@@ -1,0 +1,52 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// API Keys storage (replaces file-based keyStore)
+model ApiKey {
+  id        String   @id @default(cuid())
+  modelId   String   @unique // "chatgpt", "claude", "grok", "perplexity"
+  keyValue  String   // Encrypted or plain (depending on security requirements)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("api_keys")
+}
+
+// Panel run history (optional - for tracking usage)
+model PanelRun {
+  id            String   @id @default(cuid())
+  question      String
+  selectedModels String[] // Array of model IDs
+  status        String   // "completed", "failed", "partial"
+  createdAt     DateTime @default(now())
+
+  // Results stored as JSON
+  results       Json?    // Array of ModelResult objects
+  synthesizedReport Json? // SynthesizedReport object (if available)
+
+  @@map("panel_runs")
+  @@index([createdAt])
+}
+
+// Admin sessions (optional - for tracking admin logins)
+model AdminSession {
+  id        String   @id @default(cuid())
+  sessionId String   @unique // Cookie session ID
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+  ipAddress String?
+
+  @@map("admin_sessions")
+  @@index([sessionId])
+  @@index([expiresAt])
+}
+

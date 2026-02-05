@@ -1,0 +1,50 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Base font family - applied via Tailwind's font-sans utility */
+/* Tailwind's default sans-serif stack includes Inter, system-ui, etc. */
+@layer base {
+  body {
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}
+
+.prose h2 {
+  @apply text-xl font-bold mt-6 mb-3 text-gray-900;
+}
+
+.prose h3 {
+  @apply text-lg font-semibold mt-4 mb-2 text-gray-800;
+}
+
+.prose p {
+  @apply mb-3 text-gray-700;
+}
+
+.prose ul {
+  @apply list-disc list-inside mb-3 space-y-1;
+}
+
+.prose li {
+  @apply text-gray-700;
+}
+
+.prose strong {
+  @apply font-semibold text-gray-900;
+}
+
+.prose em {
+  @apply italic text-gray-600;
+}
+
+/* Progress bar with dynamic width - CSP compliant */
+.progress-bar-fill {
+  width: var(--progress-percent, 0%);
+}
