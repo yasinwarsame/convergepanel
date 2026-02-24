@@ -23,26 +23,16 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/AuthProvider";
-import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
+import { doc, getDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase/client";
 import { UserProfile } from "@/lib/types";
+import { safeSetDoc } from "@/lib/firestore/safeWrite";
 
 // Onboarding question option types
 type RoleOption = "founder_operator" | "analyst_consultant" | "student_researcher" | "engineer_datascientist" | "other";
 type UseCaseOption = "market_research" | "strategy_decisions" | "academic_research" | "compare_models" | "other";
 type UsageOption = "few_per_month" | "few_per_week" | "daily";
 type ReferralOption = "friend" | "social" | "search" | "community" | "other";
-
-/**
- * Strips keys with undefined values from an object.
- * Preserves false, 0, "", and null - only removes undefined.
- * Firestore does not accept undefined values in documents.
- */
-function stripUndefined<T extends object>(obj: T): Partial<T> {
-  return Object.fromEntries(
-    Object.entries(obj).filter(([_, v]) => v !== undefined)
-  ) as Partial<T>;
-}
 
 export default function OnboardingPage() {
   const { user, loading: authLoading } = useAuth();
@@ -130,18 +120,17 @@ export default function OnboardingPage() {
       // Update user profile in Firestore with onboarding responses
       // Merge with existing data to preserve email, plan, etc.
       const userDocRef = doc(db, "users", user.uid);
-      // Use stripUndefined to remove undefined values before writing to Firestore.
-      // Firestore does not accept undefined field values.
-      await setDoc(
+      // Use safeSetDoc which sanitizes data automatically (removes undefined values)
+      await safeSetDoc(
         userDocRef,
-        stripUndefined({
+        {
           onboardingRole: role, // Onboarding role (founder, analyst, etc.) - stored as onboardingRole to avoid conflict with user role
           primaryUseCase: useCase,
           expectedUsage: usage,
-          referralSource: referral || undefined, // Will be stripped if empty
+          referralSource: referral || undefined, // Will be omitted if empty by sanitizer
           onboardingCompleted: true, // Mark onboarding as complete
           updatedAt: serverTimestamp(),
-        }),
+        },
         { merge: true } // Merge with existing user document
       );
 

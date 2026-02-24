@@ -35,9 +35,10 @@ export default function LoginPage() {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
 
-      // Update user document in Firestore
-      const { doc, setDoc, getDoc, serverTimestamp } = await import("firebase/firestore");
+      // Update user document in Firestore using safe wrapper
+      const { doc, getDoc, serverTimestamp } = await import("firebase/firestore");
       const { db } = await import("@/lib/firebase/client");
+      const { safeSetDoc } = await import("@/lib/firestore/safeWrite");
       
       // Get user's role from token
       const tokenResult = await user.getIdTokenResult();
@@ -48,7 +49,8 @@ export default function LoginPage() {
       const userDoc = await getDoc(userDocRef);
       const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM format
       
-      const updateData: any = {
+      // Build update data - safeSetDoc will sanitize automatically
+      const baseData = {
         uid: user.uid,
         email: user.email,
         role,
@@ -56,15 +58,17 @@ export default function LoginPage() {
       };
       
       // Initialize plan and usage if user doc doesn't exist or missing fields
-      if (!userDoc.exists() || !userDoc.data()?.plan) {
-        updateData.plan = "free";
-        updateData.runsThisMonth = 0;
-        updateData.usageMonth = currentMonth;
-        updateData.tokensUsedCurrentPeriod = 0; // Initialize token counter
-        updateData.totalRuns = 0; // Initialize lifetime run counter
-      }
+      const needsInit = !userDoc.exists() || !userDoc.data()?.plan;
+      const updateData = needsInit ? {
+        ...baseData,
+        plan: "free",
+        runsThisMonth: 0,
+        usageMonth: currentMonth,
+        tokensUsedCurrentPeriod: 0, // Initialize token counter
+        totalRuns: 0, // Initialize lifetime run counter
+      } : baseData;
       
-      await setDoc(userDocRef, updateData, { merge: true });
+      await safeSetDoc(userDocRef, updateData, { merge: true });
 
       // Validate subscription status for paid plans (best-effort, non-blocking)
       // This ensures Firestore stays in sync with Stripe even if webhooks fail

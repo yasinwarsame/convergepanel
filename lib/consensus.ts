@@ -52,13 +52,30 @@ const SYSTEM_WRAPPER =
 
 type ClusterLabel = AgreementClaimCluster["label"];
 
-function normalizeClusterLabel(label: unknown): ClusterLabel {
+/**
+ * Normalize a cluster label to the strict union type.
+ * 
+ * Rules:
+ * - "contested" => "disagreement" (legacy mapping)
+ * - "consensus" | "single" | "disagreement" => itself (valid labels)
+ * - anything else => "single" (safe default)
+ * 
+ * IMPORTANT: Uses membership check, NOT typeof === "string".
+ * This prevents bugs like mapping any string to "consensus".
+ * 
+ * @param label - Unknown input (may come from untrusted sources)
+ * @returns Strict ClusterLabel union
+ */
+export function normalizeClusterLabel(label: unknown): ClusterLabel {
+  // Map legacy "contested" to "disagreement"
   if (label === "contested") {
     return "disagreement";
   }
+  // Membership check: only accept exact valid labels
   if (label === "consensus" || label === "single" || label === "disagreement") {
     return label;
   }
+  // Safe default for any unknown input
   return "single";
 }
 

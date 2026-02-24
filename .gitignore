@@ -31,6 +31,9 @@ yarn-error.log*
 # key storage (dev only - deprecated, now using database)
 .data/
 
+# CodeCheck evidence bundles (server-generated)
+.codecheck/
+
 # Prisma
 prisma/migrations/
 

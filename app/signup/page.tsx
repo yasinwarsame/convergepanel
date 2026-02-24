@@ -4,21 +4,11 @@ import { useState } from "react";
 import Image from "next/image";
 import { createUserWithEmailAndPassword } from "firebase/auth";
 import { auth, db } from "@/lib/firebase/client";
-import { doc, setDoc, serverTimestamp } from "firebase/firestore";
+import { doc, serverTimestamp } from "firebase/firestore";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { aboutCopy } from "@/lib/content/aboutCopy";
-
-/**
- * Strips keys with undefined values from an object.
- * Preserves false, 0, "", and null - only removes undefined.
- * Firestore does not accept undefined values in documents.
- */
-function stripUndefined<T extends object>(obj: T): Partial<T> {
-  return Object.fromEntries(
-    Object.entries(obj).filter(([_, v]) => v !== undefined)
-  ) as Partial<T>;
-}
+import { safeSetDoc } from "@/lib/firestore/safeWrite";
 
 export default function SignupPage() {
   const [email, setEmail] = useState("");
@@ -60,12 +50,11 @@ export default function SignupPage() {
       // We set onboardingCompleted: false so the app will redirect them to /onboarding
       // where they can provide role, use case, usage frequency, and referral source.
       const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM format
-      // Use stripUndefined to remove undefined values before writing to Firestore.
-      // Firestore does not accept undefined field values.
-      await setDoc(doc(db, "users", user.uid), stripUndefined({
+      // Use safeSetDoc which sanitizes data automatically (removes undefined values)
+      await safeSetDoc(doc(db, "users", user.uid), {
         uid: user.uid,
         email: user.email,
-        name: name.trim() || undefined, // Will be stripped if empty
+        name: name.trim() || undefined, // Will be omitted if empty by sanitizer
         role: "user", // User role (not onboarding role)
         plan: "free", // Default plan for all new users
         runsThisMonth: 0, // Start with zero runs
@@ -77,7 +66,7 @@ export default function SignupPage() {
         updatedAt: serverTimestamp(),
         lastLoginAt: serverTimestamp(),
         isDisabled: false,
-      }));
+      });
 
       // Redirect to onboarding page instead of main app
       // The onboarding page will capture role, use case, usage frequency, and referral source

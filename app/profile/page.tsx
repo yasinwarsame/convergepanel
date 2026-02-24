@@ -21,7 +21,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/AuthProvider";
-import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from "firebase/firestore";
+import { doc, getDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase/client";
 import { UserProfile } from "@/lib/types";
 import { signOut } from "firebase/auth";
@@ -29,6 +29,7 @@ import { auth } from "@/lib/firebase/client";
 import Link from "next/link";
 import { useUserPlan } from "@/hooks/useUserPlan";
 import { formatPlanNameWithInterval, getPlanConfig } from "@/lib/plans";
+import { safeSetDoc, safeUpdateDoc } from "@/lib/firestore/safeWrite";
 
 export default function ProfilePage() {
   const { user, loading: authLoading, authReady, isAdmin } = useAuth();
@@ -108,14 +109,13 @@ export default function ProfilePage() {
           // User doc doesn't exist - create a basic one with email
           // This handles the edge case where a user exists in Firebase Auth
           // but doesn't have a Firestore document yet
-          const basicProfile = {
+          // safeSetDoc sanitizes automatically (removes undefined values)
+          await safeSetDoc(userDocRef, {
             email: user.email || "",
             uid: user.uid,
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp(),
-          };
-          
-          await setDoc(userDocRef, basicProfile);
+          });
           
           // Load the newly created doc
           setProfileEmail(user.email || "");
@@ -154,43 +154,32 @@ export default function ProfilePage() {
     try {
       // Build update object with only the fields that can be edited
       // This preserves other fields like plan, runsThisMonth, etc.
-      // Note: Using 'any' here because serverTimestamp() returns FieldValue, not Timestamp | string
-      const updatedProfile: any = {
-        name: name.trim() || undefined, // Convert empty string to undefined
-        phone: phone.trim() || undefined,
-        address: {
-          line1: address.line1.trim() || undefined,
-          line2: address.line2.trim() || undefined,
-          city: address.city.trim() || undefined,
-          state: address.state.trim() || undefined,
-          postalCode: address.postalCode.trim() || undefined,
-          country: address.country.trim() || undefined,
-        },
+      // safeUpdateDoc sanitizes automatically - undefined values are OMITTED
+      const userDocRef = doc(db, "users", user.uid);
+      
+      // Build address object - will be sanitized by safeUpdateDoc
+      const addressData = {
+        line1: address.line1.trim() || undefined,
+        line2: address.line2.trim() || undefined,
+        city: address.city.trim() || undefined,
+        state: address.state.trim() || undefined,
+        postalCode: address.postalCode.trim() || undefined,
+        country: address.country.trim() || undefined,
+      };
+      
+      // Check if address has any non-empty values
+      const hasAddressData = Object.values(addressData).some(v => v !== undefined);
+      
+      await safeUpdateDoc(userDocRef, {
+        name: name.trim() || undefined, // Will be omitted if empty by sanitizer
+        phone: phone.trim() || undefined, // Will be omitted if empty by sanitizer
+        address: hasAddressData ? addressData : undefined, // Omit entire address if empty
         onboardingRole: onboardingRole || undefined,
         primaryUseCase: primaryUseCase || undefined,
         expectedUsage: expectedUsage || undefined,
         referralSource: referralSource || undefined,
         updatedAt: serverTimestamp(),
-      };
-
-      // Remove undefined values from address object
-      // This prevents storing empty strings in Firestore
-      if (updatedProfile.address) {
-        Object.keys(updatedProfile.address).forEach((key) => {
-          if (updatedProfile.address![key as keyof typeof updatedProfile.address] === undefined) {
-            delete updatedProfile.address![key as keyof typeof updatedProfile.address];
-          }
-        });
-        
-        // If address object is empty, set to undefined
-        if (Object.keys(updatedProfile.address).length === 0) {
-          updatedProfile.address = undefined;
-        }
-      }
-
-      // Update Firestore document (merge with existing data)
-      const userDocRef = doc(db, "users", user.uid);
-      await updateDoc(userDocRef, updatedProfile);
+      });
 
       // Show success message
       setSaveSuccess(true);
