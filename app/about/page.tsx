@@ -96,6 +96,28 @@ export default function AboutPage() {
 
               <section>
                 <h2 className="text-2xl font-semibold text-gray-900 mb-3">
+                  Decision Support &amp; Disclosure
+                </h2>
+                <p className="leading-relaxed mb-3">
+                  ConvergePanel is a decision-support tool. It helps you compare outputs across
+                  multiple AI models, surface consensus, disagreement, and blind spots, and
+                  produce structured synthesis — so you can make better-informed decisions faster.
+                </p>
+                <p className="leading-relaxed mb-3">
+                  Trust indicators such as the Verification Gate, consensus signals, and bias
+                  flags are heuristic assessments derived from model comparison. They are
+                  designed to inform your judgment, not replace it.
+                </p>
+                <p className="leading-relaxed">
+                  ConvergePanel does not guarantee the correctness of any AI-generated output
+                  and is not a substitute for professional judgment, regulatory review, or
+                  required human authorization. Users are responsible for independently
+                  validating outputs before relying on them for decisions.
+                </p>
+              </section>
+
+              <section>
+                <h2 className="text-2xl font-semibold text-gray-900 mb-3">
                   {aboutCopy.models.title}
                 </h2>
                 <p className="leading-relaxed mb-3">

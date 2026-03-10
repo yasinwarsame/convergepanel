@@ -80,16 +80,39 @@ export default function TermsPage() {
             </section>
 
             <section className="mb-8">
-              <h2 className="text-xl font-semibold text-slate-900 mb-3">6. Limitation of Liability</h2>
+              <h2 className="text-xl font-semibold text-slate-900 mb-3">6. AI-Generated Trust &amp; Readiness Indicators</h2>
               <p className="text-slate-700 mb-3">
-                ConvergePanel is provided "as is" without warranties of any kind. We are not
-                liable for any damages arising from your use of the service, including but not
-                limited to decisions made based on AI-generated responses.
+                ConvergePanel may display trust signals, readiness indicators, verification
+                gates, consensus assessments, bias flags, and similar outputs ("Indicators").
+                These Indicators are heuristic, rules-based assessments generated from
+                comparisons across multiple AI model responses. They are provided for
+                informational and decision-support purposes only.
+              </p>
+              <p className="text-slate-700 mb-3">
+                Indicators do not constitute factual certification, legal approval, compliance
+                clearance, financial advice, medical guidance, or authorization to act. No
+                Indicator should be interpreted as a guarantee of accuracy, completeness, or
+                fitness for any particular purpose.
+              </p>
+              <p className="text-slate-700">
+                You remain solely responsible for independent review, validation, and any
+                decisions made using platform outputs. ConvergePanel expressly disclaims
+                liability for actions taken in reliance on any Indicator.
               </p>
             </section>
 
             <section className="mb-8">
-              <h2 className="text-xl font-semibold text-slate-900 mb-3">7. Changes to Terms</h2>
+              <h2 className="text-xl font-semibold text-slate-900 mb-3">7. Limitation of Liability</h2>
+              <p className="text-slate-700 mb-3">
+                ConvergePanel is provided &ldquo;as is&rdquo; without warranties of any kind,
+                express or implied. We are not liable for any direct, indirect, incidental, or
+                consequential damages arising from your use of the service, including but not
+                limited to decisions made based on AI-generated responses or trust indicators.
+              </p>
+            </section>
+
+            <section className="mb-8">
+              <h2 className="text-xl font-semibold text-slate-900 mb-3">8. Changes to Terms</h2>
               <p className="text-slate-700">
                 We may update these Terms at any time. Continued use of the service after changes
                 constitutes acceptance of the new Terms.
@@ -97,7 +120,7 @@ export default function TermsPage() {
             </section>
 
             <section className="mb-8">
-              <h2 className="text-xl font-semibold text-slate-900 mb-3">8. Contact</h2>
+              <h2 className="text-xl font-semibold text-slate-900 mb-3">9. Contact</h2>
               <p className="text-slate-700">
                 If you have questions about these Terms, please contact us at{" "}
                 <a href="mailto:support@convergepanel.com" className="text-sky-600 hover:underline">

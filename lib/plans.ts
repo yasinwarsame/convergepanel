@@ -84,7 +84,7 @@ export const PLAN_CONFIGS: Record<PlanId, PlanConfig> = {
     advancedExportEnabled: true,
     features: [
       "Up to 80 panel runs / month",
-      "Use 3 models at a time (e.g., GPT 5.1 + Claude Opus 4.5 + Grok 4)",
+      "Use 3 models at a time (e.g., GPT 5.2 + Claude Opus 4.5 + Grok 4)",
       "Full unified answer + trust summary",
       "Agreement / disagreement map across all models",
       "Save and revisit past panels - Available in next release",
@@ -108,7 +108,7 @@ export const PLAN_CONFIGS: Record<PlanId, PlanConfig> = {
     advancedExportEnabled: true,
     features: [
       "Up to 150 panel runs / month",
-      "Use all 5 models at once (GPT 5.1, Claude Opus 4.5, Grok 4, Perplexity Pro, Gemini 3 Pro)",
+      "Use all 5 models at once (GPT 5.2, Claude Opus 4.5, Grok 4, Perplexity Pro, Gemini 3 Pro)",
       "Rich unified answer with strong consensus vs. contested areas",
       "Deep agreement / disagreement map across all models",
       "Compare View to see answers side-by-side",

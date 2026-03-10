@@ -53,7 +53,8 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
-import { OPENAI_API_KEY } from "@/lib/env";
+import Anthropic from "@anthropic-ai/sdk";
+import { OPENAI_API_KEY, ANTHROPIC_API_KEY } from "@/lib/env";
 import { StructuredSynthesisSchema, StructuredSynthesis } from "@/lib/synthesis/structuredSchema";
 import { buildSynthesisInput } from "@/lib/synthesis/buildSynthesisInput";
 import { adminDb } from "@/lib/firebase/admin";
@@ -202,6 +203,56 @@ HARD REQUIREMENTS:
 - Be specific and concrete, not vague
 - Maintain academic rigor while being accessible
 - Do not invent or extrapolate beyond what the cluster data provides`;
+
+/**
+ * Claude fallback for synthesis generation.
+ * Called when the primary OpenAI call fails. Uses the same prompt and
+ * returns the raw text response for downstream JSON parsing/validation.
+ */
+const CLAUDE_SYNTHESIS_MODEL = "claude-sonnet-4-20250514";
+
+async function callClaudeFallback(
+  fullPrompt: string,
+  requestId: string,
+  signal?: AbortSignal,
+): Promise<{ text: string | null; model: string }> {
+  if (!ANTHROPIC_API_KEY) {
+    logger.warn(`[${requestId}] [synthesize-panel] Claude fallback skipped: no ANTHROPIC_API_KEY`, { requestId });
+    return { text: null, model: CLAUDE_SYNTHESIS_MODEL };
+  }
+
+  logger.info(`[${requestId}] [synthesize-panel] Attempting Claude fallback synthesis`, { requestId, model: CLAUDE_SYNTHESIS_MODEL });
+  const fallbackStart = Date.now();
+
+  const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
+
+  const message = await anthropic.messages.create({
+    model: CLAUDE_SYNTHESIS_MODEL,
+    max_tokens: 8000,
+    messages: [
+      {
+        role: "user",
+        content: fullPrompt,
+      },
+    ],
+    system: "You are a research synthesis expert. You MUST output valid JSON only, no HTML tags, no markdown headings. Your response must be a valid JSON object matching the provided schema. Start your response IMMEDIATELY with { - do not include any preamble, explanation, or reasoning before the JSON object.",
+    temperature: 0.3,
+  });
+
+  const textBlock = message.content.find((b) => b.type === "text");
+  const text = textBlock?.text ?? null;
+
+  logger.info(`[${requestId}] [synthesize-panel] Claude fallback completed`, {
+    requestId,
+    model: CLAUDE_SYNTHESIS_MODEL,
+    elapsed: Date.now() - fallbackStart,
+    hasContent: !!text,
+    contentLength: text?.length ?? 0,
+    stopReason: message.stop_reason,
+  });
+
+  return { text, model: CLAUDE_SYNTHESIS_MODEL };
+}
 
 /**
  * GET /api/synthesize-panel?runId=...&mode=cache
@@ -1306,6 +1357,7 @@ IMMEDIATE OUTPUT: Begin your response with the opening brace { immediately. Do n
     llmStartTime = Date.now();
     
     let completion;
+    let synthesisProvider: "openai" | "anthropic" = "openai";
     try {
       // Call OpenAI API with timeout using Promise.race (SDK may not support signal directly)
     const client = new OpenAI({ apiKey: OPENAI_API_KEY });
@@ -1372,7 +1424,7 @@ IMMEDIATE OUTPUT: Begin your response with the opening brace { immediately. Do n
     } catch (llmError: any) {
       clearTimeout(serverTimeoutId);
       
-      // Check if it was a timeout or abort
+      // Check if it was a timeout or abort — no fallback for these
       const wasTimeout = serverTimeoutController.signal.aborted;
       const wasClientAbort = req.signal?.aborted;
       const wasCombinedAbort = combinedController.signal.aborted;
@@ -1401,32 +1453,80 @@ IMMEDIATE OUTPUT: Begin your response with the opening brace { immediately. Do n
         );
       }
       
-      // Handle OpenAI API errors (400, 401, 403, 429, etc.) - return 4xx instead of 500
-      const isOpenAIError = llmError?.status && llmError.status >= 400 && llmError.status < 500;
-      if (isOpenAIError) {
-        logger.error(`[${requestId}] [synthesize-panel] OpenAI API error`, {
+      // OpenAI failed (API error or other) — attempt Claude fallback before returning error
+      logger.warn(`[${requestId}] [synthesize-panel] OpenAI failed, attempting Claude fallback`, {
+        requestId,
+        openaiError: llmError?.message || String(llmError),
+        openaiStatus: llmError?.status,
+      });
+      
+      try {
+        const fallback = await callClaudeFallback(fullPrompt, requestId, combinedSignal);
+        if (fallback.text && fallback.text.length > 0) {
+          // Claude succeeded — build a synthetic completion-like object
+          // so the downstream text-extraction path works without changes
+          synthesisProvider = "anthropic";
+          completion = {
+            choices: [
+              {
+                message: { content: fallback.text, role: "assistant" as const, refusal: null },
+                finish_reason: "stop",
+                index: 0,
+              },
+            ],
+          } as any;
+          
+          timing.llmEnd = Date.now();
+          if (llmStartTime !== null) {
+            llmElapsedMs = Date.now() - llmStartTime;
+          }
+          
+          logger.info(`[${requestId}] [synthesize-panel] Claude fallback produced content, continuing`, {
+            requestId,
+            contentLength: fallback.text.length,
+            model: fallback.model,
+          });
+          // Fall through to normal text-extraction + validation flow
+        } else {
+          // Claude also returned nothing — return the original OpenAI error
+          logger.error(`[${requestId}] [synthesize-panel] Claude fallback returned no content`, { requestId });
+          const isOpenAIError = llmError?.status && llmError.status >= 400 && llmError.status < 500;
+          return NextResponse.json(
+            createErrorResponse(
+              isOpenAIError ? ERROR_CODES.OPENAI_API_ERROR : ERROR_CODES.INTERNAL_ERROR,
+              "Both OpenAI and Claude failed to generate synthesis",
+              requestId,
+              {
+                openaiError: llmError?.message,
+                openaiStatus: llmError?.status,
+                claudeFallback: "returned_empty",
+              }
+            ),
+            { status: 502 }
+          );
+        }
+      } catch (fallbackError: any) {
+        // Claude fallback also failed — return original OpenAI error with fallback context
+        logger.error(`[${requestId}] [synthesize-panel] Claude fallback also failed`, {
           requestId,
-          status: llmError.status,
-          message: llmError?.message || llmError,
-          error: llmError?.type || "unknown",
+          openaiError: llmError?.message,
+          claudeError: fallbackError?.message || String(fallbackError),
         });
+        const isOpenAIError = llmError?.status && llmError.status >= 400 && llmError.status < 500;
         return NextResponse.json(
           createErrorResponse(
-            ERROR_CODES.OPENAI_API_ERROR,
-            llmError?.message || "OpenAI API request failed",
+            isOpenAIError ? ERROR_CODES.OPENAI_API_ERROR : ERROR_CODES.INTERNAL_ERROR,
+            "Both OpenAI and Claude failed to generate synthesis",
             requestId,
             {
-              status: llmError.status,
-              type: llmError?.type,
-              param: llmError?.param,
+              openaiError: llmError?.message,
+              openaiStatus: llmError?.status,
+              claudeError: fallbackError?.message,
             }
           ),
-          { status: llmError.status || 400 }
+          { status: 502 }
         );
       }
-      
-      // Re-throw other errors (will result in 500)
-      throw llmError;
     }
     
     // Check client abort after LLM call
@@ -1667,10 +1767,36 @@ IMMEDIATE OUTPUT: Begin your response with the opening brace { immediately. Do n
       }
     }
 
-    // Final check - if still no content, return error
-    // This should be rare with 8000 token limit and compact prompt
+    // Final check — if OpenAI returned no content after retry, try Claude before giving up
     if (!synthesizedText || synthesizedText.length === 0) {
-      logger.error(`[${requestId}] [synthesize-panel] No content in OpenAI response after retry`, {
+      logger.warn(`[${requestId}] [synthesize-panel] No content from OpenAI after retry, attempting Claude fallback`, {
+        requestId,
+        originalFinishReason: finishReason,
+      });
+
+      try {
+        const fallback = await callClaudeFallback(fullPrompt, requestId, combinedSignal);
+        if (fallback.text && fallback.text.length > 0) {
+          synthesizedText = fallback.text;
+          synthesisProvider = "anthropic";
+          finishReason = "stop";
+          logger.info(`[${requestId}] [synthesize-panel] Claude fallback succeeded after OpenAI empty output`, {
+            requestId,
+            contentLength: fallback.text.length,
+            model: fallback.model,
+          });
+        }
+      } catch (fallbackError: any) {
+        logger.error(`[${requestId}] [synthesize-panel] Claude fallback failed after OpenAI empty output`, {
+          requestId,
+          error: fallbackError?.message || String(fallbackError),
+        });
+      }
+    }
+
+    // Still no content after all attempts (OpenAI + retry + Claude) — return error
+    if (!synthesizedText || synthesizedText.length === 0) {
+      logger.error(`[${requestId}] [synthesize-panel] No content from any provider`, {
         requestId,
         originalFinishReason: finishReason,
         responseStructure: {
@@ -1683,7 +1809,6 @@ IMMEDIATE OUTPUT: Begin your response with the opening brace { immediately. Do n
           finishReason,
         },
       });
-      // Return structured error with diagnostics (never expose full content or secrets)
       const finalFinishReason = finishReason;
       const isLengthLimitFinal = finalFinishReason === 'length' || hitLengthLimit;
       
@@ -1797,60 +1922,60 @@ IMMEDIATE OUTPUT: Begin your response with the opening brace { immediately. Do n
       });
       
       // Retry once with "fix JSON" prompt if validation fails
-      // This gives the model a chance to correct schema mismatches
+      // Use the same provider that generated the initial response
       try {
-        logger.debug(`[${requestId}] [synthesize-panel] Retrying with fix JSON prompt`, { requestId });
+        logger.debug(`[${requestId}] [synthesize-panel] Retrying with fix JSON prompt (provider: ${synthesisProvider})`, { requestId });
         const fixPrompt = `${fullPrompt}\n\nThe previous response failed validation. Please fix the JSON to match the exact schema. Ensure all required fields are present and correctly typed.`;
         
-        // Use same model for retry
-        const retryModel = model;
-        const retryTokenParams = getTokenParams(retryModel, 3000);
-        
-        logger.debug(`[${requestId}] [synthesize-panel] Retry using token params`, {
-          requestId,
-          model: retryModel,
-          tokenParam: Object.keys(retryTokenParams)[0],
-          tokenValue: Object.values(retryTokenParams)[0],
-        });
-        
-        // Recreate OpenAI client for retry
-        const retryClient = new OpenAI({ apiKey: OPENAI_API_KEY });
-        const retryCompletion = await retryClient.chat.completions.create({
-          model: retryModel,
-          messages: [
-            {
-              role: "system",
-              content: "You are a research synthesis expert. You MUST output valid JSON only, no HTML tags, no markdown headings. Your response must be a valid JSON object matching the provided schema.",
-            },
-            {
-              role: "user",
-              content: fixPrompt,
-            },
-          ],
-          temperature: 0.2, // Lower temperature for retry
-          ...retryTokenParams, // Use appropriate token parameter based on model
-          response_format: { type: "json_object" },
-        });
-        
-        const retryText = extractOpenAIText(retryCompletion);
+        let retryText: string | null = null;
+
+        if (synthesisProvider === "anthropic") {
+          const fallback = await callClaudeFallback(fixPrompt, requestId, combinedSignal);
+          retryText = fallback.text;
+        } else {
+          const retryModel = model;
+          const retryTokenParams = getTokenParams(retryModel, 3000);
+          
+          logger.debug(`[${requestId}] [synthesize-panel] Retry using token params`, {
+            requestId,
+            model: retryModel,
+            tokenParam: Object.keys(retryTokenParams)[0],
+            tokenValue: Object.values(retryTokenParams)[0],
+          });
+          
+          const retryClient = new OpenAI({ apiKey: OPENAI_API_KEY });
+          const retryCompletion = await retryClient.chat.completions.create({
+            model: retryModel,
+            messages: [
+              {
+                role: "system",
+                content: "You are a research synthesis expert. You MUST output valid JSON only, no HTML tags, no markdown headings. Your response must be a valid JSON object matching the provided schema.",
+              },
+              {
+                role: "user",
+                content: fixPrompt,
+              },
+            ],
+            temperature: 0.2,
+            ...retryTokenParams,
+            response_format: { type: "json_object" },
+          });
+          
+          retryText = extractOpenAIText(retryCompletion);
+        }
+
         if (retryText && retryText.length > 0) {
           const retryJson = extractJsonObject(retryText);
           validatedReport = StructuredSynthesisSchema.parse(JSON.parse(retryJson));
           logger.info(`[${requestId}] [synthesize-panel] Retry validation passed`, { requestId });
         } else {
-          logger.error(`[${requestId}] [synthesize-panel] Retry returned no content`, {
-            requestId,
-            finishReason: retryCompletion?.choices?.[0]?.finish_reason,
-            hasToolCalls: !!retryCompletion?.choices?.[0]?.message?.tool_calls,
-            toolCallsCount: retryCompletion?.choices?.[0]?.message?.tool_calls?.length || 0,
-          });
+          logger.error(`[${requestId}] [synthesize-panel] Retry returned no content`, { requestId });
           throw new Error("Retry returned no content");
         }
       } catch (retryError: any) {
-        // Handle OpenAI API errors in retry as well
         const isOpenAIError = retryError?.status && retryError.status >= 400 && retryError.status < 500;
         if (isOpenAIError) {
-          logger.error(`[${requestId}] [synthesize-panel] OpenAI API error in retry`, {
+          logger.error(`[${requestId}] [synthesize-panel] API error in validation retry`, {
             requestId,
             status: retryError.status,
             message: retryError?.message || retryError,
@@ -1858,7 +1983,7 @@ IMMEDIATE OUTPUT: Begin your response with the opening brace { immediately. Do n
           return NextResponse.json(
             createErrorResponse(
               ERROR_CODES.OPENAI_API_ERROR,
-              retryError?.message || "OpenAI API request failed during retry",
+              retryError?.message || "API request failed during validation retry",
               requestId,
               {
                 status: retryError.status,
@@ -1898,7 +2023,7 @@ IMMEDIATE OUTPUT: Begin your response with the opening brace { immediately. Do n
           synthesizedStructuredReport: validatedReport,
           schemaVersion: 1,
           synthesizedAt: Timestamp.now(),
-          synthesizedBy: model,
+          synthesizedBy: synthesisProvider === "anthropic" ? CLAUDE_SYNTHESIS_MODEL : model,
           synthesisInputHash: inputHash || null, // Store input hash for cache validation
           synthesisMetadata: {
             inputSizeChars: inputSizeChars || 0,
@@ -1949,11 +2074,12 @@ IMMEDIATE OUTPUT: Begin your response with the opening brace { immediately. Do n
 
     // Return structured JSON response
     // Include partial flag if content was truncated (finishReason='length' with usable partial content)
+    const actualModel = synthesisProvider === "anthropic" ? CLAUDE_SYNTHESIS_MODEL : model;
     const response: any = {
       ok: true,
       report: validatedReport,
       schemaVersion: 1,
-      synthesizedBy: model,
+      synthesizedBy: actualModel,
     };
     
     // If response was partial (hit token limit but had usable content), include warning flag

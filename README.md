@@ -6,7 +6,7 @@ ConvergePanel is a production-ready MVP web application that sends one user ques
 
 ## Features
 
-- **Multi-Model Support**: Query GPT 5.1, Claude Opus 4.5, Grok 4, Perplexity Pro, and Gemini 3 Pro simultaneously
+- **Multi-Model Support**: Query GPT 5.2, Claude Opus 4.5, Grok 4, Perplexity Pro, and Gemini 3 Pro simultaneously
 - **Parallel Execution**: All models respond in parallel for faster results
 - **Consensus Analysis**: Automatically identifies areas of agreement and disagreement
 - **Numeric Conflict Detection**: Flags when models provide conflicting numbers or percentages
@@ -161,7 +161,7 @@ ConvergePanel/
 │   ├── consensus.ts              # Consensus engine and synthesis
 │   └── connectors/
 │       ├── base.ts               # Base connector class
-│       ├── chatgpt.ts            # OpenAI GPT 5.1 connector
+│       ├── chatgpt.ts            # OpenAI GPT 5.2 connector
 │       ├── claude.ts             # Anthropic Claude Opus 4.5 connector
 │       ├── grok.ts               # X.AI Grok 4 connector
 │       ├── perplexity.ts         # Perplexity Pro connector
@@ -464,7 +464,7 @@ service cloud.firestore {
 
 | Variable | Description | Required |
 |----------|-------------|----------|
-| `OPENAI_API_KEY` | OpenAI API key for GPT 5.1 | No (uses mock if missing) |
+| `OPENAI_API_KEY` | OpenAI API key for GPT 5.2 | No (uses mock if missing) |
 | `ANTHROPIC_API_KEY` | Anthropic API key for Claude Opus 4.5 | No (uses mock if missing) |
 | `XAI_API_KEY` | X.AI API key for Grok 4 | No (uses mock if missing) |
 | `PERPLEXITY_API_KEY` | Perplexity API key for Perplexity Pro | No (uses mock if missing) |

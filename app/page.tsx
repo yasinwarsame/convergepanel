@@ -1033,7 +1033,7 @@ export default function Home() {
         </p>
 
             {/* Model Picker */}
-          {/* NOTE: For MVP testing, all five models (GPT 5.1, Claude Opus 4.5, Grok 4, Perplexity Pro, Gemini 3 Pro)
+          {/* NOTE: For MVP testing, all five models (GPT 5.2, Claude Opus 4.5, Grok 4, Perplexity Pro, Gemini 3 Pro)
               are fully enabled regardless of plan. Gating will be reintroduced later. */}
             <ModelPicker
               selectedModels={selectedModels}

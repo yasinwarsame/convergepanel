@@ -31,7 +31,7 @@ export interface PanelModelConfig {
 export const PANEL_MODELS: PanelModelConfig[] = [
   {
     id: "chatgpt",
-    label: "GPT 5.1",
+    label: "GPT 5.2",
     provider: "openai",
     colorClasses: "bg-emerald-50 text-emerald-700 border border-emerald-200",
   },

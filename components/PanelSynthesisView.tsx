@@ -40,6 +40,19 @@ import { StructuredSynthesis } from "@/lib/synthesis/structuredSchema";
 import { getModelDisplayNameSafe } from "@/lib/panelModels";
 import { fetchWithTimeout, FetchError } from "@/lib/client/fetchWithTimeout";
 import { useAuth } from "@/components/AuthProvider";
+import {
+  computeVerificationGate,
+  VerificationGateResult,
+  VerificationGateInput,
+} from "@/lib/verificationGate/verificationGate";
+import { classifyClaimSeverity, ClaimSeverityResult } from "@/lib/verificationGate/claimSeverity";
+import { classifyGrounding, GroundingResult } from "@/lib/verificationGate/sourceGrounding";
+import {
+  buildPanelVerdict,
+  formatVerdictText,
+  buildCopyForXThread,
+  PanelVerdict,
+} from "@/lib/verificationGate/panelVerdict";
 
 interface PanelSynthesisViewProps {
   results: ModelResult[];
@@ -56,9 +69,348 @@ interface SynthesisState {
   status: "idle" | "loading" | "success" | "error";
   report: StructuredSynthesis | null;
   error: string | null;
-  errorDetails?: any; // Store detailed error information for diagnostics
+  errorDetails?: any;
 }
 
+const GATE_STYLES: Record<string, { border: string; bg: string; badge: string; badgeBg: string; icon: string }> = {
+  SAFE_TO_EXPLORE: {
+    border: "border-emerald-300",
+    bg: "bg-emerald-50",
+    badge: "text-emerald-800",
+    badgeBg: "bg-emerald-100",
+    icon: "text-emerald-600",
+  },
+  NEEDS_HUMAN_REVIEW: {
+    border: "border-amber-300",
+    bg: "bg-amber-50",
+    badge: "text-amber-800",
+    badgeBg: "bg-amber-100",
+    icon: "text-amber-600",
+  },
+  DO_NOT_RELY_YET: {
+    border: "border-red-300",
+    bg: "bg-red-50",
+    badge: "text-red-800",
+    badgeBg: "bg-red-100",
+    icon: "text-red-600",
+  },
+};
+
+function VerificationGateCard({ gate }: { gate: VerificationGateResult }) {
+  const style = GATE_STYLES[gate.status] ?? GATE_STYLES.NEEDS_HUMAN_REVIEW;
+
+  return (
+    <div className={`rounded-xl border-2 ${style.border} ${style.bg} p-5 md:p-6`}>
+      {/* Header row */}
+      <div className="flex items-center gap-3 mb-4">
+        <div className={`flex-shrink-0 ${style.icon}`}>
+          {gate.status === "SAFE_TO_EXPLORE" && (
+            <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          )}
+          {gate.status === "NEEDS_HUMAN_REVIEW" && (
+            <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+          )}
+          {gate.status === "DO_NOT_RELY_YET" && (
+            <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+            </svg>
+          )}
+        </div>
+        <div>
+          <span className="text-base font-bold text-slate-900">Verification Gate</span>
+          <span className={`ml-2.5 inline-flex items-center px-3 py-0.5 rounded-full text-sm font-semibold ${style.badgeBg} ${style.badge}`}>
+            {gate.label}
+          </span>
+        </div>
+      </div>
+
+      {/* Reasons */}
+      {gate.reasons.length > 0 && (
+        <div className="mb-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Why</p>
+          <ul className="space-y-1">
+            {gate.reasons.map((r, i) => (
+              <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
+                <span className="mt-1 block h-1.5 w-1.5 flex-shrink-0 rounded-full bg-slate-400" />
+                {r}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Recommended next steps */}
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Recommended next steps</p>
+        <ul className="space-y-1">
+          {gate.recommendedNextSteps.map((s, i) => (
+            <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
+              <span className="mt-1 block h-1.5 w-1.5 flex-shrink-0 rounded-full bg-slate-400" />
+              {s}
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      {/* Advisory disclosure */}
+      <p className="mt-4 pt-3 border-t border-slate-200/60 text-[11px] leading-relaxed text-slate-400">
+        This indicator is an advisory signal derived from model comparison and analysis. It does not constitute factual certification or approval and is not a substitute for independent professional review.
+      </p>
+    </div>
+  );
+}
+
+/* ─── Severity Badge ─── */
+
+const SEVERITY_COLORS: Record<string, { bg: string; text: string; dot: string }> = {
+  low: { bg: "bg-slate-100", text: "text-slate-600", dot: "bg-slate-400" },
+  important: { bg: "bg-amber-50", text: "text-amber-700", dot: "bg-amber-400" },
+  "decision-critical": { bg: "bg-rose-50", text: "text-rose-700", dot: "bg-rose-500" },
+};
+
+function SeverityBadge({ result }: { result: ClaimSeverityResult }) {
+  const c = SEVERITY_COLORS[result.severity] ?? SEVERITY_COLORS.low;
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium ${c.bg} ${c.text}`}
+      title={
+        result.severity === "decision-critical"
+          ? "May affect action, compliance, safety, or strategic decisions"
+          : result.severity === "important"
+          ? "Materially shapes interpretation or follow-up"
+          : "Supporting context or low-impact observation"
+      }
+    >
+      <span className={`h-1.5 w-1.5 rounded-full ${c.dot}`} />
+      {result.label}
+    </span>
+  );
+}
+
+/* ─── Source-Grounding Badge ─── */
+
+const GROUNDING_COLORS: Record<string, { bg: string; text: string; icon: string }> = {
+  "source-backed": { bg: "bg-sky-50", text: "text-sky-700", icon: "text-sky-500" },
+  "model-reasoned": { bg: "bg-violet-50", text: "text-violet-700", icon: "text-violet-500" },
+  mixed: { bg: "bg-slate-100", text: "text-slate-600", icon: "text-slate-400" },
+};
+
+function GroundingBadge({ result }: { result: GroundingResult }) {
+  const c = GROUNDING_COLORS[result.level] ?? GROUNDING_COLORS.mixed;
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium ${c.bg} ${c.text}`}
+      title={
+        result.level === "source-backed"
+          ? "Claim appears grounded in cited evidence or external sources"
+          : result.level === "model-reasoned"
+          ? "Claim appears based on model inference without explicit sources"
+          : "Grounding is unclear — may blend sourced and inferred reasoning"
+      }
+    >
+      {result.level === "source-backed" && (
+        <svg className={`w-3 h-3 ${c.icon}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M10.172 13.828a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.102 1.101" />
+        </svg>
+      )}
+      {result.level === "model-reasoned" && (
+        <svg className={`w-3 h-3 ${c.icon}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+        </svg>
+      )}
+      {result.level === "mixed" && (
+        <svg className={`w-3 h-3 ${c.icon}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+      )}
+      {result.label}
+    </span>
+  );
+}
+
+/* ─── Panel Verdict Summary Card ─── */
+
+function PanelVerdictCard({
+  verdict,
+  gate,
+}: {
+  verdict: PanelVerdict;
+  gate: VerificationGateResult;
+}) {
+  const [copyState, setCopyState] = useState<"idle" | "copied-summary" | "copied-x">("idle");
+  const [showFullCaveat, setShowFullCaveat] = useState(false);
+  const gateStyle = GATE_STYLES[gate.status] ?? GATE_STYLES.NEEDS_HUMAN_REVIEW;
+  const xThread = buildCopyForXThread(verdict);
+  const xLabel = xThread.length <= 1 ? "Copy for X" : `Copy for X (thread · ${xThread.length})`;
+
+  const copyToClipboard = useCallback(
+    (text: string, label: "copied-summary" | "copied-x") => {
+      navigator.clipboard.writeText(text).then(() => {
+        setCopyState(label);
+        setTimeout(() => setCopyState("idle"), 2000);
+      });
+    },
+    []
+  );
+
+  const caveatIsLong = (verdict.keyBlindSpot?.length ?? 0) > 120;
+
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+      {/* Top accent bar */}
+      <div
+        className={`h-1 ${
+          gate.status === "SAFE_TO_EXPLORE"
+            ? "bg-emerald-400"
+            : gate.status === "NEEDS_HUMAN_REVIEW"
+            ? "bg-amber-400"
+            : "bg-red-400"
+        }`}
+      />
+
+      <div className="p-5 md:p-6 space-y-5">
+        {/* ── A) Decision header row ── */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <h3 className="text-base font-extrabold uppercase tracking-wide text-slate-700">
+              Panel Verdict
+            </h3>
+            <span
+              className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold ${gateStyle.badgeBg} ${gateStyle.badge}`}
+            >
+              {gate.label}
+            </span>
+          </div>
+          <GroundingBadge result={verdict.grounding} />
+        </div>
+
+        {/* Question */}
+        <p className="text-base font-semibold text-slate-900 leading-snug">
+          {verdict.question}
+        </p>
+
+        {/* ── B) Two-column grid: Consensus + Disagreement ── */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Left: Top consensus */}
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+            <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">
+              Top consensus
+            </span>
+            <ul className="mt-2 space-y-1.5">
+              <li className="flex items-start gap-2 text-sm text-slate-800 leading-relaxed">
+                <span className="mt-1.5 block h-1.5 w-1.5 flex-shrink-0 rounded-full bg-emerald-400" />
+                <span className="whitespace-normal break-words">{verdict.topConsensus}</span>
+              </li>
+            </ul>
+            {verdict.consensusModelCount > 0 && (
+              <p className="mt-2 text-[11px] text-slate-400">
+                Agreed by {verdict.consensusModelCount} model{verdict.consensusModelCount !== 1 ? "s" : ""}
+              </p>
+            )}
+          </div>
+
+          {/* Right: Key disagreement */}
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+            <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">
+              Key disagreement
+            </span>
+            {verdict.topDisagreement ? (
+              <>
+                <ul className="mt-2 space-y-1.5">
+                  <li className="flex items-start gap-2 text-sm text-orange-800 leading-relaxed">
+                    <span className="mt-1.5 block h-1.5 w-1.5 flex-shrink-0 rounded-full bg-orange-400" />
+                    <span className="whitespace-normal break-words">{verdict.topDisagreement}</span>
+                  </li>
+                  {verdict.disagreementDetail && (
+                    <li className="flex items-start gap-2 text-sm text-slate-600 leading-relaxed">
+                      <span className="mt-1.5 block h-1.5 w-1.5 flex-shrink-0 rounded-full bg-slate-300" />
+                      <span className="whitespace-normal break-words">{verdict.disagreementDetail}</span>
+                    </li>
+                  )}
+                </ul>
+                {verdict.disagreementModelCount > 0 && (
+                  <p className="mt-2 text-[11px] text-slate-400">
+                    {verdict.disagreementModelCount} model{verdict.disagreementModelCount !== 1 ? "s" : ""} split
+                  </p>
+                )}
+              </>
+            ) : (
+              <p className="mt-2 text-sm text-slate-400 italic">No major disagreements detected.</p>
+            )}
+          </div>
+        </div>
+
+        {/* ── C) Caveat / blind spot with show more/less ── */}
+        {verdict.keyBlindSpot && (
+          <div>
+            <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">
+              Caveat
+            </span>
+            <p
+              className={`mt-1 text-sm text-slate-600 leading-relaxed whitespace-normal break-words ${
+                !showFullCaveat && caveatIsLong ? "line-clamp-2" : ""
+              }`}
+            >
+              {verdict.keyBlindSpot}
+            </p>
+            {caveatIsLong && (
+              <button
+                onClick={() => setShowFullCaveat((v) => !v)}
+                className="mt-1 text-xs font-medium text-sky-600 hover:text-sky-800 transition-colors"
+              >
+                {showFullCaveat ? "Show less" : "Show more"}
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* ── D) Recommended next steps ── */}
+        {verdict.recommendedNextSteps.length > 0 && (
+          <div>
+            <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">
+              Recommended next steps
+            </span>
+            <ul className="mt-2 space-y-1">
+              {verdict.recommendedNextSteps.slice(0, 3).map((step, i) => (
+                <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
+                  <span className="mt-1.5 block h-1.5 w-1.5 flex-shrink-0 rounded-full bg-slate-400" />
+                  <span>{step}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* Copy actions */}
+        <div className="flex items-center gap-2 pt-3 border-t border-slate-100 flex-wrap">
+          <button
+            onClick={() => copyToClipboard(formatVerdictText(verdict, "linkedin"), "copied-summary")}
+            className="text-xs font-medium text-sky-600 hover:text-sky-800 transition-colors px-2 py-1 rounded hover:bg-sky-50"
+          >
+            {copyState === "copied-summary" ? "Copied" : "Copy summary"}
+          </button>
+          <span className="text-slate-300">|</span>
+          <button
+            onClick={() => copyToClipboard(xThread.join("\n\n"), "copied-x")}
+            className="text-xs font-medium text-slate-500 hover:text-slate-700 transition-colors px-2 py-1 rounded hover:bg-slate-50"
+          >
+            {copyState === "copied-x" ? "Copied" : xLabel}
+          </button>
+        </div>
+
+        {/* Disclaimer */}
+        <p className="text-[10px] leading-relaxed text-slate-400">
+          This summary is auto-generated from multi-model synthesis and is provided for informational purposes only.
+        </p>
+      </div>
+    </div>
+  );
+}
 
 export default function PanelSynthesisView({
   results,
@@ -762,6 +1114,16 @@ export default function PanelSynthesisView({
       // Show non-blocking notice if we're also pre-generating a new version in the background
       const showLoadingNotice = isPreGenerating;
 
+      // Compute Verification Gate from existing synthesis signals
+      const gateInput: VerificationGateInput = {
+        keyFindings: report.keyFindings,
+        disagreements: report.disagreements,
+        biasAndBlindSpots: report.biasAndBlindSpots,
+        openQuestions: report.openQuestions,
+        trustSummary: synthesizedReport?.consensusAnalysis?.trustSummary,
+      };
+      const gate = computeVerificationGate(gateInput);
+
     return (
         <div className="space-y-6">
           {/* Non-blocking loading notice (if generating new version in background) */}
@@ -771,6 +1133,9 @@ export default function PanelSynthesisView({
               <p className="text-sm text-blue-700">Generating updated synthesis in the background...</p>
             </div>
           )}
+
+          {/* Verification Gate */}
+          <VerificationGateCard gate={gate} />
 
           {/* Executive Summary */}
           {report.executiveSummary && (
@@ -789,31 +1154,43 @@ export default function PanelSynthesisView({
             <div>
               <h2 className="text-lg font-semibold text-slate-900 mb-4">Key Findings</h2>
               <div className="space-y-3">
-                {report.keyFindings.map((finding, idx) => (
-                  <div
-                    key={idx}
-                    className="relative rounded-lg bg-green-50 border border-green-200 p-4"
-                  >
-                    <div className="absolute left-0 top-0 h-full w-1 rounded-l-lg bg-green-400"></div>
-                    <div className="pl-5">
-                      <p className="text-green-800 mb-2">{finding.claim}</p>
-                      {finding.evidenceRefs && finding.evidenceRefs.length > 0 && (
-                        <ul className="text-sm text-green-700 mb-2 list-disc list-inside">
-                          {finding.evidenceRefs.map((ref, refIdx) => (
-                            <li key={refIdx}>{ref}</li>
-                          ))}
-                        </ul>
-                      )}
-                      <div className="flex items-center gap-2 mt-2">
-                        <span className="text-xs font-medium text-green-700">
-                          {finding.modelsSupporting.length} model{finding.modelsSupporting.length !== 1 ? "s" : ""}: {finding.modelsSupporting.map(getModelDisplayNameSafe).join(", ")}
-                        </span>
-                        <span className="text-xs text-green-600">•</span>
-                        <span className="text-xs text-green-600">{finding.confidence} confidence</span>
+                {report.keyFindings.map((finding, idx) => {
+                  const severity = classifyClaimSeverity(
+                    finding.claim,
+                    finding.confidence,
+                    finding.modelsSupporting?.length
+                  );
+                  const grounding = classifyGrounding(finding.claim, finding.evidenceRefs);
+                  return (
+                    <div
+                      key={idx}
+                      className="relative rounded-lg bg-green-50 border border-green-200 p-4"
+                    >
+                      <div className="absolute left-0 top-0 h-full w-1 rounded-l-lg bg-green-400"></div>
+                      <div className="pl-5">
+                        <div className="flex flex-wrap items-center gap-2 mb-2">
+                          <SeverityBadge result={severity} />
+                          <GroundingBadge result={grounding} />
+                        </div>
+                        <p className="text-green-800 mb-2">{finding.claim}</p>
+                        {finding.evidenceRefs && finding.evidenceRefs.length > 0 && (
+                          <ul className="text-sm text-green-700 mb-2 list-disc list-inside">
+                            {finding.evidenceRefs.map((ref, refIdx) => (
+                              <li key={refIdx}>{ref}</li>
+                            ))}
+                          </ul>
+                        )}
+                        <div className="flex items-center gap-2 mt-2">
+                          <span className="text-xs font-medium text-green-700">
+                            {finding.modelsSupporting.length} model{finding.modelsSupporting.length !== 1 ? "s" : ""}: {finding.modelsSupporting.map(getModelDisplayNameSafe).join(", ")}
+                          </span>
+                          <span className="text-xs text-green-600">•</span>
+                          <span className="text-xs text-green-600">{finding.confidence} confidence</span>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
@@ -823,28 +1200,46 @@ export default function PanelSynthesisView({
             <div>
               <h2 className="text-lg font-semibold text-slate-900 mb-4">Disagreements</h2>
               <div className="space-y-3">
-                {report.disagreements.map((disagreement, idx) => (
-                  <div
-                    key={idx}
-                    className="relative rounded-lg bg-orange-50 border border-orange-200 p-4"
-                  >
-                    <div className="absolute left-0 top-0 h-full w-1 rounded-l-lg bg-orange-400"></div>
-                    <div className="pl-5">
-                      <h3 className="text-orange-900 font-semibold mb-2">{disagreement.topic}</h3>
-                      <p className="text-orange-800 mb-3">{disagreement.whyTheyDiffer}</p>
-                      <div className="space-y-2 mt-3">
-                        {Object.entries(disagreement.positionsByModel).map(([modelId, position], posIdx) => (
-                          <div key={posIdx} className="pl-3 border-l-2 border-orange-300">
-                            <div className="flex items-center gap-2 mb-1">
-                              <span className="text-sm font-medium text-orange-900">{getModelDisplayNameSafe(modelId)}:</span>
+                {report.disagreements.map((disagreement, idx) => {
+                  const severity = classifyClaimSeverity(
+                    disagreement.topic + " " + disagreement.whyTheyDiffer,
+                    undefined,
+                    undefined,
+                    true
+                  );
+                  const positions = Object.values(disagreement.positionsByModel).join(" ");
+                  const grounding = classifyGrounding(
+                    disagreement.topic,
+                    undefined,
+                    positions
+                  );
+                  return (
+                    <div
+                      key={idx}
+                      className="relative rounded-lg bg-orange-50 border border-orange-200 p-4"
+                    >
+                      <div className="absolute left-0 top-0 h-full w-1 rounded-l-lg bg-orange-400"></div>
+                      <div className="pl-5">
+                        <div className="flex flex-wrap items-center gap-2 mb-2">
+                          <SeverityBadge result={severity} />
+                          <GroundingBadge result={grounding} />
+                        </div>
+                        <h3 className="text-orange-900 font-semibold mb-2">{disagreement.topic}</h3>
+                        <p className="text-orange-800 mb-3">{disagreement.whyTheyDiffer}</p>
+                        <div className="space-y-2 mt-3">
+                          {Object.entries(disagreement.positionsByModel).map(([modelId, position], posIdx) => (
+                            <div key={posIdx} className="pl-3 border-l-2 border-orange-300">
+                              <div className="flex items-center gap-2 mb-1">
+                                <span className="text-sm font-medium text-orange-900">{getModelDisplayNameSafe(modelId)}:</span>
+                              </div>
+                              <p className="text-sm text-orange-800">{position}</p>
                             </div>
-                            <p className="text-sm text-orange-800">{position}</p>
-                          </div>
-                        ))}
+                          ))}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
@@ -868,6 +1263,10 @@ export default function PanelSynthesisView({
                       }
                     : bias;
 
+                  const biasSeverity = classifyClaimSeverity(
+                    biasItem.description + " " + (biasItem.impact || "")
+                  );
+
                   return (
                     <div
                       key={idx}
@@ -875,8 +1274,10 @@ export default function PanelSynthesisView({
                     >
                       <div className="absolute left-0 top-0 h-full w-1 rounded-l-lg bg-amber-400"></div>
                       <div className="pl-5">
-                        {/* Bias Type Title */}
-                        <h3 className="text-slate-900 font-semibold mb-2">{biasItem.biasType}</h3>
+                        <div className="flex flex-wrap items-center gap-2 mb-2">
+                          <h3 className="text-slate-900 font-semibold">{biasItem.biasType}</h3>
+                          <SeverityBadge result={biasSeverity} />
+                        </div>
                         
                         {/* Description */}
                         <p className="text-slate-700 mb-3">{biasItem.description}</p>
@@ -987,6 +1388,12 @@ export default function PanelSynthesisView({
               <p className="text-slate-700">{report.methodology}</p>
             </div>
           )}
+
+          {/* Panel Verdict Summary Card */}
+          {(() => {
+            const verdict = buildPanelVerdict(question, report, gate);
+            return <PanelVerdictCard verdict={verdict} gate={gate} />;
+          })()}
       </div>
     );
   }

@@ -99,6 +99,206 @@ export default function HelpPage() {
 
               <section>
                 <h2 className="text-2xl font-semibold text-gray-900 mb-3">
+                  Verification Gate
+                </h2>
+                <p className="leading-relaxed mb-4">
+                  After every panel synthesis, ConvergePanel displays a Verification Gate at
+                  the top of the report. It gives you an at-a-glance decision-readiness signal
+                  based on how much the models agreed, where they diverged, and what evidence
+                  may be missing.
+                </p>
+                <div className="space-y-4">
+                  <div className="bg-emerald-50 p-4 rounded-lg border border-emerald-200">
+                    <h3 className="font-semibold text-emerald-900 mb-2">
+                      Broadly consistent
+                    </h3>
+                    <p className="text-emerald-800 text-sm">
+                      Models show broad agreement with supporting evidence and no major
+                      disagreements. Suitable for exploratory use &mdash; but always
+                      cross-check key claims with primary sources before acting on them.
+                    </p>
+                  </div>
+                  <div className="bg-amber-50 p-4 rounded-lg border border-amber-200">
+                    <h3 className="font-semibold text-amber-900 mb-2">
+                      Needs human review
+                    </h3>
+                    <p className="text-amber-800 text-sm">
+                      The analysis detected model disagreements, a significant number of
+                      contested claims, or a combination of bias signals and uncertainty.
+                      Review the flagged areas and verify disputed premises independently
+                      before relying on the conclusions.
+                    </p>
+                  </div>
+                  <div className="bg-red-50 p-4 rounded-lg border border-red-200">
+                    <h3 className="font-semibold text-red-900 mb-2">
+                      Low confidence &mdash; review required
+                    </h3>
+                    <p className="text-red-800 text-sm">
+                      Key findings lack source citations and models disagree or show low
+                      confidence. Treat the output as a starting hypothesis only. Request
+                      sources, narrow your question, and do not use for automated action
+                      until claims are independently verified.
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-4 space-y-3">
+                  <h3 className="font-semibold text-gray-900">What signals does it use?</h3>
+                  <p className="text-sm leading-relaxed">
+                    The Verification Gate is computed from signals already present in your
+                    synthesis &mdash; no additional model calls are made. It checks for:
+                  </p>
+                  <ul className="list-disc list-inside space-y-1 ml-4 text-sm">
+                    <li>Model disagreements on core conclusions</li>
+                    <li>Number of contested claims</li>
+                    <li>Missing sources or citations on key findings</li>
+                    <li>Bias and blind spot flags</li>
+                    <li>High uncertainty signals (low-confidence findings + open questions)</li>
+                  </ul>
+                  <p className="text-sm leading-relaxed">
+                    Along with the status badge, the gate shows <strong>why</strong> it
+                    reached its assessment (listing only the signals that triggered) and
+                    provides <strong>recommended next steps</strong> tailored to the specific
+                    issues detected.
+                  </p>
+                  <p className="text-xs text-slate-500 mt-2">
+                    The Verification Gate is an advisory signal derived from model comparison.
+                    It does not constitute factual certification and is not a substitute for
+                    independent professional review.
+                  </p>
+                </div>
+              </section>
+
+              <section>
+                <h2 className="text-2xl font-semibold text-gray-900 mb-3">
+                  Claim Severity Tags
+                </h2>
+                <p className="leading-relaxed mb-4">
+                  Not every claim in a synthesis carries the same weight. Claim Severity
+                  Tags label each finding, disagreement, and bias flag with one of three
+                  impact levels so you can focus your review where it matters most.
+                </p>
+                <div className="space-y-4">
+                  <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
+                    <h3 className="font-semibold text-slate-900 mb-2">
+                      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600 mr-2">
+                        <span className="h-1.5 w-1.5 rounded-full bg-slate-400"></span>Low stakes
+                      </span>
+                    </h3>
+                    <p className="text-slate-700 text-sm">
+                      Supporting context, secondary framing, or low-impact observations.
+                      Useful background but unlikely to change a decision.
+                    </p>
+                  </div>
+                  <div className="bg-amber-50 p-4 rounded-lg border border-amber-200">
+                    <h3 className="font-semibold text-amber-900 mb-2">
+                      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-700 mr-2">
+                        <span className="h-1.5 w-1.5 rounded-full bg-amber-400"></span>Important
+                      </span>
+                    </h3>
+                    <p className="text-amber-800 text-sm">
+                      Claims that materially shape interpretation, prioritization, or
+                      follow-up. Worth verifying before relying on them.
+                    </p>
+                  </div>
+                  <div className="bg-rose-50 p-4 rounded-lg border border-rose-200">
+                    <h3 className="font-semibold text-rose-900 mb-2">
+                      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-rose-50 text-rose-700 mr-2">
+                        <span className="h-1.5 w-1.5 rounded-full bg-rose-500"></span>Decision-critical
+                      </span>
+                    </h3>
+                    <p className="text-rose-800 text-sm">
+                      Claims that affect action, compliance, legal exposure, financial
+                      exposure, safety, or strategic recommendations. Treat these with the
+                      highest scrutiny.
+                    </p>
+                  </div>
+                </div>
+                <p className="text-xs text-slate-500 mt-3">
+                  Severity is estimated from the text content using lightweight
+                  heuristics. It reflects potential impact on downstream decisions, not
+                  model confidence alone.
+                </p>
+              </section>
+
+              <section>
+                <h2 className="text-2xl font-semibold text-gray-900 mb-3">
+                  Source-Grounding Flags
+                </h2>
+                <p className="leading-relaxed mb-4">
+                  Source-Grounding Flags indicate whether a claim appears to be backed by
+                  cited evidence, based on model inference, or a mix of both. They help
+                  you gauge how much independent verification a conclusion might need.
+                </p>
+                <div className="space-y-4">
+                  <div className="bg-sky-50 p-4 rounded-lg border border-sky-200">
+                    <h3 className="font-semibold text-sky-900 mb-2">
+                      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-sky-50 text-sky-700 mr-2">Source-backed</span>
+                    </h3>
+                    <p className="text-sky-800 text-sm">
+                      The claim references explicit citations, studies, institutions, or
+                      external evidence. Still verify the cited sources independently.
+                    </p>
+                  </div>
+                  <div className="bg-violet-50 p-4 rounded-lg border border-violet-200">
+                    <h3 className="font-semibold text-violet-900 mb-2">
+                      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-violet-50 text-violet-700 mr-2">Model-reasoned</span>
+                    </h3>
+                    <p className="text-violet-800 text-sm">
+                      The claim appears based primarily on model inference and reasoning
+                      with little or no cited evidence. Exercise extra caution.
+                    </p>
+                  </div>
+                  <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
+                    <h3 className="font-semibold text-slate-900 mb-2">
+                      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600 mr-2">Mixed / unclear</span>
+                    </h3>
+                    <p className="text-slate-700 text-sm">
+                      The grounding is ambiguous &mdash; the claim blends sourced and inferred
+                      reasoning, or there is not enough signal to classify it clearly.
+                    </p>
+                  </div>
+                </div>
+                <p className="text-xs text-slate-500 mt-3">
+                  Grounding flags are informational signals estimated from text patterns.
+                  They do not guarantee that cited sources are accurate or that
+                  model-reasoned claims are incorrect.
+                </p>
+              </section>
+
+              <section>
+                <h2 className="text-2xl font-semibold text-gray-900 mb-3">
+                  Panel Verdict Card
+                </h2>
+                <p className="leading-relaxed mb-4">
+                  At the bottom of every synthesis report, ConvergePanel generates a
+                  compact <strong>Panel Verdict</strong> &mdash; a shareable decision
+                  artifact that captures the essentials of the analysis in one card.
+                </p>
+                <p className="leading-relaxed mb-3">
+                  The card includes:
+                </p>
+                <ul className="list-disc list-inside space-y-2 ml-4 mb-4">
+                  <li>The original question</li>
+                  <li>The top consensus point</li>
+                  <li>The top disagreement (if any)</li>
+                  <li>Verification Gate result</li>
+                  <li>Source-grounding signal</li>
+                  <li>One key caveat or blind spot</li>
+                </ul>
+                <p className="leading-relaxed mb-3">
+                  Use the <strong>Copy summary</strong> button to grab a plain-text
+                  version for pasting into Slack, email, or documents. The
+                  <strong> Copy for X (short)</strong> button produces a condensed version
+                  optimized for social sharing.
+                </p>
+                <p className="text-xs text-slate-500 mt-3">
+                  The Panel Verdict is auto-generated from multi-model synthesis and is
+                  provided for informational purposes only.
+                </p>
+              </section>
+
+              <section>
+                <h2 className="text-2xl font-semibold text-gray-900 mb-3">
                   Panel Presets
                 </h2>
                 <ul className="list-disc list-inside space-y-2 ml-4">

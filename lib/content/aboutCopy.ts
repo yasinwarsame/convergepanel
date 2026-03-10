@@ -48,6 +48,22 @@ export const aboutCopy = {
     {
       text: "Builds a trust summary so you see consensus, uncertainty, and risk.",
     },
+    {
+      text: "Includes a Verification Gate — an instant decision-readiness signal for every synthesis.",
+      accent: "Verification Gate",
+    },
+    {
+      text: "Tags claims as low stakes, important, or decision-critical so you focus where it matters.",
+      accent: "decision-critical",
+    },
+    {
+      text: "Flags whether conclusions appear source-backed, model-reasoned, or mixed.",
+      accent: "source-backed",
+    },
+    {
+      text: "Generates a shareable Panel Verdict card — a compact decision artifact ready to copy.",
+      accent: "Panel Verdict",
+    },
   ],
 
   // Use case description (used in signup/login footer)
@@ -79,7 +95,7 @@ export const aboutCopy = {
     description: "ConvergePanel v1 supports five leading AI models:",
     list: [
       {
-        name: "GPT 5.1",
+        name: "GPT 5.2",
         description: "OpenAI's GPT-4 model, known for broad knowledge and reasoning.",
       },
       {
