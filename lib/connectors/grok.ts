@@ -89,6 +89,10 @@ export async function callGrok(
   const sanitizedContext = context?.trim() || null;
     const startTime = Date.now();
 
+  if (process.env.NODE_ENV !== "production" && process.env.FORCE_XAI_FAIL === "1") {
+    return { modelId: "grok", status: "error", rawText: null, errorMessage: "Forced failure (dev)", latencyMs: 0 };
+  }
+
   // TEMPORARY DEBUG LOG: Check if API key is present
   // This helps diagnose why Grok might not be working
   // TODO: Remove this debug log after confirming Grok works correctly

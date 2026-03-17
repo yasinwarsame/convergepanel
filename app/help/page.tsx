@@ -286,10 +286,7 @@ export default function HelpPage() {
                   <li>One key caveat or blind spot</li>
                 </ul>
                 <p className="leading-relaxed mb-3">
-                  Use the <strong>Copy summary</strong> button to grab a plain-text
-                  version for pasting into Slack, email, or documents. The
-                  <strong> Copy for X (short)</strong> button produces a condensed version
-                  optimized for social sharing.
+                  Use the <strong>Copy for LinkedIn</strong> button for a professional post, or <strong>Copy as Markdown</strong> for research notes. The <strong>Copy for X</strong> button produces a thread-ready version for X/Twitter.
                 </p>
                 <p className="text-xs text-slate-500 mt-3">
                   The Panel Verdict is auto-generated from multi-model synthesis and is

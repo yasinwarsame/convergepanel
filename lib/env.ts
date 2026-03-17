@@ -47,6 +47,10 @@
     if (!process.env.GEMINI_API_KEY) {
       console.warn("[env] Missing GEMINI_API_KEY – Gemini connector will be disabled.");
     }
+
+    if (!process.env.DEEPSEEK_API_KEY) {
+      console.warn("[env] Missing DEEPSEEK_API_KEY – DeepSeek fallback will be disabled.");
+    }
   }
 })();
 
@@ -56,6 +60,7 @@ export const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 export const XAI_API_KEY = process.env.XAI_API_KEY;
 export const PERPLEXITY_API_KEY = process.env.PERPLEXITY_API_KEY;
 export const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+export const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
 
 /**
  * Grok Model Configuration

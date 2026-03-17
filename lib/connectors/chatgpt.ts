@@ -37,6 +37,10 @@ export async function callChatGPT(
   const sanitizedContext = context?.trim() || null;
   const startTime = Date.now();
 
+  if (process.env.NODE_ENV !== "production" && process.env.FORCE_OPENAI_FAIL === "1") {
+    return { modelId: "chatgpt", status: "error", rawText: null, errorMessage: "Forced failure (dev)", latencyMs: 0 };
+  }
+
   if (!apiKey) {
     return mockResult();
   }
@@ -152,13 +156,14 @@ export async function callChatGPT(
       };
     }
 
-    if (error?.status === 429 || error?.message?.includes("rate limit")) {
+    if (error?.status === 429 || error?.message?.includes("rate limit") || error?.message?.includes("quota")) {
       return {
         modelId: "chatgpt",
         status: "refused",
-        rawText: "ChatGPT rate limit exceeded. Please retry shortly.",
+        rawText: null,
+        errorMessage: `429 rate limit / quota exceeded: ${error?.message?.slice(0, 200) ?? "unknown"}`,
         latencyMs,
-        tokenUsage: zeroTokenUsage, // CRITICAL: Always include tokenUsage
+        tokenUsage: zeroTokenUsage,
       };
     }
 

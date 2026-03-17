@@ -50,20 +50,15 @@ export default function StatusPill({
           label: "Done",
           color: "bg-green-100 text-green-700 border-green-300",
         };
-      case "error":
+      case "substituted":
         return {
-          label: "Error",
+          label: "Substituted",
+          color: "bg-amber-100 text-amber-700 border-amber-300",
+        };
+      case "failed":
+        return {
+          label: "Failed",
           color: "bg-red-100 text-red-700 border-red-300",
-        };
-      case "timeout":
-        return {
-          label: "Timeout",
-          color: "bg-orange-100 text-orange-700 border-orange-300",
-        };
-      case "refused":
-        return {
-          label: "Refused",
-          color: "bg-yellow-100 text-yellow-700 border-yellow-300",
         };
       default:
         return {

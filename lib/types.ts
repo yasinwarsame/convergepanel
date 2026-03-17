@@ -116,38 +116,50 @@ export interface UserProfile {
 export type ModelId = "chatgpt" | "claude" | "grok" | "perplexity" | "gemini";
 
 /**
- * Model execution status
- * - ok: Successfully received response
- * - error: API call failed (network error, API error, etc.)
- * - timeout: Request took longer than 30 seconds
- * - refused: API refused request (rate limit, authentication, etc.)
+ * Public model execution status (the only values exposed to UI / API consumers)
+ * - ok: Successfully received response from the primary model
+ * - substituted: Primary model failed, DeepSeek fallback succeeded
+ * - failed: Both primary and fallback failed (or fallback not allowed)
  */
-export type ModelStatus = "ok" | "error" | "timeout" | "refused";
+export type ModelStatus = "ok" | "substituted" | "failed";
+
+/**
+ * Internal connector status — connectors may return these granular values,
+ * but the orchestrator normalizes them to ModelStatus before exposing publicly.
+ */
+export type ConnectorStatus = ModelStatus | "error" | "timeout" | "refused" | "rate_limited";
 
 /**
  * Result from a single model execution
  * 
  * Contains the model's response along with metadata about the execution.
+ * Connectors may set status to any ConnectorStatus; the orchestrator
+ * normalizes it to ModelStatus ("ok" | "substituted" | "failed") before
+ * returning results to the API layer.
  */
 export interface ModelResult {
   modelId: ModelId;
-  status: ModelStatus;
-  rawText: string | null; // The model's response text, or null if failed
-  errorMessage?: string; // Specific error message when status is "error", "timeout", or "refused"
-  latencyMs: number; // How long the request took (for performance tracking)
-  // Token usage (always present for successful calls, may be {0, null, null} if unavailable)
-  // totalTokens is always a number (0 if unavailable), prompt/completion may be null
+  status: ConnectorStatus;
+  rawText: string | null;
+  errorMessage?: string;
+  latencyMs: number;
   tokenUsage?: {
-    totalTokens: number; // Always a number (0 if unavailable)
-    promptTokens: number | null; // null if unavailable
-    completionTokens: number | null; // null if unavailable
+    totalTokens: number;
+    promptTokens: number | null;
+    completionTokens: number | null;
   };
-  // Raw provider response (for token extraction and debugging)
   rawResponse?: any;
-  // Debug/audit fields for token tracking
-  hasUsageMetadata?: boolean; // Whether the provider returned usage metadata (for debugging, mainly used by Gemini)
-  // Output truncation detection
-  wasTruncated?: boolean; // True if response hit max output tokens limit (e.g., Gemini MAX_OUTPUT_TOKENS)
+  hasUsageMetadata?: boolean;
+  wasTruncated?: boolean;
+
+  // Per-slot metadata (always populated by panel orchestration)
+  requestedModel?: string;
+  provider?: string;
+  actualModel?: string;
+
+  // Substitution metadata (only when status === "substituted")
+  substitutedFrom?: string;
+  substitutionReason?: string;
 }
 
 /**
@@ -183,7 +195,7 @@ export interface ModelConnector {
     question: string,
     systemWrapper: string
   ): Promise<{
-    status: ModelStatus;
+    status: ConnectorStatus;
     rawText: string | null;
     latencyMs: number;
   }>;
@@ -259,7 +271,7 @@ export interface SynthesizedReport {
   rawResponses: Array<{
     modelId: ModelId;
     text: string;
-    status: ModelStatus;
+    status: ConnectorStatus;
   }>;
 }
 

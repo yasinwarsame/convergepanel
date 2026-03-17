@@ -88,6 +88,10 @@ export async function callGemini(
   const sanitizedContext = context?.trim() || null;
   const startTime = Date.now();
 
+  if (process.env.NODE_ENV !== "production" && process.env.FORCE_GEMINI_FAIL === "1") {
+    return { modelId: "gemini", status: "error", rawText: null, errorMessage: "Forced failure (dev)", latencyMs: 0 };
+  }
+
   // Early guard: Check for API key from env or parameter
   const envKey = process.env.GEMINI_API_KEY;
   const effectiveApiKey = envKey || apiKey;

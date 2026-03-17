@@ -1,27 +1,122 @@
-import { ModelId, ModelResult } from "@/lib/types";
+import { ModelId, ModelResult, ConnectorStatus } from "@/lib/types";
 import { CONNECTOR_MAP } from "@/lib/connectors";
 import { isSuspiciouslyShort } from "@/lib/textLimits";
+import { callDeepSeek, DEEPSEEK_MODEL } from "@/lib/connectors/deepseek";
+import { DEEPSEEK_API_KEY } from "@/lib/env";
+import { getPanelModelConfig } from "@/lib/panelModels";
+import { GROK_MODEL } from "@/lib/env";
 
 type ApiKeys = Partial<Record<ModelId, string | undefined>>;
 
+const isDev = () => process.env.NODE_ENV !== "production";
+
+// ─── Actual model strings per modelId ─────────────────────────────────────
+
+const ACTUAL_MODEL_STRINGS: Record<ModelId, string> = {
+  chatgpt: "gpt-4o-mini",
+  claude: "claude-3-haiku-20240307",
+  gemini: "gemini-2.0-flash",
+  grok: GROK_MODEL || "grok-4-1-fast-reasoning",
+  perplexity: "sonar",
+};
+
+// ─── Fallback allowlist ───────────────────────────────────────────────────
+
+const DEFAULT_FALLBACK_PROVIDERS = ["openai", "anthropic", "google"];
+
+function getDeepSeekFallbackAllowlist(): Set<string> {
+  const envOverride = process.env.PANEL_DEEPSEEK_FALLBACK_FOR;
+  if (envOverride && envOverride.trim().length > 0) {
+    return new Set(envOverride.split(",").map(s => s.trim().toLowerCase()));
+  }
+  return new Set(DEFAULT_FALLBACK_PROVIDERS);
+}
+
+function isFallbackAllowed(modelId: ModelId): boolean {
+  const provider = getPanelModelConfig(modelId).provider;
+  return getDeepSeekFallbackAllowlist().has(provider);
+}
+
+// ─── Retry helpers ────────────────────────────────────────────────────────
+
+const RETRYABLE_STATUSES: ConnectorStatus[] = ["timeout", "refused", "rate_limited"];
+
+function isRetryableResult(result: ModelResult): boolean {
+  if (result.status === "ok") return false;
+  if (RETRYABLE_STATUSES.includes(result.status)) return true;
+  const msg = (result.errorMessage ?? "").toLowerCase();
+  return (
+    msg.includes("rate limit") ||
+    msg.includes("429") ||
+    msg.includes("quota") ||
+    /\b5\d{2}\b/.test(msg) ||
+    msg.includes("server error")
+  );
+}
+
+function isNonRetryable(result: ModelResult): boolean {
+  const msg = (result.errorMessage ?? "").toLowerCase();
+  return (
+    msg.includes("401") ||
+    msg.includes("403") ||
+    msg.includes("auth") ||
+    msg.includes("forbidden") ||
+    msg.includes("request not allowed")
+  );
+}
+
+function classifyPrimaryErrorCode(modelId: ModelId, result: ModelResult): string {
+  const provider = getPanelModelConfig(modelId).provider;
+  const msg = (result.errorMessage ?? "").toLowerCase();
+
+  if (result.status === "timeout" || msg.includes("timeout")) {
+    return `${provider}_timeout`;
+  }
+  if (msg.includes("429") || msg.includes("rate limit") || msg.includes("exceeded your current quota") || msg.includes("billing details")) {
+    return `${provider}_429`;
+  }
+  if (msg.includes("401")) return `${provider}_auth`;
+  if (msg.includes("403") || msg.includes("forbidden") || msg.includes("request not allowed")) {
+    return `${provider}_forbidden`;
+  }
+  if (/\b5\d{2}\b/.test(msg) || msg.includes("server error")) {
+    return `${provider}_5xx`;
+  }
+  if (msg.includes("invalid") && msg.includes("json")) return `${provider}_invalid_json`;
+  return `${provider}_error`;
+}
+
+// ─── Fallback eligibility ─────────────────────────────────────────────────
+
+const NON_TRANSIENT_QUOTA_PHRASES = [
+  "billing details",
+  "exceeded your current quota",
+  "please check your plan",
+  "insufficient_quota",
+];
+
+function shouldAttemptDeepSeek(primaryCode: string, primaryResult: ModelResult): boolean {
+  if (primaryCode.includes("_auth") || primaryCode.includes("_forbidden")) {
+    return false;
+  }
+  if (primaryCode.includes("_429")) {
+    const msg = (primaryResult.errorMessage ?? "").toLowerCase();
+    if (NON_TRANSIENT_QUOTA_PHRASES.some(phrase => msg.includes(phrase))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// ─── Panel orchestration ──────────────────────────────────────────────────
+
 /**
  * Run Panel Function
- * 
- * Orchestrates calling multiple AI models in parallel and returns results for each.
- * 
- * CRITICAL GUARANTEE: This function ALWAYS returns exactly one result per selected model.
- * - If a model succeeds → status: "ok" with rawText
- * - If a model fails → status: "error" with errorMessage
- * - No model ever silently disappears from results
- * 
- * IMPORTANT: Always attach the canonical PanelModelId (from lib/panelModels.ts) so the frontend
- * can color and label consistently. The modelId field in ModelResult must be one of:
- * "chatgpt" | "claude" | "grok" | "perplexity" | "gemini"
- * 
- * @param question - The user's question to ask all models
- * @param selectedModels - Array of model IDs to query (must be valid ModelId values matching PanelModelId)
- * @param apiKeys - Object mapping model IDs to their API keys
- * @returns Promise<ModelResult[]> - One result per selected model, guaranteed
+ *
+ * CRITICAL GUARANTEE: Always returns exactly one result per selected model.
+ * - Primary succeeds → status: "ok"
+ * - Primary fails, DeepSeek succeeds → status: "substituted"
+ * - Both fail or fallback not allowed → status: "failed"
  */
 export async function runPanel(
   question: string,
@@ -32,159 +127,240 @@ export async function runPanel(
   const normalizedQuestion = question.trim();
   const normalizedContext = context ? context.trim() : null;
 
-  // Log which models are supposed to run (for debugging)
   console.log("[runPanel] Selected models:", selectedModels);
-  console.log("[runPanel] API keys present:", {
-    chatgpt: Boolean(apiKeys.chatgpt),
-    claude: Boolean(apiKeys.claude),
-    grok: Boolean(apiKeys.grok),
-    perplexity: Boolean(apiKeys.perplexity),
-    gemini: Boolean(apiKeys.gemini),
-  });
+  if (isDev()) {
+    console.log("[runPanel] API keys present:", {
+      chatgpt: Boolean(apiKeys.chatgpt),
+      claude: Boolean(apiKeys.claude),
+      grok: Boolean(apiKeys.grok),
+      perplexity: Boolean(apiKeys.perplexity),
+      gemini: Boolean(apiKeys.gemini),
+      deepseek: Boolean(DEEPSEEK_API_KEY),
+    });
+    console.log("[runPanel] Fallback allowlist:", [...getDeepSeekFallbackAllowlist()]);
+  }
 
-  // Iterate over selectedModels directly and ensure every model gets a result
-  // This guarantees that there is always one result per selected model
-  // Models can fail but they never vanish—failures are encoded as status: "error"
-  // 
-  // IMPORTANT: Use Promise.allSettled to ensure we always get results for all models,
-  // even if some fail. This guarantees finalization always happens.
-  // Promise.allSettled ensures all model connectors run in parallel and we get results
-  // for every model, regardless of success or failure.
   const settledResults = await Promise.allSettled(
-    selectedModels.map(async (modelId) => {
-      const startTime = Date.now();
-      
-      // Get connector from CONNECTOR_MAP
-      // If no connector is found, return an error entry immediately
-      const connector = CONNECTOR_MAP[modelId];
-      
-      if (!connector) {
-        console.error(
-          `[runPanel] No connector defined for modelId="${modelId}"`
-        );
-        return {
-          modelId,
-          status: "error" as const,
-          rawText: null,
-          latencyMs: 0,
-        };
-      }
-
-      // Get API key for this model
-      const apiKey = apiKeys[modelId];
-
-      // Call connector in try/catch to handle any errors
-      // Most connectors now return error results instead of throwing, but we keep try/catch
-      // as a safety net for any unexpected errors that might still throw
-      try {
-        console.log(`[runPanel] Calling connector for model: ${modelId}`);
-            const result = await connector(normalizedQuestion, normalizedContext, apiKey);
-        
-        // Verify the result has the correct modelId (safety check)
-        if (result.modelId !== modelId) {
-          console.warn(
-            `[runPanel] Connector ${modelId} returned result with mismatched modelId: ${result.modelId}`
-          );
-        }
-        
-        // Validate response length for successful responses
-        // Suspiciously short responses likely indicate refusals, errors, or superficial answers
-        if (result.status === "ok" && result.rawText) {
-          if (isSuspiciouslyShort(result.rawText)) {
-            console.warn(
-              `[runPanel] Model ${modelId} returned suspiciously short response (${result.rawText.split(/\s+/).length} words). ` +
-              `This may indicate a refusal, error, or superficial answer that doesn't meet depth requirements.`
-            );
-            // Mark the response as potentially incomplete by adding a warning to the errorMessage
-            // We don't change the status to "error" because the model did respond, but we want to flag it
-            // The UI can check for this warning and display it appropriately
-            result.errorMessage = "Unusually short answer – this model may have refused or returned less detail than requested.";
-          }
-        }
-        
-        // If connector returned an error result, return it as-is (no need to throw)
-        // This ensures error messages are displayed cleanly in the UI
-        return result;
-      } catch (err: any) {
-        // Safety net: if a connector unexpectedly throws (shouldn't happen with updated connectors),
-        // catch it and return an error result with errorMessage set
-        // IMPORTANT: errorMessage must always be a non-empty string if an error occurs
-        console.error(
-          `[runPanel] Unexpected error while calling model "${modelId}":`,
-          err
-        );
-        
-        // Extract error message from the thrown error
-        // This ensures we capture meaningful error messages
-        const message = String(err?.message || err || "Unknown error");
-        
-        return {
-          modelId,
-          status: "error" as const,
-          rawText: null,
-          errorMessage: message, // Set errorMessage so UI can display the real error
-          latencyMs: Date.now() - startTime,
-          tokenUsage: { totalTokens: 0, promptTokens: null, completionTokens: null }, // CRITICAL: Always include tokenUsage, even on error
-        };
-      }
-    })
+    selectedModels.map((modelId) =>
+      runSlotWithFallback(modelId, normalizedQuestion, normalizedContext, apiKeys)
+    )
   );
 
-  // Process Promise.allSettled results - convert to ModelResult[]
-  // This ensures we always have one result per selected model, even if some failed
   const results: ModelResult[] = settledResults.map((settled, index) => {
     const modelId = selectedModels[index];
-    
+    const provider = getPanelModelConfig(modelId).provider;
+    const requestedModel = ACTUAL_MODEL_STRINGS[modelId] || modelId;
+
     if (settled.status === "fulfilled") {
-      // Model call succeeded - return the result as-is
       return settled.value;
-    } else {
-      // Model call was rejected (unexpected error in connector)
-      // This should rarely happen since connectors catch errors internally,
-      // but we handle it defensively
-      console.error(`[runPanel] Promise rejected for model ${modelId}:`, settled.reason);
-      return {
-        modelId,
-        status: "error" as const,
-        rawText: null,
-        errorMessage: String(settled.reason?.message || settled.reason || "Unexpected error"),
-        latencyMs: 0,
-        tokenUsage: { totalTokens: 0, promptTokens: null, completionTokens: null }, // CRITICAL: Always include tokenUsage
-      };
     }
+
+    console.error(`[runPanel] Promise rejected for model ${modelId}:`, settled.reason);
+    return {
+      modelId,
+      status: "failed" as const,
+      rawText: "Model unavailable.",
+      errorMessage: String(settled.reason?.message || settled.reason || "Unexpected error"),
+      latencyMs: 0,
+      tokenUsage: { totalTokens: 0, promptTokens: null, completionTokens: null },
+      requestedModel,
+      provider,
+      actualModel: requestedModel,
+    };
   });
 
-  // Log completion and verify all models are present
   console.log(`[runPanel] All model calls completed. Results count: ${results.length}`);
-  console.log(`[runPanel] Results summary:`, results.map(r => ({ modelId: r.modelId, status: r.status })));
-  
-  // CRITICAL: Verify that all selected models are present in results
-  // This is a safety check - with the new map-based approach, this should never happen
-  // But we check anyway to catch any bugs
+  if (isDev()) {
+    console.log(`[runPanel] Results summary:`, results.map(r => ({
+      modelId: r.modelId,
+      status: r.status,
+      provider: r.provider,
+      requestedModel: r.requestedModel,
+      actualModel: r.actualModel,
+      substitutedFrom: r.substitutedFrom,
+    })));
+  }
+
+  // Safety: fill any missing models
   const resultModelIds = new Set(results.map(r => r.modelId));
   const missingModels = selectedModels.filter(id => !resultModelIds.has(id));
   if (missingModels.length > 0) {
     console.error(`[runPanel] ERROR: Missing results for models: ${missingModels.join(", ")}`);
-    console.error(`[runPanel] Selected models: ${selectedModels.join(", ")}`);
-    console.error(`[runPanel] Result model IDs: ${Array.from(resultModelIds).join(", ")}`);
-    // Add error results for missing models to ensure they appear in UI
-    // This should never happen with the new map-based approach, but we handle it anyway
     missingModels.forEach(modelId => {
+      const provider = getPanelModelConfig(modelId).provider;
+      const requestedModel = ACTUAL_MODEL_STRINGS[modelId] || modelId;
       results.push({
         modelId,
-        status: "error",
-        rawText: `No result returned from ${modelId} connector. This should not happen.`,
+        status: "failed",
+        rawText: "Model unavailable.",
         latencyMs: 0,
-        tokenUsage: { totalTokens: 0, promptTokens: null, completionTokens: null }, // CRITICAL: Always include tokenUsage
+        tokenUsage: { totalTokens: 0, promptTokens: null, completionTokens: null },
+        requestedModel,
+        provider,
+        actualModel: requestedModel,
       });
     });
   }
-  
-  // Ensure results are in the same order as selectedModels for consistency
-  const orderedResults = selectedModels.map(modelId => 
-    results.find(r => r.modelId === modelId)!
-  );
-  
-  return orderedResults;
+
+  return selectedModels.map(modelId => results.find(r => r.modelId === modelId)!);
 }
 
+/**
+ * Execute a single slot: primary → retry → DeepSeek fallback → failed placeholder.
+ */
+async function runSlotWithFallback(
+  modelId: ModelId,
+  question: string,
+  context: string | null,
+  apiKeys: ApiKeys
+): Promise<ModelResult> {
+  const connector = CONNECTOR_MAP[modelId];
+  const provider = getPanelModelConfig(modelId).provider;
+  const requestedModel = ACTUAL_MODEL_STRINGS[modelId] || modelId;
+
+  if (!connector) {
+    console.error(`[runPanel] No connector defined for modelId="${modelId}"`);
+    return {
+      modelId,
+      status: "failed" as const,
+      rawText: null,
+      latencyMs: 0,
+      requestedModel,
+      provider,
+      actualModel: requestedModel,
+    };
+  }
+
+  const apiKey = apiKeys[modelId];
+
+  // --- Primary attempt ---
+  let primaryResult = await safePrimaryCall(connector, modelId, question, context, apiKey);
+
+  if (primaryResult.status === "ok") {
+    return applyShortCheck({
+      ...primaryResult,
+      requestedModel,
+      provider,
+      actualModel: requestedModel,
+    });
+  }
+
+  // --- Retry logic (up to 2 retries for retryable errors) ---
+  if (!isNonRetryable(primaryResult) && isRetryableResult(primaryResult)) {
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      if (isDev()) console.log(`[runPanel] Retrying ${modelId} (attempt ${attempt}/2)`);
+      primaryResult = await safePrimaryCall(connector, modelId, question, context, apiKey);
+      if (primaryResult.status === "ok") {
+        return applyShortCheck({
+          ...primaryResult,
+          requestedModel,
+          provider,
+          actualModel: requestedModel,
+        });
+      }
+      if (isNonRetryable(primaryResult)) break;
+      if (!isRetryableResult(primaryResult)) break;
+    }
+  }
+
+  // --- Check fallback allowlist ---
+  if (!isFallbackAllowed(modelId)) {
+    if (isDev()) console.log(`[runPanel] Fallback not allowed for ${modelId} (provider: ${provider})`);
+    return failedPlaceholder(modelId, primaryResult, "fallback_not_allowed");
+  }
+
+  // --- DeepSeek fallback ---
+  const dsKey = DEEPSEEK_API_KEY;
+  if (!dsKey) {
+    if (isDev()) console.log(`[runPanel] No DEEPSEEK_API_KEY — skipping fallback for ${modelId}`);
+    return failedPlaceholder(modelId, primaryResult, classifyPrimaryErrorCode(modelId, primaryResult));
+  }
+
+  const primaryCode = classifyPrimaryErrorCode(modelId, primaryResult);
+
+  if (!shouldAttemptDeepSeek(primaryCode, primaryResult)) {
+    if (isDev()) {
+      console.log(`[runPanel] Skipping DeepSeek fallback for ${modelId} — non-transient primary failure: ${primaryCode}`);
+    }
+    return failedPlaceholder(modelId, primaryResult, primaryCode);
+  }
+
+  if (isDev()) {
+    console.log(`[runPanel] Primary ${modelId} failed (${primaryCode}). Attempting DeepSeek fallback.`);
+  }
+
+  const dsResult = await callDeepSeek(question, modelId, dsKey, context);
+
+  if (dsResult.ok) {
+    if (isDev()) console.log(`[runPanel] DeepSeek substitution succeeded for ${modelId}`);
+    return {
+      modelId,
+      status: "substituted" as const,
+      rawText: dsResult.text,
+      latencyMs: dsResult.latencyMs,
+      tokenUsage: { totalTokens: 0, promptTokens: null, completionTokens: null },
+      requestedModel,
+      provider: "deepseek",
+      actualModel: dsResult.actualModel,
+      substitutedFrom: `${provider}:${requestedModel}`,
+      substitutionReason: primaryCode,
+    };
+  }
+
+  const combinedReason = `${primaryCode}|${dsResult.code}`;
+
+  if (isDev()) {
+    console.log(`[runPanel] DeepSeek fallback also failed for ${modelId}: ${dsResult.message} (combined: ${combinedReason})`);
+  }
+
+  return failedPlaceholder(modelId, primaryResult, combinedReason);
+}
+
+async function safePrimaryCall(
+  connector: (q: string, ctx?: string | null, key?: string) => Promise<ModelResult>,
+  modelId: ModelId,
+  question: string,
+  context: string | null,
+  apiKey: string | undefined
+): Promise<ModelResult> {
+  try {
+    return await connector(question, context, apiKey);
+  } catch (err: any) {
+    console.error(`[runPanel] Unexpected throw from ${modelId}:`, err);
+    return {
+      modelId,
+      status: "error" as ConnectorStatus,
+      rawText: null,
+      errorMessage: String(err?.message || err || "Unknown error"),
+      latencyMs: 0,
+      tokenUsage: { totalTokens: 0, promptTokens: null, completionTokens: null },
+    };
+  }
+}
+
+function applyShortCheck(result: ModelResult): ModelResult {
+  if (result.status === "ok" && result.rawText && isSuspiciouslyShort(result.rawText)) {
+    console.warn(
+      `[runPanel] Model ${result.modelId} returned suspiciously short response (${result.rawText.split(/\s+/).length} words).`
+    );
+    result.errorMessage = "Unusually short answer – this model may have refused or returned less detail than requested.";
+  }
+  return result;
+}
+
+function failedPlaceholder(modelId: ModelId, primaryResult: ModelResult, reason?: string): ModelResult {
+  const provider = getPanelModelConfig(modelId).provider;
+  const requestedModel = ACTUAL_MODEL_STRINGS[modelId] || modelId;
+  return {
+    modelId,
+    status: "failed" as const,
+    rawText: "Model unavailable.",
+    errorMessage: primaryResult.errorMessage || `${modelId} failed`,
+    latencyMs: primaryResult.latencyMs || 0,
+    tokenUsage: { totalTokens: 0, promptTokens: null, completionTokens: null },
+    requestedModel,
+    provider,
+    actualModel: requestedModel,
+    ...(reason ? { substitutionReason: reason } : {}),
+  };
+}

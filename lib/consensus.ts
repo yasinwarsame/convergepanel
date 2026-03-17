@@ -46,6 +46,7 @@ import {
 } from "@/lib/types";
 import { buildAgreementMap, ClaimCluster as AgreementClaimCluster } from "@/lib/agreementMap";
 import { MODEL_INFO } from "@/lib/modelInfo";
+import { isUsableResult } from "@/lib/panel/publicize";
 
 const SYSTEM_WRAPPER =
   "Answer clearly. Provide your key claims and any relevant figures. If unsure, say so.";
@@ -498,7 +499,7 @@ export function synthesizeReport(
   // Use safe text getter to handle both rawTextFull and rawText fields
   const getModelText = (r: ModelResult | any): string => 
     (r as any).rawTextFull ?? (r as any).rawText ?? (r as any).text ?? "";
-  const successfulResults = results.filter((r) => r.status === "ok" && getModelText(r).trim().length > 0);
+  const successfulResults = results.filter((r) => isUsableResult(r) && getModelText(r).trim().length > 0);
 
   /**
    * Core Rule: Cannot synthesize with <2 responses

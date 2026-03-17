@@ -37,6 +37,10 @@ export async function callClaude(
   const sanitizedContext = context?.trim() || null;
   const startTime = Date.now();
 
+  if (process.env.NODE_ENV !== "production" && process.env.FORCE_ANTHROPIC_FAIL === "1") {
+    return { modelId: "claude", status: "error", rawText: null, errorMessage: "Forced failure (dev)", latencyMs: 0 };
+  }
+
   if (!apiKey) {
     return mockResult();
   }
@@ -161,13 +165,14 @@ export async function callClaude(
       };
     }
 
-    if (error?.status === 429 || error?.message?.includes("rate limit")) {
+    if (error?.status === 429 || error?.message?.includes("rate limit") || error?.message?.includes("quota")) {
       return {
         modelId: "claude",
         status: "refused",
-        rawText: "Claude rate limit exceeded. Please retry shortly.",
+        rawText: null,
+        errorMessage: `429 rate limit / quota exceeded: ${error?.message?.slice(0, 200) ?? "unknown"}`,
         latencyMs,
-        tokenUsage: zeroTokenUsage, // CRITICAL: Always include tokenUsage
+        tokenUsage: zeroTokenUsage,
       };
     }
 

@@ -38,6 +38,15 @@ import remarkGfm from "remark-gfm";
 import { ModelResult, SynthesizedReport } from "@/lib/types";
 import { StructuredSynthesis } from "@/lib/synthesis/structuredSchema";
 import { getModelDisplayNameSafe } from "@/lib/panelModels";
+import { isUsableResult } from "@/lib/panel/publicize";
+import { coerceStatus } from "@/lib/panel/normalize";
+import {
+  buildSynthesisMarkdown,
+  copyToClipboardWithFallback,
+  type ModelHealthForCopy,
+  type SourceCoverageForCopy,
+} from "@/lib/ui/copyFormats";
+import { buildLinkedInPost, type LinkedInModelHealth } from "@/lib/ui/socialCopy";
 import { fetchWithTimeout, FetchError } from "@/lib/client/fetchWithTimeout";
 import { useAuth } from "@/components/AuthProvider";
 import {
@@ -49,7 +58,6 @@ import { classifyClaimSeverity, ClaimSeverityResult } from "@/lib/verificationGa
 import { classifyGrounding, GroundingResult } from "@/lib/verificationGate/sourceGrounding";
 import {
   buildPanelVerdict,
-  formatVerdictText,
   buildCopyForXThread,
   PanelVerdict,
 } from "@/lib/verificationGate/panelVerdict";
@@ -70,6 +78,7 @@ interface SynthesisState {
   report: StructuredSynthesis | null;
   error: string | null;
   errorDetails?: any;
+  synthesizedBy?: string | null;
 }
 
 const GATE_STYLES: Record<string, { border: string; bg: string; badge: string; badgeBg: string; icon: string }> = {
@@ -164,6 +173,125 @@ function VerificationGateCard({ gate }: { gate: VerificationGateResult }) {
   );
 }
 
+/* ─── Model Health Line ─── */
+function ModelHealthLine({ results }: { results: ModelResult[] }) {
+  const total = results.length;
+  const okCount = results.filter((r) => coerceStatus(r.status) === "ok").length;
+  const substitutedCount = results.filter((r) => coerceStatus(r.status) === "substituted").length;
+  const failedCount = results.filter((r) => coerceStatus(r.status) === "failed").length;
+  const respondedCount = okCount + substitutedCount;
+
+  const substitutedLabels = results
+    .filter((r) => coerceStatus(r.status) === "substituted")
+    .map((r) => getModelDisplayNameSafe((r as { actualModel?: string })?.actualModel || r.modelId))
+    .filter((l, i, arr) => arr.indexOf(l) === i);
+  const substitutedLabel =
+    substitutedCount === 1 && substitutedLabels[0]
+      ? substitutedLabels[0]
+      : substitutedCount > 1
+        ? `${substitutedCount}`
+        : substitutedCount > 0
+          ? "1"
+          : null;
+
+  // Tooltip: slot label (canonical) + requested → actual + short reason (prefix preserved if truncated)
+  const substitutedTooltip = results
+    .filter((r) => coerceStatus(r.status) === "substituted")
+    .map((r) => {
+      const slot = getModelDisplayNameSafe(r.modelId); // slot label, not modelId raw
+      const req = (r as { requestedModel?: string }).requestedModel ?? "?";
+      const act = (r as { actualModel?: string }).actualModel ?? "?";
+      const raw = (r as { substitutionReason?: string }).substitutionReason;
+      const sanitized = raw ? String(raw).replace(/[\n\r]+/g, " ").trim() : "";
+      const shortReason = sanitized ? (sanitized.length > 28 ? `${sanitized.slice(0, 25)}…` : sanitized) : "";
+      return shortReason ? `${slot}: ${req} → ${act} (${shortReason})` : `${slot}: ${req} → ${act}`;
+    })
+    .join("\n");
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-sm text-slate-600">
+      <span>Model health:</span>
+      <span className="font-medium text-slate-700">
+        {respondedCount}/{total} responded
+      </span>
+      {(substitutedCount > 0 || failedCount > 0) && (
+        <>
+          <span className="text-slate-400">•</span>
+          {substitutedCount > 0 && (
+            <span
+              className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-amber-50 text-amber-800 border border-amber-200"
+              title={substitutedTooltip || `Substituted: ${substitutedCount}`}
+            >
+              Substituted: {substitutedLabel}
+            </span>
+          )}
+          {failedCount > 0 && (
+            <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-slate-100 text-slate-600 border border-slate-200">
+              Failed: {failedCount}
+            </span>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/** Provider string → display name for Panel note (unique providers, not per-slot) */
+function getProviderDisplayName(provider?: string): string {
+  const raw = typeof provider === "string" ? provider.trim() : "";
+  if (!raw) return "Unknown";
+  const p = raw.toLowerCase();
+  const map: Record<string, string> = {
+    deepseek: "DeepSeek",
+    openai: "OpenAI",
+    anthropic: "Anthropic",
+    xai: "XAI",
+    perplexity: "Perplexity",
+    google: "Google",
+  };
+  if (map[p]) return map[p];
+  // Unknown provider: safe title-case fallback (never render undefined)
+  return p.charAt(0).toUpperCase() + p.slice(1);
+}
+
+/* ─── Source Coverage Meter ─── */
+function SourceCoverageMeter({
+  keyFindings,
+}: {
+  keyFindings: Array<{ evidenceRefs?: string[] }>;
+}) {
+  const totalFindings = keyFindings.length; // denominator = full keyFindings.length
+  if (totalFindings === 0) return null;
+
+  const sourcedFindings = keyFindings.filter(
+    (f) => Array.isArray(f.evidenceRefs) && f.evidenceRefs.length > 0
+  ).length;
+  const coveragePct = Math.round((sourcedFindings / totalFindings) * 100);
+
+  return (
+    <div className="space-y-1">
+      <p className="text-sm text-slate-600 flex items-center gap-1.5">
+        Source coverage: {sourcedFindings}/{totalFindings} claims sourced ({coveragePct}%)
+        <span
+          className="inline-flex text-slate-400 cursor-help"
+          title="% of key findings with at least one citation reference."
+          aria-label="Info"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        </span>
+      </p>
+      <div className="h-1 w-full rounded-full bg-slate-200 overflow-hidden">
+        <div
+          className="h-full rounded-full bg-sky-400 transition-all"
+          style={{ width: `${coveragePct}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
 /* ─── Severity Badge ─── */
 
 const SEVERITY_COLORS: Record<string, { bg: string; text: string; dot: string }> = {
@@ -238,18 +366,27 @@ function GroundingBadge({ result }: { result: GroundingResult }) {
 function PanelVerdictCard({
   verdict,
   gate,
+  results,
+  keyFindings,
+  sourceBacked,
+  synthesizedBy,
 }: {
   verdict: PanelVerdict;
   gate: VerificationGateResult;
+  results: ModelResult[];
+  keyFindings: Array<{ evidenceRefs?: string[] }>;
+  sourceBacked: boolean;
+  synthesizedBy?: string | null;
 }) {
-  const [copyState, setCopyState] = useState<"idle" | "copied-summary" | "copied-x">("idle");
-  const [showFullCaveat, setShowFullCaveat] = useState(false);
+  const [copyState, setCopyState] = useState<
+    "idle" | "copied-x" | "copied-linkedin" | "copied-markdown"
+  >("idle");
   const gateStyle = GATE_STYLES[gate.status] ?? GATE_STYLES.NEEDS_HUMAN_REVIEW;
   const xThread = buildCopyForXThread(verdict);
   const xLabel = xThread.length <= 1 ? "Copy for X" : `Copy for X (thread · ${xThread.length})`;
 
   const copyToClipboard = useCallback(
-    (text: string, label: "copied-summary" | "copied-x") => {
+    (text: string, label: "copied-x") => {
       navigator.clipboard.writeText(text).then(() => {
         setCopyState(label);
         setTimeout(() => setCopyState("idle"), 2000);
@@ -258,7 +395,83 @@ function PanelVerdictCard({
     []
   );
 
-  const caveatIsLong = (verdict.keyBlindSpot?.length ?? 0) > 120;
+  const handleCopyLinkedIn = useCallback(async () => {
+    const total = results.length;
+    const okCount = results.filter((r) => coerceStatus(r.status) === "ok").length;
+    const substitutedCount = results.filter((r) => coerceStatus(r.status) === "substituted").length;
+    const failedCount = results.filter((r) => coerceStatus(r.status) === "failed").length;
+    const respondedCount = okCount + substitutedCount;
+    const substitutedProviders = [...new Set(
+      results
+        .filter((r) => coerceStatus(r.status) === "substituted")
+        .map((r) => getProviderDisplayName((r as { provider?: string }).provider))
+    )].filter((p) => p !== "Unknown");
+    const modelHealth: LinkedInModelHealth = {
+      total,
+      responded: respondedCount,
+      substituted: substitutedCount,
+      failed: failedCount,
+      substitutedProviders,
+    };
+    const post = buildLinkedInPost({
+      question: verdict.question,
+      gate,
+      verdict,
+      modelHealth,
+      sourceBacked,
+    });
+    const ok = await copyToClipboardWithFallback(post);
+    if (ok) {
+      setCopyState("copied-linkedin");
+      setTimeout(() => setCopyState("idle"), 1500);
+    }
+  }, [results, verdict, gate, sourceBacked]);
+
+  const handleCopyMarkdown = useCallback(async () => {
+    const total = results.length;
+    const okCount = results.filter((r) => coerceStatus(r.status) === "ok").length;
+    const substitutedCount = results.filter((r) => coerceStatus(r.status) === "substituted").length;
+    const failedCount = results.filter((r) => coerceStatus(r.status) === "failed").length;
+    const respondedCount = okCount + substitutedCount;
+    // Use provider from substituted result (actual responder, e.g. "deepseek"), not original from substitutedFrom
+    const substitutedProviders = [...new Set(
+      results
+        .filter((r) => coerceStatus(r.status) === "substituted")
+        .map((r) => getProviderDisplayName((r as { provider?: string }).provider))
+    )].filter((p) => p !== "Unknown");
+    const modelHealth: ModelHealthForCopy = {
+      total,
+      responded: respondedCount,
+      substitutedCount,
+      failedCount,
+      substitutedProviders,
+    };
+    const totalFindings = keyFindings.length;
+    const sourcedFindings = keyFindings.filter(
+      (f) => Array.isArray(f.evidenceRefs) && f.evidenceRefs.length > 0
+    ).length;
+    const sourceCoverage: SourceCoverageForCopy | null =
+      sourceBacked && totalFindings > 0
+        ? {
+            sourcedFindings,
+            totalFindings,
+            coveragePct: Math.round((sourcedFindings / totalFindings) * 100),
+          }
+        : null;
+    const markdown = buildSynthesisMarkdown(
+      verdict.question,
+      gate,
+      verdict,
+      modelHealth,
+      sourceCoverage,
+      synthesizedBy
+    );
+    const ok = await copyToClipboardWithFallback(markdown);
+    if (ok) {
+      setCopyState("copied-markdown");
+      setTimeout(() => setCopyState("idle"), 1500);
+    }
+  }, [results, keyFindings, sourceBacked, synthesizedBy, verdict, gate]);
 
   return (
     <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
@@ -345,27 +558,15 @@ function PanelVerdictCard({
           </div>
         </div>
 
-        {/* ── C) Caveat / blind spot with show more/less ── */}
+        {/* ── C) Caveat / blind spot (full text, no truncation) ── */}
         {verdict.keyBlindSpot && (
           <div>
             <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">
               Caveat
             </span>
-            <p
-              className={`mt-1 text-sm text-slate-600 leading-relaxed whitespace-normal break-words ${
-                !showFullCaveat && caveatIsLong ? "line-clamp-2" : ""
-              }`}
-            >
+            <p className="mt-1 text-sm text-slate-600 leading-relaxed whitespace-normal break-words">
               {verdict.keyBlindSpot}
             </p>
-            {caveatIsLong && (
-              <button
-                onClick={() => setShowFullCaveat((v) => !v)}
-                className="mt-1 text-xs font-medium text-sky-600 hover:text-sky-800 transition-colors"
-              >
-                {showFullCaveat ? "Show less" : "Show more"}
-              </button>
-            )}
           </div>
         )}
 
@@ -386,20 +587,27 @@ function PanelVerdictCard({
           </div>
         )}
 
-        {/* Copy actions */}
+        {/* Copy actions — all use full underlying strings (verdict/gate), never DOM extraction */}
         <div className="flex items-center gap-2 pt-3 border-t border-slate-100 flex-wrap">
-          <button
-            onClick={() => copyToClipboard(formatVerdictText(verdict, "linkedin"), "copied-summary")}
-            className="text-xs font-medium text-sky-600 hover:text-sky-800 transition-colors px-2 py-1 rounded hover:bg-sky-50"
-          >
-            {copyState === "copied-summary" ? "Copied" : "Copy summary"}
-          </button>
-          <span className="text-slate-300">|</span>
           <button
             onClick={() => copyToClipboard(xThread.join("\n\n"), "copied-x")}
             className="text-xs font-medium text-slate-500 hover:text-slate-700 transition-colors px-2 py-1 rounded hover:bg-slate-50"
           >
             {copyState === "copied-x" ? "Copied" : xLabel}
+          </button>
+          <span className="text-slate-300">|</span>
+          <button
+            onClick={() => void handleCopyLinkedIn()}
+            className="text-xs font-medium text-slate-500 hover:text-slate-700 transition-colors px-2 py-1 rounded hover:bg-slate-50"
+          >
+            {copyState === "copied-linkedin" ? "Copied!" : "Copy for LinkedIn"}
+          </button>
+          <span className="text-slate-300">|</span>
+          <button
+            onClick={() => void handleCopyMarkdown()}
+            className="text-xs font-medium text-slate-500 hover:text-slate-700 transition-colors px-2 py-1 rounded hover:bg-slate-50"
+          >
+            {copyState === "copied-markdown" ? "Copied" : "Copy as Markdown"}
           </button>
         </div>
 
@@ -568,9 +776,8 @@ export default function PanelSynthesisView({
         error: null,
         progress: "Preparing sources...",
       }));
-      // Filter to only successful results with non-empty text
       const okResults = results.filter(
-        (r) => r.status === "ok" && getModelText(r).trim().length > 0
+        (r) => isUsableResult(r) && getModelText(r).trim().length > 0
       );
 
       if (okResults.length < 2) {
@@ -835,8 +1042,9 @@ export default function PanelSynthesisView({
       // Set the structured report
         setSynthesisState({
           status: "success",
-        report: structuredReport,
+          report: structuredReport,
           error: null,
+          synthesizedBy: data.synthesizedBy ?? null,
         });
       
       console.log("[PanelSynthesisView] ✅ Successfully generated structured synthesis", {
@@ -1121,8 +1329,12 @@ export default function PanelSynthesisView({
         biasAndBlindSpots: report.biasAndBlindSpots,
         openQuestions: report.openQuestions,
         trustSummary: synthesizedReport?.consensusAnalysis?.trustSummary,
+        sourceBacked: (synthesizedReport?.consensusAnalysis?.agreementClusters?.length ?? 0) > 0,
+        questionLength: question?.trim().length ?? 0,
       };
       const gate = computeVerificationGate(gateInput);
+
+    const sourceBacked = (synthesizedReport?.consensusAnalysis?.agreementClusters?.length ?? 0) > 0;
 
     return (
         <div className="space-y-6">
@@ -1132,6 +1344,14 @@ export default function PanelSynthesisView({
               <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
               <p className="text-sm text-blue-700">Generating updated synthesis in the background...</p>
             </div>
+          )}
+
+          {/* Model Health Line */}
+          <ModelHealthLine results={results} />
+
+          {/* Source Coverage Meter (source-backed runs only) */}
+          {sourceBacked && report.keyFindings && report.keyFindings.length > 0 && (
+            <SourceCoverageMeter keyFindings={report.keyFindings} />
           )}
 
           {/* Verification Gate */}
@@ -1392,7 +1612,16 @@ export default function PanelSynthesisView({
           {/* Panel Verdict Summary Card */}
           {(() => {
             const verdict = buildPanelVerdict(question, report, gate);
-            return <PanelVerdictCard verdict={verdict} gate={gate} />;
+            return (
+              <PanelVerdictCard
+                verdict={verdict}
+                gate={gate}
+                results={results}
+                keyFindings={report.keyFindings ?? []}
+                sourceBacked={sourceBacked}
+                synthesizedBy={synthesisState.synthesizedBy}
+              />
+            );
           })()}
       </div>
     );
@@ -1407,11 +1636,11 @@ export default function PanelSynthesisView({
           No Synthesis Available Yet
         </h3>
         <p className="text-sm text-slate-600 mb-4">
-          {results.filter(r => r.status === "ok").length >= 2
+          {results.filter(r => isUsableResult(r)).length >= 2
             ? "Click the button below to generate a synthesis report."
             : "At least 2 successful model responses are required for synthesis."}
         </p>
-        {results.filter(r => r.status === "ok").length >= 2 && runId && (
+        {results.filter(r => isUsableResult(r)).length >= 2 && runId && (
           <button
             onClick={() => {
               setSynthesisState(prev => ({ ...prev, status: "loading", error: null }));

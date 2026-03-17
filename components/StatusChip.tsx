@@ -12,8 +12,8 @@ import { PanelModelId, getModelPillClasses, getPanelModelConfig } from "@/lib/pa
 
 interface StatusChipProps {
   label: string;
-  status: "queued" | "thinking" | "ok" | "error" | "timeout" | "refused";
-  modelId?: PanelModelId | string; // Optional model ID to apply model-specific colors
+  status: "queued" | "thinking" | "ok" | "substituted" | "failed";
+  modelId?: PanelModelId | string;
 }
 
 export default function StatusChip({ label, status, modelId }: StatusChipProps) {
@@ -23,12 +23,12 @@ export default function StatusChip({ label, status, modelId }: StatusChipProps) 
       case "queued":
         return "bg-slate-400";
       case "thinking":
-        return "bg-yellow-400 animate-pulse"; // Pulse animation for "thinking" state
+        return "bg-yellow-400 animate-pulse";
       case "ok":
         return "bg-green-500";
-      case "error":
-      case "timeout":
-      case "refused":
+      case "substituted":
+        return "bg-amber-500";
+      case "failed":
         return "bg-red-500";
       default:
         return "bg-slate-400";
@@ -58,9 +58,9 @@ export default function StatusChip({ label, status, modelId }: StatusChipProps) 
         return "text-yellow-700";
       case "ok":
         return "text-green-700";
-      case "error":
-      case "timeout":
-      case "refused":
+      case "substituted":
+        return "text-amber-700";
+      case "failed":
         return "text-slate-500";
       default:
         return "text-slate-600";

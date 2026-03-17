@@ -25,6 +25,7 @@ import { incrementUserTokenUsage } from "@/lib/firestore/userTokens";
 import { normalizeTokens } from "@/lib/panel/normalizeTokens";
 import { sanitizeModelText, truncateForSynthesis, MAX_CHARS_SYNTHESIS_PER_MODEL } from "@/lib/panel/sanitizeText";
 import { PanelResultPublic } from "@/lib/panel/schemas";
+import { normalizeModelResultPublic, assertPublicStatus } from "@/lib/panel/normalize";
 import { logger } from "@/lib/logger";
 
 // Ensure Node.js runtime (Firebase Admin requires Node.js, not Edge)
@@ -464,31 +465,31 @@ export async function POST(req: NextRequest) {
           } : undefined
         );
         
-        // Build public result (no rawResponse, full text for UI)
-        const publicResult: PanelResultPublic = {
+        const raw: Record<string, unknown> = {
           modelId: result.modelId,
           status: result.status,
-          rawTextFull: canonicalText, // Full canonical text for UI display - NEVER truncated
+          rawTextFull: canonicalText,
           latencyMs: result.latencyMs,
           tokenUsage: tokenUsageNormalized,
           wasTruncatedForSynthesis,
-          // Include wasTruncated flag if model connector detected truncation (e.g., finish_reason === 'length')
           wasTruncated: result.wasTruncated || (result as any)?.finishReason === "length",
+          requestedModel: result.requestedModel,
+          provider: result.provider,
+          actualModel: result.actualModel,
+          substitutedFrom: result.substitutedFrom,
+          substitutionReason: result.substitutionReason,
         };
-        
-        // Preserve finish_reason if present (for diagnostics and UI warnings)
-        // This helps identify when responses were truncated by the API
+
         if ((result as any)?.finishReason) {
-          (publicResult as any).finishReason = (result as any).finishReason;
+          raw.finishReason = (result as any).finishReason;
         }
-        
-        // Include error if present
+
         if (result.errorMessage) {
-          publicResult.error = {
-            message: result.errorMessage,
-          };
+          raw.error = { message: result.errorMessage };
         }
-        
+
+        const publicResult = normalizeModelResultPublic(raw as any) as unknown as PanelResultPublic;
+        assertPublicStatus(publicResult.status, `run-panel:${publicResult.modelId}`);
         return publicResult;
       });
       
@@ -496,7 +497,8 @@ export async function POST(req: NextRequest) {
       panelResultsPublic = computedPanelResultsPublic;
 
       // Compute token usage for completeRun from normalized results
-      const okResults = computedPanelResultsPublic.filter(r => r.status === "ok" && r.tokenUsage);
+      // Include substituted results since they contain valid text
+      const okResults = computedPanelResultsPublic.filter(r => (r.status === "ok" || r.status === "substituted") && r.tokenUsage);
       const tokenUsageByModel = okResults.map(r => ({
         modelId: r.modelId,
         tokenUsage: r.tokenUsage,
@@ -551,11 +553,11 @@ export async function POST(req: NextRequest) {
         totalTokens,
         tokensByProvider,
         resultsCount: results.length,
-        successfulResults: results.filter(r => r.status === "ok").length,
-        resultsWithTokenUsage: results.filter(r => r.status === "ok" && r.tokenUsage).length,
+        successfulResults: results.filter(r => r.status === "ok" || r.status === "substituted").length,
+        resultsWithTokenUsage: results.filter(r => (r.status === "ok" || r.status === "substituted") && r.tokenUsage).length,
         rawTotalTokens: runTotalTokens,
         tokenBreakdown: results
-          .filter(r => r.status === "ok" && r.tokenUsage)
+          .filter(r => (r.status === "ok" || r.status === "substituted") && r.tokenUsage)
           .map(r => ({
             modelId: r.modelId,
             totalTokens: r.tokenUsage?.totalTokens ?? 0,
@@ -573,9 +575,7 @@ export async function POST(req: NextRequest) {
       const geminiResult = results.find(r => r.modelId === "gemini");
       const geminiTokens = geminiResult?.tokenUsage?.totalTokens ?? 0;
       
-      // CRITICAL: Increment tokens if we have at least one successful model result
-      // Do NOT require all models to succeed - partial success should still increment
-      const succeededResults = results.filter(r => r.status === "ok");
+      const succeededResults = results.filter(r => r.status === "ok" || r.status === "substituted");
       const hasSuccessfulModels = succeededResults.length > 0;
       const succeededModelIds = succeededResults.map(r => r.modelId);
       
@@ -591,7 +591,7 @@ export async function POST(req: NextRequest) {
         resultsCount: results.length,
         successfulResults: succeededResults.length,
         tokenBreakdown: results
-          .filter(r => r.status === "ok")
+          .filter(r => r.status === "ok" || r.status === "substituted")
           .map(r => ({
             modelId: r.modelId,
             totalTokens: r.tokenUsage?.totalTokens ?? 0,
@@ -677,25 +677,28 @@ export async function POST(req: NextRequest) {
         } : undefined
       );
       
-      // Build public result (no rawResponse, full text for UI)
-      const publicResult: PanelResultPublic = {
+      const raw2: Record<string, unknown> = {
         modelId: result.modelId,
         status: result.status,
-        rawTextFull: canonicalText, // Full canonical text for UI display - NEVER truncated
+        rawTextFull: canonicalText,
         latencyMs: result.latencyMs,
         tokenUsage: tokenUsageNormalized,
-        // Include truncation flags for reference (UI should always show rawTextFull)
         wasTruncatedForSynthesis,
-        wasTruncated: result.wasTruncated, // Flag from model connector (e.g., Gemini MAX_OUTPUT_TOKENS)
+        wasTruncated: result.wasTruncated,
+        requestedModel: result.requestedModel,
+        provider: result.provider,
+        actualModel: result.actualModel,
+        substitutedFrom: result.substitutedFrom,
+        substitutionReason: result.substitutionReason,
       };
-      
-      // Include error if present (convert errorMessage to error object)
+
       if (result.errorMessage) {
-        publicResult.error = {
-          message: result.errorMessage,
-        };
+        raw2.error = { message: result.errorMessage };
       }
-      
+
+      const publicResult = normalizeModelResultPublic(raw2 as any) as unknown as PanelResultPublic;
+      assertPublicStatus(publicResult.status, `run-panel-fallback:${publicResult.modelId}`);
+
       // Server-only debug: log compact debug summary if flag is set
       const debugRawResponse = process.env.PANEL_DEBUG_RAW === "true" ||
                                 req.headers.get("x-debug-raw") === "1";

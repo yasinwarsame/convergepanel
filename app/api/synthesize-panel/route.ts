@@ -72,6 +72,7 @@ import { sanitizeModelText, truncateForSynthesis, MAX_CHARS_SYNTHESIS_PER_MODEL 
 import { compressModelResponse, compressClusters, computeInputHash } from "@/lib/synthesis/compressInput";
 import { buildEvidencePack } from "@/lib/synthesis/buildEvidencePack";
 import { logger, redact } from "@/lib/logger";
+import { buildSubstitutionBlock, normalizeModelResultPublic, coerceStatus } from "@/lib/panel/normalize";
 
 // Configure runtime and max duration for Next.js API route
 export const runtime = "nodejs";
@@ -822,8 +823,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Validate each result and count valid ones
     const validResults: Array<{ modelId: string; text: string }> = [];
+    const substitutionEntries: Array<{ slot: string; requestedModel: string; provider: string; actualModel: string; reason: string }> = [];
     const seenModelIds = new Set<string>();
 
     // IMPORTANT: Keep fullText and synthesisText separate
@@ -837,20 +838,16 @@ export async function POST(req: NextRequest) {
         typeof result.modelId === "string" &&
         result.modelId.trim().length > 0
       ) {
-        // Extract full text from result (supports both rawTextFull and text field)
         const fullText = (result as any).rawTextFull || result.text || "";
         
         if (typeof fullText === "string" && fullText.trim().length > 0) {
-          // Sanitize the full text first
           const sanitizedFullText = sanitizeModelText(fullText.trim());
           
-          // Create truncated copy for synthesis (does NOT mutate original)
           const { text: synthesisText, wasTruncated: wasTruncatedForSynthesis } = truncateForSynthesis(
             sanitizedFullText,
             MAX_CHARS_SYNTHESIS_PER_MODEL
           );
           
-          // Diagnostics: Log text lengths (debug level, no content)
           logger.debug(`[${requestId}] [synthesize-panel] Text processing`, {
             requestId,
             provider: result.modelId.trim(),
@@ -860,12 +857,22 @@ export async function POST(req: NextRequest) {
             truncatedBy: sanitizedFullText.length - synthesisText.length,
           });
           
-          // Store truncated text for synthesis (only field needed for synthesis)
           validResults.push({
             modelId: result.modelId.trim(),
-            text: synthesisText, // Use truncated text for synthesis
+            text: synthesisText,
           });
           seenModelIds.add(result.modelId.trim());
+
+          const norm = normalizeModelResultPublic(result as any);
+          if (norm.status === "substituted") {
+            substitutionEntries.push({
+              slot: norm.modelId,
+              requestedModel: norm.requestedModel,
+              provider: norm.provider,
+              actualModel: norm.actualModel,
+              reason: norm.substitutionReason || "primary_failed",
+            });
+          }
         }
       }
     }
@@ -1174,6 +1181,8 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    const substitutionBlock = buildSubstitutionBlock(substitutionEntries);
+
     // Build full prompt: use evidence pack format when available (more compact)
     let fullPrompt: string;
     if (agreementClusters.length > 0 && evidencePack) {
@@ -1183,7 +1192,7 @@ export async function POST(req: NextRequest) {
 ## Research Question
 
 ${question.trim()}
-
+${substitutionBlock}
 ## Cluster Analysis Data (Evidence Pack)
 
 ${evidencePack.clusterSummaries}
@@ -1231,7 +1240,7 @@ IMMEDIATE OUTPUT: Begin your response with the opening brace { immediately. Do n
 ## Research Question
 
 ${question.trim()}
-
+${substitutionBlock}
 ## Model Responses
 
 Each model response is wrapped in <ModelResponse modelId="..."> tags. Use these tags to reliably cite excerpts when attributing biases.

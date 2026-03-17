@@ -26,7 +26,9 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useAuth } from "@/components/AuthProvider";
-import { ModelId, ModelResult, SynthesizedReport, RunPanelApiResponse } from "@/lib/types";
+import { ModelId, ModelResult, ModelStatus, SynthesizedReport, RunPanelApiResponse, ConnectorStatus } from "@/lib/types";
+import { coerceStatus } from "@/lib/panel/normalize";
+import { isUsableResult } from "@/lib/panel/publicize";
 import { synthesizeReport } from "@/lib/consensus";
 import { getModelDisplayNameSafe } from "@/lib/panelModels";
 import ModelPicker from "@/components/ModelPicker";
@@ -179,8 +181,8 @@ export default function Home() {
   // Real-time status of each model (queued -> thinking -> done/error)
   // Used to show status pills during execution
   const [modelStatuses, setModelStatuses] = useState<
-    Record<ModelId, "queued" | "thinking" | "ok" | "error" | "timeout" | "refused">
-  >({} as Record<ModelId, "queued" | "thinking" | "ok" | "error" | "timeout" | "refused">);
+    Record<ModelId, "queued" | "thinking" | ModelStatus>
+  >({} as Record<ModelId, "queued" | "thinking" | ModelStatus>);
   
   // Raw results from each model (after panel completes)
   const [results, setResults] = useState<ModelResult[]>([]);
@@ -422,7 +424,7 @@ export default function Home() {
     // This shows in the UI immediately when panel starts
     const initialStatuses = {} as Record<
       ModelId,
-      "queued" | "thinking" | "ok" | "error" | "timeout" | "refused"
+      "queued" | "thinking" | ModelStatus
     >;
     selectedModels.forEach((id) => {
       initialStatuses[id] = "queued";
@@ -486,7 +488,7 @@ export default function Home() {
         setError("Network error. Please check your connection and try again.");
         setErrorCode(null);
         setRunStatus("error");
-        setModelStatuses({} as Record<ModelId, "queued" | "thinking" | "ok" | "error" | "timeout" | "refused">);
+        setModelStatuses({} as Record<ModelId, "queued" | "thinking" | ModelStatus>);
         return;
       }
 
@@ -501,7 +503,7 @@ export default function Home() {
         setError("Invalid response from server. Please try again.");
         setErrorCode(null);
         setRunStatus("error");
-        setModelStatuses({} as Record<ModelId, "queued" | "thinking" | "ok" | "error" | "timeout" | "refused">);
+        setModelStatuses({} as Record<ModelId, "queued" | "thinking" | ModelStatus>);
         return;
       }
 
@@ -522,7 +524,7 @@ export default function Home() {
         );
         setErrorCode(null);
         setRunStatus("error");
-        setModelStatuses({} as Record<ModelId, "queued" | "thinking" | "ok" | "error" | "timeout" | "refused">);
+        setModelStatuses({} as Record<ModelId, "queued" | "thinking" | ModelStatus>);
         return;
       }
 
@@ -543,7 +545,7 @@ export default function Home() {
         setError("Invalid response from server. Please try again.");
         setErrorCode(null);
         setRunStatus("error");
-        setModelStatuses({} as Record<ModelId, "queued" | "thinking" | "ok" | "error" | "timeout" | "refused">);
+        setModelStatuses({} as Record<ModelId, "queued" | "thinking" | ModelStatus>);
         return;
       }
 
@@ -603,7 +605,7 @@ export default function Home() {
         setErrorCode(normalizedErrorCode);
         setError(errorMessage);
         setRunStatus("error");
-        setModelStatuses({} as Record<ModelId, "queued" | "thinking" | "ok" | "error" | "timeout" | "refused">);
+        setModelStatuses({} as Record<ModelId, "queued" | "thinking" | ModelStatus>);
         
         // Refresh usage data if we hit a limit
         if (normalizedErrorCode === "RUN_LIMIT_REACHED" || data.errorCode === "PLAN_MODEL_LIMIT_REACHED") {
@@ -639,13 +641,12 @@ export default function Home() {
       // Add defensive error handling to prevent crashes from malformed results
       const finalStatuses = {} as Record<
         ModelId,
-        "queued" | "thinking" | "ok" | "error" | "timeout" | "refused"
+        "queued" | "thinking" | ModelStatus
       >;
       try {
       data.results.forEach((result: ModelResult) => {
-          // Defensive check: ensure result has required fields
           if (result && result.modelId && result.status) {
-        finalStatuses[result.modelId] = result.status;
+        finalStatuses[result.modelId] = coerceStatus(result.status);
           } else {
             console.warn("[panel] Skipping malformed result:", result);
           }
@@ -734,7 +735,7 @@ export default function Home() {
       setRunStatus("error");
       
       // Reset model statuses on error
-      setModelStatuses({} as Record<ModelId, "queued" | "thinking" | "ok" | "error" | "timeout" | "refused">);
+      setModelStatuses({} as Record<ModelId, "queued" | "thinking" | ModelStatus>);
     }
   };
 
@@ -804,9 +805,8 @@ export default function Home() {
       }
 
       // Cache miss - generate synthesis (POST request)
-      // Filter to only successful results with non-empty text
       const okResults = panelResults.filter(
-        (r) => r.status === "ok" && ((r as any).rawTextFull?.trim()?.length > 0 || (r as any).rawText?.trim()?.length > 0 || (r as any).text?.trim()?.length > 0)
+        (r) => isUsableResult(r) && ((r as any).rawTextFull?.trim()?.length > 0 || (r as any).rawText?.trim()?.length > 0 || (r as any).text?.trim()?.length > 0)
       );
 
       if (okResults.length < 2) {

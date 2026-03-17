@@ -5,7 +5,7 @@
  */
 
 import { z } from "zod";
-import { ModelId, ModelStatus } from "@/lib/types";
+import type { ModelId, ModelStatus, ConnectorStatus } from "@/lib/types";
 import type { TokenUsageNormalized } from "./normalizeTokens";
 
 /**
@@ -19,48 +19,74 @@ export const TokenUsageNormalizedSchema = z.object({
 });
 
 /**
+ * Backward-compatible substitutedFrom: accepts either a string ("openai:gpt-4o-mini")
+ * or a legacy object ({ provider, model, reason? }) from older stored runs.
+ */
+const SubstitutedFromSchema = z.union([
+  z.string(),
+  z.object({
+    provider: z.string(),
+    model: z.string(),
+    reason: z.string().optional(),
+  }),
+]).optional();
+
+/**
  * Panel result public schema (Zod)
  * This is what run-panel returns and synthesize-panel accepts.
  * rawResponse is NEVER included - only rawTextFull (full canonical text for UI display).
+ *
+ * Status accepts legacy values ("error"/"timeout"/"refused") for backward compat
+ * when reading old stored runs; the normalizer coerces them to "failed".
  */
 export const PanelResultPublicSchema = z.object({
   modelId: z.string(),
-  status: z.enum(["ok", "error", "timeout", "refused"]),
-  rawTextFull: z.string(), // Full canonical text for UI display - never truncated
-  rawText: z.string().optional(), // Deprecated: use rawTextFull instead
+  status: z.enum(["ok", "substituted", "failed", "error", "timeout", "refused"]),
+  rawTextFull: z.string(),
+  rawText: z.string().optional(),
   latencyMs: z.number().nonnegative(),
   tokenUsage: TokenUsageNormalizedSchema,
   error: z.object({
     message: z.string(),
     code: z.string().optional(),
   }).optional(),
-  // Optional truncation flags for synthesis/storage (not for UI display)
   wasTruncatedForSynthesis: z.boolean().optional(),
   wasTruncatedForStorage: z.boolean().optional(),
-  // Model output truncation (e.g., Gemini MAX_OUTPUT_TOKENS)
-  wasTruncated: z.boolean().optional(), // True if model response hit max output tokens limit
+  wasTruncated: z.boolean().optional(),
+  // Per-slot metadata — requestedModel and actualModel are required at the public boundary
+  requestedModel: z.string().optional(),
+  provider: z.string().optional(),
+  actualModel: z.string().optional(),
+  substitutedFrom: SubstitutedFromSchema,
+  substitutionReason: z.string().optional(),
 });
 
 /**
- * TypeScript interface matching the Zod schema
- * UI should use rawTextFull for display, never truncated versions
+ * TypeScript interface matching the Zod schema (post-normalization).
+ * After normalization:
+ *  - status is always "ok" | "substituted" | "failed"
+ *  - requestedModel and actualModel are always present
+ *  - substitutedFrom is always a string in "<provider>:<model>" format (when present)
  */
 export interface PanelResultPublic {
   modelId: ModelId;
   status: ModelStatus;
-  rawTextFull: string; // Full canonical text for UI display - never truncated
-  rawText?: string; // Deprecated: kept for backward compatibility, use rawTextFull
+  rawTextFull: string;
+  rawText?: string;
   latencyMs: number;
   tokenUsage: TokenUsageNormalized;
   error?: {
     message: string;
     code?: string;
   };
-  // Optional truncation flags (for internal use, not for UI display)
   wasTruncatedForSynthesis?: boolean;
   wasTruncatedForStorage?: boolean;
-  // Model output truncation (e.g., Gemini MAX_OUTPUT_TOKENS)
-  wasTruncated?: boolean; // True if model response hit max output tokens limit
+  wasTruncated?: boolean;
+  requestedModel: string;
+  provider: string;
+  actualModel: string;
+  substitutedFrom?: string;
+  substitutionReason?: string;
 }
 
 /**
@@ -68,8 +94,8 @@ export interface PanelResultPublic {
  */
 export interface PanelForSynthesis {
   modelId: ModelId;
-  status: ModelStatus;
-  text: string; // Sanitized and truncated for synthesis
+  status: ConnectorStatus;
+  text: string;
 }
 
 /**
@@ -95,8 +121,8 @@ export interface RunDocument {
   selectedModels: string[];
   perModel: Array<{
     modelId: string;
-    status: ModelStatus;
-    rawTextTruncated: string; // Truncated for storage
+    status: ConnectorStatus;
+    rawTextTruncated: string;
     latencyMs: number;
     tokenUsage: TokenUsageNormalized;
     wasTruncated: boolean;

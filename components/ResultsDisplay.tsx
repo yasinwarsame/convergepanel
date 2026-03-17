@@ -633,7 +633,7 @@ export default function ResultsDisplay({
   const synthesisInputsByModel = useMemo(() => {
     const inputs: Partial<Record<ModelId, { text: string; wasTruncated: boolean; truncatedAt: number }>> = {};
     for (const result of results) {
-      if (result.status === "ok") {
+      if (result.status === "ok" || result.status === "substituted") {
         const fullText = getModelText(result);
         const sanitized = sanitizeModelText(fullText);
         const { text, wasTruncated } = truncateForSynthesis(sanitized, MAX_CHARS_SYNTHESIS_PER_MODEL);
@@ -683,7 +683,7 @@ export default function ResultsDisplay({
     // 2. We have a runId (required for caching)
     // 3. Synthesis is not already complete or loading
     // 4. We haven't already triggered it for this runId
-    const okResults = results.filter(r => r.status === "ok" && getModelText(r).trim().length > 0);
+    const okResults = results.filter(r => (r.status === "ok" || r.status === "substituted") && getModelText(r).trim().length > 0);
     
     if (
       okResults.length >= 2 &&
@@ -700,10 +700,17 @@ export default function ResultsDisplay({
       
       autoTriggeredRunIdsRef.current.add(runId);
       
-      // Build payload with exact contract: runId, question, results[{modelId, text}]
       const resultsPayload = okResults.map((result) => ({
         modelId: result.modelId,
         text: getModelText(result),
+        ...(result.status === "substituted" ? {
+          substitutedFrom: (result as any).substitutedFrom,
+          substitutionReason: (result as any).substitutionReason,
+          actualModel: (result as any).actualModel,
+          requestedModel: (result as any).requestedModel,
+          provider: (result as any).provider,
+          status: result.status,
+        } : {}),
       }));
       
       // Trigger synthesis generation in background (non-blocking)
@@ -734,29 +741,25 @@ export default function ResultsDisplay({
   }, [results, runId, synthesisStatus, preGeneratedSynthesisReport, question]);
 
   const statusStyles: Record<
-    ModelResult["status"],
+    string,
     { container: string; label: string }
   > = {
     ok: {
       container: "bg-green-100 text-green-800",
       label: "OK",
     },
-    error: {
-      container: "bg-red-100 text-red-800",
-      label: "Error",
-    },
-    timeout: {
+    substituted: {
       container: "bg-amber-100 text-amber-800",
-      label: "Timeout",
+      label: "Substituted",
     },
-    refused: {
-      container: "bg-gray-200 text-gray-700",
-      label: "Refused",
+    failed: {
+      container: "bg-red-100 text-red-800",
+      label: "Failed",
     },
   };
 
-  const renderStatusPill = (status: ModelResult["status"]) => {
-    const styles = statusStyles[status] ?? statusStyles.error;
+  const renderStatusPill = (status: string) => {
+    const styles = statusStyles[status] ?? statusStyles.failed;
     return (
       <span
         className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wide ${styles.container}`}
@@ -780,8 +783,8 @@ export default function ResultsDisplay({
     (text || "").toLowerCase().includes("mock response");
 
   // Separate successful and failed results for different display handling
-  const successfulResults = results.filter((r) => r.status === "ok");
-  const failedResults = results.filter((r) => r.status !== "ok");
+  const successfulResults = results.filter((r) => r.status === "ok" || r.status === "substituted");
+  const failedResults = results.filter((r) => r.status !== "ok" && r.status !== "substituted");
 
   /**
    * Toggle expansion of a model's raw response
@@ -877,7 +880,7 @@ export default function ResultsDisplay({
   // Timeouts/errors should NOT block rendering; they will be shown with badges.
   const okResults =
     results?.filter(
-      (r) => r.status === "ok" && getModelText(r).trim().length > 0
+      (r) => (r.status === "ok" || r.status === "substituted") && getModelText(r).trim().length > 0
     ) ?? [];
   
   // Check both synthesizedReport (from consensus engine) and preGeneratedSynthesisReport (from API)
@@ -1705,14 +1708,10 @@ export default function ResultsDisplay({
                 );
                 // Use safe text getter for all model text access
                 const modelText = getModelText(result);
-                // For error/timeout results, show the error message from errorMessage (preferred) or model text (fallback)
-                // We prefer the backend-provided errorMessage; the generic message is only a last-resort fallback
-                // For successful results, use model text (full canonical text) - never truncated for UI display
-                const displayText = (status === "error" || status === "timeout") 
+                const displayText = (status === "failed") 
                   ? (result.errorMessage || modelText || "This model failed to return a response.")
                   : (modelText || "No response provided.");
 
-                // Use the shared PanelModelConfig so Panel Responses share colors with Run Panel and Agreement Map.
                 const modelConfig = getPanelModelConfig(result.modelId as PanelModelId);
 
               return (
@@ -1720,59 +1719,41 @@ export default function ResultsDisplay({
                     key={`compare-${result.modelId}`}
                     className="xl:min-w-[360px] rounded-2xl border border-gray-200 shadow-sm bg-white flex flex-col"
                   >
-                    <div className="border-b border-gray-100 px-5 py-4 flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-2">
-                        {/* Model name pill with shared color styling - uses ModelChip for consistency */}
-                        <ModelChip modelId={result.modelId as PanelModelId} variant="outline" size="xs" />
+                    <div className="border-b border-gray-100 px-5 py-4 flex flex-col gap-2">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2">
+                          <ModelChip modelId={result.modelId as PanelModelId} variant="outline" size="xs" />
+                        </div>
+                        <div className="flex items-center gap-3">
+                          {renderStatusPill(status)}
+                          {latencyLabel && (
+                            <span className="text-xs text-gray-500">
+                              {latencyLabel}
+                            </span>
+                          )}
+                        </div>
                       </div>
-                      <div className="flex items-center gap-3">
-                        {renderStatusPill(status)}
-                        {latencyLabel && (
-                          <span className="text-xs text-gray-500">
-                            {latencyLabel}
-                          </span>
-                        )}
-                      </div>
+                      {result.status === "substituted" && (
+                        <div className="flex items-center gap-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1" title={(result as any).substitutionReason || ""}>
+                          <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                          <span>Substituted: DeepSeek</span>
+                        </div>
+                      )}
                     </div>
                     {/* Increased padding (px-6 py-5) for comfortable reading in Compare View */}
                     {/* Compare View: Full text display without height constraints - allow natural scrolling */}
                     {/* CRITICAL: Remove max-height to ensure full Perplexity responses are visible */}
                     <div className="px-6 py-5 space-y-4">
-                      {/* Handle timeout status separately from errors for better UX */}
-                      {status === "timeout" && (
-                        <div className="space-y-2 text-sm text-amber-800">
-                          <div className="font-semibold">This request timed out.</div>
-                          <div className="bg-amber-50 border border-amber-200 rounded px-3 py-2">
-                            <p className="mb-2 text-xs">
-                              {result.errorMessage || 
-                                `${getModelDisplayNameSafe(result.modelId)} request timed out and was cancelled to keep the panel responsive.`}
-                            </p>
-                            <p className="font-medium mb-1 text-xs">You can try:</p>
-                            <ul className="list-disc list-inside space-y-0.5 ml-2 text-xs">
-                              <li>Rerunning the panel</li>
-                              <li>Simplifying the question</li>
-                              <li>Reducing the number of models</li>
-                            </ul>
-                          </div>
-                        </div>
-                      )}
-                      {/* Handle error status (not timeout) */}
-                      {status === "error" && (() => {
-                        // Get error message and ensure it's not duplicated
-                        // Sometimes error messages can be duplicated in the data, so we deduplicate here
+                      {status === "failed" && (() => {
                         let errorMsg = result.errorMessage || getModelText(result) || "This model failed to return a response.";
                         
-                        // Remove duplicate text if the entire message is repeated (e.g., "X. X.")
-                        // Split by sentence boundaries and check for repetition
                         const sentences = errorMsg.split(/[.!?]\s+/).filter(s => s.trim().length > 0);
                         if (sentences.length >= 2) {
-                          // Check if the message is just the same sentence repeated
                           const firstSentence = sentences[0].trim();
                           const allSame = sentences.every(s => s.trim() === firstSentence);
                           if (allSame && sentences.length > 1) {
                             errorMsg = firstSentence;
                           } else {
-                            // Check if the message is the same text repeated twice
                             const trimmed = errorMsg.trim();
                             const midPoint = Math.floor(trimmed.length / 2);
                             if (midPoint > 10) {
@@ -1802,14 +1783,13 @@ export default function ResultsDisplay({
                           </div>
                         );
                       })()}
-                      {mock && status === "ok" && (
+                      {mock && (status === "ok" || status === "substituted") && (
                         <div className="flex items-center gap-2 text-sm text-blue-700 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
                           <span>ℹ</span>
                           <span>Demo output – no API key configured.</span>
                         </div>
                       )}
-                      {/* Show truncation warning if model response hit max output tokens (e.g., Gemini MAX_OUTPUT_TOKENS) */}
-                      {status === "ok" && (result as any).wasTruncated && (
+                      {(status === "ok" || status === "substituted") && (result as any).wasTruncated && (
                         <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
                           <span className="mt-0.5">⚠️</span>
                           <div>
@@ -1823,9 +1803,8 @@ export default function ResultsDisplay({
                           (no collapse) so users can compare models side-by-side without extra clicks. */}
                       {/* Show warning for suspiciously short responses (status is ok but errorMessage indicates warning) */}
                       {/* Show warning if response was truncated by API (finish_reason === 'length') */}
-                      {status === "ok" && (
+                      {(status === "ok" || status === "substituted") && (
                         <>
-                          {/* Show truncation warning if response was cut off by token limit */}
                           {((result as any)?.wasTruncated || (result as any)?.finishReason === "length") && (
                             <div className="mb-3 px-3 py-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-800">
                               <strong>Note:</strong> This response was truncated by the model's token limit. Some sections may be missing.
@@ -1839,11 +1818,8 @@ export default function ResultsDisplay({
                           )}
                         </>
                       )}
-                      {/* CRITICAL: Compare View must show FULL text - no height constraints or truncation */}
-                      {/* Perplexity Pro responses can be very long with multiple sections - all must be visible */}
-                      {status !== "error" && status !== "timeout" && (
+                      {status !== "failed" && (
                         <div className="space-y-3">
-                          {/* Full text display - no max-height, natural scroll */}
                           <div className="leading-relaxed text-sm text-gray-800">
                             <CollapsibleMarkdown text={displayText} alwaysExpanded={true} />
                           </div>
@@ -1873,14 +1849,10 @@ export default function ResultsDisplay({
                 );
                 // Use safe text getter for all model text access
                 const modelText = getModelText(result);
-                // For error/timeout results, show the error message from errorMessage (preferred) or model text (fallback)
-                // We prefer the backend-provided errorMessage; the generic message is only a last-resort fallback
-                // For successful results, use model text (full canonical text) - never truncated for UI display
-                const displayText = (status === "error" || status === "timeout") 
+                const displayText = (status === "failed") 
                   ? (result.errorMessage || modelText || "This model failed to return a response.")
                   : (modelText || "No response provided.");
 
-                // Use the shared PanelModelConfig so Panel Responses share colors with Run Panel and Agreement Map.
                 const modelConfig = getPanelModelConfig(result.modelId as PanelModelId);
 
                 return (
@@ -1888,58 +1860,39 @@ export default function ResultsDisplay({
                     key={result.modelId}
                     className="rounded-2xl border border-gray-200 shadow-sm overflow-hidden bg-white transition-shadow hover:shadow-md"
                   >
-                    {/* List View: Increased padding (px-6 py-5) for comfortable reading */}
                     <button
                       onClick={() => toggleExpand(result.modelId)}
-                      className="w-full px-6 py-5 flex flex-col gap-2 text-left md:flex-row md:items-center md:justify-between bg-gray-50 hover:bg-gray-100 transition-colors"
+                      className="w-full px-6 py-5 flex flex-col gap-2 text-left bg-gray-50 hover:bg-gray-100 transition-colors"
                     >
-                      <div className="flex items-center gap-3">
-                        {/* Model name pill with shared color styling - uses ModelChip for consistency */}
-                        <ModelChip modelId={result.modelId as PanelModelId} variant="outline" size="xs" />
+                      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between w-full">
+                        <div className="flex items-center gap-3">
+                          <ModelChip modelId={result.modelId as PanelModelId} variant="outline" size="xs" />
+                        </div>
+                        <div className="flex items-center gap-3 text-sm">
+                          {renderStatusPill(status)}
+                          {latencyLabel && (
+                            <span className="text-xs text-gray-500">
+                              {latencyLabel}
+                            </span>
+                          )}
+                          <span className="text-gray-500 md:ml-2">
+                            {status === "ok" || status === "substituted"
+                              ? (isExpanded ? "Hide answer ▲" : "Show answer ▼")
+                              : (isExpanded ? "Hide error ▲" : "Show error ▼")
+                            }
+                          </span>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-3 text-sm">
-                        {renderStatusPill(status)}
-                        {latencyLabel && (
-                          <span className="text-xs text-gray-500">
-                            {latencyLabel}
-                    </span>
-                        )}
-                        <span className="text-gray-500 md:ml-2">
-                          {status === "ok" 
-                            ? (isExpanded ? "Hide answer ▲" : "Show answer ▼")
-                            : status === "timeout"
-                            ? (isExpanded ? "Hide timeout ▲" : "Show timeout ▼")
-                            : (isExpanded ? "Hide error ▲" : "Show error ▼")
-                          }
-                    </span>
-                      </div>
+                      {result.status === "substituted" && (
+                        <div className="flex items-center gap-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1" title={(result as any).substitutionReason || ""}>
+                          <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                          <span>Substituted: DeepSeek</span>
+                        </div>
+                      )}
                   </button>
                   {isExpanded && (
                       <div className="px-6 py-5 space-y-4 bg-white border-t border-gray-100 max-h-[600px] overflow-y-auto overflow-x-hidden">
-                        {/* Make the content area scrollable with max-height for List View */}
-                        {/* Increased padding (px-6 py-5) and spacing (space-y-4) for comfortable reading in List View */}
-                        {/* Handle timeout status separately from errors for better UX */}
-                        {status === "timeout" && (
-                          <div className="space-y-3 text-sm text-amber-800">
-                            <div className="font-semibold">This request timed out.</div>
-                            <div className="bg-amber-50 border border-amber-200 rounded px-4 py-3">
-                              <p className="mb-2">
-                                {result.errorMessage ||
-                                  `${getModelDisplayNameSafe(result.modelId)} did not finish in time. Its response is excluded from the unified analysis, but other models are shown above.`}
-                              </p>
-                              <p className="font-medium mb-1">You can try:</p>
-                              <ul className="list-disc list-inside space-y-1 ml-2">
-                                <li>Rerunning the panel (the request may complete faster on retry)</li>
-                                <li>Simplifying the question or narrowing the scope</li>
-                                <li>Reducing the number of models used at once</li>
-                              </ul>
-                            </div>
-                          </div>
-                        )}
-                        {/* Handle error status (not timeout) */}
-                        {status === "error" && (() => {
-                          // Get error message and ensure it's not duplicated
-                          // Sometimes error messages can be duplicated in the data, so we deduplicate here
+                        {status === "failed" && (() => {
                           let errorMsg = result.errorMessage || getModelText(result) || "This model failed to return a response.";
                           
                           // Remove duplicate text if the entire message is repeated (e.g., "X. X.")
@@ -1985,14 +1938,13 @@ export default function ResultsDisplay({
                             </div>
                           );
                         })()}
-                        {mock && status === "ok" && (
+                        {mock && (status === "ok" || status === "substituted") && (
                           <div className="flex items-center gap-2 text-sm text-blue-700 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
                             <span>ℹ</span>
                             <span>Demo output – no API key configured.</span>
                           </div>
                         )}
-                        {/* Show truncation warning if model response hit max output tokens (e.g., Gemini MAX_OUTPUT_TOKENS) */}
-                        {status === "ok" && (result as any).wasTruncated && (
+                        {(status === "ok" || status === "substituted") && (result as any).wasTruncated && (
                           <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
                             <span className="mt-0.5">⚠️</span>
                       <div>
@@ -2002,16 +1954,13 @@ export default function ResultsDisplay({
                       </div>
                         )}
                         {/* Show warning for suspiciously short responses (status is ok but errorMessage indicates warning) */}
-                        {status === "ok" && result.errorMessage && !(result as any).wasTruncated && (
+                        {(status === "ok" || status === "substituted") && result.errorMessage && !(result as any).wasTruncated && (
                           <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2 mb-3">
                             <strong>Note:</strong> {result.errorMessage}
                           </div>
                         )}
-                        {/* Only show displayText for successful responses - error messages are shown in the error alert above */}
-                        {/* CRITICAL: UI must show full text - no max-height clamping, use expandable component if needed */}
-                        {status !== "error" && status !== "timeout" && (
+                        {status !== "failed" && (
                           <div className="space-y-3">
-                            {/* Full text display - no height clamping, scroll naturally */}
                             <div className="leading-relaxed text-sm text-gray-800">
                                 <CollapsibleMarkdown text={displayText} />
                               </div>

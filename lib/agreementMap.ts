@@ -13,6 +13,7 @@
  */
 
 import { ModelId, ModelResult } from "@/lib/types";
+import { isUsableResult } from "@/lib/panel/publicize";
 
 /**
  * Check if debug logging is enabled (dev-only or localhost)
@@ -658,7 +659,7 @@ export function buildAgreementMap(results: ModelResult[]): ClaimCluster[] {
   // This is fully dynamic - includes all models with status: "ok", including Gemini, Grok, Perplexity
   // No hard-coding of specific model IDs; any model that succeeds is included in the analysis
   const successfulResults = results.filter(
-    (r) => r.status === "ok" && getModelText(r).trim().length > 0
+    (r) => isUsableResult(r) && getModelText(r).trim().length > 0
   );
 
   // Debug log: Verify input includes all OK models (including Gemini, Grok, Perplexity)

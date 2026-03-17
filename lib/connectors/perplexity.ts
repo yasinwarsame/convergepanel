@@ -42,6 +42,10 @@ export async function callPerplexity(
   const sanitizedContext = context?.trim() || null;
   const startTime = Date.now();
 
+  if (process.env.NODE_ENV !== "production" && process.env.FORCE_PERPLEXITY_FAIL === "1") {
+    return { modelId: "perplexity", status: "error", rawText: null, errorMessage: "Forced failure (dev)", latencyMs: 0 };
+  }
+
   // Use API key from env helper (preferred) or fallback to parameter (for backward compatibility)
   const effectiveApiKey = PERPLEXITY_API_KEY || apiKey;
 
@@ -279,14 +283,14 @@ export async function callPerplexity(
     const zeroTokenUsage = { totalTokens: 0, promptTokens: null, completionTokens: null };
 
     // Handle rate limiting
-    if (error?.status === 429 || error?.message?.includes("rate limit")) {
+    if (error?.status === 429 || error?.message?.includes("rate limit") || error?.message?.includes("quota")) {
       return {
         modelId: "perplexity",
         status: "refused" as const,
         rawText: null,
-        errorMessage: "Perplexity rate limit exceeded. Please retry shortly.",
+        errorMessage: `429 rate limit / quota exceeded: ${error?.message?.slice(0, 200) ?? "unknown"}`,
         latencyMs,
-        tokenUsage: zeroTokenUsage, // CRITICAL: Always include tokenUsage
+        tokenUsage: zeroTokenUsage,
       };
     }
 
