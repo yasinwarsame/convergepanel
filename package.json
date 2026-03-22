@@ -15,7 +15,8 @@
     "db:generate": "prisma generate",
     "db:seed": "prisma db seed",
     "verify:synthesis-ui": "ts-node --compiler-options '{\"module\":\"CommonJS\",\"moduleResolution\":\"node\"}' scripts/dev-verify-synthesis-ui-extras.ts",
-    "verify:linkedin-copy": "node scripts/dev-verify-linkedin-copy.mjs"
+    "verify:linkedin-copy": "node scripts/dev-verify-linkedin-copy.mjs",
+    "verify:low-remaining": "node scripts/dev-verify-low-remaining-indicator.mjs"
   },
   
   "dependencies": {

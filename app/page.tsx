@@ -41,9 +41,9 @@ import LandingPage from "@/components/LandingPage";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase/client";
 import { UserProfile } from "@/lib/types";
-import { PLAN_CONFIG, getPlanConfigById } from "@/lib/billing/planConfig";
+import { getPlanConfigById } from "@/lib/billing/planConfig";
 import { normalizeSelectedModels, getDefaultModelSelection } from "@/lib/utils/normalizeSelectedModels";
-import { perf, trackSlowLoad } from "@/lib/utils/performance"; "@/lib/utils/performance";
+import { perf, trackSlowLoad } from "@/lib/utils/performance";
 
 // Lazy load heavy components - defer until after first paint
 const ResultsDisplay = dynamic(() => import("@/components/ResultsDisplay"), {
@@ -97,7 +97,7 @@ export default function Home() {
   // useUserPlan hook - handles its own loading/error states internally
   const { plan, runsThisMonth, monthlyLimit, refresh: refreshUsage, loading: planLoading, error: planError } = useUserPlan();
 
-  // Get plan label from PLAN_CONFIG (single source of truth)
+  // Resolve plan id and config (single source of truth in planConfig)
   // Handle both PlanId ("free" | "lite" | "full") and legacy UserPlan ("solo" | "pro") values
   const planStr = (plan as string) || "free";
   const normalizedPlan = 
@@ -117,8 +117,6 @@ export default function Home() {
     });
     planConfig = getPlanConfigById("free");
   }
-  
-  const planLabel = planConfig.label;
   
   // Defensive: Ensure monthlyLimit is valid (never null, never 400 for full plan)
   if (monthlyLimit !== null && monthlyLimit !== undefined) {
@@ -902,6 +900,28 @@ export default function Home() {
    */
   const canRun = !!user && selectedModels.length >= 2 && question.trim().length > 0;
 
+  /** Low-runs hint near Run button only (not blocking; limit enforcement unchanged). */
+  const effectiveMonthlyLimit =
+    monthlyLimit != null && monthlyLimit !== undefined ? monthlyLimit : null;
+  const effectiveRunsThisMonth = runsThisMonth ?? 0;
+  const remainingRuns =
+    effectiveMonthlyLimit != null
+      ? Math.max(0, effectiveMonthlyLimit - effectiveRunsThisMonth)
+      : 0;
+  const LOW_REMAINING_THRESHOLD =
+    effectiveMonthlyLimit != null && effectiveMonthlyLimit > 0
+      ? Math.max(3, Math.floor(effectiveMonthlyLimit * 0.1))
+      : 3;
+  const showLowRunsRemaining =
+    !!user &&
+    effectiveMonthlyLimit != null &&
+    remainingRuns > 0 &&
+    remainingRuns <= LOW_REMAINING_THRESHOLD;
+
+  /** Only after usage has loaded — avoids "Upgrade plan" flashing for paid users (stale free default). */
+  const showHeaderUpgradePlan =
+    !!user && !planLoading && normalizedPlan === "free";
+
   // Helper to translate errors to user-friendly messages
   // Internal error details stay in logs, users see friendly text
   const getUserFriendlyError = (err: string | null): string | null => {
@@ -929,9 +949,9 @@ export default function Home() {
   return (
     <main className="max-w-4xl mx-auto px-4 py-10">
       <section className="bg-white rounded-2xl shadow-sm border border-slate-200 px-6 py-5 md:px-8 md:py-6">
-        {/* Header: title + meta tags + plan badge */}
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div>
+        {/* Header: title + meta tags (plan/usage lives on Profile & Billing) */}
+        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div className="flex-1 min-w-0">
             {/* Title */}
             <h1 className="text-3xl md:text-4xl font-semibold tracking-tight text-slate-900">
               Ask your expert panel
@@ -948,35 +968,15 @@ export default function Home() {
               <span className="text-slate-500">Trust-focused answers</span>
             </div>
           </div>
-          
-          {/* Plan badge - right-aligned on desktop */}
-          {user && monthlyLimit != null && (
-            <div className="mt-1 md:mt-0 flex items-center gap-3 flex-wrap sm:justify-end">
-              <div className="inline-flex items-center rounded-full bg-blue-50 px-4 py-1.5">
-                <span className="text-sm font-semibold text-sky-700">
-                  {planLabel.replace(" Plan", " plan").replace(" Panel", " panel")}
-                </span>
-                <span className="mx-1 text-slate-400">·</span>
-                <span
-                  className={
-                    runsThisMonth >= monthlyLimit
-                      ? "text-sm text-amber-600"
-                      : "text-sm text-slate-700"
-                  }
-                >
-                  {runsThisMonth} / {monthlyLimit}
-                </span>
-                <span className="ml-1 text-xs text-slate-500">runs used</span>
-              </div>
-              {/* Upgrade link for free plan users */}
-              {planStr === "free" && (
-                <button
-                  onClick={() => router.push("/billing")}
-                  className="text-sm font-medium text-sky-700 hover:text-sky-800 hover:underline transition-colors"
-                >
-                  Upgrade plan
-                </button>
-              )}
+          {showHeaderUpgradePlan && (
+            <div className="md:shrink-0 md:pt-1">
+              <button
+                type="button"
+                onClick={() => router.push("/billing")}
+                className="text-sm font-medium text-sky-700 hover:text-sky-800 hover:underline transition-colors"
+              >
+                Upgrade plan
+              </button>
             </div>
           )}
         </div>
@@ -1104,6 +1104,27 @@ export default function Home() {
                 You can also press <span className="font-semibold">Cmd/Ctrl + Enter</span>.
               </p>
             </div>
+            {showLowRunsRemaining && (
+              <p className="flex items-center gap-1.5 text-xs text-amber-800/90">
+                <svg
+                  className="h-3.5 w-3.5 shrink-0 text-amber-600"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                  aria-hidden
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                  />
+                </svg>
+                <span>
+                  Low runs remaining: {remainingRuns} left this month
+                </span>
+              </p>
+            )}
 
             {/* Model Status Chips While Running */}
             {runStatus === "running" && (

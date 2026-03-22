@@ -10,7 +10,7 @@
 
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useLayoutEffect, useCallback } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import { UserPlan } from "@/lib/types";
 
@@ -190,6 +190,18 @@ export function useUserPlan(): UseUserPlanReturn {
     }
   }, [user, authReady]);
 
+  /**
+   * When a user becomes available, usage still reflects DEFAULT_USAGE (free) until /api/user/usage
+   * returns. Without flipping loading to true before paint, plan-dependent UI (e.g. "Upgrade plan")
+   * can flash for paid users for one frame. useLayoutEffect runs before browser paint.
+   */
+  useLayoutEffect(() => {
+    if (!authReady || !user) {
+      return;
+    }
+    setLoading(true);
+  }, [authReady, user?.uid]);
+
   // Fetch usage when component mounts or user changes
   // IMPORTANT: Wait for auth to be ready before fetching
   // IMPORTANT: Always set loading to false eventually, even on error, to prevent infinite loading
@@ -229,7 +241,7 @@ export function useUserPlan(): UseUserPlanReturn {
     }
     
     loadUsage();
-  }, [authLoading, user]);
+  }, [authLoading, authReady, user]);
 
   return {
     plan: usageData.plan,
