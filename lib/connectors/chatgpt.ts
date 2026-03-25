@@ -1,5 +1,10 @@
+/**
+ * LLM connector adapter: provider-specific HTTP, auth, and response shaping.
+ */
+
 import OpenAI from "openai";
 import { ModelResult } from "@/lib/types";
+import type { ConnectorCallOptions } from "./types";
 import { buildPanelPrompt } from "@/lib/panelPrompt";
 import { MODEL_LIMITS, getModelTimeout } from "@/lib/modelConfig";
 import { getTotalTokensFromProviderResponse, modelIdToProviderKey, safeNum } from "@/lib/tokenExtraction";
@@ -31,7 +36,8 @@ function mockResult(): ModelResult {
 export async function callChatGPT(
   question: string,
   context?: string | null,
-  apiKey?: string
+  apiKey?: string,
+  opts?: ConnectorCallOptions
 ): Promise<ModelResult> {
   const sanitizedQuestion = question?.trim() ?? "";
   const sanitizedContext = context?.trim() || null;
@@ -51,6 +57,10 @@ export async function callChatGPT(
     // Get token limits and timeout from centralized config
     const chatgptLimits = MODEL_LIMITS.chatgpt;
     const chatgptTimeout = getModelTimeout("chatgpt");
+
+    const systemContent = opts?.systemPromptOverride
+      ? opts.systemPromptOverride
+      : buildPanelPrompt("chatgpt", sanitizedQuestion, sanitizedContext);
     
     const completion = await Promise.race([
       client.chat.completions.create({
@@ -58,8 +68,7 @@ export async function callChatGPT(
         messages: [
           {
             role: "system",
-            // Use the shared deep-research template with model-specific length guidance
-            content: buildPanelPrompt("chatgpt", sanitizedQuestion, sanitizedContext),
+            content: systemContent,
           },
           { role: "user", content: sanitizedQuestion },
         ],

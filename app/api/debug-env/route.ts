@@ -1,3 +1,7 @@
+/**
+ * HTTP API route (debug-env): server handler, auth, and JSON responses.
+ */
+
 import { NextResponse } from "next/server";
 
 export async function GET() {

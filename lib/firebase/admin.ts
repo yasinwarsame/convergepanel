@@ -1,3 +1,7 @@
+/**
+ * Firebase client or Admin SDK setup, auth helpers, and shared config.
+ */
+
 import "server-only";
 
 import admin from "firebase-admin";

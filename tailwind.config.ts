@@ -1,3 +1,6 @@
+/**
+ * Tailwind CSS configuration: content paths and theme extensions for the App Router UI.
+ */
 import type { Config } from 'tailwindcss'
 
 const config: Config = {

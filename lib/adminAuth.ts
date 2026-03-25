@@ -1,3 +1,7 @@
+/**
+ * Shared library module (adminAuth.ts): domain logic used by API routes and UI.
+ */
+
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 

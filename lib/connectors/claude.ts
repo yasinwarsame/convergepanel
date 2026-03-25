@@ -1,5 +1,10 @@
+/**
+ * LLM connector adapter: provider-specific HTTP, auth, and response shaping.
+ */
+
 import Anthropic from "@anthropic-ai/sdk";
 import { ModelResult } from "@/lib/types";
+import type { ConnectorCallOptions } from "./types";
 import { buildPanelPrompt } from "@/lib/panelPrompt";
 import { MODEL_LIMITS, getModelTimeout } from "@/lib/modelConfig";
 import { getTotalTokensFromProviderResponse, modelIdToProviderKey, safeNum } from "@/lib/tokenExtraction";
@@ -31,7 +36,8 @@ function mockResult(): ModelResult {
 export async function callClaude(
   question: string,
   context?: string | null,
-  apiKey?: string
+  apiKey?: string,
+  opts?: ConnectorCallOptions
 ): Promise<ModelResult> {
   const sanitizedQuestion = question?.trim() ?? "";
   const sanitizedContext = context?.trim() || null;
@@ -52,13 +58,16 @@ export async function callClaude(
     const claudeLimits = MODEL_LIMITS.claude;
     const claudeTimeout = getModelTimeout("claude");
     
+    const systemPrompt = opts?.systemPromptOverride
+      ? opts.systemPromptOverride
+      : buildPanelPrompt("claude", sanitizedQuestion, sanitizedContext);
+
     const message = await Promise.race([
       anthropic.messages.create({
         model: "claude-3-haiku-20240307",
         // Use centralized token limits to ensure consistent, deep responses without truncation
         max_tokens: claudeLimits.maxTokens,
-        // Use the shared deep-research template with model-specific length guidance
-        system: buildPanelPrompt("claude", sanitizedQuestion, sanitizedContext),
+        system: systemPrompt,
         messages: [{ role: "user", content: sanitizedQuestion }],
       }),
       createTimeout(claudeTimeout.hardTimeoutMs),

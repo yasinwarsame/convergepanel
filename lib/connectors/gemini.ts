@@ -16,6 +16,7 @@
  */
 
 import { ModelResult } from "@/lib/types";
+import type { ConnectorCallOptions } from "./types";
 import { buildPanelPrompt } from "@/lib/panelPrompt";
 import { MODEL_LIMITS, getModelTimeout } from "@/lib/modelConfig";
 import { getTotalTokensFromProviderResponse, modelIdToProviderKey, safeNum } from "@/lib/tokenExtraction";
@@ -82,7 +83,8 @@ function calculateRetryDelay(attempt: number, retryAfterMs?: number | null): num
 export async function callGemini(
   question: string,
   context?: string | null,
-  apiKey?: string
+  apiKey?: string,
+  opts?: ConnectorCallOptions
 ): Promise<ModelResult> {
   const sanitizedQuestion = question?.trim() ?? "";
   const sanitizedContext = context?.trim() || null;
@@ -132,22 +134,33 @@ export async function callGemini(
   // Get token limits and timeout from centralized config
   const geminiLimits = MODEL_LIMITS.gemini;
   const geminiTimeout = getModelTimeout("gemini");
+  const maxOutputTokensCap = 32768;
+  const effectiveMaxOutput =
+    typeof opts?.maxOutputTokens === "number" &&
+    Number.isFinite(opts.maxOutputTokens) &&
+    opts.maxOutputTokens > 0
+      ? Math.min(Math.floor(opts.maxOutputTokens), maxOutputTokensCap)
+      : geminiLimits.maxTokens;
   
-  // Build system instruction from the prompt template
-  // The system instruction is the long prompt template (everything before the question/context)
-  // Extract it by building the prompt with empty question/context, then removing the trailing sections
-  const systemInstructionTemplate = buildPanelPrompt("gemini", "", null);
-  // Remove everything after "---" separator (which includes "RESEARCH QUESTION:" section)
-  const separatorIndex = systemInstructionTemplate.indexOf("\n---\n");
-  const systemInstruction = separatorIndex > 0
-    ? systemInstructionTemplate.substring(0, separatorIndex).trim()
-    : systemInstructionTemplate.split("RESEARCH QUESTION:")[0].trim();
-  
-  // Build user text: question + optional context
-  // Format: "Question\n\nContext:\n{context}" if context exists, otherwise just question
-  const userText = sanitizedContext && sanitizedContext.trim().length > 0
-    ? `${sanitizedQuestion}\n\nContext:\n${sanitizedContext}`
-    : sanitizedQuestion;
+  let systemInstruction: string;
+  let userText: string;
+
+  if (opts?.systemPromptOverride) {
+    systemInstruction = opts.systemPromptOverride;
+    userText = sanitizedQuestion;
+  } else {
+    // Build system instruction from the prompt template
+    const systemInstructionTemplate = buildPanelPrompt("gemini", "", null);
+    const separatorIndex = systemInstructionTemplate.indexOf("\n---\n");
+    systemInstruction = separatorIndex > 0
+      ? systemInstructionTemplate.substring(0, separatorIndex).trim()
+      : systemInstructionTemplate.split("RESEARCH QUESTION:")[0].trim();
+
+    userText =
+      sanitizedContext && sanitizedContext.trim().length > 0
+        ? `${sanitizedQuestion}\n\nContext:\n${sanitizedContext}`
+        : sanitizedQuestion;
+  }
   
   // Use stable model: gemini-2.0-flash (avoid experimental suffixes)
   const GEMINI_MODEL = "gemini-2.0-flash";
@@ -160,7 +173,7 @@ export async function callGemini(
       model: GEMINI_MODEL,
       systemInstructionLength: systemInstruction.length,
       userTextLength: userText.length,
-      maxOutputTokens: geminiLimits.maxTokens,
+      maxOutputTokens: effectiveMaxOutput,
       keyPresent: true,
     });
   }
@@ -235,7 +248,7 @@ export async function callGemini(
         const generatePromise = model.generateContent({
           contents: requestContents,
           generationConfig: {
-            maxOutputTokens: geminiLimits.maxTokens,
+            maxOutputTokens: effectiveMaxOutput,
             temperature: 0.7,
           },
         });
@@ -390,7 +403,7 @@ export async function callGemini(
           responseLength: text.length,
           finishReason,
           wasTruncated,
-          maxOutputTokens: geminiLimits.maxTokens,
+          maxOutputTokens: effectiveMaxOutput,
         });
       }
       
@@ -401,7 +414,7 @@ export async function callGemini(
           provider: "gemini",
           responseLength: text.length,
           finishReason,
-          maxOutputTokens: geminiLimits.maxTokens,
+          maxOutputTokens: effectiveMaxOutput,
           suggestion: "Consider increasing GEMINI_MAX_OUTPUT_TOKENS env var or maxTokens in modelConfig",
         });
       }

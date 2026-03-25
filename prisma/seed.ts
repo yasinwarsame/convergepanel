@@ -1,3 +1,7 @@
+/**
+ * Prisma seed script: optional dev/test data (run via prisma db seed).
+ */
+
 import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();

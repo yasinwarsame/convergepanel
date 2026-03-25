@@ -1,3 +1,7 @@
+/**
+ * Shared library module (keyStore.db.ts): domain logic used by API routes and UI.
+ */
+
 import "server-only";
 import { prisma } from "./db";
 import type { ModelId } from "./types";

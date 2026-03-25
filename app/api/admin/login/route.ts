@@ -1,3 +1,7 @@
+/**
+ * HTTP API route (admin/login): server handler, auth, and JSON responses.
+ */
+
 import { NextRequest, NextResponse } from "next/server";
 import { validatePassword, setAdminSession } from "@/lib/adminAuth";
 

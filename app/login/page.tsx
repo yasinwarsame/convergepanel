@@ -15,7 +15,6 @@ import { signInWithEmailAndPassword } from "firebase/auth";
 import { auth } from "@/lib/firebase/client";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { aboutCopy } from "@/lib/content/aboutCopy";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -24,6 +23,7 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const router = useRouter();
   const searchParams = useSearchParams();
+  const signedOut = searchParams.get("signedOut") === "1" || searchParams.get("signedOut") === "true";
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -138,52 +138,28 @@ export default function LoginPage() {
         {/* On desktop: takes up half width with right padding for spacing */}
         {/* On mobile: full width with bottom margin */}
         <div className="w-full lg:w-1/2 lg:pr-12 mb-10 lg:mb-0">
-          {/* Small pill/tag at top for brand positioning */}
           <div className="inline-flex items-center gap-2 rounded-full bg-slate-900/60 px-3 py-1 text-xs font-medium text-sky-300 ring-1 ring-sky-500/30">
             <span className="h-1.5 w-1.5 rounded-full bg-sky-400" />
-            Multi-LLM Expert Panel · Trust your answers
+            Research · Claim verification · Audit trail
           </div>
 
-          {/* Auth hero: position ConvergePanel as a deep-research, multi-LLM expert panel
-              that highlights consensus, disagreement, and bias. */}
-          {/* Highlight "Deep Research" with the same accent color as "biases and blind spots"
-              so users immediately recognize these as core ideas of ConvergePanel. */}
-          {/* Main headline with sky accent color for emphasis */}
-          {/* Typography hierarchy: Hero headline uses largest size (text-4xl sm:text-5xl) */}
           <h1 className="mt-6 text-3xl font-semibold text-white sm:text-4xl">
-            {aboutCopy.headline.before}
-            <span className="block text-sky-300">{aboutCopy.headline.accent}</span>
+            Don&apos;t trust one AI.
+            <span className="block text-sky-300">Verify with five.</span>
           </h1>
-          <p className="mt-3 text-sm text-slate-200 sm:text-base">
-            {aboutCopy.subheadline.before}
-            <span className="font-semibold text-sky-300">{aboutCopy.subheadline.accent}</span>
-            {aboutCopy.subheadline.after}
+          <p className="mt-3 text-sm text-slate-200 sm:text-base leading-relaxed">
+            Run questions and claims through Claude, GPT, Gemini, Grok, and Perplexity in one place. See
+            consensus, splits, and a score you can explain — before you act.
           </p>
 
-          {/* Bullet list of key benefits */}
-          {/* Auth hero copy: emphasize that ConvergePanel is not just about consensus,
-              but also about exposing potential model bias and missing perspectives. */}
-          {/* Hero body text: text-slate-200 with relaxed leading */}
-          <ul className="mt-4 space-y-1 text-sm text-slate-200">
-            {aboutCopy.benefits.map((benefit, index) => {
-              if (benefit.accent) {
-                const parts = benefit.text.split(benefit.accent);
-                return (
-                  <li key={index}>
-                    • {parts[0]}
-                    <span className="font-semibold text-sky-300">{benefit.accent}</span>
-                    {parts[1]}
-                  </li>
-                );
-              }
-              return <li key={index}>• {benefit.text}</li>;
-            })}
+          <ul className="mt-4 space-y-2 text-sm text-slate-200">
+            <li>• Multi-model research panel with synthesized briefs</li>
+            <li>• Claim verification with verdicts and per-model evidence</li>
+            <li>• Consensus scoring and compact audit trails</li>
           </ul>
 
-          {/* Final line emphasizing use cases */}
-          {/* Muted text: text-slate-400 for subtle emphasis */}
-          <p className="mt-4 text-sm text-slate-300">
-            {aboutCopy.useCaseDescription}
+          <p className="mt-4 text-sm text-slate-400">
+            For analysts, researchers, product teams, and anyone who ships decisions on AI output.
           </p>
         </div>
 
@@ -191,31 +167,21 @@ export default function LoginPage() {
         {/* On desktop: takes up half width with max-width constraint */}
         {/* On mobile: full width */}
         <div className="w-full max-w-md lg:w-1/2">
-          {/* Welcome info panel above the auth card */}
-          {/* Provides context about what users get when they sign up */}
-          {/* Card styling: bg-slate-50 with slate-200 ring for subtle brand feel */}
-          <div className="mb-6 rounded-2xl bg-slate-50 p-5 text-sm text-slate-800 shadow-sm ring-1 ring-slate-200">
-            <h2 className="text-xl sm:text-2xl font-bold text-sky-600 mb-2">
-              Welcome to ConvergePanel
-            </h2>
-            <p className="text-xs sm:text-sm text-slate-600">
-              Sign in to run multi-LLM panels, view agreement maps,
-              and revisit your past research.
-            </p>
-          </div>
-
-          {/* Main auth card with elevated styling */}
-          {/* bg-white/95 provides slight transparency for depth */}
-          {/* shadow-xl and ring create a premium, floating effect */}
           <div className="rounded-2xl bg-white/95 p-6 shadow-xl ring-1 ring-slate-900/5">
-            {/* Card title: Second level in hierarchy (text-xl lg:text-2xl) */}
             <h2 className="text-xl lg:text-2xl font-semibold tracking-tight text-slate-900">
-              Sign In
+              Sign in to ConvergePanel
             </h2>
-            {/* Card subtitle: Body text in card (text-slate-600) */}
-            <p className="mt-1 text-sm text-slate-600">
-              Sign in to your ConvergePanel account
-            </p>
+            <p className="mt-1 text-sm text-slate-600">Multi-model research and claim verification</p>
+
+            {signedOut && (
+              <div
+                className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700"
+                role="status"
+              >
+                <p className="font-medium text-slate-900">You&apos;ve been signed out.</p>
+                <p className="mt-1 text-slate-600">Thanks for using ConvergePanel. Sign back in below.</p>
+              </div>
+            )}
 
             <form onSubmit={handleSubmit} className="mt-6 space-y-4">
               <div>
@@ -283,15 +249,22 @@ export default function LoginPage() {
               </button>
             </form>
 
-            {/* Footer text: Muted text (text-slate-400) with sky-600 link */}
-            <p className="mt-6 text-center text-xs text-slate-400">
-              Don&apos;t have an account?{" "}
-              <Link
-                href="/signup"
-                className="font-medium text-sky-600 hover:text-sky-700"
-              >
-                Sign up
+            <p className="mt-6 text-center text-sm text-slate-600">
+              New to ConvergePanel?{" "}
+              <Link href="/signup" className="font-medium text-sky-600 hover:text-sky-700">
+                Sign up free
+              </Link>{" "}
+              — 8 runs per month on the free plan, no credit card required.
+            </p>
+
+            <p className="mt-4 text-center text-[11px] leading-relaxed text-slate-500">
+              By signing in, you agree to our{" "}
+              <Link href="/terms" className="text-sky-600 underline hover:text-sky-700">
+                Terms of Service
               </Link>
+              , including that AI-generated outputs may be wrong and that you are solely responsible
+              for verifying information before relying on it. ConvergePanel is not liable for errors
+              in model outputs.
             </p>
           </div>
         </div>

@@ -1,3 +1,7 @@
+/**
+ * Shared library module (db.ts): domain logic used by API routes and UI.
+ */
+
 import "server-only";
 import { PrismaClient } from "@prisma/client";
 

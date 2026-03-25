@@ -73,6 +73,13 @@ import { compressModelResponse, compressClusters, computeInputHash } from "@/lib
 import { buildEvidencePack } from "@/lib/synthesis/buildEvidencePack";
 import { logger, redact } from "@/lib/logger";
 import { buildSubstitutionBlock, normalizeModelResultPublic, coerceStatus } from "@/lib/panel/normalize";
+import type { UserProfile } from "@/lib/types";
+import {
+  applyTeamGovernancePipeline,
+  mergeGovernanceIntoBody,
+  governanceFromRunDoc,
+} from "@/lib/governance/teamGovernancePipeline";
+import { computeSynthesisConsensusScoring } from "@/lib/verification/consensusScoring";
 
 // Configure runtime and max duration for Next.js API route
 export const runtime = "nodejs";
@@ -346,13 +353,23 @@ export async function GET(req: NextRequest) {
             runId,
             requestId,
           });
-          return NextResponse.json({
-            ok: true,
-            report: data.synthesizedStructuredReport,
-            schemaVersion: 1,
-            synthesizedBy: data.synthesizedBy || "gpt-5.1",
-            cached: true,
-          });
+          const gov = governanceFromRunDoc(data);
+          return NextResponse.json(
+            mergeGovernanceIntoBody(
+              {
+                ok: true,
+                report: data.synthesizedStructuredReport,
+                schemaVersion: 1,
+                synthesizedBy: data.synthesizedBy || "gpt-5.1",
+                cached: true,
+                ...(data?.synthesisConsensusSummary
+                  ? { consensusSummary: data.synthesisConsensusSummary }
+                  : {}),
+                ...(data?.synthesisConsensusAudit ? { auditBundle: data.synthesisConsensusAudit } : {}),
+              },
+              gov
+            )
+          );
         }
       }
     } catch (cacheError: any) {
@@ -570,13 +587,19 @@ export async function POST(req: NextRequest) {
                 requestId,
                 runId,
               });
-              return NextResponse.json({
-                ok: true,
-                report: data.synthesizedStructuredReport,
-                schemaVersion: 1,
-                synthesizedBy: data.synthesizedBy || "gpt-5.1",
-                cached: true,
-              });
+              const gov = governanceFromRunDoc(data);
+              return NextResponse.json(
+                mergeGovernanceIntoBody(
+                  {
+                    ok: true,
+                    report: data.synthesizedStructuredReport,
+                    schemaVersion: 1,
+                    synthesizedBy: data.synthesizedBy || "gpt-5.1",
+                    cached: true,
+                  },
+                  gov
+                )
+              );
             }
           }
         }
@@ -949,13 +972,23 @@ export async function POST(req: NextRequest) {
               inputHash,
               generatedAt: data.synthesizedAt,
             });
-            return NextResponse.json({
-              ok: true,
-              report: data.synthesizedStructuredReport,
-              schemaVersion: 1,
-              synthesizedBy: data.synthesizedBy || "gpt-5.1",
-              cached: true,
-            });
+            const gov = governanceFromRunDoc(data);
+            return NextResponse.json(
+              mergeGovernanceIntoBody(
+                {
+                  ok: true,
+                  report: data.synthesizedStructuredReport,
+                  schemaVersion: 1,
+                  synthesizedBy: data.synthesizedBy || "gpt-5.1",
+                  cached: true,
+                  ...(data?.synthesisConsensusSummary
+                    ? { consensusSummary: data.synthesisConsensusSummary }
+                    : {}),
+                  ...(data?.synthesisConsensusAudit ? { auditBundle: data.synthesisConsensusAudit } : {}),
+                },
+                gov
+              )
+            );
           } else if (cachedHash && cachedHash !== inputHash) {
             // Input changed - cache invalid, will regenerate
             logger.debug(`[${requestId}] [synthesize-panel] Cache invalid (input hash changed)`, {
@@ -2020,6 +2053,45 @@ IMMEDIATE OUTPUT: Begin your response with the opening brace { immediately. Do n
       }
     }
 
+    const scoringResults = results
+      .filter((r: any) => r && typeof r === "object" && typeof r.modelId === "string")
+      .map((r: any) => {
+        const rawText =
+          typeof r.rawTextFull === "string" && r.rawTextFull.trim().length > 0
+            ? r.rawTextFull
+            : typeof r.text === "string"
+              ? r.text
+              : null;
+        const textLen = (rawText ?? "").trim().length;
+        const statusFromBody =
+          r.status !== undefined && r.status !== null && String(r.status).length > 0
+            ? coerceStatus(r.status)
+            : textLen >= 48
+              ? "ok"
+              : "failed";
+        return {
+          modelId: String(r.modelId).trim(),
+          status: statusFromBody,
+          rawText,
+        };
+      });
+
+    const sourceBacked =
+      agreementClusters.length > 0 ||
+      validatedReport.keyFindings.some((f) => (f.evidenceRefs?.length ?? 0) >= 1);
+
+    const {
+      enrichedSynthesis,
+      consensusSummary: synthesisConsensusDetail,
+      policyConsensusSummary,
+      auditBundle: synthesisAuditBundle,
+    } = computeSynthesisConsensusScoring({
+      synthesis: validatedReport,
+      results: scoringResults,
+      sourceBacked,
+      runId: runId || "",
+    });
+
     // Mark serialization start
     timing.serializationStart = Date.now();
     
@@ -2029,11 +2101,13 @@ IMMEDIATE OUTPUT: Begin your response with the opening brace { immediately. Do n
         const totalElapsed = Date.now() - timing.requestStart;
         
         await adminDb.collection("runs").doc(runId).update({
-          synthesizedStructuredReport: validatedReport,
+          synthesizedStructuredReport: enrichedSynthesis,
           schemaVersion: 1,
           synthesizedAt: Timestamp.now(),
           synthesizedBy: synthesisProvider === "anthropic" ? CLAUDE_SYNTHESIS_MODEL : model,
           synthesisInputHash: inputHash || null, // Store input hash for cache validation
+          synthesisConsensusSummary: synthesisConsensusDetail,
+          synthesisConsensusAudit: synthesisAuditBundle,
           synthesisMetadata: {
             inputSizeChars: inputSizeChars || 0,
             llmElapsedMs: llmElapsedMs,
@@ -2086,9 +2160,11 @@ IMMEDIATE OUTPUT: Begin your response with the opening brace { immediately. Do n
     const actualModel = synthesisProvider === "anthropic" ? CLAUDE_SYNTHESIS_MODEL : model;
     const response: any = {
       ok: true,
-      report: validatedReport,
+      report: enrichedSynthesis,
       schemaVersion: 1,
       synthesizedBy: actualModel,
+      consensusSummary: synthesisConsensusDetail,
+      auditBundle: synthesisAuditBundle,
     };
     
     // If response was partial (hit token limit but had usable content), include warning flag
@@ -2131,8 +2207,8 @@ IMMEDIATE OUTPUT: Begin your response with the opening brace { immediately. Do n
         promptSizeChars,
         finishReason: finishReason || null,
         model,
-        keyFindingsCount: validatedReport.keyFindings.length,
-        disagreementsCount: validatedReport.disagreements.length,
+        keyFindingsCount: enrichedSynthesis.keyFindings.length,
+        disagreementsCount: enrichedSynthesis.disagreements.length,
         usingEvidencePack: !!evidencePack,
       });
     } else {
@@ -2141,14 +2217,45 @@ IMMEDIATE OUTPUT: Begin your response with the opening brace { immediately. Do n
         requestId,
         elapsed: Date.now() - startTime,
         ok: true,
-        keyFindingsCount: validatedReport.keyFindings.length,
-        disagreementsCount: validatedReport.disagreements.length,
+        keyFindingsCount: enrichedSynthesis.keyFindings.length,
+        disagreementsCount: enrichedSynthesis.disagreements.length,
         runId,
         cached: false,
       });
     }
 
-    return NextResponse.json(response);
+    let userEmail = "";
+    if (adminDb) {
+      const us = await adminDb.collection("users").doc(uid).get();
+      userEmail = String((us.data() as UserProfile | undefined)?.email ?? "");
+    }
+    const researchAudit = {
+      version: "1" as const,
+      kind: "research_synthesis" as const,
+      runId: runId || "",
+      timestamp: synthesisAuditBundle.timestamp,
+      models: synthesisAuditBundle.models,
+      overallConsensusScore: synthesisAuditBundle.overallConsensusScore,
+      claims: synthesisAuditBundle.claims,
+      generatedAt: synthesisAuditBundle.timestamp,
+      questionCharCount: question.length,
+      modelCount: policyConsensusSummary.modelCount,
+      modelsHealthy: policyConsensusSummary.modelsHealthy,
+      keyFindingsCount: enrichedSynthesis.keyFindings.length,
+      disagreementsCount: enrichedSynthesis.disagreements.length,
+    };
+    const gov = await applyTeamGovernancePipeline({
+      uid,
+      userEmail,
+      consensusSummary: policyConsensusSummary,
+      consensusScore: policyConsensusSummary.overallConsensusScore,
+      type: "research",
+      query: question,
+      auditBundle: researchAudit,
+      runId: runId || undefined,
+    });
+    const out = mergeGovernanceIntoBody(response as Record<string, unknown>, gov);
+    return NextResponse.json(out);
   } catch (error: any) {
     const elapsed = Date.now() - startTime;
     const wasClientAbort = req.signal?.aborted;

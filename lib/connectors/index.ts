@@ -10,6 +10,7 @@
  */
 
 import { ModelId, ModelResult } from "@/lib/types";
+import type { ConnectorCallOptions } from "./types";
 import { callChatGPT } from "./chatgpt";
 import { callClaude } from "./claude";
 import { callGrok } from "./grok";
@@ -23,10 +24,11 @@ import { callGemini } from "./gemini";
  * - Takes: question (string), optional context (string | null), optional apiKey (string)
  * - Returns: Promise<ModelResult> (always returns a result, never throws)
  */
-type ConnectorFunction = (
+export type ConnectorFunction = (
   question: string,
   context?: string | null,
-  apiKey?: string
+  apiKey?: string,
+  opts?: ConnectorCallOptions
 ) => Promise<ModelResult>;
 
 /**

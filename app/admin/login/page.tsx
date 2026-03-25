@@ -1,5 +1,9 @@
 "use client";
 
+/**
+ * Admin sign-in: separate gate for dashboard access.
+ */
+
 import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 

@@ -102,7 +102,21 @@ export interface UserProfile {
   
   // Metadata
   uid?: string; // User ID (Firebase Auth UID)
-  role?: "user" | "admin"; // User role (user or admin, not to be confused with onboardingRole)
+  /** Legacy app role; governance dashboard access uses peer reviewer assignment (see governanceReviewerFor). */
+  role?: "user" | "admin" | "reviewer";
+
+  /** Self-service governance: user is available for others to assign as reviewer (5-model plan). */
+  governanceReviewerEnabled?: boolean;
+  /** UIDs of assigners this user reviews for (maintained when assigners pick this user). */
+  governanceReviewerFor?: string[];
+  /** Assigner's chosen reviewer (exactly one at a time). */
+  governanceReviewerEmail?: string;
+  governanceReviewerUid?: string;
+  governanceReviewerAssignedAt?: string;
+
+  /** Team workspace (optional; enterprise governance) */
+  teamId?: string;
+  teamRole?: "owner" | "admin" | "member";
   createdAt?: Timestamp | string;
   updatedAt?: Timestamp | string;
   lastLoginAt?: Timestamp | string;
@@ -317,6 +331,8 @@ export interface RunPanelApiResponse {
   ok: boolean;
   results?: ModelResult[];
   runId?: string; // Run ID for associating synthesis reports with runs
+  /** Org governance evaluation (paid plans only). */
+  governanceStatus?: "approved" | "needs_review" | "blocked";
   errorCode?: string;
   message?: string;
   usage?: {

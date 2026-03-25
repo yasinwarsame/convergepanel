@@ -21,10 +21,11 @@
  * redirected to the login page.
  */
 
-import { useState, useEffect, Suspense, lazy, useCallback } from "react";
+import { useState, useEffect, Suspense, lazy, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import dynamic from "next/dynamic";
+import { BookOpen } from "lucide-react";
 import { useAuth } from "@/components/AuthProvider";
 import { ModelId, ModelResult, ModelStatus, SynthesizedReport, RunPanelApiResponse, ConnectorStatus } from "@/lib/types";
 import { coerceStatus } from "@/lib/panel/normalize";
@@ -44,6 +45,11 @@ import { UserProfile } from "@/lib/types";
 import { getPlanConfigById } from "@/lib/billing/planConfig";
 import { normalizeSelectedModels, getDefaultModelSelection } from "@/lib/utils/normalizeSelectedModels";
 import { perf, trackSlowLoad } from "@/lib/utils/performance";
+import ClaimVerificationResult from "@/components/ClaimVerificationResult";
+import type { ClaimVerificationClientPayload } from "@/lib/verification/claimVerificationClientPayload";
+import type { PanelHistoryGovernanceStatus, PanelHistoryItem } from "@/lib/user/panelHistory";
+import type { TeamGovernanceBannerProps } from "@/components/ResultsDisplay";
+import type { SynthesisConsensusSummaryDetail } from "@/lib/verification/consensusScoring";
 
 // Lazy load heavy components - defer until after first paint
 const ResultsDisplay = dynamic(() => import("@/components/ResultsDisplay"), {
@@ -68,6 +74,142 @@ const ResultsDisplay = dynamic(() => import("@/components/ResultsDisplay"), {
  */
 type RunStatus = "idle" | "running" | "complete" | "error";
 
+const HISTORY_STORAGE_KEY = "convergePanelHistoryV1";
+const MAX_CLAIM_CHARS = 2000;
+const HISTORY_PAGE_SIZE = 30;
+const MAX_HISTORY_LOCAL_STORAGE = 50;
+
+function panelHistoryStorageKey(uid: string) {
+  return `${HISTORY_STORAGE_KEY}:${uid}`;
+}
+
+function truncateHistoryTitle(text: string, max = 88): string {
+  const t = text.trim();
+  return t.length <= max ? t : `${t.slice(0, max)}…`;
+}
+
+function formatHistoryVerdictLabel(v: string): string {
+  const x = v.toLowerCase();
+  if (x === "partially_true") return "Partially true";
+  if (x === "confirmed") return "Confirmed";
+  if (x === "disputed") return "Disputed";
+  if (x === "unverifiable") return "Unverifiable";
+  return v ? v.charAt(0).toUpperCase() + v.slice(1) : "—";
+}
+
+function panelApiItemToHistoryItem(row: PanelHistoryItem): HistoryItem {
+  if (row.type === "research") {
+    const q = row.question.trim();
+    return {
+      id: row.id,
+      type: "research",
+      title: truncateHistoryTitle(q),
+      at: row.at,
+      question: q,
+      selectedModels: row.selectedModels,
+      researchStatus: row.status,
+      modelsOk: row.modelsOk,
+      modelsTotal: row.modelsTotal,
+      synthesisConsensusScore: row.synthesisConsensusScore,
+      governanceStatus: row.governanceStatus,
+    };
+  }
+  const c = row.claim.trim();
+  return {
+    id: row.id,
+    type: "verification",
+    title: truncateHistoryTitle(c),
+    at: row.at,
+    claim: c,
+    verdict: row.verdict,
+    consensusScore: row.consensusScore,
+    governanceStatus: row.governanceStatus,
+  };
+}
+
+function sortHistoryDesc(items: HistoryItem[]): HistoryItem[] {
+  return [...items].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
+}
+
+function mergeHistoryById(existing: HistoryItem[], incoming: HistoryItem[]): HistoryItem[] {
+  const map = new Map<string, HistoryItem>();
+  for (const it of existing) {
+    map.set(it.id, it);
+  }
+  for (const it of incoming) {
+    const prev = map.get(it.id);
+    if (!prev) {
+      map.set(it.id, it);
+      continue;
+    }
+    if (it.type === "verification" && prev.type === "verification") {
+      const payload = it.payload ?? prev.payload;
+      map.set(it.id, {
+        ...prev,
+        ...it,
+        payload: payload ?? undefined,
+        governanceStatus: it.governanceStatus ?? prev.governanceStatus,
+      });
+    } else if (it.type === "research" && prev.type === "research") {
+      const pick = new Date(it.at) >= new Date(prev.at) ? it : prev;
+      const other = new Date(it.at) >= new Date(prev.at) ? prev : it;
+      map.set(it.id, {
+        ...pick,
+        synthesisConsensusScore: pick.synthesisConsensusScore ?? other.synthesisConsensusScore,
+        governanceStatus: pick.governanceStatus ?? other.governanceStatus,
+      });
+    } else {
+      map.set(it.id, new Date(it.at) >= new Date(prev.at) ? it : prev);
+    }
+  }
+  return sortHistoryDesc(Array.from(map.values()));
+}
+
+type HistoryItem =
+  | {
+      id: string;
+      type: "research";
+      title: string;
+      at: string;
+      question: string;
+      selectedModels: ModelId[];
+      researchStatus?: string;
+      modelsOk?: number;
+      modelsTotal?: number;
+      synthesisConsensusScore?: number;
+      governanceStatus?: PanelHistoryGovernanceStatus;
+    }
+  | {
+      id: string;
+      type: "verification";
+      title: string;
+      at: string;
+      claim?: string;
+      verdict?: string;
+      consensusScore?: number;
+      payload?: ClaimVerificationClientPayload | null;
+      governanceStatus?: PanelHistoryGovernanceStatus;
+    };
+
+function HistoryGovernanceChip({ status }: { status?: PanelHistoryGovernanceStatus }) {
+  if (!status) return null;
+  const cfg =
+    status === "approved"
+      ? { dot: "bg-emerald-500", text: "Approved", textCls: "text-emerald-800" }
+      : status === "blocked"
+        ? { dot: "bg-red-500", text: "Blocked", textCls: "text-red-800" }
+        : { dot: "bg-amber-500", text: "Review", textCls: "text-amber-900" };
+  return (
+    <span
+      className={`inline-flex shrink-0 items-center gap-1.5 self-center rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold ${cfg.textCls}`}
+      aria-label={`Governance: ${cfg.text}`}
+    >
+      <span className={`h-2 w-2 rounded-full ${cfg.dot}`} aria-hidden />
+      {cfg.text}
+    </span>
+  );
+}
+
 export default function Home() {
   // Performance: Mark app start
   useEffect(() => {
@@ -84,6 +226,8 @@ export default function Home() {
   }, []);
 
   const router = useRouter();
+  const openHistoryItemRef = useRef<((item: HistoryItem) => Promise<void>) | null>(null);
+  const governanceDeepLinkHandled = useRef<string | null>(null);
   const { user, loading: authLoading, authReady } = useAuth();
   
   // Track auth resolution
@@ -143,7 +287,25 @@ export default function Home() {
 
   // User's question/prompt to send to models
   const [question, setQuestion] = useState("");
-  
+
+  /** Single nav: Research | Verify Claim | History */
+  const [panelTab, setPanelTab] = useState<"research" | "verify" | "history">("research");
+  const [claimInput, setClaimInput] = useState("");
+  const [verifyRunning, setVerifyRunning] = useState(false);
+  const [verificationPayload, setVerificationPayload] = useState<ClaimVerificationClientPayload | null>(
+    null
+  );
+  const [historyItems, setHistoryItems] = useState<HistoryItem[]>([]);
+  const [historyHydrated, setHistoryHydrated] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [historyHasMore, setHistoryHasMore] = useState(false);
+  const [historyPage, setHistoryPage] = useState(1);
+  const [historyDetailLoadingId, setHistoryDetailLoadingId] = useState<string | null>(null);
+  /** When set, Research tab shows saved run results instead of the composer (loaded from Firestore). */
+  const [viewingHistoryRunId, setViewingHistoryRunId] = useState<string | null>(null);
+  const historyLoadSeq = useRef(0);
+
   // Models selected for this panel run
   // Start with empty selection - users will choose their models
   // For 3-model plans (free/lite), users can select 2-3 models
@@ -194,6 +356,13 @@ export default function Home() {
   const [synthesisReport, setSynthesisReport] = useState<string | any | null>(null); // Can be string (legacy), SynthesisReportV2, or StructuredSynthesisReport
   const [synthesisError, setSynthesisError] = useState<string | null>(null);
   const [synthesisGeneratedForRunId, setSynthesisGeneratedForRunId] = useState<string | null>(null);
+  const [synthesisGovernance, setSynthesisGovernance] = useState<TeamGovernanceBannerProps>(null);
+  /** Org-wide governance evaluation chip (paid plans); from run API / history. */
+  const [orgGovernanceStatus, setOrgGovernanceStatus] = useState<
+    "approved" | "needs_review" | "blocked" | null
+  >(null);
+  const [synthesisConsensusSummary, setSynthesisConsensusSummary] =
+    useState<SynthesisConsensusSummaryDetail | null>(null);
   
   // Current run ID for associating synthesis reports with runs
   const [currentRunId, setCurrentRunId] = useState<string | null>(null);
@@ -219,6 +388,9 @@ export default function Home() {
     "Compare the pros and cons of remote-first vs hybrid workplaces.",
     "How effective are carbon taxes compared to other climate policies?",
   ];
+
+  const EXAMPLE_CLAIM =
+    "GPT-4 has a 78% accuracy rate on medical diagnosis tasks according to a 2025 Stanford study.";
 
   // State to track onboarding check (deferred - doesn't block initial render)
   const [checkingOnboarding, setCheckingOnboarding] = useState(false);
@@ -317,10 +489,97 @@ export default function Home() {
     return () => clearTimeout(timeoutId);
   }, [authLoading, checkingOnboarding, planLoading, onboardingCompleted]);
 
+  // Per-user local history cache (avoids showing another account's items from shared browser storage).
+  useEffect(() => {
+    if (!user?.uid) {
+      setHistoryItems([]);
+      setHistoryHydrated(false);
+      setHistoryPage(1);
+      setHistoryHasMore(false);
+      return;
+    }
+    try {
+      const raw = localStorage.getItem(panelHistoryStorageKey(user.uid));
+      if (raw) {
+        const parsed = JSON.parse(raw) as HistoryItem[];
+        if (Array.isArray(parsed)) setHistoryItems(parsed);
+        else setHistoryItems([]);
+      } else {
+        setHistoryItems([]);
+      }
+    } catch {
+      setHistoryItems([]);
+    }
+    setHistoryHydrated(true);
+    setHistoryPage(1);
+    setHistoryHasMore(false);
+  }, [user?.uid]);
+
+  useEffect(() => {
+    if (!historyHydrated || !user?.uid) return;
+    try {
+      localStorage.setItem(
+        panelHistoryStorageKey(user.uid),
+        JSON.stringify(historyItems.slice(0, MAX_HISTORY_LOCAL_STORAGE))
+      );
+    } catch {
+      /* ignore */
+    }
+  }, [historyItems, historyHydrated, user?.uid]);
+
+  const loadHistoryPage = useCallback(
+    async (pageNum: number) => {
+      if (!user || !authReady) return;
+      const seq = ++historyLoadSeq.current;
+      setHistoryLoading(true);
+      setHistoryError(null);
+      try {
+        const { authedFetch } = await import("@/lib/client/authedFetch");
+        const res = await authedFetch(
+          `/api/user/panel-history?page=${pageNum}&limit=${HISTORY_PAGE_SIZE}`,
+          { user, authReady, method: "GET" }
+        );
+        const data = (await res.json()) as {
+          ok?: boolean;
+          items?: PanelHistoryItem[];
+          hasMore?: boolean;
+          message?: string;
+        };
+        if (seq !== historyLoadSeq.current) return;
+        if (!data.ok) {
+          setHistoryError(typeof data.message === "string" ? data.message : "Could not load history");
+          setHistoryHasMore(false);
+          return;
+        }
+        const converted = (data.items ?? []).map(panelApiItemToHistoryItem);
+        setHistoryItems((prev) => mergeHistoryById(prev, converted));
+        setHistoryPage(pageNum);
+        setHistoryHasMore(Boolean(data.hasMore));
+      } catch (e: unknown) {
+        if (seq !== historyLoadSeq.current) return;
+        const err = e as { name?: string; message?: string };
+        if (err?.name === "NotSignedInError") return;
+        setHistoryError(err?.message || "Could not load history");
+        setHistoryHasMore(false);
+      } finally {
+        if (seq === historyLoadSeq.current) setHistoryLoading(false);
+      }
+    },
+    [user, authReady]
+  );
+
+  useEffect(() => {
+    if (panelTab !== "history" || !historyHydrated || !user || !authReady) return;
+    void loadHistoryPage(1);
+  }, [panelTab, historyHydrated, user, authReady, loadHistoryPage]);
+
   // Floating scroll navigation: show up/down arrows when user has scrolled down
   useEffect(() => {
     // Only show scroll nav when results are present and user has scrolled
-    if (runStatus === "complete" && results.length > 0) {
+    if (
+      (panelTab === "research" && runStatus === "complete" && results.length > 0) ||
+      (panelTab === "verify" && verificationPayload)
+    ) {
       const onScroll = () => {
         setShowScrollNav(window.scrollY > 400);
       };
@@ -329,42 +588,42 @@ export default function Home() {
     } else {
       setShowScrollNav(false);
     }
-  }, [runStatus, results.length]);
+  }, [panelTab, runStatus, results.length, verificationPayload]);
 
-  // PERFORMANCE: Show shell immediately, don't block on auth/onboarding
-  // Show landing page for logged-out users (only if auth resolved and no user)
-  if (!authLoading && !user) {
-    return <LandingPage />;
-  }
+  const exitHistoryResearchView = useCallback(() => {
+    setViewingHistoryRunId(null);
+    setResults([]);
+    setSynthesizedReport(null);
+    setRunStatus("idle");
+    setCurrentRunId(null);
+    setSynthesisStatus("idle");
+    setSynthesisReport(null);
+    setSynthesisError(null);
+    setSynthesisConsensusSummary(null);
+    setSynthesisGeneratedForRunId(null);
+    setSynthesisGovernance(null);
+    setOrgGovernanceStatus(null);
+    setModelStatuses({} as Record<ModelId, "queued" | "thinking" | ModelStatus>);
+    setQuestion("");
+  }, []);
 
-  // If onboarding not completed and we've checked, redirect (non-blocking)
-  // Show inline message while redirect happens instead of blocking entire page
-  if (onboardingCompleted === false && !checkingOnboarding) {
-    return (
-      <main className="max-w-4xl mx-auto px-4 py-10">
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 px-6 py-8 text-center">
-          <div className="h-6 w-6 animate-spin rounded-full border-2 border-sky-400 border-t-transparent mx-auto mb-4" />
-          <p className="text-sm text-slate-600">Redirecting to onboarding…</p>
-        </div>
-      </main>
-    );
-  }
+  useEffect(() => {
+    if (panelTab !== "research" && viewingHistoryRunId) {
+      exitHistoryResearchView();
+    }
+  }, [panelTab, viewingHistoryRunId, exitHistoryResearchView]);
 
-  // Show error state if onboarding check failed (but still allow access)
-  if (onboardingError && user) {
-    console.warn("[app/page.tsx] Onboarding check failed but allowing access:", onboardingError);
-  }
+  useEffect(() => {
+    if (onboardingError && user) {
+      console.warn("[app/page.tsx] Onboarding check failed but allowing access:", onboardingError);
+    }
+  }, [onboardingError, user]);
 
-  // PERFORMANCE: Render shell immediately even if data is still loading
-  // Show inline loading states instead of blocking the entire page
-
-  // Show error state if plan loading failed (but still allow panel usage)
-  // This prevents silent failures and helps with debugging
-  // Don't block rendering - show the panel UI even if plan loading failed
-  if (planError && user) {
-    console.warn("[app/page.tsx] Plan loading failed but allowing access:", planError);
-  }
-
+  useEffect(() => {
+    if (planError && user) {
+      console.warn("[app/page.tsx] Plan loading failed but allowing access:", planError);
+    }
+  }, [planError, user]);
 
   // Removed: generateAnonymizedSynthesis function - anonymization no longer used
 
@@ -407,6 +666,8 @@ export default function Home() {
     }
 
     // Reset state for new panel run
+    setVerificationPayload(null);
+    setViewingHistoryRunId(null);
     setError(null);
     setRunStatus("running");
     setResults([]);
@@ -416,6 +677,9 @@ export default function Home() {
     setSynthesisReport(null);
     setSynthesisError(null);
     setSynthesisGeneratedForRunId(null);
+    setSynthesisGovernance(null);
+    setOrgGovernanceStatus(null);
+    setSynthesisConsensusSummary(null);
     setCurrentRunId(null);
 
     // Initialize all selected models with "queued" status
@@ -631,6 +895,13 @@ export default function Home() {
       if (data.runId) {
         setCurrentRunId(data.runId);
       }
+
+      const gs = data.governanceStatus;
+      if (gs === "approved" || gs === "needs_review" || gs === "blocked") {
+        setOrgGovernanceStatus(gs);
+      } else {
+        setOrgGovernanceStatus(null);
+      }
       
       setResults(data.results);
 
@@ -691,7 +962,24 @@ export default function Home() {
       // and skip synthesis (handled in ResultsDisplay component)
 
       setRunStatus("complete");
-      
+
+      setHistoryItems((h) =>
+        [
+          {
+            id: data.runId || `r-${Date.now()}`,
+            type: "research" as const,
+            title:
+              question.trim().slice(0, 88) + (question.trim().length > 88 ? "…" : ""),
+            at: new Date().toISOString(),
+            question: question.trim(),
+            selectedModels: [...selectedModels],
+            governanceStatus:
+              gs === "approved" || gs === "needs_review" || gs === "blocked" ? gs : undefined,
+          },
+          ...h,
+        ].slice(0, MAX_HISTORY_LOCAL_STORAGE)
+      );
+
       // Refresh usage data after successful run
       await refreshUsage();
       
@@ -793,7 +1081,20 @@ export default function Home() {
             console.log("[auto-synthesis] Cache hit - synthesis ready instantly");
             setSynthesisStatus("complete");
             setSynthesisReport(cacheData.report);
+            setSynthesisConsensusSummary(cacheData.consensusSummary ?? null);
             setSynthesisError(null);
+            setSynthesisGovernance(
+              cacheData.governanceReviewRequired ||
+                cacheData.blockedByPolicy ||
+                (Array.isArray(cacheData.policyFlags) && cacheData.policyFlags.length > 0)
+                ? {
+                    governanceReviewRequired: !!cacheData.governanceReviewRequired,
+                    blockedByPolicy: !!cacheData.blockedByPolicy,
+                    policyBlockMessage: cacheData.policyBlockMessage,
+                    policyFlags: cacheData.policyFlags,
+                  }
+                : null
+            );
             return; // Success - exit early
           }
         }
@@ -859,7 +1160,20 @@ export default function Home() {
         console.log("[auto-synthesis] ✅ Synthesis generated successfully in background");
         setSynthesisStatus("complete");
         setSynthesisReport(data.report);
+        setSynthesisConsensusSummary(data.consensusSummary ?? null);
         setSynthesisError(null);
+        setSynthesisGovernance(
+          data.governanceReviewRequired ||
+            data.blockedByPolicy ||
+            (Array.isArray(data.policyFlags) && data.policyFlags.length > 0)
+            ? {
+                governanceReviewRequired: !!data.governanceReviewRequired,
+                blockedByPolicy: !!data.blockedByPolicy,
+                policyBlockMessage: data.policyBlockMessage,
+                policyFlags: data.policyFlags,
+              }
+            : null
+        );
       } else {
         throw new Error(data.error?.message || "Synthesis returned invalid response");
       }
@@ -871,6 +1185,385 @@ export default function Home() {
       // Don't clear synthesisGeneratedForRunId - allow manual retry
     }
   };
+
+  /**
+   * Verify claim across selected models (uses /api/verify-claim)
+   */
+  const handleVerifyClaim = async () => {
+    setViewingHistoryRunId(null);
+    if (!authReady || !user) {
+      setError("Please sign in to verify a claim");
+      return;
+    }
+    if (selectedModels.length < 2) {
+      setError("Please select at least 2 models");
+      return;
+    }
+    const claim = claimInput.trim();
+    if (!claim) {
+      setError("Please paste a claim to verify");
+      return;
+    }
+    if (claim.length > MAX_CLAIM_CHARS) {
+      setError(`Claim must be at most ${MAX_CLAIM_CHARS} characters`);
+      return;
+    }
+
+    setError(null);
+    setVerifyRunning(true);
+    setVerificationPayload(null);
+    setRunStatus("idle");
+    setResults([]);
+    setSynthesizedReport(null);
+
+    const initialStatuses = {} as Record<ModelId, "queued" | "thinking" | ModelStatus>;
+    selectedModels.forEach((id) => {
+      initialStatuses[id] = "queued";
+    });
+    setModelStatuses(initialStatuses);
+
+    setTimeout(() => {
+      setModelStatuses((prev) => {
+        const updated = { ...prev };
+        selectedModels.forEach((id) => {
+          if (updated[id] === "queued") updated[id] = "thinking";
+        });
+        return updated;
+      });
+    }, 100);
+
+    try {
+      const { authedFetch } = await import("@/lib/client/authedFetch");
+      let response = await authedFetch("/api/verify-claim", {
+        user,
+        authReady,
+        method: "POST",
+        body: JSON.stringify({ claim, models: selectedModels }),
+      });
+      if (response.status === 401 && user) {
+        response = await authedFetch("/api/verify-claim", {
+          user,
+          authReady,
+          forceTokenRefresh: true,
+          method: "POST",
+          body: JSON.stringify({ claim, models: selectedModels }),
+        });
+      }
+
+      const responseText = await response.text();
+      const contentType = response.headers.get("content-type");
+      if (!contentType || !contentType.includes("application/json")) {
+        setError(`Server error (${response.status}). Please try again.`);
+        setVerifyRunning(false);
+        setModelStatuses({} as Record<ModelId, "queued" | "thinking" | ModelStatus>);
+        return;
+      }
+
+      let data: any;
+      try {
+        data = JSON.parse(responseText);
+      } catch {
+        setError("Invalid response from server.");
+        setVerifyRunning(false);
+        setModelStatuses({} as Record<ModelId, "queued" | "thinking" | ModelStatus>);
+        return;
+      }
+
+      if (!data.ok) {
+        const errorCode = data.errorCode || data.error;
+        let errorMessage = data.message || "Could not complete your claim.";
+        if (errorCode === "RUN_LIMIT_REACHED") {
+          const runsUsed = data.runsUsed ?? 0;
+          const runsLimit = data.runsLimit ?? data.maxRunsPerMonth ?? 0;
+          errorMessage = `You've reached your monthly run limit (${runsUsed} / ${runsLimit}). Resets ${data.resetsAt ? new Date(data.resetsAt).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }) : "next month"}.`;
+        }
+        if (errorCode === "PLAN_MODEL_LIMIT_REACHED") {
+          errorMessage = data.message || errorMessage;
+        }
+        setErrorCode(errorCode === "RUN_LIMIT_REACHED" ? "RUN_LIMIT_REACHED" : errorCode || null);
+        setError(errorMessage);
+        if (errorCode === "RUN_LIMIT_REACHED") refreshUsage();
+        setVerifyRunning(false);
+        setModelStatuses({} as Record<ModelId, "queued" | "thinking" | ModelStatus>);
+        return;
+      }
+
+      const payload: ClaimVerificationClientPayload = {
+        verificationId: data.verificationId,
+        claim: data.claim || claim,
+        verdict: data.verdict,
+        consensusScore: data.consensusScore,
+        confidenceLabel: data.confidenceLabel,
+        evidenceQuality: data.evidenceQuality,
+        supportRatio: data.supportRatio,
+        modelEvidence: data.modelEvidence,
+        aggregateSummary: data.aggregateSummary,
+        whereModelsAgree: data.whereModelsAgree || [],
+        whereModelsDisagree: data.whereModelsDisagree || [],
+        auditBundle: data.auditBundle,
+        accurateAmongUsable: data.accurateAmongUsable,
+        usableModelCount: data.usableModelCount,
+        governanceReviewRequired: data.governanceReviewRequired,
+        blockedByPolicy: data.blockedByPolicy,
+        policyBlockMessage: data.policyBlockMessage,
+        policyFlags: data.policyFlags,
+        governanceStatus:
+          data.governanceStatus === "approved" ||
+          data.governanceStatus === "needs_review" ||
+          data.governanceStatus === "blocked"
+            ? data.governanceStatus
+            : undefined,
+      };
+
+      setErrorCode(null);
+      setVerificationPayload(payload);
+      setHistoryItems((h) =>
+        [
+          {
+            id: data.verificationId || `v-${Date.now()}`,
+            type: "verification" as const,
+            title: claim.slice(0, 88) + (claim.length > 88 ? "…" : ""),
+            at: new Date().toISOString(),
+            claim: claim.trim(),
+            verdict: data.verdict,
+            consensusScore: data.consensusScore,
+            payload,
+            governanceStatus: payload.governanceStatus,
+          },
+          ...h,
+        ].slice(0, MAX_HISTORY_LOCAL_STORAGE)
+      );
+
+      const finalStatuses = {} as Record<ModelId, "queued" | "thinking" | ModelStatus>;
+      data.modelEvidence?.forEach((row: { modelId: ModelId; status?: string }) => {
+        if (row?.modelId) {
+          finalStatuses[row.modelId] =
+            row.status === "failed" || row.status === "parse_error" ? "failed" : "ok";
+        }
+      });
+      setModelStatuses(finalStatuses);
+      await refreshUsage();
+      trackEvent("claim_verification", { models: selectedModels, plan: plan || "unknown" });
+    } catch (e: any) {
+      console.error("[verify-claim]", e);
+      setError("Network error. Please try again.");
+      setModelStatuses({} as Record<ModelId, "queued" | "thinking" | ModelStatus>);
+    } finally {
+      setVerifyRunning(false);
+    }
+  };
+
+  const openHistoryItem = async (item: HistoryItem) => {
+    if (item.type === "research") {
+      setPanelTab("research");
+      setVerificationPayload(null);
+      setError(null);
+      setViewingHistoryRunId(null);
+      setHistoryDetailLoadingId(item.id);
+      if (!authReady || !user) {
+        setHistoryDetailLoadingId(null);
+        setError("Sign in to load saved research results from your account.");
+        setQuestion(item.question);
+        setSelectedModels(item.selectedModels);
+        return;
+      }
+      try {
+        const { authedFetch } = await import("@/lib/client/authedFetch");
+        const res = await authedFetch(`/api/user/runs/${encodeURIComponent(item.id)}`, {
+          user,
+          authReady,
+          method: "GET",
+        });
+        const data = (await res.json()) as {
+          ok?: boolean;
+          message?: string;
+          runId?: string;
+          question?: string;
+          selectedModels?: ModelId[];
+          results?: ModelResult[];
+          synthesisCache?: {
+            report?: unknown;
+            consensusSummary?: SynthesisConsensusSummaryDetail | null;
+            synthesizedBy?: string;
+          } | null;
+          governance?: TeamGovernanceBannerProps;
+          governanceStatus?: "approved" | "needs_review" | "blocked" | null;
+        };
+        if (!res.ok || !data.ok || !data.results?.length) {
+          throw new Error(typeof data.message === "string" ? data.message : "Could not load this run.");
+        }
+        setQuestion(data.question ?? item.question);
+        setSelectedModels(
+          Array.isArray(data.selectedModels) && data.selectedModels.length > 0
+            ? data.selectedModels
+            : item.selectedModels
+        );
+        setResults(data.results as ModelResult[]);
+        setCurrentRunId(data.runId ?? item.id);
+        setRunStatus("complete");
+        setViewingHistoryRunId(data.runId ?? item.id);
+
+        const og = data.governanceStatus;
+        setOrgGovernanceStatus(
+          og === "approved" || og === "needs_review" || og === "blocked" ? og : null
+        );
+
+        const st = {} as Record<ModelId, "queued" | "thinking" | ModelStatus>;
+        for (const r of data.results) {
+          const id = r.modelId as ModelId;
+          st[id] = isUsableResult(r) ? "ok" : "failed";
+        }
+        setModelStatuses(st);
+
+        let consensusForSynthesis: SynthesizedReport | null = null;
+        try {
+          consensusForSynthesis = synthesizeReport(data.results as ModelResult[]);
+          setSynthesizedReport(consensusForSynthesis);
+        } catch {
+          consensusForSynthesis = null;
+          setSynthesizedReport(null);
+        }
+
+        if (data.synthesisCache?.report) {
+          setSynthesisStatus("complete");
+          setSynthesisReport(data.synthesisCache.report);
+          setSynthesisConsensusSummary(data.synthesisCache.consensusSummary ?? null);
+          setSynthesisError(null);
+          setSynthesisGeneratedForRunId(data.runId ?? item.id);
+          const g = data.governance;
+          setSynthesisGovernance(
+            g &&
+              (g.governanceReviewRequired ||
+                g.blockedByPolicy ||
+                (Array.isArray(g.policyFlags) && g.policyFlags.length > 0))
+              ? {
+                  governanceReviewRequired: !!g.governanceReviewRequired,
+                  blockedByPolicy: !!g.blockedByPolicy,
+                  policyBlockMessage: g.policyBlockMessage,
+                  policyFlags: g.policyFlags,
+                }
+              : null
+          );
+        } else {
+          setSynthesisStatus("idle");
+          setSynthesisReport(null);
+          setSynthesisError(null);
+          setSynthesisConsensusSummary(null);
+          setSynthesisGeneratedForRunId(null);
+          setSynthesisGovernance(null);
+          if (data.runId && (data.results as ModelResult[]).filter((r) => isUsableResult(r)).length >= 2) {
+            void generateSynthesisAutomatically(
+              data.runId,
+              data.question ?? item.question,
+              data.results as ModelResult[],
+              consensusForSynthesis
+            );
+          }
+        }
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : "Could not load this run.";
+        setError(msg);
+        setViewingHistoryRunId(null);
+        setResults([]);
+        setRunStatus("idle");
+        setCurrentRunId(null);
+        setSynthesizedReport(null);
+        setSynthesisStatus("idle");
+        setSynthesisReport(null);
+        setSynthesisConsensusSummary(null);
+        setSynthesisGeneratedForRunId(null);
+        setOrgGovernanceStatus(null);
+        setQuestion(item.question);
+        setSelectedModels(item.selectedModels);
+      } finally {
+        setHistoryDetailLoadingId(null);
+      }
+      return;
+    }
+    setPanelTab("verify");
+    setViewingHistoryRunId(null);
+    if (item.payload) {
+      setVerificationPayload({
+        ...item.payload,
+        verificationId: item.payload.verificationId ?? item.id,
+      });
+      setClaimInput(item.payload.claim);
+      return;
+    }
+    const fallbackClaim = item.claim ?? item.title;
+    setClaimInput(fallbackClaim);
+    if (!user || !authReady) {
+      setVerificationPayload(null);
+      return;
+    }
+    setHistoryDetailLoadingId(item.id);
+    try {
+      const { authedFetch } = await import("@/lib/client/authedFetch");
+      const res = await authedFetch(`/api/user/verifications/${encodeURIComponent(item.id)}`, {
+        user,
+        authReady,
+        method: "GET",
+      });
+      const data = (await res.json()) as { ok?: boolean; payload?: ClaimVerificationClientPayload };
+      if (data.ok && data.payload) {
+        setVerificationPayload(data.payload);
+        setClaimInput(data.payload.claim);
+        setHistoryItems((prev) =>
+          prev.map((h) =>
+            h.id === item.id && h.type === "verification"
+              ? {
+                  ...h,
+                  payload: data.payload!,
+                  governanceStatus: data.payload!.governanceStatus ?? h.governanceStatus,
+                }
+              : h
+          )
+        );
+      } else {
+        setVerificationPayload(null);
+      }
+    } catch {
+      setVerificationPayload(null);
+    } finally {
+      setHistoryDetailLoadingId(null);
+    }
+  };
+
+  openHistoryItemRef.current = openHistoryItem;
+
+  useEffect(() => {
+    if (!authReady || !user) return;
+    const params = new URLSearchParams(window.location.search);
+    const r = params.get("openResearchRun");
+    const v = params.get("openVerification");
+    if (!r && !v) {
+      governanceDeepLinkHandled.current = null;
+      return;
+    }
+    const token = r ? `r:${r}` : `v:${v!}`;
+    if (governanceDeepLinkHandled.current === token) return;
+    governanceDeepLinkHandled.current = token;
+    const handle = openHistoryItemRef.current;
+    if (!handle) return;
+    if (r) {
+      void handle({
+        type: "research",
+        id: r,
+        title: "",
+        at: new Date().toISOString(),
+        question: "",
+        selectedModels: [] as ModelId[],
+      });
+    } else if (v) {
+      void handle({
+        type: "verification",
+        id: v,
+        title: "",
+        at: new Date().toISOString(),
+      });
+    }
+    router.replace("/", { scroll: false });
+  }, [authReady, user, router]);
 
   /**
    * Re-run the same panel with same question and models
@@ -898,7 +1591,16 @@ export default function Home() {
    * - At least 2 models selected (enforced by core rule)
    * - Question is not empty
    */
-  const canRun = !!user && selectedModels.length >= 2 && question.trim().length > 0;
+  const canRunResearch = !!user && selectedModels.length >= 2 && question.trim().length > 0;
+  const canRunVerify =
+    !!user &&
+    selectedModels.length >= 2 &&
+    claimInput.trim().length > 0 &&
+    claimInput.trim().length <= MAX_CLAIM_CHARS;
+  const canRun =
+    panelTab === "research" ? canRunResearch : panelTab === "verify" ? canRunVerify : false;
+  const panelBusy =
+    panelTab === "research" ? runStatus === "running" : panelTab === "verify" ? verifyRunning : false;
 
   /** Low-runs hint near Run button only (not blocking; limit enforcement unchanged). */
   const effectiveMonthlyLimit =
@@ -921,6 +1623,14 @@ export default function Home() {
   /** Only after usage has loaded — avoids "Upgrade plan" flashing for paid users (stale free default). */
   const showHeaderUpgradePlan =
     !!user && !planLoading && normalizedPlan === "free";
+
+  const showSavedResearchBanner =
+    panelTab === "research" && (!!viewingHistoryRunId || !!historyDetailLoadingId);
+  const showVerifyLoadingBanner =
+    panelTab === "verify" && !!historyDetailLoadingId && !verificationPayload;
+  const showMainComposer =
+    (panelTab === "research" && !viewingHistoryRunId && !historyDetailLoadingId) ||
+    (panelTab === "verify" && !verificationPayload && !historyDetailLoadingId);
 
   // Helper to translate errors to user-friendly messages
   // Internal error details stay in logs, users see friendly text
@@ -945,6 +1655,21 @@ export default function Home() {
     // Return original error if it's user-friendly
     return err;
   };
+
+  if (!authLoading && !user) {
+    return <LandingPage />;
+  }
+
+  if (onboardingCompleted === false && !checkingOnboarding) {
+    return (
+      <main className="max-w-4xl mx-auto px-4 py-10">
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 px-6 py-8 text-center">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-sky-400 border-t-transparent mx-auto mb-4" />
+          <p className="text-sm text-slate-600">Redirecting to onboarding…</p>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="max-w-4xl mx-auto px-4 py-10">
@@ -984,15 +1709,227 @@ export default function Home() {
         {/* Divider between header and question area */}
         <div className="border-b border-slate-100 mt-6 mb-6"></div>
 
+        <div
+          className="mb-8 rounded-xl border-2 border-slate-200 bg-gradient-to-b from-slate-50 to-slate-100/80 p-2 shadow-sm"
+          role="tablist"
+          aria-label="Panel navigation"
+        >
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={panelTab === "research"}
+              onClick={() => setPanelTab("research")}
+              className={`inline-flex flex-1 items-center justify-center gap-2.5 rounded-xl border-2 px-5 py-3.5 text-lg font-bold tracking-tight transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-2 md:text-xl sm:min-w-[160px] sm:flex-none ${
+                panelTab === "research"
+                  ? "border-sky-800 bg-sky-600 text-white shadow-md ring-2 ring-sky-500/40"
+                  : "border-slate-300 bg-white text-slate-700 shadow-sm hover:border-slate-400 hover:bg-slate-50"
+              }`}
+            >
+              <BookOpen className="h-5 w-5 shrink-0 opacity-95" aria-hidden />
+              Research
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={panelTab === "verify"}
+              onClick={() => setPanelTab("verify")}
+              className={`inline-flex flex-1 items-center justify-center gap-2.5 rounded-xl border-2 px-5 py-3.5 text-lg font-bold tracking-tight transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-2 md:text-xl sm:min-w-[180px] sm:flex-none ${
+                panelTab === "verify"
+                  ? "border-sky-800 bg-sky-600 text-white shadow-md ring-2 ring-sky-500/40"
+                  : "border-slate-300 bg-white text-slate-700 shadow-sm hover:border-slate-400 hover:bg-slate-50"
+              }`}
+            >
+              <svg className="h-5 w-5 shrink-0 opacity-95" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <path
+                  d="M12 3l7 4v5c0 5-3.5 9-7 10-3.5-1-7-5-7-10V7l7-4z"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinejoin="round"
+                />
+                <path
+                  d="M9 12l2 2 4-4"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              Verify Claim
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={panelTab === "history"}
+              onClick={() => setPanelTab("history")}
+              className={`inline-flex flex-1 items-center justify-center gap-2.5 rounded-xl border-2 px-5 py-3.5 text-lg font-bold tracking-tight transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-2 md:text-xl sm:min-w-[160px] sm:flex-none ${
+                panelTab === "history"
+                  ? "border-sky-800 bg-sky-600 text-white shadow-md ring-2 ring-sky-500/40"
+                  : "border-slate-300 bg-white text-slate-700 shadow-sm hover:border-slate-400 hover:bg-slate-50"
+              }`}
+            >
+              <svg className="h-5 w-5 shrink-0 opacity-95" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" />
+                <path d="M12 7v5l3 2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+              History
+            </button>
+          </div>
+        </div>
+
+        {panelTab === "history" ? (
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 md:p-6">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+              <h2 className="text-lg font-semibold text-slate-900">Activity history</h2>
+              {historyLoading && (
+                <span className="inline-flex items-center gap-2 text-sm text-slate-500">
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-sky-500 border-t-transparent" />
+                  Syncing…
+                </span>
+              )}
+            </div>
+            {historyError && (
+              <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                {historyError}
+              </p>
+            )}
+            {historyItems.length === 0 && !historyLoading ? (
+              <p className="text-sm text-slate-500">
+                No runs yet. Complete a research panel or claim verification to see it here. When you&apos;re signed in,
+                past runs from this account load automatically (up to {HISTORY_PAGE_SIZE} per page).
+              </p>
+            ) : historyItems.length === 0 && historyLoading ? (
+              <p className="text-sm text-slate-500">Loading your history…</p>
+            ) : (
+              <>
+                <ul className="space-y-2">
+                  {historyItems.map((item) => (
+                    <li key={item.id}>
+                      <button
+                        type="button"
+                        disabled={historyDetailLoadingId === item.id}
+                        onClick={() => void openHistoryItem(item)}
+                        className="flex w-full items-start gap-3 rounded-xl border-2 border-slate-200 bg-slate-50 px-3 py-3 text-left transition-colors hover:border-sky-400 hover:bg-sky-50/60 disabled:cursor-wait disabled:opacity-70"
+                      >
+                        <span className="mt-0.5 text-lg" aria-hidden>
+                          {item.type === "verification" ? "🛡" : "📖"}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="flex flex-wrap items-center gap-2">
+                            <span
+                              className={`rounded-md px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wider ${
+                                item.type === "verification"
+                                  ? "bg-violet-200 text-violet-900 ring-1 ring-violet-400/60"
+                                  : "bg-sky-200 text-sky-900 ring-1 ring-sky-400/60"
+                              }`}
+                            >
+                              {item.type === "verification" ? "CLAIM" : "RESEARCH"}
+                            </span>
+                            <span className="text-xs font-medium text-slate-500">
+                              {new Date(item.at).toLocaleString()}
+                            </span>
+                          </span>
+                          <span className="mt-1 block text-sm font-medium text-slate-800 line-clamp-2">
+                            {item.title}
+                          </span>
+                          <span className="mt-1 block text-xs text-slate-600">
+                            {item.type === "research" ? (
+                              <>
+                                {item.modelsOk != null && item.modelsTotal != null ? (
+                                  <span>
+                                    {item.modelsOk}/{item.modelsTotal} model responses
+                                    {item.researchStatus && item.researchStatus !== "complete"
+                                      ? ` · ${item.researchStatus}`
+                                      : ""}
+                                  </span>
+                                ) : item.researchStatus === "error" ? (
+                                  <span>Run ended with an error</span>
+                                ) : (
+                                  <span>Research panel</span>
+                                )}
+                                {item.synthesisConsensusScore != null && (
+                                  <span> · Synthesis {item.synthesisConsensusScore}/100</span>
+                                )}
+                              </>
+                            ) : (
+                              <span>
+                                {item.verdict != null && item.verdict !== ""
+                                  ? `${formatHistoryVerdictLabel(item.verdict)}`
+                                  : "Claim"}
+                                {item.consensusScore != null && item.consensusScore !== undefined
+                                  ? ` · ${item.consensusScore} consensus`
+                                  : ""}
+                              </span>
+                            )}
+                          </span>
+                        </span>
+                        <HistoryGovernanceChip status={item.governanceStatus} />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                {historyHasMore && (
+                  <div className="mt-4 flex justify-center">
+                    <button
+                      type="button"
+                      disabled={historyLoading}
+                      onClick={() => void loadHistoryPage(historyPage + 1)}
+                      className="rounded-xl border-2 border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:border-sky-400 hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {historyLoading ? "Loading…" : "Load more"}
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        ) : (
+          <>
+        {(showSavedResearchBanner || showVerifyLoadingBanner) && (
+          <div className="mb-6 rounded-2xl border-2 border-sky-200 bg-sky-50/90 px-4 py-4 shadow-sm">
+            {showSavedResearchBanner && historyDetailLoadingId && (
+              <div className="flex items-center gap-2 text-sm text-slate-700">
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-sky-600 border-t-transparent" />
+                Loading saved research run…
+              </div>
+            )}
+            {showSavedResearchBanner && viewingHistoryRunId && !historyDetailLoadingId && (
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-sm text-slate-700">
+                  <span className="font-semibold text-slate-900">Saved run</span> — panel responses and synthesis
+                  below match what you saw when this run finished.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => exitHistoryResearchView()}
+                  className="shrink-0 rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-sky-700"
+                >
+                  Back to research
+                </button>
+              </div>
+            )}
+            {showVerifyLoadingBanner && (
+              <div className="flex items-center gap-2 text-sm text-slate-700">
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-violet-600 border-t-transparent" />
+                Loading saved claim…
+              </div>
+            )}
+          </div>
+        )}
+
+        {showMainComposer ? (
+        <>
         {/* Question card: label + textarea + helper text */}
         <div className="bg-slate-100 rounded-2xl p-6 md:p-8">
           <div className="rounded-2xl bg-white shadow-sm border border-slate-200 focus-within:ring-2 focus-within:ring-sky-400 focus-within:border-sky-300 transition-all">
-            {/* Question label */}
-            <label htmlFor="question" className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1 px-6 pt-5">
-              Question
-              </label>
-            
-            {/* Textarea */}
+            <label
+              htmlFor={panelTab === "research" ? "question" : "claim"}
+              className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1 px-6 pt-5"
+            >
+              {panelTab === "research" ? "Question" : "Paste a claim to verify"}
+            </label>
+
+            {panelTab === "research" ? (
               <textarea
                 id="question"
                 value={question}
@@ -1000,36 +1937,60 @@ export default function Home() {
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                     e.preventDefault();
-                    if (canRun && runStatus !== "running") {
-                      handleRunPanel();
-                    }
+                    if (canRun && !panelBusy) handleRunPanel();
                   }
                 }}
-              // Encourage users to supply optional Context: block in the same textarea.
-              placeholder={"Example: Question: How do economists explain the persistence of inflation after 2021?\nContext: Paste any relevant excerpts, notes, or data here. (Optional)"}
-              className="w-full border-none outline-none bg-transparent resize-none text-base md:text-lg leading-relaxed text-slate-900 px-6 pb-4"
+                placeholder={
+                  "Example: Question: How do economists explain the persistence of inflation after 2021?\nContext: Paste any relevant excerpts, notes, or data here. (Optional)"
+                }
+                className="w-full border-none outline-none bg-transparent resize-none text-base md:text-lg leading-relaxed text-slate-900 px-6 pb-4"
                 rows={4}
-                disabled={runStatus === "running"}
+                disabled={panelBusy}
               />
-            
-            {/* Helper row under textarea */}
+            ) : (
+              <textarea
+                id="claim"
+                value={claimInput}
+                maxLength={MAX_CLAIM_CHARS}
+                onChange={(e) => setClaimInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                    e.preventDefault();
+                    if (canRun && !panelBusy) void handleVerifyClaim();
+                  }
+                }}
+                placeholder={`e.g., ${EXAMPLE_CLAIM}`}
+                className="w-full border-none outline-none bg-transparent resize-none text-base md:text-lg leading-relaxed text-slate-900 px-6 pb-4"
+                rows={4}
+                disabled={panelBusy}
+              />
+            )}
+
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-6 pb-5 border-t border-slate-100 pt-3">
-              <p className="text-xs text-slate-500">
-                {/* Explain the Question / Context convention so users know how parsing works */}
-                Tip: Start with <span className="font-semibold">Question:</span> and, if needed, add an optional <span className="font-semibold">Context:</span> section underneath. Anything after <span className="font-mono">Context:</span> will be treated as source material (excerpts, notes, or copied documents) for the panel to analyze.
-              </p>
-              {/* Placeholder for future character count or "long-form friendly" note */}
-              {/* <span className="text-xs text-slate-400">Long-form friendly</span> */}
+              {panelTab === "research" ? (
+                <p className="text-xs text-slate-500">
+                  Tip: Start with <span className="font-semibold">Question:</span> and, if needed, add an optional{" "}
+                  <span className="font-semibold">Context:</span> section underneath. Anything after{" "}
+                  <span className="font-mono">Context:</span> will be treated as source material for the panel.
+                </p>
+              ) : (
+                <p className="text-xs text-slate-500">
+                  One sentence or multiple paragraphs — max {MAX_CLAIM_CHARS.toLocaleString()} characters (
+                  {claimInput.length}/{MAX_CLAIM_CHARS}).
+                </p>
+              )}
             </div>
           </div>
         </div>
 
-        {/* Keyboard shortcut hint + deep research description */}
         <p className="text-sm text-slate-500 mt-3">
-          Press <span className="font-semibold font-mono">Cmd/Ctrl + Enter</span> to run the panel.
+          Press <span className="font-semibold font-mono">Cmd/Ctrl + Enter</span> to{" "}
+          {panelTab === "research" ? "run the panel" : "verify the claim"}.
         </p>
         <p className="text-sm text-slate-500 leading-relaxed mt-1">
-          Ask serious, research-level questions. ConvergePanel will run a multi-LLM panel, then return a synthesized deep-research brief with consensus, disagreements, biases, and blind spots.
+          {panelTab === "research"
+            ? "Ask serious, research-level questions. ConvergePanel will run a multi-LLM panel, then return a synthesized deep-research brief with consensus, disagreements, biases, and blind spots."
+            : "Paste a factual claim. Each model evaluates accuracy, what it can confirm, and what it cannot verify — then ConvergePanel aggregates a claim verdict and consensus score."}
         </p>
 
             {/* Model Picker */}
@@ -1065,18 +2026,18 @@ export default function Home() {
                     thinking vs. when results are ready. */}
                 <button
                 type="button"
-                  onClick={handleRunPanel}
-                disabled={runStatus === "running" || !canRun}
-                aria-busy={runStatus === "running"}
+                  onClick={panelTab === "research" ? handleRunPanel : () => void handleVerifyClaim()}
+                disabled={panelBusy || !canRun}
+                aria-busy={panelBusy}
                 className={`inline-flex w-full sm:w-auto items-center justify-center rounded-xl px-6 py-2.5 text-sm font-semibold shadow-sm transition-colors ${
-                  runStatus === "running"
+                  panelBusy
                     ? "bg-slate-400 text-white cursor-wait animate-pulse"
                     : !canRun
                     ? "bg-slate-300 text-white cursor-not-allowed opacity-50"
                     : "bg-sky-600 text-white hover:bg-sky-700"
                 }`}
               >
-                {runStatus === "running" && (
+                {panelBusy && (
                   <svg
                     className="mr-2 h-4 w-4 animate-spin"
                     xmlns="http://www.w3.org/2000/svg"
@@ -1098,7 +2059,13 @@ export default function Home() {
                     />
                   </svg>
                 )}
-                {runStatus === "running" ? "Running panel…" : "Run Panel"}
+                {panelBusy
+                  ? panelTab === "research"
+                    ? "Running panel…"
+                    : "Verifying claim…"
+                  : panelTab === "research"
+                    ? "Run Panel"
+                    : "Verify Claim"}
                 </button>
               <p className="text-xs text-slate-500">
                 You can also press <span className="font-semibold">Cmd/Ctrl + Enter</span>.
@@ -1127,7 +2094,7 @@ export default function Home() {
             )}
 
             {/* Model Status Chips While Running */}
-            {runStatus === "running" && (
+            {panelBusy && (
               <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
                 <span className="font-medium text-slate-700">Querying models:</span>
                 {selectedModels.map((modelId) => {
@@ -1213,7 +2180,7 @@ export default function Home() {
             )}
           </div>
 
-          {/* Example Questions */}
+          {panelTab === "research" && showMainComposer && (
           <div className="mt-4 flex flex-wrap gap-2 text-xs">
             <span className="text-slate-500">Try one:</span>
             {EXAMPLE_QUESTIONS.map((q) => (
@@ -1227,10 +2194,15 @@ export default function Home() {
               </button>
             ))}
         </div>
+          )}
+        </>
+        ) : null}
+          </>
+        )}
       </section>
 
       {/* Status Pills (Legacy - for larger status display) */}
-        {runStatus === "running" && (
+        {panelBusy && (
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
           <h2 className="text-lg font-semibold mb-4 text-slate-900">Panel Status</h2>
             <div className="flex flex-wrap gap-3">
@@ -1252,7 +2224,37 @@ export default function Home() {
         {/* Panel Responses area is intentionally sized to feel like a "full research reading pane"
             similar to ChatGPT's answer area (~750-900px width) for comfortable document-style reading.
             This makes deep research answers easier to scan and digest. */}
-        {runStatus === "complete" && results.length > 0 && (
+        {verificationPayload && panelTab === "verify" && (
+          <div className="mx-auto mt-8 w-full max-w-[900px]">
+            <div className="mb-4 flex flex-col gap-3 rounded-2xl border-2 border-violet-200 bg-violet-50/90 px-4 py-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-slate-700">
+                <span className="font-semibold text-slate-900">Claim result</span>
+                {" — "}
+                Saved to your history. Start another check from the button below, or return to the claim composer.
+              </p>
+              <button
+                type="button"
+                onClick={() => setVerificationPayload(null)}
+                className="shrink-0 rounded-xl border-2 border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:border-violet-300 hover:bg-violet-50/80"
+              >
+                Back to verify claim
+              </button>
+            </div>
+            <ClaimVerificationResult
+              data={verificationPayload}
+              onVerifyAnother={() => {
+                setVerificationPayload(null);
+                setClaimInput("");
+                setPanelTab("verify");
+              }}
+            />
+          </div>
+        )}
+
+        {!verificationPayload &&
+          panelTab === "research" &&
+          runStatus === "complete" &&
+          results.length > 0 && (
           <Suspense
             fallback={
               <div className="mx-auto mt-8 w-full max-w-[900px] bg-white rounded-2xl shadow-sm border border-slate-200 p-8">
@@ -1273,8 +2275,11 @@ export default function Home() {
                 question={question}
                 synthesisStatus={synthesisStatus}
                 synthesisReport={synthesisReport}
+                synthesisConsensusSummary={synthesisConsensusSummary}
                 synthesisError={synthesisError}
                 runId={currentRunId}
+                teamGovernance={synthesisGovernance}
+                orgGovernanceStatus={orgGovernanceStatus}
               />
             </div>
           </Suspense>
@@ -1285,7 +2290,9 @@ export default function Home() {
 
       {/* Floating up/down arrows let users quickly jump to the top or bottom
           of long results instead of manually scrolling. */}
-      {showScrollNav && runStatus === "complete" && results.length > 0 && (
+      {showScrollNav &&
+        ((verificationPayload && panelTab === "verify") ||
+          (panelTab === "research" && runStatus === "complete" && results.length > 0)) && (
           <div className="fixed bottom-6 right-6 flex flex-col gap-2 z-50">
             <button
               type="button"

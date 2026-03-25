@@ -36,6 +36,7 @@ import {
 } from "@/lib/sectionUtils";
 import { PanelSection } from "@/components/PanelSection";
 import PanelSynthesisView from "@/components/PanelSynthesisView";
+import type { SynthesisConsensusSummaryDetail } from "@/lib/verification/consensusScoring";
 import ModelChip from "@/components/ModelChip";
 import { sanitizeModelText, truncateForSynthesis, MAX_CHARS_SYNTHESIS_PER_MODEL } from "@/lib/panel/sanitizeText";
 import { classifyClusterType, isAnalysisReady } from "@/lib/synthesis/trustSummary";
@@ -395,6 +396,13 @@ function CollapsibleMarkdown({
   );
 }
 
+export type TeamGovernanceBannerProps = {
+  governanceReviewRequired?: boolean;
+  blockedByPolicy?: boolean;
+  policyBlockMessage?: string;
+  policyFlags?: string[];
+} | null;
+
 interface ResultsDisplayProps {
   results: ModelResult[];
   synthesizedReport: SynthesizedReport | null;
@@ -403,8 +411,12 @@ interface ResultsDisplayProps {
   question: string;
   synthesisStatus?: "idle" | "loading" | "complete" | "error";
   synthesisReport?: string | null | any; // Can be string (legacy), StructuredSynthesisReport (V1), or SynthesisReportV2
+  synthesisConsensusSummary?: SynthesisConsensusSummaryDetail | null;
   synthesisError?: string | null;
   runId?: string | null; // Optional runId for storing V2 reports in Firestore
+  teamGovernance?: TeamGovernanceBannerProps;
+  /** Org governance evaluation (paid plans); optional chip in synthesis view. */
+  orgGovernanceStatus?: "approved" | "needs_review" | "blocked" | null;
 }
 
 /**
@@ -424,34 +436,27 @@ function getModelText(result: any): string {
 }
 
 export default function ResultsDisplay({
-  results,
+  results: resultsProp,
   synthesizedReport,
   onRerun,
   onAddModel,
   question,
   synthesisStatus = "idle",
   synthesisReport: preGeneratedSynthesisReport,
+  synthesisConsensusSummary: preGeneratedSynthesisConsensusSummary,
   synthesisError: preGeneratedSynthesisError,
   runId,
+  teamGovernance,
+  orgGovernanceStatus,
 }: ResultsDisplayProps) {
   const { user, authReady } = useAuth();
-  // Defensive check: handle empty or malformed results gracefully
-  if (!results || results.length === 0) {
-    return (
-      <div className="bg-white rounded-lg border border-gray-200 p-6">
-        <p className="text-sm text-slate-500">
-          No panel results to display yet. Run a panel to see the analysis.
-        </p>
-      </div>
-    );
-  }
+  const results = Array.isArray(resultsProp) ? resultsProp : [];
 
-  // TEMPORARY DEBUG LOG: Log results received by ResultsDisplay component
-  // This helps diagnose why some models might not appear in the UI
-  console.log("[ResultsDisplay] Received results:", results);
-  console.log("[ResultsDisplay] Results count:", results.length);
-  console.log("[ResultsDisplay] Results model IDs:", results.map(r => r.modelId));
-  console.log("[ResultsDisplay] Results statuses:", results.map(r => ({ modelId: r.modelId, status: r.status })));
+  const showGovBanner =
+    teamGovernance &&
+    (teamGovernance.governanceReviewRequired ||
+      teamGovernance.blockedByPolicy ||
+      (teamGovernance.policyFlags && teamGovernance.policyFlags.length > 0));
 
   // Track which model responses are expanded (for collapsible raw responses)
   const [expandedModels, setExpandedModels] = useState<Set<ModelId>>(
@@ -740,6 +745,22 @@ export default function ResultsDisplay({
     }
   }, [results, runId, synthesisStatus, preGeneratedSynthesisReport, question]);
 
+  if (results.length === 0) {
+    return (
+      <div className="bg-white rounded-lg border border-gray-200 p-6">
+        <p className="text-sm text-slate-500">
+          No panel results to display yet. Run a panel to see the analysis.
+        </p>
+      </div>
+    );
+  }
+
+  // TEMPORARY DEBUG LOG: Log results received by ResultsDisplay component
+  console.log("[ResultsDisplay] Received results:", results);
+  console.log("[ResultsDisplay] Results count:", results.length);
+  console.log("[ResultsDisplay] Results model IDs:", results.map((r) => r.modelId));
+  console.log("[ResultsDisplay] Results statuses:", results.map((r) => ({ modelId: r.modelId, status: r.status })));
+
   const statusStyles: Record<
     string,
     { container: string; label: string }
@@ -904,6 +925,33 @@ export default function ResultsDisplay({
   // Show full results when a synthesized report is available
     return (
       <div className="space-y-6">
+        {showGovBanner && teamGovernance && (
+          <div
+            className={`rounded-xl border px-4 py-3 text-sm ${
+              teamGovernance.blockedByPolicy
+                ? "border-rose-600 bg-rose-950/90 text-rose-50"
+                : "border-amber-500 bg-amber-950/80 text-amber-50"
+            }`}
+            role="alert"
+          >
+            <p className="font-semibold">
+              {teamGovernance.blockedByPolicy
+                ? "Blocked by your team's governance policy"
+                : "Team governance notice"}
+            </p>
+            <p className="mt-1 opacity-95">
+              {teamGovernance.policyBlockMessage ||
+                "This result was flagged by your team's governance policy. Human review may be required before acting on it."}
+            </p>
+            {teamGovernance.policyFlags && teamGovernance.policyFlags.length > 0 && (
+              <ul className="mt-2 list-disc pl-5 text-xs opacity-90">
+                {teamGovernance.policyFlags.map((f) => (
+                  <li key={f}>{f}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
         {/* Main Unified Answer section */}
       {/* Heading hierarchy: H2 (Unified Answer) to H3 (Trust Summary) to H3 (Overall Synthesis) to H4s (Areas of Agreement, etc.) */}
         {/* Trust metrics are presented as visual pills for quick scanning.
@@ -1656,8 +1704,10 @@ export default function ResultsDisplay({
               runId={runId || undefined}
               preGeneratedStatus={synthesisStatus}
               preGeneratedReport={preGeneratedSynthesisReport}
+              preGeneratedConsensusSummary={preGeneratedSynthesisConsensusSummary ?? null}
               preGeneratedError={preGeneratedSynthesisError}
               synthesizedReport={synthesizedReport}
+              orgGovernanceStatus={orgGovernanceStatus ?? null}
             />
           ) : panelViewMode === "compare" && canCompare ? (
             <div className="border-t border-slate-200">

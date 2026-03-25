@@ -8,12 +8,57 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifySessionCookie } from "@/lib/firebase/auth-helpers";
 import { verifyIdToken } from "@/lib/firebase/auth";
-import { adminDb } from "@/lib/firebase/admin";
+import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import { PlanId, BillingInterval, getPlanConfig } from "@/lib/plans";
 import { UserProfile } from "@/lib/types";
 import { validateUserSubscription } from "@/lib/stripe/subscriptionValidation";
 import { getEffectiveEntitlements } from "@/lib/admin/entitlements";
 import { logger } from "@/lib/logger";
+import { planHasTeamGovernance } from "@/lib/plans";
+import { isAdminEmail } from "@/lib/admin/config";
+import { parseGovernanceReviewerFor } from "@/lib/governance/reviewerFields";
+
+function clientGovernanceRole(
+  userData: Partial<UserProfile> | undefined,
+  authEmail: string
+): string {
+  if (authEmail && isAdminEmail(authEmail)) return "admin";
+  const r = userData?.role;
+  if (r === "admin" || r === "reviewer") return r;
+  const email = typeof userData?.email === "string" ? userData.email : "";
+  if (email && isAdminEmail(email)) return "admin";
+  return "member";
+}
+
+function computeGovernanceDashboardAccess(params: {
+  planId: PlanId;
+  authEmail: string;
+  governanceReviewerFor: string[];
+}): {
+  governanceDashboardEligible: boolean;
+  governanceDenyReason: "wrong_plan" | "wrong_role" | null;
+} {
+  if (params.authEmail && isAdminEmail(params.authEmail)) {
+    return { governanceDashboardEligible: true, governanceDenyReason: null };
+  }
+  if (params.planId !== "full") {
+    return { governanceDashboardEligible: false, governanceDenyReason: "wrong_plan" };
+  }
+  if (params.governanceReviewerFor.length > 0) {
+    return { governanceDashboardEligible: true, governanceDenyReason: null };
+  }
+  return { governanceDashboardEligible: false, governanceDenyReason: "wrong_role" };
+}
+
+async function authUserEmail(uid: string): Promise<string> {
+  if (!adminAuth) return "";
+  try {
+    const rec = await adminAuth.getUser(uid);
+    return rec.email ?? "";
+  } catch {
+    return "";
+  }
+}
 
 // Ensure Node.js runtime (Firebase Admin requires Node.js, not Edge)
 export const runtime = "nodejs";
@@ -75,6 +120,8 @@ export async function GET(req: NextRequest) {
       );
     }
 
+    const authEmail = await authUserEmail(uid);
+
     // Get current month for calendar-based tracking
     const now = new Date();
     const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
@@ -94,6 +141,12 @@ export async function GET(req: NextRequest) {
       );
       
       const config = getPlanConfig("free");
+      const newUserRole = clientGovernanceRole(undefined, authEmail);
+      const govNew = computeGovernanceDashboardAccess({
+        planId: "free",
+        authEmail,
+        governanceReviewerFor: [],
+      });
       return NextResponse.json(
         {
           ok: true,
@@ -101,6 +154,17 @@ export async function GET(req: NextRequest) {
           runsThisMonth: 0,
           usageMonth: currentMonth,
           monthlyLimit: config.maxRunsPerMonth,
+          maxModelsPerRun: config.maxModelsPerRun,
+          teamId: null,
+          teamRole: null,
+          teamGovernanceEligible: false,
+          role: newUserRole,
+          governanceDashboardEligible: govNew.governanceDashboardEligible,
+          governanceDenyReason: govNew.governanceDenyReason,
+          governancePolicyEditable: !!(authEmail && isAdminEmail(authEmail)),
+          governanceReviewerFor: [] as string[],
+          governanceReviewerEnabled: false,
+          governanceAssignedReviewerEmail: null as string | null,
         },
         { status: 200 }
       );
@@ -170,6 +234,20 @@ export async function GET(req: NextRequest) {
       entitlementSource: entitlements.source,
     });
 
+    const role = clientGovernanceRole(userData, authEmail);
+    const governanceReviewerFor = parseGovernanceReviewerFor(userData as Record<string, unknown>);
+    const governanceReviewerEnabled = userData?.governanceReviewerEnabled === true;
+    const assignedEmail =
+      typeof userData?.governanceReviewerEmail === "string" && userData.governanceReviewerEmail.trim()
+        ? userData.governanceReviewerEmail.trim()
+        : null;
+
+    const govDash = computeGovernanceDashboardAccess({
+      planId: plan,
+      authEmail,
+      governanceReviewerFor,
+    });
+
     return NextResponse.json(
       {
         ok: true,
@@ -179,6 +257,16 @@ export async function GET(req: NextRequest) {
         monthlyLimit,
         maxModelsPerRun,
         billingInterval, // "month" | "year" | null - set by webhook when subscription is created/updated
+        teamId: userData?.teamId ?? null,
+        teamRole: userData?.teamRole ?? null,
+        teamGovernanceEligible: planHasTeamGovernance(plan),
+        role,
+        governanceDashboardEligible: govDash.governanceDashboardEligible,
+        governanceDenyReason: govDash.governanceDenyReason,
+        governancePolicyEditable: !!(authEmail && isAdminEmail(authEmail)),
+        governanceReviewerFor,
+        governanceReviewerEnabled,
+        governanceAssignedReviewerEmail: assignedEmail,
       },
       { status: 200 }
     );
@@ -195,6 +283,16 @@ export async function GET(req: NextRequest) {
         runsThisMonth: 0,
         usageMonth: new Date().toISOString().slice(0, 7),
         monthlyLimit: 8,
+        teamId: null,
+        teamRole: null,
+        teamGovernanceEligible: false,
+        role: "member",
+        governanceDashboardEligible: false,
+        governanceDenyReason: "wrong_plan" as const,
+        governancePolicyEditable: false,
+        governanceReviewerFor: [] as string[],
+        governanceReviewerEnabled: false,
+        governanceAssignedReviewerEmail: null as string | null,
       },
       { status: 200 }
     );

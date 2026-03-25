@@ -1,5 +1,10 @@
 "use client";
 
+/**
+ * Admin section layout: client-side gate (Firebase custom claims) before rendering
+ * dashboard children; complements server-side checks in /api/admin/* routes.
+ */
+
 import { useAuth } from "@/components/AuthProvider";
 import { useRouter } from "next/navigation";
 import Link from "next/link";

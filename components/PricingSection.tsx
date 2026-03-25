@@ -21,10 +21,11 @@ export default function PricingSection() {
       {/* Section Header */}
       <div className="text-center mb-12">
         <h2 className="text-3xl sm:text-4xl font-bold text-slate-900 mb-4">
-          Pricing that scales with your curiosity
+          Plans and limits
         </h2>
         <p className="text-lg text-slate-600 max-w-2xl mx-auto">
-          Start free, then upgrade when you're ready to trust all the models—not just one.
+          Start free with two models per run. Upgrade when you need the full five-model panel and higher
+          monthly run limits.
         </p>
       </div>
 

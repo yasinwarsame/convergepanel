@@ -1,3 +1,7 @@
+/**
+ * Shared library module (keyStore.ts): domain logic used by API routes and UI.
+ */
+
 import "server-only";
 import fs from "fs";
 import path from "path";

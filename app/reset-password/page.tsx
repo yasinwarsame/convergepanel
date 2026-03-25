@@ -1,5 +1,9 @@
 "use client";
 
+/**
+ * Password reset flow for Firebase email users.
+ */
+
 import { useState } from "react";
 import { sendPasswordResetEmail } from "firebase/auth";
 import { auth } from "@/lib/firebase/client";

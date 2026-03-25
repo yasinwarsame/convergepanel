@@ -61,6 +61,8 @@ import {
   buildCopyForXThread,
   PanelVerdict,
 } from "@/lib/verificationGate/panelVerdict";
+import type { SynthesisConsensusSummaryDetail } from "@/lib/verification/consensusScoring";
+import { GovernanceBadge } from "@/components/GovernanceBadge";
 
 interface PanelSynthesisViewProps {
   results: ModelResult[];
@@ -69,8 +71,10 @@ interface PanelSynthesisViewProps {
   onError?: (error: string) => void;
   preGeneratedStatus?: "idle" | "loading" | "complete" | "error";
   preGeneratedReport?: StructuredSynthesis | null; // Cached structured synthesis from Firestore
+  preGeneratedConsensusSummary?: SynthesisConsensusSummaryDetail | null;
   preGeneratedError?: string | null;
   synthesizedReport?: SynthesizedReport | null; // The main synthesized report with consensusAnalysis (for cluster data)
+  orgGovernanceStatus?: "approved" | "needs_review" | "blocked" | null;
 }
 
 interface SynthesisState {
@@ -79,6 +83,117 @@ interface SynthesisState {
   error: string | null;
   errorDetails?: any;
   synthesizedBy?: string | null;
+  consensusSummary?: SynthesisConsensusSummaryDetail | null;
+}
+
+/** UI-only bands from synthesis consensus score (does not change scoring math). */
+function synthesisConsensusPresentation(score: number): {
+  label: string;
+  tier: "high" | "mid" | "low";
+} {
+  if (score > 75) return { label: "Defensible", tier: "high" };
+  if (score >= 50) return { label: "Review recommended", tier: "mid" };
+  return { label: "Contested", tier: "low" };
+}
+
+const SYNTHESIS_CONSENSUS_TIER_STYLES = {
+  high: {
+    shell:
+      "rounded-lg border border-emerald-200/90 bg-emerald-50/95 p-5 text-slate-800 shadow-sm border-l-4 border-l-emerald-500",
+    dot: "bg-emerald-500",
+    score: "text-emerald-700",
+    divider: "border-emerald-200/90",
+  },
+  mid: {
+    shell:
+      "rounded-lg border border-amber-200/90 bg-amber-50/95 p-5 text-slate-800 shadow-sm border-l-4 border-l-amber-500",
+    dot: "bg-amber-500",
+    score: "text-amber-800",
+    divider: "border-amber-200/90",
+  },
+  low: {
+    shell:
+      "rounded-lg border border-red-200/90 bg-red-50/95 p-5 text-slate-800 shadow-sm border-l-4 border-l-red-500",
+    dot: "bg-red-500",
+    score: "text-red-700",
+    divider: "border-red-200/90",
+  },
+} as const;
+
+/** Low-evidence count: more claims = worse signal. */
+function synthesisLowEvidenceNumberClass(count: number): string {
+  if (count <= 0) return "text-emerald-600";
+  if (count <= 2) return "text-amber-600";
+  return "text-red-600";
+}
+
+/** Aligns with 4–5/5 green, 3/5 amber, &lt;3/5 red when total is 5; ratio-based otherwise. */
+function synthesisModelHealthNumberClass(healthy: number, total: number): string {
+  const t = Math.max(1, total);
+  const ratio = healthy / t;
+  if (t === 5) {
+    if (healthy >= 4) return "text-emerald-600";
+    if (healthy === 3) return "text-amber-600";
+    return "text-red-600";
+  }
+  if (ratio >= 0.8) return "text-emerald-600";
+  if (ratio >= 0.55) return "text-amber-600";
+  return "text-red-600";
+}
+
+const SYNTHESIS_METRIC_CARD_CLASS =
+  "rounded-lg bg-white/50 p-3 text-center shadow-sm ring-1 ring-black/5 dark:bg-gray-800/50 dark:ring-white/10";
+
+function SynthesisConsensusSummaryBox({
+  summary,
+  modelTotal,
+}: {
+  summary: SynthesisConsensusSummaryDetail;
+  modelTotal: number;
+}) {
+  const denom = Math.max(1, modelTotal);
+  const { label, tier } = synthesisConsensusPresentation(summary.overallConsensusScore);
+  const st = SYNTHESIS_CONSENSUS_TIER_STYLES[tier];
+
+  return (
+    <div className={st.shell}>
+      <div className="mb-4 flex items-center gap-2.5">
+        <span className={`h-3.5 w-3.5 shrink-0 rounded-full ${st.dot}`} aria-hidden />
+        <p className="font-sans text-lg font-bold uppercase tracking-wide text-slate-700">Consensus summary</p>
+      </div>
+
+      <div className="inline-flex items-baseline gap-0 font-sans tabular-nums tracking-tight antialiased not-italic">
+        <span className={`text-5xl font-extrabold leading-none ${st.score}`}>
+          {summary.overallConsensusScore}
+        </span>
+        <span className={`text-5xl font-extrabold leading-none not-italic ${st.score}`}>/100</span>
+      </div>
+      <p className={`mt-1 font-sans text-xl font-bold leading-snug not-italic ${st.score}`}>{label}</p>
+
+      <div className={`mt-6 grid grid-cols-1 gap-4 border-t pt-5 min-[480px]:grid-cols-3 ${st.divider}`}>
+        <div className={SYNTHESIS_METRIC_CARD_CLASS}>
+          <p className="text-lg font-bold tabular-nums text-emerald-600">{summary.highConfidenceClaims}</p>
+          <p className="mt-1 text-sm leading-snug text-gray-500">High-confidence claims</p>
+        </div>
+        <div className={SYNTHESIS_METRIC_CARD_CLASS}>
+          <p
+            className={`text-lg font-bold tabular-nums ${synthesisLowEvidenceNumberClass(summary.lowEvidenceClaims)}`}
+          >
+            {summary.lowEvidenceClaims}
+          </p>
+          <p className="mt-1 text-sm leading-snug text-gray-500">Low-evidence claims</p>
+        </div>
+        <div className={SYNTHESIS_METRIC_CARD_CLASS}>
+          <p
+            className={`text-lg font-bold tabular-nums ${synthesisModelHealthNumberClass(summary.modelsHealthy, denom)}`}
+          >
+            {summary.modelsHealthy}/{denom}
+          </p>
+          <p className="mt-1 text-sm leading-snug text-gray-500">Model health</p>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 const GATE_STYLES: Record<string, { border: string; bg: string; badge: string; badgeBg: string; icon: string }> = {
@@ -627,10 +742,25 @@ export default function PanelSynthesisView({
   onError,
   preGeneratedStatus = "idle",
   preGeneratedReport = null,
+  preGeneratedConsensusSummary = null,
   preGeneratedError = null,
   synthesizedReport = null,
+  orgGovernanceStatus = null,
 }: PanelSynthesisViewProps) {
   const { user, authReady } = useAuth();
+  const [liveGov, setLiveGov] = useState<{
+    status: PanelSynthesisViewProps["orgGovernanceStatus"];
+    reviewedByUid: string | null;
+    reviewerEmail: string | null;
+    reviewedAt: string | null;
+    comment: string | null;
+  }>({
+    status: orgGovernanceStatus ?? null,
+    reviewedByUid: null,
+    reviewerEmail: null,
+    reviewedAt: null,
+    comment: null,
+  });
   const [synthesisState, setSynthesisState] = useState<SynthesisState>({
     status: "idle",
     report: null,
@@ -691,6 +821,57 @@ export default function PanelSynthesisView({
       }
     };
   }, []);
+
+  useEffect(() => {
+    setLiveGov({
+      status: orgGovernanceStatus ?? null,
+      reviewedByUid: null,
+      reviewerEmail: null,
+      reviewedAt: null,
+      comment: null,
+    });
+  }, [runId, orgGovernanceStatus]);
+
+  useEffect(() => {
+    const rid = runId?.trim();
+    if (!rid || !user || !authReady) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { authedFetch } = await import("@/lib/client/authedFetch");
+        const qs = new URLSearchParams({ runId: rid, collection: "runs" });
+        const res = await authedFetch(`/api/user/run-governance?${qs}`, {
+          user,
+          authReady,
+          method: "GET",
+          cache: "no-store",
+        });
+        const body = (await res.json()) as {
+          ok?: boolean;
+          governanceStatus?: string | null;
+          governanceReviewedBy?: string | null;
+          governanceReviewerEmail?: string | null;
+          governanceReviewedAt?: string | null;
+          governanceReviewComment?: string | null;
+        };
+        if (cancelled || !body?.ok) return;
+        const gs = body.governanceStatus;
+        setLiveGov({
+          status:
+            gs === "approved" || gs === "needs_review" || gs === "blocked" ? gs : null,
+          reviewedByUid: body.governanceReviewedBy ?? null,
+          reviewerEmail: body.governanceReviewerEmail ?? null,
+          reviewedAt: body.governanceReviewedAt ?? null,
+          comment: body.governanceReviewComment ?? null,
+        });
+      } catch {
+        /* keep props */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [runId, user, authReady]);
 
   // Generate synthesis report on demand (e.g., when user clicks "Regenerate Synthesis")
   // Wrapped in useCallback to prevent infinite loops in useEffect
@@ -753,6 +934,7 @@ export default function PanelSynthesisView({
                 status: "success",
                 report: cacheData.report,
                 error: null,
+                consensusSummary: cacheData.consensusSummary ?? null,
               });
               
               reqInFlightRef.current = false;
@@ -1045,6 +1227,7 @@ export default function PanelSynthesisView({
           report: structuredReport,
           error: null,
           synthesizedBy: data.synthesizedBy ?? null,
+          consensusSummary: data.consensusSummary ?? null,
         });
       
       console.log("[PanelSynthesisView] ✅ Successfully generated structured synthesis", {
@@ -1135,6 +1318,7 @@ export default function PanelSynthesisView({
           report: null,
           error: errorMessage,
           errorDetails: errorDetails || null,
+          consensusSummary: null,
         });
       
         if (onError) {
@@ -1172,12 +1356,14 @@ export default function PanelSynthesisView({
         status: "success",
         report: preGeneratedReport,
         error: null,
+        consensusSummary: preGeneratedConsensusSummary ?? null,
       });
     } else if (hasPreGeneratedError) {
       setSynthesisState({
         status: "error",
         report: null,
         error: preGeneratedError,
+        consensusSummary: null,
       });
     } else if (isPreGenerating) {
       setSynthesisState(prev => ({
@@ -1197,7 +1383,18 @@ export default function PanelSynthesisView({
         return () => clearTimeout(timer);
       }
     }
-  }, [hasPreGenerated, preGeneratedReport, hasPreGeneratedError, preGeneratedError, isPreGenerating, preGeneratedStatus, runId, results.length, generateSynthesis]);
+  }, [
+    hasPreGenerated,
+    preGeneratedReport,
+    preGeneratedConsensusSummary,
+    hasPreGeneratedError,
+    preGeneratedError,
+    isPreGenerating,
+    preGeneratedStatus,
+    runId,
+    results.length,
+    generateSynthesis,
+  ]);
 
   // Loading state - show when generating
   if (synthesisState.status === "loading" && !synthesisState.report) {
@@ -1336,6 +1533,12 @@ export default function PanelSynthesisView({
 
     const sourceBacked = (synthesizedReport?.consensusAnalysis?.agreementClusters?.length ?? 0) > 0;
 
+    const consensusMeta = synthesisState.consensusSummary;
+    const modelsHealthyResolved =
+      consensusMeta?.modelsHealthy ??
+      results.filter((r) => isUsableResult(r) && getModelText(r).trim().length > 0).length;
+    const modelTotalResolved = consensusMeta?.modelCount ?? Math.max(1, results.length);
+
     return (
         <div className="space-y-6">
           {/* Non-blocking loading notice (if generating new version in background) */}
@@ -1367,6 +1570,10 @@ export default function PanelSynthesisView({
           </ReactMarkdown>
         </div>
             </div>
+          )}
+
+          {consensusMeta && (
+            <SynthesisConsensusSummaryBox summary={consensusMeta} modelTotal={modelTotalResolved} />
           )}
 
           {/* Key Findings (green cards) */}
@@ -1407,6 +1614,28 @@ export default function PanelSynthesisView({
                           <span className="text-xs text-green-600">•</span>
                           <span className="text-xs text-green-600">{finding.confidence} confidence</span>
                         </div>
+                        {finding.support &&
+                          (finding.evidenceQuality === "strong" ||
+                            finding.evidenceQuality === "mixed" ||
+                            finding.evidenceQuality === "weak") && (
+                            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-green-800/90">
+                              <span>
+                                Supported by {finding.support.supportingModels.length}/
+                                {Math.max(1, modelsHealthyResolved)} models
+                              </span>
+                              <span
+                                className={`rounded-full px-2 py-0.5 font-semibold capitalize ${
+                                  finding.evidenceQuality === "strong"
+                                    ? "bg-emerald-200/80 text-emerald-900"
+                                    : finding.evidenceQuality === "weak"
+                                      ? "bg-amber-200/80 text-amber-900"
+                                      : "bg-slate-200/90 text-slate-800"
+                                }`}
+                              >
+                                {finding.evidenceQuality} evidence
+                              </span>
+                            </div>
+                          )}
                       </div>
                     </div>
                   );
@@ -1623,6 +1852,18 @@ export default function PanelSynthesisView({
               />
             );
           })()}
+
+          {liveGov.status ? (
+            <div className="mt-6">
+              <GovernanceBadge
+                status={liveGov.status}
+                reviewedBy={liveGov.reviewedByUid ?? undefined}
+                reviewedAt={liveGov.reviewedAt ?? undefined}
+                reviewComment={liveGov.comment ?? undefined}
+                reviewerEmail={liveGov.reviewerEmail ?? undefined}
+              />
+            </div>
+          ) : null}
       </div>
     );
   }

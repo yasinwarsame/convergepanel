@@ -28,6 +28,7 @@
  */
 
 import { ModelResult } from "@/lib/types";
+import type { ConnectorCallOptions } from "./types";
 import { buildPanelPrompt } from "@/lib/panelPrompt";
 import { MODEL_LIMITS, getModelTimeout } from "@/lib/modelConfig";
 import { GROK_MODEL, XAI_API_KEY } from "@/lib/env";
@@ -83,7 +84,8 @@ async function fetchWithTimeout(
 export async function callGrok(
   question: string,
   context?: string | null,
-  apiKey?: string
+  apiKey?: string,
+  opts?: ConnectorCallOptions
 ): Promise<ModelResult> {
   const sanitizedQuestion = question?.trim() ?? "";
   const sanitizedContext = context?.trim() || null;
@@ -153,6 +155,10 @@ export async function callGrok(
     // Make the API call with AbortController timeout (60 seconds for Grok)
     // Grok is slower than other models and needs more time for structured deep-research answers.
     // The timeout is set per-model via MODEL_TIMEOUTS in modelConfig.ts.
+    const systemContent = opts?.systemPromptOverride
+      ? opts.systemPromptOverride
+      : buildPanelPrompt("grok", sanitizedQuestion, sanitizedContext);
+
     const response = await fetchWithTimeout(
       XAI_API_URL,
       {
@@ -166,8 +172,7 @@ export async function callGrok(
           messages: [
             {
               role: "system",
-              // Use the shared deep-research template with model-specific length guidance
-              content: buildPanelPrompt("grok", sanitizedQuestion, sanitizedContext),
+              content: systemContent,
             },
             { role: "user", content: sanitizedQuestion },
           ],

@@ -1,3 +1,7 @@
+/**
+ * Shared library module (panel.ts): domain logic used by API routes and UI.
+ */
+
 import { ModelId, ModelResult, ConnectorStatus } from "@/lib/types";
 import { CONNECTOR_MAP } from "@/lib/connectors";
 import { isSuspiciouslyShort } from "@/lib/textLimits";

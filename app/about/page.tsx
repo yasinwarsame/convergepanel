@@ -1,163 +1,116 @@
+/**
+ * App Router page (about): UI route entry.
+ */
+
 import Link from "next/link";
-import { aboutCopy } from "@/lib/content/aboutCopy";
-import { PANEL_MODELS, getPanelModelConfig } from "@/lib/panelModels";
+import { PANEL_MODELS } from "@/lib/panelModels";
 import ModelChip from "@/components/ModelChip";
+
+const MODEL_NOTES: Record<string, string> = {
+  chatgpt: "Broad knowledge and reasoning.",
+  claude: "Long-form analysis and careful phrasing.",
+  grok: "Strong on timely and open-web context.",
+  perplexity: "Research-style answers with citations when available.",
+  gemini: "Multimodal and general reasoning.",
+};
 
 export default function AboutPage() {
   return (
-    <main className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 py-8 px-4">
-        <div className="max-w-4xl mx-auto">
-          <div className="bg-white rounded-lg shadow-lg p-8">
-            <h1 className="text-3xl font-bold text-gray-900 mb-6">About ConvergePanel</h1>
+    <main className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 px-4 py-8">
+      <div className="mx-auto max-w-4xl">
+        <div className="rounded-lg bg-white p-8 shadow-lg">
+          <h1 className="mb-6 text-3xl font-bold text-gray-900">Why ConvergePanel exists</h1>
 
-            <div className="prose max-w-none space-y-6 text-gray-700">
-              <section>
-                <h2 className="text-2xl font-semibold text-gray-900 mb-3">
-                  What is ConvergePanel?
-                </h2>
-                <p className="text-lg leading-relaxed">
-                  {aboutCopy.detailedDescription}
-                </p>
-              </section>
+          <div className="prose max-w-none space-y-8 text-gray-700">
+            <p className="text-lg leading-relaxed">
+              Every major AI model — GPT, Claude, Gemini, Grok, Perplexity — produces confident answers.
+              But confidence is not accuracy. The same model can contradict itself in one session. Different
+              models disagree on basic facts. None of them reliably tell you when they are uncertain.
+              ConvergePanel was built to address that gap.
+            </p>
 
-              <section>
-                <h2 className="text-2xl font-semibold text-gray-900 mb-3">
-                  How ConvergePanel Works
-                </h2>
-                <p className="leading-relaxed mb-3">
-                  ConvergePanel provides multiple ways to view and analyze model responses:
-                </p>
-                <ul className="list-disc list-inside space-y-2 ml-4">
-                  <li>
-                    <strong>Panel Responses:</strong> The app creates a panel response for each LLM, which you can view in <strong>List View</strong> (collapsible individual responses) or <strong>Compare View</strong> (side-by-side comparison).
-                  </li>
-                  <li>
-                    <strong>Unified Synthesis:</strong> ConvergePanel also generates a unified synthesis built from all model responses. The synthesis highlights consensus, surfaces key disagreements and debates, flags possible bias and blind spots, and calls out single-model insights.
-                  </li>
-                </ul>
-              </section>
+            <section>
+              <h2 className="text-2xl font-semibold text-gray-900">What we do</h2>
+              <p className="mt-3 leading-relaxed">
+                ConvergePanel is a multi-model research and claims tool. It runs your questions and
+                claims through five leading models at once and synthesizes the results into structured output:
+                consensus, disagreements, bias signals, and evidence quality. Instead of one AI voice, you see
+                the shape of agreement and disagreement — then you decide.
+              </p>
+            </section>
 
-              <section>
-                <h2 className="text-xl sm:text-2xl font-semibold text-slate-900 mb-3">
-                  How ConvergePanel interprets your expert panel
-                </h2>
-                <p className="text-sm text-slate-600 leading-relaxed mb-6">
-                  Every panel run is broken into three key views that help you understand what to trust.
-                </p>
-                <div className="space-y-4 not-prose">
-                  {/* Trust legend block - matches dashboard Trust Summary legend styles */}
-                  {/* Strong consensus findings - matches ResultsDisplay.tsx line 777: text-emerald-600 */}
-                  <div>
-                    <h3 className="text-xs font-semibold text-emerald-600 uppercase tracking-wide mb-1 !text-emerald-600">
-                      Strong consensus findings
-                    </h3>
-                    <p className="text-slate-600 text-sm">
-                      Where multiple models independently converge on the same answer, so you can move faster with more confidence.
-                    </p>
+            <section>
+              <h2 className="text-2xl font-semibold text-gray-900">How it works</h2>
+              <p className="mt-3 leading-relaxed">
+                <strong className="text-gray-900">Research mode</strong> — Ask a complex question. Five
+                models answer independently. ConvergePanel builds a structured brief with key findings,
+                disagreements, bias signals, and open questions. Findings show which models align and where
+                they split.
+              </p>
+              <p className="mt-3 leading-relaxed">
+                <strong className="text-gray-900">Claim verification mode</strong> — Paste a specific claim.
+                Five models rate it as accurate, partially accurate, inaccurate, or unverifiable. You get an
+                aggregate verdict, a consensus score (0–100), per-model evidence (including correct and
+                incorrect parts where parsing succeeds), and a compact audit trail.
+              </p>
+              <p className="mt-3 leading-relaxed">
+                Both flows expose a consensus score and supporting labels (confidence, evidence quality)
+                so you can see how defensible the outcome is. Audit bundles record what was run and the
+                structured signals — not full raw model text — for a practical compliance footprint.
+              </p>
+            </section>
+
+            <section>
+              <h2 className="text-2xl font-semibold text-gray-900">Who built this</h2>
+              <p className="mt-3 leading-relaxed">
+                ConvergePanel is built by Mike Warsame. It started from a simple observation: the strongest
+                decisions with AI rarely come from trusting a single model — they come from comparing several
+                and reading the disagreement.
+              </p>
+            </section>
+
+            <section>
+              <h2 className="text-2xl font-semibold text-gray-900">What&apos;s next</h2>
+              <p className="mt-3 leading-relaxed">
+                We are building team governance features — policy rules, shared activity views, and richer
+                audit exports for compliance. Some pieces exist in early form; fuller team workflows are
+                rolling out over time. For early access or questions, email{" "}
+                <a href="mailto:contact@convergepanel.com" className="text-sky-600 hover:underline">
+                  contact@convergepanel.com
+                </a>
+                .
+              </p>
+            </section>
+
+            <section>
+              <h2 className="text-2xl font-semibold text-gray-900">Models</h2>
+              <p className="mt-3 leading-relaxed">ConvergePanel supports five models in the full panel:</p>
+              <div className="not-prose mt-4 space-y-3">
+                {PANEL_MODELS.map((m) => (
+                  <div key={m.id}>
+                    <ModelChip modelId={m.id} variant="outline" size="xs" />
+                    <p className="ml-0 mt-1 text-sm text-slate-600">{MODEL_NOTES[m.id]}</p>
                   </div>
+                ))}
+              </div>
+            </section>
 
-                  {/* Contested areas - matches ResultsDisplay.tsx line 789: text-amber-600 */}
-                  <div>
-                    <h3 className="text-xs font-semibold text-amber-600 uppercase tracking-wide mb-1 !text-amber-600">
-                      Contested areas
-                    </h3>
-                    <p className="text-slate-600 text-sm">
-                      Where models disagree on facts, numbers, or interpretations, flagging claims that deserve a closer look.
-                    </p>
-                  </div>
+            <section>
+              <h2 className="text-2xl font-semibold text-gray-900">Decision support</h2>
+              <p className="mt-3 leading-relaxed">
+                ConvergePanel supports decisions; it does not replace professional judgment. Scores and
+                labels are computed from model outputs and heuristics — use them as signals, not as proof.
+              </p>
+            </section>
+          </div>
 
-                  {/* Possible bias / blind spot - matches ResultsDisplay.tsx line 1098: text-amber-700 */}
-                  <div>
-                    <h3 className="text-xs font-medium text-amber-700 mb-1 !text-amber-700">
-                      Possible bias / blind spot
-                    </h3>
-                    <p className="text-slate-600 text-sm">
-                      Where model behavior looks skewed, incomplete, or overconfident, helping you spot missing perspectives.
-                    </p>
-                  </div>
-                </div>
-              </section>
-
-              <section>
-                <h2 className="text-2xl font-semibold text-gray-900 mb-3">
-                  {aboutCopy.whyItMatters.title}
-                </h2>
-                <p className="leading-relaxed">
-                  {aboutCopy.whyItMatters.description}
-                </p>
-                <ul className="list-disc list-inside space-y-2 ml-4">
-                  {aboutCopy.whyItMatters.points.map((point, index) => (
-                    <li key={index}>
-                      <strong>{point.label}:</strong> {point.text}
-                    </li>
-                  ))}
-                </ul>
-              </section>
-
-              <section>
-                <h2 className="text-2xl font-semibold text-gray-900 mb-3">
-                  Decision Support &amp; Disclosure
-                </h2>
-                <p className="leading-relaxed mb-3">
-                  ConvergePanel is a decision-support tool. It helps you compare outputs across
-                  multiple AI models, surface consensus, disagreement, and blind spots, and
-                  produce structured synthesis — so you can make better-informed decisions faster.
-                </p>
-                <p className="leading-relaxed mb-3">
-                  Trust indicators such as the Verification Gate, consensus signals, and bias
-                  flags are heuristic assessments derived from model comparison. They are
-                  designed to inform your judgment, not replace it.
-                </p>
-                <p className="leading-relaxed">
-                  ConvergePanel does not guarantee the correctness of any AI-generated output
-                  and is not a substitute for professional judgment, regulatory review, or
-                  required human authorization. Users are responsible for independently
-                  validating outputs before relying on them for decisions.
-                </p>
-              </section>
-
-              <section>
-                <h2 className="text-2xl font-semibold text-gray-900 mb-3">
-                  {aboutCopy.models.title}
-                </h2>
-                <p className="leading-relaxed mb-3">
-                  {aboutCopy.models.description}
-                </p>
-                <div className="space-y-3">
-                  {/* Model descriptions block - uses centralized ModelChip component for consistent styling */}
-                  {aboutCopy.models.list.map((model) => {
-                    // Find the model ID by matching the display name
-                    const modelConfig = PANEL_MODELS.find(m => m.label === model.name);
-                    const modelId = modelConfig?.id || "chatgpt"; // Fallback to chatgpt if not found
-                    
-                    return (
-                      <div key={model.name}>
-                        {/* Model name - uses ModelChip component for consistent styling across the app */}
-                        <div className="mb-1">
-                          <ModelChip modelId={modelId} variant="outline" size="xs" />
-                        </div>
-                        {/* Model description - matches dashboard body text style from ResultsDisplay.tsx line 1727 */}
-                        <p className="text-slate-600 text-sm ml-0 mt-1">
-                          {model.description}
-                        </p>
-                      </div>
-                    );
-                  })}
-                </div>
-              </section>
-            </div>
-
-            <div className="mt-8 pt-6 border-t border-gray-200">
-              <Link
-                href="/"
-                className="inline-flex items-center text-primary-600 hover:text-primary-700 font-medium"
-              >
-                ← Back to Panel
-              </Link>
-            </div>
+          <div className="mt-8 border-t border-gray-200 pt-6">
+            <Link href="/" className="inline-flex items-center font-medium text-sky-600 hover:text-sky-700">
+              ← Back to panel
+            </Link>
           </div>
         </div>
-      </main>
+      </div>
+    </main>
   );
 }
-

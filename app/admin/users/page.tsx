@@ -1,5 +1,9 @@
 "use client";
 
+/**
+ * Admin user list: search and manage accounts.
+ */
+
 import { useState, useEffect } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import Link from "next/link";

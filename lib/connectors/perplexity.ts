@@ -17,6 +17,7 @@
  */
 
 import { ModelResult } from "@/lib/types";
+import type { ConnectorCallOptions } from "./types";
 import { buildPanelPrompt } from "@/lib/panelPrompt";
 import { MODEL_LIMITS, getModelTimeout } from "@/lib/modelConfig";
 import { PERPLEXITY_API_KEY } from "@/lib/env";
@@ -36,7 +37,8 @@ import { logger } from "@/lib/logger";
 export async function callPerplexity(
   question: string,
   context?: string | null,
-  apiKey?: string
+  apiKey?: string,
+  opts?: ConnectorCallOptions
 ): Promise<ModelResult> {
   const sanitizedQuestion = question?.trim() ?? "";
   const sanitizedContext = context?.trim() || null;
@@ -77,11 +79,14 @@ export async function callPerplexity(
     const perplexityLimits = MODEL_LIMITS.perplexity;
     const perplexityTimeout = getModelTimeout("perplexity");
     
+    const systemContent = opts?.systemPromptOverride
+      ? opts.systemPromptOverride
+      : buildPanelPrompt("perplexity", sanitizedQuestion, sanitizedContext);
+
     // Build messages array in OpenAI-style format
     // Perplexity requires messages array, not just a prompt string
     const messages = [
-      // Use the shared deep-research template with model-specific length guidance
-      { role: "system" as const, content: buildPanelPrompt("perplexity", sanitizedQuestion, sanitizedContext) },
+      { role: "system" as const, content: systemContent },
       { role: "user" as const, content: sanitizedQuestion },
     ];
     

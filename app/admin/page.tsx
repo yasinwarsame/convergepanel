@@ -1,5 +1,9 @@
 "use client";
 
+/**
+ * Admin dashboard: usage stats and links to admin tools.
+ */
+
 import { useEffect, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
 

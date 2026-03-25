@@ -1,5 +1,9 @@
 "use client";
 
+/**
+ * Primary site navigation: branding, auth links, profile/billing/governance entry, mobile menu.
+ */
+
 import Link from "next/link";
 import Image from "next/image";
 import { useState, useEffect, useRef } from "react";
@@ -7,6 +11,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { signOut } from "firebase/auth";
 import { auth } from "@/lib/firebase/client";
 import { useAuth } from "./AuthProvider";
+import { useIsGovernanceUser } from "@/hooks/useUserPlan";
 
 export default function TopNav() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -14,6 +19,7 @@ export default function TopNav() {
   const pathname = usePathname();
   const router = useRouter();
   const { user, loading, isAdmin } = useAuth();
+  const isGovernanceUser = useIsGovernanceUser();
   const userMenuRef = useRef<HTMLDivElement>(null);
 
   // Highlight the correct auth link based on the current route,
@@ -68,7 +74,7 @@ export default function TopNav() {
       
       // Navigate immediately - the auth state change will propagate
       // Use replace instead of push to prevent back button issues
-      router.replace("/login");
+      router.replace("/login?signedOut=1");
       
       // Reset flag after a delay to allow navigation to complete
       // This prevents race conditions if user tries to logout again quickly
@@ -118,7 +124,7 @@ export default function TopNav() {
                 shadow-sm
               "
             >
-              Multi-model research &amp; trust dashboard
+              Research · Claim verification · Consensus
             </p>
           </div>
         </Link>
@@ -143,6 +149,20 @@ export default function TopNav() {
           >
             Contact
           </Link>
+          <Link
+            href="/pricing"
+            className="px-3 py-1.5 text-sm text-slate-600 hover:text-slate-900 transition-colors"
+          >
+            Pricing
+          </Link>
+          {!loading && user && isGovernanceUser && (
+            <Link
+              href="/governance"
+              className="px-3 py-1.5 text-sm text-slate-600 hover:text-slate-900 transition-colors"
+            >
+              Governance
+            </Link>
+          )}
           
           {!loading && (
             <>
@@ -280,6 +300,22 @@ export default function TopNav() {
             >
               Contact
             </Link>
+            <Link
+              href="/pricing"
+              onClick={() => setMobileMenuOpen(false)}
+              className="px-3 py-2 text-sm text-slate-600 hover:text-slate-900 hover:bg-slate-50 rounded-md transition-colors"
+            >
+              Pricing
+            </Link>
+            {!loading && user && isGovernanceUser && (
+              <Link
+                href="/governance"
+                onClick={() => setMobileMenuOpen(false)}
+                className="px-3 py-2 text-sm text-slate-600 hover:text-slate-900 hover:bg-slate-50 rounded-md transition-colors"
+              >
+                Governance
+              </Link>
+            )}
             
             {!loading && (
               <>

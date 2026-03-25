@@ -25,6 +25,8 @@ export interface PlanConfig {
   maxModelsPerRun: number;
   historyRetentionDays?: number; // 7 for free, undefined for paid (unlimited)
   advancedExportEnabled: boolean;
+  /** Team workspaces: governance dashboard, policies, audit (Full plan). */
+  teamGovernanceAccess?: boolean;
   features: string[];
   positioningText?: string; // Optional marketing text
   badge?: string; // e.g., "Most popular"
@@ -106,6 +108,7 @@ export const PLAN_CONFIGS: Record<PlanId, PlanConfig> = {
     maxModelsPerRun: 5,
     historyRetentionDays: undefined, // Unlimited history
     advancedExportEnabled: true,
+    teamGovernanceAccess: true,
     features: [
       "Up to 150 panel runs / month",
       "Use all 5 models at once (GPT 5.2, Claude Opus 4.5, Grok 4, Perplexity Pro, Gemini 3 Pro)",
@@ -132,6 +135,13 @@ export const PLAN_CONFIGS: Record<PlanId, PlanConfig> = {
  * @param planId - Plan identifier
  * @returns Plan configuration object with normalized maxModelsPerRun
  */
+export function planHasTeamGovernance(planId: PlanId | string | undefined | null): boolean {
+  if (!planId) return false;
+  const id = planId as PlanId;
+  const c = PLAN_CONFIGS[id];
+  return c?.teamGovernanceAccess === true;
+}
+
 export function getPlanConfig(planId: PlanId): PlanConfig {
   // Defensive: validate planId exists
   if (!planId || !PLAN_CONFIGS[planId as PlanId]) {

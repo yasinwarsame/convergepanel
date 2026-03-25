@@ -1,3 +1,7 @@
+/**
+ * Synthesis layer: structured report schema, evidence packing, and transforms.
+ */
+
 import { z } from "zod";
 
 /**

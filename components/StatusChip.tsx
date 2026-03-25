@@ -1,5 +1,9 @@
 "use client";
 
+/**
+ * StatusChip: shared UI building block for the app shell or panel.
+ */
+
 import { PanelModelId, getModelPillClasses, getPanelModelConfig } from "@/lib/panelModels";
 
 /**

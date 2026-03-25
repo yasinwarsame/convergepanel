@@ -1,5 +1,9 @@
 "use client";
 
+/**
+ * Admin user detail: inspect a single user, Stripe, and overrides.
+ */
+
 import { useState, useEffect } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import { useRouter, useParams } from "next/navigation";

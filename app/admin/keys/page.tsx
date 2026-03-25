@@ -1,5 +1,9 @@
 "use client";
 
+/**
+ * Admin API keys: configure provider credentials for the deployment.
+ */
+
 import { useState, useEffect } from "react";
 import { useAuth } from "@/components/AuthProvider";
 

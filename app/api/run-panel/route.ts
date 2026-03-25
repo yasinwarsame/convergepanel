@@ -21,6 +21,8 @@ import { verifyIdToken } from "@/lib/firebase/auth";
 import { checkAndIncrementUsageForRun } from "@/lib/stripe/usageCheck";
 import { validateUserSubscription } from "@/lib/stripe/subscriptionValidation";
 import { createRun, completeRun, markRunError } from "@/lib/firestore/runs";
+import { evaluateAndStoreGovernance } from "@/lib/governance/evaluateAndStore";
+import type { GovernanceInput } from "@/lib/governance/evaluateGovernance";
 import { incrementUserTokenUsage } from "@/lib/firestore/userTokens";
 import { normalizeTokens } from "@/lib/panel/normalizeTokens";
 import { sanitizeModelText, truncateForSynthesis, MAX_CHARS_SYNTHESIS_PER_MODEL } from "@/lib/panel/sanitizeText";
@@ -415,6 +417,7 @@ export async function POST(req: NextRequest) {
     
     let totalTokens = 0;
     let panelResultsPublic: PanelResultPublic[] = []; // Declare outside try block for response
+    let panelGovernanceStatus: "approved" | "needs_review" | "blocked" | undefined;
     try {
       // CRITICAL: Convert results to public format and compute token usage BEFORE calling completeRun
       // This ensures token usage is computed once and passed in (no recomputation in completeRun)
@@ -530,7 +533,34 @@ export async function POST(req: NextRequest) {
         tokenUsageByModel,
         tokenTotals,
       });
-      
+
+      const researchGovernanceInput: GovernanceInput = {
+        consensusScore: null,
+        evidenceQuality: null,
+        sourceBacked: false,
+        missingSourcesCount: 0,
+        modelHealth: {
+          ok: results.filter((r) => r.status === "ok").length,
+          substituted: results.filter((r) => r.status === "substituted").length,
+          failed: results.filter((r) => r.status !== "ok" && r.status !== "substituted").length,
+        },
+        question: trimmedQuestion,
+        runType: "research",
+      };
+      try {
+        const govResult = await evaluateAndStoreGovernance({
+          runId,
+          collection: "runs",
+          input: researchGovernanceInput,
+          ownerUid: uid,
+        });
+        if (govResult) panelGovernanceStatus = govResult.governanceStatus;
+      } catch (govErr: unknown) {
+        logger.error("[governance] Research run evaluation failed", {
+          error: (govErr as Error)?.message,
+        });
+      }
+
       // Use tokenTotals.totalTokens (from passed-in data)
       const { safeNum } = await import("@/lib/tokenExtraction");
       totalTokens = safeNum(tokenTotals.totalTokens);
@@ -736,6 +766,7 @@ export async function POST(req: NextRequest) {
         ok: true,
         results: normalizedResults, // Normalized: includes both rawTextFull and rawText
         runId, // Include runId so client can pass it to synthesis API
+        ...(panelGovernanceStatus ? { governanceStatus: panelGovernanceStatus } : {}),
         usage: {
           runsThisMonth: usage.runsThisMonth,
           maxRunsPerMonth: usage.maxRunsPerMonth,

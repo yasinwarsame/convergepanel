@@ -29,11 +29,22 @@ import { auth } from "@/lib/firebase/client";
 import Link from "next/link";
 import { useUserPlan } from "@/hooks/useUserPlan";
 import { formatPlanNameWithInterval, getPlanConfig } from "@/lib/plans";
+import {
+  GovernancePlanTeaser,
+  GovernanceSettingsSection,
+} from "@/components/profile/GovernanceSettingsSection";
 
 export default function ProfilePage() {
   const { user, loading: authLoading, authReady, isAdmin } = useAuth();
   const router = useRouter();
-  const { plan, runsThisMonth, monthlyLimit, billingInterval, loading: planLoading } = useUserPlan();
+  const {
+    plan,
+    runsThisMonth,
+    monthlyLimit,
+    billingInterval,
+    loading: planLoading,
+    refresh: refreshUsage,
+  } = useUserPlan();
   
   // Form state - initialized from Firestore profile
   const [name, setName] = useState("");
@@ -210,7 +221,7 @@ export default function ProfilePage() {
   const handleLogout = async () => {
     try {
       await signOut(auth);
-      router.push("/");
+      router.replace("/login?signedOut=1");
     } catch (error) {
       console.error("Error signing out:", error);
     }
@@ -365,6 +376,11 @@ export default function ProfilePage() {
               </div>
             )}
           </div>
+
+          {!planLoading && plan === "full" && user && (
+            <GovernanceSettingsSection onUsageRefresh={() => refreshUsage()} />
+          )}
+          {!planLoading && plan && plan !== "full" && <GovernancePlanTeaser />}
           
           {/* Cancel Subscription Confirmation Dialog */}
           {showCancelDialog && (

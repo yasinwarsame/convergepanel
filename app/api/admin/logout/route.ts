@@ -1,3 +1,7 @@
+/**
+ * HTTP API route (admin/logout): server handler, auth, and JSON responses.
+ */
+
 import { NextRequest, NextResponse } from "next/server";
 import { clearAdminSession } from "@/lib/adminAuth";
 

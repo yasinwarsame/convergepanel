@@ -1,3 +1,7 @@
+/**
+ * App Router page (contact): UI route entry.
+ */
+
 import Link from "next/link";
 
 export default function ContactPage() {
