@@ -30,6 +30,8 @@ import {
 
 type TabId = "queue" | "policies" | "audit";
 
+type GovernanceQueueScope = "admin_global" | "assigners" | "no_assigners";
+
 type QueueRow = {
   runId: string;
   collection: "runs" | "verifications";
@@ -127,6 +129,36 @@ function queueRowUserPresentation(row: QueueRow, viewerUid: string | null | unde
   const full = ((row.userEmail || "").trim() || row.userId || "").trim() || "—";
   const displayShort = isSelf ? "You" : shortenEmailForQueue((row.userEmail || "").trim() || row.userId);
   return { isSelf, full, displayShort };
+}
+
+function queueTableEmptyCopy(params: {
+  snapshotLen: number;
+  displayedLen: number;
+  queueScope: GovernanceQueueScope | null;
+  isAdminUser: boolean;
+  queueStatus: "needs_review" | "blocked" | "approved" | "all";
+  queueRunType: "all" | "research" | "verification";
+}): string {
+  if (params.snapshotLen > 0 && params.displayedLen === 0) {
+    return "No runs match the current filter. Try another status or type.";
+  }
+  if (params.snapshotLen === 0) {
+    if (params.queueScope === "admin_global" || params.isAdminUser) {
+      return "No runs in the system yet.";
+    }
+    if (params.queueScope === "no_assigners") {
+      return "No runs to review. When another user assigns you as their reviewer, their flagged runs will appear here. You can enable reviewer availability in Account → Governance Settings.";
+    }
+    if (
+      params.queueScope === "assigners" &&
+      params.queueStatus === "needs_review" &&
+      params.queueRunType === "all"
+    ) {
+      return "No runs need review right now. Runs that fall below policy thresholds will appear here.";
+    }
+    return "No runs match the current filter. Runs that fall below policy thresholds will appear here when they need review.";
+  }
+  return "No runs match the current filter. Runs that fall below policy thresholds will appear here when they need review.";
 }
 
 function BackToPanelNav({ className = "" }: { className?: string }) {
@@ -657,8 +689,7 @@ function ReviewModal(props: {
 export default function GovernanceDashboard() {
   const router = useRouter();
   const { user, loading: authLoading, authReady } = useAuth();
-  const { loading: planLoading, governanceDashboardEligible, governanceDenyReason, governancePolicyEditable } =
-    useUserPlan();
+  const { loading: planLoading, governanceDashboardEligible, governancePolicyEditable } = useUserPlan();
   const isAdminUser = governancePolicyEditable === true;
 
   const [tab, setTab] = useState<TabId>("queue");
@@ -672,6 +703,7 @@ export default function GovernanceDashboard() {
   const [queueLoading, setQueueLoading] = useState(false);
   const [queueError, setQueueError] = useState<string | null>(null);
   const [queueNotice, setQueueNotice] = useState<string | null>(null);
+  const [queueScope, setQueueScope] = useState<GovernanceQueueScope | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
 
   const [toast, setToast] = useState<string | null>(null);
@@ -740,7 +772,7 @@ export default function GovernanceDashboard() {
         const q = new URLSearchParams({
           status: "all",
           runType: "all",
-          limit: "15",
+          limit: "50",
           offset: "0",
         });
         const res = await authedFetch(`/api/governance/queue?${q}`, {
@@ -759,12 +791,14 @@ export default function GovernanceDashboard() {
           );
           setQueueSnapshot([]);
           setQueueNotice(null);
+          setQueueScope(null);
           return;
         }
         const data = (await res.json()) as {
           ok?: boolean;
           runs?: QueueRow[];
           queueNotice?: string;
+          queueScope?: string;
         };
         if (!data.ok) {
           queueAutoFailureCountRef.current += 1;
@@ -773,13 +807,19 @@ export default function GovernanceDashboard() {
               ? "Queue is temporarily unavailable. Please try again later."
               : "Could not load queue."
           );
+          setQueueSnapshot([]);
           setQueueNotice(null);
+          setQueueScope(null);
           return;
         }
         queueAutoFailureCountRef.current = 0;
         setQueueSnapshot(data.runs ?? []);
         setQueueError(null);
         setQueueNotice(typeof data.queueNotice === "string" && data.queueNotice.trim() ? data.queueNotice : null);
+        const qs = data.queueScope;
+        setQueueScope(
+          qs === "admin_global" || qs === "assigners" || qs === "no_assigners" ? qs : null
+        );
         if (options?.manual) queueFetchedRef.current = true;
       } catch {
         queueAutoFailureCountRef.current += 1;
@@ -789,6 +829,7 @@ export default function GovernanceDashboard() {
             : "Could not load queue."
         );
         setQueueNotice(null);
+        setQueueScope(null);
       } finally {
         setQueueLoading(false);
       }
@@ -1207,79 +1248,48 @@ export default function GovernanceDashboard() {
   }
 
   if (!planLoading && !governanceDashboardEligible) {
-    if (governanceDenyReason === "wrong_plan") {
-      return (
-        <div className="mx-auto max-w-lg px-4 py-8">
-          <BackToPanelNav className="mb-6" />
-          <div className="rounded-2xl border border-sky-200 bg-gradient-to-b from-sky-50 to-white p-8 shadow-md ring-1 ring-sky-100">
-            <div className="text-4xl" aria-hidden>
-              📊
-            </div>
-            <h1 className="mt-4 text-xl font-bold text-slate-900">Governance Dashboard</h1>
-            <p className="mt-3 text-sm leading-relaxed text-slate-700">
-              Governance features are available on the 5-Model plan.
-            </p>
-            <p className="mt-2 text-sm leading-relaxed text-slate-600">
-              Get policy enforcement, review queue, and audit trails to govern how your team uses AI research
-              and claims.
-            </p>
-            <ul className="mt-5 space-y-2 text-left text-sm text-slate-700">
-              <li className="flex gap-2">
-                <span className="text-emerald-600 font-semibold">✓</span>
-                <span>Set consensus thresholds for auto-approval</span>
-              </li>
-              <li className="flex gap-2">
-                <span className="text-emerald-600 font-semibold">✓</span>
-                <span>Flag weak evidence and disputed claims for review</span>
-              </li>
-              <li className="flex gap-2">
-                <span className="text-emerald-600 font-semibold">✓</span>
-                <span>Review and approve team runs before they&apos;re acted on</span>
-              </li>
-              <li className="flex gap-2">
-                <span className="text-emerald-600 font-semibold">✓</span>
-                <span>Export audit trails for compliance</span>
-              </li>
-              <li className="flex gap-2">
-                <span className="text-emerald-600 font-semibold">✓</span>
-                <span>Detect sensitive domains (legal, medical, financial)</span>
-              </li>
-            </ul>
-            <Link
-              href="/pricing"
-              className="mt-8 inline-flex w-full items-center justify-center rounded-lg bg-sky-600 px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-sky-700"
-            >
-              Upgrade to 5-Model Plan →
-            </Link>
-          </div>
-        </div>
-      );
-    }
-
     return (
       <div className="mx-auto max-w-lg px-4 py-8">
         <BackToPanelNav className="mb-6" />
-        <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+        <div className="rounded-2xl border border-sky-200 bg-gradient-to-b from-sky-50 to-white p-8 shadow-md ring-1 ring-sky-100">
           <div className="text-4xl" aria-hidden>
-            🔒
+            📊
           </div>
-          <h1 className="mt-4 text-xl font-bold text-slate-900">Access Restricted</h1>
-          <p className="mt-3 text-sm leading-relaxed text-slate-600">
-            The governance dashboard is for people who review others&apos; flagged runs. You&apos;re on the 5-Model
-            plan, but no one has assigned you as their reviewer yet—or you haven&apos;t enabled reviewer availability.
+          <h1 className="mt-4 text-xl font-bold text-slate-900">Governance Dashboard</h1>
+          <p className="mt-3 text-sm leading-relaxed text-slate-700">
+            Governance features are available on the 5-Model plan.
           </p>
-          <p className="mt-2 text-sm text-slate-600">
-            Ask a colleague to assign you in their Profile, and turn on &quot;Available as reviewer&quot; in your{" "}
-            <Link href="/profile" className="font-semibold text-sky-700 underline hover:text-sky-800">
-              Profile
-            </Link>{" "}
-            so they can select you.
+          <p className="mt-2 text-sm leading-relaxed text-slate-600">
+            Get policy enforcement, review queue, and audit trails to govern how your team uses AI research and
+            claims.
           </p>
+          <ul className="mt-5 space-y-2 text-left text-sm text-slate-700">
+            <li className="flex gap-2">
+              <span className="font-semibold text-emerald-600">✓</span>
+              <span>Set consensus thresholds for auto-approval</span>
+            </li>
+            <li className="flex gap-2">
+              <span className="font-semibold text-emerald-600">✓</span>
+              <span>Flag weak evidence and disputed claims for review</span>
+            </li>
+            <li className="flex gap-2">
+              <span className="font-semibold text-emerald-600">✓</span>
+              <span>Review and approve team runs before they&apos;re acted on</span>
+            </li>
+            <li className="flex gap-2">
+              <span className="font-semibold text-emerald-600">✓</span>
+              <span>Export audit trails for compliance</span>
+            </li>
+            <li className="flex gap-2">
+              <span className="font-semibold text-emerald-600">✓</span>
+              <span>Detect sensitive domains (legal, medical, financial)</span>
+            </li>
+          </ul>
           <Link
-            href="/"
-            className="mt-8 inline-flex items-center justify-center rounded-lg bg-sky-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-sky-700"
+            href="/pricing"
+            className="mt-8 inline-flex w-full items-center justify-center rounded-lg bg-sky-600 px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-sky-700"
           >
-            ← Back to ConvergePanel
+            Upgrade to 5-Model Plan →
           </Link>
         </div>
       </div>
@@ -1426,8 +1436,14 @@ export default function GovernanceDashboard() {
               </div>
             ) : displayedQueueRows.length === 0 ? (
               <p className="p-8 text-center text-sm text-slate-500">
-                No runs match the current filter. Runs that fall below policy thresholds will appear here
-                automatically.
+                {queueTableEmptyCopy({
+                  snapshotLen: queueSnapshot.length,
+                  displayedLen: displayedQueueRows.length,
+                  queueScope,
+                  isAdminUser,
+                  queueStatus,
+                  queueRunType,
+                })}
               </p>
             ) : (
               <table className="min-w-full divide-y divide-slate-200 text-left text-sm">

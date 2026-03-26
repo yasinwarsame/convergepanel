@@ -5,7 +5,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebase/admin";
 import {
-  governanceQueueNotReviewerResponse,
   governanceQueuePlanForbiddenResponse,
   resolveGovernanceVisibleUserIdsCached,
   runOwnerVisibleInGovernance,
@@ -258,9 +257,6 @@ export async function GET(request: NextRequest) {
     if (vis.kind === "plan_required") {
       return governanceQueuePlanForbiddenResponse();
     }
-    if (vis.kind === "not_reviewer") {
-      return governanceQueueNotReviewerResponse();
-    }
     return NextResponse.json(
       { ok: false, error: { code: "internal_error", message: "Database unavailable" } },
       { status: 500 }
@@ -300,19 +296,7 @@ export async function GET(request: NextRequest) {
       }
       const parentData = parentSnap.data() as Record<string, unknown>;
       const ownerUid = String(parentData.userId ?? "");
-      if (!runOwnerVisibleInGovernance(vis.visibleUserIds, ownerUid) && !vis.isSupportAdmin) {
-        return NextResponse.json(
-          {
-            ok: false,
-            error: {
-              code: "forbidden",
-              message: "You don't have access to this run's audit events.",
-            },
-          },
-          { status: 403 }
-        );
-      }
-      if (vis.isSupportAdmin && ownerUid !== resolved.uid) {
+      if (!runOwnerVisibleInGovernance(vis.visibleUserIds, ownerUid)) {
         return NextResponse.json(
           {
             ok: false,

@@ -1,7 +1,8 @@
 /**
  * Governance review queue: list runs / verifications by governance status.
  *
- * Scoped by resolveGovernanceVisibleUserIds (assigners only, never the viewer's own uid). Queries use userId + orderBy
+ * Scoped by resolveGovernanceVisibleUserIds: assigners-only, empty (no assigners), or null (admin global).
+ * Queries use userId + orderBy for scoped users; admin uses recent global reads with in-memory filters.
  * (existing indexes); governance status and a 7-day lookback are filtered in memory
  * (avoids extra composite indexes for range + in + orderBy).
  */
@@ -17,7 +18,6 @@ import { getModelDisplayName } from "@/lib/modelInfo";
 import { buildAgreementDisagreementDigest } from "@/lib/verification/agreementDigest";
 import { governanceAdminEmailsForLog, isAdminEmail } from "@/lib/admin/config";
 import {
-  governanceQueueNotReviewerResponse,
   governanceQueuePlanForbiddenResponse,
   resolveGovernanceVisibleUserIdsCached,
 } from "@/lib/governance/governanceVisibleUserIds";
@@ -732,6 +732,95 @@ async function loadRunsStagedForQueue(
   return { staged, snapSize: runsSnap.size };
 }
 
+async function loadRunsStagedGlobalQueue(
+  fetchLimit: number,
+  queueCutoffMs: number,
+  statusFilter: string
+): Promise<{ staged: StagedQueueRow[]; snapSize: number }> {
+  if (!adminDb) throw new Error("no db");
+  const cap = Math.min(150, Math.max(fetchLimit * 4, 60));
+  let runsSnap;
+  try {
+    runsSnap = await adminDb
+      .collection("runs")
+      .orderBy("createdAt", "desc")
+      .limit(cap)
+      .select(...RUN_QUEUE_FIELDS)
+      .get();
+  } catch (e) {
+    console.warn("[governance/queue] global runs orderBy(createdAt) failed:", e);
+    runsSnap = await adminDb.collection("runs").limit(cap).select(...RUN_QUEUE_FIELDS).get();
+  }
+  const staged: StagedQueueRow[] = [];
+  for (const doc of runsSnap.docs) {
+    const data = doc.data() as Record<string, unknown>;
+    const createdMs = researchCreatedMs(data);
+    if (!createdMs || createdMs < queueCutoffMs) continue;
+    if (!filterRowForQueue(data, statusFilter, "runs")) continue;
+    staged.push({
+      sortKey: firestoreMillis(data.createdAt),
+      kind: "research",
+      docId: doc.id,
+      data,
+      rowUid: String(data.userId ?? ""),
+      docEmail: typeof data.userEmail === "string" ? data.userEmail : undefined,
+    });
+  }
+  return { staged, snapSize: runsSnap.size };
+}
+
+async function loadVerificationsStagedGlobalQueue(
+  fetchLimit: number,
+  queueCutoffMs: number,
+  statusFilter: string
+): Promise<{ staged: StagedQueueRow[]; docsRead: number; perOwnerLimit: number }> {
+  if (!adminDb) throw new Error("no db");
+  const cap = Math.min(150, Math.max(fetchLimit * 4, 60));
+  let verSnap;
+  try {
+    verSnap = await adminDb
+      .collection("verifications")
+      .orderBy("timestamp", "desc")
+      .limit(cap)
+      .select(...VER_QUEUE_FIELDS)
+      .get();
+  } catch (e1) {
+    try {
+      console.warn("[governance/queue] global verifications orderBy(timestamp) failed, trying createdAt:", e1);
+      verSnap = await adminDb
+        .collection("verifications")
+        .orderBy("createdAt", "desc")
+        .limit(cap)
+        .select(...VER_QUEUE_FIELDS)
+        .get();
+    } catch (e2) {
+      console.warn("[governance/queue] global verifications orderBy(createdAt) failed:", e2);
+      verSnap = await adminDb.collection("verifications").limit(cap).select(...VER_QUEUE_FIELDS).get();
+    }
+  }
+  const staged: StagedQueueRow[] = [];
+  for (const doc of verSnap.docs) {
+    const data = doc.data() as Record<string, unknown>;
+    if (!isClaimVerificationRow(data)) continue;
+    const rowUid = ownerUidFromVerificationDoc(data);
+    if (!rowUid) continue;
+    const vMs = verificationTimeMs(data);
+    if (!vMs || vMs < queueCutoffMs) continue;
+    if (!filterRowForQueue(data, statusFilter, "verifications")) continue;
+    const sortKey =
+      firestoreMillis(data.timestamp) || firestoreMillis(data.createdAt) || firestoreMillis(data.verifiedAt);
+    staged.push({
+      sortKey,
+      kind: "verification",
+      docId: doc.id,
+      data,
+      rowUid,
+      docEmail: typeof data.userEmail === "string" ? data.userEmail : undefined,
+    });
+  }
+  return { staged, docsRead: verSnap.size, perOwnerLimit: cap };
+}
+
 async function loadVerificationsStagedForQueue(
   visibleUserIds: string[],
   visibleSet: Set<string>,
@@ -799,36 +888,32 @@ export async function GET(request: NextRequest) {
     if (vis.kind === "plan_required") {
       return governanceQueuePlanForbiddenResponse();
     }
-    if (vis.kind === "not_reviewer") {
-      return governanceQueueNotReviewerResponse();
-    }
     return NextResponse.json(
       { ok: false, error: { code: "internal_error", message: "Database unavailable" } },
       { status: 500 }
     );
   }
 
-  const { visibleUserIds } = vis;
+  const { visibleUserIds, queueScope } = vis;
 
-  if (visibleUserIds.length === 0) {
+  if (visibleUserIds !== null && visibleUserIds.length === 0) {
     return NextResponse.json({
       ok: true,
       runs: [],
       total: 0,
       offset: offsetEarly,
       limit: limitEarly,
-      ...(vis.isSupportAdmin
-        ? {
-            queueNotice:
-              "Admin global review is coming soon. Runs from other users appear here when they assign you as their reviewer.",
-          }
-        : {}),
+      queueScope,
     });
   }
 
-  console.log(
-    `[governance/queue] Querying for userIds: ${visibleUserIds.join(", ")} (${visibleUserIds.length} users)`
-  );
+  if (visibleUserIds === null) {
+    console.log("[governance/queue] Admin: global queue (recent runs + verifications)");
+  } else {
+    console.log(
+      `[governance/queue] Querying for userIds: ${visibleUserIds.join(", ")} (${visibleUserIds.length} users)`
+    );
+  }
 
   const statusFilter = searchParams.get("status") ?? "needs_review";
   if (!["needs_review", "blocked", "approved", "all"].includes(statusFilter)) {
@@ -868,7 +953,7 @@ export async function GET(request: NextRequest) {
   const ownerProfileCache = new Map<string, OwnerProfileCacheEntry>();
   const merged: Array<{ sortKey: number; summary: RunSummary }> = [];
   const queueCutoffMs = Date.now() - QUEUE_LOOKBACK_MS;
-  const visibleSet = new Set(visibleUserIds);
+  const visibleSet = visibleUserIds === null ? new Set<string>() : new Set(visibleUserIds);
 
   try {
     let runsSnapSize = 0;
@@ -878,7 +963,25 @@ export async function GET(request: NextRequest) {
     const staged: StagedQueueRow[] = [];
 
     try {
-      if (runType === "all") {
+      if (visibleUserIds === null) {
+        if (runType === "all") {
+          const [rRes, vRes] = await Promise.all([
+            loadRunsStagedGlobalQueue(fetchLimit, queueCutoffMs, statusFilter),
+            loadVerificationsStagedGlobalQueue(fetchLimit, queueCutoffMs, statusFilter),
+          ]);
+          runsSnapSize = rRes.snapSize;
+          verSnapSize = vRes.docsRead;
+          staged.push(...rRes.staged, ...vRes.staged);
+        } else if (runType === "research") {
+          const rRes = await loadRunsStagedGlobalQueue(fetchLimit, queueCutoffMs, statusFilter);
+          runsSnapSize = rRes.snapSize;
+          staged.push(...rRes.staged);
+        } else {
+          const vRes = await loadVerificationsStagedGlobalQueue(fetchLimit, queueCutoffMs, statusFilter);
+          verSnapSize = vRes.docsRead;
+          staged.push(...vRes.staged);
+        }
+      } else if (runType === "all") {
         const [rRes, vRes] = await Promise.all([
           loadRunsStagedForQueue(visibleUserIds, visibleSet, fetchLimit, queueCutoffMs, statusFilter),
           loadVerificationsStagedForQueue(visibleUserIds, visibleSet, fetchLimit, queueCutoffMs, statusFilter),
@@ -958,8 +1061,11 @@ export async function GET(request: NextRequest) {
 
     console.log(
       `[governance/queue] Firestore: ${runsSnapSize} research docs, ${verSnapSize} verification docs read; ` +
-        `${merged.length} rows after 7d + status filters for userIds: ${visibleUserIds.join(", ")} ` +
-        `(cutoff ${new Date(queueCutoffMs).toISOString()})`
+        `${merged.length} rows after 7d + status filters ` +
+        (visibleUserIds === null
+          ? "(global admin)"
+          : `for userIds: ${visibleUserIds.join(", ")}`) +
+        ` (cutoff ${new Date(queueCutoffMs).toISOString()})`
     );
     console.log(`[governance/queue] Total: ${Date.now() - t0}ms`);
 
@@ -969,6 +1075,7 @@ export async function GET(request: NextRequest) {
       total,
       offset,
       limit,
+      queueScope,
     });
   } catch (e: unknown) {
     logFirestoreError("queue outer", e);

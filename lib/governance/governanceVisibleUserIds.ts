@@ -9,22 +9,24 @@ import { getEffectiveEntitlements } from "@/lib/admin/entitlements";
 import { adminDb } from "@/lib/firebase/admin";
 import { parseGovernanceReviewerFor } from "@/lib/governance/reviewerFields";
 
-/** Assigner user IDs who listed `reviewerUid` as their `governanceReviewerUid` (fixes missing `governanceReviewerFor` on reviewer doc). */
-async function assignerUidsWhoAssignedReviewer(reviewerUid: string): Promise<string[]> {
+export type GovernanceQueueScope = "admin_global" | "assigners" | "no_assigners";
+
+/** User IDs who set `governanceReviewerUid` to this reviewer. */
+export async function getAssignerUids(reviewerUid: string): Promise<string[]> {
   if (!adminDb) return [];
   const snap = await adminDb.collection("users").where("governanceReviewerUid", "==", reviewerUid).get();
   return snap.docs.map((d) => d.id);
 }
 
 export type GovernanceVisibility =
-  | { ok: true; visibleUserIds: string[]; isSupportAdmin: boolean }
-  | { ok: false; kind: "no_db" | "plan_required" | "not_reviewer" };
+  | { ok: true; visibleUserIds: string[] | null; isSupportAdmin: boolean; queueScope: GovernanceQueueScope }
+  | { ok: false; kind: "no_db" | "plan_required" };
 
 /**
  * Resolves Firestore `userId` values the caller may load in governance queue / audit / review.
- * - Support admins: empty list (global admin queue TODO); History holds their own runs.
- * - Full plan + reviewer: assigners only (from `governanceReviewerFor` and reverse `governanceReviewerUid` lookup), never the viewer's uid.
- * - Full plan, not assigned as anyone's reviewer: not_reviewer.
+ * - Support admins: `visibleUserIds: null` (global queue).
+ * - Full plan + assigners: assigner UIDs only (from `governanceReviewerFor` + reverse lookup), never the viewer's uid.
+ * - Full plan, no assigners: empty array (queue empty; policies/audit still allowed).
  * - Free / lite: plan_required.
  */
 export async function resolveGovernanceVisibleUserIds(uid: string, email: string): Promise<GovernanceVisibility> {
@@ -32,14 +34,9 @@ export async function resolveGovernanceVisibleUserIds(uid: string, email: string
     return { ok: false, kind: "no_db" };
   }
 
-  const admin = isAdminEmail(email);
-  if (admin) {
-    const visibleUserIds: string[] = [];
-    console.log(
-      `[governance/queue] User: ${uid}, isAdmin: true, plan: support_admin — review queue scoped to assigners only (empty until global admin queue)`
-    );
-    console.log(`[governance/queue] Scoping decision: visibleUserIds = []`);
-    return { ok: true, visibleUserIds, isSupportAdmin: true };
+  if (isAdminEmail(email)) {
+    console.log(`[governance/queue] Admin: global access (visibleUserIds = null)`);
+    return { ok: true, visibleUserIds: null, isSupportAdmin: true, queueScope: "admin_global" };
   }
 
   const entitlements = await getEffectiveEntitlements(uid);
@@ -48,7 +45,7 @@ export async function resolveGovernanceVisibleUserIds(uid: string, email: string
   const userDoc = await adminDb.collection("users").doc(uid).get();
   const userData = userDoc.data() as Record<string, unknown> | undefined;
   const reviewerFor = parseGovernanceReviewerFor(userData);
-  const assignersByReviewerField = await assignerUidsWhoAssignedReviewer(uid);
+  const assignersByReviewerField = await getAssignerUids(uid);
 
   console.log(
     `[governance/queue] User: ${uid}, isAdmin: false, plan: ${userPlan}, reviewerFor: ${reviewerFor.length} users, assignersByReviewerUidField: ${assignersByReviewerField.length}`
@@ -59,14 +56,14 @@ export async function resolveGovernanceVisibleUserIds(uid: string, email: string
     return { ok: false, kind: "plan_required" };
   }
 
-  const mergedAssigners = [...new Set([...reviewerFor, ...assignersByReviewerField])].filter((id) => id !== uid);
+  const allAssigners = [...new Set([...reviewerFor, ...assignersByReviewerField])].filter((id) => id !== uid);
 
-  if (mergedAssigners.length === 0) {
-    console.log(`[governance/queue] Scoping decision: not_reviewer (no assigners)`);
-    return { ok: false, kind: "not_reviewer" };
+  if (allAssigners.length === 0) {
+    console.log(`[governance/queue] Scoping decision: full plan, no assigners (empty queue scope)`);
+    return { ok: true, visibleUserIds: [], isSupportAdmin: false, queueScope: "no_assigners" };
   }
 
-  let visibleUserIds = mergedAssigners;
+  let visibleUserIds = allAssigners;
   if (visibleUserIds.length > 30) {
     visibleUserIds = visibleUserIds.slice(0, 30);
     console.warn(`[governance/queue] Truncated visibleUserIds to 30 for user ${uid}`);
@@ -74,7 +71,7 @@ export async function resolveGovernanceVisibleUserIds(uid: string, email: string
 
   console.log(`[governance/queue] Scoping decision: visibleUserIds = [${visibleUserIds.join(", ")}]`);
 
-  return { ok: true, visibleUserIds, isSupportAdmin: false };
+  return { ok: true, visibleUserIds, isSupportAdmin: false, queueScope: "assigners" };
 }
 
 /** In-memory cache so queue / audit list loads skip repeat assigner lookups (TTL 2 minutes). */
@@ -100,7 +97,8 @@ export async function resolveGovernanceVisibleUserIdsCached(
   return entry;
 }
 
-export function runOwnerVisibleInGovernance(visibleUserIds: string[], runOwnerUid: string): boolean {
+export function runOwnerVisibleInGovernance(visibleUserIds: string[] | null, runOwnerUid: string): boolean {
+  if (visibleUserIds === null) return true;
   return visibleUserIds.includes(runOwnerUid);
 }
 
@@ -117,6 +115,7 @@ export function governanceQueuePlanForbiddenResponse(): NextResponse {
   );
 }
 
+/** Legacy: full-plan users without assigners no longer receive 403 from the queue; kept for any older clients. */
 export function governanceQueueNotReviewerResponse(): NextResponse {
   return NextResponse.json(
     {

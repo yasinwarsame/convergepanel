@@ -30,11 +30,7 @@ function clientGovernanceRole(
   return "member";
 }
 
-function computeGovernanceDashboardAccess(params: {
-  planId: PlanId;
-  authEmail: string;
-  governanceReviewerFor: string[];
-}): {
+function computeGovernanceDashboardAccess(params: { planId: PlanId; authEmail: string }): {
   governanceDashboardEligible: boolean;
   governanceDenyReason: "wrong_plan" | "wrong_role" | null;
 } {
@@ -44,10 +40,7 @@ function computeGovernanceDashboardAccess(params: {
   if (params.planId !== "full") {
     return { governanceDashboardEligible: false, governanceDenyReason: "wrong_plan" };
   }
-  if (params.governanceReviewerFor.length > 0) {
-    return { governanceDashboardEligible: true, governanceDenyReason: null };
-  }
-  return { governanceDashboardEligible: false, governanceDenyReason: "wrong_role" };
+  return { governanceDashboardEligible: true, governanceDenyReason: null };
 }
 
 async function authUserEmail(uid: string): Promise<string> {
@@ -142,11 +135,7 @@ export async function GET(req: NextRequest) {
       
       const config = getPlanConfig("free");
       const newUserRole = clientGovernanceRole(undefined, authEmail);
-      const govNew = computeGovernanceDashboardAccess({
-        planId: "free",
-        authEmail,
-        governanceReviewerFor: [],
-      });
+      const govNew = computeGovernanceDashboardAccess({ planId: "free", authEmail });
       return NextResponse.json(
         {
           ok: true,
@@ -242,11 +231,7 @@ export async function GET(req: NextRequest) {
         ? userData.governanceReviewerEmail.trim()
         : null;
 
-    const govDash = computeGovernanceDashboardAccess({
-      planId: plan,
-      authEmail,
-      governanceReviewerFor,
-    });
+    const govDash = computeGovernanceDashboardAccess({ planId: plan, authEmail });
 
     return NextResponse.json(
       {

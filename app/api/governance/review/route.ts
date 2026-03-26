@@ -7,7 +7,6 @@ import type { DocumentData } from "firebase-admin/firestore";
 import { adminDb } from "@/lib/firebase/admin";
 import { sanitizeForFirestore } from "@/lib/firestore/sanitizeForFirestore";
 import {
-  governanceQueueNotReviewerResponse,
   governanceQueuePlanForbiddenResponse,
   resolveGovernanceVisibleUserIds,
   runOwnerVisibleInGovernance,
@@ -40,9 +39,6 @@ export async function POST(request: NextRequest) {
   if (!vis.ok) {
     if (vis.kind === "plan_required") {
       return governanceQueuePlanForbiddenResponse();
-    }
-    if (vis.kind === "not_reviewer") {
-      return governanceQueueNotReviewerResponse();
     }
     return NextResponse.json(
       { ok: false, error: { code: "internal_error", message: "Database unavailable" } },

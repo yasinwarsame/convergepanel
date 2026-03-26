@@ -343,10 +343,10 @@ export function useUserPlan(): UseUserPlanReturn {
   };
 }
 
-/** True when the user can open /governance (full plan + role, or support allowlist). */
+/** True when the user can open /governance (5-Model / full plan, or support allowlist admin). */
 export function useIsGovernanceUser(): boolean {
-  const { governanceDashboardEligible } = useUserPlan();
-  return governanceDashboardEligible === true;
+  const { governanceDashboardEligible, plan } = useUserPlan();
+  return governanceDashboardEligible === true || plan === "full";
 }
 
 /** True when the user can edit governance policy (support allowlist only). */
