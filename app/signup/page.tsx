@@ -137,7 +137,7 @@ export default function SignupPage() {
           {/* Small pill/tag at top for brand positioning */}
           <div className="inline-flex items-center gap-2 rounded-full bg-slate-900/60 px-3 py-1 text-xs font-medium text-sky-300 ring-1 ring-sky-500/30">
             <span className="h-1.5 w-1.5 rounded-full bg-sky-400" />
-            Five models · Consensus score · Audit trail
+            Consensus · Audit trail · Governance on 5-Model plan
           </div>
 
           <h1 className="mt-6 text-3xl font-semibold text-white sm:text-4xl">
@@ -150,14 +150,21 @@ export default function SignupPage() {
             checked.
           </p>
 
-          <ul className="mt-4 space-y-2 text-sm text-slate-200">
-            <li>• Research panel: synthesized brief, agreements, disagreements</li>
-            <li>• Claim verification: verdict + score + per-model evidence</li>
-            <li>• Export-friendly audit JSON on claims</li>
+          <p className="mt-4 text-sm font-semibold text-slate-100">Your free account includes:</p>
+          <ul className="mt-2 space-y-2 text-sm text-slate-200">
+            <li>• Up to 8 research or verification runs per month</li>
+            <li>• 2 AI models per run</li>
+            <li>• Claim verification with consensus scoring</li>
+            <li>• Audit trails on every run</li>
+            <li>• No credit card required</li>
           </ul>
 
           <p className="mt-4 text-sm text-slate-400">
-            Free tier: 8 runs/month, 2 models per run. Upgrade for all five models and higher limits.
+            Want structured review, optional peer review, and all five models?{" "}
+            <Link href="/pricing" className="font-medium text-sky-400 hover:text-sky-300 underline-offset-2 hover:underline">
+              See our plans
+            </Link>
+            .
           </p>
         </div>
 

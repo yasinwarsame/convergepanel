@@ -140,7 +140,7 @@ export default function LoginPage() {
         <div className="w-full lg:w-1/2 lg:pr-12 mb-10 lg:mb-0">
           <div className="inline-flex items-center gap-2 rounded-full bg-slate-900/60 px-3 py-1 text-xs font-medium text-sky-300 ring-1 ring-sky-500/30">
             <span className="h-1.5 w-1.5 rounded-full bg-sky-400" />
-            Research · Claim verification · Audit trail
+            Research · Claim verification · Governance
           </div>
 
           <h1 className="mt-6 text-3xl font-semibold text-white sm:text-4xl">
@@ -171,7 +171,9 @@ export default function LoginPage() {
             <h2 className="text-xl lg:text-2xl font-semibold tracking-tight text-slate-900">
               Sign in to ConvergePanel
             </h2>
-            <p className="mt-1 text-sm text-slate-600">Multi-model research and claim verification</p>
+            <p className="mt-1 text-sm text-slate-600">
+              Multi-model research, claim verification, and governance
+            </p>
 
             {signedOut && (
               <div

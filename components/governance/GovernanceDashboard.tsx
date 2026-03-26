@@ -41,10 +41,15 @@ type QueueRow = {
   governanceReasons: string[];
   modelHealth: { ok: number; substituted: number; failed: number };
   verificationVerdict?: string;
-  modelVerdicts?: { modelId: string; verdict: string; confidence: string }[];
+  modelVerdicts?: { modelId: string; verdict: string; confidence: string; summary?: string }[];
   agreementSummary?: string;
   dissentSummary?: string;
   disagreements?: string[];
+  agreementPoints?: string[];
+  disagreementPoints?: string[];
+  correctParts?: string[];
+  incorrectParts?: string[];
+  keyFindings?: string[];
   claimVerdictSummary?: string;
   createdAt: string;
   userId: string;
@@ -101,9 +106,20 @@ function queueModelVerdictToneClass(verdict: string): string {
   if (s === "failed" || s.includes("parse")) return "text-slate-500";
   if (s.includes("partially")) return "text-amber-800";
   if (s.includes("inaccurate")) return "text-red-700";
-  if (s.includes("accurate")) return "text-emerald-700";
+  if (s.includes("accurate") && !s.includes("inaccurate")) return "text-emerald-700";
   if (s.includes("unverifiable")) return "text-slate-600";
   return "text-slate-800";
+}
+
+function queueModelVerdictBadgeClass(verdict: string): string {
+  const s = verdict.toLowerCase();
+  if (s === "failed" || s.includes("parse")) return "bg-slate-200 text-slate-700";
+  if (s.includes("partially")) return "bg-amber-100 text-amber-900 ring-1 ring-amber-300/60";
+  if (s.includes("inaccurate")) return "bg-red-100 text-red-900 ring-1 ring-red-300/60";
+  if (s.includes("accurate") && !s.includes("inaccurate"))
+    return "bg-emerald-100 text-emerald-900 ring-1 ring-emerald-300/60";
+  if (s.includes("unverifiable")) return "bg-slate-100 text-slate-600 ring-1 ring-slate-300/60";
+  return "bg-slate-100 text-slate-800 ring-1 ring-slate-300/60";
 }
 
 function queueRowUserPresentation(row: QueueRow, viewerUid: string | null | undefined) {
@@ -722,6 +738,10 @@ export default function GovernanceDashboard() {
 
   /** Auto queue fetches only; manual Refresh resets retry counter. */
   const queueAutoFailureCountRef = useRef(0);
+  /** One automatic snapshot load per queue-tab visit (per login); manual Refresh calls loadQueueSnapshot directly. */
+  const queueTabFetchedRef = useRef(false);
+  /** One automatic audit load per audit-tab visit (per login); manual Refresh calls fetchAudit directly. */
+  const auditTabFetchedRef = useRef(false);
   const MAX_QUEUE_AUTO_RETRIES = 2;
   /** Prevents duplicate POSTs to /api/governance/review (double-click / rapid actions). */
   const reviewInFlightRef = useRef<string | null>(null);
@@ -883,7 +903,7 @@ export default function GovernanceDashboard() {
     setAuditError(null);
     try {
       const { authedFetch } = await import("@/lib/client/authedFetch");
-      const res = await authedFetch("/api/governance/audit?limit=50", {
+      const res = await authedFetch("/api/governance/audit?limit=20", {
         user,
         authReady,
         method: "GET",
@@ -941,9 +961,9 @@ export default function GovernanceDashboard() {
   }, [user, authReady, isAdminUser, fetchAudit, showToast]);
 
   useEffect(() => {
-    if (tab === "queue" && user && authReady) {
-      void loadQueueSnapshot();
-    }
+    if (tab !== "queue" || !user || !authReady || queueTabFetchedRef.current) return;
+    queueTabFetchedRef.current = true;
+    void loadQueueSnapshot();
   }, [tab, user, authReady, loadQueueSnapshot]);
 
   useEffect(() => {
@@ -959,9 +979,9 @@ export default function GovernanceDashboard() {
 
   /* Auto-load recent audit events when the Audit tab is active (no runId required). */
   useEffect(() => {
-    if (tab === "audit" && user && authReady && !auditDrilldown) {
-      void fetchAudit();
-    }
+    if (tab !== "audit" || !user || !authReady || auditDrilldown || auditTabFetchedRef.current) return;
+    auditTabFetchedRef.current = true;
+    void fetchAudit();
   }, [tab, user, authReady, fetchAudit, auditDrilldown]);
 
   useEffect(() => {
@@ -977,6 +997,8 @@ export default function GovernanceDashboard() {
 
   useEffect(() => {
     queueAutoFailureCountRef.current = 0;
+    queueTabFetchedRef.current = false;
+    auditTabFetchedRef.current = false;
     setQueueError(null);
     setQueueNotice(null);
   }, [user?.uid]);
@@ -1954,10 +1976,6 @@ function FragmentRow(props: {
   } = props;
   const key = `${row.collection}:${row.runId}`;
   const reviewBusyThisRow = reviewBusyKey === key;
-  const viewHref =
-    row.collection === "runs"
-      ? `/?openResearchRun=${encodeURIComponent(row.runId)}`
-      : `/?openVerification=${encodeURIComponent(row.runId)}`;
   const { isSelf, full: userFullLabel, displayShort: userDisplayShort } = queueRowUserPresentation(
     row,
     currentUserUid
@@ -2124,6 +2142,28 @@ function FragmentRow(props: {
             <p className="mt-3 font-medium text-slate-900">Full text</p>
             <p className="mt-1 whitespace-pre-wrap">{row.question}</p>
 
+            {row.runType === "research" && row.keyFindings && row.keyFindings.length > 0 ? (
+              <div className="mt-4 rounded-r-lg border-l-4 border-emerald-500 bg-emerald-50/80 pl-3 pr-3 py-3">
+                <p className="text-sm font-semibold text-emerald-900">Key findings (synthesis)</p>
+                <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-emerald-950/90">
+                  {row.keyFindings.map((f, i) => (
+                    <li key={i}>{f}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
+            {row.runType === "research" && row.disagreementPoints && row.disagreementPoints.length > 0 ? (
+              <div className="mt-4 rounded-r-lg border-l-4 border-amber-600 bg-amber-50/90 pl-3 pr-3 py-3">
+                <p className="text-sm font-semibold text-amber-950">Where synthesis flags disagreements</p>
+                <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-amber-950/90">
+                  {row.disagreementPoints.map((d, i) => (
+                    <li key={i}>{d}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
             {row.runType === "verification" && row.verificationVerdict ? (
               <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50/90 px-3 py-2.5">
                 <p className="text-sm text-slate-800">
@@ -2139,38 +2179,119 @@ function FragmentRow(props: {
             ) : null}
 
             {row.modelVerdicts && row.modelVerdicts.length > 0 ? (
-              <div className="mt-4 rounded-lg border border-slate-200 bg-white px-3 py-3">
-                <p className="text-sm font-semibold text-slate-900">Model verdicts</p>
-                <ul className="mt-2 space-y-1.5 text-sm">
-                  {row.modelVerdicts.map((m, i) => (
-                    <li key={`${m.modelId}-${i}`} className="flex flex-wrap gap-x-2 gap-y-0.5">
-                      <span className="min-w-[10rem] font-medium text-slate-700">
-                        {getModelDisplayName(m.modelId)}:
-                      </span>
-                      <span className={`font-medium ${queueModelVerdictToneClass(m.verdict)}`}>
-                        {m.verdict}
-                        {m.confidence ? (
-                          <span className="font-normal text-slate-500"> ({m.confidence})</span>
-                        ) : null}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-                {row.agreementSummary ? (
-                  <p className="mt-2 text-sm text-slate-700">
-                    <span className="font-medium text-slate-800">Agreement: </span>
-                    {row.agreementSummary}
-                  </p>
-                ) : null}
-                {row.dissentSummary ? (
-                  <p className="mt-1 text-sm text-slate-700">
-                    <span className="font-medium text-slate-800">{row.dissentSummary}</span>
-                  </p>
+              <div className="mt-4 overflow-hidden rounded-lg border border-slate-200 bg-white">
+                <p className="border-b border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-900">
+                  Model verdicts
+                </p>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[280px] text-left text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-200 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        <th className="px-3 py-2">Model</th>
+                        <th className="px-3 py-2">Verdict</th>
+                        <th className="px-3 py-2">Confidence</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {row.modelVerdicts.map((m, i) => (
+                        <tr key={`${m.modelId}-${i}`} className="border-b border-slate-100 last:border-0">
+                          <td className="px-3 py-2 font-medium text-slate-800 align-top">
+                            {getModelDisplayName(m.modelId)}
+                          </td>
+                          <td className="px-3 py-2 align-top">
+                            <span
+                              className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${queueModelVerdictBadgeClass(m.verdict)}`}
+                            >
+                              {m.verdict}
+                            </span>
+                          </td>
+                          <td className={`px-3 py-2 align-top ${queueModelVerdictToneClass(m.verdict)}`}>
+                            {m.confidence ? (
+                              <span className="text-slate-700">{m.confidence}</span>
+                            ) : (
+                              <span className="text-slate-400">—</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {row.modelVerdicts.some((m) => m.summary) ? (
+                  <ul className="space-y-2 border-t border-slate-200 bg-slate-50/80 px-3 py-2 text-xs text-slate-600">
+                    {row.modelVerdicts.map(
+                      (m, i) =>
+                        m.summary && (
+                          <li key={`sum-${m.modelId}-${i}`}>
+                            <span className="font-semibold text-slate-700">{getModelDisplayName(m.modelId)}: </span>
+                            {m.summary}
+                          </li>
+                        )
+                    )}
+                  </ul>
                 ) : null}
               </div>
             ) : null}
 
-            {row.disagreements && row.disagreements.length > 0 ? (
+            {row.runType === "verification" &&
+            ((row.agreementPoints && row.agreementPoints.length > 0) || row.agreementSummary) ? (
+              <div className="mt-4 rounded-r-lg border-l-4 border-emerald-500 bg-emerald-50/70 pl-3 pr-3 py-3">
+                <p className="text-sm font-semibold text-emerald-900">Where models agree</p>
+                <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-emerald-950/90">
+                  {(row.agreementPoints && row.agreementPoints.length > 0
+                    ? row.agreementPoints
+                    : row.agreementSummary
+                      ? [row.agreementSummary]
+                      : []
+                  ).map((line, i) => (
+                    <li key={i}>{line}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
+            {row.runType === "verification" ? (() => {
+              const disagreeLines: string[] = [
+                ...(row.disagreementPoints ?? []),
+                ...(row.disagreementPoints?.length ? [] : row.dissentSummary ? [row.dissentSummary] : []),
+                ...(row.disagreements ?? []),
+              ];
+              if (disagreeLines.length === 0) return null;
+              return (
+                <div className="mt-4 rounded-r-lg border-l-4 border-red-500 bg-red-50/60 pl-3 pr-3 py-3">
+                  <p className="text-sm font-semibold text-red-900">Where models disagree</p>
+                  <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-red-950/90">
+                    {disagreeLines.map((line, i) => (
+                      <li key={i}>{line}</li>
+                    ))}
+                  </ul>
+                </div>
+              );
+            })() : null}
+
+            {row.runType === "verification" && row.correctParts && row.correctParts.length > 0 ? (
+              <div className="mt-4">
+                <p className="text-sm font-semibold text-emerald-800">What&apos;s correct</p>
+                <ul className="mt-1.5 list-disc space-y-1 pl-5 text-sm text-emerald-900/90">
+                  {row.correctParts.map((c, i) => (
+                    <li key={i}>{c}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
+            {row.runType === "verification" && row.incorrectParts && row.incorrectParts.length > 0 ? (
+              <div className="mt-4">
+                <p className="text-sm font-semibold text-red-800">What&apos;s incorrect or imprecise</p>
+                <ul className="mt-1.5 list-disc space-y-1 pl-5 text-sm text-red-900/90">
+                  {row.incorrectParts.map((c, i) => (
+                    <li key={i}>{c}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
+            {row.disagreements && row.disagreements.length > 0 && row.runType === "research" ? (
               <div className="mt-4">
                 <p className="text-sm font-semibold text-slate-900">Key disagreements</p>
                 <ul className="mt-1.5 list-disc space-y-1 pl-5 text-sm text-slate-700">
@@ -2193,14 +2314,6 @@ function FragmentRow(props: {
                 {row.governanceReviewComment && <p>Comment: {row.governanceReviewComment}</p>}
               </div>
             )}
-            <Link
-              href={viewHref}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mt-3 inline-block text-sm font-semibold text-sky-700 hover:underline"
-            >
-              View full result →
-            </Link>
           </td>
         </tr>
       )}

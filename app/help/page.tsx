@@ -108,9 +108,56 @@ export default function HelpPage() {
 
               <FaqQ>Can I export audit trails?</FaqQ>
               <FaqA>
-                Yes for individual runs via copy and JSON download in the UI. Broader team exports with date
-                filters and CSV are planned; team governance and shared workspaces are rolling out over
-                time.
+                Yes for individual runs via copy and JSON download in the UI. Bulk export across many runs
+                is not available yet.
+              </FaqA>
+            </section>
+
+            <section>
+              <h2 className="text-xl font-semibold text-gray-900">Governance &amp; review</h2>
+
+              <FaqQ>What is the Governance Dashboard?</FaqQ>
+              <FaqA>
+                On the 5-Model plan, the Governance Dashboard is where you set trust thresholds, assign a
+                peer reviewer, and keep an audit trail of review decisions. When a claim verification or
+                research run falls below your configured threshold, it can be flagged for review
+                automatically.
+              </FaqA>
+
+              <FaqQ>How do I assign a reviewer?</FaqQ>
+              <FaqA>
+                Open <strong>Profile</strong> → <strong>Governance Settings</strong>. Turn on{" "}
+                <strong>Available as reviewer</strong> if you want others to assign you. To choose your own
+                reviewer, enter their email — they need the 5-Model plan with reviewer availability on.
+                Assignment applies right away.
+              </FaqA>
+
+              <FaqQ>What can a reviewer do?</FaqQ>
+              <FaqA>
+                Reviewers open <strong>Governance</strong> → <strong>Review Queue</strong>. Each flagged run
+                shows the claim or question, consensus score, model verdicts, where models agree or disagree,
+                and governance reasons. They can approve, block with a comment, or request changes.
+              </FaqA>
+
+              <FaqQ>What is the Audit Log?</FaqQ>
+              <FaqA>
+                The Audit Log lists your own review actions: who approved or blocked a run, when, and the
+                comment. Run owners see the outcome on their History view when you complete a review.
+              </FaqA>
+
+              <FaqQ>What triggers a review?</FaqQ>
+              <FaqA>
+                Your governance policy decides. Typical flags include consensus below a threshold, weak
+                evidence quality, model failures, sensitive-domain detection (legal, medical, financial), and
+                certain claim verdicts (e.g. disputed or unverifiable). Thresholds are configurable where your
+                account has policy access.
+              </FaqA>
+
+              <FaqQ>Do I need a reviewer to use ConvergePanel?</FaqQ>
+              <FaqA>
+                No. Reviewer assignment is optional. All plans get consensus scoring and governance status
+                on results. Peer review and the full governance dashboard are on the 5-Model plan if you want
+                that workflow.
               </FaqA>
             </section>
 
@@ -127,7 +174,8 @@ export default function HelpPage() {
               <FaqQ>What do paid plans add?</FaqQ>
               <FaqA>
                 More models per run (up to five on the full plan), higher monthly run limits, and longer
-                history retention on paid tiers. See the{" "}
+                history retention on paid tiers. The 5-Model plan adds governance dashboards, peer review,
+                and the review audit log. See the{" "}
                 <Link href="/pricing" className="font-medium text-sky-600 hover:text-sky-700">
                   pricing page
                 </Link>{" "}

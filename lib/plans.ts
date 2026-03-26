@@ -118,6 +118,12 @@ export const PLAN_CONFIGS: Record<PlanId, PlanConfig> = {
       "Unlimited saved panels & advanced exports (Markdown / PDF / copy-ready) - Available in next release",
       "Priority processing when the system is under load",
       "Early access to new model integrations",
+      "Governance Dashboard",
+      "Policy engine with configurable thresholds",
+      "Peer review — assign a reviewer for your work",
+      "Review queue — approve or block flagged runs",
+      "Full audit log of all review decisions",
+      "Sensitive domain detection (legal, medical, financial)",
     ],
     badge: "Most popular",
     highlight: true, // Visually highlight this plan

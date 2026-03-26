@@ -77,6 +77,29 @@ export async function resolveGovernanceVisibleUserIds(uid: string, email: string
   return { ok: true, visibleUserIds, isSupportAdmin: false };
 }
 
+/** In-memory cache so queue / audit list loads skip repeat assigner lookups (TTL 2 minutes). */
+const GOVERNANCE_VISIBILITY_CACHE_TTL_MS = 120_000;
+const governanceVisibilityCache = new Map<string, { entry: GovernanceVisibility; expiresAt: number }>();
+
+/**
+ * Same as {@link resolveGovernanceVisibleUserIds} but caches the result per (uid, email) for 2 minutes.
+ * Use for read-heavy list endpoints; prefer the uncached resolver when correctness must be immediate (e.g. review).
+ */
+export async function resolveGovernanceVisibleUserIdsCached(
+  uid: string,
+  email: string
+): Promise<GovernanceVisibility> {
+  const key = `${uid}::${email.trim().toLowerCase()}`;
+  const now = Date.now();
+  const hit = governanceVisibilityCache.get(key);
+  if (hit && hit.expiresAt > now) {
+    return hit.entry;
+  }
+  const entry = await resolveGovernanceVisibleUserIds(uid, email);
+  governanceVisibilityCache.set(key, { entry, expiresAt: now + GOVERNANCE_VISIBILITY_CACHE_TTL_MS });
+  return entry;
+}
+
 export function runOwnerVisibleInGovernance(visibleUserIds: string[], runOwnerUid: string): boolean {
   return visibleUserIds.includes(runOwnerUid);
 }

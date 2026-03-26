@@ -77,6 +77,31 @@ function AuditMockup() {
   );
 }
 
+function GovernanceDashboardMockup() {
+  return (
+    <div className="rounded-lg border border-slate-600 bg-slate-900/90 p-3 text-left shadow-inner">
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Governance</p>
+      <p className="mt-2 text-xs font-medium text-slate-200">Policy · thresholds</p>
+      <div className="mt-2 space-y-1 rounded border border-slate-700 bg-slate-950/60 p-2 text-[10px] text-slate-400">
+        <p className="text-amber-400/90">Needs review · 3 items</p>
+        <p className="text-slate-500">Approve · block · request changes</p>
+      </div>
+    </div>
+  );
+}
+
+function PeerReviewMockup() {
+  return (
+    <div className="rounded-lg border border-slate-600 bg-slate-900/90 p-3 text-left shadow-inner">
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Peer review</p>
+      <p className="mt-2 text-xs text-slate-300">Reviewer assigned</p>
+      <div className="mt-2 rounded border border-sky-800/60 bg-sky-950/30 px-2 py-1.5 text-[10px] text-sky-200/90">
+        Flagged run in their queue — decision logged
+      </div>
+    </div>
+  );
+}
+
 export default function LandingPage() {
   return (
     <main className="min-h-screen bg-slate-50">
@@ -222,6 +247,37 @@ export default function LandingPage() {
               </p>
             </div>
           </div>
+
+          <div className="grid grid-cols-1 items-center gap-8 lg:grid-cols-2">
+            <div>
+              <h3 className="text-xl font-semibold text-slate-900">Governance Dashboard</h3>
+              <p className="mt-3 text-slate-600 leading-relaxed">
+                Set consensus thresholds, flag weak evidence automatically, and review flagged runs before
+                they&apos;re acted on. The governance dashboard gives you a structured review flow: assign a
+                peer reviewer, approve or block claims and research, and keep a complete audit trail of
+                every decision.
+              </p>
+              <p className="mt-2 text-sm font-medium text-sky-700">
+                Included on the 5-Model plan.
+              </p>
+            </div>
+            <GovernanceDashboardMockup />
+          </div>
+
+          <div className="grid grid-cols-1 items-center gap-8 lg:grid-cols-2">
+            <PeerReviewMockup />
+            <div className="lg:order-first">
+              <h3 className="text-xl font-semibold text-slate-900">Peer review</h3>
+              <p className="mt-3 text-slate-600 leading-relaxed">
+                Assign a colleague as your reviewer. When research or claim verification scores below your
+                trust threshold, it shows up in their review queue. They can approve, block, or request
+                changes — and each decision is logged for compliance.
+              </p>
+              <p className="mt-2 text-sm font-medium text-sky-700">
+                Included on the 5-Model plan.
+              </p>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -247,10 +303,11 @@ export default function LandingPage() {
               </p>
             </div>
             <div className="rounded-xl border border-slate-200 p-6 shadow-sm">
-              <h3 className="font-semibold text-slate-900">Legal, compliance &amp; risk</h3>
+              <h3 className="font-semibold text-slate-900">Compliance &amp; risk teams</h3>
               <p className="mt-2 text-sm text-slate-600 leading-relaxed">
-                Keep an audit trail for AI-assisted reviews: what was checked, how models split, and how
-                strong the signal was. Team-wide export workflows are rolling out over time.
+                Every claim verification and research run is evaluated against governance policies.
+                Reviewers approve or block flagged results. The audit log records who reviewed what, when,
+                and why — ready for a compliance review.
               </p>
             </div>
             <div className="rounded-xl border border-slate-200 p-6 shadow-sm">
@@ -269,7 +326,8 @@ export default function LandingPage() {
         <h2 className="text-2xl font-bold text-slate-900 sm:text-3xl">Start free. Upgrade when you need more.</h2>
         <p className="mx-auto mt-4 max-w-xl text-slate-600 leading-relaxed">
           The free plan includes 8 runs per month with up to 2 models per run. Paid plans unlock all five
-          models, higher monthly limits, and more headroom for serious use.
+          models, higher monthly limits, and — on the 5-Model plan — governance dashboards, peer review, and
+          a full audit log of review decisions.
         </p>
         <Link
           href="/pricing"

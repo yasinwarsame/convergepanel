@@ -61,6 +61,24 @@ export default function AboutPage() {
             </section>
 
             <section>
+              <h2 className="text-2xl font-semibold text-gray-900">Governance &amp; peer review</h2>
+              <p className="mt-3 leading-relaxed">
+                Every run — research or claim verification — is checked against configurable governance
+                policies. If the consensus score is below your threshold, evidence quality looks weak, or a
+                sensitive topic is detected, the result can be flagged for review.
+              </p>
+              <p className="mt-3 leading-relaxed">
+                On the 5-Model plan, you can assign a peer reviewer. Flagged items appear in their governance
+                dashboard where they approve, block, or request changes. Each decision is recorded in an
+                audit log with who reviewed it, what they chose, and their note.
+              </p>
+              <p className="mt-3 leading-relaxed">
+                This is structured review at the point of verification — before you rely on the result —
+                not paperwork added after the fact.
+              </p>
+            </section>
+
+            <section>
               <h2 className="text-2xl font-semibold text-gray-900">Who built this</h2>
               <p className="mt-3 leading-relaxed">
                 ConvergePanel is built by Mike Warsame. It started from a simple observation: the strongest
@@ -72,9 +90,8 @@ export default function AboutPage() {
             <section>
               <h2 className="text-2xl font-semibold text-gray-900">What&apos;s next</h2>
               <p className="mt-3 leading-relaxed">
-                We are building team governance features — policy rules, shared activity views, and richer
-                audit exports for compliance. Some pieces exist in early form; fuller team workflows are
-                rolling out over time. For early access or questions, email{" "}
+                We keep improving structured review, policies, and audit visibility based on feedback.
+                For questions or early-access conversations, email{" "}
                 <a href="mailto:contact@convergepanel.com" className="text-sky-600 hover:underline">
                   contact@convergepanel.com
                 </a>

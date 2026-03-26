@@ -124,7 +124,7 @@ export default function TopNav() {
                 shadow-sm
               "
             >
-              Research · Claim verification · Consensus
+              Research · Claim verification · Consensus · Governance
             </p>
           </div>
         </Link>

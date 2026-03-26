@@ -19,7 +19,7 @@ import { isAdminEmail } from "@/lib/admin/config";
 import {
   governanceQueueNotReviewerResponse,
   governanceQueuePlanForbiddenResponse,
-  resolveGovernanceVisibleUserIds,
+  resolveGovernanceVisibleUserIdsCached,
 } from "@/lib/governance/governanceVisibleUserIds";
 import { resolveGovernanceRequestUser } from "@/lib/governance/authCheck";
 
@@ -28,6 +28,54 @@ export const dynamic = "force-dynamic";
 
 /** Only runs / verifications newer than this are included in the merged queue. */
 const QUEUE_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** Field projection for queue reads (avoids pulling full panel payloads). */
+const RUN_QUEUE_FIELDS = [
+  "userId",
+  "createdAt",
+  "userEmail",
+  "question",
+  "governanceStatus",
+  "governanceReasons",
+  "governanceReviewedBy",
+  "governanceReviewedAt",
+  "governanceReviewComment",
+  "consensusScore",
+  "synthesisConsensusSummary",
+  "policyConsensusSummary",
+  "sourceBacked",
+  "missingSourcesCount",
+  "runDocument.perModel",
+  "resultsCompact.perModel",
+  "governanceMeta",
+  "synthesizedStructuredReport",
+  "synthesizedReportV2",
+  "structuredSynthesis",
+  "synthesis",
+] as const;
+
+const VER_QUEUE_FIELDS = [
+  "userId",
+  "uid",
+  "type",
+  "userEmail",
+  "claim",
+  "timestamp",
+  "createdAt",
+  "verifiedAt",
+  "governanceStatus",
+  "governanceReasons",
+  "governanceReviewedBy",
+  "governanceReviewedAt",
+  "governanceReviewComment",
+  "consensusScore",
+  "evidenceQuality",
+  "verdict",
+  "sourceBacked",
+  "missingSourcesCount",
+  "governanceMeta",
+  "modelResults",
+] as const;
 
 function firestoreMillis(value: unknown): number {
   if (value && typeof value === "object" && "toMillis" in value && typeof (value as { toMillis: () => number }).toMillis === "function") {
@@ -53,6 +101,8 @@ type QueueModelVerdictRow = {
   modelId: string;
   verdict: string;
   confidence: string;
+  /** Short excerpt from the model’s written rationale (capped server-side). */
+  summary?: string;
 };
 
 type RunSummary = {
@@ -72,6 +122,16 @@ type RunSummary = {
   dissentSummary?: string;
   /** Key disagreement bullets (research synthesis and/or claim digest). */
   disagreements?: string[];
+  /** Claim verification: high-level agreement lines derived from verdict counts. */
+  agreementPoints?: string[];
+  /** Claim verification: minority-verdict lines; research: synthesis disagreement bullets. */
+  disagreementPoints?: string[];
+  /** Claim verification: merged correct-part snippets across models. */
+  correctParts?: string[];
+  /** Claim verification: merged incorrect-part snippets across models. */
+  incorrectParts?: string[];
+  /** Research: short key finding lines from stored synthesis when available. */
+  keyFindings?: string[];
   /** Short rationale line for claim verdict (first model summary). */
   claimVerdictSummary?: string;
   createdAt: string;
@@ -152,20 +212,31 @@ async function getOwnerProfile(uid: string, cache: Map<string, OwnerProfileCache
 }
 
 /** Resolve display email (doc → profile → uid) and assigner metadata for the current viewer. */
-async function resolveQueueOwnerContext(
+function resolveQueueOwnerContextSync(
   rowUid: string,
   docUserEmail: string | undefined,
   viewerUid: string,
   cache: Map<string, OwnerProfileCacheEntry>
-): Promise<{ email: string; ownerAssignedReviewerAt?: string }> {
-  const profile = await getOwnerProfile(rowUid, cache);
+): { email: string; ownerAssignedReviewerAt?: string } {
+  const profile = cache.get(rowUid);
   const fromDoc = typeof docUserEmail === "string" ? docUserEmail.trim() : "";
+  if (!profile) {
+    return { email: fromDoc || rowUid };
+  }
   const email = fromDoc || profile.email || rowUid;
   let ownerAssignedReviewerAt: string | undefined;
   if (profile.governanceReviewerUid === viewerUid && profile.governanceReviewerAssignedAt) {
     ownerAssignedReviewerAt = profile.governanceReviewerAssignedAt;
   }
   return { email, ownerAssignedReviewerAt };
+}
+
+async function prefetchOwnerProfilesForQueue(
+  uids: Iterable<string>,
+  cache: Map<string, OwnerProfileCacheEntry>
+): Promise<void> {
+  const unique = [...new Set([...uids].filter(Boolean))];
+  await Promise.all(unique.map((uid) => getOwnerProfile(uid, cache)));
 }
 
 function normalizeGovernanceStatus(raw: string): GovernanceStatus {
@@ -186,33 +257,6 @@ function humanizePerModelVerdict(v: string): string {
     unverifiable: "Unverifiable",
   };
   return map[k] || v.replace(/_/g, " ");
-}
-
-function extractModelVerdictsFromVerification(data: Record<string, unknown>): QueueModelVerdictRow[] {
-  const mr = data.modelResults;
-  if (!Array.isArray(mr)) return [];
-  const out: QueueModelVerdictRow[] = [];
-  for (const row of mr) {
-    if (!row || typeof row !== "object") continue;
-    const m = row as Record<string, unknown>;
-    const modelId = String(m.modelId ?? "");
-    if (!modelId) continue;
-    const status = String(m.status ?? "");
-    if (status !== "ok") {
-      const label = status === "failed" ? "Failed" : "Parse error";
-      out.push({ modelId, verdict: label, confidence: "" });
-      continue;
-    }
-    const confRaw = String(m.confidence ?? "").trim().toLowerCase();
-    const confidence =
-      confRaw === "high" || confRaw === "medium" || confRaw === "low" ? `${confRaw} confidence` : "";
-    out.push({
-      modelId,
-      verdict: humanizePerModelVerdict(String(m.verdict ?? "")),
-      confidence,
-    });
-  }
-  return out;
 }
 
 function buildAgreementDissentFromVerification(data: Record<string, unknown>): {
@@ -291,6 +335,105 @@ function firstVerificationModelSummary(data: Record<string, unknown>): string | 
   return undefined;
 }
 
+/** Rich claim-verification payload for the review queue expanded UI. */
+function buildVerificationQueueReviewExtras(data: Record<string, unknown>): {
+  modelVerdicts: QueueModelVerdictRow[];
+  agreementPoints: string[];
+  disagreementPoints: string[];
+  correctParts: string[];
+  incorrectParts: string[];
+} {
+  const mr = data.modelResults;
+  if (!Array.isArray(mr)) {
+    return { modelVerdicts: [], agreementPoints: [], disagreementPoints: [], correctParts: [], incorrectParts: [] };
+  }
+
+  const modelVerdicts: QueueModelVerdictRow[] = [];
+  for (const row of mr) {
+    if (!row || typeof row !== "object") continue;
+    const m = row as Record<string, unknown>;
+    const modelId = String(m.modelId ?? "");
+    if (!modelId) continue;
+    const status = String(m.status ?? "");
+    if (status !== "ok") {
+      const label = status === "failed" ? "Failed" : "Parse error";
+      modelVerdicts.push({ modelId, verdict: label, confidence: "" });
+      continue;
+    }
+    const verdictRaw = String(m.verdict ?? m.verdictLabel ?? "");
+    const confRaw = String(m.confidence ?? "").trim().toLowerCase();
+    const confidence =
+      confRaw === "high" || confRaw === "medium" || confRaw === "low"
+        ? `${confRaw} confidence`
+        : String(m.confidence ?? "").trim();
+    const summaryRaw = typeof m.summary === "string" ? m.summary.trim().substring(0, 200) : "";
+    modelVerdicts.push({
+      modelId,
+      verdict: humanizePerModelVerdict(verdictRaw),
+      confidence,
+      ...(summaryRaw ? { summary: summaryRaw } : {}),
+    });
+  }
+
+  const usable = mr.filter((row) => {
+    if (!row || typeof row !== "object") return false;
+    return String((row as Record<string, unknown>).status ?? "") === "ok";
+  }) as Record<string, unknown>[];
+  const total = Math.max(1, usable.length);
+
+  const verdictCounts: Record<string, string[]> = {};
+  for (const row of usable) {
+    const m = row as Record<string, unknown>;
+    const v = String(m.verdict ?? m.verdictLabel ?? "unknown").toLowerCase().replace(/\s+/g, "_");
+    const id = String(m.modelId ?? "");
+    if (!verdictCounts[v]) verdictCounts[v] = [];
+    verdictCounts[v].push(id);
+  }
+
+  const agreementPoints: string[] = [];
+  const disagreementPoints: string[] = [];
+  for (const [verdict, models] of Object.entries(verdictCounts)) {
+    const humanV = humanizePerModelVerdict(verdict);
+    if (models.length >= 3) {
+      agreementPoints.push(`${models.length}/${total} models rate this as ${humanV.toLowerCase()}`);
+    }
+    if (models.length === 1 || models.length === 2) {
+      const names = models.map((id) => getModelDisplayName(id)).join(", ");
+      disagreementPoints.push(`${names} rated as ${humanV.toLowerCase()} (others disagree)`);
+    }
+  }
+
+  const correctParts: string[] = [];
+  const incorrectParts: string[] = [];
+  for (const row of usable) {
+    const m = row as Record<string, unknown>;
+    const cp = m.correctParts;
+    const ip = m.incorrectParts;
+    if (Array.isArray(cp)) {
+      for (const part of cp.slice(0, 2)) {
+        if (typeof part === "string" && part.trim() && !correctParts.includes(part.trim())) {
+          correctParts.push(part.trim());
+        }
+      }
+    }
+    if (Array.isArray(ip)) {
+      for (const part of ip.slice(0, 2)) {
+        if (typeof part === "string" && part.trim() && !incorrectParts.includes(part.trim())) {
+          incorrectParts.push(part.trim());
+        }
+      }
+    }
+  }
+
+  return {
+    modelVerdicts,
+    agreementPoints,
+    disagreementPoints,
+    correctParts: correctParts.slice(0, 5),
+    incorrectParts: incorrectParts.slice(0, 5),
+  };
+}
+
 function pushDisagreementLine(out: string[], line: string) {
   const t = line.trim();
   if (t && !out.includes(t)) out.push(t);
@@ -340,9 +483,70 @@ function extractResearchDisagreementBullets(data: Record<string, unknown>): stri
   return out.slice(0, 3);
 }
 
+function extractResearchSynthesisQueueExtras(data: Record<string, unknown>): {
+  keyFindings: string[];
+  disagreementPoints: string[];
+} {
+  const keyFindings: string[] = [];
+  const disagreementPoints: string[] = [];
+  const seenK = new Set<string>();
+  const seenD = new Set<string>();
+  const pushFinding = (raw: string) => {
+    const t = raw.trim();
+    if (!t || seenK.has(t) || keyFindings.length >= 3) return;
+    seenK.add(t);
+    keyFindings.push(truncate(t, 280));
+  };
+  const pushDisagreementPoint = (raw: string) => {
+    const t = raw.trim();
+    if (!t || seenD.has(t) || disagreementPoints.length >= 3) return;
+    seenD.add(t);
+    disagreementPoints.push(truncate(t, 280));
+  };
+
+  const synthRoot = data.structuredSynthesis ?? data.synthesis;
+  const candidates: unknown[] = [];
+  if (synthRoot && typeof synthRoot === "object") {
+    candidates.push(synthRoot);
+    const nested = (synthRoot as Record<string, unknown>).structured;
+    if (nested && typeof nested === "object") candidates.push(nested);
+  }
+
+  for (const rep of candidates) {
+    if (!rep || typeof rep !== "object") continue;
+    const r = rep as Record<string, unknown>;
+    const kf = r.keyFindings;
+    if (Array.isArray(kf)) {
+      for (const f of kf) {
+        if (keyFindings.length >= 3) break;
+        if (typeof f === "string") pushFinding(f);
+        else if (f && typeof f === "object") {
+          const o = f as Record<string, unknown>;
+          pushFinding(String(o.finding ?? o.claim ?? o.description ?? ""));
+        }
+      }
+    }
+    const dg = r.disagreements;
+    if (Array.isArray(dg)) {
+      for (const d of dg) {
+        if (disagreementPoints.length >= 3) break;
+        if (typeof d === "string") pushDisagreementPoint(d);
+        else if (d && typeof d === "object") {
+          const o = d as Record<string, unknown>;
+          pushDisagreementPoint(String(o.point ?? o.description ?? o.topic ?? o.whyTheyDiffer ?? ""));
+        }
+      }
+    }
+    if (keyFindings.length >= 3 && disagreementPoints.length >= 3) break;
+  }
+
+  return { keyFindings, disagreementPoints };
+}
+
 function summarizeResearch(id: string, data: Record<string, unknown>, email: string): RunSummary {
   const gi = governanceInputFromResearchRun(data);
   const disagreements = extractResearchDisagreementBullets(data);
+  const { keyFindings, disagreementPoints } = extractResearchSynthesisQueueExtras(data);
   return {
     runId: id,
     collection: "runs",
@@ -354,6 +558,8 @@ function summarizeResearch(id: string, data: Record<string, unknown>, email: str
     governanceReasons: Array.isArray(data.governanceReasons) ? (data.governanceReasons as string[]) : [],
     modelHealth: gi.modelHealth,
     ...(disagreements.length > 0 ? { disagreements } : {}),
+    ...(keyFindings.length > 0 ? { keyFindings } : {}),
+    ...(disagreementPoints.length > 0 ? { disagreementPoints } : {}),
     createdAt: new Date(firestoreMillis(data.createdAt) || Date.now()).toISOString(),
     userId: String(data.userId ?? ""),
     userEmail: email,
@@ -372,7 +578,7 @@ function summarizeVerification(id: string, data: Record<string, unknown>, email:
     firestoreMillis(data.verifiedAt) ||
     Date.now();
   const ownerUid = ownerUidFromVerificationDoc(data);
-  const modelVerdicts = extractModelVerdictsFromVerification(data);
+  const reviewExtras = buildVerificationQueueReviewExtras(data);
   const { agreementSummary, dissentSummary } = buildAgreementDissentFromVerification(data);
   const digestDisagreements = verificationDisagreementBullets(data);
   const claimVerdictSummary = firstVerificationModelSummary(data);
@@ -387,7 +593,11 @@ function summarizeVerification(id: string, data: Record<string, unknown>, email:
     governanceReasons: Array.isArray(data.governanceReasons) ? (data.governanceReasons as string[]) : [],
     modelHealth: gi.modelHealth,
     verificationVerdict: data.verdict != null ? String(data.verdict) : undefined,
-    ...(modelVerdicts.length > 0 ? { modelVerdicts } : {}),
+    ...(reviewExtras.modelVerdicts.length > 0 ? { modelVerdicts: reviewExtras.modelVerdicts } : {}),
+    ...(reviewExtras.agreementPoints.length > 0 ? { agreementPoints: reviewExtras.agreementPoints } : {}),
+    ...(reviewExtras.disagreementPoints.length > 0 ? { disagreementPoints: reviewExtras.disagreementPoints } : {}),
+    ...(reviewExtras.correctParts.length > 0 ? { correctParts: reviewExtras.correctParts } : {}),
+    ...(reviewExtras.incorrectParts.length > 0 ? { incorrectParts: reviewExtras.incorrectParts } : {}),
     ...(agreementSummary ? { agreementSummary } : {}),
     ...(dissentSummary ? { dissentSummary } : {}),
     ...(digestDisagreements.length > 0 ? { disagreements: digestDisagreements } : {}),
@@ -447,10 +657,11 @@ function filterRowForQueue(
 function runsQuerySimple(visibleUserIds: string[], fetchLimit: number): Query {
   if (!adminDb) throw new Error("no db");
   const col = adminDb.collection("runs");
-  if (visibleUserIds.length === 1) {
-    return col.where("userId", "==", visibleUserIds[0]).orderBy("createdAt", "desc").limit(fetchLimit);
-  }
-  return col.where("userId", "in", visibleUserIds).orderBy("createdAt", "desc").limit(fetchLimit);
+  const base =
+    visibleUserIds.length === 1
+      ? col.where("userId", "==", visibleUserIds[0]).orderBy("createdAt", "desc").limit(fetchLimit)
+      : col.where("userId", "in", visibleUserIds).orderBy("createdAt", "desc").limit(fetchLimit);
+  return base.select(...RUN_QUEUE_FIELDS);
 }
 
 /**
@@ -464,11 +675,13 @@ async function fetchVerificationDocsForOwners(
   if (!adminDb) throw new Error("no db");
   const col = adminDb.collection("verifications");
   const perOwnerLimit = Math.min(
-    300,
-    Math.max(60, Math.ceil(fetchLimit / Math.max(1, visibleUserIds.length)) + 40)
+    45,
+    Math.max(12, Math.ceil(fetchLimit / Math.max(1, visibleUserIds.length)) + 8)
   );
   const snaps = await Promise.all(
-    visibleUserIds.map((ownerId) => col.where("userId", "==", ownerId).limit(perOwnerLimit).get())
+    visibleUserIds.map((ownerId) =>
+      col.where("userId", "==", ownerId).select(...VER_QUEUE_FIELDS).limit(perOwnerLimit).get()
+    )
   );
   const byId = new Map<string, QueryDocumentSnapshot>();
   for (const s of snaps) {
@@ -477,6 +690,73 @@ async function fetchVerificationDocsForOwners(
     }
   }
   return { docs: [...byId.values()], perOwnerLimit };
+}
+
+type StagedQueueRow = {
+  sortKey: number;
+  kind: "research" | "verification";
+  docId: string;
+  data: Record<string, unknown>;
+  rowUid: string;
+  docEmail?: string;
+};
+
+async function loadRunsStagedForQueue(
+  visibleUserIds: string[],
+  visibleSet: Set<string>,
+  fetchLimit: number,
+  queueCutoffMs: number,
+  statusFilter: string
+): Promise<{ staged: StagedQueueRow[]; snapSize: number }> {
+  const runsSnap = await runsQuerySimple(visibleUserIds, fetchLimit).get();
+  const staged: StagedQueueRow[] = [];
+  for (const doc of runsSnap.docs) {
+    const data = doc.data() as Record<string, unknown>;
+    if (!visibleSet.has(String(data.userId ?? ""))) continue;
+    const createdMs = researchCreatedMs(data);
+    if (!createdMs || createdMs < queueCutoffMs) continue;
+    if (!filterRowForQueue(data, statusFilter, "runs")) continue;
+    staged.push({
+      sortKey: firestoreMillis(data.createdAt),
+      kind: "research",
+      docId: doc.id,
+      data,
+      rowUid: String(data.userId ?? ""),
+      docEmail: typeof data.userEmail === "string" ? data.userEmail : undefined,
+    });
+  }
+  return { staged, snapSize: runsSnap.size };
+}
+
+async function loadVerificationsStagedForQueue(
+  visibleUserIds: string[],
+  visibleSet: Set<string>,
+  fetchLimit: number,
+  queueCutoffMs: number,
+  statusFilter: string
+): Promise<{ staged: StagedQueueRow[]; docsRead: number; perOwnerLimit: number }> {
+  const { docs: verDocs, perOwnerLimit } = await fetchVerificationDocsForOwners(visibleUserIds, fetchLimit);
+  const staged: StagedQueueRow[] = [];
+  for (const doc of verDocs) {
+    const data = doc.data() as Record<string, unknown>;
+    if (!isClaimVerificationRow(data)) continue;
+    const rowUid = ownerUidFromVerificationDoc(data);
+    if (!rowUid || !visibleSet.has(rowUid)) continue;
+    const vMs = verificationTimeMs(data);
+    if (!vMs || vMs < queueCutoffMs) continue;
+    if (!filterRowForQueue(data, statusFilter, "verifications")) continue;
+    const sortKey =
+      firestoreMillis(data.timestamp) || firestoreMillis(data.createdAt) || firestoreMillis(data.verifiedAt);
+    staged.push({
+      sortKey,
+      kind: "verification",
+      docId: doc.id,
+      data,
+      rowUid,
+      docEmail: typeof data.userEmail === "string" ? data.userEmail : undefined,
+    });
+  }
+  return { staged, docsRead: verDocs.length, perOwnerLimit };
 }
 
 export async function GET(request: NextRequest) {
@@ -500,12 +780,14 @@ export async function GET(request: NextRequest) {
   );
 
   const { searchParams } = request.nextUrl;
-  const limitRawEarly = parseInt(searchParams.get("limit") ?? "50", 10);
-  const limitEarly = Number.isFinite(limitRawEarly) ? Math.min(100, Math.max(1, limitRawEarly)) : 50;
+  const limitRawEarly = parseInt(searchParams.get("limit") ?? "15", 10);
+  const limitEarly = Number.isFinite(limitRawEarly) ? Math.min(50, Math.max(1, limitRawEarly)) : 15;
   const offsetRawEarly = parseInt(searchParams.get("offset") ?? "0", 10);
   const offsetEarly = Number.isFinite(offsetRawEarly) && offsetRawEarly >= 0 ? offsetRawEarly : 0;
 
-  const vis = await resolveGovernanceVisibleUserIds(resolved.uid, resolved.email);
+  const tVis0 = Date.now();
+  const vis = await resolveGovernanceVisibleUserIdsCached(resolved.uid, resolved.email);
+  console.log(`[governance/queue] visibleUserIds: ${Date.now() - tVis0}ms`);
   if (!vis.ok) {
     if (vis.kind === "plan_required") {
       return governanceQueuePlanForbiddenResponse();
@@ -574,116 +856,97 @@ export async function GET(request: NextRequest) {
   const limit = limitEarly;
   const offset = offsetEarly;
 
-  const fetchLimit = Math.min(500, Math.max(200, offset + limit * 4));
+  const fetchLimit = Math.min(150, Math.max(40, offset + limit * 3));
 
   const ownerProfileCache = new Map<string, OwnerProfileCacheEntry>();
   const merged: Array<{ sortKey: number; summary: RunSummary }> = [];
   const queueCutoffMs = Date.now() - QUEUE_LOOKBACK_MS;
+  const visibleSet = new Set(visibleUserIds);
 
   try {
     let runsSnapSize = 0;
     let verSnapSize = 0;
 
-    if (runType === "research" || runType === "all") {
-      try {
-        const runsSnap = await runsQuerySimple(visibleUserIds, fetchLimit).get();
-        runsSnapSize = runsSnap.size;
-        for (const doc of runsSnap.docs) {
-          const data = doc.data() as Record<string, unknown>;
-          if (!visibleUserIds.includes(String(data.userId ?? ""))) continue;
-          const createdMs = researchCreatedMs(data);
-          if (!createdMs || createdMs < queueCutoffMs) continue;
-          if (!filterRowForQueue(data, statusFilter, "runs")) continue;
-          const rowUid = String(data.userId ?? "");
-          const docEmail =
-            typeof data.userEmail === "string" ? data.userEmail : undefined;
-          const { email, ownerAssignedReviewerAt } = await resolveQueueOwnerContext(
-            rowUid,
-            docEmail,
-            resolved.uid,
-            ownerProfileCache
-          );
-          const summary = summarizeResearch(doc.id, data, email);
-          if (ownerAssignedReviewerAt) summary.ownerAssignedReviewerAt = ownerAssignedReviewerAt;
-          merged.push({
-            sortKey: firestoreMillis(data.createdAt),
-            summary,
+    const tFs0 = Date.now();
+    const staged: StagedQueueRow[] = [];
+
+    try {
+      if (runType === "all") {
+        const [rRes, vRes] = await Promise.all([
+          loadRunsStagedForQueue(visibleUserIds, visibleSet, fetchLimit, queueCutoffMs, statusFilter),
+          loadVerificationsStagedForQueue(visibleUserIds, visibleSet, fetchLimit, queueCutoffMs, statusFilter),
+        ]);
+        runsSnapSize = rRes.snapSize;
+        verSnapSize = vRes.docsRead;
+        staged.push(...rRes.staged, ...vRes.staged);
+        if (process.env.NODE_ENV !== "production") {
+          console.log(`[governance/queue] Verifications perOwner cap used (parallel branch)`, {
+            perOwnerLimit: vRes.perOwnerLimit,
+            docsRead: vRes.docsRead,
           });
         }
-      } catch (err: unknown) {
-        logFirestoreError("runs", err);
-        if (isFirestoreIndexError(err)) {
-          return indexRequiredResponse();
-        }
-        return NextResponse.json(
-          { ok: false, error: { code: "query_failed", message: "Failed to load governance queue." } },
-          { status: 500 }
-        );
-      }
-    }
-
-    if (runType === "verification" || runType === "all") {
-      try {
-        const { docs: verDocs, perOwnerLimit } = await fetchVerificationDocsForOwners(
+      } else if (runType === "research") {
+        const rRes = await loadRunsStagedForQueue(
           visibleUserIds,
-          fetchLimit
+          visibleSet,
+          fetchLimit,
+          queueCutoffMs,
+          statusFilter
         );
-        verSnapSize = verDocs.length;
-
-        console.log(`[governance/queue] Verifications query:`, {
-          collection: "verifications",
-          userIdField: "userId",
-          queryMode: "per_owner_equality_limit",
+        runsSnapSize = rRes.snapSize;
+        staged.push(...rRes.staged);
+      } else {
+        const vRes = await loadVerificationsStagedForQueue(
           visibleUserIds,
-          perOwnerLimit,
-          docsFound: verDocs.length,
-        });
-
-        if (verDocs.length > 0) {
-          const firstDoc = verDocs[0];
-          const sample = firstDoc.data() as Record<string, unknown>;
-          console.log(`[governance/queue] Sample verification doc fields:`, Object.keys(sample));
-          console.log(`[governance/queue] Sample verification doc userId:`, sample.userId);
-          console.log(`[governance/queue] Sample verification doc governanceStatus:`, sample.governanceStatus);
-          console.log(
-            `[governance/queue] Sample verification doc timestamp field:`,
-            sample.timestamp || sample.createdAt || sample.verifiedAt || "NONE FOUND"
-          );
-        }
-
-        for (const doc of verDocs) {
-          const data = doc.data() as Record<string, unknown>;
-          if (!isClaimVerificationRow(data)) continue;
-          const rowUid = ownerUidFromVerificationDoc(data);
-          if (!rowUid || !visibleUserIds.includes(rowUid)) continue;
-          const vMs = verificationTimeMs(data);
-          if (!vMs || vMs < queueCutoffMs) continue;
-          if (!filterRowForQueue(data, statusFilter, "verifications")) continue;
-          const docEmail =
-            typeof data.userEmail === "string" ? data.userEmail : undefined;
-          const { email, ownerAssignedReviewerAt } = await resolveQueueOwnerContext(
-            rowUid,
-            docEmail,
-            resolved.uid,
-            ownerProfileCache
-          );
-          const sortKey =
-            firestoreMillis(data.timestamp) || firestoreMillis(data.createdAt) || firestoreMillis(data.verifiedAt);
-          const summary = summarizeVerification(doc.id, data, email);
-          if (ownerAssignedReviewerAt) summary.ownerAssignedReviewerAt = ownerAssignedReviewerAt;
-          merged.push({ sortKey, summary });
-        }
-      } catch (err: unknown) {
-        logFirestoreError("verifications", err);
-        if (isFirestoreIndexError(err)) {
-          return indexRequiredResponse();
-        }
-        return NextResponse.json(
-          { ok: false, error: { code: "query_failed", message: "Failed to load governance queue." } },
-          { status: 500 }
+          visibleSet,
+          fetchLimit,
+          queueCutoffMs,
+          statusFilter
         );
+        verSnapSize = vRes.docsRead;
+        staged.push(...vRes.staged);
+        if (process.env.NODE_ENV !== "production") {
+          console.log(`[governance/queue] Verifications perOwner cap`, {
+            perOwnerLimit: vRes.perOwnerLimit,
+            docsRead: vRes.docsRead,
+          });
+        }
       }
+    } catch (err: unknown) {
+      logFirestoreError("runs_or_verifications", err);
+      if (isFirestoreIndexError(err)) {
+        return indexRequiredResponse();
+      }
+      return NextResponse.json(
+        { ok: false, error: { code: "query_failed", message: "Failed to load governance queue." } },
+        { status: 500 }
+      );
     }
+    console.log(`[governance/queue] Firestore queries: ${Date.now() - tFs0}ms`);
+
+    const tOwn0 = Date.now();
+    await prefetchOwnerProfilesForQueue(
+      staged.map((s) => s.rowUid),
+      ownerProfileCache
+    );
+    console.log(`[governance/queue] Owner profile prefetch: ${Date.now() - tOwn0}ms`);
+
+    const tProc0 = Date.now();
+    for (const s of staged) {
+      const { email, ownerAssignedReviewerAt } = resolveQueueOwnerContextSync(
+        s.rowUid,
+        s.docEmail,
+        resolved.uid,
+        ownerProfileCache
+      );
+      const summary =
+        s.kind === "research"
+          ? summarizeResearch(s.docId, s.data, email)
+          : summarizeVerification(s.docId, s.data, email);
+      if (ownerAssignedReviewerAt) summary.ownerAssignedReviewerAt = ownerAssignedReviewerAt;
+      merged.push({ sortKey: s.sortKey, summary });
+    }
+    console.log(`[governance/queue] Processing: ${Date.now() - tProc0}ms`);
 
     merged.sort((a, b) => b.sortKey - a.sortKey);
     const total = merged.length;
@@ -694,6 +957,7 @@ export async function GET(request: NextRequest) {
         `${merged.length} rows after 7d + status filters for userIds: ${visibleUserIds.join(", ")} ` +
         `(cutoff ${new Date(queueCutoffMs).toISOString()})`
     );
+    console.log(`[governance/queue] Total: ${Date.now() - tVis0}ms`);
 
     return NextResponse.json({
       ok: true,

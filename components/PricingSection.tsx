@@ -24,8 +24,8 @@ export default function PricingSection() {
           Plans and limits
         </h2>
         <p className="text-lg text-slate-600 max-w-2xl mx-auto">
-          Start free with two models per run. Upgrade when you need the full five-model panel and higher
-          monthly run limits.
+          Start free with two models per run. The 5-Model plan adds structured review: policy thresholds,
+          optional peer review, a review queue, and an audit log of decisions.
         </p>
       </div>
 
@@ -167,6 +167,60 @@ function PricingCard({ planId, billingInterval }: PricingCardProps) {
             <span className="text-sm text-slate-700">{feature}</span>
           </li>
         ))}
+        {planId === "lite" && (
+          <>
+            <li className="flex items-start">
+              <svg
+                className="h-5 w-5 text-sky-500 mr-2 mt-0.5 flex-shrink-0"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M5 13l4 4L19 7"
+                />
+              </svg>
+              <span className="text-sm text-slate-700">Governance status badges on your results</span>
+            </li>
+            <li className="flex items-start">
+              <span
+                className="mr-2 mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center text-sm font-bold text-slate-400"
+                aria-hidden
+              >
+                ✗
+              </span>
+              <span className="text-sm text-slate-500">
+                Governance Dashboard{" "}
+                <span className="text-slate-400">(5-Model plan)</span>
+              </span>
+            </li>
+            <li className="flex items-start">
+              <span
+                className="mr-2 mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center text-sm font-bold text-slate-400"
+                aria-hidden
+              >
+                ✗
+              </span>
+              <span className="text-sm text-slate-500">
+                Peer review <span className="text-slate-400">(5-Model plan)</span>
+              </span>
+            </li>
+          </>
+        )}
+        {planId === "free" && (
+          <li className="flex items-start">
+            <span
+              className="mr-2 mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center text-sm font-bold text-slate-400"
+              aria-hidden
+            >
+              ✗
+            </span>
+            <span className="text-sm text-slate-500">Governance features (upgrade to access)</span>
+          </li>
+        )}
       </ul>
 
       {/* Positioning Text (if present) */}

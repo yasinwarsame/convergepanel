@@ -7,7 +7,7 @@ import { adminDb } from "@/lib/firebase/admin";
 import {
   governanceQueueNotReviewerResponse,
   governanceQueuePlanForbiddenResponse,
-  resolveGovernanceVisibleUserIds,
+  resolveGovernanceVisibleUserIdsCached,
   runOwnerVisibleInGovernance,
 } from "@/lib/governance/governanceVisibleUserIds";
 import { resolveGovernanceRequestUser } from "@/lib/governance/authCheck";
@@ -140,6 +140,26 @@ function auditOwnerEmailLooksValid(s: string | undefined): boolean {
   return typeof s === "string" && s.includes("@");
 }
 
+const AUDIT_LOG_SELECT_FIELDS = [
+  "action",
+  "byUid",
+  "byEmail",
+  "at",
+  "comment",
+  "prevStatus",
+  "nextStatus",
+  "reasons",
+  "policyVersion",
+  "changes",
+  "runId",
+  "collection",
+  "runType",
+  "runOwnerUid",
+  "runOwnerEmail",
+  "question",
+  "consensusScore",
+] as const;
+
 /** Replace UID-shaped runOwnerEmail / fill missing email from users/{uid} before JSON response. */
 async function resolveRunOwnerEmailsForAuditEvents(events: AuditEvent[]): Promise<void> {
   const db = adminDb;
@@ -154,19 +174,26 @@ async function resolveRunOwnerEmailsForAuditEvents(events: AuditEvent[]): Promis
   if (uidsToResolve.size === 0) return;
 
   const emailMap = new Map<string, string>();
-  await Promise.all(
-    [...uidsToResolve].map(async (uid) => {
-      if (!uid) return;
-      try {
-        const docSnap = await db.collection("users").doc(uid).get();
+  const unique = [...uidsToResolve].filter(Boolean);
+  const chunkSize = 10;
+  for (let i = 0; i < unique.length; i += chunkSize) {
+    const chunk = unique.slice(i, i + chunkSize);
+    const refs = chunk.map((uid) => db.collection("users").doc(uid));
+    try {
+      const snaps = await db.getAll(...refs);
+      for (let j = 0; j < snaps.length; j++) {
+        const uid = chunk[j];
+        const docSnap = snaps[j];
         const d = docSnap.data() as Record<string, unknown> | undefined;
         const mail = typeof d?.email === "string" ? d.email.trim() : "";
         emailMap.set(uid, auditOwnerEmailLooksValid(mail) ? mail : uid);
-      } catch {
-        emailMap.set(uid, uid);
       }
-    })
-  );
+    } catch {
+      for (const uid of chunk) {
+        if (!emailMap.has(uid)) emailMap.set(uid, uid);
+      }
+    }
+  }
 
   for (const e of events) {
     let em = (e.runOwnerEmail ?? "").trim();
@@ -192,11 +219,16 @@ async function fetchRecentAuditDocs(maxDocs: number) {
       .collection("admin_audit_logs")
       .orderBy("at", "desc")
       .limit(maxDocs)
+      .select(...AUDIT_LOG_SELECT_FIELDS)
       .get();
     return snapshot.docs;
   } catch (e) {
     console.warn("[governance/audit] orderBy(at) failed, using limit-only fetch:", e);
-    const snapshot = await adminDb.collection("admin_audit_logs").limit(maxDocs).get();
+    const snapshot = await adminDb
+      .collection("admin_audit_logs")
+      .limit(maxDocs)
+      .select(...AUDIT_LOG_SELECT_FIELDS)
+      .get();
     return snapshot.docs;
   }
 }
@@ -209,6 +241,8 @@ export async function GET(request: NextRequest) {
     );
   }
 
+  const t0 = Date.now();
+
   const resolved = await resolveGovernanceRequestUser(request);
   if (!resolved.ok) {
     return NextResponse.json(
@@ -217,7 +251,9 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const vis = await resolveGovernanceVisibleUserIds(resolved.uid, resolved.email);
+  const tVis0 = Date.now();
+  const vis = await resolveGovernanceVisibleUserIdsCached(resolved.uid, resolved.email);
+  console.log(`[governance/audit] visibleUserIds: ${Date.now() - tVis0}ms`);
   if (!vis.ok) {
     if (vis.kind === "plan_required") {
       return governanceQueuePlanForbiddenResponse();
@@ -234,8 +270,8 @@ export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
   const runId = searchParams.get("runId");
   const collection = searchParams.get("collection") as "runs" | "verifications" | null;
-  const limitRaw = parseInt(searchParams.get("limit") ?? "50", 10);
-  const limit = Number.isFinite(limitRaw) ? Math.min(100, Math.max(1, limitRaw)) : 50;
+  const limitRaw = parseInt(searchParams.get("limit") ?? "20", 10);
+  const limit = Number.isFinite(limitRaw) ? Math.min(50, Math.max(1, limitRaw)) : 20;
 
   try {
     if (runId) {
@@ -291,6 +327,7 @@ export async function GET(request: NextRequest) {
           .collection("admin_audit_logs")
           .where("runId", "==", runId)
           .limit(200)
+          .select(...AUDIT_LOG_SELECT_FIELDS)
           .get();
         const fromGlobal = runSnap.docs
           .filter((d) => isGovernanceAuditDoc(d.data() as Record<string, unknown>))
@@ -311,7 +348,10 @@ export async function GET(request: NextRequest) {
         sorted = filterEventsToViewerActions(sorted, resolved.uid);
         const trimmed = sorted.slice(0, limit);
         if (trimmed.length > 0) {
+          const tEm0 = Date.now();
           await resolveRunOwnerEmailsForAuditEvents(trimmed);
+          console.log(`[governance/audit] Email lookups: ${Date.now() - tEm0}ms`);
+          console.log(`[governance/audit] Total: ${Date.now() - t0}ms`);
           return NextResponse.json({ ok: true, events: trimmed, runId, collection });
         }
       } catch {
@@ -338,7 +378,10 @@ export async function GET(request: NextRequest) {
         events = dedupeGovernanceAuditEvents(events);
         events = filterEventsToViewerActions(events, resolved.uid);
         const out1 = events.slice(0, limit);
+        const tEm1 = Date.now();
         await resolveRunOwnerEmailsForAuditEvents(out1);
+        console.log(`[governance/audit] Email lookups: ${Date.now() - tEm1}ms`);
+        console.log(`[governance/audit] Total: ${Date.now() - t0}ms`);
         return NextResponse.json({ ok: true, events: out1, runId, collection });
       } catch {
         const snap = await adminDb.collection(collection).doc(runId).collection("governanceEvents").get();
@@ -354,7 +397,10 @@ export async function GET(request: NextRequest) {
         events = dedupeGovernanceAuditEvents(events);
         events = filterEventsToViewerActions(events, resolved.uid);
         const out2 = events.slice(0, limit);
+        const tEm2 = Date.now();
         await resolveRunOwnerEmailsForAuditEvents(out2);
+        console.log(`[governance/audit] Email lookups: ${Date.now() - tEm2}ms`);
+        console.log(`[governance/audit] Total: ${Date.now() - t0}ms`);
         return NextResponse.json({
           ok: true,
           events: out2,
@@ -364,10 +410,12 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const fetchCap = Math.min(2000, Math.max(limit * 25, 200));
+    const fetchCap = Math.min(120, Math.max(limit * 4, limit));
     console.log("[governance/audit] Global list: fetching up to", fetchCap, "from admin_audit_logs");
 
+    const tFs0 = Date.now();
     const rawDocs = await fetchRecentAuditDocs(fetchCap);
+    console.log(`[governance/audit] Firestore queries: ${Date.now() - tFs0}ms`);
     if (process.env.NODE_ENV !== "production") {
       console.log("[governance/audit] DEBUG: Raw docs from collection:", rawDocs.length);
       if (rawDocs.length > 0) {
@@ -378,6 +426,7 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    const tProc0 = Date.now();
     let events = rawDocs
       .filter((d) => isGovernanceAuditDoc(d.data() as Record<string, unknown>))
       .map((d) => normalizeAuditEvent(d.id, d.data() as Record<string, unknown>));
@@ -387,6 +436,7 @@ export async function GET(request: NextRequest) {
     events = filterEventsToViewerActions(events, resolved.uid);
     events = dedupeGovernanceAuditEvents(events);
     events = events.slice(0, limit);
+    console.log(`[governance/audit] Processing: ${Date.now() - tProc0}ms`);
 
     console.log(
       "[governance/audit] Global list: governance-shaped=",
@@ -395,7 +445,10 @@ export async function GET(request: NextRequest) {
       events.length
     );
 
+    const tEm3 = Date.now();
     await resolveRunOwnerEmailsForAuditEvents(events);
+    console.log(`[governance/audit] Email lookups: ${Date.now() - tEm3}ms`);
+    console.log(`[governance/audit] Total: ${Date.now() - t0}ms`);
     return NextResponse.json({ ok: true, events });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : "Audit query failed";
