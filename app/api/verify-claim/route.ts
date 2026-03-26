@@ -336,8 +336,16 @@ export async function POST(req: NextRequest) {
         sanitizeForFirestore(verificationDoc) as Omit<ClaimVerificationFirestoreDoc, "timestamp">
       );
 
+      const governanceConsensusScore =
+        typeof consensusScore === "number" && !Number.isNaN(consensusScore)
+          ? consensusScore
+          : typeof consensusSummary.overallConsensusScore === "number" &&
+              !Number.isNaN(consensusSummary.overallConsensusScore)
+            ? consensusSummary.overallConsensusScore
+            : null;
+
       const verificationGovernanceInput: GovernanceInput = {
-        consensusScore,
+        consensusScore: governanceConsensusScore,
         evidenceQuality: consensusSummary.evidenceQuality,
         sourceBacked: false,
         missingSourcesCount: 0,
@@ -350,6 +358,15 @@ export async function POST(req: NextRequest) {
         runType: "verification",
         verificationVerdict: verdict,
       };
+      {
+        const evidenceQuality = consensusSummary.evidenceQuality;
+        console.log("[verify-claim] Governance input being sent:", {
+          consensusScore,
+          evidenceQuality,
+          verdict,
+          variableNames: { consensusScore: typeof consensusScore, evidenceQuality: typeof evidenceQuality },
+        });
+      }
       try {
         const govResult = await evaluateAndStoreGovernance({
           runId: verificationId,

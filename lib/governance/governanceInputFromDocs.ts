@@ -35,7 +35,8 @@ function modelHealthFromRunData(data: Record<string, unknown>): GovernanceInput[
   return { ok: 0, substituted: 0, failed: 0 };
 }
 
-function researchConsensusScore(data: Record<string, unknown>): number | null {
+/** Exported for queue diagnostics / re-eval hints. */
+export function researchConsensusScoreFromRunDoc(data: Record<string, unknown>): number | null {
   if (typeof data.consensusScore === "number" && !Number.isNaN(data.consensusScore)) {
     return data.consensusScore;
   }
@@ -94,7 +95,7 @@ function sourceBackedAndMissingFromReport(report: unknown): { sourceBacked: bool
 /** Research run document as returned by Firestore. */
 export function governanceInputFromResearchRun(data: Record<string, unknown>): GovernanceInput {
   const synthesisSum = data.synthesisConsensusSummary as Record<string, unknown> | undefined;
-  const consensusScore = researchConsensusScore(data);
+  const consensusScore = researchConsensusScoreFromRunDoc(data);
   const report = data.synthesizedStructuredReport;
 
   let sourceBacked: boolean;

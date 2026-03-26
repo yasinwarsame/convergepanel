@@ -74,6 +74,8 @@ import { buildEvidencePack } from "@/lib/synthesis/buildEvidencePack";
 import { logger, redact } from "@/lib/logger";
 import { buildSubstitutionBlock, normalizeModelResultPublic, coerceStatus } from "@/lib/panel/normalize";
 import type { UserProfile } from "@/lib/types";
+import { evaluateAndStoreGovernance } from "@/lib/governance/evaluateAndStore";
+import { governanceInputFromResearchRun } from "@/lib/governance/governanceInputFromDocs";
 import {
   applyTeamGovernancePipeline,
   mergeGovernanceIntoBody,
@@ -2092,6 +2094,14 @@ IMMEDIATE OUTPUT: Begin your response with the opening brace { immediately. Do n
       runId: runId || "",
     });
 
+    const consensusSummary = synthesisConsensusDetail;
+    console.log("[synthesize-panel] Consensus data available for governance:", {
+      hasConsensusSummary: !!consensusSummary,
+      overallConsensusScore: consensusSummary?.overallConsensusScore,
+      evidenceQuality: policyConsensusSummary?.evidenceQuality,
+      keyFieldNames: consensusSummary ? Object.keys(consensusSummary) : "no summary",
+    });
+
     // Mark serialization start
     timing.serializationStart = Date.now();
     
@@ -2116,7 +2126,29 @@ IMMEDIATE OUTPUT: Begin your response with the opening brace { immediately. Do n
             cached: false,
           },
         });
-        
+
+        const refreshed = await adminDb.collection("runs").doc(runId).get();
+        const postSynthData = refreshed.data() as Record<string, unknown> | undefined;
+        if (postSynthData) {
+          const governanceInput = governanceInputFromResearchRun(postSynthData);
+          const syn = postSynthData.synthesisConsensusSummary as Record<string, unknown> | undefined;
+          console.log("[governance] Research run input:", {
+            consensusScore: governanceInput.consensusScore,
+            evidenceQuality: governanceInput.evidenceQuality,
+            hasConsensusSummary: !!(
+              syn ||
+              postSynthData.consensusSummary ||
+              postSynthData.policyConsensusSummary
+            ),
+          });
+          void evaluateAndStoreGovernance({
+            runId,
+            collection: "runs",
+            input: governanceInput,
+            ownerUid: uid,
+          }).catch((err) => console.error("[governance] Research evaluation failed:", err));
+        }
+
         timing.serializationEnd = Date.now();
         
         // Final detailed timing summary (dev-only)

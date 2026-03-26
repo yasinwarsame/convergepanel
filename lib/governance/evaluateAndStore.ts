@@ -53,6 +53,21 @@ export async function evaluateAndStoreGovernance(params: {
     }
 
     const policy = await loadPolicy();
+    console.log(
+      "[governance/evaluateAndStore] Full input:",
+      JSON.stringify(
+        {
+          runId: params.runId,
+          collection: params.collection,
+          consensusScore: params.input.consensusScore,
+          evidenceQuality: params.input.evidenceQuality,
+          runType: params.input.runType,
+          question: params.input.question?.substring(0, 50),
+        },
+        null,
+        2
+      )
+    );
     const result = evaluateGovernance(params.input, policy);
 
     await adminDb

@@ -56,7 +56,10 @@ export async function resolveGovernanceVisibleUserIds(uid: string, email: string
     return { ok: false, kind: "plan_required" };
   }
 
-  const allAssigners = [...new Set([...reviewerFor, ...assignersByReviewerField])].filter((id) => id !== uid);
+  const self = uid.trim();
+  const allAssigners = [...new Set([...reviewerFor, ...assignersByReviewerField])].filter(
+    (id) => id.trim() !== self
+  );
 
   if (allAssigners.length === 0) {
     console.log(`[governance/queue] Scoping decision: full plan, no assigners (empty queue scope)`);
@@ -68,6 +71,7 @@ export async function resolveGovernanceVisibleUserIds(uid: string, email: string
     visibleUserIds = visibleUserIds.slice(0, 30);
     console.warn(`[governance/queue] Truncated visibleUserIds to 30 for user ${uid}`);
   }
+  visibleUserIds = visibleUserIds.filter((id) => id.trim() !== self);
 
   console.log(`[governance/queue] Scoping decision: visibleUserIds = [${visibleUserIds.join(", ")}]`);
 

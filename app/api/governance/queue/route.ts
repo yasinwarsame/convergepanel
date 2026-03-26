@@ -13,6 +13,7 @@ import { adminDb } from "@/lib/firebase/admin";
 import {
   governanceInputFromResearchRun,
   governanceInputFromVerificationDoc,
+  researchConsensusScoreFromRunDoc,
 } from "@/lib/governance/governanceInputFromDocs";
 import { getModelDisplayName } from "@/lib/modelInfo";
 import { buildAgreementDisagreementDigest } from "@/lib/verification/agreementDigest";
@@ -547,6 +548,16 @@ function extractResearchSynthesisQueueExtras(data: Record<string, unknown>): {
 }
 
 function summarizeResearch(id: string, data: Record<string, unknown>, email: string): RunSummary {
+  const reasons = Array.isArray(data.governanceReasons) ? (data.governanceReasons as string[]) : [];
+  if (reasons.includes("Consensus score not available")) {
+    const score = researchConsensusScoreFromRunDoc(data);
+    if (score != null) {
+      console.log(
+        `[governance/queue] Run ${id} has score ${score} but was evaluated without it — needs re-evaluation`
+      );
+    }
+  }
+
   const gi = governanceInputFromResearchRun(data);
   const disagreements = extractResearchDisagreementBullets(data);
   const { keyFindings, disagreementPoints } = extractResearchSynthesisQueueExtras(data);
@@ -716,6 +727,17 @@ async function loadRunsStagedForQueue(
   const staged: StagedQueueRow[] = [];
   for (const doc of runsSnap.docs) {
     const data = doc.data() as Record<string, unknown>;
+    {
+      const cs = data.consensusSummary as { overallConsensusScore?: unknown } | undefined;
+      console.log("[governance/queue] Run doc fields:", {
+        runId: doc.id,
+        consensusScore: data.consensusScore,
+        "consensusSummary.overallConsensusScore": cs?.overallConsensusScore,
+        governanceStatus: data.governanceStatus,
+        governanceReasons: data.governanceReasons,
+        allTopLevelKeys: Object.keys(data).filter((k) => k.includes("consensus") || k.includes("score")),
+      });
+    }
     if (!visibleSet.has(String(data.userId ?? ""))) continue;
     const createdMs = researchCreatedMs(data);
     if (!createdMs || createdMs < queueCutoffMs) continue;
@@ -754,6 +776,17 @@ async function loadRunsStagedGlobalQueue(
   const staged: StagedQueueRow[] = [];
   for (const doc of runsSnap.docs) {
     const data = doc.data() as Record<string, unknown>;
+    {
+      const cs = data.consensusSummary as { overallConsensusScore?: unknown } | undefined;
+      console.log("[governance/queue] Run doc fields:", {
+        runId: doc.id,
+        consensusScore: data.consensusScore,
+        "consensusSummary.overallConsensusScore": cs?.overallConsensusScore,
+        governanceStatus: data.governanceStatus,
+        governanceReasons: data.governanceReasons,
+        allTopLevelKeys: Object.keys(data).filter((k) => k.includes("consensus") || k.includes("score")),
+      });
+    }
     const createdMs = researchCreatedMs(data);
     if (!createdMs || createdMs < queueCutoffMs) continue;
     if (!filterRowForQueue(data, statusFilter, "runs")) continue;
@@ -894,7 +927,15 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const { visibleUserIds, queueScope } = vis;
+  let { visibleUserIds, queueScope } = vis;
+
+  if (visibleUserIds !== null) {
+    const self = resolved.uid.trim();
+    visibleUserIds = [...new Set(visibleUserIds.map((id) => id.trim()).filter((id) => id && id !== self))];
+    console.log(
+      `[governance/queue] Reviewer ${resolved.uid}: showing runs from [${visibleUserIds.join(", ")}], excluding own runs`
+    );
+  }
 
   if (visibleUserIds !== null && visibleUserIds.length === 0) {
     return NextResponse.json({
@@ -953,7 +994,7 @@ export async function GET(request: NextRequest) {
   const ownerProfileCache = new Map<string, OwnerProfileCacheEntry>();
   const merged: Array<{ sortKey: number; summary: RunSummary }> = [];
   const queueCutoffMs = Date.now() - QUEUE_LOOKBACK_MS;
-  const visibleSet = visibleUserIds === null ? new Set<string>() : new Set(visibleUserIds);
+  const visibleSet = visibleUserIds === null ? new Set<string>() : new Set(visibleUserIds.filter(Boolean));
 
   try {
     let runsSnapSize = 0;
@@ -1056,14 +1097,18 @@ export async function GET(request: NextRequest) {
     console.log(`[governance/queue] Processing: ${Date.now() - tProc0}ms`);
 
     merged.sort((a, b) => b.sortKey - a.sortKey);
-    const total = merged.length;
-    const runs = merged.slice(offset, offset + limit).map((m) => m.summary);
+
+    // Final safety: never return the current user's own runs in the review queue
+    const filteredMerged = merged.filter((m) => m.summary.userId !== resolved.uid);
+
+    const total = filteredMerged.length;
+    const runs = filteredMerged.slice(offset, offset + limit).map((m) => m.summary);
 
     console.log(
       `[governance/queue] Firestore: ${runsSnapSize} research docs, ${verSnapSize} verification docs read; ` +
-        `${merged.length} rows after 7d + status filters ` +
+        `${filteredMerged.length} rows after 7d + status filters ` +
         (visibleUserIds === null
-          ? "(global admin)"
+          ? "(global admin; viewer's own runs excluded)"
           : `for userIds: ${visibleUserIds.join(", ")}`) +
         ` (cutoff ${new Date(queueCutoffMs).toISOString()})`
     );
