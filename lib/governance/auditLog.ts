@@ -12,7 +12,9 @@ export type GovernanceAuditLogAction =
   | "approved"
   | "blocked"
   | "changes_requested"
-  | "policy_updated";
+  | "policy_updated"
+  | "admin_override"
+  | "admin_deleted";
 
 export async function writeAuditEvent(event: Record<string, any>): Promise<void> {
   if (!adminDb) return;

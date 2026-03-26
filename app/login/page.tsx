@@ -16,6 +16,32 @@ import { auth } from "@/lib/firebase/client";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 
+const LOGIN_VALUE_LINES = [
+  "Run research across 5 AI models simultaneously",
+  "Verify claims with multi-model consensus scoring",
+  "See where models agree and disagree",
+  "Governance dashboard with peer review",
+  "Approve or block flagged claims and research",
+  "Full audit trail on every run and review decision",
+  "Sensitive domain detection (legal, medical, financial)",
+  "Assign a peer reviewer for your work",
+] as const;
+
+function ValueFeatureList(props: { lines: readonly string[]; className?: string }) {
+  return (
+    <ul className={`space-y-2 text-sm leading-snug ${props.className ?? ""}`}>
+      {props.lines.map((line) => (
+        <li key={line} className="flex gap-2.5">
+          <span className="text-emerald-600/90 shrink-0 font-medium" aria-hidden>
+            ✓
+          </span>
+          <span>{line}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -117,63 +143,19 @@ export default function LoginPage() {
   };
 
   /**
-   * Sign In Page - 2-column hero + auth layout
-   * 
-   * This page uses a standardized design system with:
-   * - Colors: Dark slate gradient background, sky-600/700 for buttons, sky-400 for accent text
-   * - Typography: Clear hierarchy (hero > card title > body > labels)
-   * - Layout: 2-column on desktop (marketing left, auth card right), stacks on mobile
-   * 
-   * Design system colors:
-   * - Background: slate-950/900 gradient
-   * - Accent/Brand: sky-600 (buttons), sky-400 (accent text)
-   * - Text: slate-100/200/300 (hero), slate-600/700 (card), slate-400 (muted)
+   * Sign In: auth card + value summary (stacked on mobile, side-by-side from lg).
    */
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-slate-100">
       {/* Centered flex container: stacks on mobile, side-by-side on desktop */}
       {/* lg:flex-row enables the 2-column layout on large screens */}
-      <div className="mx-auto flex min-h-screen max-w-6xl flex-col items-center px-4 py-10 lg:flex-row lg:px-8 lg:py-16">
-        {/* Left column: product narrative and benefit bullets */}
-        {/* On desktop: takes up half width with right padding for spacing */}
-        {/* On mobile: full width with bottom margin */}
-        <div className="w-full lg:w-1/2 lg:pr-12 mb-10 lg:mb-0">
-          <div className="inline-flex items-center gap-2 rounded-full bg-slate-900/60 px-3 py-1 text-xs font-medium text-sky-300 ring-1 ring-sky-500/30">
-            <span className="h-1.5 w-1.5 rounded-full bg-sky-400" />
-            Research · Claim verification · Governance
-          </div>
-
-          <h1 className="mt-6 text-3xl font-semibold text-white sm:text-4xl">
-            Don&apos;t trust one AI.
-            <span className="block text-sky-300">Verify with five.</span>
-          </h1>
-          <p className="mt-3 text-sm text-slate-200 sm:text-base leading-relaxed">
-            Run questions and claims through Claude, GPT, Gemini, Grok, and Perplexity in one place. See
-            consensus, splits, and a score you can explain — before you act.
-          </p>
-
-          <ul className="mt-4 space-y-2 text-sm text-slate-200">
-            <li>• Multi-model research panel with synthesized briefs</li>
-            <li>• Claim verification with verdicts and per-model evidence</li>
-            <li>• Consensus scoring and compact audit trails</li>
-          </ul>
-
-          <p className="mt-4 text-sm text-slate-400">
-            For analysts, researchers, product teams, and anyone who ships decisions on AI output.
-          </p>
-        </div>
-
-        {/* Right column: actual authentication card */}
-        {/* On desktop: takes up half width with max-width constraint */}
-        {/* On mobile: full width */}
-        <div className="w-full max-w-md lg:w-1/2">
+      <div className="mx-auto flex min-h-screen max-w-6xl flex-col items-stretch justify-center gap-10 px-4 py-10 lg:flex-row lg:items-start lg:gap-12 lg:px-8 lg:py-16">
+        {/* Auth card first; value summary follows on mobile, sits beside on lg+ */}
+        <div className="w-full max-w-md shrink-0 lg:mx-0 mx-auto">
           <div className="rounded-2xl bg-white/95 p-6 shadow-xl ring-1 ring-slate-900/5">
             <h2 className="text-xl lg:text-2xl font-semibold tracking-tight text-slate-900">
               Sign in to ConvergePanel
             </h2>
-            <p className="mt-1 text-sm text-slate-600">
-              Multi-model research, claim verification, and governance
-            </p>
 
             {signedOut && (
               <div
@@ -269,6 +251,13 @@ export default function LoginPage() {
               in model outputs.
             </p>
           </div>
+        </div>
+
+        <div className="w-full min-w-0 lg:max-w-md lg:pt-1 xl:max-w-lg">
+          <p className="text-sm font-semibold leading-snug text-slate-100">
+            ConvergePanel — Multi-model research, claim verification, and governance
+          </p>
+          <ValueFeatureList lines={LOGIN_VALUE_LINES} className="mt-4 text-slate-200" />
         </div>
       </div>
     </main>

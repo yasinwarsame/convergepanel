@@ -6,6 +6,7 @@
  */
 
 import { useAuth } from "@/components/AuthProvider";
+import { useAdminPortalAccess } from "@/hooks/useAdminPortalAccess";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useEffect } from "react";
@@ -15,44 +16,33 @@ export default function AdminLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const { user, loading, isAdmin } = useAuth();
+  const { loading } = useAuth();
+  const { canAccess, gateReady, user } = useAdminPortalAccess();
   const router = useRouter();
 
   useEffect(() => {
-    // Wait for auth to finish loading before making decisions
-    if (loading) {
-      console.log("[admin] Auth still loading, waiting...");
+    if (loading || !gateReady) {
       return;
     }
 
-    // Log current state for debugging
-    console.log("[admin] Auth state:", { 
-      hasUser: !!user, 
-      isAdmin, 
-      loading,
-      userEmail: user?.email 
+    console.log("[admin] Auth state:", {
+      hasUser: !!user,
+      canAccess,
+      userEmail: user?.email,
     });
 
-    // If no user, redirect to login
     if (!user) {
-      console.log("[admin] No user, redirecting to login");
       router.push("/login?next=/admin");
       return;
     }
 
-    // If user exists but is not admin, redirect to home (they're already logged in)
-    if (!isAdmin) {
-      console.log("[admin] User is not admin, redirecting to home");
+    if (!canAccess) {
       router.push("/");
       return;
     }
+  }, [user, loading, gateReady, canAccess, router]);
 
-    // User is admin - allow access
-    console.log("[admin] User is admin, allowing access");
-  }, [user, loading, isAdmin, router]);
-
-  // Show loading state while auth is being determined
-  if (loading) {
+  if (loading || !gateReady) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="flex min-h-[60vh] flex-col items-center justify-center gap-2 text-gray-600">
@@ -63,8 +53,7 @@ export default function AdminLayout({
     );
   }
 
-  // If not user or not admin, show nothing (redirect is in progress)
-  if (!user || !isAdmin) {
+  if (!user || !canAccess) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="flex min-h-[60vh] flex-col items-center justify-center gap-2 text-gray-600">

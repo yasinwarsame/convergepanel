@@ -1,14 +1,21 @@
 "use client";
 
 /**
- * Admin dashboard: usage stats and links to admin tools.
+ * Admin dashboard: usage stats, runs browser, and links to admin tools.
  */
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useAuth } from "@/components/AuthProvider";
+import AdminRunsTab from "@/components/admin/AdminRunsTab";
+import { useAdminPortalAccess } from "@/hooks/useAdminPortalAccess";
+
+type AdminTab = "users" | "runs";
 
 export default function AdminDashboard() {
-  const { user, loading: authLoading, authReady, isAdmin } = useAuth();
+  const { user, loading: authLoading, authReady } = useAuth();
+  const { canAccess, gateReady } = useAdminPortalAccess();
+  const [tab, setTab] = useState<AdminTab>("users");
   const [stats, setStats] = useState({
     totalUsers: 0,
     activeUsers: 0,
@@ -18,32 +25,24 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    console.log("[admin] Dashboard auth state:", { 
-      hasUser: !!user, 
-      isAdmin, 
+    console.log("[admin] Dashboard auth state:", {
+      hasUser: !!user,
+      canAccess,
+      gateReady,
       authLoading,
-      userEmail: user?.email 
+      userEmail: user?.email,
     });
 
-    if (authLoading) {
-      console.log("[admin] Auth still loading, waiting...");
+    if (authLoading || !gateReady) {
       return;
     }
 
-    if (!isAdmin) {
-      console.log("[admin] User is not admin, not loading stats");
+    if (!canAccess) {
       return;
     }
-
-    console.log("[admin] User is admin, loading stats");
 
     const fetchStats = async () => {
       if (!authReady || !user) {
-        if (!authReady) {
-          console.log("[admin] Auth not ready yet, waiting...");
-        } else {
-          console.error("[admin] No user available for fetching stats");
-        }
         setLoading(false);
         return;
       }
@@ -106,71 +105,88 @@ export default function AdminDashboard() {
     };
 
     fetchStats();
-  }, [isAdmin, authLoading, user]);
+  }, [canAccess, gateReady, authLoading, authReady, user]);
 
-  // Show loading while auth is being determined
-  if (authLoading) {
-    return (
-      <div className="text-gray-600">Checking admin access…</div>
-    );
+  if (authLoading || !gateReady) {
+    return <div className="text-gray-600">Checking admin access…</div>;
   }
 
-  // If not admin, layout will handle redirect, but show nothing here
-  if (!isAdmin) {
+  if (!canAccess) {
     return null;
   }
 
   return (
     <div>
-      <h1 className="text-3xl font-bold text-gray-900 mb-8">Admin Dashboard</h1>
+      <h1 className="text-3xl font-bold text-gray-900 mb-6">Admin Dashboard</h1>
 
-      {loading ? (
-        <div className="text-gray-600">Loading stats...</div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <div className="bg-white rounded-lg shadow p-6">
-            <h3 className="text-sm font-medium text-gray-500 mb-2">
-              Total Users
-            </h3>
-            <p className="text-3xl font-bold text-gray-900">
-              {stats.totalUsers}
-            </p>
-          </div>
+      <div className="mb-8 flex gap-2 border-b border-gray-200 pb-2">
+        <button
+          type="button"
+          onClick={() => setTab("users")}
+          className={`rounded-lg px-4 py-2 text-sm font-semibold transition-colors ${
+            tab === "users"
+              ? "bg-gray-900 text-white"
+              : "text-gray-600 hover:bg-gray-100"
+          }`}
+        >
+          Users
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab("runs")}
+          className={`rounded-lg px-4 py-2 text-sm font-semibold transition-colors ${
+            tab === "runs"
+              ? "bg-gray-900 text-white"
+              : "text-gray-600 hover:bg-gray-100"
+          }`}
+        >
+          Runs
+        </button>
+      </div>
 
-          <div className="bg-white rounded-lg shadow p-6">
-            <h3 className="text-sm font-medium text-gray-500 mb-2">
-              Active Users
-            </h3>
-            <p className="text-3xl font-bold text-green-600">
-              {stats.activeUsers}
-            </p>
-          </div>
+      {tab === "users" && (
+        <>
+          <p className="mb-6 text-sm text-gray-600">
+            <Link href="/admin/users" className="font-medium text-sky-700 hover:underline">
+              Open user directory
+            </Link>{" "}
+            for account management, roles, and billing tools.
+          </p>
 
-          <div className="bg-white rounded-lg shadow p-6">
-            <h3 className="text-sm font-medium text-gray-500 mb-2">
-              Disabled Users
-            </h3>
-            <p className="text-3xl font-bold text-red-600">
-              {stats.disabledUsers}
-            </p>
-          </div>
+          {loading ? (
+            <div className="text-gray-600">Loading stats...</div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+              <div className="bg-white rounded-lg shadow p-6">
+                <h3 className="text-sm font-medium text-gray-500 mb-2">Total Users</h3>
+                <p className="text-3xl font-bold text-gray-900">{stats.totalUsers}</p>
+              </div>
 
-          <div className="bg-white rounded-lg shadow p-6">
-            <h3 className="text-sm font-medium text-gray-500 mb-2">
-              Models Configured
-            </h3>
-            <p className="text-3xl font-bold text-primary-600">
-              {stats.modelsConfigured}/4
-            </p>
+              <div className="bg-white rounded-lg shadow p-6">
+                <h3 className="text-sm font-medium text-gray-500 mb-2">Active Users</h3>
+                <p className="text-3xl font-bold text-green-600">{stats.activeUsers}</p>
+              </div>
+
+              <div className="bg-white rounded-lg shadow p-6">
+                <h3 className="text-sm font-medium text-gray-500 mb-2">Disabled Users</h3>
+                <p className="text-3xl font-bold text-red-600">{stats.disabledUsers}</p>
+              </div>
+
+              <div className="bg-white rounded-lg shadow p-6">
+                <h3 className="text-sm font-medium text-gray-500 mb-2">Models Configured</h3>
+                <p className="text-3xl font-bold text-primary-600">{stats.modelsConfigured}/4</p>
+              </div>
+            </div>
+          )}
+
+          <div className="mt-12">
+            <h2 className="text-2xl font-bold text-gray-900 mb-4">Data retention cleanup</h2>
+            <PurgeRunsSection />
           </div>
-        </div>
+        </>
       )}
 
-      {/* Data retention cleanup section */}
-      <div className="mt-12">
-        <h2 className="text-2xl font-bold text-gray-900 mb-4">Data retention cleanup</h2>
-        <PurgeRunsSection />
-      </div>
+      {tab === "runs" && <AdminRunsTab />}
     </div>
   );
 }

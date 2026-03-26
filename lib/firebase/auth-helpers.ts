@@ -8,7 +8,9 @@
  */
 
 import "server-only";
+import type { DecodedIdToken } from "firebase-admin/auth";
 import { NextRequest } from "next/server";
+import { isAdminEmail } from "@/lib/admin/config";
 import { adminAuth } from "./admin";
 
 /**
@@ -163,6 +165,47 @@ export async function requireAdmin(
   }
 
   return auth;
+}
+
+/**
+ * Admin portal / support APIs: Firebase `admin` custom claim OR email on {@link isAdminEmail} allowlist.
+ */
+export async function requireAdminApiAccess(
+  request: NextRequest
+): Promise<{ uid: string; email: string } | null> {
+  if (!adminAuth) return null;
+  const authHeader = request.headers.get("authorization");
+  const raw =
+    authHeader?.replace(/^Bearer\s+/i, "")?.trim() || request.cookies.get("__session")?.value;
+  if (!raw) return null;
+
+  const allow = async (decoded: DecodedIdToken): Promise<{ uid: string; email: string } | null> => {
+    let email = typeof decoded.email === "string" ? decoded.email : "";
+    if (!email && decoded.uid) {
+      try {
+        const rec = await adminAuth!.getUser(decoded.uid);
+        email = rec.email ?? "";
+      } catch {
+        /* ignore */
+      }
+    }
+    if (decoded.admin === true || isAdminEmail(email)) {
+      return { uid: decoded.uid, email };
+    }
+    return null;
+  };
+
+  try {
+    const decoded = await adminAuth.verifyIdToken(raw);
+    return await allow(decoded);
+  } catch {
+    try {
+      const decoded = await adminAuth.verifySessionCookie(raw, true);
+      return await allow(decoded);
+    } catch {
+      return null;
+    }
+  }
 }
 
 /**

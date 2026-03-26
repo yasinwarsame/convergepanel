@@ -494,37 +494,6 @@ function runTypeAuditBadge(runType: string | undefined): { label: string; cls: s
   return null;
 }
 
-function RunAuditLookup(props: { onLoad: (runId: string, collection: "runs" | "verifications") => void }) {
-  const [runId, setRunId] = useState("");
-  const [collection, setCollection] = useState<"runs" | "verifications">("runs");
-  return (
-    <>
-      <input
-        value={runId}
-        onChange={(e) => setRunId(e.target.value)}
-        placeholder="Firestore document ID"
-        className="w-full min-w-[200px] flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm sm:max-w-md"
-      />
-      <select
-        value={collection}
-        onChange={(e) => setCollection(e.target.value as "runs" | "verifications")}
-        className="rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm"
-      >
-        <option value="runs">Research (runs)</option>
-        <option value="verifications">Claim</option>
-      </select>
-      <button
-        type="button"
-        disabled={!runId.trim()}
-        onClick={() => props.onLoad(runId.trim(), collection)}
-        className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
-      >
-        Load events
-      </button>
-    </>
-  );
-}
-
 const VERDICTS: { key: string; label: string }[] = [
   { key: "Disputed", label: "Disputed" },
   { key: "Unverifiable", label: "Unverifiable" },
@@ -698,7 +667,7 @@ export default function GovernanceDashboard() {
     "needs_review"
   );
   const [queueRunType, setQueueRunType] = useState<"all" | "research" | "verification">("all");
-  /** Last full snapshot from a single `/api/governance/queue` call (status=all, limit=100). */
+  /** Last full snapshot from a single `/api/governance/queue` call (status=all; stats derived client-side). */
   const [queueSnapshot, setQueueSnapshot] = useState<QueueRow[]>([]);
   const [queueLoading, setQueueLoading] = useState(false);
   const [queueError, setQueueError] = useState<string | null>(null);
@@ -723,25 +692,20 @@ export default function GovernanceDashboard() {
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
   const [auditLoading, setAuditLoading] = useState(false);
   const [auditError, setAuditError] = useState<string | null>(null);
-  const [auditBackfillBusy, setAuditBackfillBusy] = useState(false);
-  const [auditBackfillMessage, setAuditBackfillMessage] = useState<string | null>(null);
-  const [auditDrilldown, setAuditDrilldown] = useState<{
-    runId: string;
-    collection: "runs" | "verifications";
-    events: AuditEvent[];
-    loading: boolean;
-    error: string | null;
-  } | null>(null);
+  const [auditViewMode, setAuditViewMode] = useState<"recent" | "search">("recent");
+  const [auditFromDate, setAuditFromDate] = useState("");
+  const [auditToDate, setAuditToDate] = useState("");
+  const [auditSearchRunType, setAuditSearchRunType] = useState<"all" | "claim" | "research">("all");
   const [auditInlineTrail, setAuditInlineTrail] = useState<AuditInlineTrailState>(null);
 
   const [approveFlash, setApproveFlash] = useState<Record<string, string>>({});
 
   /** Auto queue fetches only; manual Refresh resets retry counter. */
   const queueAutoFailureCountRef = useRef(0);
-  /** One automatic snapshot load per queue-tab visit (per login); manual Refresh calls loadQueueSnapshot directly. */
-  const queueTabFetchedRef = useRef(false);
-  /** One automatic audit load per audit-tab visit (per login); manual Refresh calls fetchAudit directly. */
-  const auditTabFetchedRef = useRef(false);
+  /** One automatic snapshot load per queue-tab visit (per login); reset on manual Refresh. */
+  const queueFetchedRef = useRef(false);
+  /** One automatic audit load per audit-tab visit (per login); reset when user changes. */
+  const auditFetchedRef = useRef(false);
   const MAX_QUEUE_AUTO_RETRIES = 2;
   /** Prevents duplicate POSTs to /api/governance/review (double-click / rapid actions). */
   const reviewInFlightRef = useRef<string | null>(null);
@@ -757,6 +721,7 @@ export default function GovernanceDashboard() {
       if (!user || !authReady) return;
 
       if (options?.manual) {
+        queueFetchedRef.current = false;
         queueAutoFailureCountRef.current = 0;
         setQueueError(null);
         setQueueNotice(null);
@@ -775,7 +740,7 @@ export default function GovernanceDashboard() {
         const q = new URLSearchParams({
           status: "all",
           runType: "all",
-          limit: "100",
+          limit: "15",
           offset: "0",
         });
         const res = await authedFetch(`/api/governance/queue?${q}`, {
@@ -815,6 +780,7 @@ export default function GovernanceDashboard() {
         setQueueSnapshot(data.runs ?? []);
         setQueueError(null);
         setQueueNotice(typeof data.queueNotice === "string" && data.queueNotice.trim() ? data.queueNotice : null);
+        if (options?.manual) queueFetchedRef.current = true;
       } catch {
         queueAutoFailureCountRef.current += 1;
         setQueueError(
@@ -896,7 +862,7 @@ export default function GovernanceDashboard() {
     }
   }, [user, authReady]);
 
-  const fetchAudit = useCallback(async () => {
+  const fetchAuditRecent = useCallback(async () => {
     if (!user || !authReady) return;
     setAuditInlineTrail(null);
     setAuditLoading(true);
@@ -919,6 +885,7 @@ export default function GovernanceDashboard() {
       }
       if (data.ok && Array.isArray(data.events)) {
         setAuditEvents(data.events);
+        setAuditViewMode("recent");
       } else {
         setAuditError("Could not load audit log.");
       }
@@ -929,40 +896,50 @@ export default function GovernanceDashboard() {
     }
   }, [user, authReady]);
 
-  const runAuditBackfill = useCallback(async () => {
-    if (!user || !authReady || !isAdminUser) return;
-    setAuditBackfillBusy(true);
-    setAuditBackfillMessage(null);
+  const runAuditDateSearch = useCallback(async () => {
+    if (!user || !authReady) return;
+    setAuditInlineTrail(null);
+    setAuditLoading(true);
+    setAuditError(null);
     try {
       const { authedFetch } = await import("@/lib/client/authedFetch");
-      const res = await authedFetch("/api/governance/audit/backfill", {
+      const from =
+        auditFromDate.trim() !== "" ? new Date(auditFromDate).toISOString() : "";
+      const to =
+        auditToDate.trim() !== ""
+          ? new Date(`${auditToDate}T23:59:59`).toISOString()
+          : "";
+      const q = new URLSearchParams({ limit: "50" });
+      if (from) q.set("from", from);
+      if (to) q.set("to", to);
+      if (auditSearchRunType !== "all") q.set("runType", auditSearchRunType);
+      const res = await authedFetch(`/api/governance/audit?${q}`, {
         user,
         authReady,
-        method: "POST",
+        method: "GET",
         cache: "no-store",
       });
-      const data = (await res.json()) as {
-        ok?: boolean;
-        written?: number;
-        error?: { message?: string };
-      };
-      if (res.ok && data.ok && typeof data.written === "number") {
-        setAuditBackfillMessage(`Backfilled ${data.written} event(s) from run subcollections.`);
-        await fetchAudit();
-        showToast("Audit backfill complete");
+      if (!res.ok) {
+        setAuditError(await readApiErrorMessage(res, "Search failed."));
+        return;
+      }
+      const data = (await res.json()) as { ok?: boolean; events?: AuditEvent[] };
+      if (data.ok && Array.isArray(data.events)) {
+        setAuditEvents(data.events);
+        setAuditViewMode("search");
       } else {
-        setAuditBackfillMessage(data.error?.message ?? "Backfill failed.");
+        setAuditError("Search failed.");
       }
     } catch {
-      setAuditBackfillMessage("Backfill failed.");
+      setAuditError("Search failed.");
     } finally {
-      setAuditBackfillBusy(false);
+      setAuditLoading(false);
     }
-  }, [user, authReady, isAdminUser, fetchAudit, showToast]);
+  }, [user, authReady, auditFromDate, auditToDate, auditSearchRunType]);
 
   useEffect(() => {
-    if (tab !== "queue" || !user || !authReady || queueTabFetchedRef.current) return;
-    queueTabFetchedRef.current = true;
+    if (tab !== "queue" || !user || !authReady || queueFetchedRef.current) return;
+    queueFetchedRef.current = true;
     void loadQueueSnapshot();
   }, [tab, user, authReady, loadQueueSnapshot]);
 
@@ -979,10 +956,10 @@ export default function GovernanceDashboard() {
 
   /* Auto-load recent audit events when the Audit tab is active (no runId required). */
   useEffect(() => {
-    if (tab !== "audit" || !user || !authReady || auditDrilldown || auditTabFetchedRef.current) return;
-    auditTabFetchedRef.current = true;
-    void fetchAudit();
-  }, [tab, user, authReady, fetchAudit, auditDrilldown]);
+    if (tab !== "audit" || !user || !authReady || auditFetchedRef.current) return;
+    auditFetchedRef.current = true;
+    void fetchAuditRecent();
+  }, [tab, user, authReady, fetchAuditRecent]);
 
   useEffect(() => {
     if (tab !== "audit") setAuditInlineTrail(null);
@@ -997,8 +974,8 @@ export default function GovernanceDashboard() {
 
   useEffect(() => {
     queueAutoFailureCountRef.current = 0;
-    queueTabFetchedRef.current = false;
-    auditTabFetchedRef.current = false;
+    queueFetchedRef.current = false;
+    auditFetchedRef.current = false;
     setQueueError(null);
     setQueueNotice(null);
   }, [user?.uid]);
@@ -1146,33 +1123,6 @@ export default function GovernanceDashboard() {
       }
     } finally {
       setPolicySaving(false);
-    }
-  };
-
-  const openAuditDrilldown = async (runId: string, collection: "runs" | "verifications") => {
-    if (!user || !authReady) return;
-    setAuditDrilldown({ runId, collection, events: [], loading: true, error: null });
-    try {
-      const { authedFetch } = await import("@/lib/client/authedFetch");
-      const q = new URLSearchParams({ runId, collection, limit: "100" });
-      const res = await authedFetch(`/api/governance/audit?${q}`, {
-        user,
-        authReady,
-        method: "GET",
-        cache: "no-store",
-      });
-      if (!res.ok) {
-        const errMsg = await readApiErrorMessage(res, "Could not load run events.");
-        setAuditDrilldown((d) => (d ? { ...d, loading: false, error: errMsg } : null));
-        return;
-      }
-      const data = (await res.json()) as { ok?: boolean; events?: AuditEvent[] };
-      const ev = (data.events ?? []).slice().sort((a, b) => b.at.localeCompare(a.at));
-      setAuditDrilldown({ runId, collection, events: ev, loading: false, error: null });
-    } catch {
-      setAuditDrilldown((d) =>
-        d ? { ...d, loading: false, error: "Could not load run events." } : null
-      );
     }
   };
 
@@ -1343,7 +1293,6 @@ export default function GovernanceDashboard() {
       aria-selected={tab === id}
       onClick={() => {
         setTab(id);
-        if (id === "audit") setAuditDrilldown(null);
       }}
       className={`inline-flex flex-1 items-center justify-center gap-2 rounded-xl border-2 px-5 py-3.5 text-lg font-bold tracking-tight transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 md:text-xl sm:min-w-[160px] sm:flex-none ${
         tab === id
@@ -1779,149 +1728,128 @@ export default function GovernanceDashboard() {
       )}
 
       {tab === "audit" && (
-        <div className="space-y-4">
-          {auditDrilldown ? (
-            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <h2 className="text-lg font-semibold text-slate-900">
+              {auditViewMode === "search" ? "Search results" : "Recent Governance Activity"}
+            </h2>
+            <div className="flex flex-wrap items-center gap-3">
+              {auditViewMode === "search" ? (
+                <button
+                  type="button"
+                  disabled={auditLoading}
+                  onClick={() => void fetchAuditRecent()}
+                  className="text-sm font-semibold text-sky-700 hover:underline disabled:opacity-50"
+                >
+                  Clear search / Show recent
+                </button>
+              ) : null}
               <button
                 type="button"
-                onClick={() => setAuditDrilldown(null)}
-                className="text-sm font-semibold text-sky-700 hover:underline"
+                disabled={auditLoading}
+                onClick={() =>
+                  void (auditViewMode === "search" ? runAuditDateSearch() : fetchAuditRecent())
+                }
+                className="self-start text-sm font-semibold text-sky-700 hover:underline disabled:opacity-50"
               >
-                ← Back to all events
+                Refresh
               </button>
-              <h2 className="mt-4 text-lg font-semibold text-slate-900">
-                Run {truncateText(auditDrilldown.runId, 24)}
-              </h2>
-              {auditDrilldown.loading && <p className="mt-4 text-sm text-slate-500">Loading…</p>}
-              {auditDrilldown.error && (
-                <p className="mt-4 text-sm text-red-600">{auditDrilldown.error}</p>
-              )}
-              <ul className="mt-4 space-y-3">
-                {auditDrilldown.events.map((ev) => {
-                  const rt = runTypeAuditBadge(ev.runType);
-                  const statusLine = auditStatusLine(ev);
-                  return (
-                    <li
-                      key={ev.id}
-                      className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-sm"
-                    >
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className={auditActionBadgeSm(ev.action)}>
-                          {ev.action.replace(/_/g, " ").toUpperCase()}
-                        </span>
-                        {rt && (
-                          <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${rt.cls}`}>
-                            {rt.label}
-                          </span>
-                        )}
-                        <time
-                          className="text-slate-500"
-                          title={formatFullDatetime(ev.at)}
-                          dateTime={ev.at}
-                        >
-                          {formatRelativeTime(ev.at)}
-                        </time>
-                      </div>
-                      {ev.question ? (
-                        <p className="mt-1 text-slate-700">&quot;{truncateText(ev.question, 120)}&quot;</p>
-                      ) : null}
-                      {statusLine && <p className="mt-0.5 text-xs text-slate-600">{statusLine}</p>}
-                      <p className="mt-0.5 text-xs text-slate-500">by {auditActorLabel(ev)}</p>
-                      {ev.comment?.trim() ? (
-                        <p className="mt-1 italic text-slate-600">&quot;{ev.comment}&quot;</p>
-                      ) : null}
-                    </li>
-                  );
-                })}
-              </ul>
             </div>
-          ) : (
-            <>
-              <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <h2 className="text-lg font-semibold text-slate-900">Recent Governance Activity</h2>
-                  <button
-                    type="button"
-                    disabled={auditLoading}
-                    onClick={() => void fetchAudit()}
-                    className="self-start text-sm font-semibold text-sky-700 hover:underline disabled:opacity-50"
-                  >
-                    Refresh
-                  </button>
-                </div>
-                <p className="mt-1 text-sm text-slate-600">
-                  Latest review decisions and policy updates (scoped to your governance access).
-                </p>
-                {auditError && (
-                  <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-                    Failed to load audit log.{" "}
-                    <button
-                      type="button"
-                      className="font-semibold underline"
-                      onClick={() => void fetchAudit()}
-                    >
-                      Retry
-                    </button>
-                  </div>
-                )}
-                {auditLoading ? (
-                  <div className="mt-6 space-y-2">
-                    {[1, 2, 3, 4].map((i) => (
-                      <div key={i} className="h-20 animate-pulse rounded-xl bg-slate-100" />
-                    ))}
-                  </div>
-                ) : auditEvents.length === 0 ? (
-                  <p className="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">
-                    No governance activity yet. Approve or block a run from the Review Queue, or use Backfill
-                    (admin) to import older subcollection events.
-                  </p>
-                ) : (
-                  <ul className="mt-6 space-y-4">
-                    {auditEvents.map((ev) => (
-                      <AuditLogEventCard
-                        key={ev.id}
-                        ev={ev}
-                        inlineTrail={auditInlineTrail}
-                        onToggleTrail={() => void toggleAuditInlineTrail(ev)}
-                      />
-                    ))}
-                  </ul>
-                )}
-              </div>
-
-              {isAdminUser && (
-                <div className="rounded-xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-sm text-amber-950">
-                  <p className="font-medium">Backfill past events</p>
-                  <p className="mt-1 text-amber-900/90">
-                    Copy historical events from run subcollections into the global audit log (idempotent; up
-                    to 200 research runs and 200 claim verifications per request).
-                  </p>
-                  <button
-                    type="button"
-                    disabled={auditBackfillBusy}
-                    onClick={() => void runAuditBackfill()}
-                    className="mt-3 rounded-lg bg-amber-700 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-800 disabled:opacity-50"
-                  >
-                    {auditBackfillBusy ? "Backfilling…" : "Backfill past events"}
-                  </button>
-                  {auditBackfillMessage && (
-                    <p className="mt-2 text-xs text-amber-950/90">{auditBackfillMessage}</p>
-                  )}
-                </div>
-              )}
-
-              <div className="border-t border-slate-200 pt-6">
-                <h3 className="text-sm font-semibold text-slate-800">Inspect a specific run&apos;s audit trail</h3>
-                <p className="mt-1 text-sm text-slate-600">
-                  Optional: load the full timeline for one Firestore document (research run or claim
-                  verification).
-                </p>
-                <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end">
-                  <RunAuditLookup onLoad={(runId, collection) => void openAuditDrilldown(runId, collection)} />
-                </div>
-              </div>
-            </>
+          </div>
+          <p className="mt-1 text-sm text-slate-600">
+            {auditViewMode === "search"
+              ? "Events matching your date range and type filter (your review decisions and policy updates you applied)."
+              : "Latest review decisions and policy updates (scoped to your governance access)."}
+          </p>
+          {auditError && (
+            <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+              {auditViewMode === "search" ? "Search failed. " : "Failed to load audit log. "}
+              <button
+                type="button"
+                className="font-semibold underline"
+                onClick={() =>
+                  void (auditViewMode === "search" ? runAuditDateSearch() : fetchAuditRecent())
+                }
+              >
+                Retry
+              </button>
+            </div>
           )}
+          {auditLoading ? (
+            <div className="mt-6 space-y-2">
+              {[1, 2, 3, 4].map((i) => (
+                <div key={i} className="h-20 animate-pulse rounded-xl bg-slate-100" />
+              ))}
+            </div>
+          ) : auditEvents.length === 0 ? (
+            <p className="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">
+              {auditViewMode === "search"
+                ? "No events matched your search."
+                : "No governance activity yet. Approve or block a run from the Review Queue."}
+            </p>
+          ) : (
+            <ul className="mt-6 space-y-4">
+              {auditEvents.map((ev) => (
+                <AuditLogEventCard
+                  key={ev.id}
+                  ev={ev}
+                  inlineTrail={auditInlineTrail}
+                  onToggleTrail={() => void toggleAuditInlineTrail(ev)}
+                />
+              ))}
+            </ul>
+          )}
+
+          <div className="my-8 border-t border-slate-200" aria-hidden />
+
+          <h3 className="text-sm font-semibold text-slate-800">Search past events</h3>
+          <p className="mt-1 text-sm text-slate-600">
+            Filter by date range and run type. Results replace the list above until you clear the search.
+          </p>
+          <div className="mt-4 flex flex-col gap-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="font-medium text-slate-700">From</span>
+                <input
+                  type="date"
+                  value={auditFromDate}
+                  onChange={(e) => setAuditFromDate(e.target.value)}
+                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="font-medium text-slate-700">To</span>
+                <input
+                  type="date"
+                  value={auditToDate}
+                  onChange={(e) => setAuditToDate(e.target.value)}
+                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="font-medium text-slate-700">Type</span>
+                <select
+                  value={auditSearchRunType}
+                  onChange={(e) =>
+                    setAuditSearchRunType(e.target.value as "all" | "claim" | "research")
+                  }
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                >
+                  <option value="all">All</option>
+                  <option value="claim">Claims only</option>
+                  <option value="research">Research only</option>
+                </select>
+              </label>
+              <button
+                type="button"
+                disabled={auditLoading}
+                onClick={() => void runAuditDateSearch()}
+                className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50 sm:mb-0.5"
+              >
+                Search
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

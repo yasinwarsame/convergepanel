@@ -83,8 +83,8 @@ export const MODEL_LIMITS: Record<ModelId, ModelLimits> = {
     softMaxTokens: 1800,
   },
   gemini: {
-    // Increased maxTokens to 4096 (configurable via GEMINI_MAX_OUTPUT_TOKENS env var)
-    // This ensures Gemini can return full deep-research answers without truncation
+    // Default maxTokens 8192 (configurable via GEMINI_MAX_OUTPUT_TOKENS env var)
+    // Large enough for long research answers and claim-verification JSON without truncation
     // Research-style long answers need space for all sections:
     // Summary, Key Claims, Evidence, Uncertainties, Biases, Gaps, Methodology, etc.
     // Default: 4096 tokens (~3000-3200 words), env override supported
@@ -97,7 +97,7 @@ export const MODEL_LIMITS: Record<ModelId, ModelLimits> = {
           return Math.min(parsed, 8192);
         }
       }
-      return 4096; // Default: 4096 tokens for research-grade responses
+      return 8192; // Default: 8192 — avoids truncation on large JSON (e.g. claim verification) when no per-call override
     })(),
     softMaxTokens: 1800,
   },

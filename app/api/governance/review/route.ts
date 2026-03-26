@@ -146,6 +146,44 @@ export async function POST(request: NextRequest) {
   const prevStatus =
     typeof data.governanceStatus === "string" && data.governanceStatus ? data.governanceStatus : "needs_review";
 
+  const nextGovernanceStatus = reviewAction === "changes_requested" ? "needs_review" : reviewAction;
+
+  if (
+    (reviewAction === "approved" || reviewAction === "blocked") &&
+    prevStatus === reviewAction
+  ) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: {
+          code: "already_reviewed",
+          message: `This run is already ${reviewAction}.`,
+        },
+      },
+      { status: 400 }
+    );
+  }
+
+  if (nextGovernanceStatus === prevStatus) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: {
+          code: "already_reviewed",
+          message:
+            prevStatus === "needs_review"
+              ? "This run is already awaiting review."
+              : `No status change (${prevStatus}).`,
+        },
+      },
+      { status: 400 }
+    );
+  }
+
+  if (prevStatus === "blocked" && reviewAction === "approved") {
+    console.log(`[governance/review] Override: ${resolved.uid} approving previously blocked run ${docId}`);
+  }
+
   const reviewableStatuses = new Set(["needs_review", "blocked"]);
   if (!reviewableStatuses.has(prevStatus)) {
     const message =
@@ -164,8 +202,6 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const nextGovernanceStatus = reviewAction === "changes_requested" ? "needs_review" : reviewAction;
-
   const patch = sanitizeForFirestore({
     governanceStatus: nextGovernanceStatus,
     governanceReviewedBy: resolved.uid,
@@ -178,18 +214,18 @@ export async function POST(request: NextRequest) {
   const runData = data;
   const rowOwnerUid = String(runData.userId ?? runData.uid ?? ownerUid ?? "").trim();
   let runOwnerEmail = typeof runData.userEmail === "string" ? runData.userEmail.trim() : "";
-  if (runOwnerEmail && !runOwnerEmail.includes("@")) {
+  if (!runOwnerEmail || !runOwnerEmail.includes("@")) {
     runOwnerEmail = "";
-  }
-  if (!runOwnerEmail && rowOwnerUid) {
-    try {
-      const ownerDoc = await adminDb.collection("users").doc(rowOwnerUid).get();
-      const od = ownerDoc.data() as Record<string, unknown> | undefined;
-      const fromProfile = typeof od?.email === "string" ? od.email.trim() : "";
-      runOwnerEmail =
-        fromProfile && fromProfile.includes("@") ? fromProfile : rowOwnerUid;
-    } catch {
-      runOwnerEmail = rowOwnerUid;
+    if (rowOwnerUid) {
+      try {
+        const ownerDoc = await adminDb.collection("users").doc(rowOwnerUid).get();
+        const od = ownerDoc.data() as Record<string, unknown> | undefined;
+        const fromProfile = typeof od?.email === "string" ? od.email.trim() : "";
+        runOwnerEmail =
+          fromProfile && fromProfile.includes("@") ? fromProfile : rowOwnerUid;
+      } catch {
+        runOwnerEmail = rowOwnerUid;
+      }
     }
   }
 
@@ -204,10 +240,6 @@ export async function POST(request: NextRequest) {
     typeof runData.consensusScore === "number" ? runData.consensusScore : consensusFromSummary;
 
   const auditNextStatus = reviewAction === "changes_requested" ? "needs_review" : reviewAction;
-  let auditPrevStatus = prevStatus;
-  if (auditPrevStatus === auditNextStatus && auditPrevStatus === "approved") {
-    auditPrevStatus = "needs_review";
-  }
 
   /** Single global audit row per review (governanceEvents subcollection is updated below). */
   await writeAuditEvent({
@@ -218,7 +250,7 @@ export async function POST(request: NextRequest) {
     byUid: uid,
     byEmail: userEmail,
     comment: finalComment || undefined,
-    prevStatus: auditPrevStatus,
+    prevStatus,
     nextStatus: auditNextStatus,
     runOwnerUid: rowOwnerUid,
     runOwnerEmail,

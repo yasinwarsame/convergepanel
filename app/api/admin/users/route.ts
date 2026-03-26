@@ -11,7 +11,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/firebase/auth-helpers";
+import { requireAdminApiAccess } from "@/lib/firebase/auth-helpers";
 import { adminDb } from "@/lib/firebase/admin";
 import { logger } from "@/lib/logger";
 
@@ -30,7 +30,7 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(request: NextRequest) {
   // Verify admin authentication
-  const auth = await requireAdmin(request);
+  const auth = await requireAdminApiAccess(request);
   if (!auth) {
     logger.error("[admin/users] Unauthorized access attempt");
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

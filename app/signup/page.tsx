@@ -23,6 +23,144 @@ function stripUndefined<T extends object>(obj: T): Partial<T> {
   ) as Partial<T>;
 }
 
+const SIGNUP_FREE_LINES = [
+  "8 research or verification runs per month",
+  "2 AI models per run (Claude, GPT, Gemini, Grok, Perplexity)",
+  "Claim verification with consensus scoring",
+  "Governance status badges on every result",
+  "Audit trail on every run",
+  "No credit card required",
+] as const;
+
+const SIGNUP_UPGRADE_LINES = [
+  "All 5 models per run",
+  "150 runs per month",
+  "Governance dashboard and peer review",
+  "Approve or block flagged results",
+  "Full audit log of all review decisions",
+  "Sensitive domain detection",
+] as const;
+
+const FEATURE_SHOWCASE_ITEMS = [
+  {
+    icon: "🔍",
+    title: "Multi-Model Research",
+    lines: [
+      "Ask a question. 5 AI models answer independently.",
+      "See consensus, disagreements, and blind spots.",
+    ],
+  },
+  {
+    icon: "🛡️",
+    title: "Claim Verification",
+    lines: [
+      "Paste any claim. Get a verdict: Confirmed, Disputed, Partially True, or Unverifiable.",
+    ],
+  },
+  {
+    icon: "📊",
+    title: "Consensus Scoring",
+    lines: [
+      "Every run scored 0-100. Know what's defensible and what needs a second look.",
+    ],
+  },
+  {
+    icon: "⚖️",
+    title: "Governance Dashboard",
+    lines: [
+      "Set trust thresholds. Flag weak evidence automatically.",
+      "Review flagged runs before they're acted on.",
+    ],
+  },
+  {
+    icon: "👥",
+    title: "Peer Review",
+    lines: [
+      "Assign a colleague as your reviewer. They approve or block your flagged claims and research.",
+    ],
+  },
+  {
+    icon: "📋",
+    title: "Audit Trail",
+    lines: ["Every run and every review decision logged.", "Who checked what, when, and why."],
+  },
+  {
+    icon: "🔐",
+    title: "Sensitive Domain Detection",
+    lines: [
+      "Legal, medical, and financial queries automatically get stricter verification thresholds.",
+    ],
+  },
+] as const;
+
+function FeatureShowcase(props: { variant: "onDark" | "onLight" }) {
+  const { variant } = props;
+  const headingCls = variant === "onDark" ? "text-slate-100" : "text-slate-900";
+  const titleCls = variant === "onDark" ? "text-white" : "text-slate-900";
+  const bodyCls = variant === "onDark" ? "text-slate-400" : "text-slate-600";
+  const col1 = FEATURE_SHOWCASE_ITEMS.slice(0, 4);
+  const col2 = FEATURE_SHOWCASE_ITEMS.slice(4);
+
+  return (
+    <section aria-labelledby="signup-why-heading" className="text-left">
+      <h3 id="signup-why-heading" className={`text-base font-semibold sm:text-lg ${headingCls}`}>
+        Why ConvergePanel?
+      </h3>
+      <div className="mt-4 grid grid-cols-1 gap-x-8 gap-y-4 lg:grid-cols-2 lg:gap-y-5">
+        <div className="space-y-4 lg:space-y-5">
+          {col1.map((item) => (
+            <div key={item.title} className="flex gap-3">
+              <span className="shrink-0 text-lg leading-none" aria-hidden>
+                {item.icon}
+              </span>
+              <div className="min-w-0">
+                <p className={`text-sm font-semibold ${titleCls}`}>{item.title}</p>
+                {item.lines.map((line) => (
+                  <p key={line} className={`mt-1 text-xs leading-snug sm:text-sm ${bodyCls}`}>
+                    {line}
+                  </p>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="space-y-4 lg:space-y-5">
+          {col2.map((item) => (
+            <div key={item.title} className="flex gap-3">
+              <span className="shrink-0 text-lg leading-none" aria-hidden>
+                {item.icon}
+              </span>
+              <div className="min-w-0">
+                <p className={`text-sm font-semibold ${titleCls}`}>{item.title}</p>
+                {item.lines.map((line) => (
+                  <p key={line} className={`mt-1 text-xs leading-snug sm:text-sm ${bodyCls}`}>
+                    {line}
+                  </p>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function SignupValueCheckList(props: { lines: readonly string[] }) {
+  return (
+    <ul className="mt-2 space-y-1.5 text-sm leading-snug text-slate-700">
+      {props.lines.map((line) => (
+        <li key={line} className="flex gap-2.5">
+          <span className="text-emerald-600/90 shrink-0 font-medium" aria-hidden>
+            ✓
+          </span>
+          <span>{line}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export default function SignupPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -93,30 +231,13 @@ export default function SignupPage() {
     }
   };
 
-  /**
-   * Sign Up Page - 2-column hero + auth layout
-   * 
-   * This page uses the same standardized design system as Sign In:
-   * - Colors: Dark slate gradient background, sky-600/700 for buttons, sky-400 for accent text
-   * - Typography: Clear hierarchy (hero > card title > body > labels)
-   * - Layout: 2-column on desktop (marketing left, auth card right), stacks on mobile
-   * 
-   * Design system colors:
-   * - Background: slate-950/900 gradient
-   * - Accent/Brand: sky-600 (buttons), sky-400 (accent text)
-   * - Text: slate-100/200/300 (hero), slate-600/700 (card), slate-400 (muted)
-   */
+  /** Sign Up: hero image + feature showcase + narrative left; form and plan summary right (showcase repeats in-card on mobile after form). */
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-slate-100">
-      {/* Centered flex container: stacks on mobile, side-by-side on desktop */}
-      {/* lg:flex-row enables the 2-column layout on large screens */}
-      <div className="mx-auto flex min-h-screen max-w-6xl flex-col items-center px-4 py-10 lg:flex-row lg:px-8 lg:py-16">
-        {/* Left column: product narrative and benefit bullets */}
-        {/* On desktop: takes up half width with right padding for spacing */}
-        {/* On mobile: full width with bottom margin */}
-        <div className="w-full lg:w-1/2 lg:pr-12 mb-10 lg:mb-0">
-          {/* Research Image - positioned on top */}
-          <div className="relative w-full aspect-[4/3] rounded-xl overflow-hidden shadow-2xl border border-slate-800/50 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 mb-6">
+      <div className="mx-auto flex min-h-screen max-w-6xl flex-col items-stretch px-4 py-10 lg:flex-row lg:px-8 lg:py-16 lg:gap-10">
+        {/* Left: image (all breakpoints), then showcase + headline (desktop only) */}
+        <div className="mb-8 w-full lg:mb-0 lg:w-1/2 lg:max-w-none lg:pr-4">
+          <div className="relative mb-6 aspect-[4/3] w-full overflow-hidden rounded-xl border border-slate-800/50 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 shadow-2xl lg:mb-8">
             <Image
               src="/research-hero.png"
               alt="AI research workspace with data visualizations, neural network graphics, and advanced analytics"
@@ -124,59 +245,42 @@ export default function SignupPage() {
               className="object-cover"
               priority
               sizes="(max-width: 1024px) 100vw, 50vw"
-              // Fallback if image doesn't exist yet
               onError={(e) => {
-                // Hide image container if image fails to load
-                (e.target as HTMLElement).parentElement?.classList.add('hidden');
+                (e.target as HTMLElement).parentElement?.classList.add("hidden");
               }}
             />
-            {/* Overlay gradient for better visual integration with dark background */}
-            <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-slate-950/20 to-transparent pointer-events-none" />
+            <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-slate-950/80 via-slate-950/20 to-transparent" />
           </div>
 
-          {/* Small pill/tag at top for brand positioning */}
-          <div className="inline-flex items-center gap-2 rounded-full bg-slate-900/60 px-3 py-1 text-xs font-medium text-sky-300 ring-1 ring-sky-500/30">
-            <span className="h-1.5 w-1.5 rounded-full bg-sky-400" />
-            Consensus · Audit trail · Governance on 5-Model plan
+          <div className="hidden lg:block">
+            <FeatureShowcase variant="onDark" />
+            <div className="mt-8 inline-flex items-center gap-2 rounded-full bg-slate-900/60 px-3 py-1 text-xs font-medium text-sky-300 ring-1 ring-sky-500/30">
+              <span className="h-1.5 w-1.5 rounded-full bg-sky-400" />
+              Multi-model research · Claim verification · Governance
+            </div>
+            <h1 className="mt-6 text-3xl font-semibold text-white sm:text-4xl">
+              Don&apos;t trust one AI.
+              <span className="block text-sky-300">Verify with five.</span>
+            </h1>
+            <p className="mt-3 text-sm leading-relaxed text-slate-200 sm:text-base">
+              Research and claims go to multiple models at once—with consensus, governance signals, and
+              audit trails you can rely on.
+            </p>
+            <p className="mt-5 text-sm text-slate-400">
+              <Link
+                href="/pricing"
+                className="font-medium text-sky-400 underline-offset-2 hover:text-sky-300 hover:underline"
+              >
+                Compare plans
+              </Link>{" "}
+              — free tier includes 2 models per run; upgrade for all five and team governance.
+            </p>
           </div>
-
-          <h1 className="mt-6 text-3xl font-semibold text-white sm:text-4xl">
-            Don&apos;t trust one AI.
-            <span className="block text-sky-300">Verify with five.</span>
-          </h1>
-          <p className="mt-3 text-sm text-slate-200 sm:text-base leading-relaxed">
-            Same workflow as the product: research questions and pasted claims go to multiple models at
-            once. You keep the structured synthesis, the claim verdict, and the record of what was
-            checked.
-          </p>
-
-          <p className="mt-4 text-sm font-semibold text-slate-100">Your free account includes:</p>
-          <ul className="mt-2 space-y-2 text-sm text-slate-200">
-            <li>• Up to 8 research or verification runs per month</li>
-            <li>• 2 AI models per run</li>
-            <li>• Claim verification with consensus scoring</li>
-            <li>• Audit trails on every run</li>
-            <li>• No credit card required</li>
-          </ul>
-
-          <p className="mt-4 text-sm text-slate-400">
-            Want structured review, optional peer review, and all five models?{" "}
-            <Link href="/pricing" className="font-medium text-sky-400 hover:text-sky-300 underline-offset-2 hover:underline">
-              See our plans
-            </Link>
-            .
-          </p>
         </div>
 
-        {/* Right column: actual authentication card */}
-        {/* On desktop: takes up half width with max-width constraint */}
-        {/* On mobile: full width */}
-        <div className="w-full max-w-md lg:w-1/2">
-          {/* Welcome info panel above the auth card */}
-          {/* Provides context about what users get when they sign up */}
-          {/* Card styling: bg-slate-50 with slate-200 ring for subtle brand feel */}
+        <div className="w-full max-w-md lg:mx-0 lg:w-1/2 lg:max-w-none">
           <div className="rounded-2xl bg-white/95 p-6 shadow-xl ring-1 ring-slate-900/5">
-            <h2 className="text-xl lg:text-2xl font-semibold tracking-tight text-slate-900">
+            <h2 className="text-xl font-semibold tracking-tight text-slate-900 lg:text-2xl">
               Create your ConvergePanel account
             </h2>
             <p className="mt-1 text-sm text-slate-600">
@@ -281,15 +385,25 @@ export default function SignupPage() {
               </button>
             </form>
 
-            <div className="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-4 text-left text-sm text-slate-700">
-              <p className="font-semibold text-slate-900">Your free account includes:</p>
-              <ul className="mt-2 list-disc space-y-1 pl-5">
-                <li>8 research or claim runs per month</li>
-                <li>2 AI models per run (choose from Claude, GPT, Gemini, Grok, Perplexity)</li>
-                <li>Claim verification with consensus scoring</li>
-                <li>Audit trails on results (view, copy JSON, download where offered)</li>
-                <li>No credit card required</li>
-              </ul>
+            <div className="mt-6 border-t border-slate-200 pt-6 lg:hidden">
+              <FeatureShowcase variant="onLight" />
+            </div>
+
+            <div className="mt-6 space-y-5 rounded-xl border border-slate-200 bg-slate-50 p-4 text-left text-sm text-slate-700">
+              <div>
+                <p className="font-semibold text-slate-900">Your free account includes:</p>
+                <SignupValueCheckList lines={SIGNUP_FREE_LINES} />
+              </div>
+              <div className="border-t border-slate-200 pt-4">
+                <p className="font-semibold text-slate-800">
+                  Upgrade to the{" "}
+                  <Link href="/pricing" className="text-sky-700 underline hover:text-sky-800">
+                    5-Model plan
+                  </Link>{" "}
+                  for:
+                </p>
+                <SignupValueCheckList lines={SIGNUP_UPGRADE_LINES} />
+              </div>
             </div>
 
             <p className="mt-6 text-center text-sm text-slate-500">
@@ -307,6 +421,30 @@ export default function SignupPage() {
               , including that AI outputs may be inaccurate and that you alone are responsible for
               vetting and cross-checking any information. ConvergePanel disclaims liability for
               incorrect model responses.
+            </p>
+          </div>
+
+          <div className="mt-10 space-y-5 border-t border-slate-800/40 pt-8 lg:hidden">
+            <div className="inline-flex items-center gap-2 rounded-full bg-slate-900/60 px-3 py-1 text-xs font-medium text-sky-300 ring-1 ring-sky-500/30">
+              <span className="h-1.5 w-1.5 rounded-full bg-sky-400" />
+              Multi-model research · Claim verification · Governance
+            </div>
+            <h1 className="text-2xl font-semibold text-white sm:text-3xl">
+              Don&apos;t trust one AI.
+              <span className="block text-sky-300">Verify with five.</span>
+            </h1>
+            <p className="text-sm leading-relaxed text-slate-200">
+              Research and claims go to multiple models at once—with consensus, governance signals, and
+              audit trails you can rely on.
+            </p>
+            <p className="text-sm text-slate-400">
+              <Link
+                href="/pricing"
+                className="font-medium text-sky-400 underline-offset-2 hover:text-sky-300 hover:underline"
+              >
+                Compare plans
+              </Link>{" "}
+              — free tier includes 2 models per run; upgrade for all five and team governance.
             </p>
           </div>
         </div>

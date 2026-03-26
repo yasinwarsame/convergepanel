@@ -69,6 +69,13 @@ function aggregateVerdictTextClass(verdict: ClaimVerdictUi): string {
   }
 }
 
+const AGGREGATE_VERDICT_ICONS: Record<ClaimVerdictUi, ReactNode> = {
+  confirmed: <CheckCircle className="h-8 w-8 shrink-0 text-green-400" aria-hidden />,
+  disputed: <AlertTriangle className="h-8 w-8 shrink-0 text-red-400" aria-hidden />,
+  partially_true: <AlertCircle className="h-8 w-8 shrink-0 text-amber-400" aria-hidden />,
+  unverifiable: <HelpCircle className="h-8 w-8 shrink-0 text-gray-400" aria-hidden />,
+};
+
 function aggregateVerdictBadgeClass(verdict: ClaimVerdictUi): string {
   switch (verdict) {
     case "confirmed":
@@ -273,25 +280,32 @@ export default function ClaimVerificationResult({
     const u = data.usableModelCount ?? data.modelEvidence.filter((m) => m.status === "ok").length;
     const a = data.accurateAmongUsable ?? data.modelEvidence.filter((m) => m.status === "ok" && m.verdict === "accurate").length;
 
-    switch (data.verdict) {
+    const v: ClaimVerdictUi =
+      data.verdict === "confirmed" ||
+      data.verdict === "disputed" ||
+      data.verdict === "partially_true" ||
+      data.verdict === "unverifiable"
+        ? data.verdict
+        : "unverifiable";
+    switch (v) {
       case "confirmed":
         return {
           className: "bg-emerald-950/80 border-emerald-600/60 text-emerald-50",
-          icon: <CheckCircle className="h-8 w-8 shrink-0 text-green-400" aria-hidden />,
+          icon: AGGREGATE_VERDICT_ICONS.confirmed,
           title: `This claim is supported by ${a}/${u} models`,
           subtitle: "Majority agreement: accurate",
         };
       case "disputed":
         return {
           className: "bg-orange-950/80 border-orange-600/50 text-orange-50",
-          icon: <AlertTriangle className="h-8 w-8 shrink-0 text-red-400" aria-hidden />,
+          icon: AGGREGATE_VERDICT_ICONS.disputed,
           title: "Models disagree on this claim",
           subtitle: "Review per-model evidence below",
         };
       case "partially_true":
         return {
           className: "bg-amber-950/80 border-amber-600/50 text-amber-50",
-          icon: <AlertCircle className="h-8 w-8 shrink-0 text-amber-400" aria-hidden />,
+          icon: AGGREGATE_VERDICT_ICONS.partially_true,
           title: "Core claim may hold — details need correction",
           subtitle: "Partial agreement across models",
         };
@@ -299,7 +313,7 @@ export default function ClaimVerificationResult({
       default:
         return {
           className: "bg-slate-800/90 border-slate-600/60 text-slate-100",
-          icon: <HelpCircle className="h-8 w-8 shrink-0 text-gray-400" aria-hidden />,
+          icon: AGGREGATE_VERDICT_ICONS.unverifiable,
           title: "Models cannot verify this claim with sufficient confidence",
           subtitle: "Insufficient agreement or too many unknowns",
         };

@@ -15,7 +15,7 @@ import {
 } from "@/lib/governance/governanceInputFromDocs";
 import { getModelDisplayName } from "@/lib/modelInfo";
 import { buildAgreementDisagreementDigest } from "@/lib/verification/agreementDigest";
-import { isAdminEmail } from "@/lib/admin/config";
+import { governanceAdminEmailsForLog, isAdminEmail } from "@/lib/admin/config";
 import {
   governanceQueueNotReviewerResponse,
   governanceQueuePlanForbiddenResponse,
@@ -35,6 +35,8 @@ const RUN_QUEUE_FIELDS = [
   "createdAt",
   "userEmail",
   "question",
+  "query",
+  "consensusSummary",
   "governanceStatus",
   "governanceReasons",
   "governanceReviewedBy",
@@ -60,6 +62,7 @@ const VER_QUEUE_FIELDS = [
   "type",
   "userEmail",
   "claim",
+  "question",
   "timestamp",
   "createdAt",
   "verifiedAt",
@@ -551,7 +554,7 @@ function summarizeResearch(id: string, data: Record<string, unknown>, email: str
     runId: id,
     collection: "runs",
     runType: "research",
-    question: truncate(String(data.question ?? ""), 200),
+    question: truncate(String(data.question ?? data.query ?? ""), 200),
     consensusScore: gi.consensusScore,
     evidenceQuality: gi.evidenceQuality,
     governanceStatus: normalizeGovernanceStatus(String(data.governanceStatus ?? "needs_review")),
@@ -586,7 +589,7 @@ function summarizeVerification(id: string, data: Record<string, unknown>, email:
     runId: id,
     collection: "verifications",
     runType: "verification",
-    question: truncate(String(data.claim ?? ""), 200),
+    question: truncate(String(data.claim ?? data.question ?? ""), 200),
     consensusScore: gi.consensusScore,
     evidenceQuality: gi.evidenceQuality,
     governanceStatus: normalizeGovernanceStatus(String(data.governanceStatus ?? "needs_review")),
@@ -656,11 +659,12 @@ function filterRowForQueue(
 /** userId + orderBy only — uses existing composite (userId, createdAt desc). */
 function runsQuerySimple(visibleUserIds: string[], fetchLimit: number): Query {
   if (!adminDb) throw new Error("no db");
+  const capped = Math.min(25, Math.max(1, fetchLimit));
   const col = adminDb.collection("runs");
   const base =
     visibleUserIds.length === 1
-      ? col.where("userId", "==", visibleUserIds[0]).orderBy("createdAt", "desc").limit(fetchLimit)
-      : col.where("userId", "in", visibleUserIds).orderBy("createdAt", "desc").limit(fetchLimit);
+      ? col.where("userId", "==", visibleUserIds[0]).orderBy("createdAt", "desc").limit(capped)
+      : col.where("userId", "in", visibleUserIds).orderBy("createdAt", "desc").limit(capped);
   return base.select(...RUN_QUEUE_FIELDS);
 }
 
@@ -675,8 +679,8 @@ async function fetchVerificationDocsForOwners(
   if (!adminDb) throw new Error("no db");
   const col = adminDb.collection("verifications");
   const perOwnerLimit = Math.min(
-    45,
-    Math.max(12, Math.ceil(fetchLimit / Math.max(1, visibleUserIds.length)) + 8)
+    25,
+    Math.max(12, Math.ceil(fetchLimit / Math.max(1, visibleUserIds.length)) + 4)
   );
   const snaps = await Promise.all(
     visibleUserIds.map((ownerId) =>
@@ -767,6 +771,8 @@ export async function GET(request: NextRequest) {
     );
   }
 
+  const t0 = Date.now();
+
   const resolved = await resolveGovernanceRequestUser(request);
   if (!resolved.ok) {
     return NextResponse.json(
@@ -775,8 +781,9 @@ export async function GET(request: NextRequest) {
     );
   }
 
+  const email = resolved.email;
   console.log(
-    `[governance/queue] Checking admin for email: "${resolved.email}", isAdmin: ${isAdminEmail(resolved.email)}`
+    `[governance] isAdminEmail check: email="${email ?? ""}", result=${isAdminEmail(email)}, adminList=${governanceAdminEmailsForLog()}`
   );
 
   const { searchParams } = request.nextUrl;
@@ -787,7 +794,7 @@ export async function GET(request: NextRequest) {
 
   const tVis0 = Date.now();
   const vis = await resolveGovernanceVisibleUserIdsCached(resolved.uid, resolved.email);
-  console.log(`[governance/queue] visibleUserIds: ${Date.now() - tVis0}ms`);
+  console.log(`[governance/queue] Visibility: ${Date.now() - tVis0}ms`);
   if (!vis.ok) {
     if (vis.kind === "plan_required") {
       return governanceQueuePlanForbiddenResponse();
@@ -856,7 +863,7 @@ export async function GET(request: NextRequest) {
   const limit = limitEarly;
   const offset = offsetEarly;
 
-  const fetchLimit = Math.min(150, Math.max(40, offset + limit * 3));
+  const fetchLimit = Math.min(50, Math.max(25, offset + limit * 2));
 
   const ownerProfileCache = new Map<string, OwnerProfileCacheEntry>();
   const merged: Array<{ sortKey: number; summary: RunSummary }> = [];
@@ -922,18 +929,15 @@ export async function GET(request: NextRequest) {
         { status: 500 }
       );
     }
-    console.log(`[governance/queue] Firestore queries: ${Date.now() - tFs0}ms`);
+    console.log(`[governance/queue] Firestore: ${Date.now() - tFs0}ms`);
 
-    const tOwn0 = Date.now();
+    const tProc0 = Date.now();
     await prefetchOwnerProfilesForQueue(
       staged.map((s) => s.rowUid),
       ownerProfileCache
     );
-    console.log(`[governance/queue] Owner profile prefetch: ${Date.now() - tOwn0}ms`);
-
-    const tProc0 = Date.now();
     for (const s of staged) {
-      const { email, ownerAssignedReviewerAt } = resolveQueueOwnerContextSync(
+      const { email: rowEmail, ownerAssignedReviewerAt } = resolveQueueOwnerContextSync(
         s.rowUid,
         s.docEmail,
         resolved.uid,
@@ -941,8 +945,8 @@ export async function GET(request: NextRequest) {
       );
       const summary =
         s.kind === "research"
-          ? summarizeResearch(s.docId, s.data, email)
-          : summarizeVerification(s.docId, s.data, email);
+          ? summarizeResearch(s.docId, s.data, rowEmail)
+          : summarizeVerification(s.docId, s.data, rowEmail);
       if (ownerAssignedReviewerAt) summary.ownerAssignedReviewerAt = ownerAssignedReviewerAt;
       merged.push({ sortKey: s.sortKey, summary });
     }
@@ -957,7 +961,7 @@ export async function GET(request: NextRequest) {
         `${merged.length} rows after 7d + status filters for userIds: ${visibleUserIds.join(", ")} ` +
         `(cutoff ${new Date(queueCutoffMs).toISOString()})`
     );
-    console.log(`[governance/queue] Total: ${Date.now() - tVis0}ms`);
+    console.log(`[governance/queue] Total: ${Date.now() - t0}ms`);
 
     return NextResponse.json({
       ok: true,

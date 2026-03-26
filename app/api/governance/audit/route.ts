@@ -272,6 +272,9 @@ export async function GET(request: NextRequest) {
   const collection = searchParams.get("collection") as "runs" | "verifications" | null;
   const limitRaw = parseInt(searchParams.get("limit") ?? "20", 10);
   const limit = Number.isFinite(limitRaw) ? Math.min(50, Math.max(1, limitRaw)) : 20;
+  const fromParam = searchParams.get("from") ?? "";
+  const toParam = searchParams.get("to") ?? "";
+  const runTypeParam = searchParams.get("runType") ?? "all";
 
   try {
     if (runId) {
@@ -410,7 +413,13 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const fetchCap = Math.min(120, Math.max(limit * 4, limit));
+    const needsWideScan =
+      Boolean(fromParam.trim()) ||
+      Boolean(toParam.trim()) ||
+      (Boolean(runTypeParam.trim()) && runTypeParam !== "all");
+    const fetchCap = needsWideScan
+      ? Math.min(1200, Math.max(limit * 25, 300))
+      : Math.min(120, Math.max(limit * 4, limit));
     console.log("[governance/audit] Global list: fetching up to", fetchCap, "from admin_audit_logs");
 
     const tFs0 = Date.now();
@@ -435,6 +444,19 @@ export async function GET(request: NextRequest) {
     events = filterAuditLogDisplayEvents(events);
     events = filterEventsToViewerActions(events, resolved.uid);
     events = dedupeGovernanceAuditEvents(events);
+    if (fromParam.trim()) {
+      events = events.filter((e) => e.at >= fromParam);
+    }
+    if (toParam.trim()) {
+      events = events.filter((e) => e.at <= toParam);
+    }
+    if (runTypeParam && runTypeParam !== "all") {
+      const typeMap: Record<string, string> = { claim: "claim", research: "research" };
+      const want = typeMap[runTypeParam];
+      if (want) {
+        events = events.filter((e) => e.runType === want);
+      }
+    }
     events = events.slice(0, limit);
     console.log(`[governance/audit] Processing: ${Date.now() - tProc0}ms`);
 
