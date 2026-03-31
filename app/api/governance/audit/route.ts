@@ -126,7 +126,7 @@ function dedupeGovernanceAuditEvents(events: AuditEvent[]): AuditEvent[] {
 function enrichRunScopedEvent(
   e: AuditEvent,
   runId: string,
-  collection: "runs" | "verifications"
+  collection: "runs" | "verifications" | "videoVerifications"
 ): AuditEvent {
   return {
     ...e,
@@ -265,7 +265,7 @@ export async function GET(request: NextRequest) {
 
   const { searchParams } = request.nextUrl;
   const runId = searchParams.get("runId");
-  const collection = searchParams.get("collection") as "runs" | "verifications" | null;
+  const collection = searchParams.get("collection") as "runs" | "verifications" | "videoVerifications" | null;
   const limitRaw = parseInt(searchParams.get("limit") ?? "20", 10);
   const limit = Number.isFinite(limitRaw) ? Math.min(50, Math.max(1, limitRaw)) : 20;
   const fromParam = searchParams.get("from") ?? "";
@@ -274,14 +274,17 @@ export async function GET(request: NextRequest) {
 
   try {
     if (runId) {
-      if (collection !== "runs" && collection !== "verifications") {
+      if (collection !== "runs" && collection !== "verifications" && collection !== "videoVerifications") {
         return NextResponse.json(
           {
             ok: false,
             error: {
               code: "validation_error",
               message: "collection is required when runId is set",
-              fields: { collection: 'Required when runId is set; must be "runs" or "verifications"' },
+              fields: {
+                collection:
+                  'Required when runId is set; must be "runs", "verifications", or "videoVerifications"',
+              },
             },
           },
           { status: 400 }
@@ -435,7 +438,7 @@ export async function GET(request: NextRequest) {
       events = events.filter((e) => e.at <= toParam);
     }
     if (runTypeParam && runTypeParam !== "all") {
-      const typeMap: Record<string, string> = { claim: "claim", research: "research" };
+      const typeMap: Record<string, string> = { claim: "claim", research: "research", video: "video" };
       const want = typeMap[runTypeParam];
       if (want) {
         events = events.filter((e) => e.runType === want);

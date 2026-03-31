@@ -34,8 +34,8 @@ type GovernanceQueueScope = "admin_global" | "assigners" | "no_assigners";
 
 type QueueRow = {
   runId: string;
-  collection: "runs" | "verifications";
-  runType: "research" | "verification";
+  collection: "runs" | "verifications" | "videoVerifications";
+  runType: "research" | "verification" | "video";
   question: string;
   consensusScore: number | null;
   evidenceQuality: string | null;
@@ -103,6 +103,27 @@ function queueClaimVerdictToneClass(raw: string | undefined): string {
   return "text-slate-800";
 }
 
+function formatQueueVideoVerdictLabel(raw: string | undefined): string {
+  if (!raw) return "";
+  const k = raw.toLowerCase().replace(/\s+/g, "_");
+  const map: Record<string, string> = {
+    authentic: "Authentic",
+    likely_manipulated: "Likely manipulated",
+    inconclusive: "Inconclusive",
+    insufficient: "Insufficient",
+  };
+  return map[k] ?? raw.replace(/_/g, " ");
+}
+
+function queueVideoVerdictToneClass(raw: string | undefined): string {
+  const k = (raw ?? "").toLowerCase().replace(/\s+/g, "_");
+  if (k === "authentic") return "text-emerald-700";
+  if (k === "likely_manipulated") return "text-red-700";
+  if (k === "inconclusive") return "text-amber-800";
+  if (k === "insufficient") return "text-slate-600";
+  return "text-slate-800";
+}
+
 function queueModelVerdictToneClass(verdict: string): string {
   const s = verdict.toLowerCase();
   if (s === "failed" || s.includes("parse")) return "text-slate-500";
@@ -137,7 +158,7 @@ function queueTableEmptyCopy(params: {
   queueScope: GovernanceQueueScope | null;
   isAdminUser: boolean;
   queueStatus: "needs_review" | "blocked" | "approved" | "all";
-  queueRunType: "all" | "research" | "verification";
+  queueRunType: "all" | "research" | "verification" | "video";
 }): string {
   if (params.snapshotLen > 0 && params.displayedLen === 0) {
     return "No runs match the current filter. Try another status or type.";
@@ -197,7 +218,7 @@ type AuditEvent = {
 type AuditInlineTrailState = {
   eventId: string;
   runId: string;
-  collection: "runs" | "verifications";
+  collection: "runs" | "verifications" | "videoVerifications";
   events: AuditEvent[];
   loading: boolean;
   error: string | null;
@@ -522,6 +543,7 @@ function auditStatusLine(ev: AuditEvent): string | null {
 
 function runTypeAuditBadge(runType: string | undefined): { label: string; cls: string } | null {
   if (runType === "claim") return { label: "CLAIM", cls: "bg-violet-100 text-violet-900" };
+  if (runType === "video") return { label: "VIDEO", cls: "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300" };
   if (runType === "research") return { label: "RESEARCH", cls: "bg-slate-200 text-slate-800" };
   return null;
 }
@@ -697,7 +719,7 @@ export default function GovernanceDashboard() {
   const [queueStatus, setQueueStatus] = useState<"needs_review" | "blocked" | "approved" | "all">(
     "needs_review"
   );
-  const [queueRunType, setQueueRunType] = useState<"all" | "research" | "verification">("all");
+  const [queueRunType, setQueueRunType] = useState<"all" | "research" | "verification" | "video">("all");
   /** Last full snapshot from a single `/api/governance/queue` call (status=all; stats derived client-side). */
   const [queueSnapshot, setQueueSnapshot] = useState<QueueRow[]>([]);
   const [queueLoading, setQueueLoading] = useState(false);
@@ -727,7 +749,7 @@ export default function GovernanceDashboard() {
   const [auditViewMode, setAuditViewMode] = useState<"recent" | "search">("recent");
   const [auditFromDate, setAuditFromDate] = useState("");
   const [auditToDate, setAuditToDate] = useState("");
-  const [auditSearchRunType, setAuditSearchRunType] = useState<"all" | "claim" | "research">("all");
+  const [auditSearchRunType, setAuditSearchRunType] = useState<"all" | "claim" | "research" | "video">("all");
   const [auditInlineTrail, setAuditInlineTrail] = useState<AuditInlineTrailState>(null);
 
   const [approveFlash, setApproveFlash] = useState<Record<string, string>>({});
@@ -857,9 +879,11 @@ export default function GovernanceDashboard() {
   const displayedQueueRows = useMemo(() => {
     let rows = queueSnapshot;
     if (queueRunType !== "all") {
-      rows = rows.filter((r) =>
-        queueRunType === "research" ? r.runType === "research" : r.runType === "verification"
-      );
+      rows = rows.filter((r) => {
+        if (queueRunType === "research") return r.runType === "research";
+        if (queueRunType === "verification") return r.runType === "verification";
+        return r.runType === "video";
+      });
     }
     if (queueStatus !== "all") {
       rows = rows.filter((r) => r.governanceStatus === queueStatus);
@@ -1171,7 +1195,9 @@ export default function GovernanceDashboard() {
     async (ev: AuditEvent) => {
       if (!user || !authReady) return;
       if (!ev.runId || ev.runId === "policy") return;
-      const coll = (ev.collection as "runs" | "verifications") || "runs";
+      const coll =
+        (ev.collection as "runs" | "verifications" | "videoVerifications") ||
+        ("runs" as const);
 
       if (auditInlineTrail?.eventId === ev.id) {
         setAuditInlineTrail(null);
@@ -1403,6 +1429,7 @@ export default function GovernanceDashboard() {
                 <option value="all">All</option>
                 <option value="research">Research</option>
                 <option value="verification">Claims</option>
+                <option value="video">Video</option>
               </select>
             </label>
             <button
@@ -1847,13 +1874,14 @@ export default function GovernanceDashboard() {
                 <select
                   value={auditSearchRunType}
                   onChange={(e) =>
-                    setAuditSearchRunType(e.target.value as "all" | "claim" | "research")
+                    setAuditSearchRunType(e.target.value as "all" | "claim" | "research" | "video")
                   }
                   className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
                 >
                   <option value="all">All</option>
                   <option value="claim">Claims only</option>
                   <option value="research">Research only</option>
+                  <option value="video">Video only</option>
                 </select>
               </label>
               <button
@@ -1975,15 +2003,21 @@ function FragmentRow(props: {
           {truncateText(row.question, 80)}
         </td>
         <td className="px-3 py-2">
-          <span
-            className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${
-              row.runType === "research"
-                ? "border-sky-400 text-sky-800"
-                : "border-purple-400 text-purple-800"
-            }`}
-          >
-            {row.runType === "research" ? "RESEARCH" : "CLAIM"}
-          </span>
+          {row.runType === "video" ? (
+            <span className="inline-flex rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300">
+              VIDEO
+            </span>
+          ) : (
+            <span
+              className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${
+                row.runType === "research"
+                  ? "border-sky-400 text-sky-800"
+                  : "border-purple-400 text-purple-800"
+              }`}
+            >
+              {row.runType === "research" ? "RESEARCH" : "CLAIM"}
+            </span>
+          )}
         </td>
         <td className={`px-3 py-2 font-semibold ${consensusColor(row.consensusScore)}`}>
           {row.consensusScore == null ? "—" : Math.round(row.consensusScore)}
@@ -2122,6 +2156,20 @@ function FragmentRow(props: {
               </div>
             ) : null}
 
+            {row.runType === "video" && row.verificationVerdict ? (
+              <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50/90 px-3 py-2.5">
+                <p className="text-sm text-slate-800">
+                  <span className="font-semibold text-slate-900">Video verdict: </span>
+                  <span className={`font-semibold ${queueVideoVerdictToneClass(row.verificationVerdict)}`}>
+                    {formatQueueVideoVerdictLabel(row.verificationVerdict)}
+                  </span>
+                </p>
+                {row.claimVerdictSummary ? (
+                  <p className="mt-1.5 text-sm leading-snug text-slate-700">{row.claimVerdictSummary}</p>
+                ) : null}
+              </div>
+            ) : null}
+
             {row.modelVerdicts && row.modelVerdicts.length > 0 ? (
               <div className="mt-4 overflow-hidden rounded-lg border border-slate-200 bg-white">
                 <p className="border-b border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-900">
@@ -2177,7 +2225,7 @@ function FragmentRow(props: {
               </div>
             ) : null}
 
-            {row.runType === "verification" &&
+            {(row.runType === "verification" || row.runType === "video") &&
             ((row.agreementPoints && row.agreementPoints.length > 0) || row.agreementSummary) ? (
               <div className="mt-4 rounded-r-lg border-l-4 border-emerald-500 bg-emerald-50/70 pl-3 pr-3 py-3">
                 <p className="text-sm font-semibold text-emerald-900">Where models agree</p>
@@ -2194,24 +2242,26 @@ function FragmentRow(props: {
               </div>
             ) : null}
 
-            {row.runType === "verification" ? (() => {
-              const disagreeLines: string[] = [
-                ...(row.disagreementPoints ?? []),
-                ...(row.disagreementPoints?.length ? [] : row.dissentSummary ? [row.dissentSummary] : []),
-                ...(row.disagreements ?? []),
-              ];
-              if (disagreeLines.length === 0) return null;
-              return (
-                <div className="mt-4 rounded-r-lg border-l-4 border-red-500 bg-red-50/60 pl-3 pr-3 py-3">
-                  <p className="text-sm font-semibold text-red-900">Where models disagree</p>
-                  <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-red-950/90">
-                    {disagreeLines.map((line, i) => (
-                      <li key={i}>{line}</li>
-                    ))}
-                  </ul>
-                </div>
-              );
-            })() : null}
+            {row.runType === "verification" || row.runType === "video"
+              ? (() => {
+                  const disagreeLines: string[] = [
+                    ...(row.disagreementPoints ?? []),
+                    ...(row.disagreementPoints?.length ? [] : row.dissentSummary ? [row.dissentSummary] : []),
+                    ...(row.disagreements ?? []),
+                  ];
+                  if (disagreeLines.length === 0) return null;
+                  return (
+                    <div className="mt-4 rounded-r-lg border-l-4 border-red-500 bg-red-50/60 pl-3 pr-3 py-3">
+                      <p className="text-sm font-semibold text-red-900">Where models disagree</p>
+                      <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-red-950/90">
+                        {disagreeLines.map((line, i) => (
+                          <li key={i}>{line}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  );
+                })()
+              : null}
 
             {row.runType === "verification" && row.correctParts && row.correctParts.length > 0 ? (
               <div className="mt-4">

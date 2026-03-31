@@ -33,6 +33,7 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ModelResult, SynthesizedReport } from "@/lib/types";
@@ -602,6 +603,16 @@ function PanelVerdictCard({
       />
 
       <div className="p-5 md:p-6 space-y-5">
+        <div className="rounded-lg border border-sky-200 bg-sky-50/90 px-3 py-2 text-[11px] leading-relaxed text-sky-900">
+          <span className="mr-1" aria-hidden>
+            ℹ️
+          </span>
+          ConvergePanel is an AI-assisted research tool, not a forensic or fact-checking authority. Synthesis
+          informs judgment — it doesn&apos;t replace it.{" "}
+          <Link href="/terms" className="font-medium text-sky-700 underline-offset-2 hover:underline">
+            Terms
+          </Link>
+        </div>
         {/* ── A) Decision header row ── */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
           <div className="flex items-center gap-2.5 flex-wrap">
@@ -726,10 +737,24 @@ function PanelVerdictCard({
           </button>
         </div>
 
-        {/* Disclaimer */}
-        <p className="text-[10px] leading-relaxed text-slate-400">
-          This summary is auto-generated from multi-model synthesis and is provided for informational purposes only.
-        </p>
+        <div className="mt-8 space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-4 text-xs text-slate-500">
+          <p className="font-semibold text-slate-700">Disclaimer</p>
+          <p>
+            Research results are synthesized from multiple AI language models and reflect their training data, not
+            real-time or authoritative sources. AI models may produce inaccurate, incomplete, or outdated
+            information. Consensus between models does not guarantee factual accuracy — models may share common
+            biases or training data errors.
+          </p>
+          <p>
+            These results are for informational purposes only and do not constitute professional advice of any
+            kind, including but not limited to legal, medical, financial, or investment advice.
+          </p>
+          <p>
+            <Link href="/terms" className="font-medium text-sky-600 underline-offset-2 hover:text-sky-700 hover:underline">
+              Terms of Service
+            </Link>
+          </p>
+        </div>
       </div>
     </div>
   );

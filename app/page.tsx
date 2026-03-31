@@ -25,7 +25,7 @@ import { useState, useEffect, Suspense, lazy, useCallback, useRef } from "react"
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import dynamic from "next/dynamic";
-import { BookOpen } from "lucide-react";
+import { BookOpen, Film } from "lucide-react";
 import { useAuth } from "@/components/AuthProvider";
 import { ModelId, ModelResult, ModelStatus, SynthesizedReport, RunPanelApiResponse, ConnectorStatus } from "@/lib/types";
 import { coerceStatus } from "@/lib/panel/normalize";
@@ -46,7 +46,10 @@ import { getPlanConfigById } from "@/lib/billing/planConfig";
 import { normalizeSelectedModels, getDefaultModelSelection } from "@/lib/utils/normalizeSelectedModels";
 import { perf, trackSlowLoad } from "@/lib/utils/performance";
 import ClaimVerificationResult from "@/components/ClaimVerificationResult";
+import VideoUploader from "@/components/VideoUploader";
+import VideoVerificationResult from "@/components/VideoVerificationResult";
 import type { ClaimVerificationClientPayload } from "@/lib/verification/claimVerificationClientPayload";
+import type { VideoVerificationClientPayload } from "@/lib/verification/videoVerificationClientPayload";
 import type { PanelHistoryGovernanceStatus, PanelHistoryItem } from "@/lib/user/panelHistory";
 import type { TeamGovernanceBannerProps } from "@/components/ResultsDisplay";
 import type { SynthesisConsensusSummaryDetail } from "@/lib/verification/consensusScoring";
@@ -94,7 +97,18 @@ function formatHistoryVerdictLabel(v: string): string {
   if (x === "confirmed") return "Confirmed";
   if (x === "disputed") return "Disputed";
   if (x === "unverifiable") return "Unverifiable";
+  if (x === "likely_manipulated") return "Likely manipulated";
+  if (x === "authentic") return "Authentic";
+  if (x === "inconclusive") return "Inconclusive";
+  if (x === "insufficient") return "Insufficient";
   return v ? v.charAt(0).toUpperCase() + v.slice(1) : "—";
+}
+
+function formatHistoryVideoDuration(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds));
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return `${m}:${r.toString().padStart(2, "0")}`;
 }
 
 function panelApiItemToHistoryItem(row: PanelHistoryItem): HistoryItem {
@@ -111,6 +125,21 @@ function panelApiItemToHistoryItem(row: PanelHistoryItem): HistoryItem {
       modelsOk: row.modelsOk,
       modelsTotal: row.modelsTotal,
       synthesisConsensusScore: row.synthesisConsensusScore,
+      governanceStatus: row.governanceStatus,
+    };
+  }
+  if (row.type === "video_verification") {
+    const fn = row.fileName.trim() || "Uploaded video";
+    const line = `Video: ${fn} (${formatHistoryVideoDuration(row.durationSeconds)})`;
+    return {
+      id: row.id,
+      type: "video_verification",
+      title: truncateHistoryTitle(line),
+      at: row.at,
+      fileName: row.fileName,
+      durationSeconds: row.durationSeconds,
+      verdict: row.verdict,
+      consensusScore: row.consensusScore,
       governanceStatus: row.governanceStatus,
     };
   }
@@ -158,6 +187,12 @@ function mergeHistoryById(existing: HistoryItem[], incoming: HistoryItem[]): His
         synthesisConsensusScore: pick.synthesisConsensusScore ?? other.synthesisConsensusScore,
         governanceStatus: pick.governanceStatus ?? other.governanceStatus,
       });
+    } else if (it.type === "video_verification" && prev.type === "video_verification") {
+      map.set(it.id, {
+        ...prev,
+        ...it,
+        governanceStatus: it.governanceStatus ?? prev.governanceStatus,
+      });
     } else {
       map.set(it.id, new Date(it.at) >= new Date(prev.at) ? it : prev);
     }
@@ -188,6 +223,17 @@ type HistoryItem =
       verdict?: string;
       consensusScore?: number;
       payload?: ClaimVerificationClientPayload | null;
+      governanceStatus?: PanelHistoryGovernanceStatus;
+    }
+  | {
+      id: string;
+      type: "video_verification";
+      title: string;
+      at: string;
+      fileName?: string;
+      durationSeconds?: number;
+      verdict?: string;
+      consensusScore?: number;
       governanceStatus?: PanelHistoryGovernanceStatus;
     };
 
@@ -239,7 +285,16 @@ export default function Home() {
   }, [authLoading]);
 
   // useUserPlan hook - handles its own loading/error states internally
-  const { plan, runsThisMonth, monthlyLimit, refresh: refreshUsage, loading: planLoading, error: planError } = useUserPlan();
+  const {
+    plan,
+    runsThisMonth,
+    monthlyLimit,
+    videoLimit,
+    videoRunsThisMonth,
+    refresh: refreshUsage,
+    loading: planLoading,
+    error: planError,
+  } = useUserPlan();
 
   // Resolve plan id and config (single source of truth in planConfig)
   // Handle both PlanId ("free" | "lite" | "full") and legacy UserPlan ("solo" | "pro") values
@@ -288,11 +343,14 @@ export default function Home() {
   // User's question/prompt to send to models
   const [question, setQuestion] = useState("");
 
-  /** Single nav: Research | Verify Claim | History */
-  const [panelTab, setPanelTab] = useState<"research" | "verify" | "history">("research");
+  /** Single nav: Research | Verify Claim | Verify Video | History */
+  const [panelTab, setPanelTab] = useState<"research" | "verify" | "video" | "history">("research");
   const [claimInput, setClaimInput] = useState("");
   const [verifyRunning, setVerifyRunning] = useState(false);
   const [verificationPayload, setVerificationPayload] = useState<ClaimVerificationClientPayload | null>(
+    null
+  );
+  const [videoVerificationPayload, setVideoVerificationPayload] = useState<VideoVerificationClientPayload | null>(
     null
   );
   const [historyItems, setHistoryItems] = useState<HistoryItem[]>([]);
@@ -578,7 +636,8 @@ export default function Home() {
     // Only show scroll nav when results are present and user has scrolled
     if (
       (panelTab === "research" && runStatus === "complete" && results.length > 0) ||
-      (panelTab === "verify" && verificationPayload)
+      (panelTab === "verify" && verificationPayload) ||
+      (panelTab === "video" && videoVerificationPayload)
     ) {
       const onScroll = () => {
         setShowScrollNav(window.scrollY > 400);
@@ -588,7 +647,7 @@ export default function Home() {
     } else {
       setShowScrollNav(false);
     }
-  }, [panelTab, runStatus, results.length, verificationPayload]);
+  }, [panelTab, runStatus, results.length, verificationPayload, videoVerificationPayload]);
 
   const exitHistoryResearchView = useCallback(() => {
     setViewingHistoryRunId(null);
@@ -1357,6 +1416,7 @@ export default function Home() {
     if (item.type === "research") {
       setPanelTab("research");
       setVerificationPayload(null);
+      setVideoVerificationPayload(null);
       setError(null);
       setViewingHistoryRunId(null);
       setHistoryDetailLoadingId(item.id);
@@ -1480,7 +1540,46 @@ export default function Home() {
       }
       return;
     }
+    if (item.type === "video_verification") {
+      setPanelTab("video");
+      setVerificationPayload(null);
+      setViewingHistoryRunId(null);
+      setVideoVerificationPayload(null);
+      setError(null);
+      setErrorCode(null);
+      if (!user || !authReady) {
+        setHistoryDetailLoadingId(null);
+        return;
+      }
+      setHistoryDetailLoadingId(item.id);
+      try {
+        const { authedFetch } = await import("@/lib/client/authedFetch");
+        const url = `/api/user/verifications/${encodeURIComponent(item.id)}?collection=videoVerifications`;
+        const res = await authedFetch(url, { user, authReady, method: "GET" });
+        const data = (await res.json()) as { ok?: boolean; payload?: VideoVerificationClientPayload };
+        if (data.ok && data.payload) {
+          setVideoVerificationPayload(data.payload);
+          setHistoryItems((prev) =>
+            prev.map((h) =>
+              h.id === item.id && h.type === "video_verification"
+                ? { ...h, governanceStatus: data.payload!.governanceStatus ?? h.governanceStatus }
+                : h
+            )
+          );
+        } else {
+          setVideoVerificationPayload(null);
+          setError("Could not load this video verification.");
+        }
+      } catch {
+        setVideoVerificationPayload(null);
+        setError("Could not load this video verification.");
+      } finally {
+        setHistoryDetailLoadingId(null);
+      }
+      return;
+    }
     setPanelTab("verify");
+    setVideoVerificationPayload(null);
     setViewingHistoryRunId(null);
     if (item.payload) {
       setVerificationPayload({
@@ -1536,11 +1635,12 @@ export default function Home() {
     const params = new URLSearchParams(window.location.search);
     const r = params.get("openResearchRun");
     const v = params.get("openVerification");
-    if (!r && !v) {
+    const vid = params.get("openVideoVerification");
+    if (!r && !v && !vid) {
       governanceDeepLinkHandled.current = null;
       return;
     }
-    const token = r ? `r:${r}` : `v:${v!}`;
+    const token = r ? `r:${r}` : v ? `v:${v}` : `vid:${vid!}`;
     if (governanceDeepLinkHandled.current === token) return;
     governanceDeepLinkHandled.current = token;
     const handle = openHistoryItemRef.current;
@@ -1558,6 +1658,13 @@ export default function Home() {
       void handle({
         type: "verification",
         id: v,
+        title: "",
+        at: new Date().toISOString(),
+      });
+    } else if (vid) {
+      void handle({
+        type: "video_verification",
+        id: vid,
         title: "",
         at: new Date().toISOString(),
       });
@@ -1598,9 +1705,17 @@ export default function Home() {
     claimInput.trim().length > 0 &&
     claimInput.trim().length <= MAX_CLAIM_CHARS;
   const canRun =
-    panelTab === "research" ? canRunResearch : panelTab === "verify" ? canRunVerify : false;
+    panelTab === "research"
+      ? canRunResearch
+      : panelTab === "verify"
+        ? canRunVerify
+        : false;
   const panelBusy =
-    panelTab === "research" ? runStatus === "running" : panelTab === "verify" ? verifyRunning : false;
+    panelTab === "research"
+      ? runStatus === "running"
+      : panelTab === "verify"
+        ? verifyRunning
+        : false;
 
   /** Low-runs hint near Run button only (not blocking; limit enforcement unchanged). */
   const effectiveMonthlyLimit =
@@ -1628,9 +1743,13 @@ export default function Home() {
     panelTab === "research" && (!!viewingHistoryRunId || !!historyDetailLoadingId);
   const showVerifyLoadingBanner =
     panelTab === "verify" && !!historyDetailLoadingId && !verificationPayload;
+  const showVideoHistoryLoadingBanner =
+    panelTab === "video" && !!historyDetailLoadingId && !videoVerificationPayload;
   const showMainComposer =
     (panelTab === "research" && !viewingHistoryRunId && !historyDetailLoadingId) ||
     (panelTab === "verify" && !verificationPayload && !historyDetailLoadingId);
+  const showMainVideoComposer =
+    panelTab === "video" && !videoVerificationPayload && !historyDetailLoadingId;
 
   // Helper to translate errors to user-friendly messages
   // Internal error details stay in logs, users see friendly text
@@ -1691,6 +1810,14 @@ export default function Home() {
               <span className="text-slate-500">Multi-LLM expert panel</span>
               <span className="text-slate-300">·</span>
               <span className="text-slate-500">Trust-focused answers</span>
+              {user && videoLimit > 0 && (
+                <>
+                  <span className="text-slate-300">·</span>
+                  <span className="text-slate-500">
+                    Video: {videoRunsThisMonth}/{videoLimit} this month
+                  </span>
+                </>
+              )}
             </div>
           </div>
           {showHeaderUpgradePlan && (
@@ -1760,6 +1887,20 @@ export default function Home() {
             <button
               type="button"
               role="tab"
+              aria-selected={panelTab === "video"}
+              onClick={() => setPanelTab("video")}
+              className={`inline-flex flex-1 items-center justify-center gap-2.5 rounded-xl border-2 px-5 py-3.5 text-lg font-bold tracking-tight transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-2 md:text-xl sm:min-w-[180px] sm:flex-none ${
+                panelTab === "video"
+                  ? "border-sky-800 bg-sky-600 text-white shadow-md ring-2 ring-sky-500/40"
+                  : "border-slate-300 bg-white text-slate-700 shadow-sm hover:border-slate-400 hover:bg-slate-50"
+              }`}
+            >
+              <Film className="h-5 w-5 shrink-0 opacity-95" aria-hidden />
+              Verify Video
+            </button>
+            <button
+              type="button"
+              role="tab"
               aria-selected={panelTab === "history"}
               onClick={() => setPanelTab("history")}
               className={`inline-flex flex-1 items-center justify-center gap-2.5 rounded-xl border-2 px-5 py-3.5 text-lg font-bold tracking-tight transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-2 md:text-xl sm:min-w-[160px] sm:flex-none ${
@@ -1795,8 +1936,9 @@ export default function Home() {
             )}
             {historyItems.length === 0 && !historyLoading ? (
               <p className="text-sm text-slate-500">
-                No runs yet. Complete a research panel or claim verification to see it here. When you&apos;re signed in,
-                past runs from this account load automatically (up to {HISTORY_PAGE_SIZE} per page).
+                No runs yet. Complete a research panel, claim verification, or video verification to see it here. When
+                you&apos;re signed in, past runs from this account load automatically (up to {HISTORY_PAGE_SIZE} per
+                page).
               </p>
             ) : historyItems.length === 0 && historyLoading ? (
               <p className="text-sm text-slate-500">Loading your history…</p>
@@ -1811,19 +1953,31 @@ export default function Home() {
                         onClick={() => void openHistoryItem(item)}
                         className="flex w-full items-start gap-3 rounded-xl border-2 border-slate-200 bg-slate-50 px-3 py-3 text-left transition-colors hover:border-sky-400 hover:bg-sky-50/60 disabled:cursor-wait disabled:opacity-70"
                       >
-                        <span className="mt-0.5 text-lg" aria-hidden>
-                          {item.type === "verification" ? "🛡" : "📖"}
+                        <span className="mt-0.5 shrink-0" aria-hidden>
+                          {item.type === "video_verification" ? (
+                            <Film className="h-5 w-5 text-indigo-500" aria-hidden />
+                          ) : item.type === "verification" ? (
+                            <span className="text-lg">🛡</span>
+                          ) : (
+                            <span className="text-lg">📖</span>
+                          )}
                         </span>
                         <span className="min-w-0 flex-1">
                           <span className="flex flex-wrap items-center gap-2">
                             <span
                               className={`rounded-md px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wider ${
-                                item.type === "verification"
-                                  ? "bg-violet-200 text-violet-900 ring-1 ring-violet-400/60"
-                                  : "bg-sky-200 text-sky-900 ring-1 ring-sky-400/60"
+                                item.type === "video_verification"
+                                  ? "bg-indigo-100 text-indigo-800 ring-1 ring-indigo-300/70 dark:bg-indigo-900/30 dark:text-indigo-300"
+                                  : item.type === "verification"
+                                    ? "bg-violet-200 text-violet-900 ring-1 ring-violet-400/60"
+                                    : "bg-sky-200 text-sky-900 ring-1 ring-sky-400/60"
                               }`}
                             >
-                              {item.type === "verification" ? "CLAIM" : "RESEARCH"}
+                              {item.type === "video_verification"
+                                ? "VIDEO"
+                                : item.type === "verification"
+                                  ? "CLAIM"
+                                  : "RESEARCH"}
                             </span>
                             <span className="text-xs font-medium text-slate-500">
                               {new Date(item.at).toLocaleString()}
@@ -1851,6 +2005,19 @@ export default function Home() {
                                   <span> · Synthesis {item.synthesisConsensusScore}/100</span>
                                 )}
                               </>
+                            ) : item.type === "video_verification" ? (
+                              <span>
+                                {item.verdict != null && item.verdict !== ""
+                                  ? formatHistoryVerdictLabel(item.verdict)
+                                  : "Video"}
+                                {item.consensusScore != null && item.consensusScore !== undefined
+                                  ? ` · ${item.consensusScore} consensus`
+                                  : ""}
+                                {item.fileName ? ` · ${item.fileName}` : ""}
+                                {item.durationSeconds != null
+                                  ? ` · ${formatHistoryVideoDuration(item.durationSeconds)}`
+                                  : ""}
+                              </span>
                             ) : (
                               <span>
                                 {item.verdict != null && item.verdict !== ""
@@ -1885,7 +2052,7 @@ export default function Home() {
           </div>
         ) : (
           <>
-        {(showSavedResearchBanner || showVerifyLoadingBanner) && (
+        {(showSavedResearchBanner || showVerifyLoadingBanner || showVideoHistoryLoadingBanner) && (
           <div className="mb-6 rounded-2xl border-2 border-sky-200 bg-sky-50/90 px-4 py-4 shadow-sm">
             {showSavedResearchBanner && historyDetailLoadingId && (
               <div className="flex items-center gap-2 text-sm text-slate-700">
@@ -1912,6 +2079,12 @@ export default function Home() {
               <div className="flex items-center gap-2 text-sm text-slate-700">
                 <span className="h-4 w-4 animate-spin rounded-full border-2 border-violet-600 border-t-transparent" />
                 Loading saved claim…
+              </div>
+            )}
+            {showVideoHistoryLoadingBanner && (
+              <div className="flex items-center gap-2 text-sm text-slate-700">
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-indigo-600 border-t-transparent" />
+                Loading saved video verification…
               </div>
             )}
           </div>
@@ -2197,6 +2370,37 @@ export default function Home() {
           )}
         </>
         ) : null}
+        {showMainVideoComposer && (
+          <VideoUploader
+            plan={normalizedPlan}
+            videoLimit={videoLimit}
+            videoRunsThisMonth={videoRunsThisMonth}
+            onSuccess={(p) => {
+              setVideoVerificationPayload(p);
+              void refreshUsage();
+              setHistoryItems((h) =>
+                [
+                  {
+                    id: p.verificationId,
+                    type: "video_verification" as const,
+                    title: truncateHistoryTitle(
+                      `Video: ${p.fileName} (${formatHistoryVideoDuration(p.metadata.duration)})`
+                    ),
+                    at: new Date().toISOString(),
+                    fileName: p.fileName,
+                    durationSeconds: p.metadata.duration,
+                    verdict: p.verdict,
+                    consensusScore: p.consensusScore,
+                    governanceStatus: p.governanceStatus ?? undefined,
+                  },
+                  ...h,
+                ].slice(0, MAX_HISTORY_LOCAL_STORAGE)
+              );
+              trackEvent("video_verification", { plan: normalizedPlan });
+            }}
+            onUsageRefresh={() => void refreshUsage()}
+          />
+        )}
           </>
         )}
       </section>
@@ -2251,6 +2455,32 @@ export default function Home() {
           </div>
         )}
 
+        {videoVerificationPayload && panelTab === "video" && (
+          <div className="mx-auto mt-8 w-full max-w-[900px]">
+            <div className="mb-4 flex flex-col gap-3 rounded-2xl border-2 border-indigo-200 bg-indigo-50/90 px-4 py-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-slate-700">
+                <span className="font-semibold text-slate-900">Video result</span>
+                {" — "}
+                Saved to your history. Verify another file below, or return to the upload screen.
+              </p>
+              <button
+                type="button"
+                onClick={() => setVideoVerificationPayload(null)}
+                className="shrink-0 rounded-xl border-2 border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:border-indigo-300 hover:bg-indigo-50/80"
+              >
+                Back to verify video
+              </button>
+            </div>
+            <VideoVerificationResult
+              data={videoVerificationPayload}
+              onVerifyAnother={() => {
+                setVideoVerificationPayload(null);
+                setPanelTab("video");
+              }}
+            />
+          </div>
+        )}
+
         {!verificationPayload &&
           panelTab === "research" &&
           runStatus === "complete" &&
@@ -2292,6 +2522,7 @@ export default function Home() {
           of long results instead of manually scrolling. */}
       {showScrollNav &&
         ((verificationPayload && panelTab === "verify") ||
+          (videoVerificationPayload && panelTab === "video") ||
           (panelTab === "research" && runStatus === "complete" && results.length > 0)) && (
           <div className="fixed bottom-6 right-6 flex flex-col gap-2 z-50">
             <button

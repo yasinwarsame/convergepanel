@@ -77,7 +77,7 @@ export async function GET(req: NextRequest) {
   );
 
   try {
-    const [runsSnap, verSnap] = await Promise.all([
+    const [runsSnap, verSnap, videoSnap] = await Promise.all([
       adminDb
         .collection("runs")
         .where("userId", "==", uid)
@@ -86,6 +86,12 @@ export async function GET(req: NextRequest) {
         .get(),
       adminDb
         .collection("verifications")
+        .where("userId", "==", uid)
+        .orderBy("timestamp", "desc")
+        .limit(FETCH_CAP)
+        .get(),
+      adminDb
+        .collection("videoVerifications")
         .where("userId", "==", uid)
         .orderBy("timestamp", "desc")
         .limit(FETCH_CAP)
@@ -150,6 +156,29 @@ export async function GET(req: NextRequest) {
       });
     }
 
+    for (const d of videoSnap.docs) {
+      const data = d.data();
+      if (String(data.userId ?? "") !== uid) continue;
+      if (data.type != null && data.type !== "video_verification") continue;
+      const sortKey = firestoreMillis(data.timestamp);
+      const meta = data.metadata as { duration?: number } | undefined;
+      const durationSec =
+        meta && typeof meta.duration === "number" && Number.isFinite(meta.duration) ? meta.duration : 0;
+      merged.push({
+        sortKey,
+        item: {
+          type: "video_verification",
+          id: d.id,
+          at: new Date(sortKey || Date.now()).toISOString(),
+          fileName: typeof data.fileName === "string" ? data.fileName : "Uploaded video",
+          durationSeconds: durationSec,
+          verdict: String(data.verdict ?? "inconclusive"),
+          consensusScore: typeof data.consensusScore === "number" ? data.consensusScore : 0,
+          governanceStatus: normalizeGovernanceStatus(data.governanceStatus),
+        },
+      });
+    }
+
     merged.sort((a, b) => b.sortKey - a.sortKey);
 
     const total = merged.length;
@@ -173,8 +202,7 @@ export async function GET(req: NextRequest) {
         {
           ok: false,
           errorCode: "index_required",
-          message:
-            "Firestore composite index required for panel history. Add indexes on (userId, createdAt desc) for runs and (userId, timestamp desc) for verifications.",
+          message: "Unable to load activity history. Please try again.",
         },
         { status: 503 }
       );

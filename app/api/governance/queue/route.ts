@@ -81,6 +81,25 @@ const VER_QUEUE_FIELDS = [
   "modelResults",
 ] as const;
 
+const VIDEO_QUEUE_FIELDS = [
+  "userId",
+  "userEmail",
+  "fileName",
+  "type",
+  "timestamp",
+  "governanceStatus",
+  "governanceReasons",
+  "governanceReviewedBy",
+  "governanceReviewedAt",
+  "governanceReviewComment",
+  "consensusScore",
+  "evidenceQuality",
+  "verdict",
+  "governanceMeta",
+  "metadata",
+  "modelResults",
+] as const;
+
 function firestoreMillis(value: unknown): number {
   if (value && typeof value === "object" && "toMillis" in value && typeof (value as { toMillis: () => number }).toMillis === "function") {
     return (value as { toMillis: () => number }).toMillis();
@@ -111,8 +130,8 @@ type QueueModelVerdictRow = {
 
 type RunSummary = {
   runId: string;
-  collection: "runs" | "verifications";
-  runType: "research" | "verification";
+  collection: "runs" | "verifications" | "videoVerifications";
+  runType: "research" | "verification" | "video";
   question: string;
   consensusScore: number | null;
   evidenceQuality: string | null;
@@ -636,6 +655,204 @@ function isClaimVerificationRow(data: Record<string, unknown>): boolean {
   return t === "claim_verification" || t === undefined || t === null;
 }
 
+function isVideoVerificationRow(data: Record<string, unknown>): boolean {
+  return data.type === "video_verification";
+}
+
+function humanizeVideoVerdict(v: string): string {
+  const k = v.toLowerCase().replace(/\s+/g, "_");
+  const map: Record<string, string> = {
+    authentic: "Authentic",
+    likely_manipulated: "Likely manipulated",
+    inconclusive: "Inconclusive",
+    insufficient: "Insufficient",
+  };
+  return map[k] || v.replace(/_/g, " ");
+}
+
+function videoModelHealth(data: Record<string, unknown>): { ok: number; substituted: number; failed: number } {
+  const mr = data.modelResults;
+  if (!Array.isArray(mr)) return { ok: 0, substituted: 0, failed: 0 };
+  let ok = 0;
+  let failed = 0;
+  for (const row of mr) {
+    if (!row || typeof row !== "object") continue;
+    const s = String((row as Record<string, unknown>).status ?? "");
+    if (s === "ok") ok += 1;
+    else failed += 1;
+  }
+  return { ok, substituted: 0, failed };
+}
+
+function buildAgreementDissentFromVideo(data: Record<string, unknown>): {
+  agreementSummary?: string;
+  dissentSummary?: string;
+} {
+  const mr = data.modelResults;
+  if (!Array.isArray(mr)) return {};
+  type Row = { verdict: string };
+  const usable: Row[] = [];
+  for (const row of mr) {
+    if (!row || typeof row !== "object") continue;
+    const m = row as Record<string, unknown>;
+    if (String(m.status ?? "") !== "ok") continue;
+    usable.push({ verdict: String(m.verdict ?? "").toLowerCase().replace(/\s+/g, "_") });
+  }
+  if (usable.length === 0) return {};
+  const counts = new Map<string, number>();
+  for (const u of usable) {
+    counts.set(u.verdict, (counts.get(u.verdict) ?? 0) + 1);
+  }
+  let majority = "";
+  let max = 0;
+  for (const [v, c] of counts) {
+    if (c > max) {
+      max = c;
+      majority = v;
+    }
+  }
+  const n = usable.length;
+  const agreementSummary = `${max}/${n} models say ${humanizeVideoVerdict(majority).toLowerCase()}`;
+  const outliers = mr.filter((row) => {
+    if (!row || typeof row !== "object") return false;
+    const m = row as Record<string, unknown>;
+    if (String(m.status ?? "") !== "ok") return false;
+    return String(m.verdict ?? "").toLowerCase().replace(/\s+/g, "_") !== majority;
+  }) as Record<string, unknown>[];
+  if (outliers.length === 0) return { agreementSummary };
+  const parts = outliers.map((o) => {
+    const id = String(o.modelId ?? "");
+    const v = humanizeVideoVerdict(String(o.verdict ?? ""));
+    return `${getModelDisplayName(id)}: ${v}`;
+  });
+  return { agreementSummary, dissentSummary: `Dissent: ${parts.join("; ")}` };
+}
+
+/** Per-model video authenticity rows for the expanded queue UI. */
+function buildVideoQueueReviewExtras(data: Record<string, unknown>): {
+  modelVerdicts: QueueModelVerdictRow[];
+  agreementPoints: string[];
+  disagreementPoints: string[];
+} {
+  const mr = data.modelResults;
+  if (!Array.isArray(mr)) {
+    return { modelVerdicts: [], agreementPoints: [], disagreementPoints: [] };
+  }
+
+  const modelVerdicts: QueueModelVerdictRow[] = [];
+  for (const row of mr) {
+    if (!row || typeof row !== "object") continue;
+    const m = row as Record<string, unknown>;
+    const modelId = String(m.modelId ?? "");
+    if (!modelId) continue;
+    const status = String(m.status ?? "");
+    if (status !== "ok") {
+      const label = status === "failed" ? "Failed" : "Parse error";
+      modelVerdicts.push({ modelId, verdict: label, confidence: "" });
+      continue;
+    }
+    const verdictRaw = String(m.verdict ?? "");
+    const confRaw = String(m.confidence ?? "").trim().toLowerCase();
+    const confidence =
+      confRaw === "high" || confRaw === "medium" || confRaw === "low"
+        ? `${confRaw} confidence`
+        : String(m.confidence ?? "").trim();
+    const summaryRaw = typeof m.summary === "string" ? m.summary.trim().substring(0, 200) : "";
+    modelVerdicts.push({
+      modelId,
+      verdict: humanizeVideoVerdict(verdictRaw),
+      confidence,
+      ...(summaryRaw ? { summary: summaryRaw } : {}),
+    });
+  }
+
+  const usable = mr.filter((row) => {
+    if (!row || typeof row !== "object") return false;
+    return String((row as Record<string, unknown>).status ?? "") === "ok";
+  }) as Record<string, unknown>[];
+  const total = Math.max(1, usable.length);
+
+  const verdictCounts: Record<string, string[]> = {};
+  for (const row of usable) {
+    const m = row as Record<string, unknown>;
+    const v = String(m.verdict ?? "unknown").toLowerCase().replace(/\s+/g, "_");
+    const id = String(m.modelId ?? "");
+    if (!verdictCounts[v]) verdictCounts[v] = [];
+    verdictCounts[v].push(id);
+  }
+
+  const agreementPoints: string[] = [];
+  const disagreementPoints: string[] = [];
+  for (const [verdict, models] of Object.entries(verdictCounts)) {
+    const humanV = humanizeVideoVerdict(verdict);
+    if (models.length >= 2) {
+      agreementPoints.push(`${models.length}/${total} models rate as ${humanV.toLowerCase()}`);
+    }
+    if (models.length === 1 && total > 1) {
+      const names = models.map((id) => getModelDisplayName(id)).join(", ");
+      disagreementPoints.push(`${names} rated as ${humanV.toLowerCase()} (others disagree)`);
+    }
+  }
+
+  return { modelVerdicts, agreementPoints, disagreementPoints };
+}
+
+function firstVideoModelSummary(data: Record<string, unknown>): string | undefined {
+  const mr = data.modelResults;
+  if (!Array.isArray(mr)) return undefined;
+  for (const row of mr) {
+    if (!row || typeof row !== "object") continue;
+    const m = row as Record<string, unknown>;
+    if (String(m.status ?? "") !== "ok") continue;
+    const s = typeof m.summary === "string" ? m.summary.trim() : "";
+    if (s) return truncate(s, 240);
+  }
+  return undefined;
+}
+
+function summarizeVideo(id: string, data: Record<string, unknown>, email: string): RunSummary {
+  const meta = (data.metadata as Record<string, unknown> | undefined) ?? {};
+  const duration =
+    typeof meta.duration === "number" && Number.isFinite(meta.duration) ? Math.round(meta.duration) : null;
+  const w = typeof meta.width === "number" ? meta.width : "?";
+  const h = typeof meta.height === "number" ? meta.height : "?";
+  const fn =
+    typeof data.fileName === "string" && data.fileName.trim() ? data.fileName.trim() : "Uploaded video";
+  const question = truncate(`Video: ${fn} (${duration != null ? `${duration}s` : "unknown"}, ${w}x${h})`, 200);
+  const createdMs = firestoreMillis(data.timestamp) || Date.now();
+  const reviewExtras = buildVideoQueueReviewExtras(data);
+  const { agreementSummary, dissentSummary } = buildAgreementDissentFromVideo(data);
+  const digestDisagreements = verificationDisagreementBullets(data);
+  const videoSummary = firstVideoModelSummary(data);
+
+  return {
+    runId: id,
+    collection: "videoVerifications",
+    runType: "video",
+    question,
+    consensusScore: typeof data.consensusScore === "number" ? data.consensusScore : null,
+    evidenceQuality: typeof data.evidenceQuality === "string" ? data.evidenceQuality : null,
+    governanceStatus: normalizeGovernanceStatus(String(data.governanceStatus ?? "needs_review")),
+    governanceReasons: Array.isArray(data.governanceReasons) ? (data.governanceReasons as string[]) : [],
+    modelHealth: videoModelHealth(data),
+    verificationVerdict: data.verdict != null ? String(data.verdict) : undefined,
+    ...(reviewExtras.modelVerdicts.length > 0 ? { modelVerdicts: reviewExtras.modelVerdicts } : {}),
+    ...(reviewExtras.agreementPoints.length > 0 ? { agreementPoints: reviewExtras.agreementPoints } : {}),
+    ...(reviewExtras.disagreementPoints.length > 0 ? { disagreementPoints: reviewExtras.disagreementPoints } : {}),
+    ...(agreementSummary ? { agreementSummary } : {}),
+    ...(dissentSummary ? { dissentSummary } : {}),
+    ...(digestDisagreements.length > 0 ? { disagreements: digestDisagreements } : {}),
+    ...(videoSummary ? { claimVerdictSummary: videoSummary } : {}),
+    createdAt: new Date(createdMs).toISOString(),
+    userId: String(data.userId ?? ""),
+    userEmail: email,
+    governanceReviewedBy: typeof data.governanceReviewedBy === "string" ? data.governanceReviewedBy : undefined,
+    governanceReviewedAt: typeof data.governanceReviewedAt === "string" ? data.governanceReviewedAt : undefined,
+    governanceReviewComment:
+      typeof data.governanceReviewComment === "string" ? data.governanceReviewComment : undefined,
+  };
+}
+
 /**
  * Research runs: must have governanceStatus (evaluation wired on pipeline).
  * Claim verifications: include rows without governance when filter is needs_review/all
@@ -656,10 +873,13 @@ function verificationTimeMs(data: Record<string, unknown>): number {
 function filterRowForQueue(
   data: Record<string, unknown>,
   statusFilter: string,
-  source: "runs" | "verifications"
+  source: "runs" | "verifications" | "videoVerifications"
 ): boolean {
   const evaluated = hasEvaluatedGovernance(data);
   if (source === "verifications" && isClaimVerificationRow(data) && !evaluated) {
+    return statusFilter === "needs_review" || statusFilter === "all";
+  }
+  if (source === "videoVerifications" && isVideoVerificationRow(data) && !evaluated) {
     return statusFilter === "needs_review" || statusFilter === "all";
   }
   if (!evaluated) return false;
@@ -709,7 +929,7 @@ async function fetchVerificationDocsForOwners(
 
 type StagedQueueRow = {
   sortKey: number;
-  kind: "research" | "verification";
+  kind: "research" | "verification" | "video";
   docId: string;
   data: Record<string, unknown>;
   rowUid: string;
@@ -885,6 +1105,101 @@ async function loadVerificationsStagedForQueue(
   return { staged, docsRead: verDocs.length, perOwnerLimit };
 }
 
+async function fetchVideoDocsForOwners(
+  visibleUserIds: string[],
+  fetchLimit: number
+): Promise<{ docs: QueryDocumentSnapshot[]; perOwnerLimit: number }> {
+  if (!adminDb) throw new Error("no db");
+  const col = adminDb.collection("videoVerifications");
+  const perOwnerLimit = Math.min(
+    25,
+    Math.max(12, Math.ceil(fetchLimit / Math.max(1, visibleUserIds.length)) + 4)
+  );
+  const snaps = await Promise.all(
+    visibleUserIds.map((ownerId) =>
+      col.where("userId", "==", ownerId).select(...VIDEO_QUEUE_FIELDS).limit(perOwnerLimit).get()
+    )
+  );
+  const byId = new Map<string, QueryDocumentSnapshot>();
+  for (const s of snaps) {
+    for (const d of s.docs) {
+      byId.set(d.id, d);
+    }
+  }
+  return { docs: [...byId.values()], perOwnerLimit };
+}
+
+async function loadVideoStagedGlobalQueue(
+  fetchLimit: number,
+  queueCutoffMs: number,
+  statusFilter: string
+): Promise<{ staged: StagedQueueRow[]; docsRead: number; perOwnerLimit: number }> {
+  if (!adminDb) throw new Error("no db");
+  const cap = Math.min(150, Math.max(fetchLimit * 4, 60));
+  let vidSnap;
+  try {
+    vidSnap = await adminDb
+      .collection("videoVerifications")
+      .orderBy("timestamp", "desc")
+      .limit(cap)
+      .select(...VIDEO_QUEUE_FIELDS)
+      .get();
+  } catch (e1) {
+    console.warn("[governance/queue] global videoVerifications orderBy(timestamp) failed:", e1);
+    vidSnap = await adminDb.collection("videoVerifications").limit(cap).select(...VIDEO_QUEUE_FIELDS).get();
+  }
+  const staged: StagedQueueRow[] = [];
+  for (const doc of vidSnap.docs) {
+    const data = doc.data() as Record<string, unknown>;
+    if (!isVideoVerificationRow(data)) continue;
+    const rowUid = String(data.userId ?? "").trim();
+    if (!rowUid) continue;
+    const vMs = firestoreMillis(data.timestamp);
+    if (!vMs || vMs < queueCutoffMs) continue;
+    if (!filterRowForQueue(data, statusFilter, "videoVerifications")) continue;
+    const sortKey = firestoreMillis(data.timestamp);
+    staged.push({
+      sortKey,
+      kind: "video",
+      docId: doc.id,
+      data,
+      rowUid,
+      docEmail: typeof data.userEmail === "string" ? data.userEmail : undefined,
+    });
+  }
+  return { staged, docsRead: vidSnap.size, perOwnerLimit: cap };
+}
+
+async function loadVideoStagedForQueue(
+  visibleUserIds: string[],
+  visibleSet: Set<string>,
+  fetchLimit: number,
+  queueCutoffMs: number,
+  statusFilter: string
+): Promise<{ staged: StagedQueueRow[]; docsRead: number; perOwnerLimit: number }> {
+  const { docs: vidDocs, perOwnerLimit } = await fetchVideoDocsForOwners(visibleUserIds, fetchLimit);
+  const staged: StagedQueueRow[] = [];
+  for (const doc of vidDocs) {
+    const data = doc.data() as Record<string, unknown>;
+    if (!isVideoVerificationRow(data)) continue;
+    const rowUid = String(data.userId ?? "").trim();
+    if (!rowUid || !visibleSet.has(rowUid)) continue;
+    const vMs = firestoreMillis(data.timestamp);
+    if (!vMs || vMs < queueCutoffMs) continue;
+    if (!filterRowForQueue(data, statusFilter, "videoVerifications")) continue;
+    const sortKey = firestoreMillis(data.timestamp);
+    staged.push({
+      sortKey,
+      kind: "video",
+      docId: doc.id,
+      data,
+      rowUid,
+      docEmail: typeof data.userEmail === "string" ? data.userEmail : undefined,
+    });
+  }
+  return { staged, docsRead: vidDocs.length, perOwnerLimit };
+}
+
 export async function GET(request: NextRequest) {
   if (!adminDb) {
     return NextResponse.json(
@@ -949,7 +1264,7 @@ export async function GET(request: NextRequest) {
   }
 
   if (visibleUserIds === null) {
-    console.log("[governance/queue] Admin: global queue (recent runs + verifications)");
+    console.log("[governance/queue] Admin: global queue (recent runs + verifications + video)");
   } else {
     console.log(
       `[governance/queue] Querying for userIds: ${visibleUserIds.join(", ")} (${visibleUserIds.length} users)`
@@ -972,14 +1287,14 @@ export async function GET(request: NextRequest) {
   }
 
   const runType = searchParams.get("runType") ?? "all";
-  if (!["research", "verification", "all"].includes(runType)) {
+  if (!["research", "verification", "video", "all"].includes(runType)) {
     return NextResponse.json(
       {
         ok: false,
         error: {
           code: "validation_error",
           message: "Invalid runType",
-          fields: { runType: 'Must be "research", "verification", or "all"' },
+          fields: { runType: 'Must be "research", "verification", "video", or "all"' },
         },
       },
       { status: 400 }
@@ -999,6 +1314,7 @@ export async function GET(request: NextRequest) {
   try {
     let runsSnapSize = 0;
     let verSnapSize = 0;
+    let videoSnapSize = 0;
 
     const tFs0 = Date.now();
     const staged: StagedQueueRow[] = [];
@@ -1006,34 +1322,46 @@ export async function GET(request: NextRequest) {
     try {
       if (visibleUserIds === null) {
         if (runType === "all") {
-          const [rRes, vRes] = await Promise.all([
+          const [rRes, vRes, vidRes] = await Promise.all([
             loadRunsStagedGlobalQueue(fetchLimit, queueCutoffMs, statusFilter),
             loadVerificationsStagedGlobalQueue(fetchLimit, queueCutoffMs, statusFilter),
+            loadVideoStagedGlobalQueue(fetchLimit, queueCutoffMs, statusFilter),
           ]);
           runsSnapSize = rRes.snapSize;
           verSnapSize = vRes.docsRead;
-          staged.push(...rRes.staged, ...vRes.staged);
+          videoSnapSize = vidRes.docsRead;
+          staged.push(...rRes.staged, ...vRes.staged, ...vidRes.staged);
         } else if (runType === "research") {
           const rRes = await loadRunsStagedGlobalQueue(fetchLimit, queueCutoffMs, statusFilter);
           runsSnapSize = rRes.snapSize;
           staged.push(...rRes.staged);
-        } else {
+        } else if (runType === "verification") {
           const vRes = await loadVerificationsStagedGlobalQueue(fetchLimit, queueCutoffMs, statusFilter);
           verSnapSize = vRes.docsRead;
           staged.push(...vRes.staged);
+        } else {
+          const vidRes = await loadVideoStagedGlobalQueue(fetchLimit, queueCutoffMs, statusFilter);
+          videoSnapSize = vidRes.docsRead;
+          staged.push(...vidRes.staged);
         }
       } else if (runType === "all") {
-        const [rRes, vRes] = await Promise.all([
+        const [rRes, vRes, vidRes] = await Promise.all([
           loadRunsStagedForQueue(visibleUserIds, visibleSet, fetchLimit, queueCutoffMs, statusFilter),
           loadVerificationsStagedForQueue(visibleUserIds, visibleSet, fetchLimit, queueCutoffMs, statusFilter),
+          loadVideoStagedForQueue(visibleUserIds, visibleSet, fetchLimit, queueCutoffMs, statusFilter),
         ]);
         runsSnapSize = rRes.snapSize;
         verSnapSize = vRes.docsRead;
-        staged.push(...rRes.staged, ...vRes.staged);
+        videoSnapSize = vidRes.docsRead;
+        staged.push(...rRes.staged, ...vRes.staged, ...vidRes.staged);
         if (process.env.NODE_ENV !== "production") {
           console.log(`[governance/queue] Verifications perOwner cap used (parallel branch)`, {
             perOwnerLimit: vRes.perOwnerLimit,
             docsRead: vRes.docsRead,
+          });
+          console.log(`[governance/queue] Video perOwner cap (parallel branch)`, {
+            perOwnerLimit: vidRes.perOwnerLimit,
+            docsRead: vidRes.docsRead,
           });
         }
       } else if (runType === "research") {
@@ -1046,7 +1374,7 @@ export async function GET(request: NextRequest) {
         );
         runsSnapSize = rRes.snapSize;
         staged.push(...rRes.staged);
-      } else {
+      } else if (runType === "verification") {
         const vRes = await loadVerificationsStagedForQueue(
           visibleUserIds,
           visibleSet,
@@ -1060,6 +1388,22 @@ export async function GET(request: NextRequest) {
           console.log(`[governance/queue] Verifications perOwner cap`, {
             perOwnerLimit: vRes.perOwnerLimit,
             docsRead: vRes.docsRead,
+          });
+        }
+      } else {
+        const vidRes = await loadVideoStagedForQueue(
+          visibleUserIds,
+          visibleSet,
+          fetchLimit,
+          queueCutoffMs,
+          statusFilter
+        );
+        videoSnapSize = vidRes.docsRead;
+        staged.push(...vidRes.staged);
+        if (process.env.NODE_ENV !== "production") {
+          console.log(`[governance/queue] Video perOwner cap`, {
+            perOwnerLimit: vidRes.perOwnerLimit,
+            docsRead: vidRes.docsRead,
           });
         }
       }
@@ -1090,7 +1434,9 @@ export async function GET(request: NextRequest) {
       const summary =
         s.kind === "research"
           ? summarizeResearch(s.docId, s.data, rowEmail)
-          : summarizeVerification(s.docId, s.data, rowEmail);
+          : s.kind === "verification"
+            ? summarizeVerification(s.docId, s.data, rowEmail)
+            : summarizeVideo(s.docId, s.data, rowEmail);
       if (ownerAssignedReviewerAt) summary.ownerAssignedReviewerAt = ownerAssignedReviewerAt;
       merged.push({ sortKey: s.sortKey, summary });
     }
@@ -1105,7 +1451,7 @@ export async function GET(request: NextRequest) {
     const runs = filteredMerged.slice(offset, offset + limit).map((m) => m.summary);
 
     console.log(
-      `[governance/queue] Firestore: ${runsSnapSize} research docs, ${verSnapSize} verification docs read; ` +
+      `[governance/queue] Firestore: ${runsSnapSize} research docs, ${verSnapSize} verification docs, ${videoSnapSize} video docs read; ` +
         `${filteredMerged.length} rows after 7d + status filters ` +
         (visibleUserIds === null
           ? "(global admin; viewer's own runs excluded)"

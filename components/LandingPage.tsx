@@ -6,6 +6,7 @@
 
 import Link from "next/link";
 import Image from "next/image";
+import { Film } from "lucide-react";
 
 function ResearchMockup() {
   return (
@@ -18,6 +19,26 @@ function ResearchMockup() {
         <div className="h-2 w-full rounded bg-amber-900/50" />
       </div>
       <p className="mt-2 text-[10px] text-slate-500">Bias signals · Blind spots · Open questions</p>
+    </div>
+  );
+}
+
+function VideoVerificationMockup() {
+  return (
+    <div className="rounded-lg border border-slate-600 bg-slate-900/90 p-3 text-left shadow-inner">
+      <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+        <Film className="h-4 w-4 shrink-0 text-sky-400" aria-hidden />
+        Video · frames · metadata
+      </div>
+      <div className="mt-2 rounded-md bg-slate-800/90 px-2 py-1.5 text-[10px] font-medium text-slate-200">
+        Verdict · Inconclusive
+      </div>
+      <div className="mt-2 grid grid-cols-3 gap-1.5 text-[9px] text-slate-400">
+        <div className="rounded border border-slate-700 bg-slate-950/80 p-1.5 text-center">Model A</div>
+        <div className="rounded border border-slate-700 bg-slate-950/80 p-1.5 text-center">Model B</div>
+        <div className="rounded border border-slate-700 bg-slate-950/80 p-1.5 text-center">Model C</div>
+      </div>
+      <p className="mt-2 text-[10px] text-slate-500">Per-model signals · Paid plans</p>
     </div>
   );
 }
@@ -111,7 +132,7 @@ export default function LandingPage() {
           <div className="space-y-6 text-center lg:text-left">
             <div className="inline-flex items-center gap-2 rounded-full border border-sky-400/30 bg-sky-400/10 px-4 py-2 text-sm text-sky-700">
               <span className="h-2 w-2 rounded-full bg-sky-500" />
-              Five models · One comparison · Full record
+              Research · Claims · Video (paid) · Governance
             </div>
 
             <h1 className="text-4xl font-bold text-slate-900 sm:text-5xl lg:text-6xl">
@@ -121,7 +142,8 @@ export default function LandingPage() {
             <p className="text-lg text-slate-600 sm:text-xl">
               ConvergePanel runs your research questions and claims through Claude, GPT, Gemini, Grok, and
               Perplexity simultaneously — and shows you where they agree, where they disagree, and what each
-              one misses.
+              one misses. Paid plans add video verification: three vision-capable models review frames and
+              metadata for authenticity signals.
             </p>
 
             <div className="flex flex-col items-center gap-4 pt-2 sm:flex-row lg:items-start">
@@ -226,6 +248,25 @@ export default function LandingPage() {
 
           <div className="grid grid-cols-1 items-center gap-8 lg:grid-cols-2">
             <div>
+              <h3 className="text-xl font-semibold text-slate-900 flex items-center gap-2">
+                <Film className="h-6 w-6 text-sky-600 shrink-0" aria-hidden />
+                Video verification
+              </h3>
+              <p className="mt-3 text-slate-600 leading-relaxed">
+                Upload a video up to 60 seconds. Three vision-capable AI models independently analyze
+                extracted frames and metadata for signs of AI generation or manipulation. You get a clear
+                verdict — Authentic, Likely Manipulated, Inconclusive, or Insufficient — with per-model
+                evidence showing what each model flagged.
+              </p>
+              <p className="mt-2 text-xs text-amber-800/90">
+                ⚠️ AI-assisted authenticity review — not forensic analysis.
+              </p>
+            </div>
+            <VideoVerificationMockup />
+          </div>
+
+          <div className="grid grid-cols-1 items-center gap-8 lg:grid-cols-2">
+            <div>
               <h3 className="text-xl font-semibold text-slate-900">Consensus scoring</h3>
               <p className="mt-3 text-slate-600 leading-relaxed">
                 Every run produces a consensus score from 0–100 that summarizes how defensible the result is
@@ -317,6 +358,20 @@ export default function LandingPage() {
                 Catch mistakes that read as polished and confident.
               </p>
             </div>
+            <div className="rounded-xl border border-slate-200 p-6 shadow-sm">
+              <h3 className="font-semibold text-slate-900">Journalists &amp; fact-checkers</h3>
+              <p className="mt-2 text-sm text-slate-600 leading-relaxed">
+                Review video clips before publishing. When citizen journalism or a viral clip lands on your
+                desk, run multi-model analysis before you stake your credibility on it.
+              </p>
+            </div>
+            <div className="rounded-xl border border-slate-200 p-6 shadow-sm">
+              <h3 className="font-semibold text-slate-900">PR &amp; communications</h3>
+              <p className="mt-2 text-sm text-slate-600 leading-relaxed">
+                Review video before you amplify or respond. Understand authenticity signals before a clip
+                shapes your strategy.
+              </p>
+            </div>
           </div>
         </div>
       </section>
@@ -329,6 +384,38 @@ export default function LandingPage() {
           models, higher monthly limits, and — on the 5-Model plan — governance dashboards, peer review, and
           a full audit log of review decisions.
         </p>
+        <ul className="mx-auto mt-6 max-w-lg space-y-2 text-left text-sm text-slate-700">
+          <li className="flex gap-2">
+            <span className="text-emerald-600 font-medium shrink-0" aria-hidden>
+              ✓
+            </span>
+            <span>Research across 5 AI models</span>
+          </li>
+          <li className="flex gap-2">
+            <span className="text-emerald-600 font-medium shrink-0" aria-hidden>
+              ✓
+            </span>
+            <span>Claim verification with consensus scoring</span>
+          </li>
+          <li className="flex gap-2">
+            <span className="text-emerald-600 font-medium shrink-0" aria-hidden>
+              ✓
+            </span>
+            <span>Video authenticity analysis (paid plans)</span>
+          </li>
+          <li className="flex gap-2">
+            <span className="text-emerald-600 font-medium shrink-0" aria-hidden>
+              ✓
+            </span>
+            <span>Governance dashboard with peer review (5-Model plan)</span>
+          </li>
+          <li className="flex gap-2">
+            <span className="text-emerald-600 font-medium shrink-0" aria-hidden>
+              ✓
+            </span>
+            <span>Full audit trail on every decision</span>
+          </li>
+        </ul>
         <Link
           href="/pricing"
           className="mt-8 inline-flex items-center justify-center rounded-xl bg-sky-600 px-8 py-3 text-base font-semibold text-white shadow-sm transition-colors hover:bg-sky-700"

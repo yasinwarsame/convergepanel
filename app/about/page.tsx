@@ -54,16 +54,33 @@ export default function AboutPage() {
                 incorrect parts where parsing succeeds), and a compact audit trail.
               </p>
               <p className="mt-3 leading-relaxed">
-                Both flows expose a consensus score and supporting labels (confidence, evidence quality)
+                <strong className="text-gray-900">Video verification</strong> — Upload a video up to 60
+                seconds. Three vision-capable AI models — GPT-4o, Claude, and Gemini — independently review
+                extracted frames and metadata for signs of AI generation, synthetic-looking artifacts, and
+                manipulation indicators. You receive a verdict, consensus score, and per-model evidence with
+                manipulation signals, authenticity signals, and compression notes. The same consensus scoring
+                and governance pipeline can apply to video results on eligible plans. This is an
+                AI-assisted review tool — not forensic analysis.
+              </p>
+              <p className="mt-3 leading-relaxed">
+                These modes expose a consensus score and supporting labels (confidence, evidence quality)
                 so you can see how defensible the outcome is. Audit bundles record what was run and the
                 structured signals — not full raw model text — for a practical compliance footprint.
               </p>
             </section>
 
             <section>
+              <h2 className="text-2xl font-semibold text-gray-900">What makes ConvergePanel different</h2>
+              <p className="mt-3 leading-relaxed">
+                Few products combine multi-model text research, claim verification, and video authenticity
+                review with governance scoring and audit trails in one workflow.
+              </p>
+            </section>
+
+            <section>
               <h2 className="text-2xl font-semibold text-gray-900">Governance &amp; peer review</h2>
               <p className="mt-3 leading-relaxed">
-                Every run — research or claim verification — is checked against configurable governance
+                Every run — research, claim verification, or video verification — is checked against configurable governance
                 policies. If the consensus score is below your threshold, evidence quality looks weak, or a
                 sensitive topic is detected, the result can be flagged for review.
               </p>
@@ -116,7 +133,8 @@ export default function AboutPage() {
               <h2 className="text-2xl font-semibold text-gray-900">Decision support</h2>
               <p className="mt-3 leading-relaxed">
                 ConvergePanel supports decisions; it does not replace professional judgment. Scores and
-                labels are computed from model outputs and heuristics — use them as signals, not as proof.
+                labels are computed from model outputs and heuristics — use them as signals, not as a sole
+                basis for high-stakes calls.
               </p>
             </section>
           </div>

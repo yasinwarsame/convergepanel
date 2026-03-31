@@ -31,7 +31,7 @@ export type GovernanceEvalStatus = "approved" | "needs_review" | "blocked";
 
 export async function evaluateAndStoreGovernance(params: {
   runId: string;
-  collection: "runs" | "verifications";
+  collection: "runs" | "verifications" | "videoVerifications";
   input: GovernanceInput;
   /** When missing, evaluation is skipped (e.g. anonymous / unknown owner). */
   ownerUid?: string | null;

@@ -17,6 +17,7 @@ import { logger } from "@/lib/logger";
 import { planHasTeamGovernance } from "@/lib/plans";
 import { isAdminEmail } from "@/lib/admin/config";
 import { parseGovernanceReviewerFor } from "@/lib/governance/reviewerFields";
+import { getVideoLimit } from "@/lib/billing/planConfig";
 
 function clientGovernanceRole(
   userData: Partial<UserProfile> | undefined,
@@ -144,6 +145,8 @@ export async function GET(req: NextRequest) {
           usageMonth: currentMonth,
           monthlyLimit: config.maxRunsPerMonth,
           maxModelsPerRun: config.maxModelsPerRun,
+          videoRunsThisMonth: 0,
+          videoLimit: 0,
           teamId: null,
           teamRole: null,
           teamGovernanceEligible: false,
@@ -170,6 +173,8 @@ export async function GET(req: NextRequest) {
     const maxModelsPerRun = entitlements.maxModelsPerRun;
     const storedMonth = userData?.usageMonth || currentMonth;
     let currentRuns = userData?.runsThisMonth ?? 0;
+    let currentVideoRuns =
+      typeof userData?.videoRunsThisMonth === "number" ? userData.videoRunsThisMonth : 0;
 
     // Validate subscription status for paid plans (best-effort, non-blocking)
     // This ensures Firestore stays in sync with Stripe even if webhooks fail
@@ -201,9 +206,11 @@ export async function GET(req: NextRequest) {
     const isNewMonth = storedMonth !== currentMonth;
     if (isNewMonth) {
       currentRuns = 0;
+      currentVideoRuns = 0;
       // Optionally reset in DB (but don't block the response)
       adminDb.collection("users").doc(uid).update({
         runsThisMonth: 0,
+        videoRunsThisMonth: 0,
         usageMonth: currentMonth,
         billingCycleStart: now.toISOString(),
       }).catch((err) => {
@@ -232,6 +239,7 @@ export async function GET(req: NextRequest) {
         : null;
 
     const govDash = computeGovernanceDashboardAccess({ planId: plan, authEmail });
+    const videoLimit = getVideoLimit(plan);
 
     return NextResponse.json(
       {
@@ -242,6 +250,8 @@ export async function GET(req: NextRequest) {
         monthlyLimit,
         maxModelsPerRun,
         billingInterval, // "month" | "year" | null - set by webhook when subscription is created/updated
+        videoRunsThisMonth: currentVideoRuns,
+        videoLimit,
         teamId: userData?.teamId ?? null,
         teamRole: userData?.teamRole ?? null,
         teamGovernanceEligible: planHasTeamGovernance(plan),
@@ -268,6 +278,8 @@ export async function GET(req: NextRequest) {
         runsThisMonth: 0,
         usageMonth: new Date().toISOString().slice(0, 7),
         monthlyLimit: 8,
+        videoRunsThisMonth: 0,
+        videoLimit: 0,
         teamId: null,
         teamRole: null,
         teamGovernanceEligible: false,

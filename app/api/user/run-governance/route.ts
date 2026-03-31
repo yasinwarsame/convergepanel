@@ -48,7 +48,7 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = req.nextUrl;
   const runId = (searchParams.get("runId") ?? "").trim();
-  const collection = searchParams.get("collection") as "runs" | "verifications" | null;
+  const collection = searchParams.get("collection") as "runs" | "verifications" | "videoVerifications" | null;
 
   if (!runId) {
     return NextResponse.json(
@@ -56,12 +56,12 @@ export async function GET(req: NextRequest) {
       { status: 400 }
     );
   }
-  if (collection !== "runs" && collection !== "verifications") {
+  if (collection !== "runs" && collection !== "verifications" && collection !== "videoVerifications") {
     return NextResponse.json(
       {
         ok: false,
         errorCode: "validation_error",
-        message: 'collection must be "runs" or "verifications".',
+        message: 'collection must be "runs", "verifications", or "videoVerifications".',
       },
       { status: 400 }
     );

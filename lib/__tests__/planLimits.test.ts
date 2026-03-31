@@ -6,6 +6,7 @@
  * Run with: npm test -- lib/__tests__/planLimits.test.ts
  */
 
+import { getVideoLimit } from "@/lib/billing/planConfig";
 import { PLAN_CONFIGS, getPlanConfig, normalizeMaxModels } from "@/lib/plans";
 
 describe("Plan Limits", () => {
@@ -14,18 +15,21 @@ describe("Plan Limits", () => {
       const free = PLAN_CONFIGS.free;
       expect(free.maxRunsPerMonth).toBe(8);
       expect(free.maxModelsPerRun).toBe(2);
+      expect(free.videoVerificationsPerMonth).toBe(0);
     });
 
     it("should have correct limits for lite plan", () => {
       const lite = PLAN_CONFIGS.lite;
       expect(lite.maxRunsPerMonth).toBe(80); // Updated from 100
       expect(lite.maxModelsPerRun).toBe(3);
+      expect(lite.videoVerificationsPerMonth).toBe(5);
     });
 
     it("should have correct limits for full plan", () => {
       const full = PLAN_CONFIGS.full;
       expect(full.maxRunsPerMonth).toBe(150); // Updated from 400
       expect(full.maxModelsPerRun).toBe(5);
+      expect(full.videoVerificationsPerMonth).toBe(20);
     });
   });
 
@@ -52,6 +56,15 @@ describe("Plan Limits", () => {
       const config = getPlanConfig("invalid" as any);
       expect(config.id).toBe("free");
       expect(config.maxRunsPerMonth).toBe(8);
+    });
+  });
+
+  describe("getVideoLimit", () => {
+    it("returns plan video caps", () => {
+      expect(getVideoLimit("free")).toBe(0);
+      expect(getVideoLimit("lite")).toBe(5);
+      expect(getVideoLimit("full")).toBe(20);
+      expect(getVideoLimit("unknown")).toBe(0);
     });
   });
 

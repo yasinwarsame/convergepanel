@@ -23,6 +23,8 @@ export interface PlanConfig {
   };
   maxRunsPerMonth: number; // CRITICAL: This is the single source of truth for run limits
   maxModelsPerRun: number;
+  /** Video verifications per calendar month (0 on free). Mirrors `lib/billing/planConfig`. */
+  videoVerificationsPerMonth: number;
   historyRetentionDays?: number; // 7 for free, undefined for paid (unlimited)
   advancedExportEnabled: boolean;
   /** Team workspaces: governance dashboard, policies, audit (Full plan). */
@@ -60,6 +62,7 @@ export const PLAN_CONFIGS: Record<PlanId, PlanConfig> = {
     stripePriceIds: undefined,
     maxRunsPerMonth: 8,
     maxModelsPerRun: 2,
+    videoVerificationsPerMonth: 0,
     historyRetentionDays: 7, // Only last 7 days accessible
     advancedExportEnabled: false,
     features: [
@@ -82,6 +85,7 @@ export const PLAN_CONFIGS: Record<PlanId, PlanConfig> = {
     },
     maxRunsPerMonth: 80, // CRITICAL: This is the single source of truth
     maxModelsPerRun: 3,
+    videoVerificationsPerMonth: 5,
     historyRetentionDays: undefined, // Unlimited history
     advancedExportEnabled: true,
     features: [
@@ -106,6 +110,7 @@ export const PLAN_CONFIGS: Record<PlanId, PlanConfig> = {
     },
     maxRunsPerMonth: 150, // CRITICAL: This is the single source of truth
     maxModelsPerRun: 5,
+    videoVerificationsPerMonth: 20,
     historyRetentionDays: undefined, // Unlimited history
     advancedExportEnabled: true,
     teamGovernanceAccess: true,

@@ -21,6 +21,8 @@ export interface PlanConfig {
   label: string;
   maxModels: number;
   monthlyLimit: number;
+  /** Paid-plan video verification quota per calendar month (0 = not available). */
+  videoVerificationsPerMonth: number;
 }
 
 /**
@@ -38,18 +40,21 @@ export const PLAN_CONFIG: Record<BillingPlanId, PlanConfig> = {
     label: "Free Plan",
     maxModels: 2,
     monthlyLimit: 8,
+    videoVerificationsPerMonth: 0,
   },
   lite: {
     id: "lite",
     label: "3-Model Plan",
     maxModels: 3,
     monthlyLimit: 80,
+    videoVerificationsPerMonth: 5,
   },
   full: {
     id: "full",
     label: "Full Panel",
     maxModels: 5,
     monthlyLimit: 150,
+    videoVerificationsPerMonth: 20,
   },
 };
 
@@ -91,6 +96,16 @@ if (STRIPE_5_MODELS_ANNUAL) {
 export function getPlanConfigById(planId: BillingPlanId | string): PlanConfig {
   const normalizedId = planId as BillingPlanId;
   return PLAN_CONFIG[normalizedId] || PLAN_CONFIG.free;
+}
+
+/**
+ * Monthly video verification allowance for the given plan (calendar month; separate from panel run count).
+ */
+export function getVideoLimit(plan: string): number {
+  if (plan === "full" || plan === "lite" || plan === "free") {
+    return PLAN_CONFIG[plan].videoVerificationsPerMonth;
+  }
+  return 0;
 }
 
 /**

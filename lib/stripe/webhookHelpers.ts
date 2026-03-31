@@ -66,6 +66,7 @@ export async function updateUserPlanInFirestore(args: {
   };
 
   // If downgrading to free, remove subscription ID
+  // Video allowance is 0 on free via plan; do not zero `videoRunsThisMonth` here (calendar-month counter).
   if (planMapping.planId === "free") {
     updateData.stripeSubscriptionId = firebaseAdmin.firestore.FieldValue.delete();
     updateData.billingInterval = null;

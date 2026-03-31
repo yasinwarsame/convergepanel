@@ -4,13 +4,17 @@ const nextConfig = {
   eslint: { ignoreDuringBuilds: true },
 
   experimental: {
+    serverActions: {
+      bodySizeLimit: "12mb",
+    },
     serverComponentsExternalPackages: [
       "firebase-admin",
       "google-auth-library",
       "gtoken",
       "gaxios",
       "jws",
-      "jsonwebtoken"
+      "jsonwebtoken",
+      "sharp",
     ],
   },
 
@@ -21,6 +25,7 @@ const nextConfig = {
       "script-src-elem 'self' 'unsafe-inline' https://js.stripe.com https://*.firebaseio.com https://*.googleapis.com https://apis.google.com https://accounts.google.com https://*.gstatic.com",
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: https:",
+      "media-src 'self' blob:",
       "font-src 'self' data:",
       "connect-src 'self' https://*.firebaseio.com https://*.googleapis.com https://api.openai.com https://api.anthropic.com https://api.x.ai https://api.perplexity.ai https://api.stripe.com https://generativelanguage.googleapis.com",
       "frame-src 'self' https://js.stripe.com https://hooks.stripe.com https://accounts.google.com",

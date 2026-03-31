@@ -9,6 +9,7 @@ import { adminDb } from "@/lib/firebase/admin";
 import { logger } from "@/lib/logger";
 import type { ClaimVerificationFirestoreDoc } from "@/lib/firestore/verifications";
 import { mapStoredVerificationToClientPayload } from "@/lib/user/mapStoredVerificationToClientPayload";
+import { mapStoredVideoVerificationToClientPayload } from "@/lib/user/mapStoredVideoVerificationToClientPayload";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -52,16 +53,39 @@ export async function GET(
     );
   }
 
-  const snap = await adminDb.collection("verifications").doc(verificationId).get();
+  const collectionParam = (req.nextUrl.searchParams.get("collection") ?? "verifications").trim();
+  const collection =
+    collectionParam === "videoVerifications" ? "videoVerifications" : "verifications";
+
+  if (collectionParam !== "verifications" && collectionParam !== "videoVerifications") {
+    return NextResponse.json(
+      {
+        ok: false,
+        errorCode: "validation_error",
+        message: 'collection must be "verifications" or "videoVerifications".',
+      },
+      { status: 400 }
+    );
+  }
+
+  const snap = await adminDb.collection(collection).doc(verificationId).get();
   if (!snap.exists) {
     return NextResponse.json(
-      { ok: false, errorCode: "not_found", message: "Claim not found." },
+      {
+        ok: false,
+        errorCode: "not_found",
+        message: collection === "videoVerifications" ? "Video verification not found." : "Claim not found.",
+      },
       { status: 404 }
     );
   }
 
-  const data = snap.data() as ClaimVerificationFirestoreDoc;
-  if (data.userId !== uid) {
+  const raw = snap.data() as Record<string, unknown>;
+  const owner =
+    (typeof raw.userId === "string" && raw.userId.trim()) ||
+    (typeof raw.uid === "string" && raw.uid.trim()) ||
+    "";
+  if (owner !== uid) {
     return NextResponse.json(
       { ok: false, errorCode: "forbidden", message: "Access denied." },
       { status: 403 }
@@ -69,6 +93,18 @@ export async function GET(
   }
 
   try {
+    if (collection === "videoVerifications") {
+      if (raw.type != null && raw.type !== "video_verification") {
+        return NextResponse.json(
+          { ok: false, errorCode: "not_found", message: "Video verification not found." },
+          { status: 404 }
+        );
+      }
+      const payload = mapStoredVideoVerificationToClientPayload(verificationId, raw);
+      return NextResponse.json({ ok: true, payload });
+    }
+
+    const data = raw as ClaimVerificationFirestoreDoc;
     const payload = mapStoredVerificationToClientPayload(data, verificationId);
     return NextResponse.json({ ok: true, payload });
   } catch (e: unknown) {

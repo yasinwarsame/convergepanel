@@ -66,7 +66,24 @@ export default function PrivacyPage() {
             </section>
 
             <section className="mb-8">
-              <h2 className="text-xl font-semibold text-slate-900 mb-3">4. Third-Party Services</h2>
+              <h2 className="text-xl font-semibold text-slate-900 mb-3">4. Video Data</h2>
+              <p className="text-slate-700 mb-3">
+                When you use video verification, your video file is processed in your browser. ConvergePanel
+                does not upload, store, or retain your complete video files on our servers. Only extracted frame
+                images are transmitted to our servers for the duration of the analysis request. Frame data is
+                sent to third-party AI model providers (including OpenAI, Anthropic, and Google) for analysis
+                and is subject to their respective privacy policies and data handling practices. After analysis is
+                complete, frame data is discarded. Only the analysis results, metadata, and model verdicts are
+                stored in your account.
+              </p>
+              <p className="text-slate-700">
+                We do not share, sell, or use your video content or verification results for any purpose other
+                than providing the verification service you requested.
+              </p>
+            </section>
+
+            <section className="mb-8">
+              <h2 className="text-xl font-semibold text-slate-900 mb-3">5. Third-Party Services</h2>
               <p className="text-slate-700 mb-3">
                 ConvergePanel uses the following third-party services:
               </p>
@@ -90,7 +107,7 @@ export default function PrivacyPage() {
             </section>
 
             <section className="mb-8">
-              <h2 className="text-xl font-semibold text-slate-900 mb-3">5. Data Security</h2>
+              <h2 className="text-xl font-semibold text-slate-900 mb-3">6. Data Security</h2>
               <p className="text-slate-700 mb-3">
                 We implement industry-standard security measures to protect your data:
               </p>
@@ -106,7 +123,7 @@ export default function PrivacyPage() {
             </section>
 
             <section className="mb-8">
-              <h2 className="text-xl font-semibold text-slate-900 mb-3">6. Your Rights</h2>
+              <h2 className="text-xl font-semibold text-slate-900 mb-3">7. Your Rights</h2>
               <p className="text-slate-700 mb-3">
                 You have the right to:
               </p>
@@ -125,7 +142,7 @@ export default function PrivacyPage() {
             </section>
 
             <section className="mb-8">
-              <h2 className="text-xl font-semibold text-slate-900 mb-3">7. Changes to This Policy</h2>
+              <h2 className="text-xl font-semibold text-slate-900 mb-3">8. Changes to This Policy</h2>
               <p className="text-slate-700">
                 We may update this Privacy Policy at any time. We will notify you of significant
                 changes via email or a notice on the service.
@@ -133,7 +150,7 @@ export default function PrivacyPage() {
             </section>
 
             <section className="mb-8">
-              <h2 className="text-xl font-semibold text-slate-900 mb-3">8. Contact</h2>
+              <h2 className="text-xl font-semibold text-slate-900 mb-3">9. Contact</h2>
               <p className="text-slate-700">
                 If you have questions about this Privacy Policy, please contact us at{" "}
                 <a href="mailto:support@convergepanel.com" className="text-sky-600 hover:underline">

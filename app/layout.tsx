@@ -13,7 +13,7 @@ import { ServiceWorkerUnregister } from "@/components/ServiceWorkerUnregister";
 export const metadata: Metadata = {
   title: "ConvergePanel — Multi-model research & claim verification",
   description:
-    "Run research questions and claims through five AI models. Compare consensus, verify claims, and keep audit trails.",
+    "Multi-model AI research, claim verification, video authenticity analysis (paid plans), and governance scoring — with audit trails.",
   icons: {
     icon: [{ url: "/convergepanel-logo.png", type: "image/png" }],
     shortcut: "/convergepanel-logo.png",
@@ -46,6 +46,20 @@ export default function RootLayout({
             {/* Footer renders with shell */}
             <footer className="mt-10 border-t border-slate-200 bg-white">
               <div className="mx-auto max-w-4xl px-4 py-4 text-xs text-slate-500">
+                <p className="mb-3 max-w-3xl text-[11px] leading-relaxed text-slate-400">
+                  ConvergePanel provides AI-assisted verification for informational purposes only. Not forensic
+                  analysis. Not legal evidence.{" "}
+                  <Link href="/terms" className="text-slate-600 underline-offset-2 hover:text-slate-800 hover:underline">
+                    Terms
+                  </Link>{" "}
+                  ·{" "}
+                  <Link
+                    href="/privacy"
+                    className="text-slate-600 underline-offset-2 hover:text-slate-800 hover:underline"
+                  >
+                    Privacy
+                  </Link>
+                </p>
                 <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
                   <span>© {new Date().getFullYear()} ConvergePanel</span>
                   <nav className="flex flex-wrap items-center gap-x-3 gap-y-2" aria-label="Footer">

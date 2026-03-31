@@ -74,6 +74,8 @@ export interface UserProfile {
   // Plan & usage
   plan?: "free" | "lite" | "full";
   runsThisMonth?: number; // Usage tracking for quota enforcement
+  /** Video verifications used in the current usage month (paid plans). */
+  videoRunsThisMonth?: number;
   usageMonth?: string; // YYYY-MM format for monthly reset tracking
   totalRuns?: number; // Lifetime total of panel runs (never resets)
   // Token usage tracking (denormalized for fast Admin queries)

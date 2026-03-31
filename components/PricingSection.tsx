@@ -67,6 +67,44 @@ export default function PricingSection() {
         {/* Full Panel Plan */}
         <PricingCard planId="full" billingInterval={billingInterval} />
       </div>
+
+      <div className="mx-auto mt-14 max-w-4xl overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+        <table className="w-full min-w-[320px] text-left text-sm text-slate-700">
+          <caption className="sr-only">Plan comparison including video verification</caption>
+          <thead>
+            <tr className="border-b border-slate-200 bg-slate-50">
+              <th className="px-4 py-3 font-semibold text-slate-900">Feature</th>
+              <th className="px-4 py-3 font-semibold text-slate-900">Free</th>
+              <th className="px-4 py-3 font-semibold text-slate-900">3-Model</th>
+              <th className="px-4 py-3 font-semibold text-slate-900">5-Model</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr className="border-b border-slate-100">
+              <td className="px-4 py-3">Video verifications / month</td>
+              <td className="px-4 py-3 text-slate-500">—</td>
+              <td className="px-4 py-3">5</td>
+              <td className="px-4 py-3">20</td>
+            </tr>
+            <tr className="border-b border-slate-100">
+              <td className="px-4 py-3">Vision models per video</td>
+              <td className="px-4 py-3 text-slate-500">—</td>
+              <td className="px-4 py-3">3</td>
+              <td className="px-4 py-3">3</td>
+            </tr>
+            <tr>
+              <td className="px-4 py-3">Video governance review</td>
+              <td className="px-4 py-3 text-slate-500">—</td>
+              <td className="px-4 py-3 text-slate-500">—</td>
+              <td className="px-4 py-3">✓</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p className="mx-auto mt-6 max-w-2xl text-center text-xs text-amber-800/90">
+        ⚠️ Video verification is an AI-assisted authenticity review — not forensic analysis.
+      </p>
     </section>
   );
 }
@@ -167,8 +205,85 @@ function PricingCard({ planId, billingInterval }: PricingCardProps) {
             <span className="text-sm text-slate-700">{feature}</span>
           </li>
         ))}
+        {planId === "free" && (
+          <li className="flex items-start">
+            <span
+              className="mr-2 mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center text-sm font-bold text-slate-400"
+              aria-hidden
+            >
+              ✗
+            </span>
+            <span className="text-sm text-slate-500">Video verification (paid plans only)</span>
+          </li>
+        )}
         {planId === "lite" && (
           <>
+            <li className="flex items-start">
+              <svg
+                className="h-5 w-5 text-sky-500 mr-2 mt-0.5 flex-shrink-0"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M5 13l4 4L19 7"
+                />
+              </svg>
+              <span className="text-sm text-slate-700">5 video verifications per month</span>
+            </li>
+            <li className="flex items-start">
+              <svg
+                className="h-5 w-5 text-sky-500 mr-2 mt-0.5 flex-shrink-0"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M5 13l4 4L19 7"
+                />
+              </svg>
+              <span className="text-sm text-slate-700">3 AI vision models review each video</span>
+            </li>
+            <li className="flex items-start">
+              <svg
+                className="h-5 w-5 text-sky-500 mr-2 mt-0.5 flex-shrink-0"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M5 13l4 4L19 7"
+                />
+              </svg>
+              <span className="text-sm text-slate-700">Metadata review and AI-creation tool markers</span>
+            </li>
+            <li className="flex items-start">
+              <svg
+                className="h-5 w-5 text-sky-500 mr-2 mt-0.5 flex-shrink-0"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M5 13l4 4L19 7"
+                />
+              </svg>
+              <span className="text-sm text-slate-700">
+                Per-model evidence with manipulation and authenticity signals
+              </span>
+            </li>
             <li className="flex items-start">
               <svg
                 className="h-5 w-5 text-sky-500 mr-2 mt-0.5 flex-shrink-0"
@@ -193,8 +308,7 @@ function PricingCard({ planId, billingInterval }: PricingCardProps) {
                 ✗
               </span>
               <span className="text-sm text-slate-500">
-                Governance Dashboard{" "}
-                <span className="text-slate-400">(5-Model plan)</span>
+                Governance Dashboard <span className="text-slate-400">(5-Model plan)</span>
               </span>
             </li>
             <li className="flex items-start">
@@ -206,6 +320,94 @@ function PricingCard({ planId, billingInterval }: PricingCardProps) {
               </span>
               <span className="text-sm text-slate-500">
                 Peer review <span className="text-slate-400">(5-Model plan)</span>
+              </span>
+            </li>
+          </>
+        )}
+        {planId === "full" && (
+          <>
+            <li className="flex items-start">
+              <svg
+                className="h-5 w-5 text-sky-500 mr-2 mt-0.5 flex-shrink-0"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M5 13l4 4L19 7"
+                />
+              </svg>
+              <span className="text-sm text-slate-700">20 video verifications per month</span>
+            </li>
+            <li className="flex items-start">
+              <svg
+                className="h-5 w-5 text-sky-500 mr-2 mt-0.5 flex-shrink-0"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M5 13l4 4L19 7"
+                />
+              </svg>
+              <span className="text-sm text-slate-700">3 AI vision models review each video</span>
+            </li>
+            <li className="flex items-start">
+              <svg
+                className="h-5 w-5 text-sky-500 mr-2 mt-0.5 flex-shrink-0"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M5 13l4 4L19 7"
+                />
+              </svg>
+              <span className="text-sm text-slate-700">Metadata review and AI-creation tool markers</span>
+            </li>
+            <li className="flex items-start">
+              <svg
+                className="h-5 w-5 text-sky-500 mr-2 mt-0.5 flex-shrink-0"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M5 13l4 4L19 7"
+                />
+              </svg>
+              <span className="text-sm text-slate-700">
+                Per-model evidence with manipulation and authenticity signals
+              </span>
+            </li>
+            <li className="flex items-start">
+              <svg
+                className="h-5 w-5 text-sky-500 mr-2 mt-0.5 flex-shrink-0"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M5 13l4 4L19 7"
+                />
+              </svg>
+              <span className="text-sm text-slate-700">
+                Video results in governance review and audit trail (5-Model plan)
               </span>
             </li>
           </>

@@ -35,6 +35,8 @@ const SIGNUP_FREE_LINES = [
 const SIGNUP_UPGRADE_LINES = [
   "All 5 models per run",
   "150 runs per month",
+  "20 video verifications per month",
+  "AI-assisted video authenticity review (paid plans)",
   "Governance dashboard and peer review",
   "Approve or block flagged results",
   "Full audit log of all review decisions",
@@ -55,6 +57,14 @@ const FEATURE_SHOWCASE_ITEMS = [
     title: "Claim Verification",
     lines: [
       "Paste any claim. Get a verdict: Confirmed, Disputed, Partially True, or Unverifiable.",
+    ],
+  },
+  {
+    icon: "🎬",
+    title: "Video Verification",
+    lines: [
+      "Upload a video. Three AI vision models review for AI generation, synthetic edits, and manipulation.",
+      "⚠️ AI-assisted authenticity review — not forensic analysis.",
     ],
   },
   {
@@ -256,7 +266,7 @@ export default function SignupPage() {
             <FeatureShowcase variant="onDark" />
             <div className="mt-8 inline-flex items-center gap-2 rounded-full bg-slate-900/60 px-3 py-1 text-xs font-medium text-sky-300 ring-1 ring-sky-500/30">
               <span className="h-1.5 w-1.5 rounded-full bg-sky-400" />
-              Multi-model research · Claim verification · Governance
+              Multi-model research · Claim verification · Video verification · Governance
             </div>
             <h1 className="mt-6 text-3xl font-semibold text-white sm:text-4xl">
               Don&apos;t trust one AI.
@@ -393,6 +403,13 @@ export default function SignupPage() {
               <div>
                 <p className="font-semibold text-slate-900">Your free account includes:</p>
                 <SignupValueCheckList lines={SIGNUP_FREE_LINES} />
+                <p className="mt-3 text-xs leading-relaxed text-slate-600">
+                  Want video verification, governance, and all 5 models?{" "}
+                  <Link href="/pricing" className="font-medium text-sky-700 underline hover:text-sky-800">
+                    See our plans
+                  </Link>
+                  .
+                </p>
               </div>
               <div className="border-t border-slate-200 pt-4">
                 <p className="font-semibold text-slate-800">
@@ -427,7 +444,7 @@ export default function SignupPage() {
           <div className="mt-10 space-y-5 border-t border-slate-800/40 pt-8 lg:hidden">
             <div className="inline-flex items-center gap-2 rounded-full bg-slate-900/60 px-3 py-1 text-xs font-medium text-sky-300 ring-1 ring-sky-500/30">
               <span className="h-1.5 w-1.5 rounded-full bg-sky-400" />
-              Multi-model research · Claim verification · Governance
+              Multi-model research · Claim verification · Video verification · Governance
             </div>
             <h1 className="text-2xl font-semibold text-white sm:text-3xl">
               Don&apos;t trust one AI.

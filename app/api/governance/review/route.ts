@@ -48,7 +48,7 @@ export async function POST(request: NextRequest) {
 
   let body: {
     runId?: string;
-    collection?: "runs" | "verifications";
+    collection?: "runs" | "verifications" | "videoVerifications";
     action?: ReviewAction;
     comment?: string;
   };
@@ -70,8 +70,8 @@ export async function POST(request: NextRequest) {
   if (!runId || typeof runId !== "string" || !runId.trim()) {
     fields.runId = "Required non-empty string";
   }
-  if (coll !== "runs" && coll !== "verifications") {
-    fields.collection = 'Must be "runs" or "verifications"';
+  if (coll !== "runs" && coll !== "verifications" && coll !== "videoVerifications") {
+    fields.collection = 'Must be "runs", "verifications", or "videoVerifications"';
   }
   if (action !== "approved" && action !== "blocked" && action !== "changes_requested") {
     fields.action = "Invalid action";
@@ -87,7 +87,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const collection = coll as "runs" | "verifications";
+  const collection = coll as "runs" | "verifications" | "videoVerifications";
   const reviewAction = action as ReviewAction;
   const docId = (runId as string).trim();
 
@@ -238,10 +238,29 @@ export async function POST(request: NextRequest) {
   const auditNextStatus = reviewAction === "changes_requested" ? "needs_review" : reviewAction;
 
   /** Single global audit row per review (governanceEvents subcollection is updated below). */
+  const auditQuestion =
+    collection === "videoVerifications"
+      ? (() => {
+          const meta = runData.metadata as Record<string, unknown> | undefined;
+          const dur =
+            meta && typeof meta.duration === "number" && Number.isFinite(meta.duration)
+              ? `${Math.round(meta.duration)}s`
+              : "unknown";
+          const w = meta && typeof meta.width === "number" ? meta.width : "?";
+          const h = meta && typeof meta.height === "number" ? meta.height : "?";
+          const fn =
+            typeof runData.fileName === "string" && runData.fileName.trim()
+              ? runData.fileName.trim()
+              : "Uploaded video";
+          return `Video: ${fn} (${dur}, ${w}x${h})`.substring(0, 200);
+        })()
+      : String(runData.question ?? runData.claim ?? runData.query ?? "").substring(0, 200);
+
   await writeAuditEvent({
     runId: docId,
     collection,
-    runType: collection === "verifications" ? "claim" : "research",
+    runType:
+      collection === "videoVerifications" ? "video" : collection === "verifications" ? "claim" : "research",
     action: reviewAction,
     byUid: uid,
     byEmail: userEmail,
@@ -250,7 +269,7 @@ export async function POST(request: NextRequest) {
     nextStatus: auditNextStatus,
     runOwnerUid: rowOwnerUid,
     runOwnerEmail,
-    question: String(runData.question ?? runData.claim ?? runData.query ?? "").substring(0, 200),
+    question: auditQuestion,
     consensusScore: consensusScore ?? null,
   });
 

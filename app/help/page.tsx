@@ -2,8 +2,15 @@
  * App Router page (help): UI route entry.
  */
 
+import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import Link from "next/link";
+
+export const metadata: Metadata = {
+  title: "Help — ConvergePanel",
+  description:
+    "How to use research mode, claim verification, video verification FAQ, governance, plans, and troubleshooting.",
+};
 
 function FaqQ({ children }: { children: ReactNode }) {
   return <h3 className="mt-6 text-base font-semibold text-gray-900 first:mt-0">{children}</h3>;
@@ -44,6 +51,69 @@ export default function HelpPage() {
                 parsing succeeds. ConvergePanel aggregates those into an overall verdict (confirmed,
                 disputed, partially true, or unverifiable), a consensus score, per-model summaries, and an
                 audit trail you can copy as JSON.
+              </FaqA>
+            </section>
+
+            <section>
+              <h2 className="text-xl font-semibold text-gray-900">Video verification</h2>
+              <p className="mt-2 rounded-lg border border-amber-200/80 bg-amber-50/80 px-3 py-2 text-xs leading-relaxed text-amber-950/90">
+                ⚠️ AI-assisted authenticity review — not forensic analysis. This is an AI-assisted video
+                authenticity review; results should inform human judgment, not replace it.
+              </p>
+
+              <FaqQ>How does video verification work?</FaqQ>
+              <FaqA>
+                Upload a video file (MP4, MOV, or WebM, up to 60 seconds and 50MB). ConvergePanel extracts
+                frames at regular intervals and sends them with video metadata to three vision-capable AI
+                models (GPT-4o, Claude, and Gemini). Each model independently reviews the frames for signs
+                of AI generation, synthetic-looking edits, and manipulation indicators. You receive a verdict
+                with consensus scoring and per-model evidence.
+              </FaqA>
+
+              <FaqQ>What do the video verdicts mean?</FaqQ>
+              <FaqA>
+                <strong>Authentic:</strong> Models reported no strong manipulation indicators. That does not
+                mean the clip is necessarily genuine — it means no major red flags showed up in this pass.{" "}
+                <strong>Likely manipulated:</strong> Multiple models flagged inconsistencies suggesting AI
+                generation or digital editing; open the per-model evidence for specifics.{" "}
+                <strong>Inconclusive:</strong> Models split or lacked confidence — human review is
+                appropriate. <strong>Insufficient:</strong> The clip is too short, low resolution, or too
+                compressed for a meaningful read.
+              </FaqA>
+
+              <FaqQ>Can I rely on this as legal or lab-grade evidence?</FaqQ>
+              <FaqA>
+                No. ConvergePanel uses general-purpose AI vision models, not dedicated authenticity-lab
+                suites. Treat outputs as indicators for your judgment, not as standalone evidence in legal
+                or compliance settings.
+              </FaqA>
+
+              <FaqQ>What does metadata review cover?</FaqQ>
+              <FaqA>
+                We read file metadata such as creation time, encoding software, resolution, frame rate, and
+                codec. The product can flag markers like software names associated with AI video tools,
+                missing creation dates, implausible timestamps, or unusual technical mixes — always as hints,
+                not as definitive labels.
+              </FaqA>
+
+              <FaqQ>What about heavy compression?</FaqQ>
+              <FaqA>
+                Social and mobile video is often heavily compressed; compression can look like tampering.
+                Models are guided to separate compression artifacts from manipulation indicators and to call
+                out ambiguity. Very low quality may land in Inconclusive or Insufficient.
+              </FaqA>
+
+              <FaqQ>How many video verifications do I get?</FaqQ>
+              <FaqA>
+                Free plan: not available. 3-Model plan: 5 per calendar month. 5-Model plan: 20 per calendar
+                month. Each video verification also consumes one run from your monthly panel run allowance.
+              </FaqA>
+
+              <FaqQ>What formats are supported, and is my video kept?</FaqQ>
+              <FaqA>
+                MP4, MOV, and WebM; max 50MB and 60 seconds. The file is processed in memory and not stored
+                as media — only analysis results and structured metadata are saved. Extracted frames are
+                discarded after the models finish.
               </FaqA>
             </section>
 
@@ -167,13 +237,14 @@ export default function HelpPage() {
               <FaqQ>What&apos;s included in the free plan?</FaqQ>
               <FaqA>
                 Eight runs per calendar month and up to two models per run. Both research and claim
-                runs count as one run each. Audit trail views and JSON copy/download are included
-                where the product exposes them for your results.
+                runs count as one run each. Video verification is not included on free. Audit trail views
+                and JSON copy/download are included where the product exposes them for your results.
               </FaqA>
 
               <FaqQ>What do paid plans add?</FaqQ>
               <FaqA>
-                More models per run (up to five on the full plan), higher monthly run limits, and longer
+                More models per run (up to five on the full plan), higher monthly run limits, video
+                verification with its own monthly allowance (each video also uses one panel run), and longer
                 history retention on paid tiers. The 5-Model plan adds governance dashboards, peer review,
                 and the review audit log. See the{" "}
                 <Link href="/pricing" className="font-medium text-sky-600 hover:text-sky-700">

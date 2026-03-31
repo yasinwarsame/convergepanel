@@ -31,4 +31,18 @@ export type PanelHistoryVerificationItem = {
   governanceStatus?: PanelHistoryGovernanceStatus;
 };
 
-export type PanelHistoryItem = PanelHistoryResearchItem | PanelHistoryVerificationItem;
+export type PanelHistoryVideoVerificationItem = {
+  type: "video_verification";
+  id: string;
+  at: string;
+  fileName: string;
+  durationSeconds: number;
+  verdict: string;
+  consensusScore: number;
+  governanceStatus?: PanelHistoryGovernanceStatus;
+};
+
+export type PanelHistoryItem =
+  | PanelHistoryResearchItem
+  | PanelHistoryVerificationItem
+  | PanelHistoryVideoVerificationItem;

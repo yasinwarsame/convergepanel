@@ -19,6 +19,7 @@ import Link from "next/link";
 const LOGIN_VALUE_LINES = [
   "Run research across 5 AI models simultaneously",
   "Verify claims with multi-model consensus scoring",
+  "Video verification with AI vision models (paid plans)",
   "See where models agree and disagree",
   "Governance dashboard with peer review",
   "Approve or block flagged claims and research",
@@ -255,7 +256,7 @@ export default function LoginPage() {
 
         <div className="w-full min-w-0 lg:max-w-md lg:pt-1 xl:max-w-lg">
           <p className="text-sm font-semibold leading-snug text-slate-100">
-            ConvergePanel — Multi-model research, claim verification, and governance
+            ConvergePanel — Multi-model research, claim verification, video verification, and governance
           </p>
           <ValueFeatureList lines={LOGIN_VALUE_LINES} className="mt-4 text-slate-200" />
         </div>

@@ -28,6 +28,9 @@ interface UserUsageData {
   runsThisMonth: number;
   usageMonth: string;
   monthlyLimit: number | null;
+  /** Paid-plan video verification quota (0 on free). */
+  videoLimit: number;
+  videoRunsThisMonth: number;
   billingInterval: "month" | "year" | null;
   teamId?: string | null;
   teamRole?: "owner" | "admin" | "member" | null;
@@ -49,6 +52,8 @@ interface UseUserPlanReturn {
   plan: UserPlan | null;
   runsThisMonth: number;
   monthlyLimit: number | null;
+  videoLimit: number;
+  videoRunsThisMonth: number;
   billingInterval: "month" | "year" | null;
   teamId: string | null;
   teamRole: "owner" | "admin" | "member" | null;
@@ -73,6 +78,8 @@ const DEFAULT_USAGE: UserUsageData = {
   runsThisMonth: 0,
   usageMonth: new Date().toISOString().slice(0, 7),
   monthlyLimit: 8, // FREE_MONTHLY_LIMIT
+  videoLimit: 0,
+  videoRunsThisMonth: 0,
   billingInterval: null,
   teamId: null,
   teamRole: null,
@@ -179,6 +186,8 @@ async function fetchUsage(user: any): Promise<UserUsageData> {
       runsThisMonth: data.runsThisMonth ?? 0,
       usageMonth: data.usageMonth || DEFAULT_USAGE.usageMonth,
       monthlyLimit: data.monthlyLimit ?? 8,
+      videoLimit: typeof data.videoLimit === "number" ? data.videoLimit : 0,
+      videoRunsThisMonth: typeof data.videoRunsThisMonth === "number" ? data.videoRunsThisMonth : 0,
       billingInterval: data.billingInterval || null,
       teamId: data.teamId ?? null,
       teamRole: data.teamRole ?? null,
@@ -320,6 +329,8 @@ export function useUserPlan(): UseUserPlanReturn {
     plan: usageData.plan,
     runsThisMonth: usageData.runsThisMonth,
     monthlyLimit: usageData.monthlyLimit,
+    videoLimit: usageData.videoLimit ?? 0,
+    videoRunsThisMonth: usageData.videoRunsThisMonth ?? 0,
     billingInterval: usageData.billingInterval,
     teamId: usageData.teamId ?? null,
     teamRole: usageData.teamRole ?? null,

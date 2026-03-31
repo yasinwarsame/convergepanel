@@ -74,6 +74,7 @@ export async function getUserPlanAndUsage(uid: string): Promise<{
   if (storedMonth !== currentMonth) {
     await adminDb.collection("users").doc(uid).update({
       runsThisMonth: 0,
+      videoRunsThisMonth: 0,
       usageMonth: currentMonth,
     });
     runsUsed = 0;
@@ -166,6 +167,9 @@ export async function incrementRunCount(uid: string): Promise<void> {
  * 
  * Called when user upgrades/downgrades to reset their usage counter
  * for the new billing period.
+ *
+ * Note: `videoRunsThisMonth` is intentionally not updated here — it tracks the calendar month
+ * alongside `usageMonth` (see usage API / usageCheck). Plan changes do not zero video usage mid-month.
  * 
  * @param uid - Firebase user ID
  * @param newPlan - New plan ID
