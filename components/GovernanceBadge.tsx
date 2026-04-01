@@ -17,6 +17,8 @@ export type GovernanceBadgeProps = {
   reviewComment?: string | null;
   reviewerEmail?: string | null;
   theme?: "light" | "dark";
+  /** Current user's email; their own address stays unmasked when shown. */
+  viewerEmail?: string | null;
 };
 
 function normalizeStatus(
@@ -35,6 +37,7 @@ export function GovernanceBadge({
   reviewComment,
   reviewerEmail,
   theme,
+  viewerEmail,
 }: GovernanceBadgeProps) {
   const s = normalizeStatus(status);
   return (
@@ -45,6 +48,7 @@ export function GovernanceBadge({
       governanceReviewerEmail={reviewerEmail ?? null}
       governanceReviewedAt={reviewedAt ?? null}
       governanceReviewComment={reviewComment ?? null}
+      viewerEmail={viewerEmail}
     />
   );
 }

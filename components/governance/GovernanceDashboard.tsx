@@ -27,6 +27,7 @@ import {
   readApiErrorMessage,
   truncateText,
 } from "./governanceUtils";
+import { maskEmail } from "@/lib/utils/maskEmail";
 
 type TabId = "queue" | "policies" | "audit";
 
@@ -145,10 +146,28 @@ function queueModelVerdictBadgeClass(verdict: string): string {
   return "bg-slate-100 text-slate-800 ring-1 ring-slate-300/60";
 }
 
-function queueRowUserPresentation(row: QueueRow, viewerUid: string | null | undefined) {
+function queueRowUserPresentation(
+  row: QueueRow,
+  viewerUid: string | null | undefined,
+  viewerEmail?: string | null
+) {
   const isSelf = Boolean(viewerUid && row.userId && row.userId === viewerUid);
-  const full = ((row.userEmail || "").trim() || row.userId || "").trim() || "—";
-  const displayShort = isSelf ? "You" : shortenEmailForQueue((row.userEmail || "").trim() || row.userId);
+  const rawEmail = (row.userEmail || "").trim();
+  const id = (row.userId || "").trim();
+
+  if (isSelf) {
+    const full = rawEmail || id || "—";
+    return { isSelf, full, displayShort: "You" as const };
+  }
+
+  if (rawEmail.includes("@")) {
+    const masked = maskEmail(rawEmail, viewerEmail);
+    return { isSelf, full: masked, displayShort: masked };
+  }
+
+  const fallback = rawEmail || id;
+  const full = fallback || "—";
+  const displayShort = shortenEmailForQueue(fallback || id);
   return { isSelf, full, displayShort };
 }
 
@@ -359,14 +378,17 @@ function AuditLogEventCard(props: {
   ev: AuditEvent;
   inlineTrail: AuditInlineTrailState;
   onToggleTrail: () => void;
+  currentUserEmail?: string | null;
 }) {
-  const { ev, inlineTrail, onToggleTrail } = props;
+  const { ev, inlineTrail, onToggleTrail, currentUserEmail } = props;
   const expanded = inlineTrail?.eventId === ev.id;
   const trail = expanded ? inlineTrail : null;
   const rt = runTypeAuditBadge(ev.runType);
-  const runBy = formatAuditRunOwnerDisplay(ev.runOwnerEmail);
+  const runByRaw = formatAuditRunOwnerDisplay(ev.runOwnerEmail);
+  const runBy =
+    runByRaw.includes("@") ? maskEmail(runByRaw, currentUserEmail) : runByRaw;
   const actorLabel = actorByLabelForAction(ev.action);
-  const actorDisplay = (ev.byEmail || ev.byUid || "—").trim() || "—";
+  const actorDisplay = auditActorDisplay(ev, currentUserEmail);
   const border = auditCardLeftBorder(ev.action);
   const score =
     typeof ev.consensusScore === "number" && Number.isFinite(ev.consensusScore)
@@ -403,9 +425,7 @@ function AuditLogEventCard(props: {
           <div className="space-y-2 text-sm">
             <p>
               <span className="font-medium text-slate-600">Updated by:</span>{" "}
-              <span className="text-slate-800">
-                {(ev.byEmail || ev.byUid || "—").trim() || "—"}
-              </span>
+              <span className="text-slate-800">{actorDisplay}</span>
             </p>
             {typeof ev.policyVersion === "number" ? (
               <p>
@@ -502,7 +522,7 @@ function AuditLogEventCard(props: {
                   {auditStatusLine(e) ? (
                     <p className="mt-1 text-slate-600">{auditStatusLine(e)}</p>
                   ) : null}
-                  <p className="mt-0.5 text-slate-500">by {auditActorLabel(e)}</p>
+                  <p className="mt-0.5 text-slate-500">by {auditActorDisplay(e, currentUserEmail)}</p>
                   {e.comment?.trim() ? (
                     <p className="mt-1 italic text-slate-600">&quot;{e.comment}&quot;</p>
                   ) : null}
@@ -516,7 +536,7 @@ function AuditLogEventCard(props: {
   );
 }
 
-function auditActorLabel(ev: AuditEvent): string {
+function auditActorDisplay(ev: AuditEvent, currentUserEmail?: string | null): string {
   if (
     ev.byUid === "system" ||
     ev.byEmail === "system@convergepanel.com" ||
@@ -524,7 +544,9 @@ function auditActorLabel(ev: AuditEvent): string {
   ) {
     return "System";
   }
-  return (ev.byEmail || ev.byUid || "—").trim() || "—";
+  const email = (ev.byEmail || "").trim();
+  if (email.includes("@")) return maskEmail(email, currentUserEmail);
+  return (ev.byUid || "—").trim() || "—";
 }
 
 function auditStatusLine(ev: AuditEvent): string | null {
@@ -1502,6 +1524,7 @@ export default function GovernanceDashboard() {
                         key={`${row.collection}:${row.runId}`}
                         row={row}
                         currentUserUid={user?.uid}
+                        currentUserEmail={user?.email}
                         chip={chip}
                         mh={mh}
                         ev={ev}
@@ -1838,6 +1861,7 @@ export default function GovernanceDashboard() {
                   ev={ev}
                   inlineTrail={auditInlineTrail}
                   onToggleTrail={() => void toggleAuditInlineTrail(ev)}
+                  currentUserEmail={user?.email}
                 />
               ))}
             </ul>
@@ -1913,6 +1937,7 @@ export default function GovernanceDashboard() {
 function FragmentRow(props: {
   row: QueueRow;
   currentUserUid?: string;
+  currentUserEmail?: string | null;
   chip: { wrap: string; label: string };
   mh: { text: string; cls: string; title: string };
   ev: { text: string; cls: string };
@@ -1931,6 +1956,7 @@ function FragmentRow(props: {
   const {
     row,
     currentUserUid,
+    currentUserEmail,
     chip,
     mh,
     ev,
@@ -1950,7 +1976,8 @@ function FragmentRow(props: {
   const reviewBusyThisRow = reviewBusyKey === key;
   const { isSelf, full: userFullLabel, displayShort: userDisplayShort } = queueRowUserPresentation(
     row,
-    currentUserUid
+    currentUserUid,
+    currentUserEmail
   );
 
   return (

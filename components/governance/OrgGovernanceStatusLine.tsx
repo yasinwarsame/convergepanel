@@ -6,6 +6,7 @@
 
 import Link from "next/link";
 import { useUserPlan } from "@/hooks/useUserPlan";
+import { maskEmail } from "@/lib/utils/maskEmail";
 
 export type OrgGovernanceEvalStatus = "approved" | "needs_review" | "blocked";
 
@@ -16,9 +17,16 @@ function formatGovDate(iso: string | null | undefined): string {
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
 
-function reviewerDisplay(email?: string | null, uid?: string | null): string {
+function reviewerDisplay(
+  email: string | null | undefined,
+  uid: string | null | undefined,
+  viewerEmail?: string | null
+): string {
   const e = email?.trim();
-  if (e) return e;
+  if (e) {
+    if (e.includes("@")) return maskEmail(e, viewerEmail);
+    return e;
+  }
   const u = uid?.trim();
   if (u) return u.length > 14 ? `${u.slice(0, 10)}…` : u;
   return "Reviewer";
@@ -34,6 +42,8 @@ export function OrgGovernanceStatusLine(props: {
   governanceReviewerEmail?: string | null;
   governanceReviewedAt?: string | null;
   governanceReviewComment?: string | null;
+  /** Signed-in user's email; used to unmask their own address when shown as reviewer. */
+  viewerEmail?: string | null;
 }) {
   const { plan, governanceAssignedReviewerEmail } = useUserPlan();
   const dark = props.theme === "dark";
@@ -49,7 +59,11 @@ export function OrgGovernanceStatusLine(props: {
   const hasHumanReview = Boolean(
     props.governanceReviewedByUid?.trim() || props.governanceReviewerEmail?.trim()
   );
-  const who = reviewerDisplay(props.governanceReviewerEmail, props.governanceReviewedByUid);
+  const who = reviewerDisplay(
+    props.governanceReviewerEmail,
+    props.governanceReviewedByUid,
+    props.viewerEmail
+  );
   const when = formatGovDate(props.governanceReviewedAt);
   const whenPhrase = when ? ` · ${when}` : "";
   const comment = (props.governanceReviewComment ?? "").trim();
@@ -141,7 +155,9 @@ export function OrgGovernanceStatusLine(props: {
               {governanceAssignedReviewerEmail ? (
                 <>
                   Your reviewer:{" "}
-                  <span className={`font-medium ${strong}`}>{governanceAssignedReviewerEmail}</span>
+                  <span className={`font-medium ${strong}`}>
+                    {maskEmail(governanceAssignedReviewerEmail, props.viewerEmail)}
+                  </span>
                 </>
               ) : (
                 <>

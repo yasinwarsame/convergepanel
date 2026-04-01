@@ -459,6 +459,7 @@ export default function ClaimVerificationResult({
             reviewedAt={liveGov.reviewedAt ?? undefined}
             reviewComment={liveGov.comment ?? undefined}
             reviewerEmail={liveGov.reviewerEmail ?? undefined}
+            viewerEmail={user?.email ?? undefined}
           />
         </div>
 
