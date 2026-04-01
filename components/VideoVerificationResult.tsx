@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import {
   CheckCircle,
@@ -10,15 +10,14 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/components/AuthProvider";
 import { GovernanceBadge } from "@/components/GovernanceBadge";
+import { VerificationActions } from "@/components/VerificationActions";
+import { downloadTextFile, generateVerificationMemo } from "@/lib/verification/generateMemo";
 import type { VideoVerificationClientPayload } from "@/lib/verification/videoVerificationClientPayload";
 import { VIDEO_VERDICT_CLIPBOARD_DISCLAIMER } from "@/lib/legal/clipboardDisclaimers";
 import { VIDEO_VERIFICATION_DISCLAIMER } from "@/lib/legal/videoVerificationDisclaimer";
 
 const BUTTON_OUTLINE_SECONDARY =
   "rounded-lg border border-gray-500 px-4 py-2 text-sm font-medium text-gray-300 hover:bg-gray-700 transition-colors";
-
-const BUTTON_AUDIT_TRAIL_ACTIVE =
-  "rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors";
 
 function formatDuration(seconds: number): string {
   const mins = Math.floor(seconds / 60);
@@ -217,8 +216,6 @@ export default function VideoVerificationResult({
 }) {
   const { user, authReady } = useAuth();
   const [auditOpen, setAuditOpen] = useState(false);
-  const [verdictCopied, setVerdictCopied] = useState(false);
-  const verdictCopyResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [liveGov, setLiveGov] = useState<{
     status: "approved" | "needs_review" | "blocked" | null;
@@ -287,12 +284,6 @@ export default function VideoVerificationResult({
     };
   }, [data.verificationId, user, authReady]);
 
-  useEffect(() => {
-    return () => {
-      if (verdictCopyResetRef.current) clearTimeout(verdictCopyResetRef.current);
-    };
-  }, []);
-
   const config = verdictConfig[data.verdict] ?? verdictConfig.inconclusive;
   const supportPct = supportPercent(data.supportRatio);
   const evidenceQ = data.evidenceQuality;
@@ -318,7 +309,7 @@ export default function VideoVerificationResult({
     };
   }, [data, supportPct]);
 
-  const copyVerdict = useCallback(() => {
+  const copyVerdict = useCallback((): Promise<void> => {
     const verdictLabels: Record<string, string> = {
       authentic: "Authentic",
       likely_manipulated: "Likely Manipulated",
@@ -344,14 +335,37 @@ export default function VideoVerificationResult({
       VIDEO_VERDICT_CLIPBOARD_DISCLAIMER.trimEnd(),
     ].join("\n");
 
-    void navigator.clipboard.writeText(text).then(
-      () => {
-        setVerdictCopied(true);
-        if (verdictCopyResetRef.current) clearTimeout(verdictCopyResetRef.current);
-        verdictCopyResetRef.current = setTimeout(() => setVerdictCopied(false), 2000);
-      },
-      () => setVerdictCopied(false)
-    );
+    return navigator.clipboard.writeText(text);
+  }, [data]);
+
+  const handleExportMemo = useCallback(() => {
+    const memo = generateVerificationMemo({
+      type: "video",
+      verdict: data.verdict,
+      consensusScore: data.consensusScore,
+      confidenceLabel: data.confidenceLabel,
+      evidenceQuality: data.evidenceQuality,
+      modelEvidence: data.modelEvidence.map((m) => ({
+        modelId: m.modelId,
+        modelName: m.modelName,
+        verdict: m.verdict,
+        confidence: m.confidence,
+        summary: m.summary,
+        manipulationSignals: m.manipulationSignals,
+        authenticitySignals: m.authenticitySignals,
+        compressionNotes: m.compressionNotes,
+        limitations: m.limitations,
+      })),
+      agreementPoints: data.agreementPoints,
+      disagreementPoints: data.disagreementPoints,
+      fileName: data.fileName,
+      videoMetadata: data.metadata,
+      metadataFlags: data.metadataAnalysis?.flags,
+      frameCount: data.frameCount,
+      verificationId: data.verificationId ?? "",
+    });
+    const base = data.verificationId?.replace(/[^a-zA-Z0-9-_]+/g, "-").slice(0, 48) || String(Date.now());
+    downloadTextFile(memo, `video-memo-${base}.txt`);
   }, [data]);
 
   const bundle = buildAuditSnapshot();
@@ -570,32 +584,16 @@ export default function VideoVerificationResult({
           </div>
         )}
 
-        <div className="flex flex-col sm:flex-row flex-wrap gap-2 sm:gap-3">
-          <div className="relative inline-flex">
-            <button type="button" onClick={copyVerdict} className={BUTTON_OUTLINE_SECONDARY}>
-              Copy verdict
-            </button>
-            {verdictCopied ? (
-              <span
-                role="status"
-                className="pointer-events-none absolute left-1/2 top-full z-10 mt-1.5 -translate-x-1/2 whitespace-nowrap rounded-md bg-slate-700 px-2.5 py-1 text-xs font-medium text-slate-100 shadow-lg ring-1 ring-slate-500/80"
-              >
-                Copied
-              </span>
-            ) : null}
-          </div>
-          <button
-            type="button"
-            onClick={() => setAuditOpen((o) => !o)}
-            aria-pressed={auditOpen}
-            className={auditOpen ? BUTTON_AUDIT_TRAIL_ACTIVE : BUTTON_OUTLINE_SECONDARY}
-          >
-            {auditOpen ? "Hide audit trail" : "View audit trail"}
-          </button>
-          <button type="button" onClick={onVerifyAnother} className={BUTTON_OUTLINE_SECONDARY}>
-            Verify another video
-          </button>
-        </div>
+        <VerificationActions
+          type="video"
+          onCopy={copyVerdict}
+          onExportMemo={handleExportMemo}
+          onViewAuditTrail={() => setAuditOpen((o) => !o)}
+          showAuditTrail={auditOpen}
+          onVerifyAnother={onVerifyAnother}
+          copyLabel="Copy verdict"
+          verifyAnotherLabel="Verify another video"
+        />
 
         {auditOpen && (
           <div className="rounded-lg border border-slate-700 bg-slate-900 p-5 shadow-inner">

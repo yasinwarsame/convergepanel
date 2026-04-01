@@ -47,7 +47,6 @@ import {
   type ModelHealthForCopy,
   type SourceCoverageForCopy,
 } from "@/lib/ui/copyFormats";
-import { buildLinkedInPost, type LinkedInModelHealth } from "@/lib/ui/socialCopy";
 import { fetchWithTimeout, FetchError } from "@/lib/client/fetchWithTimeout";
 import { useAuth } from "@/components/AuthProvider";
 import {
@@ -57,13 +56,27 @@ import {
 } from "@/lib/verificationGate/verificationGate";
 import { classifyClaimSeverity, ClaimSeverityResult } from "@/lib/verificationGate/claimSeverity";
 import { classifyGrounding, GroundingResult } from "@/lib/verificationGate/sourceGrounding";
+import { buildPanelVerdict, PanelVerdict } from "@/lib/verificationGate/panelVerdict";
 import {
-  buildPanelVerdict,
-  buildCopyForXThread,
-  PanelVerdict,
-} from "@/lib/verificationGate/panelVerdict";
-import type { SynthesisConsensusSummaryDetail } from "@/lib/verification/consensusScoring";
+  rollupPolicyConsensusSummary,
+  type SynthesisConsensusSummaryDetail,
+} from "@/lib/verification/consensusScoring";
 import { GovernanceBadge } from "@/components/GovernanceBadge";
+import { VerificationActions } from "@/components/VerificationActions";
+import { downloadTextFile, generateVerificationMemo } from "@/lib/verification/generateMemo";
+
+function extractResearchKeyFindings(report: StructuredSynthesis): string[] {
+  return (report.keyFindings ?? []).map((k) => k.claim);
+}
+
+function extractResearchAgreements(panelVerdict: PanelVerdict): string[] {
+  const t = panelVerdict.topConsensus?.trim();
+  return t ? [t] : [];
+}
+
+function extractResearchDisagreements(report: StructuredSynthesis): string[] {
+  return (report.disagreements ?? []).map((d) => `${d.topic}: ${d.whyTheyDiffer}`.trim());
+}
 
 interface PanelSynthesisViewProps {
   results: ModelResult[];
@@ -477,117 +490,66 @@ function GroundingBadge({ result }: { result: GroundingResult }) {
   );
 }
 
+async function copyStructuredSynthesisMarkdown(
+  results: ModelResult[],
+  verdict: PanelVerdict,
+  gate: VerificationGateResult,
+  keyFindings: StructuredSynthesis["keyFindings"],
+  sourceBacked: boolean,
+  synthesizedBy?: string | null
+): Promise<boolean> {
+  const total = results.length;
+  const okCount = results.filter((r) => coerceStatus(r.status) === "ok").length;
+  const substitutedCount = results.filter((r) => coerceStatus(r.status) === "substituted").length;
+  const failedCount = results.filter((r) => coerceStatus(r.status) === "failed").length;
+  const respondedCount = okCount + substitutedCount;
+  const substitutedProviders = [
+    ...new Set(
+      results
+        .filter((r) => coerceStatus(r.status) === "substituted")
+        .map((r) => getProviderDisplayName((r as { provider?: string }).provider))
+    ),
+  ].filter((p) => p !== "Unknown");
+  const modelHealth: ModelHealthForCopy = {
+    total,
+    responded: respondedCount,
+    substitutedCount,
+    failedCount,
+    substitutedProviders,
+  };
+  const totalFindings = keyFindings.length;
+  const sourcedFindings = keyFindings.filter(
+    (f) => Array.isArray(f.evidenceRefs) && f.evidenceRefs.length > 0
+  ).length;
+  const sourceCoverage: SourceCoverageForCopy | null =
+    sourceBacked && totalFindings > 0
+      ? {
+          sourcedFindings,
+          totalFindings,
+          coveragePct: Math.round((sourcedFindings / totalFindings) * 100),
+        }
+      : null;
+  const markdown = buildSynthesisMarkdown(
+    verdict.question,
+    gate,
+    verdict,
+    modelHealth,
+    sourceCoverage,
+    synthesizedBy
+  );
+  return copyToClipboardWithFallback(markdown);
+}
+
 /* ─── Panel Verdict Summary Card ─── */
 
 function PanelVerdictCard({
   verdict,
   gate,
-  results,
-  keyFindings,
-  sourceBacked,
-  synthesizedBy,
 }: {
   verdict: PanelVerdict;
   gate: VerificationGateResult;
-  results: ModelResult[];
-  keyFindings: Array<{ evidenceRefs?: string[] }>;
-  sourceBacked: boolean;
-  synthesizedBy?: string | null;
 }) {
-  const [copyState, setCopyState] = useState<
-    "idle" | "copied-x" | "copied-linkedin" | "copied-markdown"
-  >("idle");
   const gateStyle = GATE_STYLES[gate.status] ?? GATE_STYLES.NEEDS_HUMAN_REVIEW;
-  const xThread = buildCopyForXThread(verdict);
-  const xLabel = xThread.length <= 1 ? "Copy for X" : `Copy for X (thread · ${xThread.length})`;
-
-  const copyToClipboard = useCallback(
-    (text: string, label: "copied-x") => {
-      navigator.clipboard.writeText(text).then(() => {
-        setCopyState(label);
-        setTimeout(() => setCopyState("idle"), 2000);
-      });
-    },
-    []
-  );
-
-  const handleCopyLinkedIn = useCallback(async () => {
-    const total = results.length;
-    const okCount = results.filter((r) => coerceStatus(r.status) === "ok").length;
-    const substitutedCount = results.filter((r) => coerceStatus(r.status) === "substituted").length;
-    const failedCount = results.filter((r) => coerceStatus(r.status) === "failed").length;
-    const respondedCount = okCount + substitutedCount;
-    const substitutedProviders = [...new Set(
-      results
-        .filter((r) => coerceStatus(r.status) === "substituted")
-        .map((r) => getProviderDisplayName((r as { provider?: string }).provider))
-    )].filter((p) => p !== "Unknown");
-    const modelHealth: LinkedInModelHealth = {
-      total,
-      responded: respondedCount,
-      substituted: substitutedCount,
-      failed: failedCount,
-      substitutedProviders,
-    };
-    const post = buildLinkedInPost({
-      question: verdict.question,
-      gate,
-      verdict,
-      modelHealth,
-      sourceBacked,
-    });
-    const ok = await copyToClipboardWithFallback(post);
-    if (ok) {
-      setCopyState("copied-linkedin");
-      setTimeout(() => setCopyState("idle"), 1500);
-    }
-  }, [results, verdict, gate, sourceBacked]);
-
-  const handleCopyMarkdown = useCallback(async () => {
-    const total = results.length;
-    const okCount = results.filter((r) => coerceStatus(r.status) === "ok").length;
-    const substitutedCount = results.filter((r) => coerceStatus(r.status) === "substituted").length;
-    const failedCount = results.filter((r) => coerceStatus(r.status) === "failed").length;
-    const respondedCount = okCount + substitutedCount;
-    // Use provider from substituted result (actual responder, e.g. "deepseek"), not original from substitutedFrom
-    const substitutedProviders = [...new Set(
-      results
-        .filter((r) => coerceStatus(r.status) === "substituted")
-        .map((r) => getProviderDisplayName((r as { provider?: string }).provider))
-    )].filter((p) => p !== "Unknown");
-    const modelHealth: ModelHealthForCopy = {
-      total,
-      responded: respondedCount,
-      substitutedCount,
-      failedCount,
-      substitutedProviders,
-    };
-    const totalFindings = keyFindings.length;
-    const sourcedFindings = keyFindings.filter(
-      (f) => Array.isArray(f.evidenceRefs) && f.evidenceRefs.length > 0
-    ).length;
-    const sourceCoverage: SourceCoverageForCopy | null =
-      sourceBacked && totalFindings > 0
-        ? {
-            sourcedFindings,
-            totalFindings,
-            coveragePct: Math.round((sourcedFindings / totalFindings) * 100),
-          }
-        : null;
-    const markdown = buildSynthesisMarkdown(
-      verdict.question,
-      gate,
-      verdict,
-      modelHealth,
-      sourceCoverage,
-      synthesizedBy
-    );
-    const ok = await copyToClipboardWithFallback(markdown);
-    if (ok) {
-      setCopyState("copied-markdown");
-      setTimeout(() => setCopyState("idle"), 1500);
-    }
-  }, [results, keyFindings, sourceBacked, synthesizedBy, verdict, gate]);
 
   return (
     <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
@@ -713,30 +675,6 @@ function PanelVerdictCard({
           </div>
         )}
 
-        {/* Copy actions — all use full underlying strings (verdict/gate), never DOM extraction */}
-        <div className="flex items-center gap-2 pt-3 border-t border-slate-100 flex-wrap">
-          <button
-            onClick={() => copyToClipboard(xThread.join("\n\n"), "copied-x")}
-            className="text-xs font-medium text-slate-500 hover:text-slate-700 transition-colors px-2 py-1 rounded hover:bg-slate-50"
-          >
-            {copyState === "copied-x" ? "Copied" : xLabel}
-          </button>
-          <span className="text-slate-300">|</span>
-          <button
-            onClick={() => void handleCopyLinkedIn()}
-            className="text-xs font-medium text-slate-500 hover:text-slate-700 transition-colors px-2 py-1 rounded hover:bg-slate-50"
-          >
-            {copyState === "copied-linkedin" ? "Copied!" : "Copy for LinkedIn"}
-          </button>
-          <span className="text-slate-300">|</span>
-          <button
-            onClick={() => void handleCopyMarkdown()}
-            className="text-xs font-medium text-slate-500 hover:text-slate-700 transition-colors px-2 py-1 rounded hover:bg-slate-50"
-          >
-            {copyState === "copied-markdown" ? "Copied" : "Copy as Markdown"}
-          </button>
-        </div>
-
         <div className="mt-8 space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-4 text-xs text-slate-500">
           <p className="font-semibold text-slate-700">Disclaimer</p>
           <p>
@@ -791,6 +729,9 @@ export default function PanelSynthesisView({
     report: null,
     error: null,
   });
+  const [generatedPost, setGeneratedPost] = useState<string | null>(null);
+  const [generatedPostType, setGeneratedPostType] = useState<"linkedin" | "x" | null>(null);
+  const [copiedPost, setCopiedPost] = useState(false);
   const reqInFlightRef = useRef(false); // Prevent duplicate in-flight requests
   const abortControllerRef = useRef<AbortController | null>(null); // For cleanup on unmount/new request
   const triggeredRunIdsRef = useRef<Set<string>>(new Set()); // Track which runIds have had synthesis triggered
@@ -846,6 +787,12 @@ export default function PanelSynthesisView({
       }
     };
   }, []);
+
+  useEffect(() => {
+    setGeneratedPost(null);
+    setGeneratedPostType(null);
+    setCopiedPost(false);
+  }, [runId]);
 
   useEffect(() => {
     setLiveGov({
@@ -1563,6 +1510,77 @@ export default function PanelSynthesisView({
       consensusMeta?.modelsHealthy ??
       results.filter((r) => isUsableResult(r) && getModelText(r).trim().length > 0).length;
     const modelTotalResolved = consensusMeta?.modelCount ?? Math.max(1, results.length);
+    const panelVerdict = buildPanelVerdict(question, report, gate);
+    const policyRollup =
+      consensusMeta != null
+        ? rollupPolicyConsensusSummary(consensusMeta, report.keyFindings?.length ?? 0)
+        : null;
+
+    const handleGenerateLinkedIn = () => {
+      const q = (question ?? "").trim();
+      const score = consensusMeta?.overallConsensusScore ?? 0;
+      const confidence = policyRollup?.confidenceLabel ?? "Medium";
+      const findings = extractResearchKeyFindings(report);
+      const agreements = extractResearchAgreements(panelVerdict);
+      const disagreements = extractResearchDisagreements(report);
+
+      const head = `I researched "${q.length > 120 ? `${q.slice(0, 117)}...` : q}" across 5 AI models simultaneously using ConvergePanel.`;
+      const parts: string[] = [head, "", `Consensus score: ${score}/100 (${confidence})`, ""];
+      if (findings.length > 0) {
+        parts.push("Key findings:");
+        findings.slice(0, 3).forEach((f) => parts.push(`→ ${f}`));
+        parts.push("");
+      }
+      if (agreements.length > 0) {
+        parts.push("Where models agree:");
+        agreements.slice(0, 2).forEach((a) => parts.push(`→ ${a}`));
+        parts.push("");
+      }
+      if (disagreements.length > 0) {
+        parts.push("Where models disagree:");
+        disagreements.slice(0, 2).forEach((d) => parts.push(`→ ${d}`));
+        parts.push("");
+      }
+      parts.push("The disagreements tell you more than any single answer.", "", "→ convergepanel.com");
+      setGeneratedPost(parts.join("\n"));
+      setGeneratedPostType("linkedin");
+      setCopiedPost(false);
+    };
+
+    const handleGenerateX = () => {
+      const q = (question ?? "").trim();
+      const score = consensusMeta?.overallConsensusScore ?? 0;
+      const findings = extractResearchKeyFindings(report);
+      const disagreements = extractResearchDisagreements(report);
+      const line = (f: string, max: number) => (f.length > max ? `${f.slice(0, max - 3)}...` : f);
+
+      const parts: string[] = [
+        `Asked 5 AI models: "${q.length > 80 ? `${q.slice(0, 77)}...` : q}"`,
+        "",
+        `Consensus: ${score}/100`,
+        "",
+      ];
+      if (findings.length > 0) {
+        parts.push(
+          findings
+            .slice(0, 2)
+            .map((f) => `→ ${line(f, 100)}`)
+            .join("\n"),
+          ""
+        );
+      }
+      if (disagreements.length > 0) {
+        parts.push(`Models disagreed on: ${line(disagreements[0] ?? "", 100)}`, "");
+      }
+      parts.push(
+        "One model gives you a confident answer. Five give you the shape of the problem.",
+        "",
+        "convergepanel.com"
+      );
+      setGeneratedPost(parts.join("\n"));
+      setGeneratedPostType("x");
+      setCopiedPost(false);
+    };
 
     return (
         <div className="space-y-6">
@@ -1864,19 +1882,83 @@ export default function PanelSynthesisView({
           )}
 
           {/* Panel Verdict Summary Card */}
-          {(() => {
-            const verdict = buildPanelVerdict(question, report, gate);
-            return (
-              <PanelVerdictCard
-                verdict={verdict}
-                gate={gate}
-                results={results}
-                keyFindings={report.keyFindings ?? []}
-                sourceBacked={sourceBacked}
-                synthesizedBy={synthesisState.synthesizedBy}
-              />
-            );
-          })()}
+          <PanelVerdictCard verdict={panelVerdict} gate={gate} />
+
+          <VerificationActions
+            type="research"
+            onCopy={() =>
+              copyStructuredSynthesisMarkdown(
+                results,
+                panelVerdict,
+                gate,
+                report.keyFindings ?? [],
+                sourceBacked,
+                synthesisState.synthesizedBy
+              ).then((ok) => {
+                if (!ok) throw new Error("copy failed");
+              })
+            }
+            onExportMemo={() => {
+              const disagreeLines = (report.disagreements ?? []).map((d) =>
+                `${d.topic}: ${d.whyTheyDiffer}`.trim()
+              );
+              const memo = generateVerificationMemo({
+                type: "research",
+                question,
+                consensusScore: consensusMeta?.overallConsensusScore ?? 0,
+                confidenceLabel: policyRollup?.confidenceLabel ?? "Medium",
+                evidenceQuality: policyRollup?.evidenceQuality ?? "mixed",
+                keyFindings: (report.keyFindings ?? []).map((k) => k.claim),
+                synthesisAgreements: panelVerdict.topConsensus ? [panelVerdict.topConsensus] : [],
+                synthesisDisagreements: disagreeLines,
+                confidenceAssessment:
+                  report.executiveSummary?.trim() || panelVerdict.keyBlindSpot || "",
+                modelsUsed: results.filter(isUsableResult).map((r) => getModelDisplayNameSafe(r.modelId)),
+                verificationId: runId ?? "",
+              });
+              const base = runId?.replace(/[^a-zA-Z0-9-_]+/g, "-").slice(0, 48) || String(Date.now());
+              downloadTextFile(memo, `research-memo-${base}.txt`);
+            }}
+            onGenerateLinkedIn={handleGenerateLinkedIn}
+            onGenerateX={handleGenerateX}
+            copyLabel="Copy synthesis"
+          />
+
+          {generatedPost ? (
+            <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <span className="text-sm font-medium text-slate-800 dark:text-slate-200">
+                  {generatedPostType === "linkedin" ? "LinkedIn post" : "𝕏 post"} — ready to copy
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void navigator.clipboard.writeText(generatedPost).then(() => {
+                      setCopiedPost(true);
+                      window.setTimeout(() => setCopiedPost(false), 2000);
+                    });
+                  }}
+                  className="rounded-lg bg-blue-600 px-3 py-1 text-sm font-medium text-white hover:bg-blue-700"
+                >
+                  {copiedPost ? "Copied!" : "Copy to clipboard"}
+                </button>
+              </div>
+              <pre className="whitespace-pre-wrap font-sans text-sm text-gray-700 dark:text-gray-300">
+                {generatedPost}
+              </pre>
+              <button
+                type="button"
+                onClick={() => {
+                  setGeneratedPost(null);
+                  setGeneratedPostType(null);
+                  setCopiedPost(false);
+                }}
+                className="mt-2 text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+              >
+                Dismiss
+              </button>
+            </div>
+          ) : null}
 
           {liveGov.status ? (
             <div className="mt-6">

@@ -246,7 +246,7 @@ function perClaimConfidenceLabel(
   return "Low";
 }
 
-function rollupPolicyConsensusSummary(
+export function rollupPolicyConsensusSummary(
   detail: SynthesisConsensusSummaryDetail,
   keyFindingCount: number
 ): ConsensusSummary {

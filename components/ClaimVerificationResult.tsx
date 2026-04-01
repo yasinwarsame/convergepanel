@@ -5,7 +5,7 @@
  * evidence rows, agreement digest, and optional policy / audit sections.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { HelpCircle, CheckCircle, AlertTriangle, AlertCircle } from "lucide-react";
 import { getModelDisplayName } from "@/lib/modelInfo";
@@ -16,17 +16,11 @@ import type {
 } from "@/lib/verification/claimVerificationClientPayload";
 import { useAuth } from "@/components/AuthProvider";
 import { GovernanceBadge } from "@/components/GovernanceBadge";
+import { VerificationActions } from "@/components/VerificationActions";
+import { downloadTextFile, generateVerificationMemo } from "@/lib/verification/generateMemo";
 import { CLAIM_VERDICT_CLIPBOARD_DISCLAIMER } from "@/lib/legal/clipboardDisclaimers";
 
 export type { ClaimVerificationClientPayload, ClaimVerdictUi };
-
-/** Outline / secondary: Copy verdict, View audit (closed), Verify another. */
-const BUTTON_OUTLINE_SECONDARY =
-  "rounded-lg border border-gray-500 px-4 py-2 text-sm font-medium text-gray-300 hover:bg-gray-700 transition-colors";
-
-/** Solid: audit trail toggle when open. */
-const BUTTON_AUDIT_TRAIL_ACTIVE =
-  "rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors";
 
 function verdictBadgeClass(verdict: string): string {
   const v = verdict.toLowerCase();
@@ -197,8 +191,6 @@ export default function ClaimVerificationResult({
   const { user, authReady } = useAuth();
   const [auditOpen, setAuditOpen] = useState(false);
   const [openModels, setOpenModels] = useState<Record<string, boolean>>({});
-  const [verdictCopied, setVerdictCopied] = useState(false);
-  const verdictCopyResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [liveGov, setLiveGov] = useState<{
     status: ClaimVerificationClientPayload["governanceStatus"] | null;
@@ -267,12 +259,6 @@ export default function ClaimVerificationResult({
     };
   }, [data.verificationId, user, authReady]);
 
-  useEffect(() => {
-    return () => {
-      if (verdictCopyResetRef.current) clearTimeout(verdictCopyResetRef.current);
-    };
-  }, []);
-
   const banner = useMemo((): {
     className: string;
     icon: ReactNode;
@@ -322,7 +308,10 @@ export default function ClaimVerificationResult({
     }
   }, [data]);
 
-  const copyVerdict = useCallback(() => {
+  const bundle = data.auditBundle;
+  const evidenceQ = data.evidenceQuality ?? bundle.evidenceQuality;
+
+  const copyVerdict = useCallback((): Promise<void> => {
     const lines: string[] = [];
     lines.push(`ConvergePanel — Claim result`);
     lines.push(`Claim: ${data.claim}`);
@@ -344,23 +333,39 @@ export default function ClaimVerificationResult({
       data.whereModelsDisagree.forEach((x) => lines.push(`• ${x.point} [${x.models.join(", ")}]`));
     }
     lines.push(CLAIM_VERDICT_CLIPBOARD_DISCLAIMER.trimEnd());
-    void navigator.clipboard.writeText(lines.join("\n")).then(
-      () => {
-        setVerdictCopied(true);
-        if (verdictCopyResetRef.current) clearTimeout(verdictCopyResetRef.current);
-        verdictCopyResetRef.current = setTimeout(() => setVerdictCopied(false), 2000);
-      },
-      () => setVerdictCopied(false)
-    );
+    return navigator.clipboard.writeText(lines.join("\n"));
   }, [data]);
+
+  const handleExportMemo = useCallback(() => {
+    const memo = generateVerificationMemo({
+      type: "claim",
+      claim: data.claim,
+      verdict: data.verdict,
+      consensusScore: data.consensusScore,
+      confidenceLabel: data.confidenceLabel,
+      evidenceQuality: typeof evidenceQ === "string" ? evidenceQ : "mixed",
+      modelEvidence: data.modelEvidence.map((m) => ({
+        modelId: m.modelId,
+        status: m.status,
+        verdict: m.verdict,
+        confidence: m.confidence,
+        summary: m.summary,
+        correctParts: m.correctParts,
+        incorrectParts: m.incorrectParts,
+        unverifiableParts: m.unverifiableParts,
+      })),
+      agreementPoints: data.whereModelsAgree,
+      disagreementPoints: data.whereModelsDisagree.map((d) => d.point),
+      verificationId: data.verificationId ?? "",
+    });
+    const base = data.verificationId?.replace(/[^a-zA-Z0-9-_]+/g, "-").slice(0, 48) || String(Date.now());
+    downloadTextFile(memo, `claim-memo-${base}.txt`);
+  }, [data, evidenceQ]);
 
   const showGov =
     data.governanceReviewRequired ||
     data.blockedByPolicy ||
     (data.policyFlags && data.policyFlags.length > 0);
-
-  const bundle = data.auditBundle;
-  const evidenceQ = data.evidenceQuality ?? bundle.evidenceQuality;
 
   const copyAuditJson = useCallback(() => {
     void navigator.clipboard.writeText(JSON.stringify(bundle, null, 2));
@@ -468,38 +473,16 @@ export default function ClaimVerificationResult({
           <p className="text-sm md:text-base text-slate-200 leading-relaxed whitespace-pre-wrap">{data.claim}</p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="relative inline-flex">
-            <button
-              type="button"
-              onClick={copyVerdict}
-              className={BUTTON_OUTLINE_SECONDARY}
-              aria-label="Copy verdict summary to clipboard"
-            >
-              Copy verdict
-            </button>
-            {verdictCopied ? (
-              <span
-                role="status"
-                aria-live="polite"
-                className="pointer-events-none absolute left-1/2 top-full z-10 mt-1.5 -translate-x-1/2 whitespace-nowrap rounded-md bg-slate-700 px-2.5 py-1 text-xs font-medium text-slate-100 shadow-lg ring-1 ring-slate-500/80"
-              >
-                Copied
-              </span>
-            ) : null}
-          </div>
-          <button
-            type="button"
-            onClick={() => setAuditOpen((o) => !o)}
-            aria-pressed={auditOpen}
-            className={auditOpen ? BUTTON_AUDIT_TRAIL_ACTIVE : BUTTON_OUTLINE_SECONDARY}
-          >
-            {auditOpen ? "Hide audit trail" : "View audit trail"}
-          </button>
-          <button type="button" onClick={onVerifyAnother} className={BUTTON_OUTLINE_SECONDARY}>
-            Verify another claim
-          </button>
-        </div>
+        <VerificationActions
+          type="claim"
+          onCopy={copyVerdict}
+          onExportMemo={handleExportMemo}
+          onViewAuditTrail={() => setAuditOpen((o) => !o)}
+          showAuditTrail={auditOpen}
+          onVerifyAnother={onVerifyAnother}
+          copyLabel="Copy verdict"
+          verifyAnotherLabel="Verify another claim"
+        />
 
         {auditOpen && (
           <div className="rounded-lg border border-gray-700 bg-gray-800 p-5 shadow-inner">
