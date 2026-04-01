@@ -1,24 +1,25 @@
 "use client";
 
 /**
- * Admin portal: all research runs and claim verifications (list, detail, governance override, delete).
+ * Admin portal: research runs, claim verifications, and video verifications (list, detail, override, delete).
  */
 
 import { Fragment, useCallback, useEffect, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import { useAdminPortalAccess } from "@/hooks/useAdminPortalAccess";
 
-type RunCollection = "runs" | "verifications";
-type RunTypeFilter = "all" | "research" | "claim";
+type RunCollection = "runs" | "verifications" | "videoVerifications";
+type RunTypeFilter = "all" | "research" | "claim" | "video";
 
 type AdminRunRow = {
   runId: string;
   collection: RunCollection;
-  runType: "research" | "claim";
+  runType: "research" | "claim" | "video";
   question: string;
   userEmail: string;
   userId: string;
   consensusScore: number | null;
+  verdict: string | null;
   governanceStatus: string | null;
   governanceReviewedBy: string | null;
   createdAt: string;
@@ -262,7 +263,8 @@ export default function AdminRunsTab() {
           >
             <option value="all">All</option>
             <option value="research">Research</option>
-            <option value="claim">Claim</option>
+            <option value="claim">Claims</option>
+            <option value="video">Video</option>
           </select>
         </div>
         <div>
@@ -289,7 +291,7 @@ export default function AdminRunsTab() {
           />
         </div>
         <div className="min-w-[200px] flex-1">
-          <label className="block text-xs font-medium text-gray-500">Search question / claim</label>
+          <label className="block text-xs font-medium text-gray-500">Search</label>
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -299,7 +301,7 @@ export default function AdminRunsTab() {
               }
             }}
             className="mt-1 w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm"
-            placeholder="Search runs…"
+            placeholder="Question, claim, or video file name…"
           />
         </div>
         <button
@@ -334,7 +336,7 @@ export default function AdminRunsTab() {
               <tr>
                 <th className="px-3 py-3">User</th>
                 <th className="px-3 py-3">Type</th>
-                <th className="px-3 py-3">Query / Claim</th>
+                <th className="px-3 py-3">Summary</th>
                 <th className="px-3 py-3">Consensus</th>
                 <th className="px-3 py-3">Governance</th>
                 <th className="px-3 py-3">Time</th>
@@ -362,15 +364,21 @@ export default function AdminRunsTab() {
                           </span>
                         </td>
                         <td className="px-3 py-2">
-                          <span
-                            className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${
-                              r.runType === "research"
-                                ? "bg-indigo-100 text-indigo-900"
-                                : "bg-violet-100 text-violet-900"
-                            }`}
-                          >
-                            {r.runType === "research" ? "RESEARCH" : "CLAIM"}
-                          </span>
+                          {r.runType === "research" && (
+                            <span className="inline-flex rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-800 ring-1 ring-green-200">
+                              RESEARCH
+                            </span>
+                          )}
+                          {r.runType === "claim" && (
+                            <span className="inline-flex rounded-full bg-purple-100 px-2 py-0.5 text-xs font-semibold text-purple-800 ring-1 ring-purple-200">
+                              CLAIM
+                            </span>
+                          )}
+                          {r.runType === "video" && (
+                            <span className="inline-flex rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-semibold text-indigo-800 ring-1 ring-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-200">
+                              VIDEO
+                            </span>
+                          )}
                         </td>
                         <td className="px-3 py-2 max-w-xs">
                           <span title={r.question}>{truncate(r.question, 80)}</span>
@@ -433,8 +441,20 @@ export default function AdminRunsTab() {
                               <div className="space-y-2 max-w-4xl">
                                 <p>
                                   <span className="font-semibold text-gray-700">Full text:</span>{" "}
-                                  {String(detail.question ?? detail.claim ?? detail.query ?? "—")}
+                                  {String(
+                                    detail.question ??
+                                      detail.claim ??
+                                      detail.query ??
+                                      detail.fileName ??
+                                      "—"
+                                  )}
                                 </p>
+                                {(r.verdict || detail.verdict != null) && (
+                                  <p>
+                                    <span className="font-semibold text-gray-700">Verdict:</span>{" "}
+                                    {String(r.verdict ?? detail.verdict ?? "—")}
+                                  </p>
+                                )}
                                 <p>
                                   <span className="font-semibold text-gray-700">User:</span>{" "}
                                   {r.userEmail} <span className="text-gray-500">({r.userId})</span>

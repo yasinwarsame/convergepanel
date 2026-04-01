@@ -12,11 +12,33 @@ import { sanitizeForFirestore } from "@/lib/firestore/sanitizeForFirestore";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-type CollectionName = "runs" | "verifications";
+type CollectionName = "runs" | "verifications" | "videoVerifications";
 
 function parseCollection(sp: URLSearchParams): CollectionName | null {
   const c = sp.get("collection");
-  return c === "runs" || c === "verifications" ? c : null;
+  return c === "runs" || c === "verifications" || c === "videoVerifications" ? c : null;
+}
+
+function auditQuestionFromDoc(collection: CollectionName, prev: Record<string, unknown>): string {
+  if (collection === "videoVerifications") {
+    const meta = prev.metadata as Record<string, unknown> | undefined;
+    const dur =
+      meta && typeof meta.duration === "number" && Number.isFinite(meta.duration)
+        ? `${Math.round(meta.duration)}s`
+        : "unknown";
+    const w = meta && typeof meta.width === "number" ? meta.width : "?";
+    const h = meta && typeof meta.height === "number" ? meta.height : "?";
+    const fn =
+      typeof prev.fileName === "string" && prev.fileName.trim() ? prev.fileName.trim() : "Uploaded video";
+    return `Video: ${fn} (${dur}, ${w}x${h})`.slice(0, 200);
+  }
+  return String(prev.question ?? prev.claim ?? prev.query ?? "").slice(0, 200);
+}
+
+function auditRunType(collection: CollectionName): string {
+  if (collection === "videoVerifications") return "video";
+  if (collection === "verifications") return "claim";
+  return "research";
 }
 
 export async function GET(
@@ -30,7 +52,10 @@ export async function GET(
   const collection = parseCollection(request.nextUrl.searchParams);
   if (!collection) {
     return NextResponse.json(
-      { ok: false, error: 'Query param collection is required: "runs" or "verifications"' },
+      {
+        ok: false,
+        error: 'Query param collection is required: "runs", "verifications", or "videoVerifications"',
+      },
       { status: 400 }
     );
   }
@@ -69,7 +94,7 @@ export async function PATCH(
     return NextResponse.json({ ok: false, error: "Invalid action" }, { status: 400 });
   }
   const collection = body.collection as CollectionName;
-  if (collection !== "runs" && collection !== "verifications") {
+  if (collection !== "runs" && collection !== "verifications" && collection !== "videoVerifications") {
     return NextResponse.json({ ok: false, error: "Invalid collection" }, { status: 400 });
   }
   const status = body.status;
@@ -99,12 +124,12 @@ export async function PATCH(
     { merge: true }
   );
 
-  const question = String(prev.question ?? prev.claim ?? prev.query ?? "").slice(0, 200);
+  const question = auditQuestionFromDoc(collection, prev);
   await writeAuditEvent({
     action: "admin_override",
     runId,
     collection,
-    runType: collection === "verifications" ? "claim" : "research",
+    runType: auditRunType(collection),
     byUid: auth.uid,
     byEmail: auth.email,
     comment,
@@ -130,7 +155,10 @@ export async function DELETE(
   const collection = parseCollection(request.nextUrl.searchParams);
   if (!collection) {
     return NextResponse.json(
-      { ok: false, error: 'Query param collection is required: "runs" or "verifications"' },
+      {
+        ok: false,
+        error: 'Query param collection is required: "runs", "verifications", or "videoVerifications"',
+      },
       { status: 400 }
     );
   }
@@ -152,13 +180,13 @@ export async function DELETE(
     return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
   }
   const prev = snap.data() as Record<string, unknown>;
-  const question = String(prev.question ?? prev.claim ?? prev.query ?? "").slice(0, 200);
+  const question = auditQuestionFromDoc(collection, prev);
 
   await writeAuditEvent({
     action: "admin_deleted",
     runId,
     collection,
-    runType: collection === "verifications" ? "claim" : "research",
+    runType: auditRunType(collection),
     byUid: auth.uid,
     byEmail: auth.email,
     runOwnerUid: String(prev.userId ?? prev.uid ?? ""),
