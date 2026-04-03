@@ -7,6 +7,7 @@ import {
   AlertTriangle,
   AlertCircle,
   HelpCircle,
+  Film,
 } from "lucide-react";
 import { useAuth } from "@/components/AuthProvider";
 import { GovernanceBadge } from "@/components/GovernanceBadge";
@@ -52,57 +53,97 @@ const verdictConfig: Record<
     subtitle: string;
   }
 > = {
-  authentic: {
+  authentic_captured: {
     icon: <CheckCircle className="w-8 h-8 shrink-0 text-green-400" aria-hidden />,
     className: "bg-green-900/30 border-l-4 border-green-500",
-    title: "No significant manipulation indicators detected",
-    subtitle: "Models found no strong evidence of AI generation or manipulation",
+    title: "Authentic camera footage",
+    subtitle: "Models found no manipulation indicators. Metadata consistent with a physical capture device.",
+  },
+  authentic_produced: {
+    icon: <Film className="w-8 h-8 shrink-0 text-blue-400" aria-hidden />,
+    className: "bg-blue-900/30 border-l-4 border-blue-500",
+    title: "Legitimately produced content",
+    subtitle:
+      "This appears to be animation, motion graphics, or professional production — not deceptive manipulation.",
   },
   likely_manipulated: {
     icon: <AlertTriangle className="w-8 h-8 shrink-0 text-red-400" aria-hidden />,
     className: "bg-red-900/30 border-l-4 border-red-500",
-    title: "Multiple models detected manipulation indicators",
-    subtitle: "Review the per-model evidence below for details",
+    title: "Deceptive manipulation indicators detected",
+    subtitle: "Multiple models detected signs that this content misrepresents reality. Review per-model evidence.",
   },
   inconclusive: {
     icon: <AlertCircle className="w-8 h-8 shrink-0 text-amber-400" aria-hidden />,
     className: "bg-amber-900/30 border-l-4 border-amber-500",
-    title: "Models cannot determine authenticity with confidence",
-    subtitle: "Mixed signals — human judgment required",
+    title: "Models cannot determine with confidence",
+    subtitle: "Mixed signals — human judgment required.",
   },
   insufficient: {
     icon: <HelpCircle className="w-8 h-8 shrink-0 text-gray-400" aria-hidden />,
     className: "bg-gray-800 border-l-4 border-gray-500",
     title: "Insufficient data for meaningful analysis",
-    subtitle: "Video may be too short, low quality, or heavily compressed",
+    subtitle: "Video may be too short, low quality, or heavily compressed.",
+  },
+  authentic: {
+    icon: <CheckCircle className="w-8 h-8 shrink-0 text-green-400" aria-hidden />,
+    className: "bg-green-900/30 border-l-4 border-green-500",
+    title: "No significant manipulation indicators detected",
+    subtitle: "Models found no strong evidence of manipulation.",
   },
 };
+
+const contentTypeLabels: Record<string, string> = {
+  camera_footage: "Camera Footage",
+  animation: "Animation",
+  screen_recording: "Screen Recording",
+  ai_generated_creative: "AI-Generated (Creative/Non-Deceptive)",
+  ai_generated_deceptive: "AI-Generated (Deceptive)",
+  mixed: "Mixed Content",
+  unknown: "Unknown",
+};
+
+function modelRowVerdictLabel(verdict: string): string {
+  const map: Record<string, string> = {
+    authentic_captured: "Authentic (camera)",
+    authentic_produced: "Authentic (produced)",
+    likely_manipulated: "Likely manipulated",
+    inconclusive: "Inconclusive",
+    insufficient: "Insufficient",
+    authentic: "Authentic",
+  };
+  return map[verdict] ?? (verdict ? verdict.charAt(0).toUpperCase() + verdict.slice(1) : "—");
+}
 
 function ModelEvidenceCard({ model }: { model: VideoVerificationClientPayload["modelEvidence"][number] }) {
   const [expanded, setExpanded] = useState(false);
 
   const verdictColor =
-    model.verdict === "authentic"
+    model.verdict === "authentic_captured" || model.verdict === "authentic"
       ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300"
-      : model.verdict === "likely_manipulated"
-        ? "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300"
-        : model.verdict === "inconclusive"
-          ? "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300"
-          : "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300";
+      : model.verdict === "authentic_produced"
+        ? "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300"
+        : model.verdict === "likely_manipulated"
+          ? "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300"
+          : model.verdict === "inconclusive"
+            ? "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300"
+            : "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300";
 
-  const statusBadge =
-    model.status === "ok"
-      ? null
-      : model.status === "parse_error"
-        ? "bg-gray-500 text-white"
-        : "bg-red-500 text-white";
+  const statusBadgeEl =
+    model.status === "ok" ? null : model.status === "refused" ? (
+      <span className="text-xs px-2 py-0.5 rounded-full shrink-0 bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
+        Declined
+      </span>
+    ) : model.status === "parse_error" ? (
+      <span className="text-xs px-2 py-0.5 rounded-full shrink-0 bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300">
+        Parse error
+      </span>
+    ) : (
+      <span className="text-xs px-2 py-0.5 rounded-full shrink-0 bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300">
+        Error
+      </span>
+    );
 
-  const verdictLabel =
-    model.verdict === "likely_manipulated"
-      ? "Likely manipulated"
-      : model.verdict
-        ? model.verdict.charAt(0).toUpperCase() + model.verdict.slice(1)
-        : "—";
+  const verdictLabel = modelRowVerdictLabel(model.verdict);
 
   return (
     <div className="border border-slate-700 rounded-lg mb-2 overflow-hidden bg-slate-900/40">
@@ -117,15 +158,19 @@ function ModelEvidenceCard({ model }: { model: VideoVerificationClientPayload["m
           {model.confidence && (
             <span className="text-xs text-slate-400 shrink-0">({model.confidence} confidence)</span>
           )}
-          {statusBadge && (
-            <span className={`text-xs px-2 py-0.5 rounded-full shrink-0 ${statusBadge}`}>{model.status}</span>
-          )}
+          {statusBadgeEl}
         </div>
         <span className="text-slate-500 shrink-0">{expanded ? "▲" : "▼"}</span>
       </button>
 
       {expanded && (
         <div className="p-4 border-t border-slate-700 text-sm space-y-3">
+          {model.status === "refused" && (
+            <p className="text-sm text-amber-600 dark:text-amber-400 italic">
+              This model declined to analyze the video due to its content policy. This is not a reflection on the
+              video&apos;s authenticity — some models have restrictions on certain visual content.
+            </p>
+          )}
           {model.summary && <p className="text-slate-300">{model.summary}</p>}
 
           {model.manipulationSignals?.length > 0 && (
@@ -147,6 +192,32 @@ function ModelEvidenceCard({ model }: { model: VideoVerificationClientPayload["m
               <ul className="list-disc list-inside space-y-0.5">
                 {model.authenticitySignals.map((s, j) => (
                   <li key={j} className="text-green-200">
+                    {s}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {model.productionSignals && model.productionSignals.length > 0 && (
+            <div>
+              <h5 className="font-medium text-blue-600 dark:text-blue-400 mb-1">Production signals</h5>
+              <ul className="list-disc list-inside space-y-0.5">
+                {model.productionSignals.map((s, j) => (
+                  <li key={j} className="text-blue-700 dark:text-blue-300">
+                    {s}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {model.deceptionIndicators && model.deceptionIndicators.length > 0 && (
+            <div>
+              <h5 className="font-medium text-red-600 dark:text-red-400 mb-1">Deception indicators</h5>
+              <ul className="list-disc list-inside space-y-0.5">
+                {model.deceptionIndicators.map((s, j) => (
+                  <li key={j} className="text-red-700 dark:text-red-300">
                     {s}
                   </li>
                 ))}
@@ -310,15 +381,22 @@ export default function VideoVerificationResult({
   }, [data, supportPct]);
 
   const copyVerdict = useCallback((): Promise<void> => {
-    const verdictLabels: Record<string, string> = {
-      authentic: "Authentic",
-      likely_manipulated: "Likely Manipulated",
-      inconclusive: "Inconclusive",
-      insufficient: "Insufficient for Analysis",
+    const verdictText: Record<string, string> = {
+      authentic_captured: "Authentic — Camera footage with no manipulation indicators",
+      authentic_produced: "Authentic — Legitimately produced content (not deceptive)",
+      likely_manipulated: "Likely Manipulated — Deceptive manipulation indicators detected",
+      inconclusive: "Inconclusive — Human judgment required",
+      insufficient: "Insufficient — Not enough data for analysis",
+      authentic: "Authentic — Legacy summary (camera-style authenticity)",
     };
+    const ct =
+      data.contentType && data.contentType !== "unknown"
+        ? contentTypeLabels[data.contentType] || data.contentType
+        : null;
     const text = [
       `VIDEO VERIFICATION RESULT`,
-      `Verdict: ${verdictLabels[data.verdict] || data.verdict}`,
+      `Verdict: ${verdictText[data.verdict] || data.verdict}`,
+      ...(ct ? [`Content type: ${ct}`] : []),
       `Consensus: ${data.consensusScore}/100 (${data.confidenceLabel})`,
       `Evidence quality: ${data.evidenceQuality}`,
       ``,
@@ -353,11 +431,14 @@ export default function VideoVerificationResult({
         summary: m.summary,
         manipulationSignals: m.manipulationSignals,
         authenticitySignals: m.authenticitySignals,
+        productionSignals: m.productionSignals,
+        deceptionIndicators: m.deceptionIndicators,
         compressionNotes: m.compressionNotes,
         limitations: m.limitations,
       })),
       agreementPoints: data.agreementPoints,
       disagreementPoints: data.disagreementPoints,
+      contentType: data.contentType,
       fileName: data.fileName,
       videoMetadata: data.metadata,
       metadataFlags: data.metadataAnalysis?.flags,
@@ -409,9 +490,14 @@ export default function VideoVerificationResult({
         <div className={`p-6 rounded-lg ${config.className}`}>
           <div className="flex items-start gap-4">
             {config.icon}
-            <div>
+            <div className="min-w-0 flex-1">
               <h2 className="text-xl font-bold text-slate-50">{config.title}</h2>
               <p className="text-sm text-slate-200/90 mt-1">{config.subtitle}</p>
+              {data.contentType && data.contentType !== "unknown" && (
+                <span className="mt-3 inline-block text-sm px-3 py-1 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300">
+                  Content type: {contentTypeLabels[data.contentType] || data.contentType}
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -436,6 +522,13 @@ export default function VideoVerificationResult({
               <p className="text-xs text-slate-400">Support ratio</p>
             </div>
           </div>
+          {data.modelEvidence.some((m) => m.status === "refused") && (
+            <p className="text-xs text-slate-500 mt-2">
+              Note: {data.modelEvidence.filter((m) => m.status === "refused").length} model(s) declined to analyze due
+              to content policy. Consensus is based on {data.modelEvidence.filter((m) => m.status === "ok").length}{" "}
+              responding model(s).
+            </p>
+          )}
           <GovernanceBadge
             status={liveGov.status}
             theme="dark"

@@ -67,11 +67,14 @@ function asModelRow(raw: unknown): VideoModelEvidenceRow | null {
     status: typeof m.status === "string" ? m.status : "ok",
     verdict: typeof m.verdict === "string" ? m.verdict : "inconclusive",
     confidence: typeof m.confidence === "string" ? m.confidence : "low",
+    contentType: typeof m.contentType === "string" ? m.contentType : undefined,
     summary: typeof m.summary === "string" ? m.summary : "",
     visualIndicators: asStrArr(m.visualIndicators),
     metadataIndicators: asStrArr(m.metadataIndicators),
     manipulationSignals: asStrArr(m.manipulationSignals),
     authenticitySignals: asStrArr(m.authenticitySignals),
+    productionSignals: asStrArr(m.productionSignals),
+    deceptionIndicators: asStrArr(m.deceptionIndicators),
     compressionNotes: asStrArr(m.compressionNotes),
     limitations: asStrArr(m.limitations),
   };
@@ -112,6 +115,7 @@ export function mapStoredVideoVerificationToClientPayload(
     verificationId: docId,
     fileName: typeof data.fileName === "string" ? data.fileName : "Uploaded video",
     verdict: typeof data.verdict === "string" ? data.verdict : "inconclusive",
+    contentType: typeof data.contentType === "string" ? data.contentType : undefined,
     consensusScore:
       typeof data.consensusScore === "number" && Number.isFinite(data.consensusScore)
         ? Math.round(data.consensusScore)

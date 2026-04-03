@@ -15,6 +15,8 @@ export function formatVerdictLabel(verdict: string): string {
     parse_error: "Parse error",
     failed: "Failed",
     authentic: "Authentic",
+    authentic_captured: "Authentic (Camera Footage)",
+    authentic_produced: "Authentic (Produced Content)",
     likely_manipulated: "Likely Manipulated",
     inconclusive: "Inconclusive",
     insufficient: "Insufficient",
@@ -29,8 +31,16 @@ export function buildClaimShareText(claim: string, verdict: string, score: numbe
 }
 
 export function buildVideoShareText(verdict: string, score: number): string {
-  const verdictLabel = formatVerdictLabel(verdict);
-  return `Verified a video using ConvergePanel\n\nVerdict: ${verdictLabel} | Consensus: ${score}/100\n3 AI vision models analyzed independently\n\nconvergepanel.com`;
+  const verdictLabels: Record<string, string> = {
+    authentic_captured: "Authentic Camera Footage",
+    authentic_produced: "Produced Content (Not Deceptive)",
+    likely_manipulated: "Likely Manipulated",
+    inconclusive: "Inconclusive",
+    insufficient: "Insufficient",
+    authentic: "Authentic",
+  };
+  const label = verdictLabels[verdict.trim().toLowerCase().replace(/\s+/g, "_")] || formatVerdictLabel(verdict);
+  return `Verified a video using ConvergePanel\n\nVerdict: ${label} | Consensus: ${score}/100\n3 AI vision models analyzed independently\n\nconvergepanel.com`;
 }
 
 export function buildResearchShareText(question: string, score: number): string {

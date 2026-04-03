@@ -11,7 +11,7 @@
  * 7. **Analyze metadata** — `analyzeMetadata` for heuristic flags.
  * 8. **Prompt** — `buildVideoVerificationPrompt`.
  * 9. **Vision** — `Promise.all` parallel calls to OpenAI, Claude, Gemini; parse JSON via `cleanJsonResponse` / `repairTruncatedJson`.
- * 10. **Verdict** — majority needs **≥67%** of *usable* (parsed OK) models on `authentic` or `likely_manipulated`; else `insufficient` / `inconclusive` branches.
+ * 10. **Verdict** — majority rules on five video verdicts (plus legacy model output `authentic` counted as `authentic_captured`); governance maps to claim-style labels.
  * 11. **Consensus score** — base = dominant fraction × 100; penalties for suspicious metadata (−10), &lt;3 usable models (−15), &gt;2 client warnings (−5).
  * 12. **Firestore** — write to `videoVerifications`: **no** frame blobs or base64; only metadata, flags, trimmed model text fields, counts.
  * 13. **Panel usage** — `checkAndIncrementUsageForRun` (counts toward monthly panel runs).
@@ -48,17 +48,96 @@ const MAX_FRAMES = 15;
 const MAX_BASE64_CHARS_PER_FRAME = 900_000;
 const MAX_TOTAL_BASE64_CHARS = 12_000_000;
 
+const KNOWN_MODEL_VIDEO_VERDICTS = new Set([
+  "authentic_captured",
+  "authentic_produced",
+  "likely_manipulated",
+  "inconclusive",
+  "insufficient",
+  "authentic",
+]);
+
+const KNOWN_VIDEO_CONTENT_TYPES = new Set([
+  "camera_footage",
+  "animation",
+  "screen_recording",
+  "ai_generated_creative",
+  "ai_generated_deceptive",
+  "mixed",
+  "unknown",
+]);
+
+function normalizeModelVideoVerdict(v: unknown): string {
+  const s = typeof v === "string" ? v.trim().toLowerCase().replace(/\s+/g, "_") : "";
+  if (KNOWN_MODEL_VIDEO_VERDICTS.has(s)) return s;
+  return "inconclusive";
+}
+
+function normalizeVideoContentType(v: unknown): string {
+  const s = typeof v === "string" ? v.trim().toLowerCase().replace(/\s+/g, "_") : "";
+  if (KNOWN_VIDEO_CONTENT_TYPES.has(s)) return s;
+  return "unknown";
+}
+
+const MODEL_REFUSAL_PATTERNS = [
+  "I'm sorry",
+  "I cannot assist",
+  "I can't assist",
+  "I'm unable to",
+  "I cannot help",
+  "I can't help",
+  "not able to analyze",
+  "cannot process this",
+  "against my guidelines",
+  "content policy",
+] as const;
+
+function isVisionModelRefusalResponse(text: string): boolean {
+  const t = text.trim().toLowerCase();
+  return MODEL_REFUSAL_PATTERNS.some((p) => t.includes(p.toLowerCase()));
+}
+
+function refusedModelRow(
+  model: { id: string; name: string },
+  responseText: string,
+  tokens: number | undefined
+): VisionModelRow {
+  console.log(`[verify-video] ${model.id} refused to analyze: ${responseText.substring(0, 100)}`);
+  return {
+    modelId: model.id,
+    modelName: model.name,
+    status: "refused",
+    verdict: "inconclusive",
+    confidence: "low",
+    contentType: "unknown",
+    summary: "Model declined to analyze this content due to content policy restrictions.",
+    visualIndicators: [],
+    metadataIndicators: [],
+    manipulationSignals: [],
+    authenticitySignals: [],
+    productionSignals: [],
+    deceptionIndicators: [],
+    compressionNotes: [],
+    limitations: ["Model content policy prevented analysis of these frames."],
+    reasoning: "",
+    tokens,
+  };
+}
+
 type VisionModelRow = {
   modelId: string;
   modelName: string;
-  status: "ok" | "parse_error" | "error";
+  status: "ok" | "refused" | "parse_error" | "error";
   verdict: string;
   confidence: string;
+  contentType: string;
   summary: string;
   visualIndicators: string[];
   metadataIndicators: string[];
   manipulationSignals: string[];
   authenticitySignals: string[];
+  productionSignals: string[];
+  deceptionIndicators: string[];
   compressionNotes: string[];
   limitations: string[];
   reasoning: string;
@@ -431,16 +510,27 @@ export async function POST(request: NextRequest) {
       const elapsed = Date.now() - modelStart;
       console.log(`[verify-video] ${model.id} responded in ${elapsed}ms`);
 
+      const responseText = response.text || "";
+      if (isVisionModelRefusalResponse(responseText)) {
+        return refusedModelRow(model, responseText, response.tokens);
+      }
+
       let parsed: Record<string, unknown>;
       try {
         const cleaned = cleanJsonResponse(response.text);
         parsed = JSON.parse(cleaned) as Record<string, unknown>;
       } catch {
+        if (isVisionModelRefusalResponse(responseText)) {
+          return refusedModelRow(model, responseText, response.tokens);
+        }
         try {
           const repaired = repairTruncatedJson(cleanJsonResponse(response.text));
           parsed = JSON.parse(repaired) as Record<string, unknown>;
           console.log(`[verify-video] Repaired truncated JSON for ${model.id}`);
         } catch {
+          if (isVisionModelRefusalResponse(responseText)) {
+            return refusedModelRow(model, responseText, response.tokens);
+          }
           console.error(`[verify-video] JSON parse failed for ${model.id}:`, response.text.substring(0, 300));
           return {
             modelId: model.id,
@@ -448,11 +538,14 @@ export async function POST(request: NextRequest) {
             status: "parse_error",
             verdict: "insufficient",
             confidence: "low",
+            contentType: "unknown",
             summary: "Model returned invalid JSON; could not parse verification result.",
             visualIndicators: [],
             metadataIndicators: [],
             manipulationSignals: [],
             authenticitySignals: [],
+            productionSignals: [],
+            deceptionIndicators: [],
             compressionNotes: [],
             limitations: ["Response could not be parsed"],
             reasoning: "",
@@ -467,13 +560,16 @@ export async function POST(request: NextRequest) {
         modelId: model.id,
         modelName: model.name,
         status: "ok",
-        verdict: typeof parsed.verdict === "string" ? parsed.verdict : "inconclusive",
+        verdict: normalizeModelVideoVerdict(parsed.verdict),
         confidence: typeof parsed.confidence === "string" ? parsed.confidence : "low",
+        contentType: normalizeVideoContentType(parsed.contentType),
         summary: typeof parsed.summary === "string" ? parsed.summary : "",
         visualIndicators: asStrArr(parsed.visualIndicators),
         metadataIndicators: asStrArr(parsed.metadataIndicators),
         manipulationSignals: asStrArr(parsed.manipulationSignals),
         authenticitySignals: asStrArr(parsed.authenticitySignals),
+        productionSignals: asStrArr(parsed.productionSignals),
+        deceptionIndicators: asStrArr(parsed.deceptionIndicators),
         compressionNotes: asStrArr(parsed.compressionNotes),
         limitations: asStrArr(parsed.limitations),
         reasoning: typeof parsed.reasoning === "string" ? parsed.reasoning : "",
@@ -489,11 +585,14 @@ export async function POST(request: NextRequest) {
         status: "error",
         verdict: "insufficient",
         confidence: "low",
+        contentType: "unknown",
         summary: `Model failed: ${msg}`,
         visualIndicators: [],
         metadataIndicators: [],
         manipulationSignals: [],
         authenticitySignals: [],
+        productionSignals: [],
+        deceptionIndicators: [],
         compressionNotes: [],
         limitations: [`Model error: ${msg}`],
         reasoning: "",
@@ -505,23 +604,43 @@ export async function POST(request: NextRequest) {
   const modelResults = await Promise.all(modelPromises);
   console.log(`[verify-video] All models responded. Statuses: ${modelResults.map((r) => `${r.modelId}=${r.status}`).join(", ")}`);
 
+  const refusedCount = modelResults.filter((r) => r.status === "refused").length;
+  if (refusedCount > 0) {
+    console.log(
+      `[verify-video] ${refusedCount} model(s) refused to analyze — excluded from consensus`
+    );
+  }
+
   const usableResults = modelResults.filter((r) => r.status === "ok");
   const totalUsable = usableResults.length;
 
   const verdictCounts = {
-    authentic: usableResults.filter((r) => r.verdict === "authentic").length,
+    authentic_captured: usableResults.filter((r) => r.verdict === "authentic_captured").length,
+    authentic_produced: usableResults.filter((r) => r.verdict === "authentic_produced").length,
     likely_manipulated: usableResults.filter((r) => r.verdict === "likely_manipulated").length,
     inconclusive: usableResults.filter((r) => r.verdict === "inconclusive").length,
     insufficient: usableResults.filter((r) => r.verdict === "insufficient").length,
   };
 
+  const legacyAuthentic = usableResults.filter((r) => r.verdict === "authentic").length;
+  verdictCounts.authentic_captured += legacyAuthentic;
+
   let aggregateVerdict: string;
   if (totalUsable === 0) {
     aggregateVerdict = "insufficient";
-  } else if (verdictCounts.authentic / totalUsable >= 0.67) {
-    aggregateVerdict = "authentic";
   } else if (verdictCounts.likely_manipulated / totalUsable >= 0.67) {
     aggregateVerdict = "likely_manipulated";
+  } else if (verdictCounts.authentic_captured / totalUsable >= 0.67) {
+    aggregateVerdict = "authentic_captured";
+  } else if (verdictCounts.authentic_produced / totalUsable >= 0.67) {
+    aggregateVerdict = "authentic_produced";
+  } else if (
+    (verdictCounts.authentic_captured + verdictCounts.authentic_produced) / totalUsable >= 0.67
+  ) {
+    aggregateVerdict =
+      verdictCounts.authentic_captured >= verdictCounts.authentic_produced
+        ? "authentic_captured"
+        : "authentic_produced";
   } else if (verdictCounts.insufficient / totalUsable >= 0.5) {
     aggregateVerdict = "insufficient";
   } else {
@@ -529,7 +648,33 @@ export async function POST(request: NextRequest) {
   }
   // 0.67 = 2/3 majority among models that returned parseable JSON.
 
-  const maxAgreement = Math.max(...Object.values(verdictCounts));
+  const contentTypeTally = new Map<string, number>();
+  for (const r of usableResults) {
+    const ct = r.contentType && r.contentType !== "unknown" ? r.contentType : null;
+    if (ct) {
+      contentTypeTally.set(ct, (contentTypeTally.get(ct) || 0) + 1);
+    }
+  }
+  let aggregateContentType = "unknown";
+  if (contentTypeTally.size > 0) {
+    let best = "unknown";
+    let bestN = 0;
+    for (const [ct, n] of contentTypeTally) {
+      if (n > bestN) {
+        best = ct;
+        bestN = n;
+      }
+    }
+    aggregateContentType = best;
+  }
+
+  const maxAgreement = Math.max(
+    verdictCounts.authentic_captured,
+    verdictCounts.authentic_produced,
+    verdictCounts.likely_manipulated,
+    verdictCounts.inconclusive,
+    verdictCounts.insufficient
+  );
   const supportRatio = totalUsable > 0 ? maxAgreement / totalUsable : 0;
 
   let consensusScore = Math.round(supportRatio * 100);
@@ -551,11 +696,20 @@ export async function POST(request: NextRequest) {
   const agreementPoints: string[] = [];
   const disagreementPoints: string[] = [];
 
-  if (verdictCounts.authentic >= 2) {
-    agreementPoints.push(`${verdictCounts.authentic}/${totalUsable} models found no significant manipulation indicators`);
+  if (verdictCounts.authentic_captured >= 2) {
+    agreementPoints.push(
+      `${verdictCounts.authentic_captured}/${totalUsable} models identified this as authentic camera footage`
+    );
+  }
+  if (verdictCounts.authentic_produced >= 2) {
+    agreementPoints.push(
+      `${verdictCounts.authentic_produced}/${totalUsable} models identified this as legitimately produced content`
+    );
   }
   if (verdictCounts.likely_manipulated >= 2) {
-    agreementPoints.push(`${verdictCounts.likely_manipulated}/${totalUsable} models detected manipulation indicators`);
+    agreementPoints.push(
+      `${verdictCounts.likely_manipulated}/${totalUsable} models detected deceptive manipulation indicators`
+    );
   }
 
   const manipSignalCounts = new Map<string, number>();
@@ -571,16 +725,39 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  if (verdictCounts.authentic > 0 && verdictCounts.likely_manipulated > 0) {
-    const authModels = usableResults.filter((r) => r.verdict === "authentic").map((r) => r.modelName);
+  if (verdictCounts.authentic_captured > 0 && verdictCounts.authentic_produced > 0) {
+    const capturedModels = usableResults
+      .filter((r) => r.verdict === "authentic_captured" || r.verdict === "authentic")
+      .map((r) => r.modelName);
+    const producedModels = usableResults
+      .filter((r) => r.verdict === "authentic_produced")
+      .map((r) => r.modelName);
+    disagreementPoints.push(
+      `${capturedModels.join(", ")} identified camera footage; ${producedModels.join(", ")} identified produced/animated content`
+    );
+  }
+
+  const nonDeceptiveVerdicts = new Set(["authentic_captured", "authentic_produced", "authentic"]);
+  const hasNonDeceptive = usableResults.some((r) => nonDeceptiveVerdicts.has(r.verdict));
+  const hasManip = usableResults.some((r) => r.verdict === "likely_manipulated");
+  if (hasNonDeceptive && hasManip) {
+    const okModels = usableResults
+      .filter((r) => nonDeceptiveVerdicts.has(r.verdict))
+      .map((r) => r.modelName);
     const manipModels = usableResults
       .filter((r) => r.verdict === "likely_manipulated")
       .map((r) => r.modelName);
     disagreementPoints.push(
-      `${authModels.join(", ")} found authentic; ${manipModels.join(", ")} found manipulation indicators`
+      `${okModels.join(", ")} found authentic-style content; ${manipModels.join(", ")} found deceptive manipulation indicators`
     );
   }
-  if (verdictCounts.inconclusive > 0 && (verdictCounts.authentic > 0 || verdictCounts.likely_manipulated > 0)) {
+
+  if (
+    verdictCounts.inconclusive > 0 &&
+    (verdictCounts.authentic_captured > 0 ||
+      verdictCounts.authentic_produced > 0 ||
+      verdictCounts.likely_manipulated > 0)
+  ) {
     const incModels = usableResults.filter((r) => r.verdict === "inconclusive").map((r) => r.modelName);
     disagreementPoints.push(
       `${incModels.join(", ")} could not determine authenticity while other models reached a verdict`
@@ -595,6 +772,7 @@ export async function POST(request: NextRequest) {
     type: "video_verification",
     fileName,
     verdict: aggregateVerdict,
+    contentType: aggregateContentType,
     consensusScore,
     confidenceLabel,
     evidenceQuality,
@@ -610,11 +788,14 @@ export async function POST(request: NextRequest) {
       status: m.status,
       verdict: m.verdict,
       confidence: m.confidence,
+      contentType: m.contentType,
       summary: m.summary,
       visualIndicators: (m.visualIndicators || []).slice(0, 10),
       metadataIndicators: (m.metadataIndicators || []).slice(0, 5),
       manipulationSignals: (m.manipulationSignals || []).slice(0, 10),
       authenticitySignals: (m.authenticitySignals || []).slice(0, 10),
+      productionSignals: (m.productionSignals || []).slice(0, 10),
+      deceptionIndicators: (m.deceptionIndicators || []).slice(0, 10),
       compressionNotes: (m.compressionNotes || []).slice(0, 5),
       limitations: (m.limitations || []).slice(0, 5),
     })),
@@ -660,9 +841,13 @@ export async function POST(request: NextRequest) {
       ? "disputed"
       : aggregateVerdict === "inconclusive"
         ? "unverifiable"
-        : aggregateVerdict === "authentic"
+        : aggregateVerdict === "authentic_captured"
           ? "confirmed"
-          : "unverifiable";
+          : aggregateVerdict === "authentic_produced"
+            ? "confirmed"
+            : aggregateVerdict === "authentic"
+              ? "confirmed"
+              : "unverifiable";
 
   try {
     await evaluateAndStoreGovernance({
@@ -726,6 +911,7 @@ export async function POST(request: NextRequest) {
     ok: true,
     verificationId,
     verdict: aggregateVerdict,
+    contentType: aggregateContentType,
     consensusScore,
     confidenceLabel,
     evidenceQuality,
@@ -738,11 +924,14 @@ export async function POST(request: NextRequest) {
       status: m.status,
       verdict: m.verdict,
       confidence: m.confidence,
+      contentType: m.contentType,
       summary: m.summary,
       visualIndicators: m.visualIndicators,
       metadataIndicators: m.metadataIndicators,
       manipulationSignals: m.manipulationSignals,
       authenticitySignals: m.authenticitySignals,
+      productionSignals: m.productionSignals,
+      deceptionIndicators: m.deceptionIndicators,
       compressionNotes: m.compressionNotes,
       limitations: m.limitations,
     })),
@@ -750,7 +939,9 @@ export async function POST(request: NextRequest) {
     disagreementPoints,
     aggregateSummary: {
       totalModels: visionModels.length,
-      modelsAuthentic: verdictCounts.authentic,
+      modelsAuthenticCaptured: verdictCounts.authentic_captured,
+      modelsAuthenticProduced: verdictCounts.authentic_produced,
+      modelsAuthentic: verdictCounts.authentic_captured + verdictCounts.authentic_produced,
       modelsManipulated: verdictCounts.likely_manipulated,
       modelsInconclusive: verdictCounts.inconclusive,
       modelsInsufficient: verdictCounts.insufficient,

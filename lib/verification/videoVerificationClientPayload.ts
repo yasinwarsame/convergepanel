@@ -11,11 +11,15 @@ export type VideoModelEvidenceRow = {
   status: string;
   verdict: string;
   confidence: string;
+  /** Majority-normalized content classification from the vision model. */
+  contentType?: string;
   summary: string;
   visualIndicators: string[];
   metadataIndicators: string[];
   manipulationSignals: string[];
   authenticitySignals: string[];
+  productionSignals?: string[];
+  deceptionIndicators?: string[];
   compressionNotes: string[];
   limitations: string[];
 };
@@ -24,6 +28,8 @@ export type VideoVerificationClientPayload = {
   verificationId: string;
   fileName: string;
   verdict: string;
+  /** Aggregate content-type label when models agree (or plurality). */
+  contentType?: string;
   consensusScore: number;
   confidenceLabel: "High" | "Medium" | "Low";
   evidenceQuality: "strong" | "mixed" | "weak";

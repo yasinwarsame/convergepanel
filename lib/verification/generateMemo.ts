@@ -31,11 +31,16 @@ export interface MemoInput {
     unverifiableParts?: string[];
     manipulationSignals?: string[];
     authenticitySignals?: string[];
+    productionSignals?: string[];
+    deceptionIndicators?: string[];
     compressionNotes?: string[];
     limitations?: string[];
   }>;
 
   claim?: string;
+
+  /** Aggregate video content type (plurality across models). */
+  contentType?: string;
 
   fileName?: string;
   videoMetadata?: {
@@ -156,16 +161,28 @@ function claimSummarySentence(verdict: string | undefined): string {
 
 function videoSummarySentence(verdict: string | undefined): string {
   const v = (verdict ?? "").toLowerCase().replace(/\s+/g, "_");
-  if (v === "authentic")
-    return "Independently, vision models did not surface strong, consistent manipulation signals.";
+  if (v === "authentic_captured" || v === "authentic")
+    return "Independently, vision models treated this as camera-captured content without strong manipulation signals.";
+  if (v === "authentic_produced")
+    return "Models largely read this as legitimately produced or animated content rather than deceptive fakery.";
   if (v === "likely_manipulated")
-    return "Multiple models noted patterns or artifacts that warrant cautious interpretation.";
+    return "Multiple models noted patterns or artifacts consistent with deceptive manipulation.";
   if (v === "inconclusive")
     return "Signals were mixed; models could not reach a firm authenticity conclusion.";
   if (v === "insufficient")
     return "Available frames or context were too limited for confident assessment.";
   return "Vision-capable models reviewed extracted frames and metadata independently.";
 }
+
+const videoContentTypeMemoLabels: Record<string, string> = {
+  camera_footage: "Camera Footage",
+  animation: "Animation",
+  screen_recording: "Screen Recording",
+  ai_generated_creative: "AI-Generated (Creative/Non-Deceptive)",
+  ai_generated_deceptive: "AI-Generated (Deceptive)",
+  mixed: "Mixed Content",
+  unknown: "Unknown",
+};
 
 function researchSummarySentence(score: number, evidenceQuality: string): string {
   const eq = evidenceQuality.toLowerCase();
@@ -321,6 +338,10 @@ function generateVideoMemo(input: MemoInput): string {
   lines.push(`Has audio: ${meta.hasAudio === true ? "Yes" : meta.hasAudio === false ? "No" : "—"}`);
   lines.push("");
   lines.push(`VERDICT: ${verdictHuman}`);
+  const ct = (input.contentType ?? "").trim().toLowerCase().replace(/\s+/g, "_");
+  if (ct && ct !== "unknown") {
+    lines.push(`CONTENT TYPE: ${videoContentTypeMemoLabels[ct] ?? input.contentType}`);
+  }
   lines.push(`CONSENSUS SCORE: ${input.consensusScore}/100 (${input.confidenceLabel} confidence)`);
   lines.push(`EVIDENCE QUALITY: ${input.evidenceQuality}`);
   lines.push("");
@@ -367,6 +388,20 @@ function generateVideoMemo(input: MemoInput): string {
   if (manip.length) {
     lines.push("MANIPULATION SIGNALS");
     manip.forEach((p) => lines.push(`- ${p}`));
+    lines.push("");
+  }
+
+  const prod = dedupeCap(models.flatMap((m) => m.productionSignals ?? []));
+  if (prod.length) {
+    lines.push("PRODUCTION SIGNALS");
+    prod.forEach((p) => lines.push(`- ${p}`));
+    lines.push("");
+  }
+
+  const decep = dedupeCap(models.flatMap((m) => m.deceptionIndicators ?? []));
+  if (decep.length) {
+    lines.push("DECEPTION INDICATORS");
+    decep.forEach((p) => lines.push(`- ${p}`));
     lines.push("");
   }
 

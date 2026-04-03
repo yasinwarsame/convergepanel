@@ -358,6 +358,15 @@ function firstVerificationModelSummary(data: Record<string, unknown>): string | 
   return undefined;
 }
 
+function queueNonOkModelStatusLabel(status: string): string {
+  const s = status.toLowerCase();
+  if (s === "refused") return "Declined";
+  if (s === "error") return "Error";
+  if (s === "parse_error") return "Parse error";
+  if (s === "failed") return "Failed";
+  return "Parse error";
+}
+
 /** Rich claim-verification payload for the review queue expanded UI. */
 function buildVerificationQueueReviewExtras(data: Record<string, unknown>): {
   modelVerdicts: QueueModelVerdictRow[];
@@ -379,8 +388,7 @@ function buildVerificationQueueReviewExtras(data: Record<string, unknown>): {
     if (!modelId) continue;
     const status = String(m.status ?? "");
     if (status !== "ok") {
-      const label = status === "failed" ? "Failed" : "Parse error";
-      modelVerdicts.push({ modelId, verdict: label, confidence: "" });
+      modelVerdicts.push({ modelId, verdict: queueNonOkModelStatusLabel(status), confidence: "" });
       continue;
     }
     const verdictRaw = String(m.verdict ?? m.verdictLabel ?? "");
@@ -747,8 +755,7 @@ function buildVideoQueueReviewExtras(data: Record<string, unknown>): {
     if (!modelId) continue;
     const status = String(m.status ?? "");
     if (status !== "ok") {
-      const label = status === "failed" ? "Failed" : "Parse error";
-      modelVerdicts.push({ modelId, verdict: label, confidence: "" });
+      modelVerdicts.push({ modelId, verdict: queueNonOkModelStatusLabel(status), confidence: "" });
       continue;
     }
     const verdictRaw = String(m.verdict ?? "");

@@ -43,6 +43,7 @@ function mergeApiSuccessToPayload(
     verificationId: String(data.verificationId ?? ""),
     fileName,
     verdict: typeof data.verdict === "string" ? data.verdict : "inconclusive",
+    contentType: typeof data.contentType === "string" ? data.contentType : undefined,
     consensusScore:
       typeof data.consensusScore === "number" && Number.isFinite(data.consensusScore)
         ? Math.round(data.consensusScore)

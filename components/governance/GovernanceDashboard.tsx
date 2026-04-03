@@ -104,25 +104,24 @@ function queueClaimVerdictToneClass(raw: string | undefined): string {
   return "text-slate-800";
 }
 
+const videoVerdictBadge: Record<string, { label: string; colorClass: string }> = {
+  authentic_captured: { label: "Camera Footage", colorClass: "bg-green-100 text-green-800" },
+  authentic_produced: { label: "Produced Content", colorClass: "bg-blue-100 text-blue-800" },
+  likely_manipulated: { label: "Manipulated", colorClass: "bg-red-100 text-red-800" },
+  inconclusive: { label: "Inconclusive", colorClass: "bg-amber-100 text-amber-800" },
+  insufficient: { label: "Insufficient", colorClass: "bg-gray-100 text-gray-800" },
+  authentic: { label: "Authentic", colorClass: "bg-green-100 text-green-800" },
+};
+
 function formatQueueVideoVerdictLabel(raw: string | undefined): string {
   if (!raw) return "";
   const k = raw.toLowerCase().replace(/\s+/g, "_");
-  const map: Record<string, string> = {
-    authentic: "Authentic",
-    likely_manipulated: "Likely manipulated",
-    inconclusive: "Inconclusive",
-    insufficient: "Insufficient",
-  };
-  return map[k] ?? raw.replace(/_/g, " ");
+  return videoVerdictBadge[k]?.label ?? raw.replace(/_/g, " ");
 }
 
-function queueVideoVerdictToneClass(raw: string | undefined): string {
+function queueVideoVerdictBadgeClass(raw: string | undefined): string {
   const k = (raw ?? "").toLowerCase().replace(/\s+/g, "_");
-  if (k === "authentic") return "text-emerald-700";
-  if (k === "likely_manipulated") return "text-red-700";
-  if (k === "inconclusive") return "text-amber-800";
-  if (k === "insufficient") return "text-slate-600";
-  return "text-slate-800";
+  return videoVerdictBadge[k]?.colorClass ?? "bg-slate-100 text-slate-800";
 }
 
 function queueModelVerdictToneClass(verdict: string): string {
@@ -138,6 +137,12 @@ function queueModelVerdictToneClass(verdict: string): string {
 function queueModelVerdictBadgeClass(verdict: string): string {
   const s = verdict.toLowerCase();
   if (s === "failed" || s.includes("parse")) return "bg-slate-200 text-slate-700";
+  if (s === "declined") return "bg-amber-100 text-amber-800 ring-1 ring-amber-300/60";
+  if (s === "authentic_captured" || s === "authentic") return "bg-green-100 text-green-800 ring-1 ring-green-300/60";
+  if (s === "authentic_produced") return "bg-blue-100 text-blue-800 ring-1 ring-blue-300/60";
+  if (s === "likely_manipulated") return "bg-red-100 text-red-800 ring-1 ring-red-300/60";
+  if (s === "inconclusive") return "bg-amber-100 text-amber-800 ring-1 ring-amber-300/60";
+  if (s === "insufficient") return "bg-gray-100 text-gray-800 ring-1 ring-gray-300/60";
   if (s.includes("partially")) return "bg-amber-100 text-amber-900 ring-1 ring-amber-300/60";
   if (s.includes("inaccurate")) return "bg-red-100 text-red-900 ring-1 ring-red-300/60";
   if (s.includes("accurate") && !s.includes("inaccurate"))
@@ -2185,9 +2190,11 @@ function FragmentRow(props: {
 
             {row.runType === "video" && row.verificationVerdict ? (
               <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50/90 px-3 py-2.5">
-                <p className="text-sm text-slate-800">
+                <p className="text-sm text-slate-800 flex flex-wrap items-center gap-2">
                   <span className="font-semibold text-slate-900">Video verdict: </span>
-                  <span className={`font-semibold ${queueVideoVerdictToneClass(row.verificationVerdict)}`}>
+                  <span
+                    className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${queueVideoVerdictBadgeClass(row.verificationVerdict)}`}
+                  >
                     {formatQueueVideoVerdictLabel(row.verificationVerdict)}
                   </span>
                 </p>
@@ -2221,7 +2228,9 @@ function FragmentRow(props: {
                             <span
                               className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${queueModelVerdictBadgeClass(m.verdict)}`}
                             >
-                              {m.verdict}
+                              {row.runType === "video"
+                                ? formatQueueVideoVerdictLabel(m.verdict)
+                                : m.verdict}
                             </span>
                           </td>
                           <td className={`px-3 py-2 align-top ${queueModelVerdictToneClass(m.verdict)}`}>

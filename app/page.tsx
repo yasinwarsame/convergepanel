@@ -98,10 +98,27 @@ function formatHistoryVerdictLabel(v: string): string {
   if (x === "disputed") return "Disputed";
   if (x === "unverifiable") return "Unverifiable";
   if (x === "likely_manipulated") return "Likely manipulated";
+  if (x === "authentic_captured") return "Camera footage";
+  if (x === "authentic_produced") return "Produced content";
   if (x === "authentic") return "Authentic";
   if (x === "inconclusive") return "Inconclusive";
   if (x === "insufficient") return "Insufficient";
   return v ? v.charAt(0).toUpperCase() + v.slice(1) : "—";
+}
+
+const HISTORY_VIDEO_VERDICT_BADGE: Record<string, { label: string; className: string }> = {
+  authentic_captured: { label: "Camera Footage", className: "bg-green-100 text-green-800" },
+  authentic_produced: { label: "Produced Content", className: "bg-blue-100 text-blue-800" },
+  likely_manipulated: { label: "Manipulated", className: "bg-red-100 text-red-800" },
+  inconclusive: { label: "Inconclusive", className: "bg-amber-100 text-amber-800" },
+  insufficient: { label: "Insufficient", className: "bg-gray-100 text-gray-800" },
+  authentic: { label: "Authentic", className: "bg-green-100 text-green-800" },
+};
+
+function historyVideoVerdictBadge(verdict: string | undefined): { label: string; className: string } | null {
+  if (verdict == null || verdict === "") return null;
+  const k = verdict.toLowerCase().replace(/\s+/g, "_");
+  return HISTORY_VIDEO_VERDICT_BADGE[k] ?? null;
 }
 
 function formatHistoryVideoDuration(seconds: number): string {
@@ -2006,10 +2023,23 @@ export default function Home() {
                                 )}
                               </>
                             ) : item.type === "video_verification" ? (
-                              <span>
-                                {item.verdict != null && item.verdict !== ""
-                                  ? formatHistoryVerdictLabel(item.verdict)
-                                  : "Video"}
+                              <span className="inline-flex flex-wrap items-center gap-2">
+                                {(() => {
+                                  const vb = historyVideoVerdictBadge(item.verdict);
+                                  if (vb) {
+                                    return (
+                                      <span
+                                        className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${vb.className}`}
+                                      >
+                                        {vb.label}
+                                      </span>
+                                    );
+                                  }
+                                  if (item.verdict != null && item.verdict !== "") {
+                                    return <span>{formatHistoryVerdictLabel(item.verdict)}</span>;
+                                  }
+                                  return <span>Video</span>;
+                                })()}
                                 {item.consensusScore != null && item.consensusScore !== undefined
                                   ? ` · ${item.consensusScore} consensus`
                                   : ""}

@@ -48,18 +48,61 @@ IMPORTANT GUIDELINES:
 - State your confidence level explicitly.
 - Be specific about which frames show which indicators.
 
+Your verdict must be one of these five options:
+
+"authentic_captured" — This appears to be real footage captured by a physical 
+camera or device. Visual elements are consistent with real-world physics. 
+Metadata supports a physical capture device (camera model, creation date, 
+standard codec). No significant manipulation indicators.
+
+"authentic_produced" — This appears to be legitimately produced content such 
+as animation, motion graphics, promotional material, screen recordings, or 
+AI-assisted creative production. The content is NOT attempting to deceive — 
+it presents itself as produced/animated content. This includes marketing 
+videos, explainer animations, AI-generated art used openly, and professional 
+video production.
+
+"likely_manipulated" — This content shows indicators of deceptive manipulation. 
+This includes: deepfakes (face swaps on real footage), AI-generated footage 
+presented as if it were real camera footage, doctored evidence, altered 
+timestamps or metadata to misrepresent origin, or any content where the 
+apparent intent is to make the viewer believe something happened that did not.
+The key distinction: manipulation implies deceptive intent — the content 
+pretends to be something it is not.
+
+"inconclusive" — Cannot determine with confidence. Mixed signals from 
+different indicators.
+
+"insufficient" — Not enough data for meaningful analysis.
+
+IMPORTANT DISTINCTION: A video being AI-generated does NOT automatically mean 
+it is "likely_manipulated." An AI-generated marketing animation is 
+"authentic_produced" — it is what it claims to be. A deepfake of a politician 
+saying something they never said is "likely_manipulated" — it pretends to be 
+real footage. The difference is deceptive intent, not the presence of AI.
+
+To determine deceptive intent, consider:
+- Does the content present itself as real camera footage when it is not?
+- Are real people's faces or voices being impersonated?
+- Is the metadata fabricated to suggest a real capture device?
+- Would a reasonable viewer be misled about what they are seeing?
+- Is the style openly artistic/animated (not deceptive) or attempting photorealism (potentially deceptive)?
+
 Respond in this exact JSON format:
 {
-  "verdict": "authentic" | "likely_manipulated" | "inconclusive" | "insufficient",
+  "verdict": "authentic_captured" | "authentic_produced" | "likely_manipulated" | "inconclusive" | "insufficient",
   "confidence": "high" | "medium" | "low",
+  "contentType": "camera_footage" | "animation" | "screen_recording" | "ai_generated_creative" | "ai_generated_deceptive" | "mixed" | "unknown",
   "summary": "One sentence overall assessment",
+  "deceptionIndicators": ["specific signs suggesting deceptive intent, if any"],
   "visualIndicators": ["list of specific visual observations with frame references"],
   "metadataIndicators": ["list of metadata observations"],
   "manipulationSignals": ["specific signs suggesting manipulation, with frame references"],
   "authenticitySignals": ["specific signs supporting authenticity"],
+  "productionSignals": ["signs this is legitimately produced content — animation style, motion graphics, consistent branding, professional editing"],
   "compressionNotes": ["observations that could be compression rather than manipulation"],
   "limitations": ["what you cannot determine from these frames alone"],
-  "reasoning": "Detailed reasoning for your verdict"
+  "reasoning": "Detailed reasoning for your verdict, specifically addressing whether deceptive intent is present"
 }
 
 Return ONLY the JSON object.`;

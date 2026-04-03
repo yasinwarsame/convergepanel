@@ -272,3 +272,31 @@ export function analyzeMetadata(metadata: VideoMetadata): MetadataAnalysis {
 
   return { flags, summary };
 }
+
+/**
+ * Video verification verdicts:
+ *
+ * "authentic_captured" — Real footage from a camera/device. Metadata supports
+ *   a physical capture device. No manipulation indicators detected.
+ *
+ * "authentic_produced" — Legitimately produced content (animation, motion
+ *   graphics, AI-assisted production, screen recordings). Not deceptive —
+ *   the content is what it presents itself to be. May be AI-generated but
+ *   not created to mislead.
+ *
+ * "likely_manipulated" — Content altered or generated to misrepresent reality.
+ *   Deceptive intent indicators present — deepfakes, face swaps, fabricated
+ *   footage presented as real, altered evidence.
+ *
+ * "inconclusive" — Models disagree or cannot determine with confidence.
+ *   Mixed signals — human judgment required.
+ *
+ * "insufficient" — Video too short, low quality, or compressed for
+ *   meaningful analysis.
+ */
+export type VideoVerdict =
+  | "authentic_captured"
+  | "authentic_produced"
+  | "likely_manipulated"
+  | "inconclusive"
+  | "insufficient";
