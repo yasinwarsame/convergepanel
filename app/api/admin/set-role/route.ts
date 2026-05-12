@@ -133,7 +133,7 @@ export async function POST(request: NextRequest) {
   } catch (error: any) {
     console.error("[admin/set-role] Error updating role:", error);
     return NextResponse.json(
-      { error: "Internal server error", message: error.message },
+      { error: "Internal server error" },
       { status: 500 }
     );
   }

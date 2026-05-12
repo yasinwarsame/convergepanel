@@ -79,7 +79,7 @@ export async function POST(request: NextRequest) {
     response.cookies.set("__session", sessionCookie, {
       maxAge: expiresIn / 1000, // Convert to seconds
       httpOnly: true, // Prevents JavaScript access (XSS protection)
-      secure: process.env.NODE_ENV === "production", // HTTPS only in production
+      secure: true,
       sameSite: "lax", // CSRF protection
       path: "/",
     });

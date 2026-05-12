@@ -103,7 +103,7 @@ export async function POST(req: NextRequest) {
   } catch (error: any) {
     console.error("[test-webhook] Error:", error);
     return NextResponse.json(
-      { error: error.message || "Failed to test webhook" },
+      { error: "Failed to test webhook" },
       { status: 500 }
     );
   }

@@ -96,7 +96,7 @@ export async function GET(request: NextRequest) {
   } catch (error: any) {
     console.error("[admin/users/search] Error:", error);
     return NextResponse.json(
-      { ok: false, error: "Internal server error", message: error.message },
+      { ok: false, error: "Internal server error" },
       { status: 500 }
     );
   }

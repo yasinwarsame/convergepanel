@@ -184,7 +184,7 @@ export async function GET(request: NextRequest) {
   } catch (error: any) {
     logger.error("[admin/users] Error fetching users", { error: error?.message });
     return NextResponse.json(
-      { error: "Internal server error", message: error.message },
+      { error: "Internal server error" },
       { status: 500 }
     );
   }

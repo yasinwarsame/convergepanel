@@ -90,7 +90,7 @@ export async function PATCH(
   } catch (error: any) {
     console.error("Error updating user:", error);
     return NextResponse.json(
-      { error: "Internal server error", message: error.message },
+      { error: "Internal server error" },
       { status: 500 }
     );
   }
@@ -151,7 +151,7 @@ export async function DELETE(
   } catch (error: any) {
     console.error("Error deleting user:", error);
     return NextResponse.json(
-      { error: "Internal server error", message: error.message },
+      { error: "Internal server error" },
       { status: 500 }
     );
   }

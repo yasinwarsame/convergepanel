@@ -153,7 +153,7 @@ export async function GET(
   } catch (error: any) {
     console.error(`[admin/users/${params.uid}/details] Error:`, error);
     return NextResponse.json(
-      { ok: false, error: "Internal server error", message: error.message },
+      { ok: false, error: "Internal server error" },
       { status: 500 }
     );
   }

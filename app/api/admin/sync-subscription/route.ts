@@ -206,7 +206,7 @@ export async function POST(req: NextRequest) {
   } catch (error: any) {
     console.error("[sync-subscription] Error:", error);
     return NextResponse.json(
-      { error: error.message || "Failed to sync subscription" },
+      { error: "Failed to sync subscription" },
       { status: 500 }
     );
   }
