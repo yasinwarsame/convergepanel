@@ -2,34 +2,70 @@
  * Shared library module (adminAuth.ts): domain logic used by API routes and UI.
  */
 
-import { timingSafeEqual } from "crypto";
+import { randomBytes, timingSafeEqual } from "crypto";
 import { cookies } from "next/headers";
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";
 const COOKIE_NAME = "admin_session";
-const COOKIE_VALUE = "authenticated";
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 7; // 7 days
 
-export function isAdminAuthenticated(request: NextRequest): boolean {
-  const cookie = request.cookies.get(COOKIE_NAME);
-  return cookie?.value === COOKIE_VALUE;
-}
-
 export async function setAdminSession(): Promise<void> {
+  const token = randomBytes(32).toString("hex");
+
+  // Persist token in Firestore so it can be validated and revoked server-side.
+  // Import lazily to avoid initialising Firebase Admin at module load time.
+  try {
+    const { adminDb } = await import("@/lib/firebase/admin");
+    if (adminDb) {
+      await adminDb.collection("admin_sessions").doc(token).set({
+        createdAt: Date.now(),
+        expiresAt: Date.now() + COOKIE_MAX_AGE * 1000,
+      });
+    }
+  } catch (err) {
+    console.error("[adminAuth] Failed to persist session token:", err);
+  }
+
   const cookieStore = await cookies();
-  cookieStore.set(COOKIE_NAME, COOKIE_VALUE, {
+  cookieStore.set(COOKIE_NAME, token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: true,
     sameSite: "strict",
     maxAge: COOKIE_MAX_AGE,
     path: "/",
   });
 }
 
-export async function clearAdminSession(): Promise<void> {
+export async function clearAdminSession(request?: NextRequest): Promise<void> {
+  const token = request?.cookies.get(COOKIE_NAME)?.value;
+  if (token) {
+    try {
+      const { adminDb } = await import("@/lib/firebase/admin");
+      if (adminDb) {
+        await adminDb.collection("admin_sessions").doc(token).delete();
+      }
+    } catch (err) {
+      console.error("[adminAuth] Failed to delete session token:", err);
+    }
+  }
   const cookieStore = await cookies();
   cookieStore.delete(COOKIE_NAME);
+}
+
+export async function isAdminSessionValid(request: NextRequest): Promise<boolean> {
+  const token = request.cookies.get(COOKIE_NAME)?.value;
+  if (!token || token.length !== 64) return false;
+  try {
+    const { adminDb } = await import("@/lib/firebase/admin");
+    if (!adminDb) return false;
+    const doc = await adminDb.collection("admin_sessions").doc(token).get();
+    if (!doc.exists) return false;
+    const { expiresAt } = doc.data() as { expiresAt: number };
+    return Date.now() < expiresAt;
+  } catch {
+    return false;
+  }
 }
 
 export function validatePassword(password: string): boolean {
@@ -42,16 +78,3 @@ export function validatePassword(password: string): boolean {
   if (a.length !== b.length) return false;
   return timingSafeEqual(a, b);
 }
-
-export function requireAdmin(
-  request: NextRequest
-): { authenticated: boolean; response?: NextResponse } {
-  if (!isAdminAuthenticated(request)) {
-    return {
-      authenticated: false,
-      response: NextResponse.redirect(new URL("/admin/login", request.url)),
-    };
-  }
-  return { authenticated: true };
-}
-

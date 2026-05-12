@@ -7,7 +7,7 @@ import { clearAdminSession } from "@/lib/adminAuth";
 
 export async function POST(request: NextRequest) {
   try {
-    await clearAdminSession();
+    await clearAdminSession(request);
     return NextResponse.json({ success: true });
   } catch (error: any) {
     console.error("Error in admin logout:", error);

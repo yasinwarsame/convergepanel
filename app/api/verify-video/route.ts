@@ -32,6 +32,7 @@ import { sanitizeForFirestore } from "@/lib/firestore/sanitizeForFirestore";
 import { incrementUserTokenUsage } from "@/lib/firestore/userTokens";
 import { cleanJsonResponse, repairTruncatedJson } from "@/lib/verification/cleanJsonResponse";
 import { evaluateAndStoreGovernance } from "@/lib/governance/evaluateAndStore";
+import { mapStoredVideoVerificationToClientPayload } from "@/lib/user/mapStoredVideoVerificationToClientPayload";
 import { logger } from "@/lib/logger";
 
 import type { ExtractedFrame, VideoMetadata } from "@/lib/video/videoPure";
@@ -47,6 +48,7 @@ export const maxDuration = 300;
 const MAX_FRAMES = 15;
 const MAX_BASE64_CHARS_PER_FRAME = 900_000;
 const MAX_TOTAL_BASE64_CHARS = 12_000_000;
+const DEDUP_WINDOW_MS = 30_000;
 
 const KNOWN_MODEL_VIDEO_VERDICTS = new Set([
   "authentic_captured",
@@ -454,6 +456,70 @@ export async function POST(request: NextRequest) {
   console.log(
     `[verify-video] JSON: ${fileName}, ${frames.length} frames, ${duration}s, ~${(totalB64 / 1e6).toFixed(2)}MB base64`
   );
+
+  // --- Deduplication: reject if the same user submitted the same file within the last 30 seconds ---
+  try {
+    const cutoff = new Date(Date.now() - DEDUP_WINDOW_MS);
+    const recentSnap = await adminDb
+      .collection("videoVerifications")
+      .where("userId", "==", uid)
+      .where("fileName", "==", fileName)
+      .orderBy("timestamp", "desc")
+      .limit(1)
+      .get();
+
+    if (!recentSnap.empty) {
+      const recentDoc = recentSnap.docs[0];
+      const recentData = recentDoc.data() as Record<string, unknown>;
+      const ts = recentData.timestamp;
+      let recentMs = 0;
+      if (ts && typeof ts === "object" && "toMillis" in ts && typeof (ts as { toMillis: () => number }).toMillis === "function") {
+        recentMs = (ts as { toMillis: () => number }).toMillis();
+      }
+      const meta = recentData.metadata as Record<string, unknown> | undefined;
+      const recentFileSize =
+        typeof meta?.fileSize === "number" ? meta.fileSize : -1;
+      const recentDuration =
+        typeof meta?.duration === "number" ? meta.duration : -1;
+
+      if (
+        recentMs > 0 &&
+        new Date(recentMs) > cutoff &&
+        recentFileSize === fileSize &&
+        Math.abs(recentDuration - duration) < 0.5
+      ) {
+        console.log(
+          `[verify-video] Duplicate submission detected for ${fileName} (existing doc ${recentDoc.id}, ${Date.now() - recentMs}ms ago). Returning existing result.`
+        );
+        const existing = mapStoredVideoVerificationToClientPayload(recentDoc.id, recentData);
+        return NextResponse.json({
+          ok: true,
+          verificationId: existing.verificationId,
+          verdict: existing.verdict,
+          contentType: existing.contentType,
+          consensusScore: existing.consensusScore,
+          confidenceLabel: existing.confidenceLabel,
+          evidenceQuality: existing.evidenceQuality,
+          supportRatio: existing.supportRatio,
+          metadata: existing.metadata,
+          metadataAnalysis: existing.metadataAnalysis,
+          modelEvidence: existing.modelEvidence,
+          agreementPoints: existing.agreementPoints,
+          disagreementPoints: existing.disagreementPoints,
+          frameCount: existing.frameCount,
+          warnings: existing.warnings,
+          disclaimer: VIDEO_VERIFICATION_DISCLAIMER,
+          _deduplicated: true,
+        });
+      }
+    }
+  } catch (dedupErr) {
+    console.error("[verify-video] Dedup check failed, denying request:", dedupErr);
+    return NextResponse.json(
+      { ok: false, error: { code: "service_error", message: "Could not process request. Please try again." } },
+      { status: 503 }
+    );
+  }
 
   const { checkUsageAllowanceForRun, checkAndIncrementUsageForRun } = await import("@/lib/stripe/usageCheck");
   const usagePrecheck = await checkUsageAllowanceForRun(uid, 2);
@@ -875,24 +941,22 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const preSnap = await adminDb.collection("users").doc(uid).get();
-    const preData = preSnap.data();
-    const storedUsageMonthInDb =
-      typeof preData?.usageMonth === "string" ? preData.usageMonth.trim() : "";
-    const monthRolledInDb = storedUsageMonthInDb !== nowMonth;
-
-    const usageUpdate: Record<string, unknown> = {
-      updatedAt: FieldValue.serverTimestamp(),
-    };
-    if (monthRolledInDb) {
-      usageUpdate.usageMonth = nowMonth;
-      usageUpdate.videoRunsThisMonth = 1;
-    } else {
-      usageUpdate.videoRunsThisMonth = FieldValue.increment(1);
-    }
-
-    await adminDb.collection("users").doc(uid).set(usageUpdate, { merge: true });
-    console.log(`[verify-video] Video usage updated (monthRolled=${monthRolledInDb})`);
+    const userRef = adminDb.collection("users").doc(uid);
+    await adminDb.runTransaction(async (txn) => {
+      const snap = await txn.get(userRef);
+      const data = snap.data();
+      const storedMonth =
+        typeof data?.usageMonth === "string" ? data.usageMonth.trim() : "";
+      const monthRolled = storedMonth !== nowMonth;
+      txn.set(
+        userRef,
+        monthRolled
+          ? { usageMonth: nowMonth, videoRunsThisMonth: 1, updatedAt: FieldValue.serverTimestamp() }
+          : { videoRunsThisMonth: FieldValue.increment(1), updatedAt: FieldValue.serverTimestamp() },
+        { merge: true }
+      );
+    });
+    console.log(`[verify-video] Video usage updated (transactional)`);
   } catch (err) {
     console.error("[verify-video] Usage increment failed:", err);
   }

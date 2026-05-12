@@ -49,10 +49,7 @@ export async function POST(request: NextRequest) {
       decodedToken = await adminAuth.verifyIdToken(idToken);
     } catch (verifyError: any) {
       console.error("Token verification failed:", verifyError);
-      return NextResponse.json(
-        { error: `Token verification failed: ${verifyError.message}` },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: "Invalid or expired token" }, { status: 401 });
     }
 
     /**
@@ -70,10 +67,7 @@ export async function POST(request: NextRequest) {
       });
     } catch (cookieError: any) {
       console.error("Session cookie creation failed:", cookieError);
-      return NextResponse.json(
-        { error: `Failed to create session cookie: ${cookieError.message}` },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: "Failed to create session" }, { status: 500 });
     }
 
     /**
@@ -96,18 +90,10 @@ export async function POST(request: NextRequest) {
     
     // Provide helpful error message if Admin SDK is not configured
     if (error.message?.includes("service account") || error.message?.includes("credential")) {
-      return NextResponse.json(
-        { 
-          error: "Firebase Admin SDK not configured. Please add FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY to .env.local. See SETUP_FIREBASE_ADMIN.md for instructions."
-        },
-        { status: 500 }
-      );
+      console.error("[auth/session] Firebase Admin SDK not configured");
     }
-    
-    return NextResponse.json(
-      { error: `Failed to create session: ${error.message || "Unknown error"}` },
-      { status: 500 }
-    );
+
+    return NextResponse.json({ error: "Failed to create session" }, { status: 500 });
   }
 }
 

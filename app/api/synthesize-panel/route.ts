@@ -339,7 +339,11 @@ export async function GET(req: NextRequest) {
         }
       }
     } catch (ownershipError: any) {
-      // Continue - ownership check is best effort
+      console.error("[synthesize-panel] Ownership check failed, denying access:", ownershipError);
+      return NextResponse.json(
+        createErrorResponse(ERROR_CODES.FORBIDDEN, "Could not verify access to this run.", requestId),
+        { status: 403 }
+      );
     }
   }
 

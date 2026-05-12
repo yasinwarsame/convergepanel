@@ -4,6 +4,16 @@ import { ANTHROPIC_API_KEY, GEMINI_API_KEY, OPENAI_API_KEY } from "@/lib/env";
 
 import type { ExtractedFrame } from "./videoPure";
 
+const VISION_TIMEOUT_MS = 60_000;
+
+function fetchWithTimeout(url: string, options: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), VISION_TIMEOUT_MS);
+  return fetch(url, { ...options, signal: controller.signal }).finally(() =>
+    clearTimeout(timer)
+  );
+}
+
 /**
  * Send video frames to OpenAI (GPT-4o) for authenticity analysis.
  *
@@ -22,7 +32,7 @@ export async function callOpenAIVision(
   const apiKey = OPENAI_API_KEY;
   if (!apiKey) throw new Error("OPENAI_API_KEY not configured");
 
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+  const response = await fetchWithTimeout("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -83,7 +93,7 @@ export async function callClaudeVision(
   const apiKey = ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY not configured");
 
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
+  const response = await fetchWithTimeout("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -146,7 +156,7 @@ export async function callGeminiVision(
   const apiKey = GEMINI_API_KEY;
   if (!apiKey) throw new Error("GEMINI_API_KEY not configured");
 
-  const response = await fetch(
+  const response = await fetchWithTimeout(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(apiKey)}`,
     {
       method: "POST",
