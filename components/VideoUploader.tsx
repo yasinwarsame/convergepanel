@@ -114,6 +114,7 @@ export default function VideoUploader({
   const [progressMessage, setProgressMessage] = useState<string | null>(null);
   const [allowDragDrop, setAllowDragDrop] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const submittingRef = useRef(false);
   const [hasAcknowledged, setHasAcknowledged] = useState(false);
 
   useEffect(() => {
@@ -217,6 +218,8 @@ export default function VideoUploader({
 
   const handleVerifyVideo = useCallback(async () => {
     if (!selectedFile || loading || !user) return;
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setLoading(true);
     setError(null);
     setProgress(0);
@@ -362,6 +365,7 @@ export default function VideoUploader({
     } finally {
       setLoading(false);
       setProgressMessage(null);
+      submittingRef.current = false;
     }
   }, [selectedFile, loading, user, onSuccess, onUsageRefresh, videoLimit]);
 
@@ -563,9 +567,9 @@ export default function VideoUploader({
                 type="button"
                 disabled={!authReady || !user || loading}
                 onClick={() => void handleVerifyVideo()}
-                className="rounded-xl bg-sky-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-sky-700 disabled:opacity-50"
+                className="rounded-xl bg-sky-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-sky-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Verify Video
+                {loading ? "Verifying…" : "Verify Video"}
               </button>
               <button
                 type="button"

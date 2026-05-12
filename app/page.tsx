@@ -1393,22 +1393,22 @@ export default function Home() {
 
       setErrorCode(null);
       setVerificationPayload(payload);
-      setHistoryItems((h) =>
-        [
-          {
-            id: data.verificationId || `v-${Date.now()}`,
-            type: "verification" as const,
-            title: claim.slice(0, 88) + (claim.length > 88 ? "…" : ""),
-            at: new Date().toISOString(),
-            claim: claim.trim(),
-            verdict: data.verdict,
-            consensusScore: data.consensusScore,
-            payload,
-            governanceStatus: payload.governanceStatus,
-          },
-          ...h,
-        ].slice(0, MAX_HISTORY_LOCAL_STORAGE)
-      );
+      setHistoryItems((h) => {
+        const itemId = data.verificationId || `v-${Date.now()}`;
+        const newItem: HistoryItem = {
+          id: itemId,
+          type: "verification" as const,
+          title: claim.slice(0, 88) + (claim.length > 88 ? "…" : ""),
+          at: new Date().toISOString(),
+          claim: claim.trim(),
+          verdict: data.verdict,
+          consensusScore: data.consensusScore,
+          payload,
+          governanceStatus: payload.governanceStatus,
+        };
+        const deduped = h.filter((x) => x.id !== itemId);
+        return [newItem, ...deduped].slice(0, MAX_HISTORY_LOCAL_STORAGE);
+      });
 
       const finalStatuses = {} as Record<ModelId, "queued" | "thinking" | ModelStatus>;
       data.modelEvidence?.forEach((row: { modelId: ModelId; status?: string }) => {
@@ -2408,24 +2408,25 @@ export default function Home() {
             onSuccess={(p) => {
               setVideoVerificationPayload(p);
               void refreshUsage();
-              setHistoryItems((h) =>
-                [
-                  {
-                    id: p.verificationId,
-                    type: "video_verification" as const,
-                    title: truncateHistoryTitle(
-                      `Video: ${p.fileName} (${formatHistoryVideoDuration(p.metadata.duration)})`
-                    ),
-                    at: new Date().toISOString(),
-                    fileName: p.fileName,
-                    durationSeconds: p.metadata.duration,
-                    verdict: p.verdict,
-                    consensusScore: p.consensusScore,
-                    governanceStatus: p.governanceStatus ?? undefined,
-                  },
-                  ...h,
-                ].slice(0, MAX_HISTORY_LOCAL_STORAGE)
-              );
+              setHistoryItems((h) => {
+                const newItem: HistoryItem = {
+                  id: p.verificationId,
+                  type: "video_verification" as const,
+                  title: truncateHistoryTitle(
+                    `Video: ${p.fileName} (${formatHistoryVideoDuration(p.metadata.duration)})`
+                  ),
+                  at: new Date().toISOString(),
+                  fileName: p.fileName,
+                  durationSeconds: p.metadata.duration,
+                  verdict: p.verdict,
+                  consensusScore: p.consensusScore,
+                  governanceStatus: p.governanceStatus ?? undefined,
+                };
+                const deduped = h.filter(
+                  (x) => x.id !== p.verificationId
+                );
+                return [newItem, ...deduped].slice(0, MAX_HISTORY_LOCAL_STORAGE);
+              });
               trackEvent("video_verification", { plan: normalizedPlan });
             }}
             onUsageRefresh={() => void refreshUsage()}
