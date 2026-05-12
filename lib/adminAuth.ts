@@ -10,6 +10,28 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";
 const COOKIE_NAME = "admin_session";
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 7; // 7 days
 
+// Opportunistic cleanup: deletes up to 50 expired session docs on each login.
+// For zero-maintenance collection hygiene, also configure a Firestore TTL policy
+// in the Firebase console: Collection "admin_sessions", field "expiresAt" (timestamp).
+async function cleanupExpiredAdminSessions(): Promise<void> {
+  try {
+    const { adminDb } = await import("@/lib/firebase/admin");
+    const { Timestamp } = await import("firebase-admin/firestore");
+    if (!adminDb) return;
+    const expired = await adminDb
+      .collection("admin_sessions")
+      .where("expiresAt", "<", Timestamp.fromMillis(Date.now()))
+      .limit(50)
+      .get();
+    if (expired.empty) return;
+    const batch = adminDb.batch();
+    expired.docs.forEach((doc) => batch.delete(doc.ref));
+    await batch.commit();
+  } catch (err) {
+    console.error("[adminAuth] Session cleanup failed:", err);
+  }
+}
+
 export async function setAdminSession(): Promise<void> {
   const token = randomBytes(32).toString("hex");
 
@@ -26,6 +48,9 @@ export async function setAdminSession(): Promise<void> {
   } catch (err) {
     console.error("[adminAuth] Failed to persist session token:", err);
   }
+
+  // Fire-and-forget: don't await so cleanup never delays the login response.
+  void cleanupExpiredAdminSessions();
 
   const cookieStore = await cookies();
   cookieStore.set(COOKIE_NAME, token, {

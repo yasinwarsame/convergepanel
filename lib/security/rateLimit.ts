@@ -97,7 +97,12 @@ export async function checkRateLimit(
     });
     
     const retryAfter = result.allowed ? undefined : Math.ceil((resetAt.getTime() - now) / 1000);
-    
+
+    // Opportunistic cleanup: run on ~1% of requests, fire-and-forget.
+    if (Math.random() < 0.01) {
+      void cleanupRateLimits();
+    }
+
     return {
       allowed: result.allowed,
       remaining: result.remaining,

@@ -937,7 +937,18 @@ export async function POST(request: NextRequest) {
     });
     console.log(`[verify-video] Governance evaluation complete`);
   } catch (err) {
-    console.error("[verify-video] Governance evaluation failed (non-blocking):", err);
+    console.error("[verify-video] Governance evaluation failed:", err);
+    try {
+      await adminDb.collection("failed_governance_audits").add({
+        runId: verificationId,
+        collection: "videoVerifications",
+        ownerUid: uid,
+        failedAt: FieldValue.serverTimestamp(),
+        error: err instanceof Error ? err.message : String(err),
+      });
+    } catch (writeErr) {
+      console.error("[verify-video] Failed to write governance failure record:", writeErr);
+    }
   }
 
   try {
