@@ -39,10 +39,11 @@ export async function setAdminSession(): Promise<void> {
   // Import lazily to avoid initialising Firebase Admin at module load time.
   try {
     const { adminDb } = await import("@/lib/firebase/admin");
+    const { Timestamp } = await import("firebase-admin/firestore");
     if (adminDb) {
       await adminDb.collection("admin_sessions").doc(token).set({
-        createdAt: Date.now(),
-        expiresAt: Date.now() + COOKIE_MAX_AGE * 1000,
+        createdAt: Timestamp.now(),
+        expiresAt: Timestamp.fromMillis(Date.now() + COOKIE_MAX_AGE * 1000),
       });
     }
   } catch (err) {
@@ -86,8 +87,8 @@ export async function isAdminSessionValid(request: NextRequest): Promise<boolean
     if (!adminDb) return false;
     const doc = await adminDb.collection("admin_sessions").doc(token).get();
     if (!doc.exists) return false;
-    const { expiresAt } = doc.data() as { expiresAt: number };
-    return Date.now() < expiresAt;
+    const { expiresAt } = doc.data() as { expiresAt: { toMillis(): number } };
+    return Date.now() < expiresAt.toMillis();
   } catch {
     return false;
   }
