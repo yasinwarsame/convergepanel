@@ -40,12 +40,12 @@ export async function checkRateLimit(
   config: RateLimitConfig
 ): Promise<RateLimitResult> {
   if (!adminDb) {
-    // In development/testing, allow all requests if Firestore is not available
-    console.warn("[rateLimit] Firestore not available, allowing request (dev mode)");
+    console.error("[rateLimit] Firestore not available, denying request");
     return {
-      allowed: true,
-      remaining: config.maxRequests,
+      allowed: false,
+      remaining: 0,
       resetAt: new Date(Date.now() + config.windowSeconds * 1000),
+      retryAfter: config.windowSeconds,
     };
   }
 
@@ -105,17 +105,15 @@ export async function checkRateLimit(
       retryAfter,
     };
   } catch (error: any) {
-    // On error, allow the request (fail open) but log the error
-    console.error("[rateLimit] Error checking rate limit:", {
+    console.error("[rateLimit] Error checking rate limit, denying request:", {
       identifier: config.identifier,
       error: error?.message,
     });
-    
-    // Fail open - allow request if rate limit check fails
     return {
-      allowed: true,
-      remaining: config.maxRequests,
+      allowed: false,
+      remaining: 0,
       resetAt,
+      retryAfter: config.windowSeconds,
     };
   }
 }

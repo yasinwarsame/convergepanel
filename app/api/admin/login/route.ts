@@ -4,9 +4,23 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { validatePassword, setAdminSession } from "@/lib/adminAuth";
+import { checkRateLimit } from "@/lib/security/rateLimit";
 
 export async function POST(request: NextRequest) {
   try {
+    const ip = request.headers.get("x-forwarded-for")?.split(",")[0].trim() ?? "unknown";
+    const rl = await checkRateLimit({
+      maxRequests: 5,
+      windowSeconds: 300,
+      identifier: `admin-login:${ip}`,
+    });
+    if (!rl.allowed) {
+      return NextResponse.json(
+        { error: "Too many login attempts. Try again later." },
+        { status: 429 }
+      );
+    }
+
     const body = await request.json();
     const { password } = body;
 

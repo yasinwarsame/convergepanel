@@ -2,6 +2,7 @@
  * Shared library module (adminAuth.ts): domain logic used by API routes and UI.
  */
 
+import { timingSafeEqual } from "crypto";
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -36,7 +37,10 @@ export function validatePassword(password: string): boolean {
     console.warn("ADMIN_PASSWORD not set in environment variables");
     return false;
   }
-  return password === ADMIN_PASSWORD;
+  const a = Buffer.from(password);
+  const b = Buffer.from(ADMIN_PASSWORD);
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
 }
 
 export function requireAdmin(
