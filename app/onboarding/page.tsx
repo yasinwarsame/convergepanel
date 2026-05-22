@@ -21,11 +21,12 @@
  */
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/AuthProvider";
 import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase/client";
 import { UserProfile } from "@/lib/types";
+import { safeRedirect } from "@/lib/utils/safeRedirect";
 
 // Onboarding question option types
 type RoleOption = "founder_operator" | "analyst_consultant" | "student_researcher" | "engineer_datascientist" | "other";
@@ -47,6 +48,7 @@ function stripUndefined<T extends object>(obj: T): Partial<T> {
 export default function OnboardingPage() {
   const { user, loading: authLoading } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
   
   // Form state
   const [role, setRole] = useState<RoleOption | null>(null);
@@ -83,10 +85,9 @@ export default function OnboardingPage() {
         if (userDoc.exists()) {
           const userData = userDoc.data() as UserProfile;
           
-          // If onboarding is already completed, redirect to main app
-          // This ensures onboarding only appears once per user
+          // If onboarding is already completed, redirect to intended page or main app
           if (userData.onboardingCompleted === true) {
-            router.push("/");
+            router.push(safeRedirect(searchParams.get("redirect"), "/"));
             return;
           }
         }
@@ -145,8 +146,9 @@ export default function OnboardingPage() {
         { merge: true } // Merge with existing user document
       );
 
-      // Redirect to main app after successful onboarding
-      router.push("/");
+      // Redirect to intended destination (from extension/verify flow) or main app
+      const postRedirect = safeRedirect(searchParams.get("redirect"), "/");
+      router.push(postRedirect);
       router.refresh();
     } catch (err: any) {
       console.error("Error saving onboarding data:", err);

@@ -9,8 +9,9 @@ import Image from "next/image";
 import { createUserWithEmailAndPassword } from "firebase/auth";
 import { auth, db } from "@/lib/firebase/client";
 import { doc, setDoc, serverTimestamp } from "firebase/firestore";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { safeRedirect } from "@/lib/utils/safeRedirect";
 
 /**
  * Strips keys with undefined values from an object.
@@ -179,6 +180,7 @@ export default function SignupPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -231,8 +233,13 @@ export default function SignupPage() {
       }));
 
       // Redirect to onboarding page instead of main app
-      // The onboarding page will capture role, use case, usage frequency, and referral source
-      router.push("/onboarding");
+      // Preserve any redirect param so the user lands on their intended page after onboarding
+      const rawRedirect = searchParams.get("redirect") || searchParams.get("next");
+      const postOnboardingRedirect = safeRedirect(rawRedirect, "/");
+      const onboardingUrl = postOnboardingRedirect !== "/"
+        ? `/onboarding?redirect=${encodeURIComponent(postOnboardingRedirect)}`
+        : "/onboarding";
+      router.push(onboardingUrl);
       router.refresh(); // Refresh to update auth state
     } catch (err: any) {
       setError(err.message || "Failed to create account");

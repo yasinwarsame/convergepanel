@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ConvergePanel Verify</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      width: 320px;
+      padding: 20px;
+      background: #fafafa;
+      color: #1a1a1a;
+    }
+
+    .header {
+      margin-bottom: 16px;
+    }
+
+    .header h1 {
+      font-size: 16px;
+      font-weight: 700;
+      color: #111;
+    }
+
+    .header p {
+      font-size: 12px;
+      color: #666;
+      margin-top: 4px;
+    }
+
+    .preview {
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 16px;
+      min-height: 48px;
+    }
+
+    .preview-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #999;
+      margin-bottom: 6px;
+    }
+
+    .preview-text {
+      font-size: 13px;
+      line-height: 1.4;
+      color: #333;
+      word-break: break-word;
+    }
+
+    .preview-text.empty {
+      color: #aaa;
+      font-style: italic;
+    }
+
+    .actions {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    button {
+      width: 100%;
+      padding: 10px 16px;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+
+    button:hover {
+      opacity: 0.85;
+    }
+
+    button:active {
+      opacity: 0.7;
+    }
+
+    .btn-primary {
+      background: #2563eb;
+      color: #fff;
+    }
+
+    .btn-secondary {
+      background: #e5e7eb;
+      color: #374151;
+    }
+
+    .btn-primary:disabled {
+      background: #93c5fd;
+      cursor: not-allowed;
+      opacity: 1;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>ConvergePanel Verify</h1>
+    <p>Right-click any claim. Get a panel verdict.</p>
+  </div>
+
+  <div class="preview">
+    <div class="preview-label">Last highlighted text</div>
+    <div class="preview-text empty" id="preview-text">No text selected yet.</div>
+  </div>
+
+  <div class="actions">
+    <button class="btn-primary" id="btn-verify" disabled>Verify Last Selection</button>
+    <button class="btn-secondary" id="btn-open">Open ConvergePanel</button>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

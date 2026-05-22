@@ -1689,6 +1689,24 @@ export default function Home() {
     router.replace("/", { scroll: false });
   }, [authReady, user, router]);
 
+  // Handle ?tab=verify&claim=... or ?tab=research&q=... from /verify page (extension flow)
+  useEffect(() => {
+    if (!authReady || !user) return;
+    const params = new URLSearchParams(window.location.search);
+    const tab = params.get("tab");
+    if (tab === "verify") {
+      setPanelTab("verify");
+      const claim = params.get("claim");
+      if (claim) setClaimInput(decodeURIComponent(claim));
+      router.replace("/", { scroll: false });
+    } else if (tab === "research") {
+      setPanelTab("research");
+      const q = params.get("q");
+      if (q) setQuestion(decodeURIComponent(q));
+      router.replace("/", { scroll: false });
+    }
+  }, [authReady, user, router]);
+
   /**
    * Re-run the same panel with same question and models
    */

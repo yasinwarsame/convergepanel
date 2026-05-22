@@ -15,6 +15,7 @@ import { signInWithEmailAndPassword } from "firebase/auth";
 import { auth } from "@/lib/firebase/client";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { safeRedirect } from "@/lib/utils/safeRedirect";
 
 const LOGIN_VALUE_LINES = [
   "Run research across 5 AI models simultaneously",
@@ -132,7 +133,14 @@ export default function LoginPage() {
       }
 
       // Redirect to the page user was trying to access (or home)
-      const next = searchParams.get("next") || "/";
+      // Supports both "redirect" (from extension/verify flow) and "next" (legacy)
+      const rawRedirect = searchParams.get("redirect") || searchParams.get("next");
+      const next = safeRedirect(rawRedirect, "/");
+
+      if (process.env.NODE_ENV !== "production") {
+        console.debug("[login] Post-login redirect:", { rawRedirect, resolved: next });
+      }
+
       router.push(next);
       router.refresh(); // Refresh to update auth state
     } catch (err: any) {
@@ -236,7 +244,14 @@ export default function LoginPage() {
 
             <p className="mt-6 text-center text-sm text-slate-600">
               New to ConvergePanel?{" "}
-              <Link href="/signup" className="font-medium text-sky-600 hover:text-sky-700">
+              <Link
+                href={
+                  searchParams.get("redirect")
+                    ? `/signup?redirect=${encodeURIComponent(searchParams.get("redirect")!)}`
+                    : "/signup"
+                }
+                className="font-medium text-sky-600 hover:text-sky-700"
+              >
                 Sign up free
               </Link>{" "}
               — 8 runs per month on the free plan, no credit card required.
