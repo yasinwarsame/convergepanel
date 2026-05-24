@@ -458,18 +458,25 @@ export async function POST(request: NextRequest) {
   );
 
   // --- Deduplication: reject if the same user submitted the same file within the last 30 seconds ---
+  // Uses equality-only filters (no orderBy) to avoid requiring a composite index.
   try {
     const cutoff = new Date(Date.now() - DEDUP_WINDOW_MS);
     const recentSnap = await adminDb
       .collection("videoVerifications")
       .where("userId", "==", uid)
       .where("fileName", "==", fileName)
-      .orderBy("timestamp", "desc")
-      .limit(1)
       .get();
 
-    if (!recentSnap.empty) {
-      const recentDoc = recentSnap.docs[0];
+    const sortedDocs = recentSnap.docs.sort((a, b) => {
+      const aTs = a.data().timestamp;
+      const bTs = b.data().timestamp;
+      const aMs = aTs && typeof aTs.toMillis === "function" ? aTs.toMillis() : 0;
+      const bMs = bTs && typeof bTs.toMillis === "function" ? bTs.toMillis() : 0;
+      return bMs - aMs;
+    });
+
+    if (sortedDocs.length > 0) {
+      const recentDoc = sortedDocs[0];
       const recentData = recentDoc.data() as Record<string, unknown>;
       const ts = recentData.timestamp;
       let recentMs = 0;
