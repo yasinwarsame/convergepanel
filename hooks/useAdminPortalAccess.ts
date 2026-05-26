@@ -5,6 +5,9 @@ import { useAuth } from "@/components/AuthProvider";
 
 /**
  * True when the user has the Firebase `admin` claim or is on the governance admin email allowlist (server-checked).
+ *
+ * Waits for `adminResolved` from AuthProvider before making any access decision,
+ * preventing a race where the admin claim hasn't loaded yet.
  */
 export function useAdminPortalAccess(): {
   canAccess: boolean;
@@ -12,11 +15,11 @@ export function useAdminPortalAccess(): {
   authReady: boolean;
   user: ReturnType<typeof useAuth>["user"];
 } {
-  const { user, loading, authReady, isAdmin } = useAuth();
+  const { user, loading, authReady, isAdmin, adminResolved } = useAuth();
   const [emailAllowlistOk, setEmailAllowlistOk] = useState<boolean | null>(null);
 
   useEffect(() => {
-    if (!authReady || !user) {
+    if (!authReady || !adminResolved || !user) {
       setEmailAllowlistOk(null);
       return;
     }
@@ -42,9 +45,9 @@ export function useAdminPortalAccess(): {
     return () => {
       cancelled = true;
     };
-  }, [user, authReady, isAdmin]);
+  }, [user, authReady, adminResolved, isAdmin]);
 
-  const gateReady = !loading && authReady && (!user || isAdmin || emailAllowlistOk !== null);
+  const gateReady = !loading && authReady && adminResolved && (!user || isAdmin || emailAllowlistOk !== null);
   const canAccess = !!user && (isAdmin || emailAllowlistOk === true);
 
   return { canAccess, gateReady, authReady, user };

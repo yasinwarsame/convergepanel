@@ -29,12 +29,14 @@ import { perf } from "@/lib/utils/performance";
  * - authReady: Whether the first onAuthStateChanged callback has executed (regardless of user state)
  *   This is the signal that auth initialization is complete and API calls are safe.
  * - isAdmin: Whether current user has admin custom claim (from Firebase token)
+ * - adminResolved: Whether the admin claim check has completed (prevents premature admin gate decisions)
  */
 interface AuthContextType {
   user: User | null;
   loading: boolean;
   authReady: boolean;
   isAdmin: boolean;
+  adminResolved: boolean;
 }
 
 /**
@@ -45,6 +47,7 @@ const AuthContext = createContext<AuthContextType>({
   loading: true,
   authReady: false,
   isAdmin: false,
+  adminResolved: false,
 });
 
 /**
@@ -75,6 +78,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [loading, setLoading] = useState(true);
   const [authReady, setAuthReady] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [adminResolved, setAdminResolved] = useState(false);
 
   /**
    * Set up Firebase auth state listener
@@ -108,6 +112,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         setUser(null);
         setLoading(false);
         setIsAdmin(false);
+        setAdminResolved(true);
         // Mark auth as ready even on timeout so API calls can proceed (with null user)
         if (!authReadySet) {
           setAuthReady(true);
@@ -157,6 +162,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
           const tokenResult = await getIdTokenResult(user);
           if (isMounted) {
             setIsAdmin(tokenResult.claims.admin === true);
+            setAdminResolved(true);
             if (process.env.NODE_ENV !== "production") {
               console.log("[AuthProvider] Admin status:", tokenResult.claims.admin === true);
             }
@@ -165,10 +171,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
           console.error("[AuthProvider] Error getting token result:", error);
           if (isMounted) {
             setIsAdmin(false);
+            setAdminResolved(true);
           }
         }
       } else {
         setIsAdmin(false);
+        setAdminResolved(true);
       }
     });
 
@@ -184,7 +192,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
    * Provide auth state to all child components via Context
    */
   return (
-    <AuthContext.Provider value={{ user, loading, authReady, isAdmin }}>
+    <AuthContext.Provider value={{ user, loading, authReady, isAdmin, adminResolved }}>
       {children}
     </AuthContext.Provider>
   );
