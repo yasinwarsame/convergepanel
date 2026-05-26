@@ -22,7 +22,7 @@ export default function PrivacyPage() {
             <section className="mb-8">
               <h2 className="text-xl font-semibold text-slate-900 mb-3">1. Introduction</h2>
               <p className="text-slate-700 mb-3">
-                ConvergePanel ("we", "our", "us") is committed to protecting your privacy. This
+                ConvergePanel (&quot;we&quot;, &quot;our&quot;, &quot;us&quot;) is committed to protecting your privacy. This
                 Privacy Policy explains how we collect, use, and protect your information.
               </p>
               <p className="text-slate-700">

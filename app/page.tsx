@@ -2349,7 +2349,7 @@ export default function Home() {
                 <span className="mt-0.5 text-orange-600">⛔</span>
                 <div className="flex-1">
                   <p className="font-semibold text-orange-900 mb-1">
-                    You've reached your monthly run limit
+                    You&apos;ve reached your monthly run limit
                   </p>
                   <p className="text-orange-800 mb-2">
                     {error || "Your monthly limit has been reached. Your limit resets on the first of next month."}

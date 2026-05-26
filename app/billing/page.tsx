@@ -332,7 +332,7 @@ export default function BillingPage() {
                 ✅ {upgraded ? "Upgrade successful!" : "Payment successful!"} Your plan has been {upgraded ? "upgraded" : "updated"}. You now have access to more runs and features.
               </p>
               <p className="text-xs text-emerald-700">
-                You're all set. Head back to your dashboard to start running multi-model panels.
+                You&apos;re all set. Head back to your dashboard to start running multi-model panels.
               </p>
             </div>
             <Link

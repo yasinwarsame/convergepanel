@@ -1800,7 +1800,7 @@ export default function PanelSynthesisView({
                                 <div key={evIdx} className="bg-white rounded border border-slate-200 p-3">
                                   <div className="flex items-start gap-2 mb-1">
                                     <span className="text-sm font-medium text-slate-700">{getModelDisplayNameSafe(ev.modelId)}:</span>
-                                    <span className="text-sm text-slate-600 italic flex-1">"{ev.excerpt}"</span>
+                                    <span className="text-sm text-slate-600 italic flex-1">&quot;{ev.excerpt}&quot;</span>
                                   </div>
                                   <p className="text-sm text-slate-600 ml-0 mt-1">{ev.rationale}</p>
                                 </div>

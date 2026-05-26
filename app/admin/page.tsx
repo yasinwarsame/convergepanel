@@ -514,7 +514,7 @@ function PurgeRunsSection() {
         {!dryRun && (
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Type "DELETE" to confirm
+              Type &quot;DELETE&quot; to confirm
             </label>
             <input
               type="text"

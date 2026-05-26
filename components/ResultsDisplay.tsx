@@ -291,14 +291,14 @@ function CollapsibleMarkdown({
   text: string;
   alwaysExpanded?: boolean; // If true, bias/contention sections are always visible (no collapse)
 }) {
+  // Must be called before any early return to satisfy Rules of Hooks
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
+
   // In Compare View (alwaysExpanded=true), render all content directly without collapsible UI
   // ModelResponseBody handles all section extraction, deduplication, and uniform rendering
   if (alwaysExpanded) {
     return <ModelResponseBody content={text} />;
   }
-
-  // In List View, identify bias/contention sections for collapsible UI
-  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
 
   // Extract and merge sections to identify which ones should be collapsible
   const rawSections = extractAllSections(text);
@@ -1737,7 +1737,7 @@ export default function ResultsDisplay({
               </button>
               {!isCompareViewOpen && (
                 <div className="px-4 pb-3">
-                  <p className="text-xs text-slate-500">Click to compare each model's response.</p>
+                  <p className="text-xs text-slate-500">Click to compare each model&apos;s response.</p>
                 </div>
               )}
               <div id="compare-view-panel" className={`${isCompareViewOpen ? "" : "hidden"} px-4 pb-4 pt-2`}>
@@ -1857,7 +1857,7 @@ export default function ResultsDisplay({
                         <>
                           {((result as any)?.wasTruncated || (result as any)?.finishReason === "length") && (
                             <div className="mb-3 px-3 py-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-800">
-                              <strong>Note:</strong> This response was truncated by the model's token limit. Some sections may be missing.
+                              <strong>Note:</strong> This response was truncated by the model&apos;s token limit. Some sections may be missing.
                             </div>
                           )}
                           {/* Show other errorMessage warnings (non-truncation) */}
