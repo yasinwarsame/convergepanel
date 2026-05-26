@@ -64,7 +64,7 @@ export async function callClaude(
 
     const message = await Promise.race([
       anthropic.messages.create({
-        model: "claude-3-haiku-20240307",
+        model: "claude-haiku-4-5-20251001",
         // Use centralized token limits to ensure consistent, deep responses without truncation
         max_tokens: claudeLimits.maxTokens,
         system: systemPrompt,

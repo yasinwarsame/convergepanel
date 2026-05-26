@@ -18,7 +18,7 @@ const isDev = () => process.env.NODE_ENV !== "production";
 
 const ACTUAL_MODEL_STRINGS: Record<ModelId, string> = {
   chatgpt: "gpt-4o-mini",
-  claude: "claude-3-haiku-20240307",
+  claude: "claude-haiku-4-5-20251001",
   gemini: "gemini-2.0-flash",
   grok: GROK_MODEL || "grok-4-1-fast-reasoning",
   perplexity: "sonar",
