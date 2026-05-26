@@ -70,14 +70,13 @@ export async function verifyAdminToken(
     }
     const claimsKeys = Object.keys(customClaims);
 
-    console.log("[auth-helpers] Token verified:", {
-      uid: decodedToken.uid,
-      isAdmin,
-      hasAdminClaim: decodedToken.admin, // will print true/undefined
-      hasClaims: claimsKeys.length > 0,
-      claimsKeys,
-      allClaims: claimsKeys.length > 0 ? customClaims : null,
-    });
+    if (process.env.NODE_ENV !== "production") {
+      console.log("[auth-helpers] Token verified:", {
+        uid: decodedToken.uid,
+        isAdmin,
+        hasAdminClaim: decodedToken.admin,
+      });
+    }
 
     return {
       uid: decodedToken.uid,

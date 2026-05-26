@@ -3,6 +3,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { randomUUID } from "crypto";
 import { ModelId, ModelResult } from "@/lib/types";
 import { OPENAI_API_KEY, ANTHROPIC_API_KEY, XAI_API_KEY, PERPLEXITY_API_KEY, GEMINI_API_KEY } from "@/lib/env";
 import { verifySessionCookie } from "@/lib/firebase/auth-helpers";
@@ -218,13 +219,14 @@ export async function POST(req: NextRequest) {
       }
       const modelId = r.modelId;
       const rawText = r.rawText ?? "";
-      console.log(`[verify-claim] Raw response from ${modelId}:`, rawText.substring(0, 500));
+      logger.debug(`[verify-claim] Raw response from ${modelId}`, { length: rawText.length });
 
       const cleaned = cleanJsonResponse(rawText);
       const trimmedRaw = rawText.trim();
       if (cleaned !== trimmedRaw) {
-        console.log(
-          `[verify-claim] Cleaned JSON response for ${modelId} (removed ${rawText.length - cleaned.length} chars)`
+        logger.debug(
+          `[verify-claim] Cleaned JSON response for ${modelId}`,
+          { removedChars: rawText.length - cleaned.length }
         );
       }
       let d: ReturnType<typeof parsedModelVerificationFromObject>;
@@ -236,11 +238,11 @@ export async function POST(req: NextRequest) {
           const repaired = repairTruncatedJson(cleaned);
           const obj = JSON.parse(repaired) as Record<string, unknown>;
           d = parsedModelVerificationFromObject(obj);
-          console.log(`[verify-claim] Repaired truncated JSON for ${modelId}`);
+          logger.debug(`[verify-claim] Repaired truncated JSON for ${modelId}`);
         } catch {
-          console.error(
-            `[verify-claim] JSON parse failed even after repair for ${modelId}. Cleaned text:`,
-            cleaned.substring(0, 300)
+          logger.error(
+            `[verify-claim] JSON parse failed even after repair for ${modelId}`,
+            { cleanedPreview: cleaned.substring(0, 100) }
           );
           return {
             modelId,
@@ -313,7 +315,7 @@ export async function POST(req: NextRequest) {
       evidenceQuality: consensusSummary.evidenceQuality,
     });
 
-    const verificationId = `${uid}-${Date.now()}-v-${Math.random().toString(36).slice(2, 9)}`;
+    const verificationId = `vcl-${randomUUID()}`;
 
     let orgGovernanceStatus: "approved" | "needs_review" | "blocked" | undefined;
 
@@ -360,11 +362,10 @@ export async function POST(req: NextRequest) {
       };
       {
         const evidenceQuality = consensusSummary.evidenceQuality;
-        console.log("[verify-claim] Governance input being sent:", {
+        logger.debug("[verify-claim] Governance input being sent", {
           consensusScore,
           evidenceQuality,
           verdict,
-          variableNames: { consensusScore: typeof consensusScore, evidenceQuality: typeof evidenceQuality },
         });
       }
       try {

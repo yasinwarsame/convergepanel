@@ -18,18 +18,22 @@
 import { NextRequest, NextResponse } from "next/server";
 
 export function middleware(request: NextRequest) {
-  // Allow all routes - admin protection is handled client-side
-  // This prevents unnecessary redirects for already-authenticated users
+  // Gate /admin routes: redirect to login if no session cookie is present.
+  // This prevents the admin page HTML from being served to unauthenticated visitors.
+  // The real auth check (Firebase custom claims) still happens client-side in
+  // app/admin/layout.tsx and server-side in every /api/admin/* route.
+  if (request.nextUrl.pathname.startsWith("/admin")) {
+    const session = request.cookies.get("__session")?.value;
+    if (!session) {
+      const loginUrl = new URL("/login", request.url);
+      loginUrl.searchParams.set("next", request.nextUrl.pathname);
+      return NextResponse.redirect(loginUrl);
+    }
+  }
   return NextResponse.next();
 }
 
-/**
- * Middleware configuration
- * 
- * Currently no routes are protected by middleware.
- * All authentication and authorization is handled client-side and in API routes.
- */
 export const config = {
-  matcher: [],
+  matcher: ["/admin/:path*"],
 };
 

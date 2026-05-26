@@ -163,13 +163,15 @@ async function evaluateUsageGate(uid: string, requestedModelCount: number): Prom
       });
   }
 
+  // Correct stale Firestore value in all environments — this data may exist in production.
+  if (plan === "full" && maxRunsPerMonth === 400) {
+    console.error(`[usageCheck] CRITICAL: Full plan has stale maxRunsPerMonth=400, correcting to 150`);
+    maxRunsPerMonth = 150;
+  }
+
   if (process.env.NODE_ENV !== "production") {
     if (maxModelsPerRun !== 2 && maxModelsPerRun !== 3 && maxModelsPerRun !== 5) {
       console.error(`[usageCheck] CRITICAL: maxModelsPerRun is ${maxModelsPerRun}, expected 2, 3, or 5.`);
-    }
-    if (plan === "full" && maxRunsPerMonth === 400) {
-      console.error(`[usageCheck] CRITICAL: Full plan has maxRunsPerMonth=400 (stale value), should be 150`);
-      maxRunsPerMonth = 150;
     }
     const expectedLimits: Record<PlanId, { runs: number; models: number }> = {
       free: { runs: 8, models: 2 },
@@ -237,9 +239,12 @@ async function evaluateUsageGate(uid: string, requestedModelCount: number): Prom
 }
 
 /**
- * Check plan limits and atomically increment usage if allowed
+ * Check plan limits and atomically increment usage if allowed.
  *
- * See module header for field semantics and atomicity notes.
+ * The run-count check and increment happen inside a single Firestore transaction
+ * so concurrent requests from the same user cannot both pass the limit gate
+ * (TOCTOU race). Model-limit and entitlements checks remain outside the
+ * transaction because they depend on plan config, not concurrent document state.
  */
 export async function checkAndIncrementUsageForRun(
   uid: string,
@@ -250,52 +255,56 @@ export async function checkAndIncrementUsageForRun(
     return gate.result;
   }
 
-  const {
-    currentRuns,
-    maxRunsPerMonth,
-    maxModelsPerRun,
-    plan,
-    resetsAt,
-    isNewMonth,
-    now,
-    currentMonth,
-  } = gate.pass;
-  const newRunsCount = currentRuns + 1;
+  const { maxRunsPerMonth, maxModelsPerRun, plan, resetsAt, now, currentMonth } = gate.pass;
 
   try {
-    if (isNewMonth) {
-      await adminDb!.collection("users").doc(uid).update({
-        runsThisMonth: 1,
-        videoRunsThisMonth: 0,
-        usageMonth: currentMonth,
-        billingCycleStart: now.toISOString(),
-        totalRuns: FieldValue.increment(1),
-      });
-      console.log("[usageCheck] Reset usage for new month, set runsThisMonth to 1, incremented totalRuns");
-    } else {
-      await adminDb!.collection("users").doc(uid).update({
-        runsThisMonth: FieldValue.increment(1),
-        usageMonth: currentMonth,
-        totalRuns: FieldValue.increment(1),
-      });
-      console.log("[usageCheck] Incremented runsThisMonth and totalRuns atomically");
-    }
+    const txnResult = await adminDb!.runTransaction(async (txn) => {
+      const userRef = adminDb!.collection("users").doc(uid);
+      const snap = await txn.get(userRef);
+      const data = snap.data() as Partial<UserProfile> | undefined;
 
-    const updatedDoc = await adminDb!.collection("users").doc(uid).get();
-    const updatedData = updatedDoc.data() as Partial<UserProfile>;
-    const actualRuns = updatedData?.runsThisMonth ?? 0;
-    const actualTotalRuns = updatedData?.totalRuns ?? 0;
+      const storedMonth = data?.usageMonth || currentMonth;
+      const isNewMonth = storedMonth !== currentMonth;
+      const currentRuns = isNewMonth ? 0 : (data?.runsThisMonth ?? 0);
 
-    console.log("[usageCheck] Updated usage:", {
-      expectedRunsThisMonth: newRunsCount,
-      actualRunsThisMonth: actualRuns,
-      actualTotalRuns: actualTotalRuns,
-      uid,
+      if (currentRuns >= maxRunsPerMonth) {
+        return { allowed: false as const, currentRuns };
+      }
+
+      if (isNewMonth) {
+        txn.update(userRef, {
+          runsThisMonth: 1,
+          videoRunsThisMonth: 0,
+          usageMonth: currentMonth,
+          billingCycleStart: now.toISOString(),
+          totalRuns: FieldValue.increment(1),
+        });
+      } else {
+        txn.update(userRef, {
+          runsThisMonth: FieldValue.increment(1),
+          usageMonth: currentMonth,
+          totalRuns: FieldValue.increment(1),
+        });
+      }
+
+      return { allowed: true as const, runsThisMonth: currentRuns + 1 };
     });
+
+    if (!txnResult.allowed) {
+      return {
+        allowed: false,
+        reason: "RUN_LIMIT",
+        runsThisMonth: txnResult.currentRuns,
+        maxRunsPerMonth,
+        maxModelsPerRun,
+        plan,
+        resetsAt,
+      };
+    }
 
     return {
       allowed: true,
-      runsThisMonth: actualRuns,
+      runsThisMonth: txnResult.runsThisMonth,
       maxRunsPerMonth,
       maxModelsPerRun,
       plan,

@@ -21,6 +21,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { randomUUID } from "crypto";
 import { FieldValue, type DocumentData } from "firebase-admin/firestore";
 
 import { adminDb } from "@/lib/firebase/admin";
@@ -104,7 +105,7 @@ function refusedModelRow(
   responseText: string,
   tokens: number | undefined
 ): VisionModelRow {
-  console.log(`[verify-video] ${model.id} refused to analyze: ${responseText.substring(0, 100)}`);
+  logger.debug(`[verify-video] ${model.id} refused to analyze`, { modelId: model.id, textLength: responseText.length });
   return {
     modelId: model.id,
     modelName: model.name,
@@ -453,9 +454,11 @@ export async function POST(request: NextRequest) {
 
   const allWarnings = [...clientWarnings];
 
-  console.log(
-    `[verify-video] JSON: ${fileName}, ${frames.length} frames, ${duration}s, ~${(totalB64 / 1e6).toFixed(2)}MB base64`
-  );
+  logger.debug(`[verify-video] Parsed request`, {
+    frames: frames.length,
+    duration,
+    base64Mb: (totalB64 / 1e6).toFixed(2),
+  });
 
   // --- Deduplication: reject if the same user submitted the same file within the last 30 seconds ---
   // Uses equality-only filters (no orderBy) to avoid requiring a composite index.
@@ -495,9 +498,10 @@ export async function POST(request: NextRequest) {
         recentFileSize === fileSize &&
         Math.abs(recentDuration - duration) < 0.5
       ) {
-        console.log(
-          `[verify-video] Duplicate submission detected for ${fileName} (existing doc ${recentDoc.id}, ${Date.now() - recentMs}ms ago). Returning existing result.`
-        );
+        logger.info(`[verify-video] Duplicate submission detected, returning cached result`, {
+          docId: recentDoc.id,
+          ageMs: Date.now() - recentMs,
+        });
         const existing = mapStoredVideoVerificationToClientPayload(recentDoc.id, recentData);
         return NextResponse.json({
           ok: true,
@@ -521,11 +525,10 @@ export async function POST(request: NextRequest) {
       }
     }
   } catch (dedupErr) {
-    console.error("[verify-video] Dedup check failed, denying request:", dedupErr);
-    return NextResponse.json(
-      { ok: false, error: { code: "service_error", message: "Could not process request. Please try again." } },
-      { status: 503 }
-    );
+    // Dedup is best-effort — a transient Firestore error should not block the request.
+    logger.warn("[verify-video] Dedup check failed, proceeding without dedup", {
+      error: (dedupErr as Error)?.message,
+    });
   }
 
   const { checkUsageAllowanceForRun, checkAndIncrementUsageForRun } = await import("@/lib/stripe/usageCheck");
@@ -562,9 +565,10 @@ export async function POST(request: NextRequest) {
   }
 
   const metadataAnalysis = analyzeMetadata(metadata);
-  console.log(
-    `[verify-video] Metadata flags: ${metadataAnalysis.flags.length} (${metadataAnalysis.flags.filter((f) => f.severity === "suspicious").length} suspicious)`
-  );
+  logger.debug(`[verify-video] Metadata analysis`, {
+    flags: metadataAnalysis.flags.length,
+    suspicious: metadataAnalysis.flags.filter((f) => f.severity === "suspicious").length,
+  });
 
   const prompt = buildVideoVerificationPrompt(metadata, metadataAnalysis, frames.length);
 
@@ -574,14 +578,14 @@ export async function POST(request: NextRequest) {
     { id: "gemini", name: "Gemini", caller: callGeminiVision },
   ];
 
-  console.log(`[verify-video] Sending ${frames.length} frames to ${visionModels.length} vision models...`);
+  logger.debug(`[verify-video] Dispatching to vision models`, { frames: frames.length, models: visionModels.length });
 
   const modelPromises = visionModels.map(async (model): Promise<VisionModelRow> => {
     const modelStart = Date.now();
     try {
       const response = await model.caller(prompt, frames);
       const elapsed = Date.now() - modelStart;
-      console.log(`[verify-video] ${model.id} responded in ${elapsed}ms`);
+      logger.debug(`[verify-video] ${model.id} responded`, { modelId: model.id, elapsedMs: elapsed });
 
       const responseText = response.text || "";
       if (isVisionModelRefusalResponse(responseText)) {
@@ -599,12 +603,12 @@ export async function POST(request: NextRequest) {
         try {
           const repaired = repairTruncatedJson(cleanJsonResponse(response.text));
           parsed = JSON.parse(repaired) as Record<string, unknown>;
-          console.log(`[verify-video] Repaired truncated JSON for ${model.id}`);
+          logger.debug(`[verify-video] Repaired truncated JSON`, { modelId: model.id });
         } catch {
           if (isVisionModelRefusalResponse(responseText)) {
             return refusedModelRow(model, responseText, response.tokens);
           }
-          console.error(`[verify-video] JSON parse failed for ${model.id}:`, response.text.substring(0, 300));
+          logger.error(`[verify-video] JSON parse failed`, { modelId: model.id, responseLength: response.text.length });
           return {
             modelId: model.id,
             modelName: model.name,
@@ -651,7 +655,7 @@ export async function POST(request: NextRequest) {
     } catch (err: unknown) {
       const elapsed = Date.now() - modelStart;
       const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[verify-video] ${model.id} failed after ${elapsed}ms:`, msg);
+      logger.error(`[verify-video] ${model.id} failed`, { modelId: model.id, elapsedMs: elapsed, error: msg });
       return {
         modelId: model.id,
         modelName: model.name,
@@ -674,14 +678,40 @@ export async function POST(request: NextRequest) {
     }
   });
 
-  const modelResults = await Promise.all(modelPromises);
-  console.log(`[verify-video] All models responded. Statuses: ${modelResults.map((r) => `${r.modelId}=${r.status}`).join(", ")}`);
+  const settledResults = await Promise.allSettled(modelPromises);
+  const modelResults: VisionModelRow[] = settledResults.map((r, i) => {
+    if (r.status === "fulfilled") return r.value;
+    const model = visionModels[i];
+    const msg = r.reason instanceof Error ? r.reason.message : String(r.reason);
+    logger.error(`[verify-video] ${model.id} promise rejected unexpectedly`, { modelId: model.id, error: msg });
+    return {
+      modelId: model.id,
+      modelName: model.name,
+      status: "error" as const,
+      verdict: "insufficient",
+      confidence: "low",
+      contentType: "unknown",
+      summary: `Model failed unexpectedly: ${msg}`,
+      visualIndicators: [],
+      metadataIndicators: [],
+      manipulationSignals: [],
+      authenticitySignals: [],
+      productionSignals: [],
+      deceptionIndicators: [],
+      compressionNotes: [],
+      limitations: [`Unexpected model error: ${msg}`],
+      reasoning: "",
+      tokens: 0,
+    };
+  });
+
+  logger.debug(`[verify-video] All models responded`, {
+    statuses: modelResults.map((r) => `${r.modelId}=${r.status}`).join(", "),
+  });
 
   const refusedCount = modelResults.filter((r) => r.status === "refused").length;
   if (refusedCount > 0) {
-    console.log(
-      `[verify-video] ${refusedCount} model(s) refused to analyze — excluded from consensus`
-    );
+    logger.debug(`[verify-video] ${refusedCount} model(s) refused to analyze — excluded from consensus`);
   }
 
   const usableResults = modelResults.filter((r) => r.status === "ok");
@@ -837,7 +867,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const verificationId = `${uid}-${Date.now()}-vid-${Math.random().toString(36).substring(2, 9)}`;
+  const verificationId = `vid-${randomUUID()}`;
 
   const resultDoc = {
     userId: uid,
@@ -885,9 +915,9 @@ export async function POST(request: NextRequest) {
       .collection("videoVerifications")
       .doc(verificationId)
       .set(sanitizeForFirestore(resultDoc) as DocumentData);
-    console.log(`[verify-video] Stored result: ${verificationId}`);
+    logger.info(`[verify-video] Result stored`, { verificationId });
   } catch (err) {
-    console.error("[verify-video] Firestore save failed:", err);
+    logger.error("[verify-video] Firestore save failed", { error: (err as Error)?.message });
     return NextResponse.json(
       {
         ok: false,
@@ -942,9 +972,9 @@ export async function POST(request: NextRequest) {
         verificationVerdict: govVerdict,
       },
     });
-    console.log(`[verify-video] Governance evaluation complete`);
+    logger.debug(`[verify-video] Governance evaluation complete`);
   } catch (err) {
-    console.error("[verify-video] Governance evaluation failed:", err);
+    logger.error("[verify-video] Governance evaluation failed", { error: (err as Error)?.message });
     try {
       await adminDb.collection("failed_governance_audits").add({
         runId: verificationId,
@@ -954,7 +984,7 @@ export async function POST(request: NextRequest) {
         error: err instanceof Error ? err.message : String(err),
       });
     } catch (writeErr) {
-      console.error("[verify-video] Failed to write governance failure record:", writeErr);
+      logger.error("[verify-video] Failed to write governance failure record", { error: (writeErr as Error)?.message });
     }
   }
 
@@ -974,9 +1004,9 @@ export async function POST(request: NextRequest) {
         { merge: true }
       );
     });
-    console.log(`[verify-video] Video usage updated (transactional)`);
+    logger.debug(`[verify-video] Video usage counter incremented`);
   } catch (err) {
-    console.error("[verify-video] Usage increment failed:", err);
+    logger.error("[verify-video] Video usage increment failed", { error: (err as Error)?.message });
   }
 
   const totalTokens = modelResults.reduce((sum, r) => sum + (r.tokens || 0), 0);
@@ -987,7 +1017,7 @@ export async function POST(request: NextRequest) {
   }
 
   const totalElapsed = Date.now() - startTime;
-  console.log(`[verify-video] Complete in ${totalElapsed}ms. Verdict: ${aggregateVerdict}, Score: ${consensusScore}`);
+  logger.info(`[verify-video] Complete`, { elapsedMs: totalElapsed, verdict: aggregateVerdict, consensusScore });
 
   return NextResponse.json({
     ok: true,

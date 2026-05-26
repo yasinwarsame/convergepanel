@@ -12,6 +12,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { randomUUID } from "crypto";
 import { ModelId, ModelResult, RunPanelApiResponse } from "@/lib/types";
 import { runPanel } from "@/lib/panel";
 import { splitQuestionAndContext } from "@/lib/questionContext";
@@ -305,7 +306,7 @@ export async function POST(req: NextRequest) {
     // ============================================
     
     // Generate unique run ID
-    const runId = `${uid}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+    const runId = `run-${randomUUID()}`;
     
     // Create run document in Firestore (status: "running")
     try {

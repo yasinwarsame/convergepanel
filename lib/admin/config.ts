@@ -20,13 +20,21 @@ function parseEmailList(raw: string | undefined): string[] {
 }
 
 /**
- * Built-in governance admin emails (matched case-insensitively after {@link normalizeEmailForMatch}).
- * Env `GOVERNANCE_ADMIN_EMAILS` is merged in {@link isAdminEmail}.
+ * Admin emails sourced from the ADMIN_EMAILS environment variable (comma-separated).
+ * Set ADMIN_EMAILS=email1@example.com,email2@example.com in your environment.
+ * Env `GOVERNANCE_ADMIN_EMAILS` is also merged in {@link isAdminEmail}.
  */
-export const ADMIN_EMAILS = [
-  "yasinwarsame@hotmail.com",
-  "ywarsame@convergepanel.com",
-] as const;
+export const ADMIN_EMAILS: readonly string[] = parseEmailList(process.env.ADMIN_EMAILS);
+
+if (
+  typeof window === "undefined" &&
+  ADMIN_EMAILS.length === 0 &&
+  !process.env.GOVERNANCE_ADMIN_EMAILS?.trim()
+) {
+  console.warn(
+    "[config] No admin emails configured. Set ADMIN_EMAILS=email1,email2 in your environment."
+  );
+}
 
 /** Effective allowlist for logs (built-in + env), lowercased, deduped. */
 export function governanceAdminEmailsForLog(): string {

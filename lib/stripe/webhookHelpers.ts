@@ -85,18 +85,6 @@ export async function updateUserPlanInFirestore(args: {
   try {
     await userRef.set(updateData, { merge: true });
     console.log(`[webhookHelpers] ✅ Firestore update successful for user ${uid}`);
-    
-    // Verify the update
-    const userDocAfter = await userRef.get();
-    if (userDocAfter.exists) {
-      const userDataAfter = userDocAfter.data();
-      console.log(`[webhookHelpers] ✅ Verified Firestore update for user ${uid}:`, {
-        plan: userDataAfter?.plan,
-        monthlyLimit: userDataAfter?.monthlyLimit,
-        maxModelsPerRun: userDataAfter?.maxModelsPerRun,
-        subscriptionStatus: userDataAfter?.subscriptionStatus,
-      });
-    }
   } catch (firestoreError: any) {
     console.error(`[webhookHelpers] ❌ CRITICAL: Firestore update failed for user ${uid}:`, {
       message: firestoreError?.message,
