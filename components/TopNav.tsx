@@ -11,7 +11,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { signOut } from "firebase/auth";
 import { auth } from "@/lib/firebase/client";
 import { useAuth } from "./AuthProvider";
-import { useIsGovernanceUser } from "@/hooks/useUserPlan";
+import { useUserPlan } from "@/hooks/useUserPlan";
 
 export default function TopNav() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -19,7 +19,8 @@ export default function TopNav() {
   const pathname = usePathname();
   const router = useRouter();
   const { user, loading, isAdmin } = useAuth();
-  const isGovernanceUser = useIsGovernanceUser();
+  const { governanceDashboardEligible, plan: userPlan, loading: planLoading } = useUserPlan();
+  const isGovernanceUser = governanceDashboardEligible || userPlan === "full";
   const userMenuRef = useRef<HTMLDivElement>(null);
 
   // Highlight the correct auth link based on the current route,
@@ -155,13 +156,17 @@ export default function TopNav() {
           >
             Pricing
           </Link>
-          {!loading && user && isGovernanceUser && (
-            <Link
-              href="/governance"
-              className="px-3 py-1.5 text-sm text-slate-600 hover:text-slate-900 transition-colors"
-            >
-              Governance
-            </Link>
+          {!loading && user && (
+            planLoading ? (
+              <span className="invisible px-3 py-1.5 text-sm">Governance</span>
+            ) : isGovernanceUser ? (
+              <Link
+                href="/governance"
+                className="px-3 py-1.5 text-sm text-slate-600 hover:text-slate-900 transition-colors"
+              >
+                Governance
+              </Link>
+            ) : null
           )}
           
           {!loading && (
@@ -307,14 +312,18 @@ export default function TopNav() {
             >
               Pricing
             </Link>
-            {!loading && user && isGovernanceUser && (
-              <Link
-                href="/governance"
-                onClick={() => setMobileMenuOpen(false)}
-                className="px-3 py-2 text-sm text-slate-600 hover:text-slate-900 hover:bg-slate-50 rounded-md transition-colors"
-              >
-                Governance
-              </Link>
+            {!loading && user && (
+              planLoading ? (
+                <span className="invisible px-3 py-2 text-sm">Governance</span>
+              ) : isGovernanceUser ? (
+                <Link
+                  href="/governance"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="px-3 py-2 text-sm text-slate-600 hover:text-slate-900 hover:bg-slate-50 rounded-md transition-colors"
+                >
+                  Governance
+                </Link>
+              ) : null
             )}
             
             {!loading && (

@@ -232,6 +232,19 @@ export default function SignupPage() {
         isDisabled: false,
       }));
 
+      // Create session cookie so middleware can gate /admin/* without redirecting
+      // authenticated users to login. Non-blocking.
+      try {
+        const idToken = await user.getIdToken();
+        await fetch("/api/auth/session", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ idToken }),
+        });
+      } catch {
+        // Session cookie is best-effort; admin layout enforces real access control
+      }
+
       // Redirect to onboarding page instead of main app
       // Preserve any redirect param so the user lands on their intended page after onboarding
       const rawRedirect = searchParams.get("redirect") || searchParams.get("next");

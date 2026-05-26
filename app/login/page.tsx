@@ -94,6 +94,19 @@ export default function LoginPage() {
       
       await setDoc(userDocRef, updateData, { merge: true });
 
+      // Create session cookie so middleware can gate /admin/* without redirecting
+      // authenticated users. Non-blocking — client-side admin gate still applies.
+      try {
+        const idToken = await user.getIdToken();
+        await fetch("/api/auth/session", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ idToken }),
+        });
+      } catch {
+        // Session cookie is best-effort; admin layout enforces real access control
+      }
+
       // Validate subscription status for paid plans (best-effort, non-blocking)
       // This ensures Firestore stays in sync with Stripe even if webhooks fail
       // Check the actual userDoc data (after merge) to see if user has a paid plan
