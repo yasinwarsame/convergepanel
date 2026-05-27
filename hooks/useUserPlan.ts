@@ -1,18 +1,37 @@
-/**
- * useUserPlan Hook (Temporary MVP Version)
- * 
- * TODO: Re-enable real usage tracking after MVP validation.
- * 
- * This hook is intentionally defensive and never throws.
- * If usage cannot be fetched, it assumes a free plan so the UI stays usable.
- * This allows the core product (multi-LLM panel) to be tested without worrying about quotas or auth.
- */
-
 "use client";
 
 import { useState, useEffect, useLayoutEffect, useCallback, useRef } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import { UserPlan } from "@/lib/types";
+
+// ─── Plan data cache ──────────────────────────────────────────────────────────
+// Memory layer survives client-side navigation; sessionStorage survives page reloads.
+const planMemCache = new Map<string, UserUsageData>();
+
+function readPlanCache(uid: string): UserUsageData | null {
+  if (planMemCache.has(uid)) return planMemCache.get(uid)!;
+  try {
+    const raw = typeof sessionStorage !== "undefined"
+      ? sessionStorage.getItem(`cp_plan_${uid}`)
+      : null;
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as UserUsageData;
+    if (typeof parsed?.plan === "string") {
+      planMemCache.set(uid, parsed);
+      return parsed;
+    }
+  } catch {}
+  return null;
+}
+
+function writePlanCache(uid: string, data: UserUsageData): void {
+  planMemCache.set(uid, data);
+  try {
+    if (typeof sessionStorage !== "undefined") {
+      sessionStorage.setItem(`cp_plan_${uid}`, JSON.stringify(data));
+    }
+  } catch {}
+}
 
 /**
  * Firestore User Schema (for reference):
@@ -93,23 +112,7 @@ const DEFAULT_USAGE: UserUsageData = {
   governanceAssignedReviewerEmail: null,
 };
 
-/**
- * Fetch user usage from API
- * 
- * This function is intentionally defensive and never throws.
- * On any error or non-OK response, it returns safe default free plan data.
- * This ensures the UI always has data to display, even if the backend fails.
- */
-/**
- * Fetch user usage from API
- * 
- * This function is intentionally defensive and never throws.
- * On any error or non-OK response, it returns safe default free plan data.
- * This ensures the UI always has data to display, even if the backend fails.
- * 
- * IMPORTANT: This function never throws - it always returns DEFAULT_USAGE on error
- * to prevent infinite loading states.
- */
+// Never throws — returns DEFAULT_USAGE on any error to prevent infinite loading states.
 async function fetchUsage(user: any): Promise<UserUsageData> {
   try {
     // Import authedFetch helper
@@ -223,14 +226,9 @@ export function useUserPlan(): UseUserPlanReturn {
   const [usageData, setUsageData] = useState<UserUsageData>(DEFAULT_USAGE);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // True when useLayoutEffect found a cache hit for the current uid
+  const hadCacheHitRef = useRef(false);
 
-  /**
-   * Refresh usage data
-   *
-   * Public function that components can call to manually refresh
-   * usage data (e.g., after a panel run).
-   * This function never throws - it always sets safe defaults on error.
-   */
   const refresh = useCallback(async () => {
     if (authLoading || !authReady) {
       return;
@@ -248,6 +246,7 @@ export function useUserPlan(): UseUserPlanReturn {
       setError(null);
 
       const data = await fetchUsage(u);
+      writePlanCache(u.uid, data);
       setUsageData(data);
       if (process.env.NODE_ENV !== "production") {
         console.log("[useUserPlan] Refreshed usage:", { plan: data.plan, runsThisMonth: data.runsThisMonth });
@@ -261,16 +260,19 @@ export function useUserPlan(): UseUserPlanReturn {
     }
   }, [authLoading, authReady]);
 
-  /**
-   * When a user becomes available, usage still reflects DEFAULT_USAGE (free) until /api/user/usage
-   * returns. Without flipping loading to true before paint, plan-dependent UI (e.g. "Upgrade plan")
-   * can flash for paid users for one frame. useLayoutEffect runs before browser paint.
-   */
+  // Runs before browser paint. On cache hit, apply data immediately so the Governance
+  // link renders on first paint with no loading state. On cache miss, block as before.
   useLayoutEffect(() => {
-    if (!authReady || !uid) {
-      return;
+    if (!authReady || !uid) return;
+    const cached = readPlanCache(uid);
+    if (cached) {
+      hadCacheHitRef.current = true;
+      setUsageData(cached);
+      setLoading(false);
+    } else {
+      hadCacheHitRef.current = false;
+      setLoading(true);
     }
-    setLoading(true);
   }, [authReady, uid]);
 
   // Fetch when auth is ready and Firebase uid changes — not when the User object reference changes
@@ -294,14 +296,19 @@ export function useUserPlan(): UseUserPlanReturn {
     }
 
     let cancelled = false;
+    const wasCacheHit = hadCacheHitRef.current;
 
     (async () => {
       try {
-        setLoading(true);
-        setError(null);
+        // Only show loading spinner when there's no cached data to display
+        if (!wasCacheHit) {
+          setLoading(true);
+          setError(null);
+        }
 
         const data = await fetchUsage(u);
         if (!cancelled) {
+          writePlanCache(uid, data);
           setUsageData(data);
           if (process.env.NODE_ENV !== "production") {
             console.log("[useUserPlan] Loaded usage:", { plan: data.plan, runsThisMonth: data.runsThisMonth });
@@ -310,7 +317,8 @@ export function useUserPlan(): UseUserPlanReturn {
       } catch (err: unknown) {
         if (!cancelled) {
           console.error("[useUserPlan] Unexpected error in loadUsage:", err);
-          setUsageData(DEFAULT_USAGE);
+          // On background refresh failure, keep the cached data visible
+          if (!wasCacheHit) setUsageData(DEFAULT_USAGE);
           setError("Failed to load usage data");
         }
       } finally {
