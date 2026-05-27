@@ -19,6 +19,7 @@ export interface PSEOCategory {
   tailwindText: string;
   tailwindBg: string;
   tailwindBorder: string;
+  tailwindDot: string;
 }
 
 export const CATEGORIES: Record<string, PSEOCategory> = {
@@ -28,6 +29,7 @@ export const CATEGORIES: Record<string, PSEOCategory> = {
     tailwindText: "text-blue-700",
     tailwindBg: "bg-blue-50",
     tailwindBorder: "border-blue-200",
+    tailwindDot: "bg-blue-600",
   },
   "video-verification": {
     label: "Video Verification",
@@ -35,6 +37,7 @@ export const CATEGORIES: Record<string, PSEOCategory> = {
     tailwindText: "text-violet-700",
     tailwindBg: "bg-violet-50",
     tailwindBorder: "border-violet-200",
+    tailwindDot: "bg-violet-600",
   },
   research: {
     label: "Research",
@@ -42,6 +45,7 @@ export const CATEGORIES: Record<string, PSEOCategory> = {
     tailwindText: "text-emerald-700",
     tailwindBg: "bg-emerald-50",
     tailwindBorder: "border-emerald-200",
+    tailwindDot: "bg-emerald-600",
   },
   governance: {
     label: "Governance",
@@ -49,6 +53,7 @@ export const CATEGORIES: Record<string, PSEOCategory> = {
     tailwindText: "text-amber-700",
     tailwindBg: "bg-amber-50",
     tailwindBorder: "border-amber-200",
+    tailwindDot: "bg-amber-600",
   },
   "thought-leadership": {
     label: "Thought Leadership",
@@ -56,6 +61,7 @@ export const CATEGORIES: Record<string, PSEOCategory> = {
     tailwindText: "text-red-700",
     tailwindBg: "bg-red-50",
     tailwindBorder: "border-red-200",
+    tailwindDot: "bg-red-600",
   },
   glossary: {
     label: "Glossary",
@@ -63,6 +69,7 @@ export const CATEGORIES: Record<string, PSEOCategory> = {
     tailwindText: "text-cyan-700",
     tailwindBg: "bg-cyan-50",
     tailwindBorder: "border-cyan-200",
+    tailwindDot: "bg-cyan-600",
   },
   "how-to": {
     label: "How-To",
@@ -70,6 +77,7 @@ export const CATEGORIES: Record<string, PSEOCategory> = {
     tailwindText: "text-indigo-700",
     tailwindBg: "bg-indigo-50",
     tailwindBorder: "border-indigo-200",
+    tailwindDot: "bg-indigo-600",
   },
 };
 

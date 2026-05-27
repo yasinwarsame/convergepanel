@@ -60,7 +60,7 @@ export default async function UseCasePage({
     <>
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd).replace(/</g, "\\u003c") }}
       />
 
       <main className="mx-auto max-w-2xl px-4 py-12 sm:px-6 lg:py-16">
@@ -130,7 +130,7 @@ export default async function UseCasePage({
           <ul className="space-y-2">
             {page.useCases.map((uc, i) => (
               <li key={i} className="flex gap-2.5 text-base leading-relaxed text-slate-700">
-                <span className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${cat.tailwindText.replace("text-", "bg-")}`} />
+                <span className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${cat.tailwindDot}`} />
                 {uc}
               </li>
             ))}
