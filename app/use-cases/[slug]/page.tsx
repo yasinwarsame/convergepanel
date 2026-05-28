@@ -31,18 +31,37 @@ export async function generateMetadata({
   };
 }
 
-export default async function UseCasePage({
-  params,
-}: {
-  params: Promise<{ slug: string }>;
-}) {
-  const { slug } = await params;
-  const page = getPageBySlug(slug);
-  if (!page) notFound();
+function buildJsonLd(page: ReturnType<typeof getPageBySlug>, slug: string) {
+  if (!page) return null;
+  const schemaType = page.schemaType ?? "Article";
 
-  const cat = CATEGORIES[page.category];
+  if (schemaType === "HowTo") {
+    return {
+      "@context": "https://schema.org",
+      "@type": "HowTo",
+      name: page.h1,
+      description: page.metaDescription,
+      step: page.workflow.map((text, i) => ({
+        "@type": "HowToStep",
+        position: i + 1,
+        text,
+      })),
+    };
+  }
 
-  const jsonLd = {
+  if (schemaType === "FAQPage") {
+    return {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      mainEntity: (page.faq ?? []).map(({ q, a }) => ({
+        "@type": "Question",
+        name: q,
+        acceptedAnswer: { "@type": "Answer", text: a },
+      })),
+    };
+  }
+
+  return {
     "@context": "https://schema.org",
     "@type": "Article",
     headline: page.h1,
@@ -55,13 +74,31 @@ export default async function UseCasePage({
     },
     mainEntityOfPage: `https://convergepanel.com/use-cases/${slug}`,
   };
+}
+
+export default async function UseCasePage({
+  params,
+}: {
+  params: Promise<{ slug: string }>;
+}) {
+  const { slug } = await params;
+  const page = getPageBySlug(slug);
+  if (!page) notFound();
+
+  const cat = CATEGORIES[page.category];
+  const jsonLd = buildJsonLd(page, slug);
+
+  const problemParagraphs = page.problem.split("\n\n").filter(Boolean);
+  const solutionParagraphs = page.solution.split("\n\n").filter(Boolean);
 
   return (
     <>
-      <script
-        type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd).replace(/</g, "\\u003c") }}
-      />
+      {jsonLd && (
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd).replace(/</g, "\\u003c") }}
+        />
+      )}
 
       <main className="mx-auto max-w-2xl px-4 py-12 sm:px-6 lg:py-16">
         {/* Category + breadcrumb */}
@@ -98,17 +135,63 @@ export default async function UseCasePage({
           </p>
         </div>
 
-        {/* Body sections */}
+        {/* The problem */}
         <section className="mb-9">
           <h2 className="mb-3 text-xl font-bold text-slate-900">The problem</h2>
-          <p className="text-base leading-relaxed text-slate-700">{page.problem}</p>
+          <div className="space-y-4">
+            {problemParagraphs.map((para, i) => (
+              <p key={i} className="text-base leading-relaxed text-slate-700">{para}</p>
+            ))}
+          </div>
         </section>
 
+        {/* How ConvergePanel helps */}
         <section className="mb-9">
           <h2 className="mb-3 text-xl font-bold text-slate-900">How ConvergePanel helps</h2>
-          <p className="text-base leading-relaxed text-slate-700">{page.solution}</p>
+          <div className="space-y-4">
+            {solutionParagraphs.map((para, i) => (
+              <p key={i} className="text-base leading-relaxed text-slate-700">{para}</p>
+            ))}
+          </div>
         </section>
 
+        {/* Comparison table (optional) */}
+        {page.comparisonTable && (
+          <section className="mb-9">
+            <div className="overflow-x-auto rounded-lg border border-slate-200">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className={`${cat.tailwindBg}`}>
+                    {page.comparisonTable.headers.map((h, i) => (
+                      <th
+                        key={i}
+                        className={`px-4 py-3 text-left text-xs font-bold uppercase tracking-wide ${cat.tailwindText}`}
+                      >
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {page.comparisonTable.rows.map((row, ri) => (
+                    <tr key={ri} className={ri % 2 === 0 ? "bg-white" : "bg-slate-50"}>
+                      {row.map((cell, ci) => (
+                        <td
+                          key={ci}
+                          className={`px-4 py-3 text-slate-700 leading-relaxed${ci === 0 ? " font-medium text-slate-900" : ""}`}
+                        >
+                          {cell}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
+
+        {/* How it works */}
         <section className="mb-9">
           <h2 className="mb-3 text-xl font-bold text-slate-900">How it works</h2>
           <ol className="space-y-3">
@@ -125,7 +208,8 @@ export default async function UseCasePage({
           </ol>
         </section>
 
-        <section className="mb-12">
+        {/* Use cases */}
+        <section className="mb-9">
           <h2 className="mb-3 text-xl font-bold text-slate-900">Use cases</h2>
           <ul className="space-y-2">
             {page.useCases.map((uc, i) => (
@@ -137,8 +221,23 @@ export default async function UseCasePage({
           </ul>
         </section>
 
+        {/* FAQ (optional) */}
+        {page.faq && page.faq.length > 0 && (
+          <section className="mb-12">
+            <h2 className="mb-5 text-xl font-bold text-slate-900">Frequently asked questions</h2>
+            <div className="space-y-6">
+              {page.faq.map(({ q, a }, i) => (
+                <div key={i}>
+                  <h3 className="mb-2 text-base font-semibold text-slate-900">{q}</h3>
+                  <p className="text-base leading-relaxed text-slate-700">{a}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
         {/* CTA */}
-        <div className="rounded-2xl bg-slate-900 px-8 py-10 text-center">
+        <div className="mb-10 rounded-2xl bg-slate-900 px-8 py-10 text-center">
           <p className="mb-6 text-lg font-semibold text-white">{page.cta}</p>
           <Link
             href="/signup"
@@ -148,6 +247,11 @@ export default async function UseCasePage({
           </Link>
           <p className="mt-4 text-xs text-slate-500">Free tier available. No credit card required.</p>
         </div>
+
+        {/* Disclaimer */}
+        <p className="mb-10 text-center text-xs text-slate-400 leading-relaxed">
+          ConvergePanel provides AI-assisted verification for informational purposes only. Not forensic analysis. Not legal evidence.
+        </p>
 
         {/* Related category links */}
         <RelatedPages currentSlug={page.slug} category={page.category} />
