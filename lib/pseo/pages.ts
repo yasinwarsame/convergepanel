@@ -578,6 +578,7 @@ export const PAGES: PSEOPage[] = [
     category: "how-to",
     metaDescription:
       "Paste a viral claim. Get a verdict from 5 AI models in seconds. ConvergePanel shows consensus, disagreements, and evidence — so you share facts, not fiction.",
+    schemaType: "HowTo",
   },
   {
     slug: "how-to-review-a-suspicious-video-with-ai",
@@ -604,13 +605,14 @@ export const PAGES: PSEOPage[] = [
     category: "how-to",
     metaDescription:
       "Upload a suspicious video. 3 vision AI models check for deepfake signals, manipulation artifacts, and generation signatures. Get a structured verdict.",
+    schemaType: "HowTo",
   },
 
   // ── GROUP A: Viral claim verification ────────────────────────────────────────
 
   {
     slug: "how-to-verify-a-viral-claim-before-sharing-it",
-    title: "How to Verify a Viral Claim Before Sharing It",
+    title: "How to Verify a Viral Claim Before Sharing",
     h1: "How to Verify a Viral Claim Before You Hit Share",
     audience: "General public",
     audienceDetail: "Anyone who reads news, follows social media, or shares content online",
@@ -1011,7 +1013,7 @@ export const PAGES: PSEOPage[] = [
     cta: "Give your team a shared research baseline — start free",
     category: "research",
     metaDescription:
-      "Decision-making teams need shared, reliable research inputs. Multi-model AI research surfaces consensus, disagreements, and uncertainty — not just one AI's take.",
+      "Decision-making teams need shared, reliable research inputs. Multi-model AI surfaces consensus, disagreements, and uncertainty — not just one AI's take.",
   },
 
   // ── GROUP C: Comparison pages ──────────────────────────────────────────────────
@@ -1163,7 +1165,7 @@ export const PAGES: PSEOPage[] = [
     cta: "Understand AI claim verification in practice — run a free check",
     category: "thought-leadership",
     metaDescription:
-      "Fact-checking and claim verification aren't the same thing. Learn the difference, where AI fits, and how multi-model verification complements human fact-checkers.",
+      "Fact-checking and claim verification differ. Learn the difference, where AI fits, and how multi-model verification complements human fact-checkers.",
     comparisonTable: {
       headers: ["Dimension", "Traditional Fact-Checking", "AI Claim Verification"],
       rows: [
@@ -1366,12 +1368,12 @@ export const PAGES: PSEOPage[] = [
     cta: "Set up lightweight AI governance — no enterprise overhead required",
     category: "governance",
     metaDescription:
-      "AI governance doesn't require a compliance team. Small teams can set consensus thresholds, topic flags, and lightweight peer review in minutes with ConvergePanel.",
+      "AI governance doesn't require a compliance team. Small teams can set consensus thresholds, topic flags, and lightweight peer review in minutes.",
   },
 
   {
     slug: "how-to-document-an-ai-assisted-research-decision",
-    title: "How to Document an AI-Assisted Research Decision",
+    title: "How to Document an AI Research Decision",
     h1: "How to Document an AI-Assisted Research Decision — Step by Step",
     audience: "Analysts, researchers, and knowledge workers",
     audienceDetail: "Anyone who uses AI for research that informs consequential decisions and needs to document the process",
@@ -1457,7 +1459,7 @@ export const PAGES: PSEOPage[] = [
     cta: "See the consensus score in action — run a free panel",
     category: "glossary",
     metaDescription:
-      "ConvergePanel's consensus score (0–100) measures how much five AI models agree on a verdict. Learn how to read it and what different thresholds mean in practice.",
+      "ConvergePanel's consensus score (0–100) measures how much five AI models agree on a verdict. Learn how to read it and what thresholds mean.",
     schemaType: "FAQPage",
     faq: [
       {
@@ -1479,7 +1481,7 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "how-to-check-if-a-viral-video-might-be-manipulated",
-    title: "How to Check If a Viral Video Might Be Manipulated",
+    title: "How to Tell If a Viral Video Is Manipulated",
     h1: "How to Check If a Viral Video Might Be AI-Generated or Manipulated",
     audience: "General audience",
     audienceDetail: "Anyone who encounters viral videos and wants to evaluate them critically before sharing or reacting",
@@ -1505,7 +1507,7 @@ export const PAGES: PSEOPage[] = [
     cta: "Upload a video and see what 3 vision models find — free",
     category: "how-to",
     metaDescription:
-      "Not all strange videos are fake — and not all fakes look strange. Learn how to check viral videos for AI-generation and manipulation signals using 3 vision models.",
+      "Not all strange videos are fake — and not all fakes look strange. Check viral videos for AI-generation and manipulation signals with 3 vision models.",
     schemaType: "HowTo",
   },
 
@@ -1627,7 +1629,7 @@ export const PAGES: PSEOPage[] = [
     cta: "Add video verification to your publishing workflow — start free",
     category: "how-to",
     metaDescription:
-      "Publishing a manipulated clip is a damaging editorial mistake. Add a structured pre-publication video verification step with 3 vision AI models and a full audit trail.",
+      "Publishing a manipulated clip is a damaging editorial mistake. Add a structured pre-publication video verification step with 3 vision AI models.",
     schemaType: "HowTo",
   },
 ];

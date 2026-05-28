@@ -44,16 +44,17 @@ function buildJsonLd(page: ReturnType<typeof getPageBySlug>, slug: string) {
       step: page.workflow.map((text, i) => ({
         "@type": "HowToStep",
         position: i + 1,
+        name: text.split(/\s+—\s+|:\s+/)[0].trim(),
         text,
       })),
     };
   }
 
-  if (schemaType === "FAQPage") {
+  if (schemaType === "FAQPage" && page.faq && page.faq.length > 0) {
     return {
       "@context": "https://schema.org",
       "@type": "FAQPage",
-      mainEntity: (page.faq ?? []).map(({ q, a }) => ({
+      mainEntity: page.faq.map(({ q, a }) => ({
         "@type": "Question",
         name: q,
         acceptedAnswer: { "@type": "Answer", text: a },
@@ -83,7 +84,7 @@ export default async function UseCasePage({
 }) {
   const { slug } = await params;
   const page = getPageBySlug(slug);
-  if (!page) notFound();
+  if (!page) return notFound();
 
   const cat = CATEGORIES[page.category];
   const jsonLd = buildJsonLd(page, slug);
@@ -158,6 +159,7 @@ export default async function UseCasePage({
         {/* Comparison table (optional) */}
         {page.comparisonTable && (
           <section className="mb-9">
+            <h2 className="mb-3 text-xl font-bold text-slate-900">How they compare</h2>
             <div className="overflow-x-auto rounded-lg border border-slate-200">
               <table className="w-full text-sm">
                 <thead>
@@ -209,7 +211,7 @@ export default async function UseCasePage({
         </section>
 
         {/* Use cases */}
-        <section className="mb-9">
+        <section className="mb-12">
           <h2 className="mb-3 text-xl font-bold text-slate-900">Use cases</h2>
           <ul className="space-y-2">
             {page.useCases.map((uc, i) => (
