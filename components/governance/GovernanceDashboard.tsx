@@ -390,8 +390,11 @@ function AuditLogEventCard(props: {
   const trail = expanded ? inlineTrail : null;
   const rt = runTypeAuditBadge(ev.runType);
   const runByRaw = formatAuditRunOwnerDisplay(ev.runOwnerEmail);
-  const runBy =
-    runByRaw.includes("@") ? maskEmail(runByRaw, currentUserEmail) : runByRaw;
+  const runBy = runByRaw.includes("@")
+    ? (currentUserEmail && runByRaw.toLowerCase() === currentUserEmail.trim().toLowerCase()
+        ? "You"
+        : maskEmail(runByRaw))
+    : runByRaw;
   const actorLabel = actorByLabelForAction(ev.action);
   const actorDisplay = auditActorDisplay(ev, currentUserEmail);
   const border = auditCardLeftBorder(ev.action);
@@ -550,8 +553,12 @@ function auditActorDisplay(ev: AuditEvent, currentUserEmail?: string | null): st
     return "System";
   }
   const email = (ev.byEmail || "").trim();
-  if (email.includes("@")) return maskEmail(email, currentUserEmail);
-  return (ev.byUid || "—").trim() || "—";
+  if (!email.includes("@")) return (ev.byUid || "—").trim() || "—";
+
+  if (currentUserEmail && email.toLowerCase() === currentUserEmail.trim().toLowerCase()) {
+    return "You";
+  }
+  return maskEmail(email);
 }
 
 function auditStatusLine(ev: AuditEvent): string | null {
