@@ -5,6 +5,24 @@ import { PAGES, CATEGORIES, getPageBySlug } from "@/lib/pseo/pages";
 
 export const dynamic = "force-static";
 
+const BASE = "https://convergepanel.com";
+
+const OG_IMAGES = {
+  "video-verification": { path: "/Video%20Verification.png", width: 2002, height: 1684 },
+  research:             { path: "/Deep%20Research.png",       width: 1990, height: 1844 },
+  governance:           { path: "/Governance.png",            width: 2076, height: 1344 },
+  default:              { path: "/Claim%20Verification.png",  width: 2004, height: 1842 },
+} as const;
+
+function getOgImage(category: string, slug: string) {
+  if (category === "video-verification") return OG_IMAGES["video-verification"];
+  if (category === "research")           return OG_IMAGES["research"];
+  if (category === "governance")         return OG_IMAGES["governance"];
+  if (category === "how-to" && (slug.includes("video") || slug.includes("clip")))
+    return OG_IMAGES["video-verification"];
+  return OG_IMAGES["default"];
+}
+
 export async function generateStaticParams() {
   return PAGES.map((p) => ({ slug: p.slug }));
 }
@@ -17,16 +35,18 @@ export async function generateMetadata({
   const { slug } = await params;
   const page = getPageBySlug(slug);
   if (!page) return {};
+  const img = getOgImage(page.category, slug);
   return {
     title: `${page.title} | ConvergePanel`,
     description: page.metaDescription,
-    alternates: { canonical: `https://convergepanel.com/use-cases/${slug}` },
+    alternates: { canonical: `${BASE}/use-cases/${slug}` },
     openGraph: {
       title: `${page.title} | ConvergePanel`,
       description: page.metaDescription,
       type: "article",
-      url: `https://convergepanel.com/use-cases/${slug}`,
+      url: `${BASE}/use-cases/${slug}`,
       siteName: "ConvergePanel",
+      images: [{ url: `${BASE}${img.path}`, width: img.width, height: img.height, alt: `${page.title} | ConvergePanel` }],
     },
   };
 }
@@ -62,18 +82,24 @@ function buildJsonLd(page: ReturnType<typeof getPageBySlug>, slug: string) {
     };
   }
 
+  const img = getOgImage(page.category, slug);
+  const datePublished = page.publishedAt ?? "2026-05-28";
   return {
     "@context": "https://schema.org",
     "@type": "Article",
     headline: page.h1,
     description: page.metaDescription,
-    author: { "@type": "Organization", name: "ConvergePanel" },
+    image: `${BASE}${img.path}`,
+    datePublished,
+    dateModified: datePublished,
+    author: { "@type": "Organization", name: "ConvergePanel", url: BASE },
     publisher: {
       "@type": "Organization",
       name: "ConvergePanel",
-      url: "https://convergepanel.com",
+      url: BASE,
+      logo: { "@type": "ImageObject", url: `${BASE}/convergepanel-logo.png` },
     },
-    mainEntityOfPage: `https://convergepanel.com/use-cases/${slug}`,
+    mainEntityOfPage: `${BASE}/use-cases/${slug}`,
   };
 }
 

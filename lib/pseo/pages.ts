@@ -14,6 +14,7 @@ export interface PSEOPage {
   schemaType?: "Article" | "HowTo" | "FAQPage";
   faq?: { q: string; a: string }[];
   comparisonTable?: { headers: string[]; rows: string[][] };
+  publishedAt?: string;
 }
 
 export interface PSEOCategory {
@@ -612,6 +613,7 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "how-to-verify-a-viral-claim-before-sharing-it",
+    publishedAt: "2026-05-29",
     title: "How to Verify a Viral Claim Before Sharing",
     h1: "How to Verify a Viral Claim Before You Hit Share",
     audience: "General public",
@@ -644,6 +646,7 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "how-to-verify-a-viral-health-claim",
+    publishedAt: "2026-05-29",
     title: "How to Verify a Viral Health Claim",
     h1: "How to Verify a Viral Health Claim Before Trusting or Sharing It",
     audience: "Health-conscious individuals",
@@ -676,6 +679,7 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "how-to-verify-a-viral-finance-claim",
+    publishedAt: "2026-05-29",
     title: "How to Verify a Viral Finance Claim",
     h1: "How to Verify a Viral Finance Claim Before You Invest or Share",
     audience: "Retail investors and finance-curious individuals",
@@ -708,6 +712,7 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "how-to-verify-a-viral-political-claim",
+    publishedAt: "2026-05-29",
     title: "How to Verify a Viral Political Claim",
     h1: "How to Verify a Viral Political Claim — Without the Bias",
     audience: "Politically engaged individuals",
@@ -740,6 +745,7 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "how-to-verify-a-viral-ai-claim",
+    publishedAt: "2026-05-29",
     title: "How to Verify a Viral AI Claim",
     h1: "How to Verify a Viral 'AI Can Now Do X' Claim",
     audience: "Tech-aware professionals",
@@ -772,6 +778,7 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "how-to-verify-a-viral-climate-claim",
+    publishedAt: "2026-05-29",
     title: "How to Verify a Viral Climate Claim",
     h1: "How to Verify a Viral Climate Claim Without Getting Lost in the Debate",
     audience: "Climate-engaged individuals",
@@ -806,6 +813,7 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "ai-claim-verification-for-content-creators",
+    publishedAt: "2026-05-29",
     title: "AI Claim Verification for Content Creators",
     h1: "How Content Creators Can Verify Claims Before Publishing",
     audience: "Content creators",
@@ -836,6 +844,7 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "ai-claim-verification-for-founders",
+    publishedAt: "2026-05-29",
     title: "AI Claim Verification for Founders",
     h1: "Why Founders Need to Verify Market Claims Before the Pitch",
     audience: "Startup founders",
@@ -866,6 +875,7 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "ai-claim-verification-for-newsrooms",
+    publishedAt: "2026-05-29",
     title: "AI Claim Verification for Newsrooms",
     h1: "Multi-Model Claim Verification for Editorial Teams",
     audience: "Editorial teams",
@@ -896,6 +906,7 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "ai-claim-verification-for-educators",
+    publishedAt: "2026-05-29",
     title: "AI Claim Verification for Educators",
     h1: "How Educators Can Verify AI-Generated Content Before Using It in Teaching",
     audience: "Educators",
@@ -926,6 +937,7 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "ai-claim-verification-for-investigators",
+    publishedAt: "2026-05-29",
     title: "AI Claim Verification for Investigators",
     h1: "Multi-Model Claim Verification for Investigators and OSINT Professionals",
     audience: "Investigators",
@@ -957,6 +969,7 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "ai-claim-verification-for-knowledge-workers",
+    publishedAt: "2026-05-29",
     title: "AI Claim Verification for Knowledge Workers",
     h1: "The Knowledge Worker's Problem: Is This AI Answer Actually Right?",
     audience: "Knowledge workers",
@@ -987,6 +1000,7 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "ai-research-for-decision-making-teams",
+    publishedAt: "2026-05-29",
     title: "AI Research for Decision-Making Teams",
     h1: "Multi-Model AI Research for Teams Making Consequential Decisions",
     audience: "Decision-making teams",
@@ -1020,6 +1034,7 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "single-ai-model-vs-multi-model-verification",
+    publishedAt: "2026-05-29",
     title: "Single AI Model vs Multi-Model Verification",
     h1: "Single AI Model vs Multi-Model Verification: A Practical Comparison",
     audience: "Decision-makers and AI tool evaluators",
@@ -1061,6 +1076,7 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "chatgpt-vs-claude-vs-gemini-for-research",
+    publishedAt: "2026-05-29",
     title: "ChatGPT vs Claude vs Gemini for Research",
     h1: "ChatGPT, Claude, Gemini, Grok, and Perplexity for Research: Strengths and Blind Spots",
     audience: "Researchers and knowledge workers",
@@ -1100,6 +1116,7 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "ai-search-vs-ai-verification",
+    publishedAt: "2026-05-29",
     title: "AI Search vs AI Verification",
     h1: "AI Search vs AI Verification: When to Use Which",
     audience: "Professionals using AI tools",
@@ -1141,6 +1158,7 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "ai-fact-checking-vs-claim-verification",
+    publishedAt: "2026-05-29",
     title: "AI Fact-Checking vs Claim Verification",
     h1: "AI Fact-Checking vs AI Claim Verification: What's the Difference?",
     audience: "Journalists, researchers, and professionals",
@@ -1182,6 +1200,7 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "ai-summarizer-vs-multi-model-research-panel",
+    publishedAt: "2026-05-29",
     title: "AI Summarizer vs Multi-Model Research Panel",
     h1: "Why a Multi-Model Research Panel Is Different From an AI Summarizer",
     audience: "Knowledge workers and researchers",
@@ -1223,6 +1242,7 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "perplexity-vs-multi-model-panel-for-research",
+    publishedAt: "2026-05-29",
     title: "Perplexity vs Multi-Model Panel for Research",
     h1: "Perplexity vs a Multi-Model Research Panel: Different Tools for Different Jobs",
     audience: "Researchers and knowledge workers",
@@ -1266,6 +1286,7 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "what-is-a-decision-receipt",
+    publishedAt: "2026-05-29",
     title: "What Is a Decision Receipt?",
     h1: "What Is a Decision Receipt — and Why AI-Assisted Decisions Need One",
     audience: "AI-curious professionals and compliance-minded teams",
@@ -1310,6 +1331,7 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "how-to-create-an-ai-audit-trail",
+    publishedAt: "2026-05-29",
     title: "How to Create an AI Audit Trail",
     h1: "How to Create an AI Audit Trail for Research and Verification Decisions",
     audience: "Compliance-minded professionals and team leads",
@@ -1342,6 +1364,7 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "ai-governance-for-small-teams",
+    publishedAt: "2026-05-29",
     title: "AI Governance for Small Teams",
     h1: "AI Governance Without Enterprise Overhead: A Guide for Small Teams",
     audience: "Small team leads",
@@ -1373,6 +1396,7 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "how-to-document-an-ai-assisted-research-decision",
+    publishedAt: "2026-05-29",
     title: "How to Document an AI Research Decision",
     h1: "How to Document an AI-Assisted Research Decision — Step by Step",
     audience: "Analysts, researchers, and knowledge workers",
@@ -1405,6 +1429,7 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "why-teams-need-to-slow-down-ai-decisions",
+    publishedAt: "2026-05-29",
     title: "Why Teams Need to Slow Down AI Decisions",
     h1: "The Case for Slowing Down: Why Verification Steps Improve AI-Assisted Team Decisions",
     audience: "Team leads and decision-makers",
@@ -1435,6 +1460,7 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "what-is-a-consensus-score",
+    publishedAt: "2026-05-29",
     title: "What Is a Consensus Score?",
     h1: "What Is a Consensus Score — and How Do You Read It?",
     audience: "AI-curious professionals",
@@ -1481,6 +1507,7 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "how-to-check-if-a-viral-video-might-be-manipulated",
+    publishedAt: "2026-05-29",
     title: "How to Tell If a Viral Video Is Manipulated",
     h1: "How to Check If a Viral Video Might Be AI-Generated or Manipulated",
     audience: "General audience",
@@ -1513,6 +1540,7 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "ai-video-verification-for-journalists",
+    publishedAt: "2026-05-29",
     title: "AI Video Verification for Journalists",
     h1: "AI Video Verification for Solo Journalists and Reporters",
     audience: "Journalists",
@@ -1543,6 +1571,7 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "ai-video-verification-for-content-creators",
+    publishedAt: "2026-05-29",
     title: "AI Video Verification for Content Creators",
     h1: "Why Content Creators Need to Verify Video Before Amplifying It",
     audience: "Content creators",
@@ -1573,6 +1602,7 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "how-to-sanity-check-a-viral-clip",
+    publishedAt: "2026-05-29",
     title: "How to Sanity Check a Viral Clip",
     h1: "How to Sanity Check a Viral Clip in Under Two Minutes",
     audience: "General audience",
@@ -1603,6 +1633,7 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "how-to-verify-a-clip-before-publishing",
+    publishedAt: "2026-05-29",
     title: "How to Verify a Clip Before Publishing",
     h1: "How to Verify a Video Clip Before Publishing It to an Audience",
     audience: "Publishers and journalists",
