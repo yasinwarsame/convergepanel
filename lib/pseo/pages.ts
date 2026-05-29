@@ -188,7 +188,7 @@ export const PAGES: PSEOPage[] = [
     cta: "Try video verification on your next flagged clip",
     category: "video-verification",
     metaDescription:
-      "3 vision-capable AI models review your video for deepfake and manipulation signals. ConvergePanel gives fact-checkers a consensus verdict — not one tool's guess.",
+      "3 vision-capable AI models review your video for deepfake and manipulation signals. ConvergePanel gives fact-checkers a consensus verdict — not one tool's",
   },
   {
     slug: "video-authenticity-review-for-researchers",
@@ -582,7 +582,7 @@ export const PAGES: PSEOPage[] = [
     cta: "See multi-model verification in action — run a free check",
     category: "how-to",
     metaDescription:
-      "How does AI claim verification actually work? Learn the mechanics: independent model queries, consensus scoring, and how to read disagreement as a research signal.",
+      "How does AI claim verification actually work? Learn the mechanics: independent model queries, consensus scoring, and how to read disagreement as a research",
     schemaType: "HowTo",
   },
   {
@@ -1846,7 +1846,7 @@ export const PAGES: PSEOPage[] = [
     cta: "Check for Hallucinations — run a multi-model comparison",
     category: "how-to",
     metaDescription:
-      "AI hallucinations look exactly like accurate facts. Use multi-model comparison to identify unsupported claims, fabricated citations, and invented details before they cause problems.",
+      "AI hallucinations look exactly like accurate facts. Use multi-model comparison to identify unsupported claims, fabricated citations, and invented details",
     schemaType: "HowTo",
     faq: [
       {
@@ -1946,7 +1946,7 @@ export const PAGES: PSEOPage[] = [
     cta: "Pressure-Test This Response — see where it holds and where it doesn't",
     category: "how-to",
     metaDescription:
-      "One AI response is a first draft, not a verdict. Learn how to pressure-test AI output across multiple models to find weak claims, missing context, and blind spots.",
+      "One AI response is a first draft, not a verdict. Learn how to pressure-test AI output across multiple models to find weak claims, missing context, and blind",
     schemaType: "HowTo",
     faq: [
       {
@@ -2046,7 +2046,7 @@ export const PAGES: PSEOPage[] = [
     cta: "Run a Bias Check — compare framings across five AI models",
     category: "how-to",
     metaDescription:
-      "AI research bias is in the framing and selection, not just the facts. Learn how to identify one-sided AI outputs using multi-model comparison before acting on them.",
+      "AI research bias is in the framing and selection, not just the facts. Learn how to identify one-sided AI outputs using multi-model comparison before acting",
     schemaType: "HowTo",
     faq: [
       {
@@ -2096,7 +2096,7 @@ export const PAGES: PSEOPage[] = [
     cta: "Validate AI Research — run a multi-model verification panel",
     category: "research",
     metaDescription:
-      "AI research looks credible but may contain hallucinations, gaps, or weak evidence. Learn how to validate AI-generated research before using it in consequential work.",
+      "AI research looks credible but may contain hallucinations, gaps, or weak evidence. Learn how to validate AI-generated research before using it in",
     schemaType: "HowTo",
     faq: [
       {
@@ -2248,7 +2248,8 @@ export const PAGES: PSEOPage[] = [
     cta: "Ask All Five AI Models — one question, five perspectives",
     category: "research",
     metaDescription:
-      "Instead of switching between AI tools, ask all five at once. ConvergePanel queries GPT, Claude, Gemini, Grok, and Perplexity simultaneously and surfaces consensus and disagreement.",
+      "Instead of switching between AI tools, ask all five at once. ConvergePanel queries GPT, Claude, Gemini, Grok, and Perplexity simultaneously and surfaces",
+    schemaType: "FAQPage",
     faq: [
       {
         q: "Why ask multiple AI models the same question?",
@@ -2296,7 +2297,7 @@ export const PAGES: PSEOPage[] = [
     cta: "See Consensus in Action — run a free panel",
     category: "glossary",
     metaDescription:
-      "ConvergePanel's AI consensus tool shows where five AI models agree or disagree on a question. Consensus score, per-model evidence, and flagged divergences in one view.",
+      "ConvergePanel's AI consensus tool shows where five AI models agree or disagree on a question. Consensus score, per-model evidence, and flagged divergences",
     schemaType: "FAQPage",
     faq: [
       {
@@ -2346,7 +2347,7 @@ export const PAGES: PSEOPage[] = [
     cta: "Analyze Model Disagreement — see what AI models dispute",
     category: "research",
     metaDescription:
-      "AI disagreement is a signal, not a failure. ConvergePanel's disagreement analysis surfaces where models diverge, what they dispute, and where human judgment is most needed.",
+      "AI disagreement is a signal, not a failure. ConvergePanel's disagreement analysis surfaces where models diverge, what they dispute, and where human judgment",
     schemaType: "FAQPage",
     faq: [
       {
@@ -2396,6 +2397,7 @@ export const PAGES: PSEOPage[] = [
     category: "research",
     metaDescription:
       "One AI answer is a first opinion. ConvergePanel gives you four more, a consensus score, and a synthesis — so you can decide with more than one perspective.",
+    schemaType: "FAQPage",
     faq: [
       {
         q: "Why do I need a second opinion from an AI?",
@@ -2444,7 +2446,8 @@ export const PAGES: PSEOPage[] = [
     cta: "Pressure-Test This Decision — get multi-model AI support",
     category: "research",
     metaDescription:
-      "Single-model AI decision support imports one model's biases. Multi-model decision support shows you where models agree, where they diverge, and what the uncertainty is.",
+      "Single-model AI decision support imports one model's biases. Multi-model decision support shows you where models agree, where they diverge, and what the",
+    schemaType: "FAQPage",
     faq: [
       {
         q: "What is multi-model AI decision support?",
@@ -2493,7 +2496,7 @@ export const PAGES: PSEOPage[] = [
     cta: "Compare AI Models Side by Side — free on ConvergePanel",
     category: "how-to",
     metaDescription:
-      "Comparing AI models manually is slow and approximate. ConvergePanel's Compare View shows five model responses side by side with highlighted divergences and a synthesis.",
+      "Comparing AI models manually is slow and approximate. ConvergePanel's Compare View shows five model responses side by side with highlighted divergences and",
     schemaType: "HowTo",
     faq: [
       {
@@ -2543,7 +2546,8 @@ export const PAGES: PSEOPage[] = [
     cta: "Run an AI Panel — consult five models at once",
     category: "research",
     metaDescription:
-      "Replace the single-chatbot workflow with a structured AI expert panel. ConvergePanel queries five models, synthesizes the responses, and shows where they agree and disagree.",
+      "Replace the single-chatbot workflow with a structured AI expert panel. ConvergePanel queries five models, synthesizes the responses, and shows where they",
+    schemaType: "FAQPage",
     faq: [
       {
         q: "What is an AI expert panel?",
@@ -2592,7 +2596,8 @@ export const PAGES: PSEOPage[] = [
     cta: "Compare LLM Answers — five models, one query",
     category: "research",
     metaDescription:
-      "Different LLMs give different answers to the same question. ConvergePanel compares GPT, Claude, Gemini, Grok, and Perplexity simultaneously so you can see the full picture.",
+      "Different LLMs give different answers to the same question. ConvergePanel compares GPT, Claude, Gemini, Grok, and Perplexity simultaneously so you can see",
+    schemaType: "FAQPage",
     faq: [
       {
         q: "Why do different LLMs give different answers to the same question?",
@@ -2641,7 +2646,8 @@ export const PAGES: PSEOPage[] = [
     cta: "Start Multi-Model Research — five models, full transparency",
     category: "research",
     metaDescription:
-      "The best multi-model AI research tool shows you disagreements, not just consensus. Learn what features actually matter and how ConvergePanel structures multi-model research.",
+      "The best multi-model AI research tool shows you disagreements, not just consensus. Learn what features actually matter and how ConvergePanel structures",
+    schemaType: "FAQPage",
     faq: [
       {
         q: "What makes a multi-model AI research tool useful?",
@@ -2692,7 +2698,7 @@ export const PAGES: PSEOPage[] = [
     cta: "Verify Before Publishing — add video verification to your newsroom workflow",
     category: "video-verification",
     metaDescription:
-      "Publishing a manipulated viral clip is one of the costliest editorial mistakes. Use multi-model video verification to review clips before publication — in under two minutes.",
+      "Publishing a manipulated viral clip is one of the costliest editorial mistakes. Use multi-model video verification to review clips before publication — in",
     schemaType: "HowTo",
     faq: [
       {
@@ -2792,7 +2798,7 @@ export const PAGES: PSEOPage[] = [
     cta: "Verify This Content — run a multi-model UGC check",
     category: "claim-verification",
     metaDescription:
-      "User-generated content carries the highest verification risk in news workflows. Multi-model AI provides a structured first-pass for video and claims before publication.",
+      "User-generated content carries the highest verification risk in news workflows. Multi-model AI provides a structured first-pass for video and claims before",
     schemaType: "HowTo",
     faq: [
       {
@@ -2842,7 +2848,8 @@ export const PAGES: PSEOPage[] = [
     cta: "Start a Governance Review — build your newsroom verification workflow",
     category: "governance",
     metaDescription:
-      "Ad-hoc AI use in newsrooms creates accountability gaps. Learn how to build a repeatable, documented AI verification workflow with multi-model claim and video review.",
+      "Ad-hoc AI use in newsrooms creates accountability gaps. Learn how to build a repeatable, documented AI verification workflow with multi-model claim and",
+    schemaType: "FAQPage",
     faq: [
       {
         q: "Does a newsroom need an AI verification policy?",
@@ -2891,7 +2898,8 @@ export const PAGES: PSEOPage[] = [
     cta: "Start an Investigation Review — deep research across five AI models",
     category: "research",
     metaDescription:
-      "Investigative journalism needs AI tools built for deep, documented, multi-source research — not quick answers. Learn how multi-model AI supports serious investigative work.",
+      "Investigative journalism needs AI tools built for deep, documented, multi-source research — not quick answers. Learn how multi-model AI supports serious",
+    schemaType: "FAQPage",
     faq: [
       {
         q: "What AI tools are useful for investigative journalists?",
@@ -2940,7 +2948,7 @@ export const PAGES: PSEOPage[] = [
     cta: "Verify This Statement — multi-model claim check in 60 seconds",
     category: "how-to",
     metaDescription:
-      "Public statements are often cited without verification. Multi-model AI claim verification gives journalists and analysts a fast first-pass check before reporting.",
+      "Public statements are often cited without verification. Multi-model AI claim verification gives journalists and analysts a fast first-pass check before",
     schemaType: "HowTo",
     faq: [
       {
@@ -2991,7 +2999,8 @@ export const PAGES: PSEOPage[] = [
     cta: "Run a Verification Checklist — claim and video verification in one platform",
     category: "claim-verification",
     metaDescription:
-      "Inconsistent verification is an editorial liability. A structured AI-assisted checklist makes verification repeatable, documented, and defensible before publication.",
+      "Inconsistent verification is an editorial liability. A structured AI-assisted checklist makes verification repeatable, documented, and defensible before",
+    schemaType: "FAQPage",
     faq: [
       {
         q: "What should a journalism verification checklist include?",
@@ -3142,7 +3151,8 @@ export const PAGES: PSEOPage[] = [
     cta: "Research Before You Record — multi-model AI research built for creators",
     category: "research",
     metaDescription:
-      "AI research for YouTube content can include hallucinations. ConvergePanel combines deep multi-model research with built-in claim verification — for content you can trust.",
+      "AI research for YouTube content can include hallucinations. ConvergePanel combines deep multi-model research with built-in claim verification — for content",
+    schemaType: "FAQPage",
     faq: [
       {
         q: "What AI research tools are useful for YouTubers?",
@@ -3191,7 +3201,7 @@ export const PAGES: PSEOPage[] = [
     cta: "Sanity-Check This Clip — verify before you react",
     category: "video-verification",
     metaDescription:
-      "Reaction videos built on fake clips or false claims damage your credibility. A two-minute verification check before recording protects your content and your audience.",
+      "Reaction videos built on fake clips or false claims damage your credibility. A two-minute verification check before recording protects your content and your",
     schemaType: "HowTo",
     faq: [
       {
@@ -3241,7 +3251,8 @@ export const PAGES: PSEOPage[] = [
     cta: "Check Your Sources — verify claims across five AI models",
     category: "claim-verification",
     metaDescription:
-      "Creator content with wrong or fabricated sources damages audience trust. Learn how to verify sources and claims before publishing using multi-model AI comparison.",
+      "Creator content with wrong or fabricated sources damages audience trust. Learn how to verify sources and claims before publishing using multi-model AI",
+    schemaType: "FAQPage",
     faq: [
       {
         q: "How do I verify that a source cited in my AI research actually exists?",
@@ -3342,7 +3353,7 @@ export const PAGES: PSEOPage[] = [
     cta: "Pressure-Test This Decision — challenge your startup idea before you commit",
     category: "how-to",
     metaDescription:
-      "Most startup ideas fail because core assumptions were never seriously challenged. Multi-model AI pressure-testing surfaces risks before you commit time and money.",
+      "Most startup ideas fail because core assumptions were never seriously challenged. Multi-model AI pressure-testing surfaces risks before you commit time and",
     schemaType: "HowTo",
     faq: [
       {
@@ -3392,7 +3403,7 @@ export const PAGES: PSEOPage[] = [
     cta: "Test Your Assumptions — submit them to a multi-model review",
     category: "how-to",
     metaDescription:
-      "Business plans rest on assumptions that are rarely tested before commitment. Multi-model AI exposes which assumptions are well-supported and which ones carry the most risk.",
+      "Business plans rest on assumptions that are rarely tested before commitment. Multi-model AI exposes which assumptions are well-supported and which ones",
     schemaType: "HowTo",
     faq: [
       {
@@ -3442,7 +3453,8 @@ export const PAGES: PSEOPage[] = [
     cta: "Verify Pitch Claims — run a pre-pitch claim audit",
     category: "claim-verification",
     metaDescription:
-      "Unverified claims in investor pitches get challenged in meetings and killed in due diligence. Run a pre-pitch claim audit across five AI models before the meeting.",
+      "Unverified claims in investor pitches get challenged in meetings and killed in due diligence. Run a pre-pitch claim audit across five AI models before the",
+    schemaType: "FAQPage",
     faq: [
       {
         q: "Why do investor pitch claims need to be verified?",
@@ -3541,7 +3553,8 @@ export const PAGES: PSEOPage[] = [
     cta: "Get Multiple AI Perspectives — five models, one startup question",
     category: "research",
     metaDescription:
-      "One AI perspective on your startup idea isn't enough. ConvergePanel runs your question through five independent models and surfaces agreement, disagreement, and what each uniquely identifies.",
+      "One AI perspective on your startup idea isn't enough. ConvergePanel runs your question through five independent models and surfaces agreement, disagreement,",
+    schemaType: "FAQPage",
     faq: [
       {
         q: "Why does it matter if different AI models see a startup idea differently?",
@@ -3590,7 +3603,8 @@ export const PAGES: PSEOPage[] = [
     cta: "Start a Decision Review — multi-model AI support for founders",
     category: "research",
     metaDescription:
-      "Single-model AI advice for founders hides uncertainty and minority views. Multi-model decision support surfaces agreement, disagreement, and the risks you actually need to consider.",
+      "Single-model AI advice for founders hides uncertainty and minority views. Multi-model decision support surfaces agreement, disagreement, and the risks you",
+    schemaType: "FAQPage",
     faq: [
       {
         q: "What is AI decision support for founders?",
@@ -3641,7 +3655,8 @@ export const PAGES: PSEOPage[] = [
     cta: "Create an Audit Trail — automatic documentation for every AI-assisted decision",
     category: "governance",
     metaDescription:
-      "Most AI tools leave no audit trail. ConvergePanel automatically documents every panel run — query, models, outputs, consensus score, and reviewer decisions — for full accountability.",
+      "Most AI tools leave no audit trail. ConvergePanel automatically documents every panel run — query, models, outputs, consensus score, and reviewer decisions",
+    schemaType: "FAQPage",
     faq: [
       {
         q: "What is an AI audit trail?",
@@ -3691,6 +3706,7 @@ export const PAGES: PSEOPage[] = [
     category: "governance",
     metaDescription:
       "AI decisions need audit trails. ConvergePanel automatically records query, models, outputs, consensus score, and reviewer decisions — exportable for any review.",
+    schemaType: "FAQPage",
     faq: [
       {
         q: "What should an AI decision audit trail include?",
@@ -3739,7 +3755,7 @@ export const PAGES: PSEOPage[] = [
     cta: "Create a Decision Receipt — document the review for every AI-assisted decision",
     category: "governance",
     metaDescription:
-      "In regulated environments, a correct AI decision isn't enough — you need to prove it was reviewed. ConvergePanel documents every review step with reviewer identity and decision.",
+      "In regulated environments, a correct AI decision isn't enough — you need to prove it was reviewed. ConvergePanel documents every review step with reviewer",
     schemaType: "FAQPage",
     faq: [
       {
@@ -3790,6 +3806,7 @@ export const PAGES: PSEOPage[] = [
     category: "governance",
     metaDescription:
       "Hiding AI model disagreement doesn't resolve it. Documenting it creates more defensible, credible research. Learn how to capture and record model divergence.",
+    schemaType: "FAQPage",
     faq: [
       {
         q: "Why document AI model disagreement instead of just using the consensus?",
@@ -3838,7 +3855,8 @@ export const PAGES: PSEOPage[] = [
     cta: "Start a Governance Review — build an accountable AI workflow for your team",
     category: "governance",
     metaDescription:
-      "AI accountability doesn't happen by accident. Build a documented workflow with defined review steps, audit logging, and governance policies that make AI use defensible.",
+      "AI accountability doesn't happen by accident. Build a documented workflow with defined review steps, audit logging, and governance policies that make AI use",
+    schemaType: "FAQPage",
     faq: [
       {
         q: "What is an AI accountability workflow?",
@@ -3887,7 +3905,8 @@ export const PAGES: PSEOPage[] = [
     cta: "Build a Team Review Process — structured AI output review with ConvergePanel",
     category: "governance",
     metaDescription:
-      "Teams using AI need a defined review process — not just a habit. Learn how to build a consistent, documented AI output review process with defined trigger criteria and reviewers.",
+      "Teams using AI need a defined review process — not just a habit. Learn how to build a consistent, documented AI output review process with defined trigger",
+    schemaType: "FAQPage",
     faq: [
       {
         q: "What is an AI review process for teams?",
@@ -3986,7 +4005,8 @@ export const PAGES: PSEOPage[] = [
     cta: "Track AI Decisions — build a live audit log for your team's AI use",
     category: "governance",
     metaDescription:
-      "AI decision-making is invisible without a tracking system. ConvergePanel's audit log captures every panel run automatically — queries, models, outputs, and review decisions.",
+      "AI decision-making is invisible without a tracking system. ConvergePanel's audit log captures every panel run automatically — queries, models, outputs, and",
+    schemaType: "FAQPage",
     faq: [
       {
         q: "Why do organizations need to track AI decision-making?",
@@ -4035,7 +4055,8 @@ export const PAGES: PSEOPage[] = [
     cta: "Run an AI Risk Review — identify risk before it becomes a problem",
     category: "governance",
     metaDescription:
-      "AI-assisted work introduces hallucination risk, one-sided analysis risk, and undocumented review risk. ConvergePanel surfaces these signals before decisions are made.",
+      "AI-assisted work introduces hallucination risk, one-sided analysis risk, and undocumented review risk. ConvergePanel surfaces these signals before decisions",
+    schemaType: "FAQPage",
     faq: [
       {
         q: "What is an AI risk review?",
@@ -4134,7 +4155,7 @@ export const PAGES: PSEOPage[] = [
     cta: "Identify Risks Before Deciding — run a multi-model risk analysis",
     category: "how-to",
     metaDescription:
-      "Most decisions don't invest enough in finding risks before committing. Multi-model AI risk analysis surfaces hidden failure modes across five independent perspectives.",
+      "Most decisions don't invest enough in finding risks before committing. Multi-model AI risk analysis surfaces hidden failure modes across five independent",
     schemaType: "HowTo",
     faq: [
       {
