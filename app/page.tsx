@@ -2241,11 +2241,20 @@ export default function Home() {
                   disabled={panelBusy}
                   attachedFileName={claimAttachedFile ?? undefined}
                   onExtracted={(text, fileName) => {
-                    const trimmed = text.length > MAX_CLAIM_CHARS ? text.slice(0, MAX_CLAIM_CHARS) : text;
-                    setClaimInput(trimmed);
+                    const MAX_FILE_CHARS = 12000;
+                    const trimmed = text.length > MAX_FILE_CHARS ? text.slice(0, MAX_FILE_CHARS) : text;
+                    setClaimInput((prev) => {
+                      const base = prev.trim();
+                      if (base) {
+                        const fileBody = trimmed.replace(/^context:\s*/i, "").trimStart();
+                        const combined = `${base}\n\nContext:\n${fileBody}`;
+                        return combined.length > MAX_CLAIM_CHARS ? combined.slice(0, MAX_CLAIM_CHARS) : combined;
+                      }
+                      return trimmed.length > MAX_CLAIM_CHARS ? trimmed.slice(0, MAX_CLAIM_CHARS) : trimmed;
+                    });
                     setClaimAttachedFile(fileName);
-                    if (text.length > MAX_CLAIM_CHARS) {
-                      setError(`File truncated to ${MAX_CLAIM_CHARS.toLocaleString()} characters.`);
+                    if (text.length > MAX_FILE_CHARS) {
+                      setError(`File truncated to ${MAX_FILE_CHARS.toLocaleString()} characters.`);
                     }
                   }}
                   onError={(msg) => setError(msg)}
