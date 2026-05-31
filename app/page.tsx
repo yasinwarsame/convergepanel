@@ -48,6 +48,7 @@ import { perf, trackSlowLoad } from "@/lib/utils/performance";
 import ClaimVerificationResult from "@/components/ClaimVerificationResult";
 import VideoUploader from "@/components/VideoUploader";
 import VideoVerificationResult from "@/components/VideoVerificationResult";
+import FileAttachButton from "@/components/FileAttachButton";
 import type { ClaimVerificationClientPayload } from "@/lib/verification/claimVerificationClientPayload";
 import type { VideoVerificationClientPayload } from "@/lib/verification/videoVerificationClientPayload";
 import type { PanelHistoryGovernanceStatus, PanelHistoryItem } from "@/lib/user/panelHistory";
@@ -359,6 +360,10 @@ export default function Home() {
 
   // User's question/prompt to send to models
   const [question, setQuestion] = useState("");
+
+  // Attached file names for the Research and Verify tabs (display only — text already injected)
+  const [researchAttachedFile, setResearchAttachedFile] = useState<string | null>(null);
+  const [claimAttachedFile, setClaimAttachedFile] = useState<string | null>(null);
 
   /** Single nav: Research | Verify Claim | Verify Video | History */
   const [panelTab, setPanelTab] = useState<"research" | "verify" | "video" | "history">("research");
@@ -748,6 +753,7 @@ export default function Home() {
     setRunStatus("running");
     setResults([]);
     setSynthesizedReport(null);
+    setResearchAttachedFile(null);
     // Reset synthesis state for new run
     setSynthesisStatus("idle");
     setSynthesisReport(null);
@@ -1291,6 +1297,7 @@ export default function Home() {
     setRunStatus("idle");
     setResults([]);
     setSynthesizedReport(null);
+    setClaimAttachedFile(null);
 
     const initialStatuses = {} as Record<ModelId, "queued" | "thinking" | ModelStatus>;
     selectedModels.forEach((id) => {
@@ -2199,6 +2206,53 @@ export default function Home() {
                   One sentence or multiple paragraphs — max {MAX_CLAIM_CHARS.toLocaleString()} characters (
                   {claimInput.length}/{MAX_CLAIM_CHARS}).
                 </p>
+              )}
+              {/* File attach — Research tab */}
+              {panelTab === "research" && (
+                <FileAttachButton
+                  disabled={panelBusy}
+                  attachedFileName={researchAttachedFile ?? undefined}
+                  onExtracted={(text, fileName) => {
+                    const MAX_FILE_CHARS = 12000;
+                    const trimmed = text.length > MAX_FILE_CHARS ? text.slice(0, MAX_FILE_CHARS) : text;
+                    setQuestion((prev) => {
+                      const base = prev.trim();
+                      if (base) {
+                        // Strip any leading "Context:" the file may already have to avoid doubling
+                        const fileBody = trimmed.replace(/^context:\s*/i, "").trimStart();
+                        return `${base}\n\nContext:\n${fileBody}`;
+                      }
+                      return trimmed;
+                    });
+                    setResearchAttachedFile(fileName);
+                    if (text.length > MAX_FILE_CHARS) {
+                      setError(`File truncated to ${MAX_FILE_CHARS.toLocaleString()} characters.`);
+                    }
+                  }}
+                  onError={(msg) => setError(msg)}
+                  onClear={() => {
+                    setResearchAttachedFile(null);
+                  }}
+                />
+              )}
+              {/* File attach — Verify tab */}
+              {panelTab === "verify" && (
+                <FileAttachButton
+                  disabled={panelBusy}
+                  attachedFileName={claimAttachedFile ?? undefined}
+                  onExtracted={(text, fileName) => {
+                    const trimmed = text.length > MAX_CLAIM_CHARS ? text.slice(0, MAX_CLAIM_CHARS) : text;
+                    setClaimInput(trimmed);
+                    setClaimAttachedFile(fileName);
+                    if (text.length > MAX_CLAIM_CHARS) {
+                      setError(`File truncated to ${MAX_CLAIM_CHARS.toLocaleString()} characters.`);
+                    }
+                  }}
+                  onError={(msg) => setError(msg)}
+                  onClear={() => {
+                    setClaimAttachedFile(null);
+                  }}
+                />
               )}
             </div>
           </div>
