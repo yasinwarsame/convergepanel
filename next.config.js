@@ -21,7 +21,7 @@ const nextConfig = {
       "default-src 'self'",
       "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: https://js.stripe.com https://*.firebaseio.com https://*.googleapis.com https://apis.google.com https://accounts.google.com https://*.gstatic.com",
       "script-src-elem 'self' 'unsafe-inline' blob: https://js.stripe.com https://*.firebaseio.com https://*.googleapis.com https://apis.google.com https://accounts.google.com https://*.gstatic.com",
-      "worker-src 'self' blob:",
+      "worker-src 'self' blob: https://cdn.jsdelivr.net",
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: https:",
       "media-src 'self' blob:",

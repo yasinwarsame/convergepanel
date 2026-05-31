@@ -39,12 +39,10 @@ async function readAsArrayBuffer(file: File): Promise<ArrayBuffer> {
 async function extractPdf(file: File): Promise<string> {
   const pdfjsLib = await import("pdfjs-dist");
 
-  // Point the worker at the bundled worker file
+  // Load worker from CDN to avoid webpack bundling the ESM worker file.
+  // A string URL is never processed by Terser; only webpack URL() magic is.
   if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-      "pdfjs-dist/build/pdf.worker.mjs",
-      import.meta.url
-    ).toString();
+    pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
   }
 
   const buffer = await readAsArrayBuffer(file);
