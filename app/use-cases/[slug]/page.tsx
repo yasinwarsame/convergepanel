@@ -8,10 +8,10 @@ export const dynamic = "force-static";
 const BASE = "https://convergepanel.com";
 
 const OG_IMAGES = {
-  "video-verification": { path: "/Video%20Verification.png", width: 2002, height: 1684 },
-  research:             { path: "/Deep%20Research.png",       width: 1990, height: 1844 },
-  governance:           { path: "/Governance.png",            width: 2076, height: 1344 },
-  default:              { path: "/Claim%20Verification.png",  width: 2004, height: 1842 },
+  "video-verification": { path: "/video-verification.png", width: 2002, height: 1684 },
+  research:             { path: "/deep-research.png",       width: 1990, height: 1844 },
+  governance:           { path: "/governance.png",          width: 2076, height: 1344 },
+  default:              { path: "/claim-verification.png",  width: 2004, height: 1842 },
 } as const;
 
 function getOgImage(category: string, slug: string) {
@@ -37,7 +37,7 @@ export async function generateMetadata({
   if (!page) return {};
   const img = getOgImage(page.category, slug);
   return {
-    title: `${page.title} | ConvergePanel`,
+    title: { absolute: `${page.title} | ConvergePanel` },
     description: page.metaDescription,
     alternates: { canonical: `${BASE}/use-cases/${slug}` },
     openGraph: {
@@ -114,6 +114,14 @@ export default async function UseCasePage({
 
   const cat = CATEGORIES[page.category];
   const jsonLd = buildJsonLd(page, slug);
+  const breadcrumbJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      { "@type": "ListItem", position: 1, name: "Use cases", item: `${BASE}/use-cases` },
+      { "@type": "ListItem", position: 2, name: page.title, item: `${BASE}/use-cases/${slug}` },
+    ],
+  };
 
   const problemParagraphs = page.problem.split("\n\n").filter(Boolean);
   const solutionParagraphs = page.solution.split("\n\n").filter(Boolean);
@@ -126,6 +134,10 @@ export default async function UseCasePage({
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd).replace(/</g, "\\u003c") }}
         />
       )}
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd).replace(/</g, "\\u003c") }}
+      />
 
       <main className="mx-auto max-w-2xl px-4 py-12 sm:px-6 lg:py-16">
         {/* Category + breadcrumb */}

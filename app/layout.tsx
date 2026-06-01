@@ -11,13 +11,37 @@ import { ErrorBoundaryWrapper } from "@/components/ErrorBoundaryWrapper";
 import { ServiceWorkerUnregister } from "@/components/ServiceWorkerUnregister";
 
 export const metadata: Metadata = {
-  title: "ConvergePanel — Multi-model research & claim verification",
+  metadataBase: new URL("https://convergepanel.com"),
+  title: {
+    default: "ConvergePanel — Multi-model research & claim verification",
+    template: "%s | ConvergePanel",
+  },
   description:
     "Multi-model AI research, claim verification, video authenticity analysis (paid plans), and governance scoring — with audit trails.",
+  alternates: { canonical: "/" },
+  openGraph: {
+    type: "website",
+    siteName: "ConvergePanel",
+    url: "https://convergepanel.com",
+    title: "ConvergePanel — Multi-model research & claim verification",
+    description:
+      "Don't trust one AI. Verify with five. Multi-model research, claim verification, video authenticity, and governance — with audit trails.",
+    images: [{ url: "/claim-verification.png", width: 2004, height: 1842, alt: "ConvergePanel" }],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "ConvergePanel — Multi-model research & claim verification",
+    description:
+      "Don't trust one AI. Verify with five. Multi-model research, claim verification, and video authenticity with audit trails.",
+    images: ["/claim-verification.png"],
+  },
   icons: {
-    icon: [{ url: "/convergepanel-logo.png", type: "image/png" }],
-    shortcut: "/convergepanel-logo.png",
-    apple: "/convergepanel-logo.png",
+    icon: [
+      { url: "/favicon-32x32.png", sizes: "32x32", type: "image/png" },
+      { url: "/favicon-16x16.png", sizes: "16x16", type: "image/png" },
+    ],
+    shortcut: "/favicon-32x32.png",
+    apple: "/apple-touch-icon.png",
   },
 };
 
@@ -36,6 +60,27 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="antialiased bg-slate-50">
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify({
+              "@context": "https://schema.org",
+              "@graph": [
+                {
+                  "@type": "Organization",
+                  name: "ConvergePanel",
+                  url: "https://convergepanel.com",
+                  logo: { "@type": "ImageObject", url: "https://convergepanel.com/convergepanel-logo.png" },
+                },
+                {
+                  "@type": "WebSite",
+                  name: "ConvergePanel",
+                  url: "https://convergepanel.com",
+                },
+              ],
+            }).replace(/</g, "\\u003c"),
+          }}
+        />
         <ServiceWorkerUnregister />
         <ErrorBoundaryWrapper>
           <AuthProvider>

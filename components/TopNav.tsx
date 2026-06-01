@@ -103,10 +103,10 @@ export default function TopNav() {
             className="h-16 w-auto"
           />
           <div className="flex flex-col">
-            <h1 className="text-2xl md:text-3xl font-semibold tracking-tight">
+            <span className="text-2xl md:text-3xl font-semibold tracking-tight">
               <span className="text-slate-900">Converge</span>
               <span className="text-sky-600">Panel</span>
-            </h1>
+            </span>
             <p
               className="
                 mt-1

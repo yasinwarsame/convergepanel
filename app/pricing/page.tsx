@@ -7,9 +7,11 @@ import Link from "next/link";
 import PricingSection from "@/components/PricingSection";
 
 export const metadata: Metadata = {
-  title: "Pricing — ConvergePanel",
+  title: "Pricing",
   description:
     "Plans for multi-model research, claim verification, video verification (paid), governance on the 5-Model plan, and audit trails.",
+  alternates: { canonical: "/pricing" },
+  openGraph: { url: "https://convergepanel.com/pricing", title: "Pricing | ConvergePanel" },
 };
 
 export default function PricingPage() {

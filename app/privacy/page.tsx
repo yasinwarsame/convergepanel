@@ -5,7 +5,15 @@
  * This is a draft that should be reviewed by legal counsel before production launch.
  */
 
+import type { Metadata } from "next";
 import Link from "next/link";
+
+export const metadata: Metadata = {
+  title: "Privacy Policy",
+  description: "How ConvergePanel collects, uses, and protects your data.",
+  alternates: { canonical: "/privacy" },
+  openGraph: { url: "https://convergepanel.com/privacy", title: "Privacy Policy | ConvergePanel" },
+};
 
 export default function PrivacyPage() {
   return (

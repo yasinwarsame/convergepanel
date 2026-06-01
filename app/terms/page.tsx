@@ -4,7 +4,15 @@
  * Includes disclaimers regarding third-party AI outputs. Review with legal counsel before relying in production.
  */
 
+import type { Metadata } from "next";
 import Link from "next/link";
+
+export const metadata: Metadata = {
+  title: "Terms of Service",
+  description: "Terms of service for ConvergePanel — AI-assisted research and verification platform.",
+  alternates: { canonical: "/terms" },
+  openGraph: { url: "https://convergepanel.com/terms", title: "Terms of Service | ConvergePanel" },
+};
 
 export default function TermsPage() {
   return (

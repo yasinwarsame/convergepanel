@@ -7,9 +7,11 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 
 export const metadata: Metadata = {
-  title: "Help — ConvergePanel",
+  title: "Help",
   description:
     "How to use research mode, claim verification, video verification FAQ, governance, plans, and troubleshooting.",
+  alternates: { canonical: "/help" },
+  openGraph: { url: "https://convergepanel.com/help", title: "Help | ConvergePanel" },
 };
 
 function FaqQ({ children }: { children: ReactNode }) {

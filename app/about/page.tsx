@@ -2,9 +2,17 @@
  * App Router page (about): UI route entry.
  */
 
+import type { Metadata } from "next";
 import Link from "next/link";
 import { PANEL_MODELS } from "@/lib/panelModels";
 import ModelChip from "@/components/ModelChip";
+
+export const metadata: Metadata = {
+  title: "About",
+  description: "What ConvergePanel is and why multi-model verification matters.",
+  alternates: { canonical: "/about" },
+  openGraph: { url: "https://convergepanel.com/about", title: "About ConvergePanel" },
+};
 
 const MODEL_NOTES: Record<string, string> = {
   chatgpt: "Broad knowledge and reasoning.",

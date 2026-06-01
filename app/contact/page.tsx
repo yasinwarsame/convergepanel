@@ -2,7 +2,15 @@
  * App Router page (contact): UI route entry.
  */
 
+import type { Metadata } from "next";
 import Link from "next/link";
+
+export const metadata: Metadata = {
+  title: "Contact",
+  description: "Get in touch with the ConvergePanel team.",
+  alternates: { canonical: "/contact" },
+  openGraph: { url: "https://convergepanel.com/contact", title: "Contact ConvergePanel" },
+};
 
 export default function ContactPage() {
   return (

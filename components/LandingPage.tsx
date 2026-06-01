@@ -170,7 +170,7 @@ export default function LandingPage() {
           <div className="relative aspect-[4/3] w-full overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 shadow-xl">
             <Image
               src="/research-hero.png"
-              alt=""
+              alt="ConvergePanel multi-model research panel"
               fill
               className="object-cover"
               priority

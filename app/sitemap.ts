@@ -3,30 +3,28 @@ import { PAGES } from "@/lib/pseo/pages";
 
 const BASE = "https://convergepanel.com";
 
-const STATIC_ROUTES: { path: string; priority: number; changeFrequency: MetadataRoute.Sitemap[number]["changeFrequency"] }[] = [
-  { path: "",          priority: 1.0, changeFrequency: "weekly"  },
-  { path: "/pricing",  priority: 0.9, changeFrequency: "monthly" },
-  { path: "/about",    priority: 0.7, changeFrequency: "monthly" },
-  { path: "/contact",  priority: 0.6, changeFrequency: "yearly"  },
-  { path: "/help",     priority: 0.6, changeFrequency: "monthly" },
-  { path: "/use-cases",priority: 0.8, changeFrequency: "monthly" },
-  { path: "/terms",    priority: 0.4, changeFrequency: "yearly"  },
-  { path: "/privacy",  priority: 0.4, changeFrequency: "yearly"  },
+const STATIC_ROUTES: { path: string; lastModified: string; priority: number; changeFrequency: MetadataRoute.Sitemap[number]["changeFrequency"] }[] = [
+  { path: "",           lastModified: "2026-05-28", priority: 1.0, changeFrequency: "weekly"  },
+  { path: "/pricing",   lastModified: "2026-05-28", priority: 0.9, changeFrequency: "monthly" },
+  { path: "/about",     lastModified: "2026-05-28", priority: 0.7, changeFrequency: "monthly" },
+  { path: "/contact",   lastModified: "2026-05-28", priority: 0.6, changeFrequency: "yearly"  },
+  { path: "/help",      lastModified: "2026-05-28", priority: 0.6, changeFrequency: "monthly" },
+  { path: "/use-cases", lastModified: "2026-05-29", priority: 0.8, changeFrequency: "monthly" },
+  { path: "/terms",     lastModified: "2026-05-28", priority: 0.4, changeFrequency: "yearly"  },
+  { path: "/privacy",   lastModified: "2026-05-28", priority: 0.4, changeFrequency: "yearly"  },
 ];
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const now = new Date();
-
-  const staticEntries: MetadataRoute.Sitemap = STATIC_ROUTES.map(({ path, priority, changeFrequency }) => ({
+  const staticEntries: MetadataRoute.Sitemap = STATIC_ROUTES.map(({ path, lastModified, priority, changeFrequency }) => ({
     url: `${BASE}${path}`,
-    lastModified: now,
+    lastModified: new Date(lastModified),
     changeFrequency,
     priority,
   }));
 
   const useCaseEntries: MetadataRoute.Sitemap = PAGES.map((page) => ({
     url: `${BASE}/use-cases/${page.slug}`,
-    lastModified: now,
+    lastModified: new Date(page.publishedAt ?? "2026-05-28"),
     changeFrequency: "monthly" as const,
     priority: 0.7,
   }));
