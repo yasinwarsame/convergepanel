@@ -15,6 +15,13 @@ export interface PSEOPage {
   faq?: { q: string; a: string }[];
   comparisonTable?: { headers: string[]; rows: string[][] };
   publishedAt?: string;
+  relatedLinks?: { label: string; href: string }[];
+  bodySections?: {
+    heading: string;
+    paragraphs?: string[];
+    bullets?: string[];
+    steps?: string[];
+  }[];
 }
 
 export interface PSEOCategory {
@@ -338,6 +345,11 @@ export const PAGES: PSEOPage[] = [
     category: "governance",
     metaDescription:
       "Enterprise AI governance: automatic policy checks, peer review workflows, and full audit trails. ConvergePanel makes AI verification auditable.",
+    relatedLinks: [
+      { label: "How to Create an AI Audit Trail", href: "/use-cases/how-to-create-an-ai-audit-trail" },
+      { label: "AI Accountability Workflow", href: "/use-cases/ai-accountability-workflow" },
+      { label: "AI Governance for Small Teams", href: "/use-cases/ai-governance-for-small-teams" },
+    ],
   },
   {
     slug: "what-is-a-verification-gate",
@@ -611,6 +623,11 @@ export const PAGES: PSEOPage[] = [
     ],
     metaDescription:
       "Add structured peer review and a compliance-ready audit trail to AI-assisted decisions. ConvergePanel auto-flags low-confidence results and logs every review action.",
+    relatedLinks: [
+      { label: "AI audit trail for high-stakes decisions", href: "/use-cases/how-to-create-an-ai-audit-trail" },
+      { label: "AI Decision Audit Trail", href: "/use-cases/ai-decision-audit-trail" },
+      { label: "How to Prove an AI Decision Was Reviewed", href: "/use-cases/how-to-prove-an-ai-decision-was-reviewed" },
+    ],
   },
   {
     slug: "how-to-compare-chatgpt-claude-gemini-grok-perplexity-for-research",
@@ -1463,39 +1480,174 @@ export const PAGES: PSEOPage[] = [
         a: "Every ConvergePanel panel run automatically captures the query, each model's verdict and evidence, the consensus score, governance policy checks, and any peer review decisions. This structured output can be exported as an audit bundle that serves as the Decision Receipt for that query.",
       },
     ],
+    relatedLinks: [
+      { label: "Decision receipts and audit trails", href: "/use-cases/how-to-create-an-ai-audit-trail" },
+      { label: "AI Decision Audit Trail", href: "/use-cases/ai-decision-audit-trail" },
+      { label: "AI Audit Trail Software", href: "/use-cases/ai-audit-trail-software" },
+    ],
   },
 
   {
     slug: "how-to-create-an-ai-audit-trail",
     publishedAt: "2026-05-29",
-    title: "How to Create an AI Audit Trail",
-    h1: "How to Create an AI Audit Trail for Research and Verification Decisions",
+    title: "How to Create an AI Audit Trail for High-Stakes Decisions",
+    h1: "How to Create an AI Audit Trail Before You Trust AI Output",
     audience: "Compliance-minded professionals and team leads",
-    audienceDetail: "Knowledge workers, editors, analysts, and compliance officers who need to document AI-assisted work",
+    audienceDetail: "Knowledge workers, editors, analysts, researchers, and compliance officers who use AI for serious work and need to document the process",
     problem:
-      "Most AI tool usage leaves no paper trail. Queries are entered. Outputs are used. No one records what was asked, which model answered, what the quality of the evidence was, or whether any human reviewed it before action was taken. In low-stakes contexts, this doesn't matter much. In regulated industries, consequential decisions, or publishable work, it's a real liability.\n\nBuilding an AI audit trail manually is tedious: copying outputs, noting dates, tracking reviewer decisions, formatting records consistently. The overhead is high enough that most teams skip it — until they need it and don't have it.",
+      "An AI audit trail is a structured record of how an AI-assisted answer, recommendation, claim review, or decision was produced, reviewed, challenged, and approved. For serious work, a chat history is not enough. Teams need to know what was asked, which models responded, where they agreed, where they disagreed, what risks were flagged, who reviewed the output, and why the final decision was accepted, rejected, or escalated.\n\nMost AI tools leave no paper trail. Queries are entered. Outputs are used. No one records which model answered, what the quality of the evidence was, or whether any human reviewed it before action was taken. In low-stakes contexts, this rarely matters. In regulated industries, high-stakes decisions, or publishable work, the absence of a documented process is a real liability.\n\nWho needs an AI audit trail? Any team using AI for research that informs decisions, regulated industries subject to AI oversight requirements, editorial teams publishing AI-assisted findings, compliance officers responsible for documenting AI use, and anyone whose AI-assisted work may need to be explained, defended, or audited later.",
     solution:
-      "ConvergePanel's governance layer creates audit trails automatically. Every panel run captures the query, each model's response, the consensus score, governance policy outcomes, and peer review decisions. The audit log shows who reviewed what, when, and what they decided — without requiring any manual documentation effort.",
+      "ConvergePanel helps teams create stronger AI audit trails by running the same claim, question, or decision through multiple AI models simultaneously, surfacing where they agree and where they diverge, flagging weak assumptions and possible blind spots, and preserving the full record in an exportable audit bundle. The trail is a natural byproduct of the verification workflow — not a separate documentation task.\n\nBuilding an AI audit trail manually is tedious: copying outputs, noting dates, tracking reviewer decisions, formatting records consistently. The overhead is high enough that most teams skip it — until they need it and don't have it. ConvergePanel automates the capture so the record exists without requiring additional effort from the people doing the work.",
     workflow: [
-      "Set governance policies for your team: consensus thresholds, topic flags, required review tiers",
-      "Team members run queries through ConvergePanel as part of their normal workflow",
-      "Each run is automatically logged: query, models used, outputs, consensus score",
-      "Governance flags trigger peer review steps, which are also logged with reviewer identity and decision",
-      "Export the full audit bundle for any run — it contains the complete record of the AI-assisted process",
-      "Review the audit log periodically to identify patterns in flagged or low-consensus outputs",
+      "Define the specific claim, question, or decision being reviewed",
+      "Run it through ConvergePanel — all five models respond independently",
+      "Review the consensus score and identify where models agree",
+      "Examine the disagreement map — note what each dissenting model found and why",
+      "Check source grounding: which responses cite evidence vs. reason from assumptions",
+      "Flag any bias signals, uncertainty warnings, or missing-context notes surfaced by the models",
+      "Add human reviewer notes on output quality and any concerns",
+      "Complete peer review if governance policy requires it — the reviewer's decision is logged automatically",
+      "Export the audit bundle — it captures the full record as a decision receipt",
     ],
     useCases: [
-      "Building a compliance-ready record of AI-assisted research decisions",
-      "Documenting editorial fact-checking for legal protection",
-      "Meeting internal AI governance requirements in regulated industries",
-      "Creating accountability infrastructure for teams using AI at scale",
-      "Preparing for external audits of AI use in consequential decisions",
+      "Before publishing research, analysis, or reports based on AI output",
+      "Before acting on an AI-assisted recommendation that affects others",
+      "Before approving a policy or compliance decision informed by AI",
+      "Before relying on a high-stakes claim that needs to hold up to scrutiny",
+      "Before using AI output in a client deliverable or contract context",
+      "Before sharing an AI-assisted conclusion with leadership or a board",
+      "Before approving content, legal language, or public statements",
+      "When multiple AI models disagree on a critical point",
+      "When the decision may need to be explained, defended, or audited later",
     ],
-    cta: "Build your AI audit trail — start a free trial",
+    cta: "Start an AI Audit Trail — compare models, surface disagreement, and document your review",
     category: "how-to",
     metaDescription:
-      "AI audit trails document what was queried, which models answered, and who reviewed the output. Learn how ConvergePanel automates them for every panel run.",
-    schemaType: "HowTo",
+      "Learn how to create an AI audit trail that records prompts, model responses, disagreement, peer review, and final decision reasoning.",
+    schemaType: "FAQPage",
+    bodySections: [
+      {
+        heading: "What Should an AI Audit Trail Include?",
+        paragraphs: [
+          "A complete AI audit trail documents the full review process, not just the final answer. Before relying on AI output for anything consequential, check that your record covers these elements:",
+        ],
+        bullets: [
+          "The original question, claim, file, or decision being reviewed",
+          "The exact prompt or instructions used",
+          "The AI models queried",
+          "Each model's response or verdict",
+          "Areas where models agreed",
+          "Areas where models disagreed or expressed uncertainty",
+          "Source grounding and evidence cited by each model",
+          "Bias signals, blind-spot warnings, and missing-context flags",
+          "Human reviewer notes and observations",
+          "Peer review status and reviewer identity",
+          "The final decision or recommendation made",
+          "The reasoning behind accepting, rejecting, or escalating the output",
+          "Timestamps throughout the review process",
+        ],
+      },
+      {
+        heading: "Why AI Chat History Is Not the Same as an AI Audit Trail",
+        paragraphs: [
+          "A chat history records the conversation. It shows what you asked and what the model said. It does not show whether the answer was challenged by other models, whether disagreement was reviewed, whether weak evidence was flagged, or whether any human verified the output before action was taken.",
+          "For serious work, a chat history is not a governance record. It cannot tell an auditor whether the model's confidence was justified, whether a dissenting view was considered, whether the evidence was grounded in verifiable sources, or whether a qualified person approved the final recommendation before it was acted on.",
+          "An AI audit trail is more than a log. It documents the review process — the multi-model comparison, the disagreement, the scrutiny, the human oversight, and the reasoning behind the final decision. That structured record is what transforms an AI answer into an accountable conclusion.",
+        ],
+      },
+      {
+        heading: "How ConvergePanel Helps Create AI Audit Trails",
+        paragraphs: [
+          "ConvergePanel supports stronger AI audit trails by adding structure to the review process that most AI tools skip. Rather than producing a single model's answer, it helps teams:",
+        ],
+        bullets: [
+          "Run the same claim, question, or decision through multiple AI models simultaneously",
+          "See where models agree and where they diverge",
+          "Surface uncertainty, weak evidence, and possible blind spots",
+          "Generate a synthesis that documents the shape of multi-model agreement",
+          "Support peer review, logging who reviewed and what they decided",
+          "Preserve an exportable audit log of the complete review process",
+          "Produce a decision receipt that serves as the point-in-time record",
+        ],
+      },
+      {
+        heading: "AI Audit Trail: Example Workflow",
+        steps: [
+          "Define the specific claim, question, or decision to be reviewed",
+          "Run it through multiple AI models using ConvergePanel",
+          "Review the consensus score and identify where models agree",
+          "Examine disagreement — what each dissenting model found and why",
+          "Check source grounding: which responses cite evidence vs. reason from assumptions",
+          "Note any bias signals, uncertainty flags, or missing context surfaced by the models",
+          "Add human reviewer notes on the output quality and any concerns",
+          "Complete peer review if governance policy requires it — log the reviewer's decision",
+          "Generate or save a decision receipt capturing the full record",
+        ],
+      },
+      {
+        heading: "Common Mistakes to Avoid",
+        bullets: [
+          "Treating a chat transcript as an audit trail — it records conversation, not process",
+          "Relying on a single AI model for decisions that need scrutiny",
+          "Saving only the final answer while discarding the disagreement",
+          "Ignoring uncertainty signals and low-confidence outputs",
+          "Skipping human review for high-stakes AI-assisted conclusions",
+          "Failing to preserve the original prompt or decision context",
+          "Not recording why the final decision was accepted, rejected, or escalated",
+          "Using AI output in high-stakes workflows without a documented peer review step",
+          "Assuming that a high-confidence AI answer is a verified answer",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "What is an AI audit trail?",
+        a: "An AI audit trail is a structured record of how an AI-assisted task was performed: what was queried, which models responded, where they agreed and disagreed, what evidence quality existed, who reviewed the output, and what decision was made. It makes AI-assisted work observable, verifiable, and accountable — not just to the person who did it, but to anyone reviewing it later.",
+      },
+      {
+        q: "Why is AI chat history not enough for serious decisions?",
+        a: "A chat history records the conversation but not the process. It doesn't show whether the answer was challenged by other models, whether disagreement was reviewed, whether weak assumptions were flagged, or whether a human verified the output. For high-stakes work, you need a record of the review process, not just the exchange.",
+      },
+      {
+        q: "What should an AI audit trail include?",
+        a: "The original query or claim, the models used, each model's response, areas of agreement and disagreement, evidence quality and citations, any bias or uncertainty flags, human reviewer notes, peer review status, the final decision made, and timestamps throughout. A complete record documents the process, not just the outcome.",
+      },
+      {
+        q: "When should a team create an AI audit trail?",
+        a: "Any time AI output informs a consequential decision: before publishing research, before acting on an AI-assisted recommendation, before approving policy decisions, before sharing AI conclusions with leadership, when models disagree on a critical point, or when the decision may need to be explained or audited later.",
+      },
+      {
+        q: "How does an AI audit trail help with AI governance?",
+        a: "An audit trail gives governance teams the evidence they need to verify that AI use was responsible: what was queried, how it was reviewed, who approved it, and on what basis. Without it, AI governance is a policy with no enforcement mechanism — you can require responsible AI use, but you can't demonstrate it.",
+      },
+      {
+        q: "What is the difference between an AI audit trail and a decision receipt?",
+        a: "They document the same process from different angles. An audit trail is the longitudinal record covering AI use over time — useful for compliance and governance reviews. A decision receipt is the point-in-time document for a specific decision — what was decided, on what evidence, reviewed by whom. ConvergePanel's export functions as both.",
+      },
+      {
+        q: "Can an AI audit trail show model disagreement?",
+        a: "Yes — and it should. A trail that only shows the consensus hides the most important information. Model disagreement signals that the topic is contested, evidence is uncertain, or the conclusion depends on framing. Documenting disagreement shows that the complexity was seen and addressed, not smoothed over.",
+      },
+      {
+        q: "Who needs an AI audit trail?",
+        a: "Regulated industries (financial services, healthcare, legal, insurance), editorial and publishing teams, compliance officers, research teams using AI for analysis that informs decisions, and any organization where AI-assisted work may be reviewed by auditors, clients, boards, or regulators.",
+      },
+    ],
+    relatedLinks: [
+      { label: "AI Decision Audit Trail", href: "/use-cases/ai-decision-audit-trail" },
+      { label: "AI Audit Trail Software", href: "/use-cases/ai-audit-trail-software" },
+      { label: "What Is a Decision Receipt?", href: "/use-cases/what-is-a-decision-receipt" },
+      { label: "How to Prove an AI Decision Was Reviewed", href: "/use-cases/how-to-prove-an-ai-decision-was-reviewed" },
+      { label: "AI Governance for Small Teams", href: "/use-cases/ai-governance-for-small-teams" },
+      { label: "AI Accountability Workflow", href: "/use-cases/ai-accountability-workflow" },
+      { label: "How to Document Model Disagreement", href: "/use-cases/how-to-document-model-disagreement" },
+      { label: "How to Track AI Decision-Making", href: "/use-cases/how-to-track-ai-decision-making" },
+      { label: "AI Review Process for Teams", href: "/use-cases/ai-review-process-for-teams" },
+      { label: "AI Peer Review for High-Stakes Workflows", href: "/use-cases/ai-peer-review-for-high-stakes-workflows" },
+      { label: "AI Governance Workflow for Enterprise Teams", href: "/use-cases/ai-governance-workflow-for-enterprise-teams" },
+      { label: "Why Teams Need to Slow Down AI Decisions", href: "/use-cases/why-teams-need-to-slow-down-ai-decisions" },
+      { label: "What Is a Consensus Score?", href: "/use-cases/what-is-a-consensus-score" },
+    ],
   },
 
   {
@@ -1528,6 +1680,11 @@ export const PAGES: PSEOPage[] = [
     category: "governance",
     metaDescription:
       "AI governance doesn't require a compliance team. Small teams can set consensus thresholds, topic flags, and lightweight peer review in minutes.",
+    relatedLinks: [
+      { label: "Documenting AI-assisted decisions", href: "/use-cases/how-to-create-an-ai-audit-trail" },
+      { label: "AI Accountability Workflow", href: "/use-cases/ai-accountability-workflow" },
+      { label: "AI Governance Workflow for Enterprise Teams", href: "/use-cases/ai-governance-workflow-for-enterprise-teams" },
+    ],
   },
 
   {
@@ -1592,6 +1749,11 @@ export const PAGES: PSEOPage[] = [
     category: "thought-leadership",
     metaDescription:
       "The cost of skipping AI verification is paid later and multiplied. Learn why a structured verification pause improves team decisions and how to build it in.",
+    relatedLinks: [
+      { label: "AI audit trail workflow", href: "/use-cases/how-to-create-an-ai-audit-trail" },
+      { label: "What Is a Decision Receipt?", href: "/use-cases/what-is-a-decision-receipt" },
+      { label: "AI Review Process for Teams", href: "/use-cases/ai-review-process-for-teams" },
+    ],
   },
 
   {
@@ -1636,6 +1798,10 @@ export const PAGES: PSEOPage[] = [
         q: "Can a claim have a high consensus score and still be wrong?",
         a: "Yes. A high consensus score means the AI models agree — not that they're correct. All five models share training data biases, and can converge on an inaccuracy that's widely represented in their training data. The consensus score is a reliability signal, not a guarantee. For high-stakes claims, it should inform — not replace — human judgment and primary-source verification.",
       },
+    ],
+    relatedLinks: [
+      { label: "Building an AI audit trail", href: "/use-cases/how-to-create-an-ai-audit-trail" },
+      { label: "AI Governance for Small Teams", href: "/use-cases/ai-governance-for-small-teams" },
     ],
   },
 
@@ -3767,9 +3933,9 @@ export const PAGES: PSEOPage[] = [
     audience: "Compliance teams, governance teams, decision-making teams",
     audienceDetail: "Compliance officers, team leads, and governance managers who need software that automatically documents AI-assisted research and decision processes",
     problem:
-      "Most AI tools leave no audit trail. A query is entered, an answer is returned, and the interaction disappears. No record of what was asked, which model was used, what the evidence quality was, or whether any human reviewed the output before it informed a decision. In low-stakes contexts, this is an inconvenience. In regulated industries, consequential decisions, or environments where accountability is legally required, it's a serious gap.",
+      "Most AI tools leave no audit trail. A query is entered, an answer is returned, and the interaction disappears. No record of what was asked, which model was used, what the evidence quality was, or whether any human reviewed the output before it informed a decision. In low-stakes contexts, this is an inconvenience. In regulated industries, consequential decisions, or environments where accountability is legally required, it's a serious gap.\n\nThe absence of an AI audit trail isn't just a compliance risk — it's an accountability gap. When an AI-assisted decision is later questioned, challenged, or audited, the inability to reconstruct what happened is itself a finding. 'We used AI but have no record of how' is not a defensible position in front of a regulator, a board, or a client. Who needs an AI audit trail? Regulated industries (financial services, healthcare, legal, insurance), compliance-conscious teams, editors and publishers, and any organization where AI-assisted outputs inform consequential decisions.\n\nThe gap between 'we used AI responsibly' and 'we can prove we used AI responsibly' is an audit trail.",
     solution:
-      "ConvergePanel creates audit trails automatically. Every panel run captures the query, model identities, per-model responses, consensus score, governance policy outcomes, and reviewer decisions in a structured, exportable record. The audit trail is a natural byproduct of the verification workflow — not additional documentation effort imposed on top of it.",
+      "ConvergePanel creates audit trails automatically. Every panel run captures the query, model identities, per-model responses, consensus score, governance policy outcomes, and reviewer decisions in a structured, exportable record. The audit trail is a natural byproduct of the verification workflow — not additional documentation effort imposed on top of it.\n\nThis is fundamentally different from a chat history. A chat history records the conversation. An AI audit trail records the process: what was verified, what each model independently concluded, what the consensus quality was, whether governance policies flagged anything, who reviewed it, and what decision was made. A chat history tells you what was said. An audit trail tells you whether the output was trustworthy enough to act on — and who made that call.\n\nPeer review is part of what makes the trail meaningful. When a governance policy flags a low-confidence result, ConvergePanel routes it to an assigned reviewer. Their decision — approve, block, request changes — is logged with their identity and timestamp. Decision receipts capture this peer review step as a structured record, creating the human-in-the-loop evidence that compliance frameworks increasingly require.",
     workflow: [
       "Configure ConvergePanel governance: set the audit policy for which query types require a full audit trail",
       "Run AI-assisted research through ConvergePanel as part of the standard workflow",
@@ -3783,29 +3949,53 @@ export const PAGES: PSEOPage[] = [
       "Creating documentation of AI research processes for legal or contractual accountability",
       "Meeting internal AI governance requirements that specify what AI use must be logged",
       "Providing evidence of due diligence in an audit or external review of AI-assisted decisions",
+      "Demonstrating human oversight for AI-assisted decisions under the EU AI Act or similar frameworks",
     ],
     cta: "Create an Audit Trail — automatic documentation for every AI-assisted decision",
     category: "governance",
     metaDescription:
-      "Most AI tools leave no audit trail. ConvergePanel automatically documents every panel run — query, models, outputs, consensus score, and reviewer decisions",
+      "Most AI tools leave no audit trail. ConvergePanel automatically documents every panel run — query, models, outputs, consensus score, and reviewer decisions — exportable for compliance.",
     schemaType: "FAQPage",
     faq: [
       {
         q: "What is an AI audit trail?",
-        a: "An AI audit trail is a structured record of how an AI-assisted task was performed: what was queried, which models were used, what they returned, what the evidence quality was, and who reviewed the output before it was acted upon. It creates accountability for AI-assisted work by making the process observable and verifiable.",
+        a: "An AI audit trail is a structured record of how an AI-assisted task was performed: what was queried, which models were used, what they returned, what the evidence quality was, and who reviewed the output before it was acted upon. It makes AI-assisted work observable, verifiable, and accountable — not just to the person who did it, but to anyone who needs to review it later.",
       },
       {
-        q: "What should AI audit trail software capture?",
-        a: "At minimum: the query or claim, the model or models used, the outputs returned, a confidence or quality signal, any governance flags triggered, and the human review decision if applicable. For full accountability, it should also capture timestamps and reviewer identity.",
+        q: "Why does an AI audit trail matter?",
+        a: "Because 'we used AI' is not the same as 'we used AI responsibly.' An audit trail provides the evidence that a reasonable process was followed: the right questions were asked, the outputs were assessed for quality, and a human reviewed the result before action was taken. Without it, AI-assisted decisions are indistinguishable from uninformed intuition to anyone reviewing them after the fact.",
       },
       {
-        q: "Does ConvergePanel provide audit trails for compliance purposes?",
-        a: "ConvergePanel's audit export is designed for exactly this use. It captures the full record of every panel run in a structured, exportable format that can be reviewed by compliance teams, attached to decision files, or stored in accordance with internal record-keeping requirements.",
+        q: "Who needs an AI audit trail?",
+        a: "Any team where AI-assisted outputs inform consequential decisions: regulated industries (financial services, healthcare, legal, insurance), compliance teams, editorial and publishing teams, research teams, and organizations subject to AI governance requirements. If a wrong AI output could cause harm — financial, reputational, legal, or otherwise — an audit trail is warranted.",
       },
       {
-        q: "How long should AI audit trails be retained?",
-        a: "Retention requirements vary by industry, regulation, and decision type. A reasonable default is to align AI audit trail retention with the retention policy for the underlying decision — if the decision is retained for seven years, the AI audit trail for that decision should be too. Consult your organization's legal or compliance team for specific requirements.",
+        q: "What should an AI audit trail include?",
+        a: "At minimum: the original query or claim, the AI models used, each model's output and verdict, a confidence or consensus quality signal, any governance flags triggered, the human review decision if applicable, and timestamps throughout. For full accountability, also capture reviewer identity and the final decision made.",
       },
+      {
+        q: "How does ConvergePanel create an AI decision trail?",
+        a: "Every ConvergePanel panel run automatically logs the query, the five models queried, their individual outputs and verdicts, the consensus score, any governance flags, and peer review decisions. This structured record is exportable as an audit bundle — a complete, timestamped trail of the AI-assisted process, ready for compliance teams, legal review, or internal audit.",
+      },
+      {
+        q: "How is an AI audit trail different from a normal chat history?",
+        a: "A chat history records the conversation. An AI audit trail records the process: what was verified, what multiple independent models concluded, what the consensus quality was, whether governance policies were triggered, who reviewed the output, and what decision was made. Chat histories tell you what was said. Audit trails tell you whether the output was trustworthy enough to act on — and who made that determination.",
+      },
+      {
+        q: "How does peer review help with AI audit trails?",
+        a: "Peer review adds a documented human-in-the-loop step to the audit trail. When governance policies flag a low-confidence result, ConvergePanel routes it to an assigned reviewer. Their decision — approve, block, or request changes — is logged with their identity and timestamp. This creates the evidence of human oversight that compliance frameworks and regulations increasingly require.",
+      },
+      {
+        q: "How do decision receipts relate to AI audit trails?",
+        a: "A decision receipt is the point-in-time document for a specific AI-assisted decision: what was decided, on what evidence, and who reviewed it. An audit trail is the longitudinal record covering all AI use over time. ConvergePanel's export functions as both — a receipt for the specific decision, and a contribution to the ongoing audit trail of AI use in your organization.",
+      },
+    ],
+    relatedLinks: [
+      { label: "What is a Decision Receipt?", href: "/use-cases/what-is-a-decision-receipt" },
+      { label: "How to Create an AI Audit Trail", href: "/use-cases/how-to-create-an-ai-audit-trail" },
+      { label: "AI Decision Audit Trail", href: "/use-cases/ai-decision-audit-trail" },
+      { label: "How to Prove an AI Decision Was Reviewed", href: "/use-cases/how-to-prove-an-ai-decision-was-reviewed" },
+      { label: "AI Governance for Small Teams", href: "/use-cases/ai-governance-for-small-teams" },
     ],
   },
 
@@ -3857,6 +4047,11 @@ export const PAGES: PSEOPage[] = [
         a: "They refer to the same thing from different angles. An audit trail emphasizes the process documentation — useful for compliance and accountability reviews. A Decision Receipt emphasizes the decision itself — useful as a point-in-time record of what was decided, why, and on what basis. ConvergePanel's export functions as both.",
       },
     ],
+    relatedLinks: [
+      { label: "AI audit trail for high-stakes decisions", href: "/use-cases/how-to-create-an-ai-audit-trail" },
+      { label: "AI Audit Trail Software", href: "/use-cases/ai-audit-trail-software" },
+      { label: "How to Prove an AI Decision Was Reviewed", href: "/use-cases/how-to-prove-an-ai-decision-was-reviewed" },
+    ],
   },
 
   {
@@ -3906,6 +4101,11 @@ export const PAGES: PSEOPage[] = [
         q: "What governance standards require documented AI reviews?",
         a: "Several frameworks are relevant depending on context: EU AI Act Article 14 requires human oversight for high-risk AI systems; SOX and other financial regulations require documented processes for material decisions; ISO 42001 establishes AI management system requirements including human oversight. Consult your legal team for the standards applicable to your specific context.",
       },
+    ],
+    relatedLinks: [
+      { label: "Create a documented AI audit trail", href: "/use-cases/how-to-create-an-ai-audit-trail" },
+      { label: "AI Decision Audit Trail", href: "/use-cases/ai-decision-audit-trail" },
+      { label: "What Is a Decision Receipt?", href: "/use-cases/what-is-a-decision-receipt" },
     ],
   },
 
@@ -3957,6 +4157,10 @@ export const PAGES: PSEOPage[] = [
         a: "Treat it as unresolved and say so. A high-disagreement finding is not a failed verification — it's an accurate representation of a contested issue. Clearly labeling it as contested, documenting what each model says, and recommending further primary-source investigation is the most defensible approach.",
       },
     ],
+    relatedLinks: [
+      { label: "AI audit trail workflow", href: "/use-cases/how-to-create-an-ai-audit-trail" },
+      { label: "AI Decision Audit Trail", href: "/use-cases/ai-decision-audit-trail" },
+    ],
   },
 
   {
@@ -4007,6 +4211,10 @@ export const PAGES: PSEOPage[] = [
         a: "Check whether the audit log shows consistent use of the workflow. Are flagged outputs being reviewed? Are review decisions being documented? Are exported audit bundles being stored? Patterns in the audit log — high flag rates, skipped reviews, inconsistent documentation — reveal where the workflow is breaking down.",
       },
     ],
+    relatedLinks: [
+      { label: "How to create an AI audit trail", href: "/use-cases/how-to-create-an-ai-audit-trail" },
+      { label: "AI Governance Workflow for Enterprise Teams", href: "/use-cases/ai-governance-workflow-for-enterprise-teams" },
+    ],
   },
 
   {
@@ -4056,6 +4264,10 @@ export const PAGES: PSEOPage[] = [
         q: "Can a small team implement a meaningful AI review process?",
         a: "Yes. A two-person team can establish a simple standard: one person runs the AI query, the second reviews before it's used for anything client-facing or consequential. ConvergePanel supports this with configurable governance thresholds — the review step triggers automatically when it's needed, not for every query.",
       },
+    ],
+    relatedLinks: [
+      { label: "Documenting AI-assisted decisions", href: "/use-cases/how-to-create-an-ai-audit-trail" },
+      { label: "AI Accountability Workflow", href: "/use-cases/ai-accountability-workflow" },
     ],
   },
 
@@ -4156,6 +4368,10 @@ export const PAGES: PSEOPage[] = [
         q: "How do I turn AI decision tracking data into governance improvements?",
         a: "Look for patterns: which topics generate the most flags? Which teams have the lowest review completion rates? Which query types consistently produce low-consensus outputs? These patterns reveal where governance policies need adjustment, where training is needed, and where additional oversight is most valuable.",
       },
+    ],
+    relatedLinks: [
+      { label: "AI audit trail for high-stakes decisions", href: "/use-cases/how-to-create-an-ai-audit-trail" },
+      { label: "AI Accountability Workflow", href: "/use-cases/ai-accountability-workflow" },
     ],
   },
 

@@ -145,6 +145,37 @@ export default function AboutPage() {
                 basis for high-stakes calls.
               </p>
             </section>
+
+            <section>
+              <h2 className="text-2xl font-semibold text-gray-900">See it in practice</h2>
+              <p className="mt-3 leading-relaxed">
+                Detailed use-case guides covering claim verification, video authenticity, AI audit trails,
+                governance workflows, and more:
+              </p>
+              <ul className="not-prose mt-4 space-y-2">
+                {[
+                  { label: "AI Audit Trail Software", href: "/use-cases/ai-audit-trail-software" },
+                  { label: "What Is a Decision Receipt?", href: "/use-cases/what-is-a-decision-receipt" },
+                  { label: "AI Governance for Small Teams", href: "/use-cases/ai-governance-for-small-teams" },
+                  { label: "Claim Verification for Journalists", href: "/use-cases/claim-verification-for-journalists" },
+                  { label: "Video Authenticity Review for Fact-Checkers", href: "/use-cases/video-authenticity-review-for-fact-checkers" },
+                  { label: "How to Check if AI Hallucinated", href: "/use-cases/how-to-check-if-ai-hallucinated" },
+                  { label: "AI Model Consensus Tool", href: "/use-cases/ai-model-consensus-tool" },
+                  { label: "How to Prove an AI Decision Was Reviewed", href: "/use-cases/how-to-prove-an-ai-decision-was-reviewed" },
+                ].map(({ label, href }) => (
+                  <li key={href}>
+                    <Link href={href} className="text-sm text-sky-600 hover:underline">
+                      {label} →
+                    </Link>
+                  </li>
+                ))}
+                <li>
+                  <Link href="/use-cases" className="text-sm font-semibold text-sky-700 hover:underline">
+                    Browse all 100 use cases →
+                  </Link>
+                </li>
+              </ul>
+            </section>
           </div>
 
           <div className="mt-8 border-t border-gray-200 pt-6">

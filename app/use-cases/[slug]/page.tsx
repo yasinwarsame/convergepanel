@@ -261,6 +261,42 @@ export default async function UseCasePage({
           </ul>
         </section>
 
+        {/* Body sections (optional custom H2 sections) */}
+        {page.bodySections && page.bodySections.map((section, i) => (
+          <section key={i} className="mb-9">
+            <h2 className="mb-3 text-xl font-bold text-slate-900">{section.heading}</h2>
+            {section.paragraphs && (
+              <div className="space-y-4 mb-3">
+                {section.paragraphs.map((para, j) => (
+                  <p key={j} className="text-base leading-relaxed text-slate-700">{para}</p>
+                ))}
+              </div>
+            )}
+            {section.bullets && (
+              <ul className="space-y-2">
+                {section.bullets.map((item, j) => (
+                  <li key={j} className="flex gap-2.5 text-base leading-relaxed text-slate-700">
+                    <span className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${cat.tailwindDot}`} />
+                    {item}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {section.steps && (
+              <ol className="space-y-3">
+                {section.steps.map((step, j) => (
+                  <li key={j} className="flex gap-3">
+                    <span className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${cat.tailwindText} ${cat.tailwindBg}`}>
+                      {j + 1}
+                    </span>
+                    <span className="text-base leading-relaxed text-slate-700">{step}</span>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </section>
+        ))}
+
         {/* FAQ (optional) */}
         {page.faq && page.faq.length > 0 && (
           <section className="mb-12">
@@ -273,6 +309,28 @@ export default async function UseCasePage({
                 </div>
               ))}
             </div>
+          </section>
+        )}
+
+        {/* Related pages (cross-cluster) */}
+        {page.relatedLinks && page.relatedLinks.length > 0 && (
+          <section className="mb-12 rounded-xl border border-slate-200 bg-slate-50 px-6 py-5">
+            <h2 className="mb-4 text-sm font-bold uppercase tracking-widest text-slate-400">
+              Explore related pages
+            </h2>
+            <ul className="space-y-2">
+              {page.relatedLinks.map(({ label, href }, i) => (
+                <li key={i}>
+                  <Link
+                    href={href}
+                    className="group flex items-center gap-2 text-sm font-medium text-slate-700 hover:text-sky-700 transition-colors"
+                  >
+                    <span className="text-slate-300 group-hover:text-sky-400 transition-colors">→</span>
+                    {label}
+                  </Link>
+                </li>
+              ))}
+            </ul>
           </section>
         )}
 
