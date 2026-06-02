@@ -170,25 +170,47 @@ export const PAGES: PSEOPage[] = [
     h1: "AI Video Authenticity Review for Fact-Checking Teams",
     audience: "Fact-checkers",
     audienceDetail: "Professional fact-checkers at newsrooms, NGOs, and verification organizations",
+    publishedAt: "2026-05-29",
     problem:
-      "Deepfakes and AI-generated video are increasingly realistic. A single detection tool has blind spots. Fact-checkers need multiple signals — not one model's guess — before making a call.",
+      "Deepfakes and AI-generated video are increasingly realistic. A single detection tool has blind spots. Fact-checkers need multiple signals — not one model's guess — before making a call.\n\nThe institutional stakes make this harder. Fact-checkers face editor scrutiny, legal review, and public accountability. A false positive — calling authentic video fake — carries reputational damage equal to a false negative. Newsrooms need defensible documentation of every step in the verification chain, not just a tool's output.\n\nSpeed is also a constraint that single-model tools don't solve. If a clip is circulating during a breaking news cycle, a verification process that takes 30 minutes per video doesn't fit editorial timelines. The gap between 'we saw the clip' and 'we have a defensible verdict' has to close faster than the news cycle.",
     solution:
-      "ConvergePanel's Video Verification mode sends extracted frames to three vision-capable AI models (GPT-4o, Claude, Gemini). Each independently looks for synthetic artifacts, manipulation indicators, and generation signatures. You get a consensus verdict, not a single opinion.",
+      "ConvergePanel's Video Verification mode sends extracted frames to three vision-capable AI models (GPT-4o, Claude, Gemini). Each independently looks for synthetic artifacts, manipulation indicators, and generation signatures. You get a consensus verdict, not a single opinion.\n\nThe output is structured for editorial use: per-model evidence with specific signals flagged, a consensus score, and a verdict that can be referenced in a published methodology note. When models agree that a video shows AI generation artifacts, that agreement is the evidence. When they split, the split tells you where your manual investigation should focus.",
     workflow: [
       "Upload a video clip (up to 60 seconds)",
       "ConvergePanel extracts frames and metadata",
       "Three vision models independently review for manipulation and generation signals",
-      "You receive a verdict, consensus score, and per-model evidence with specific signals flagged",
+      "Review the consensus verdict, per-model signal breakdown, and evidence quality",
+      "Export the structured result for your editor or include it in your methodology",
     ],
     useCases: [
       "Checking whether a viral social media video shows signs of AI generation",
       "Reviewing campaign footage flagged by readers or tipsters",
-      "Adding a structured AI-review step to your fact-checking workflow",
+      "Documenting your AI-review step for editors and published methodology notes",
+      "Adding a repeatable verification layer to breaking-news video workflows",
     ],
     cta: "Try video verification on your next flagged clip",
     category: "video-verification",
+    schemaType: "FAQPage",
+    faq: [
+      {
+        q: "How long does video verification take?",
+        a: "Typically 30–60 seconds per clip. Three models analyze extracted frames simultaneously, so the wait is roughly the same regardless of clip length up to 60 seconds.",
+      },
+      {
+        q: "Can ConvergePanel prove a video is authentic?",
+        a: "No — it identifies signals consistent with AI generation or manipulation. A clean result across all three models reduces suspicion, but the absence of detected signals is not proof of authenticity. Use it as one step in your verification process.",
+      },
+      {
+        q: "Can I use the results in a published fact-check?",
+        a: "Yes. The per-model evidence breakdown is exportable and suitable for a methodology note. You can reference the models used and their specific signals found.",
+      },
+      {
+        q: "What if the three models disagree?",
+        a: "Disagreement is a signal, not a failure. If models split, ConvergePanel highlights where they diverge and what each model found. That's where your manual investigation should focus.",
+      },
+    ],
     metaDescription:
-      "3 vision-capable AI models review your video for deepfake and manipulation signals. ConvergePanel gives fact-checkers a consensus verdict — not one tool's",
+      "3 vision-capable AI models review your video for deepfake signals. ConvergePanel gives fact-checkers a documented consensus verdict — not one tool's opinion.",
   },
   {
     slug: "video-authenticity-review-for-researchers",
@@ -196,25 +218,47 @@ export const PAGES: PSEOPage[] = [
     h1: "Multi-Model Video Authenticity Analysis for Research",
     audience: "Researchers",
     audienceDetail: "Media researchers, misinformation scholars, and digital forensics students",
+    publishedAt: "2026-05-29",
     problem:
-      "Studying video manipulation at scale requires consistent, structured analysis. Manual frame-by-frame review doesn't scale, and single-model detectors produce inconsistent results across video types.",
+      "Studying video manipulation at scale requires consistent, structured analysis. Manual frame-by-frame review doesn't scale, and single-model detectors produce inconsistent results across video types.\n\nReproducibility is the deeper methodological issue. If your study relies on deepfake detection, other researchers need to replicate your methodology. Ad-hoc tool outputs aren't reproducible — they depend on which model you used, its version, and its output format at the time of analysis. Citing 'we used a commercial detection tool' in a methods section doesn't satisfy peer review.\n\nGround-truth labeling also requires consistent criteria. When building a dataset of authentic versus generated video, you need inter-annotator reliability. Two researchers using different single-model tools will produce incomparable labels — making dataset merging and cross-study comparison impossible.",
     solution:
-      "ConvergePanel provides structured multi-model video review with per-model evidence, consensus scoring, and exportable results — giving researchers a repeatable analysis framework rather than ad-hoc tool outputs.",
+      "ConvergePanel provides structured multi-model video review with per-model evidence, consensus scoring, and exportable results — giving researchers a repeatable analysis framework rather than ad-hoc tool outputs.\n\nThe per-model evidence output uses consistent fields across every run: signals detected, confidence level, and evidence quality rating per model. You can build your dataset schema around this structure. The consensus score provides a numeric label for classification tasks; the per-model breakdown lets you study model disagreement as a research artifact in itself — useful for understanding where current AI detection methods are most uncertain.",
     workflow: [
       "Upload a video sample (up to 60 seconds)",
       "Three vision-capable models independently analyze extracted frames",
       "Review per-model evidence: manipulation signals, authenticity signals, compression artifacts",
-      "Export structured results for your dataset or paper",
+      "Note the consensus score for your dataset label and the disagreement pattern for analysis",
+      "Export structured results (CSV or JSON) for your dataset or paper appendix",
     ],
     useCases: [
-      "Building a labeled dataset of AI-generated vs. authentic video",
-      "Comparing multi-model consensus against ground-truth labels",
-      "Documenting detection methodology for reproducible research",
+      "Building a labeled dataset of AI-generated vs. authentic video with consistent criteria",
+      "Comparing multi-model consensus against ground-truth labels to measure detection accuracy",
+      "Documenting detection methodology in a format suitable for a reproducibility section",
+      "Studying where AI models disagree — disagreement patterns reveal detection uncertainty",
     ],
     cta: "Start structured video analysis — see how models compare",
     category: "video-verification",
+    schemaType: "FAQPage",
+    faq: [
+      {
+        q: "Can I export results in bulk for a dataset?",
+        a: "Currently exports are per-clip. API access for bulk analysis is available for research teams — contact us to discuss your dataset requirements.",
+      },
+      {
+        q: "What does the consensus score mean for a dataset label?",
+        a: "A score above 80 indicates strong multi-model agreement on whether manipulation signals are present. Below 50 means significant disagreement — suitable as an 'uncertain' label in your dataset rather than a binary classification.",
+      },
+      {
+        q: "How do I cite ConvergePanel in a paper?",
+        a: "Reference it as a multi-model verification tool and list the specific models used (GPT-4o, Claude, Gemini). Each run logs model identifiers and output versions, which can be included in a methods appendix.",
+      },
+      {
+        q: "Is the output format consistent across runs?",
+        a: "Yes — the same fields are returned for every clip: per-model verdict, signal list, evidence quality rating, and consensus score. This consistency is what makes it suitable for dataset construction.",
+      },
+    ],
     metaDescription:
-      "Researchers: analyze video authenticity with 3 vision AI models. ConvergePanel provides structured, exportable results with consensus scoring.",
+      "Researchers: analyze video authenticity with 3 vision AI models. ConvergePanel provides structured, exportable results with reproducible methodology and consensus scoring.",
   },
   {
     slug: "deep-research-with-multiple-ai-models",
@@ -353,25 +397,47 @@ export const PAGES: PSEOPage[] = [
     h1: "What Is Source-Grounding — and Why Does It Matter for AI Trust?",
     audience: "AI-curious professionals",
     audienceDetail: "Professionals evaluating AI reliability for their work",
+    publishedAt: "2026-05-29",
     problem:
-      "AI models generate plausible-sounding answers regardless of whether they have good evidence. Without source-grounding, you can't tell the difference between 'the model found strong evidence' and 'the model made something up.'",
+      "AI models generate plausible-sounding answers regardless of whether they have good evidence. Without source-grounding, you can't tell the difference between 'the model found strong evidence' and 'the model made something up.'\n\nThis problem has a specific mechanism. Language models are trained to predict the next token — they don't distinguish between 'I retrieved this from a document' and 'I generated this based on patterns in my training data.' When a model says 'according to a 2023 study…', it may be citing a real study, paraphrasing one, or generating a plausible-sounding reference from scratch. The output looks identical in all three cases.\n\nSource-grounding is the field's response. A grounded AI system ties its claims to retrievable, verifiable sources — documents, passages, or structured knowledge bases. An ungrounded system operates purely from parametric memory: the implicit knowledge encoded in its weights during training, which can't be audited, corrected, or cited. The practical difference is whether you can check the answer.",
     solution:
-      "Source-grounding means tying AI claims back to retrievable evidence. In ConvergePanel, each model's output includes evidence quality ratings and, where available, citations — so you can see whether a verdict rests on solid ground or thin air.",
+      "Source-grounding means tying AI claims back to retrievable evidence. In ConvergePanel, each model's output includes evidence quality ratings and, where available, citations — so you can see whether a verdict rests on solid ground or thin air.\n\nIn practice, source-grounding exists on a spectrum. A model that cites a specific passage from a named document is strongly grounded. A model that says 'experts generally believe...' with no citation is weakly grounded — it may be correct, but you can't verify it. ConvergePanel's per-model evidence quality rating captures this spectrum, letting you distinguish models that supported their conclusions with verifiable evidence from those that provided plausible-sounding reasoning without it.",
     workflow: [
       "Submit a question or claim",
       "Models return answers with evidence and (where available) citations",
-      "ConvergePanel rates evidence quality per model",
-      "You see which answers are grounded and which are speculative",
+      "ConvergePanel rates evidence quality per model: strong, moderate, or weak",
+      "Compare grounding levels across models — where they all cite evidence vs. where they speculate",
+      "Prioritize well-grounded answers and flag weakly grounded ones for further verification",
     ],
     useCases: [
-      "Distinguishing AI-generated reasoning from AI-retrieved evidence",
-      "Prioritizing well-grounded claims over speculative ones in reports",
-      "Teaching teams to evaluate AI output critically",
+      "Distinguishing AI-generated reasoning from AI-retrieved evidence before acting on it",
+      "Prioritizing well-grounded claims over speculative ones when writing reports",
+      "Training teams to ask 'what is the model's evidence?' not just 'what is the model's answer?'",
+      "Evaluating whether a specific AI model is suitable for evidence-dependent tasks in your domain",
     ],
     cta: "See evidence quality scoring in a free panel run",
     category: "glossary",
+    schemaType: "FAQPage",
+    faq: [
+      {
+        q: "What's the difference between source-grounding and RAG?",
+        a: "RAG (Retrieval-Augmented Generation) is a technical implementation of source-grounding — the model retrieves documents at query time and bases its answer on them. Source-grounding is the broader principle: claims should be tied to verifiable evidence, regardless of implementation method.",
+      },
+      {
+        q: "Can ConvergePanel show me the actual sources?",
+        a: "Where models return citations, ConvergePanel displays them. Not all models consistently return citations; the evidence quality rating reflects the presence, specificity, and verifiability of whatever supporting evidence each model provides.",
+      },
+      {
+        q: "Is a highly grounded answer always correct?",
+        a: "No — a model can cite a real source and misrepresent its content, or cite a source that itself contains errors. Grounding reduces hallucination risk because the claim becomes auditable. It doesn't eliminate error.",
+      },
+      {
+        q: "Why does source-grounding matter for AI trust?",
+        a: "Because it makes AI claims checkable. If a model's answer can be traced to a specific source, you can verify whether that source says what the model claims. Without grounding, you have a fluent answer with no audit path — you can agree or disagree, but you can't check.",
+      },
+    ],
     metaDescription:
-      "Source-grounding ties AI claims to retrievable evidence. Learn why it matters and how ConvergePanel rates evidence quality across 5 models.",
+      "Source-grounding ties AI claims to retrievable, verifiable evidence. Learn what it means, why it matters, and how ConvergePanel rates evidence quality across 5 models.",
   },
   {
     slug: "single-model-vs-multi-model-verification",
@@ -456,25 +522,47 @@ export const PAGES: PSEOPage[] = [
     h1: "AI Video Authenticity Review for Media and Communications Teams",
     audience: "Media teams",
     audienceDetail: "Social media managers, communications directors, PR teams, and brand safety officers",
+    publishedAt: "2026-05-29",
     problem:
-      "Deepfakes and AI-generated video increasingly target brands, executives, and public figures. Media teams need a fast way to check whether a circulating video is authentic before deciding how to respond.",
+      "Deepfakes and AI-generated video increasingly target brands, executives, and public figures. Media teams need a fast way to check whether a circulating video is authentic before deciding how to respond.\n\nThe response window is the constraint. When a video of your CEO appears to say something damaging, the decision — respond immediately, wait for verification, or issue a denial — has to happen within hours, not days. Acting on an authentic video as if it were fake creates its own crisis. The cost of a wrong call in either direction is high.\n\nBrand safety is also an ongoing concern, not just a crisis event. User-submitted video, influencer content, and partner-produced footage all carry deepfake risk. Systematically reviewing flagged content before amplification prevents a different kind of damage: becoming the channel that amplified a generated video as real.",
     solution:
-      "ConvergePanel's Video Verification mode runs three vision-capable AI models against extracted frames to check for AI generation signatures, synthetic artifacts, and manipulation indicators — giving you a structured assessment in minutes, not hours.",
+      "ConvergePanel's Video Verification mode runs three vision-capable AI models against extracted frames to check for AI generation signatures, synthetic artifacts, and manipulation indicators — giving you a structured assessment in minutes, not hours.\n\nThe output is designed to feed directly into a communications response. A consensus verdict above 80 with specific manipulation signals gives you a documented basis for a 'likely inauthentic' statement. A clean result with cross-model agreement supports a confidence-appropriate response. Either way, you have a structured record of what was checked and what each model found — which matters when decisions are questioned later.",
     workflow: [
-      "Upload the flagged video (up to 60 seconds)",
+      "Download the flagged video clip (up to 60 seconds)",
+      "Upload to ConvergePanel's Video Verification mode",
       "Three vision models independently analyze frames and metadata",
-      "Review the consensus verdict and per-model signals",
-      "Use the structured output to inform your team's response",
+      "Review the consensus verdict and per-model signals — typically ready in under 60 seconds",
+      "Use the structured output and documented signals to inform your team's response",
     ],
     useCases: [
-      "Checking whether a viral video of your CEO is authentic or generated",
-      "Reviewing user-submitted video content before amplification",
-      "Adding an AI-review step to crisis communications protocols",
+      "Checking whether a viral video of your CEO or spokesperson is authentic or generated",
+      "Reviewing user-submitted video content before amplification or reposting",
+      "Adding a documented AI-review step to crisis communications protocols",
+      "Providing a basis for a public statement when a deepfake is suspected",
     ],
     cta: "Review a video clip — see what 3 models find",
     category: "video-verification",
+    schemaType: "FAQPage",
+    faq: [
+      {
+        q: "How quickly can we get a verdict?",
+        a: "Typically under 60 seconds for a clip up to 60 seconds long. Three models run simultaneously, so the wait doesn't scale with clip length.",
+      },
+      {
+        q: "Can ConvergePanel handle videos shared on social media?",
+        a: "You'll need to download the clip first. Most platforms allow video download via their own tools or third-party utilities. Once downloaded, upload to ConvergePanel in MP4, MOV, or WebM format.",
+      },
+      {
+        q: "Is a positive result — deepfake detected — definitive?",
+        a: "No — it's a multi-model assessment indicating signals consistent with AI generation or manipulation. Use it as documented evidence in your decision process, not as a legal determination.",
+      },
+      {
+        q: "Can we use the output to support a public statement?",
+        a: "The output documents the signals found and the models' consensus. It's suitable as due-diligence documentation. For statements with legal implications, have your legal team review before publishing.",
+      },
+    ],
     metaDescription:
-      "Media teams: check video authenticity with 3 vision AI models. ConvergePanel detects deepfake signals and provides a structured consensus verdict.",
+      "Media teams: check video authenticity with 3 vision AI models before responding to a crisis. ConvergePanel detects deepfake signals and documents the consensus verdict.",
   },
   {
     slug: "ai-peer-review-for-high-stakes-workflows",
@@ -482,25 +570,47 @@ export const PAGES: PSEOPage[] = [
     h1: "Structured AI Peer Review for High-Stakes Decisions",
     audience: "Enterprise teams",
     audienceDetail: "Teams where AI-assisted outputs feed into consequential decisions",
+    publishedAt: "2026-05-29",
     problem:
-      "When AI outputs inform high-stakes decisions — hiring, investing, publishing, regulating — there's no 'undo.' But most AI tools have zero review layer between 'model generated it' and 'someone acted on it.'",
+      "When AI outputs inform high-stakes decisions — hiring, investing, publishing, regulating — there's no 'undo.' But most AI tools have zero review layer between 'model generated it' and 'someone acted on it.'\n\nRegulatory pressure is making this gap more urgent. The EU AI Act and emerging US AI governance guidance require documentation of how AI-assisted decisions affecting individuals or significant resources were reviewed. 'We ran it through ChatGPT and it looked right' doesn't constitute a governance trail — and in regulated industries, the absence of documentation is its own liability.\n\nThe accountability problem runs deeper than compliance. When an AI-assisted decision goes wrong, organizations need to show who reviewed the output, what criteria were applied, and what basis existed for approval. Most AI tools produce none of this. The review — if it happens — is informal, undocumented, and unrepeatable.",
     solution:
-      "ConvergePanel's governance layer adds peer review to AI-assisted workflows. Results that fall below consensus or evidence thresholds are automatically flagged. An assigned reviewer approves, blocks, or requests changes — and every decision is logged.",
+      "ConvergePanel's governance layer adds structured peer review to AI-assisted workflows. Results that fall below consensus or evidence thresholds are automatically flagged. An assigned reviewer approves, blocks, or requests changes — and every decision is logged with timestamp, reviewer identity, and rationale.\n\nFor compliance purposes, the audit log is queryable. You can demonstrate that every AI-assisted output above a defined impact threshold was reviewed before use, document who reviewed it and when, and export that record for internal audit or external reporting. The review process becomes a documented organizational capability, not an informal practice that disappears when someone leaves.",
     workflow: [
-      "Run a research query, claim verification, or video review",
-      "Governance policies auto-flag results below your thresholds",
-      "Peer reviewer receives flagged items in their dashboard",
-      "They approve, block, or request changes — each action is logged",
+      "Configure governance policies: consensus thresholds, evidence quality floors, topic-based flags",
+      "Team members run research queries, claim verification, or video review as normal",
+      "Results meeting your thresholds pass through automatically; others are flagged",
+      "Flagged items appear in the peer reviewer's dashboard with the full output and signals",
+      "Reviewer approves, blocks, or requests changes — each action is timestamped and logged",
     ],
     useCases: [
-      "Editorial teams requiring sign-off before publishing AI-verified claims",
-      "Compliance teams auditing AI-assisted research outputs",
-      "Any team that needs a paper trail for AI-informed decisions",
+      "Editorial teams requiring documented sign-off before publishing AI-verified claims",
+      "Compliance teams maintaining an audit trail of AI-assisted research decisions",
+      "Legal and regulatory teams documenting AI review processes for external reporting",
+      "Any organization building a defensible governance trail for consequential AI use",
     ],
     cta: "Add peer review to your AI workflow",
     category: "governance",
+    schemaType: "FAQPage",
+    faq: [
+      {
+        q: "What governance thresholds can we configure?",
+        a: "Consensus score minimums, evidence quality floors, and topic-based flags — for example, automatically flagging any output touching financial decisions, personnel matters, or legal claims.",
+      },
+      {
+        q: "Who can be designated as a peer reviewer?",
+        a: "Any team member with the reviewer role. Roles are managed in the admin dashboard. You can assign different reviewers by topic or query type.",
+      },
+      {
+        q: "Is the audit log exportable for compliance reporting?",
+        a: "Yes — CSV and JSON export, with timestamps, reviewer identities, and decision notes. Suitable for internal audit, legal review, or regulatory documentation.",
+      },
+      {
+        q: "Does peer review add significant delay to the workflow?",
+        a: "Only for flagged items. High-confidence results that pass all configured thresholds proceed without manual review. Flagged items are typically reviewed within your team's SLA, not in real time.",
+      },
+    ],
     metaDescription:
-      "Add structured peer review to AI-assisted decisions. ConvergePanel auto-flags low-confidence results and logs every review action for compliance.",
+      "Add structured peer review and a compliance-ready audit trail to AI-assisted decisions. ConvergePanel auto-flags low-confidence results and logs every review action.",
   },
   {
     slug: "how-to-compare-chatgpt-claude-gemini-grok-perplexity-for-research",
@@ -534,25 +644,47 @@ export const PAGES: PSEOPage[] = [
     h1: "The AI Trust Dashboard: Consensus, Confidence, and Evidence at a Glance",
     audience: "Decision-makers",
     audienceDetail: "Leaders and teams who use AI outputs to inform decisions",
+    publishedAt: "2026-05-29",
     problem:
-      "AI gives you answers. It doesn't give you a trust score. You're left guessing whether the output is well-supported or the model just sounded confident.",
+      "AI gives you answers. It doesn't give you a trust score. You're left guessing whether the output is well-supported or the model just sounded confident.\n\nThe gap between confidence and accuracy is systematic, not incidental. Language models generate fluent, assertive text regardless of whether the underlying claim is well-evidenced. A model that has strong training-data support for an answer and a model that is confabulating a plausible-sounding response look identical from the outside. The confidence in the output is a property of the language — not of the evidence behind it.\n\nTeams that have adopted AI tools often discover this problem after acting on a bad output. The reaction is usually binary: full trust or deep skepticism. Neither is operationally useful. What's needed is a calibrated middle ground — a way to trust AI outputs proportionally to how well-supported they actually are, with a mechanism to automate that trust decision for routine queries.",
     solution:
-      "ConvergePanel's structured output is effectively a trust dashboard: consensus scores, evidence quality ratings, confidence labels, and disagreement maps — all computed from multi-model comparison. You see how trustworthy the output is, not just what it says.",
+      "ConvergePanel's structured output is effectively a trust dashboard: consensus scores, evidence quality ratings, confidence labels, and disagreement maps — all computed from multi-model comparison. You see how trustworthy the output is, not just what it says.\n\nFor team-level use, governance thresholds let you operationalize the trust decision. Results above your consensus and evidence floor are cleared for use. Results below are flagged for human review. Over time, you can tune these thresholds based on your domain's actual error rate — building an AI trust policy grounded in observed performance rather than instinct.",
     workflow: [
       "Run any query — research, claim verification, or video review",
-      "Review the consensus score (0–100) and evidence quality ratings",
-      "Check disagreement signals and bias flags",
-      "Use governance thresholds to automate trust decisions",
+      "Review the consensus score (0–100) across the model panel",
+      "Check evidence quality ratings per model and the disagreement signal map",
+      "Flag items below your trust threshold for human review",
+      "Use governance thresholds to automate this routing for routine queries",
     ],
     useCases: [
-      "Quickly assessing whether an AI output is decision-ready",
-      "Setting team-wide thresholds for 'good enough to act on'",
-      "Building a culture of measured AI trust rather than blind acceptance",
+      "Quickly assessing whether an AI output is decision-ready before acting on it",
+      "Setting team-wide consensus thresholds for 'reliable enough to proceed'",
+      "Identifying which query types consistently produce low-trust outputs in your domain",
+      "Building an organizational AI trust policy grounded in observed data",
     ],
     cta: "See the trust dashboard — run a free panel",
     category: "governance",
+    schemaType: "FAQPage",
+    faq: [
+      {
+        q: "What does a consensus score of 85 mean?",
+        a: "The model panel substantially agreed in their assessment. It doesn't guarantee correctness, but it means the answer isn't idiosyncratic to one model's training data — multiple independent systems reached the same conclusion.",
+      },
+      {
+        q: "How are evidence quality ratings calculated?",
+        a: "Each model's output is assessed for specificity, citation presence, and internal consistency. The rating reflects how well the model's answer is grounded in verifiable evidence rather than parametric memory.",
+      },
+      {
+        q: "Can we set different trust thresholds for different query types?",
+        a: "Yes — governance policies can be scoped by topic category, user role, or query type. A higher threshold for legal or financial queries, a lower one for routine research, for example.",
+      },
+      {
+        q: "Is the trust dashboard a replacement for human judgment?",
+        a: "No — it's designed to inform and calibrate human judgment. High trust scores reduce the depth of review required. Low scores signal where human scrutiny is most needed. The dashboard structures the decision; humans make it.",
+      },
+    ],
     metaDescription:
-      "ConvergePanel's trust dashboard shows consensus scores, evidence quality, and disagreement signals — so you know how trustworthy AI output really is.",
+      "ConvergePanel's trust dashboard shows consensus scores, evidence quality, and disagreement signals — so you know how trustworthy AI output is before acting on it.",
   },
   {
     slug: "how-to-verify-a-viral-claim-with-ai",
