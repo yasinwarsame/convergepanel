@@ -410,6 +410,11 @@ export const PAGES: PSEOPage[] = [
     category: "glossary",
     metaDescription:
       "A Panel Verdict aggregates ratings from 5 AI models into one structured output: verdict, consensus score, and per-model evidence. Learn how it works.",
+    relatedLinks: [
+      { label: "AI Claim Verification for Newsrooms", href: "/use-cases/ai-claim-verification-for-newsrooms" },
+      { label: "AI Claim Verification for Investigators", href: "/use-cases/ai-claim-verification-for-investigators" },
+      { label: "What Is a Consensus Score?", href: "/use-cases/what-is-a-consensus-score" },
+    ],
   },
   {
     slug: "what-is-source-grounding-in-ai",
@@ -587,9 +592,9 @@ export const PAGES: PSEOPage[] = [
   {
     slug: "ai-peer-review-for-high-stakes-workflows",
     title: "AI Peer Review for High-Stakes Workflows",
-    h1: "Structured AI Peer Review for High-Stakes Decisions",
-    audience: "Enterprise teams",
-    audienceDetail: "Teams where AI-assisted outputs feed into consequential decisions",
+    h1: "AI Peer Review for High-Stakes Decisions and Workflows",
+    audience: "Enterprise teams and compliance-minded organisations",
+    audienceDetail: "Teams where AI-assisted outputs feed into consequential decisions and need a documented review layer before action is taken",
     publishedAt: "2026-05-29",
     problem:
       "When AI outputs inform high-stakes decisions — hiring, investing, publishing, regulating — there's no 'undo.' But most AI tools have zero review layer between 'model generated it' and 'someone acted on it.'\n\nRegulatory pressure is making this gap more urgent. The EU AI Act and emerging US AI governance guidance require documentation of how AI-assisted decisions affecting individuals or significant resources were reviewed. 'We ran it through ChatGPT and it looked right' doesn't constitute a governance trail — and in regulated industries, the absence of documentation is its own liability.\n\nThe accountability problem runs deeper than compliance. When an AI-assisted decision goes wrong, organizations need to show who reviewed the output, what criteria were applied, and what basis existed for approval. Most AI tools produce none of this. The review — if it happens — is informal, undocumented, and unrepeatable.",
@@ -608,9 +613,48 @@ export const PAGES: PSEOPage[] = [
       "Legal and regulatory teams documenting AI review processes for external reporting",
       "Any organization building a defensible governance trail for consequential AI use",
     ],
-    cta: "Add peer review to your AI workflow",
+    cta: "Start a Peer Review",
     category: "governance",
+    metaDescription:
+      "Use AI peer review to compare models, surface disagreement, document review notes, and create decision receipts for serious work.",
     schemaType: "FAQPage",
+    bodySections: [
+      {
+        heading: "What Peer Review Should Cover in a High-Stakes AI Workflow",
+        bullets: [
+          "The original query or claim — what was being reviewed and why",
+          "The multi-model output — each model's independent response and evidence",
+          "Consensus score — how much the models agree, and what the threshold policy requires",
+          "Disagreement points — where models split and what the disagreement reveals",
+          "Reviewer's assessment — notes on output quality, gaps, and concerns",
+          "The review decision — approve, block, request changes, or escalate",
+          "The decision receipt — a timestamped record of who reviewed, when, and what they decided",
+        ],
+      },
+      {
+        heading: "When High-Stakes Decisions Need AI Peer Review",
+        bullets: [
+          "Before publishing research or analysis that relies on AI-assisted verification",
+          "Before an AI-assisted recommendation reaches a client or stakeholder",
+          "Before a compliance decision is made based on AI-generated analysis",
+          "When the consensus score is below your organisation's threshold",
+          "When models disagree significantly on a load-bearing claim",
+          "When the topic triggers a sensitivity flag (legal, financial, regulatory)",
+          "Before any AI-informed decision that may need to be defended or explained later",
+        ],
+      },
+      {
+        heading: "Common Peer Review Mistakes",
+        bullets: [
+          "Conducting peer review verbally without documentation — a verbal review is not a governance record",
+          "Assigning review to someone without the relevant domain knowledge",
+          "Approving outputs that fall below policy thresholds without explicit escalation",
+          "Not documenting the reviewer's reasoning — only the decision",
+          "Using peer review as a rubber stamp rather than a genuine quality check",
+          "Skipping review for outputs that 'seem fine' without checking the consensus score",
+        ],
+      },
+    ],
     faq: [
       {
         q: "What governance thresholds can we configure?",
@@ -628,13 +672,22 @@ export const PAGES: PSEOPage[] = [
         q: "Does peer review add significant delay to the workflow?",
         a: "Only for flagged items. High-confidence results that pass all configured thresholds proceed without manual review. Flagged items are typically reviewed within your team's SLA, not in real time.",
       },
+      {
+        q: "What is a decision receipt and why does it matter for peer review?",
+        a: "A decision receipt is the structured record of a specific AI-assisted decision: what was queried, what the models returned, what the consensus was, who reviewed it, and what was decided. In a peer review context, the decision receipt is the documentation that a qualified person assessed the AI output before it was acted on.",
+      },
+      {
+        q: "Can peer review be applied to video verification as well as claim verification?",
+        a: "Yes. ConvergePanel's governance layer applies to all verification modes — research, claim verification, and video verification. Any output below your configured thresholds — regardless of the verification type — can be routed to peer review and logged in the audit trail.",
+      },
     ],
-    metaDescription:
-      "Add structured peer review and a compliance-ready audit trail to AI-assisted decisions. ConvergePanel auto-flags low-confidence results and logs every review action.",
     relatedLinks: [
-      { label: "AI audit trail for high-stakes decisions", href: "/use-cases/how-to-create-an-ai-audit-trail" },
-      { label: "AI Decision Audit Trail", href: "/use-cases/ai-decision-audit-trail" },
+      { label: "How to Create an AI Audit Trail", href: "/use-cases/how-to-create-an-ai-audit-trail" },
+      { label: "What Is a Decision Receipt?", href: "/use-cases/what-is-a-decision-receipt" },
       { label: "How to Prove an AI Decision Was Reviewed", href: "/use-cases/how-to-prove-an-ai-decision-was-reviewed" },
+      { label: "AI Review Process for Teams", href: "/use-cases/ai-review-process-for-teams" },
+      { label: "How to Document Model Disagreement", href: "/use-cases/how-to-document-model-disagreement" },
+      { label: "AI Governance Workflow for Enterprise Teams", href: "/use-cases/ai-governance-workflow-for-enterprise-teams" },
     ],
   },
   {
@@ -917,8 +970,15 @@ export const PAGES: PSEOPage[] = [
     cta: "See multi-model verification in action — run a free check",
     category: "how-to",
     metaDescription:
-      "How does AI claim verification actually work? Learn the mechanics: independent model queries, consensus scoring, and how to read disagreement as a research",
+      "How does AI claim verification actually work? Learn the mechanics: independent model queries, consensus scoring, and how to read disagreement as a research signal.",
     schemaType: "HowTo",
+    relatedLinks: [
+      { label: "How to Verify a Viral Health Claim", href: "/use-cases/how-to-verify-a-viral-health-claim" },
+      { label: "How to Verify a Viral Finance Claim", href: "/use-cases/how-to-verify-a-viral-finance-claim" },
+      { label: "How to Verify a Viral Political Claim", href: "/use-cases/how-to-verify-a-viral-political-claim" },
+      { label: "How to Verify a Viral AI Claim", href: "/use-cases/how-to-verify-a-viral-ai-claim" },
+      { label: "How to Verify a Viral Climate Claim", href: "/use-cases/how-to-verify-a-viral-climate-claim" },
+    ],
   },
   {
     slug: "how-to-review-a-suspicious-video-with-ai",
@@ -953,14 +1013,14 @@ export const PAGES: PSEOPage[] = [
   {
     slug: "how-to-verify-a-viral-claim-before-sharing-it",
     publishedAt: "2026-05-29",
-    title: "How to Verify a Viral Claim Before Sharing",
-    h1: "How to Verify a Viral Claim Before You Hit Share",
-    audience: "General public",
-    audienceDetail: "Anyone who reads news, follows social media, or shares content online",
+    title: "How to Verify a Viral Claim Before Sharing It",
+    h1: "How to Verify a Viral Claim Before You Share It",
+    audience: "Anyone who shares information online",
+    audienceDetail: "Anyone who reads news, follows social media, and shares content with friends, family, or their audience — and wants to share accurately",
     problem:
-      "Viral claims travel six times faster than corrections. By the time a debunk circulates, the original claim has already reached millions. Most people don't share falsehoods maliciously — they share content that feels emotionally resonant, statistically surprising, or confirms what they already believe. The anxiety isn't 'am I malicious?' It's 'what if I'm wrong and people believe me?'\n\nThe instinctive fix — 'let me ask AI' — creates a false sense of security. A single AI model gives you a confident, fluent answer regardless of whether it has solid evidence. It won't tell you three other models disagree. It won't show you the uncertainty underneath the confidence. You've just added one more opinion to the pile.\n\nA 60-second multi-model verification check is the real answer. Not a deep dive into primary sources every time, but a structured check that tells you whether a claim is well-supported, contested, or unverifiable — before you amplify it.",
+      "Viral claims travel six times faster than corrections. By the time a debunk circulates, the original claim has already reached millions. Most people don't share falsehoods maliciously — they share content that feels emotionally resonant, statistically surprising, or confirms what they already believe. The anxiety isn't 'am I malicious?' It's 'what if I'm wrong and people believe me?'\n\nThe instinctive fix — 'let me ask AI' — creates a false sense of security. A single AI model gives you a confident, fluent answer regardless of whether it has solid evidence. It won't tell you three other models disagree. It won't show you the uncertainty underneath the confidence. You've just added one more opinion to the pile.\n\nViral claims come in many forms: health statistics, financial claims, political quotes, AI capability claims, climate data, breaking news assertions. Each type carries specific patterns of misinformation that a general check can miss. A structured multi-model check is faster than opening five tabs — and more reliable than one.",
     solution:
-      "ConvergePanel's Claim Verification mode runs your claim through five AI models simultaneously — GPT-5.2, Claude Opus 4.5, Grok 4, Perplexity Pro, and Gemini 2.0 Flash. Each rates it independently: accurate, partially accurate, inaccurate, or unverifiable. The consensus score (0–100) tells you at a glance how much agreement there is.\n\nA score above 80 means the models broadly agree the claim is well-supported. Below 50 means significant disagreement — that's the signal to pause before sharing. The per-model breakdown shows exactly where the split is and what evidence each model cites.",
+      "ConvergePanel's Claim Verification mode runs your claim through five AI models simultaneously — GPT-5.2, Claude Opus 4.5, Grok 4, Perplexity Pro, and Gemini 2.0 Flash. Each rates it independently: accurate, partially accurate, inaccurate, or unverifiable. The consensus score (0–100) tells you at a glance how much agreement there is.\n\nA score above 80 means the models broadly agree the claim is well-supported. Below 50 means significant disagreement — that's the signal to pause before sharing. The per-model breakdown shows exactly where the split is and what evidence each model cites. For topic-specific viral claims, see the guides below for health, finance, political, AI, and climate claims.",
     workflow: [
       "Copy the exact claim — the headline, quote, or statistic you want to check",
       "Paste it into ConvergePanel's Claim Verification mode",
@@ -970,182 +1030,612 @@ export const PAGES: PSEOPage[] = [
       "Decide: share with confidence, share with a caveat, or hold until you've verified further",
     ],
     useCases: [
-      "A dramatic health statistic in a viral tweet that seems more alarming than you'd expect",
+      "A dramatic health statistic in a viral post that seems more alarming than expected",
       "A quote attributed to a politician or public figure that's spreading rapidly",
       "A 'breaking news' claim arriving before major outlets have confirmed it",
-      "A historical fact used to contextualize a current event",
+      "A historical fact used to contextualise a current event",
       "A scientific finding that seems counterintuitive or politically convenient",
+      "An investment or financial claim that arrived with urgency framing",
     ],
-    cta: "Verify your next claim before sharing — free",
+    cta: "Verify Before Sharing",
     category: "how-to",
     metaDescription:
       "Build a 60-second verification habit before sharing viral claims. Five AI models give you a consensus score so you share facts, not fiction.",
-    schemaType: "HowTo",
+    schemaType: "FAQPage",
+    bodySections: [
+      {
+        heading: "Viral Claim Verification by Topic",
+        paragraphs: [
+          "Different types of viral claims have different misinformation patterns. For specific verification guidance by topic, see:",
+        ],
+        bullets: [
+          "Health claims — supplement benefits, medication warnings, wellness statistics, 'studies show' assertions",
+          "Finance claims — investment returns, crypto predictions, earnings claims, market timing assertions",
+          "Political claims — public figure quotes, crime statistics, policy outcome claims, out-of-context clips",
+          "AI claims — capability benchmarks, 'AI can now do X' announcements, AGI claims, demo screenshots",
+          "Climate claims — temperature statistics, event attribution, contrarian cherry-picking, policy cost claims",
+        ],
+      },
+      {
+        heading: "Why One AI Model Isn't Enough",
+        paragraphs: [
+          "Asking one AI model whether a viral claim is true gives you one model's perspective — shaped by that model's training data, framing tendencies, and knowledge gaps. A model that encountered the viral claim frequently in its training may affirm it confidently even if the claim is wrong. A model that wasn't trained on recent events may not know the claim is outdated.",
+          "Multi-model comparison adds cross-validation. When five independent models disagree about a claim, that disagreement is itself information — it tells you the claim is contested, uncertain, or at least not universally supported in the AI knowledge base. A single model's confidence tells you nothing about whether other models would agree.",
+        ],
+      },
+      {
+        heading: "Common Mistakes Before Sharing",
+        bullets: [
+          "Sharing a claim because it confirms something you already believe without checking it",
+          "Using a single AI model as a quick check and treating the answer as verified",
+          "Adding 'apparently' or 'I think' as a disclaimer while still sharing a claim you haven't checked",
+          "Assuming a widely shared claim must have been checked by someone",
+          "Checking whether the claim exists online rather than whether it's accurate",
+          "Sharing a corrected version of a claim without flagging the original error for your audience",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "How quickly can I verify a viral claim before sharing it?",
+        a: "Typically 15–30 seconds for the verification run itself. The total time including reading the consensus score and per-model evidence is usually under 2 minutes — faster than opening three browser tabs to check separately.",
+      },
+      {
+        q: "What if a claim is spreading rapidly and I need to decide quickly?",
+        a: "The consensus score gives you a quick calibration: 80+ is broadly supported, below 50 is contested. For fast-moving content, a low consensus score or a 'partially accurate' verdict is sufficient reason to wait for more confirmation before sharing. Speed is the mechanism by which misinformation spreads — slowing down is the appropriate response to a low score.",
+      },
+      {
+        q: "Is a high consensus score a guarantee that a claim is true?",
+        a: "No. Five models can agree on something wrong if they all share the same training data bias or all draw from the same flawed source. A high consensus score is a confidence signal — it means the answer isn't idiosyncratic to one model — but it doesn't guarantee correctness. For high-stakes claims, primary-source verification is still warranted.",
+      },
+      {
+        q: "What should I do if I've already shared a claim that turned out to be false?",
+        a: "Share the correction to the same audience, with the same prominence. A correction that reaches fewer people than the original error is not a responsible correction. If possible, edit or delete the original post and note why. Your audience trusts you to correct your mistakes visibly, not quietly.",
+      },
+      {
+        q: "Which types of viral claims are most likely to be misleading?",
+        a: "Claims that trigger strong emotions (fear, outrage, hope), claims that perfectly confirm a community's existing beliefs, claims with suspiciously precise statistics and no named source, claims arriving with urgency framing, and claims that include misattributed quotes. These patterns are engineered for sharing, not for accuracy.",
+      },
+      {
+        q: "How is ConvergePanel different from traditional fact-checking sites?",
+        a: "Traditional fact-checking sites check specific high-profile claims on a delay — useful for major stories but not for the constant stream of claims in your feed. ConvergePanel checks any claim you paste in real time, across five models, with a structured output. It's a personal verification tool, not a media organisation's fact-check archive.",
+      },
+    ],
+    relatedLinks: [
+      { label: "How to Verify a Viral Health Claim", href: "/use-cases/how-to-verify-a-viral-health-claim" },
+      { label: "How to Verify a Viral Finance Claim", href: "/use-cases/how-to-verify-a-viral-finance-claim" },
+      { label: "How to Verify a Viral Political Claim", href: "/use-cases/how-to-verify-a-viral-political-claim" },
+      { label: "How to Verify a Viral AI Claim", href: "/use-cases/how-to-verify-a-viral-ai-claim" },
+      { label: "How to Verify a Viral Climate Claim", href: "/use-cases/how-to-verify-a-viral-climate-claim" },
+      { label: "How to Verify a Viral Claim with AI", href: "/use-cases/how-to-verify-a-viral-claim-with-ai" },
+      { label: "What Is a Consensus Score?", href: "/use-cases/what-is-a-consensus-score" },
+    ],
   },
 
   {
     slug: "how-to-verify-a-viral-health-claim",
     publishedAt: "2026-05-29",
     title: "How to Verify a Viral Health Claim",
-    h1: "How to Verify a Viral Health Claim Before Trusting or Sharing It",
-    audience: "Health-conscious individuals",
-    audienceDetail: "Anyone who follows health news, shares medical content, or makes decisions based on health information online",
+    h1: "How to Verify a Viral Health Claim Before You Trust or Share It",
+    audience: "Health-conscious individuals and anyone who shares health information",
+    audienceDetail: "Anyone who follows health news, shares medical content online, or makes personal health decisions based on information shared through social media",
     problem:
-      "Health misinformation spreads faster in any format than health corrections. A statistic about a supplement, a warning about a medication, a claim about a study's findings — these travel because they trigger fear, hope, or urgency. Sharing them feels responsible: you're helping people.\n\nThe problem is structural. Many health claims are technically true but misleading — a relative risk inflated to sound dramatic, a preliminary study presented as settled science, a cherry-picked finding from a paper that reached the opposite conclusion. Even accurate AI models struggle with this nuance, and they often present contested medical findings as established consensus.\n\nA single AI model queried about a health claim will typically give you a confident answer. It may cite real studies. But it may also confuse correlation with causation, fail to mention replication problems, or miss that the claim was based on a retracted paper.",
+      "Health misinformation spreads faster than corrections in any medium. A statistic about a supplement, a warning about a medication, a claim about a study's findings — these travel because they trigger fear, hope, or urgency. Sharing them feels responsible: you're helping people.\n\nThe problem is structural. Many health claims are technically true but misleading — a relative risk inflated to sound dramatic, a preliminary study presented as settled science, a cherry-picked finding from a paper that actually reached the opposite conclusion. Even accurate AI models struggle with this nuance, and they often present contested medical findings as established consensus.\n\nA single AI model queried about a health claim will typically give you a confident answer. It may cite real studies. But it may also confuse correlation with causation, fail to mention replication problems, or miss that the claim was based on a retracted paper. Health decisions informed by wrong information carry real consequences.",
     solution:
-      "ConvergePanel cross-checks health claims across five AI models, each with different training data and different tendencies to hedge versus assert. When they agree strongly, you have reasonable confidence. When they split — especially on a claim with high emotional stakes — the disagreement is the important signal, not the verdict.",
+      "ConvergePanel cross-checks health claims across five AI models, each with different training data and different tendencies to hedge versus assert. When they agree strongly, you have reasonable confidence about the claim's grounding. When they split — especially on a claim with high emotional stakes — the disagreement is the important signal, not the verdict. It tells you where uncertainty actually exists.\n\nImportant: AI claim verification is not a substitute for professional medical advice. Use it as an information-quality check before sharing, not as a basis for personal health decisions.",
     workflow: [
-      "Find the exact claim — copy it verbatim, including any statistics or attributions",
+      "Find the exact claim — copy it verbatim, including any statistics, study citations, or attributions",
       "Paste it into ConvergePanel's Claim Verification mode",
-      "Review the consensus score and pay particular attention to the 'partially accurate' and 'unverifiable' ratings",
-      "Read each model's evidence — look for whether they're citing the same study or different ones",
-      "Flag any claim where models disagree significantly or where evidence is described as 'limited' or 'preliminary'",
-      "For high-stakes health decisions, treat a multi-model check as triage, not a substitute for a medical professional",
+      "Review the consensus score: 80+ is broad agreement, below 60 is contested",
+      "Pay particular attention to 'partially accurate' and 'unverifiable' ratings — these are most common for health claims",
+      "Read each model's evidence — are they citing the same study, or different ones?",
+      "Flag any claim where evidence is described as 'limited,' 'preliminary,' or 'based on a single study'",
+      "For claims you're considering acting on personally, consult a qualified medical professional",
     ],
     useCases: [
-      "A viral claim that a common medication has undisclosed risks",
-      "A supplement benefit claim backed by 'studies' without specifics",
-      "A dietary advice post citing a statistic that seems surprisingly precise",
-      "A public health warning spreading through group chats",
-      "A claim about a new study contradicting established medical consensus",
+      "A viral claim that a common medication has undisclosed risks or interactions",
+      "A supplement benefit claim backed by 'studies' without specific citations",
+      "A dietary advice post citing a precise-sounding statistic without a named source",
+      "A public health warning spreading through group chats before official guidance",
+      "A claim about a new study that contradicts established medical consensus",
+      "A 'before and after' claim about a treatment or wellness intervention",
     ],
-    cta: "Check health claims with 5 AI models — start free",
+    cta: "Review This Health Claim",
     category: "how-to",
     metaDescription:
-      "Health misinformation is hard to spot. Learn how multi-model AI verification can flag contested health claims before you share or act on them.",
-    schemaType: "HowTo",
+      "Learn how to review viral health and wellness claims for missing context, weak evidence, and misinformation risk before sharing.",
+    schemaType: "FAQPage",
+    bodySections: [
+      {
+        heading: "Types of Viral Health Claims to Watch For",
+        paragraphs: [
+          "Health misinformation takes predictable forms. Recognising the pattern helps you spot the risk before checking the claim:",
+        ],
+        bullets: [
+          "Miracle cure or treatment claims with dramatic before/after language",
+          "Supplement or wellness claims citing 'studies' without specific attributions",
+          "Statistical claims about risk or benefit that seem implausibly precise",
+          "Claims about a 'new study' contradicting established medical guidance",
+          "Medication warnings or scare claims circulating without official health agency backing",
+          "Dietary claims that require dramatic lifestyle changes based on a single source",
+          "Claims about diseases or treatments that invoke urgency or fear",
+        ],
+      },
+      {
+        heading: "Why Health Misinformation Is Hard to Spot",
+        paragraphs: [
+          "Health misinformation is often technically accurate in its individual claims but misleading in its framing. A study might genuinely show a correlation between X and Y — but the viral version omits the study's limitations, the effect size, or the fact that it was industry-funded. The claim is 'based on research' and therefore feels credible.",
+          "AI models are not immune to this problem. They're trained on data that includes both accurate science communication and viral health content. When they summarise a health topic, they may reflect the dominant framing in their training data rather than the most methodologically rigorous view. Multi-model comparison helps surface where different AI systems diverge on a health claim — which is often exactly where the evidence is contested.",
+        ],
+      },
+      {
+        heading: "Important: AI Verification Is Not Medical Advice",
+        paragraphs: [
+          "ConvergePanel's claim verification is designed to help you assess information quality before sharing — not to provide personal medical guidance. A multi-model check tells you whether a claim is broadly supported, contested, or poorly evidenced. It does not tell you whether a particular treatment, supplement, or intervention is appropriate for you or any other individual.",
+          "For any health claim that could affect personal decisions about treatment, medication, diet, or care, consult a qualified medical professional. Use AI verification as a way to understand the information landscape, not as a substitute for personalised medical advice.",
+        ],
+      },
+      {
+        heading: "Common Health Claim Verification Mistakes",
+        bullets: [
+          "Treating a multi-model consensus on a health claim as equivalent to medical advice",
+          "Sharing a claim because 'the AI said it was accurate' without checking evidence quality",
+          "Ignoring 'partially accurate' ratings — these often flag the critical nuance",
+          "Not checking whether a cited study has been retracted or significantly challenged",
+          "Focusing on the verdict without reading each model's evidence quality notes",
+          "Assuming that a widely shared health claim has already been checked by someone else",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "Can AI tell me whether a health claim is medically accurate?",
+        a: "AI models can assess whether a health claim appears well-supported or contested based on training data. They can't diagnose, prescribe, or provide personalised medical guidance. Multi-model verification is useful for assessing whether a viral health claim is generally credible before sharing it — not as a basis for personal health decisions.",
+      },
+      {
+        q: "Why do AI models sometimes disagree about health information?",
+        a: "Because the evidence base for many health claims is genuinely contested, and different models draw on different subsets of the scientific and popular health literature. When models disagree on a health claim, it often reflects real scientific uncertainty — not a model error. That disagreement is the signal to treat the claim with more caution.",
+      },
+      {
+        q: "What are the most common types of health misinformation to watch for?",
+        a: "Miracle cure claims, supplement benefit claims with vague citations, dramatic statistical claims about risk or benefit, single-study claims presented as settled science, and 'contradicts everything you were told' framing. These patterns appear across wellness content, social media, and sometimes legitimate-looking health websites.",
+      },
+      {
+        q: "Is multi-model health claim verification a substitute for medical advice?",
+        a: "No. It is a tool for assessing information quality before sharing. For any decision affecting your own or someone else's health — treatment, medication, supplement, diet — consult a qualified medical professional. AI verification helps you be a more careful consumer of health information; it doesn't replace professional judgement.",
+      },
+      {
+        q: "How should I interpret 'partially accurate' on a health claim?",
+        a: "A 'partially accurate' rating often means the core claim has some factual basis but is presented in a way that inflates, misframes, or omits important context. The per-model evidence will show you what's accurate and what's misleading. This is often the most valuable output — it tells you what to clarify if you do share the claim.",
+      },
+      {
+        q: "What should I do if a health claim has low consensus across models?",
+        a: "Treat it as contested and add a meaningful caveat if you share it at all. Low consensus on a health claim often reflects genuine scientific uncertainty or known disagreement in the literature. Sharing it without that caveat misrepresents the evidence quality — which can affect how others act on the information.",
+      },
+    ],
+    relatedLinks: [
+      { label: "How to Verify a Viral Claim Before Sharing It", href: "/use-cases/how-to-verify-a-viral-claim-before-sharing-it" },
+      { label: "How to Verify a Viral AI Claim", href: "/use-cases/how-to-verify-a-viral-ai-claim" },
+      { label: "How to Check If AI Hallucinated", href: "/use-cases/how-to-check-if-ai-hallucinated" },
+      { label: "How to Verify Sources from AI Answers", href: "/use-cases/how-to-verify-sources-from-ai-answers" },
+      { label: "How to Validate AI-Generated Research", href: "/use-cases/how-to-validate-ai-generated-research" },
+    ],
   },
 
   {
     slug: "how-to-verify-a-viral-finance-claim",
     publishedAt: "2026-05-29",
     title: "How to Verify a Viral Finance Claim",
-    h1: "How to Verify a Viral Finance Claim Before You Invest or Share",
-    audience: "Retail investors and finance-curious individuals",
-    audienceDetail: "Retail investors, finance Twitter followers, and anyone who encounters market claims and statistics online",
+    h1: "How to Verify a Viral Finance Claim Before Acting on It",
+    audience: "Retail investors and anyone who encounters financial claims online",
+    audienceDetail: "Retail investors, personal finance followers, and anyone who encounters investment claims, crypto posts, or market statistics on social media",
     problem:
-      "Financial misinformation carries unique danger: it has a profit motive. Pump-and-dump schemes, coordinated hype campaigns, fabricated earnings projections, and 'guaranteed returns' claims are designed to be shared. The people creating them want you to amplify them before you think critically.\n\nViral finance claims often have a specific structure: a dramatic statistic ('this asset returned 400% last year'), a credible-sounding source ('according to Goldman analysts'), and urgency ('before the window closes'). Each element is designed to bypass skepticism. And unlike health claims, which might produce regret later, finance claims can produce immediate, irreversible financial loss.\n\nAI models can help — but a single model queried about a market claim will often either echo the narrative (especially if it's been circulated widely) or give you an appropriately cautious hedge. Neither response tells you whether the specific claim is accurate.",
+      "Financial misinformation carries unique danger: it has a profit motive. Pump-and-dump schemes, coordinated hype campaigns, fabricated earnings projections, and 'guaranteed returns' claims are designed to be shared. The people creating them want you to amplify them before you think critically.\n\nViral finance claims often have a specific structure: a dramatic statistic ('this asset returned 400% last year'), a credible-sounding source ('according to Goldman analysts'), and urgency ('before the window closes'). Each element is designed to bypass scepticism. Unlike health claims, which might produce regret later, finance claims can produce immediate, irreversible financial loss.\n\nAI models can help — but a single model queried about a market claim will often either echo the narrative (especially if it's been widely circulated) or give you an appropriately cautious hedge. Neither response tells you whether the specific claim is accurate or whether the source is legitimate.",
     solution:
-      "ConvergePanel's multi-model approach is particularly useful for finance claims because different models have different relationships with financial data. GPT-5.2 and Claude Opus 4.5 tend to flag unsourced statistics. Grok 4 and Perplexity Pro tend to surface real-time counter-evidence. When all five converge on 'inaccurate' or 'unverifiable,' you have strong grounds to dismiss the claim. When they split, that's a reason to do more digging, not to share.",
+      "ConvergePanel's multi-model approach is useful for finance claims because different models have different relationships with financial data and different tendencies to flag unsourced statistics. When all five models converge on 'inaccurate' or 'unverifiable,' you have strong grounds to dismiss the claim before acting or sharing. When they split, that's a reason to do more digging, not to proceed.\n\nImportant: AI claim verification is not financial advice. It helps you assess whether a specific claim appears well-supported or poorly sourced. It does not tell you whether a particular investment is appropriate for your situation. Always consult a qualified financial professional before making investment decisions.",
     workflow: [
-      "Copy the exact claim — include the statistic, the purported source, and the date if given",
+      "Copy the exact claim — include the statistic, the purported source, and any date given",
       "Paste into ConvergePanel's Claim Verification mode",
       "Look first at the overall verdict: accurate, partially accurate, inaccurate, or unverifiable",
       "Check which models flag sourcing problems or unsupported statistics",
       "Look for model agreement on 'unverifiable' — this is the most common outcome for pump-style claims",
-      "Before sharing or acting: ask yourself whether you'd share it with a friend you'd be accountable to",
+      "Check whether models flag urgency framing or missing context about incentives",
+      "Before acting or sharing, ask: would you stake real money on this source?",
     ],
     useCases: [
       "A viral post claiming a stock is about to 'explode' based on insider signals",
-      "A statistic about a cryptocurrency's return that seems too precise to be fabricated",
+      "A cryptocurrency return claim with precise-sounding historical statistics",
       "An earnings claim about a company that hasn't reported yet",
-      "A 'guaranteed' investment return claim shared in an investment community",
+      "A 'guaranteed' return claim shared in an investment community",
       "A market prediction attributed to a named analyst or institution",
+      "An influencer finance post promoting an asset with undisclosed sponsorship",
     ],
-    cta: "Verify financial claims before acting on them — free",
+    cta: "Pressure-Test This Finance Claim",
     category: "how-to",
     metaDescription:
-      "Pump claims, fake stats, and inflated returns spread fast. Learn how to verify viral finance claims with 5 AI models before you invest or share.",
-    schemaType: "HowTo",
+      "Review viral finance, investing, crypto, and market claims for weak evidence, missing context, and overconfident advice.",
+    schemaType: "FAQPage",
+    bodySections: [
+      {
+        heading: "Types of Viral Finance Claims",
+        paragraphs: [
+          "Financial misinformation follows recognisable patterns. The most common types to check before sharing or acting include:",
+        ],
+        bullets: [
+          "Investment return claims — 'this asset is up X% this year' with no verifiable source",
+          "Crypto promotion claims — 'this coin is about to break out' with vague insider framing",
+          "Earnings predictions — claims about a company's performance before official reporting",
+          "Market timing claims — 'buy before X date' urgency framing without named analyst attribution",
+          "Screenshots of gains — purported trading returns with no independent verification",
+          "Influencer finance advice — investment suggestions with undisclosed sponsorship or incentives",
+          "Regulatory claims — assertions about tax treatment, legal status, or policy changes affecting assets",
+        ],
+      },
+      {
+        heading: "Why Finance Misinformation Spreads",
+        paragraphs: [
+          "Financial misinformation is designed to be shared. A pump claim needs retail buyers to work. A fear claim needs sellers to move. The emotional triggers — greed, loss aversion, urgency, exclusivity — are all engineered to move people to act before they think. The claim format is optimised for sharing, not accuracy.",
+          "AI-generated finance content compounds this problem. Sophisticated misinformation can now include plausible-sounding statistics, fabricated quotes from real institutions, and well-formatted 'analysis' that passes casual scrutiny. The production quality of false financial claims has increased significantly, making source verification more important, not less.",
+        ],
+      },
+      {
+        heading: "Important: AI Verification Is Not Financial Advice",
+        paragraphs: [
+          "ConvergePanel's claim verification is designed to help you assess whether a financial claim appears well-supported or poorly sourced before sharing or acting on it. It is not investment advice, legal advice, tax advice, or a recommendation about any specific asset, strategy, or investment decision.",
+          "For any financial decision — investment, trading, retirement planning — consult a qualified financial adviser. Use AI claim verification as an information-quality check on claims you encounter, not as a substitute for professional financial guidance.",
+        ],
+      },
+      {
+        heading: "Common Finance Claim Verification Mistakes",
+        bullets: [
+          "Acting on a finance claim because it has a high consensus score — consensus on information quality is not investment advice",
+          "Trusting a claim because it uses precise-sounding numbers — specificity is not accuracy",
+          "Sharing a claim because it's widely circulating in your investment community",
+          "Not checking whether a named analyst or institution actually made the cited statement",
+          "Ignoring urgency framing as a red flag — legitimate investment information rarely includes countdown clocks",
+          "Assuming AI-generated financial content has been independently verified",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "Can AI models detect fake investment claims?",
+        a: "AI models can assess whether a financial claim appears to be supported by known data, sourced from credible institutions, or consistent with publicly available market information. They can flag claims as 'unverifiable' when the specific statistic or source can't be confirmed in their training data. This is a useful signal, but not a substitute for primary-source verification of specific financial claims.",
+      },
+      {
+        q: "What are the most common types of viral finance misinformation?",
+        a: "Investment return claims with unverifiable statistics, cryptocurrency promotion posts, earnings predictions ahead of official reporting, urgency-framed market timing claims, and influencer finance posts with undisclosed incentives. Each uses emotional triggers — greed, urgency, exclusivity — to bypass scepticism.",
+      },
+      {
+        q: "Is multi-model verification a substitute for financial advice?",
+        a: "No. It is a tool for assessing whether a specific claim appears credible before you share or act on it. For investment decisions, consult a qualified financial professional. AI verification helps you be a more careful consumer of financial information; it doesn't replace professional financial advice.",
+      },
+      {
+        q: "How do I know if an investment return claim is realistic?",
+        a: "Paste the specific claim into ConvergePanel's Claim Verification mode. If models rate it as 'unverifiable' or note that the statistic can't be traced to a named source, that's a red flag. If models flag urgency framing or missing context about incentives, that's a further warning sign.",
+      },
+      {
+        q: "What should I do if a finance claim has very low model consensus?",
+        a: "Treat it with significant scepticism. Low consensus on a finance claim often means either the statistic isn't traceable to an independent source, the claim is contested, or it's a form of coordinated misinformation. Don't share or act on it without independent verification from a named primary source.",
+      },
+      {
+        q: "Can ConvergePanel verify crypto or alternative asset claims?",
+        a: "Yes — paste the specific claim into Claim Verification mode. Crypto-related claims frequently rate as 'unverifiable' because the underlying statistics are either fabricated, drawn from non-independent sources, or based on selective data. Low consensus is particularly common for claims about future crypto performance.",
+      },
+    ],
+    relatedLinks: [
+      { label: "How to Verify a Viral Claim Before Sharing It", href: "/use-cases/how-to-verify-a-viral-claim-before-sharing-it" },
+      { label: "How to Check If a Decision Is Based on Weak Information", href: "/use-cases/how-to-check-if-a-decision-is-based-on-weak-information" },
+      { label: "How to Identify Risks Before Deciding", href: "/use-cases/how-to-identify-risks-before-deciding" },
+      { label: "How to Verify Sources from AI Answers", href: "/use-cases/how-to-verify-sources-from-ai-answers" },
+      { label: "Multi-Model Decision Support Tool", href: "/use-cases/multi-model-decision-support-tool" },
+    ],
   },
 
   {
     slug: "how-to-verify-a-viral-political-claim",
     publishedAt: "2026-05-29",
     title: "How to Verify a Viral Political Claim",
-    h1: "How to Verify a Viral Political Claim — Without the Bias",
-    audience: "Politically engaged individuals",
-    audienceDetail: "Anyone who follows political news and debates online and shares political content",
+    h1: "How to Verify a Viral Political Claim Before Sharing It",
+    audience: "Politically engaged individuals and civic-minded readers",
+    audienceDetail: "Anyone who follows political news and debates online and wants to verify claims before sharing them further",
     problem:
-      "Political misinformation is different from other kinds. It's not just wrong — it's strategic. Quote misattribution, fabricated statistics, out-of-context numbers, and misleading framing are deployed specifically to move people and to be shared by people who already believe what the claim implies. You share political misinformation not despite your engagement — but because of it.\n\nThe added difficulty: political claims often can't be resolved as simply 'true' or 'false.' They involve contested data, disputed interpretations, and genuine disagreement among experts. A claim about crime rates, economic performance, or policy outcomes might cite real numbers in a misleading frame. The claim is technically accurate but constructed to mislead.\n\nAsking a single AI model about a political claim often produces the worst possible outcome: a confident, balanced-sounding answer that doesn't actually resolve whether the specific framing is accurate or misleading.",
+      "Political misinformation is different from other kinds. It's not just wrong — it's strategic. Quote misattribution, fabricated statistics, out-of-context excerpts, and misleading framing are deployed specifically to move people and to be shared by people who already believe what the claim implies. You share political misinformation not despite your engagement — but because of it.\n\nThe added difficulty: political claims often can't be resolved as simply 'true' or 'false.' They involve contested data, disputed interpretations, and genuine disagreement among experts. A claim about crime rates, economic performance, or policy outcomes might cite real numbers in a misleading frame. The claim is technically accurate but constructed to mislead.\n\nAsking a single AI model about a political claim often produces the worst possible outcome: a confident, balanced-sounding answer that doesn't actually resolve whether the specific framing is accurate or misleading. The model may even reflect whichever framing is most prevalent in its training data.",
     solution:
-      "Multi-model verification is particularly valuable for political claims because different models have different tendencies when handling contested political territory. Seeing where they agree and disagree — and reading each model's evidence independently — gives you a richer picture than any single verdict. A consensus score below 60 on a political claim should make you pause before sharing, regardless of which side of an argument it supports.",
+      "Multi-model verification is particularly valuable for political claims because different models have different tendencies when handling contested political territory. Seeing where they agree and disagree — and reading each model's evidence independently — gives you a richer picture than any single verdict.\n\nA consensus score below 60 on a political claim should make you pause before sharing, regardless of which side of an argument it supports. When models agree that a claim is 'partially accurate,' the per-model breakdown shows you exactly which part is accurate and which framing is misleading.",
     workflow: [
       "Copy the claim verbatim — including any attributed source, date, or specific statistic",
       "Paste it into ConvergePanel's Claim Verification mode",
       "Note whether models rate it 'partially accurate' — this is common with politically framed claims",
-      "Read each model's evidence summary looking for the frame, not just the verdict",
-      "Check for misattribution signals: does the claim attribute words or numbers to a source?",
-      "Apply your own judgment: does the multi-model check change how you'd characterize the claim to someone you trust?",
+      "Read each model's evidence looking for the frame, not just the verdict",
+      "Check for misattribution signals: does the claim put words or numbers in a named person's mouth?",
+      "Look for context flags: is the statistic accurate but time-period-cherry-picked?",
+      "Apply your own judgment: does the multi-model check change how you'd characterise the claim to someone you trust?",
     ],
     useCases: [
-      "A viral statistic about crime, employment, or economic performance",
-      "A quote attributed to a politician that seems unusually extreme or convenient",
-      "An out-of-context excerpt from a speech or document",
+      "A viral statistic about crime, employment, or economic performance attributed to a specific policy period",
+      "A quote attributed to a politician that seems unusually extreme or politically convenient",
+      "An out-of-context excerpt from a speech, report, or document",
       "A historical comparison framed to support a current political argument",
-      "A 'fact' shared rapidly by one partisan community and denied by another",
+      "A 'fact' spreading rapidly in one partisan community and being denied by another",
+      "A clipped video that appears to show a public figure saying something damaging",
     ],
-    cta: "Check political claims with 5 models — start free",
+    cta: "Verify Before Sharing",
     category: "how-to",
     metaDescription:
-      "Political misinformation is strategic and hard to spot. Use 5 AI models to check viral political claims for misattribution, false stats, and misleading framing.",
-    schemaType: "HowTo",
+      "Review viral political claims, public statements, clips, and quotes for missing context, weak evidence, and misleading framing.",
+    schemaType: "FAQPage",
+    bodySections: [
+      {
+        heading: "Types of Viral Political Claims",
+        paragraphs: [
+          "Political misinformation takes recognisable forms. Knowing the pattern helps you spot the verification risk before the emotional response sets in:",
+        ],
+        bullets: [
+          "Misattributed quotes — words attributed to a public figure who didn't say them, or said them in a different context",
+          "Cherry-picked statistics — real numbers from a selective time period or comparison set",
+          "Out-of-context clips — video or audio excerpts that omit the surrounding content that changes the meaning",
+          "Misleading charts — data presented in a frame that makes a trend look more dramatic than the full picture shows",
+          "Policy attribution claims — crediting or blaming a specific leader for an outcome they didn't cause",
+          "Historical analogy claims — comparing a current situation to a past one in ways that don't hold up",
+          "Manufactured urgency — false claims about upcoming votes, decisions, or deadlines",
+        ],
+      },
+      {
+        heading: "Why Political Framing Makes Verification Harder",
+        paragraphs: [
+          "Political claims often can't be cleanly resolved as true or false because they involve framing, not just facts. A statistic can be accurate and misleading at the same time — accurate for the time period selected, misleading because that period was cherry-picked. Multi-model verification is particularly useful here because different models surface different contextual flags.",
+          "The 'partially accurate' verdict is the most common and most useful outcome for political claims. It tells you the claim has some factual basis but is being framed in a way that creates a misleading impression. The per-model breakdown shows exactly where the accurate part ends and the misleading framing begins.",
+        ],
+      },
+      {
+        heading: "Common Political Claim Verification Mistakes",
+        bullets: [
+          "Applying different verification standards to claims that support your existing views versus those that challenge them",
+          "Treating a multi-model consensus as confirmation that the framing is fair — models can agree on facts while missing the misleading frame",
+          "Sharing a claim with 'apparently true' language without noting the missing context",
+          "Not checking whether a clipped video or quote has a publicly available longer version",
+          "Ignoring 'partially accurate' ratings as 'close enough to share'",
+          "Assuming a claim must be accurate because it's been shared by a trusted source",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "Can AI models be politically biased when checking political claims?",
+        a: "AI models reflect tendencies in their training data, and some may handle certain political topics differently. This is one reason multi-model verification is more reliable than single-model checks for political claims — different models with different training sets provide cross-checks on each other's tendencies. The disagreement between models is itself informative.",
+      },
+      {
+        q: "What is the difference between a false political claim and a misleading one?",
+        a: "A false political claim is factually wrong. A misleading political claim uses accurate facts in a frame designed to create a wrong impression — cherry-picked statistics, out-of-context quotes, or comparison periods selected for maximum partisan effect. Both are worth checking; misleading claims are often harder to catch because the individual facts hold up.",
+      },
+      {
+        q: "How should I interpret 'partially accurate' on a political claim?",
+        a: "The 'partially accurate' verdict means some elements of the claim are factually supported, but the claim as a whole is misleading — usually because of framing, omitted context, or selective data. Read the per-model breakdown to understand exactly which part is accurate and what's being left out.",
+      },
+      {
+        q: "What are the most common types of political misinformation to check?",
+        a: "Misattributed quotes, cherry-picked statistics with selective time periods or comparisons, out-of-context video or audio clips, misleading charts, and policy attribution claims that assign credit or blame for outcomes that had multiple causes.",
+      },
+      {
+        q: "Can I use AI verification to respond to claims on social media?",
+        a: "You can use the structured output — the consensus score, the 'partially accurate' breakdown, the per-model evidence — to construct a more specific, evidence-based response than a simple 'that's wrong.' Having a documented basis for a challenge is more useful than assertion-versus-assertion.",
+      },
+      {
+        q: "What if one model says a political claim is accurate and another says it isn't?",
+        a: "That split is worth examining. Read both models' evidence to understand what's driving the disagreement. Often the disagreeing model is surfacing missing context, a different time period, or a different interpretation of the underlying data. The disagreement tells you the specific contested point — which is exactly what you need to investigate further.",
+      },
+    ],
+    relatedLinks: [
+      { label: "How to Verify Public Statements Quickly", href: "/use-cases/how-to-verify-public-statements-quickly" },
+      { label: "How to Fact-Check Breaking News Claims", href: "/use-cases/how-to-fact-check-breaking-news-claims" },
+      { label: "How to Check If a Viral Video Might Be Manipulated", href: "/use-cases/how-to-check-if-a-viral-video-might-be-manipulated" },
+      { label: "AI Video Verification for Journalists", href: "/use-cases/ai-video-verification-for-journalists" },
+      { label: "How to Document Model Disagreement", href: "/use-cases/how-to-document-model-disagreement" },
+      { label: "How to Verify a Viral Claim Before Sharing It", href: "/use-cases/how-to-verify-a-viral-claim-before-sharing-it" },
+    ],
   },
 
   {
     slug: "how-to-verify-a-viral-ai-claim",
     publishedAt: "2026-05-29",
     title: "How to Verify a Viral AI Claim",
-    h1: "How to Verify a Viral 'AI Can Now Do X' Claim",
-    audience: "Tech-aware professionals",
-    audienceDetail: "Developers, technologists, and anyone who follows AI news and wants to evaluate capability claims critically",
+    h1: "How to Verify a Viral AI Capability or Product Claim",
+    audience: "Tech professionals, developers, and AI-curious decision-makers",
+    audienceDetail: "Developers, product managers, investors, researchers, and anyone who follows AI news and needs to evaluate capability and product claims critically",
     problem:
-      "The AI space generates more hype claims per week than almost any other domain. 'AI can now pass the bar exam.' 'AI beats doctors at cancer diagnosis.' 'AI has achieved AGI.' Each of these circulates as a confident assertion — and each, on closer inspection, involves significant caveats, cherry-picked benchmarks, or misleading framing.\n\nThese claims matter because they influence investment decisions, hiring decisions, policy debates, and how non-technical people understand what AI actually can and can't do. When an AI capability claim spreads before the nuance catches up, the consequences range from bad product decisions to distorted public policy.\n\nThe irony is that asking an AI model whether an AI capability claim is true is genuinely tricky — models may be trained on the inflated headlines, may not have context on the benchmark conditions, or may simply lack the specific technical knowledge to evaluate the claim accurately.",
+      "The AI space generates more hype claims per week than almost any other domain. 'AI can now pass the bar exam.' 'AI beats doctors at cancer diagnosis.' 'This demo shows AGI.' Each circulates as a confident assertion — and each, on closer inspection, involves significant caveats, cherry-picked benchmarks, or misleading framing.\n\nThese claims matter because they influence investment decisions, hiring decisions, product roadmaps, and policy debates. When an AI capability claim spreads before the nuance catches up, the consequences range from misallocated engineering resources to distorted public understanding of what AI actually can and can't do.\n\nVerifying AI claims is particularly tricky because the AI models you'd use to check them are trained on the same inflated headlines. They may not have context on specific benchmark conditions, may lack technical knowledge to evaluate narrow test domains, or may reflect the dominant framing in tech media rather than the methodologically careful assessment.",
     solution:
-      "Running an AI capability claim through five models is useful precisely because they have different training data, different relationships to benchmark literature, and different tendencies to flag speculative claims. When GPT-5.2, Claude Opus 4.5, Grok 4, Perplexity Pro, and Gemini 2.0 Flash all agree a claim is overstated — that's meaningful signal. When they split, the splits often reveal exactly where the nuance lies.",
+      "Running an AI capability claim through five models is useful precisely because they have different training data, different relationships to the benchmark literature, and different tendencies to flag speculative claims. When models agree that a claim is overstated, that convergence is meaningful signal. When they split, the splits often reveal exactly where the nuance lies — typically the difference between 'true in a narrow test' and 'true in the way the headline implies.'",
     workflow: [
       "Copy the specific claim — include the source (paper, tweet, press release) and any benchmark numbers cited",
       "Paste it into ConvergePanel's Claim Verification mode",
       "Pay attention to 'partially accurate' verdicts — these are common for AI capability claims",
       "Read each model's evidence: do they flag benchmark conditions, narrow test domains, or missing comparisons?",
-      "Look for consensus on 'unverifiable' — often the claim can't be evaluated without access to the specific paper or test setup",
-      "Before sharing: can you add a caveat that captures the nuance the models flagged?",
+      "Look for consensus on 'unverifiable' — the claim often can't be evaluated without access to the specific paper or test setup",
+      "Check whether models note that the capability is limited to a specific version, dataset, or use case",
+      "Before sharing, add a caveat that captures the nuance the models flagged",
     ],
     useCases: [
       "A headline claiming AI surpasses human experts on a medical diagnostic task",
       "A benchmark claim that a new model 'beats' all previous models on every task",
-      "A viral clip purporting to show AI performing a task that wasn't possible last week",
-      "A startup claim about AI capabilities that seems to exceed public model capabilities",
+      "A viral demo showing AI performing a task that wasn't possible last week",
+      "A startup claim about AI capabilities that seems to exceed publicly available model capabilities",
       "An AGI or near-AGI claim from a researcher, journalist, or investor",
+      "A vendor marketing claim about AI product capabilities that influences a procurement decision",
     ],
-    cta: "Verify AI capability claims — run a free panel",
+    cta: "Run a Multi-Model Claim Review",
     category: "how-to",
     metaDescription:
-      "AI hype claims spread fast. Learn how to verify 'AI can now do X' claims using multi-model verification to expose benchmark caveats and misleading framing.",
-    schemaType: "HowTo",
+      "AI hype claims spread fast. Learn how to verify 'AI can now do X' product and benchmark claims using multi-model verification.",
+    schemaType: "FAQPage",
+    bodySections: [
+      {
+        heading: "Types of Viral AI Claims",
+        paragraphs: [
+          "AI capability and product claims take recognisable forms. Understanding the pattern helps you identify the verification risk before engaging with the claim:",
+        ],
+        bullets: [
+          "Benchmark claims — 'this model beats all others on X benchmark' without specifying the test conditions",
+          "Human-comparison claims — 'AI performs at doctor/lawyer/expert level' based on narrow test scenarios",
+          "Capability breakthrough claims — 'AI can now do X' framed as a categorical shift rather than an incremental improvement",
+          "Demo claims — screenshots or clips of AI doing something impressive without context about the setup or failure modes",
+          "AGI or near-AGI claims — assertions about general intelligence based on performance on specific tasks",
+          "Vendor marketing claims — product capability assertions in press releases, landing pages, or fundraising materials",
+          "Research paper claims — findings presented in coverage that overstates what the paper actually showed",
+        ],
+      },
+      {
+        heading: "Why AI Capability Claims Are Hard to Verify",
+        paragraphs: [
+          "AI capability claims often mix accurate and misleading elements in ways that require technical context to disentangle. A benchmark comparison may be accurate for the test conditions used — but those conditions may have been selected to show the model in the best light. A capability claim may reflect real performance on a narrow domain while being used to imply general capability.",
+          "The irony of asking AI models to check AI claims is that those models are trained on the same hype-heavy coverage. They may reflect the dominant public framing rather than the methodologically careful view. Multi-model comparison helps because different models have different knowledge coverage — and where they disagree on an AI claim, the disagreement usually reveals the specific caveat that's missing.",
+        ],
+      },
+      {
+        heading: "Common AI Claim Verification Mistakes",
+        bullets: [
+          "Sharing a benchmark claim without noting the specific test conditions",
+          "Treating 'partially accurate' as 'close enough' for a claim that will influence a decision",
+          "Assuming that because a claim is from a credible organisation, the framing is accurate",
+          "Not checking whether a demo was conducted under conditions representative of real-world use",
+          "Conflating 'performs well on benchmark X' with 'generally capable at related tasks'",
+          "Not checking the original paper or source when a claim is widely cited in secondary coverage",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "Why are AI capability claims so often misleading?",
+        a: "Because incentives favour strong claims. Researchers want their work noticed. Companies want their products to stand out. Journalists want engaging headlines. Each step in the claim's journey from paper to headline involves selection for impressiveness over accuracy. Benchmark conditions, failure modes, and scope limitations get dropped as the claim travels.",
+      },
+      {
+        q: "What makes benchmark claims hard to verify?",
+        a: "Benchmark claims require knowing what the benchmark actually tests, how it was conducted, what the comparison baselines were, and whether the test conditions generalise to real-world use. Most viral benchmark claims omit at least one of these. 'Model X beats model Y on task Z' often obscures that the test was narrow, cherry-picked, or conducted by the model's own developers.",
+      },
+      {
+        q: "How do I evaluate an 'AI achieves human-level' claim?",
+        a: "Check what specific task 'human level' refers to, how the human comparison was constructed, and what the failure modes were on adjacent tasks. Most human-level claims are accurate for a narrow test domain and misleading when used to imply general capability. The 'partially accurate' verdict in ConvergePanel often flags exactly this nuance.",
+      },
+      {
+        q: "What should I look for when checking an AI product demo claim?",
+        a: "Whether the demo was cherry-picked or representative, whether the task shown is within the product's actual scope, whether the claim is supported by independent testing or only vendor-provided evidence, and whether comparable models or products would perform similarly. Demos optimise for impressiveness, not for accuracy about typical performance.",
+      },
+      {
+        q: "How do different AI models rate other AI models' claimed capabilities?",
+        a: "Interestingly, models often flag inflated claims about other models — partly because they have training data that includes critical assessments alongside the original hype. When multiple models agree that a capability claim is overstated, that cross-model consensus is meaningful signal that the claim doesn't reflect the nuanced reality.",
+      },
+      {
+        q: "What are common red flags in viral AI announcement claims?",
+        a: "Absence of specific test conditions, comparison to 'human experts' without defining the expert sample or test setup, capability described in categorical terms ('can now do X') rather than performance terms ('performs Y% better than baseline on task Z'), and claims from a single source without independent replication.",
+      },
+    ],
+    relatedLinks: [
+      { label: "How to Verify a Viral Claim Before Sharing It", href: "/use-cases/how-to-verify-a-viral-claim-before-sharing-it" },
+      { label: "How to Check If AI Hallucinated", href: "/use-cases/how-to-check-if-ai-hallucinated" },
+      { label: "How to Identify Blind Spots in AI Answers", href: "/use-cases/how-to-identify-blind-spots-in-ai-answers" },
+      { label: "What Is a Panel Verdict?", href: "/use-cases/what-is-a-panel-verdict" },
+      { label: "Single AI Model vs Multi-Model Verification", href: "/use-cases/single-ai-model-vs-multi-model-verification" },
+    ],
   },
 
   {
     slug: "how-to-verify-a-viral-climate-claim",
     publishedAt: "2026-05-29",
     title: "How to Verify a Viral Climate Claim",
-    h1: "How to Verify a Viral Climate Claim Without Getting Lost in the Debate",
-    audience: "Climate-engaged individuals",
-    audienceDetail: "Anyone who follows climate news, shares environmental content, or participates in climate discussions",
+    h1: "How to Verify a Viral Climate Claim Before Sharing It",
+    audience: "Climate-engaged individuals and environmental communicators",
+    audienceDetail: "Anyone who follows climate news, shares environmental content, or wants to check climate-related claims before sharing them",
     problem:
-      "Climate misinformation operates in both directions: false denial claims and inflated alarmist claims each circulate, get shared, get corrected, and get shared again. The underlying science is not actually disputed among researchers — but specific statistics, predictions, and attributions are regularly cherry-picked, misrepresented, or taken out of context.\n\nA claim like '97% of scientists agree on climate change' is technically accurate but often used without context about what the figure actually measures. A claim about a specific extreme weather event being 'caused by' climate change may reflect genuine scientific attribution research — or may be a misrepresentation of probability-based statements. These distinctions matter enormously for credibility and honest debate.\n\nWhat makes climate claims particularly hard to verify manually is the density of underlying literature and the genuine complexity of attribution science. Even a well-informed person without a climate science background may struggle to evaluate a specific statistical claim without digging into primary research.",
+      "Climate misinformation operates in both directions: denial claims and inflated alarmist claims each circulate, get shared, get corrected, and get shared again. The underlying science is not actually disputed among climate researchers — but specific statistics, predictions, and event attributions are regularly cherry-picked, misrepresented, or taken out of context.\n\nA statistic about sea level rise or temperature increase may be accurate for one time period and misleading when presented as a trend. A claim about an extreme weather event being 'caused by' climate change may reflect genuine scientific attribution research — or may misrepresent probability-based statements as causal ones. These distinctions matter enormously for credibility in climate communication.\n\nVerifying climate claims manually is difficult because the underlying literature is dense, attribution science is genuinely complex, and the same data can support very different framings depending on which time period, region, or comparison is selected.",
     solution:
-      "Multi-model verification is useful for climate claims because different models draw on different subsets of the scientific literature. A consensus between models is a meaningful signal that a claim reflects well-established findings. Splits — particularly between models that flag sourcing issues — point to where the complexity lies. This doesn't replace consulting the primary literature on important questions, but it provides a useful structured first pass.",
+      "Multi-model verification is useful for climate claims because different models draw on different subsets of the scientific literature. A consensus between models is a meaningful signal that a claim reflects well-established findings. Splits — particularly between models that flag sourcing issues — point to where the complexity lies. This doesn't replace consulting the primary literature for important questions, but it provides a structured first pass that surfaces the most common misrepresentation patterns.",
     workflow: [
       "Copy the claim exactly, including any specific statistics, dates, or attributions",
       "Paste it into ConvergePanel's Claim Verification mode",
       "Note the distinction between 'inaccurate' and 'partially accurate' — many climate claims involve accurate data in misleading frames",
       "Check each model's evidence for whether they cite the same sources or different ones",
       "Look for model disagreement on specific statistics — this often reveals cherry-picking or outdated figures",
-      "Consider whether a more precisely worded version of the claim would be both accurate and useful to share",
+      "Consider whether a more precisely worded version of the claim would be both accurate and honest to share",
     ],
     useCases: [
       "A statistic about sea level rise, temperature increases, or extreme weather frequency",
       "A claim attributing a specific disaster directly to climate change",
-      "A 'scientists say' claim without a specific citation",
+      "A 'scientists say' claim without a specific citation or named study",
       "A contrarian claim that contradicts mainstream climate science",
       "A policy claim about the costs or benefits of a climate intervention",
+      "A weather vs. climate claim that conflates short-term events with long-term trends",
     ],
-    cta: "Check climate claims with 5 AI models — free",
+    cta: "Verify Before Sharing",
     category: "how-to",
     metaDescription:
       "Climate misinformation runs in both directions. Verify specific climate statistics and claims with 5 AI models to spot cherry-picking and misleading framing.",
-    schemaType: "HowTo",
+    schemaType: "FAQPage",
+    bodySections: [
+      {
+        heading: "Types of Viral Climate Claims",
+        bullets: [
+          "Temperature or sea level statistics cited for a specific time period or region selected for maximum effect",
+          "Attribution claims — 'climate change caused' framing for events where science establishes probability, not direct causation",
+          "'Scientists say' claims without specific study citations or named researchers",
+          "Contrarian claims cherry-picking cold anomalies or outdated datasets to challenge mainstream findings",
+          "Policy framing claims — asserting the costs or benefits of climate interventions based on selective modelling",
+          "Percentage claims — commonly misrepresented statistics about scientific consensus or species loss",
+          "Weather vs. climate confusion — using short-term anomalies to argue about long-term trends",
+        ],
+      },
+      {
+        heading: "Why Climate Claims Are Complex to Verify",
+        paragraphs: [
+          "Climate science involves genuinely complex attribution. 'Extreme weather X is caused by climate change' is almost always a misrepresentation — attribution science calculates probability, not causation. A more accurate framing would be 'climate change increased the probability of events like X by Y%.' The viral version drops the probability framing because it's less dramatic.",
+          "The 'partially accurate' verdict is particularly common for climate claims because the core fact often has a basis in the scientific literature but the framing exaggerates the certainty, overstates the directness of causation, or applies a local or regional finding to a global claim. Reading each model's evidence breakdown shows you exactly where the accurate part ends.",
+        ],
+      },
+      {
+        heading: "Common Climate Claim Verification Mistakes",
+        bullets: [
+          "Treating a high consensus score on a climate claim as confirmation that the framing is accurate",
+          "Sharing denial claims to 'debunk them' without first checking that the debunking is correct",
+          "Assuming that a statistic published by a climate organisation must be presented in accurate context",
+          "Conflating weather events with climate trends — short-term anomalies in either direction don't confirm or deny long-term trends",
+          "Not checking the time period or region for which a climate statistic is accurate",
+          "Sharing exaggerated claims about climate impact because they're 'in the right direction' — overclaiming undermines credibility",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "What is the difference between weather and climate in viral claims?",
+        a: "Weather is short-term atmospheric conditions in a specific place. Climate is long-term patterns across regions over decades. Viral claims often conflate them — using a single cold week to claim global warming isn't real, or a single heat record to claim climate change is worse than projected. Multi-model verification often flags this confusion explicitly.",
+      },
+      {
+        q: "Can AI models help evaluate climate science claims?",
+        a: "Yes, within limits. AI models can assess whether a climate statistic appears consistent with established scientific findings, identify cherry-picking patterns, and flag framing that misrepresents attribution science. They can't access the primary literature directly, so complex technical claims still require primary-source verification for high-stakes uses.",
+      },
+      {
+        q: "Why do some climate claims rate as 'partially accurate' rather than false?",
+        a: "Because many climate claims are accurate for a specific time period, region, or measurement, but are presented in a way that overstates what the data shows. The statistic is real; the framing is misleading. The 'partially accurate' verdict and per-model breakdown identify exactly where the misrepresentation occurs.",
+      },
+      {
+        q: "What are the most commonly misrepresented climate statistics?",
+        a: "Temperature increase rates presented without context about the baseline period, attribution of specific events to climate change without probability framing, consensus percentage claims used without explaining what scientists agree on, and species loss or ecosystem change statistics presented without time horizon or geographic scope.",
+      },
+      {
+        q: "How should I handle climate claims where scientific debate exists?",
+        a: "There's a difference between scientific debate at the frontier of research and manufactured controversy about settled questions. For the former, model disagreement often reflects genuine scientific uncertainty — worth flagging in any claim you share. For the latter, low consensus on a contrarian claim about well-established findings is a signal that the claim misrepresents the state of science.",
+      },
+      {
+        q: "Is attribution science the same as proving climate causation?",
+        a: "No. Attribution science calculates the change in probability of an event given climate change — not direct causation. 'Climate change made this event twice as likely' is an attribution science finding. 'Climate change caused this event' is a misrepresentation of that finding. Many viral climate claims make this error, which is one reason 'partially accurate' is so common in climate claim verification.",
+      },
+    ],
+    relatedLinks: [
+      { label: "How to Verify a Viral Claim Before Sharing It", href: "/use-cases/how-to-verify-a-viral-claim-before-sharing-it" },
+      { label: "How to Verify a Viral Political Claim", href: "/use-cases/how-to-verify-a-viral-political-claim" },
+      { label: "How to Document Model Disagreement", href: "/use-cases/how-to-document-model-disagreement" },
+      { label: "What Is a Consensus Score?", href: "/use-cases/what-is-a-consensus-score" },
+      { label: "How to Verify Sources from AI Answers", href: "/use-cases/how-to-verify-sources-from-ai-answers" },
+    ],
   },
 
   // ── GROUP B: Audience pages ───────────────────────────────────────────────────
@@ -1154,187 +1644,618 @@ export const PAGES: PSEOPage[] = [
     slug: "ai-claim-verification-for-content-creators",
     publishedAt: "2026-05-29",
     title: "AI Claim Verification for Content Creators",
-    h1: "How Content Creators Can Verify Claims Before Publishing",
+    h1: "AI Claim Verification for Creators Before Posting or Reacting",
     audience: "Content creators",
-    audienceDetail: "YouTubers, newsletter writers, podcasters, and social media influencers who publish factual claims to large audiences",
+    audienceDetail: "YouTubers, TikTok creators, newsletter writers, podcasters, and social media influencers who publish factual claims to large audiences",
     problem:
-      "Content creators live in a trust economy. Your audience follows you because they believe what you say is worth listening to. One viral correction — 'actually that statistic was completely wrong' — can do lasting damage to that trust. And corrections rarely spread as far as the original claim.\n\nThe pressure is compounded by content velocity. Research-heavy content takes time. But the AI-assisted research shortcut comes with a hidden cost: AI models confidently fabricate statistics, cite papers that don't exist, and present contested claims as settled. The more fluent the output, the harder it is to spot the problem before you publish it to a hundred thousand people.\n\nThe problem isn't using AI — it's using one AI model without a verification step. A single model has no way to flag its own errors.",
+      "Content creators live in a trust economy. Your audience follows you because they believe what you say is worth listening to. One viral correction — 'actually that statistic was completely wrong' — can do lasting damage to that trust. And corrections rarely spread as far as the original claim.\n\nThe pressure is compounded by content velocity. Reaction videos, trend-chasing, and viral response content all require fast publishing decisions. But the AI-assisted research shortcut comes with a hidden cost: models confidently fabricate statistics, cite papers that don't exist, and present contested claims as settled fact. The more fluent the output, the harder it is to catch before it reaches a hundred thousand people.\n\nSponsor claims, 'studies show' assertions, viral screenshots, and trending stats all carry the same risk: they're in your content, under your name, to your audience. If they're wrong, the blowback is yours to manage.",
     solution:
-      "ConvergePanel's Claim Verification mode lets creators fact-check specific claims before they go into a video, newsletter, or post. Run a statistic or assertion through five models and get a consensus score in under a minute. A score above 80 gives you reasonable confidence to publish. A split below 60 is a clear signal to dig further before the content goes out.",
+      "ConvergePanel's Claim Verification mode lets creators check specific claims before they go into a video, newsletter, or post. Run a statistic or assertion through five models and get a consensus score in under a minute. A score above 80 gives you reasonable confidence to publish. A split below 60 is a clear signal to either find a primary source or cut the claim from the script.\n\nThe verification record is also a professional asset. If a claim is ever challenged, you have documented evidence that you performed a structured verification check before publishing.",
     workflow: [
-      "Identify the specific factual claims in your draft — statistics, attributions, research findings",
+      "Identify the specific factual claims in your draft — statistics, attributed quotes, research findings",
       "Paste each claim into ConvergePanel's Claim Verification mode",
-      "Review the consensus score and per-model evidence before including the claim in your content",
-      "Flag any 'partially accurate' results — these often contain the real nuance your audience needs",
-      "Export the verification record as a reference if you're ever challenged on a claim",
+      "Review the consensus score: 80+ proceed with confidence, 60–79 add context or a caveat, below 60 verify further or cut",
+      "Read the 'partially accurate' breakdowns — they often reveal the nuance your audience needs to hear",
+      "Check whether models flag claims as unverifiable — common for 'studies show' claims without specific citations",
+      "Export the verification summary as a reference for your production notes or if challenged later",
     ],
     useCases: [
-      "Verifying a statistic you found via AI research before citing it in a YouTube video",
-      "Checking a historical claim before building a newsletter section around it",
-      "Confirming a scientific finding before making it the centerpiece of a health-focused post",
-      "Cross-checking a viral claim your audience has been asking you about",
-      "Building a verification habit into your pre-publish checklist",
+      "Verifying a statistic cited in a YouTube video script before recording",
+      "Checking a viral screenshot or trending claim before reacting to it in a video",
+      "Confirming sponsor claims or product benefit assertions before featuring them in sponsored content",
+      "Fact-checking TikTok trends and 'did you know' claims before repeating them to your audience",
+      "Reviewing AI-generated research briefs for your podcast before treating them as reliable",
+      "Building a pre-publish verification checklist for health, finance, or legal content",
     ],
-    cta: "Verify claims before you publish — start free",
+    cta: "Check Before You Post",
     category: "claim-verification",
     metaDescription:
-      "Content creators: protect your reputation by verifying claims before publishing. Five AI models give you a consensus score and audit trail in under a minute.",
+      "Use AI claim verification to review viral posts, scripts, screenshots, and trending claims before publishing creator content.",
+    schemaType: "FAQPage",
+    bodySections: [
+      {
+        heading: "Claims Creators Encounter Most",
+        paragraphs: [
+          "The claims most likely to damage creator credibility are the ones that seem most shareable: surprising statistics, confident expert attributions, and viral assertions that perfectly illustrate a point. Common claim types that need verification before publishing include:",
+        ],
+        bullets: [
+          "Statistics cited in video scripts — especially 'X% of people' or 'studies show' claims",
+          "Expert quotes or attributed statements pulled from AI-generated research",
+          "Viral screenshots or screenshots of other creators' claims you're reacting to",
+          "Sponsor claims about product benefits, especially health, performance, or financial outcomes",
+          "TikTok trend assertions and trending 'facts' spreading through creator communities",
+          "Historical claims used as context for current topics",
+          "AI-generated script content that includes plausible-sounding citations",
+        ],
+      },
+      {
+        heading: "Why Creator Credibility Depends on Verification",
+        paragraphs: [
+          "Audience trust is the asset that takes years to build and hours to damage. When a creator publishes a wrong claim, the correction is rarely as viral as the original error. Viewers who saw the wrong claim often don't see the correction — they carry the wrong information forward, associated with your name.",
+          "For creators in regulated or sensitive areas — health, finance, legal — the stakes are higher. Wrong health claims can change how viewers act on medical decisions. Wrong investment claims can affect financial decisions. In these areas, 'I was just repeating what the AI told me' is not a protection for your audience or your reputation.",
+        ],
+      },
+      {
+        heading: "Common Creator Verification Mistakes",
+        bullets: [
+          "Treating AI-generated research as verified because it sounds authoritative",
+          "Reacting to viral claims without checking whether they're accurately reported",
+          "Adding 'I think' disclaimers as a substitute for verification",
+          "Not checking the original source of a statistic before repeating it",
+          "Using a single AI model to verify a claim that came from a different AI model",
+          "Skipping verification under deadline pressure for trending content",
+          "Assuming a claim is true because it's been widely shared",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "How can content creators use AI to fact-check before publishing?",
+        a: "Run specific claims from your draft through ConvergePanel's Claim Verification mode. Paste the exact claim — the statistic, quote, or assertion — and get a consensus score from five models in under a minute. Claims above 80 have broad model agreement. Claims below 60 should be cut, caveated, or verified against a primary source.",
+      },
+      {
+        q: "What happens if I publish a claim that turns out to be wrong?",
+        a: "The correction cycle is slow and rarely reaches everyone who saw the original. Your audience carries the wrong information forward. Documentation of a structured verification check before publishing is a meaningful defence of your process — even if the outcome was imperfect. Without it, there's no evidence of due diligence.",
+      },
+      {
+        q: "How is ConvergePanel different from Googling a claim to check it?",
+        a: "Google shows you what's on the web, which may include the same misinformation that's circulating. ConvergePanel runs the claim through five independent AI models with different training data, then shows you where they agree and disagree. The disagreement signal — which Google search doesn't provide — is often more useful than any individual result.",
+      },
+      {
+        q: "What types of claims should creators prioritise for verification?",
+        a: "Any claim that's central to your content's argument, any statistic you found via AI research, any viral claim you're reacting to rather than independently researching, and any claim in a sensitive area — health, finance, legal. If the claim's accuracy is load-bearing for your content, it warrants verification.",
+      },
+      {
+        q: "Can I use the verification record to defend my content if challenged?",
+        a: "Yes. The exported verification summary shows the claim you checked, the models queried, the consensus score, and the per-model evidence. This documents that you performed a structured verification check before publishing — which is materially different from no documented process.",
+      },
+      {
+        q: "How long does verification take for a single claim?",
+        a: "Typically 15–30 seconds per claim. For a script with five key claims, a full verification pass takes under three minutes — a small investment relative to the protection it provides.",
+      },
+    ],
+    relatedLinks: [
+      { label: "How Creators Can Fact-Check Videos", href: "/use-cases/how-creators-can-fact-check-videos" },
+      { label: "How to Verify Information for a Video Script", href: "/use-cases/how-to-verify-information-for-a-video-script" },
+      { label: "AI Research Tool for YouTubers", href: "/use-cases/ai-research-tool-for-youtubers" },
+      { label: "How to Fact-Check a Reaction Video", href: "/use-cases/how-to-fact-check-a-reaction-video" },
+      { label: "How to Check Sources for Creator Content", href: "/use-cases/how-to-check-sources-for-creator-content" },
+      { label: "How to Verify a Viral Claim Before Sharing It", href: "/use-cases/how-to-verify-a-viral-claim-before-sharing-it" },
+    ],
   },
 
   {
     slug: "ai-claim-verification-for-founders",
     publishedAt: "2026-05-29",
     title: "AI Claim Verification for Founders",
-    h1: "Why Founders Need to Verify Market Claims Before the Pitch",
-    audience: "Startup founders",
-    audienceDetail: "Early-stage founders building pitch decks, fundraising materials, and investor updates",
+    h1: "AI Claim Verification for Founders Making High-Stakes Decisions",
+    audience: "Startup founders and entrepreneurs",
+    audienceDetail: "Early-stage and growth-stage founders building pitch decks, fundraising materials, investor updates, and business strategies",
     problem:
-      "A pitch deck is a document someone will fact-check. VCs have seen thousands of decks. They notice when a market size claim is suspiciously round, when a growth statistic doesn't match public filings, or when a research finding that forms the basis of your TAM isn't from the source you cited. One bad data point doesn't just undermine a slide — it undermines your credibility as a founder.\n\nThe temptation to use AI for market research is understandable. It's fast, it sounds authoritative, and it produces well-formatted output. The risk is that AI models regularly fabricate market size figures, cite studies that don't exist, and blend real data with plausible-sounding extrapolations — all in the same confident tone.\n\nFounders who've been through diligence know the anxiety: 'I put that number in the deck six months ago. Where did it come from?' If you can't answer that question, you have a problem.",
+      "A pitch deck is a document someone will fact-check. VCs have seen thousands of decks. They notice when a market size claim is suspiciously round, when a growth statistic doesn't match public filings, or when a research finding that forms the basis of your TAM isn't from the source you cited. One bad data point doesn't just undermine a slide — it undermines your credibility as a founder.\n\nThe temptation to use AI for market research is understandable. It's fast, it sounds authoritative, and it produces well-formatted output. The risk is that AI models regularly fabricate market size figures, cite studies that don't exist, and blend real data with plausible-sounding extrapolations — all in the same confident tone. An AI research brief for a pitch deck is not a verified primary source.\n\nFounders who've been through diligence know the anxiety: 'I put that number in the deck six months ago. Where did it come from?' If you can't answer that question, you have a problem. The same risk extends beyond fundraising to business decisions, pricing assumptions, and go-to-market strategies built on AI-assisted research.",
     solution:
-      "ConvergePanel lets founders verify market claims, growth statistics, and competitive assertions before they enter fundraising materials. Run each major claim through five models and check for consensus. When models disagree on a market size claim, that's often because the underlying data is genuinely contested — which means you shouldn't cite it as fact.",
+      "ConvergePanel helps founders pressure-test market claims, competitive assertions, and strategic assumptions before they enter fundraising materials or business decisions. Running each major claim through five models surfaces where the data is genuinely supported versus where it's plausible-sounding but poorly grounded.\n\nWhen models disagree on a market size claim, that's often because the underlying data is genuinely contested — which means you shouldn't cite it as settled fact in front of an investor. A verification pass before the deck is finalised is faster and less painful than a diligence conversation where you can't source a central claim.",
     workflow: [
-      "List every factual claim in your pitch deck — market size, growth rates, competitive assertions",
-      "Paste each claim into ConvergePanel's Claim Verification mode",
-      "Note the consensus score and per-model evidence for each",
-      "Replace any claim with a score below 70 with either a more defensible version or explicit sourcing from a primary source",
-      "Export verification records as a due-diligence reference you can provide if asked",
+      "List every factual claim in your pitch deck — market size, growth rates, competitive assertions, customer demand data",
+      "Paste each claim into ConvergePanel's Claim Verification mode with source attribution if you have one",
+      "Note the consensus score and per-model evidence for each claim",
+      "For any claim with a score below 70, either find a primary source or replace it with a more defensible formulation",
+      "For claims rated 'unverifiable,' decide whether to remove them or explicitly caveat them in the deck",
+      "Export verification records as a due-diligence reference you can provide if a VC asks 'where does this come from?'",
     ],
     useCases: [
       "Verifying a TAM figure before presenting it to institutional investors",
-      "Checking a competitor's claimed metrics that you're using as a reference point",
-      "Confirming a growth rate or adoption statistic from industry research",
-      "Validating a regulatory or policy claim that's material to your market",
-      "Stress-testing the factual claims in your investor update before a diligence process",
+      "Checking competitor claimed metrics you're using as a reference point",
+      "Confirming a growth rate or adoption statistic from AI-assisted industry research",
+      "Pressure-testing customer demand claims before committing budget to a go-to-market plan",
+      "Validating pricing assumptions derived from AI-generated market analysis",
+      "Stress-testing the factual claims in an investor update before a diligence process begins",
     ],
-    cta: "Verify your pitch claims — try the free panel",
+    cta: "Pressure-Test This Decision",
     category: "claim-verification",
     metaDescription:
-      "Investors fact-check pitch decks. Verify your market claims, statistics, and competitive data with 5 AI models before your next fundraise.",
+      "Pressure-test startup claims, market assumptions, pitch narratives, and AI-generated business advice before acting on them.",
+    schemaType: "FAQPage",
+    bodySections: [
+      {
+        heading: "High-Risk Claims in Startup Work",
+        paragraphs: [
+          "Not all claims in a pitch deck carry the same verification risk. The claims most likely to cause problems in diligence — or to lead to a bad business decision — are the ones that are hard to source but central to the narrative:",
+        ],
+        bullets: [
+          "Total addressable market figures with suspiciously round numbers or no named source",
+          "Growth rate or adoption statistics from 'industry reports' that can't be traced to a specific document",
+          "Competitor claims about pricing, market share, or customer counts drawn from AI research",
+          "Customer demand assertions based on AI-generated surveys or market analysis",
+          "Regulatory or policy claims used to justify market timing",
+          "AI capability claims used to justify product positioning",
+          "Historical analogy claims ('just like X did in the Y market') that may not accurately represent the cited case",
+        ],
+      },
+      {
+        heading: "Why Pitch Deck Claims Need Verification",
+        paragraphs: [
+          "The most common investor objection isn't 'I disagree with your vision' — it's 'I can't source this claim.' Founders who can't defend their data points in diligence signal a pattern: if the market research isn't rigorous, how confident should an investor be in the operating decisions that follow?",
+          "The same logic applies to business decisions beyond fundraising. A go-to-market strategy built on AI-generated market data that hasn't been verified may look credible in a planning session and fall apart when tested against reality. Verification isn't about distrust of AI — it's about understanding which claims are well-grounded and which are best guesses in authoritative language.",
+        ],
+      },
+      {
+        heading: "Common Founder Verification Mistakes",
+        bullets: [
+          "Citing AI-generated market size figures without tracing them to a named primary source",
+          "Using a single AI model's research brief as the factual basis for pitch deck claims",
+          "Assuming a statistic widely cited in industry content must be accurate",
+          "Not keeping documentation of where major claims came from",
+          "Treating a competitor's published claims as verified facts without independent confirmation",
+          "Using 'AI says' as a source defence in a diligence conversation",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "What kinds of market claims do VCs typically fact-check during diligence?",
+        a: "TAM/SAM/SOM figures, growth rate statistics, cited reports, competitor revenue or market share claims, customer demand assertions, and any stat that anchors the investment thesis. If a claim justifies the market opportunity or competitive position, expect it to be questioned.",
+      },
+      {
+        q: "How can I verify a TAM figure I found through AI research?",
+        a: "Paste the specific claim into ConvergePanel's Claim Verification mode. If models rate it 'unverifiable' or disagree significantly, that signals the underlying data isn't clearly established — which likely means you can't source it to a credible primary source either. Replace it with a claim you can actually defend.",
+      },
+      {
+        q: "What if a pitch deck claim can't be verified?",
+        a: "Replace it with either a verifiable version — more conservative, with a named source — or an explicitly qualified assertion: 'Based on our primary research with X customers...' An unverifiable claim presented as fact is a diligence liability. A transparent qualification is a sign of rigour.",
+      },
+      {
+        q: "How does multi-model verification help with investor narrative?",
+        a: "It helps you distinguish between claims that are well-supported and claims that are plausible. Claims that multi-model verification rates as 'partially accurate' often contain exactly the nuance a VC will use to probe the story. Knowing these in advance lets you address them proactively.",
+      },
+      {
+        q: "Can ConvergePanel verify competitive claims or market positioning?",
+        a: "Yes — paste a competitive claim into Claim Verification mode. The per-model evidence will show what's known about the competitor in the AI knowledge base. Claims that models rate as 'unverifiable' are often based on the competitor's own marketing materials rather than independent data.",
+      },
+      {
+        q: "When in the fundraising process should I verify pitch claims?",
+        a: "Before the deck is finalised, not after you've started sending it. The goal is to enter diligence conversations already knowing which claims are well-grounded and which need a caveat. Discovering an unverifiable claim mid-diligence is a much worse position than removing it before the first investor meeting.",
+      },
+    ],
+    relatedLinks: [
+      { label: "How to Validate a Business Idea with AI", href: "/use-cases/how-to-validate-a-business-idea-with-ai" },
+      { label: "How to Pressure-Test a Startup Idea", href: "/use-cases/how-to-pressure-test-a-startup-idea" },
+      { label: "How to Test Business Assumptions with AI", href: "/use-cases/how-to-test-business-assumptions-with-ai" },
+      { label: "How to Pressure-Test Investor Pitch Claims", href: "/use-cases/how-to-pressure-test-investor-pitch-claims" },
+      { label: "How to Validate Market Assumptions", href: "/use-cases/how-to-validate-market-assumptions" },
+      { label: "AI Decision Support for Founders", href: "/use-cases/ai-decision-support-for-founders" },
+    ],
   },
 
   {
     slug: "ai-claim-verification-for-newsrooms",
     publishedAt: "2026-05-29",
     title: "AI Claim Verification for Newsrooms",
-    h1: "Multi-Model Claim Verification for Editorial Teams",
-    audience: "Editorial teams",
-    audienceDetail: "Editors, managing editors, and editorial operations staff at news organizations",
+    h1: "AI Claim Verification for Newsrooms Under Publishing Pressure",
+    audience: "Editorial teams and newsroom operations",
+    audienceDetail: "Reporters, editors, managing editors, and editorial operations staff at news organizations of all sizes",
     problem:
-      "The newsroom verification problem is a workflow problem, not just a fact-checking problem. Individual reporters check claims. Editors review drafts. But when dozens of stories move through a newsroom simultaneously, verification quality is uneven. Some claims get rigorous checks. Others make it through because no one had time to dig.\n\nAI tools have entered newsrooms but have introduced new risks alongside the efficiency gains. Reporters using AI for research may not flag AI-generated text for additional verification. AI-assisted research briefs may contain hallucinated statistics presented in fluent, authoritative prose. The editorial layer often can't catch what it doesn't know to look for.\n\nThe newsroom challenge is building a consistent, documentable verification step that doesn't add prohibitive time to deadline-driven workflows.",
+      "The newsroom verification problem is a workflow problem, not just a fact-checking problem. When dozens of stories move through a newsroom simultaneously, verification quality is uneven. Breaking news creates pressure to publish before claims can be fully checked. Viral screenshots and public figure statements arrive without provenance. User-generated content from social platforms can't be taken at face value — but there's rarely time for a full investigation before a competitor runs with the story.\n\nAI tools have entered newsrooms but introduced new risks. Reporters using AI for research may not flag AI-generated text for additional verification. A hallucinated statistic in fluent, authoritative prose looks identical to a real one. The editorial layer often can't catch what it doesn't know to look for.\n\nThe cost of a wrong claim reaching publication is measured in corrections, trust, and legal exposure. The original false claim continues to circulate with your newsroom's name attached long after the correction.",
     solution:
-      "ConvergePanel's governance layer makes verification systematic rather than ad hoc. Reporters can run claims through a multi-model panel in under a minute. Governance policies can require that low-consensus claims be flagged for editorial review before publication. The peer review dashboard gives editors visibility into what's been verified, what's been flagged, and what decision was made — creating an audit trail that protects the newsroom.",
+      "ConvergePanel helps newsrooms build consistent, documented verification into editorial workflows. Reporters run claims through a five-model panel in under a minute — before a story reaches an editor. Governance policies can require that low-consensus claims are flagged for editorial review before publication. The peer review dashboard gives editors visibility into what was checked, what was flagged, and how the editorial decision was made.\n\nFor newsrooms, the value isn't only catching wrong claims. It's creating an audit trail that documents the verification process — protecting editorial credibility and, in sensitive cases, legal exposure.",
     workflow: [
-      "Set newsroom-wide governance policies: consensus thresholds, topic flags, evidence quality standards",
-      "Reporters run specific claims through Claim Verification before submitting stories",
-      "Claims below threshold are automatically flagged for editorial review",
-      "Editors approve, request changes, or flag for additional reporting in the peer review dashboard",
-      "The audit log records every verification decision — who checked what, when, and what was decided",
+      "Isolate the specific claim, statistic, or public figure statement that needs verification",
+      "Paste it into ConvergePanel's Claim Verification mode before submitting the story",
+      "Review the consensus score — low consensus is a publish/hold signal",
+      "For flagged claims, the governance dashboard routes them to an editor for review",
+      "The editor approves, requests additional reporting, or holds the claim",
+      "Every verification decision is logged — who checked, when, and what was decided",
+      "Export the verification record as part of the editorial file for contested stories",
     ],
     useCases: [
-      "Verifying statistics in breaking news before publication when primary sources are unavailable",
-      "Cross-checking claims in submitted op-eds or contributed content",
+      "Verifying statistics in breaking news stories before publication when primary sources are unavailable",
+      "Checking public figure statements and attributed quotes that arrived via press releases or social posts",
+      "Reviewing viral screenshots and user-generated claims submitted by readers or tipsters",
       "Adding a structured verification gate to AI-assisted reporting workflows",
-      "Building an auditable record of editorial fact-checking decisions",
-      "Triaging a high volume of claims during major news events",
+      "Building an auditable record of editorial fact-checking decisions for contested or legally sensitive stories",
+      "Triaging high claim volumes during major news events when editorial bandwidth is stretched",
     ],
-    cta: "Add structured verification to your newsroom — start a trial",
+    cta: "Verify Before Publishing",
     category: "claim-verification",
     metaDescription:
-      "Newsrooms: build consistent, auditable claim verification into editorial workflows. Multi-model checks, governance policies, and peer review for every story.",
+      "Help newsroom teams review public claims, viral posts, and source-sensitive statements before publishing or escalating high-risk stories.",
+    schemaType: "FAQPage",
+    bodySections: [
+      {
+        heading: "What Newsrooms Need to Verify",
+        paragraphs: [
+          "Not all newsroom verification problems are the same. A claim from a verified institution source is different from a viral screenshot with no provenance. The types of claims that most commonly create editorial risk include:",
+        ],
+        bullets: [
+          "Breaking news claims arriving before primary sources can be independently confirmed",
+          "Public figure statements attributed via press releases, social posts, or secondhand reporting",
+          "Viral screenshots where the original source is unknown or unverifiable",
+          "User-generated content from social platforms submitted as evidence",
+          "Statistics from AI-assisted research that haven't been traced to an original source",
+          "Op-ed or contributed content claims that the editorial team hasn't independently checked",
+          "Historical claims or precedents cited to support a current news angle",
+        ],
+      },
+      {
+        heading: "The Correction Problem",
+        paragraphs: [
+          "Publishing a wrong claim is recoverable. Publishing one in a high-profile story, or repeatedly in high-pressure situations, has cumulative effects on newsroom credibility that are much harder to recover from. A correction rarely spreads as far as the original false claim — readers who saw the error often don't see the correction.",
+          "The legal exposure from published false claims about individuals makes documentation of the verification process important even when a claim turns out to be accurate. Being able to show that a claim was verified using a documented process is materially different from 'our reporter checked it and felt confident.'",
+        ],
+      },
+      {
+        heading: "Common Newsroom Verification Mistakes",
+        bullets: [
+          "Checking claims after a story is submitted rather than before — creating publish pressure before verification is complete",
+          "Using a single AI model as a quick check without structured output or documentation",
+          "Treating a claim as verified because no explicit correction exists online",
+          "Not documenting the verification process — only the outcome",
+          "Applying different verification standards to claims that confirm editorial assumptions versus those that challenge them",
+          "Missing AI-hallucinated statistics in research briefs because they look identical to real data",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "How is multi-model AI claim verification different from a reporter checking sources manually?",
+        a: "Manual source-checking verifies a claim against primary sources. Multi-model AI verification gives you a fast, structured cross-check before you reach out to sources — it surfaces whether a claim is well-established, contested, or unverifiable in the existing AI knowledge base, so you know where to focus your manual verification effort.",
+      },
+      {
+        q: "Can ConvergePanel handle breaking news claims where sources are limited?",
+        a: "Yes — it's particularly useful there. When a claim is breaking and primary sources haven't responded, a multi-model check surfaces how well-established the underlying claim is in AI training data. A consensus score below 60 on a breaking claim is a clear signal to hold until you have independent confirmation.",
+      },
+      {
+        q: "What is the benefit of multi-model verification for editorial decisions?",
+        a: "It turns 'I checked it and it seemed right' into 'I ran it through five models, got a consensus score of X, and the model that flagged it identified these specific issues.' That's a documentable, defensible basis for an editorial decision — not just a reporter's confidence level.",
+      },
+      {
+        q: "How does ConvergePanel create an audit trail for newsroom fact-checking?",
+        a: "Every panel run is automatically logged: the claim checked, the models queried, the consensus score, the per-model evidence, any governance flags triggered, and any peer review decisions made. This record can be exported and retained as documentation of the editorial verification process.",
+      },
+      {
+        q: "What claims should newsrooms prioritise for AI verification?",
+        a: "Statistics cited without a named original source, attributed quotes arriving via social media, claims from sources with a track record of embellishment, AI-generated research briefs before they enter stories, and any claim that's central to the story's premise rather than incidental context.",
+      },
+      {
+        q: "How does the peer review feature work for editorial sign-off?",
+        a: "Governance policies define what triggers a peer review step — for example, any claim with a consensus score below 70, or claims flagged by a topic filter (legal, financial, public figure). Flagged claims appear in the editor's dashboard for approve/hold/request-more-reporting decisions. Each decision is logged with the editor's identity and timestamp.",
+      },
+    ],
+    relatedLinks: [
+      { label: "How to Fact-Check Breaking News Claims", href: "/use-cases/how-to-fact-check-breaking-news-claims" },
+      { label: "How Journalists Can Verify Viral Clips", href: "/use-cases/how-journalists-can-verify-viral-clips" },
+      { label: "AI Video Verification for Journalists", href: "/use-cases/ai-video-verification-for-journalists" },
+      { label: "How to Create an AI Audit Trail", href: "/use-cases/how-to-create-an-ai-audit-trail" },
+      { label: "What Is a Decision Receipt?", href: "/use-cases/what-is-a-decision-receipt" },
+      { label: "Claim Verification for Journalists", href: "/use-cases/claim-verification-for-journalists" },
+      { label: "Newsroom AI Verification Workflow", href: "/use-cases/newsroom-ai-verification-workflow" },
+    ],
   },
 
   {
     slug: "ai-claim-verification-for-educators",
     publishedAt: "2026-05-29",
     title: "AI Claim Verification for Educators",
-    h1: "How Educators Can Verify AI-Generated Content Before Using It in Teaching",
-    audience: "Educators",
-    audienceDetail: "Teachers, professors, and instructional designers who use AI tools to develop teaching materials",
+    h1: "AI Claim Verification for Educators Using AI in Teaching",
+    audience: "Educators and instructional designers",
+    audienceDetail: "Teachers, professors, curriculum designers, and instructional designers at schools, universities, and learning organisations",
     problem:
-      "Educators face a dual challenge with AI: verifying AI-generated content they're considering using in their materials, and modeling good verification practice for students who are using AI themselves. Both require the same underlying skill — not just skepticism, but structured, evidence-based evaluation of AI outputs.\n\nThe specific risk for educators is that AI-generated teaching materials carry institutional authority. When a teacher presents a statistic or claim in class, students trust it. When that claim is wrong and later corrected, it undermines not just the specific fact but the educator's credibility as a source. The stakes are higher than they appear.\n\nAI models frequently hallucinate citations in educational contexts — inventing papers that sound real, attributing quotes to scholars who never said them, and presenting contested research as settled consensus. These errors are hard to catch because the output looks exactly like correct academic content.",
+      "Educators face a dual challenge with AI: verifying AI-generated content they're considering using in their materials, and modelling good verification practice for students who are using AI themselves. Both require the same underlying skill — not just scepticism, but structured, evidence-based evaluation of AI outputs.\n\nThe specific risk is that AI-generated teaching materials carry institutional authority. When a teacher presents a statistic or claim in class, students trust it. When that claim is wrong and later corrected, it undermines not just the specific fact but the educator's credibility as a reliable source.\n\nAI models frequently hallucinate citations in educational contexts — inventing papers that sound real, attributing quotes to scholars who never said them, and presenting contested research as settled consensus. These errors are particularly hard to catch because the output looks identical to correct academic content.",
     solution:
-      "ConvergePanel provides educators with a structured verification step that models critical AI evaluation. Before a claim, statistic, or research finding goes into a lesson, slide, or handout, run it through five models. The consensus score shows students — and educators — how settled the evidence is. The per-model breakdown demonstrates what multi-source verification looks like in practice.",
+      "ConvergePanel provides educators with a structured verification step that also models critical AI evaluation practice. Before a claim, statistic, or research finding goes into a lesson, slide, or handout, run it through five models. The consensus score shows how settled the evidence is. The per-model breakdown demonstrates what multi-source verification looks like — and can be used as a classroom teaching example.",
     workflow: [
       "Identify every factual claim, statistic, or research finding in your AI-generated content",
       "Paste each claim into ConvergePanel's Claim Verification mode",
-      "Review the consensus score and the 'partially accurate' signals — these are often teachable nuances",
-      "Flag any claim where evidence is described as 'limited,' 'preliminary,' or 'contested'",
-      "Use the verification process itself as a teaching demonstration of AI critical evaluation",
+      "Review the consensus score: high consensus suggests settled evidence, low consensus suggests contested or uncertain ground",
+      "Flag any 'partially accurate' results — these often contain the academic nuance worth teaching",
+      "Note claims where models describe evidence as 'limited,' 'preliminary,' or 'contested'",
+      "Use the verification process itself as a classroom demonstration of AI critical evaluation",
     ],
     useCases: [
       "Vetting statistics in AI-generated lesson materials before distributing them to students",
       "Checking research findings cited in AI-assisted lecture preparation",
-      "Demonstrating multi-model AI verification as a classroom skill",
+      "Demonstrating multi-model AI verification as a classroom or workshop skill",
       "Validating claims in student-submitted work that appears to be AI-assisted",
-      "Building a personal verification habit for AI-generated teaching resources",
+      "Building a personal verification habit for AI-generated curriculum resources",
+      "Assessing whether AI-generated explanations of scientific or historical topics reflect current scholarly consensus",
     ],
-    cta: "Model good AI verification practice — start free",
+    cta: "Run a Multi-Model Claim Review",
     category: "claim-verification",
     metaDescription:
       "Educators: verify AI-generated content before using it in teaching. Multi-model claim verification catches hallucinated citations and unsupported statistics.",
+    schemaType: "FAQPage",
+    bodySections: [
+      {
+        heading: "AI Claims Educators Encounter",
+        paragraphs: [
+          "The types of AI-generated claims most likely to cause problems in educational contexts include:",
+        ],
+        bullets: [
+          "Fabricated citations — papers that sound real but don't exist, or papers that exist but say something different",
+          "Misattributed quotes — words attributed to scholars, historical figures, or researchers who didn't say them",
+          "Outdated statistics presented as current — figures that were accurate in previous years but no longer reflect current data",
+          "Contested research presented as settled — findings from a single study framed as established consensus",
+          "Historical claims that reflect outdated interpretations rather than current scholarship",
+          "Scientific explanations that omit known limitations, alternative theories, or active research debates",
+        ],
+      },
+      {
+        heading: "Why Verification Is an Institutional Responsibility",
+        paragraphs: [
+          "Educational materials carry a different kind of authority than general content. Students trust curriculum materials because they've been selected and prepared by educators with domain knowledge. That trust creates a responsibility: wrong information in teaching materials doesn't just mislead one person — it multiplies through every student who encounters it.",
+          "Using AI to generate teaching materials is a legitimate time-saving tool, but it shifts the verification responsibility to the educator. 'The AI generated it' is not an adequate explanation to students, parents, administrators, or accreditation bodies when a factual error is discovered in curriculum materials. The verification step is part of the professional responsibility of using AI in educational practice.",
+        ],
+      },
+      {
+        heading: "Common Educator Verification Mistakes",
+        bullets: [
+          "Trusting AI-generated citations without checking whether the cited paper or source actually exists",
+          "Treating consensus across AI models as confirmation of academic consensus — AI models can agree on outdated or fringe views",
+          "Not distinguishing between established scientific consensus and active research debate in AI-generated explanations",
+          "Using AI-generated content in high-stakes assessments without independent verification",
+          "Assuming a student's AI-generated submission is accurate because it sounds confident",
+          "Not modelling verification practice for students who will use AI throughout their education",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "Why do AI-generated citations sometimes not exist?",
+        a: "AI models generate plausible-sounding content based on patterns in training data. When asked for citations, they sometimes produce bibliographic references that sound credible — correct author name format, realistic journal names, plausible publication years — but don't correspond to real papers. This is a well-documented form of hallucination that requires explicit verification.",
+      },
+      {
+        q: "How can I teach students to verify AI output critically?",
+        a: "Use ConvergePanel's multi-model panel as a demonstration: take a claim from an AI-generated piece of student work, run it through five models, and walk through the consensus score and per-model evidence. This makes the abstract concept of 'AI can be wrong' concrete and shows what a structured verification check actually looks like.",
+      },
+      {
+        q: "What types of claims appear most commonly in AI-generated educational materials?",
+        a: "Statistics about historical events, scientific findings presented without caveats, quotes from scholars or historical figures, explanations of contested theories presented as settled, and research citations. These are also the claim types most prone to hallucination and misrepresentation.",
+      },
+      {
+        q: "How should I handle a claim where AI models disagree significantly?",
+        a: "Treat it as a teaching opportunity and a verification flag. Model disagreement on an educational claim often reflects genuine scholarly debate — which is itself valuable teaching content. Explain to students that the disagreement reflects contested evidence, and seek a primary source to clarify which view reflects current scholarly consensus.",
+      },
+      {
+        q: "Can I use ConvergePanel to demonstrate AI verification as a classroom skill?",
+        a: "Yes — the panel view and consensus score are straightforward enough to show students directly. Running a student-generated or AI-generated claim through the panel in class demonstrates what structured verification looks like, shows that AI models disagree, and builds critical evaluation skills that transfer beyond the classroom.",
+      },
+      {
+        q: "Is ConvergePanel appropriate for K–12 contexts?",
+        a: "ConvergePanel is designed for professional and adult educational contexts where users assess research quality and verify factual claims. For K–12 contexts, it can be a useful educator tool for preparing and checking materials, and could be used in secondary classroom demonstrations with appropriate teacher guidance.",
+      },
+    ],
+    relatedLinks: [
+      { label: "How to Verify an AI Answer", href: "/use-cases/how-to-verify-an-ai-answer" },
+      { label: "How to Check If AI Hallucinated", href: "/use-cases/how-to-check-if-ai-hallucinated" },
+      { label: "How to Validate AI-Generated Research", href: "/use-cases/how-to-validate-ai-generated-research" },
+      { label: "What Is Source-Grounding in AI?", href: "/use-cases/what-is-source-grounding-in-ai" },
+      { label: "Single AI Model vs Multi-Model Verification", href: "/use-cases/single-ai-model-vs-multi-model-verification" },
+    ],
   },
 
   {
     slug: "ai-claim-verification-for-investigators",
     publishedAt: "2026-05-29",
     title: "AI Claim Verification for Investigators",
-    h1: "Multi-Model Claim Verification for Investigators and OSINT Professionals",
-    audience: "Investigators",
-    audienceDetail: "Investigative researchers, OSINT analysts, due-diligence professionals, and intelligence researchers",
+    h1: "AI Claim Verification for Investigators Reviewing Evidence and Claims",
+    audience: "Investigators and OSINT analysts",
+    audienceDetail: "Investigative researchers, OSINT analysts, due-diligence professionals, and journalists who work with complex evidence chains",
     problem:
-      "Investigative work depends on the integrity of evidence chains. When a claim is wrong early in an investigation, it shapes every subsequent question you ask, every source you pursue, every conclusion you reach. A single false premise can redirect months of work.\n\nThe problem with using AI for investigative research is that AI models are trained to be helpful — which means they generate plausible-sounding outputs even when evidence is thin. In an investigative context, a plausible-sounding claim that isn't well-grounded is worse than no claim at all. It's a confident pointer in a potentially wrong direction.\n\nOSINT and due-diligence work also requires documentation. You need to show not just what you found, but how you verified it, what counter-evidence you considered, and why you reached the conclusions you did. A single AI response provides none of that structure.",
+      "Investigative work depends on the integrity of evidence chains. When a claim is wrong early in an investigation, it shapes every subsequent question you ask, every source you pursue, every conclusion you reach. A single false premise can redirect months of work.\n\nThe problem with using AI for investigative research is that AI models are trained to be helpful — which means they generate plausible-sounding outputs even when evidence is thin. In an investigative context, a plausible-sounding claim that isn't well-grounded is worse than no claim at all. It's a confident pointer in a potentially wrong direction.\n\nOSINT and due-diligence work also requires documentation. You need to show not just what you found, but how you verified it, what counter-evidence you considered, and why you reached your conclusions. A single AI response provides none of that structure. Conflicting accounts, disputed timelines, and claims about public records all require structured assessment — not a single model's confident synthesis.",
     solution:
-      "ConvergePanel's structured multi-model output gives investigators two things: a cross-verified assessment of factual claims and an exportable audit trail documenting the verification process. When five models with different training data and reasoning approaches agree on a claim, you have stronger grounds to build on it. When they split, the disagreement map tells you where to apply skepticism.",
+      "ConvergePanel's structured multi-model output gives investigators two things: a cross-verified assessment of factual claims and an exportable audit trail documenting the verification process. When five models with different training data and reasoning approaches agree on a claim, you have stronger grounds to build on it. When they split, the disagreement map tells you exactly where to apply scepticism and where to dig deeper with primary sources.\n\nThe source grounding information in each model's evidence output helps distinguish between claims backed by identifiable sources and claims that are generative reasoning from patterns. That distinction is critical for evidence quality assessment in investigative work.",
     workflow: [
       "Identify the specific factual claims that are load-bearing in your investigation",
       "Paste each claim into ConvergePanel's Claim Verification mode",
       "Review the consensus score as a reliability signal — treat anything below 60 with elevated scrutiny",
       "Read each model's evidence separately, looking for which models cite specific sources vs. general reasoning",
+      "Examine the disagreement map: where models split often reveals contested evidence or disputed accounts",
       "Export the structured verification output as documentation for your evidence chain",
-      "Flag unverifiable claims explicitly in your working notes rather than treating them as unverified background",
+      "Flag unverifiable claims explicitly in your working notes rather than treating them as background",
     ],
     useCases: [
-      "Cross-checking biographical claims about a subject under investigation",
-      "Verifying financial or corporate claims that will inform further inquiry",
-      "Testing the strength of a claim before building additional investigative threads on it",
+      "Cross-checking biographical claims about a subject under investigation before building further inquiry on them",
+      "Verifying financial or corporate claims that will inform the next phase of investigation",
+      "Testing the strength of a claim before allocating investigative resources to confirm it",
       "Documenting the verification process for claims that will appear in a published investigation",
-      "Triaging a large set of tips or claims by reliability before committing investigative resources",
+      "Triaging a large set of tips or claims by reliability before deciding where to focus",
+      "Reviewing conflicting accounts by checking each version against multi-model evidence",
     ],
-    cta: "Verify investigative claims with 5 models — start free",
+    cta: "Review the Evidence",
     category: "claim-verification",
     metaDescription:
-      "Investigators: verify claims across 5 AI models with full evidence chains and exportable audit trails. Structured verification for OSINT and due-diligence work.",
+      "Review claims, timelines, public sources, and conflicting accounts with a multi-model AI verification workflow.",
+    schemaType: "FAQPage",
+    bodySections: [
+      {
+        heading: "Claims Investigators Need to Verify",
+        paragraphs: [
+          "Investigative claims require more rigorous assessment than general fact-checking because the consequences of an unverified premise compound through the investigation. High-priority claim types include:",
+        ],
+        bullets: [
+          "Biographical claims about subjects — dates, affiliations, roles, and stated histories",
+          "Financial or corporate claims — revenue, ownership, legal status, transaction histories",
+          "Timeline claims — the sequence of events that forms the investigative narrative",
+          "Public records claims — assertions about what official documents show",
+          "Social media and open-source claims — screenshots, posts, attributed statements",
+          "Claims about sources — whether a source's identity or credentials are as stated",
+          "Counter-claims from subjects — their account of disputed events",
+        ],
+      },
+      {
+        heading: "Documenting Uncertainty in Investigative Work",
+        paragraphs: [
+          "In investigative contexts, documenting uncertainty is as important as documenting what's established. A claim that three models assess as accurate and two assess as unverifiable is meaningfully different from a claim that all five confirm — and that difference should appear in your notes and ultimately in how the claim is characterised in published work.",
+          "ConvergePanel's per-model evidence output provides the structured documentation needed for an evidence chain: what each model found, what it cited, and where it disagreed. This is exportable and can be filed alongside primary source documentation as part of the investigation record.",
+        ],
+      },
+      {
+        heading: "Common Investigator Verification Mistakes",
+        bullets: [
+          "Using AI synthesis as a source — AI output is a research starting point, not primary evidence",
+          "Treating model consensus as confirmation rather than as a signal warranting primary-source verification",
+          "Ignoring model disagreement on a load-bearing claim",
+          "Failing to document the verification process alongside the findings",
+          "Using different AI tools with different prompts to check the same claim — producing incomparable outputs",
+          "Not distinguishing between 'the models don't know' and 'the claim is false'",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "How is AI verification useful for OSINT investigations?",
+        a: "Multi-model verification helps you quickly assess the plausibility and support level of factual claims before committing investigative resources to confirm them. High-consensus claims are more likely to reward primary-source confirmation. Low-consensus or 'unverifiable' ratings signal that the claim needs careful handling — or may not be worth pursuing until independent evidence emerges.",
+      },
+      {
+        q: "Can ConvergePanel help verify biographical or financial claims?",
+        a: "Yes — paste the specific claim into Claim Verification mode. The per-model evidence will show what's known in the AI knowledge base about the subject. This surfaces what's clearly established versus what's contested or absent, helping you prioritise where to direct primary-source investigation.",
+      },
+      {
+        q: "What does an exportable audit trail mean for investigative documentation?",
+        a: "The exported verification record captures the claim checked, the five models queried, each model's verdict and evidence, the consensus score, and any flags. This creates a documented basis for how a claim was assessed — useful for editorial review, legal scrutiny, or demonstrating verification methodology in published work.",
+      },
+      {
+        q: "How should investigators handle claims where models disagree?",
+        a: "Treat disagreement as a flag, not a conclusion. Map exactly which claim point the models disagree on, review what each dissenting model's evidence says, and identify whether the disagreement reflects contested evidence, missing information, or model knowledge gaps. This shapes the primary-source investigation you need to do.",
+      },
+      {
+        q: "What's the difference between AI verification and primary-source investigation?",
+        a: "AI verification assesses the plausibility and cross-model support of a claim based on AI training data. Primary-source investigation confirms or refutes claims against original documents, witnesses, and records. AI verification is a fast triage layer — it tells you where to focus primary-source investigation, not whether to skip it.",
+      },
+      {
+        q: "When should investigators escalate from AI verification to primary sources?",
+        a: "Always, for load-bearing claims — but especially when: the claim is central to the investigative thesis, the consensus score is low or mixed, models flag the claim as 'unverifiable,' or the claim involves a person who is a subject of the investigation. AI verification is a filter, not a finish line.",
+      },
+    ],
+    relatedLinks: [
+      { label: "How to Verify User-Generated Content", href: "/use-cases/how-to-verify-user-generated-content" },
+      { label: "AI Tools for Investigative Journalists", href: "/use-cases/ai-tools-for-investigative-journalists" },
+      { label: "How to Verify Public Statements Quickly", href: "/use-cases/how-to-verify-public-statements-quickly" },
+      { label: "How to Document Model Disagreement", href: "/use-cases/how-to-document-model-disagreement" },
+      { label: "How to Create an AI Audit Trail", href: "/use-cases/how-to-create-an-ai-audit-trail" },
+      { label: "What Is Source-Grounding in AI?", href: "/use-cases/what-is-source-grounding-in-ai" },
+    ],
   },
 
   {
     slug: "ai-claim-verification-for-knowledge-workers",
     publishedAt: "2026-05-29",
     title: "AI Claim Verification for Knowledge Workers",
-    h1: "The Knowledge Worker's Problem: Is This AI Answer Actually Right?",
-    audience: "Knowledge workers",
-    audienceDetail: "Professionals who use AI tools daily for research, writing, analysis, and decision support",
+    h1: "AI Claim Verification for Knowledge Workers Who Rely on AI Daily",
+    audience: "Knowledge workers and professionals",
+    audienceDetail: "Analysts, consultants, strategists, writers, and any professional who uses AI tools daily for research, writing, and decision support",
     problem:
-      "The daily problem for knowledge workers isn't dramatic misinformation — it's the quiet, routine reliance on AI outputs that might be slightly wrong, selectively accurate, or based on outdated training data. 'Is this statistic current?' 'Did that policy actually change?' 'Is this the right interpretation of that regulation?' These questions don't feel high-stakes enough to warrant a full verification process, so they often go unchecked.\n\nThe compounding problem: wrong information injected into work products doesn't stay contained. It gets cited in the memo. The memo informs the decision. The decision shapes the strategy. By the time someone notices the original claim was wrong, it's become embedded in three layers of organizational knowledge.\n\nAsking a different AI model to verify the first AI model's output is better than nothing — but it's still asking one model to evaluate another. What you need is structured comparison, not just a second opinion.",
+      "The daily problem for knowledge workers isn't dramatic misinformation — it's the quiet, routine reliance on AI outputs that might be slightly wrong, selectively accurate, or based on outdated training data. 'Is this statistic current?' 'Did that policy actually change?' 'Is this the right interpretation of that regulation?' These questions don't feel high-stakes enough to warrant a full verification process, so they often go unchecked.\n\nThe compounding problem: wrong information injected into work products doesn't stay contained. A wrong statistic gets cited in a memo. The memo informs a decision. The decision shapes strategy. By the time someone notices the original claim was wrong, it's embedded in three layers of organisational knowledge. The correction trail is expensive.\n\nAsking a different AI model to verify the first AI model's output is better than nothing — but it's still asking one model to evaluate another. What you need is structured comparison across multiple independent systems, not just a second opinion from the same category of tool.",
     solution:
-      "ConvergePanel makes multi-model verification fast enough to use on everyday AI-assisted work. Drop in a claim you're about to use in a memo, presentation, or report. Get a consensus score in 30 seconds. A high-consensus result gives you confidence to proceed. A split tells you where to add a caveat or do a quick primary-source check before committing the claim to your work product.",
+      "ConvergePanel makes multi-model verification fast enough to use on everyday AI-assisted work. Drop in a claim you're about to include in a memo, presentation, or report. Get a consensus score in 30 seconds. A high-consensus result gives you confidence to proceed. A split tells you where to add a caveat or do a quick primary-source check before committing the claim to your work product.",
     workflow: [
       "Flag factual claims in AI-generated drafts before using them in work products",
       "Paste each flagged claim into ConvergePanel's Claim Verification mode",
-      "Review the consensus score: 80+ for normal use, 60–79 add a caveat, below 60 verify further",
+      "Review the consensus score: 80+ proceed with confidence, 60–79 add a caveat, below 60 verify further",
       "Use the per-model breakdown to understand which specific aspect of the claim is uncertain",
-      "Keep a brief verification note for any claim that appears in a consequential document",
+      "For claims in consequential documents, keep a brief verification note in your working file",
+      "Build the verification pass into your pre-delivery checklist for client-facing or leadership materials",
     ],
     useCases: [
       "Checking a statistic before it goes into a slide deck presented to leadership",
       "Verifying a regulatory claim before it informs an operational decision",
       "Confirming a market figure before citing it in a client-facing report",
       "Spot-checking AI-assisted research before it becomes the basis of a strategic recommendation",
-      "Building a lightweight verification habit for AI-assisted daily work",
+      "Reviewing AI-generated summaries before distributing them as reliable briefings",
+      "Building a lightweight verification habit for high-stakes daily AI-assisted work",
     ],
-    cta: "Verify AI outputs before they reach your work — free",
+    cta: "Run a Multi-Model Claim Review",
     category: "claim-verification",
     metaDescription:
-      "Knowledge workers: the quiet risk of trusting one AI answer compounds through your work. Verify claims across 5 models in 30 seconds before they spread.",
+      "Knowledge workers: verify AI claims before they compound through memos, reports, and decisions. Multi-model checks in 30 seconds.",
+    schemaType: "FAQPage",
+    bodySections: [
+      {
+        heading: "Where AI Claims Enter Knowledge Work",
+        paragraphs: [
+          "AI-assisted work introduces factual claims at multiple points in the production of memos, reports, strategy documents, and client deliverables. The highest-risk injection points are:",
+        ],
+        bullets: [
+          "AI-generated research briefs treated as starting points without verification",
+          "Statistics and market figures pulled from AI queries and included in presentations",
+          "Regulatory or legal summaries generated by AI without primary-source confirmation",
+          "Competitive intelligence claims derived from AI research without independent verification",
+          "Historical precedents or analogies generated by AI to support strategic arguments",
+          "AI-written drafts that include citations or attributions the writer didn't personally verify",
+        ],
+      },
+      {
+        heading: "The Compounding Problem",
+        paragraphs: [
+          "Wrong AI outputs in knowledge work don't stay contained. A slightly wrong statistic in a research brief gets cited in a strategy document. The strategy document informs a proposal. The proposal becomes a client commitment. Each step down the chain makes the correction harder and more expensive.",
+          "The most dangerous category is the claim that's plausible enough to pass initial review but wrong enough to matter. AI models are particularly good at generating plausible-sounding claims in authoritative language — which makes them easy to overlook in a document review and hard to catch until something goes wrong.",
+        ],
+      },
+      {
+        heading: "Common Knowledge Worker Verification Mistakes",
+        bullets: [
+          "Treating AI-generated research as equivalent to independently verified analysis",
+          "Skipping verification for claims that seem consistent with existing knowledge",
+          "Not noting which claims in a document came from AI sources",
+          "Using 'the AI said' as an implicit source attribution in work products",
+          "Verifying only the claims you're personally uncertain about rather than systematically checking AI-sourced claims",
+          "Not keeping a record of what was verified and what wasn't for consequential documents",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "How often do knowledge workers encounter AI errors in daily work?",
+        a: "Studies and practitioner reports suggest AI models fabricate or misstate statistics, citations, and factual claims regularly — with rates varying by model, domain, and query type. For knowledge workers using AI daily, the question isn't whether errors occur but whether their current process catches them before they enter consequential work products.",
+      },
+      {
+        q: "What types of AI claims are most likely to be wrong in business contexts?",
+        a: "Market size figures, regulatory or legal summaries, historical precedents cited for analogies, attribution of quotes or statistics to specific reports, and performance claims about companies or products. These categories are prone to AI fabrication because they involve specific, verifiable data that the model may 'fill in' plausibly from patterns rather than from verified sources.",
+      },
+      {
+        q: "How do I build verification into my daily workflow without slowing down?",
+        a: "Identify the five to ten claim types that most commonly appear in your work and set a threshold: any AI-sourced statistic, regulatory summary, or market figure that enters a client-facing or leadership document gets a quick panel check. Most checks take under 30 seconds. The total overhead is minutes per document, not hours.",
+      },
+      {
+        q: "What is a reasonable threshold for acting on AI-generated research?",
+        a: "A working rule: consensus scores above 80 can generally proceed with normal confidence. Scores between 60–79 warrant a caveat or a quick primary-source check. Below 60 means the claim is contested or unverifiable and should either be removed or explicitly flagged in the document.",
+      },
+      {
+        q: "Can I use ConvergePanel for a specific industry or domain?",
+        a: "Yes. Paste domain-specific claims — regulatory, financial, technical, or research-based — directly into Claim Verification mode. The per-model breakdown will show domain-specific evidence quality signals. Some domains (legal, medical, highly technical) will more frequently produce 'unverifiable' ratings because the model knowledge base has lower coverage or higher specialisation requirements.",
+      },
+      {
+        q: "How does multi-model verification differ from using two AI tools manually?",
+        a: "Manual two-tool comparison requires you to formulate the same query in both tools, compare the outputs, and assess the disagreement yourself — with no structure, no consensus score, and no audit trail. ConvergePanel automates this across five models, structures the comparison, and produces a documented output. It's systematically different, not just faster.",
+      },
+    ],
+    relatedLinks: [
+      { label: "Single AI Model vs Multi-Model Verification", href: "/use-cases/single-ai-model-vs-multi-model-verification" },
+      { label: "How to Verify an AI Answer", href: "/use-cases/how-to-verify-an-ai-answer" },
+      { label: "How to Pressure-Test an AI Response", href: "/use-cases/how-to-pressure-test-an-ai-response" },
+      { label: "How to Validate AI-Generated Research", href: "/use-cases/how-to-validate-ai-generated-research" },
+      { label: "What Is a Consensus Score?", href: "/use-cases/what-is-a-consensus-score" },
+    ],
   },
 
   {
@@ -1414,6 +2335,9 @@ export const PAGES: PSEOPage[] = [
     relatedLinks: [
       { label: "Multi-model AI research comparison", href: "/use-cases/how-to-compare-chatgpt-claude-gemini-grok-perplexity-for-research" },
       { label: "AI Disagreement Analysis Tool", href: "/use-cases/ai-disagreement-analysis-tool" },
+      { label: "AI Claim Verification for Founders", href: "/use-cases/ai-claim-verification-for-founders" },
+      { label: "AI Claim Verification for Newsrooms", href: "/use-cases/ai-claim-verification-for-newsrooms" },
+      { label: "AI Claim Verification for Investigators", href: "/use-cases/ai-claim-verification-for-investigators" },
     ],
   },
 
