@@ -2450,13 +2450,10 @@ export default function Home() {
                   {error || "You've used your free panel runs for this month."}{" "}
                   <button
                     type="button"
-                    onClick={() => {
-                      // TODO: Navigate to upgrade page when Stripe is integrated
-                      alert("Upgrade feature coming soon!");
-                    }}
+                    onClick={() => router.push("/billing")}
                     className="font-semibold underline hover:text-amber-900"
                   >
-                    Upgrade (coming soon)
+                    Upgrade Plan
                   </button>{" "}
                   or try again next month.
                 </p>

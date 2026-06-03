@@ -9,6 +9,7 @@ import TopNav from "@/components/TopNav";
 import { AuthProvider } from "@/components/AuthProvider";
 import { ErrorBoundaryWrapper } from "@/components/ErrorBoundaryWrapper";
 import { ServiceWorkerUnregister } from "@/components/ServiceWorkerUnregister";
+import { PostHogProvider } from "@/components/PostHogProvider";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://convergepanel.com"),
@@ -82,8 +83,9 @@ export default function RootLayout({
           }}
         />
         <ServiceWorkerUnregister />
-        <ErrorBoundaryWrapper>
-          <AuthProvider>
+        <PostHogProvider>
+          <ErrorBoundaryWrapper>
+            <AuthProvider>
             {/* Shell renders immediately - header is visible right away */}
             <TopNav />
             {/* Children (page content) render in parallel */}
@@ -142,8 +144,9 @@ export default function RootLayout({
                 </div>
               </div>
             </footer>
-          </AuthProvider>
-        </ErrorBoundaryWrapper>
+            </AuthProvider>
+          </ErrorBoundaryWrapper>
+        </PostHogProvider>
       </body>
     </html>
   );

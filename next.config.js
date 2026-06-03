@@ -1,4 +1,6 @@
 /** @type {import('next').NextConfig} */
+const { withSentryConfig } = require("@sentry/nextjs");
+
 const nextConfig = {
   reactStrictMode: true,
   experimental: {
@@ -14,6 +16,7 @@ const nextConfig = {
       "jsonwebtoken",
       "sharp",
     ],
+    instrumentationHook: true,
   },
 
   async headers() {
@@ -26,7 +29,7 @@ const nextConfig = {
       "img-src 'self' data: https:",
       "media-src 'self' blob:",
       "font-src 'self' data:",
-      "connect-src 'self' https://*.firebaseio.com https://*.googleapis.com https://api.openai.com https://api.anthropic.com https://api.x.ai https://api.perplexity.ai https://api.stripe.com https://generativelanguage.googleapis.com",
+      "connect-src 'self' https://*.firebaseio.com https://*.googleapis.com https://api.openai.com https://api.anthropic.com https://api.x.ai https://api.perplexity.ai https://api.stripe.com https://generativelanguage.googleapis.com https://us.i.posthog.com https://eu.i.posthog.com https://*.posthog.com https://*.sentry.io https://*.ingest.sentry.io",
       "frame-src 'self' https://js.stripe.com https://hooks.stripe.com https://accounts.google.com",
       "object-src 'none'",
       "base-uri 'self'",
@@ -50,4 +53,9 @@ const nextConfig = {
   },
 };
 
-module.exports = nextConfig;
+module.exports = withSentryConfig(nextConfig, {
+  org: process.env.SENTRY_ORG,
+  project: process.env.SENTRY_PROJECT,
+  silent: true,
+  widenClientFileUpload: true,
+});

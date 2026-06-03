@@ -156,17 +156,11 @@ export function planHasTeamGovernance(planId: PlanId | string | undefined | null
 export function getPlanConfig(planId: PlanId): PlanConfig {
   // Defensive: validate planId exists
   if (!planId || !PLAN_CONFIGS[planId as PlanId]) {
-    console.error(`[plans] Unknown planId: ${planId}, falling back to free plan`);
     return PLAN_CONFIGS.free;
   }
-  
+
   const config = PLAN_CONFIGS[planId as PlanId];
-  // Return config with normalized maxModelsPerRun
-  // Dev assertion: maxModelsPerRun must be one of [2, 3, 5]
   const normalized = normalizeMaxModels(config.maxModelsPerRun);
-  if (process.env.NODE_ENV !== "production" && normalized !== 2 && normalized !== 3 && normalized !== 5) {
-    console.error(`[plans] CRITICAL: maxModelsPerRun is ${normalized}, expected 2, 3, or 5.`);
-  }
   return {
     ...config,
     maxModelsPerRun: normalized,
@@ -191,8 +185,6 @@ export function normalizeMaxModels(maxModels: number): number {
   if (maxModels === 2 || maxModels === 3 || maxModels === 5) {
     return maxModels;
   }
-  // Invalid value - default to 2 (safest fallback)
-  console.warn(`[plans] Invalid maxModels value: ${maxModels}, defaulting to 2`);
   return 2;
 }
 
