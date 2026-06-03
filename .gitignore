@@ -46,3 +46,12 @@ next-env.d.ts
 
 # Sentry Config File
 .env.sentry-build-plugin
+
+# Editor / tooling
+.claude/
+.cursor/
+.mcp.json
+
+# Setup reports
+SEO_AUDIT.md
+posthog-setup-report.md
