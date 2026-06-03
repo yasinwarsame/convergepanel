@@ -28,9 +28,11 @@ export function PostHogProvider({ children }: { children: React.ReactNode }) {
       process.env.NEXT_PUBLIC_POSTHOG_HOST ?? "https://us.i.posthog.com";
     if (!key) return;
     posthog.init(key, {
-      api_host: host,
+      api_host: "/ingest",
+      ui_host: host,
       capture_pageview: false,
       capture_pageleave: true,
+      capture_exceptions: true,
       loaded: (ph) => {
         if (process.env.NODE_ENV === "development") ph.debug();
       },

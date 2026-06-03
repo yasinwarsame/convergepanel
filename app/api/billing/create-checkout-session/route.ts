@@ -13,6 +13,8 @@ import { adminDb } from "@/lib/firebase/admin";
 import { verifyIdToken } from "@/lib/firebase/auth";
 import { verifySessionCookie } from "@/lib/firebase/auth-helpers";
 import { STRIPE_PRICE_3_MODELS, STRIPE_3_MODELS_ANNUAL, STRIPE_PRICE_5_MODELS, STRIPE_5_MODELS_ANNUAL } from "@/lib/env";
+import { getPostHogClient } from "@/lib/posthog-server";
+import { logger } from "@/lib/logger";
 import Stripe from "stripe";
 
 // Ensure Node.js runtime (Firebase Admin requires Node.js, not Edge)
@@ -223,6 +225,22 @@ export async function POST(req: NextRequest) {
           newPriceId: updatedSubscription.items.data[0]?.price.id,
           status: updatedSubscription.status,
         });
+
+        try {
+          const ph = getPostHogClient();
+          ph.capture({
+            distinctId: uid,
+            event: "subscription_upgraded",
+            properties: {
+              plan: planId,
+              interval,
+              subscription_id: updatedSubscription.id,
+            },
+          });
+          await ph.flush();
+        } catch (phErr) {
+          logger.warn("[create-checkout-session] PostHog capture failed (non-critical)", { error: phErr });
+        }
 
         // Redirect to billing page - webhook will handle Firestore update
         const baseUrl = process.env.NEXT_PUBLIC_APP_URL || req.nextUrl.origin;

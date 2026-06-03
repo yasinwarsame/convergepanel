@@ -27,6 +27,7 @@ import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase/client";
 import { UserProfile } from "@/lib/types";
 import { safeRedirect } from "@/lib/utils/safeRedirect";
+import posthog from "posthog-js";
 
 // Onboarding question option types
 type RoleOption = "founder_operator" | "analyst_consultant" | "student_researcher" | "engineer_datascientist" | "other";
@@ -145,6 +146,13 @@ export default function OnboardingPage() {
         }),
         { merge: true } // Merge with existing user document
       );
+
+      posthog.capture("onboarding_completed", {
+        role,
+        use_case: useCase,
+        usage_frequency: usage,
+        referral_source: referral || undefined,
+      });
 
       // Redirect to intended destination (from extension/verify flow) or main app
       const postRedirect = safeRedirect(searchParams.get("redirect"), "/");

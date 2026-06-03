@@ -54,6 +54,8 @@ import { PLAN_CONFIG, getPlanIdFromPriceId, getPlanConfigById, BillingPlanId, ST
 import { mapSubscriptionToPlan, getCurrentMonthString, SubscriptionPlanMapping } from "@/lib/billing/subscriptionMapper";
 import { PlanId, BillingInterval } from "@/lib/plans";
 import { updateUserPlanInFirestore } from "@/lib/stripe/webhookHelpers";
+import { getPostHogClient } from "@/lib/posthog-server";
+import { logger } from "@/lib/logger";
 import Stripe from "stripe";
 
 export async function POST(req: NextRequest) {
@@ -476,7 +478,23 @@ export async function handleSubscriptionChange(subscription: Stripe.Subscription
       currentPeriodStart: (subscription as any).current_period_start, // Pass Stripe's actual billing period start
     });
     console.log(`[webhook] ✅ Successfully processed subscription change for user ${firebaseUid}`);
-    
+
+    try {
+      const ph = getPostHogClient();
+      ph.capture({
+        distinctId: firebaseUid,
+        event: "subscription_created",
+        properties: {
+          plan: planMapping.planId,
+          interval: billingInterval,
+          subscription_id: subscriptionId,
+        },
+      });
+      await ph.flush();
+    } catch (phErr) {
+      logger.warn("[webhook] PostHog capture failed (non-critical)", { error: phErr });
+    }
+
     // Verify the update by reading back from Firestore
     if (adminDb) {
       try {
@@ -597,6 +615,18 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
       status: "canceled",
     });
     console.log(`[webhook] ✅ Successfully downgraded user ${firebaseUid} to free plan`);
+
+    try {
+      const ph = getPostHogClient();
+      ph.capture({
+        distinctId: firebaseUid,
+        event: "subscription_canceled",
+        properties: { subscription_id: subscriptionId },
+      });
+      await ph.flush();
+    } catch (phErr) {
+      logger.warn("[webhook] PostHog capture failed (non-critical)", { error: phErr });
+    }
   } catch (updateError: any) {
     console.error(`[webhook] ❌ CRITICAL: Failed to downgrade user ${firebaseUid}:`, updateError);
   }

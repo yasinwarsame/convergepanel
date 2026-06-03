@@ -16,6 +16,7 @@ import { auth } from "@/lib/firebase/client";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { safeRedirect } from "@/lib/utils/safeRedirect";
+import posthog from "posthog-js";
 
 const LOGIN_VALUE_LINES = [
   "Run research across 5 AI models simultaneously",
@@ -144,6 +145,9 @@ export default function LoginPage() {
           }, 100); // Small delay to ensure auth state propagation
         }
       }
+
+      posthog.identify(user.uid, { email: user.email ?? undefined });
+      posthog.capture("user_logged_in", { method: "email" });
 
       // Redirect to the page user was trying to access (or home)
       // Supports both "redirect" (from extension/verify flow) and "next" (legacy)

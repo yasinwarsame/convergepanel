@@ -12,6 +12,7 @@ import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { safeRedirect } from "@/lib/utils/safeRedirect";
+import posthog from "posthog-js";
 
 /**
  * Strips keys with undefined values from an object.
@@ -244,6 +245,9 @@ export default function SignupPage() {
       } catch {
         // Session cookie is best-effort; admin layout enforces real access control
       }
+
+      posthog.identify(user.uid, { email: user.email ?? undefined, name: name.trim() || undefined });
+      posthog.capture("user_signed_up", { method: "email" });
 
       // Redirect to onboarding page instead of main app
       // Preserve any redirect param so the user lands on their intended page after onboarding

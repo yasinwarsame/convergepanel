@@ -3,6 +3,23 @@ const { withSentryConfig } = require("@sentry/nextjs");
 
 const nextConfig = {
   reactStrictMode: true,
+  skipTrailingSlashRedirect: true,
+  async rewrites() {
+    return [
+      {
+        source: "/ingest/static/:path*",
+        destination: "https://us-assets.i.posthog.com/static/:path*",
+      },
+      {
+        source: "/ingest/array/:path*",
+        destination: "https://us-assets.i.posthog.com/array/:path*",
+      },
+      {
+        source: "/ingest/:path*",
+        destination: "https://us.i.posthog.com/:path*",
+      },
+    ];
+  },
   experimental: {
     serverActions: {
       bodySizeLimit: "12mb",
@@ -54,8 +71,13 @@ const nextConfig = {
 };
 
 module.exports = withSentryConfig(nextConfig, {
-  org: process.env.SENTRY_ORG,
-  project: process.env.SENTRY_PROJECT,
-  silent: true,
+  org: "convergepanelcom",
+  project: "javascript-nextjs",
+  silent: !process.env.CI,
   widenClientFileUpload: true,
+  tunnelRoute: "/monitoring",
+  automaticVercelMonitors: true,
+  treeshake: {
+    removeDebugLogging: true,
+  },
 });

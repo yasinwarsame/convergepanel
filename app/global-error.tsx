@@ -1,15 +1,6 @@
 "use client";
 
-/**
- * Global Error Component
- * 
- * Next.js App Router requires this file to handle errors in the root layout.
- * This component catches errors that occur in the root layout.tsx file itself.
- * 
- * IMPORTANT: This must be a client component and must include <html> and <body> tags
- * because it replaces the entire root layout when an error occurs.
- */
-
+import * as Sentry from "@sentry/nextjs";
 import { useEffect } from "react";
 
 interface GlobalErrorProps {
@@ -19,8 +10,7 @@ interface GlobalErrorProps {
 
 export default function GlobalError({ error, reset }: GlobalErrorProps) {
   useEffect(() => {
-    // Log error to console for debugging
-    console.error("[app/global-error.tsx] Global error caught:", error);
+    Sentry.captureException(error);
   }, [error]);
 
   return (
@@ -59,4 +49,3 @@ export default function GlobalError({ error, reset }: GlobalErrorProps) {
     </html>
   );
 }
-

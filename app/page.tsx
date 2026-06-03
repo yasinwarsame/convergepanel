@@ -954,6 +954,9 @@ export default function Home() {
         // Refresh usage data if we hit a limit
         if (normalizedErrorCode === "RUN_LIMIT_REACHED" || data.errorCode === "PLAN_MODEL_LIMIT_REACHED") {
           refreshUsage();
+          if (normalizedErrorCode === "RUN_LIMIT_REACHED") {
+            trackEvent("run_limit_reached", { plan: plan || "unknown", tab: panelTab });
+          }
         }
         return;
       }
@@ -1365,7 +1368,10 @@ export default function Home() {
         }
         setErrorCode(errorCode === "RUN_LIMIT_REACHED" ? "RUN_LIMIT_REACHED" : errorCode || null);
         setError(errorMessage);
-        if (errorCode === "RUN_LIMIT_REACHED") refreshUsage();
+        if (errorCode === "RUN_LIMIT_REACHED") {
+          refreshUsage();
+          trackEvent("run_limit_reached", { plan: plan || "unknown", tab: panelTab });
+        }
         setVerifyRunning(false);
         setModelStatuses({} as Record<ModelId, "queued" | "thinking" | ModelStatus>);
         return;

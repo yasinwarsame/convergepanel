@@ -2,6 +2,7 @@
  * Root layout: global HTML shell, fonts, providers, and metadata.
  */
 
+import * as Sentry from "@sentry/nextjs";
 import type { Metadata } from "next";
 import Link from "next/link";
 import "./globals.css";
@@ -11,40 +12,45 @@ import { ErrorBoundaryWrapper } from "@/components/ErrorBoundaryWrapper";
 import { ServiceWorkerUnregister } from "@/components/ServiceWorkerUnregister";
 import { PostHogProvider } from "@/components/PostHogProvider";
 
-export const metadata: Metadata = {
-  metadataBase: new URL("https://convergepanel.com"),
-  title: {
-    default: "ConvergePanel — Multi-model research & claim verification",
-    template: "%s | ConvergePanel",
-  },
-  description:
-    "Multi-model AI research, claim verification, video authenticity analysis (paid plans), and governance scoring — with audit trails.",
-  alternates: { canonical: "/" },
-  openGraph: {
-    type: "website",
-    siteName: "ConvergePanel",
-    url: "https://convergepanel.com",
-    title: "ConvergePanel — Multi-model research & claim verification",
+export function generateMetadata(): Metadata {
+  return {
+    metadataBase: new URL("https://convergepanel.com"),
+    title: {
+      default: "ConvergePanel — Multi-model research & claim verification",
+      template: "%s | ConvergePanel",
+    },
     description:
-      "Don't trust one AI. Verify with five. Multi-model research, claim verification, video authenticity, and governance — with audit trails.",
-    images: [{ url: "/claim-verification.png", width: 2004, height: 1842, alt: "ConvergePanel" }],
-  },
-  twitter: {
-    card: "summary_large_image",
-    title: "ConvergePanel — Multi-model research & claim verification",
-    description:
-      "Don't trust one AI. Verify with five. Multi-model research, claim verification, and video authenticity with audit trails.",
-    images: ["/claim-verification.png"],
-  },
-  icons: {
-    icon: [
-      { url: "/favicon-32x32.png", sizes: "32x32", type: "image/png" },
-      { url: "/favicon-16x16.png", sizes: "16x16", type: "image/png" },
-    ],
-    shortcut: "/favicon-32x32.png",
-    apple: "/apple-touch-icon.png",
-  },
-};
+      "Multi-model AI research, claim verification, video authenticity analysis (paid plans), and governance scoring — with audit trails.",
+    alternates: { canonical: "/" },
+    openGraph: {
+      type: "website",
+      siteName: "ConvergePanel",
+      url: "https://convergepanel.com",
+      title: "ConvergePanel — Multi-model research & claim verification",
+      description:
+        "Don't trust one AI. Verify with five. Multi-model research, claim verification, video authenticity, and governance — with audit trails.",
+      images: [{ url: "/claim-verification.png", width: 2004, height: 1842, alt: "ConvergePanel" }],
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: "ConvergePanel — Multi-model research & claim verification",
+      description:
+        "Don't trust one AI. Verify with five. Multi-model research, claim verification, and video authenticity with audit trails.",
+      images: ["/claim-verification.png"],
+    },
+    icons: {
+      icon: [
+        { url: "/favicon-32x32.png", sizes: "32x32", type: "image/png" },
+        { url: "/favicon-16x16.png", sizes: "16x16", type: "image/png" },
+      ],
+      shortcut: "/favicon-32x32.png",
+      apple: "/apple-touch-icon.png",
+    },
+    other: {
+      ...Sentry.getTraceData(),
+    },
+  };
+}
 
 /**
  * Root Layout

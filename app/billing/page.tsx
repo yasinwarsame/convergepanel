@@ -14,6 +14,7 @@ import Link from "next/link";
 import { useAuth } from "@/components/AuthProvider";
 import { useUserPlan } from "@/hooks/useUserPlan";
 import { getPlanConfig, formatUsageText, PlanId, BillingInterval } from "@/lib/plans";
+import posthog from "posthog-js";
 
 /**
  * Progress bar component that uses style tag injection instead of inline styles
@@ -225,13 +226,13 @@ export default function BillingPage() {
       if (!response.ok) {
         const data = await response.json();
         const errorMessage = data.error || "Failed to create checkout session";
-        
+
         // Provide user-friendly error messages
-        if (errorMessage.includes("Stripe price ID not configured") || 
+        if (errorMessage.includes("Stripe price ID not configured") ||
             errorMessage.includes("Missing environment variable")) {
           throw new Error("Billing is not fully configured yet. Please contact support or try again later.");
         }
-        
+
         throw new Error(errorMessage);
       }
 
@@ -239,6 +240,7 @@ export default function BillingPage() {
 
       // Redirect to Stripe Checkout
       if (url) {
+        posthog.capture("checkout_started", { plan: planId, interval });
         window.location.href = url;
       } else {
         throw new Error("Checkout URL not returned");
