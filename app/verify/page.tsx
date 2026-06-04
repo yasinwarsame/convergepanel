@@ -4,10 +4,8 @@
  * /verify — Standalone verification page for the Chrome extension.
  *
  * Reads "text" and "source" from URL search params, prefills a textarea,
- * and offers actions: Claim Verification, Deep Research, or Open Main App.
- *
- * Auth guard: unauthenticated users are redirected to /login with the full
- * /verify?... path preserved so they return here after login.
+ * and shows the selected text to ALL visitors. Unauthenticated users see a
+ * signup CTA; authenticated users get the action buttons.
  */
 
 import { useState, useEffect } from "react";
@@ -18,7 +16,7 @@ import { useAuth } from "@/components/AuthProvider";
 export default function VerifyPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { user, loading: authLoading, authReady } = useAuth();
+  const { user, authReady } = useAuth();
 
   const rawText = searchParams.get("text") || "";
   const source = searchParams.get("source") || "";
@@ -35,16 +33,6 @@ export default function VerifyPage() {
     }
   }, [rawText]);
 
-  // Auth guard: redirect unauthenticated users to login with full path preserved
-  useEffect(() => {
-    if (!authReady) return;
-    if (user) return;
-
-    const currentPath = `/verify${window.location.search}`;
-    const loginUrl = `/login?redirect=${encodeURIComponent(currentPath)}`;
-    router.replace(loginUrl);
-  }, [authReady, user, router]);
-
   const handleClaimVerification = () => {
     router.push(`/?tab=verify&claim=${encodeURIComponent(claim)}`);
   };
@@ -53,29 +41,8 @@ export default function VerifyPage() {
     router.push(`/?tab=research&q=${encodeURIComponent(claim)}`);
   };
 
-  // Show loading while auth resolves
-  if (!authReady || authLoading) {
-    return (
-      <main className="flex min-h-screen items-center justify-center bg-slate-950">
-        <div className="text-center">
-          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-slate-600 border-t-sky-400" />
-          <p className="mt-4 text-sm text-slate-400">Loading ConvergePanel…</p>
-        </div>
-      </main>
-    );
-  }
-
-  // Still show loading briefly if user is null (redirect will fire)
-  if (!user) {
-    return (
-      <main className="flex min-h-screen items-center justify-center bg-slate-950">
-        <div className="text-center">
-          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-slate-600 border-t-sky-400" />
-          <p className="mt-4 text-sm text-slate-400">Redirecting to sign in…</p>
-        </div>
-      </main>
-    );
-  }
+  const signupHref = `/signup?redirect=${encodeURIComponent(`/verify${window?.location?.search ?? ""}`)}`;
+  const loginHref  = `/login?redirect=${encodeURIComponent(`/verify${window?.location?.search ?? ""}`)}`;
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 px-4 py-12 text-slate-100">
@@ -92,7 +59,7 @@ export default function VerifyPage() {
           </p>
         </div>
 
-        {/* Claim textarea */}
+        {/* Claim textarea — visible to everyone */}
         <div className="rounded-2xl border border-slate-700/60 bg-slate-800/50 p-5 shadow-lg">
           <label
             htmlFor="verify-text"
@@ -115,29 +82,61 @@ export default function VerifyPage() {
           )}
         </div>
 
-        {/* Actions */}
-        <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-          <button
-            onClick={handleClaimVerification}
-            disabled={!claim.trim()}
-            className="flex-1 rounded-xl bg-sky-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            Run Claim Verification
-          </button>
-          <button
-            onClick={handleDeepResearch}
-            disabled={!claim.trim()}
-            className="flex-1 rounded-xl bg-violet-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            Run Deep Research
-          </button>
-          <Link
-            href="/"
-            className="flex-1 rounded-xl border border-slate-600 bg-slate-800 px-5 py-3 text-center text-sm font-semibold text-slate-200 shadow-sm transition hover:border-slate-500 hover:bg-slate-700"
-          >
-            Open Main App
-          </Link>
-        </div>
+        {/* Actions — differ by auth state */}
+        {!authReady ? (
+          /* Tiny spinner while auth resolves — text is already visible above */
+          <div className="mt-6 flex justify-center">
+            <div className="h-5 w-5 animate-spin rounded-full border-2 border-slate-600 border-t-sky-400" />
+          </div>
+        ) : user ? (
+          /* Authenticated: action buttons */
+          <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+            <button
+              onClick={handleClaimVerification}
+              disabled={!claim.trim()}
+              className="flex-1 rounded-xl bg-sky-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Run Claim Verification
+            </button>
+            <button
+              onClick={handleDeepResearch}
+              disabled={!claim.trim()}
+              className="flex-1 rounded-xl bg-violet-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Run Deep Research
+            </button>
+            <Link
+              href="/"
+              className="flex-1 rounded-xl border border-slate-600 bg-slate-800 px-5 py-3 text-center text-sm font-semibold text-slate-200 shadow-sm transition hover:border-slate-500 hover:bg-slate-700"
+            >
+              Open Main App
+            </Link>
+          </div>
+        ) : (
+          /* Unauthenticated: signup CTA */
+          <div className="mt-6 rounded-2xl border border-sky-500/30 bg-sky-950/40 px-6 py-6 text-center">
+            <p className="mb-1 text-base font-semibold text-white">
+              Create a free account to verify this
+            </p>
+            <p className="mb-5 text-sm text-slate-400">
+              ConvergePanel runs your text through 5 AI models simultaneously and returns a panel verdict — free to try.
+            </p>
+            <div className="flex flex-col gap-3 sm:flex-row sm:justify-center">
+              <Link
+                href={signupHref}
+                className="rounded-xl bg-sky-600 px-6 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-sky-500"
+              >
+                Create free account →
+              </Link>
+              <Link
+                href={loginHref}
+                className="rounded-xl border border-slate-600 bg-slate-800 px-6 py-3 text-sm font-semibold text-slate-200 transition hover:border-slate-500 hover:bg-slate-700"
+              >
+                Log in
+              </Link>
+            </div>
+          </div>
+        )}
 
         {/* Footer note */}
         <p className="mt-8 text-center text-xs text-slate-500">
