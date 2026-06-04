@@ -21,17 +21,11 @@ export default function VerifyPage() {
   const rawText = searchParams.get("text") || "";
   const source = searchParams.get("source") || "";
 
-  const [claim, setClaim] = useState("");
-
-  useEffect(() => {
-    if (rawText) {
-      try {
-        setClaim(decodeURIComponent(rawText));
-      } catch {
-        setClaim(rawText);
-      }
-    }
-  }, [rawText]);
+  // Initialize synchronously so the textarea and char count render immediately.
+  // searchParams.get() already URL-decodes, so no further decoding is needed.
+  // The effect keeps claim in sync if the URL changes (e.g. post-signup redirect).
+  const [claim, setClaim] = useState(rawText);
+  useEffect(() => { setClaim(rawText); }, [rawText]);
 
   const handleClaimVerification = () => {
     router.push(`/?tab=verify&claim=${encodeURIComponent(claim)}`);
