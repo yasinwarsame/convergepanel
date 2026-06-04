@@ -1,15 +1,25 @@
 {
   "manifest_version": 3,
   "name": "ConvergePanel Verify",
-  "version": "0.1.0",
-  "description": "Verify claims, AI answers, and online content with ConvergePanel.",
+  "version": "1.0.0",
+  "description": "Highlight any text, right-click, and verify it across 5 AI models instantly with ConvergePanel.",
   "permissions": ["contextMenus", "storage", "activeTab"],
   "background": {
     "service_worker": "background.js"
   },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Verify with ConvergePanel"
+    "default_title": "Verify with ConvergePanel",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
   },
   "content_scripts": [
     {
