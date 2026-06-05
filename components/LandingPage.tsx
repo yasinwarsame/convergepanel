@@ -376,6 +376,45 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* Popular verification workflows */}
+      <section className="border-t border-slate-200 bg-slate-50 py-14">
+        <div className="mx-auto max-w-4xl px-4">
+          <h2 className="mb-2 text-center text-xl font-bold text-slate-900">
+            Popular verification workflows
+          </h2>
+          <p className="mb-8 text-center text-sm text-slate-500">
+            Explore how different teams use ConvergePanel in practice.
+          </p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {[
+              { label: "AI claim verification for content creators", href: "/use-cases/ai-claim-verification-for-content-creators" },
+              { label: "How to fact-check ChatGPT responses", href: "/use-cases/how-to-fact-check-chatgpt-responses" },
+              { label: "How to create an AI audit trail", href: "/use-cases/how-to-create-an-ai-audit-trail" },
+              { label: "How to pressure-test an AI response", href: "/use-cases/how-to-pressure-test-an-ai-response" },
+              { label: "What is an AI consensus score?", href: "/use-cases/what-is-a-consensus-score" },
+              { label: "How to verify sources from AI answers", href: "/use-cases/how-to-verify-sources-from-ai-answers" },
+              { label: "AI disagreement analysis tool", href: "/use-cases/ai-disagreement-analysis-tool" },
+              { label: "How to identify blind spots in AI answers", href: "/use-cases/how-to-identify-blind-spots-in-ai-answers" },
+              { label: "What is source grounding in AI?", href: "/use-cases/what-is-source-grounding-in-ai" },
+            ].map(({ label, href }) => (
+              <Link
+                key={href}
+                href={href}
+                className="group flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:border-sky-200 hover:text-sky-700"
+              >
+                <span className="text-slate-300 group-hover:text-sky-400 transition-colors shrink-0">→</span>
+                {label}
+              </Link>
+            ))}
+          </div>
+          <p className="mt-6 text-center">
+            <Link href="/use-cases" className="text-sm font-medium text-sky-600 hover:text-sky-800 transition-colors">
+              View all use cases →
+            </Link>
+          </p>
+        </div>
+      </section>
+
       {/* Pricing CTA */}
       <section className="mx-auto max-w-3xl px-4 py-16 text-center">
         <h2 className="text-2xl font-bold text-slate-900 sm:text-3xl">Start free. Upgrade when you need more.</h2>

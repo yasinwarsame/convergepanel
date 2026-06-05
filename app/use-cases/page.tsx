@@ -3,9 +3,9 @@ import Link from "next/link";
 import { PAGES } from "@/lib/pseo/pages";
 
 export const metadata: Metadata = {
-  title: "Use Cases | ConvergePanel",
+  title: "AI Verification Use Cases | ConvergePanel",
   description:
-    "See how journalists, researchers, analysts, founders, and enterprise teams use ConvergePanel's multi-model AI verification for claims, video, research, and governance.",
+    "Explore how creators, journalists, researchers, analysts, and teams use ConvergePanel to verify claims, fact-check AI answers, review video, build audit trails, and compare AI models.",
   alternates: { canonical: "https://convergepanel.com/use-cases" },
 };
 
@@ -21,44 +21,19 @@ interface HubGroup {
 
 const HUB_GROUPS: HubGroup[] = [
   {
-    id: "ai-answer-verification",
-    label: "AI Answer Verification",
-    description: "Check whether AI outputs are accurate, grounded, and worth acting on.",
-    tailwindText: "text-indigo-700",
-    tailwindBg: "bg-indigo-50",
-    tailwindBorder: "border-indigo-200",
-    slugs: [
-      "how-to-check-if-chatgpt-is-wrong",
-      "how-to-verify-an-ai-answer",
-      "how-to-fact-check-chatgpt-responses",
-      "how-to-check-if-ai-hallucinated",
-      "how-to-verify-sources-from-ai-answers",
-      "how-to-pressure-test-an-ai-response",
-      "how-to-identify-blind-spots-in-ai-answers",
-      "how-to-check-if-ai-research-is-biased",
-      "how-to-validate-ai-generated-research",
-      "how-to-check-if-ai-missed-important-context",
-      "why-not-trust-one-ai-model-for-serious-decisions",
-      "single-model-vs-multi-model-verification",
-      "single-ai-model-vs-multi-model-verification",
-      "ai-search-vs-ai-verification",
-      "ai-fact-checking-vs-claim-verification",
-    ],
-  },
-  {
     id: "claim-verification",
     label: "Claim Verification",
-    description: "Verify specific claims, quotes, and statistics across five AI models.",
+    description: "Verify specific claims, quotes, and statistics across five AI models before publishing or acting.",
     tailwindText: "text-blue-700",
     tailwindBg: "bg-blue-50",
     tailwindBorder: "border-blue-200",
     slugs: [
+      "ai-claim-verification-for-content-creators",
       "claim-verification-for-journalists",
       "claim-verification-for-researchers",
       "claim-verification-for-analysts",
       "ai-claim-verification-for-finance-teams",
       "ai-claim-verification-for-policy-teams",
-      "ai-claim-verification-for-content-creators",
       "ai-claim-verification-for-founders",
       "ai-claim-verification-for-newsrooms",
       "ai-claim-verification-for-educators",
@@ -74,9 +49,55 @@ const HUB_GROUPS: HubGroup[] = [
     ],
   },
   {
+    id: "ai-answer-verification",
+    label: "AI Answer Verification",
+    description: "Fact-check ChatGPT and other AI outputs for hallucinations, weak sources, missing context, and blind spots.",
+    tailwindText: "text-indigo-700",
+    tailwindBg: "bg-indigo-50",
+    tailwindBorder: "border-indigo-200",
+    slugs: [
+      "how-to-fact-check-chatgpt-responses",
+      "how-to-pressure-test-an-ai-response",
+      "how-to-verify-sources-from-ai-answers",
+      "how-to-identify-blind-spots-in-ai-answers",
+      "how-to-check-if-chatgpt-is-wrong",
+      "how-to-verify-an-ai-answer",
+      "how-to-check-if-ai-hallucinated",
+      "how-to-check-if-ai-research-is-biased",
+      "how-to-validate-ai-generated-research",
+      "how-to-check-if-ai-missed-important-context",
+      "why-not-trust-one-ai-model-for-serious-decisions",
+      "single-model-vs-multi-model-verification",
+      "single-ai-model-vs-multi-model-verification",
+      "ai-search-vs-ai-verification",
+      "ai-fact-checking-vs-claim-verification",
+    ],
+  },
+  {
+    id: "consensus-disagreement",
+    label: "Consensus & Disagreement",
+    description: "Compare model agreement, surface disagreement, and understand what AI splits mean for your decisions.",
+    tailwindText: "text-rose-700",
+    tailwindBg: "bg-rose-50",
+    tailwindBorder: "border-rose-200",
+    slugs: [
+      "what-is-a-consensus-score",
+      "ai-disagreement-analysis-tool",
+      "ai-model-consensus-tool",
+      "ai-second-opinion-tool",
+      "multi-model-decision-support-tool",
+      "how-to-compare-ai-model-outputs-side-by-side",
+      "ai-expert-panel-tool",
+      "multi-llm-answer-comparison",
+      "best-multi-model-ai-tool-for-research",
+      "ask-multiple-ai-models-one-question",
+      "how-to-compare-ai-answers-before-deciding",
+    ],
+  },
+  {
     id: "video-verification",
     label: "Video Verification",
-    description: "Detect deepfakes and manipulation signals using three vision-capable AI models.",
+    description: "Review video clips for AI-generation signals and manipulation indicators using three vision models.",
     tailwindText: "text-violet-700",
     tailwindBg: "bg-violet-50",
     tailwindBorder: "border-violet-200",
@@ -93,82 +114,16 @@ const HUB_GROUPS: HubGroup[] = [
     ],
   },
   {
-    id: "journalist-workflows",
-    label: "Journalist Workflows",
-    description: "Verification workflows built for newsrooms, deadlines, and editorial accountability.",
-    tailwindText: "text-sky-700",
-    tailwindBg: "bg-sky-50",
-    tailwindBorder: "border-sky-200",
-    slugs: [
-      "newsroom-ai-verification-workflow",
-      "ai-tools-for-investigative-journalists",
-      "how-to-verify-public-statements-quickly",
-      "verification-checklist-for-journalists",
-      "how-to-verify-user-generated-content",
-      "how-to-fact-check-breaking-news-claims",
-    ],
-  },
-  {
-    id: "creator-workflows",
-    label: "Creator Workflows",
-    description: "Fact-checking and source verification for YouTubers, podcasters, and content teams.",
-    tailwindText: "text-pink-700",
-    tailwindBg: "bg-pink-50",
-    tailwindBorder: "border-pink-200",
-    slugs: [
-      "how-creators-can-fact-check-videos",
-      "how-to-verify-information-for-a-video-script",
-      "ai-research-tool-for-youtubers",
-      "how-to-fact-check-a-reaction-video",
-      "how-to-check-sources-for-creator-content",
-      "ai-video-verification-for-content-creators",
-    ],
-  },
-  {
-    id: "founder-decision-support",
-    label: "Founder Decision Support",
-    description: "Pressure-test business assumptions, pitch claims, and market research with multi-model AI.",
-    tailwindText: "text-orange-700",
-    tailwindBg: "bg-orange-50",
-    tailwindBorder: "border-orange-200",
-    slugs: [
-      "how-to-validate-a-business-idea-with-ai",
-      "how-to-pressure-test-a-startup-idea",
-      "how-to-test-business-assumptions-with-ai",
-      "how-to-pressure-test-investor-pitch-claims",
-      "how-to-validate-market-assumptions",
-      "how-to-get-multiple-ai-perspectives-on-a-startup-idea",
-      "ai-decision-support-for-founders",
-      "ai-research-for-decision-making-teams",
-    ],
-  },
-  {
-    id: "research-quality",
-    label: "Research Quality",
-    description: "Get structured multi-model research briefs that surface disagreements and bias signals.",
-    tailwindText: "text-emerald-700",
-    tailwindBg: "bg-emerald-50",
-    tailwindBorder: "border-emerald-200",
-    slugs: [
-      "deep-research-with-multiple-ai-models",
-      "how-to-compare-chatgpt-claude-gemini-grok-perplexity-for-research",
-      "chatgpt-vs-claude-vs-gemini-for-research",
-      "ai-summarizer-vs-multi-model-research-panel",
-      "perplexity-vs-multi-model-panel-for-research",
-      "how-to-compare-ai-answers-before-deciding",
-    ],
-  },
-  {
     id: "governance-audit-trails",
-    label: "Governance & Audit Trails",
+    label: "AI Audit Trails & Governance",
     description: "Build compliance-ready audit trails, peer review workflows, and AI accountability documentation.",
     tailwindText: "text-amber-700",
     tailwindBg: "bg-amber-50",
     tailwindBorder: "border-amber-200",
     slugs: [
+      "how-to-create-an-ai-audit-trail",
       "ai-audit-trail-software",
       "ai-decision-audit-trail",
-      "how-to-create-an-ai-audit-trail",
       "how-to-prove-an-ai-decision-was-reviewed",
       "ai-governance-workflow-for-enterprise-teams",
       "ai-governance-for-small-teams",
@@ -186,7 +141,7 @@ const HUB_GROUPS: HubGroup[] = [
   },
   {
     id: "decision-receipts",
-    label: "Decision Receipts",
+    label: "Decision Receipts & Trust",
     description: "Document AI-assisted decisions with structured receipts, confidence scores, and evidence records.",
     tailwindText: "text-teal-700",
     tailwindBg: "bg-teal-50",
@@ -196,28 +151,76 @@ const HUB_GROUPS: HubGroup[] = [
       "what-is-a-verification-gate",
       "what-is-a-panel-verdict",
       "what-is-source-grounding-in-ai",
-      "what-is-a-consensus-score",
       "ai-trust-dashboard-for-decision-support",
       "why-teams-need-to-slow-down-ai-decisions",
     ],
   },
   {
-    id: "multi-model-comparison",
-    label: "Multi-Model Comparison",
-    description: "Compare AI model outputs side by side to find consensus, disagreement, and blind spots.",
-    tailwindText: "text-rose-700",
-    tailwindBg: "bg-rose-50",
-    tailwindBorder: "border-rose-200",
+    id: "creator-workflows",
+    label: "Creator Workflows",
+    description: "Fact-checking and source verification for YouTubers, podcasters, and content teams before publishing.",
+    tailwindText: "text-pink-700",
+    tailwindBg: "bg-pink-50",
+    tailwindBorder: "border-pink-200",
     slugs: [
-      "ai-model-consensus-tool",
-      "ai-disagreement-analysis-tool",
-      "ai-second-opinion-tool",
-      "multi-model-decision-support-tool",
-      "how-to-compare-ai-model-outputs-side-by-side",
-      "ai-expert-panel-tool",
-      "multi-llm-answer-comparison",
-      "best-multi-model-ai-tool-for-research",
-      "ask-multiple-ai-models-one-question",
+      "ai-claim-verification-for-content-creators",
+      "how-creators-can-fact-check-videos",
+      "how-to-verify-information-for-a-video-script",
+      "ai-research-tool-for-youtubers",
+      "how-to-fact-check-a-reaction-video",
+      "how-to-check-sources-for-creator-content",
+      "ai-video-verification-for-content-creators",
+      "how-to-sanity-check-a-viral-clip",
+    ],
+  },
+  {
+    id: "journalist-workflows",
+    label: "Journalist & Newsroom Workflows",
+    description: "Verification workflows built for newsrooms, deadlines, editorial standards, and accountability.",
+    tailwindText: "text-sky-700",
+    tailwindBg: "bg-sky-50",
+    tailwindBorder: "border-sky-200",
+    slugs: [
+      "newsroom-ai-verification-workflow",
+      "ai-tools-for-investigative-journalists",
+      "how-to-verify-public-statements-quickly",
+      "verification-checklist-for-journalists",
+      "how-to-verify-user-generated-content",
+      "how-to-fact-check-breaking-news-claims",
+    ],
+  },
+  {
+    id: "founder-decision-support",
+    label: "Founder & Decision Support",
+    description: "Pressure-test business assumptions, pitch claims, and market research with multi-model AI.",
+    tailwindText: "text-orange-700",
+    tailwindBg: "bg-orange-50",
+    tailwindBorder: "border-orange-200",
+    slugs: [
+      "how-to-validate-a-business-idea-with-ai",
+      "how-to-pressure-test-a-startup-idea",
+      "how-to-test-business-assumptions-with-ai",
+      "how-to-pressure-test-investor-pitch-claims",
+      "how-to-validate-market-assumptions",
+      "how-to-get-multiple-ai-perspectives-on-a-startup-idea",
+      "ai-decision-support-for-founders",
+      "ai-research-for-decision-making-teams",
+    ],
+  },
+  {
+    id: "research-quality",
+    label: "Research & Analyst Workflows",
+    description: "Get structured multi-model research briefs that surface disagreements, bias signals, and source gaps.",
+    tailwindText: "text-emerald-700",
+    tailwindBg: "bg-emerald-50",
+    tailwindBorder: "border-emerald-200",
+    slugs: [
+      "deep-research-with-multiple-ai-models",
+      "how-to-compare-chatgpt-claude-gemini-grok-perplexity-for-research",
+      "chatgpt-vs-claude-vs-gemini-for-research",
+      "ai-summarizer-vs-multi-model-research-panel",
+      "perplexity-vs-multi-model-panel-for-research",
+      "how-to-compare-ai-answers-before-deciding",
     ],
   },
 ];
@@ -237,11 +240,12 @@ export default function UseCasesIndex() {
       {/* Header */}
       <div className="mb-12">
         <h1 className="mb-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
-          Use Cases
+          AI Verification Use Cases
         </h1>
         <p className="text-lg text-slate-600">
-          How journalists, researchers, founders, and enterprise teams use multi-model AI
-          verification in practice. Every page is reachable below.
+          How creators, journalists, researchers, analysts, founders, and teams use ConvergePanel
+          to verify claims, fact-check AI answers, review video, build audit trails, and surface
+          model disagreement before acting on AI output.
         </p>
       </div>
 
@@ -297,9 +301,11 @@ export default function UseCasesIndex() {
       {/* Footer CTA */}
       <div className="mt-16 rounded-2xl bg-slate-900 px-8 py-10 text-center">
         <p className="mb-2 text-lg font-semibold text-white">
-          See multi-model verification in action
+          Compare AI models, surface disagreement, and verify before you act
         </p>
-        <p className="mb-6 text-sm text-slate-400">Free tier available. No credit card required.</p>
+        <p className="mb-6 text-sm text-slate-400">
+          Claim verification, AI answer fact-checking, video review, audit trails, and multi-model research. Free tier available.
+        </p>
         <Link
           href="/signup"
           className="inline-block rounded-lg bg-sky-500 px-7 py-3 text-sm font-bold text-white shadow-sm hover:bg-sky-400 transition-colors"
