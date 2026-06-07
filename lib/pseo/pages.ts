@@ -458,40 +458,75 @@ export const PAGES: PSEOPage[] = [
   },
   {
     slug: "what-is-source-grounding-in-ai",
-    title: "What Is Source-Grounding in AI?",
-    h1: "What Is Source-Grounding — and Why Does It Matter for AI Trust?",
-    audience: "AI-curious professionals",
-    audienceDetail: "Professionals evaluating AI reliability for their work",
-    publishedAt: "2026-05-29",
+    title: "What Is Source Grounding in AI?",
+    h1: "What Is Source Grounding in AI and Why Does It Matter?",
+    audience: "AI-curious professionals, researchers, analysts",
+    audienceDetail: "Professionals evaluating AI reliability for their work, particularly those who need to act on or publish AI-generated claims",
+    publishedAt: "2026-06-07",
     problem:
-      "AI models generate plausible-sounding answers regardless of whether they have good evidence. Without source-grounding, you can't tell the difference between 'the model found strong evidence' and 'the model made something up.'\n\nThis problem has a specific mechanism. Language models are trained to predict the next token — they don't distinguish between 'I retrieved this from a document' and 'I generated this based on patterns in my training data.' When a model says 'according to a 2023 study…', it may be citing a real study, paraphrasing one, or generating a plausible-sounding reference from scratch. The output looks identical in all three cases.\n\nSource-grounding is the field's response. A grounded AI system ties its claims to retrievable, verifiable sources — documents, passages, or structured knowledge bases. An ungrounded system operates purely from parametric memory: the implicit knowledge encoded in its weights during training, which can't be audited, corrected, or cited. The practical difference is whether you can check the answer.",
+      "AI models generate plausible-sounding answers regardless of whether they have good evidence. Without source grounding, you can't tell the difference between 'the model found strong evidence' and 'the model made something up.'\n\nThis problem has a specific mechanism. Language models are trained to predict the next token — they don't distinguish between 'I retrieved this from a document' and 'I generated this based on patterns in my training data.' When a model says 'according to a 2023 study…', it may be citing a real study, paraphrasing one, or generating a plausible-sounding reference from scratch. The output looks identical in all three cases.\n\nSource grounding is the field's response. A grounded AI system ties its claims to retrievable, verifiable sources — documents, passages, or structured knowledge bases. An ungrounded system operates purely from parametric memory: the implicit knowledge encoded in its weights during training, which can't be audited, corrected, or cited. The practical difference is whether you can check the answer.",
     solution:
-      "Source-grounding means tying AI claims back to retrievable evidence. In ConvergePanel, each model's output includes evidence quality ratings and, where available, citations — so you can see whether a verdict rests on solid ground or thin air.\n\nIn practice, source-grounding exists on a spectrum. A model that cites a specific passage from a named document is strongly grounded. A model that says 'experts generally believe...' with no citation is weakly grounded — it may be correct, but you can't verify it. ConvergePanel's per-model evidence quality rating captures this spectrum, letting you distinguish models that supported their conclusions with verifiable evidence from those that provided plausible-sounding reasoning without it.",
+      "Source grounding means tying AI claims back to retrievable evidence. In ConvergePanel, each model's output includes evidence quality ratings and, where available, citations — so you can see whether a verdict rests on solid ground or thin air.\n\nIn practice, source grounding exists on a spectrum. A model that cites a specific passage from a named document is strongly grounded. A model that says 'experts generally believe...' with no citation is weakly grounded — it may be correct, but you can't verify it. ConvergePanel's per-model evidence quality rating captures this spectrum, letting you distinguish models that supported their conclusions with verifiable evidence from those that provided plausible-sounding reasoning without it.",
     workflow: [
-      "Submit a question or claim",
-      "Models return answers with evidence and (where available) citations",
+      "Submit a question or claim to ConvergePanel",
+      "Models return answers with evidence and, where available, citations",
       "ConvergePanel rates evidence quality per model: strong, moderate, or weak",
       "Compare grounding levels across models — where they all cite evidence vs. where they speculate",
-      "Prioritize well-grounded answers and flag weakly grounded ones for further verification",
+      "Prioritize well-grounded answers and flag weakly grounded claims for further verification",
+      "Check any cited sources directly — verify the source exists and says what's claimed",
     ],
     useCases: [
       "Distinguishing AI-generated reasoning from AI-retrieved evidence before acting on it",
-      "Prioritizing well-grounded claims over speculative ones when writing reports",
+      "Prioritizing well-grounded claims over speculative ones when writing reports or making decisions",
       "Training teams to ask 'what is the model's evidence?' not just 'what is the model's answer?'",
       "Evaluating whether a specific AI model is suitable for evidence-dependent tasks in your domain",
+      "Checking whether source-grounded answers hold up when the cited sources are verified directly",
+    ],
+    bodySections: [
+      {
+        heading: "Source-Backed Answers Still Need Verification",
+        paragraphs: [
+          "Source grounding reduces hallucination risk — but it doesn't eliminate error. A model can cite a real source and misrepresent its content. It can cite a source that itself contains errors. It can accurately quote a source while stripping context that would change the interpretation.",
+          "Grounding makes claims auditable. It means you can check the source. That is a significant advantage over an ungrounded answer — but it shifts the verification task from 'does this answer exist anywhere?' to 'does this source actually say what the model claims?' Both questions need answers before you act.",
+        ],
+      },
+      {
+        heading: "Strong vs. Weak Grounding",
+        bullets: [
+          "Strong grounding: model cites a specific document, passage, or named source that can be retrieved and verified",
+          "Moderate grounding: model references a named publication or institution without a specific passage",
+          "Weak grounding: model says 'experts generally believe' or 'studies show' with no specific citation",
+          "No grounding: model states a claim as fact with no supporting evidence cited",
+          "Fabricated grounding: model cites a source that does not exist — the most dangerous failure mode",
+        ],
+      },
+      {
+        heading: "Why Multi-Model Comparison Reveals Grounding Quality",
+        paragraphs: [
+          "When you run the same question through five models, grounding differences become visible. One model may cite three specific studies; another may assert the same claim without any evidence. A third may express uncertainty. These differences are not a problem — they are information about where the evidence is strong and where you should verify before acting.",
+          "ConvergePanel's evidence quality ratings surface this comparison without requiring you to read each model's response in full. The per-model grounding signal helps you prioritize which claims need independent verification and which have sufficient support across multiple independent sources.",
+        ],
+      },
     ],
     relatedLinks: [
-      { label: "How to verify information for a video script", href: "/use-cases/how-to-verify-information-for-a-video-script" },
-      { label: "How to check sources for creator content", href: "/use-cases/how-to-check-sources-for-creator-content" },
-      { label: "How to verify user-generated content", href: "/use-cases/how-to-verify-user-generated-content" },
+      { label: "How to Verify Sources from AI Answers", href: "/use-cases/how-to-verify-sources-from-ai-answers" },
+      { label: "How to Fact-Check ChatGPT Responses", href: "/use-cases/how-to-fact-check-chatgpt-responses" },
+      { label: "What Is a Consensus Score?", href: "/use-cases/what-is-a-consensus-score" },
+      { label: "How to Identify Blind Spots in AI Answers", href: "/use-cases/how-to-identify-blind-spots-in-ai-answers" },
+      { label: "AI Disagreement Analysis Tool", href: "/use-cases/ai-disagreement-analysis-tool" },
+      { label: "How to Pressure-Test an AI Response", href: "/use-cases/how-to-pressure-test-an-ai-response" },
     ],
     cta: "See evidence quality scoring in a free panel run",
     category: "glossary",
     schemaType: "FAQPage",
     faq: [
       {
-        q: "What's the difference between source-grounding and RAG?",
-        a: "RAG (Retrieval-Augmented Generation) is a technical implementation of source-grounding — the model retrieves documents at query time and bases its answer on them. Source-grounding is the broader principle: claims should be tied to verifiable evidence, regardless of implementation method.",
+        q: "What is source grounding in AI?",
+        a: "Source grounding means tying AI-generated claims to retrievable, verifiable evidence — specific documents, passages, or structured knowledge bases. A grounded AI answer can be traced to a source you can check. An ungrounded answer is generated from the model's training data with no audit path.",
+      },
+      {
+        q: "What's the difference between source grounding and RAG?",
+        a: "RAG (Retrieval-Augmented Generation) is a technical implementation of source grounding — the model retrieves documents at query time and bases its answer on them. Source grounding is the broader principle: claims should be tied to verifiable evidence, regardless of implementation method.",
       },
       {
         q: "Can ConvergePanel show me the actual sources?",
@@ -499,15 +534,15 @@ export const PAGES: PSEOPage[] = [
       },
       {
         q: "Is a highly grounded answer always correct?",
-        a: "No — a model can cite a real source and misrepresent its content, or cite a source that itself contains errors. Grounding reduces hallucination risk because the claim becomes auditable. It doesn't eliminate error.",
+        a: "No — a model can cite a real source and misrepresent its content, or cite a source that itself contains errors. Grounding reduces hallucination risk because the claim becomes auditable. It doesn't eliminate error. You still need to verify that the cited source says what the model claims.",
       },
       {
-        q: "Why does source-grounding matter for AI trust?",
+        q: "Why does source grounding matter for AI trust?",
         a: "Because it makes AI claims checkable. If a model's answer can be traced to a specific source, you can verify whether that source says what the model claims. Without grounding, you have a fluent answer with no audit path — you can agree or disagree, but you can't check.",
       },
     ],
     metaDescription:
-      "Source-grounding ties AI claims to retrievable, verifiable evidence. Learn what it means, why it matters, and how ConvergePanel rates evidence quality across 5 models.",
+      "Learn what source grounding means, why citations are useful, and why source-backed AI answers still need verification.",
   },
   {
     slug: "single-model-vs-multi-model-verification",
@@ -2069,17 +2104,13 @@ export const PAGES: PSEOPage[] = [
       },
     ],
     relatedLinks: [
+      { label: "AI Tools for Investigative Journalists", href: "/use-cases/ai-tools-for-investigative-journalists" },
       { label: "How to Fact-Check Breaking News Claims", href: "/use-cases/how-to-fact-check-breaking-news-claims" },
       { label: "How Journalists Can Verify Viral Clips", href: "/use-cases/how-journalists-can-verify-viral-clips" },
+      { label: "Verification Checklist for Journalists", href: "/use-cases/verification-checklist-for-journalists" },
       { label: "AI Video Verification for Journalists", href: "/use-cases/ai-video-verification-for-journalists" },
       { label: "How to Create an AI Audit Trail", href: "/use-cases/how-to-create-an-ai-audit-trail" },
-      { label: "What Is a Decision Receipt?", href: "/use-cases/what-is-a-decision-receipt" },
-      { label: "Claim Verification for Journalists", href: "/use-cases/claim-verification-for-journalists" },
       { label: "Newsroom AI Verification Workflow", href: "/use-cases/newsroom-ai-verification-workflow" },
-      { label: "AI video verification for journalists", href: "/use-cases/ai-video-verification-for-journalists" },
-      { label: "Newsroom AI verification workflow", href: "/use-cases/newsroom-ai-verification-workflow" },
-      { label: "Verification checklist for journalists", href: "/use-cases/verification-checklist-for-journalists" },
-      { label: "How journalists can verify viral clips", href: "/use-cases/how-journalists-can-verify-viral-clips" },
     ],
   },
 
@@ -2282,15 +2313,13 @@ export const PAGES: PSEOPage[] = [
       },
     ],
     relatedLinks: [
-      { label: "How to Verify User-Generated Content", href: "/use-cases/how-to-verify-user-generated-content" },
       { label: "AI Tools for Investigative Journalists", href: "/use-cases/ai-tools-for-investigative-journalists" },
+      { label: "How to Verify User-Generated Content", href: "/use-cases/how-to-verify-user-generated-content" },
       { label: "How to Verify Public Statements Quickly", href: "/use-cases/how-to-verify-public-statements-quickly" },
       { label: "How to Document Model Disagreement", href: "/use-cases/how-to-document-model-disagreement" },
       { label: "How to Create an AI Audit Trail", href: "/use-cases/how-to-create-an-ai-audit-trail" },
-      { label: "What Is Source-Grounding in AI?", href: "/use-cases/what-is-source-grounding-in-ai" },
-      { label: "AI tools for investigative journalists", href: "/use-cases/ai-tools-for-investigative-journalists" },
-      { label: "How to verify user-generated content", href: "/use-cases/how-to-verify-user-generated-content" },
-      { label: "Newsroom AI verification workflow", href: "/use-cases/newsroom-ai-verification-workflow" },
+      { label: "Newsroom AI Verification Workflow", href: "/use-cases/newsroom-ai-verification-workflow" },
+      { label: "What Is Source Grounding in AI?", href: "/use-cases/what-is-source-grounding-in-ai" },
     ],
   },
 
@@ -3463,7 +3492,7 @@ export const PAGES: PSEOPage[] = [
     audience: "Researchers, students, professionals, creators, analysts",
     audienceDetail: "Anyone who uses ChatGPT for research, writing, or decisions and wants to check accuracy before acting on the response",
     problem:
-      "ChatGPT can sound confident and still be wrong. It cites sources that don't exist, states statistics with no supporting evidence, and presents contested claims as settled fact. The fluency makes it hard to spot — a hallucinated study is formatted and presented identically to a real one.\n\nFact-checking a ChatGPT response isn't just about checking individual facts. It's about separating what's supported from what's plausible-sounding. A long response might contain twenty claims, and without a triage method, you end up checking everything inefficiently or nothing at all.",
+      "ChatGPT can sound confident and still be wrong. Before you cite, publish, advise, or decide based on a ChatGPT answer, isolate the claims, verify the sources, compare the answer against other models, and check what context may be missing.\n\nIt cites sources that don't exist, states statistics with no supporting evidence, and presents contested claims as settled fact. The fluency makes it hard to spot — a hallucinated study is formatted and presented identically to a real one.\n\nFact-checking a ChatGPT response isn't just about checking individual facts. It's about separating what's supported from what's plausible-sounding. A long response might contain twenty claims, and without a triage method, you end up checking everything inefficiently or nothing at all.",
     solution:
       "Multi-model comparison gives you a fast triage layer for ChatGPT responses. By running the same question through Claude, Gemini, Grok, and Perplexity, you can identify which claims have broad AI consensus (lower risk) and which produce model disagreement (higher priority for manual fact-checking). ConvergePanel surfaces this comparison automatically with a consensus score, per-model evidence, and flagged discrepancies — so you know where to focus before you trust the response.",
     workflow: [
@@ -4199,7 +4228,7 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "ask-multiple-ai-models-one-question",
-    publishedAt: "2026-05-29",
+    publishedAt: "2026-06-07",
     title: "Ask Multiple AI Models One Question",
     h1: "Ask Multiple AI Models One Question — and Compare the Answers",
     audience: "Information workers, researchers, founders",
@@ -4223,14 +4252,17 @@ export const PAGES: PSEOPage[] = [
       "Using multi-model comparison as a teaching tool for AI literacy and critical thinking",
     ],
     relatedLinks: [
-      { label: "Multi-model decision support tool", href: "/use-cases/multi-model-decision-support-tool" },
-      { label: "How to get multiple AI perspectives on a startup idea", href: "/use-cases/how-to-get-multiple-ai-perspectives-on-a-startup-idea" },
-      { label: "Best multi-model AI tool for research", href: "/use-cases/best-multi-model-ai-tool-for-research" },
+      { label: "How to Pressure-Test an AI Response", href: "/use-cases/how-to-pressure-test-an-ai-response" },
+      { label: "How to Fact-Check ChatGPT Responses", href: "/use-cases/how-to-fact-check-chatgpt-responses" },
+      { label: "How to Verify Sources from AI Answers", href: "/use-cases/how-to-verify-sources-from-ai-answers" },
+      { label: "AI Disagreement Analysis Tool", href: "/use-cases/ai-disagreement-analysis-tool" },
+      { label: "What Is a Consensus Score?", href: "/use-cases/what-is-a-consensus-score" },
+      { label: "How to Identify Blind Spots in AI Answers", href: "/use-cases/how-to-identify-blind-spots-in-ai-answers" },
     ],
     cta: "Ask All Five AI Models — one question, five perspectives",
     category: "research",
     metaDescription:
-      "Instead of switching between AI tools, ask all five at once. ConvergePanel queries GPT, Claude, Gemini, Grok, and Perplexity simultaneously and surfaces",
+      "Instead of switching between AI tools, ask all five at once. ConvergePanel queries GPT, Claude, Gemini, Grok, and Perplexity simultaneously and surfaces where they agree, where they disagree, and what you should verify.",
     schemaType: "FAQPage",
     faq: [
       {
@@ -4753,6 +4785,12 @@ export const PAGES: PSEOPage[] = [
       "Adding a structured verification step to a newsroom's standard workflow for user-submitted video",
       "Creating an editorial audit trail for video content decisions",
     ],
+    relatedLinks: [
+      { label: "AI Tools for Investigative Journalists", href: "/use-cases/ai-tools-for-investigative-journalists" },
+      { label: "Verification Checklist for Journalists", href: "/use-cases/verification-checklist-for-journalists" },
+      { label: "AI Claim Verification for Newsrooms", href: "/use-cases/ai-claim-verification-for-newsrooms" },
+      { label: "How to Fact-Check Breaking News Claims", href: "/use-cases/how-to-fact-check-breaking-news-claims" },
+    ],
     cta: "Verify Before Publishing — add video verification to your newsroom workflow",
     category: "video-verification",
     metaDescription:
@@ -4802,6 +4840,13 @@ export const PAGES: PSEOPage[] = [
       "Checking attribution claims — did the named person actually say this, in this context?",
       "Assessing the plausibility of reported events when primary sources are not yet accessible",
       "Building a structured verification layer into a newsroom's breaking news workflow",
+    ],
+    relatedLinks: [
+      { label: "AI Tools for Investigative Journalists", href: "/use-cases/ai-tools-for-investigative-journalists" },
+      { label: "Verification Checklist for Journalists", href: "/use-cases/verification-checklist-for-journalists" },
+      { label: "AI Claim Verification for Newsrooms", href: "/use-cases/ai-claim-verification-for-newsrooms" },
+      { label: "How Journalists Can Verify Viral Clips", href: "/use-cases/how-journalists-can-verify-viral-clips" },
+      { label: "How to Fact-Check ChatGPT Responses", href: "/use-cases/how-to-fact-check-chatgpt-responses" },
     ],
     cta: "Fact-Check Fast — run a multi-model claim verification",
     category: "claim-verification",
@@ -4930,50 +4975,129 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "ai-tools-for-investigative-journalists",
-    publishedAt: "2026-05-29",
-    title: "AI Tools for Investigative Journalists",
-    h1: "AI Tools for Investigative Journalists — What Actually Helps",
-    audience: "Investigative journalists, researchers",
-    audienceDetail: "Journalists working on long-form investigations who need AI tools for research, source verification, document analysis, and evidence review",
+    publishedAt: "2026-06-07",
+    title: "AI Tools for Investigative Journalists to Verify Claims and Evidence",
+    h1: "AI Tools for Investigative Journalists Reviewing Claims, Sources, and Evidence",
+    audience: "Investigative journalists, researchers, editors",
+    audienceDetail: "Journalists working on long-form investigations who need structured AI tools for claim verification, source review, document analysis, and editorial documentation",
     problem:
-      "Investigative journalism requires sustained, deep, multi-source research — the opposite of the single-query AI workflow most tools are designed for. An investigative journalist doesn't just need an answer; they need to know where the evidence is strong, where it's contested, what they may have missed, and how to document the research process for editorial and legal accountability.\n\nMost AI tools are built for quick answers, not deep investigations. They don't surface disagreement, they don't document their process, and they don't help you identify what you haven't found yet.",
+      "Investigative journalism requires sustained, deep, multi-source research — the opposite of the single-query AI workflow most tools are designed for. An investigative journalist doesn't just need an answer; they need to know where the evidence is strong, where it's contested, what they may have missed, and how to document the research process for editorial and legal accountability.\n\nThe gap isn't access to AI — most journalists already use AI tools. The gap is structure: a single AI model gives you one answer, one framing, one set of omissions. Investigations built on one model's answer miss what other models would have flagged. And when a published investigation is challenged, a chat history is not a defensible audit trail.",
     solution:
-      "ConvergePanel's multi-model panel and Deep Research mode are built for exactly the kind of work investigative journalism requires: running contested claims through multiple models to see where evidence is strong and where it breaks down, surfacing what individual models omit, and creating an audit record of the research process that protects both editorial integrity and legal accountability.",
+      "ConvergePanel's multi-model panel and Deep Research mode help investigative journalists run contested claims through multiple models, surface where evidence is strong and where it breaks down, and identify what individual models leave out. Every panel run creates an exportable audit record — documenting the research process for editorial review, editorial legal accountability, or post-publication challenges.",
     workflow: [
-      "Use Deep Research mode to run the core investigative question through five models and review the full range of perspectives",
-      "Verify key claims using Claim Verification mode and review per-model evidence for each",
-      "Use the disagreement map to identify where evidence is contested — these are often the most important points to investigate further",
-      "Cross-check named sources, documents, and attributed statements using multi-model comparison",
-      "Export audit records for every significant research step — these form your investigation's documentation backbone",
-      "Use the governance peer review feature for editorial sign-off on high-stakes claims before they reach the story",
+      "Define the claim, source, or evidence item being reviewed — be specific about what's being checked",
+      "Separate allegation, evidence, interpretation, and unknowns before running AI comparison",
+      "Run the question through ConvergePanel's Deep Research or Claim Verification mode",
+      "Compare agreement and disagreement across models — splits often mark the most important investigative questions",
+      "Check source provenance: do the sources models cite actually exist and say what's claimed?",
+      "Identify missing context and weak assumptions using the disagreement map",
+      "Add editorial review notes documenting what was verified, what couldn't be confirmed, and what still needs human investigation",
+      "Save a decision receipt or export an audit trail for high-stakes claims before they reach publication",
     ],
     useCases: [
       "Deep-researching a complex story where evidence is contested and multiple perspectives matter",
       "Verifying claims made by sources before attributing them in a published investigation",
+      "Reviewing public records, open-source evidence, and user-generated content before publication",
+      "Cross-checking conflicting accounts and documenting where the evidence is genuinely uncertain",
       "Building a documented research trail for an investigation that may face legal scrutiny",
-      "Identifying gaps in existing AI knowledge on a topic — finding what the models don't know is often as useful as what they do",
+      "Identifying gaps in AI knowledge on a topic — finding what models don't know is often as useful as what they do",
     ],
-    cta: "Start an Investigation Review — deep research across five AI models",
+    bodySections: [
+      {
+        heading: "Why Investigative Journalists Need More Than One AI Answer",
+        paragraphs: [
+          "One AI model gives you one answer — shaped by one training dataset, one set of omissions, and one framing tendency. For a breaking news triage, that may be enough. For an investigation where accuracy is load-bearing and the stakes include legal exposure and editorial reputation, one answer isn't a sufficient basis.",
+          "Multi-model comparison doesn't just give you more answers — it shows you where the answers diverge, which is exactly where the hardest investigative questions live. When four models agree on an interpretation but one flags a significant counterargument, that minority view is the one worth investigating further.",
+        ],
+      },
+      {
+        heading: "What Investigative Journalists Should Verify",
+        bullets: [
+          "Public claims and statements — attributed or not — before incorporating them as established fact",
+          "Source provenance: is the named source credible, verifiable, and correctly represented?",
+          "Public records and official documents: does the document say what's being claimed?",
+          "Open-source evidence: photos, videos, social media content, and user-generated content before use",
+          "Timelines: are dates, sequences, and causation claims consistent across independent sources?",
+          "Conflicting accounts: where sources contradict each other, what does the evidence actually support?",
+          "Viral screenshots and circulating claims: original context vs. how they're being presented",
+          "Allegation vs. evidence: is what's being treated as a fact actually an unverified allegation?",
+        ],
+      },
+      {
+        heading: "Common Investigation Scenarios",
+        bullets: [
+          "A source makes a specific claim — run it through multi-model verification before attributing it",
+          "Multiple sources give conflicting accounts — compare AI model responses for each version",
+          "A document or record is cited as evidence — verify it exists and says what's claimed",
+          "A viral video or screenshot is central to the story — check it with video or image verification before publishing",
+          "A public statement includes a specific statistic — check whether the data supports the claim",
+          "An allegation has been made — document clearly what is alleged vs. what has been independently established",
+          "The investigation may face legal challenge — every key claim should have a documented verification trail",
+        ],
+      },
+      {
+        heading: "Why Model Disagreement Matters in Investigations",
+        paragraphs: [
+          "Model disagreement is one of the most useful signals in investigative research. When models split on a claim — different conclusions, different evidence, different framing — the split usually reflects something real: contested evidence, an unsettled factual record, or a framing assumption that produces different conclusions when changed.",
+          "Treating disagreement as a signal rather than noise means the investigation focuses its manual verification effort on the right places. High-consensus claims are lower-risk for publication; low-consensus claims or flagged disagreements are where editorial scrutiny belongs.",
+        ],
+      },
+      {
+        heading: "Editorial Risk and Documenting Uncertainty",
+        paragraphs: [
+          "The strongest protection against post-publication challenges is a documented verification process. If a published claim is later disputed, a timestamped record showing what was checked, what the AI panels returned, what the disagreement looked like, and what a human reviewer concluded is materially more defensible than no record.",
+          "This matters even when the investigation is accurate. Being able to show that a defined verification process was followed — not just that the reporter believed the claim was right — is the difference between a defensible editorial position and an indefensible one.",
+        ],
+      },
+      {
+        heading: "Common Mistakes to Avoid",
+        bullets: [
+          "Using a single AI model's research output as a basis for attribution without cross-checking",
+          "Treating AI consensus as proof — models share training data and can share the same errors",
+          "Using AI to verify claims that originated in AI-generated content without checking primary sources",
+          "Failing to document the verification steps before publication",
+          "Ignoring low-consensus signals because the reporting timeline is tight",
+          "Not distinguishing between what AI models say is likely and what primary sources actually establish",
+        ],
+      },
+    ],
+    relatedLinks: [
+      { label: "Verification Checklist for Journalists", href: "/use-cases/verification-checklist-for-journalists" },
+      { label: "How to Verify User-Generated Content", href: "/use-cases/how-to-verify-user-generated-content" },
+      { label: "How to Fact-Check Breaking News Claims", href: "/use-cases/how-to-fact-check-breaking-news-claims" },
+      { label: "How Journalists Can Verify Viral Clips", href: "/use-cases/how-journalists-can-verify-viral-clips" },
+      { label: "How to Verify Public Statements Quickly", href: "/use-cases/how-to-verify-public-statements-quickly" },
+      { label: "AI Claim Verification for Investigators", href: "/use-cases/ai-claim-verification-for-investigators" },
+      { label: "AI Claim Verification for Newsrooms", href: "/use-cases/ai-claim-verification-for-newsrooms" },
+      { label: "How to Create an AI Audit Trail", href: "/use-cases/how-to-create-an-ai-audit-trail" },
+      { label: "What Is a Decision Receipt?", href: "/use-cases/what-is-a-decision-receipt" },
+      { label: "How to Verify Sources from AI Answers", href: "/use-cases/how-to-verify-sources-from-ai-answers" },
+    ],
+    cta: "Review the Evidence — compare multiple AI models and document your investigation",
     category: "research",
     metaDescription:
-      "Investigative journalism needs AI tools built for deep, documented, multi-source research — not quick answers. Learn how multi-model AI supports serious",
+      "Use AI tools to review public claims, sources, timelines, UGC, and conflicting accounts before publishing investigative work.",
     schemaType: "FAQPage",
     faq: [
       {
         q: "What AI tools are useful for investigative journalists?",
-        a: "The most useful AI tools for investigative journalism are those that support multi-source verification, surface disagreement, and provide audit documentation. Multi-model platforms like ConvergePanel, specialized research tools, document analysis AI, and translation tools are all useful depending on the investigation type.",
+        a: "The most useful AI tools for investigative journalism support multi-source verification, surface disagreement between models, and provide audit documentation. Multi-model platforms like ConvergePanel, document analysis AI, and video verification tools are all useful depending on the investigation. The key is tools that document their process — not just give an answer.",
       },
       {
         q: "Can AI replace investigative reporting?",
-        a: "No. AI can accelerate research, surface leads, verify claims, and help identify evidence gaps — but it can't substitute for source relationships, document access, human judgment, and the structured storytelling of investigative journalism. AI is a research accelerant, not a reporter.",
+        a: "No. AI can accelerate research, surface leads, verify claims, and help identify evidence gaps — but it can't substitute for source relationships, document access, human editorial judgment, and the structured storytelling of investigative journalism. AI is a research accelerant and verification layer, not a reporter.",
       },
       {
         q: "How should investigative journalists document their AI research?",
-        a: "Every AI research step that informs a published claim should have a documented record: what was queried, which tool was used, what it returned, what the confidence level was, and whether a human reviewed and verified the output. ConvergePanel's audit export automates this for multi-model research runs.",
+        a: "Every AI research step that informs a published claim should have a documented record: what was queried, which models were used, what they returned, what the consensus level was, and whether a human reviewed the output. ConvergePanel's audit export automates this for multi-model research runs — creating the editorial paper trail that protects both the journalist and the publication.",
       },
       {
         q: "What are the risks of using AI in investigative journalism?",
-        a: "The main risks are acting on hallucinated facts, publishing claims that have low AI consensus without additional verification, and using AI outputs without documenting the process for editorial accountability. Multi-model verification reduces the first two risks; audit logging addresses the third.",
+        a: "The main risks are acting on hallucinated facts, publishing claims with low AI consensus without primary-source verification, and using AI outputs without documenting the process for editorial accountability. Multi-model verification reduces the first two; audit logging addresses the third.",
+      },
+      {
+        q: "How do you handle conflicting AI model answers in an investigation?",
+        a: "Treat disagreement as a research signal, not a failure. When models split on a specific claim, that split usually reflects genuine uncertainty or contested evidence. Use the disagreement to direct your manual verification — the contested points are the ones that need primary sources, not just AI consensus.",
       },
     ],
   },
@@ -5030,51 +5154,114 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "verification-checklist-for-journalists",
-    publishedAt: "2026-05-29",
-    title: "Verification Checklist for Journalists",
-    h1: "AI-Assisted Verification Checklist for Journalists",
+    publishedAt: "2026-06-07",
+    title: "Verification Checklist for Journalists Covering Claims and Viral Content",
+    h1: "Verification Checklist for Journalists Before Publishing Claims or Clips",
     audience: "Journalists, editors, journalism students",
-    audienceDetail: "Working journalists and journalism students who want a practical, repeatable checklist for verifying claims and media before publication",
+    audienceDetail: "Working journalists, editors, and journalism students who want a practical, repeatable checklist for verifying claims, sources, viral content, and media before publication",
     problem:
-      "Verification is one of the foundational skills of journalism — and one of the most inconsistently applied. Without a standard checklist, what gets verified depends on the individual reporter's time, experience, and intuition. High-volume workflows produce the most pressure to skip steps and the most exposure when those steps are skipped.",
+      "Verification is one of the foundational skills of journalism — and one of the most inconsistently applied. Without a standard checklist, what gets verified depends on the individual reporter's time, experience, and intuition. High-volume workflows produce the most pressure to skip steps and the most exposure when those steps are skipped.\n\nThe problem isn't that journalists don't know how to verify. It's that without a structured checklist, verification becomes ad hoc — different thresholds for different reporters, different steps depending on deadline pressure, and no consistent paper trail when a published claim is later challenged.",
     solution:
-      "A structured verification checklist makes the process consistent and auditable. Combining traditional verification steps with AI-assisted multi-model checking gives journalists a fast first pass for the most common verification tasks — before more time-intensive primary-source verification is applied to the highest-risk claims.",
+      "A structured verification checklist makes the process consistent, repeatable, and auditable. Combining traditional verification steps with AI-assisted multi-model checking gives journalists a fast first pass for the most common verification tasks — before more time-intensive primary-source verification is applied to the highest-risk claims. The result is a defensible editorial process, not just good intentions.",
     workflow: [
-      "Step 1 — Identify the key claims: isolate every specific factual claim that will appear in the published piece",
-      "Step 2 — Categorize by risk: which claims would be most damaging if wrong? Start there",
-      "Step 3 — Run AI multi-model verification: submit high-risk claims to ConvergePanel and review consensus scores",
-      "Step 4 — Flag low-consensus claims: any claim below 70 gets a primary-source verification step",
-      "Step 5 — Check sources cited or implied: verify that named sources exist and say what's attributed to them",
-      "Step 6 — Video and media check: any video or image supporting the story gets multi-model visual verification",
-      "Step 7 — Document everything: attach the verification record to the story file before publication",
+      "Identify every specific factual claim in the story before publication",
+      "Rank claims by risk — which ones would be most damaging if wrong? Start there",
+      "Separate allegation from established fact: every allegation must be clearly labeled",
+      "Submit high-risk claims to ConvergePanel Claim Verification and review consensus scores",
+      "Flag claims with low consensus or model disagreement — these need primary-source verification",
+      "Verify that named sources exist and are correctly represented in every attribution",
+      "Check that cited documents, studies, and records actually say what is claimed",
+      "Run any supporting video, image, or screenshot through multi-model visual verification",
+      "Document what was verified, what couldn't be confirmed, and what editorial decision was made",
+      "Attach the verification record to the story file before publication",
     ],
     useCases: [
-      "Building a standard verification checklist for a newsroom's editorial workflow",
-      "Training journalism students in systematic verification as part of a digital journalism curriculum",
+      "Applying a standard verification workflow to breaking news before publication",
+      "Reviewing viral claims and screenshots before incorporating them into a story",
+      "Documenting the editorial verification process for stories with legal or reputational risk",
+      "Building a consistent newsroom verification standard across reporters and editors",
+      "Training journalism students in structured verification as part of a digital journalism curriculum",
       "Creating a personal verification habit for freelance journalists before submitting work",
-      "Documenting verification steps for stories that carry legal or reputational risk",
     ],
-    cta: "Run a Verification Checklist — claim and video verification in one platform",
+    bodySections: [
+      {
+        heading: "Claim Verification Checklist",
+        bullets: [
+          "Is this a fact or an allegation? Label all unverified allegations explicitly",
+          "Is this claim specific enough to be verified? Vague claims cannot be checked",
+          "Does this claim appear in primary sources, or only in secondary or AI-generated content?",
+          "If a statistic is cited, does the original source say what's claimed?",
+          "If a quote is attributed, can it be verified in the original context?",
+          "If a document is cited, does the document exist and say what's attributed?",
+          "What is the consensus across multiple AI models on this claim?",
+          "Are there significant model disagreements that warrant primary-source verification?",
+          "What context is missing that could change the interpretation of this claim?",
+        ],
+      },
+      {
+        heading: "Source Verification Checklist",
+        bullets: [
+          "Does this named source exist and have the authority they're presented as having?",
+          "Is this source being quoted accurately and in the right context?",
+          "Is this source independent, or do they have a stake in the claim being verified?",
+          "Can the source's account be independently corroborated?",
+          "If an anonymous source, is their anonymity justified by the editorial standards being applied?",
+          "Are there AI-generated fake citations that look credible but cannot be traced to an original?",
+        ],
+      },
+      {
+        heading: "Viral Content and Media Verification Checklist",
+        bullets: [
+          "What is the original source of this video, image, or screenshot?",
+          "Is there manipulation or synthetic content in the media?",
+          "Is the media being presented in its original context, or is context being stripped?",
+          "Has this media been digitally altered since its original publication?",
+          "Can the claimed location, date, and subject of the media be independently confirmed?",
+          "If this is a screenshot, does the original platform post still exist and match?",
+          "Has this specific video or image appeared before in a different context?",
+        ],
+      },
+      {
+        heading: "Editorial Documentation Checklist",
+        bullets: [
+          "Is there a record of every high-risk claim that was checked before publication?",
+          "Are unverified claims clearly labeled in the published piece?",
+          "Is there a note attached to the story file documenting what was verified and what wasn't?",
+          "Has an editor reviewed the verification status of all key claims?",
+          "If the story carries legal risk, has the verification record been preserved in accessible form?",
+        ],
+      },
+    ],
+    relatedLinks: [
+      { label: "AI Tools for Investigative Journalists", href: "/use-cases/ai-tools-for-investigative-journalists" },
+      { label: "How to Verify Sources from AI Answers", href: "/use-cases/how-to-verify-sources-from-ai-answers" },
+      { label: "How to Fact-Check ChatGPT Responses", href: "/use-cases/how-to-fact-check-chatgpt-responses" },
+      { label: "How to Create an AI Audit Trail", href: "/use-cases/how-to-create-an-ai-audit-trail" },
+      { label: "AI Claim Verification for Newsrooms", href: "/use-cases/ai-claim-verification-for-newsrooms" },
+      { label: "What Is a Consensus Score?", href: "/use-cases/what-is-a-consensus-score" },
+      { label: "How to Identify Blind Spots in AI Answers", href: "/use-cases/how-to-identify-blind-spots-in-ai-answers" },
+    ],
+    cta: "Verify Before Publishing — claim and video verification in one platform",
     category: "claim-verification",
     metaDescription:
-      "Inconsistent verification is an editorial liability. A structured AI-assisted checklist makes verification repeatable, documented, and defensible before",
+      "Use this journalist verification checklist to review claims, sources, viral clips, screenshots, and public statements before publishing.",
     schemaType: "FAQPage",
     faq: [
       {
         q: "What should a journalism verification checklist include?",
-        a: "At minimum: identify key claims, rank by risk, verify high-risk claims against primary sources, check that named sources and cited materials are real and accurately represented, verify any video or image content, and document what was verified and what couldn't be confirmed at the time of publication.",
+        a: "At minimum: identify all factual claims, rank by risk, separate allegation from established fact, verify high-risk claims against primary sources, check that named sources and cited documents are real and accurately represented, verify any video or image content, and document what was verified and what couldn't be confirmed before publication.",
       },
       {
         q: "How does AI-assisted verification fit into a traditional journalism checklist?",
-        a: "AI multi-model verification is a fast first-pass layer that helps you triage which claims need deep verification. Claims with high AI consensus are lower-priority for manual verification; claims with low consensus or model disagreement should be prioritized for primary-source checking. It's a prioritization tool, not a replacement for traditional verification.",
+        a: "AI multi-model verification is a fast first-pass layer that helps triage which claims need deep verification. Claims with high AI consensus are lower-priority for manual verification; claims with low consensus or model disagreement should be prioritized for primary-source checking. It's a prioritization tool, not a replacement for traditional verification.",
       },
       {
         q: "How should a journalist handle a claim they couldn't verify before deadline?",
-        a: "Publish a clear caveat: 'The claim could not be independently verified.' Don't present unverified claims as confirmed. If the claim is essential to the story and can't be verified, consider whether the story can be published without it, or whether the deadline should be extended.",
+        a: "Publish a clear caveat: 'The claim could not be independently verified.' Don't present unverified claims as confirmed. If the claim is essential to the story and can't be confirmed before deadline, consider whether the story can run without it or whether the deadline should be extended.",
       },
       {
         q: "Is using AI for verification consistent with journalistic standards?",
-        a: "When used properly — as a first-pass triage layer, not a definitive verdict — AI-assisted verification is consistent with the principle of seeking independent corroboration. The key is transparency about the tool's limitations and the continued application of traditional verification for high-stakes claims.",
+        a: "When used as a first-pass triage layer — not as a definitive verdict — AI-assisted verification is consistent with the principle of seeking independent corroboration. The key is transparency about the tool's limitations and continued application of primary-source verification for high-stakes claims.",
       },
     ],
   },
@@ -5699,9 +5886,9 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "ai-audit-trail-software",
-    publishedAt: "2026-05-29",
-    title: "AI Audit Trail Software",
-    h1: "AI Audit Trail Software — Document Every AI-Assisted Decision",
+    publishedAt: "2026-06-07",
+    title: "AI Audit Trail Software for AI-Assisted Decisions",
+    h1: "AI Audit Trail Software for Documenting AI-Assisted Decisions",
     audience: "Compliance teams, governance teams, decision-making teams",
     audienceDetail: "Compliance officers, team leads, and governance managers who need software that automatically documents AI-assisted research and decision processes",
     problem:
@@ -5723,10 +5910,55 @@ export const PAGES: PSEOPage[] = [
       "Providing evidence of due diligence in an audit or external review of AI-assisted decisions",
       "Demonstrating human oversight for AI-assisted decisions under the EU AI Act or similar frameworks",
     ],
-    cta: "Create an Audit Trail — automatic documentation for every AI-assisted decision",
+    bodySections: [
+      {
+        heading: "What AI Audit Trail Software Should Include",
+        bullets: [
+          "The original query or prompt — what was asked of the AI",
+          "Which models were used and when",
+          "Each model's full output and verdict — not a summary",
+          "A confidence or consensus quality signal showing how much models agreed",
+          "Any governance flags triggered during the run",
+          "Human reviewer identity, review decision, and timestamp if a review step occurred",
+          "The final decision made based on the AI-assisted research",
+          "An exportable, structured record that can be presented to compliance, legal, or internal audit",
+        ],
+      },
+      {
+        heading: "Why a Chat History Is Not an Audit Trail",
+        paragraphs: [
+          "A chat history records what was said. An audit trail records what was verified and on what evidence. These are fundamentally different things. A chat log shows the transcript; an audit trail shows whether the output was trustworthy enough to act on — and who made that determination.",
+          "Chat histories don't capture consensus quality, model disagreement, governance flags, or human review decisions. They're not structured for export in a compliance-ready format. If an AI-assisted decision is later reviewed by a regulator, an auditor, or legal counsel, a chat history does not answer the core question: was this output verified before it was acted upon?",
+        ],
+      },
+      {
+        heading: "Features to Look for in AI Audit Trail Software",
+        bullets: [
+          "Automatic logging — audit records should be a byproduct of the workflow, not manual documentation",
+          "Multi-model comparison — running one model is not sufficient for high-stakes decisions",
+          "Consensus scoring — a structured signal of output quality, not just raw responses",
+          "Governance policy enforcement — flagging and routing low-confidence or high-risk queries",
+          "Human review logging — capturing reviewer identity, decision, and timestamp",
+          "Exportable audit bundles — structured records ready for compliance, legal, or internal review",
+          "Decision receipt generation — point-in-time documents for individual AI-assisted decisions",
+        ],
+      },
+      {
+        heading: "Common Mistakes in AI Governance Without Audit Trail Software",
+        bullets: [
+          "Treating chat history as an audit trail — it records conversation, not verification quality",
+          "Running only one AI model and treating the output as verified",
+          "Relying on verbal or informal review without a logged record of who approved what",
+          "Documenting AI use after the fact rather than at the time of the decision",
+          "Using AI for consequential decisions without any governance policy governing when human review is required",
+          "Not preserving audit records in an accessible format — records that can't be retrieved can't be produced in an audit",
+        ],
+      },
+    ],
+    cta: "Start an AI Audit Trail — automatic documentation for every AI-assisted decision",
     category: "governance",
     metaDescription:
-      "Most AI tools leave no audit trail. ConvergePanel automatically documents every panel run — query, models, outputs, consensus score, and reviewer decisions — exportable for compliance.",
+      "Compare models, document disagreement, record human review, and create decision receipts for AI-assisted work.",
     schemaType: "FAQPage",
     faq: [
       {
@@ -5773,38 +6005,75 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "ai-decision-audit-trail",
-    publishedAt: "2026-05-29",
-    title: "AI Decision Audit Trail",
-    h1: "AI Decision Audit Trail — A Documented Record of How AI-Assisted Decisions Were Made",
+    publishedAt: "2026-06-07",
+    title: "AI Decision Audit Trail for Reviewable AI-Assisted Decisions",
+    h1: "AI Decision Audit Trail: Record Review, Disagreement, and Final Reasoning",
     audience: "Governance teams, analysts, managers",
-    audienceDetail: "Managers and governance team members who need to be able to produce a documented record of AI-assisted decision processes for internal or external review",
+    audienceDetail: "Managers and governance team members who need to produce a documented record of AI-assisted decision processes for internal review, compliance, or external audit",
     problem:
-      "Decisions informed by AI are increasingly common — but the process behind them is rarely documented. If a decision is later questioned, the answers to basic accountability questions are unavailable: what was the AI asked? What did it say? Was the output reviewed before the decision was made? Was the evidence quality assessed?\n\nWithout a decision audit trail, AI-assisted decisions are indistinguishable from uninformed intuition to anyone reviewing them after the fact.",
+      "Decisions informed by AI are increasingly common — but the process behind them is rarely documented. If a decision is later questioned, the answers to basic accountability questions are unavailable: what was the AI asked? What did it say? Were there conflicting outputs from different models? Was the output reviewed before the decision was made?\n\nWithout a decision audit trail, AI-assisted decisions are indistinguishable from uninformed intuition to anyone reviewing them after the fact. And when a regulator, auditor, or review board asks 'how was this decision made?', 'we used AI' without documentation is not an answer that satisfies.",
     solution:
-      "A decision audit trail for AI-assisted work documents the full decision process: what was queried, which models were used, what they returned, what the quality signal was, and who reviewed the output before the decision was made. ConvergePanel creates this trail automatically as part of its standard workflow — every panel run generates an exportable audit record.",
+      "A decision audit trail for AI-assisted work documents the full process: what was queried, which models were used, what they returned, where models disagreed, what the quality signal was, and who reviewed the output before the decision was made. ConvergePanel creates this trail automatically — every panel run generates an exportable audit record that captures disagreement, confidence signals, governance flags, and reviewer decisions.",
     workflow: [
+      "Define what decision is being made and what information the AI is being asked to support",
       "Run the research or verification query through ConvergePanel as part of the decision preparation process",
+      "Review model agreement and disagreement — record where models split on evidence or interpretation",
       "Note the consensus score and any governance flags in the decision record",
       "Complete the peer review step if required by governance policy, documenting the reviewer's decision",
+      "Add reasoning notes: why this decision was made, what evidence it was based on, what was uncertain",
       "Export the audit bundle and attach it to the decision file",
-      "Store the audit trail in a location accessible for future review",
-      "Reference the audit trail in any review, discussion, or challenge of the original decision",
+      "Store the audit trail in a location accessible for future review or external production",
     ],
     useCases: [
       "Creating a documented decision audit trail for a strategic recommendation informed by AI research",
       "Building a paper trail for AI-assisted compliance decisions in a regulated environment",
       "Providing governance evidence for decisions that may be reviewed by a board, committee, or external auditor",
       "Demonstrating due diligence in an AI-assisted decision if that decision is later questioned",
+      "Meeting internal AI governance policy requirements for documenting high-stakes AI use",
     ],
-    cta: "Create a Decision Audit Trail — export the full record of every AI-assisted decision",
+    bodySections: [
+      {
+        heading: "What a Decision Audit Trail Should Record",
+        bullets: [
+          "The original query or claim submitted to AI",
+          "Which models were queried and at what time",
+          "Each model's full output and verdict — not a summary",
+          "Where models disagreed and what the disagreement was about",
+          "The consensus score or evidence quality signal",
+          "Any governance flags triggered during the run",
+          "Human reviewer identity, review decision, and timestamp",
+          "Final reasoning: why the decision was made and on what basis",
+          "An exportable, structured record ready for compliance or audit presentation",
+        ],
+      },
+      {
+        heading: "Why Disagreement Belongs in the Audit Trail",
+        paragraphs: [
+          "When AI models disagree on a question relevant to a decision, that disagreement is part of the evidentiary record. A decision made despite model disagreement — with documented reasoning for why one interpretation was preferred — is a defensible decision. A decision made without recording that disagreement existed is not.",
+          "Recording model disagreement in the audit trail shows that uncertainty was identified and accounted for, not overlooked. This is the difference between a reviewable decision process and an unexplained conclusion.",
+        ],
+      },
+      {
+        heading: "Common Mistakes in AI Decision Documentation",
+        bullets: [
+          "Treating a chat transcript as an audit trail — it records conversation, not verification quality or disagreement",
+          "Documenting decisions after the fact rather than at the time they were made",
+          "Omitting the reasoning for the final decision — what was weighed, what was uncertain, what was accepted",
+          "Not preserving records in a format that can be produced in an audit or review",
+          "Running only one AI model and treating the output as independently verified",
+          "Failing to log human review when governance policy requires it",
+        ],
+      },
+    ],
+    cta: "Create a Decision Receipt — export the full record of every AI-assisted decision",
     category: "governance",
     metaDescription:
-      "AI decisions need audit trails. ConvergePanel automatically records query, models, outputs, consensus score, and reviewer decisions — exportable for any review.",
+      "Document prompts, model responses, disagreement, reviewer notes, and final reasoning for AI-assisted decisions.",
     schemaType: "FAQPage",
     faq: [
       {
         q: "What should an AI decision audit trail include?",
-        a: "A complete AI decision audit trail should include: the original query or claim, the AI models used, the outputs or verdicts returned, the consensus score or evidence quality signal, any governance flags triggered, the human review step (if applicable), and the final decision made — all with timestamps.",
+        a: "A complete AI decision audit trail should include: the original query or claim, the AI models used, the outputs or verdicts returned, where models disagreed, the consensus score or evidence quality signal, any governance flags triggered, the human review step (if applicable), final reasoning notes, and the decision made — all with timestamps.",
       },
       {
         q: "Who is responsible for maintaining an AI decision audit trail?",
@@ -5812,7 +6081,7 @@ export const PAGES: PSEOPage[] = [
       },
       {
         q: "How do I produce an AI decision audit trail from ConvergePanel?",
-        a: "Every ConvergePanel panel run generates an exportable audit bundle that includes the full record of the run. Click export on any run to download the structured record — it's ready to attach to a decision file, share with a compliance team, or store in your documentation system.",
+        a: "Every ConvergePanel panel run generates an exportable audit bundle that includes the full record of the run — models, outputs, consensus score, governance flags, and reviewer decisions. Click export on any run to download the structured record, ready to attach to a decision file or share with a compliance team.",
       },
       {
         q: "What's the difference between an AI audit trail and a Decision Receipt?",
@@ -5820,9 +6089,11 @@ export const PAGES: PSEOPage[] = [
       },
     ],
     relatedLinks: [
-      { label: "AI audit trail for high-stakes decisions", href: "/use-cases/how-to-create-an-ai-audit-trail" },
       { label: "AI Audit Trail Software", href: "/use-cases/ai-audit-trail-software" },
+      { label: "How to Create an AI Audit Trail", href: "/use-cases/how-to-create-an-ai-audit-trail" },
+      { label: "What Is a Decision Receipt?", href: "/use-cases/what-is-a-decision-receipt" },
       { label: "How to Prove an AI Decision Was Reviewed", href: "/use-cases/how-to-prove-an-ai-decision-was-reviewed" },
+      { label: "AI Governance for Small Teams", href: "/use-cases/ai-governance-for-small-teams" },
     ],
   },
 

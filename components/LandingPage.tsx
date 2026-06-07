@@ -388,12 +388,12 @@ export default function LandingPage() {
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {[
               { label: "AI claim verification for content creators", href: "/use-cases/ai-claim-verification-for-content-creators" },
+              { label: "AI tools for investigative journalists", href: "/use-cases/ai-tools-for-investigative-journalists" },
               { label: "How to fact-check ChatGPT responses", href: "/use-cases/how-to-fact-check-chatgpt-responses" },
               { label: "How to create an AI audit trail", href: "/use-cases/how-to-create-an-ai-audit-trail" },
-              { label: "How to pressure-test an AI response", href: "/use-cases/how-to-pressure-test-an-ai-response" },
+              { label: "AI audit trail software", href: "/use-cases/ai-audit-trail-software" },
               { label: "What is an AI consensus score?", href: "/use-cases/what-is-a-consensus-score" },
               { label: "How to verify sources from AI answers", href: "/use-cases/how-to-verify-sources-from-ai-answers" },
-              { label: "AI disagreement analysis tool", href: "/use-cases/ai-disagreement-analysis-tool" },
               { label: "How to identify blind spots in AI answers", href: "/use-cases/how-to-identify-blind-spots-in-ai-answers" },
               { label: "What is source grounding in AI?", href: "/use-cases/what-is-source-grounding-in-ai" },
             ].map(({ label, href }) => (

@@ -6,7 +6,7 @@ export default function robots(): MetadataRoute.Robots {
       {
         userAgent: "*",
         allow: "/",
-        disallow: ["/admin", "/api", "/profile", "/billing", "/onboarding", "/login", "/signup"],
+        disallow: ["/admin", "/api", "/profile", "/billing", "/onboarding", "/login", "/login/"],
       },
     ],
     sitemap: "https://convergepanel.com/sitemap.xml",
