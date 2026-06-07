@@ -1367,7 +1367,7 @@ export default function GovernanceDashboard() {
       className={`inline-flex flex-1 items-center justify-center gap-2 rounded-xl border-2 px-5 py-3.5 text-lg font-bold tracking-tight transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent md:text-xl sm:min-w-[160px] sm:flex-none ${
         tab === id
           ? "border-cp-accent bg-cp-accent text-cp-bg shadow-md ring-2 ring-cp-accent/30"
-          : "border-cp-border bg-cp-surface text-cp-muted shadow-sm hover:border-cp-accent/50 hover:bg-cp-raised hover:text-cp-text"
+          : "border-cp-border bg-cp-surface text-cp-text/70 shadow-sm hover:border-cp-accent/50 hover:bg-cp-raised hover:text-cp-text"
       }`}
     >
       {label}
@@ -1386,7 +1386,7 @@ export default function GovernanceDashboard() {
 
       <header className="mb-8 border-b border-cp-border pb-6">
         <h1 className="text-2xl font-bold text-cp-text md:text-3xl">Governance Dashboard</h1>
-        <p className="mt-2 text-cp-muted">
+        <p className="mt-2 text-cp-text/75">
           Review runs, manage policies, and track governance activity
         </p>
       </header>
@@ -1406,23 +1406,23 @@ export default function GovernanceDashboard() {
         <div className="space-y-6">
           <div className="flex flex-wrap gap-6 rounded-xl border border-cp-border bg-cp-surface p-4 text-sm shadow-sm">
             <div>
-              <span className="text-cp-muted">Needs Review:</span>{" "}
+              <span className="text-cp-text/75">Needs Review:</span>{" "}
               <span className="font-bold text-amber-400">
                 {queueLoading ? "…" : queueStats.needs}
               </span>
             </div>
             <div>
-              <span className="text-cp-muted">Blocked:</span>{" "}
+              <span className="text-cp-text/75">Blocked:</span>{" "}
               <span className="font-bold text-red-400">{queueLoading ? "…" : queueStats.blocked}</span>
             </div>
             <div>
-              <span className="text-cp-muted">Approved:</span>{" "}
+              <span className="text-cp-text/75">Approved:</span>{" "}
               <span className="font-bold text-emerald-400">
                 {queueLoading ? "…" : queueStats.approved}
               </span>
             </div>
             <div>
-              <span className="text-cp-muted">Total:</span>{" "}
+              <span className="text-cp-text/75">Total:</span>{" "}
               <span className="font-bold text-cp-text">
                 {queueLoading ? "…" : queueStats.total}
               </span>
@@ -1496,7 +1496,7 @@ export default function GovernanceDashboard() {
                 ))}
               </div>
             ) : displayedQueueRows.length === 0 ? (
-              <p className="p-8 text-center text-sm text-cp-muted">
+              <p className="p-8 text-center text-sm text-cp-text/70">
                 {queueTableEmptyCopy({
                   snapshotLen: queueSnapshot.length,
                   displayedLen: displayedQueueRows.length,
@@ -1508,7 +1508,7 @@ export default function GovernanceDashboard() {
               </p>
             ) : (
               <table className="min-w-full divide-y divide-cp-border text-left text-sm">
-                <thead className="bg-cp-raised text-xs font-semibold uppercase tracking-wide text-cp-muted">
+                <thead className="bg-cp-raised text-xs font-semibold uppercase tracking-wide text-cp-text/70">
                   <tr>
                     <th className="px-3 py-2">Status</th>
                     <th className="hidden px-3 py-2 md:table-cell">User</th>
@@ -1623,7 +1623,7 @@ export default function GovernanceDashboard() {
                       <span className="text-cp-muted"> /100</span>
                     </label>
                   </div>
-                  <p className="mt-3 text-xs text-cp-muted">
+                  <p className="mt-3 text-xs text-cp-text/70">
                     Runs scoring between these values are auto-approved. Runs below the review threshold go to
                     the Review Queue.
                   </p>
@@ -1646,7 +1646,7 @@ export default function GovernanceDashboard() {
                       ON/OFF
                     </label>
                   </div>
-                  <p className="mt-2 text-sm text-cp-muted">
+                  <p className="mt-2 text-sm text-cp-text/75">
                     Apply stricter thresholds for legal, medical, and financial queries.
                   </p>
                   <div
@@ -1745,7 +1745,7 @@ export default function GovernanceDashboard() {
                       </label>
                     ))}
                   </div>
-                  <p className="mt-3 text-xs text-cp-muted">
+                  <p className="mt-3 text-xs text-cp-text/70">
                     Claims with these verdicts will be sent to the Review Queue.
                   </p>
                 </section>
@@ -1834,7 +1834,7 @@ export default function GovernanceDashboard() {
               </button>
             </div>
           </div>
-          <p className="mt-1 text-sm text-cp-muted">
+          <p className="mt-1 text-sm text-cp-text/75">
             {auditViewMode === "search"
               ? "Events matching your date range and type filter (your review decisions and policy updates you applied)."
               : "Latest review decisions and policy updates (scoped to your governance access)."}
@@ -1860,7 +1860,7 @@ export default function GovernanceDashboard() {
               ))}
             </div>
           ) : auditEvents.length === 0 ? (
-            <p className="mt-6 rounded-xl border border-cp-border bg-cp-raised p-8 text-center text-sm text-cp-muted">
+            <p className="mt-6 rounded-xl border border-cp-border bg-cp-raised p-8 text-center text-sm text-cp-text/70">
               {auditViewMode === "search"
                 ? "No events matched your search."
                 : "No governance activity yet. Approve or block a run from the Review Queue."}
@@ -1882,7 +1882,7 @@ export default function GovernanceDashboard() {
           <div className="my-8 border-t border-cp-border" aria-hidden />
 
           <h3 className="text-sm font-semibold text-cp-text">Search past events</h3>
-          <p className="mt-1 text-sm text-cp-muted">
+          <p className="mt-1 text-sm text-cp-text/75">
             Filter by date range and run type. Results replace the list above until you clear the search.
           </p>
           <div className="mt-4 flex flex-col gap-4">

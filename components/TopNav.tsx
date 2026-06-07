@@ -83,11 +83,11 @@ export default function TopNav() {
             className="h-10 w-auto"
           />
           <div className="flex flex-col">
-            <span className="font-serif text-xl font-normal tracking-tight">
+            <span className="font-serif text-2xl font-normal tracking-tight">
               <span className="text-cp-text">Converge</span>
               <span className="text-cp-accent">Panel</span>
             </span>
-            <span className="hidden font-sans text-[9px] font-medium tracking-[0.18em] uppercase text-cp-muted md:block">
+            <span className="hidden font-sans text-[10px] font-medium tracking-[0.18em] uppercase text-cp-muted md:block">
               Research · Verify · Govern
             </span>
           </div>
