@@ -162,8 +162,8 @@ export async function callGemini(
         : sanitizedQuestion;
   }
   
-  // Use stable model: gemini-2.0-flash (avoid experimental suffixes)
-  const GEMINI_MODEL = "gemini-2.0-flash";
+  // gemini-2.0-flash was deprecated/removed in mid-2026; use 2.5-flash as the stable successor
+  const GEMINI_MODEL = "gemini-2.5-flash";
   
   // Defensive logging (dev-only, no API key value, no full prompt)
   if (process.env.NODE_ENV !== "production") {

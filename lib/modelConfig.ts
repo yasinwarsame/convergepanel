@@ -43,7 +43,7 @@ export interface ModelLimits {
  * 
  * Timeouts are set based on each model's typical response time:
  * - ChatGPT: 60s (can be slower for deep research queries)
- * - Claude: 30s (generally fast)
+ * - Claude: 60s (largest-but-one output budget; full 4000-token answers take ~45s)
  * - Grok: 60s (slower model, needs more time for structured answers)
  * - Perplexity: 60s (web search adds latency)
  */
@@ -114,7 +114,10 @@ export const MODEL_TIMEOUTS: Record<ModelId, ModelTimeoutConfig> = {
     hardTimeoutMs: 60_000, // 60 seconds for deep research queries
   },
   claude: {
-    hardTimeoutMs: 30_000, // 30 seconds (generally fast)
+    // 60s: Claude has the second-largest output budget (maxTokens: 4000). A full
+    // deep-research generation at that cap measures ~45s, so the previous 30s limit
+    // killed every request before completion (and triggered needless retries/fallbacks).
+    hardTimeoutMs: 60_000,
   },
   grok: {
     hardTimeoutMs: 60_000, // 60 seconds (slower model, needs more time)
