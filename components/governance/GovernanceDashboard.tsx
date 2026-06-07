@@ -97,20 +97,20 @@ function formatQueueClaimVerdictLabel(raw: string | undefined): string {
 
 function queueClaimVerdictToneClass(raw: string | undefined): string {
   const k = (raw ?? "").toLowerCase().replace(/\s+/g, "_");
-  if (k === "confirmed") return "text-emerald-700";
-  if (k === "disputed") return "text-red-700";
-  if (k === "partially_true") return "text-amber-800";
-  if (k === "unverifiable") return "text-slate-600";
-  return "text-slate-800";
+  if (k === "confirmed") return "text-emerald-400";
+  if (k === "disputed") return "text-red-400";
+  if (k === "partially_true") return "text-amber-400";
+  if (k === "unverifiable") return "text-cp-muted";
+  return "text-cp-text";
 }
 
 const videoVerdictBadge: Record<string, { label: string; colorClass: string }> = {
-  authentic_captured: { label: "Camera Footage", colorClass: "bg-green-100 text-green-800" },
-  authentic_produced: { label: "Produced Content", colorClass: "bg-blue-100 text-blue-800" },
-  likely_manipulated: { label: "Manipulated", colorClass: "bg-red-100 text-red-800" },
-  inconclusive: { label: "Inconclusive", colorClass: "bg-amber-100 text-amber-800" },
-  insufficient: { label: "Insufficient", colorClass: "bg-gray-100 text-gray-800" },
-  authentic: { label: "Authentic", colorClass: "bg-green-100 text-green-800" },
+  authentic_captured: { label: "Camera Footage", colorClass: "bg-emerald-900/30 text-emerald-400" },
+  authentic_produced: { label: "Produced Content", colorClass: "bg-blue-900/30 text-blue-400" },
+  likely_manipulated: { label: "Manipulated", colorClass: "bg-red-900/30 text-red-400" },
+  inconclusive: { label: "Inconclusive", colorClass: "bg-amber-900/30 text-amber-400" },
+  insufficient: { label: "Insufficient", colorClass: "bg-cp-raised text-cp-muted" },
+  authentic: { label: "Authentic", colorClass: "bg-emerald-900/30 text-emerald-400" },
 };
 
 function formatQueueVideoVerdictLabel(raw: string | undefined): string {
@@ -121,34 +121,34 @@ function formatQueueVideoVerdictLabel(raw: string | undefined): string {
 
 function queueVideoVerdictBadgeClass(raw: string | undefined): string {
   const k = (raw ?? "").toLowerCase().replace(/\s+/g, "_");
-  return videoVerdictBadge[k]?.colorClass ?? "bg-slate-100 text-slate-800";
+  return videoVerdictBadge[k]?.colorClass ?? "bg-cp-raised text-cp-text";
 }
 
 function queueModelVerdictToneClass(verdict: string): string {
   const s = verdict.toLowerCase();
-  if (s === "failed" || s.includes("parse")) return "text-slate-500";
-  if (s.includes("partially")) return "text-amber-800";
-  if (s.includes("inaccurate")) return "text-red-700";
-  if (s.includes("accurate") && !s.includes("inaccurate")) return "text-emerald-700";
-  if (s.includes("unverifiable")) return "text-slate-600";
-  return "text-slate-800";
+  if (s === "failed" || s.includes("parse")) return "text-cp-muted";
+  if (s.includes("partially")) return "text-amber-400";
+  if (s.includes("inaccurate")) return "text-red-400";
+  if (s.includes("accurate") && !s.includes("inaccurate")) return "text-emerald-400";
+  if (s.includes("unverifiable")) return "text-cp-muted";
+  return "text-cp-text";
 }
 
 function queueModelVerdictBadgeClass(verdict: string): string {
   const s = verdict.toLowerCase();
-  if (s === "failed" || s.includes("parse")) return "bg-slate-200 text-slate-700";
-  if (s === "declined") return "bg-amber-100 text-amber-800 ring-1 ring-amber-300/60";
-  if (s === "authentic_captured" || s === "authentic") return "bg-green-100 text-green-800 ring-1 ring-green-300/60";
-  if (s === "authentic_produced") return "bg-blue-100 text-blue-800 ring-1 ring-blue-300/60";
-  if (s === "likely_manipulated") return "bg-red-100 text-red-800 ring-1 ring-red-300/60";
-  if (s === "inconclusive") return "bg-amber-100 text-amber-800 ring-1 ring-amber-300/60";
-  if (s === "insufficient") return "bg-gray-100 text-gray-800 ring-1 ring-gray-300/60";
-  if (s.includes("partially")) return "bg-amber-100 text-amber-900 ring-1 ring-amber-300/60";
-  if (s.includes("inaccurate")) return "bg-red-100 text-red-900 ring-1 ring-red-300/60";
+  if (s === "failed" || s.includes("parse")) return "bg-cp-raised text-cp-muted";
+  if (s === "declined") return "bg-amber-900/30 text-amber-400 ring-1 ring-amber-700/40";
+  if (s === "authentic_captured" || s === "authentic") return "bg-emerald-900/30 text-emerald-400 ring-1 ring-emerald-700/40";
+  if (s === "authentic_produced") return "bg-blue-900/30 text-blue-400 ring-1 ring-blue-700/40";
+  if (s === "likely_manipulated") return "bg-red-900/30 text-red-400 ring-1 ring-red-700/40";
+  if (s === "inconclusive") return "bg-amber-900/30 text-amber-400 ring-1 ring-amber-700/40";
+  if (s === "insufficient") return "bg-cp-raised text-cp-muted ring-1 ring-cp-border";
+  if (s.includes("partially")) return "bg-amber-900/30 text-amber-400 ring-1 ring-amber-700/40";
+  if (s.includes("inaccurate")) return "bg-red-900/30 text-red-400 ring-1 ring-red-700/40";
   if (s.includes("accurate") && !s.includes("inaccurate"))
-    return "bg-emerald-100 text-emerald-900 ring-1 ring-emerald-300/60";
-  if (s.includes("unverifiable")) return "bg-slate-100 text-slate-600 ring-1 ring-slate-300/60";
-  return "bg-slate-100 text-slate-800 ring-1 ring-slate-300/60";
+    return "bg-emerald-900/30 text-emerald-400 ring-1 ring-emerald-700/40";
+  if (s.includes("unverifiable")) return "bg-cp-raised text-cp-muted ring-1 ring-cp-border";
+  return "bg-cp-raised text-cp-text ring-1 ring-cp-border";
 }
 
 function queueRowUserPresentation(
@@ -210,7 +210,7 @@ function BackToPanelNav({ className = "" }: { className?: string }) {
   return (
     <Link
       href="/"
-      className={`inline-flex items-center gap-2 text-sm font-medium text-slate-600 transition-colors hover:text-sky-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-2 rounded ${className}`}
+      className={`inline-flex items-center gap-2 text-sm font-medium text-cp-muted transition-colors hover:text-cp-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent focus-visible:ring-offset-2 rounded ${className}`}
     >
       <ArrowLeft className="h-4 w-4 shrink-0" aria-hidden />
       Back to research and claim verification
@@ -261,7 +261,7 @@ function auditActionBadgeLg(action: string): string {
     case "policy_updated":
       return `${base} bg-sky-600 text-white`;
     default:
-      return `${base} bg-slate-200 text-slate-800`;
+      return `${base} bg-cp-raised text-cp-muted`;
   }
 }
 
@@ -278,7 +278,7 @@ function auditActionBadgeSm(action: string): string {
     case "policy_updated":
       return `${base} bg-sky-600 text-white`;
     default:
-      return `${base} bg-slate-200 text-slate-800`;
+      return `${base} bg-cp-raised text-cp-muted`;
   }
 }
 
@@ -293,14 +293,14 @@ function auditCardLeftBorder(action: string): string {
     case "policy_updated":
       return "border-l-sky-600";
     default:
-      return "border-l-slate-400";
+      return "border-l-cp-faint";
   }
 }
 
 function auditConsensusDisplayClass(score: number): string {
-  if (score > 75) return "text-emerald-600";
-  if (score >= 50) return "text-amber-600";
-  return "text-red-600";
+  if (score > 75) return "text-emerald-400";
+  if (score >= 50) return "text-amber-400";
+  return "text-red-400";
 }
 
 function actorByLabelForAction(action: string): string {
@@ -322,21 +322,21 @@ function renderGovernanceStatusToken(status: string) {
   const s = status.trim();
   const cls =
     s === "approved"
-      ? "font-semibold text-emerald-600"
+      ? "font-semibold text-emerald-400"
       : s === "blocked"
-        ? "font-semibold text-red-600"
+        ? "font-semibold text-red-400"
         : s === "needs_review"
-          ? "font-semibold text-amber-600"
-          : "font-semibold text-slate-600";
+          ? "font-semibold text-amber-400"
+          : "font-semibold text-cp-muted";
   return <span className={cls}>{s}</span>;
 }
 
 function governanceTransitionArrowClass(status: string): string {
   const s = status.trim();
-  if (s === "approved") return "text-emerald-600";
-  if (s === "blocked") return "text-red-600";
-  if (s === "needs_review") return "text-amber-600";
-  return "text-slate-400";
+  if (s === "approved") return "text-emerald-400";
+  if (s === "blocked") return "text-red-400";
+  if (s === "needs_review") return "text-amber-400";
+  return "text-cp-faint";
 }
 
 function AuditResultBlock({ ev }: { ev: AuditEvent }) {
@@ -345,10 +345,10 @@ function AuditResultBlock({ ev }: { ev: AuditEvent }) {
   const next = ev.nextStatus?.trim();
   if (prev && next && prev === next) {
     return (
-      <p className="text-sm text-slate-800">
-        <span className="font-medium text-slate-600">Decision:</span>{" "}
+      <p className="text-sm text-cp-text">
+        <span className="font-medium text-cp-muted">Decision:</span>{" "}
         {renderGovernanceStatusToken(next)}
-        <span className="ml-1 text-xs font-normal text-slate-500">
+        <span className="ml-1 text-xs font-normal text-cp-muted">
           (no status change — likely duplicate or legacy row)
         </span>
       </p>
@@ -356,21 +356,21 @@ function AuditResultBlock({ ev }: { ev: AuditEvent }) {
   }
   if (prev && next) {
     return (
-      <p className="text-sm text-slate-800">
-        <span className="font-medium text-slate-600">Decision:</span>{" "}
+      <p className="text-sm text-cp-text">
+        <span className="font-medium text-cp-muted">Decision:</span>{" "}
         {renderGovernanceStatusToken(prev)}
         <span className={`mx-1 font-semibold ${governanceTransitionArrowClass(next)}`}>→</span>
         {renderGovernanceStatusToken(next)}
         {ev.action === "changes_requested" && prev === "needs_review" && next === "needs_review" ? (
-          <span className="text-slate-500"> (changes requested)</span>
+          <span className="text-cp-muted"> (changes requested)</span>
         ) : null}
       </p>
     );
   }
   if (next) {
     return (
-      <p className="text-sm text-slate-800">
-        <span className="font-medium text-slate-600">Decision:</span>{" "}
+      <p className="text-sm text-cp-text">
+        <span className="font-medium text-cp-muted">Decision:</span>{" "}
         <span className={`font-semibold ${governanceTransitionArrowClass(next)}`}>→</span>{" "}
         {renderGovernanceStatusToken(next)}
       </p>
@@ -406,7 +406,7 @@ function AuditLogEventCard(props: {
   const actionLabel = ev.action.replace(/_/g, " ").toUpperCase();
 
   return (
-    <li className={`rounded-xl border border-slate-200 bg-white shadow-sm border-l-4 ${border}`}>
+    <li className={`rounded-xl border border-cp-border bg-cp-surface shadow-sm border-l-4 ${border}`}>
       <div className="space-y-3 p-4 sm:p-5">
         <div className="flex flex-wrap items-center gap-2 gap-y-2">
           <span className={auditActionBadgeLg(ev.action)}>{actionLabel}</span>
@@ -421,7 +421,7 @@ function AuditLogEventCard(props: {
             </span>
           ) : null}
           <time
-            className="ml-auto shrink-0 text-sm text-slate-500"
+            className="ml-auto shrink-0 text-sm text-cp-muted"
             title={formatFullDatetime(ev.at)}
             dateTime={ev.at}
           >
@@ -432,13 +432,13 @@ function AuditLogEventCard(props: {
         {ev.action === "policy_updated" ? (
           <div className="space-y-2 text-sm">
             <p>
-              <span className="font-medium text-slate-600">Updated by:</span>{" "}
-              <span className="text-slate-800">{actorDisplay}</span>
+              <span className="font-medium text-cp-muted">Updated by:</span>{" "}
+              <span className="text-cp-text">{actorDisplay}</span>
             </p>
             {typeof ev.policyVersion === "number" ? (
               <p>
-                <span className="font-medium text-slate-600">Policy version:</span>{" "}
-                <span className="text-slate-800">
+                <span className="font-medium text-cp-muted">Policy version:</span>{" "}
+                <span className="text-cp-text">
                   {ev.policyVersion > 1
                     ? `v${ev.policyVersion - 1} → v${ev.policyVersion}`
                     : `v${ev.policyVersion}`}
@@ -447,30 +447,30 @@ function AuditLogEventCard(props: {
             ) : null}
             {ev.comment?.trim() ? (
               <p>
-                <span className="font-medium text-slate-600">Comment:</span>{" "}
-                <span className="italic text-slate-700">&quot;{ev.comment}&quot;</span>
+                <span className="font-medium text-cp-muted">Comment:</span>{" "}
+                <span className="italic text-cp-muted">&quot;{ev.comment}&quot;</span>
               </p>
             ) : null}
           </div>
         ) : (
           <>
             {ev.question ? (
-              <p className="text-sm leading-snug text-slate-800">&quot;{ev.question}&quot;</p>
+              <p className="text-sm leading-snug text-cp-text">&quot;{ev.question}&quot;</p>
             ) : null}
             <div className="space-y-1.5 text-sm">
               <p>
-                <span className="font-medium text-slate-600">Run by:</span>{" "}
-                <span className="text-slate-800">{runBy}</span>
+                <span className="font-medium text-cp-muted">Run by:</span>{" "}
+                <span className="text-cp-text">{runBy}</span>
               </p>
               <p>
-                <span className="font-medium text-slate-600">{actorLabel}:</span>{" "}
-                <span className="text-slate-800">{actorDisplay}</span>
+                <span className="font-medium text-cp-muted">{actorLabel}:</span>{" "}
+                <span className="text-cp-text">{actorDisplay}</span>
               </p>
               <AuditResultBlock ev={ev} />
               {ev.comment?.trim() ? (
                 <p>
-                  <span className="font-medium text-slate-600">Comment:</span>{" "}
-                  <span className="italic text-slate-700">&quot;{ev.comment}&quot;</span>
+                  <span className="font-medium text-cp-muted">Comment:</span>{" "}
+                  <span className="italic text-cp-muted">&quot;{ev.comment}&quot;</span>
                 </p>
               ) : null}
             </div>
@@ -478,16 +478,16 @@ function AuditLogEventCard(props: {
         )}
 
         {ev.action !== "policy_updated" ? (
-          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-cp-border pt-2">
             {typeof ev.policyVersion === "number" ? (
-              <span className="text-xs text-slate-500">Policy: v{ev.policyVersion}</span>
+              <span className="text-xs text-cp-muted">Policy: v{ev.policyVersion}</span>
             ) : (
               <span />
             )}
             {showTrailBtn ? (
               <button
                 type="button"
-                className="text-sm font-semibold text-sky-700 hover:underline"
+                className="text-sm font-semibold text-cp-accent hover:underline"
                 onClick={onToggleTrail}
               >
                 {expanded ? "Hide trail" : "Open trail →"}
@@ -500,27 +500,27 @@ function AuditLogEventCard(props: {
       </div>
 
       {expanded && trail ? (
-        <div className="border-t border-slate-200 bg-slate-50/90 px-4 py-3 sm:px-5">
+        <div className="border-t border-cp-border bg-cp-raised px-4 py-3 sm:px-5">
           {trail.loading ? (
-            <p className="text-sm text-slate-500">Loading event history…</p>
+            <p className="text-sm text-cp-muted">Loading event history…</p>
           ) : null}
-          {trail.error ? <p className="text-sm text-red-600">{trail.error}</p> : null}
+          {trail.error ? <p className="text-sm text-red-400">{trail.error}</p> : null}
           {!trail.loading && !trail.error && trail.events.length === 0 ? (
-            <p className="text-sm text-slate-500">No additional events found for this run.</p>
+            <p className="text-sm text-cp-muted">No additional events found for this run.</p>
           ) : null}
           {!trail.loading && !trail.error && trail.events.length > 0 ? (
             <ul className="space-y-2">
               {trail.events.map((e) => (
                 <li
                   key={e.id}
-                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs"
+                  className="rounded-lg border border-cp-border bg-cp-surface px-3 py-2 text-xs"
                 >
                   <div className="flex flex-wrap items-baseline gap-2">
                     <span className={auditActionBadgeSm(e.action)}>
                       {e.action.replace(/_/g, " ").toUpperCase()}
                     </span>
                     <time
-                      className="text-slate-400"
+                      className="text-cp-faint"
                       title={formatFullDatetime(e.at)}
                       dateTime={e.at}
                     >
@@ -528,11 +528,11 @@ function AuditLogEventCard(props: {
                     </time>
                   </div>
                   {auditStatusLine(e) ? (
-                    <p className="mt-1 text-slate-600">{auditStatusLine(e)}</p>
+                    <p className="mt-1 text-cp-muted">{auditStatusLine(e)}</p>
                   ) : null}
-                  <p className="mt-0.5 text-slate-500">by {auditActorDisplay(e, currentUserEmail)}</p>
+                  <p className="mt-0.5 text-cp-muted">by {auditActorDisplay(e, currentUserEmail)}</p>
                   {e.comment?.trim() ? (
-                    <p className="mt-1 italic text-slate-600">&quot;{e.comment}&quot;</p>
+                    <p className="mt-1 italic text-cp-muted">&quot;{e.comment}&quot;</p>
                   ) : null}
                 </li>
               ))}
@@ -576,9 +576,9 @@ function auditStatusLine(ev: AuditEvent): string | null {
 }
 
 function runTypeAuditBadge(runType: string | undefined): { label: string; cls: string } | null {
-  if (runType === "claim") return { label: "CLAIM", cls: "bg-violet-100 text-violet-900" };
-  if (runType === "video") return { label: "VIDEO", cls: "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300" };
-  if (runType === "research") return { label: "RESEARCH", cls: "bg-slate-200 text-slate-800" };
+  if (runType === "claim") return { label: "CLAIM", cls: "bg-violet-900/30 text-violet-400" };
+  if (runType === "video") return { label: "VIDEO", cls: "bg-indigo-900/30 text-indigo-400" };
+  if (runType === "research") return { label: "RESEARCH", cls: "bg-cp-raised text-cp-muted" };
   return null;
 }
 
@@ -592,35 +592,35 @@ const VERDICTS: { key: string; label: string }[] = [
 function statusChipClasses(status: string): { wrap: string; label: string } {
   if (status === "blocked") {
     return {
-      wrap: "bg-red-600 text-white",
+      wrap: "bg-red-900/40 text-red-400",
       label: "Blocked",
     };
   }
   if (status === "approved") {
     return {
-      wrap: "bg-emerald-100 text-emerald-900",
+      wrap: "bg-emerald-900/40 text-emerald-400",
       label: "Approved",
     };
   }
   return {
-    wrap: "bg-amber-100 text-amber-950",
+    wrap: "bg-amber-900/40 text-amber-400",
     label: "Review",
   };
 }
 
 function consensusColor(score: number | null): string {
-  if (score == null) return "text-slate-400";
-  if (score > 75) return "text-emerald-600";
-  if (score >= 50) return "text-amber-600";
-  return "text-red-600";
+  if (score == null) return "text-cp-faint";
+  if (score > 75) return "text-emerald-400";
+  if (score >= 50) return "text-amber-400";
+  return "text-red-400";
 }
 
 function evidenceChip(eq: string | null): { text: string; cls: string } {
-  if (!eq) return { text: "—", cls: "bg-slate-100 text-slate-500" };
+  if (!eq) return { text: "—", cls: "bg-cp-raised text-cp-muted" };
   const l = eq.toLowerCase();
-  if (l === "strong") return { text: "Strong", cls: "bg-emerald-100 text-emerald-800" };
-  if (l === "weak") return { text: "Weak", cls: "bg-red-100 text-red-800" };
-  return { text: "Mixed", cls: "bg-amber-100 text-amber-900" };
+  if (l === "strong") return { text: "Strong", cls: "bg-emerald-900/30 text-emerald-400" };
+  if (l === "weak") return { text: "Weak", cls: "bg-red-900/30 text-red-400" };
+  return { text: "Mixed", cls: "bg-amber-900/30 text-amber-400" };
 }
 
 function modelHealthDisplay(mh: QueueRow["modelHealth"]): { text: string; cls: string; title: string } {
@@ -675,43 +675,43 @@ function ReviewModal(props: {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-slate-200 bg-white p-6 shadow-xl">
-        <h2 id="gov-review-modal-title" className="text-lg font-bold text-slate-900">
+      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-cp-border bg-cp-surface p-6 shadow-xl">
+        <h2 id="gov-review-modal-title" className="text-lg font-bold text-cp-text">
           {title}
         </h2>
-        <div className="mt-4 space-y-2 text-sm text-slate-600">
+        <div className="mt-4 space-y-2 text-sm text-cp-muted">
           <p>
-            <span className="font-medium text-slate-700">Run:</span>{" "}
+            <span className="font-medium text-cp-text">Run:</span>{" "}
             {truncateText(row.question, 120)}
           </p>
           <p>
-            <span className="font-medium text-slate-700">Current status:</span> {statusLabel}
+            <span className="font-medium text-cp-text">Current status:</span> {statusLabel}
           </p>
           <p>
-            <span className="font-medium text-slate-700">Consensus:</span> {consensus}
+            <span className="font-medium text-cp-text">Consensus:</span> {consensus}
           </p>
         </div>
-        <label className="mt-4 block text-sm font-medium text-slate-700">
+        <label className="mt-4 block text-sm font-medium text-cp-text">
           Comment (required)
           <textarea
             value={comment}
             onChange={(e) => setComment(e.target.value)}
             rows={4}
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500"
+            className="mt-1 w-full rounded-lg border border-cp-border bg-cp-raised px-3 py-2 text-sm text-cp-text shadow-sm focus:border-cp-accent focus:outline-none focus:ring-1 focus:ring-cp-accent"
             placeholder="Explain the decision for the audit trail…"
           />
         </label>
-        <p className="mt-2 text-xs text-slate-500">
+        <p className="mt-2 text-xs text-cp-muted">
           {isBlock
             ? "This will mark the run as blocked in the governance audit trail."
             : "This will keep the run in the review queue with your feedback attached."}
         </p>
-        {err && <p className="mt-2 text-sm text-red-600">{err}</p>}
+        {err && <p className="mt-2 text-sm text-red-400">{err}</p>}
         <div className="mt-6 flex flex-wrap justify-end gap-2">
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            className="rounded-lg border border-cp-border px-4 py-2 text-sm font-medium text-cp-text hover:bg-cp-raised"
           >
             Cancel
           </button>
@@ -1283,8 +1283,8 @@ export default function GovernanceDashboard() {
     return (
       <div className="mx-auto max-w-6xl px-4 py-8">
         <BackToPanelNav className="mb-8" />
-        <div className="py-12 text-center text-slate-500">
-          <span className="inline-block h-8 w-8 animate-spin rounded-full border-2 border-sky-500 border-t-transparent" />
+        <div className="py-12 text-center text-cp-muted">
+          <span className="inline-block h-8 w-8 animate-spin rounded-full border-2 border-cp-accent border-t-transparent" />
           <p className="mt-4 text-sm">Loading…</p>
         </div>
       </div>
@@ -1295,10 +1295,10 @@ export default function GovernanceDashboard() {
     return (
       <div className="mx-auto max-w-6xl px-4 py-8">
         <BackToPanelNav className="mb-8" />
-        <div className="py-8 text-center text-slate-500">
+        <div className="py-8 text-center text-cp-muted">
           <p className="text-sm">Redirecting to sign in…</p>
           <p className="mt-4 text-sm">
-            <Link href="/login" className="font-semibold text-sky-700 underline hover:text-sky-800">
+            <Link href="/login" className="font-semibold text-cp-accent underline hover:text-amber-400">
               Go to sign in
             </Link>
           </p>
@@ -1311,43 +1311,43 @@ export default function GovernanceDashboard() {
     return (
       <div className="mx-auto max-w-lg px-4 py-8">
         <BackToPanelNav className="mb-6" />
-        <div className="rounded-2xl border border-sky-200 bg-gradient-to-b from-sky-50 to-white p-8 shadow-md ring-1 ring-sky-100">
+        <div className="rounded-2xl border border-cp-border bg-cp-surface p-8 shadow-md">
           <div className="text-4xl" aria-hidden>
             📊
           </div>
-          <h1 className="mt-4 text-xl font-bold text-slate-900">Governance Dashboard</h1>
-          <p className="mt-3 text-sm leading-relaxed text-slate-700">
+          <h1 className="mt-4 text-xl font-bold text-cp-text">Governance Dashboard</h1>
+          <p className="mt-3 text-sm leading-relaxed text-cp-text">
             Governance features are available on the 5-Model plan.
           </p>
-          <p className="mt-2 text-sm leading-relaxed text-slate-600">
+          <p className="mt-2 text-sm leading-relaxed text-cp-muted">
             Get policy enforcement, review queue, and audit trails to govern how your team uses AI research and
             claims.
           </p>
-          <ul className="mt-5 space-y-2 text-left text-sm text-slate-700">
+          <ul className="mt-5 space-y-2 text-left text-sm text-cp-text">
             <li className="flex gap-2">
-              <span className="font-semibold text-emerald-600">✓</span>
+              <span className="font-semibold text-emerald-400">✓</span>
               <span>Set consensus thresholds for auto-approval</span>
             </li>
             <li className="flex gap-2">
-              <span className="font-semibold text-emerald-600">✓</span>
+              <span className="font-semibold text-emerald-400">✓</span>
               <span>Flag weak evidence and disputed claims for review</span>
             </li>
             <li className="flex gap-2">
-              <span className="font-semibold text-emerald-600">✓</span>
+              <span className="font-semibold text-emerald-400">✓</span>
               <span>Review and approve team runs before they&apos;re acted on</span>
             </li>
             <li className="flex gap-2">
-              <span className="font-semibold text-emerald-600">✓</span>
+              <span className="font-semibold text-emerald-400">✓</span>
               <span>Export audit trails for compliance</span>
             </li>
             <li className="flex gap-2">
-              <span className="font-semibold text-emerald-600">✓</span>
+              <span className="font-semibold text-emerald-400">✓</span>
               <span>Detect sensitive domains (legal, medical, financial)</span>
             </li>
           </ul>
           <Link
             href="/pricing"
-            className="mt-8 inline-flex w-full items-center justify-center rounded-lg bg-sky-600 px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-sky-700"
+            className="mt-8 inline-flex w-full items-center justify-center rounded-lg bg-cp-accent px-5 py-3 text-sm font-semibold text-cp-bg shadow-sm hover:bg-amber-400"
           >
             Upgrade to 5-Model Plan →
           </Link>
@@ -1364,10 +1364,10 @@ export default function GovernanceDashboard() {
       onClick={() => {
         setTab(id);
       }}
-      className={`inline-flex flex-1 items-center justify-center gap-2 rounded-xl border-2 px-5 py-3.5 text-lg font-bold tracking-tight transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 md:text-xl sm:min-w-[160px] sm:flex-none ${
+      className={`inline-flex flex-1 items-center justify-center gap-2 rounded-xl border-2 px-5 py-3.5 text-lg font-bold tracking-tight transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent md:text-xl sm:min-w-[160px] sm:flex-none ${
         tab === id
-          ? "border-sky-800 bg-sky-600 text-white shadow-md ring-2 ring-sky-500/40"
-          : "border-slate-300 bg-white text-slate-700 shadow-sm hover:border-slate-400 hover:bg-slate-50"
+          ? "border-cp-accent bg-cp-accent text-cp-bg shadow-md ring-2 ring-cp-accent/30"
+          : "border-cp-border bg-cp-surface text-cp-muted shadow-sm hover:border-cp-accent/50 hover:bg-cp-raised hover:text-cp-text"
       }`}
     >
       {label}
@@ -1384,15 +1384,15 @@ export default function GovernanceDashboard() {
 
       <BackToPanelNav className="mb-6" />
 
-      <header className="mb-8 border-b border-slate-200 pb-6">
-        <h1 className="text-2xl font-bold text-slate-900 md:text-3xl">Governance Dashboard</h1>
-        <p className="mt-2 text-slate-600">
+      <header className="mb-8 border-b border-cp-border pb-6">
+        <h1 className="text-2xl font-bold text-cp-text md:text-3xl">Governance Dashboard</h1>
+        <p className="mt-2 text-cp-muted">
           Review runs, manage policies, and track governance activity
         </p>
       </header>
 
       <div
-        className="mb-8 rounded-xl border-2 border-slate-200 bg-gradient-to-b from-slate-50 to-slate-100/80 p-2 shadow-sm"
+        className="mb-8 rounded-xl border-2 border-cp-border bg-cp-raised p-2 shadow-sm"
         role="tablist"
       >
         <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
@@ -1404,46 +1404,46 @@ export default function GovernanceDashboard() {
 
       {tab === "queue" && (
         <div className="space-y-6">
-          <div className="flex flex-wrap gap-6 rounded-xl border border-slate-200 bg-white p-4 text-sm shadow-sm">
+          <div className="flex flex-wrap gap-6 rounded-xl border border-cp-border bg-cp-surface p-4 text-sm shadow-sm">
             <div>
-              <span className="text-slate-500">Needs Review:</span>{" "}
-              <span className="font-bold text-amber-600">
+              <span className="text-cp-muted">Needs Review:</span>{" "}
+              <span className="font-bold text-amber-400">
                 {queueLoading ? "…" : queueStats.needs}
               </span>
             </div>
             <div>
-              <span className="text-slate-500">Blocked:</span>{" "}
-              <span className="font-bold text-red-600">{queueLoading ? "…" : queueStats.blocked}</span>
+              <span className="text-cp-muted">Blocked:</span>{" "}
+              <span className="font-bold text-red-400">{queueLoading ? "…" : queueStats.blocked}</span>
             </div>
             <div>
-              <span className="text-slate-500">Approved:</span>{" "}
-              <span className="font-bold text-emerald-600">
+              <span className="text-cp-muted">Approved:</span>{" "}
+              <span className="font-bold text-emerald-400">
                 {queueLoading ? "…" : queueStats.approved}
               </span>
             </div>
             <div>
-              <span className="text-slate-500">Total:</span>{" "}
-              <span className="font-bold text-slate-800">
+              <span className="text-cp-muted">Total:</span>{" "}
+              <span className="font-bold text-cp-text">
                 {queueLoading ? "…" : queueStats.total}
               </span>
             </div>
           </div>
 
           {queueNotice && (
-            <div className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-950 shadow-sm">
+            <div className="rounded-xl border border-sky-800/50 bg-sky-900/20 px-4 py-3 text-sm text-sky-300 shadow-sm">
               {queueNotice}
             </div>
           )}
 
           <div className="flex flex-wrap items-center gap-3">
-            <label className="flex items-center gap-2 text-sm text-slate-700">
+            <label className="flex items-center gap-2 text-sm text-cp-text">
               Status
               <select
                 value={queueStatus}
                 onChange={(e) =>
                   setQueueStatus(e.target.value as typeof queueStatus)
                 }
-                className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm"
+                className="rounded-lg border border-cp-border bg-cp-raised px-2 py-1.5 text-sm text-cp-text"
               >
                 <option value="needs_review">Needs Review</option>
                 <option value="blocked">Blocked</option>
@@ -1451,14 +1451,14 @@ export default function GovernanceDashboard() {
                 <option value="all">All</option>
               </select>
             </label>
-            <label className="flex items-center gap-2 text-sm text-slate-700">
+            <label className="flex items-center gap-2 text-sm text-cp-text">
               Type
               <select
                 value={queueRunType}
                 onChange={(e) =>
                   setQueueRunType(e.target.value as typeof queueRunType)
                 }
-                className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm"
+                className="rounded-lg border border-cp-border bg-cp-raised px-2 py-1.5 text-sm text-cp-text"
               >
                 <option value="all">All</option>
                 <option value="research">Research</option>
@@ -1469,14 +1469,14 @@ export default function GovernanceDashboard() {
             <button
               type="button"
               onClick={() => void loadQueueSnapshot({ manual: true })}
-              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium hover:bg-slate-50"
+              className="rounded-lg border border-cp-border bg-cp-raised px-3 py-1.5 text-sm font-medium text-cp-text hover:bg-cp-surface"
             >
               ↻ Refresh
             </button>
           </div>
 
           {queueError && (
-            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+            <div className="rounded-lg border border-red-800/50 bg-red-900/20 px-4 py-3 text-sm text-red-400">
               {queueError}{" "}
               <button
                 type="button"
@@ -1488,15 +1488,15 @@ export default function GovernanceDashboard() {
             </div>
           )}
 
-          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div className="overflow-x-auto rounded-xl border border-cp-border bg-cp-surface shadow-sm">
             {queueLoading ? (
               <div className="space-y-2 p-4">
                 {[1, 2, 3, 4, 5].map((i) => (
-                  <div key={i} className="h-10 animate-pulse rounded bg-slate-100" />
+                  <div key={i} className="h-10 animate-pulse rounded bg-cp-raised" />
                 ))}
               </div>
             ) : displayedQueueRows.length === 0 ? (
-              <p className="p-8 text-center text-sm text-slate-500">
+              <p className="p-8 text-center text-sm text-cp-muted">
                 {queueTableEmptyCopy({
                   snapshotLen: queueSnapshot.length,
                   displayedLen: displayedQueueRows.length,
@@ -1507,8 +1507,8 @@ export default function GovernanceDashboard() {
                 })}
               </p>
             ) : (
-              <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
-                <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
+              <table className="min-w-full divide-y divide-cp-border text-left text-sm">
+                <thead className="bg-cp-raised text-xs font-semibold uppercase tracking-wide text-cp-muted">
                   <tr>
                     <th className="px-3 py-2">Status</th>
                     <th className="hidden px-3 py-2 md:table-cell">User</th>
@@ -1522,7 +1522,7 @@ export default function GovernanceDashboard() {
                     <th className="px-3 py-2">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <tbody className="divide-y divide-cp-border">
                   {displayedQueueRows.map((row) => {
                     const chip = statusChipClasses(row.governanceStatus);
                     const mh = modelHealthDisplay(row.modelHealth);
@@ -1564,7 +1564,7 @@ export default function GovernanceDashboard() {
       {tab === "policies" && (
         <div className="space-y-6">
           {policyError && (
-            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+            <div className="rounded-lg border border-red-800/50 bg-red-900/20 px-4 py-3 text-sm text-red-400">
               Failed to load policy.{" "}
               <button type="button" className="font-semibold underline" onClick={() => void fetchPolicy()}>
                 Retry
@@ -1574,21 +1574,21 @@ export default function GovernanceDashboard() {
           {policyLoading ? (
             <div className="space-y-2">
               {[1, 2, 3, 4].map((i) => (
-                <div key={i} className="h-24 animate-pulse rounded-xl bg-slate-100" />
+                <div key={i} className="h-24 animate-pulse rounded-xl bg-cp-raised" />
               ))}
             </div>
           ) : policy ? (
             <>
               {!isAdminUser && (
-                <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                <p className="rounded-lg border border-amber-700/50 bg-amber-900/20 px-4 py-3 text-sm text-amber-300">
                   Only admins can modify governance policies. You have read-only access.
                 </p>
               )}
               <div className="space-y-6">
-                <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-                  <h2 className="text-lg font-semibold text-slate-900">Consensus Thresholds</h2>
+                <section className="rounded-xl border border-cp-border bg-cp-surface p-6 shadow-sm">
+                  <h2 className="text-lg font-semibold text-cp-text">Consensus Thresholds</h2>
                   <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                    <label className="text-sm text-slate-700">
+                    <label className="text-sm text-cp-text">
                       Auto-approve above
                       <input
                         type="number"
@@ -1601,11 +1601,11 @@ export default function GovernanceDashboard() {
                             p ? { ...p, minConsensusToApprove: Number(e.target.value) } : p
                           )
                         }
-                        className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 disabled:bg-slate-100"
+                        className="mt-1 w-full rounded-lg border border-cp-border bg-cp-raised px-3 py-2 text-cp-text disabled:opacity-50"
                       />
-                      <span className="text-slate-500"> /100</span>
+                      <span className="text-cp-muted"> /100</span>
                     </label>
-                    <label className="text-sm text-slate-700">
+                    <label className="text-sm text-cp-text">
                       Flag for review below
                       <input
                         type="number"
@@ -1618,21 +1618,21 @@ export default function GovernanceDashboard() {
                             p ? { ...p, minConsensusToAvoidReview: Number(e.target.value) } : p
                           )
                         }
-                        className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 disabled:bg-slate-100"
+                        className="mt-1 w-full rounded-lg border border-cp-border bg-cp-raised px-3 py-2 text-cp-text disabled:opacity-50"
                       />
-                      <span className="text-slate-500"> /100</span>
+                      <span className="text-cp-muted"> /100</span>
                     </label>
                   </div>
-                  <p className="mt-3 text-xs text-slate-500">
+                  <p className="mt-3 text-xs text-cp-muted">
                     Runs scoring between these values are auto-approved. Runs below the review threshold go to
                     the Review Queue.
                   </p>
                 </section>
 
-                <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+                <section className="rounded-xl border border-cp-border bg-cp-surface p-6 shadow-sm">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <h2 className="text-lg font-semibold text-slate-900">Sensitive Domain Detection</h2>
-                    <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+                    <h2 className="text-lg font-semibold text-cp-text">Sensitive Domain Detection</h2>
+                    <label className="flex items-center gap-2 text-sm font-medium text-cp-text">
                       <input
                         type="checkbox"
                         disabled={!isAdminUser}
@@ -1646,13 +1646,13 @@ export default function GovernanceDashboard() {
                       ON/OFF
                     </label>
                   </div>
-                  <p className="mt-2 text-sm text-slate-600">
+                  <p className="mt-2 text-sm text-cp-muted">
                     Apply stricter thresholds for legal, medical, and financial queries.
                   </p>
                   <div
                     className={`mt-4 grid gap-4 sm:grid-cols-2 ${!policy.sensitiveDomainsEnabled ? "opacity-40" : ""}`}
                   >
-                    <label className="text-sm text-slate-700">
+                    <label className="text-sm text-cp-text">
                       Approval threshold
                       <input
                         type="number"
@@ -1665,10 +1665,10 @@ export default function GovernanceDashboard() {
                             p ? { ...p, sensitiveMinConsensusToApprove: Number(e.target.value) } : p
                           )
                         }
-                        className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 disabled:bg-slate-100"
+                        className="mt-1 w-full rounded-lg border border-cp-border bg-cp-raised px-3 py-2 text-cp-text disabled:opacity-50"
                       />
                     </label>
-                    <label className="text-sm text-slate-700">
+                    <label className="text-sm text-cp-text">
                       Review threshold
                       <input
                         type="number"
@@ -1681,15 +1681,15 @@ export default function GovernanceDashboard() {
                             p ? { ...p, sensitiveMinConsensusToAvoidReview: Number(e.target.value) } : p
                           )
                         }
-                        className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 disabled:bg-slate-100"
+                        className="mt-1 w-full rounded-lg border border-cp-border bg-cp-raised px-3 py-2 text-cp-text disabled:opacity-50"
                       />
                     </label>
                   </div>
                 </section>
 
-                <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-                  <h2 className="text-lg font-semibold text-slate-900">Evidence &amp; Model Quality</h2>
-                  <div className="mt-4 space-y-3 text-sm text-slate-800">
+                <section className="rounded-xl border border-cp-border bg-cp-surface p-6 shadow-sm">
+                  <h2 className="text-lg font-semibold text-cp-text">Evidence &amp; Model Quality</h2>
+                  <div className="mt-4 space-y-3 text-sm text-cp-text">
                     {(
                       [
                         ["reviewIfEvidenceQualityWeak", "Flag if evidence quality is weak"],
@@ -1717,8 +1717,8 @@ export default function GovernanceDashboard() {
                   </div>
                 </section>
 
-                <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-                  <h2 className="text-lg font-semibold text-slate-900">
+                <section className="rounded-xl border border-cp-border bg-cp-surface p-6 shadow-sm">
+                  <h2 className="text-lg font-semibold text-cp-text">
                     Claim verdicts that require review
                   </h2>
                   <div className="mt-4 space-y-2 text-sm">
@@ -1745,7 +1745,7 @@ export default function GovernanceDashboard() {
                       </label>
                     ))}
                   </div>
-                  <p className="mt-3 text-xs text-slate-500">
+                  <p className="mt-3 text-xs text-cp-muted">
                     Claims with these verdicts will be sent to the Review Queue.
                   </p>
                 </section>
@@ -1755,22 +1755,22 @@ export default function GovernanceDashboard() {
                 <p className="text-sm text-red-600">{policyFormError || policyValidationError}</p>
               )}
 
-              <div className="sticky bottom-0 z-10 flex flex-col gap-3 border-t border-slate-200 bg-slate-50/95 py-4 backdrop-blur sm:flex-row sm:items-center sm:justify-between">
-                <div className="text-sm text-slate-600">
+              <div className="sticky bottom-0 z-10 flex flex-col gap-3 border-t border-cp-border bg-cp-surface/95 py-4 backdrop-blur sm:flex-row sm:items-center sm:justify-between">
+                <div className="text-sm text-cp-muted">
                   Policy version:{" "}
-                  <span className="rounded-md bg-slate-200 px-2 py-0.5 font-mono text-xs font-semibold">
+                  <span className="rounded-md bg-cp-raised px-2 py-0.5 font-mono text-xs font-semibold text-cp-text">
                     v{policy.policyVersion}
                   </span>
                 </div>
                 {isAdminUser && (
                   <div className="flex flex-col gap-2 sm:items-end">
                     {showPolicyNote && (
-                      <label className="w-full max-w-md text-xs text-slate-600">
+                      <label className="w-full max-w-md text-xs text-cp-muted">
                         Add a note about this change (optional)
                         <input
                           value={policySaveNote}
                           onChange={(e) => setPolicySaveNote(e.target.value)}
-                          className="mt-1 w-full rounded border border-slate-300 px-2 py-1 text-sm"
+                          className="mt-1 w-full rounded border border-cp-border bg-cp-raised px-2 py-1 text-sm text-cp-text"
                         />
                       </label>
                     )}
@@ -1778,7 +1778,7 @@ export default function GovernanceDashboard() {
                       <button
                         type="button"
                         onClick={() => setShowPolicyNote((s) => !s)}
-                        className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-white"
+                        className="rounded-lg border border-cp-border px-3 py-2 text-sm text-cp-text hover:bg-cp-raised"
                       >
                         {showPolicyNote ? "Hide note" : "Add note"}
                       </button>
@@ -1796,7 +1796,7 @@ export default function GovernanceDashboard() {
               </div>
             </>
           ) : (
-            <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm text-slate-600">
+            <div className="rounded-lg border border-cp-border bg-cp-raised px-4 py-6 text-center text-sm text-cp-muted">
               {policyError
                 ? "Policy data did not load. Use Retry above or check the browser Network tab for /api/governance/policy."
                 : "No policy data yet. Try Refresh or sign in again."}
@@ -1806,9 +1806,9 @@ export default function GovernanceDashboard() {
       )}
 
       {tab === "audit" && (
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+        <div className="rounded-xl border border-cp-border bg-cp-surface p-4 shadow-sm sm:p-6">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <h2 className="text-lg font-semibold text-slate-900">
+            <h2 className="text-lg font-semibold text-cp-text">
               {auditViewMode === "search" ? "Search results" : "Recent Governance Activity"}
             </h2>
             <div className="flex flex-wrap items-center gap-3">
@@ -1817,7 +1817,7 @@ export default function GovernanceDashboard() {
                   type="button"
                   disabled={auditLoading}
                   onClick={() => void fetchAuditRecent()}
-                  className="text-sm font-semibold text-sky-700 hover:underline disabled:opacity-50"
+                  className="text-sm font-semibold text-cp-accent hover:underline disabled:opacity-50"
                 >
                   Clear search / Show recent
                 </button>
@@ -1828,19 +1828,19 @@ export default function GovernanceDashboard() {
                 onClick={() =>
                   void (auditViewMode === "search" ? runAuditDateSearch() : fetchAuditRecent())
                 }
-                className="self-start text-sm font-semibold text-sky-700 hover:underline disabled:opacity-50"
+                className="self-start text-sm font-semibold text-cp-accent hover:underline disabled:opacity-50"
               >
                 Refresh
               </button>
             </div>
           </div>
-          <p className="mt-1 text-sm text-slate-600">
+          <p className="mt-1 text-sm text-cp-muted">
             {auditViewMode === "search"
               ? "Events matching your date range and type filter (your review decisions and policy updates you applied)."
               : "Latest review decisions and policy updates (scoped to your governance access)."}
           </p>
           {auditError && (
-            <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+            <div className="mt-4 rounded-lg border border-red-800/50 bg-red-900/20 px-4 py-3 text-sm text-red-400">
               {auditViewMode === "search" ? "Search failed. " : "Failed to load audit log. "}
               <button
                 type="button"
@@ -1856,11 +1856,11 @@ export default function GovernanceDashboard() {
           {auditLoading ? (
             <div className="mt-6 space-y-2">
               {[1, 2, 3, 4].map((i) => (
-                <div key={i} className="h-20 animate-pulse rounded-xl bg-slate-100" />
+                <div key={i} className="h-20 animate-pulse rounded-xl bg-cp-raised" />
               ))}
             </div>
           ) : auditEvents.length === 0 ? (
-            <p className="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">
+            <p className="mt-6 rounded-xl border border-cp-border bg-cp-raised p-8 text-center text-sm text-cp-muted">
               {auditViewMode === "search"
                 ? "No events matched your search."
                 : "No governance activity yet. Approve or block a run from the Review Queue."}
@@ -1879,40 +1879,40 @@ export default function GovernanceDashboard() {
             </ul>
           )}
 
-          <div className="my-8 border-t border-slate-200" aria-hidden />
+          <div className="my-8 border-t border-cp-border" aria-hidden />
 
-          <h3 className="text-sm font-semibold text-slate-800">Search past events</h3>
-          <p className="mt-1 text-sm text-slate-600">
+          <h3 className="text-sm font-semibold text-cp-text">Search past events</h3>
+          <p className="mt-1 text-sm text-cp-muted">
             Filter by date range and run type. Results replace the list above until you clear the search.
           </p>
           <div className="mt-4 flex flex-col gap-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
               <label className="flex flex-col gap-1 text-sm">
-                <span className="font-medium text-slate-700">From</span>
+                <span className="font-medium text-cp-text">From</span>
                 <input
                   type="date"
                   value={auditFromDate}
                   onChange={(e) => setAuditFromDate(e.target.value)}
-                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  className="rounded-lg border border-cp-border bg-cp-raised px-3 py-2 text-sm text-cp-text"
                 />
               </label>
               <label className="flex flex-col gap-1 text-sm">
-                <span className="font-medium text-slate-700">To</span>
+                <span className="font-medium text-cp-text">To</span>
                 <input
                   type="date"
                   value={auditToDate}
                   onChange={(e) => setAuditToDate(e.target.value)}
-                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  className="rounded-lg border border-cp-border bg-cp-raised px-3 py-2 text-sm text-cp-text"
                 />
               </label>
               <label className="flex flex-col gap-1 text-sm">
-                <span className="font-medium text-slate-700">Type</span>
+                <span className="font-medium text-cp-text">Type</span>
                 <select
                   value={auditSearchRunType}
                   onChange={(e) =>
                     setAuditSearchRunType(e.target.value as "all" | "claim" | "research" | "video")
                   }
-                  className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                  className="rounded-lg border border-cp-border bg-cp-raised px-3 py-2 text-sm text-cp-text"
                 >
                   <option value="all">All</option>
                   <option value="claim">Claims only</option>
@@ -1995,7 +1995,7 @@ function FragmentRow(props: {
   return (
     <>
       <tr
-        className={`cursor-pointer hover:bg-slate-50/80 ${isSelf ? "bg-sky-50/50" : ""}`}
+        className={`cursor-pointer hover:bg-cp-raised ${isSelf ? "bg-sky-900/10" : ""}`}
         onClick={(e) => {
           const t = e.target as HTMLElement;
           if (t.closest("button,a")) return;
@@ -2013,26 +2013,26 @@ function FragmentRow(props: {
           </span>
         </td>
         <td
-          className={`hidden max-w-[160px] px-3 py-2 md:table-cell ${isSelf ? "bg-sky-100/60" : ""}`}
+          className={`hidden max-w-[160px] px-3 py-2 md:table-cell ${isSelf ? "bg-sky-900/10" : ""}`}
           title={isSelf ? `You (${userFullLabel})` : userFullLabel}
         >
           {isSelf ? (
-            <span className="inline-flex rounded-full bg-sky-200/80 px-2 py-0.5 text-xs font-semibold text-sky-950">
+            <span className="inline-flex rounded-full bg-sky-900/40 px-2 py-0.5 text-xs font-semibold text-sky-300">
               You
             </span>
           ) : (
-            <span className="block truncate font-medium text-slate-800">{userDisplayShort}</span>
+            <span className="block truncate font-medium text-cp-text">{userDisplayShort}</span>
           )}
         </td>
-        <td className="max-w-[200px] px-3 py-2 text-slate-800" title={row.question}>
+        <td className="max-w-[200px] px-3 py-2 text-cp-text" title={row.question}>
           <div className="mb-1 flex flex-wrap items-center gap-2 md:hidden">
             {isSelf ? (
-              <span className="inline-flex rounded-full bg-sky-200/80 px-2 py-0.5 text-xs font-semibold text-sky-950">
+              <span className="inline-flex rounded-full bg-sky-900/40 px-2 py-0.5 text-xs font-semibold text-sky-300">
                 You
               </span>
             ) : (
               <span
-                className="max-w-[min(100%,14rem)] truncate rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-800"
+                className="max-w-[min(100%,14rem)] truncate rounded-md bg-cp-raised px-2 py-0.5 text-xs font-medium text-cp-text"
                 title={userFullLabel}
               >
                 {userDisplayShort}
@@ -2069,18 +2069,18 @@ function FragmentRow(props: {
         <td className={`hidden px-3 py-2 font-medium md:table-cell ${mh.cls}`} title={mh.title}>
           {mh.text}
         </td>
-        <td className="hidden max-w-[180px] px-3 py-2 text-xs text-slate-600 md:table-cell">
+        <td className="hidden max-w-[180px] px-3 py-2 text-xs text-cp-muted md:table-cell">
           {firstReason}
-          {more && <span className="text-slate-400">{more}</span>}
+          {more && <span className="text-cp-faint">{more}</span>}
         </td>
-        <td className="whitespace-nowrap px-3 py-2 text-slate-500">
+        <td className="whitespace-nowrap px-3 py-2 text-cp-muted">
           {formatRelativeTime(row.createdAt)}
         </td>
         <td className="px-3 py-2">
           {row.governanceStatus === "approved" ? (
-            <div className="text-xs text-slate-500">
+            <div className="text-xs text-cp-muted">
               {approveHint ? (
-                <span className="font-medium text-emerald-700">{approveHint}</span>
+                <span className="font-medium text-emerald-400">{approveHint}</span>
               ) : row.governanceReviewedAt ? (
                 <span>Reviewed · {formatRelativeTime(row.governanceReviewedAt)}</span>
               ) : (
@@ -2131,32 +2131,32 @@ function FragmentRow(props: {
         </td>
       </tr>
       {exp && (
-        <tr className="bg-slate-50">
-          <td colSpan={10} className="px-4 py-4 text-sm text-slate-700">
-            <p className="font-medium text-slate-900">Run owner</p>
-            <p className="mt-1 text-slate-800">
+        <tr className="bg-cp-raised">
+          <td colSpan={10} className="px-4 py-4 text-sm text-cp-muted">
+            <p className="font-medium text-cp-text">Run owner</p>
+            <p className="mt-1 text-cp-text">
               {isSelf ? (
                 <>
-                  <span className="font-semibold text-sky-900">You</span>
+                  <span className="font-semibold text-sky-400">You</span>
                   {userFullLabel && userFullLabel !== "—" && (
-                    <span className="text-slate-600"> · {userFullLabel}</span>
+                    <span className="text-cp-muted"> · {userFullLabel}</span>
                   )}
                 </>
               ) : (
                 <>
                   <span className="break-all font-medium">{userFullLabel}</span>
                   {row.userId && (
-                    <span className="mt-1 block text-xs text-slate-500">User ID: {row.userId}</span>
+                    <span className="mt-1 block text-xs text-cp-muted">User ID: {row.userId}</span>
                   )}
                 </>
               )}
             </p>
             {!isSelf && row.ownerAssignedReviewerAt && (
-              <p className="mt-2 text-sm text-slate-600">
+              <p className="mt-2 text-sm text-cp-muted">
                 Assigned you as reviewer on {formatReviewerAssignedDate(row.ownerAssignedReviewerAt)}
               </p>
             )}
-            <p className="mt-3 font-medium text-slate-900">Full text</p>
+            <p className="mt-3 font-medium text-cp-text">Full text</p>
             <p className="mt-1 whitespace-pre-wrap">{row.question}</p>
 
             {row.runType === "research" && row.keyFindings && row.keyFindings.length > 0 ? (
@@ -2182,23 +2182,23 @@ function FragmentRow(props: {
             ) : null}
 
             {row.runType === "verification" && row.verificationVerdict ? (
-              <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50/90 px-3 py-2.5">
-                <p className="text-sm text-slate-800">
-                  <span className="font-semibold text-slate-900">Claim verdict: </span>
+              <div className="mt-4 rounded-lg border border-cp-border bg-cp-surface px-3 py-2.5">
+                <p className="text-sm text-cp-text">
+                  <span className="font-semibold text-cp-text">Claim verdict: </span>
                   <span className={`font-semibold ${queueClaimVerdictToneClass(row.verificationVerdict)}`}>
                     {formatQueueClaimVerdictLabel(row.verificationVerdict)}
                   </span>
                 </p>
                 {row.claimVerdictSummary ? (
-                  <p className="mt-1.5 text-sm leading-snug text-slate-700">{row.claimVerdictSummary}</p>
+                  <p className="mt-1.5 text-sm leading-snug text-cp-muted">{row.claimVerdictSummary}</p>
                 ) : null}
               </div>
             ) : null}
 
             {row.runType === "video" && row.verificationVerdict ? (
-              <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50/90 px-3 py-2.5">
-                <p className="text-sm text-slate-800 flex flex-wrap items-center gap-2">
-                  <span className="font-semibold text-slate-900">Video verdict: </span>
+              <div className="mt-4 rounded-lg border border-cp-border bg-cp-surface px-3 py-2.5">
+                <p className="text-sm text-cp-text flex flex-wrap items-center gap-2">
+                  <span className="font-semibold text-cp-text">Video verdict: </span>
                   <span
                     className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${queueVideoVerdictBadgeClass(row.verificationVerdict)}`}
                   >
@@ -2206,20 +2206,20 @@ function FragmentRow(props: {
                   </span>
                 </p>
                 {row.claimVerdictSummary ? (
-                  <p className="mt-1.5 text-sm leading-snug text-slate-700">{row.claimVerdictSummary}</p>
+                  <p className="mt-1.5 text-sm leading-snug text-cp-muted">{row.claimVerdictSummary}</p>
                 ) : null}
               </div>
             ) : null}
 
             {row.modelVerdicts && row.modelVerdicts.length > 0 ? (
-              <div className="mt-4 overflow-hidden rounded-lg border border-slate-200 bg-white">
-                <p className="border-b border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-900">
+              <div className="mt-4 overflow-hidden rounded-lg border border-cp-border bg-cp-surface">
+                <p className="border-b border-cp-border bg-cp-raised px-3 py-2 text-sm font-semibold text-cp-text">
                   Model verdicts
                 </p>
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[280px] text-left text-sm">
                     <thead>
-                      <tr className="border-b border-slate-200 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      <tr className="border-b border-cp-border text-xs font-semibold uppercase tracking-wide text-cp-muted">
                         <th className="px-3 py-2">Model</th>
                         <th className="px-3 py-2">Verdict</th>
                         <th className="px-3 py-2">Confidence</th>
@@ -2227,8 +2227,8 @@ function FragmentRow(props: {
                     </thead>
                     <tbody>
                       {row.modelVerdicts.map((m, i) => (
-                        <tr key={`${m.modelId}-${i}`} className="border-b border-slate-100 last:border-0">
-                          <td className="px-3 py-2 font-medium text-slate-800 align-top">
+                        <tr key={`${m.modelId}-${i}`} className="border-b border-cp-border last:border-0">
+                          <td className="px-3 py-2 font-medium text-cp-text align-top">
                             {getModelDisplayName(m.modelId)}
                           </td>
                           <td className="px-3 py-2 align-top">
@@ -2242,9 +2242,9 @@ function FragmentRow(props: {
                           </td>
                           <td className={`px-3 py-2 align-top ${queueModelVerdictToneClass(m.verdict)}`}>
                             {m.confidence ? (
-                              <span className="text-slate-700">{m.confidence}</span>
+                              <span className="text-cp-muted">{m.confidence}</span>
                             ) : (
-                              <span className="text-slate-400">—</span>
+                              <span className="text-cp-faint">—</span>
                             )}
                           </td>
                         </tr>
@@ -2253,12 +2253,12 @@ function FragmentRow(props: {
                   </table>
                 </div>
                 {row.modelVerdicts.some((m) => m.summary) ? (
-                  <ul className="space-y-2 border-t border-slate-200 bg-slate-50/80 px-3 py-2 text-xs text-slate-600">
+                  <ul className="space-y-2 border-t border-cp-border bg-cp-raised px-3 py-2 text-xs text-cp-muted">
                     {row.modelVerdicts.map(
                       (m, i) =>
                         m.summary && (
                           <li key={`sum-${m.modelId}-${i}`}>
-                            <span className="font-semibold text-slate-700">{getModelDisplayName(m.modelId)}: </span>
+                            <span className="font-semibold text-cp-text">{getModelDisplayName(m.modelId)}: </span>
                             {m.summary}
                           </li>
                         )
@@ -2339,14 +2339,14 @@ function FragmentRow(props: {
               </div>
             ) : null}
 
-            <p className="mt-3 font-medium text-slate-900">Governance reasons</p>
+            <p className="mt-3 font-medium text-cp-text">Governance reasons</p>
             <ul className="mt-1 list-disc pl-5">
               {(row.governanceReasons ?? []).map((r, i) => (
                 <li key={i}>{r}</li>
               ))}
             </ul>
             {(row.governanceReviewedAt || row.governanceReviewComment) && (
-              <div className="mt-3 text-xs text-slate-600">
+              <div className="mt-3 text-xs text-cp-muted">
                 {row.governanceReviewedAt && <p>Reviewed at: {row.governanceReviewedAt}</p>}
                 {row.governanceReviewComment && <p>Comment: {row.governanceReviewComment}</p>}
               </div>
