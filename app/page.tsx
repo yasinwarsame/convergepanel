@@ -1854,14 +1854,14 @@ export default function Home() {
               <span className="inline-flex items-center rounded-full bg-sky-50 px-3 py-1 text-sm font-semibold text-sky-700">
                 Deep research
               </span>
-              <span className="text-slate-300">·</span>
-              <span className="text-slate-500">Multi-LLM expert panel</span>
-              <span className="text-slate-300">·</span>
-              <span className="text-slate-500">Trust-focused answers</span>
+              <span className="text-slate-400">·</span>
+              <span className="text-slate-700">Multi-LLM expert panel</span>
+              <span className="text-slate-400">·</span>
+              <span className="text-slate-700">Trust-focused answers</span>
               {user && videoLimit > 0 && (
                 <>
-                  <span className="text-slate-300">·</span>
-                  <span className="text-slate-500">
+                  <span className="text-slate-400">·</span>
+                  <span className="text-slate-700">
                     Video: {videoRunsThisMonth}/{videoLimit} this month
                   </span>
                 </>
@@ -2158,7 +2158,7 @@ export default function Home() {
           <div className="rounded-2xl bg-white shadow-sm border border-slate-200 focus-within:ring-2 focus-within:ring-sky-400 focus-within:border-sky-300 transition-all">
             <label
               htmlFor={panelTab === "research" ? "question" : "claim"}
-              className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1 px-6 pt-5"
+              className="block text-xs font-semibold text-slate-700 uppercase tracking-wide mb-1 px-6 pt-5"
             >
               {panelTab === "research" ? "Question" : "Paste a claim to verify"}
             </label>
@@ -2202,13 +2202,13 @@ export default function Home() {
 
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-6 pb-5 border-t border-slate-100 pt-3">
               {panelTab === "research" ? (
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-slate-600">
                   Tip: Start with <span className="font-semibold">Question:</span> and, if needed, add an optional{" "}
                   <span className="font-semibold">Context:</span> section underneath. Anything after{" "}
                   <span className="font-mono">Context:</span> will be treated as source material for the panel.
                 </p>
               ) : (
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-slate-600">
                   One sentence or multiple paragraphs — max {MAX_CLAIM_CHARS.toLocaleString()} characters (
                   {claimInput.length}/{MAX_CLAIM_CHARS}).
                 </p>
@@ -2273,11 +2273,11 @@ export default function Home() {
           </div>
         </div>
 
-        <p className="text-sm text-slate-500 mt-3">
+        <p className="text-sm text-slate-600 mt-3">
           Press <span className="font-semibold font-mono">Cmd/Ctrl + Enter</span> to{" "}
           {panelTab === "research" ? "run the panel" : "verify the claim"}.
         </p>
-        <p className="text-sm text-slate-500 leading-relaxed mt-1">
+        <p className="text-sm text-slate-600 leading-relaxed mt-1">
           {panelTab === "research"
             ? "Ask serious, research-level questions. ConvergePanel will run a multi-LLM panel, then return a synthesized deep-research brief with consensus, disagreements, biases, and blind spots."
             : "Paste a factual claim. Each model evaluates accuracy, what it can confirm, and what it cannot verify — then ConvergePanel aggregates a claim verdict and consensus score."}

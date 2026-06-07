@@ -225,7 +225,7 @@ export default function ModelPicker({
       </div>
 
       {/* Helper Text */}
-      <p className="mt-1 text-xs text-slate-500">
+      <p className="mt-1 text-xs text-slate-600">
         Select at least <span className="font-semibold">2 models</span>.
         {plan === "free" && (
           <> Free plan allows up to <span className="font-semibold">2 models</span> per run.</>
