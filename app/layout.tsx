@@ -127,23 +127,23 @@ export default function RootLayout({
                       <span className="text-cp-text">Converge</span>
                       <span className="text-cp-accent">Panel</span>
                     </span>
-                    <p className="mt-2 text-[11px] leading-relaxed text-cp-faint">
+                    <p className="mt-2 text-[11px] leading-relaxed text-cp-muted">
                       AI-assisted verification for informational purposes only.
                       Not forensic analysis. Not legal evidence.{" "}
-                      <Link href="/terms" className="text-cp-muted hover:text-cp-text transition-colors underline underline-offset-2">
+                      <Link href="/terms" className="text-cp-text hover:text-cp-accent transition-colors underline underline-offset-2">
                         Terms
                       </Link>{" "}
                       ·{" "}
-                      <Link href="/privacy" className="text-cp-muted hover:text-cp-text transition-colors underline underline-offset-2">
+                      <Link href="/privacy" className="text-cp-text hover:text-cp-accent transition-colors underline underline-offset-2">
                         Privacy
                       </Link>
                     </p>
-                    <p className="mt-3 text-[11px] text-cp-faint">
+                    <p className="mt-3 text-[11px] text-cp-muted">
                       © {new Date().getFullYear()} ConvergePanel
                     </p>
                   </div>
                   {/* Nav links */}
-                  <nav className="flex flex-wrap items-start gap-x-6 gap-y-2 text-xs text-cp-muted" aria-label="Footer">
+                  <nav className="flex flex-wrap items-start gap-x-6 gap-y-2 text-xs text-cp-text" aria-label="Footer">
                     {[
                       { label: "About", href: "/about" },
                       { label: "Help", href: "/help" },
