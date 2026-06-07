@@ -87,7 +87,7 @@ export default function TopNav() {
               <span className="text-cp-text">Converge</span>
               <span className="text-cp-accent">Panel</span>
             </span>
-            <span className="hidden font-sans text-[10px] font-medium tracking-[0.18em] uppercase text-cp-muted md:block">
+            <span className="hidden font-sans text-[10px] font-medium tracking-[0.18em] uppercase text-cp-text md:block">
               Research · Verify · Govern
             </span>
           </div>

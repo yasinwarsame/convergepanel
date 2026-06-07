@@ -210,7 +210,7 @@ function BackToPanelNav({ className = "" }: { className?: string }) {
   return (
     <Link
       href="/"
-      className={`inline-flex items-center gap-2 text-sm font-medium text-cp-muted transition-colors hover:text-cp-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent focus-visible:ring-offset-2 rounded ${className}`}
+      className={`inline-flex items-center gap-2 text-sm font-medium text-cp-text transition-colors hover:text-cp-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent focus-visible:ring-offset-2 rounded ${className}`}
     >
       <ArrowLeft className="h-4 w-4 shrink-0" aria-hidden />
       Back to research and claim verification
