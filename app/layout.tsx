@@ -5,12 +5,33 @@
 import * as Sentry from "@sentry/nextjs";
 import type { Metadata } from "next";
 import Link from "next/link";
+import { DM_Serif_Display, Outfit, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import TopNav from "@/components/TopNav";
 import { AuthProvider } from "@/components/AuthProvider";
 import { ErrorBoundaryWrapper } from "@/components/ErrorBoundaryWrapper";
 import { ServiceWorkerUnregister } from "@/components/ServiceWorkerUnregister";
 import { PostHogProvider } from "@/components/PostHogProvider";
+
+const dmSerif = DM_Serif_Display({
+  weight: ["400"],
+  style: ["normal", "italic"],
+  subsets: ["latin"],
+  variable: "--font-dm-serif",
+  display: "swap",
+});
+
+const outfit = Outfit({
+  subsets: ["latin"],
+  variable: "--font-outfit",
+  display: "swap",
+});
+
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ["latin"],
+  variable: "--font-mono",
+  display: "swap",
+});
 
 export function generateMetadata(): Metadata {
   return {
@@ -66,7 +87,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className="antialiased bg-slate-50">
+      <body className={`${dmSerif.variable} ${outfit.variable} ${jetbrainsMono.variable} antialiased bg-cp-bg font-sans`}>
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{
@@ -96,55 +117,51 @@ export default function RootLayout({
             <TopNav />
             {/* Children (page content) render in parallel */}
             {children}
-            {/* Footer renders with shell */}
-            <footer className="mt-10 border-t border-slate-200 bg-white">
-              <div className="mx-auto max-w-4xl px-4 py-4 text-xs text-slate-500">
-                <p className="mb-3 max-w-3xl text-[11px] leading-relaxed text-slate-400">
-                  ConvergePanel provides AI-assisted verification for informational purposes only. Not forensic
-                  analysis. Not legal evidence.{" "}
-                  <Link href="/terms" className="text-slate-600 underline-offset-2 hover:text-slate-800 hover:underline">
-                    Terms
-                  </Link>{" "}
-                  ·{" "}
-                  <Link
-                    href="/privacy"
-                    className="text-slate-600 underline-offset-2 hover:text-slate-800 hover:underline"
-                  >
-                    Privacy
-                  </Link>
-                </p>
-                <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-                  <span>© {new Date().getFullYear()} ConvergePanel</span>
-                  <nav className="flex flex-wrap items-center gap-x-3 gap-y-2" aria-label="Footer">
-                    <Link href="/about" className="hover:text-slate-700 transition-colors">
-                      About
-                    </Link>
-                    <Link href="/help" className="hover:text-slate-700 transition-colors">
-                      Help
-                    </Link>
-                    <Link href="/pricing" className="hover:text-slate-700 transition-colors">
-                      Pricing
-                    </Link>
-                    <Link href="/contact" className="hover:text-slate-700 transition-colors">
-                      Contact
-                    </Link>
-                    <Link href="/login" className="hover:text-slate-700 transition-colors">
-                      Login
-                    </Link>
-                    <Link href="/signup" className="hover:text-slate-700 transition-colors">
-                      Sign up
-                    </Link>
-                    <Link href="/terms" className="hover:text-slate-700 transition-colors" title="Includes disclaimers on AI outputs">
-                      Terms
-                    </Link>
-                    <Link href="/privacy" className="hover:text-slate-700 transition-colors">
-                      Privacy
-                    </Link>
+            {/* Footer */}
+            <footer className="mt-10 border-t border-cp-border bg-cp-surface">
+              <div className="mx-auto max-w-5xl px-6 py-8">
+                <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
+                  {/* Brand + disclaimer */}
+                  <div className="max-w-sm">
+                    <span className="font-serif text-base font-normal tracking-tight">
+                      <span className="text-cp-text">Converge</span>
+                      <span className="text-cp-accent">Panel</span>
+                    </span>
+                    <p className="mt-2 text-[11px] leading-relaxed text-cp-faint">
+                      AI-assisted verification for informational purposes only.
+                      Not forensic analysis. Not legal evidence.{" "}
+                      <Link href="/terms" className="text-cp-muted hover:text-cp-text transition-colors underline underline-offset-2">
+                        Terms
+                      </Link>{" "}
+                      ·{" "}
+                      <Link href="/privacy" className="text-cp-muted hover:text-cp-text transition-colors underline underline-offset-2">
+                        Privacy
+                      </Link>
+                    </p>
+                    <p className="mt-3 text-[11px] text-cp-faint">
+                      © {new Date().getFullYear()} ConvergePanel
+                    </p>
+                  </div>
+                  {/* Nav links */}
+                  <nav className="flex flex-wrap items-start gap-x-6 gap-y-2 text-xs text-cp-muted" aria-label="Footer">
+                    {[
+                      { label: "About", href: "/about" },
+                      { label: "Help", href: "/help" },
+                      { label: "Pricing", href: "/pricing" },
+                      { label: "Contact", href: "/contact" },
+                      { label: "Use cases", href: "/use-cases" },
+                      { label: "Login", href: "/login" },
+                      { label: "Sign up", href: "/signup" },
+                    ].map(({ label, href }) => (
+                      <Link key={href} href={href} className="hover:text-cp-accent transition-colors">
+                        {label}
+                      </Link>
+                    ))}
                     <a
                       href="mailto:support@convergepanel.com?subject=Feedback"
-                      className="underline hover:text-slate-700 transition-colors"
+                      className="hover:text-cp-accent transition-colors"
                     >
-                      Send feedback
+                      Feedback
                     </a>
                   </nav>
                 </div>
