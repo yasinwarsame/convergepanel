@@ -182,11 +182,11 @@ const HUB_GROUPS: HubGroup[] = [
     tailwindBorder: "border-cp-border",
     slugs: [
       "newsroom-ai-verification-workflow",
-      "ai-tools-for-investigative-journalists",
-      "how-to-verify-public-statements-quickly",
       "verification-checklist-for-journalists",
-      "how-to-verify-user-generated-content",
+      "ai-tools-for-investigative-journalists",
       "how-to-fact-check-breaking-news-claims",
+      "how-to-verify-user-generated-content",
+      "how-to-verify-public-statements-quickly",
     ],
   },
   {
