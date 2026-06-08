@@ -223,6 +223,24 @@ const HUB_GROUPS: HubGroup[] = [
       "how-to-compare-ai-answers-before-deciding",
     ],
   },
+  {
+    id: "competitive-intelligence",
+    label: "Competitive Intelligence",
+    description: "Verify competitor claims, pressure-test market research, compare trend analysis, and review pricing intelligence across AI models.",
+    tailwindText: "text-cyan-400",
+    tailwindBg: "bg-cp-raised",
+    tailwindBorder: "border-cp-border",
+    slugs: [
+      "ai-verification-for-competitive-intelligence",
+      "how-to-verify-competitor-claims-with-ai",
+      "market-research-with-multiple-ai-models",
+      "ai-consensus-for-competitive-intelligence",
+      "compare-market-trends-across-ai-models",
+      "should-analysts-trust-one-ai-model",
+      "multi-model-research-for-market-sizing",
+      "competitor-pricing-claim-check-with-ai",
+    ],
+  },
 ];
 
 export default function UseCasesIndex() {
