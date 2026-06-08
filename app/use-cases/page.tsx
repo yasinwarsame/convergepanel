@@ -24,9 +24,9 @@ const HUB_GROUPS: HubGroup[] = [
     id: "claim-verification",
     label: "Claim Verification",
     description: "Verify specific claims, quotes, and statistics across five AI models before publishing or acting.",
-    tailwindText: "text-blue-700",
-    tailwindBg: "bg-blue-50",
-    tailwindBorder: "border-blue-200",
+    tailwindText: "text-blue-400",
+    tailwindBg: "bg-cp-raised",
+    tailwindBorder: "border-cp-border",
     slugs: [
       "ai-claim-verification-for-content-creators",
       "claim-verification-for-journalists",
@@ -52,9 +52,9 @@ const HUB_GROUPS: HubGroup[] = [
     id: "ai-answer-verification",
     label: "AI Answer Verification",
     description: "Fact-check ChatGPT and other AI outputs for hallucinations, weak sources, missing context, and blind spots.",
-    tailwindText: "text-indigo-700",
-    tailwindBg: "bg-indigo-50",
-    tailwindBorder: "border-indigo-200",
+    tailwindText: "text-indigo-400",
+    tailwindBg: "bg-cp-raised",
+    tailwindBorder: "border-cp-border",
     slugs: [
       "how-to-fact-check-chatgpt-responses",
       "how-to-pressure-test-an-ai-response",
@@ -77,9 +77,9 @@ const HUB_GROUPS: HubGroup[] = [
     id: "consensus-disagreement",
     label: "Consensus & Disagreement",
     description: "Compare model agreement, surface disagreement, and understand what AI splits mean for your decisions.",
-    tailwindText: "text-rose-700",
-    tailwindBg: "bg-rose-50",
-    tailwindBorder: "border-rose-200",
+    tailwindText: "text-rose-400",
+    tailwindBg: "bg-cp-raised",
+    tailwindBorder: "border-cp-border",
     slugs: [
       "what-is-a-consensus-score",
       "ai-disagreement-analysis-tool",
@@ -98,9 +98,9 @@ const HUB_GROUPS: HubGroup[] = [
     id: "video-verification",
     label: "Video Verification",
     description: "Review video clips for AI-generation signals and manipulation indicators using three vision models.",
-    tailwindText: "text-violet-700",
-    tailwindBg: "bg-violet-50",
-    tailwindBorder: "border-violet-200",
+    tailwindText: "text-violet-400",
+    tailwindBg: "bg-cp-raised",
+    tailwindBorder: "border-cp-border",
     slugs: [
       "video-authenticity-review-for-fact-checkers",
       "video-authenticity-review-for-researchers",
@@ -117,9 +117,9 @@ const HUB_GROUPS: HubGroup[] = [
     id: "governance-audit-trails",
     label: "AI Audit Trails & Governance",
     description: "Build compliance-ready audit trails, peer review workflows, and AI accountability documentation.",
-    tailwindText: "text-amber-700",
-    tailwindBg: "bg-amber-50",
-    tailwindBorder: "border-amber-200",
+    tailwindText: "text-amber-400",
+    tailwindBg: "bg-cp-raised",
+    tailwindBorder: "border-cp-border",
     slugs: [
       "how-to-create-an-ai-audit-trail",
       "ai-audit-trail-software",
@@ -143,9 +143,9 @@ const HUB_GROUPS: HubGroup[] = [
     id: "decision-receipts",
     label: "Decision Receipts & Trust",
     description: "Document AI-assisted decisions with structured receipts, confidence scores, and evidence records.",
-    tailwindText: "text-teal-700",
-    tailwindBg: "bg-teal-50",
-    tailwindBorder: "border-teal-200",
+    tailwindText: "text-teal-400",
+    tailwindBg: "bg-cp-raised",
+    tailwindBorder: "border-cp-border",
     slugs: [
       "what-is-a-decision-receipt",
       "what-is-a-verification-gate",
@@ -159,9 +159,9 @@ const HUB_GROUPS: HubGroup[] = [
     id: "creator-workflows",
     label: "Creator Workflows",
     description: "Fact-checking and source verification for YouTubers, podcasters, and content teams before publishing.",
-    tailwindText: "text-pink-700",
-    tailwindBg: "bg-pink-50",
-    tailwindBorder: "border-pink-200",
+    tailwindText: "text-pink-400",
+    tailwindBg: "bg-cp-raised",
+    tailwindBorder: "border-cp-border",
     slugs: [
       "ai-claim-verification-for-content-creators",
       "how-creators-can-fact-check-videos",
@@ -177,9 +177,9 @@ const HUB_GROUPS: HubGroup[] = [
     id: "journalist-workflows",
     label: "Journalist & Newsroom Workflows",
     description: "Verification workflows built for newsrooms, deadlines, editorial standards, and accountability.",
-    tailwindText: "text-sky-700",
-    tailwindBg: "bg-sky-50",
-    tailwindBorder: "border-sky-200",
+    tailwindText: "text-sky-400",
+    tailwindBg: "bg-cp-raised",
+    tailwindBorder: "border-cp-border",
     slugs: [
       "newsroom-ai-verification-workflow",
       "ai-tools-for-investigative-journalists",
@@ -193,9 +193,9 @@ const HUB_GROUPS: HubGroup[] = [
     id: "founder-decision-support",
     label: "Founder & Decision Support",
     description: "Pressure-test business assumptions, pitch claims, and market research with multi-model AI.",
-    tailwindText: "text-orange-700",
-    tailwindBg: "bg-orange-50",
-    tailwindBorder: "border-orange-200",
+    tailwindText: "text-orange-400",
+    tailwindBg: "bg-cp-raised",
+    tailwindBorder: "border-cp-border",
     slugs: [
       "how-to-validate-a-business-idea-with-ai",
       "how-to-pressure-test-a-startup-idea",
@@ -211,9 +211,9 @@ const HUB_GROUPS: HubGroup[] = [
     id: "research-quality",
     label: "Research & Analyst Workflows",
     description: "Get structured multi-model research briefs that surface disagreements, bias signals, and source gaps.",
-    tailwindText: "text-emerald-700",
-    tailwindBg: "bg-emerald-50",
-    tailwindBorder: "border-emerald-200",
+    tailwindText: "text-emerald-400",
+    tailwindBg: "bg-cp-raised",
+    tailwindBorder: "border-cp-border",
     slugs: [
       "deep-research-with-multiple-ai-models",
       "how-to-compare-chatgpt-claude-gemini-grok-perplexity-for-research",
@@ -239,10 +239,10 @@ export default function UseCasesIndex() {
     <main className="mx-auto max-w-4xl px-4 py-12 sm:px-6 lg:py-16">
       {/* Header */}
       <div className="mb-12">
-        <h1 className="mb-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
+        <h1 className="mb-3 text-3xl font-bold tracking-tight text-cp-text sm:text-4xl">
           AI Verification Use Cases
         </h1>
-        <p className="text-lg text-slate-600">
+        <p className="text-lg text-cp-muted">
           How creators, journalists, researchers, analysts, founders, and teams use ConvergePanel
           to verify claims, fact-check AI answers, review video, build audit trails, and surface
           model disagreement before acting on AI output.
@@ -274,23 +274,23 @@ export default function UseCasesIndex() {
                 >
                   {group.label}
                 </span>
-                <span className="text-xs text-slate-400">{group.pages.length} pages</span>
+                <span className="text-xs text-cp-muted">{group.pages.length} pages</span>
               </div>
               <p className={`mt-1.5 text-sm ${group.tailwindText}`}>{group.description}</p>
             </div>
 
             {/* Page list */}
-            <div className="grid gap-px bg-slate-100 sm:grid-cols-2 rounded-lg overflow-hidden">
+            <div className="grid gap-px bg-cp-border sm:grid-cols-2 rounded-lg overflow-hidden">
               {group.pages.map((p) => (
                 <Link
                   key={p.slug}
                   href={`/use-cases/${p.slug}`}
-                  className="group flex flex-col gap-0.5 bg-white px-4 py-3 hover:bg-slate-50 transition-colors"
+                  className="group flex flex-col gap-0.5 bg-cp-surface px-4 py-3 hover:bg-cp-raised transition-colors"
                 >
-                  <span className={`text-sm font-semibold group-hover:${group.tailwindText} transition-colors text-slate-800`}>
+                  <span className={`text-sm font-semibold group-hover:${group.tailwindText} transition-colors text-cp-text`}>
                     {p.title}
                   </span>
-                  <span className="text-xs text-slate-400 line-clamp-1">{p.metaDescription}</span>
+                  <span className="text-xs text-cp-muted line-clamp-1">{p.metaDescription}</span>
                 </Link>
               ))}
             </div>
@@ -299,11 +299,11 @@ export default function UseCasesIndex() {
       </div>
 
       {/* Footer CTA */}
-      <div className="mt-16 rounded-2xl bg-slate-900 px-8 py-10 text-center">
+      <div className="mt-16 rounded-2xl bg-cp-raised px-8 py-10 text-center">
         <p className="mb-2 text-lg font-semibold text-white">
           Compare AI models, surface disagreement, and verify before you act
         </p>
-        <p className="mb-6 text-sm text-slate-400">
+        <p className="mb-6 text-sm text-cp-muted">
           Claim verification, AI answer fact-checking, video review, audit trails, and multi-model research. Free tier available.
         </p>
         <Link

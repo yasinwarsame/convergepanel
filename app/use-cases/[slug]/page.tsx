@@ -144,11 +144,11 @@ export default async function UseCasePage({
         <div className="mb-8 flex items-center gap-3">
           <Link
             href="/use-cases"
-            className="text-xs font-medium text-slate-400 hover:text-slate-600 transition-colors"
+            className="text-xs font-medium text-cp-muted hover:text-cp-text transition-colors"
           >
             Use cases
           </Link>
-          <span className="text-slate-300">/</span>
+          <span className="text-cp-muted">/</span>
           <span
             className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold tracking-wide uppercase ${cat.tailwindText} ${cat.tailwindBg}`}
           >
@@ -157,39 +157,39 @@ export default async function UseCasePage({
         </div>
 
         {/* H1 */}
-        <h1 className="mb-4 text-3xl font-bold leading-tight tracking-tight text-slate-900 sm:text-4xl">
+        <h1 className="mb-4 text-3xl font-bold leading-tight tracking-tight text-cp-text sm:text-4xl">
           {page.h1}
         </h1>
 
         {/* Lede */}
-        <p className="mb-10 text-lg leading-relaxed text-slate-600">{page.metaDescription}</p>
+        <p className="mb-10 text-lg leading-relaxed text-cp-muted">{page.metaDescription}</p>
 
         {/* Audience callout */}
         <div className={`mb-10 rounded-lg border px-5 py-4 ${cat.tailwindBg} ${cat.tailwindBorder}`}>
-          <p className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-1">
+          <p className="text-xs font-bold uppercase tracking-widest text-cp-muted mb-1">
             Who this is for
           </p>
-          <p className="text-sm text-slate-700 leading-relaxed">
+          <p className="text-sm text-cp-text leading-relaxed">
             <span className="font-semibold">{page.audience}</span> — {page.audienceDetail}
           </p>
         </div>
 
         {/* The problem */}
         <section className="mb-9">
-          <h2 className="mb-3 text-xl font-bold text-slate-900">The problem</h2>
+          <h2 className="mb-3 text-xl font-bold text-cp-text">The problem</h2>
           <div className="space-y-4">
             {problemParagraphs.map((para, i) => (
-              <p key={i} className="text-base leading-relaxed text-slate-700">{para}</p>
+              <p key={i} className="text-base leading-relaxed text-cp-text">{para}</p>
             ))}
           </div>
         </section>
 
         {/* How ConvergePanel helps */}
         <section className="mb-9">
-          <h2 className="mb-3 text-xl font-bold text-slate-900">How ConvergePanel helps</h2>
+          <h2 className="mb-3 text-xl font-bold text-cp-text">How ConvergePanel helps</h2>
           <div className="space-y-4">
             {solutionParagraphs.map((para, i) => (
-              <p key={i} className="text-base leading-relaxed text-slate-700">{para}</p>
+              <p key={i} className="text-base leading-relaxed text-cp-text">{para}</p>
             ))}
           </div>
         </section>
@@ -197,8 +197,8 @@ export default async function UseCasePage({
         {/* Comparison table (optional) */}
         {page.comparisonTable && (
           <section className="mb-9">
-            <h2 className="mb-3 text-xl font-bold text-slate-900">How they compare</h2>
-            <div className="overflow-x-auto rounded-lg border border-slate-200">
+            <h2 className="mb-3 text-xl font-bold text-cp-text">How they compare</h2>
+            <div className="overflow-x-auto rounded-lg border border-cp-border">
               <table className="w-full text-sm">
                 <thead>
                   <tr className={`${cat.tailwindBg}`}>
@@ -214,11 +214,11 @@ export default async function UseCasePage({
                 </thead>
                 <tbody>
                   {page.comparisonTable.rows.map((row, ri) => (
-                    <tr key={ri} className={ri % 2 === 0 ? "bg-white" : "bg-slate-50"}>
+                    <tr key={ri} className={ri % 2 === 0 ? "bg-cp-surface" : "bg-cp-raised"}>
                       {row.map((cell, ci) => (
                         <td
                           key={ci}
-                          className={`px-4 py-3 text-slate-700 leading-relaxed${ci === 0 ? " font-medium text-slate-900" : ""}`}
+                          className={`px-4 py-3 text-cp-text leading-relaxed${ci === 0 ? " font-medium text-cp-text" : ""}`}
                         >
                           {cell}
                         </td>
@@ -233,7 +233,7 @@ export default async function UseCasePage({
 
         {/* How it works */}
         <section className="mb-9">
-          <h2 className="mb-3 text-xl font-bold text-slate-900">How it works</h2>
+          <h2 className="mb-3 text-xl font-bold text-cp-text">How it works</h2>
           <ol className="space-y-3">
             {page.workflow.map((step, i) => (
               <li key={i} className="flex gap-3">
@@ -242,7 +242,7 @@ export default async function UseCasePage({
                 >
                   {i + 1}
                 </span>
-                <span className="text-base leading-relaxed text-slate-700">{step}</span>
+                <span className="text-base leading-relaxed text-cp-text">{step}</span>
               </li>
             ))}
           </ol>
@@ -250,10 +250,10 @@ export default async function UseCasePage({
 
         {/* Use cases */}
         <section className="mb-12">
-          <h2 className="mb-3 text-xl font-bold text-slate-900">Use cases</h2>
+          <h2 className="mb-3 text-xl font-bold text-cp-text">Use cases</h2>
           <ul className="space-y-2">
             {page.useCases.map((uc, i) => (
-              <li key={i} className="flex gap-2.5 text-base leading-relaxed text-slate-700">
+              <li key={i} className="flex gap-2.5 text-base leading-relaxed text-cp-text">
                 <span className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${cat.tailwindDot}`} />
                 {uc}
               </li>
@@ -264,18 +264,18 @@ export default async function UseCasePage({
         {/* Body sections (optional custom H2 sections) */}
         {page.bodySections && page.bodySections.map((section, i) => (
           <section key={i} className="mb-9">
-            <h2 className="mb-3 text-xl font-bold text-slate-900">{section.heading}</h2>
+            <h2 className="mb-3 text-xl font-bold text-cp-text">{section.heading}</h2>
             {section.paragraphs && (
               <div className="space-y-4 mb-3">
                 {section.paragraphs.map((para, j) => (
-                  <p key={j} className="text-base leading-relaxed text-slate-700">{para}</p>
+                  <p key={j} className="text-base leading-relaxed text-cp-text">{para}</p>
                 ))}
               </div>
             )}
             {section.bullets && (
               <ul className="space-y-2">
                 {section.bullets.map((item, j) => (
-                  <li key={j} className="flex gap-2.5 text-base leading-relaxed text-slate-700">
+                  <li key={j} className="flex gap-2.5 text-base leading-relaxed text-cp-text">
                     <span className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${cat.tailwindDot}`} />
                     {item}
                   </li>
@@ -289,7 +289,7 @@ export default async function UseCasePage({
                     <span className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${cat.tailwindText} ${cat.tailwindBg}`}>
                       {j + 1}
                     </span>
-                    <span className="text-base leading-relaxed text-slate-700">{step}</span>
+                    <span className="text-base leading-relaxed text-cp-text">{step}</span>
                   </li>
                 ))}
               </ol>
@@ -300,12 +300,12 @@ export default async function UseCasePage({
         {/* FAQ (optional) */}
         {page.faq && page.faq.length > 0 && (
           <section className="mb-12">
-            <h2 className="mb-5 text-xl font-bold text-slate-900">Frequently asked questions</h2>
+            <h2 className="mb-5 text-xl font-bold text-cp-text">Frequently asked questions</h2>
             <div className="space-y-6">
               {page.faq.map(({ q, a }, i) => (
                 <div key={i}>
-                  <h3 className="mb-2 text-base font-semibold text-slate-900">{q}</h3>
-                  <p className="text-base leading-relaxed text-slate-700">{a}</p>
+                  <h3 className="mb-2 text-base font-semibold text-cp-text">{q}</h3>
+                  <p className="text-base leading-relaxed text-cp-text">{a}</p>
                 </div>
               ))}
             </div>
@@ -314,8 +314,8 @@ export default async function UseCasePage({
 
         {/* Related pages (cross-cluster) */}
         {page.relatedLinks && page.relatedLinks.length > 0 && (
-          <section className="mb-12 rounded-xl border border-slate-200 bg-slate-50 px-6 py-5">
-            <h2 className="mb-4 text-sm font-bold uppercase tracking-widest text-slate-400">
+          <section className="mb-12 rounded-xl border border-cp-border bg-cp-raised px-6 py-5">
+            <h2 className="mb-4 text-sm font-bold uppercase tracking-widest text-cp-muted">
               Explore related pages
             </h2>
             <ul className="space-y-2">
@@ -323,9 +323,9 @@ export default async function UseCasePage({
                 <li key={i}>
                   <Link
                     href={href}
-                    className="group flex items-center gap-2 text-sm font-medium text-slate-700 hover:text-sky-700 transition-colors"
+                    className="group flex items-center gap-2 text-sm font-medium text-cp-text hover:text-sky-400 transition-colors"
                   >
-                    <span className="text-slate-300 group-hover:text-sky-400 transition-colors">→</span>
+                    <span className="text-cp-muted group-hover:text-sky-400 transition-colors">→</span>
                     {label}
                   </Link>
                 </li>
@@ -335,7 +335,7 @@ export default async function UseCasePage({
         )}
 
         {/* CTA */}
-        <div className="mb-10 rounded-2xl bg-slate-900 px-8 py-10 text-center">
+        <div className="mb-10 rounded-2xl bg-cp-raised px-8 py-10 text-center">
           <p className="mb-6 text-lg font-semibold text-white">{page.cta}</p>
           <Link
             href="/signup"
@@ -343,11 +343,11 @@ export default async function UseCasePage({
           >
             Get started →
           </Link>
-          <p className="mt-4 text-xs text-slate-500">Free tier available. No credit card required.</p>
+          <p className="mt-4 text-xs text-cp-muted">Free tier available. No credit card required.</p>
         </div>
 
         {/* Disclaimer */}
-        <p className="mb-10 text-center text-xs text-slate-400 leading-relaxed">
+        <p className="mb-10 text-center text-xs text-cp-muted leading-relaxed">
           ConvergePanel provides AI-assisted verification for informational purposes only. Not forensic analysis. Not legal evidence.
         </p>
 
@@ -368,8 +368,8 @@ function RelatedPages({ currentSlug, category }: { currentSlug: string; category
   const cat = CATEGORIES[category];
 
   return (
-    <div className="mt-14 border-t border-slate-100 pt-10">
-      <h3 className="mb-5 text-sm font-bold uppercase tracking-widest text-slate-400">
+    <div className="mt-14 border-t border-cp-border pt-10">
+      <h3 className="mb-5 text-sm font-bold uppercase tracking-widest text-cp-muted">
         More in {cat.label}
       </h3>
       <div className="space-y-3">
@@ -377,14 +377,14 @@ function RelatedPages({ currentSlug, category }: { currentSlug: string; category
           <Link
             key={p.slug}
             href={`/use-cases/${p.slug}`}
-            className="group flex items-start gap-3 rounded-lg p-3 hover:bg-slate-50 transition-colors"
+            className="group flex items-start gap-3 rounded-lg p-3 hover:bg-cp-raised transition-colors"
           >
             <span className={`mt-0.5 text-sm ${cat.tailwindText}`}>→</span>
             <div>
-              <p className="text-sm font-semibold text-slate-800 group-hover:text-sky-700 transition-colors">
+              <p className="text-sm font-semibold text-cp-text group-hover:text-sky-400 transition-colors">
                 {p.title}
               </p>
-              <p className="mt-0.5 text-xs text-slate-500 line-clamp-1">{p.metaDescription}</p>
+              <p className="mt-0.5 text-xs text-cp-muted line-clamp-1">{p.metaDescription}</p>
             </div>
           </Link>
         ))}

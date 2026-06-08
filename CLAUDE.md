@@ -81,6 +81,42 @@ Always use `logger` from `@/lib/logger` for server-side logging. Never use `cons
 
 Content-Security-Policy headers are defined in `next.config.js`. When adding calls to new external domains (new AI providers, analytics, etc.) the `connect-src` directive must be updated.
 
+### Dark theme — always use cp tokens
+
+The app uses a **dark theme globally** (`body { background: #07090F }`). Never use light-mode Tailwind classes in any page or component. Violating this makes text invisible against the dark background.
+
+**Use these tokens — defined in `tailwind.config.ts` and `globals.css`:**
+
+| Token | Value | Use for |
+|-------|-------|---------|
+| `text-cp-text` | `#E2E8F4` | Headings, primary body text |
+| `text-cp-muted` | `#7B8BAF` | Secondary text, labels, descriptions |
+| `text-cp-accent` | `#F59E0B` | Accent / highlight text |
+| `bg-cp-bg` | `#07090F` | Page background (body default) |
+| `bg-cp-surface` | `#0C0F1A` | Cards, panels |
+| `bg-cp-raised` | `#131824` | Elevated surfaces, callout boxes |
+| `border-cp-border` | `#1C2236` | All borders |
+
+**Never use these light-mode classes** (invisible or wrong on dark background):
+- `text-slate-900 / 800 / 700 / 600 / 500 / 400` → use `text-cp-text` or `text-cp-muted`
+- `text-gray-*` → same replacements
+- `bg-white` → use `bg-cp-surface`
+- `bg-slate-50 / gray-50` → use `bg-cp-raised`
+- `bg-slate-100 / gray-100` → use `bg-cp-border`
+- `border-slate-200 / 100` → use `border-cp-border`
+- `bg-gradient-to-br from-gray-50 to-gray-100` → remove; body background handles it
+
+**Colored text on dark bg:** use `*-400` variants (e.g. `text-blue-400`, `text-sky-400`), not `*-600` or `*-700` which are too dark to read.
+
+**Category/badge backgrounds** (`lib/pseo/pages.ts` CATEGORIES, page-level HUB_GROUPS): use `bg-cp-raised` + `border-cp-border` + `text-*-400` — never `bg-*-50` + `border-*-200` + `text-*-700`.
+
+**Page wrapper pattern** — do not wrap pages in a white card. Use the bare layout:
+```tsx
+<main className="mx-auto max-w-4xl px-4 py-10 sm:py-14">
+  {/* content directly on dark body */}
+</main>
+```
+
 ### Key structural conventions
 
 - `lib/panel/` — panel-specific utilities (schemas, normalization, sanitization)

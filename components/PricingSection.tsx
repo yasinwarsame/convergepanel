@@ -20,10 +20,10 @@ export default function PricingSection() {
     <section className="max-w-7xl mx-auto px-4 py-16 sm:py-24">
       {/* Section Header */}
       <div className="text-center mb-12">
-        <h2 className="text-3xl sm:text-4xl font-bold text-slate-900 mb-4">
+        <h2 className="text-3xl sm:text-4xl font-bold text-cp-text mb-4">
           Plans and limits
         </h2>
-        <p className="text-lg text-slate-600 max-w-2xl mx-auto">
+        <p className="text-lg text-cp-muted max-w-2xl mx-auto">
           Start free with two models per run. The 5-Model plan adds structured review: policy thresholds,
           optional peer review, a review queue, and an audit log of decisions.
         </p>
@@ -31,13 +31,13 @@ export default function PricingSection() {
 
       {/* Monthly/Annual Toggle (only for paid plans) */}
       <div className="flex justify-center mb-8">
-        <div className="inline-flex rounded-lg bg-slate-100 p-1">
+        <div className="inline-flex rounded-lg bg-cp-surface p-1">
           <button
             onClick={() => setBillingInterval("month")}
             className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
               billingInterval === "month"
-                ? "bg-white text-slate-900 shadow-sm"
-                : "text-slate-600 hover:text-slate-900"
+                ? "bg-cp-raised text-cp-text shadow-sm"
+                : "text-cp-muted hover:text-cp-text"
             }`}
           >
             Monthly
@@ -46,8 +46,8 @@ export default function PricingSection() {
             onClick={() => setBillingInterval("year")}
             className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
               billingInterval === "year"
-                ? "bg-white text-slate-900 shadow-sm"
-                : "text-slate-600 hover:text-slate-900"
+                ? "bg-cp-raised text-cp-text shadow-sm"
+                : "text-cp-muted hover:text-cp-text"
             }`}
           >
             Annual
@@ -68,41 +68,41 @@ export default function PricingSection() {
         <PricingCard planId="full" billingInterval={billingInterval} />
       </div>
 
-      <div className="mx-auto mt-14 max-w-4xl overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-        <table className="w-full min-w-[320px] text-left text-sm text-slate-700">
+      <div className="mx-auto mt-14 max-w-4xl overflow-x-auto rounded-xl border border-cp-border bg-cp-surface shadow-sm">
+        <table className="w-full min-w-[320px] text-left text-sm text-cp-text">
           <caption className="sr-only">Plan comparison including video verification</caption>
           <thead>
-            <tr className="border-b border-slate-200 bg-slate-50">
-              <th className="px-4 py-3 font-semibold text-slate-900">Feature</th>
-              <th className="px-4 py-3 font-semibold text-slate-900">Free</th>
-              <th className="px-4 py-3 font-semibold text-slate-900">3-Model</th>
-              <th className="px-4 py-3 font-semibold text-slate-900">5-Model</th>
+            <tr className="border-b border-cp-border bg-cp-raised">
+              <th className="px-4 py-3 font-semibold text-cp-text">Feature</th>
+              <th className="px-4 py-3 font-semibold text-cp-text">Free</th>
+              <th className="px-4 py-3 font-semibold text-cp-text">3-Model</th>
+              <th className="px-4 py-3 font-semibold text-cp-text">5-Model</th>
             </tr>
           </thead>
           <tbody>
-            <tr className="border-b border-slate-100">
+            <tr className="border-b border-cp-border">
               <td className="px-4 py-3">Video verifications / month</td>
-              <td className="px-4 py-3 text-slate-500">—</td>
+              <td className="px-4 py-3 text-cp-muted">—</td>
               <td className="px-4 py-3">5</td>
               <td className="px-4 py-3">20</td>
             </tr>
-            <tr className="border-b border-slate-100">
+            <tr className="border-b border-cp-border">
               <td className="px-4 py-3">Vision models per video</td>
-              <td className="px-4 py-3 text-slate-500">—</td>
+              <td className="px-4 py-3 text-cp-muted">—</td>
               <td className="px-4 py-3">3</td>
               <td className="px-4 py-3">3</td>
             </tr>
             <tr>
               <td className="px-4 py-3">Video governance review</td>
-              <td className="px-4 py-3 text-slate-500">—</td>
-              <td className="px-4 py-3 text-slate-500">—</td>
+              <td className="px-4 py-3 text-cp-muted">—</td>
+              <td className="px-4 py-3 text-cp-muted">—</td>
               <td className="px-4 py-3">✓</td>
             </tr>
           </tbody>
         </table>
       </div>
 
-      <p className="mx-auto mt-6 max-w-2xl text-center text-xs text-amber-800/90">
+      <p className="mx-auto mt-6 max-w-2xl text-center text-xs text-amber-400">
         ⚠️ Video verification is an AI-assisted authenticity review — not forensic analysis.
       </p>
     </section>
@@ -146,8 +146,8 @@ function PricingCard({ planId, billingInterval }: PricingCardProps) {
     <div
       className={`relative rounded-2xl p-8 ${
         isHighlighted
-          ? "bg-sky-50 ring-2 ring-sky-200 shadow-lg scale-105"
-          : "bg-white ring-1 ring-slate-200 shadow-sm"
+          ? "bg-sky-950/40 ring-2 ring-sky-600 shadow-lg scale-105"
+          : "bg-cp-surface ring-1 ring-cp-border shadow-sm"
       }`}
     >
       {/* Badge */}
@@ -160,21 +160,21 @@ function PricingCard({ planId, billingInterval }: PricingCardProps) {
       )}
 
       {/* Plan Name */}
-      <h3 className="text-2xl font-bold text-slate-900 mb-2">{config.name}</h3>
+      <h3 className="text-2xl font-bold text-cp-text mb-2">{config.name}</h3>
 
       {/* Price */}
       <div className="mb-4">
         {isFree ? (
-          <span className="text-4xl font-bold text-slate-900">Free</span>
+          <span className="text-4xl font-bold text-cp-text">Free</span>
         ) : (
           <>
-            <span className="text-4xl font-bold text-slate-900">${displayPrice.toFixed(2)}</span>
-            <span className="text-lg text-slate-600">
+            <span className="text-4xl font-bold text-cp-text">${displayPrice.toFixed(2)}</span>
+            <span className="text-lg text-cp-muted">
               {" "}
               / {billingInterval === "month" ? "month" : "year"}
             </span>
             {billingInterval === "year" && displayPricePerMonth && (
-              <p className="text-sm text-slate-500 mt-1">
+              <p className="text-sm text-cp-muted mt-1">
                 ${displayPricePerMonth.toFixed(2)} / month
               </p>
             )}
@@ -183,7 +183,7 @@ function PricingCard({ planId, billingInterval }: PricingCardProps) {
       </div>
 
       {/* Tagline */}
-      <p className="text-sm text-slate-600 mb-6">{config.tagline}</p>
+      <p className="text-sm text-cp-muted mb-6">{config.tagline}</p>
 
       {/* Features List */}
       <ul className="space-y-3 mb-8">
@@ -202,18 +202,18 @@ function PricingCard({ planId, billingInterval }: PricingCardProps) {
                 d="M5 13l4 4L19 7"
               />
             </svg>
-            <span className="text-sm text-slate-700">{feature}</span>
+            <span className="text-sm text-cp-text">{feature}</span>
           </li>
         ))}
         {planId === "free" && (
           <li className="flex items-start">
             <span
-              className="mr-2 mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center text-sm font-bold text-slate-400"
+              className="mr-2 mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center text-sm font-bold text-cp-muted"
               aria-hidden
             >
               ✗
             </span>
-            <span className="text-sm text-slate-500">Video verification (paid plans only)</span>
+            <span className="text-sm text-cp-muted">Video verification (paid plans only)</span>
           </li>
         )}
         {planId === "lite" && (
@@ -232,7 +232,7 @@ function PricingCard({ planId, billingInterval }: PricingCardProps) {
                   d="M5 13l4 4L19 7"
                 />
               </svg>
-              <span className="text-sm text-slate-700">5 video verifications per month</span>
+              <span className="text-sm text-cp-text">5 video verifications per month</span>
             </li>
             <li className="flex items-start">
               <svg
@@ -248,7 +248,7 @@ function PricingCard({ planId, billingInterval }: PricingCardProps) {
                   d="M5 13l4 4L19 7"
                 />
               </svg>
-              <span className="text-sm text-slate-700">3 AI vision models review each video</span>
+              <span className="text-sm text-cp-text">3 AI vision models review each video</span>
             </li>
             <li className="flex items-start">
               <svg
@@ -264,7 +264,7 @@ function PricingCard({ planId, billingInterval }: PricingCardProps) {
                   d="M5 13l4 4L19 7"
                 />
               </svg>
-              <span className="text-sm text-slate-700">Metadata review and AI-creation tool markers</span>
+              <span className="text-sm text-cp-text">Metadata review and AI-creation tool markers</span>
             </li>
             <li className="flex items-start">
               <svg
@@ -280,7 +280,7 @@ function PricingCard({ planId, billingInterval }: PricingCardProps) {
                   d="M5 13l4 4L19 7"
                 />
               </svg>
-              <span className="text-sm text-slate-700">
+              <span className="text-sm text-cp-text">
                 Per-model evidence with manipulation and authenticity signals
               </span>
             </li>
@@ -298,28 +298,28 @@ function PricingCard({ planId, billingInterval }: PricingCardProps) {
                   d="M5 13l4 4L19 7"
                 />
               </svg>
-              <span className="text-sm text-slate-700">Governance status badges on your results</span>
+              <span className="text-sm text-cp-text">Governance status badges on your results</span>
             </li>
             <li className="flex items-start">
               <span
-                className="mr-2 mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center text-sm font-bold text-slate-400"
+                className="mr-2 mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center text-sm font-bold text-cp-muted"
                 aria-hidden
               >
                 ✗
               </span>
-              <span className="text-sm text-slate-500">
-                Governance Dashboard <span className="text-slate-400">(5-Model plan)</span>
+              <span className="text-sm text-cp-muted">
+                Governance Dashboard <span className="text-cp-muted">(5-Model plan)</span>
               </span>
             </li>
             <li className="flex items-start">
               <span
-                className="mr-2 mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center text-sm font-bold text-slate-400"
+                className="mr-2 mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center text-sm font-bold text-cp-muted"
                 aria-hidden
               >
                 ✗
               </span>
-              <span className="text-sm text-slate-500">
-                Peer review <span className="text-slate-400">(5-Model plan)</span>
+              <span className="text-sm text-cp-muted">
+                Peer review <span className="text-cp-muted">(5-Model plan)</span>
               </span>
             </li>
           </>
@@ -340,7 +340,7 @@ function PricingCard({ planId, billingInterval }: PricingCardProps) {
                   d="M5 13l4 4L19 7"
                 />
               </svg>
-              <span className="text-sm text-slate-700">20 video verifications per month</span>
+              <span className="text-sm text-cp-text">20 video verifications per month</span>
             </li>
             <li className="flex items-start">
               <svg
@@ -356,7 +356,7 @@ function PricingCard({ planId, billingInterval }: PricingCardProps) {
                   d="M5 13l4 4L19 7"
                 />
               </svg>
-              <span className="text-sm text-slate-700">3 AI vision models review each video</span>
+              <span className="text-sm text-cp-text">3 AI vision models review each video</span>
             </li>
             <li className="flex items-start">
               <svg
@@ -372,7 +372,7 @@ function PricingCard({ planId, billingInterval }: PricingCardProps) {
                   d="M5 13l4 4L19 7"
                 />
               </svg>
-              <span className="text-sm text-slate-700">Metadata review and AI-creation tool markers</span>
+              <span className="text-sm text-cp-text">Metadata review and AI-creation tool markers</span>
             </li>
             <li className="flex items-start">
               <svg
@@ -388,7 +388,7 @@ function PricingCard({ planId, billingInterval }: PricingCardProps) {
                   d="M5 13l4 4L19 7"
                 />
               </svg>
-              <span className="text-sm text-slate-700">
+              <span className="text-sm text-cp-text">
                 Per-model evidence with manipulation and authenticity signals
               </span>
             </li>
@@ -406,7 +406,7 @@ function PricingCard({ planId, billingInterval }: PricingCardProps) {
                   d="M5 13l4 4L19 7"
                 />
               </svg>
-              <span className="text-sm text-slate-700">
+              <span className="text-sm text-cp-text">
                 Video results in governance review and audit trail (5-Model plan)
               </span>
             </li>
@@ -415,19 +415,19 @@ function PricingCard({ planId, billingInterval }: PricingCardProps) {
         {planId === "free" && (
           <li className="flex items-start">
             <span
-              className="mr-2 mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center text-sm font-bold text-slate-400"
+              className="mr-2 mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center text-sm font-bold text-cp-muted"
               aria-hidden
             >
               ✗
             </span>
-            <span className="text-sm text-slate-500">Governance features (upgrade to access)</span>
+            <span className="text-sm text-cp-muted">Governance features (upgrade to access)</span>
           </li>
         )}
       </ul>
 
       {/* Positioning Text (if present) */}
       {config.positioningText && (
-        <p className="text-xs text-slate-500 italic mb-6">{config.positioningText}</p>
+        <p className="text-xs text-cp-muted italic mb-6">{config.positioningText}</p>
       )}
 
       {/* CTA Button */}
@@ -437,7 +437,7 @@ function PricingCard({ planId, billingInterval }: PricingCardProps) {
           className={`block w-full text-center rounded-xl px-6 py-3 text-base font-semibold transition-colors ${
             isHighlighted
               ? "bg-sky-600 text-white hover:bg-sky-700"
-              : "bg-slate-900 text-white hover:bg-slate-800"
+              : "bg-cp-border text-cp-text hover:bg-slate-700"
           }`}
         >
           Start for free
@@ -448,7 +448,7 @@ function PricingCard({ planId, billingInterval }: PricingCardProps) {
           className={`block w-full text-center rounded-xl px-6 py-3 text-base font-semibold transition-colors ${
             isHighlighted
               ? "bg-sky-600 text-white hover:bg-sky-700"
-              : "bg-slate-900 text-white hover:bg-slate-800"
+              : "bg-cp-border text-cp-text hover:bg-slate-700"
           }`}
         >
           {planId === "full" ? "Get Full Panel" : "Get Research Lite"}
