@@ -221,6 +221,7 @@ const HUB_GROUPS: HubGroup[] = [
       "ai-summarizer-vs-multi-model-research-panel",
       "perplexity-vs-multi-model-panel-for-research",
       "how-to-compare-ai-answers-before-deciding",
+      "multi-model-decision-support-tool",
     ],
   },
   {

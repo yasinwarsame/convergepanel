@@ -195,7 +195,7 @@ export const PAGES: PSEOPage[] = [
     h1: "Video Authenticity Review for Fact-Checkers Reviewing Viral Claims",
     audience: "Fact-checkers",
     audienceDetail: "Professional fact-checkers at newsrooms, NGOs, and verification organizations who need defensible, documented video review before publishing",
-    publishedAt: "2026-06-07",
+    publishedAt: "2026-06-12",
     problem:
       "Deepfakes and AI-generated video are increasingly realistic. A single detection tool has blind spots. Fact-checkers need multiple signals — not one model's guess — before making a call.\n\nThe institutional stakes make this harder. Fact-checkers face editor scrutiny, legal review, and public accountability. A false positive — calling authentic video fake — carries reputational damage equal to a false negative. Newsrooms need defensible documentation of every step in the verification chain, not just a tool's output.\n\nSpeed is also a constraint that single-model tools don't solve. If a clip is circulating during a breaking news cycle, a verification process that takes 30 minutes per video doesn't fit editorial timelines. The gap between 'we saw the clip' and 'we have a defensible verdict' has to close faster than the news cycle.",
     solution:
@@ -263,8 +263,10 @@ export const PAGES: PSEOPage[] = [
       { label: "How to Check If a Viral Video Might Be Manipulated", href: "/use-cases/how-to-check-if-a-viral-video-might-be-manipulated" },
       { label: "Video Authenticity Review for Researchers", href: "/use-cases/video-authenticity-review-for-researchers" },
       { label: "Verification Checklist for Journalists", href: "/use-cases/verification-checklist-for-journalists" },
+      { label: "AI Fact-Checking vs. Claim Verification", href: "/use-cases/ai-fact-checking-vs-claim-verification" },
+      { label: "How to Verify Sources from AI Answers", href: "/use-cases/how-to-verify-sources-from-ai-answers" },
     ],
-    cta: "Review Video Authenticity — get a documented multi-model verdict",
+    cta: "Review Video Authenticity",
     category: "video-verification",
     schemaType: "FAQPage",
     faq: [
@@ -298,7 +300,7 @@ export const PAGES: PSEOPage[] = [
     h1: "Video Authenticity Review for Researchers Evaluating Visual Evidence",
     audience: "Researchers",
     audienceDetail: "Media researchers, misinformation scholars, computational social scientists, and digital forensics students studying video manipulation",
-    publishedAt: "2026-06-07",
+    publishedAt: "2026-06-12",
     problem:
       "Studying video manipulation at scale requires consistent, structured analysis. Manual frame-by-frame review doesn't scale, and single-model detectors produce inconsistent results across video types.\n\nReproducibility is the deeper methodological issue. If your study relies on deepfake detection, other researchers need to replicate your methodology. Ad-hoc tool outputs aren't reproducible — they depend on which model you used, its version, and its output format at the time of analysis. Citing 'we used a commercial detection tool' in a methods section doesn't satisfy peer review.\n\nGround-truth labeling also requires consistent criteria. When building a dataset of authentic versus generated video, you need inter-annotator reliability. Two researchers using different single-model tools will produce incomparable labels — making dataset merging and cross-study comparison impossible.",
     solution:
@@ -351,8 +353,10 @@ export const PAGES: PSEOPage[] = [
       { label: "How to Review a Suspicious Video with AI", href: "/use-cases/how-to-review-a-suspicious-video-with-ai" },
       { label: "What Is a Consensus Score?", href: "/use-cases/what-is-a-consensus-score" },
       { label: "AI Disagreement Analysis Tool", href: "/use-cases/ai-disagreement-analysis-tool" },
+      { label: "Deep Research with Multiple AI Models", href: "/use-cases/deep-research-with-multiple-ai-models" },
+      { label: "What Is Source Grounding in AI?", href: "/use-cases/what-is-source-grounding-in-ai" },
     ],
-    cta: "Review Visual Evidence — structured multi-model analysis with exportable results",
+    cta: "Review Visual Evidence",
     category: "video-verification",
     schemaType: "FAQPage",
     faq: [
@@ -1117,7 +1121,7 @@ export const PAGES: PSEOPage[] = [
     h1: "AI Trust Dashboard for Reviewing Consensus, Disagreement, and Risk",
     audience: "Decision-makers, governance teams",
     audienceDetail: "Leaders, analysts, and governance teams who need to assess how trustworthy an AI output is before acting on it or routing it for human review",
-    publishedAt: "2026-06-07",
+    publishedAt: "2026-06-12",
     problem:
       "AI gives you answers. It doesn't give you a trust score. You're left guessing whether the output is well-supported or the model just sounded confident.\n\nThe gap between confidence and accuracy is systematic, not incidental. Language models generate fluent, assertive text regardless of whether the underlying claim is well-evidenced. A model that has strong training-data support for an answer and a model that is confabulating a plausible-sounding response look identical from the outside. The confidence in the output is a property of the language — not of the evidence behind it.\n\nTeams that have adopted AI tools often discover this problem after acting on a bad output. The reaction is usually binary: full trust or deep skepticism. Neither is operationally useful. What's needed is a calibrated middle ground — a way to trust AI outputs proportionally to how well-supported they actually are, with a mechanism to automate that trust decision for routine queries.",
     solution:
@@ -1184,8 +1188,12 @@ export const PAGES: PSEOPage[] = [
       { label: "AI Disagreement Analysis Tool", href: "/use-cases/ai-disagreement-analysis-tool" },
       { label: "How to Create an AI Audit Trail", href: "/use-cases/how-to-create-an-ai-audit-trail" },
       { label: "AI Governance for Small Teams", href: "/use-cases/ai-governance-for-small-teams" },
+      { label: "How to Identify Blind Spots in AI Answers", href: "/use-cases/how-to-identify-blind-spots-in-ai-answers" },
+      { label: "What Is Source Grounding in AI?", href: "/use-cases/what-is-source-grounding-in-ai" },
+      { label: "What Is a Decision Receipt?", href: "/use-cases/what-is-a-decision-receipt" },
+      { label: "AI Decision Support for Founders", href: "/use-cases/ai-decision-support-for-founders" },
     ],
-    cta: "Review Trust Signals — run a free panel and see consensus, disagreement, and evidence quality",
+    cta: "Review Trust Signals",
     category: "governance",
     schemaType: "FAQPage",
     faq: [
@@ -1262,7 +1270,7 @@ export const PAGES: PSEOPage[] = [
     h1: "How to Review a Suspicious Video with AI Before You Trust It",
     audience: "General audience, journalists, content creators",
     audienceDetail: "Anyone who encounters a video that looks potentially fake, manipulated, or out of context and wants a structured first-pass check before sharing or acting on it",
-    publishedAt: "2026-06-07",
+    publishedAt: "2026-06-12",
     problem:
       "You see a video that doesn't look right — maybe the lighting is off, the audio doesn't match, or the movements seem unnatural. Or maybe it looks completely fine but the claim attached to it seems too dramatic to be true. You want to check it, but you don't have access to forensic tools or the time for a deep investigation.\n\nThe problem is that visual intuition is no longer reliable. Sophisticated AI-generated video is designed to pass casual inspection. The markers people use to spot fakes — blurry hands, mismatched lips, flickering backgrounds — are increasingly absent from high-quality deepfakes. Meanwhile, authentic video with unusual lighting or compression can look suspicious when it's real.",
     solution:
@@ -1321,8 +1329,10 @@ export const PAGES: PSEOPage[] = [
       { label: "AI Video Verification for Content Creators", href: "/use-cases/ai-video-verification-for-content-creators" },
       { label: "How Journalists Can Verify Viral Clips", href: "/use-cases/how-journalists-can-verify-viral-clips" },
       { label: "How to Fact-Check a Reaction Video", href: "/use-cases/how-to-fact-check-a-reaction-video" },
+      { label: "Video Authenticity Review for Researchers", href: "/use-cases/video-authenticity-review-for-researchers" },
+      { label: "How to Verify a Clip Before Publishing", href: "/use-cases/how-to-verify-a-clip-before-publishing" },
     ],
-    cta: "Review a Suspicious Video — three AI models, one structured verdict",
+    cta: "Review a Suspicious Video",
     category: "how-to",
     metaDescription:
       "Use AI-assisted review to check suspicious videos for context, visual claims, manipulation risk, and source uncertainty.",
@@ -3435,6 +3445,7 @@ export const PAGES: PSEOPage[] = [
       { label: "Why Not Trust One AI Model for Serious Decisions?", href: "/use-cases/why-not-trust-one-ai-model-for-serious-decisions" },
       { label: "AI Consensus for Government Analysis", href: "/use-cases/ai-consensus-for-government-analysis" },
       { label: "AI Consensus for Operations Planning", href: "/use-cases/ai-consensus-for-operations-planning" },
+      { label: "AI Trust Dashboard for Decision Support", href: "/use-cases/ai-trust-dashboard-for-decision-support" },
     ],
   },
 
@@ -3442,7 +3453,7 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "how-to-check-if-a-viral-video-might-be-manipulated",
-    publishedAt: "2026-06-07",
+    publishedAt: "2026-06-12",
     title: "How to Check If a Viral Video Might Be Manipulated",
     h1: "How to Check If a Viral Video Might Be Manipulated or Missing Context",
     audience: "General audience, social media users, concerned citizens",
@@ -3507,8 +3518,10 @@ export const PAGES: PSEOPage[] = [
       { label: "How Journalists Can Verify Viral Clips", href: "/use-cases/how-journalists-can-verify-viral-clips" },
       { label: "How to Fact-Check a Reaction Video", href: "/use-cases/how-to-fact-check-a-reaction-video" },
       { label: "AI Video Verification for Content Creators", href: "/use-cases/ai-video-verification-for-content-creators" },
+      { label: "How to Verify a Clip Before Publishing", href: "/use-cases/how-to-verify-a-clip-before-publishing" },
+      { label: "How to Sanity-Check a Viral Clip", href: "/use-cases/how-to-sanity-check-a-viral-clip" },
     ],
-    cta: "Sanity-Check the Viral Video — three AI models, one structured verdict",
+    cta: "Sanity-Check the Viral Video",
     category: "how-to",
     metaDescription:
       "Learn how to review viral videos for manipulation signals, missing context, old footage, misleading captions, and weak claims.",
@@ -3530,12 +3543,16 @@ export const PAGES: PSEOPage[] = [
         q: "What should I do if a video looks suspicious?",
         a: "Run it through AI video review, reverse search the video to check its history, look for credible news coverage of the event, and check the original account. If multiple signals point toward manipulation or false context, don't share it — especially if the claim attached to it is emotionally charged.",
       },
+      {
+        q: "Is it worth checking a video before sharing if I'm not a journalist?",
+        a: "Yes. Everyone who shares content contributes to how it spreads. A viral video built on a false claim travels further when more people share it without checking. A two-minute AI review before sharing is enough to identify the most obvious manipulation signals — and to catch context manipulation that makes even authentic footage misleading.",
+      },
     ],
   },
 
   {
     slug: "ai-video-verification-for-journalists",
-    publishedAt: "2026-06-07",
+    publishedAt: "2026-06-12",
     title: "AI Video Verification for Journalists",
     h1: "AI Video Verification for Journalists Reviewing Viral Clips and Visual Claims",
     audience: "Journalists, solo reporters, correspondents",
@@ -3599,8 +3616,9 @@ export const PAGES: PSEOPage[] = [
       { label: "Video Authenticity Review for Fact-Checkers", href: "/use-cases/video-authenticity-review-for-fact-checkers" },
       { label: "Verification Checklist for Journalists", href: "/use-cases/verification-checklist-for-journalists" },
       { label: "How to Fact-Check Breaking News Claims", href: "/use-cases/how-to-fact-check-breaking-news-claims" },
+      { label: "How to Check If a Viral Video Might Be Manipulated", href: "/use-cases/how-to-check-if-a-viral-video-might-be-manipulated" },
     ],
-    cta: "Verify Before Reporting — structured video review with editorial documentation",
+    cta: "Verify Before Reporting",
     category: "video-verification",
     schemaType: "FAQPage",
     faq: [
@@ -3631,7 +3649,7 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "ai-video-verification-for-content-creators",
-    publishedAt: "2026-06-07",
+    publishedAt: "2026-06-12",
     title: "AI Video Verification for Content Creators",
     h1: "AI Video Verification for Creators Reviewing Viral Clips",
     audience: "Content creators, YouTubers, streamers",
@@ -3693,8 +3711,9 @@ export const PAGES: PSEOPage[] = [
       { label: "How to Review a Suspicious Video with AI", href: "/use-cases/how-to-review-a-suspicious-video-with-ai" },
       { label: "How to Check If a Viral Video Might Be Manipulated", href: "/use-cases/how-to-check-if-a-viral-video-might-be-manipulated" },
       { label: "How to Verify Information for a Video Script", href: "/use-cases/how-to-verify-information-for-a-video-script" },
+      { label: "AI Research Tool for YouTubers Before Publishing", href: "/use-cases/ai-research-tool-for-youtubers" },
     ],
-    cta: "Verify a Video — three models, one fast sanity check before publishing",
+    cta: "Verify a Video",
     category: "video-verification",
     schemaType: "FAQPage",
     faq: [
@@ -4994,7 +5013,7 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "multi-model-decision-support-tool",
-    publishedAt: "2026-06-07",
+    publishedAt: "2026-06-12",
     title: "Multi-Model Decision Support Tool",
     h1: "Multi-Model Decision Support Tool for Comparing AI Answers Before You Decide",
     audience: "Founders, executives, analysts, decision-making teams",
@@ -5057,7 +5076,7 @@ export const PAGES: PSEOPage[] = [
       { label: "Verify Financial Assumptions with AI", href: "/use-cases/verify-financial-assumptions-with-ai" },
       { label: "Panel-Based Research for Decision Support", href: "/use-cases/panel-based-research-for-decision-support" },
     ],
-    cta: "Compare Models Before Deciding — five AI perspectives, one decision",
+    cta: "Compare Models Before Deciding",
     category: "research",
     metaDescription:
       "Compare multiple AI models, surface disagreement, review assumptions, and generate a stronger decision synthesis.",
@@ -5613,6 +5632,7 @@ export const PAGES: PSEOPage[] = [
       { label: "Verification Checklist for Journalists", href: "/use-cases/verification-checklist-for-journalists" },
       { label: "AI Claim Verification for Newsrooms", href: "/use-cases/ai-claim-verification-for-newsrooms" },
       { label: "How to Fact-Check ChatGPT Responses", href: "/use-cases/how-to-fact-check-chatgpt-responses" },
+      { label: "AI Video Verification for Journalists", href: "/use-cases/ai-video-verification-for-journalists" },
     ],
     cta: "Fact-Check Fast — run a multi-model claim verification before publishing",
     category: "claim-verification",
@@ -5698,6 +5718,7 @@ export const PAGES: PSEOPage[] = [
       { label: "AI Tools for Investigative Journalists", href: "/use-cases/ai-tools-for-investigative-journalists" },
       { label: "Verification Checklist for Journalists", href: "/use-cases/verification-checklist-for-journalists" },
       { label: "AI Claim Verification for Newsrooms", href: "/use-cases/ai-claim-verification-for-newsrooms" },
+      { label: "How to Check If a Viral Video Might Be Manipulated", href: "/use-cases/how-to-check-if-a-viral-video-might-be-manipulated" },
     ],
     cta: "Verify This Content — run a multi-model UGC check before publishing",
     category: "claim-verification",
@@ -5880,6 +5901,8 @@ export const PAGES: PSEOPage[] = [
       { label: "How to Create an AI Audit Trail", href: "/use-cases/how-to-create-an-ai-audit-trail" },
       { label: "What Is a Decision Receipt?", href: "/use-cases/what-is-a-decision-receipt" },
       { label: "How to Verify Sources from AI Answers", href: "/use-cases/how-to-verify-sources-from-ai-answers" },
+      { label: "AI Video Verification for Journalists", href: "/use-cases/ai-video-verification-for-journalists" },
+      { label: "How to Review a Suspicious Video With AI", href: "/use-cases/how-to-review-a-suspicious-video-with-ai" },
     ],
     cta: "Review the Evidence — compare multiple AI models and document your investigation",
     category: "research",
@@ -6225,7 +6248,7 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "how-creators-can-fact-check-videos",
-    publishedAt: "2026-06-07",
+    publishedAt: "2026-06-12",
     title: "How Content Creators Can Fact-Check Videos Before Posting",
     h1: "How Content Creators Can Fact-Check Videos Before Posting or Reacting",
     audience: "Creators, YouTubers, TikTokers, podcasters",
@@ -6275,18 +6298,19 @@ export const PAGES: PSEOPage[] = [
         ],
       },
     ],
-    cta: "Verify Before You Post — fact-check clips and claims in minutes",
+    cta: "Check Before You Post",
     category: "video-verification",
     metaDescription:
       "Amplifying a false claim or manipulated clip can damage your audience's trust. Learn how content creators can fact-check videos and claims in minutes before posting.",
-    schemaType: "HowTo",
+    schemaType: "FAQPage",
     relatedLinks: [
       { label: "How to Fact-Check a Reaction Video", href: "/use-cases/how-to-fact-check-a-reaction-video" },
       { label: "How to Verify Information for a Video Script", href: "/use-cases/how-to-verify-information-for-a-video-script" },
       { label: "AI Video Verification for Content Creators", href: "/use-cases/ai-video-verification-for-content-creators" },
       { label: "AI Claim Verification for Content Creators", href: "/use-cases/ai-claim-verification-for-content-creators" },
-      { label: "How to Sanity-Check a Viral Clip", href: "/use-cases/how-to-sanity-check-a-viral-clip" },
-      { label: "How to Fact-Check ChatGPT Responses", href: "/use-cases/how-to-fact-check-chatgpt-responses" },
+      { label: "How to Check Sources for Creator Content", href: "/use-cases/how-to-check-sources-for-creator-content" },
+      { label: "AI Research Tool for YouTubers Before Publishing", href: "/use-cases/ai-research-tool-for-youtubers" },
+      { label: "How to Check If a Viral Video Might Be Manipulated", href: "/use-cases/how-to-check-if-a-viral-video-might-be-manipulated" },
     ],
     faq: [
       {
@@ -6305,12 +6329,16 @@ export const PAGES: PSEOPage[] = [
         q: "Can I use ConvergePanel to check a clip I didn't create?",
         a: "Yes. Video Verification is designed for any video content — viral clips, news footage, user-submitted videos, social media clips. Upload it, get the multi-model verdict, and make an informed decision about whether to feature it in your content.",
       },
+      {
+        q: "Why should I disclose that I verified content before posting?",
+        a: "Transparency about verification builds long-term audience trust. Audiences know most creators don't have a formal verification step — those who mention it signal that they take accuracy seriously. A brief note ('I verified this clip before including it') differentiates your content and compounds over time as a credibility signal.",
+      },
     ],
   },
 
   {
     slug: "how-to-verify-information-for-a-video-script",
-    publishedAt: "2026-06-07",
+    publishedAt: "2026-06-12",
     title: "How to Verify Information for a Video Script Before Recording",
     h1: "How to Verify Information in a Video Script Before Recording",
     audience: "Content creators, YouTubers, educators",
@@ -6366,9 +6394,10 @@ export const PAGES: PSEOPage[] = [
       { label: "AI Claim Verification for Content Creators", href: "/use-cases/ai-claim-verification-for-content-creators" },
       { label: "How to Fact-Check ChatGPT Responses", href: "/use-cases/how-to-fact-check-chatgpt-responses" },
       { label: "How to Verify Sources from AI Answers", href: "/use-cases/how-to-verify-sources-from-ai-answers" },
-      { label: "AI Research Tool for YouTubers", href: "/use-cases/ai-research-tool-for-youtubers" },
+      { label: "AI Research Tool for YouTubers Before Publishing", href: "/use-cases/ai-research-tool-for-youtubers" },
+      { label: "How to Check Sources for Creator Content", href: "/use-cases/how-to-check-sources-for-creator-content" },
     ],
-    cta: "Verify Script Claims — check your research before recording",
+    cta: "Verify This Script",
     category: "how-to",
     metaDescription:
       "AI research for video scripts can include hallucinations. Verify key claims before recording — a quick check protects your credibility with your audience.",
@@ -6389,6 +6418,10 @@ export const PAGES: PSEOPage[] = [
       {
         q: "Can AI write and verify a script at the same time?",
         a: "AI can draft scripts and assist with research — but it can't verify its own output. Treating AI-generated script content as verified because it came from an AI model is the core risk. Use AI for drafting, then run the factual claims through a separate multi-model verification step before recording.",
+      },
+      {
+        q: "What is the difference between verifying a script claim and verifying a video clip?",
+        a: "Script claim verification checks whether a text statement — a statistic, quote, or factual assertion — is accurate. Video clip verification checks whether a video itself is authentic, manipulated, or miscontextualized. Both are valuable for creators: script verification protects you from broadcasting inaccurate information, and clip verification protects you from amplifying misleading video content.",
       },
     ],
   },
@@ -6513,9 +6546,9 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "how-to-fact-check-a-reaction-video",
-    publishedAt: "2026-06-07",
-    title: "How to Fact-Check a Reaction Video Before You Post",
-    h1: "How to Fact-Check a Reaction Video Before You Post",
+    publishedAt: "2026-06-12",
+    title: "How to Fact-Check a Reaction Video Before Publishing",
+    h1: "How to Fact-Check a Reaction Video Before You Amplify a Claim",
     audience: "Creators, streamers, commentators",
     audienceDetail: "Content creators who produce reaction, commentary, or response videos and want to avoid amplifying false or misleading content to their audience",
     problem:
@@ -6563,11 +6596,11 @@ export const PAGES: PSEOPage[] = [
         ],
       },
     ],
-    cta: "Sanity-Check This Clip — verify before you react",
+    cta: "Fact-Check Before Reacting",
     category: "video-verification",
     metaDescription:
-      "Reaction videos built on fake clips or false claims damage your credibility. A two-minute verification check before recording protects your content and your audience's trust.",
-    schemaType: "HowTo",
+      "Review claims, clips, context, and source material before reacting to viral content or publishing commentary.",
+    schemaType: "FAQPage",
     relatedLinks: [
       { label: "How Content Creators Can Fact-Check Videos", href: "/use-cases/how-creators-can-fact-check-videos" },
       { label: "How to Verify Information for a Video Script", href: "/use-cases/how-to-verify-information-for-a-video-script" },
@@ -6575,6 +6608,8 @@ export const PAGES: PSEOPage[] = [
       { label: "AI Claim Verification for Content Creators", href: "/use-cases/ai-claim-verification-for-content-creators" },
       { label: "How to Sanity-Check a Viral Clip", href: "/use-cases/how-to-sanity-check-a-viral-clip" },
       { label: "How to Check Sources for Creator Content", href: "/use-cases/how-to-check-sources-for-creator-content" },
+      { label: "How to Check If a Viral Video Might Be Manipulated", href: "/use-cases/how-to-check-if-a-viral-video-might-be-manipulated" },
+      { label: "How to Review a Suspicious Video With AI", href: "/use-cases/how-to-review-a-suspicious-video-with-ai" },
     ],
     faq: [
       {
@@ -6592,6 +6627,10 @@ export const PAGES: PSEOPage[] = [
       {
         q: "What are the most common types of manipulated content in reaction videos?",
         a: "Deepfake videos, selectively edited clips presented out of context, old footage labeled as recent events, and AI-generated content passed off as authentic. The first and last are best caught by AI vision analysis; the middle two are better caught by metadata checking and context research.",
+      },
+      {
+        q: "How is checking a reaction video different from verifying a viral clip for journalism?",
+        a: "The workflow is similar but the standard differs. Journalists require a higher bar before publishing — they need sourced confirmation before broadcasting a claim. Reaction creators have more flexibility to proceed with caveats ('this clip appears authentic based on my check, but I can't confirm the full context'). The key is being transparent with your audience about what you checked and what remains uncertain.",
       },
     ],
   },
@@ -6679,6 +6718,7 @@ export const PAGES: PSEOPage[] = [
       { label: "How to Test Business Assumptions with AI", href: "/use-cases/how-to-test-business-assumptions-with-ai" },
       { label: "How to Validate Market Assumptions", href: "/use-cases/how-to-validate-market-assumptions" },
       { label: "Multi-Model Decision Support Tool", href: "/use-cases/multi-model-decision-support-tool" },
+      { label: "AI Decision Support for Founders", href: "/use-cases/ai-decision-support-for-founders" },
     ],
     cta: "Pressure-Test This Idea — validate your assumptions across five AI models",
     category: "how-to",
@@ -6736,6 +6776,7 @@ export const PAGES: PSEOPage[] = [
       { label: "How to Test Business Assumptions with AI", href: "/use-cases/how-to-test-business-assumptions-with-ai" },
       { label: "How to Pressure-Test Investor Pitch Claims", href: "/use-cases/how-to-pressure-test-investor-pitch-claims" },
       { label: "AI Disagreement Analysis Tool", href: "/use-cases/ai-disagreement-analysis-tool" },
+      { label: "AI Decision Support for Founders", href: "/use-cases/ai-decision-support-for-founders" },
     ],
     cta: "Pressure-Test This Decision — challenge your startup idea before you commit",
     category: "how-to",
@@ -6978,9 +7019,9 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "ai-decision-support-for-founders",
-    publishedAt: "2026-06-07",
-    title: "AI Decision Support for Founders",
-    h1: "AI Decision Support for Founders — Multi-Model Analysis for High-Stakes Choices",
+    publishedAt: "2026-06-12",
+    title: "AI Decision Support for Founders Making High-Stakes Calls",
+    h1: "AI Decision Support for Founders Who Need More Than One AI Opinion",
     audience: "Founders, startup teams",
     audienceDetail: "Founders at any stage who use AI to inform important business decisions and want to avoid the risk of acting on single-model advice",
     problem:
@@ -7035,8 +7076,11 @@ export const PAGES: PSEOPage[] = [
       { label: "How to Pressure-Test a Startup Idea", href: "/use-cases/how-to-pressure-test-a-startup-idea" },
       { label: "AI Disagreement Analysis Tool", href: "/use-cases/ai-disagreement-analysis-tool" },
       { label: "What Is a Decision Receipt?", href: "/use-cases/what-is-a-decision-receipt" },
+      { label: "How to Validate a Business Idea With AI", href: "/use-cases/how-to-validate-a-business-idea-with-ai" },
+      { label: "How to Test Business Assumptions With AI", href: "/use-cases/how-to-test-business-assumptions-with-ai" },
+      { label: "How to Validate Market Assumptions", href: "/use-cases/how-to-validate-market-assumptions" },
     ],
-    cta: "Start a Decision Review — multi-model AI support for founders",
+    cta: "Pressure-Test This Founder Decision",
     category: "research",
     metaDescription:
       "Single-model AI advice for founders hides uncertainty and minority views. Multi-model decision support surfaces agreement, disagreement, and the risks that matter.",
@@ -7057,6 +7101,10 @@ export const PAGES: PSEOPage[] = [
       {
         q: "How do I document AI decision support for accountability purposes?",
         a: "Export the panel run from ConvergePanel after each significant AI-supported decision. This record captures what was queried, what each model said, and what the consensus view was — useful for board reporting, investor conversations, and internal team accountability.",
+      },
+      {
+        q: "How is multi-model AI decision support different from asking one AI model repeatedly?",
+        a: "Asking one model the same question multiple times generates variations within a single analytical framework. Multi-model support gives you genuinely independent analytical perspectives — different training data, different architectures, different reasoning patterns. The disagreements that emerge across models are informative in a way that within-model variation is not.",
       },
     ],
   },
@@ -7707,6 +7755,7 @@ export const PAGES: PSEOPage[] = [
       { label: "AI Audit Trail Software", href: "/use-cases/ai-audit-trail-software" },
       { label: "What Is a Decision Receipt?", href: "/use-cases/what-is-a-decision-receipt" },
       { label: "Multi-Model Decision Support Tool", href: "/use-cases/multi-model-decision-support-tool" },
+      { label: "AI Trust Dashboard for Decision Support", href: "/use-cases/ai-trust-dashboard-for-decision-support" },
     ],
     cta: "Review AI Decision Risk — compare models, surface blind spots, and document review notes before acting",
     category: "governance",
