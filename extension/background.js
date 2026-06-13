@@ -8,7 +8,8 @@
  * - Opens ConvergePanel verification page with the selected text prefilled.
  */
 
-const CONVERGEPANEL_VERIFY_URL = 'https://convergepanel.com/verify';
+const BASE_URL = "https://convergepanel.com";
+const CONVERGEPANEL_VERIFY_URL = `${BASE_URL}/verify`;
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({

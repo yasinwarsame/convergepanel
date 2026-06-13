@@ -7,8 +7,8 @@
  * - Provides buttons to open ConvergePanel or verify the last selection.
  */
 
-const CONVERGEPANEL_URL = 'https://convergepanel.com';
-const CONVERGEPANEL_VERIFY_URL = 'https://convergepanel.com/verify';
+const BASE_URL = "https://convergepanel.com";
+const CONVERGEPANEL_VERIFY_URL = `${BASE_URL}/verify`;
 const MAX_PREVIEW_LENGTH = 140;
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -37,6 +37,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   btnOpen.addEventListener('click', () => {
-    chrome.tabs.create({ url: CONVERGEPANEL_URL });
+    chrome.tabs.create({ url: BASE_URL });
   });
 });
