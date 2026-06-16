@@ -77,10 +77,10 @@ export default function TopNav() {
           <Image
             src="/convergepanel-logo.png"
             alt="ConvergePanel"
-            width={48}
-            height={48}
+            width={64}
+            height={64}
             priority
-            className="h-10 w-auto"
+            className="h-14 w-auto"
           />
           <div className="flex flex-col">
             <span className="font-serif text-2xl font-normal tracking-tight">
