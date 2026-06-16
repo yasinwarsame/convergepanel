@@ -622,12 +622,14 @@ export const PAGES: PSEOPage[] = [
     relatedLinks: [
       { label: "How to Verify Sources from AI Answers", href: "/use-cases/how-to-verify-sources-from-ai-answers" },
       { label: "How to Fact-Check ChatGPT Responses", href: "/use-cases/how-to-fact-check-chatgpt-responses" },
+      { label: "How to Verify an AI Answer", href: "/use-cases/how-to-verify-an-ai-answer" },
+      { label: "Multi-LLM Answer Comparison", href: "/use-cases/multi-llm-answer-comparison" },
       { label: "Deep Research with Multiple AI Models", href: "/use-cases/deep-research-with-multiple-ai-models" },
       { label: "How to Validate AI-Generated Research", href: "/use-cases/how-to-validate-ai-generated-research" },
       { label: "How to Pressure-Test an AI Response", href: "/use-cases/how-to-pressure-test-an-ai-response" },
       { label: "AI Disagreement Analysis Tool", href: "/use-cases/ai-disagreement-analysis-tool" },
     ],
-    cta: "Review Source Grounding — compare AI answers, check citations, and surface disagreement",
+    cta: "Review Source Grounding",
     category: "glossary",
     schemaType: "FAQPage",
     faq: [
@@ -653,7 +655,7 @@ export const PAGES: PSEOPage[] = [
       },
     ],
     metaDescription:
-      "Learn what source grounding means, why citations are useful, and why source-backed AI answers still need verification.",
+      "Learn what source grounding means, why citations help, and why source-backed AI answers still need verification.",
   },
   {
     slug: "single-model-vs-multi-model-verification",
@@ -2111,7 +2113,7 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "ai-claim-verification-for-content-creators",
-    publishedAt: "2026-06-15",
+    publishedAt: "2026-06-17",
     title: "AI Claim Verification for Content Creators Before Posting",
     h1: "AI Claim Verification for Creators Before Posting or Reacting",
     audience: "Content creators",
@@ -3167,7 +3169,7 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "how-to-create-an-ai-audit-trail",
-    publishedAt: "2026-06-13",
+    publishedAt: "2026-06-17",
     title: "How to Create an AI Audit Trail for High-Stakes Decisions",
     h1: "How to Create an AI Audit Trail Before You Trust AI Output",
     audience: "Compliance-minded professionals and team leads",
@@ -3198,10 +3200,10 @@ export const PAGES: PSEOPage[] = [
       "When multiple AI models disagree on a critical point",
       "When the decision may need to be explained, defended, or audited later",
     ],
-    cta: "Start an AI Audit Trail — compare models, surface disagreement, and document your review",
+    cta: "Create an AI Audit Trail",
     category: "how-to",
     metaDescription:
-      "Learn how to create an AI audit trail that records prompts, model responses, disagreement, peer review, and final decision reasoning.",
+      "Learn how to document prompts, model responses, disagreement, source review, peer review, and final decision reasoning.",
     schemaType: "FAQPage",
     bodySections: [
       {
@@ -3457,7 +3459,7 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "what-is-a-consensus-score",
-    publishedAt: "2026-06-13",
+    publishedAt: "2026-06-17",
     title: "What Is an AI Consensus Score?",
     h1: "What Is an AI Consensus Score and When Should You Trust It?",
     audience: "AI-curious professionals, analysts, researchers, governance teams",
@@ -3525,10 +3527,10 @@ export const PAGES: PSEOPage[] = [
         ],
       },
     ],
-    cta: "Check Model Consensus — compare multiple AI models and see where they agree",
+    cta: "Review AI Consensus",
     category: "glossary",
     metaDescription:
-      "Learn what an AI consensus score means, how model agreement can help, and why consensus should still be reviewed with sources and context.",
+      "Learn how AI consensus scores show model agreement, why agreement is not the same as accuracy, and when disagreement needs review.",
     schemaType: "FAQPage",
     faq: [
       {
@@ -3558,11 +3560,12 @@ export const PAGES: PSEOPage[] = [
       { label: "AI Model Consensus Tool", href: "/use-cases/ai-model-consensus-tool" },
       { label: "What Is a Panel Verdict?", href: "/use-cases/what-is-a-panel-verdict" },
       { label: "How to Pressure-Test an AI Response", href: "/use-cases/how-to-pressure-test-an-ai-response" },
+      { label: "How to Compare AI Model Outputs Side by Side", href: "/use-cases/how-to-compare-ai-model-outputs-side-by-side" },
+      { label: "Multi-LLM Answer Comparison", href: "/use-cases/multi-llm-answer-comparison" },
       { label: "How to Compare AI Answers Before Deciding", href: "/use-cases/how-to-compare-ai-answers-before-deciding" },
       { label: "Single AI Model vs. Multi-Model Verification", href: "/use-cases/single-ai-model-vs-multi-model-verification" },
       { label: "Why Not Trust One AI Model for Serious Decisions?", href: "/use-cases/why-not-trust-one-ai-model-for-serious-decisions" },
       { label: "AI Consensus for Government Analysis", href: "/use-cases/ai-consensus-for-government-analysis" },
-      { label: "AI Consensus for Operations Planning", href: "/use-cases/ai-consensus-for-operations-planning" },
       { label: "AI Trust Dashboard for Decision Support", href: "/use-cases/ai-trust-dashboard-for-decision-support" },
     ],
   },
@@ -4122,7 +4125,7 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "how-to-fact-check-chatgpt-responses",
-    publishedAt: "2026-06-15",
+    publishedAt: "2026-06-17",
     title: "How to Fact-Check ChatGPT Responses Before You Trust Them",
     h1: "How to Fact-Check ChatGPT Responses for Errors, Sources, and Missing Context",
     audience: "Researchers, students, professionals, creators, analysts",
@@ -4222,7 +4225,7 @@ export const PAGES: PSEOPage[] = [
       { label: "Multi-LLM Answer Comparison", href: "/use-cases/multi-llm-answer-comparison" },
       { label: "How to Compare AI Model Outputs Side by Side", href: "/use-cases/how-to-compare-ai-model-outputs-side-by-side" },
     ],
-    cta: "Fact-Check This AI Answer",
+    cta: "Fact-Check This ChatGPT Answer",
     category: "claim-verification",
     metaDescription:
       "Check ChatGPT answers for hallucinations, weak sources, missing context, model disagreement, and unsupported claims before relying on them.",
@@ -4311,7 +4314,7 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "how-to-verify-sources-from-ai-answers",
-    publishedAt: "2026-06-15",
+    publishedAt: "2026-06-17",
     title: "How to Verify Sources from AI Answers Before You Cite Them",
     h1: "How to Verify Sources from AI Answers Before You Cite Them",
     audience: "Researchers, journalists, students, analysts, creators",
@@ -4456,7 +4459,7 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "how-to-pressure-test-an-ai-response",
-    publishedAt: "2026-06-13",
+    publishedAt: "2026-06-17",
     title: "How to Pressure-Test an AI Response Before You Trust It",
     h1: "How to Pressure-Test an AI Response with Multiple Models",
     audience: "Knowledge workers, analysts, founders, researchers",
@@ -5390,7 +5393,7 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "how-to-compare-ai-model-outputs-side-by-side",
-    publishedAt: "2026-06-15",
+    publishedAt: "2026-06-17",
     title: "How to Compare AI Model Outputs Side by Side",
     h1: "How to Compare AI Model Outputs Side by Side Before You Decide",
     audience: "Researchers, analysts, knowledge workers",
@@ -5620,7 +5623,7 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "multi-llm-answer-comparison",
-    publishedAt: "2026-06-15",
+    publishedAt: "2026-06-17",
     title: "Multi-LLM Answer Comparison for Research and Verification",
     h1: "Multi-LLM Answer Comparison Before You Trust One AI Response",
     audience: "Researchers, analysts, information workers, developers",
@@ -6144,9 +6147,9 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "ai-tools-for-investigative-journalists",
-    publishedAt: "2026-06-07",
-    title: "AI Tools for Investigative Journalists to Verify Claims and Evidence",
-    h1: "AI Tools for Investigative Journalists Reviewing Claims, Sources, and Evidence",
+    publishedAt: "2026-06-17",
+    title: "AI Tools for Investigative Journalists to Verify Claims and Sources",
+    h1: "AI Tools for Investigative Journalists Reviewing Claims, Sources, and Public Evidence",
     audience: "Investigative journalists, researchers, editors",
     audienceDetail: "Journalists working on long-form investigations who need structured AI tools for claim verification, source review, document analysis, and editorial documentation",
     problem:
@@ -6241,13 +6244,15 @@ export const PAGES: PSEOPage[] = [
       { label: "How to Create an AI Audit Trail", href: "/use-cases/how-to-create-an-ai-audit-trail" },
       { label: "What Is a Decision Receipt?", href: "/use-cases/what-is-a-decision-receipt" },
       { label: "How to Verify Sources from AI Answers", href: "/use-cases/how-to-verify-sources-from-ai-answers" },
+      { label: "Multi-LLM Answer Comparison", href: "/use-cases/multi-llm-answer-comparison" },
+      { label: "AI Disagreement Analysis Tool", href: "/use-cases/ai-disagreement-analysis-tool" },
       { label: "AI Video Verification for Journalists", href: "/use-cases/ai-video-verification-for-journalists" },
       { label: "How to Review a Suspicious Video With AI", href: "/use-cases/how-to-review-a-suspicious-video-with-ai" },
     ],
-    cta: "Review the Evidence — compare multiple AI models and document your investigation",
+    cta: "Verify an Investigative Claim",
     category: "research",
     metaDescription:
-      "Use AI tools to review public claims, sources, timelines, UGC, and conflicting accounts before publishing investigative work.",
+      "Use AI tools to compare sources, verify claims, review public statements, surface disagreement, and support investigative research.",
     schemaType: "FAQPage",
     faq: [
       {
@@ -6255,20 +6260,28 @@ export const PAGES: PSEOPage[] = [
         a: "The most useful AI tools for investigative journalism support multi-source verification, surface disagreement between models, and provide audit documentation. Multi-model platforms like ConvergePanel, document analysis AI, and video verification tools are all useful depending on the investigation. The key is tools that document their process — not just give an answer.",
       },
       {
-        q: "Can AI replace investigative reporting?",
-        a: "No. AI can accelerate research, surface leads, verify claims, and help identify evidence gaps — but it can't substitute for source relationships, document access, human editorial judgment, and the structured storytelling of investigative journalism. AI is a research accelerant and verification layer, not a reporter.",
+        q: "Can AI verify claims for journalists?",
+        a: "AI can help journalists triage and pressure-test claims by running them through multiple models and surfacing where evidence is strong and where it breaks down. It cannot independently access non-public documents, verify very recent events, or replace primary-source verification. It is a structured first layer — not a final authority on accuracy.",
+      },
+      {
+        q: "Why should journalists compare multiple AI models?",
+        a: "A single AI model gives one framing — shaped by one training dataset, one set of omissions, and one set of tendencies. Comparing multiple models surfaces where the evidence is genuinely contested, where key context is missing, and where different framings produce different conclusions. For investigations where accuracy is load-bearing, multi-model comparison is the stronger starting point.",
+      },
+      {
+        q: "Can AI replace editorial verification?",
+        a: "No. AI can accelerate research, surface leads, verify claims, and help identify evidence gaps — but it cannot substitute for source relationships, document access, human editorial judgment, and the structured accountability of investigative journalism. AI is a research accelerant and verification layer, not a reporter.",
+      },
+      {
+        q: "How can journalists use AI to review sources?",
+        a: "Submit the underlying claim to a multi-model panel and review which sources each model cites — and whether they agree on the source and its characterization. When multiple models cite the same source consistently, the probability that the source is real and accurately described rises. When models cite different sources or can't corroborate a reference, that divergence is a verification signal worth investigating before publishing.",
       },
       {
         q: "How should investigative journalists document their AI research?",
         a: "Every AI research step that informs a published claim should have a documented record: what was queried, which models were used, what they returned, what the consensus level was, and whether a human reviewed the output. ConvergePanel's audit export automates this for multi-model research runs — creating the editorial paper trail that protects both the journalist and the publication.",
       },
       {
-        q: "What are the risks of using AI in investigative journalism?",
-        a: "The main risks are acting on hallucinated facts, publishing claims with low AI consensus without primary-source verification, and using AI outputs without documenting the process for editorial accountability. Multi-model verification reduces the first two; audit logging addresses the third.",
-      },
-      {
-        q: "How do you handle conflicting AI model answers in an investigation?",
-        a: "Treat disagreement as a research signal, not a failure. When models split on a specific claim, that split usually reflects genuine uncertainty or contested evidence. Use the disagreement to direct your manual verification — the contested points are the ones that need primary sources, not just AI consensus.",
+        q: "How does ConvergePanel support investigative research?",
+        a: "ConvergePanel runs contested claims through multiple models, surfaces where evidence is strong and where it breaks down, and identifies what individual models leave out. Every panel run creates an exportable audit record — documenting the research process for editorial review, legal accountability, or post-publication challenges. It is a review layer, not a verification authority.",
       },
     ],
   },
@@ -6406,7 +6419,7 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "verification-checklist-for-journalists",
-    publishedAt: "2026-06-15",
+    publishedAt: "2026-06-17",
     title: "Verification Checklist for Journalists Before Publishing Claims or Clips",
     h1: "Verification Checklist for Journalists Before Publishing Claims or Clips",
     audience: "Journalists, reporters, editors, newsroom teams, investigative researchers",
@@ -6542,6 +6555,8 @@ export const PAGES: PSEOPage[] = [
       { label: "AI Claim Verification for Newsrooms", href: "/use-cases/ai-claim-verification-for-newsrooms" },
       { label: "How to Verify Public Statements Quickly", href: "/use-cases/how-to-verify-public-statements-quickly" },
       { label: "How to Create an AI Audit Trail", href: "/use-cases/how-to-create-an-ai-audit-trail" },
+      { label: "Multi-LLM Answer Comparison", href: "/use-cases/multi-llm-answer-comparison" },
+      { label: "AI Disagreement Analysis Tool", href: "/use-cases/ai-disagreement-analysis-tool" },
       { label: "What Is Source Grounding in AI?", href: "/use-cases/what-is-source-grounding-in-ai" },
     ],
     cta: "Verify Before Publishing",
@@ -7604,7 +7619,7 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "ai-audit-trail-software",
-    publishedAt: "2026-06-15",
+    publishedAt: "2026-06-17",
     title: "AI Audit Trail Software for AI-Assisted Decisions",
     h1: "AI Audit Trail Software for Tracking AI-Assisted Decision Reviews",
     audience: "Compliance teams, governance teams, decision-making teams",
@@ -9029,9 +9044,9 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "multi-model-research-for-market-sizing",
-    publishedAt: "2026-06-08",
+    publishedAt: "2026-06-17",
     title: "Multi-Model Research for Market Sizing",
-    h1: "Multi-Model Research for Market Sizing Before You Trust the Number",
+    h1: "Multi-Model Research for Market Sizing Before You Trust One Estimate",
     audience: "Founders, analysts, investors, product teams, market researchers",
     audienceDetail: "Founders and analysts preparing market sizing estimates for fundraising, strategy, or investment analysis who want to pressure-test their numbers and assumptions before presenting them",
     problem:
@@ -9094,37 +9109,50 @@ export const PAGES: PSEOPage[] = [
     relatedLinks: [
       { label: "AI Verification for Competitive Intelligence", href: "/use-cases/ai-verification-for-competitive-intelligence" },
       { label: "Market Research with Multiple AI Models", href: "/use-cases/market-research-with-multiple-ai-models" },
+      { label: "Multi-Model Research for Product Strategy", href: "/use-cases/multi-model-research-for-product-strategy" },
       { label: "Compare Market Trends Across AI Models", href: "/use-cases/compare-market-trends-across-ai-models" },
       { label: "How to Validate Market Assumptions", href: "/use-cases/how-to-validate-market-assumptions" },
       { label: "How to Test Business Assumptions with AI", href: "/use-cases/how-to-test-business-assumptions-with-ai" },
+      { label: "How to Pressure-Test a Startup Idea", href: "/use-cases/how-to-pressure-test-a-startup-idea" },
       { label: "How to Pressure-Test Investor Pitch Claims", href: "/use-cases/how-to-pressure-test-investor-pitch-claims" },
+      { label: "AI Consensus for Competitive Intelligence", href: "/use-cases/ai-consensus-for-competitive-intelligence" },
+      { label: "How to Verify Competitor Claims with AI", href: "/use-cases/how-to-verify-competitor-claims-with-ai" },
+      { label: "Multi-LLM Answer Comparison", href: "/use-cases/multi-llm-answer-comparison" },
       { label: "What Is a Consensus Score?", href: "/use-cases/what-is-a-consensus-score" },
     ],
-    cta: "Pressure-Test Market Sizing — compare estimates across models and identify what still needs primary-source validation",
+    cta: "Review Market Sizing",
     category: "how-to",
     metaDescription:
-      "Compare market sizing assumptions across multiple AI models to identify weak estimates, missing context, and disagreement before deciding.",
+      "Compare market sizing assumptions, sources, ranges, and model disagreement across multiple AI models before using an estimate.",
     schemaType: "FAQPage",
     faq: [
       {
-        q: "Can AI estimate market size reliably?",
+        q: "Can AI help with market sizing?",
         a: "AI can surface existing market size estimates from published sources and synthesize them into a number — but it cannot produce reliable market size estimates independently. The reliability depends on the quality of the data in its training set, the recency of that data, the market definition implied by the question, and the methodology used. AI market sizing should be treated as a starting point for research, not a citable primary source.",
       },
       {
-        q: "Why do AI models give different market size numbers for the same market?",
+        q: "Why should market sizing use multiple AI models?",
         a: "Different models may draw on different analyst reports, use different market definitions, apply different methodologies (revenue-based vs. customer-based), cover different time periods, or have different training data cutoffs. A significant divergence across model estimates usually reflects genuine methodological ambiguity — not an error in one model. Use the divergence to identify what the market definition and methodology choices are before choosing a number.",
       },
       {
-        q: "What should I verify in market sizing research?",
+        q: "Does model agreement mean a market estimate is reliable?",
+        a: "Not necessarily. Model agreement is a confidence signal, not a verification certificate. Models trained on overlapping data can share the same estimate if it originated from a widely-reproduced source — even if that source used a flawed methodology. Agreement is a reason to proceed cautiously; it is not a substitute for tracing the estimate to a named primary source.",
+      },
+      {
+        q: "What assumptions should I check in market sizing?",
         a: "Verify: the primary source behind the estimate (who produced it, when, and using what methodology), the market definition (what is included and excluded), whether the estimate is global or regional, whether it is TAM or SAM, and whether the time period is consistent with your business planning horizon. Any estimate that will be cited in an investor document or board presentation should trace to a named primary source.",
+      },
+      {
+        q: "How does ConvergePanel help with market sizing research?",
+        a: "ConvergePanel runs your market sizing question through multiple AI models and surfaces where estimates are consistent and where they diverge. Consistent estimates with a common methodology give you stronger grounds for a citable range. Divergent estimates tell you that the market definition or methodology is contested — which is the signal to find a primary source before presenting the number externally. ConvergePanel supports the review step; it does not produce independent market research.",
+      },
+      {
+        q: "Should AI-generated market sizing be used without human review?",
+        a: "No. AI-generated market sizing should be treated as a research starting point, not a final citable figure. Before using an estimate in strategy, investor materials, or a board presentation, trace it to a named primary source, check whether the market definition matches your business context, and verify the time period and methodology. AI research helps you find and evaluate estimates — human judgment determines whether they are defensible.",
       },
       {
         q: "What is the difference between TAM, SAM, and SOM?",
         a: "TAM (Total Addressable Market) is the total market demand for a product or service if every potential customer were reached. SAM (Serviceable Addressable Market) is the portion of the TAM that your product and go-to-market strategy can realistically target. SOM (Serviceable Obtainable Market) is the share of the SAM you can realistically capture. AI models frequently conflate these, and using the wrong one in an investor presentation is a common credibility issue.",
-      },
-      {
-        q: "How does ConvergePanel help with market sizing?",
-        a: "ConvergePanel runs your market sizing question through multiple AI models and surfaces where estimates are consistent and where they diverge. Consistent estimates with a common methodology give you stronger grounds for a citable range. Divergent estimates tell you that the market definition or methodology is contested — which is the signal to find a primary source before presenting the number externally. ConvergePanel supports the review step; it does not produce independent market research.",
       },
     ],
   },
@@ -9462,7 +9490,7 @@ export const PAGES: PSEOPage[] = [
   },
   {
     slug: "vendor-risk-review-checklist-using-ai",
-    publishedAt: "2026-06-13",
+    publishedAt: "2026-06-17",
     title: "Vendor Risk Review Checklist Using AI",
     h1: "Vendor Risk Review Checklist Using AI Before Approval",
     metaDescription: "Use this AI-assisted vendor risk checklist to review vendor claims, security statements, operational risks, sources, and decision evidence before approval.",
@@ -9544,6 +9572,14 @@ export const PAGES: PSEOPage[] = [
       {
         q: "What vendor claims should be reviewed most carefully?",
         a: "Security and compliance claims deserve the closest scrutiny: certifications should be verified for currency and scope, SLA commitments should be traced to contract language (not just marketing materials), and data handling claims should specify where data is stored, who can access it, and what happens to it at contract end. Vendor-provided materials are not independent evidence.",
+      },
+      {
+        q: "How do AI models help with vendor risk review?",
+        a: "Running vendor risk questions through multiple AI models surfaces risk categories that a single query or template approach might miss. Where models consistently flag the same risk — security gaps, compliance scope limitations, contractual ambiguities — that consensus gives you a stronger basis for directing expert review. Where models diverge, that divergence is a signal the risk category is contested or context-dependent and warrants deeper investigation.",
+      },
+      {
+        q: "Does ConvergePanel replace a legal or security review of a vendor?",
+        a: "No. ConvergePanel supports the research and checklist preparation phase. It does not constitute legal advice, a formal information security assessment, or a compliance audit. All vendor risk decisions should be reviewed by qualified legal, security, and compliance professionals before contract sign-off.",
       },
     ],
     relatedLinks: [
