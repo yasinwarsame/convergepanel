@@ -562,11 +562,11 @@ export const PAGES: PSEOPage[] = [
   },
   {
     slug: "what-is-source-grounding-in-ai",
-    title: "What Is Source Grounding in AI?",
+    title: "What Is Source Grounding in AI? Meaning, Limits, and Examples",
     h1: "What Is Source Grounding in AI and Why Does It Matter?",
     audience: "AI-curious professionals, researchers, analysts",
     audienceDetail: "Professionals evaluating AI reliability for their work, particularly those who need to act on or publish AI-generated claims",
-    publishedAt: "2026-06-15",
+    publishedAt: "2026-06-17",
     problem:
       "AI models generate plausible-sounding answers regardless of whether they have good evidence. Without source grounding, you can't tell the difference between 'the model found strong evidence' and 'the model made something up.'\n\nThis problem has a specific mechanism. Language models are trained to predict the next token — they don't distinguish between 'I retrieved this from a document' and 'I generated this based on patterns in my training data.' When a model says 'according to a 2023 study…', it may be citing a real study, paraphrasing one, or generating a plausible-sounding reference from scratch. The output looks identical in all three cases.\n\nSource grounding is the field's response. A grounded AI system ties its claims to retrievable, verifiable sources — documents, passages, or structured knowledge bases. An ungrounded system operates purely from parametric memory: the implicit knowledge encoded in its weights during training, which can't be audited, corrected, or cited. The practical difference is whether you can check the answer.",
     solution:
@@ -655,7 +655,7 @@ export const PAGES: PSEOPage[] = [
       },
     ],
     metaDescription:
-      "Learn what source grounding means, why citations help, and why source-backed AI answers still need verification.",
+      "Learn what source grounding means, how grounded AI answers use evidence, and why citations still require verification.",
   },
   {
     slug: "single-model-vs-multi-model-verification",
@@ -751,11 +751,11 @@ export const PAGES: PSEOPage[] = [
   },
   {
     slug: "ai-video-review-for-media-teams",
-    title: "AI Video Review for Media Teams",
-    h1: "AI Video Authenticity Review for Media and Communications Teams",
+    title: "AI Video Review for Media Teams Before Publishing",
+    h1: "AI Video Review for Media Teams Evaluating Viral and Suspicious Clips",
     audience: "Media teams",
     audienceDetail: "Social media managers, communications directors, PR teams, and brand safety officers",
-    publishedAt: "2026-05-29",
+    publishedAt: "2026-06-17",
     problem:
       "Deepfakes and AI-generated video increasingly target brands, executives, and public figures. Media teams need a fast way to check whether a circulating video is authentic before deciding how to respond.\n\nThe response window is the constraint. When a video of your CEO appears to say something damaging, the decision — respond immediately, wait for verification, or issue a denial — has to happen within hours, not days. Acting on an authentic video as if it were fake creates its own crisis. The cost of a wrong call in either direction is high.\n\nBrand safety is also an ongoing concern, not just a crisis event. User-submitted video, influencer content, and partner-produced footage all carry deepfake risk. Systematically reviewing flagged content before amplification prevents a different kind of damage: becoming the channel that amplified a generated video as real.",
     solution:
@@ -779,7 +779,7 @@ export const PAGES: PSEOPage[] = [
       { label: "How to check if a viral video might be manipulated", href: "/use-cases/how-to-check-if-a-viral-video-might-be-manipulated" },
       { label: "How journalists can verify viral clips", href: "/use-cases/how-journalists-can-verify-viral-clips" },
     ],
-    cta: "Review a video clip — see what 3 models find",
+    cta: "Review a Video Before Publishing",
     category: "video-verification",
     schemaType: "FAQPage",
     faq: [
@@ -801,7 +801,7 @@ export const PAGES: PSEOPage[] = [
       },
     ],
     metaDescription:
-      "Media teams: check video authenticity with 3 vision AI models before responding to a crisis. ConvergePanel detects deepfake signals and documents the consensus verdict.",
+      "Use multiple vision models to sanity-check viral clips, visual claims, source context, and uncertainty before publishing. Not forensic proof — a structured review layer.",
   },
   {
     slug: "ai-peer-review-for-high-stakes-workflows",
@@ -3170,7 +3170,7 @@ export const PAGES: PSEOPage[] = [
   {
     slug: "how-to-create-an-ai-audit-trail",
     publishedAt: "2026-06-17",
-    title: "How to Create an AI Audit Trail for High-Stakes Decisions",
+    title: "How to Create an AI Audit Trail Step by Step",
     h1: "How to Create an AI Audit Trail Before You Trust AI Output",
     audience: "Compliance-minded professionals and team leads",
     audienceDetail: "Knowledge workers, editors, analysts, researchers, and compliance officers who use AI for serious work and need to document the process",
@@ -3460,8 +3460,8 @@ export const PAGES: PSEOPage[] = [
   {
     slug: "what-is-a-consensus-score",
     publishedAt: "2026-06-17",
-    title: "What Is an AI Consensus Score?",
-    h1: "What Is an AI Consensus Score and When Should You Trust It?",
+    title: "What Is an AI Consensus Score? Agreement vs Accuracy",
+    h1: "What Is an AI Consensus Score and What Does It Actually Tell You?",
     audience: "AI-curious professionals, analysts, researchers, governance teams",
     audienceDetail: "Anyone using ConvergePanel or evaluating multi-model AI verification tools who wants to understand what model agreement means for decision-making",
     problem:
@@ -3530,7 +3530,7 @@ export const PAGES: PSEOPage[] = [
     cta: "Review AI Consensus",
     category: "glossary",
     metaDescription:
-      "Learn how AI consensus scores show model agreement, why agreement is not the same as accuracy, and when disagreement needs review.",
+      "Learn how an AI consensus score measures model agreement, why agreement is not proof of accuracy, and how to interpret model disagreement.",
     schemaType: "FAQPage",
     faq: [
       {
@@ -4126,8 +4126,8 @@ export const PAGES: PSEOPage[] = [
   {
     slug: "how-to-fact-check-chatgpt-responses",
     publishedAt: "2026-06-17",
-    title: "How to Fact-Check ChatGPT Responses Before You Trust Them",
-    h1: "How to Fact-Check ChatGPT Responses for Errors, Sources, and Missing Context",
+    title: "How to Fact-Check ChatGPT Answers for Errors and Sources",
+    h1: "How to Fact-Check ChatGPT Responses Before You Trust Them",
     audience: "Researchers, students, professionals, creators, analysts",
     audienceDetail: "Anyone who uses ChatGPT for research, writing, or decisions and wants to check accuracy before acting on the response",
     problem:
@@ -4228,7 +4228,7 @@ export const PAGES: PSEOPage[] = [
     cta: "Fact-Check This ChatGPT Answer",
     category: "claim-verification",
     metaDescription:
-      "Check ChatGPT answers for hallucinations, weak sources, missing context, model disagreement, and unsupported claims before relying on them.",
+      "Check ChatGPT answers for unsupported claims, weak sources, outdated context, hallucinations, and disagreement with other AI models before relying on them.",
     schemaType: "HowTo",
     faq: [
       {
@@ -4373,6 +4373,18 @@ export const PAGES: PSEOPage[] = [
         ],
       },
       {
+        heading: "Source Verification Framework: Six Checks Before You Cite",
+        bullets: [
+          "Does the source exist? — search for it directly in databases, publisher sites, or via DOI before trusting it",
+          "Is it primary or secondary? — primary sources (original studies, official records) carry more weight than secondary summaries",
+          "Is it current? — check the publication date; research and policy guidance can be superseded or retracted",
+          "Does it actually support the claim? — read the relevant passage; a real paper can be used to support a claim it doesn't make",
+          "Is the quotation accurate? — if the AI quotes text, verify the exact wording against the source",
+          "Has contradictory evidence been omitted? — check whether the model referenced only one side of a contested body of evidence",
+          "Do other models interpret it differently? — run the underlying claim through multiple models; divergence on a source is a verification signal",
+        ],
+      },
+      {
         heading: "Why Source Grounding Helps But Is Not Enough",
         paragraphs: [
           "Source grounding means tying an AI answer to a retrievable document — a study, a report, a named source. It helps because it makes claims auditable. Instead of 'is this claim true?', you can ask 'does this document say what the model claims?' That is a narrower, more tractable question.",
@@ -4460,7 +4472,7 @@ export const PAGES: PSEOPage[] = [
   {
     slug: "how-to-pressure-test-an-ai-response",
     publishedAt: "2026-06-17",
-    title: "How to Pressure-Test an AI Response Before You Trust It",
+    title: "How to Pressure-Test an AI Answer Before You Trust It",
     h1: "How to Pressure-Test an AI Response with Multiple Models",
     audience: "Knowledge workers, analysts, founders, researchers",
     audienceDetail: "Professionals who receive AI responses for high-stakes questions and want to challenge them before acting or publishing",
@@ -4554,10 +4566,10 @@ export const PAGES: PSEOPage[] = [
       { label: "How to Compare AI Answers Before Deciding", href: "/use-cases/how-to-compare-ai-answers-before-deciding" },
       { label: "Compliance Claim Verification with AI", href: "/use-cases/compliance-claim-verification-with-ai" },
     ],
-    cta: "Pressure-Test This AI Response",
+    cta: "Pressure-Test an AI Answer",
     category: "how-to",
     metaDescription:
-      "Challenge AI answers for weak assumptions, missing context, unsupported claims, source gaps, and model disagreement before relying on them.",
+      "Challenge an AI answer for weak assumptions, missing context, unsupported claims, source gaps, and model disagreement before relying on it.",
     schemaType: "HowTo",
     faq: [
       {
@@ -5005,8 +5017,8 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "ask-multiple-ai-models-one-question",
-    publishedAt: "2026-06-15",
-    title: "Ask Multiple AI Models One Question",
+    publishedAt: "2026-06-17",
+    title: "Ask Multiple AI Models One Question and Compare the Answers",
     h1: "Ask Multiple AI Models One Question Before You Trust the Answer",
     audience: "Information workers, researchers, founders",
     audienceDetail: "Anyone who wants more than one AI perspective on a research question, without manually switching between different AI tools",
@@ -5040,7 +5052,7 @@ export const PAGES: PSEOPage[] = [
     cta: "Ask Multiple Models",
     category: "research",
     metaDescription:
-      "Ask the same question across multiple AI models to compare answers, surface disagreement, check sources, and build a stronger response.",
+      "Ask the same question across multiple AI models, compare responses, and see where they agree, disagree, or need verification before you decide.",
     schemaType: "FAQPage",
     faq: [
       {
@@ -5527,9 +5539,9 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "ai-expert-panel-tool",
-    publishedAt: "2026-06-07",
-    title: "AI Expert Panel Tool for Multi-Model Review",
-    h1: "AI Expert Panel Tool for Comparing Multiple AI Perspectives",
+    publishedAt: "2026-06-17",
+    title: "AI Expert Panel Tool for Multi-Model Research and Verification",
+    h1: "AI Expert Panel Tool: Compare Multiple Models Before You Decide",
     audience: "Researchers, founders, analysts, teams",
     audienceDetail: "Anyone who wants to replace the single-chatbot workflow with a panel-style consultation that surfaces multiple expert perspectives on a complex or high-stakes question",
     problem:
@@ -5592,10 +5604,10 @@ export const PAGES: PSEOPage[] = [
       { label: "Trustworthy AI for Analysts and Consultants", href: "/use-cases/trustworthy-ai-for-analysts-and-consultants" },
       { label: "Public Sector Research with Multiple AI Models", href: "/use-cases/public-sector-research-with-multiple-ai-models" },
     ],
-    cta: "Start an AI Panel Review — five models, one consultation",
+    cta: "Run an AI Expert Panel",
     category: "research",
     metaDescription:
-      "Use an AI expert panel workflow to compare models, surface disagreement, and create a stronger synthesis before deciding.",
+      "Use an AI expert panel to compare model answers, surface disagreement, review sources, and create a stronger synthesis for important decisions.",
     schemaType: "FAQPage",
     faq: [
       {
@@ -5624,7 +5636,7 @@ export const PAGES: PSEOPage[] = [
   {
     slug: "multi-llm-answer-comparison",
     publishedAt: "2026-06-17",
-    title: "Multi-LLM Answer Comparison for Research and Verification",
+    title: "Multi-LLM Answer Comparison: Compare AI Models in One Review",
     h1: "Multi-LLM Answer Comparison Before You Trust One AI Response",
     audience: "Researchers, analysts, information workers, developers",
     audienceDetail: "Anyone who wants to understand how different large language models respond to the same question — and what model divergence reveals about research quality and reliability",
@@ -5709,7 +5721,7 @@ export const PAGES: PSEOPage[] = [
     cta: "Compare LLM Answers",
     category: "research",
     metaDescription:
-      "Compare multiple LLM answers, identify agreement and disagreement, review source use, and decide what needs verification before relying on one response.",
+      "Compare answers from multiple LLMs, identify consensus and disagreement, review sources, and build a stronger synthesis before relying on one model.",
     schemaType: "FAQPage",
     faq: [
       {
@@ -6420,8 +6432,8 @@ export const PAGES: PSEOPage[] = [
   {
     slug: "verification-checklist-for-journalists",
     publishedAt: "2026-06-17",
-    title: "Verification Checklist for Journalists Before Publishing Claims or Clips",
-    h1: "Verification Checklist for Journalists Before Publishing Claims or Clips",
+    title: "Verification Checklist for Journalists Before Publishing",
+    h1: "Verification Checklist for Journalists Reviewing Claims, Sources, and Viral Media",
     audience: "Journalists, reporters, editors, newsroom teams, investigative researchers",
     audienceDetail: "Working journalists, editors, and newsroom teams who want a practical, repeatable checklist for verifying claims, sources, viral clips, screenshots, UGC, and public statements before publication",
     problem:
@@ -7621,7 +7633,7 @@ export const PAGES: PSEOPage[] = [
     slug: "ai-audit-trail-software",
     publishedAt: "2026-06-17",
     title: "AI Audit Trail Software for AI-Assisted Decisions",
-    h1: "AI Audit Trail Software for Tracking AI-Assisted Decision Reviews",
+    h1: "AI Audit Trail Software for Tracking AI Review and Accountability",
     audience: "Compliance teams, governance teams, decision-making teams",
     audienceDetail: "Compliance officers, team leads, and governance managers who need software that automatically documents AI-assisted research and decision processes",
     problem:
@@ -7691,7 +7703,7 @@ export const PAGES: PSEOPage[] = [
     cta: "Start an AI Audit Trail",
     category: "governance",
     metaDescription:
-      "Track prompts, model responses, disagreement, reviewer notes, and decision receipts for reviewable AI-assisted work.",
+      "Track prompts, model outputs, disagreement, source review, peer review, and decision receipts for accountable AI-assisted work.",
     schemaType: "FAQPage",
     faq: [
       {
@@ -7740,9 +7752,9 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "ai-decision-audit-trail",
-    publishedAt: "2026-06-09",
-    title: "AI Decision Audit Trail for Reviewable AI-Assisted Decisions",
-    h1: "AI Decision Audit Trail: Record Review, Disagreement, and Final Reasoning",
+    publishedAt: "2026-06-17",
+    title: "AI Decision Audit Trail for Reviewable AI-Assisted Work",
+    h1: "AI Decision Audit Trail: Document How an AI-Assisted Decision Was Reviewed",
     audience: "Governance teams, analysts, managers",
     audienceDetail: "Managers and governance team members who need to produce a documented record of AI-assisted decision processes for internal review, compliance, or external audit",
     problem:
@@ -7803,7 +7815,7 @@ export const PAGES: PSEOPage[] = [
     cta: "Create a Decision Receipt — export the full record of every AI-assisted decision",
     category: "governance",
     metaDescription:
-      "Document prompts, model responses, disagreement, reviewer notes, and final reasoning for AI-assisted decisions.",
+      "Record prompts, model responses, source checks, disagreement, reviewer notes, and final decision reasoning for accountable AI-assisted work.",
     schemaType: "FAQPage",
     faq: [
       {
