@@ -21464,7 +21464,7 @@ export const PAGES: PSEOPage[] = [
     title: "Insurance Policy Research with AI",
     h1: "Researching Insurance Policy Language with Multiple AI Models",
     metaDescription: "Compare how multiple AI models interpret policy clauses and terms before escalating to qualified staff — surfacing where models disagree so reviewers know what to check. Not legal or coverage advice.",
-    category: "research-panel",
+    category: "research",
     schemaType: "FAQPage",
     audience: "Insurance operations and support staff",
     audienceDetail: "Operations staff, support teams, and intake coordinators who research what a policy says in order to prepare summaries or route questions to qualified claims professionals and adjusters.",
