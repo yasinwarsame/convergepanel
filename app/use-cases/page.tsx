@@ -259,6 +259,7 @@ const HUB_GROUPS: HubGroup[] = [
       "how-to-verify-saas-vendor-features-with-ai",
       "ai-due-diligence-for-technology-purchases",
       "consensus-scoring-for-vendor-evaluation",
+      "should-procurement-teams-trust-one-ai-answer",
     ],
   },
   {
@@ -277,6 +278,7 @@ const HUB_GROUPS: HubGroup[] = [
       "ai-consensus-for-risk-assessments",
       "policy-exception-review-with-ai-models",
       "trustworthy-ai-for-compliance-operations",
+      "should-compliance-teams-trust-one-llm",
     ],
   },
   {
@@ -295,6 +297,8 @@ const HUB_GROUPS: HubGroup[] = [
       "ai-panel-for-internal-controls-testing",
       "control-exception-analysis-with-ai-consensus",
       "audit-walkthrough-documentation-with-ai",
+      "trustworthy-ai-for-audit-teams",
+      "research-panel-for-assurance-workflows",
     ],
   },
   {
@@ -309,6 +313,12 @@ const HUB_GROUPS: HubGroup[] = [
       "multi-model-research-for-threat-intelligence",
       "threat-report-fact-checking-with-ai-models",
       "security-advisory-validation-using-ai",
+      "ai-consensus-for-security-incident-analysis",
+      "should-security-teams-trust-one-ai-answer",
+      "malware-report-analysis-with-multiple-ai-models",
+      "phishing-report-verification-with-ai",
+      "trustworthy-ai-for-soc-teams",
+      "incident-response-research-panel",
     ],
   },
   {
@@ -325,6 +335,10 @@ const HUB_GROUPS: HubGroup[] = [
       "product-discovery-research-with-ai-panel",
       "multi-model-research-for-product-strategy",
       "product-assumptions-check-with-ai",
+      "should-product-managers-trust-one-ai-answer",
+      "validate-feature-ideas-with-ai-models",
+      "trustworthy-ai-for-product-teams",
+      "research-panel-for-roadmap-decisions",
     ],
   },
   {
@@ -339,6 +353,12 @@ const HUB_GROUPS: HubGroup[] = [
       "knowledge-base-validation-tool-with-ai",
       "support-article-fact-check-with-multiple-ai-models",
       "verify-troubleshooting-steps-with-ai",
+      "multi-model-support-response-checker",
+      "ai-consensus-for-knowledge-base-accuracy",
+      "should-support-teams-trust-one-ai-model",
+      "customer-service-script-verification-with-ai",
+      "trustworthy-ai-for-support-operations",
+      "ai-research-panel-for-escalation-handling",
     ],
   },
   {
@@ -352,6 +372,13 @@ const HUB_GROUPS: HubGroup[] = [
       "verify-account-research-with-ai",
       "sales-battlecard-fact-check-with-ai",
       "multi-model-research-for-sales-prospecting",
+      "ai-consensus-for-sales-call-prep",
+      "prospect-claim-verification-with-ai",
+      "should-sales-teams-trust-one-ai-answer",
+      "account-intelligence-validation-with-multiple-ai-models",
+      "trustworthy-ai-for-revenue-teams",
+      "research-panel-for-account-planning",
+      "verify-company-background-with-ai-models",
     ],
   },
   {
@@ -364,6 +391,13 @@ const HUB_GROUPS: HubGroup[] = [
     slugs: [
       "verify-financial-assumptions-with-ai",
       "finance-memo-review-with-ai-consensus",
+      "finance-ops-research-with-multiple-ai-models",
+      "ai-consensus-for-budgeting-decisions",
+      "should-finance-teams-trust-one-ai-model",
+      "forecast-narrative-verification-with-ai",
+      "trustworthy-ai-for-fpa-teams",
+      "investor-update-fact-check-with-ai-models",
+      "financial-analysis-validation-with-ai",
     ],
   },
   {
@@ -425,6 +459,8 @@ const HUB_GROUPS: HubGroup[] = [
       "campus-policy-explanation-with-ai-verification",
       "verify-program-information-with-ai-models",
       "education-administration-knowledge-validation",
+      "should-administrators-trust-one-ai-answer",
+      "multi-model-research-for-student-services",
     ],
   },
   {
@@ -441,6 +477,8 @@ const HUB_GROUPS: HubGroup[] = [
       "vendor-and-shipping-risk-analysis-with-ai",
       "operational-assumptions-check-with-ai",
       "logistics-planning-verification-with-ai-models",
+      "should-ops-teams-trust-one-ai-model",
+      "multi-model-research-for-inventory-decisions",
     ],
   },
   {
@@ -455,6 +493,39 @@ const HUB_GROUPS: HubGroup[] = [
       "multi-model-language-quality-review",
       "product-copy-verification-across-languages",
       "multilingual-content-review-with-ai-panel",
+      "ai-consensus-for-localization-qa",
+    ],
+  },
+  {
+    id: "legal-operations-contract-review",
+    label: "Legal Operations & Contract Review",
+    description:
+      "Use ConvergePanel to compare how multiple AI models summarize contracts, explain clauses, and research matter background, so legal teams can spot disagreement before relying on a single answer. ConvergePanel does not provide legal advice.",
+    tailwindText: "text-indigo-300",
+    tailwindBg: "bg-cp-raised",
+    tailwindBorder: "border-cp-border",
+    slugs: [
+      "legal-ops-research-with-multiple-ai-models",
+      "verify-contract-summary-claims-with-ai",
+      "ai-consensus-for-clause-explanation",
+      "should-legal-teams-trust-one-ai-model",
+      "legal-intake-research-panel",
+      "matter-background-research-with-ai",
+      "multi-model-review-for-legal-ops-workflows",
+      "legal-document-grounding-with-ai",
+    ],
+  },
+  {
+    id: "insurance-claims-document-review",
+    label: "Insurance & Claims Document Review",
+    description:
+      "Use ConvergePanel to compare how multiple AI models read claims and policy documents, so insurance teams can flag disagreement for human review. ConvergePanel does not make coverage or claims decisions.",
+    tailwindText: "text-rose-300",
+    tailwindBg: "bg-cp-raised",
+    tailwindBorder: "border-cp-border",
+    slugs: [
+      "claims-document-grounding-with-ai",
+      "insurance-policy-research-with-ai",
     ],
   },
 ];
