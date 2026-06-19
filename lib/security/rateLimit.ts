@@ -13,6 +13,7 @@
 import "server-only";
 import { adminDb } from "@/lib/firebase/admin";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
+import { logger } from "@/lib/logger";
 
 export interface RateLimitConfig {
   maxRequests: number; // Max requests allowed in the time window
@@ -40,7 +41,7 @@ export async function checkRateLimit(
   config: RateLimitConfig
 ): Promise<RateLimitResult> {
   if (!adminDb) {
-    console.error("[rateLimit] Firestore not available, denying request");
+    logger.error("[rateLimit] Firestore not available, denying request");
     return {
       allowed: false,
       remaining: 0,
@@ -110,7 +111,7 @@ export async function checkRateLimit(
       retryAfter,
     };
   } catch (error: any) {
-    console.error("[rateLimit] Error checking rate limit, denying request:", {
+    logger.error("[rateLimit] Error checking rate limit, denying request", {
       identifier: config.identifier,
       error: error?.message,
     });
@@ -150,7 +151,7 @@ export async function cleanupRateLimits(olderThanSeconds: number = 3600): Promis
     
     return snapshot.size;
   } catch (error: any) {
-    console.error("[rateLimit] Error cleaning up rate limits:", error?.message);
+    logger.error("[rateLimit] Error cleaning up rate limits", { error: error?.message });
     return 0;
   }
 }

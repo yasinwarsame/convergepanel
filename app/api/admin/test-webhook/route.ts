@@ -13,17 +13,17 @@ import { adminDb } from "@/lib/firebase/admin";
 
 // Ensure Node.js runtime (Firebase Admin requires Node.js, not Edge)
 export const runtime = "nodejs";
-import { verifySessionCookie } from "@/lib/firebase/auth-helpers";
+import { requireAdminApiAccess } from "@/lib/firebase/auth-helpers";
 import { handleSubscriptionChange } from "@/app/api/stripe/webhook/route";
 import Stripe from "stripe";
 
 export async function POST(req: NextRequest) {
   try {
-    // Verify authentication
-    const auth = await verifySessionCookie(req);
+    // Verify admin authentication — session cookie alone is not sufficient
+    const auth = await requireAdminApiAccess(req);
     if (!auth) {
       return NextResponse.json(
-        { error: "Unauthorized. Please sign in." },
+        { error: "Unauthorized. Admin access required." },
         { status: 401 }
       );
     }

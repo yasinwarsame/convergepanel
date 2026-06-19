@@ -10,8 +10,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { stripe } from "@/lib/stripe/client";
 import { adminDb, firebaseAdmin } from "@/lib/firebase/admin";
-import { verifySessionCookie } from "@/lib/firebase/auth-helpers";
-import { getPlanIdFromPriceId, getPlanConfigById, STRIPE_PRICE_TO_PLAN } from "@/lib/billing/planConfig";
+import { requireAdminApiAccess } from "@/lib/firebase/auth-helpers";
+import { getPlanIdFromPriceId, getPlanConfigById } from "@/lib/billing/planConfig";
 import { BillingInterval } from "@/lib/plans";
 import { resetUsageForNewPlan } from "@/lib/stripe/usage";
 import Stripe from "stripe";
@@ -21,11 +21,11 @@ export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
   try {
-    // Verify authentication
-    const auth = await verifySessionCookie(req);
+    // Verify admin authentication — session cookie alone is not sufficient
+    const auth = await requireAdminApiAccess(req);
     if (!auth) {
       return NextResponse.json(
-        { error: "Unauthorized. Please sign in." },
+        { error: "Unauthorized. Admin access required." },
         { status: 401 }
       );
     }
@@ -100,12 +100,7 @@ export async function POST(req: NextRequest) {
     const planId = getPlanIdFromPriceId(priceId);
     if (!planId) {
       return NextResponse.json(
-        {
-          error: "Could not map price ID to plan",
-          priceId,
-          availableMappings: Object.keys(STRIPE_PRICE_TO_PLAN),
-          configuredMappings: STRIPE_PRICE_TO_PLAN,
-        },
+        { error: "Could not map price ID to plan", priceId },
         { status: 400 }
       );
     }
