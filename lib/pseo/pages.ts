@@ -257,6 +257,7 @@ export const PAGES: PSEOPage[] = [
       },
     ],
     relatedLinks: [
+      { label: "AI video verification with multiple models", href: "/use-cases/ai-video-verification" },
       { label: "AI Video Verification for Journalists", href: "/use-cases/ai-video-verification-for-journalists" },
       { label: "How Journalists Can Verify Viral Clips", href: "/use-cases/how-journalists-can-verify-viral-clips" },
       { label: "How to Review a Suspicious Video with AI", href: "/use-cases/how-to-review-a-suspicious-video-with-ai" },
@@ -264,7 +265,6 @@ export const PAGES: PSEOPage[] = [
       { label: "Video Authenticity Review for Researchers", href: "/use-cases/video-authenticity-review-for-researchers" },
       { label: "Verification Checklist for Journalists", href: "/use-cases/verification-checklist-for-journalists" },
       { label: "AI Fact-Checking vs. Claim Verification", href: "/use-cases/ai-fact-checking-vs-claim-verification" },
-      { label: "How to Verify Sources from AI Answers", href: "/use-cases/how-to-verify-sources-from-ai-answers" },
     ],
     cta: "Review Video Authenticity",
     category: "video-verification",
@@ -410,6 +410,7 @@ export const PAGES: PSEOPage[] = [
     metaDescription:
       "Run complex research questions through 5 AI models at once. ConvergePanel synthesizes consensus, disagreements, and bias signals into one structured brief.",
     relatedLinks: [
+      { label: "Deep research and AI verification", href: "/use-cases/deep-research-and-ai-verification" },
       { label: "Compare ChatGPT, Claude, Gemini, Grok, and Perplexity", href: "/use-cases/how-to-compare-chatgpt-claude-gemini-grok-perplexity-for-research" },
       { label: "Multi-LLM Answer Comparison", href: "/use-cases/multi-llm-answer-comparison" },
       { label: "Best multi-model AI tool for research", href: "/use-cases/best-multi-model-ai-tool-for-research" },
@@ -418,8 +419,6 @@ export const PAGES: PSEOPage[] = [
       { label: "How to validate market assumptions", href: "/use-cases/how-to-validate-market-assumptions" },
       { label: "How to get multiple AI perspectives on a startup idea", href: "/use-cases/how-to-get-multiple-ai-perspectives-on-a-startup-idea" },
       { label: "Market Research with Multiple AI Models", href: "/use-cases/market-research-with-multiple-ai-models" },
-      { label: "AI Vendor Due Diligence with Multiple Models", href: "/use-cases/ai-vendor-due-diligence-with-multiple-models" },
-      { label: "Multi-Model Research for Threat Intelligence", href: "/use-cases/multi-model-research-for-threat-intelligence" },
       { label: "Multi-Model Research for Complex Decisions", href: "/use-cases/multi-model-research-for-complex-decisions" },
       { label: "Research Synthesis for Knowledge Workers", href: "/use-cases/research-synthesis-for-knowledge-workers" },
     ],
@@ -803,6 +802,7 @@ export const PAGES: PSEOPage[] = [
       "Providing a basis for a public statement when a deepfake is suspected",
     ],
     relatedLinks: [
+      { label: "AI video verification with multiple models", href: "/use-cases/ai-video-verification" },
       { label: "Video authenticity review for fact-checkers", href: "/use-cases/video-authenticity-review-for-fact-checkers" },
       { label: "How to review a suspicious video with AI", href: "/use-cases/how-to-review-a-suspicious-video-with-ai" },
       { label: "How to check if a viral video might be manipulated", href: "/use-cases/how-to-check-if-a-viral-video-might-be-manipulated" },
@@ -3774,13 +3774,13 @@ export const PAGES: PSEOPage[] = [
       },
     ],
     relatedLinks: [
+      { label: "AI video verification with multiple models", href: "/use-cases/ai-video-verification" },
       { label: "How Journalists Can Verify Viral Clips", href: "/use-cases/how-journalists-can-verify-viral-clips" },
       { label: "AI Tools for Investigative Journalists", href: "/use-cases/ai-tools-for-investigative-journalists" },
       { label: "How to Verify User-Generated Content", href: "/use-cases/how-to-verify-user-generated-content" },
       { label: "Video Authenticity Review for Fact-Checkers", href: "/use-cases/video-authenticity-review-for-fact-checkers" },
       { label: "Verification Checklist for Journalists", href: "/use-cases/verification-checklist-for-journalists" },
       { label: "How to Fact-Check Breaking News Claims", href: "/use-cases/how-to-fact-check-breaking-news-claims" },
-      { label: "How to Check If a Viral Video Might Be Manipulated", href: "/use-cases/how-to-check-if-a-viral-video-might-be-manipulated" },
     ],
     cta: "Verify Before Reporting",
     category: "video-verification",
@@ -5911,6 +5911,7 @@ export const PAGES: PSEOPage[] = [
       },
     ],
     relatedLinks: [
+      { label: "Deep research and AI verification", href: "/use-cases/deep-research-and-ai-verification" },
       { label: "Multi-LLM Answer Comparison", href: "/use-cases/multi-llm-answer-comparison" },
       { label: "AI Expert Panel Tool", href: "/use-cases/ai-expert-panel-tool" },
       { label: "How to Compare AI Model Outputs Side by Side", href: "/use-cases/how-to-compare-ai-model-outputs-side-by-side" },
@@ -21891,6 +21892,378 @@ export const PAGES: PSEOPage[] = [
       { href: "/use-cases/ai-disagreement-analysis-tool", label: "AI Disagreement Analysis Tool" },
       { href: "/use-cases/how-to-pressure-test-an-ai-response", label: "How to Pressure-Test an AI Response" },
       { href: "/use-cases/research-synthesis-for-knowledge-workers", label: "Research Synthesis for Knowledge Workers" },
+    ],
+  },
+
+  // ── FLAGSHIP: Deep Research and AI Verification ────────────────────────────
+
+  {
+    slug: "deep-research-and-ai-verification",
+    title: "Deep Research and AI Verification with Multiple Models",
+    h1: "Deep Research and AI Verification Before You Trust the Answer",
+    audience: "Researchers, analysts, journalists, and decision-makers",
+    audienceDetail: "Knowledge workers, consultants, investigators, founders, and teams who use AI for research and need to verify what they find before acting on it",
+    publishedAt: "2026-06-20",
+    problem:
+      "Most AI research workflows stop at generation. A model produces a confident, well-structured answer — and because it reads well, it gets used. But a confident answer is not a verified one. Models hallucinate citations, compress uncertainty into false clarity, and share training-data biases that produce correlated errors across outputs.\n\nThe problem is structural: research quality is not visible from the outside. You cannot tell whether an AI answer is built on solid evidence or on a model's tendency to sound authoritative. Most tools don't give you the signals to find out. They generate — they don't verify.",
+    solution:
+      "Deep research and AI verification is a two-phase workflow. The first phase generates research by running a question across multiple leading models and surfacing where they agree and where they diverge. The second phase verifies that research by reviewing the claims made, the sources cited, the evidence quality, and the reasoning offered — before any of it becomes the basis for a decision.\n\nConvergePanel supports both phases in one workflow. The Research mode queries multiple models and produces a structured synthesis. The Claim Verification mode checks specific claims against the same panel. The disagreement view and audit trail document what was found, what was contested, and how the final synthesis was reached.",
+    workflow: [
+      "Define the research question precisely — ambiguous questions produce ambiguous research",
+      "Add context, relevant documents, or constraints that should shape model responses",
+      "Run the question across multiple models and collect independent responses",
+      "Identify the central factual claims each model is making",
+      "Compare conclusions and supporting evidence across models",
+      "Review the consensus score and the agreement map",
+      "Examine where models disagree — disagreement marks the territory that needs verification",
+      "Check the sources cited or implied: do they exist, are they authoritative, do they support the claim?",
+      "Identify missing context, unexamined assumptions, and open questions",
+      "Generate a synthesis that preserves the distinction between what is settled and what is contested",
+      "Document the review — the claims checked, the disagreements found, and the final conclusion",
+    ],
+    useCases: [
+      "Verifying the evidence base before including an AI-generated claim in a published report",
+      "Cross-checking competitor research across five models before making a strategic decision",
+      "Reviewing AI-generated policy analysis for source quality and contested claims",
+      "Building a documented research audit trail before sharing findings with a client or executive",
+      "Pressure-testing a startup idea by running it across models and verifying the strongest objections",
+    ],
+    cta: "Run Deep Research and Verification",
+    category: "research",
+    schemaType: "FAQPage",
+    metaDescription:
+      "Run deep research across multiple AI models, verify claims and sources, surface disagreement, and produce a documented synthesis with ConvergePanel.",
+    comparisonTable: {
+      headers: ["Activity", "Single-model research", "ConvergePanel research + verification"],
+      rows: [
+        ["Model perspectives", "One", "Multiple (up to five)"],
+        ["Claim verification", "Not built in", "Dedicated verification panel"],
+        ["Source comparison", "Single model's citations", "Cross-model citation review"],
+        ["Disagreement visibility", "Hidden", "Explicitly surfaced"],
+        ["Consensus signal", "None", "Scored 0–100"],
+        ["Bias and blind spots", "Invisible", "Partially visible via model divergence"],
+        ["Synthesis quality", "One model's synthesis", "Structured synthesis with uncertainty preserved"],
+        ["Human review support", "Informal", "Documented with peer-review flag"],
+        ["Audit trail", "None", "Exportable review record"],
+        ["Decision receipt", "None", "Structured receipt for high-stakes decisions"],
+      ],
+    },
+    bodySections: [
+      {
+        heading: "What Should Be Verified in AI-Generated Research",
+        bullets: [
+          "Central factual claims — the statements the research depends on",
+          "Statistics, percentages, and numerical claims — check the source and the date",
+          "Named entities — people, organizations, and publications cited as authorities",
+          "Quotations attributed to real people — confirm they were actually said",
+          "Causal claims — models often assert causation where only correlation exists",
+          "Market claims — size, growth rate, and trend claims require traceable sources",
+          "Policy and regulatory claims — rules change; check the effective date",
+          "Technical claims — check whether stated behavior matches actual specifications",
+          "Source interpretation — did the model accurately represent what the source says?",
+          "Unexamined assumptions — what is the research taking for granted?",
+          "Recommendations — the action implied by the research, which inherits all the above risks",
+        ],
+      },
+      {
+        heading: "What Model Agreement Can and Cannot Tell You",
+        paragraphs: [
+          "When five models converge on the same answer, that consensus is a meaningful signal — it suggests the claim is well-supported across different training datasets and reasoning approaches. A consensus score above 80 is a reasonable basis for proceeding, with appropriate documentation.",
+          "But consensus is not proof. Models can share training-data errors. They can converge on a widely-repeated misconception. They can agree on a claim that was true when their training data was assembled but is no longer accurate. Consensus tells you the claim is plausible and not contested across models — it does not tell you the underlying sources are sound or that the world has not changed.",
+          "Treat high consensus as a starting point for acting, not as a substitute for source review. For high-stakes claims, verify the underlying sources regardless of the consensus score.",
+        ],
+      },
+      {
+        heading: "What Model Disagreement Reveals",
+        bullets: [
+          "Ambiguity in the research question — models parsed the question differently",
+          "Genuinely contested evidence — different models weight conflicting sources differently",
+          "Time sensitivity — some models have more recent information than others",
+          "Methodological differences — models may apply different analytical frameworks",
+          "Missing context — the question doesn't include information that would resolve the disagreement",
+          "Legitimate uncertainty — the underlying question may not have a settled answer",
+          "High-risk claims — disagreement is a warning to verify before acting",
+          "Research directions — what models disagree on is often where the most useful investigation leads",
+        ],
+      },
+      {
+        heading: "Source Grounding and Citation Review",
+        bullets: [
+          "Does the cited source exist? AI models sometimes cite plausible-sounding but non-existent references",
+          "Is the source current? Regulatory, scientific, and market claims require recent sources",
+          "Is the source authoritative for this type of claim? A blog post is not the same as a peer-reviewed study",
+          "Does the source actually support the claim being made? Read the source, not just the citation",
+          "Did the model overstate what the source says? Models sometimes amplify the confidence of a finding",
+          "Did a different model cite a conflicting source? If so, which is more authoritative?",
+          "Is the source being interpreted in context? Sources can be technically accurate and misleading in application",
+        ],
+      },
+      {
+        heading: "Who Uses Deep Research and Verification",
+        paragraphs: [
+          "Journalists use it to verify AI-assisted research before publication — checking whether the claims in a draft hold up to cross-model scrutiny and whether cited sources say what the model suggests they say.",
+          "Analysts and consultants use it to pressure-test research briefs before they reach clients — running competitive assessments through multiple models to catch the confident error before it becomes a slide.",
+          "Founders and strategists use it to stress-test business assumptions — comparing how different AI models evaluate market size claims, competitive dynamics, and regulatory risk before committing to a direction.",
+          "Compliance and audit teams use it to review AI-generated policy analysis — checking whether regulatory summaries are accurate, well-sourced, and consistent across models before relying on them in documentation.",
+          "Investigators and researchers use it to build documented evidence trails — generating research, verifying claims, reviewing sources, and preserving the complete review record for peer review or publication.",
+          "Knowledge workers generally use it when the stakes of being wrong are high enough that single-model confidence is not sufficient — when acting on a wrong answer has a meaningful cost.",
+        ],
+      },
+      {
+        heading: "Example: Deep Research Review (Illustrative)",
+        paragraphs: [
+          "This is an illustrative workflow, not a customer case study. Research question: Should a mid-sized company adopt an AI governance framework, and which frameworks are most widely recognized?",
+          "Initial research across five models produces broad agreement that AI governance frameworks exist and are increasingly adopted in regulated industries. Models agree on several named frameworks but disagree on their current adoption status and on whether a mid-sized company outside regulated industries is subject to any of them.",
+          "Claims requiring verification: statements about which frameworks are legally mandatory versus voluntary, specific adoption rates cited by models, and which jurisdictions a particular framework applies to. One model cites a specific enforcement date that differs from two other models.",
+          "Source review reveals: the date disagreement reflects a real ambiguity in the regulation's implementation timeline — one model is more current than the others. The adoption rate statistic is traceable to an industry association report that the models are not misrepresenting.",
+          "Final synthesis preserves the disagreement: frameworks are recommended for all AI-using organizations but legally mandatory primarily in regulated industries and specific jurisdictions. The enforcement date is noted as of the review date, with a recommendation to verify against the current official schedule.",
+          "ConvergePanel supports research and verification; it does not provide legal advice.",
+        ],
+      },
+      {
+        heading: "Limitations and Human Review",
+        bullets: [
+          "ConvergePanel is a research and verification support tool — it identifies signals that warrant review, not conclusions that settle questions",
+          "Model consensus does not prove accuracy — models can share the same training-data error",
+          "Source review is the user's responsibility — ConvergePanel surfaces citations but does not independently verify source quality",
+          "High-stakes conclusions require qualified human review — legal, financial, medical, and regulatory questions should involve qualified professionals",
+          "Research findings should not be treated as professional advice — ConvergePanel accelerates research; it does not replace expert judgment",
+          "Model capabilities and knowledge cutoffs vary — claims about recent events require particular care regardless of consensus score",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "What is deep research with AI?",
+        a: "Deep research with AI involves running a complex question through multiple AI models, collecting their independent responses, comparing their reasoning and evidence, and synthesizing a conclusion that reflects where models agree and where they diverge. It goes beyond asking one chatbot by surfacing the full landscape of AI interpretation — including the disagreements that single-model tools hide.",
+      },
+      {
+        q: "How is AI verification different from AI research?",
+        a: "AI research generates answers. AI verification checks those answers — examining specific claims, reviewing the evidence and sources cited, comparing interpretations across models, and surfacing where conclusions are contested or poorly grounded. Verification is the quality-control layer that research alone doesn't provide. ConvergePanel supports both: Research mode generates multi-model output; Claim Verification mode checks specific claims from that output.",
+      },
+      {
+        q: "Why compare multiple AI models for research?",
+        a: "Each model has different training data, reasoning approaches, and blind spots. A single model presents one perspective as the answer. Multiple models reveal where the evidence is genuinely settled (high consensus) and where it is contested or uncertain (low consensus or disagreement). Disagreement is the most valuable signal — it identifies exactly where verification effort should be focused.",
+      },
+      {
+        q: "Does agreement across models mean the answer is correct?",
+        a: "No. Agreement is a useful signal but not proof. Models can share training-data errors, converge on widely-repeated misconceptions, or agree on claims that were accurate at training time but are no longer current. Treat high consensus as a reasonable starting point, then verify the underlying sources for high-stakes claims regardless of the score.",
+      },
+      {
+        q: "How can I verify sources used in AI research?",
+        a: "Check whether the cited source exists and can be located. Then verify it is current, authoritative for the type of claim, and actually supports the specific claim being made. Compare what different models cite — conflicting citations indicate a contested area worth investigating. ConvergePanel surfaces citations; source review is the user's responsibility.",
+      },
+      {
+        q: "What should I do when AI models give conflicting research answers?",
+        a: "Treat disagreement as a signal, not a failure. It means the underlying question has genuine uncertainty, contested evidence, or ambiguity. Use the disagreement to identify exactly what is contested, find the sources each position rests on, and investigate those sources to understand which is better grounded. For high-stakes decisions, disagreement is a reason to seek qualified human expertise before acting.",
+      },
+      {
+        q: "Can ConvergePanel replace a human researcher?",
+        a: "No. ConvergePanel accelerates research by running multiple models, surfacing consensus and disagreement, and structuring the verification workflow. It does not replace the human researcher's judgment about source quality, contextual interpretation, domain expertise, and decision-making. For research that informs high-stakes decisions, ConvergePanel is a support and verification layer — not a replacement for expert review.",
+      },
+      {
+        q: "Does ConvergePanel create a research audit trail?",
+        a: "Yes. ConvergePanel records the research question, models used, each model's response, the consensus score, disagreement analysis, and synthesis. This record is exportable and suitable for documentation, peer review, or governance requirements. For high-stakes decisions, this audit trail supports a decision receipt — a structured record of what was researched, verified, and concluded.",
+      },
+    ],
+    relatedLinks: [
+      { label: "Deep research with multiple AI models", href: "/use-cases/deep-research-with-multiple-ai-models" },
+      { label: "Best multi-model AI tool for research", href: "/use-cases/best-multi-model-ai-tool-for-research" },
+      { label: "Multi-LLM answer comparison", href: "/use-cases/multi-llm-answer-comparison" },
+      { label: "AI expert panel tool", href: "/use-cases/ai-expert-panel-tool" },
+      { label: "How to verify sources from AI answers", href: "/use-cases/how-to-verify-sources-from-ai-answers" },
+      { label: "What is source grounding in AI?", href: "/use-cases/what-is-source-grounding-in-ai" },
+      { label: "What is an AI consensus score?", href: "/use-cases/what-is-a-consensus-score" },
+      { label: "AI disagreement analysis tool", href: "/use-cases/ai-disagreement-analysis-tool" },
+      { label: "How to identify blind spots in AI answers", href: "/use-cases/how-to-identify-blind-spots-in-ai-answers" },
+      { label: "How to validate AI-generated research", href: "/use-cases/how-to-validate-ai-generated-research" },
+    ],
+  },
+
+  // ── FLAGSHIP: AI Video Verification ──────────────────────────────────────
+
+  {
+    slug: "ai-video-verification",
+    title: "AI Video Verification with Multiple Vision Models",
+    h1: "Verify Suspicious and Viral Videos with Multiple AI Models",
+    audience: "Journalists, fact-checkers, researchers, content creators, and communications teams",
+    audienceDetail: "Anyone who receives a suspicious, viral, or potentially manipulated video and needs a structured, documented review before acting on it or sharing it",
+    publishedAt: "2026-06-20",
+    problem:
+      "Video is one of the most persuasive forms of evidence and one of the easiest to manipulate. A clip that appears to show a public figure, a breaking news event, or a viral moment may be AI-generated, edited, decontextualized, or genuine footage presented with a false caption. A single review — whether by a person or an AI tool — produces a single opinion.\n\nThe cost of acting on a manipulated video is high: reputational damage, published misinformation, decisions made on false premises, or legal exposure. The cost of holding genuine footage unnecessarily is also real: delayed coverage, missed context, missed response opportunities.",
+    solution:
+      "ConvergePanel's Video Verification mode sends extracted video frames to three vision-capable AI models — GPT-4o, Claude, and Gemini — independently. Each model reviews the frames for manipulation signals, synthetic artifacts, visual inconsistencies, and context indicators. The results are compared to produce a consensus assessment and surfaced disagreements that indicate where further human review is warranted.\n\nThe output is explicitly advisory. ConvergePanel does not prove a video is authentic or confirm that manipulation occurred. It produces a structured, multi-model review — an advisory trust signal — alongside a documented record of what each model found. That record supports human review, editorial decisions, and documentation requirements.",
+    workflow: [
+      "Upload the video clip to ConvergePanel's Video Verification mode (up to 60 seconds)",
+      "Add the claim, caption, or context associated with the clip — what is this video said to show?",
+      "ConvergePanel extracts frames at key intervals and sends them to GPT-4o, Claude, and Gemini independently",
+      "Each model reviews independently for manipulation signals, synthetic artifacts, and visual inconsistencies",
+      "Review the areas where all three models agree — high agreement strengthens the assessment",
+      "Examine where models disagree — disagreement indicates ambiguity requiring human attention",
+      "Consider the context gap: what would you need to verify that AI cannot determine from frames alone?",
+      "Review the advisory trust signal and the panel-level summary",
+      "Preserve the structured result as a review record for documentation, editorial files, or peer review",
+    ],
+    useCases: [
+      "Journalists reviewing viral footage before publication to document their verification process",
+      "Fact-checkers adding a structured first-pass AI review to their video verification workflow",
+      "Communications teams checking a suspected deepfake of a public figure before issuing a response",
+      "Researchers examining video evidence for academic or investigative purposes",
+      "Content creators reviewing viral clips before reacting to or amplifying them",
+      "Newsrooms building a documented, repeatable video review workflow for editorial accountability",
+    ],
+    cta: "Verify a Video with Three AI Models",
+    category: "video-verification",
+    schemaType: "FAQPage",
+    metaDescription:
+      "Review suspicious or viral videos with multiple vision models to surface manipulation signals, context gaps, and areas requiring human verification.",
+    bodySections: [
+      {
+        heading: "What AI Video Verification Reviews",
+        paragraphs: [
+          "AI video verification involves reviewing video content for signals that may indicate manipulation, synthetic generation, decontextualization, or other concerns that affect whether a clip can be trusted. ConvergePanel sends extracted frames to three vision models, each reviewing independently.",
+          "Vision models identify visible inconsistencies such as unusual visual artifacts, signs of AI generation, scene discontinuity, unusual lighting or shadow behavior, and visual elements that appear synthetic. They can also assess whether the visual content appears consistent with the context or claim accompanying the clip.",
+          "AI video review is distinct from forensic video analysis. Forensic analysis involves technical investigation at the pixel, frequency, and metadata levels using specialized tools. AI video review is a fast, advisory first-pass layer that surfaces signals worth investigating further — not a forensic determination.",
+        ],
+      },
+      {
+        heading: "What the Three Vision Models Review",
+        bullets: [
+          "Visible artifacts: unusual patterns, texture inconsistencies, or elements inconsistent with natural footage",
+          "Synthetic generation indicators: patterns associated with AI video generation or deepfake techniques",
+          "Scene continuity: consistency of lighting, shadows, reflections, and background elements across frames",
+          "Visual-context alignment: whether frames are consistent with the accompanying claim or caption",
+          "Facial and motion consistency: whether faces and motion appear natural in clips showing people",
+          "Text overlays and graphics: whether added text or graphics appear consistent with the rest of the clip",
+          "Ambiguous signals: elements that could reflect compression or natural artifacts — flagged for human assessment",
+        ],
+      },
+      {
+        heading: "Video Authenticity vs. Claim Verification",
+        paragraphs: [
+          "Video verification involves two distinct questions that are often confused. The first is whether the video has been manipulated: whether it was generated by AI, edited to remove or add content, or altered in ways that change its meaning. The second is whether the accompanying claim is true: whether the caption accurately describes what the video shows, whether the location and date are correct, and whether the clip proves the assertion being made.",
+          "A video can be completely unmanipulated — genuine, unedited footage — and still be accompanied by a false claim. Footage from one location can circulate with a caption attributing it to another. Old footage can be presented as recent. Real footage can be real but irrelevant to the claim it is used to support.",
+          "ConvergePanel's vision models review for manipulation signals in the video itself. Caption verification, location confirmation, and context validation require different methods — reverse video search, geolocation, source investigation, and human domain expertise. A clean AI video review does not confirm that the accompanying claim is accurate.",
+        ],
+      },
+      {
+        heading: "What Agreement and Disagreement Mean",
+        paragraphs: [
+          "When all three vision models agree that a clip shows no significant manipulation signals, that consensus is an advisory signal worth documenting. It reduces but does not eliminate grounds for suspecting synthetic manipulation. It does not rule out context manipulation — old footage, mislabeled location, or false captions.",
+          "When models disagree, that disagreement is meaningful. Different models may focus on different visual elements or interpret ambiguous artifacts differently. A split result indicates the clip presents ambiguous signals — further human or forensic review is warranted before acting on the footage.",
+          "Agreement is never proof. Models can agree on a false negative — a sophisticated deepfake that evades all three models — or on a false positive — flagging compression artifacts on genuine footage. The advisory trust signal is a starting point for review, not an endpoint.",
+        ],
+      },
+      {
+        heading: "Video Verification Checklist",
+        bullets: [
+          "What exact claim or caption accompanies this clip? Write it down before reviewing.",
+          "Who first published this video and when? Trace it to the earliest known source.",
+          "Is the original, uncompressed video available? Compression affects review results.",
+          "Is the clip complete, or has it been edited? Look for cuts, transitions, or missing frames.",
+          "Are the date and location verifiable from visual or contextual evidence in the clip?",
+          "Does the audio match the visual scene naturally — or does it appear added or replaced?",
+          "Is the caption or claim independently verified, or only asserted by the source sharing the clip?",
+          "Do all three AI models agree on their assessment of the visual content?",
+          "What specific signals do models disagree on, and what might explain the disagreement?",
+          "Does this result require additional forensic analysis or specialist human review?",
+          "Is publication or amplification appropriate, or should it be held pending further verification?",
+        ],
+      },
+      {
+        heading: "Common Video Verification Scenarios",
+        paragraphs: [
+          "Journalists reviewing breaking-news footage: A clip arrives claiming to show violence or damage at a named location. The journalist needs a fast documented review before editorial decisions. ConvergePanel provides a structured first-pass assessment and a review record within minutes.",
+          "Content creators checking a viral clip: A creator considers reacting to footage circulating widely. Before amplifying it, they want to know whether it shows signs of manipulation. ConvergePanel surfaces AI-generation indicators or returns a clean result — either way, the review is documented.",
+          "Fact-checkers reviewing manipulated-media claims: A published article claims a viral video is AI-generated. The fact-checker needs an independent multi-model assessment to include in their methodology. ConvergePanel provides per-model evidence suitable for a published methodology note.",
+          "Researchers examining online evidence: A researcher studying a social phenomenon has collected video from social media. Before including it in their analysis, they run it through multi-model review to document the authenticity assessment in their methodology.",
+          "Communications teams reviewing reputational risk: A video purportedly showing a company executive making damaging statements is circulating. Before issuing a response, the team runs it through video verification to determine whether the footage appears genuine or synthetic.",
+          "Investigators documenting uncertainty: A legal or investigative team has video that may be relevant to a case. They need a documented record of an AI-assisted review — with clear notation that the result is advisory and not forensic authentication.",
+        ],
+      },
+      {
+        heading: "Example: Viral Protest Clip (Illustrative)",
+        paragraphs: [
+          "This is an illustrative workflow, not a case study. A video circulates on social media claiming to show a current protest in a named city. The clip is 40 seconds long, shows crowds and police presence, and is accompanied by a caption naming a specific date and location.",
+          "Three models review extracted frames. Two find no significant synthetic generation signals — the footage appears to show real people in a real environment. One model flags an unusual visual artifact in the background of two frames that could indicate compositing or could be a compression artifact.",
+          "Agreement: all three models find that the foreground content shows no strong deepfake indicators and appears consistent with real crowd footage. Disagreement: one model flags a background element that the others do not flag at the same severity.",
+          "Context gap: the AI review cannot confirm the location, date, or whether the caption accurately describes what the clip shows. Reverse video search is the appropriate next step to determine whether this footage has appeared before in a different context.",
+          "Result: the advisory assessment is that the video shows no strong manipulation signals, but one model flagged a visual element requiring further investigation. The caption claim has not been verified and requires additional sourcing. The result is documented and appended to the editorial file.",
+          "ConvergePanel's review is advisory. It is not forensic authentication. A clean result does not confirm that the caption is accurate or that the footage was recorded when and where the caption claims.",
+        ],
+      },
+      {
+        heading: "When Further Human or Forensic Review Is Required",
+        bullets: [
+          "Legal matters where video will be used as evidence or referenced in legal proceedings",
+          "Election-related footage where authentication standards are high and stakes are severe",
+          "Public safety incidents where a wrong determination could cause harm",
+          "Criminal allegations where the video is central to a claim about a person's actions",
+          "Content intended for court, regulatory submissions, or formal investigations",
+          "Sophisticated deepfake concerns where production quality is high and AI detection is uncertain",
+          "Cases where all three models produce conflicting results and no clear advisory signal emerges",
+          "Any case where the consequences of a wrong determination are irreversible",
+        ],
+      },
+      {
+        heading: "What ConvergePanel Provides",
+        bullets: [
+          "Three-model video review: GPT-4o, Claude, and Gemini independently analyze extracted frames",
+          "Per-model observations: each model's specific findings, signals, and confidence level",
+          "Agreement analysis: where all three models converge on the same assessment",
+          "Disagreement analysis: where models diverge and what each model uniquely flags",
+          "Advisory trust signal: a panel-level summary of what the three models collectively found",
+          "Audit trail: a documented record of the review, the models used, and the findings",
+          "Review record: exportable documentation for editorial files, methodology notes, or governance requirements",
+          "Human review support: structured output designed to feed into human decision-making, not replace it",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "What is AI video verification?",
+        a: "AI video verification is the process of sending video content to AI vision models to review for manipulation signals, synthetic generation indicators, visual inconsistencies, and context gaps. It produces an advisory assessment based on what multiple models find in the footage — not a forensic determination of authenticity. ConvergePanel uses three vision models that analyze independently and compare results.",
+      },
+      {
+        q: "How many AI models does ConvergePanel use for video review?",
+        a: "Three. GPT-4o, Claude, and Gemini each independently analyze extracted frames from the uploaded clip. Their findings are compared to produce a consensus assessment and surface areas of disagreement. Three independent models reduce the risk of false positives and false negatives that any single model would produce alone.",
+      },
+      {
+        q: "Can AI prove that a video is authentic?",
+        a: "No. ConvergePanel provides an advisory, multi-model assessment — not proof of authenticity. A clean result across all three models reduces grounds for suspecting AI generation or obvious manipulation, but it does not confirm that the video was recorded when and where claimed, that the caption is accurate, or that sophisticated manipulation methods were not used. AI video review is a first-pass support layer, not forensic authentication.",
+      },
+      {
+        q: "Can ConvergePanel detect every deepfake?",
+        a: "No. AI generation techniques evolve faster than detection techniques. Sophisticated deepfakes can produce output that current vision models do not flag. ConvergePanel increases detection capability beyond any single model by using three independent reviewers, but it cannot guarantee detection of all manipulated content. High-stakes authentication requires specialist forensic analysis.",
+      },
+      {
+        q: "What does it mean when the three models disagree?",
+        a: "Disagreement means the clip presents ambiguous visual signals. Different models may focus on different aspects of the frames or interpret uncertain visual elements differently. When models disagree, it signals that the clip requires additional human review or forensic investigation before acting on it. Disagreement is not a failure — it is an honest signal about the limits of what the footage clearly shows.",
+      },
+      {
+        q: "Can it verify the caption attached to a video?",
+        a: "Partially. Vision models can assess whether frames are visually consistent with the associated claim. They can flag obvious mismatches — footage that clearly does not show what the caption describes. But they cannot independently verify location, date, source provenance, or the accuracy of text claims. Caption verification requires reverse video search, geolocation, and source investigation.",
+      },
+      {
+        q: "Is ConvergePanel a forensic video-analysis tool?",
+        a: "No. Forensic video analysis involves technical investigation at the pixel, frequency, and metadata levels using specialized tools and expert analysts. ConvergePanel's video review is a fast, structured, advisory first-pass layer using three general-purpose vision models. For legal proceedings, criminal investigations, or other high-stakes authentication needs, specialist forensic analysis is required.",
+      },
+      {
+        q: "Who should use AI video verification?",
+        a: "Journalists, fact-checkers, content creators, researchers, and communications teams who regularly encounter suspicious or viral video and need a structured, documented first-pass review. It is most valuable when you need to act quickly, document your review process, or establish a baseline before deciding whether forensic investigation is warranted. It is not appropriate as the only review step for high-stakes legal or public-safety decisions.",
+      },
+    ],
+    relatedLinks: [
+      { label: "Video authenticity review for fact-checkers", href: "/use-cases/video-authenticity-review-for-fact-checkers" },
+      { label: "AI video verification for journalists", href: "/use-cases/ai-video-verification-for-journalists" },
+      { label: "AI video review for media teams", href: "/use-cases/ai-video-review-for-media-teams" },
+      { label: "How journalists can verify viral clips", href: "/use-cases/how-journalists-can-verify-viral-clips" },
+      { label: "How to check if a viral video might be manipulated", href: "/use-cases/how-to-check-if-a-viral-video-might-be-manipulated" },
+      { label: "How to verify a clip before publishing", href: "/use-cases/how-to-verify-a-clip-before-publishing" },
+      { label: "Video authenticity review for researchers", href: "/use-cases/video-authenticity-review-for-researchers" },
+      { label: "How to review a suspicious video with AI", href: "/use-cases/how-to-review-a-suspicious-video-with-ai" },
+      { label: "Verification checklist for journalists", href: "/use-cases/verification-checklist-for-journalists" },
+      { label: "Newsroom AI verification workflow", href: "/use-cases/newsroom-ai-verification-workflow" },
     ],
   },
 ];

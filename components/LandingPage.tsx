@@ -402,6 +402,8 @@ export default function LandingPage() {
           </p>
           <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
             {[
+              { label: "Deep research and AI verification", href: "/use-cases/deep-research-and-ai-verification" },
+              { label: "AI video verification with multiple models", href: "/use-cases/ai-video-verification" },
               { label: "AI claim verification for content creators", href: "/use-cases/ai-claim-verification-for-content-creators" },
               { label: "AI tools for investigative journalists", href: "/use-cases/ai-tools-for-investigative-journalists" },
               { label: "How to fact-check ChatGPT responses", href: "/use-cases/how-to-fact-check-chatgpt-responses" },

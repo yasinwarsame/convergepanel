@@ -97,11 +97,12 @@ const HUB_GROUPS: HubGroup[] = [
   {
     id: "video-verification",
     label: "Video Verification",
-    description: "Review video clips for AI-generation signals and manipulation indicators using three vision models.",
+    description: "Review suspicious or viral videos with three vision models. Surface manipulation signals, compare model assessments, and produce an advisory review record before acting on or publishing a clip.",
     tailwindText: "text-violet-400",
     tailwindBg: "bg-cp-raised",
     tailwindBorder: "border-cp-border",
     slugs: [
+      "ai-video-verification",
       "video-authenticity-review-for-fact-checkers",
       "video-authenticity-review-for-researchers",
       "ai-video-review-for-media-teams",
@@ -209,12 +210,13 @@ const HUB_GROUPS: HubGroup[] = [
   },
   {
     id: "research-quality",
-    label: "Research & Analyst Workflows",
-    description: "Get structured multi-model research briefs that surface disagreements, bias signals, and source gaps.",
+    label: "Deep Research & Verification",
+    description: "Run multi-model research, verify claims and sources, surface disagreement, and produce a documented synthesis. Generate and verify in one workflow — not two separate tools.",
     tailwindText: "text-emerald-400",
     tailwindBg: "bg-cp-raised",
     tailwindBorder: "border-cp-border",
     slugs: [
+      "deep-research-and-ai-verification",
       "deep-research-with-multiple-ai-models",
       "how-to-compare-chatgpt-claude-gemini-grok-perplexity-for-research",
       "chatgpt-vs-claude-vs-gemini-for-research",
