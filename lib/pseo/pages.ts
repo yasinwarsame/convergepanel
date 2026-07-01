@@ -23469,6 +23469,1075 @@ export const PAGES: PSEOPage[] = [
     metaDescription:
       "When three vision models give different video verdicts, the split is a reason to slow down. Learn what disagreement means in video review and how to respond to it.",
   },
+
+  // ── Journalist & Fact-Checker Cluster ─────────────────────────────────────
+
+  {
+    slug: "ai-source-laundering",
+    publishedAt: "2026-07-01",
+    title: "AI Source Laundering: When Weak Claims Look Credible",
+    h1: "AI Can Make a Weak Source Look Like Independent Evidence",
+    audience: "Journalists, researchers, editors, fact-checkers",
+    audienceDetail: "Anyone who relies on AI-assisted research and needs to know whether multiple citations represent independent evidence or the same weak original claim repeated",
+    problem:
+      "Five citations do not mean five independent sources. When an AI answer draws on secondary articles that all cite the same newsletter, which cited a social post that cited no study at all, the result looks like corroborated evidence. It is not.\n\nAI source laundering is the process by which a single weak claim accumulates the appearance of independent verification through repetition, summarization, and citation proliferation. The model hasn't invented anything. Every source it cites may be a real document. The problem is that every document leads back to the same original claim, and that original claim was never properly evidenced.",
+    solution:
+      "ConvergePanel surfaces where multiple models cite the same evidence or reach the same conclusion from the same underlying source. That pattern — agreement without independence — is the signature of source laundering. When five models agree and all five reference the same originating article, you have one source with five citations, not five independent data points. Seeing that pattern is the first step toward tracing the claim back to its actual evidentiary base.",
+    workflow: [
+      "List every source named or implied in the AI answer — including sources cited within cited sources",
+      "Check whether the sources cite each other, or whether multiple paths lead back to the same original publication",
+      "Identify the original claim: was it a primary study, an official record, or a secondary summary of something else?",
+      "Check whether AI models agree because they independently reached the same conclusion or because they drew on the same source",
+      "Submit the underlying claim to ConvergePanel and compare what each model cites — convergent citations on one source are a laundering signal",
+      "Identify any circular citation chains: A cites B, B cites C, C cites A",
+      "Trace every citation back to the point where original primary evidence actually exists",
+    ],
+    useCases: [
+      "Checking whether a widely-repeated statistic has independent corroborating evidence or traces to one misread report",
+      "Auditing an AI-generated research synthesis to verify that citations represent genuinely independent sources",
+      "Identifying whether model agreement on a contested claim reflects real corroboration or shared training data provenance",
+      "Reviewing a viral claim before incorporating it into a story",
+    ],
+    bodySections: [
+      {
+        heading: "Hallucination vs. Source Laundering",
+        paragraphs: [
+          "Hallucination is when an AI invents a source that does not exist. Source laundering is different: every source is real, every citation is a real document, and the chain of evidence is traceable. The problem is that every link in the chain leads back to the same weak original claim, which was never independently evidenced in the first place.",
+          "Source laundering is harder to catch than hallucination precisely because the sources check out. You can find the article. You can read the newsletter. The study title resolves. But when you trace each source back one step further, they all converge on the same origin — and that origin is a claim, not evidence.",
+        ],
+      },
+      {
+        heading: "Five Mechanisms of AI Source Laundering",
+        bullets: [
+          "Repetition amplification — one claim is repeated across many secondary articles; models cite the repetitions as independent confirmation",
+          "Summary citation — models cite a summary of a study rather than the study itself; the summary may have mischaracterized the original finding",
+          "Secondary source stacking — each source cites the previous one; the citation chain appears long but traces to a single original claim",
+          "Circular citation chains — source A cites B, B cites C, C cites A; the chain has no external anchor",
+          "Narrative encoding — the claim was repeated so widely that it became embedded in model training data as an accepted fact, regardless of its evidential basis",
+        ],
+      },
+      {
+        heading: "Source Lineage Review",
+        paragraphs: [
+          "The following framework helps surface source laundering before a claim reaches publication. Apply it to any AI answer that presents multiple citations in support of a single significant claim.",
+        ],
+        bullets: [
+          "Claim — state the specific claim exactly as the AI presents it",
+          "Cited page — identify every source the AI cites or implies",
+          "What that source actually cites — trace each source back one level",
+          "Is the evidence primary? — does any source in the chain trace to original data, a study, or an official record?",
+          "Does the primary source support the exact claim? — verify that the original actually says what is claimed",
+          "Independent corroboration — is there a second source that reached the same conclusion without citing the first?",
+          "Human conclusion — based on the lineage review, is the claim independently evidenced or dependent on a single origin?",
+        ],
+      },
+      {
+        heading: "Illustrative Example",
+        paragraphs: [
+          "Illustrative example: A claim appears in an AI answer that a specific policy reduced a particular rate by 34 percent. The AI cites three articles. Each of the three articles cites a think-tank report published eighteen months earlier. The think-tank report cites a government press release. The press release contains no data — it makes a forward-looking projection. The 34 percent figure is a projected target, not a measured outcome, but it has been cited enough times that it now appears as an established finding.",
+          "This is source laundering. The AI did not fabricate anything. Every source exists. The problem is that a projection was reframed as a result through successive citation — and the model's training data reflects that reframing, not the original context.",
+        ],
+      },
+      {
+        heading: "What ConvergePanel Can and Cannot Do",
+        paragraphs: [
+          "ConvergePanel helps identify source convergence: when multiple models cite the same evidence for the same claim, that convergence is a laundering signal rather than independent corroboration. The structured comparison across five models makes this pattern visible where a single-model query would hide it.",
+          "ConvergePanel cannot automatically trace every citation to primary evidence or confirm that a source says what is claimed. That step still requires human inspection of the actual documents.",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "Can several AI citations all trace back to the same original source?",
+        a: "Yes — this is the core mechanism of AI source laundering. When an AI model cites five articles in support of a claim, those five articles may all cite the same earlier publication, which itself cites no primary evidence. The citation count rises while the evidentiary base stays the same. Tracing each source back one level is the test.",
+      },
+      {
+        q: "How do I know whether evidence is independently corroborated?",
+        a: "Independent corroboration means two or more sources reached the same conclusion without one relying on the other. If source A and source B both cite source C, that is not independent corroboration — it is one source cited twice. The check is whether the paths to each source converge on the same earlier origin.",
+      },
+      {
+        q: "What is a circular citation chain in AI research?",
+        a: "A circular citation chain is when source A cites B, B cites C, and C cites A — forming a loop with no external anchor. The chain has length but no ground truth. Every source in it references another in the same chain, and none of them trace to primary evidence outside the loop.",
+      },
+      {
+        q: "Does model agreement count as independent confirmation?",
+        a: "No. Multiple AI models agreeing on a claim does not mean the evidence is independently corroborated. Models trained on the same widely-repeated claim will converge on it precisely because it was widely repeated — not because it was independently verified. Agreement is a confidence signal only when it reflects genuinely independent sources, not shared training data.",
+      },
+      {
+        q: "How does ConvergePanel help identify source laundering?",
+        a: "ConvergePanel runs the same claim through multiple models and compares what each one cites. When models converge on the same source or the same original claim, that convergence is visible in the comparison. A single-model query hides this because you see only one citation chain. The multi-model comparison makes the pattern legible.",
+      },
+    ],
+    relatedLinks: [
+      { label: "What If Every AI Model Cites the Same Weak Source?", href: "/use-cases/when-ai-models-cite-the-same-weak-source" },
+      { label: "How to Verify Sources from AI Answers", href: "/use-cases/how-to-verify-sources-from-ai-answers" },
+      { label: "What Is Source Grounding in AI?", href: "/use-cases/what-is-source-grounding-in-ai" },
+      { label: "How to Find the Weakest Claim in an AI Answer", href: "/use-cases/find-the-weakest-claim-in-an-ai-answer" },
+      { label: "Verification Checklist for Journalists", href: "/use-cases/verification-checklist-for-journalists" },
+      { label: "How to Audit an AI Summary Against the Original", href: "/use-cases/audit-ai-summary-against-original-document" },
+      { label: "AI Context Collapse", href: "/use-cases/ai-context-collapse" },
+    ],
+    cta: "Trace the Claim to Its Source",
+    category: "thought-leadership",
+    schemaType: "FAQPage",
+    metaDescription:
+      "AI source laundering is what happens when a weak claim is cited and re-cited until it looks independently verified. Five citations do not mean five independent sources.",
+  },
+
+  {
+    slug: "audit-ai-summary-against-original-document",
+    publishedAt: "2026-07-01",
+    title: "How to Audit an AI Summary Against the Original Document",
+    h1: "A Good Summary Can Still Remove the Most Important Qualification",
+    audience: "Journalists, researchers, editors, policy analysts",
+    audienceDetail: "Anyone who receives AI-generated summaries of reports, studies, filings, transcripts, or policy documents and needs to verify them against the original before acting or publishing",
+    problem:
+      "An AI summary can be accurate in every sentence that appears while still being wrong in its overall effect. The missing sentence is the exception. The removed qualification changes 'this applies in controlled conditions' to 'this applies generally.' The softened hedge turns 'the evidence is mixed' into 'the evidence shows.' A summary looks complete — it covers the main points — but it has removed the caveat that would change what you conclude from it.\n\nThis is harder to catch than a hallucination. The summary is real. The document it summarizes is real. The issue is what was lost between them — and a reader who has not seen the original has no way of knowing what's missing.",
+    solution:
+      "Auditing an AI summary requires comparing it against the original. ConvergePanel's multi-model approach helps triage where to look: when models produce different summaries of the same underlying document or claim, the divergence usually marks the passage that was most nuanced in the original. That divergence shows you exactly where to read the source most carefully.",
+    workflow: [
+      "Obtain the original document, report, study, transcript, or filing being summarized",
+      "Read the AI summary and list every specific claim it makes",
+      "Locate each claim in the original document and verify it directly",
+      "Check for omitted qualifications: does the original place conditions on the claim that the summary drops?",
+      "Check for changed certainty: does the original hedge with 'may,' 'suggests,' or 'under specific conditions' where the summary states conclusions?",
+      "Check for removed exceptions: does the original name groups or scenarios the summary ignores?",
+      "Submit the same question to ConvergePanel and compare how models summarize the key passage — divergences mark items for priority verification",
+      "Record every discrepancy between the summary and the original in an audit record",
+    ],
+    useCases: [
+      "Checking an AI summary of a government report before quoting figures in a story",
+      "Verifying that a clinical study's conclusions haven't been broadened in an AI summary before citing them",
+      "Auditing an AI-generated summary of a court filing, earnings call, or policy document before publication",
+      "Reviewing whether an AI summary of a spokesperson statement accurately reflects what was said",
+    ],
+    comparisonTable: {
+      headers: ["What the original said", "What the AI summary said", "What changed"],
+      rows: [
+        ["'The reduction applied to patients over 65 in the trial cohort'", "'The treatment reduced rates'", "Age group and trial-scope qualifier removed"],
+        ["'The evidence is mixed, with three studies showing no effect'", "'Evidence supports the approach'", "Mixed evidence and contrary studies omitted"],
+        ["'The policy is projected to reduce costs by 2030'", "'The policy reduces costs'", "Projection framing replaced with stated fact; 2030 timeframe dropped"],
+        ["'We cannot rule out confounding factors'", "'Results were significant'", "Uncertainty statement removed; conclusion stated without caveat"],
+      ],
+    },
+    bodySections: [
+      {
+        heading: "What AI Summaries Remove",
+        paragraphs: [
+          "AI summaries are compression tools. They produce shorter, more readable versions of longer documents. The compression itself is the problem: something must be removed, and what gets removed is often the hedging, the exceptions, the qualifications, and the scope limitations — precisely the parts of the original that make the main finding conditional rather than absolute.",
+          "The result is a summary that reads as cleaner and more decisive than the original — and that overstates the confidence and generalizability of the source it summarizes.",
+        ],
+        bullets: [
+          "Scope conditions — 'this applied to this specific population' becomes 'this applies'",
+          "Certainty hedges — 'suggests,' 'may indicate,' 'appears to' become 'shows,' 'demonstrates,' 'proves'",
+          "Contrary evidence — summaries often cite the main finding without the contradicting evidence that appears in the same document",
+          "Time limitations — findings valid 'at the time of publication' or 'as of a specific date' become timeless",
+          "Study limitations — sample size, methodology, and self-reported data caveats are commonly removed",
+          "Disputed interpretations — a contested finding may appear in the summary without the dispute noted",
+        ],
+      },
+      {
+        heading: "How to Run a Summary Audit",
+        steps: [
+          "Read the summary first without the original — note what you would conclude from it",
+          "Obtain the original document and identify every claim the summary makes",
+          "For each claim, find the corresponding passage in the original",
+          "Compare the exact language — note hedges, qualifications, conditions, and exceptions that appear in the original but not the summary",
+          "Note any contrary evidence in the original that the summary omits",
+          "Submit the most critical claim to ConvergePanel and compare how models characterize the same passage",
+          "Where models give different characterizations, read the original passage directly and resolve the discrepancy",
+          "Record every discrepancy as a corrected understanding before publishing or acting on the summary",
+        ],
+      },
+      {
+        heading: "Illustrative Example",
+        paragraphs: [
+          "Illustrative example: A policy brief includes the finding, 'In a 90-day pilot covering three mid-sized municipalities, compliance rates increased by 28 percent among businesses that voluntarily enrolled in the program.' The AI summary of the brief states: 'The policy increases compliance rates by 28 percent.' The scope qualifiers — pilot, three municipalities, voluntary enrollment, 90 days — have all been removed. The summary is not false in the sense that the study found that result. But the summary removes every condition that makes the finding limited rather than general.",
+        ],
+      },
+      {
+        heading: "What ConvergePanel Helps With",
+        paragraphs: [
+          "When you submit the same document or claim to multiple models, the comparison reveals where models diverge in how they characterize the source. That divergence is often the signal: one model retained the qualification that another dropped. The comparison shows you where the original was most nuanced and where your review effort should be concentrated.",
+          "ConvergePanel does not replace reading the original. It helps identify which claims are contested across model summaries — and those contested claims are the ones most likely to have been simplified in ways that change the meaning.",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "Why would an AI summary change the meaning of the original?",
+        a: "AI summaries are trained to produce shorter, cleaner text. The compression process systematically removes hedging, qualifications, scope conditions, and contrary evidence — which are the parts of the original that make its conclusions conditional. The result is a summary that is more decisive than the source it summarizes, often without any single sentence being false.",
+      },
+      {
+        q: "How do I identify a qualification that was removed from a summary?",
+        a: "Compare the summary's certainty language against the original's. If the summary uses 'shows,' 'demonstrates,' or 'proves' where the original uses 'suggests,' 'may indicate,' or 'appears,' a qualification was removed. Also check whether the original applies the finding to a specific population, time period, or condition that the summary drops.",
+      },
+      {
+        q: "What types of documents most need summary audits?",
+        a: "Documents where precision matters most: research studies with scope conditions and methodology limitations, regulatory filings with legal caveats, earnings call transcripts with forward-looking disclaimers, expert reports with disputed interpretations, and policy documents where implementation conditions are as important as the headline commitment.",
+      },
+      {
+        q: "Does ConvergePanel directly compare a summary against a source document?",
+        a: "ConvergePanel compares how multiple AI models summarize or characterize the same claim or question. That comparison surfaces divergences — places where models characterize the same source differently. Those divergences mark the passages most worth checking against the original. Document-to-summary comparison still requires reading the original.",
+      },
+      {
+        q: "What should I record when I find a discrepancy?",
+        a: "Record: the original passage, what the AI summary said instead, what changed, and what the correct characterization is. This audit record becomes part of the editorial documentation — evidence that the summary was checked and that the discrepancy was corrected before publication.",
+      },
+    ],
+    relatedLinks: [
+      { label: "AI Source Laundering", href: "/use-cases/ai-source-laundering" },
+      { label: "How to Verify Sources from AI Answers", href: "/use-cases/how-to-verify-sources-from-ai-answers" },
+      { label: "How to Find the Weakest Claim in an AI Answer", href: "/use-cases/find-the-weakest-claim-in-an-ai-answer" },
+      { label: "Build a Defensible Answer from Conflicting AI Outputs", href: "/use-cases/build-a-defensible-answer-from-conflicting-ai-outputs" },
+      { label: "Verification Checklist for Journalists", href: "/use-cases/verification-checklist-for-journalists" },
+      { label: "AI Tools for Investigative Journalists", href: "/use-cases/ai-tools-for-investigative-journalists" },
+      { label: "How to Find Hidden Assumptions in AI Answers", href: "/use-cases/find-hidden-assumptions-in-ai-answers" },
+    ],
+    cta: "Review the Summary Against the Source",
+    category: "how-to",
+    schemaType: "HowTo",
+    metaDescription:
+      "An AI summary can be accurate in every sentence it contains while still omitting the qualification that changes the conclusion. How to audit an AI summary against the original document.",
+  },
+
+  {
+    slug: "verify-ai-generated-allegation-before-publication",
+    publishedAt: "2026-07-01",
+    title: "How to Verify an AI-Generated Allegation Before Publication",
+    h1: "A Serious Allegation Requires More Than Model Agreement",
+    audience: "Journalists, editors, editorial and legal review teams",
+    audienceDetail: "Reporters, editors, and investigative journalists who receive AI-sourced allegations and need a structured process for reviewing them before any publication decision",
+    problem:
+      "An AI answer that states an allegation is not evidence. Neither is a consensus score. Model agreement means multiple systems drew a similar inference from their training data — it does not mean the underlying allegation has been independently verified, that the evidence is current, or that the subject has had an opportunity to respond.\n\nPublishing an allegation that turns out to be wrong, outdated, or misattributed causes harm to real people. The verification threshold for allegations is higher than for factual claims — not just 'is this plausible?' but: can this be independently corroborated, does the evidence actually support it, has the subject been given a meaningful opportunity to respond, and have editorial and legal reviewed it?",
+    solution:
+      "ConvergePanel helps organize what is known, what is sourced, and where models disagree about the claims underlying an allegation. That structure is useful for research — it identifies contested points, weak sourcing, and model divergence. But the workflow below treats model output as one input into a multi-step process, not as the conclusion of it.",
+    workflow: [
+      "State the allegation precisely — define exactly what is claimed, against whom, and based on what",
+      "Identify the originating source: where did this allegation first appear and who is making it?",
+      "Locate and inspect the documentary evidence claimed to support it — read the actual documents, not the AI's characterization of them",
+      "Seek independent corroboration: is there at least one source with no connection to the originating source that confirms it independently?",
+      "Run the underlying factual claims through ConvergePanel — note where models agree, where they disagree, and where they cannot find supporting evidence",
+      "Evaluate source motivation: are the sources providing evidence parties with a direct interest in the allegation being accepted?",
+      "Obtain and document a response from the subject — this is required for fair publication, not optional",
+      "Escalate to editorial and legal review before any publication decision — model agreement does not substitute for this step",
+    ],
+    useCases: [
+      "Reviewing AI-surfaced allegations about individuals or organizations before any publication decision",
+      "Auditing the evidential basis of claims that arrived through AI-assisted research before assigning them to a reporter",
+      "Building a documented review record for allegations that were investigated but not published",
+      "Establishing that a newsroom followed a defined process for evaluating high-risk claims",
+    ],
+    bodySections: [
+      {
+        heading: "Why Model Agreement Is Not Enough",
+        paragraphs: [
+          "Multiple AI models agreeing on an allegation tells you one thing: the allegation appears in the training data with sufficient frequency that models reproduce it. It does not tell you whether the evidence behind the allegation is independent, current, or sufficient. If a false allegation circulated widely before the models were trained, model agreement amplifies it.",
+          "The verification standard for a publishable allegation has four components that AI cannot supply: independent corroboration from sources that are not connected to each other, current evidence that has not been superseded or retracted, a fair opportunity for the subject to respond, and editorial and legal review of the decision to publish.",
+        ],
+      },
+      {
+        heading: "Distinction: Allegation vs. Established Fact",
+        bullets: [
+          "An allegation is a claim that has not been established by independent evidence — label it as such in any notes and drafts",
+          "A confirmed fact is supported by independently verified primary evidence — it can be stated without qualification",
+          "A court finding is a legal determination in a specific proceeding — it does not establish factual truth beyond that proceeding",
+          "A source's account is one perspective — it becomes stronger evidence when corroborated by independent sources without connection to the first",
+          "Model agreement is not corroboration — multiple AI outputs referencing the same claim are not independent sources",
+        ],
+      },
+      {
+        heading: "What to Document",
+        bullets: [
+          "The allegation stated precisely — date, who is alleged, what is alleged, based on what",
+          "Originating source — who made the allegation first and when",
+          "Documentary evidence reviewed — what documents were inspected, what they say",
+          "Model analysis from ConvergePanel — what models found, where they agreed, where they disagreed",
+          "Independent corroboration obtained — what independent sources confirmed what element",
+          "Subject response — what the subject said, when they were contacted, and whether they declined to respond",
+          "Open questions — what could not be resolved before the editorial decision",
+          "Editorial and legal review — who reviewed it, when, and what decision was made",
+          "Decision and reason — publish, hold, or reject, with stated rationale",
+        ],
+      },
+      {
+        heading: "When Editorial and Legal Review Is Required",
+        paragraphs: [
+          "Editorial review is required before publishing any allegation. Legal review is required when the allegation could expose the publication to defamation liability, when the subject is a private individual rather than a public figure, when the evidence base is contested or incomplete, or when the allegation involves criminal conduct.",
+          "ConvergePanel can organize claims, sources, and model disagreement. It cannot determine legal liability, advise on defamation risk, or replace the judgment of editors and lawyers who understand the applicable legal and editorial standards.",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "Does multiple-model agreement make an allegation publishable?",
+        a: "No. Multiple AI models agreeing on an allegation means the claim appears in training data frequently — it does not mean the evidence is independently corroborated, current, or sufficient for publication. Model agreement is a research signal, not an editorial standard.",
+      },
+      {
+        q: "What evidence should be independently corroborated before publishing an allegation?",
+        a: "At minimum: the core factual claims underlying the allegation, each confirmed by a source that has no connection to the source that originated the claim. Independent corroboration means the second source arrived at the same conclusion through its own investigation, not by relying on the first.",
+      },
+      {
+        q: "How should uncertainty be described in reporting on an unverified allegation?",
+        a: "Describe only what is confirmed, attribute what is alleged, and state explicitly what could not be independently verified. 'Source A claims' is not the same as 'Source A confirmed.' Uncertainty in the evidence should appear as uncertainty in the language — 'allegedly,' 'according to,' 'could not be independently verified.'",
+      },
+      {
+        q: "When is legal review required before publishing an allegation?",
+        a: "Consult your legal team when: the allegation could be defamatory, the subject is a private individual, evidence is contested or incomplete, the allegation involves criminal conduct, or the claim could expose the publication to liability in any jurisdiction where it may be published. These decisions depend on jurisdiction and editorial policy — consult qualified legal counsel, not an AI model.",
+      },
+      {
+        q: "Can ConvergePanel determine whether an allegation is defamatory?",
+        a: "No. ConvergePanel can help organize claims, surface model disagreement, and identify where evidence is weak or contested. It cannot provide legal analysis, assess defamation risk, or replace editorial and legal review. Publishing decisions for allegations involving legal risk require qualified human judgment.",
+      },
+    ],
+    relatedLinks: [
+      { label: "Verification Checklist for Journalists", href: "/use-cases/verification-checklist-for-journalists" },
+      { label: "AI Tools for Investigative Journalists", href: "/use-cases/ai-tools-for-investigative-journalists" },
+      { label: "How to Document Why a Newsroom Rejected an AI Claim", href: "/use-cases/document-why-newsroom-rejected-ai-claim" },
+      { label: "How to Create an AI Audit Trail", href: "/use-cases/how-to-create-an-ai-audit-trail" },
+      { label: "What Is a Decision Receipt?", href: "/use-cases/what-is-a-decision-receipt" },
+      { label: "AI Peer Review for High-Stakes Workflows", href: "/use-cases/ai-peer-review-for-high-stakes-workflows" },
+      { label: "How to Verify Sources from AI Answers", href: "/use-cases/how-to-verify-sources-from-ai-answers" },
+    ],
+    cta: "Review the Evidence Before Publication",
+    category: "how-to",
+    schemaType: "HowTo",
+    metaDescription:
+      "Model agreement does not make an allegation publishable. How to verify an AI-generated allegation before publication — evidence review, corroboration, response, and editorial escalation.",
+  },
+
+  {
+    slug: "check-if-ai-merged-two-events",
+    publishedAt: "2026-07-01",
+    title: "How to Check If AI Merged Two Different Events",
+    h1: "AI Can Combine True Details Into a False Account",
+    audience: "Journalists, fact-checkers, reporters, editors",
+    audienceDetail: "Journalists and fact-checkers who receive AI-generated accounts of events and need to verify whether details from separate incidents have been combined into one misleading narrative",
+    problem:
+      "Every detail in the AI answer can be individually verifiable — and the overall account can still be wrong. When AI merges two separate events that share a topic, location, actors, or date range, each component fact traces to a real source. The error is structural: two distinct events have been woven into a single account that never happened as described.\n\nThis is harder to catch than a fabrication. There is nothing to debunk at the fact level. The verification step that catches it is different: not 'is this true?' but 'can all of these details coexist in a single event?'",
+    solution:
+      "The test for merged events is internal consistency: can all the specific facts named in the account — every person, date, place, and action — be confirmed in a single primary source that covers all of them together? If they cannot, and if each fact traces to a different primary source, the account has likely merged separate events. ConvergePanel helps by running the account through multiple models: when models surface different dates, people, or contexts for what appears to be the same story, that divergence marks the merged seam.",
+    workflow: [
+      "Extract every specific detail from the AI account: every person named, every date, every location, every stated action",
+      "Attempt to find a single primary source — a contemporaneous report, official record, or transcript — that contains all of them together",
+      "If no single source does, sort each detail to the source where it actually appears",
+      "Identify the contradiction: which details cannot coexist in a single event (two different cities, two different dates, two different principals)?",
+      "Submit the account to ConvergePanel and compare how models describe each key element",
+      "Where models give different dates, different people, or different contexts for the same apparent event, that divergence marks where events were merged",
+      "Trace each element back to its primary source and verify the two events separately",
+      "Rewrite the account to reflect the two events accurately, or discard the merged account entirely",
+    ],
+    useCases: [
+      "Checking whether an AI account of a political event has conflated two separate incidents",
+      "Verifying that a narrative about a public figure hasn't merged two different statements made in different contexts",
+      "Identifying whether a conflict or crisis account has combined events from different dates or locations",
+      "Fact-checking an AI-generated timeline where dates, people, or locations appear inconsistent",
+    ],
+    bodySections: [
+      {
+        heading: "Why AI Merges Events",
+        paragraphs: [
+          "AI models generate text by predicting what follows from patterns in training data. When two events share a topic, participants, or setting, the model can produce a coherent-sounding account by drawing on evidence from both — without distinguishing between them. The model is not 'confusing' the events in the human sense; it is pattern-matching on shared features without tracking whether those features coexist in a single event.",
+          "Events most susceptible to merging: events that involve the same person in different periods, incidents that share a location but occurred at different times, protests or demonstrations with the same organizers in different cities, ongoing stories that developed over multiple news cycles, and cases that share enough surface similarities that training data about both appears together.",
+        ],
+      },
+      {
+        heading: "The Consistency Test",
+        bullets: [
+          "Can every person named appear together in the same primary source account?",
+          "Is the date consistent — does a single event on a single date account for all the details?",
+          "Does the location hold for all details — or do some facts point to a different city, venue, or country?",
+          "Are the stated actions consistent with what was reported about this specific event?",
+          "Is there a contemporaneous news account or official record that contains all the details together?",
+          "If the answer to any of these is no, the account may have merged separate events",
+        ],
+      },
+      {
+        heading: "Illustrative Example",
+        paragraphs: [
+          "Illustrative example: An AI account describes a protest held in a capital city on a specific date, attended by a named organization, during which a specific statement was made by a named spokesperson. The journalist checks primary sources and finds: the protest in the capital city happened three months earlier and involved a different organizer. The statement attributed to the spokesperson was made at a separate event in a different city. The named organization did hold an event on the specified date, but it was in a different location and the statement in the AI account was never made there.",
+          "Every element traces to a real source. The account as a whole describes an event that never happened.",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "What is the difference between a merged event and a hallucination in an AI account?",
+        a: "A hallucination involves invented facts — names, dates, or sources that don't exist. A merged event involves real facts from different real events combined into one account that never happened. Hallucinations fail at the fact level; merged events fail at the structural level. Verifying that each fact is real is not sufficient to catch a merged event — you must also verify that all the facts coexist in the same event.",
+      },
+      {
+        q: "What types of events is AI most likely to merge?",
+        a: "Events most susceptible to merging include: recurring events at the same location (annual meetings, regular protests), events involving the same public figure across different periods, incidents that share a topic or cause (different demonstrations for the same movement), and ongoing news stories that developed across multiple reporting cycles.",
+      },
+      {
+        q: "How does ConvergePanel help detect merged events?",
+        a: "When you submit an account to ConvergePanel, different models may surface different dates, different people, or different contexts for the same apparent event. That divergence is the signal: it marks exactly which element — date, location, or person — the models cannot agree on, which is usually where the two events were combined.",
+      },
+      {
+        q: "What should I do once I confirm that two events were merged?",
+        a: "Discard the merged account. Write separate accurate accounts of each event using only details confirmed to that event from primary sources. Do not patch the merged account — the structural error is not fixable by changing one fact. A patched merged account will have new inconsistencies.",
+      },
+      {
+        q: "How is checking for merged events different from standard fact-checking?",
+        a: "Standard fact-checking verifies whether individual claims are true. Checking for merged events requires verifying that all the individual claims belong together — that they describe a single coherent event. The question is not just 'did this happen?' but 'did all of this happen at the same time, in the same place, involving the same people?'",
+      },
+    ],
+    relatedLinks: [
+      { label: "AI Context Collapse", href: "/use-cases/ai-context-collapse" },
+      { label: "AI Timeline Verification for Journalists", href: "/use-cases/ai-timeline-verification" },
+      { label: "Verify Names, Dates, and Locations in an AI Summary", href: "/use-cases/verify-names-dates-locations-in-ai-summary" },
+      { label: "How to Find Hidden Assumptions in AI Answers", href: "/use-cases/find-hidden-assumptions-in-ai-answers" },
+      { label: "Verification Checklist for Journalists", href: "/use-cases/verification-checklist-for-journalists" },
+      { label: "How to Fact-Check Breaking News Claims", href: "/use-cases/how-to-fact-check-breaking-news-claims" },
+      { label: "When AI Models Agree But Are Wrong", href: "/use-cases/when-ai-models-agree-but-are-wrong" },
+    ],
+    cta: "Separate the Events",
+    category: "how-to",
+    schemaType: "HowTo",
+    metaDescription:
+      "Every detail can trace to a real source while the combined account describes an event that never happened. How to detect and separate two events that AI merged into one.",
+  },
+
+  {
+    slug: "verify-names-dates-locations-in-ai-summary",
+    publishedAt: "2026-07-01",
+    title: "Verify Names, Dates, and Locations in an AI Summary",
+    h1: "Small Entity Errors Can Undermine the Entire Story",
+    audience: "Journalists, reporters, editors, fact-checkers",
+    audienceDetail: "Working journalists and editors who receive AI-generated summaries, research, or drafts and need to verify that names, dates, and locations are correct before publication",
+    problem:
+      "Entity errors are often caught last and published first. A name misspelled by one letter, a date off by one year, a location given as the capital city when the event happened somewhere else — these feel minor during drafting and consequential after publication. AI models pattern-match on frequently appearing information, not on whether a specific name, date, or location is correct for the specific context in question.\n\nEntity errors also compound. A wrong date makes the timeline wrong. A wrong location changes the jurisdiction. A misidentified person becomes a false attribution. Getting these right is not a detail task — it is the structural accuracy that everything else in the story rests on.",
+    solution:
+      "Entity verification is a distinct step from claim verification. It requires checking specific names against primary sources, dates against records, and locations against contemporaneous reporting — independently of whether the broader claim is accurate. ConvergePanel's multi-model comparison helps surface entity divergence: when models give different names, different dates, or different locations for the same element of a story, that divergence is a flag.",
+    workflow: [
+      "List every person named in the AI summary: extract full names, titles, roles, and organizations",
+      "List every date: event dates, publication dates, legal dates, and time references",
+      "List every location: cities, venues, regions, countries, and jurisdictions",
+      "For each name: verify against a primary source — official biography, organization website, public record, or contemporaneous report",
+      "For each date: find a contemporaneous primary source (news report, official record, court filing) that confirms the date for that specific event",
+      "For each location: confirm against a contemporaneous primary source or geographic record",
+      "Submit the summary to ConvergePanel and note where models give different names, dates, or locations for the same element",
+      "Resolve any divergence by going to the primary source for that specific entity",
+    ],
+    useCases: [
+      "Checking an AI summary of a news story before incorporating specific names or dates into a report",
+      "Verifying entity data in an AI-generated profile of a public figure before publication",
+      "Fact-checking dates and locations in an AI-generated timeline before using it in an investigation",
+      "Reviewing AI-assisted research notes for name, date, and location accuracy before they enter a draft",
+    ],
+    comparisonTable: {
+      headers: ["Entity type", "What to verify", "Primary source to use", "Common AI error"],
+      rows: [
+        ["Person's name", "Full legal or public name, spelling, middle name or initial", "Official biography, organization website, public record", "Common-name collision — correct first and last name but wrong individual"],
+        ["Title or role", "Current title at the time of the event, not current title", "Contemporaneous organizational record or news report", "Using current title for a role the person held years earlier"],
+        ["Event date", "Exact date the event occurred vs. date it was reported", "Contemporaneous news report, official record, or court filing", "Publication date substituted for event date; year off by one"],
+        ["Location", "Specific venue, city, and country — not just country or region", "Contemporaneous news report, official record, or photograph record", "Capital city substituted for actual location; venue name from different event"],
+      ],
+    },
+    bodySections: [
+      {
+        heading: "Why AI Gets Entities Wrong",
+        paragraphs: [
+          "AI models generate names, dates, and locations from pattern-matching on training data. For frequently mentioned entities, the model has seen the same combination many times and reproduces it reliably. For less-covered entities, the model may produce a plausible name that belongs to a different person, a date that appears nearby in the training data, or a location associated with the topic rather than the specific event.",
+          "The most common source of entity errors is similarity: two people with the same or similar names in the same field; two events with the same participants in the same location but different years; two locations associated with the same organization that are easily confused.",
+        ],
+      },
+      {
+        heading: "Entity Verification Checklist",
+        bullets: [
+          "Full name — verify spelling, full legal or public name, and whether the name is the person's commonly used name or a variation",
+          "Middle name or initial — check for disambiguation against others with the same first and last name",
+          "Title or role — verify the title the person held at the time of the specific event, not their current title",
+          "Organization — verify the exact organization name and whether the person actually belonged to it at that time",
+          "Same-name collision — search for other individuals with the same or similar name who could be confused",
+          "Event date — verify against a contemporaneous record, not a later article about the event",
+          "Publication date vs. event date — distinguish when something was announced from when it occurred",
+          "Location specificity — verify city and venue, not just country or region",
+          "Time zone — for international stories, confirm whether the stated time is local or GMT",
+          "Current vs. historical name — verify that the place name used is correct for the period in question",
+          "Jurisdiction — for legal stories, confirm the specific court, territory, or regulatory body",
+          "Organization name at the time — institutions change names; verify the name that was in use at the event date",
+        ],
+      },
+      {
+        heading: "Same-Name Collisions",
+        paragraphs: [
+          "Same-name collisions are one of the most frequent sources of AI entity error and one of the most damaging for published stories. Two people with the same name in the same field — politicians, researchers, executives, public officials — can be conflated without any other indicator that something is wrong. The name is correct; the person is not.",
+          "When a named individual appears in an AI summary, always verify not just that the name is correctly spelled but that it refers to the specific individual relevant to the event in question. Common disambiguation checks: employer and role, geographic location, age range where publicly available, and confirmation in a primary source that refers to this individual specifically in connection with this event.",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "Why are AI entity errors so common if the facts appear correct?",
+        a: "AI models generate names, dates, and locations from training data patterns. They produce the entity most commonly associated with a topic, role, or context — which may be the right entity type but the wrong specific instance. The model has no mechanism to verify that a specific individual, date, or location is correct for a specific event; it reproduces the most likely candidate based on patterns.",
+      },
+      {
+        q: "What is a same-name collision in AI research?",
+        a: "A same-name collision is when an AI references the correct name but the wrong individual bearing that name. Two researchers with the same name, two politicians with the same surname, two executives with the same first and last name — the AI attributes a statement, role, or action to the right name but the wrong person. The check is verifying, via a primary source, that the named individual was actually connected to the specific event.",
+      },
+      {
+        q: "How do I verify a date that an AI gives for a historical event?",
+        a: "Find a contemporaneous primary source — a news report, official record, court filing, or organizational announcement published at the time of the event. Do not rely on later articles about the event, which may have introduced errors. Where multiple contemporaneous sources give different dates, note the discrepancy and use the source with the most direct connection to the event.",
+      },
+      {
+        q: "Is the location the AI gives for an event usually wrong?",
+        a: "Not always, but AI location errors are common for: events that moved between locations, events associated with an organization's headquarters rather than where they occurred, international events where the AI defaults to the capital city, and events named after a location that is not where they took place. Always verify against a contemporaneous source.",
+      },
+      {
+        q: "Does ConvergePanel help with entity verification?",
+        a: "ConvergePanel helps surface entity divergence: when multiple models give different names, dates, or locations for the same element of a story, that divergence flags the entity for primary-source verification. The primary-source check still requires human review of the specific records — ConvergePanel surfaces which entities need the most scrutiny.",
+      },
+    ],
+    relatedLinks: [
+      { label: "How to Check If AI Merged Two Events", href: "/use-cases/check-if-ai-merged-two-events" },
+      { label: "AI Timeline Verification for Journalists", href: "/use-cases/ai-timeline-verification" },
+      { label: "Verification Checklist for Journalists", href: "/use-cases/verification-checklist-for-journalists" },
+      { label: "AI Quote Verification Before Publication", href: "/use-cases/ai-quote-verification" },
+      { label: "How to Audit an AI Summary Against the Original", href: "/use-cases/audit-ai-summary-against-original-document" },
+      { label: "How to Fact-Check Breaking News Claims", href: "/use-cases/how-to-fact-check-breaking-news-claims" },
+    ],
+    cta: "Check the Key Details",
+    category: "how-to",
+    schemaType: "HowTo",
+    metaDescription:
+      "A name wrong by one letter. A date off by one year. A location in the wrong city. Entity errors in AI summaries are common and compound. How to verify names, dates, and locations before publishing.",
+  },
+
+  {
+    slug: "document-why-newsroom-rejected-ai-claim",
+    publishedAt: "2026-07-01",
+    title: "How to Document Why a Newsroom Rejected an AI Claim",
+    h1: "'We Did Not Trust It' Is Not a Review Record",
+    audience: "Editors, managing editors, newsroom teams, fact-checking teams",
+    audienceDetail: "Editors and managing editors who need a structured process for documenting the rejection of AI-sourced claims so the decision is defensible and reviewable",
+    problem:
+      "The decision not to publish is as important as the decision to publish. When a newsroom rejects an AI-sourced claim because evidence was insufficient, model agreement did not substitute for corroboration, or the allegation could not be independently verified — the reasoning should be documented. Without a record, the rejection is a judgment call with no audit trail.\n\nIf the story surfaces later in another outlet, if a source challenges the decision, or if a similar claim appears with new evidence, there is no record of what was found and why it was not sufficient. The gap is not malice — it is that most newsrooms have workflow for publication but not for documented rejection.",
+    solution:
+      "ConvergePanel's verification output provides the evidence layer for the rejection record. The log of what was submitted, what models found, where they disagreed, and what evidence was reviewed becomes the basis for the documentation. The journalist or editor adds the editorial conclusion and the specific reason the claim was not sufficient for publication.",
+    workflow: [
+      "Document the original claim: what was it, when was it submitted, who submitted it",
+      "List every source the AI cited or implied as evidence",
+      "Record the verification steps taken: what was checked, by whom, and what ConvergePanel returned",
+      "Note model agreement and disagreement on the core claim",
+      "State the specific weakness that prevented publication: missing corroboration, contradicted evidence, insufficient sourcing, subject response that changes the claim",
+      "Document any open questions that were not resolved before the rejection",
+      "Identify the reviewer who made the rejection decision and their role",
+      "Record the editorial decision, the stated reason, and the date",
+      "Note any required follow-up: whether the claim will be monitored, whether a source will be contacted again, whether it can be revisited with additional evidence",
+    ],
+    useCases: [
+      "Creating a defensible record of why a newsroom chose not to publish an AI-sourced allegation",
+      "Building an institutional audit trail that shows the editorial process for rejected claims",
+      "Preparing documentation in case a rejected claim later appears in another publication",
+      "Training journalists and editors on what constitutes a sufficient rejection record",
+    ],
+    comparisonTable: {
+      headers: ["Record field", "What to document", "Why it matters"],
+      rows: [
+        ["Claim", "Exact wording of the AI-sourced claim", "Establishes what was under review"],
+        ["Sources supplied", "Every source the AI cited or implied", "Documents the evidentiary basis as received"],
+        ["Evidence reviewed", "What was independently checked and what it showed", "Proves the rejection was based on review, not avoidance"],
+        ["Model analysis", "ConvergePanel output: agreement score, disagreements, evidence gaps", "Provides structured documentation of AI research quality"],
+        ["Weakness identified", "Specific reason the claim was insufficient: missing corroboration, contradicted by evidence, subject denial", "States the editorial conclusion directly"],
+        ["Unresolved questions", "What remained open at the time of rejection", "Documents known uncertainty rather than concealing it"],
+        ["Reviewer", "Name and role of the editor who made the decision", "Establishes editorial accountability"],
+        ["Decision and reason", "Reject / hold / refer to legal, with stated rationale", "Creates the formal record of the outcome"],
+        ["Follow-up", "Whether the claim will be revisited, monitored, or referred", "Prevents the rejected claim from disappearing without resolution"],
+      ],
+    },
+    bodySections: [
+      {
+        heading: "Why Documentation of Rejection Matters",
+        paragraphs: [
+          "When a newsroom investigates a claim and decides not to publish, two things are true simultaneously: the claim was reviewed seriously, and it was found insufficient. Both parts of that record matter. The review record demonstrates due diligence. The rejection reason demonstrates editorial judgment. Together, they create a defensible position if the claim surfaces later.",
+          "Without documentation, 'we looked at it and decided it wasn't publishable' is a statement with no supporting evidence. With documentation, it is a reviewable decision that can be examined against the record of what was found.",
+        ],
+      },
+      {
+        heading: "What Is Not a Sufficient Rejection Record",
+        bullets: [
+          "'We did not trust the source' — states a conclusion without the basis",
+          "'The AI said it was unverifiable' — documents a tool output, not an editorial review",
+          "'It felt wrong' — editorial instinct is valid but cannot stand alone as a documented reason",
+          "'We couldn't confirm it' — does not state what was checked or why confirmation failed",
+          "'The legal team said no' — is a decision point, not a review record; the legal team's concerns should be documented",
+          "No record at all — leaves the newsroom with no defense if the claim surfaces elsewhere",
+        ],
+      },
+      {
+        heading: "How ConvergePanel Supports the Rejection Record",
+        paragraphs: [
+          "When a claim is run through ConvergePanel, the output includes model agreement, per-model evidence, disagreements, and the points where evidence is absent or contested. This structured output becomes the documented evidence review — more precise and reviewable than 'we searched and didn't find support.'",
+          "The ConvergePanel run does not make the rejection decision. The editor makes that decision. ConvergePanel provides a structured, exportable record of what was found in the AI research phase — one component of a complete rejection record.",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "Does every rejected claim need to be documented?",
+        a: "Not every claim requires the same level of documentation. A claim rejected immediately because it was obviously unsubstantiated may need a short note. A claim that was seriously investigated before rejection — involving documentary review, source contacts, and editorial review — requires a complete record. Apply higher documentation standards to claims that involve allegations, that carried significant investigation time, or that could resurface.",
+      },
+      {
+        q: "How long should a rejection record be retained?",
+        a: "Retention depends on editorial policy and jurisdiction, but as a general principle: retain rejection records for claims that involved significant investigation for at least as long as the claim could plausibly resurface or lead to a challenge. For allegations involving named individuals, retention should align with the limitation period relevant to your jurisdiction.",
+      },
+      {
+        q: "What if the same claim appears in another publication after we rejected it?",
+        a: "A documented rejection record shows your newsroom reviewed the claim and found it insufficient. That record becomes relevant to your editorial response. If new evidence appears in the other publication that was not available during your review, document that the evidence is new and decide whether to revisit the claim under the same review process.",
+      },
+      {
+        q: "Can the rejection record be created after the fact?",
+        a: "A contemporaneous record — created at the time of the rejection — is more credible than one reconstructed later. After-the-fact documentation can omit what was not remembered, alter emphasis in light of later events, and cannot demonstrate that the decision was based on what was known at the time. Create the record when the decision is made.",
+      },
+      {
+        q: "Does ConvergePanel generate the rejection record automatically?",
+        a: "ConvergePanel generates an exportable record of the AI research phase: what was queried, what models found, where they agreed and disagreed. That record needs to be combined with the editorial components — reviewer name, editorial reason, decision, and follow-up — to constitute a complete rejection documentation. The editorial judgment is added by the journalist or editor, not by the tool.",
+      },
+    ],
+    relatedLinks: [
+      { label: "How to Verify an AI-Generated Allegation Before Publication", href: "/use-cases/verify-ai-generated-allegation-before-publication" },
+      { label: "What Is a Decision Receipt?", href: "/use-cases/what-is-a-decision-receipt" },
+      { label: "How to Create an AI Audit Trail", href: "/use-cases/how-to-create-an-ai-audit-trail" },
+      { label: "How to Prove an AI Decision Was Reviewed", href: "/use-cases/how-to-prove-an-ai-decision-was-reviewed" },
+      { label: "Newsroom AI Verification Workflow", href: "/use-cases/newsroom-ai-verification-workflow" },
+      { label: "AI Peer Review for High-Stakes Workflows", href: "/use-cases/ai-peer-review-for-high-stakes-workflows" },
+    ],
+    cta: "Create a Defensible Review Record",
+    category: "governance",
+    schemaType: "HowTo",
+    metaDescription:
+      "When a newsroom rejects an AI claim, that decision needs a record. How to document the rejection so the review is defensible if the claim resurfaces elsewhere.",
+  },
+
+  {
+    slug: "ai-context-collapse",
+    publishedAt: "2026-07-01",
+    title: "AI Context Collapse: When Separate Facts Become One False Story",
+    h1: "Every Detail Can Be Real While the Story Is Still Wrong",
+    audience: "Journalists, fact-checkers, researchers, editors",
+    audienceDetail: "Anyone who receives AI-generated accounts of events and needs to understand how factually accurate details can be combined into a misleading narrative without any individual fact being false",
+    problem:
+      "AI context collapse is what happens when facts from different times, places, or people are combined into a single coherent-sounding account that is false as a whole even though each element traces to a real source.\n\nA protest that happened in two different cities on two different dates becomes one event. A quote from a 2019 interview appears alongside details from a 2024 story. A policy associated with one official is described in the context of another who held the same role. The model has not invented any of these facts. It has combined real facts from different contexts into an account that misrepresents reality.",
+    solution:
+      "The test for context collapse is not 'is each fact real?' but 'do these facts belong together in the same context?' ConvergePanel helps surface context collapse by running an account through multiple models: when models give different contexts for the same apparent facts — different dates, different attributions, different settings — that divergence marks where contexts were combined.",
+    workflow: [
+      "Identify every specific factual element in the AI account: people, dates, locations, statements, actions",
+      "Ask the consistency test: can all of these elements be confirmed in a single primary source that covers them together?",
+      "Submit the account to ConvergePanel and note where models give different contexts for the same claimed facts",
+      "For any element that produces model divergence, find the primary source for that element specifically",
+      "Check whether the element belongs to the same event as the others, or to a different event that happens to share some features",
+      "If elements are from different contexts, reconstruct each event accurately using only elements confirmed to that event",
+    ],
+    useCases: [
+      "Detecting whether an AI account of a recurring event has combined details from different instances",
+      "Checking whether a public figure's statements from different periods have been placed in the same context",
+      "Verifying that an AI account of a policy or decision hasn't merged details from different administrations or time periods",
+      "Identifying whether a news account about a location has combined events from different incidents at that location",
+    ],
+    bodySections: [
+      {
+        heading: "What Is Context Collapse?",
+        paragraphs: [
+          "Context collapse in AI outputs occurs when a model draws on information from multiple separate events, time periods, or settings to produce a coherent account of what it presents as a single event. The account is coherent — it reads smoothly, each sentence follows logically from the last — but the coherence is a product of the model's text generation, not a reflection of what actually happened.",
+          "The term is borrowed from social media contexts where content originally intended for one audience is seen by another, changing its meaning. In AI outputs, context collapse means information originally pertaining to one event is encountered in the context of another, changing what the combined account implies.",
+        ],
+      },
+      {
+        heading: "Common Patterns of AI Context Collapse",
+        bullets: [
+          "Two protests by the same movement, in different cities and different months, described as one event",
+          "A quote from an old interview placed in the context of a recent story, implying it was a reaction to current events",
+          "Old footage of one incident described as showing a current incident with similar characteristics",
+          "Two officials who held the same role in different administrations conflated as the same person",
+          "A policy announcement from one period described with implementation details from a different period",
+          "An incident at one location described with details from a similar incident at the same location in a different year",
+        ],
+      },
+      {
+        heading: "Context Collapse vs. Other AI Accuracy Failures",
+        bullets: [
+          "Hallucination — invented facts that have no source. Context collapse involves only real facts from real sources.",
+          "Source laundering — weak evidence that appears more robust than it is. Context collapse is about correct evidence in the wrong context.",
+          "Merged events — two events combined into one account. Context collapse is broader: it includes quotes, policies, and statements from different contexts, not just events.",
+          "Outdated information — facts that were true at an earlier point. Context collapse places facts in a context that changes their meaning, not just their currency.",
+        ],
+      },
+      {
+        heading: "The Context Test",
+        paragraphs: [
+          "The context test is a single question applied to every fact in an AI account: was this fact — this specific statement, this specific action, this specific date — part of this specific event or context, or does it belong to a different event or context that shares surface features?",
+          "The answer requires a primary source: a contemporaneous report, official record, or original recording that places this fact in this context specifically. If the fact cannot be placed in this specific context by a primary source, it belongs somewhere else.",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "What causes AI context collapse?",
+        a: "AI models generate text by predicting what follows from patterns in training data. When two events share a topic, location, or actors, the model can produce a coherent account by drawing on information from both without tracking whether those details belong to the same event. The model is not confusing the events intentionally — it is pattern-matching on shared features without separating contexts.",
+      },
+      {
+        q: "Is context collapse the same as a hallucination?",
+        a: "No. Hallucination involves invented facts — names, dates, or sources that do not exist. Context collapse involves only real facts that genuinely exist, placed in the wrong context. Every element in a context-collapsed account is verifiable. The problem is that the elements are combined from different events, times, or people, producing a false account from true components.",
+      },
+      {
+        q: "How do I know if an AI account has collapsed separate contexts?",
+        a: "The consistency test: can every specific fact in the account be confirmed in a single primary source that covers all of them together? If some facts trace to one source and other facts trace to a different source for a similar but separate event, the account has collapsed two contexts into one. The failure sign is that you cannot find one primary source containing all the specific details together.",
+      },
+      {
+        q: "Does ConvergePanel detect context collapse directly?",
+        a: "ConvergePanel does not automatically identify context collapse. It helps by running an account through multiple models: when models give different contexts for the same apparent facts — different dates, different attributions, different settings — that divergence is a signal. Those divergence points are where you should check the specific primary source to determine which context each fact actually belongs to.",
+      },
+      {
+        q: "Is context collapse more common in some topics than others?",
+        a: "Context collapse is most common in topics with recurring events (protests, elections, court proceedings), public figures who appear in many different contexts over time, locations associated with multiple incidents, and ongoing stories that developed across many news cycles. Any topic where training data contains many similar events with overlapping features is susceptible.",
+      },
+    ],
+    relatedLinks: [
+      { label: "How to Check If AI Merged Two Events", href: "/use-cases/check-if-ai-merged-two-events" },
+      { label: "AI Timeline Verification for Journalists", href: "/use-cases/ai-timeline-verification" },
+      { label: "AI Source Laundering", href: "/use-cases/ai-source-laundering" },
+      { label: "How to Find Hidden Assumptions in AI Answers", href: "/use-cases/find-hidden-assumptions-in-ai-answers" },
+      { label: "When AI Models Agree But Are Wrong", href: "/use-cases/when-ai-models-agree-but-are-wrong" },
+      { label: "Verify Names, Dates, and Locations in an AI Summary", href: "/use-cases/verify-names-dates-locations-in-ai-summary" },
+    ],
+    cta: "Check the Context",
+    category: "thought-leadership",
+    schemaType: "FAQPage",
+    metaDescription:
+      "AI context collapse is when facts from different events, times, or people are combined into one false account. Every detail is real. The story they tell together is not.",
+  },
+
+  {
+    slug: "ai-quote-verification",
+    publishedAt: "2026-07-01",
+    title: "AI Quote Verification Before Publication",
+    h1: "Verify the Words, Speaker, Context, and Meaning",
+    audience: "Journalists, editors, fact-checkers",
+    audienceDetail: "Journalists and editors who receive quotations sourced, summarized, translated, or attributed by AI and need to verify them against primary sources before publication",
+    problem:
+      "A quotation generated, summarized, translated, or attributed by AI carries four distinct risks: the exact words may have been changed, the speaker may have been misidentified, the context may have been removed, and the meaning may have shifted. Any one of these failures can make a published quote inaccurate.\n\nQuotations in journalism carry special weight — they are the voice of the source, in their words. Getting them wrong is not a minor accuracy issue. A paraphrase published as a direct quote misrepresents the source. A quote published without its surrounding context can invert the speaker's meaning. An AI system assigning a quote to the wrong person creates a false attribution that harms both the person wrongly cited and the publication's credibility.",
+    solution:
+      "Quote verification is a distinct step from general claim verification. It requires checking exact wording against the original recording, transcript, or publication; verifying speaker identity and role; reviewing surrounding context; and checking the date, any translation, and whether the AI presented a paraphrase as a direct quotation.",
+    workflow: [
+      "Find the original source of the quotation: the recording, official transcript, press release, or publication where it first appeared",
+      "Compare exact wording: what the source said versus what the AI reported they said",
+      "Check whether qualifications, negations, or hedges were removed that change the meaning",
+      "Verify the speaker: full name, title, role, and whether they held that role at the time of the quotation",
+      "Verify context: what question was the person responding to? what came immediately before and after the statement?",
+      "Determine whether the AI presented a direct quote or a paraphrase in quotation marks — this distinction matters for publication",
+      "Verify the date: is this a current statement or an old quote being applied to a new context?",
+      "If translated: find the original language version and check for meaning shifts, changed certainty, or omitted qualifications",
+    ],
+    useCases: [
+      "Verifying a quotation attributed to a public figure by an AI research tool before including it in a story",
+      "Checking whether an AI-generated summary placed a real quote from a different context into a current story",
+      "Identifying whether a translated quotation has shifted meaning from the original language version",
+      "Establishing that a quotation is a direct statement and not an AI-produced paraphrase before attributing it",
+    ],
+    bodySections: [
+      {
+        heading: "What Can Go Wrong with an AI-Sourced Quote",
+        bullets: [
+          "The words were changed — AI paraphrased but presented the result as a direct quotation",
+          "A qualification was removed — 'I believe this could work under specific conditions' becomes 'This works'",
+          "A negation was dropped — 'We are not planning to expand' becomes 'We are planning to expand'",
+          "The tense was changed — a past statement is presented as a current position",
+          "The speaker was misidentified — a correct quote from one person attributed to another with a similar name or role",
+          "Context was removed — a statement made in one context is presented without that context, changing what it implies",
+          "A translated quote shifted meaning — the original language version expressed different certainty, tone, or meaning",
+          "The quote is composite — the AI combined two separate statements into one that the person never actually said",
+        ],
+      },
+      {
+        heading: "Direct Quote vs. Paraphrase vs. AI Summary",
+        paragraphs: [
+          "A direct quote is the exact words the person said, verified against the original recording or transcript, rendered in quotation marks. A paraphrase is a restatement of what the person said, in different words, not placed in quotation marks. An AI summary is the model's interpretation of what was said or meant, which should never appear as a quotation.",
+          "AI tools frequently produce paraphrases inside quotation marks. This happens because AI summarizes and then presents the summary in a form that reads like attribution. The result is a publication-ready quote that is not what the person said. The test: can you find the exact words, in this order, in the original recording or transcript?",
+        ],
+      },
+      {
+        heading: "Verifying the Attribution",
+        paragraphs: [
+          "Attribution verification means confirming not just that a person with this name said something like this, but that this specific person — with this role, at this organization, in this context — made this specific statement at this specific time. Same-name collisions are a frequent source of attribution error in AI research: the correct name but the wrong individual.",
+        ],
+        bullets: [
+          "Search for the specific person by full name, title, and organization",
+          "Confirm they held the stated role at the time the statement was made",
+          "Find the original recording, transcript, or publication where the statement appears",
+          "Confirm the statement is attributed to this person in the original source",
+          "If the statement appears only in secondary sources, trace it back to the original",
+        ],
+      },
+      {
+        heading: "Checking Translated Quotes",
+        paragraphs: [
+          "A fluent translation can still change the speaker's meaning. AI translation systems optimize for readability and fluency in the target language; they do not always preserve subtle differences in certainty, tone, formality, or cultural register that change what the speaker implied.",
+          "For translated quotations, the verification standard is higher: find the original language version, confirm what the speaker actually said in their own language, and verify the translation against the original — not against a secondary English-language source that may have already introduced translation error. For sensitive or contested quotations, qualified human translation review is required.",
+        ],
+        bullets: [
+          "Find the original language recording, transcript, or publication",
+          "Identify whether the quoted passage is a direct statement or a translation of a paraphrase",
+          "Check whether certainty language was preserved: 'seems possible' and 'is confirmed' translate differently",
+          "Check whether honorifics, formal address, or register changes affect meaning in the target language",
+          "For high-stakes quotations: have the translation reviewed by a qualified human translator before publication",
+        ],
+      },
+      {
+        heading: "The Quote Verification Checklist",
+        bullets: [
+          "Words — exact match against the original recording or transcript",
+          "Speaker — confirmed identity, role at time of statement, and same-name disambiguation",
+          "Context — surrounding content that affects meaning; what was being asked or discussed",
+          "Date — when the statement was made, not when it was first reported",
+          "Direct vs. paraphrase — confirmed as the exact words, not an AI-produced summary",
+          "Qualifications — no hedges, negations, or conditions have been removed",
+          "Translation — original language version consulted; meaning verified by qualified reviewer if sensitive",
+          "Currency — this statement reflects the person's current position and is not an old quote in a new context",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "How do I know whether an AI-sourced quote is a direct statement or a paraphrase?",
+        a: "The only reliable test is finding the original recording or transcript and confirming that the exact words appear there in that order. If you cannot find the source, or if the source contains a paraphrase that differs from the AI's version, the quote should not be published as a direct statement. Treat any AI-sourced quotation as unverified until the primary source is found.",
+      },
+      {
+        q: "What happens when a qualification is removed from a quote?",
+        a: "Removing a qualification changes what a speaker is saying. 'This approach may be effective in certain conditions' and 'This approach is effective' are different statements. The first expresses conditional uncertainty; the second states a general conclusion. AI summaries frequently remove qualifications because they make text cleaner and shorter. The removal is invisible unless the quote is compared to the original.",
+      },
+      {
+        q: "Does ConvergePanel verify quotes against recordings or transcripts?",
+        a: "No. ConvergePanel compares how multiple AI models characterize the same statement or claim. If models give different versions of a quotation, that divergence is a flag for primary-source verification. But quote verification against an original recording or transcript requires human review of the source document — ConvergePanel surfaces where disagreement exists, not what the recording says.",
+      },
+      {
+        q: "What is the standard for verifying a translated quote before publication?",
+        a: "For any translated quotation: find the original language source, verify that the passage exists as stated in the original language, and confirm that the translation accurately reflects meaning — including certainty, tone, and any qualifications. For contested, sensitive, or high-stakes quotations, have the translation reviewed by a qualified human translator before publication. AI translation review is not a substitute for human translation expertise on material where precision matters.",
+      },
+      {
+        q: "Should I always get a statement from the person quoted?",
+        a: "For attributed direct quotations, the primary source — the recording, transcript, or publication — is the verification. For quotations where the attribution is contested or where the context is disputed, contacting the individual or their representative for confirmation adds an additional layer. For high-stakes attributions, the combination of a primary source and a contemporaneous confirmation provides the strongest basis for publication.",
+      },
+    ],
+    relatedLinks: [
+      { label: "Verify Names, Dates, and Locations in an AI Summary", href: "/use-cases/verify-names-dates-locations-in-ai-summary" },
+      { label: "Verify Translated Content with AI Models", href: "/use-cases/verify-translated-content-with-ai-models" },
+      { label: "AI Context Collapse", href: "/use-cases/ai-context-collapse" },
+      { label: "Verification Checklist for Journalists", href: "/use-cases/verification-checklist-for-journalists" },
+      { label: "Claim Verification for Journalists", href: "/use-cases/claim-verification-for-journalists" },
+      { label: "AI Source Laundering", href: "/use-cases/ai-source-laundering" },
+    ],
+    cta: "Verify a Quote Before Publishing",
+    category: "how-to",
+    schemaType: "HowTo",
+    metaDescription:
+      "AI can change quote wording, misattribute speakers, remove context, and present paraphrases as direct statements. How to verify a quote's words, speaker, context, and meaning before publication.",
+  },
+
+  {
+    slug: "ai-correction-check",
+    publishedAt: "2026-07-01",
+    title: "How to Check Whether an AI Answer Missed a Correction",
+    h1: "The Original Report May No Longer Be the Latest Truth",
+    audience: "Journalists, fact-checkers, researchers, editors",
+    audienceDetail: "Anyone who relies on AI-assisted research and needs to know whether a claim reflects the current state of knowledge — including retractions, corrections, updates, and later reporting that the AI model may not have seen",
+    problem:
+      "An AI answer can be accurate for the state of knowledge at the time of the model's training and wrong for the state of knowledge today. Corrections are published. Studies are retracted. Officials issue updated statements. Court cases conclude with different outcomes than initially reported. Investigations end with findings that contradict early accounts. Models trained before those updates do not know they happened.\n\nThe risk is not only recency. Models can also produce outdated answers about events that occurred before their training cutoff — when a retraction or correction was published but not as widely indexed as the original claim. A retracted study may have been cited thousands of times in training data; the retraction notice may have appeared in a small percentage of those sources.",
+    solution:
+      "Checking for corrections, retractions, and later reporting is a human step that AI cannot reliably complete. ConvergePanel helps surface one signal: when one model cites a finding and another doesn't, or when models give different accounts of the same situation, that divergence can sometimes indicate that one model's training included a correction that the other's didn't. But the only reliable check is a deliberate human search.",
+    workflow: [
+      "Identify every specific claim in the AI answer that rests on a named study, report, statement, or source",
+      "Search the originating publication for corrections, updates, or retraction notices related to that source",
+      "For research claims: search journal databases (PubMed Retraction Watch, Crossref) for retraction or correction notices",
+      "For official statements: check whether the issuing body has published an updated or superseded position",
+      "For news claims: search for later reporting on the same topic and check whether the underlying situation has changed",
+      "For court or legal claims: verify the current status of the proceeding — many AI answers reflect charges filed rather than the final disposition",
+      "Document what you found in each search, including searches that returned no updates",
+      "If no correction or update is found, record that the search was conducted rather than leaving it undocumented",
+    ],
+    useCases: [
+      "Checking whether a study cited in an AI answer has been retracted or corrected before citing it in a story",
+      "Verifying that an AI answer about a legal case reflects the final disposition, not just early reporting",
+      "Confirming that a public official's position cited by an AI has not since changed or been corrected",
+      "Auditing whether an AI-generated news timeline reflects the latest reporting or only early accounts",
+    ],
+    bodySections: [
+      {
+        heading: "The Distinction: Correction, Retraction, Update, Editor's Note",
+        bullets: [
+          "Correction — a factual error in a published work was identified and changed; the original claim is no longer accurate as stated",
+          "Retraction — a study, article, or finding has been formally withdrawn; it should not be cited as evidence",
+          "Update — new information has changed the significance or accuracy of an earlier report; the original may still exist but is no longer the complete picture",
+          "Editor's note — a clarification or change has been appended to a published piece; varies in significance from minor to substantive",
+          "Superseded claim — a finding was accurate when published but has been overtaken by subsequent evidence; the original claim is no longer current",
+          "Later reporting — subsequent journalism changed the understanding of a story without a formal correction process",
+          "Changed official record — a government body, institution, or organization updated its official position on a previously stated matter",
+        ],
+      },
+      {
+        heading: "Why AI Models Miss Corrections",
+        paragraphs: [
+          "Corrections and retractions are published in places and formats that are less prominent than original claims. A study cited thousands of times may have a retraction notice that appeared in far fewer sources. A breaking news claim reported by dozens of outlets may have a correction issued by one. The original claim becomes embedded in training data at scale; the correction appears in a small fraction of the same data.",
+          "Models are also trained on snapshots. A model with a training cutoff before a major correction was published will not have the correction in its training data regardless of how prominent the correction was.",
+        ],
+      },
+      {
+        heading: "How to Check for Retractions",
+        steps: [
+          "For academic studies: search Retraction Watch and PubMed for the study by title, author, or DOI",
+          "For journal articles: check the journal's website directly for notices appended to the article page",
+          "For preprints: check whether the preprint has been updated, superseded, or formally retracted",
+          "For news claims: search the original outlet's website for correction notices and search other major outlets for later reporting",
+          "For official statements: search the issuing organization's press releases and statements pages for updates",
+          "For legal claims: check court records for the current status of the case and any final disposition",
+          "Document the date of each search and what was found — including searches that returned no results",
+        ],
+      },
+      {
+        heading: "What ConvergePanel Can and Cannot Do",
+        paragraphs: [
+          "ConvergePanel helps surface model disagreement on claims. When one model describes a study's findings and another model does not cite that study at all, or cites it differently, that divergence can indicate that one model's training data included a correction or retraction that the other's did not. It is a signal, not a definitive finding.",
+          "ConvergePanel cannot search live databases for retraction notices or correction pages. It cannot access sources published after its constituent models' training cutoffs. The retraction check requires human search of the specific databases and publications where corrections would appear.",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "How do I know if a study cited by an AI has been retracted?",
+        a: "Search Retraction Watch by the study's title, author, or journal. Check the journal's website for any notices appended to the original article. Search PubMed for a Retraction Of notice linked to the original article. Do not rely on the AI to tell you whether a study has been retracted — the model may not have that information if the retraction was published after its training cutoff or was not widely indexed.",
+      },
+      {
+        q: "Can an AI model tell me its training cutoff date?",
+        a: "Major AI models can state approximate training cutoffs, but those dates are estimates, not precise boundaries. Data near the cutoff date is often underrepresented because there was less time for it to be indexed and included. Treat the training cutoff as an approximate guide — corrections and retractions close to that date may or may not appear in the model's training data.",
+      },
+      {
+        q: "What if no correction is found in my search?",
+        a: "Document that the search was conducted and returned no results. The absence of a visible correction is not the same as confirmation that none exists — some corrections are published in places that are not easily searchable. For high-stakes claims, contact the original publisher directly to ask whether any correction has been issued.",
+      },
+      {
+        q: "Does an AI model know when official positions have changed?",
+        a: "Only if the change was published before the model's training cutoff and was indexed in the training data. For ongoing situations where positions change frequently — health guidance, regulatory status, legal proceedings — assume that the AI answer may be outdated and verify current status against the issuing organization's current publications.",
+      },
+      {
+        q: "Is there a difference between checking for corrections in AI research vs. journalism?",
+        a: "The correction types differ. In academic research, the key documents are formal retraction notices, correction notices, and expressions of concern from journals. In journalism, look for correction pages on the original outlet's website, later reporting by the same or other outlets, and any official responses from the subjects of the original reporting. In legal matters, check the current status of the proceedings in court records.",
+      },
+    ],
+    relatedLinks: [
+      { label: "AI Timeline Verification for Journalists", href: "/use-cases/ai-timeline-verification" },
+      { label: "How to Audit an AI Summary Against the Original", href: "/use-cases/audit-ai-summary-against-original-document" },
+      { label: "How to Verify Sources from AI Answers", href: "/use-cases/how-to-verify-sources-from-ai-answers" },
+      { label: "Verification Checklist for Journalists", href: "/use-cases/verification-checklist-for-journalists" },
+      { label: "How to Validate AI-Generated Research", href: "/use-cases/how-to-validate-ai-generated-research" },
+      { label: "How to Check If AI Hallucinated", href: "/use-cases/how-to-check-if-ai-hallucinated" },
+    ],
+    cta: "Check for Later Corrections",
+    category: "how-to",
+    schemaType: "FAQPage",
+    metaDescription:
+      "AI models do not know about corrections published after their training cutoff. How to check whether an AI answer missed a retraction, update, or later reporting before you cite it.",
+  },
+
+  {
+    slug: "ai-timeline-verification",
+    publishedAt: "2026-07-01",
+    title: "AI Timeline Verification for Journalists",
+    h1: "Verify the Dates Before You Trust the Story",
+    audience: "Journalists, editors, researchers, fact-checkers",
+    audienceDetail: "Journalists and editors who receive AI-generated timelines, chronologies, or date-dependent accounts and need to verify sequencing and dates before publication",
+    problem:
+      "Chronological accuracy is the foundation of any story built around a sequence of events. A regulation that took effect before a company's decision versus after it. A protest that preceded a policy versus one that followed it. An announcement attributed to the correct year versus the wrong one. Sequencing errors do not just create inaccuracies — they can invert the meaning of a story entirely.\n\nAI models are prone to timeline errors because they pattern-match on frequently appearing narratives about a topic, not on whether a specific date is correct for a specific event. When two events involve the same actors, the same issue, or the same geography, AI often merges, reorders, or misdates them.",
+    solution:
+      "AI timeline verification means checking every specific date against a primary source, verifying that the sequence of events is correct, and identifying whether events have been collapsed or reordered. ConvergePanel helps surface timeline disagreement: when models give different dates for the same event, that divergence points directly to the item that needs primary-source verification.",
+    workflow: [
+      "Extract every date, time reference, and sequence indicator from the AI account",
+      "List them in the order given and identify any that are approximate or unverified",
+      "For each event, find the primary source: a contemporaneous news report, official record, announcement, or filing",
+      "Verify the date against the primary source — not a later article that may have introduced its own timeline error",
+      "Check the sequence: does the order of events in the AI account match the confirmed dates?",
+      "Identify whether any events appear to have been collapsed into one or reordered relative to the evidence",
+      "Submit the account to ConvergePanel and compare how models describe the dates and sequence — divergences mark items for priority verification",
+      "Check for later corrections or updates to the timeline: did the situation change after early reporting?",
+    ],
+    useCases: [
+      "Verifying the order of events in an AI-generated account of a political crisis, legal case, or corporate incident",
+      "Checking whether dates in an AI-generated timeline of a policy development are accurate before publication",
+      "Identifying whether an AI account has collapsed two time-adjacent events into one",
+      "Auditing a chronology generated by an AI research tool before incorporating it into a long-form investigation",
+    ],
+    comparisonTable: {
+      headers: ["Event", "Claimed date", "Confirmed date", "Primary source", "Issue found"],
+      rows: [
+        ["Regulation announced", "March 2022", "September 2021", "Official federal register", "Date off by 18 months; changes the causal sequence"],
+        ["Company decision made", "April 2022", "February 2022", "Corporate filing, contemporaneous reporting", "Company acted before the regulation — AI account inverted the sequence"],
+        ["Protest held", "June 2023", "June 2022", "Local news report, archived photograph record", "One-year date error; turned a recent event into a historical one"],
+        ["Investigation concluded", "Pending", "Closed September 2023", "Court docket, official statement", "AI reflected charges filed, not final disposition"],
+      ],
+    },
+    bodySections: [
+      {
+        heading: "Common Timeline Errors in AI Answers",
+        bullets: [
+          "Wrong year — a date correct to the month and day but off by one or more years",
+          "Event reordering — two events with the correct dates individually, but presented in the wrong sequence",
+          "Collapsed events — two events on different dates described as one event, with one date",
+          "Publication date vs. event date — the date the news was published rather than when the event occurred",
+          "Announcement vs. implementation — a policy announced in one year and implemented in another, with only one date given",
+          "Initial report vs. final disposition — the date of an accusation or charge rather than the final legal outcome",
+          "Retrospective reporting — a later article about a historical event may give a slightly different date than contemporaneous sources",
+        ],
+      },
+      {
+        heading: "How to Use Timeline Disagreement as a Research Signal",
+        paragraphs: [
+          "When multiple models give different dates for the same event, that disagreement is not a reason to give up on the timeline — it is a research signal that identifies exactly which date is most uncertain. The divergence marks where to invest verification effort.",
+          "Submit the account to ConvergePanel and note specifically where models disagree on dates or sequence. Those points of disagreement are the items that need primary-source verification most urgently — they are the places where the AI account is most likely to have introduced an error.",
+        ],
+      },
+      {
+        heading: "Verifying Cause and Effect Through Chronology",
+        paragraphs: [
+          "Many AI accounts imply causal relationships based on chronological proximity — event A happened, then event B happened, therefore A caused B. Timeline errors that change the sequence can invert the implied causation entirely. If the AI says the policy preceded the decision, but the primary sources show the decision preceded the policy, the entire causal framing of the story is wrong.",
+          "For any story that includes a causal claim — 'in response to,' 'following,' 'after,' 'because of' — verify the chronological basis of the causation specifically, not just the individual dates.",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "Why are AI timelines often wrong when the individual facts appear correct?",
+        a: "AI models generate timelines from patterns in training data about a topic. When two events share actors, location, or subject matter, the model can generate a coherent-sounding sequence by drawing on information from both without accurately tracking which event happened first. Each individual date may trace to a real source — just not the same event the AI has attributed it to.",
+      },
+      {
+        q: "What is the most reliable primary source for verifying a date?",
+        a: "The most reliable primary source is a document created at the time of the event: a contemporaneous news report published on or immediately after the date in question, an official government announcement, a court filing with a date stamp, or an organizational press release. Later articles about the event are less reliable because they may have introduced their own timeline errors.",
+      },
+      {
+        q: "How do I verify the sequence when events are days apart?",
+        a: "For close-in-time events, a contemporaneous news timeline from a reliable outlet — or an official document that references both events — is the most reliable source. Be aware that early reporting can itself get the sequence wrong. Where multiple primary sources give different sequences, note the discrepancy and use the source closest to the events.",
+      },
+      {
+        q: "How does ConvergePanel help with timeline verification?",
+        a: "ConvergePanel runs the same account through multiple models and compares their outputs. When models give different dates or different sequences for the same events, that divergence appears in the comparison. It marks exactly which chronological elements are most uncertain and most in need of primary-source verification. The actual date verification against primary sources is a human step.",
+      },
+      {
+        q: "Should I correct the AI timeline or start a new one from primary sources?",
+        a: "For timelines where multiple dates are uncertain, starting from primary sources is more reliable than patching an AI-generated timeline. Patching introduces the risk that correcting one error reveals another or creates inconsistencies with other dates in the account. Build the verified timeline from primary sources and use the AI account only as an initial orientation to the events involved.",
+      },
+    ],
+    relatedLinks: [
+      { label: "How to Check If AI Merged Two Events", href: "/use-cases/check-if-ai-merged-two-events" },
+      { label: "AI Correction Check", href: "/use-cases/ai-correction-check" },
+      { label: "Verify Names, Dates, and Locations in an AI Summary", href: "/use-cases/verify-names-dates-locations-in-ai-summary" },
+      { label: "AI Context Collapse", href: "/use-cases/ai-context-collapse" },
+      { label: "Verification Checklist for Journalists", href: "/use-cases/verification-checklist-for-journalists" },
+      { label: "How to Fact-Check Breaking News Claims", href: "/use-cases/how-to-fact-check-breaking-news-claims" },
+    ],
+    cta: "Verify the Timeline",
+    category: "how-to",
+    schemaType: "HowTo",
+    metaDescription:
+      "Timeline errors in AI answers can reorder events, collapse separate incidents, or invert a story's causation. How to verify an AI-generated timeline before publishing.",
+  },
 ];
 
 export function getPageBySlug(slug: string): PSEOPage | undefined {

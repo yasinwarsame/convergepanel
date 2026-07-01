@@ -551,6 +551,27 @@ const HUB_GROUPS: HubGroup[] = [
       "when-video-verification-models-disagree",
     ],
   },
+  {
+    id: "journalist-verification-cluster",
+    label: "AI Verification for Journalists & Fact-Checkers",
+    description:
+      "Review AI-generated claims, quotes, timelines, sources, summaries, and allegations before publication — and document why the newsroom accepted or rejected them.",
+    tailwindText: "text-rose-400",
+    tailwindBg: "bg-cp-raised",
+    tailwindBorder: "border-cp-border",
+    slugs: [
+      "ai-source-laundering",
+      "ai-context-collapse",
+      "ai-quote-verification",
+      "ai-timeline-verification",
+      "ai-correction-check",
+      "check-if-ai-merged-two-events",
+      "verify-names-dates-locations-in-ai-summary",
+      "audit-ai-summary-against-original-document",
+      "verify-ai-generated-allegation-before-publication",
+      "document-why-newsroom-rejected-ai-claim",
+    ],
+  },
 ];
 
 export default function UseCasesIndex() {
