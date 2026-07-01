@@ -22409,6 +22409,1066 @@ export const PAGES: PSEOPage[] = [
       { label: "Newsroom AI verification workflow", href: "/use-cases/newsroom-ai-verification-workflow" },
     ],
   },
+
+  // ── CLUSTER: AI Trust, Disagreement & Human Review ──────────────────────────
+
+  {
+    slug: "when-ai-models-agree-but-are-wrong",
+    publishedAt: "2026-07-01",
+    title: "When AI Models Agree but Are Still Wrong",
+    h1: "AI Model Agreement Is Not the Same as Truth",
+    audience: "Analysts, researchers, decision-makers",
+    audienceDetail: "Anyone using multi-model AI tools who wants to understand what consensus actually proves — and what it cannot",
+    problem:
+      "When multiple AI models give the same answer, the instinct is to trust it. Agreement looks like corroboration. Five models saying the same thing feels more reliable than one. That instinct is usually helpful — but it has a specific failure mode that matters for serious work.\n\nAI models trained on the same internet, referencing the same frequently-cited sources, encoding the same dominant cultural narratives, and cut off at the same point in time can converge on the same wrong answer. The agreement is real. The truth behind it is not. This is false consensus — and it is harder to catch than a single model's hallucination, because the warning signal you expect (disagreement) is absent.",
+    solution:
+      "Multi-model consensus is a meaningful signal — not a meaningless one. When five independent models agree and the underlying evidence is solid, that agreement warrants real confidence. The problem arises when agreement is mistaken for proof.\n\nConvergePanel's consensus score measures agreement. It does not certify accuracy. The per-model evidence breakdown shows what each model cited and how it supported its conclusion. Reading the evidence — not just the score — is what separates a consensus that can be trusted from one that masks shared assumptions.",
+    workflow: [
+      "Submit the claim or question to ConvergePanel's Claim Verification or Deep Research mode",
+      "Note the consensus score — but do not stop at the number",
+      "Open the per-model evidence breakdown and read what each model cited",
+      "Check whether the supporting sources are the same across models or genuinely independent",
+      "Ask adversarially: what would need to be true for all five models to be wrong together?",
+      "For high-stakes conclusions, verify the underlying evidence directly before acting on the consensus",
+    ],
+    useCases: [
+      "Before citing a multi-model consensus result in a published piece or client report",
+      "Before making a financial or strategic decision where all AI sources agree",
+      "When a high consensus score feels more reassuring than the underlying evidence warrants",
+      "When researching a topic where a single narrative dominates public discourse",
+      "When checking whether models are drawing on the same few primary sources",
+    ],
+    bodySections: [
+      {
+        heading: "Four Mechanisms Behind False Consensus",
+        paragraphs: [
+          "Shared training data is the most common cause. Most major AI models are trained predominantly on the same internet — the same Wikipedia articles, news archives, academic preprints, and reference sites. A claim that is widely repeated across those sources will score high consensus regardless of its accuracy. The models are not independently verifying the claim. They are independently recalling the same cached version of it.",
+        ],
+        bullets: [
+          "Shared source dependence: models cite the same handful of primary sources — a widely-linked report, a frequently-cited study, a single expert interview — because those sources dominate their training data",
+          "Shared narrative encoding: dominant public discourse becomes embedded as apparent consensus even when academic or expert opinion is contested",
+          "Shared temporal gaps: all models share a training cutoff — recent reversals, retracted findings, or updated guidelines post-cutoff will be absent from every model simultaneously",
+          "Shared framing conventions: certain topics have become structured around standard framings that all models reproduce, even when the underlying evidence is weaker than the framing implies",
+        ],
+      },
+      {
+        heading: "What Consensus Can Tell You",
+        bullets: [
+          "That multiple AI models, reasoning from their training data, reached the same conclusion independently",
+          "That the claim is likely consistent with the most-indexed, most-cited public information available at training time",
+          "That the claim is not controversial within the sources those models were trained on",
+          "That acting on this claim has lower AI-level risk than acting on a low-consensus claim",
+          "That the claim is worth investigating further — with primary sources — if the stakes justify it",
+        ],
+      },
+      {
+        heading: "What Consensus Cannot Tell You",
+        bullets: [
+          "Whether the underlying evidence is sound — models can agree on a conclusion drawn from weak or outdated primary sources",
+          "Whether the claim was recently revised, retracted, or contested after the training cutoff",
+          "Whether the supporting sources are genuinely independent or all trace to a single origin",
+          "Whether the framing of the claim encodes hidden assumptions that all models share",
+          "Whether the claim is accurate in the specific context you are applying it to",
+        ],
+      },
+      {
+        heading: "A Worked Example",
+        paragraphs: [
+          "Consider asking five models whether a widely-cited statistic in a market research field is accurate. All five return the same figure. Consensus score: 92. The figure has been cited in hundreds of articles, blog posts, and business reports — all of which drew from the same original report, which itself acknowledged significant methodological limitations in a footnote that no subsequent citation repeated.",
+          "The models did not fabricate the figure. They reported what the indexed record said. The indexed record was wrong in a way that propagated silently across every source they trained on. A high consensus score with no independent primary source behind it is not corroboration. It is echo.",
+        ],
+      },
+      {
+        heading: "How to Test Agreement Against Evidence",
+        steps: [
+          "Read each model's per-model evidence — not just the summary verdict",
+          "List every source cited or implied by each model",
+          "Check whether those sources are the same across models or genuinely distinct",
+          "For the primary sources cited, verify they actually say what the models claim",
+          "Ask: does any model cite a source that is specifically a primary study rather than a summary or commentary?",
+          "If all citations trace to the same origin, treat the consensus as uncorroborated pending direct primary-source verification",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "Does a high consensus score mean a claim is accurate?",
+        a: "No. A high consensus score means multiple AI models reached the same conclusion based on their training data. It does not mean the underlying evidence is sound, that sources are independent, or that the claim is current. It is a useful confidence signal, not a verification certificate.",
+      },
+      {
+        q: "When should I be most suspicious of false consensus?",
+        a: "When a claim is widely repeated across public sources without a clear primary study behind it. When the topic involves popular narratives that dominate discourse. When the claim might have been updated, revised, or contested after the models' training cutoff. And when the stakes of being wrong are high.",
+      },
+      {
+        q: "How is ConvergePanel's consensus different from just getting one confident answer?",
+        a: "ConvergePanel shows you per-model evidence alongside the score — you can see what each model cited and whether those sources are independent. A confident single-model answer shows you nothing about whether the underlying evidence has any depth. The consensus score plus evidence breakdown is a diagnostic tool, not just an aggregate answer.",
+      },
+      {
+        q: "What should I do when all models agree but I am not sure I trust the result?",
+        a: "Trust the instinct. Read the per-model evidence to identify what sources are being cited. Check whether those sources are independent primary studies or derivatives of a single origin. For claims that matter, verify the primary source directly. Agreement is a starting point for further investigation, not an endpoint.",
+      },
+    ],
+    relatedLinks: [
+      { label: "What Is an AI Consensus Score?", href: "/use-cases/what-is-a-consensus-score" },
+      { label: "What AI Model Disagreement Reveals About Risk", href: "/use-cases/what-ai-disagreement-reveals-about-risk" },
+      { label: "When AI Models Cite the Same Weak Source", href: "/use-cases/when-ai-models-cite-the-same-weak-source" },
+      { label: "AI Confidence vs. Evidence", href: "/use-cases/ai-confidence-vs-evidence" },
+      { label: "Find the Weakest Claim in an AI Answer", href: "/use-cases/find-the-weakest-claim-in-an-ai-answer" },
+      { label: "Why You Should Not Trust One AI Model for Serious Decisions", href: "/use-cases/why-not-trust-one-ai-model-for-serious-decisions" },
+      { label: "AI Disagreement Analysis Tool", href: "/use-cases/ai-disagreement-analysis-tool" },
+      { label: "Deep Research and AI Verification", href: "/use-cases/deep-research-and-ai-verification" },
+    ],
+    cta: "Test the Consensus — see what the evidence actually says",
+    category: "thought-leadership",
+    schemaType: "FAQPage",
+    metaDescription:
+      "Multiple AI models agreeing does not mean they are right. Learn why false consensus happens, what it reveals, and how to test agreement against evidence.",
+  },
+
+  {
+    slug: "find-the-weakest-claim-in-an-ai-answer",
+    publishedAt: "2026-07-01",
+    title: "How to Find the Weakest Claim in an AI Answer",
+    h1: "Do Not Verify the Whole Answer at Once",
+    audience: "Researchers, analysts, journalists, knowledge workers",
+    audienceDetail: "Anyone reviewing an AI-generated answer that contains multiple claims and needs to know where to focus verification effort first",
+    problem:
+      "An AI answer often contains ten to twenty distinct factual claims. Verifying all of them equally is inefficient and usually impossible under real-world time constraints. The alternative most people take — skimming the answer and assuming it is correct — is worse.\n\nThe practical solution is claim prioritization: decompose the answer into its atomic claims and identify which one, if wrong, would cause the most harm. That claim gets verified first. The others are ranked behind it. Verification becomes tractable because it has a clear starting point and a clear end condition.",
+    solution:
+      "ConvergePanel's Claim Verification mode helps you test individual claims against five AI models simultaneously. Rather than submitting the full answer for review, extract the claim most likely to cause harm — the one with the weakest apparent support, the highest downstream impact, or the most confident assertion — and submit that first. The consensus score and per-model evidence tell you whether that specific claim holds up.",
+    workflow: [
+      "Copy the AI answer and list every factual claim it makes — even implied ones",
+      "For each claim, score it on severity (how much it would matter if wrong) and source quality (how well-evidenced it appears)",
+      "Identify the highest-risk claim — typically the one combining high severity with weak apparent evidence",
+      "Submit that claim to ConvergePanel Claim Verification as a standalone assertion",
+      "Review the consensus score, disagreements, and per-model evidence for that specific claim",
+      "Move to the next-highest-risk claim and repeat until you have verified what matters most",
+      "Document which claims were verified, which remain unverified, and what uncertainty remains",
+    ],
+    useCases: [
+      "Before publishing an article that relied on AI research assistance",
+      "Before citing AI-generated statistics in a business report or client deliverable",
+      "When reviewing a long AI-generated research brief under time pressure",
+      "When a single wrong claim in the answer could have significant downstream consequences",
+      "Before acting on an AI recommendation where the rationale contains mixed-evidence claims",
+    ],
+    bodySections: [
+      {
+        heading: "Break the Answer into Atomic Claims",
+        paragraphs: [
+          "An atomic claim is the smallest verifiable unit in an AI answer — a specific factual assertion that can be true or false independently of the surrounding text. A paragraph of AI output usually contains three to six atomic claims buried inside fluent prose. Decomposing the paragraph reveals them.",
+          "For example: 'The technology was adopted across six European markets in 2022, driven by regulatory pressure, and is now used by an estimated 40 percent of mid-sized enterprises in the region' contains at least four atomic claims: the geographic scope, the year, the causal driver (regulatory pressure), and the adoption figure. Each needs to be evaluated separately.",
+        ],
+      },
+      {
+        heading: "The Claim Priority Matrix",
+        paragraphs: [
+          "Not all claims carry the same risk. Use this matrix to rank them before you spend time verifying:",
+        ],
+        bullets: [
+          "Severity — how much harm would result if this claim is wrong? A wrong statistic in a board presentation is high severity; a wrong contextual detail is low",
+          "Source quality — does the claim appear to be well-grounded (specific citation, primary source) or weakly grounded (generic assertion, no source)?",
+          "Factual importance — is this claim load-bearing for the conclusion, or incidental background?",
+          "Uncertainty — does the claim express appropriate uncertainty, or is it stated as settled fact without qualification?",
+          "Downstream impact — if this claim propagates into a decision, publication, or recommendation, what does it affect?",
+          "Contradiction level — does any part of the same answer or adjacent AI output contradict this claim?",
+        ],
+      },
+      {
+        heading: "Start with the Highest-Risk Claim",
+        paragraphs: [
+          "The highest-risk claim is the one where severity is high and source quality appears weak. That combination means it matters if wrong and you have little reason to trust it.",
+          "The most dangerous claim in an AI answer is not always the most prominent one. Often the weakest claim is presented as context or supporting detail — stated confidently in a subordinate clause, never questioned, and passed into the downstream decision without scrutiny. Train yourself to look for those quiet confident assertions.",
+        ],
+      },
+      {
+        heading: "Worked Example",
+        paragraphs: [
+          "An AI answers a market research question and states: 'The sector grew by 34 percent year-on-year in 2023, with the strongest growth concentrated in Southeast Asian markets, particularly driven by mobile-first adoption patterns among consumers under 35.' Three claims: growth figure (34%), regional concentration (Southeast Asia), and causal mechanism (mobile-first, under-35 consumers).",
+          "The growth figure (34%) is high-severity and appears specific — specific enough to be falsifiable. It goes to the top of the verification list. The regional concentration is medium-severity but could be verified quickly. The causal mechanism is the hardest to verify and most likely to be an inference rather than a measured fact. Verify in that order.",
+        ],
+      },
+      {
+        heading: "Limitations",
+        bullets: [
+          "Claim decomposition takes practice — prose AI answers are designed to read fluently, which makes atomic claims harder to isolate than they should be",
+          "Some claims are unfalsifiable as stated and should be flagged as assertions, not verified as facts",
+          "A verified claim can still be true but irrelevant, misapplied, or misleadingly framed",
+          "Multi-model consensus on a specific claim is not the same as primary-source verification — it is a first-pass triage step",
+          "The priority matrix is a guide, not an algorithm — judgment is still required about what matters most",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "Why should I prioritize one claim instead of verifying everything?",
+        a: "Because verification capacity is finite and not all claims carry equal risk. The goal is to reduce harm from wrong information, not to achieve theoretical completeness. Starting with the highest-risk claim means the most consequential potential error is addressed first. If you run out of time, you have at least verified what matters most.",
+      },
+      {
+        q: "How do I identify an atomic claim in flowing AI prose?",
+        a: "Look for specific factual assertions: numbers, dates, named entities, causal claims, and comparative statements. Each one is a candidate atomic claim. The signal that something is atomic is that it could be independently true or false — it does not depend on other sentences around it to be verifiable.",
+      },
+      {
+        q: "What makes a claim high-severity?",
+        a: "High severity means the claim is load-bearing: if it is wrong, a significant downstream consequence follows. A wrong figure in a decision model is high severity. A wrong historical date in a contextual paragraph is low severity. Severity is relative to what the answer is being used for — the same claim can be high-severity in one context and low in another.",
+      },
+      {
+        q: "How does ConvergePanel help with claim prioritization?",
+        a: "ConvergePanel Claim Verification mode tests individual claims against five models simultaneously. You can submit the highest-priority claim as a standalone assertion and receive a consensus score, per-model evidence breakdown, and flagged disagreements — all focused on that specific claim rather than the full answer.",
+      },
+    ],
+    relatedLinks: [
+      { label: "AI Confidence vs. Evidence", href: "/use-cases/ai-confidence-vs-evidence" },
+      { label: "Does the AI Source Actually Support the Claim?", href: "/use-cases/when-ai-models-cite-the-same-weak-source" },
+      { label: "How to Pressure-Test an AI Response", href: "/use-cases/how-to-pressure-test-an-ai-response" },
+      { label: "How to Verify Sources from AI Answers", href: "/use-cases/how-to-verify-sources-from-ai-answers" },
+      { label: "What Is Source Grounding in AI?", href: "/use-cases/what-is-source-grounding-in-ai" },
+      { label: "Build a Defensible Answer from Conflicting AI Outputs", href: "/use-cases/build-a-defensible-answer-from-conflicting-ai-outputs" },
+      { label: "Claim Verification for Researchers", href: "/use-cases/claim-verification-for-researchers" },
+    ],
+    cta: "Find the Weakest Claim — submit it for multi-model review",
+    category: "how-to",
+    schemaType: "HowTo",
+    metaDescription:
+      "Do not verify every AI claim at once. Learn to decompose an answer into atomic claims, rank them by risk, and verify the one most likely to cause harm first.",
+  },
+
+  {
+    slug: "turn-ai-disagreement-into-a-research-plan",
+    publishedAt: "2026-07-01",
+    title: "How to Turn AI Disagreement into a Research Plan",
+    h1: "When Models Disagree, Your Next Question Becomes Clearer",
+    audience: "Researchers, analysts, journalists, knowledge workers",
+    audienceDetail: "Anyone who receives split or conflicting results from multiple AI models and needs to know what to do with the disagreement rather than feel stuck by it",
+    problem:
+      "Most people encountering AI disagreement experience it as a problem — the models did not give a clean answer, and now it is unclear what to do. That reaction is understandable but backwards. A split between models is not a failure of the research process. It is the most informative output the research process can produce.\n\nDisagreement tells you exactly where the evidence is weak, where assumptions conflict, where definitions are ambiguous, or where the underlying question is genuinely unsettled. That information is what you need to generate a targeted research plan — better focused than any plan you could have made before seeing the split.",
+    solution:
+      "ConvergePanel's disagreement map identifies the specific points where models diverge, along with the per-model evidence each is drawing on. Rather than treating that map as a problem to average away, use it as the first draft of your research agenda: the disputed claims become your investigation targets, the competing assumptions become your hypotheses, and the missing evidence becomes your sourcing task.",
+    workflow: [
+      "Submit your research question to ConvergePanel and review the panel results",
+      "Open the disagreement map and identify the specific claims or conclusions where models split",
+      "For each disputed point, read the per-model evidence — understand what each model was drawing on and why the conclusions differ",
+      "Classify the disagreement: is this a factual dispute, a framing difference, an assumption conflict, or a source gap?",
+      "Turn each disputed point into a targeted follow-up question: 'What primary evidence exists for X?' or 'Is the causal relationship between A and B established?'",
+      "Assign each follow-up question to a specific verification method: database search, primary source review, expert consultation",
+      "Work through the follow-up questions and update your analysis as you gather answers",
+      "Document what disagreements were resolved, how they were resolved, and what uncertainty remains",
+    ],
+    useCases: [
+      "When a multi-model panel returns a low consensus score on a research question you need to answer",
+      "Before committing to a strategic direction where AI models give conflicting assessments",
+      "When a research brief needs to account for contested evidence rather than pick one side",
+      "When a claim is important enough that resolving the model split is worth the investigation time",
+      "When a governance policy requires documenting how disagreement was handled before a decision was made",
+    ],
+    bodySections: [
+      {
+        heading: "Why Disagreement Is More Useful Than Agreement",
+        paragraphs: [
+          "Agreement tells you the claim is consistent with what models know. Disagreement tells you something more specific: it identifies the exact point where the evidence becomes uncertain, the framing becomes contested, or the models are working from different source material. That specificity is actionable in a way that bare agreement is not.",
+          "A research plan built from a disagreement map is more targeted than one built from scratch. You are not searching for what you need to know. You already know: it is the thing the models could not agree on.",
+        ],
+      },
+      {
+        heading: "Four Types of Model Disagreement",
+        bullets: [
+          "Factual dispute: models give different answers about a verifiable fact — a number, a date, an event. Resolve by finding the primary source.",
+          "Framing difference: models describe the same situation differently based on different implicit assumptions about what matters. Resolve by making the competing frames explicit and deciding which fits your context.",
+          "Assumption conflict: models reach different conclusions because they start from different background assumptions about markets, causality, or context. Resolve by surfacing and testing the competing assumptions.",
+          "Source gap: one model cites strong primary evidence; others cite none or weaker sources. Resolve by tracing the best-evidenced model's sources and checking whether they say what is claimed.",
+        ],
+      },
+      {
+        heading: "A Worked Example",
+        paragraphs: [
+          "A question about the effectiveness of a particular management intervention produces a split: two models endorse it strongly, two express uncertainty, one is skeptical. The disagreement map shows the split is concentrated on the evidence quality — the endorsing models cite a widely-referenced meta-analysis, while the skeptical model notes the studies in that meta-analysis were small and heterogeneous.",
+          "The research plan is now clear: find the original meta-analysis, read the studies cited, assess the methodology, and check whether subsequent research has replicated or challenged the finding. The disagreement did not make the answer harder to find — it made the investigation more focused.",
+        ],
+      },
+      {
+        heading: "What to Do with Remaining Uncertainty",
+        paragraphs: [
+          "Not all disagreements resolve cleanly. Some questions are genuinely contested in the literature, and the model split is an accurate reflection of that state. In those cases, the research plan produces not a definitive answer but a clear documentation of what is known, what is disputed, and what would be needed to resolve it.",
+          "Documenting remaining uncertainty is not a failure of the research. It is an honest output. A decision made with clear understanding of what is contested is better than a decision made under false confidence in a resolution that does not exist.",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "How do I know which model is right when they disagree?",
+        a: "You usually cannot determine which model is right from the models alone. That is why the disagreement generates a research plan rather than a verdict. The goal is to find primary-source evidence that resolves the specific disputed point — not to pick the model that sounds most authoritative.",
+      },
+      {
+        q: "Is high model disagreement always a reason to investigate further?",
+        a: "For high-stakes questions, yes. For low-stakes questions where the specific disputed point does not affect your conclusion, you can document the disagreement and move on. The decision to investigate is a function of how much the disputed point matters to what you are doing with the answer.",
+      },
+      {
+        q: "Can ConvergePanel help me investigate the disputed claims?",
+        a: "Yes. Once you have identified the specific disputed claim from the disagreement map, you can submit it as a standalone assertion to Claim Verification mode for focused multi-model review. The targeted claim submission produces a deeper evidence review than the broader research question.",
+      },
+      {
+        q: "What if the models disagree about whether a source exists?",
+        a: "That specific disagreement — one model cites a study, others do not — is a citation quality signal. Check the cited source directly: does it exist, does it say what the model claims, and can you find independent corroboration? A source cited by only one model with no corroboration from others is a higher-risk citation.",
+      },
+    ],
+    relatedLinks: [
+      { label: "AI Disagreement Analysis Tool", href: "/use-cases/ai-disagreement-analysis-tool" },
+      { label: "What AI Model Disagreement Reveals About Risk", href: "/use-cases/what-ai-disagreement-reveals-about-risk" },
+      { label: "When AI Models Agree but Are Still Wrong", href: "/use-cases/when-ai-models-agree-but-are-wrong" },
+      { label: "Build a Defensible Answer from Conflicting AI Outputs", href: "/use-cases/build-a-defensible-answer-from-conflicting-ai-outputs" },
+      { label: "How to Document Model Disagreement", href: "/use-cases/how-to-document-model-disagreement" },
+      { label: "Deep Research with Multiple AI Models", href: "/use-cases/deep-research-with-multiple-ai-models" },
+      { label: "How to Identify Blind Spots in AI Answers", href: "/use-cases/how-to-identify-blind-spots-in-ai-answers" },
+    ],
+    cta: "Turn Disagreement into Next Steps — review the split before you decide",
+    category: "how-to",
+    schemaType: "HowTo",
+    metaDescription:
+      "AI model disagreement is not a dead end. Learn to read what the split reveals, classify the type of dispute, and turn contested claims into a focused research plan.",
+  },
+
+  {
+    slug: "build-a-defensible-answer-from-conflicting-ai-outputs",
+    publishedAt: "2026-07-01",
+    title: "Build a Defensible Answer from Conflicting AI Outputs",
+    h1: "A Strong Synthesis Does Not Hide Disagreement",
+    audience: "Analysts, researchers, consultants, governance teams",
+    audienceDetail: "Anyone who needs to turn conflicting multi-model AI outputs into a synthesis that a reviewer, stakeholder, or auditor could examine and trust",
+    problem:
+      "When multiple AI models give conflicting answers, the easiest synthesis is to average them — pick the consensus view, smooth the disagreements into qualifications, and present a clean answer. That synthesis is easier to write and easier to present. It is also harder to defend.\n\nA synthesis that hides disagreement gives reviewers and decision-makers a false picture of certainty. When the decision later surfaces problems, the synthesis record shows nothing that should have prompted more scrutiny. A defensible synthesis preserves the disagreements so that reviewers can see exactly where the uncertainty was and assess whether the decision appropriately accounted for it.",
+    solution:
+      "ConvergePanel's panel output contains everything a defensible synthesis requires: per-model conclusions, evidence quality ratings, identified disagreements, and a consensus score. The synthesis you build from that output is stronger when it preserves those elements — not as an appendix but as an explicit part of the answer itself.",
+    workflow: [
+      "Run your research question through ConvergePanel and collect the full panel output",
+      "Identify the claims on which all or most models agree — these form the consensus section of your synthesis",
+      "Identify the claims on which models diverge — these become the contested claims section",
+      "Note any evidence cited by only one or two models that does not appear elsewhere — these are unique evidence signals",
+      "Explicitly document what remains unresolved after the panel review",
+      "State your reviewer conclusion and the basis for it — what you decided to do with the consensus, the contested claims, and the unresolved uncertainty",
+      "Record who reviewed this synthesis, what they considered, and what was decided — the decision trail",
+    ],
+    useCases: [
+      "Producing a research synthesis that can withstand editorial, compliance, or regulatory scrutiny",
+      "Preparing a recommendation that must be explainable if challenged after the fact",
+      "Creating a decision record for a high-stakes AI-assisted conclusion",
+      "Building a synthesis where team members need to understand both what was decided and what was uncertain",
+      "Establishing a review trail for governance or audit purposes",
+    ],
+    bodySections: [
+      {
+        heading: "What Defensible Means in an AI Synthesis",
+        paragraphs: [
+          "A defensible synthesis is one that a reasonable reviewer, with access to the underlying evidence, would assess as having been produced with appropriate care. It does not require that every claim be verified with primary sources. It does require that uncertainty and disagreement were acknowledged rather than hidden, that the basis for conclusions was stated, and that a reviewer could trace the reasoning.",
+          "The opposite of a defensible synthesis is a confident-looking document that conceals the ambiguity in the underlying research. That document is not stronger for being cleaner — it is weaker, because reviewers cannot assess what they cannot see.",
+        ],
+      },
+      {
+        heading: "The Seven-Section Synthesis Structure",
+        bullets: [
+          "Consensus — claims where all or most models agreed, with the evidence basis stated",
+          "Contested claims — specific points where models diverged, with each position and its evidence noted",
+          "Unique evidence — evidence cited by one or two models that was not corroborated elsewhere, flagged for additional scrutiny",
+          "Unresolved uncertainty — what remains genuinely uncertain after the full panel review, stated plainly",
+          "Excluded claims — claims that appeared in the panel output but were excluded from the synthesis and why",
+          "Reviewer conclusion — the decision or recommendation drawn from the above, with explicit statement of what it depends on",
+          "Decision trail — who reviewed this synthesis, when, what they were asked to assess, and what they decided",
+        ],
+      },
+      {
+        heading: "Sample Synthesis Structure",
+        paragraphs: [
+          "Consensus (high confidence): Models agree on the core mechanism and four of the five cited supporting factors. Evidence quality ratings are strong across all models for these points.",
+          "Contested: Two models dispute the third supporting factor; their evidence differs and appears to draw from different primary sources. This point remains uncertain and is not load-bearing for the recommendation.",
+          "Unique evidence: One model cited a 2024 study that others did not reference. Marked for direct verification before relying on.",
+          "Unresolved: The long-term effect under different regulatory conditions is not determinable from available AI evidence. Human expert review recommended before committing to a position dependent on this factor.",
+          "Reviewer conclusion: The recommendation proceeds based on the high-consensus points. The contested point and unresolved uncertainty are explicitly acknowledged in the final output and flagged for revisiting if conditions change.",
+          "Decision trail: Reviewed by [name], [date]. Approved with the uncertainty acknowledgment noted.",
+        ],
+      },
+      {
+        heading: "Why Hiding Disagreement Weakens a Synthesis",
+        bullets: [
+          "A reviewer who does not know where the uncertainty was cannot assess whether it was handled appropriately",
+          "A synthesis that looks certain will be held to a higher standard of accuracy when something goes wrong",
+          "Hidden uncertainty compounds — subsequent decisions built on a smoothed synthesis inherit the hidden risk",
+          "Governance and audit requirements increasingly expect that AI-assisted work documents where agreement ended and judgment began",
+          "Preserving disagreement protects the reviewer as much as the analyst — they can see what they were told and what they were not",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "Is it always necessary to document contested claims in a synthesis?",
+        a: "For high-stakes work — recommendations with significant financial, legal, reputational, or safety implications — yes. For low-stakes analysis where the contested point does not affect the conclusion, a brief acknowledgment may be sufficient. The standard should match the consequence of being wrong.",
+      },
+      {
+        q: "What counts as a decision trail?",
+        a: "A decision trail is a record of what was reviewed, who reviewed it, when, what the reviewer was asked to assess, and what they concluded. It does not need to be lengthy — a timestamped note with the reviewer's identity and decision is usually sufficient. The requirement is that it be created at the time of review, not reconstructed afterward.",
+      },
+      {
+        q: "How do I handle a synthesis where the contested claims are central to the conclusion?",
+        a: "State that explicitly. The conclusion depends on a contested claim means the recommendation carries more uncertainty than one built on high-consensus evidence. Flag the dependency, document the competing positions, and recommend the level of additional scrutiny warranted. A recommendation that acknowledges its weakest point is stronger than one that does not.",
+      },
+      {
+        q: "Can ConvergePanel generate the synthesis directly?",
+        a: "ConvergePanel generates a structured panel output — consensus score, per-model evidence, and identified disagreements — that you use to build the synthesis. The synthesis itself requires your judgment about what matters, what to include, and how to frame the conclusions. The panel output is the input material; the synthesis is the documented human conclusion.",
+      },
+    ],
+    relatedLinks: [
+      { label: "Turn AI Disagreement into a Research Plan", href: "/use-cases/turn-ai-disagreement-into-a-research-plan" },
+      { label: "How to Document Model Disagreement", href: "/use-cases/how-to-document-model-disagreement" },
+      { label: "What Is a Decision Receipt?", href: "/use-cases/what-is-a-decision-receipt" },
+      { label: "AI Peer Review for High-Stakes Workflows", href: "/use-cases/ai-peer-review-for-high-stakes-workflows" },
+      { label: "How to Prove an AI Decision Was Reviewed", href: "/use-cases/how-to-prove-an-ai-decision-was-reviewed" },
+      { label: "Find the Weakest Claim in an AI Answer", href: "/use-cases/find-the-weakest-claim-in-an-ai-answer" },
+      { label: "Research Synthesis for Knowledge Workers", href: "/use-cases/research-synthesis-for-knowledge-workers" },
+    ],
+    cta: "Build a Defensible Synthesis — run the panel and structure what you find",
+    category: "how-to",
+    schemaType: "HowTo",
+    metaDescription:
+      "A synthesis that hides disagreement is not stronger for being cleaner. Learn how to build an AI synthesis that preserves contested claims, uncertain evidence, and the decision trail.",
+  },
+
+  {
+    slug: "does-the-video-prove-the-caption",
+    publishedAt: "2026-07-01",
+    title: "Does the Video Actually Prove the Caption?",
+    h1: "A Real Video Can Still Support a False Claim",
+    audience: "Journalists, fact-checkers, researchers, content teams",
+    audienceDetail: "Anyone reviewing a video that circulates with a specific claim, caption, or accompanying narrative — before publishing or acting on it",
+    problem:
+      "The instinct when a video appears authentic is to trust what it is said to show. If the video is not manipulated, the claim accompanying it must be accurate. That logic is wrong, and it is responsible for a significant share of misinformation spread by credible sources.\n\nAuthenticity and accuracy are two different questions. A video can be completely unmanipulated — genuine footage, no deepfake, no editing — and still support a claim that is false. Old footage presented as recent. Footage from one location captioned with another. Real events described with a false causal claim. The video is real; the interpretation attached to it is not.",
+    solution:
+      "ConvergePanel's Video Verification mode reviews extracted frames against three vision models for manipulation signals. But caption verification requires a different set of checks. The vision models assess what the video appears to show. Verifying whether the caption is accurate requires checking date, location, source provenance, and whether the visual evidence actually supports the accompanying claim.\n\nBoth reviews are necessary. Neither substitutes for the other. A video that passes the authenticity review still needs the caption verified against what the footage actually shows and what the original source claims.",
+    workflow: [
+      "Write down the exact claim or caption before reviewing the video — record what you are being asked to believe",
+      "Submit the video to ConvergePanel Video Verification for a manipulation and authenticity review",
+      "Separately, verify the claim: trace the earliest known upload and the stated date and location",
+      "Check whether the visual content is consistent with the caption — do the frames actually show what is described?",
+      "If the caption makes a causal claim, assess whether the video actually demonstrates causation or only shows a compatible event",
+      "Review what contextual information is absent from the footage that would be necessary to confirm the caption",
+      "Document the authenticity review result and the caption review result separately — they are different findings",
+    ],
+    useCases: [
+      "Reviewing a viral video before publishing a fact-check or news report on the claim it accompanies",
+      "Checking whether footage circulating on social media actually shows what the caption says it shows",
+      "Adding a caption verification step to a video authenticity workflow",
+      "Training a team to distinguish the manipulation question from the accuracy question",
+      "Creating a documented record of both the authenticity review and the caption verification",
+    ],
+    bodySections: [
+      {
+        heading: "Authenticity Is Not the Same as Accuracy",
+        paragraphs: [
+          "A deepfake is a manipulated video — synthetic imagery created or altered by technology. Caption misinformation is a true video presented with a false description. Both spread through the same channels and both require different review methods.",
+          "Most video verification workflows, including AI-assisted ones, focus on the authenticity question. That is the right first step — but it is only the first step. If a video is authentic, the question of whether the caption is accurate remains completely open. The absence of manipulation signals does not mean the accompanying claim is correct.",
+        ],
+      },
+      {
+        heading: "Eight Caption-to-Video Checks",
+        bullets: [
+          "Visual authenticity: Does the video show signs of manipulation, synthetic generation, or editing?",
+          "Caption accuracy: Does the accompanying text accurately describe what the video shows?",
+          "Event date: Is the claimed date consistent with available evidence about when the footage was first published or where it was recorded?",
+          "Location: Is the claimed location consistent with visual, audio, or other evidence in the footage?",
+          "Completeness: Is this the full clip, or has footage before or after the relevant moment been removed?",
+          "Context: Does the caption provide all the context necessary to understand what the footage shows, or does it frame partial footage to imply something not demonstrated?",
+          "Causal claim: If the caption makes a causal claim — 'this video shows X caused Y' — does the footage actually demonstrate causation, or only show a compatible sequence of events?",
+          "Original source: Can the footage be traced to an original publisher or eyewitness source that corroborates the caption?",
+        ],
+      },
+      {
+        heading: "What ConvergePanel Reviews and What Requires Additional Methods",
+        paragraphs: [
+          "ConvergePanel's vision models can assess manipulation signals, synthetic artifacts, and whether visual content is broadly consistent with an associated claim. They can flag obvious caption mismatches — footage that clearly does not show what is described.",
+          "They cannot independently verify location, date, source provenance, or the accuracy of specific contextual claims. Those checks require reverse video search, geolocation analysis, source investigation, and, where necessary, domain expertise. The AI video review is the first step. Caption verification requires additional methods that go beyond what vision models can determine from frames alone.",
+        ],
+      },
+      {
+        heading: "Advisory Notice",
+        paragraphs: [
+          "ConvergePanel's video review is advisory. It is not forensic proof of authenticity and it is not caption verification. A clean result — no manipulation signals across three vision models — means the footage passes an AI-level first-pass review. It does not rule out sophisticated deepfakes, context manipulation, or caption inaccuracy.",
+          "For high-stakes decisions, including published fact-checks and editorial decisions about manipulated media, AI video review should be one documented step in a broader verification process, not the entire process.",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "Can an unmanipulated video still accompany a false claim?",
+        a: "Yes. This is one of the most common forms of video misinformation. Real footage from one location is captioned as another. Old footage is presented as showing a recent event. Genuine footage of one event is described as evidence for a different claim. The video is authentic; the claim is not. AI manipulation detection does not catch this.",
+      },
+      {
+        q: "What does it mean when the vision models say the video appears authentic?",
+        a: "It means the models found no signals consistent with AI generation, synthetic artifacts, or visible manipulation. It does not mean the caption is accurate, the date and location are correct, or that the video proves the claim it is said to support. The authenticity result and the caption accuracy result are separate findings.",
+      },
+      {
+        q: "How do I verify the date and location in a video without metadata?",
+        a: "Look for visual cues in the footage: signs, vegetation, architecture, lighting, and visible weather can help establish location and season. Cross-reference with news reports or public records from the claimed date and place. Use reverse video search to find earlier publications of the same footage. If the clip has no verifiable provenance, state that uncertainty explicitly.",
+      },
+      {
+        q: "Does ConvergePanel assess whether a caption is accurate?",
+        a: "Partially. Vision models can flag obvious mismatches between visual content and an associated caption. They cannot independently verify location, date, causal claims, or contextual accuracy. Caption verification requires methods beyond AI frame analysis: source tracing, reverse video search, geolocation, and domain expertise.",
+      },
+    ],
+    relatedLinks: [
+      { label: "AI Video Verification with Multiple Vision Models", href: "/use-cases/ai-video-verification" },
+      { label: "When Video Verification Models Disagree", href: "/use-cases/when-video-verification-models-disagree" },
+      { label: "How to Check If a Viral Video Might Be Manipulated", href: "/use-cases/how-to-check-if-a-viral-video-might-be-manipulated" },
+      { label: "Video Authenticity Review for Fact-Checkers", href: "/use-cases/video-authenticity-review-for-fact-checkers" },
+      { label: "How Journalists Can Verify Viral Clips", href: "/use-cases/how-journalists-can-verify-viral-clips" },
+      { label: "AI Video Verification for Journalists", href: "/use-cases/ai-video-verification-for-journalists" },
+      { label: "How to Verify a Clip Before Publishing", href: "/use-cases/how-to-verify-a-clip-before-publishing" },
+    ],
+    cta: "Review the Video and the Claim — submit to three vision models",
+    category: "video-verification",
+    schemaType: "FAQPage",
+    metaDescription:
+      "A real, unmanipulated video can still accompany a false claim. Learn the eight checks that separate what the video shows from what the caption says it proves.",
+  },
+
+  {
+    slug: "what-ai-disagreement-reveals-about-risk",
+    publishedAt: "2026-07-01",
+    title: "What AI Model Disagreement Reveals About Risk",
+    h1: "Disagreement Is Not Noise. It Is a Risk Signal.",
+    audience: "Decision-makers, risk managers, analysts, governance teams",
+    audienceDetail: "Anyone making consequential decisions based on AI-assisted research who wants to use model disagreement as a structured risk indicator — not just an inconclusive result",
+    problem:
+      "When AI models disagree, the natural response is frustration: the tools did not produce a clean answer, so something must be wrong. That interpretation has it backwards. Disagreement is not a flaw in the output — it is information about the underlying problem.\n\nThe specific pattern of disagreement — which models split, on which claims, with what evidence — tells you something about the risk embedded in the question. Acting on a conclusion that one or two models support while others contest it carries a different risk profile than acting on a conclusion all models support. Recognizing that difference is how you use disagreement deliberately rather than treating it as noise to average away.",
+    solution:
+      "ConvergePanel's disagreement map makes model splits visible and specific. Rather than returning a single blended answer, it shows which models diverged, on which claims, and with what evidence. That breakdown is the raw material for a risk assessment: high disagreement on a load-bearing claim is a reason to apply more scrutiny before acting.",
+    workflow: [
+      "Submit the research question or claim to ConvergePanel and open the disagreement map",
+      "Identify which specific claims or conclusions produced significant model splits",
+      "For each split, assess: how much does this claim matter for the conclusion you need to draw?",
+      "Apply the risk escalation matrix to determine the appropriate response level",
+      "For high-stakes disagreements, escalate to primary-source verification or human expert review",
+      "Document the disagreement pattern and your response in the decision record",
+    ],
+    useCases: [
+      "Before committing to a strategic recommendation where AI models split on a key assumption",
+      "When a compliance or governance decision involves AI-assisted research with notable disagreement",
+      "When model disagreement coincides with a high-consequence decision point",
+      "When explaining risk levels to stakeholders based on the strength of underlying AI evidence",
+      "When setting internal review thresholds based on disagreement level rather than just consensus score",
+    ],
+    bodySections: [
+      {
+        heading: "What Model Disagreement Can Reveal",
+        bullets: [
+          "Weak evidence: the underlying claim is not well-supported — different models draw on different thin sources and reach different conclusions",
+          "Hidden assumptions: models reach different conclusions because they start from different implicit assumptions about the domain",
+          "Ambiguous definitions: the question contains a term or concept that different models interpret differently, producing structurally different answers",
+          "Changing facts: some models are working with more recent data than others, producing a split that reflects genuine temporal change rather than model error",
+          "Contested literature: the underlying field has genuine expert disagreement that is accurately reflected in the model split",
+          "Different risk tolerances: models with different calibration tendencies express different uncertainty levels for the same underlying evidence",
+        ],
+      },
+      {
+        heading: "The Risk Escalation Matrix",
+        paragraphs: ["Use this matrix to calibrate your response to disagreement:"],
+        bullets: [
+          "Low disagreement (one minor model outlier, load-bearing claims are consistent): proceed with moderate confidence; note the outlier in your documentation",
+          "Meaningful disagreement (two or more models split on a secondary claim): document the specific disputed point; escalate to targeted verification before acting on that claim",
+          "High-stakes disagreement (two or more models split on a load-bearing claim): do not act on the conclusion without primary-source verification or human expert review; document that the decision was made with known uncertainty",
+          "Compound disagreement (multiple models split across multiple load-bearing claims): treat the entire answer as requiring deeper investigation; consider whether the question is well enough defined to answer at all",
+        ],
+      },
+      {
+        heading: "Disagreement as Evidence About Evidence",
+        paragraphs: [
+          "The most useful way to think about AI disagreement is that it is evidence about the state of the underlying evidence base. When models trained on different data, with different architectures, using different training methods all arrive at the same conclusion, that convergence is a meaningful signal that the evidence base points in one direction. When they split, the split reflects something real about the evidence: it is thin, contested, ambiguous, or absent.",
+          "Acting on a high-disagreement conclusion as if the evidence were settled is not a small error of calibration. It is treating an uncertain foundation as if it were solid — and building consequential decisions on it.",
+        ],
+      },
+      {
+        heading: "When Disagreement Is Not a Risk Signal",
+        bullets: [
+          "When models split on a point that is not load-bearing for your conclusion — note it but do not halt work",
+          "When the disagreement reflects different phrasings of the same underlying conclusion",
+          "When one model disagrees because it lacks relevant training data on a niche topic, not because the claim is genuinely contested",
+          "When you already have primary-source evidence that resolves the specific disputed point",
+        ],
+      },
+    ],
+    comparisonTable: {
+      headers: ["Disagreement Level", "What It Signals", "Recommended Response"],
+      rows: [
+        ["Low (minor outlier)", "Minor framing variation or data gap in one model", "Proceed; note outlier in documentation"],
+        ["Meaningful (2+ models, secondary claim)", "Contested secondary evidence or assumption difference", "Document; verify the disputed point before relying on it"],
+        ["High-stakes (2+ models, load-bearing claim)", "Significant uncertainty on a decision-critical point", "Pause; escalate to primary-source review or expert input"],
+        ["Compound (multiple splits)", "Broadly unsettled evidence base", "Investigate before concluding; reframe the question if needed"],
+      ],
+    },
+    faq: [
+      {
+        q: "Does high model disagreement mean the AI is unreliable?",
+        a: "Not necessarily. High disagreement often means the underlying question is genuinely contested or the evidence is thin — which the models are accurately reflecting. The AI is not unreliable; the evidence base is uncertain. The disagreement is useful information about that uncertainty, not a failure of the tool.",
+      },
+      {
+        q: "Can I use disagreement level to set governance thresholds?",
+        a: "Yes. Many organizations configure review policies around consensus scores, which are the inverse of disagreement. A policy that routes all outputs below 60 consensus score for human review is effectively a policy that routes high-disagreement outputs for review. ConvergePanel's governance layer supports configurable thresholds for exactly this purpose.",
+      },
+      {
+        q: "What is the difference between the consensus score and the disagreement map?",
+        a: "The consensus score is an aggregate number representing overall agreement level. The disagreement map is a breakdown of which specific claims or conclusions produced divergence and what each model said. The score tells you how much agreement exists. The map tells you where the disagreement is and what it is about. Both are necessary.",
+      },
+      {
+        q: "Should I always resolve disagreement before making a decision?",
+        a: "For high-stakes decisions where the disputed claim is load-bearing, yes. For lower-stakes decisions or where the disputed claim is peripheral, you can make the decision while documenting the uncertainty. The requirement is not to achieve certainty — it is to make the decision with accurate knowledge of what is settled and what is not.",
+      },
+    ],
+    relatedLinks: [
+      { label: "AI Disagreement Analysis Tool", href: "/use-cases/ai-disagreement-analysis-tool" },
+      { label: "When AI Models Agree but Are Still Wrong", href: "/use-cases/when-ai-models-agree-but-are-wrong" },
+      { label: "Turn AI Disagreement into a Research Plan", href: "/use-cases/turn-ai-disagreement-into-a-research-plan" },
+      { label: "What Is an AI Consensus Score?", href: "/use-cases/what-is-a-consensus-score" },
+      { label: "AI Risk Assessment Tool", href: "/use-cases/ai-risk-review-tool" },
+      { label: "AI Peer Review for High-Stakes Workflows", href: "/use-cases/ai-peer-review-for-high-stakes-workflows" },
+      { label: "Build a Defensible Answer from Conflicting AI Outputs", href: "/use-cases/build-a-defensible-answer-from-conflicting-ai-outputs" },
+    ],
+    cta: "Review the Disagreement — surface what the split reveals",
+    category: "thought-leadership",
+    schemaType: "FAQPage",
+    metaDescription:
+      "Model disagreement is not a failure to resolve. It is a signal about the evidence underneath. Learn to read the risk pattern in an AI split before you act.",
+  },
+
+  {
+    slug: "ai-confidence-vs-evidence",
+    publishedAt: "2026-07-01",
+    title: "AI Confidence vs. Evidence: How to Tell the Difference",
+    h1: "A Confident Answer Is Not an Evidence-Backed Answer",
+    audience: "Analysts, researchers, journalists, decision-makers",
+    audienceDetail: "Anyone evaluating AI-generated answers and needing to distinguish between fluent confident-sounding output and answers that are actually well-evidenced",
+    problem:
+      "AI models generate fluent, confident prose regardless of whether the underlying evidence is strong. A model that has excellent evidence produces output that reads the same as a model that is reasoning from assumptions. The tone is confident in both cases. The word count is similar. The structure is comparable. Without deliberately checking the evidence, a reader cannot tell the difference.\n\nThis creates a consistent bias: readers who rely on confidence as a proxy for accuracy will systematically overweight confident answers and underweight appropriately cautious ones. The model that says 'studies clearly show...' with no citation will be trusted more than the model that says 'the evidence here is mixed, with some studies suggesting...' while citing three specific papers. The first sounds more authoritative. The second is more evidenced.",
+    solution:
+      "ConvergePanel returns evidence quality ratings per model alongside each verdict — separating the confidence of the claim from the quality of the evidence supporting it. When you see a confident model that has no evidence quality rating or weak source grounding alongside a cautious model citing specific studies, you have a direct comparison of what confidence versus evidence looks like in practice.",
+    workflow: [
+      "Submit a question or claim to ConvergePanel",
+      "When the panel results arrive, read each model's response and note the tone and the evidence",
+      "For each model, separate the assertion (what it claims) from the evidence (what it cites)",
+      "Check the evidence quality rating: strong, moderate, or weak",
+      "Compare across models: which ones are confident with strong evidence versus confident with weak grounding?",
+      "Weight your conclusions by evidence quality, not by confidence level",
+    ],
+    useCases: [
+      "When evaluating two AI answers that sound equally authoritative but may not have equal evidence",
+      "When deciding which model to trust on a contested question",
+      "When reviewing AI-generated research for inclusion in a report or deliverable",
+      "When training a team to evaluate AI output systematically rather than by impression",
+      "When writing a review of an AI-assisted recommendation that needs to distinguish evidence from assertion",
+    ],
+    bodySections: [
+      {
+        heading: "Why Confidence and Evidence Are Not the Same",
+        paragraphs: [
+          "Language models are optimized to produce fluent, coherent text. That optimization produces output that reads confidently regardless of the underlying evidence. A model stating something it has weak support for does not usually hedge more than a model stating something it has strong support for — unless the model has been specifically trained or prompted to calibrate its uncertainty.",
+          "Calibration — the relationship between expressed confidence and actual accuracy — varies significantly across models and across topic domains. A highly capable model can be systematically overconfident in domains where its training data was sparse. Relying on a model's tone to assess the quality of its evidence is therefore unreliable.",
+        ],
+      },
+      {
+        heading: "The Four Combinations",
+        bullets: [
+          "Confident and well-grounded: the model expresses certainty and cites specific verifiable evidence — this is the combination you want. Confidence tracks evidence.",
+          "Cautious and well-grounded: the model expresses appropriate uncertainty and cites solid evidence — this is often the most trustworthy output. The model's calibration is accurate.",
+          "Confident but weakly grounded: the model sounds certain but cites no specific source or cites vague generalizations — this is the most dangerous combination. High confidence, low evidence.",
+          "Cautious and unresolved: the model expresses significant uncertainty and has no strong evidence — this is honest and appropriate for genuinely contested questions. Do not mistake appropriate uncertainty for weakness.",
+        ],
+      },
+      {
+        heading: "How to Detect Overconfidence in an AI Answer",
+        bullets: [
+          "The answer contains definitive statements about contested topics without acknowledging disagreement",
+          "Sources are cited by type rather than specifically: 'studies show' rather than citing a named study",
+          "The answer describes one position on a complex question without acknowledging alternatives",
+          "Qualifications appear at the end of a confident answer as an afterthought rather than integrated into the reasoning",
+          "Specific numbers appear without any indication of the source, methodology, or confidence interval",
+          "The answer addresses a question about future outcomes with the same certainty as a question about established fact",
+        ],
+      },
+      {
+        heading: "Source Signals That Distinguish Evidence from Assertion",
+        bullets: [
+          "Strong evidence signal: named study, report, or institution with enough specificity to look it up",
+          "Moderate evidence signal: named institution without a specific document, or a named author without a citation",
+          "Weak evidence signal: 'experts agree,' 'research suggests,' or 'it is widely understood that' without attribution",
+          "No evidence: assertion stated as fact with no supporting reference of any kind",
+          "Fabricated evidence: specific-sounding citation that cannot be verified — more dangerous than weak evidence because it mimics strong evidence",
+        ],
+      },
+      {
+        heading: "What ConvergePanel Surfaces",
+        paragraphs: [
+          "When models vary in their evidence quality on the same question, the comparison becomes visible. One model cites three named studies; another asserts the same conclusion without any citation. The per-model evidence quality ratings quantify this difference. You are not choosing between two equally-supported answers when you see that pattern — you are choosing between one answer backed by evidence and one backed by fluent assertion.",
+        ],
+      },
+    ],
+    comparisonTable: {
+      headers: ["Combination", "What It Looks Like", "How to Handle It"],
+      rows: [
+        ["Confident + well-grounded", "Strong claim, specific citations, verifiable sources", "Verify sources; proceed with confidence"],
+        ["Cautious + well-grounded", "Hedged claim, specific citations, acknowledged uncertainty", "High trust: calibration is accurate"],
+        ["Confident + weakly grounded", "Strong claim, vague sources or no citation", "Treat as assertion, not evidence; verify before using"],
+        ["Cautious + unresolved", "Uncertain claim, little or no source", "Acknowledge genuine uncertainty; do not force resolution"],
+      ],
+    },
+    faq: [
+      {
+        q: "Why do AI models sound confident even when evidence is weak?",
+        a: "Language models produce fluent text by predicting the next token based on patterns — not by retrieving verified evidence. A model that lacks strong evidence for a claim does not automatically produce hedged output. It produces the most likely fluent continuation, which often sounds confident because most training text is written confidently.",
+      },
+      {
+        q: "Which is better: a confident answer or a cautious one?",
+        a: "Neither, in the abstract. The right combination is accuracy of calibration: a confident answer that is well-evidenced and a cautious answer that accurately reflects genuine uncertainty are both correct. The dangerous combination is a confident answer with weak evidence — it overstates certainty without a corresponding evidence base.",
+      },
+      {
+        q: "How does ConvergePanel help me separate confidence from evidence?",
+        a: "ConvergePanel returns evidence quality ratings per model alongside the verdict. You can see whether a model's confident conclusion is backed by specific citations or by assertion. Comparing evidence quality across models on the same question makes the difference visible rather than leaving it hidden in the prose.",
+      },
+      {
+        q: "Can I train myself to recognize overconfident AI output?",
+        a: "Yes. The main skill is slowing down when an answer sounds authoritative and asking: what specifically is this based on? Where did this claim come from? If you cannot find the answer in the model's response, the confidence is not backed by accessible evidence. Practice treating 'it is widely accepted that' as a flag, not a reassurance.",
+      },
+    ],
+    relatedLinks: [
+      { label: "When AI Models Agree but Are Still Wrong", href: "/use-cases/when-ai-models-agree-but-are-wrong" },
+      { label: "What Is Source Grounding in AI?", href: "/use-cases/what-is-source-grounding-in-ai" },
+      { label: "Find the Weakest Claim in an AI Answer", href: "/use-cases/find-the-weakest-claim-in-an-ai-answer" },
+      { label: "How to Verify Sources from AI Answers", href: "/use-cases/how-to-verify-sources-from-ai-answers" },
+      { label: "What Is an AI Consensus Score?", href: "/use-cases/what-is-a-consensus-score" },
+      { label: "AI Risk Assessment Tool", href: "/use-cases/ai-risk-review-tool" },
+      { label: "How to Pressure-Test an AI Response", href: "/use-cases/how-to-pressure-test-an-ai-response" },
+    ],
+    cta: "Check the Evidence — see what the confidence is actually based on",
+    category: "thought-leadership",
+    schemaType: "FAQPage",
+    metaDescription:
+      "AI confidence and AI evidence are not the same thing. Learn to separate what a model asserts confidently from what it can actually support with verifiable sources.",
+  },
+
+  {
+    slug: "when-ai-models-cite-the-same-weak-source",
+    publishedAt: "2026-07-01",
+    title: "What If Every AI Model Cites the Same Weak Source?",
+    h1: "Repeated Evidence Is Not Independent Evidence",
+    audience: "Researchers, analysts, journalists, fact-checkers",
+    audienceDetail: "Anyone using multi-model AI to verify claims and needing to understand when multiple models citing the same source represents corroboration versus a single point of failure",
+    problem:
+      "One of the key advantages of multi-model verification is that independent models reaching the same conclusion from different evidence provides stronger grounds for confidence than one model reaching that conclusion alone. But there is a specific failure mode that undermines this: when multiple models cite the same source, their agreement does not represent independent corroboration. It represents one data point referenced by several tools.\n\nA widely-indexed report, a frequently-cited summary, or a popular secondary source can appear in the training data of every major AI model. When you ask five models about a claim, and all five cite the same report, you have not received five independent confirmations — you have received five models reporting the same source. If that source is weak, outdated, or wrong, all five models will converge on the same error. The consensus score will be high. The evidence will be thin.",
+    solution:
+      "ConvergePanel shows per-model evidence citations alongside consensus scores. Reading the per-model evidence — not just the aggregate — lets you check whether the supporting sources are the same across models or genuinely distinct. When the same source appears across all five models' evidence, that convergence is a signal that the corroboration is apparent rather than independent.",
+    workflow: [
+      "Submit the claim or research question to ConvergePanel and review the panel results",
+      "Open the per-model evidence for each model and list every source cited or implied",
+      "Check whether the same source appears in multiple models' evidence",
+      "For claims where one source dominates across all models, treat that as a single-source claim regardless of the consensus score",
+      "Locate the original source and verify it directly: does it exist, is it credible, and does it actually support the specific claim?",
+      "Look for genuinely independent corroboration: primary studies, regulatory databases, or named expert sources that are different from the dominant citation",
+      "Document whether corroboration is independent or convergent before using the claim in a high-stakes context",
+    ],
+    useCases: [
+      "Before citing a high-consensus AI finding in a report without checking whether the supporting sources are independent",
+      "When a widely-repeated claim produces high consensus but you want to verify the corroboration is genuine",
+      "When researching a topic dominated by a small number of frequently-indexed sources",
+      "When building a research methodology that requires independent corroboration, not just multi-model agreement",
+      "When coaching a team on the difference between consensus and independent evidence",
+    ],
+    bodySections: [
+      {
+        heading: "What Source Convergence Looks Like",
+        paragraphs: [
+          "Source convergence is when multiple AI models independently produce the same citation because that citation is the dominant source in their shared training data. If a claim about market size, for example, traces almost entirely to one widely-cited industry report, every model trained on that data will cite or paraphrase that report. Five models agreeing and all citing the same report is not five-source corroboration — it is one source, accessed by five models.",
+        ],
+      },
+      {
+        heading: "Why Models Cite the Same Sources",
+        bullets: [
+          "Major language models are trained on overlapping subsets of the internet, which tends to surface the same highly-indexed, frequently-linked sources",
+          "Some research domains are dominated by one or two landmark studies that become default references even when alternatives exist",
+          "Secondary sources — summaries, analyses, and commentary — often propagate the same underlying primary source across hundreds of articles, all of which may be indexed in training data",
+          "A frequently-cited source appears many times in training data relative to less-cited sources, making models proportionally more likely to reference it",
+        ],
+      },
+      {
+        heading: "Circular Citation and the Secondhand Summary Problem",
+        paragraphs: [
+          "A related failure mode is circular citation: a claim is published, cited by secondary sources, those secondary sources are cited by further secondary sources, and eventually the claim appears to be corroborated by a long chain of references — all of which trace to the same original source, or to a misrepresentation of it.",
+          "AI models trained on this citation chain may reproduce the apparent corroboration without recognizing the circularity. A model might cite five articles that all trace to one primary study — reporting apparent independent agreement that is structurally a single point of origin.",
+        ],
+      },
+      {
+        heading: "What Counts as Independent Corroboration",
+        bullets: [
+          "Primary sources that independently arrived at the same finding through different research methods",
+          "Official data from separate institutional sources — two government databases, two regulatory filings",
+          "Named expert positions from different fields or institutions who have independently assessed the same question",
+          "Replication studies that specifically attempted to reproduce an original finding",
+          "Sources from different time periods that reached compatible conclusions from the data available at the time",
+        ],
+      },
+      {
+        heading: "How to Check for Source Convergence",
+        steps: [
+          "List every source cited or implied by each model in the panel output",
+          "Group citations by source — how many models cite the same document or the same report?",
+          "For dominant citations, locate the original document and read the relevant section directly",
+          "Check the original document: how was the claim generated? Is it primary research or a secondary summary?",
+          "Search for alternative primary sources that independently address the same claim",
+          "If no independent corroboration exists, document that the claim has single-source support regardless of the consensus score",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "If all five models agree and cite the same source, is the claim reliable?",
+        a: "You have strong agreement on the claim from models drawing on the same source. That tells you the claim is consistent with what that source says. It does not tell you whether the source is correct or whether independent evidence exists. The reliability depends on the quality of that one source, not on the number of models reporting it.",
+      },
+      {
+        q: "How can I tell if models are citing the same source without reading each model's evidence?",
+        a: "You cannot tell from the consensus score alone — it does not distinguish between convergent and independent corroboration. You need to read the per-model evidence for each model. ConvergePanel shows this breakdown. Look for the same report, study name, or institution appearing across multiple models' evidence sections.",
+      },
+      {
+        q: "Is source convergence always a problem?",
+        a: "Not always. If models converge on a high-quality primary study with strong methodology and the claim has been independently replicated, convergent citation is fine. The risk is when convergence creates the appearance of independent corroboration where none exists — particularly for claims that have not been independently replicated.",
+      },
+      {
+        q: "What should I do when I find source convergence on a high-stakes claim?",
+        a: "Treat the claim as having single-source support and verify that source directly: does it exist, is it methodologically sound, and does it actually say what the models claim? Then search for independent corroboration. If the claim only exists in one source, and that source has not been independently replicated, disclose that dependency in any use of the claim.",
+      },
+    ],
+    relatedLinks: [
+      { label: "When AI Models Agree but Are Still Wrong", href: "/use-cases/when-ai-models-agree-but-are-wrong" },
+      { label: "How to Verify Sources from AI Answers", href: "/use-cases/how-to-verify-sources-from-ai-answers" },
+      { label: "What Is Source Grounding in AI?", href: "/use-cases/what-is-source-grounding-in-ai" },
+      { label: "AI Confidence vs. Evidence", href: "/use-cases/ai-confidence-vs-evidence" },
+      { label: "Find the Weakest Claim in an AI Answer", href: "/use-cases/find-the-weakest-claim-in-an-ai-answer" },
+      { label: "What Is an AI Consensus Score?", href: "/use-cases/what-is-a-consensus-score" },
+      { label: "Claim Verification for Researchers", href: "/use-cases/claim-verification-for-researchers" },
+    ],
+    cta: "Check for Source Convergence — read the evidence behind the consensus",
+    category: "thought-leadership",
+    schemaType: "FAQPage",
+    metaDescription:
+      "When every AI model cites the same source, agreement is not corroboration. Learn to distinguish independent evidence from convergent citation on one weak source.",
+  },
+
+  {
+    slug: "find-hidden-assumptions-in-ai-answers",
+    publishedAt: "2026-07-01",
+    title: "How to Find Hidden Assumptions in AI Answers",
+    h1: "The Answer May Be Correct Only If Its Assumptions Are",
+    audience: "Analysts, strategists, researchers, decision-makers",
+    audienceDetail: "Anyone evaluating AI-generated analysis or recommendations where the conclusion depends on implicit assumptions the model did not surface",
+    problem:
+      "An AI answer is almost never unconditionally true. It is true given a set of assumptions about markets, users, timing, causality, legal context, and risk tolerance. The problem is that those assumptions are rarely stated. The model produces a conclusion, and the assumptions it rests on are embedded invisibly in the framing.\n\nA recommendation to pursue a market strategy assumes the market is as the model describes it. An analysis of regulatory risk assumes the regulations cited are current and applicable. An estimate of adoption assumes user behavior will follow historical patterns. When those assumptions are wrong — when the market has shifted, the regulation changed, or users behave differently — the conclusion fails even if the reasoning was internally consistent.",
+    solution:
+      "Multi-model comparison exposes hidden assumptions because different models encode different priors. When models disagree on a conclusion, the disagreement often traces to an assumption one model makes implicitly that another does not. ConvergePanel's disagreement map surfaces these divergences explicitly. Separately, the panel allows you to submit targeted adversarial prompts — asking each model to state what it assumes rather than just what it concludes.",
+    workflow: [
+      "Read the AI answer and list the assumptions required for it to be correct — not just the claims it makes but the unstated conditions it depends on",
+      "For each assumption, classify it by type: market, causal, legal, timing, user-behavior, data-quality, or risk-tolerance",
+      "Submit targeted adversarial questions to ConvergePanel: 'What conditions would need to be true for this to fail?' or 'What assumptions does this analysis make about X?'",
+      "Compare how different models answer the adversarial questions — differences reveal competing priors",
+      "For the most consequential assumptions, check whether they are warranted by the current evidence or are outdated defaults",
+      "Update your analysis to state its assumptions explicitly and flag the ones you have not been able to verify",
+    ],
+    useCases: [
+      "Before acting on a strategic recommendation that is framed as generally true but may depend on specific market conditions",
+      "When reviewing an AI-generated analysis that reached a different conclusion from your team's prior view — the difference may be an assumption, not a fact",
+      "Before presenting AI-assisted research to stakeholders who will scrutinize the reasoning",
+      "When a conclusion depends on a regulatory or legal context that may have changed since the model was trained",
+      "Before a decision that will be hard to reverse, where unstated assumptions represent material risk",
+    ],
+    bodySections: [
+      {
+        heading: "What a Hidden Assumption Is",
+        paragraphs: [
+          "A hidden assumption is a condition the AI answer depends on for its conclusion to hold, which the answer does not state or acknowledge. It is not a claim in the answer — it is a precondition for the claims to be valid.",
+          "For example: an AI answer about market entry strategy may recommend a particular approach without stating that the recommendation assumes the market is growing, that the regulatory environment is stable, that the target customer segment behaves as historical data suggests, and that the first-mover advantages described apply in this specific geography. Each of those is a hidden assumption — the conclusion is only correct given all of them.",
+        ],
+      },
+      {
+        heading: "Seven Categories of Hidden Assumptions",
+        bullets: [
+          "Market assumptions: that demand, competition, pricing, or growth rates will continue on their current trajectory or match the model's training-time picture",
+          "Causal assumptions: that the relationship described is genuinely causal rather than correlational, and that the cause operates in the described direction",
+          "Legal assumptions: that the regulatory, contractual, or compliance context the model learned at training time is still current and applies to this specific situation",
+          "Timing assumptions: that the situation being described is current, that timelines are realistic, and that conditions described as future will actually materialize",
+          "User-behavior assumptions: that people will respond to the described product, policy, or intervention in the ways the model expects, based on historical or generalized behavior",
+          "Data-quality assumptions: that the sources the model drew on accurately measured what they claimed to measure, without systematic bias",
+          "Risk-tolerance assumptions: that the decision-maker is willing to accept the level of uncertainty and downside risk implicit in the recommendation",
+        ],
+      },
+      {
+        heading: "How to Surface Hidden Assumptions",
+        steps: [
+          "After reading the answer, ask yourself: 'For this to be true, what else has to be true?' List every dependency.",
+          "Ask the AI directly: 'What assumptions does this recommendation make about the market, users, and regulatory environment?'",
+          "Ask adversarially: 'Under what conditions would this recommendation be wrong?' A model that cannot answer this has not surfaced its own assumptions.",
+          "Compare models: if one model gives a confident recommendation and another gives a hedged one, the difference is usually an assumption one model makes and the other does not.",
+          "For each assumption, check whether it is currently warranted: is the regulatory environment as described? Has the market changed?",
+        ],
+      },
+      {
+        heading: "A Worked Example",
+        paragraphs: [
+          "An AI gives a recommendation to pursue a particular pricing strategy, citing historical data showing that customers in this segment are price-sensitive. The hidden assumptions include: that the historical customer data is recent enough to be representative; that the same price sensitivity applies to the current product configuration; that competitors have not changed their pricing since the training data was collected; and that the specific customer segment referenced is the one you are actually targeting.",
+          "None of these assumptions are stated in the answer. Each is potentially false. Checking all four takes less time than recovering from a pricing strategy built on wrong assumptions.",
+        ],
+      },
+      {
+        heading: "What Happens When Assumptions Are Wrong",
+        bullets: [
+          "The conclusion fails even if the reasoning was internally consistent — the logic was correct, but it operated on a false premise",
+          "The error is hard to detect because the AI answer sounded well-reasoned — it cited evidence, used structure, and expressed appropriate nuance",
+          "Subsequent decisions built on the flawed conclusion inherit the assumption error",
+          "In governance or compliance contexts, an assumption error that was not documented is harder to explain retroactively than one that was flagged and accepted deliberately",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "How do I know which hidden assumptions are most important to check?",
+        a: "Prioritize assumptions that are load-bearing (the conclusion directly depends on them), that could plausibly be wrong (recent changes in regulation, market, or technology), and that would be costly if wrong (high-stakes decisions with limited reversibility). An assumption that the market is growing by a specific rate in a recommendation about market entry is high priority. An assumption about the definition of a technical term usually is not.",
+      },
+      {
+        q: "Will asking the AI to state its assumptions produce reliable results?",
+        a: "Often yes, partially. Models can surface many of their assumptions when directly asked, especially with prompts like 'What conditions does this analysis depend on?' or 'When would this recommendation fail?' They may still miss assumptions that are so deeply embedded in their training that they are invisible even to the model. Multi-model comparison helps surface what a single adversarial prompt misses.",
+      },
+      {
+        q: "Is finding hidden assumptions the same as finding blind spots?",
+        a: "Related but distinct. A blind spot is something the AI did not address — a missing consideration. A hidden assumption is something the AI did address, but only if a specific background condition holds that it did not state. Blind spots are about omission; hidden assumptions are about unstated preconditions for the stated conclusions.",
+      },
+      {
+        q: "How does ConvergePanel help surface hidden assumptions?",
+        a: "When models disagree on a conclusion, the disagreement often traces to competing assumptions. The disagreement map makes these divergences visible. You can also use the panel to run targeted adversarial prompts across all models simultaneously — asking what conditions the recommendation depends on — and compare how each model responds to identify where assumptions vary.",
+      },
+    ],
+    relatedLinks: [
+      { label: "How to Identify Blind Spots in AI Answers", href: "/use-cases/how-to-identify-blind-spots-in-ai-answers" },
+      { label: "Turn AI Disagreement into a Research Plan", href: "/use-cases/turn-ai-disagreement-into-a-research-plan" },
+      { label: "What AI Model Disagreement Reveals About Risk", href: "/use-cases/what-ai-disagreement-reveals-about-risk" },
+      { label: "AI Confidence vs. Evidence", href: "/use-cases/ai-confidence-vs-evidence" },
+      { label: "How to Check If a Decision Is Based on Weak Information", href: "/use-cases/how-to-check-if-a-decision-is-based-on-weak-information" },
+      { label: "Build a Defensible Answer from Conflicting AI Outputs", href: "/use-cases/build-a-defensible-answer-from-conflicting-ai-outputs" },
+      { label: "AI Risk Assessment Tool", href: "/use-cases/ai-risk-review-tool" },
+    ],
+    cta: "Surface the Assumptions — run adversarial prompts across the panel",
+    category: "how-to",
+    schemaType: "HowTo",
+    metaDescription:
+      "AI answers depend on unstated assumptions about markets, regulation, timing, and behavior. Learn to surface them before they drive a decision that rests on a false premise.",
+  },
+
+  {
+    slug: "when-video-verification-models-disagree",
+    publishedAt: "2026-07-01",
+    title: "What to Do When Video Verification Models Disagree",
+    h1: "Conflicting Video Assessments Are a Reason to Slow Down",
+    audience: "Journalists, fact-checkers, researchers, communications teams",
+    audienceDetail: "Anyone using multi-model AI video review who receives split results from the three vision models and needs to know how to proceed",
+    problem:
+      "The useful case in AI video verification is when all three vision models agree: either no manipulation signals, or consistent manipulation signals across all models. A split result is harder to work with. One model flags synthetic artifacts; another finds nothing unusual; the third notes ambiguity. What does that mean? And what should you do with it?\n\nSplit results are common — vision models vary in their sensitivity to different types of artifacts, and some video characteristics produce ambiguous signals that different models read differently. The risk is responding incorrectly to a split: either treating it as a clean result and proceeding without additional scrutiny, or treating it as a definitive finding of manipulation when it may reflect compression or natural artifacts in authentic footage.",
+    solution:
+      "ConvergePanel surfaces the specific points of divergence between the three vision models — not just that they disagreed, but what each model saw and flagged. That breakdown is the starting point for deciding what the split means and what the appropriate next step is. A split is not a verdict. It is a request for additional investigation.",
+    workflow: [
+      "Review the full panel output: note which models agreed and which disagreed",
+      "Read each model's specific evidence: what did the dissenting model flag, and what exactly did the others find?",
+      "Check whether the disagreement is about manipulation signals specifically, or about ambiguous visual elements that could be compression or encoding artifacts",
+      "If the disagreement centers on specific visual elements, isolate those elements and consider whether they could have an innocent explanation",
+      "Do not publish or act on a split result as if it were a clean result in either direction",
+      "Escalate: pursue additional verification methods — reverse video search, source tracing, or, for high-stakes cases, forensic analysis",
+      "Document the split result and the steps taken in response before making any editorial or distribution decision",
+    ],
+    useCases: [
+      "When a video you are about to publish or share receives a split verdict from three vision models",
+      "When a communications team needs to decide whether to issue a statement about a video and the AI review is inconclusive",
+      "When a fact-checker encounters split model results on a potentially manipulated video",
+      "When a research team is building a labeled dataset and needs to handle ambiguous cases consistently",
+      "When setting an organizational protocol for how to respond to split AI video verdicts",
+    ],
+    bodySections: [
+      {
+        heading: "What Model Disagreement Means in Video Review",
+        paragraphs: [
+          "A split between vision models means at least one model found signals that others did not. That can happen for several reasons, and the reason matters for how you interpret the result.",
+          "Different vision models attend to different visual features when reviewing extracted frames. One model may be more sensitive to texture inconsistencies associated with synthetic generation; another may prioritize scene continuity and motion patterns; a third may focus on compression artifacts and encoding signals. The same clip can produce different assessments from models with different sensitivities.",
+        ],
+      },
+      {
+        heading: "Why Vision Models Can Disagree",
+        bullets: [
+          "Ambiguous visual signals: some visual elements are consistent with both AI generation and compression or encoding artifacts — models with different sensitivities will read them differently",
+          "Model-specific training: different vision models were trained with different emphases; a signal one model learned to flag may not appear in another model's detection vocabulary",
+          "Frame selection: if the models analyze different extracted frames, they may see different moments in the video that carry different signal levels",
+          "Context gap: models reviewing frames without access to audio, metadata, or contextual information may reach different conclusions about whether what they see is consistent with the claimed context",
+          "Low resolution or heavy compression: lower-quality video is harder to assess, and models will disagree more on ambiguous inputs than on high-quality footage",
+        ],
+      },
+      {
+        heading: "What to Do When Models Split",
+        bullets: [
+          "Do not treat a split result as a clean result in either direction — it is neither a confirmed finding nor a cleared one",
+          "Read the specific evidence from each model: what exactly did the dissenting model flag, and is it a recognizable manipulation signal or an ambiguous artifact?",
+          "Check whether the flagged elements could have an innocent explanation: heavy compression produces artifacts that are visually similar to some synthetic generation signals",
+          "Compare the specific claim or caption against what the video appears to show — caption review can proceed independently of the authenticity question",
+          "Pursue additional verification: reverse video search to find the earliest known upload, geolocation using visual evidence in the clip, or source tracing",
+          "For high-stakes decisions — legal proceedings, major editorial publications, public statements — request specialist forensic analysis rather than relying on AI review alone",
+          "Document the split, the specific evidence each model provided, and the steps you took in response",
+        ],
+      },
+      {
+        heading: "The Escalation Decision Tree",
+        bullets: [
+          "Low-stakes content + split result: document the split, pursue reverse video search, state the uncertainty in your notes",
+          "Medium-stakes content + split result: pursue reverse video search, source tracing, and additional context review before publishing or amplifying",
+          "High-stakes content + split result: do not publish or amplify until you have pursued forensic analysis or cleared the specific flagged elements through other means",
+          "Any split result where the disputed element is the central question: treat as requiring additional investigation regardless of stakes",
+        ],
+      },
+      {
+        heading: "Advisory Trust Signal Limitations",
+        paragraphs: [
+          "ConvergePanel's video review is an advisory first-pass layer. A split result does not confirm that the video is manipulated, nor does it clear the video of suspicion. It means the three models found ambiguous or conflicting signals that require additional human judgment.",
+          "Vision models can produce false positives — flagging authentic footage due to compression or unusual natural lighting conditions — and false negatives — missing sophisticated deepfakes that produce no detectable artifacts in extracted frames. AI video review reduces uncertainty; it does not eliminate it. For any video where the stakes of getting the answer wrong are significant, AI review is one documented step, not the entire review process.",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "Is a split result more likely to mean manipulation or an artifact?",
+        a: "It is not possible to determine from the split alone. The distinction requires reading what each model specifically flagged and assessing whether those signals are more consistent with manipulation or with compression and encoding artifacts. Some flagged elements are strongly associated with synthetic generation; others are ambiguous and can appear in both authentic and manipulated footage.",
+      },
+      {
+        q: "Can I publish a story about a video if the three models disagree?",
+        a: "That depends on what the story claims about the video. If you are reporting that the video's authenticity is uncertain, a split result is relevant evidence to disclose. If you are publishing the video as evidence of a specific event, a split result warrants additional verification before publication — particularly if your story would be directly contradicted if the video proves to be manipulated.",
+      },
+      {
+        q: "When should I request forensic analysis instead of relying on AI video review?",
+        a: "When the stakes of a wrong conclusion are high enough to justify the additional cost and time. Criminal investigations, legal proceedings, public statements with potential defamation exposure, and major editorial decisions where the video is central to the story all warrant forensic analysis for ambiguous or split AI results. AI review is a fast first-pass layer; forensic analysis is appropriate when that layer is not sufficient.",
+      },
+      {
+        q: "How do I document a split result for editorial or compliance purposes?",
+        a: "Record: which models agreed, which disagreed, what each model specifically flagged, what additional steps were taken in response, and what decision was ultimately made and on what basis. That record is the audit trail for the editorial or compliance decision — it shows that the split was acknowledged, investigated, and handled with appropriate care rather than ignored.",
+      },
+    ],
+    relatedLinks: [
+      { label: "AI Video Verification with Multiple Vision Models", href: "/use-cases/ai-video-verification" },
+      { label: "Does the Video Actually Prove the Caption?", href: "/use-cases/does-the-video-prove-the-caption" },
+      { label: "Video Authenticity Review for Fact-Checkers", href: "/use-cases/video-authenticity-review-for-fact-checkers" },
+      { label: "How to Check If a Viral Video Might Be Manipulated", href: "/use-cases/how-to-check-if-a-viral-video-might-be-manipulated" },
+      { label: "AI Video Verification for Journalists", href: "/use-cases/ai-video-verification-for-journalists" },
+      { label: "How Journalists Can Verify Viral Clips", href: "/use-cases/how-journalists-can-verify-viral-clips" },
+      { label: "What AI Model Disagreement Reveals About Risk", href: "/use-cases/what-ai-disagreement-reveals-about-risk" },
+    ],
+    cta: "Review the Conflicting Signals — see what each model found",
+    category: "video-verification",
+    schemaType: "FAQPage",
+    metaDescription:
+      "When three vision models give different video verdicts, the split is a reason to slow down. Learn what disagreement means in video review and how to respond to it.",
+  },
 ];
 
 export function getPageBySlug(slug: string): PSEOPage | undefined {

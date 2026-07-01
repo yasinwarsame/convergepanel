@@ -530,6 +530,27 @@ const HUB_GROUPS: HubGroup[] = [
       "insurance-policy-research-with-ai",
     ],
   },
+  {
+    id: "trust-disagreement-review",
+    label: "AI Trust, Disagreement & Human Review",
+    description:
+      "Explore what model agreement, disagreement, weak sources, hidden assumptions, and human review reveal about whether an AI answer can be trusted.",
+    tailwindText: "text-sky-400",
+    tailwindBg: "bg-cp-raised",
+    tailwindBorder: "border-cp-border",
+    slugs: [
+      "when-ai-models-agree-but-are-wrong",
+      "what-ai-disagreement-reveals-about-risk",
+      "ai-confidence-vs-evidence",
+      "when-ai-models-cite-the-same-weak-source",
+      "find-the-weakest-claim-in-an-ai-answer",
+      "turn-ai-disagreement-into-a-research-plan",
+      "build-a-defensible-answer-from-conflicting-ai-outputs",
+      "find-hidden-assumptions-in-ai-answers",
+      "does-the-video-prove-the-caption",
+      "when-video-verification-models-disagree",
+    ],
+  },
 ];
 
 export default function UseCasesIndex() {
