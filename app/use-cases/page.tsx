@@ -572,6 +572,26 @@ const HUB_GROUPS: HubGroup[] = [
       "document-why-newsroom-rejected-ai-claim",
     ],
   },
+  {
+    id: "editorial-judgment-evidence-review",
+    label: "AI Editorial Judgment & Evidence Review",
+    description:
+      "Review how AI changes certainty, framing, source selection, statistics, and causal claims — and how to document what's still unresolved before you publish.",
+    tailwindText: "text-amber-300",
+    tailwindBg: "bg-cp-raised",
+    tailwindBorder: "border-cp-border",
+    slugs: [
+      "ai-claim-drift",
+      "check-if-ai-turned-speculation-into-fact",
+      "ai-false-balance",
+      "compare-ai-framing-of-the-same-story",
+      "check-if-ai-cherry-picked-sources",
+      "verify-statistics-generated-by-ai",
+      "check-if-ai-confused-correlation-with-causation",
+      "check-if-ai-used-wrong-document-version",
+      "document-unresolved-facts-before-publication",
+    ],
+  },
 ];
 
 export default function UseCasesIndex() {

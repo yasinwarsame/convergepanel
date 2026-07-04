@@ -4933,6 +4933,8 @@ export const PAGES: PSEOPage[] = [
       { label: "How to test business assumptions with AI", href: "/use-cases/how-to-test-business-assumptions-with-ai" },
       { label: "How to check if a decision is based on weak information", href: "/use-cases/how-to-check-if-a-decision-is-based-on-weak-information" },
       { label: "How to validate market assumptions", href: "/use-cases/how-to-validate-market-assumptions" },
+      { label: "AI False Balance: When Unequal Evidence Is Presented as Equal", href: "/use-cases/ai-false-balance" },
+      { label: "How to Check If AI Cherry-Picked Sources", href: "/use-cases/check-if-ai-cherry-picked-sources" },
     ],
     cta: "Run a Bias Check — compare framings across five AI models",
     category: "how-to",
@@ -5698,6 +5700,7 @@ export const PAGES: PSEOPage[] = [
       { label: "How to Verify an AI Answer", href: "/use-cases/how-to-verify-an-ai-answer" },
       { label: "How to Verify Sources from AI Answers", href: "/use-cases/how-to-verify-sources-from-ai-answers" },
       { label: "Claim Verification for Researchers", href: "/use-cases/claim-verification-for-researchers" },
+      { label: "How to Compare AI Framing of the Same Story", href: "/use-cases/compare-ai-framing-of-the-same-story" },
     ],
     cta: "Compare AI Outputs Side by Side",
     category: "how-to",
@@ -5943,6 +5946,7 @@ export const PAGES: PSEOPage[] = [
       { label: "AI Disagreement Analysis Tool", href: "/use-cases/ai-disagreement-analysis-tool" },
       { label: "What Is a Consensus Score?", href: "/use-cases/what-is-a-consensus-score" },
       { label: "How to Pressure-Test an AI Response", href: "/use-cases/how-to-pressure-test-an-ai-response" },
+      { label: "How to Compare AI Framing of the Same Story", href: "/use-cases/compare-ai-framing-of-the-same-story" },
     ],
     cta: "Run a Multi-LLM Comparison",
     category: "research",
@@ -6156,7 +6160,7 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "how-to-fact-check-breaking-news-claims",
-    publishedAt: "2026-06-07",
+    publishedAt: "2026-07-04",
     title: "How to Fact-Check Breaking News Claims",
     h1: "How to Fact-Check Breaking News Claims Under Time Pressure",
     audience: "Journalists, editors, researchers",
@@ -6205,6 +6209,24 @@ export const PAGES: PSEOPage[] = [
           "Use the consensus score as a triage tool: high-consensus claims are lower priority for manual verification; low-consensus claims or claims flagged with model disagreement should either carry a clear caveat ('could not be independently verified') or be held until primary-source confirmation is available.",
         ],
       },
+      {
+        heading: "Checking an AI-Generated Breaking News Summary",
+        paragraphs: [
+          "The first version of a developing story is usually incomplete, and an AI-generated summary of it inherits that incompleteness while reading as though it were finished. No AI summary can be assumed current during a rapidly developing event — the underlying facts may have changed between when the model's sources were gathered and the moment you're reading its output.",
+          "Run this checklist before publishing or briefing from an AI summary of a breaking story:",
+        ],
+        steps: [
+          "Freeze the current version of the summary and timestamp it",
+          "Separate what is confirmed from what is alleged, reported, or attributed to a single source",
+          "Identify the earliest reliable source for each key claim, not just the most recent one",
+          "Check for an official statement, and distinguish it clearly from eyewitness or social-media claims",
+          "Submit the summary to ConvergePanel and compare multiple models — note where they disagree on details",
+          "Check for any update or correction published since the summary's sources were gathered",
+          "Note what remains unresolved rather than letting the summary imply completeness",
+          "Send any high-risk claim — one that would cause real harm if wrong — for editorial review before it runs",
+          "Update the decision record as the story develops and earlier claims are confirmed, corrected, or dropped",
+        ],
+      },
     ],
     relatedLinks: [
       { label: "How Journalists Can Verify Viral Clips", href: "/use-cases/how-journalists-can-verify-viral-clips" },
@@ -6214,11 +6236,13 @@ export const PAGES: PSEOPage[] = [
       { label: "AI Claim Verification for Newsrooms", href: "/use-cases/ai-claim-verification-for-newsrooms" },
       { label: "How to Fact-Check ChatGPT Responses", href: "/use-cases/how-to-fact-check-chatgpt-responses" },
       { label: "AI Video Verification for Journalists", href: "/use-cases/ai-video-verification-for-journalists" },
+      { label: "How to Document Unresolved Facts Before Publication", href: "/use-cases/document-unresolved-facts-before-publication" },
+      { label: "AI Timeline Verification for Journalists", href: "/use-cases/ai-timeline-verification" },
     ],
     cta: "Fact-Check Fast — run a multi-model claim verification before publishing",
     category: "claim-verification",
     metaDescription:
-      "Breaking news claims can't wait for a full fact-checking cycle. Multi-model AI claim verification gives journalists a fast consensus signal before publication.",
+      "Breaking news claims and AI-generated breaking news summaries can't wait for a full fact-checking cycle. A fast checklist and multi-model consensus signal for verifying either before publication.",
     schemaType: "HowTo",
     faq: [
       {
@@ -6236,6 +6260,14 @@ export const PAGES: PSEOPage[] = [
       {
         q: "How does multi-model verification help with the speed pressure in breaking news?",
         a: "It gives you a structured basis for editorial decisions within seconds, rather than waiting for a full verification cycle. A quick consensus check doesn't replace thorough verification — but it helps you identify which claims are safer to report provisionally and which ones need a clear caveat or a hold.",
+      },
+      {
+        q: "How current is an AI-generated breaking news summary?",
+        a: "Only as current as the sources it drew from at the moment it was generated. A summary produced ten minutes ago can already be missing an official statement, a correction, or a later update. Treat every AI summary of a developing story as provisional and re-check it before each publication milestone.",
+      },
+      {
+        q: "How should unconfirmed claims in an AI summary be labeled?",
+        a: "Distinguish confirmed facts from allegations, single-source claims, and social-media reports explicitly in the copy — don't let an AI summary's even tone imply that every sentence carries the same evidentiary weight. If the summary doesn't already make this distinction, add it before publishing.",
       },
     ],
   },
@@ -21227,6 +21259,7 @@ export const PAGES: PSEOPage[] = [
       { href: "/use-cases/finance-memo-review-with-ai-consensus", label: "Finance Memo Review with AI Consensus" },
       { href: "/use-cases/how-to-pressure-test-an-ai-response", label: "How to Pressure-Test an AI Response" },
       { href: "/use-cases/ai-disagreement-analysis-tool", label: "AI Disagreement Analysis Tool" },
+      { href: "/use-cases/verify-statistics-generated-by-ai", label: "How to Verify Statistics Generated by AI" },
     ],
   },
   {
@@ -23132,6 +23165,10 @@ export const PAGES: PSEOPage[] = [
         q: "Can I train myself to recognize overconfident AI output?",
         a: "Yes. The main skill is slowing down when an answer sounds authoritative and asking: what specifically is this based on? Where did this claim come from? If you cannot find the answer in the model's response, the confidence is not backed by accessible evidence. Practice treating 'it is widely accepted that' as a flag, not a reassurance.",
       },
+      {
+        q: "What does a full uncertainty audit add beyond checking confidence and evidence?",
+        a: "This page focuses on the gap between how confident an answer sounds and how strong its evidence is. A fuller audit also checks disputed facts, forecast uncertainty, and unresolved attribution — for that broader pass, see how to check if AI turned speculation into fact.",
+      },
     ],
     relatedLinks: [
       { label: "When AI Models Agree but Are Still Wrong", href: "/use-cases/when-ai-models-agree-but-are-wrong" },
@@ -23141,6 +23178,7 @@ export const PAGES: PSEOPage[] = [
       { label: "What Is an AI Consensus Score?", href: "/use-cases/what-is-a-consensus-score" },
       { label: "AI Risk Assessment Tool", href: "/use-cases/ai-risk-review-tool" },
       { label: "How to Pressure-Test an AI Response", href: "/use-cases/how-to-pressure-test-an-ai-response" },
+      { label: "How to Check If AI Turned Speculation into Fact", href: "/use-cases/check-if-ai-turned-speculation-into-fact" },
     ],
     cta: "Check the Evidence — see what the confidence is actually based on",
     category: "thought-leadership",
@@ -23567,6 +23605,10 @@ export const PAGES: PSEOPage[] = [
         q: "How does ConvergePanel help identify source laundering?",
         a: "ConvergePanel runs the same claim through multiple models and compares what each one cites. When models converge on the same source or the same original claim, that convergence is visible in the comparison. A single-model query hides this because you see only one citation chain. The multi-model comparison makes the pattern legible.",
       },
+      {
+        q: "How do I close a corroboration gap once I've found one?",
+        a: "Search independently for a source that reaches the same conclusion without citing, or being cited by, any source already in the chain. If none exists, the claim has one evidentiary origin, not several — treat it as a single unconfirmed source until independent corroboration is found.",
+      },
     ],
     relatedLinks: [
       { label: "What If Every AI Model Cites the Same Weak Source?", href: "/use-cases/when-ai-models-cite-the-same-weak-source" },
@@ -23576,6 +23618,7 @@ export const PAGES: PSEOPage[] = [
       { label: "Verification Checklist for Journalists", href: "/use-cases/verification-checklist-for-journalists" },
       { label: "How to Audit an AI Summary Against the Original", href: "/use-cases/audit-ai-summary-against-original-document" },
       { label: "AI Context Collapse", href: "/use-cases/ai-context-collapse" },
+      { label: "How to Check If AI Cherry-Picked Sources", href: "/use-cases/check-if-ai-cherry-picked-sources" },
     ],
     cta: "Trace the Claim to Its Source",
     category: "thought-leadership",
@@ -23684,6 +23727,10 @@ export const PAGES: PSEOPage[] = [
         q: "What should I record when I find a discrepancy?",
         a: "Record: the original passage, what the AI summary said instead, what changed, and what the correct characterization is. This audit record becomes part of the editorial documentation — evidence that the summary was checked and that the discrepancy was corrected before publication.",
       },
+      {
+        q: "How do I check if AI removed an important caveat?",
+        a: "Read the summary's certainty language against the original's, sentence by sentence. A removed caveat usually shows up as a dropped condition ('in this specific population'), a dropped hedge ('may' becoming 'does'), or a dropped exception the original explicitly named. If the summary states something the original only qualified, the caveat was removed.",
+      },
     ],
     relatedLinks: [
       { label: "AI Source Laundering", href: "/use-cases/ai-source-laundering" },
@@ -23693,6 +23740,7 @@ export const PAGES: PSEOPage[] = [
       { label: "Verification Checklist for Journalists", href: "/use-cases/verification-checklist-for-journalists" },
       { label: "AI Tools for Investigative Journalists", href: "/use-cases/ai-tools-for-investigative-journalists" },
       { label: "How to Find Hidden Assumptions in AI Answers", href: "/use-cases/find-hidden-assumptions-in-ai-answers" },
+      { label: "AI Claim Drift: How Accurate Claims Become Misleading", href: "/use-cases/ai-claim-drift" },
     ],
     cta: "Review the Summary Against the Source",
     category: "how-to",
@@ -24094,6 +24142,10 @@ export const PAGES: PSEOPage[] = [
         q: "Does ConvergePanel generate the rejection record automatically?",
         a: "ConvergePanel generates an exportable record of the AI research phase: what was queried, what models found, where they agreed and disagreed. That record needs to be combined with the editorial components — reviewer name, editorial reason, decision, and follow-up — to constitute a complete rejection documentation. The editorial judgment is added by the journalist or editor, not by the tool.",
       },
+      {
+        q: "What if the story is published anyway, with the open question still unresolved?",
+        a: "That's a different record. This page covers documenting a decision not to publish. If the decision is to proceed with publication while a specific fact remains open, see how to document unresolved facts before publication — it covers the qualification language, reviewer sign-off, and follow-up tracking for that scenario instead.",
+      },
     ],
     relatedLinks: [
       { label: "How to Verify an AI-Generated Allegation Before Publication", href: "/use-cases/verify-ai-generated-allegation-before-publication" },
@@ -24102,6 +24154,7 @@ export const PAGES: PSEOPage[] = [
       { label: "How to Prove an AI Decision Was Reviewed", href: "/use-cases/how-to-prove-an-ai-decision-was-reviewed" },
       { label: "Newsroom AI Verification Workflow", href: "/use-cases/newsroom-ai-verification-workflow" },
       { label: "AI Peer Review for High-Stakes Workflows", href: "/use-cases/ai-peer-review-for-high-stakes-workflows" },
+      { label: "How to Document Unresolved Facts Before Publication", href: "/use-cases/document-unresolved-facts-before-publication" },
     ],
     cta: "Create a Defensible Review Record",
     category: "governance",
@@ -24422,6 +24475,10 @@ export const PAGES: PSEOPage[] = [
         q: "Is there a difference between checking for corrections in AI research vs. journalism?",
         a: "The correction types differ. In academic research, the key documents are formal retraction notices, correction notices, and expressions of concern from journals. In journalism, look for correction pages on the original outlet's website, later reporting by the same or other outlets, and any official responses from the subjects of the original reporting. In legal matters, check the current status of the proceedings in court records.",
       },
+      {
+        q: "What is an evidence freshness check?",
+        a: "An evidence freshness check confirms that a source's date, and the date range its underlying data covers, is still current for the claim being made — separately from checking whether the source has been formally corrected or retracted. A source can be un-retracted and still too old to support a claim about the present.",
+      },
     ],
     relatedLinks: [
       { label: "AI Timeline Verification for Journalists", href: "/use-cases/ai-timeline-verification" },
@@ -24430,6 +24487,7 @@ export const PAGES: PSEOPage[] = [
       { label: "Verification Checklist for Journalists", href: "/use-cases/verification-checklist-for-journalists" },
       { label: "How to Validate AI-Generated Research", href: "/use-cases/how-to-validate-ai-generated-research" },
       { label: "How to Check If AI Hallucinated", href: "/use-cases/how-to-check-if-ai-hallucinated" },
+      { label: "How to Check If AI Used the Wrong Document Version", href: "/use-cases/check-if-ai-used-wrong-document-version" },
     ],
     cta: "Check for Later Corrections",
     category: "how-to",
@@ -24531,12 +24589,851 @@ export const PAGES: PSEOPage[] = [
       { label: "AI Context Collapse", href: "/use-cases/ai-context-collapse" },
       { label: "Verification Checklist for Journalists", href: "/use-cases/verification-checklist-for-journalists" },
       { label: "How to Fact-Check Breaking News Claims", href: "/use-cases/how-to-fact-check-breaking-news-claims" },
+      { label: "How to Check If AI Confused Correlation with Causation", href: "/use-cases/check-if-ai-confused-correlation-with-causation" },
+      { label: "How to Check If AI Used the Wrong Document Version", href: "/use-cases/check-if-ai-used-wrong-document-version" },
     ],
     cta: "Verify the Timeline",
     category: "how-to",
     schemaType: "HowTo",
     metaDescription:
       "Timeline errors in AI answers can reorder events, collapse separate incidents, or invert a story's causation. How to verify an AI-generated timeline before publishing.",
+  },  {
+    slug: "ai-claim-drift",
+    publishedAt: "2026-07-04",
+    title: "AI Claim Drift: How Accurate Claims Become Misleading",
+    h1: "A Claim Can Start Accurate and End Up Wrong",
+    audience: "Journalists, researchers, editors, analysts",
+    audienceDetail: "Anyone who reads AI-generated summaries of summaries and needs to know whether repeated paraphrasing has changed what a claim actually means",
+    problem:
+      "The first version of the claim may be accurate. The fifth may not mean the same thing.\n\nAI claim drift happens when a claim passes through repeated summarization, paraphrase, or synthesis and comes out the other side broader, more certain, or less qualified than it started. No single step looks dishonest. Each summary is a reasonable compression of the one before it. But compression is lossy, and what gets lost first is the hedge, the scope, and the condition — the exact material that made the original claim true rather than misleading.",
+    solution:
+      "ConvergePanel cannot see the chain of summaries that produced the version you're holding. What it can do is show you how differently five current models restate the same underlying source right now — and a wide spread in how confidently they state it is a signal that the claim has room to drift further. Tracing drift backward to the original source is still a manual step.",
+    workflow: [
+      "Identify the specific claim as it appears in the text you're reviewing",
+      "Search for the earliest identifiable version of the claim — the original study, statement, or report",
+      "Compare the original wording against the current version, phrase by phrase",
+      "Note any changes in scope (who or what it applies to), certainty (hedged vs. stated as fact), or time frame",
+      "Check whether attribution survived — does the claim still cite who said it, or has it become an unattributed fact?",
+      "Submit both versions to ConvergePanel and see whether models treat them as equivalent or flag a meaningful difference",
+      "If drift occurred, decide whether the current version needs to be rewritten to match the original's actual scope",
+    ],
+    useCases: [
+      "Checking whether a statistic that has been summarized several times still matches the original study's scope",
+      "Reviewing a research synthesis before quoting a headline finding that may have lost its qualifications",
+      "Auditing an AI-generated brief that compiles several prior AI summaries of the same underlying report",
+      "Verifying a widely repeated claim before treating it as settled",
+    ],
+    bodySections: [
+      {
+        heading: "The Claim-Drift Chain",
+        paragraphs: [
+          "Drift is easiest to see laid out step by step. Each stage looks like a small, reasonable edit. The cumulative effect is a claim that no longer means what the original evidence supported.",
+        ],
+      },
+      {
+        heading: "Illustrative Example",
+        paragraphs: [
+          "Illustrative example: a study finds that a dietary intervention 'was associated with modest improvement in a small trial cohort of adults with a specific condition.' A first AI summary renders this as 'the intervention may improve outcomes in a limited group.' A second summary, working from the first, drops 'limited group' and says 'the intervention may improve outcomes.' A third summary, working from the second, drops the hedge: 'the intervention improves outcomes.' Nothing in the final sentence is fabricated. Every word traces back to a real finding. But the final claim asserts something the original study never demonstrated.",
+        ],
+      },
+      {
+        heading: "Four Mechanisms of Drift",
+        bullets: [
+          "Certainty inflation — 'may,' 'suggests,' and 'is associated with' get replaced by 'shows' and 'proves' across successive summaries",
+          "Scope broadening — a finding limited to a specific population, region, or time period is generalized to everyone, everywhere, always",
+          "Lost attribution — 'according to the report' disappears, and the claim becomes an unattributed fact stated in the writer's own voice",
+          "Condition dropping — 'under laboratory conditions' or 'in the initial trial phase' is quietly removed as summaries get shorter",
+        ],
+      },
+      {
+        heading: "Claim Drift vs. Hallucination vs. Caveat Removal",
+        bullets: [
+          "Hallucination invents a fact that never existed. Claim drift changes the meaning of a fact that did exist, through repeated restatement.",
+          "Caveat removal is usually a single-step failure: one summary drops one qualification from one source. Claim drift is cumulative — it compounds across a chain of summaries, each one working from the last rather than the original.",
+          "Drift can happen without any one summary being dishonest. That is what makes it hard to catch: no single version looks like a distortion.",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "How does an accurate claim become misleading without anyone lying?",
+        a: "Through repeated compression. Each summary in a chain works from the previous summary, not the original source, and each compression drops a little more qualification. No individual step is dishonest — the writer is accurately summarizing what they were given. The distortion accumulates across the chain, not within any single step.",
+      },
+      {
+        q: "What is certainty inflation?",
+        a: "Certainty inflation is when hedged language — 'may,' 'suggests,' 'preliminary evidence indicates' — is replaced with unhedged language — 'shows,' 'proves,' 'demonstrates' — as a claim is repeatedly restated. It usually happens because hedges are the first thing cut when someone is shortening text, since they add words without (apparently) changing the core assertion.",
+      },
+      {
+        q: "Can several AI summaries repeat the same distortion?",
+        a: "Yes, especially if later summaries are generated from earlier AI summaries rather than the original source. Each model compresses independently, but if the input is already drifted, the output drifts further in the same direction. This is why tracing back to the original source — not the most recent summary — is the only reliable check.",
+      },
+      {
+        q: "How do I compare a paraphrase with the original source?",
+        a: "Line up the current claim against the earliest version you can find, phrase by phrase. Look specifically for three things: has the certainty language changed, has the scope (who or what it applies to) broadened, and has the attribution (who said this, and under what conditions) been dropped.",
+      },
+      {
+        q: "Does model agreement rule out claim drift?",
+        a: "No. If multiple models are summarizing an already-drifted version of a claim, they can agree with each other while all being wrong relative to the original source. Model agreement tells you the current wording is stable across models — it does not tell you the current wording still matches what the original evidence said.",
+      },
+      {
+        q: "Is claim drift the same as a misquote?",
+        a: "No. A misquote changes specific words attributed to a specific speaker. Claim drift is broader — it describes gradual meaning-change across successive summaries of a finding, statistic, or event, not necessarily a quotation. See AI quote verification for the speaker-specific version of this problem.",
+      },
+    ],
+    relatedLinks: [
+      { label: "How to Audit an AI Summary Against the Original Document", href: "/use-cases/audit-ai-summary-against-original-document" },
+      { label: "How to Check If AI Turned Speculation into Fact", href: "/use-cases/check-if-ai-turned-speculation-into-fact" },
+      { label: "AI Quote Verification Before Publication", href: "/use-cases/ai-quote-verification" },
+      { label: "AI Confidence vs. Evidence: How to Tell the Difference", href: "/use-cases/ai-confidence-vs-evidence" },
+      { label: "How to Verify Sources from AI Answers", href: "/use-cases/how-to-verify-sources-from-ai-answers" },
+      { label: "How to Check If AI Cherry-Picked Sources", href: "/use-cases/check-if-ai-cherry-picked-sources" },
+    ],
+    cta: "Trace the Claim Back to Its Meaning",
+    category: "thought-leadership",
+    schemaType: "FAQPage",
+    metaDescription:
+      "A claim can be accurate at the source and misleading five summaries later. How AI claim drift happens — certainty inflation, scope broadening, lost attribution — and how to trace a claim back to what the original evidence actually said.",
+  },
+  {
+    slug: "ai-false-balance",
+    publishedAt: "2026-07-04",
+    title: "AI False Balance: When Unequal Evidence Is Presented as Equal",
+    h1: "Two Sides Do Not Always Have Equal Evidence",
+    audience: "Journalists, editors, researchers, policy analysts",
+    audienceDetail: "Anyone reviewing an AI-generated summary of a contested topic and needing to check whether it gave equal-sounding weight to unequal evidence",
+    problem:
+      "A well-supported finding and a fringe objection are not the same kind of thing, even when an AI answer describes them in parallel sentences. 'Some researchers say X, while others argue Y' reads as balanced prose. It is not necessarily balanced evidence. When the AI gives one paragraph to a position backed by a wide, independent body of evidence and one paragraph to a position backed by a single contested source, the sentence structure implies parity that the underlying evidence does not have.",
+    solution:
+      "ConvergePanel does not settle which side of a contested question is right. What it can do is show you where models diverge on how they characterize the strength of each position — and per-model evidence citations let you compare what's actually behind each side of the 'balance,' rather than trusting the framing of one summary.",
+    workflow: [
+      "Identify each position the AI answer presents as a side of the disagreement",
+      "For each position, list the evidence actually cited — not just the position stated",
+      "Assess source count and independence for each side: how many genuinely separate sources support it?",
+      "Assess authority and relevant expertise behind each side's evidence",
+      "Note whether one side represents an established consensus and the other a minority or outlier view",
+      "Submit the underlying question to ConvergePanel and compare how each model characterizes the strength of each side",
+      "Rewrite the framing to reflect proportional weight, not equal sentence length",
+    ],
+    useCases: [
+      "Reviewing an AI-generated explainer on a scientific or health topic before publication",
+      "Checking whether an AI summary of a policy debate has flattened an expert-consensus position into 'one side of a debate'",
+      "Auditing coverage of a contested claim to confirm sourcing strength is represented accurately, not just described as disputed",
+      "Training junior reporters to distinguish reporting disagreement from reporting it as though evidence were equal",
+    ],
+    comparisonTable: {
+      headers: ["Position", "Evidence quality", "Independent sources", "Consensus level", "Appropriate weight"],
+      rows: [
+        ["Position A", "Multiple peer-reviewed studies, replicated findings", "6+ independent research groups", "Broad expert consensus", "Primary framing, stated with confidence"],
+        ["Position B", "One contested study, not replicated", "1 source, cited repeatedly by others", "Minority view, actively disputed", "Noted as a minority position with its evidentiary basis stated"],
+      ],
+    },
+    bodySections: [
+      {
+        heading: "Disagreement vs. False Equivalence",
+        paragraphs: [
+          "Real disagreement exists in almost every field — that is not the problem false balance describes. The problem is representing disagreement as though the evidence on each side carried equal weight, when one side rests on a broad, independent, replicated evidence base and the other rests on a single contested source, an outlier study, or an interested party's assertion.",
+          "Reporting that a debate exists is accurate. Reporting it in a way that implies the debate is evenly matched, when it is not, is false balance — even if every individual sentence in the summary is technically true.",
+        ],
+      },
+      {
+        heading: "Where AI Produces False Balance",
+        bullets: [
+          "Two-sentence pairing — 'X argue... while Y argue...' structure implies parity regardless of evidence weight behind each clause",
+          "Symmetric hedging — applying the same cautious language to a well-established finding and a speculative counter-claim",
+          "Source-count blindness — treating one dissenting expert as equivalent to a body of peer-reviewed consensus",
+          "Neutral tone as a proxy for balance — a calm, even tone can make an outlier claim sound as credible as an established one",
+        ],
+      },
+      {
+        heading: "Balance vs. Proportionality",
+        paragraphs: [
+          "Balanced coverage of a genuinely contested topic still needs to be proportionate: the space, confidence, and framing given to each position should roughly track the strength of evidence behind it, not just the existence of a counter-argument. Proportionate coverage can still mention a minority view — it just labels it as one, rather than implying the matter is a coin flip.",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "Is reporting disagreement the same thing as false balance?",
+        a: "No. Reporting that credible experts disagree is accurate and often necessary. False balance is specifically about implying the evidence on each side is comparably strong when it is not — for example, giving equal space and equal-sounding certainty to a broad scientific consensus and a single contested outlier study.",
+      },
+      {
+        q: "How do I tell a fringe claim from a legitimate minority position?",
+        a: "Check independent source count, whether the position has been through any form of peer review or replication, and whether the people making the claim have relevant standing and no undisclosed conflict of interest. A legitimate minority position usually has some independent support even if it's not the consensus view; a fringe claim typically traces to a single source or interested party.",
+      },
+      {
+        q: "Can an AI answer be factually accurate and still produce false balance?",
+        a: "Yes. Every sentence in a false-balance answer can be individually true — the failure is in the framing and proportion, not the individual facts. This is what makes it harder to catch with a simple fact-check: there's nothing false to correct, only weight to recalibrate.",
+      },
+      {
+        q: "What is the risk of over-correcting for false balance?",
+        a: "Over-correcting can suppress legitimate uncertainty or a genuinely emerging minority view that later turns out to be right. The goal isn't to flatten every disagreement into a single confident answer — it's to represent the actual state and weight of evidence honestly, including when that state is genuinely uncertain.",
+      },
+      {
+        q: "Does ConvergePanel decide which side of a debate is correct?",
+        a: "No. ConvergePanel shows you what each model cites and how confidently it states each position, and where models diverge on the underlying evidence. Deciding how to frame a genuinely contested topic, and how much weight each side deserves, is an editorial judgment that requires a human reviewer with subject expertise.",
+      },
+    ],
+    relatedLinks: [
+      { label: "AI Framing and How Models Shape the Same Story Differently", href: "/use-cases/compare-ai-framing-of-the-same-story" },
+      { label: "How to Check If AI Cherry-Picked Sources", href: "/use-cases/check-if-ai-cherry-picked-sources" },
+      { label: "How to Check If AI Research Is Biased", href: "/use-cases/how-to-check-if-ai-research-is-biased" },
+      { label: "AI Source Laundering: When Weak Claims Look Credible", href: "/use-cases/ai-source-laundering" },
+      { label: "When AI Models Agree but Are Still Wrong", href: "/use-cases/when-ai-models-agree-but-are-wrong" },
+      { label: "How to Verify AI Sources Before You Cite Them", href: "/use-cases/how-to-verify-sources-from-ai-answers" },
+    ],
+    cta: "Compare the Weight of the Evidence",
+    category: "thought-leadership",
+    schemaType: "FAQPage",
+    metaDescription:
+      "An AI answer can present a fringe claim and a well-evidenced finding as equally credible. How to spot AI false balance and check whether disagreement is being reported proportionately.",
+  },
+  {
+    slug: "check-if-ai-turned-speculation-into-fact",
+    publishedAt: "2026-07-04",
+    title: "How to Check If AI Turned Speculation into Fact",
+    h1: "Possibility, Forecast, and Fact Are Not the Same Thing",
+    audience: "Journalists, editors, analysts, researchers",
+    audienceDetail: "Anyone reviewing an AI-generated answer that states something as settled fact and needs to check whether the underlying source was actually a prediction, estimate, allegation, or scenario",
+    problem:
+      "A precise, declarative sentence can be built on a source that was never precise or declarative. AI models are fluent regardless of how certain the underlying material actually is — a forecast, a rumor, an analyst's opinion, and a confirmed fact can all get rendered in the same confident sentence structure. The reader has no way to tell, from tone alone, which one they're looking at.",
+    solution:
+      "ConvergePanel cannot tell you what a source actually said — that requires reading it. What it does is surface disagreement: when one model treats a claim as settled and another hedges or flags it as a projection, that split is a signal to go back and check the certainty language in the original source before repeating the claim as fact.",
+    workflow: [
+      "Extract the specific factual-sounding claim from the AI answer",
+      "Trace the claim to its source — the study, statement, forecast, or report it came from",
+      "Read the exact certainty language the source used: does it say 'is,' 'will,' 'may,' 'is expected to,' or 'is projected to'?",
+      "Classify the source statement on the certainty ladder: confirmed fact, established finding, forecast or projection, analyst opinion, scenario, allegation, or rumor",
+      "Compare the AI's wording against the source's actual certainty level",
+      "Submit the claim to ConvergePanel and note whether models agree on how certain it is",
+      "Rewrite the claim to match the source's actual certainty before it goes into a draft",
+      "Send anything still ambiguous, or any high-stakes claim, for human review before publication",
+    ],
+    useCases: [
+      "Checking whether an AI-generated market or election forecast has been reported as a confirmed outcome",
+      "Verifying that an AI summary of a scientific projection hasn't dropped the word 'projected'",
+      "Reviewing an AI account of an unconfirmed allegation before it's treated as established in a draft",
+      "Auditing an AI-generated brief for scenario language that has quietly become declarative",
+    ],
+    bodySections: [
+      {
+        heading: "The Certainty Ladder",
+        bullets: [
+          "Confirmed fact — independently verified, supported by primary evidence, can be stated without qualification",
+          "Established finding — supported by a body of replicated evidence; can be stated with light qualification",
+          "Forecast or projection — a model-based estimate of a future outcome; requires 'is projected to' or 'is expected to,' not 'will'",
+          "Analyst opinion — one qualified person's interpretation; requires attribution, not treatment as fact",
+          "Scenario — one of several possible outcomes under stated assumptions; requires the assumptions to be stated alongside it",
+          "Allegation — a claim not yet independently established; requires labeling as an allegation",
+          "Rumor — circulating claim with no identified evidentiary basis; should not appear as fact under any framing",
+        ],
+      },
+      {
+        heading: "Illustrative Example: A Forecast Becomes a Fact",
+        paragraphs: [
+          "Illustrative example: an economic model projects that a proposed policy 'could reduce unemployment by approximately one point over two years under current assumptions.' An AI summary renders this as 'the policy will reduce unemployment.' The word 'projected' is gone. The stated assumptions are gone. The two-year time frame is gone. What was a conditional model output is now a stated fact — and the underlying analysis never claimed that level of certainty.",
+        ],
+      },
+      {
+        heading: "Speculation and Forecasts Fail the Same Way",
+        paragraphs: [
+          "Forecasts, projections, and estimates fail the same certainty test as raw speculation: they are model outputs conditioned on assumptions, not observed outcomes. A well-built forecast from a credible source is still a forecast. If an AI answer states 'the region will see 3% growth' instead of 'analysts project 3% growth under current conditions,' it has performed the same certainty inflation as turning a rumor into a fact — only with better-dressed source material.",
+        ],
+      },
+      {
+        heading: "Quick Checks Before You Trust the Wording",
+        bullets: [
+          "Does the source use future tense ('will') where the AI should have used conditional language ('is expected to,' 'is projected to')?",
+          "Has an attributed opinion ('X believes...') become an unattributed statement?",
+          "Has a range or estimate become a single stated number?",
+          "Has 'under these conditions' or 'if current trends continue' been dropped?",
+          "Would a reader who saw only the AI's sentence assume more certainty than the source actually claims?",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "How do I check if AI reported a forecast as a confirmed fact?",
+        a: "Find the original forecast or projection and check its exact certainty language — 'is projected to,' 'is expected to,' 'could,' or a stated range. If the AI's version uses unqualified future tense ('will') or states a single number where the source gave a range or a set of assumptions, the forecast has been rewritten as fact.",
+      },
+      {
+        q: "What is the difference between an allegation and speculation?",
+        a: "An allegation is a specific claim made against a specific person or entity that has not yet been independently established — it usually has an identifiable source making the claim. Speculation is broader and often has no identified source at all; it's a possibility being floated rather than a claim being made by someone accountable for it. Both require labeling before they can be treated as fact.",
+      },
+      {
+        q: "Can model agreement confirm that a speculative claim is true?",
+        a: "No. If multiple models were trained on the same widely circulated speculation, they can agree with each other while all repeating an unconfirmed claim. Agreement across models tells you the claim is common in the training data — it does not tell you the claim has been independently verified.",
+      },
+      {
+        q: "How should I re-word a claim once I find it was speculation?",
+        a: "Restore the source's actual certainty language and attribution: name who made the claim, state it as a possibility or projection rather than a fact, and include the conditions or assumptions the source attached to it. If the claim can't be attributed to a specific, credible source, treat it as unconfirmed rather than including it at all.",
+      },
+      {
+        q: "Is every hedge in a source equally important to preserve?",
+        a: "No — some hedges are boilerplate caution that doesn't change the substance of a finding. The hedges that matter are the ones that change what a reader would conclude: scope limits, sample size, time frame, and stated assumptions behind a forecast. Prioritize checking those over-generic academic caution language.",
+      },
+    ],
+    relatedLinks: [
+      { label: "How to Audit an AI Summary Against the Original Document", href: "/use-cases/audit-ai-summary-against-original-document" },
+      { label: "AI Claim Drift: How Accurate Claims Become Misleading", href: "/use-cases/ai-claim-drift" },
+      { label: "How to Verify an AI-Generated Allegation Before Publication", href: "/use-cases/verify-ai-generated-allegation-before-publication" },
+      { label: "AI Confidence vs. Evidence: How to Tell the Difference", href: "/use-cases/ai-confidence-vs-evidence" },
+      { label: "How to Check If ChatGPT Is Wrong", href: "/use-cases/how-to-check-if-chatgpt-is-wrong" },
+    ],
+    cta: "Check the Claim's Certainty",
+    category: "how-to",
+    schemaType: "HowTo",
+    metaDescription:
+      "A forecast, an allegation, and a confirmed fact can all read the same in an AI answer. How to check whether AI turned speculation, a projection, or an estimate into a stated fact before you publish it.",
+  },
+  {
+    slug: "check-if-ai-cherry-picked-sources",
+    publishedAt: "2026-07-04",
+    title: "How to Check If AI Cherry-Picked Sources",
+    h1: "A Well-Cited Answer Can Still Be One-Sided",
+    audience: "Journalists, researchers, analysts, editors",
+    audienceDetail: "Anyone reviewing an AI-generated answer with visible citations who needs to check whether the sources represent the actual range of available evidence, not just the range that supports one conclusion",
+    problem:
+      "Citations create the appearance of rigor regardless of whether they represent the full evidentiary picture. An AI answer can cite five real, credible sources and still be one-sided, if all five happen to support the same conclusion and the model never surfaced the sources that complicate it. This is different from a source being fake or weak — every citation can check out individually. The gap is what's missing: the counterevidence, the dissenting study, the source that reached a different conclusion using the same data.",
+    solution:
+      "ConvergePanel runs the same question across five models independently. If one model surfaces a source or a counterargument that the others omit, that divergence is a direct signal that a single-model answer would have missed a relevant piece of evidence. Comparing what each model chose to cite is the fastest way to see the shape of what a one-sided answer left out.",
+    workflow: [
+      "List every source the AI answer actually cites",
+      "Search separately for evidence on the other side of the conclusion — do not rely on the AI to surface its own counterevidence",
+      "Check whether any omitted source is more recent, more rigorous, or more directly on-point than the sources that were included",
+      "Check date selection: does the answer favor older sources that support its framing while ignoring newer ones that complicate it?",
+      "Check geography and population selection: does the evidence generalize, or was a favorable subset chosen?",
+      "Submit the same question to ConvergePanel and compare which sources each model surfaces",
+      "Note any source that would weaken the stated conclusion and was not mentioned",
+      "Revise the framing to reflect the full range of credible evidence, not just the supporting subset",
+    ],
+    useCases: [
+      "Auditing an AI-generated research brief before treating its conclusion as comprehensive",
+      "Checking whether an AI summary of a scientific debate has omitted the studies that complicate its stated conclusion",
+      "Reviewing an AI-assisted competitive or policy analysis for one-sided sourcing before it goes into a report",
+      "Verifying that a viral claim's supporting sources aren't a curated subset of the available evidence",
+    ],
+    comparisonTable: {
+      headers: ["Source", "Supports or challenges the stated conclusion", "Independent of other cited sources", "Included by the AI answer", "Reviewer note"],
+      rows: [
+        ["Study A (2019)", "Supports", "Yes", "Included", "Smaller sample, cited prominently"],
+        ["Study B (2023)", "Challenges", "Yes", "Omitted", "Larger, more recent replication — not surfaced"],
+        ["Industry report", "Supports", "Funded by an interested party", "Included", "Conflict of interest not disclosed in the AI summary"],
+        ["Independent meta-analysis", "Mixed", "Yes", "Omitted", "Would have changed the confidence of the stated conclusion"],
+      ],
+    },
+    bodySections: [
+      {
+        heading: "Cherry-Picking vs. Source Laundering",
+        paragraphs: [
+          "Source laundering is about false independence: sources that look separate but all trace back to one original claim. Cherry-picking is a different failure — the cited sources may be genuinely independent and individually credible, but they were selected because they support one conclusion while comparably credible sources that don't were left out. The check for cherry-picking isn't 'do these sources trace to the same origin?' — it's 'what did the model choose not to show me?'",
+        ],
+      },
+      {
+        heading: "Where Cherry-Picking Hides",
+        bullets: [
+          "Date selection — citing older studies that support a conclusion while newer, contradicting research is left out",
+          "Geographic selection — generalizing from a region or population where the effect is strongest, ignoring where it isn't",
+          "Methodology selection — favoring studies with a specific design that tends to support the conclusion, without noting studies using other methods that don't",
+          "Interest-holder sources — including a funded or interested party's report without noting the conflict, while omitting independent findings",
+        ],
+      },
+      {
+        heading: "The Range Check",
+        paragraphs: [
+          "The fastest test for cherry-picking is to search independently, outside the AI tool, for the strongest available counterevidence to the stated conclusion. If credible counterevidence exists and the AI answer didn't surface any of it, the sourcing is one-sided regardless of how many citations it includes.",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "How is cherry-picking different from a fake or hallucinated source?",
+        a: "A hallucinated source doesn't exist. A cherry-picked source is real and accurately cited — the issue is that the model, or the person prompting it, selected sources that support one conclusion while leaving out comparably credible sources that don't. Every individual citation can be verified as genuine, and the answer can still be one-sided.",
+      },
+      {
+        q: "Does more citations mean more reliable?",
+        a: "Not by itself. Five citations that all support the same conclusion tell you the model found supporting evidence — they don't tell you whether it looked for, or found, the evidence that complicates that conclusion. Reliability depends on range, not count.",
+      },
+      {
+        q: "How do I find the counterevidence an AI answer left out?",
+        a: "Search independently for the strongest challenge to the stated conclusion, using different search terms than the ones that would surface supporting evidence. Check recent meta-analyses or literature reviews on the topic, which are more likely to summarize the full range of findings than a single AI-generated answer.",
+      },
+      {
+        q: "Can multi-model comparison catch cherry-picking on its own?",
+        a: "It can surface it — if one model cites a source the others don't, that's worth checking. But models drawing on similar training data can all cherry-pick in the same direction, especially on well-covered but contested topics. Comparison narrows where to look; it doesn't replace an independent search for counterevidence.",
+      },
+      {
+        q: "What should I do if I find the AI's sourcing was one-sided?",
+        a: "Add the omitted evidence and restate the conclusion to reflect the actual range of findings, including their relative strength. If the omitted evidence is substantial enough to change the conclusion, the conclusion needs to change — not just gain a caveat.",
+      },
+    ],
+    relatedLinks: [
+      { label: "AI Source Laundering: When Weak Claims Look Credible", href: "/use-cases/ai-source-laundering" },
+      { label: "AI False Balance: When Unequal Evidence Is Presented as Equal", href: "/use-cases/ai-false-balance" },
+      { label: "How to Check If AI Research Is Biased", href: "/use-cases/how-to-check-if-ai-research-is-biased" },
+      { label: "How to Verify Sources from AI Answers", href: "/use-cases/how-to-verify-sources-from-ai-answers" },
+      { label: "How to Identify Blind Spots in AI Answers", href: "/use-cases/how-to-identify-blind-spots-in-ai-answers" },
+    ],
+    cta: "Review the Source Selection",
+    category: "how-to",
+    schemaType: "HowTo",
+    metaDescription:
+      "Five real citations can still add up to a one-sided answer. How to check whether AI cherry-picked sources — and find the counterevidence it left out — before you trust the conclusion.",
+  },
+  {
+    slug: "verify-statistics-generated-by-ai",
+    publishedAt: "2026-07-04",
+    title: "How to Verify Statistics Generated by AI",
+    h1: "A Precise Number Can Still Be Wrong",
+    audience: "Journalists, analysts, researchers, editors",
+    audienceDetail: "Anyone citing an AI-generated statistic, percentage, or figure who needs to verify it against the original dataset before publication",
+    problem:
+      "A number with two decimal places looks more trustworthy than one without — regardless of whether it's correct. AI models can state a precise-sounding figure while getting the unit wrong, confusing a percentage with a percentage point, citing a stale estimate as current, or misreading a chart. The precision of the number tells you nothing about whether it's the right number.",
+    solution:
+      "ConvergePanel does not calculate or verify statistics on your behalf — that would create the same risk it's meant to reduce. What it does is show you where models diverge on a stated figure: if one model gives a materially different number for the same statistic, that's a direct flag to check the underlying dataset before either version is published.",
+    workflow: [
+      "Identify the exact figure the AI answer states and the claim it's attached to",
+      "Find the original dataset, report, or study the figure is supposedly drawn from",
+      "Check the numerator and denominator: what exactly is being measured, and against what base?",
+      "Check the unit: is this a percentage, a percentage-point change, a rate, or a raw count?",
+      "Check the sample size and whether it's large enough to support the stated precision",
+      "Check the date range and geography: does the figure apply to the period and population being discussed?",
+      "Check whether the figure is an estimate, a projection, or an observed result — and whether the AI labeled it accordingly",
+      "If a chart or table is involved, verify the AI read the correct axis, unit, and time period",
+      "For any statistic materially shaping the story's conclusion, have a second person recompute or independently verify it",
+    ],
+    useCases: [
+      "Checking a percentage or rate cited in an AI-generated summary of a study or government report",
+      "Verifying that an AI-reported year-over-year change wasn't confused with a percentage-point change",
+      "Auditing an AI-generated chart interpretation before including the figure in a story",
+      "Confirming that a statistic attributed to a specific population actually applies to the group being discussed",
+    ],
+    bodySections: [
+      {
+        heading: "Common AI Statistical Errors",
+        bullets: [
+          "Percentage vs. percentage point — 'increased by 5%' and 'increased by 5 percentage points' describe different magnitudes and are easy to conflate",
+          "Numerator/denominator mismatch — citing a rate calculated against the wrong base population or time period",
+          "Estimate presented as observed — a projected or modeled figure stated without noting it's an estimate",
+          "Stale figure presented as current — an older statistic cited without its date, implying it reflects the present",
+          "Sample size omission — a precise-sounding figure from a small sample, stated without the sample size that would signal its limits",
+          "Chart misread — a model describing a trend line, axis value, or inflection point that doesn't match the actual chart",
+          "Inflation-adjustment mismatch — comparing dollar or currency figures across years without adjusting for inflation",
+          "Rounding compounding — a chain of rounded figures multiplied or combined, producing a result that drifts from the precise calculation",
+        ],
+      },
+      {
+        heading: "Illustrative Example",
+        paragraphs: [
+          "Illustrative example: a report states that a metric \"rose from 12% to 17%.\" An AI summary describes this as \"a 41% increase\" (17 divided by 12) in one sentence, and elsewhere as \"a 5% increase\" — conflating the percentage-point change with a percentage change of the metric itself. Both statements can appear in the same AI-generated brief, and only one framing is typically what the original report intended. Reading the original phrasing, not the AI's restatement, is the only way to know which.",
+        ],
+      },
+      {
+        heading: "What ConvergePanel Can and Cannot Verify",
+        paragraphs: [
+          "ConvergePanel can show you when multiple models produce different figures for what should be the same statistic, and can help you compare how each model describes the source of a number. It cannot independently confirm that a calculation is correct or substitute for checking the original dataset. Statistical claims that carry real weight in a story warrant a qualified analyst or statistician's review, not just a model comparison.",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "What's the difference between a percentage and a percentage-point change?",
+        a: "A percentage-point change is the arithmetic difference between two percentages (17% minus 12% is 5 percentage points). A percentage change describes that difference relative to the starting value (5 divided by 12 is roughly a 42% increase). AI answers frequently use these interchangeably, and the two describe very different magnitudes.",
+      },
+      {
+        q: "How do I check if an AI-cited statistic is out of date?",
+        a: "Find the original source's publication date and the date range the data itself covers, which can be different from the publication date. Search for more recent data on the same metric. A statistic can be accurately quoted and still misleading if it's presented without its date and a more current figure exists.",
+      },
+      {
+        q: "Can ConvergePanel calculate or verify a statistic for me?",
+        a: "No. ConvergePanel compares how multiple models describe a statistic and flags where they diverge, which tells you where to look more carefully. It does not perform independent statistical analysis or verify a calculation against a dataset — that step requires checking the original data directly, and for consequential figures, a qualified analyst.",
+      },
+      {
+        q: "What should I check first when a statistic seems central to a story?",
+        a: "Start with the numerator and denominator — what exactly is being counted, and against what total or baseline. Most misleading statistics trace to a mismatch here: a rate calculated against the wrong population, time period, or base value, even when the stated number is technically real.",
+      },
+      {
+        q: "Is a statistic from a credible source automatically safe to cite?",
+        a: "The source being credible tells you the underlying data is probably sound. It doesn't tell you the AI correctly extracted, labeled, or contextualized that data. Verify the AI's restatement against the source's own framing, not just the source's reputation.",
+      },
+    ],
+    relatedLinks: [
+      { label: "How to Check If AI Confused Correlation with Causation", href: "/use-cases/check-if-ai-confused-correlation-with-causation" },
+      { label: "How to Audit an AI Summary Against the Original Document", href: "/use-cases/audit-ai-summary-against-original-document" },
+      { label: "How to Check If AI Cherry-Picked Sources", href: "/use-cases/check-if-ai-cherry-picked-sources" },
+      { label: "AI Claim Drift: How Accurate Claims Become Misleading", href: "/use-cases/ai-claim-drift" },
+      { label: "Financial Analysis Validation with AI", href: "/use-cases/financial-analysis-validation-with-ai" },
+    ],
+    cta: "Check the Number and the Source",
+    category: "how-to",
+    schemaType: "HowTo",
+    metaDescription:
+      "A precise-sounding statistic can still be the wrong number. How to verify AI-generated statistics — percentages, rates, and chart readings — against the original dataset before you cite them.",
+  },
+  {
+    slug: "check-if-ai-confused-correlation-with-causation",
+    publishedAt: "2026-07-04",
+    title: "How to Check If AI Confused Correlation with Causation",
+    h1: "Two Things Moving Together Does Not Prove One Caused the Other",
+    audience: "Journalists, researchers, analysts, editors",
+    audienceDetail: "Anyone reviewing an AI-generated summary of a study or dataset that implies a causal relationship, and needing to check whether the underlying evidence actually supports causation",
+    problem:
+      "'Linked to,' 'associated with,' and 'causes' describe very different levels of evidence, and AI models routinely collapse them into the strongest-sounding version. An observational study that found two variables move together gets summarized as one variable causing the other. The underlying finding may be entirely real. The causal claim built on top of it may not be supported by the study at all.",
+    solution:
+      "ConvergePanel does not adjudicate causal questions — that requires domain expertise and access to the full study design, not just its abstract. What it does is surface disagreement: when models differ on whether a finding supports a causal or merely correlational claim, that split tells you the underlying evidence is being read differently, which is a reason to go to the original study before repeating either version.",
+    workflow: [
+      "Identify the exact causal language in the AI answer: 'causes,' 'leads to,' 'because of,' 'driven by'",
+      "Find the original study or dataset and check its design: was it observational or experimental?",
+      "Observational studies show association; only controlled experiments (or very specific quasi-experimental designs) can support causal claims",
+      "Check for confounding variables the study itself flags or that are evident from the design",
+      "Check the temporal order: did the proposed cause clearly precede the proposed effect, and could reverse causation explain the pattern instead?",
+      "Read the study's own stated conclusion — does it use causal language, or does it hedge with 'associated with' or 'linked to'?",
+      "Compare the AI's wording against the study's actual conclusion",
+      "For any causal claim shaping a story's conclusion, note the limitation explicitly rather than silently upgrading an association into a cause",
+    ],
+    useCases: [
+      "Checking whether an AI summary of a health or social-science study inflated an association into a causal claim",
+      "Reviewing an AI-generated business or policy analysis that implies one metric drove another without confirming study design",
+      "Verifying a viral claim that treats a correlation as proof of a mechanism",
+      "Auditing a data journalism piece before publishing a causal framing of a statistical pattern",
+    ],
+    bodySections: [
+      {
+        heading: "What the Study Design Actually Tells You",
+        bullets: [
+          "Randomized controlled experiment — can support a causal claim, within the scope of what was tested",
+          "Natural or quasi-experiment — can support a cautious causal claim if confounders are well-controlled and the design is sound",
+          "Observational or correlational study — can show that two things move together; cannot, on its own, establish that one caused the other",
+          "Cross-sectional survey — captures a single point in time; often cannot even establish which variable came first",
+        ],
+      },
+      {
+        heading: "Signs an AI Answer Has Overstated Causation",
+        bullets: [
+          "The source study uses 'associated with' or 'linked to,' and the AI answer uses 'causes' or 'leads to'",
+          "No mention of the study design (observational vs. experimental) anywhere in the summary",
+          "No acknowledgment of confounding variables the original authors flagged",
+          "A plausible reverse-causation explanation exists and isn't addressed — did the claimed effect actually happen first?",
+          "The claim implies a specific mechanism that the underlying study didn't test",
+        ],
+      },
+      {
+        heading: "Illustrative Example",
+        paragraphs: [
+          "Illustrative example: an observational study finds that people who use a particular productivity tool report higher job satisfaction. The study explicitly notes it cannot rule out that more satisfied employees are simply more likely to adopt new tools, not the other way around. An AI summary states: 'using the tool increases job satisfaction.' The correlation is real. The direction of causation asserted by the AI summary is not supported by the study's own design.",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "How can I tell if a study supports a causal claim?",
+        a: "Check the study design first. Randomized controlled experiments can support causal claims within their tested scope. Observational studies — which make up most social science, nutrition, and public health research covered in the news — generally cannot, on their own, establish causation, no matter how strong the association appears.",
+      },
+      {
+        q: "What is reverse causation and why does it matter here?",
+        a: "Reverse causation is when the assumed cause and effect are actually backwards — the thing assumed to be the effect happened first and influenced the thing assumed to be the cause. AI summaries rarely check temporal order carefully, so a plausible reverse explanation is often left unexamined even when it fits the data just as well.",
+      },
+      {
+        q: "What is a confounding variable?",
+        a: "A confounding variable is a third factor that influences both the supposed cause and the supposed effect, creating an association between them without either one causing the other. Well-designed studies attempt to control for known confounders; AI summaries frequently drop the confounder discussion entirely when compressing a study's findings.",
+      },
+      {
+        q: "Can ConvergePanel tell me whether a claim is actually causal?",
+        a: "ConvergePanel can show you where models disagree on causal language for the same underlying finding, which flags claims worth checking more carefully. It cannot make the causal determination itself — that requires reading the original study's design and, for high-stakes claims, review from someone with relevant statistical or subject-matter expertise.",
+      },
+      {
+        q: "Is it ever safe to use causal language from an AI summary directly?",
+        a: "Only after confirming the underlying study's design supports it and that the study's own authors used comparable causal language. If the original source hedges with 'associated with' and the AI didn't, use the source's own wording, not the AI's upgrade.",
+      },
+    ],
+    relatedLinks: [
+      { label: "How to Verify Statistics Generated by AI", href: "/use-cases/verify-statistics-generated-by-ai" },
+      { label: "AI Timeline Verification for Journalists", href: "/use-cases/ai-timeline-verification" },
+      { label: "How to Check If AI Research Is Biased", href: "/use-cases/how-to-check-if-ai-research-is-biased" },
+      { label: "How to Audit an AI Summary Against the Original Document", href: "/use-cases/audit-ai-summary-against-original-document" },
+    ],
+    cta: "Review the Causal Claim",
+    category: "how-to",
+    schemaType: "HowTo",
+    metaDescription:
+      "Two things moving together in a study is not proof one caused the other. How to check whether AI upgraded a correlational finding into a causal claim the underlying evidence doesn't support.",
+  },
+  {
+    slug: "check-if-ai-used-wrong-document-version",
+    publishedAt: "2026-07-04",
+    title: "How to Check If AI Used the Wrong Document Version",
+    h1: "The Source May Be Real and Still Be Out of Date",
+    audience: "Journalists, policy analysts, researchers, legal and compliance teams",
+    audienceDetail: "Anyone relying on an AI-generated summary of a policy, filing, or report who needs to confirm it reflects the current, final version rather than a draft, superseded, or amended one",
+    problem:
+      "A document can be entirely genuine and still be the wrong one to cite. Policies get amended. Draft filings get superseded by final versions. Reports get revised after initial release. An AI model summarizing 'the policy' or 'the filing' has no inherent way to know whether the version it drew from during training, or the version a user pasted in, is the current, operative one — and a summary of an outdated version can read exactly as confidently as a summary of the current one.",
+    solution:
+      "ConvergePanel cannot confirm which version of a document is current — that requires checking the issuing body's own records. It can help by comparing how different models describe the same document: if one model's summary includes provisions the others don't, or dates the document differently, that divergence is often a version mismatch worth checking before you cite either one.",
+    workflow: [
+      "Identify the specific document the AI answer is summarizing: its title, issuing organization, and stated date",
+      "Search the issuing organization's own records for the current, official version of that document",
+      "Check for a revision number, amendment notice, or 'supersedes' notation on the current version",
+      "Compare the AI's summary against the current official version, not just against the version that was likely in its training data",
+      "Check whether the AI is summarizing a draft, proposed, or preliminary version rather than the final adopted one",
+      "For legal or regulatory documents, check the effective date separately from the publication or announcement date",
+      "If a discrepancy exists, identify exactly which provisions changed between the version summarized and the current version",
+      "Cite only the current version, and note explicitly if the story concerns a provision that has since changed",
+    ],
+    useCases: [
+      "Verifying that an AI summary of a regulation or policy reflects the version currently in effect, not a draft or earlier revision",
+      "Checking whether an AI-summarized court filing has been superseded by an amended or final version",
+      "Confirming that an AI account of a corporate report or filing reflects the most recently restated figures",
+      "Auditing an AI-generated policy explainer before publication to ensure it isn't built on an archived or withdrawn version",
+    ],
+    comparisonTable: {
+      headers: ["Version used by AI", "Current version", "Material change", "Editorial impact"],
+      rows: [
+        ["Draft proposal, released for comment", "Final rule, adopted after comment period", "Two provisions were narrowed before adoption", "AI summary overstates the rule's current scope"],
+        ["Original filing", "Amended filing, refiled two weeks later", "Financial figures were restated", "Citing the original filing would misstate the current numbers"],
+        ["Report, first edition", "Report, revised edition with corrected data", "A key chart's data was corrected", "Original chart's figures no longer match the publisher's own current position"],
+      ],
+    },
+    bodySections: [
+      {
+        heading: "Version Checks to Run",
+        bullets: [
+          "Document title — does it exactly match the current version's title, including any revision marker?",
+          "Issuing organization — has the issuing body itself published a superseding or amended version?",
+          "Publication date vs. effective date — a policy can be announced on one date and take effect on another; both differ from any later amendment date",
+          "Revision number — many official documents carry an explicit version or revision number worth checking directly",
+          "Draft vs. final — was this ever released for comment, and did the final adopted version change from the draft?",
+          "Archived vs. current — is the version the AI drew from still hosted as the active version, or has it been moved to an archive with a superseding notice?",
+        ],
+      },
+      {
+        heading: "Why This Fails Differently Than a Wrong Citation",
+        paragraphs: [
+          "A wrong citation points to a source that doesn't say what's claimed. A wrong document version points to a source that is real, was accurately summarized, and simply isn't the operative one anymore. The summary can be a perfectly faithful account of an outdated draft — which makes it more dangerous, not less, because there is nothing internally wrong with the summary to catch. The only way to catch it is checking the issuing organization's records for a newer version.",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "How do I know if a policy document I'm citing has been amended?",
+        a: "Go directly to the issuing organization or official register and search for the document by its title or docket number. Official sources typically note amendments, supersessions, or revision history on the document's own page — this information is often not present in the version an AI model was trained on or was given to summarize.",
+      },
+      {
+        q: "What's the difference between a publication date and an effective date?",
+        a: "The publication date is when a document was released or announced. The effective date is when its provisions actually take hold, which can be weeks or months later — and for some regulations, is itself subject to delay or amendment. AI summaries frequently use the publication date when the effective date is what actually matters for the claim being made.",
+      },
+      {
+        q: "Can ConvergePanel tell me if a document has been superseded?",
+        a: "Not directly — that requires checking the issuing organization's own records, which ConvergePanel does not independently monitor. What it can do is show you when multiple models describe the same named document differently, which is often a sign that at least one is working from an outdated or different version.",
+      },
+      {
+        q: "Is a draft document ever safe to cite as though it were final?",
+        a: "Only if it's explicitly labeled as a draft, proposal, or preliminary version in the text — and even then, only with a clear note that its provisions may change before adoption. Treating a draft's specific provisions as settled is a common source of stories that need correction once the final version differs.",
+      },
+    ],
+    relatedLinks: [
+      { label: "AI Correction Check: Missed Retractions and Updates", href: "/use-cases/ai-correction-check" },
+      { label: "AI Timeline Verification for Journalists", href: "/use-cases/ai-timeline-verification" },
+      { label: "How to Audit an AI Summary Against the Original Document", href: "/use-cases/audit-ai-summary-against-original-document" },
+      { label: "Verify Names, Dates, and Locations in an AI Summary", href: "/use-cases/verify-names-dates-locations-in-ai-summary" },
+      { label: "Legal Document Grounding with AI", href: "/use-cases/legal-document-grounding-with-ai" },
+    ],
+    cta: "Check the Document Version",
+    category: "how-to",
+    schemaType: "HowTo",
+    metaDescription:
+      "A cited document can be entirely genuine and still be a draft, an earlier revision, or a version that's since been amended. How to check whether AI summarized the wrong document version before you publish.",
+  },
+  {
+    slug: "compare-ai-framing-of-the-same-story",
+    publishedAt: "2026-07-04",
+    title: "How to Compare AI Framing of the Same Story",
+    h1: "Different Models Can Tell Different Stories with the Same Facts",
+    audience: "Journalists, editors, researchers, media analysts",
+    audienceDetail: "Anyone comparing how multiple AI models describe the same event and needing a structured way to see where framing — not just facts — diverges between them",
+    problem:
+      "Two accounts can share every underlying fact and still tell different stories, through what gets emphasized, what gets left out, which actor is named first, which side's language is adopted, and how much uncertainty is disclosed. AI models are not neutral narrators — they generate the framing patterns most common in their training data, and different models trained on different mixes of sources can produce noticeably different accounts of the identical event.",
+    solution:
+      "ConvergePanel runs the same question through multiple models and shows their answers side by side, which turns framing differences from something you'd have to notice on your own into something you can see directly, model by model. The comparison surfaces the divergence. Deciding which framing is fair, and how to write the story, is still an editorial judgment.",
+    workflow: [
+      "Submit the same factual question or story prompt to ConvergePanel across all available models",
+      "Compare the opening sentence of each model's account: what fact or frame does each lead with?",
+      "Compare which facts are emphasized and which are left out entirely across the different responses",
+      "Note actor labels: does one model describe a party more favorably or unfavorably than another?",
+      "Check causal framing: does one model assign responsibility or motive that another doesn't?",
+      "Compare sourcing: are the models drawing on different sources for the same story, and does that explain the framing gap?",
+      "Note how much uncertainty each model discloses about contested elements",
+      "Use the comparison to write an account that reflects the full range of defensible framing, not just the first model's version",
+    ],
+    useCases: [
+      "Checking whether a single-model summary of a contested story reflects one particular framing before it goes into a draft",
+      "Reviewing how different models describe a political event to spot where language choices imply judgment",
+      "Comparing AI accounts of a corporate or public controversy to identify omitted context before publication",
+      "Training a newsroom team to recognize framing differences as a distinct verification step from fact-checking",
+    ],
+    comparisonTable: {
+      headers: ["Model", "Opening frame", "Strongest emphasis", "Notable omission", "Uncertainty disclosed"],
+      rows: [
+        ["Model A", "Leads with the official statement", "Institutional response", "Community reaction", "Low"],
+        ["Model B", "Leads with the affected party's account", "Human impact", "Procedural context", "Moderate"],
+        ["Model C", "Leads with background context", "Historical pattern", "Immediate event details", "Moderate"],
+        ["Model D", "Leads with disputed facts", "Points of disagreement", "Areas of actual consensus", "High"],
+      ],
+    },
+    bodySections: [
+      {
+        heading: "What Framing Differences Actually Look Like",
+        bullets: [
+          "Headline framing — which fact or actor is presented first, shaping what a reader assumes is most important",
+          "Actor labels — descriptive language that casts a party more sympathetically or less sympathetically without changing the facts",
+          "Selected and omitted facts — the same event described with different subsets of true details",
+          "Causal framing — implying blame, motive, or responsibility that the underlying facts support but don't require",
+          "Source selection — different models drawing on different outlets or documents for the same story, which shapes what each account contains",
+          "Uncertainty disclosure — some accounts flag contested or unconfirmed elements; others state them as settled",
+        ],
+      },
+      {
+        heading: "Why This Isn't the Same as Checking for Errors",
+        paragraphs: [
+          "Every account in a framing comparison can be factually accurate. The comparison isn't looking for a mistake to correct — it's looking for the editorial choices embedded in each version, which a single-model answer would present as though they were the only reasonable way to tell the story. Seeing four different framings side by side makes those choices visible.",
+        ],
+      },
+      {
+        heading: "No Model Is a Neutral Baseline",
+        paragraphs: [
+          "It's tempting to treat one model's framing as the 'objective' version and the others as deviations from it. None of them is neutral — each reflects the patterns in its own training data and its own tuning. The value of the comparison is in seeing the range of defensible framings, not in picking one model's output as the correct one and discarding the rest.",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "How do I know if a difference between models is a factual error or just framing?",
+        a: "Check whether the specific facts stated are individually verifiable and consistent, or whether they differ. If the facts match but the emphasis, order, labels, or omissions differ, you're looking at framing, not error. Framing differences require an editorial decision about fairness and completeness, not a correction.",
+      },
+      {
+        q: "Can model agreement on framing tell me the framing is fair?",
+        a: "No. Multiple models can share the same framing bias if they were trained on overlapping sources that all frame the story the same way. Agreement on framing tells you the framing is common — not that it's balanced or complete.",
+      },
+      {
+        q: "What should I do when models disagree sharply on how to frame a story?",
+        a: "Treat the range of framings as raw material, not a menu to choose from. Identify what each version emphasizes or omits, check those choices against the full set of available facts, and write an account that reflects the actual weight of evidence and context — which may not match any single model's version exactly.",
+      },
+      {
+        q: "Does ConvergePanel decide which framing is correct?",
+        a: "No. ConvergePanel surfaces the different framings side by side. Judging which emphasis is fair, which omissions matter, and how to write the final account is an editorial decision that depends on context the models don't have — including your outlet's standards and any additional reporting you've done.",
+      },
+      {
+        q: "Is framing bias only a concern for political stories?",
+        a: "No. Framing differences show up in coverage of companies, science, court cases, and local events just as often as politics — anywhere an account involves selecting which facts to emphasize and which actor's account to center.",
+      },
+    ],
+    relatedLinks: [
+      { label: "AI False Balance: When Unequal Evidence Is Presented as Equal", href: "/use-cases/ai-false-balance" },
+      { label: "How to Check If AI Research Is Biased", href: "/use-cases/how-to-check-if-ai-research-is-biased" },
+      { label: "AI Context Collapse: When Separate Facts Become One False Story", href: "/use-cases/ai-context-collapse" },
+      { label: "How to Compare AI Model Outputs Side by Side", href: "/use-cases/how-to-compare-ai-model-outputs-side-by-side" },
+      { label: "Multi-LLM Answer Comparison", href: "/use-cases/multi-llm-answer-comparison" },
+    ],
+    cta: "Compare the Story Frames",
+    category: "how-to",
+    schemaType: "FAQPage",
+    metaDescription:
+      "The same facts can produce different stories depending on which model tells them. How to compare AI framing across models — emphasis, omissions, labels, and disclosed uncertainty — before you publish.",
+  },
+  {
+    slug: "document-unresolved-facts-before-publication",
+    publishedAt: "2026-07-04",
+    title: "How to Document Unresolved Facts Before Publication",
+    h1: "Responsible Verification Does Not Always End with Certainty",
+    audience: "Editors, managing editors, reporters, fact-checking teams",
+    audienceDetail: "Editors who are proceeding with publication despite some facts remaining unresolved, and need a documented record of what's unknown, what was qualified, and who signed off",
+    problem:
+      "Not every story can wait for full certainty, and not every unresolved question should block publication — but publishing around an open question without documenting it leaves no record of what was known, what wasn't, and why the decision was made to proceed anyway. If the unresolved fact later turns out to matter, there's nothing showing it was identified, weighed, and consciously qualified rather than missed.",
+    solution:
+      "This is a different scenario from deciding not to publish. ConvergePanel's model comparison output — where models agree, where they don't, and what evidence each one found — becomes the evidentiary layer for a publication decision that proceeds with stated qualifications. The editor's record adds what remained open, how it was qualified in the published piece, and who approved moving forward with that gap acknowledged.",
+    workflow: [
+      "List every unresolved claim or open question relevant to the story at the time of the publication decision",
+      "For each one, note the evidence available and what evidence is still missing",
+      "Record where AI models agreed and where they diverged on the unresolved point",
+      "Assess the potential consequence if the unresolved fact turns out differently than assumed",
+      "Decide how the published piece will qualify the unresolved element — a caveat, an attribution, or an explicit note that it remains unconfirmed",
+      "Identify the reviewer or editor who approved publishing with the qualification in place",
+      "Record the publication decision, the qualification language used, and the date",
+      "Set a follow-up action: whether the fact will be revisited, monitored, or updated if new evidence appears",
+    ],
+    useCases: [
+      "Documenting why a story proceeded to publication with a specific detail flagged as unconfirmed rather than fully resolved",
+      "Creating a record of what remained open on a fast-moving story before a scheduled publication deadline",
+      "Showing that an editorial team consciously weighed an open question rather than overlooking it",
+      "Supporting a later editorial review if an unresolved fact becomes contested after publication",
+    ],
+    comparisonTable: {
+      headers: ["Record field", "What to document", "Why it matters"],
+      rows: [
+        ["Unresolved claim", "The specific fact or figure that could not be fully confirmed", "Establishes exactly what remained open"],
+        ["Evidence available / missing", "What was found and what could not be located or confirmed", "Shows the gap was investigated, not assumed"],
+        ["Model agreement / disagreement", "ConvergePanel output on the unresolved point", "Provides a structured signal of how contested the claim is"],
+        ["Potential consequence", "What happens if the unresolved fact turns out to be wrong", "Justifies the level of caution applied in the published wording"],
+        ["Qualification used", "The exact caveat or attribution language used in the published piece", "Shows the uncertainty was disclosed to readers, not hidden"],
+        ["Reviewer and approval", "Who approved proceeding with the qualification in place", "Establishes editorial accountability for the decision"],
+        ["Follow-up action", "Whether and how the fact will be revisited", "Prevents an open question from being forgotten after publication"],
+      ],
+    },
+    bodySections: [
+      {
+        heading: "This Is Not the Rejection Record",
+        paragraphs: [
+          "Documenting why a newsroom rejected an AI-sourced claim is a record of a decision not to publish. This is the opposite scenario: the decision is to publish, with a specific fact still unresolved, qualified rather than either stated as settled or withheld entirely. The two records serve different purposes and lead to different outcomes — a rejection record explains why a story didn't run; an unresolved-facts record explains why a story ran the way it did.",
+        ],
+      },
+      {
+        heading: "What Counts as an Adequate Qualification",
+        bullets: [
+          "Naming the source of uncertainty specifically — not just 'some details are unclear,' but which detail and why",
+          "Attributing a contested figure to its source rather than stating it as the outlet's own confirmed number",
+          "Noting that a claim is based on preliminary information and may be updated",
+          "Avoiding a qualification so vague it reads as boilerplate rather than a genuine signal to the reader",
+        ],
+      },
+      {
+        heading: "Uncertainty Recorded Is Not Uncertainty Resolved",
+        paragraphs: [
+          "A review record does not make an uncertain claim true. It shows how the uncertainty was handled — what was checked, what remained open, and what the newsroom told its readers about that gap. If the unresolved fact later turns out to be wrong, the record shows a conscious, qualified decision rather than an oversight — which matters, but it does not retroactively make the original claim correct.",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "How is this different from a decision to reject a claim?",
+        a: "A rejection record documents a decision not to publish. This record documents the opposite: a decision to publish, with a specific fact still open, and a description of how that gap was qualified for readers. If a story doesn't run at all, use the rejection-record workflow instead.",
+      },
+      {
+        q: "Does documenting uncertainty protect against being wrong?",
+        a: "No. It shows that the newsroom identified the open question, weighed its consequence, and disclosed it rather than either hiding it or treating it as settled. Being wrong about an unresolved fact is still being wrong — the record demonstrates process, not correctness.",
+      },
+      {
+        q: "What if the unresolved fact turns out to be significant later?",
+        a: "The follow-up action field exists for this reason — the record should state whether and how the fact will be revisited if new evidence appears. If a fact is significant enough that being wrong about it would cause real harm, that's a signal to hold publication rather than qualify and proceed.",
+      },
+      {
+        q: "Who should be able to see this record?",
+        a: "At minimum, the editor and reporter involved in the publication decision. Many newsrooms also make this available to legal or standards teams, since a documented, qualified decision is a materially different position than an unqualified claim if the story is later challenged.",
+      },
+      {
+        q: "Can ConvergePanel decide whether an unresolved fact is safe to publish around?",
+        a: "No. ConvergePanel provides the evidence layer — what was found, where models agreed or disagreed, and how contested the claim appears. Whether that's an acceptable level of uncertainty to publish around is an editorial judgment that depends on the story's stakes, deadline, and your outlet's standards.",
+      },
+    ],
+    relatedLinks: [
+      { label: "How to Document Why a Newsroom Rejected an AI Claim", href: "/use-cases/document-why-newsroom-rejected-ai-claim" },
+      { label: "What Is a Verification Gate?", href: "/use-cases/what-is-a-verification-gate" },
+      { label: "What Is a Decision Receipt?", href: "/use-cases/what-is-a-decision-receipt" },
+      { label: "How to Prove an AI Decision Was Reviewed", href: "/use-cases/how-to-prove-an-ai-decision-was-reviewed" },
+      { label: "How to Fact-Check Breaking News Claims", href: "/use-cases/how-to-fact-check-breaking-news-claims" },
+    ],
+    cta: "Create an Uncertainty Record",
+    category: "governance",
+    schemaType: "HowTo",
+    metaDescription:
+      "Not every story can wait for full certainty. How to document unresolved facts before publication — what remained open, how it was qualified, and who approved proceeding — distinct from a rejection record.",
   },
 ];
 
