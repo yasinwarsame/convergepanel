@@ -573,6 +573,27 @@ const HUB_GROUPS: HubGroup[] = [
     ],
   },
   {
+    id: "enterprise-ai-assurance-review",
+    label: "Enterprise AI Assurance and Review",
+    description:
+      "Evaluate whether AI-assisted conclusions were supported by sufficient evidence, meaningfully challenged, independently reviewed, and appropriately approved.",
+    tailwindText: "text-blue-300",
+    tailwindBg: "bg-cp-raised",
+    tailwindBorder: "border-cp-border",
+    slugs: [
+      "ai-evidence-sufficiency",
+      "ai-decision-defensibility",
+      "ai-challenge-record",
+      "ai-reviewer-independence",
+      "ai-approval-drift",
+      "document-ai-human-reviewer-disagreement",
+      "test-ai-approval-control-effectiveness",
+      "review-ai-evidence-before-approval",
+      "ai-override-documentation",
+      "create-ai-decision-assurance-record",
+    ],
+  },
+  {
     id: "editorial-judgment-evidence-review",
     label: "AI Editorial Judgment & Evidence Review",
     description:

@@ -1002,11 +1002,9 @@ export const PAGES: PSEOPage[] = [
       { label: "AI Review Process for Teams", href: "/use-cases/ai-review-process-for-teams" },
       { label: "How to Document Model Disagreement", href: "/use-cases/how-to-document-model-disagreement" },
       { label: "AI Governance Workflow for Enterprise Teams", href: "/use-cases/ai-governance-workflow-for-enterprise-teams" },
-      { label: "How to prove an AI decision was reviewed", href: "/use-cases/how-to-prove-an-ai-decision-was-reviewed" },
-      { label: "How to document model disagreement", href: "/use-cases/how-to-document-model-disagreement" },
+      { label: "AI Reviewer Independence", href: "/use-cases/ai-reviewer-independence" },
+      { label: "AI Challenge Record", href: "/use-cases/ai-challenge-record" },
       { label: "AI risk review tool", href: "/use-cases/ai-risk-review-tool" },
-      { label: "How to review AI-generated recommendations", href: "/use-cases/how-to-review-ai-generated-recommendations" },
-      { label: "AI tools for investigative journalists", href: "/use-cases/ai-tools-for-investigative-journalists" },
     ],
   },
   {
@@ -3310,6 +3308,7 @@ export const PAGES: PSEOPage[] = [
       { label: "How to prove an AI decision was reviewed", href: "/use-cases/how-to-prove-an-ai-decision-was-reviewed" },
       { label: "AI trust dashboard for decision support", href: "/use-cases/ai-trust-dashboard-for-decision-support" },
       { label: "How to track AI decision-making", href: "/use-cases/how-to-track-ai-decision-making" },
+      { label: "Create an AI Decision Assurance Record", href: "/use-cases/create-ai-decision-assurance-record" },
     ],
   },
 
@@ -8172,13 +8171,13 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "how-to-prove-an-ai-decision-was-reviewed",
-    publishedAt: "2026-06-09",
+    publishedAt: "2026-07-05",
     title: "How to Prove an AI Decision Was Reviewed",
     h1: "How to Prove an AI-Assisted Decision Was Properly Reviewed",
     audience: "Compliance teams, managers, decision-making teams",
     audienceDetail: "Compliance officers and team leads who need to demonstrate that AI-assisted decisions went through a defined review process before action was taken",
     problem:
-      "In regulated industries and accountability-heavy environments, it's not enough for an AI-assisted decision to be correct. You also need to be able to prove that it was reviewed — that someone with authority assessed the AI output before it became the basis for action, and that the review process was documented.\n\nWithout this evidence, even a correct AI-assisted decision is exposed: an auditor, regulator, or board asking 'was this reviewed by a human?' deserves a documented answer, not a verbal assurance.",
+      "In regulated industries and accountability-heavy environments, it's not enough for an AI-assisted decision to be correct. You also need to be able to prove that it was reviewed — that someone with authority assessed the AI output before it became the basis for action, and that the review process was documented.\n\nWithout this evidence, even a correct AI-assisted decision is exposed: an auditor, regulator, or board asking 'was this reviewed by a human?' deserves a documented answer, not a verbal assurance.\n\nA checkbox does not prove human judgment. A logged 'approved' status shows that someone clicked a button. It does not show that a qualified person actually challenged the output, checked its evidence, or considered disagreement before accepting it.",
     solution:
       "ConvergePanel's governance layer creates a documented review record for every flagged AI output. Peer review steps are logged with reviewer identity, review decision, and timestamp. The exported audit bundle contains the complete record — query, outputs, governance flags, review step, and decision — in a format that can be shared with auditors, boards, or compliance teams as evidence of a defined review process.",
     workflow: [
@@ -8195,6 +8194,26 @@ export const PAGES: PSEOPage[] = [
       "Showing that an AI-assisted hiring, investment, or publishing decision had a documented review step",
       "Meeting AI governance standards that require evidence of human-in-the-loop processes",
     ],
+    bodySections: [
+      {
+        heading: "What Separates a Meaningful Review from a Checkbox",
+        bullets: [
+          "Reviewer identity — a named, accountable person, not an anonymous system action",
+          "Reviewer competence — the reviewer had the relevant domain knowledge to evaluate the claims, not just sign-off authority",
+          "Time of review — realistic review duration for the output's complexity, not an instant click",
+          "Claims challenged — specific evidence the reviewer questioned, not a read-through",
+          "Disagreement considered — any model disagreement was weighed, not ignored",
+          "Changes made — what, if anything, was revised as a result of the review",
+          "Rationale — why the reviewer approved, rejected, or escalated, in their own words",
+        ],
+      },
+      {
+        heading: "Documentation Can Show What Happened, Not That Judgment Was Perfect",
+        paragraphs: [
+          "Documentation can show what the reviewer did. It cannot prove the reviewer exercised perfect judgment. A thorough, honestly recorded review that later turns out to have missed something is still meaningful evidence of process — the record shows a qualified person engaged with the output at the time, with the information available. That is what proof of review is meant to establish; it does not extend to guaranteeing the reviewer was infallible.",
+        ],
+      },
+    ],
     cta: "Create a Decision Receipt — document the review for every AI-assisted decision",
     category: "governance",
     metaDescription:
@@ -8210,6 +8229,14 @@ export const PAGES: PSEOPage[] = [
         a: "No. A verbal review leaves no record that can survive a compliance audit or governance review. Proof of review requires a written record with sufficient detail to demonstrate that a qualified person assessed the AI output and made a documented decision before action was taken.",
       },
       {
+        q: "Is clicking approve enough to prove meaningful review?",
+        a: "No. An approval click shows a decision was recorded. It does not show that anyone actually challenged the claims, checked the evidence, or considered disagreement. Pair the approval with a challenge record showing what was specifically tested before the click.",
+      },
+      {
+        q: "Can documentation prove that the reviewer's judgment was reasonable?",
+        a: "It can show what the reviewer considered, checked, and decided — which is the standard a defensible process is held to. It cannot prove the judgment was correct in hindsight, only that a qualified person engaged with the output using the information available at the time.",
+      },
+      {
         q: "How does ConvergePanel document the peer review step?",
         a: "When a governance policy requires peer review, ConvergePanel routes the flagged output to the assigned reviewer. The reviewer's assessment and decision are logged in the system with their identity and a timestamp. This record is included in the exported audit bundle — a complete, time-stamped documentation of the review.",
       },
@@ -8223,6 +8250,9 @@ export const PAGES: PSEOPage[] = [
       { label: "Create a documented AI audit trail", href: "/use-cases/how-to-create-an-ai-audit-trail" },
       { label: "AI Decision Audit Trail", href: "/use-cases/ai-decision-audit-trail" },
       { label: "What Is a Decision Receipt?", href: "/use-cases/what-is-a-decision-receipt" },
+      { label: "AI Challenge Record", href: "/use-cases/ai-challenge-record" },
+      { label: "AI Reviewer Independence", href: "/use-cases/ai-reviewer-independence" },
+      { label: "AI Approval Drift", href: "/use-cases/ai-approval-drift" },
     ],
   },
 
@@ -8277,6 +8307,7 @@ export const PAGES: PSEOPage[] = [
     relatedLinks: [
       { label: "AI audit trail workflow", href: "/use-cases/how-to-create-an-ai-audit-trail" },
       { label: "AI Decision Audit Trail", href: "/use-cases/ai-decision-audit-trail" },
+      { label: "Document Disagreement Between AI and Human Reviewers", href: "/use-cases/document-ai-human-reviewer-disagreement" },
     ],
   },
 
@@ -10337,6 +10368,8 @@ export const PAGES: PSEOPage[] = [
       { href: "/use-cases/control-exception-analysis-with-ai-consensus", label: "Control Exception Analysis with AI Consensus" },
       { href: "/use-cases/compliance-evidence-checking-with-multiple-ai", label: "Compliance Evidence Checking with Multiple AI" },
       { href: "/use-cases/ai-decision-audit-trail", label: "AI Decision Audit Trail" },
+      { href: "/use-cases/ai-evidence-sufficiency", label: "AI Evidence Sufficiency" },
+      { href: "/use-cases/review-ai-evidence-before-approval", label: "Review AI Evidence Before Approval" },
     ],
   },
   {
@@ -15611,7 +15644,7 @@ export const PAGES: PSEOPage[] = [
       { href: "/use-cases/control-exception-analysis-with-ai-consensus", label: "Control Exception Analysis with AI Consensus" },
       { href: "/use-cases/should-auditors-use-one-ai-model", label: "Should Auditors Use One AI Model?" },
       { href: "/use-cases/how-to-create-an-ai-audit-trail", label: "How to Create an AI Audit Trail" },
-      { href: "/use-cases/what-is-a-consensus-score", label: "What Is a Consensus Score?" },
+      { href: "/use-cases/test-ai-approval-control-effectiveness", label: "Test Whether an AI Approval Control Is Working" },
     ],
   },
   {
@@ -22855,6 +22888,7 @@ export const PAGES: PSEOPage[] = [
       { label: "How to Prove an AI Decision Was Reviewed", href: "/use-cases/how-to-prove-an-ai-decision-was-reviewed" },
       { label: "Find the Weakest Claim in an AI Answer", href: "/use-cases/find-the-weakest-claim-in-an-ai-answer" },
       { label: "Research Synthesis for Knowledge Workers", href: "/use-cases/research-synthesis-for-knowledge-workers" },
+      { label: "AI Decision Defensibility", href: "/use-cases/ai-decision-defensibility" },
     ],
     cta: "Build a Defensible Synthesis — run the panel and structure what you find",
     category: "how-to",
@@ -25434,6 +25468,1020 @@ export const PAGES: PSEOPage[] = [
     schemaType: "HowTo",
     metaDescription:
       "Not every story can wait for full certainty. How to document unresolved facts before publication — what remained open, how it was qualified, and who approved proceeding — distinct from a rejection record.",
+  },
+
+  // ── GROUP L: Enterprise AI Assurance & Review ─────────────────────────────
+
+  {
+    slug: "ai-evidence-sufficiency",
+    publishedAt: "2026-07-05",
+    title: "AI Evidence Sufficiency: Is There Enough Support to Approve the Decision?",
+    h1: "A Source Can Be Relevant Without Being Sufficient",
+    audience: "Enterprise assurance and governance teams",
+    audienceDetail:
+      "Internal auditors, AI governance officers, model-risk analysts, and control owners who need to judge whether the evidence behind an AI-assisted conclusion is strong enough for the decision being made — not just whether evidence exists",
+    problem:
+      "The question is not only whether evidence exists. It is whether the evidence is sufficient for the decision being made.\n\nA claim can arrive with three citations and still be insufficient — if all three trace back to the same source, none of them is current, or the decision at hand carries more risk than any of them can support. Evidence existence is a low bar. Evidence sufficiency is a judgment about fit between what was found and what the decision requires.\n\nMost AI-assisted workflows stop at existence. A model says 'according to X,' the citation resolves to a real document, and the review ends there. Whether X is authoritative, current, contradicted elsewhere, or simply too weak a source for a high-stakes decision is a separate question that a citation count cannot answer.",
+    solution:
+      "ConvergePanel surfaces per-model evidence and flags where sources converge, diverge, or go missing entirely across a panel of models. That comparison is the raw material for a sufficiency judgment — it shows you what evidence exists and where models disagree. Whether that evidence is sufficient for your specific decision, at your specific risk level, remains a reviewer's call.",
+    workflow: [
+      "State the specific claim and the decision it will support",
+      "List every source the AI-assisted output supplies for that claim",
+      "Check source authority — is each source qualified to speak to this claim, or merely adjacent to it",
+      "Check independent corroboration — do the sources trace to genuinely separate origins, or one shared origin",
+      "Check completeness and recency — is anything material missing, outdated, or superseded",
+      "Check for contradictory evidence the output did not surface",
+      "Weigh the decision's materiality against the evidence found — higher-consequence decisions require a higher sufficiency bar",
+      "Record the reviewer's sufficiency conclusion and whether escalation is required",
+    ],
+    useCases: [
+      "Deciding whether vendor-supplied evidence is enough to approve a procurement decision",
+      "Assessing whether a compliance claim is backed by enough independent support before sign-off",
+      "Reviewing whether a risk assessment rests on genuine corroboration or one repeated source",
+      "Setting a documented sufficiency bar that scales with decision materiality",
+      "Training reviewers to separate 'a source exists' from 'the evidence is enough'",
+    ],
+    bodySections: [
+      {
+        heading: "Existence, Relevance, and Sufficiency Are Three Different Tests",
+        paragraphs: [
+          "Existence asks: is there a source at all? Relevance asks: does the source actually address this claim? Sufficiency asks: given the decision's stakes, is what was found enough to act on? An AI-assisted answer can pass the first two tests and still fail the third — three relevant sources are not sufficient if a fourth, more authoritative source contradicts them, or if the decision is consequential enough to require independent verification rather than citation.",
+          "Reviewers who stop at 'the model cited something' are answering the wrong question. The sufficiency question is the one that matters for approval.",
+        ],
+      },
+      {
+        heading: "Worked Example: The Vendor Claim With Three Sources and One Origin",
+        paragraphs: [
+          "A procurement team asks ConvergePanel to verify a vendor's uptime claim. The panel returns three supporting citations across different models. On inspection, all three trace back to the same vendor-published case study — one press release, quoted by two industry blogs that added no independent testing of their own.",
+          "Three citations look like corroboration. They are one source, repeated. The evidence is real and relevant to the claim — but it is not sufficient to approve a contract renewal on cost or reliability grounds without an independent reference check.",
+        ],
+      },
+      {
+        heading: "Evidence-Sufficiency Matrix Applied to the Vendor Example",
+      },
+      {
+        heading: "Why Model Consensus Does Not Settle Sufficiency",
+        bullets: [
+          "Models can independently reach the same conclusion by drawing on the same underlying weak source",
+          "High consensus reflects agreement between models, not agreement between independent evidence bases",
+          "A single strong, authoritative source can outweigh five models converging on a weaker one",
+          "Sufficiency depends on the decision's materiality, which no model can assess on your organization's behalf",
+        ],
+      },
+    ],
+    comparisonTable: {
+      headers: ["Dimension", "Finding in the Vendor Example", "Sufficient?"],
+      rows: [
+        ["Evidence supplied", "3 citations across 2 models", "Exists, but see below"],
+        ["Source authority", "Vendor press release + 2 blogs quoting it", "Weak — no independent tester"],
+        ["Independent corroboration", "All 3 trace to 1 origin", "No — not corroboration"],
+        ["Contradictory evidence", "None surfaced by the panel", "Unknown — not the same as absent"],
+        ["Decision impact", "Multi-year contract renewal", "High materiality"],
+        ["Escalation required?", "Yes — request independent reference", "Reviewer conclusion, not AI output"],
+      ],
+    },
+    faq: [
+      {
+        q: "What makes evidence sufficient for an AI-assisted decision?",
+        a: "Sufficiency depends on the decision's materiality, not a citation count. Evidence is sufficient when it is authoritative for the specific claim, independently corroborated, current, and not contradicted by evidence the review has already seen — and when the strength of all of that matches the consequence of getting the decision wrong.",
+      },
+      {
+        q: "Can several citations still be insufficient?",
+        a: "Yes. If all the citations trace back to one underlying source — a single study, a single vendor claim, a single press release repeated by secondary outlets — you have one data point, not several. Citation count is not the same as independent support.",
+      },
+      {
+        q: "Does model consensus increase evidence sufficiency?",
+        a: "Not on its own. Models can converge because they were trained on the same widely-repeated source, not because independent evidence points the same direction. Consensus is useful context; it is not a substitute for checking whether the underlying sources are actually independent and authoritative.",
+      },
+      {
+        q: "How should contradictory evidence be handled?",
+        a: "Document it explicitly rather than resolving it silently. Note which sources conflict, what each one is based on, and which the reviewer weighted more heavily and why. A sufficiency conclusion that ignores contradictory evidence it was aware of is not defensible later.",
+      },
+      {
+        q: "Who decides whether the evidence is sufficient?",
+        a: "A qualified human reviewer, not the AI panel. ConvergePanel can show you what evidence exists, whether it converges, and whether models disagree — but the judgment of whether that evidence clears the bar for a specific decision, at a specific risk level, requires reviewer accountability.",
+      },
+      {
+        q: "What's the difference between evidence sufficiency and source grounding?",
+        a: "Source grounding asks whether a claim is tied to a retrievable, checkable source at all. Evidence sufficiency asks a further question: given the decision's stakes, is what was found — even if well-grounded — actually enough to approve on? A claim can be strongly grounded in one authoritative-sounding source and still be insufficient for a high-materiality decision that requires independent corroboration.",
+      },
+    ],
+    relatedLinks: [
+      { label: "What Is Source Grounding in AI?", href: "/use-cases/what-is-source-grounding-in-ai" },
+      { label: "AI Confidence vs. Evidence", href: "/use-cases/ai-confidence-vs-evidence" },
+      { label: "Audit Evidence Review with AI Models", href: "/use-cases/audit-evidence-review-with-ai-models" },
+      { label: "AI Decision Defensibility", href: "/use-cases/ai-decision-defensibility" },
+      { label: "Review AI Evidence Before Approval", href: "/use-cases/review-ai-evidence-before-approval" },
+      { label: "Create an AI Decision Assurance Record", href: "/use-cases/create-ai-decision-assurance-record" },
+      { label: "How to Verify Sources from AI Answers", href: "/use-cases/how-to-verify-sources-from-ai-answers" },
+    ],
+    cta: "Review the Evidence Sufficiency",
+    category: "governance",
+    schemaType: "FAQPage",
+    metaDescription:
+      "A source can be relevant without being sufficient. Learn to judge whether AI-assisted evidence is strong enough to approve a decision — not just whether it exists.",
+  },
+
+  {
+    slug: "ai-decision-defensibility",
+    publishedAt: "2026-07-05",
+    title: "AI Decision Defensibility: Can You Explain and Support the Conclusion?",
+    h1: "Could You Defend This AI-Assisted Decision Six Months Later?",
+    audience: "Enterprise assurance, governance, and risk teams",
+    audienceDetail:
+      "Governance officers, risk managers, and decision owners who need a reviewable record of how an AI-assisted enterprise decision was reached, challenged, and approved — distinct from documenting a research synthesis",
+    problem:
+      "Could you defend this AI-assisted decision six months later? Not the outcome — the process. Who reviewed it. What they challenged. What evidence it rested on. Why it was approved despite whatever uncertainty existed.\n\nMost organizations can answer this question for about a week after a decision is made, while the reasoning is still fresh in someone's memory. Six months later, the person who approved it may have left, the thread that explained the reasoning is gone, and all that remains is the decision itself with no visible path back to how it was reached.\n\nA defensible decision is not one that turned out to be right. It is one where the reasoning, the challenge, and the approval can still be reconstructed and examined after the fact.",
+    solution:
+      "ConvergePanel's panel output and audit bundle capture the raw material a defensible decision record needs: per-model conclusions, disagreement, evidence quality, and a peer review trail where governance policy requires it. Building the defensible record means assembling that raw material against twelve specific components — not just exporting a transcript.",
+    workflow: [
+      "State the decision's purpose and the question originally put to the AI panel",
+      "Capture each model's output and the claims the decision relies on",
+      "Record the sources cited for those claims",
+      "Document where models disagreed and how the disagreement was resolved or left open",
+      "Record what the reviewer challenged and what, if anything, changed as a result",
+      "Write the approval rationale — not just the approval decision itself",
+      "State what uncertainty remained unresolved at the time of approval",
+      "Record the final decision and the name of the decision owner accountable for it",
+    ],
+    useCases: [
+      "Building a defensible record for a vendor-selection decision that a losing bidder later challenges",
+      "Documenting the reasoning behind an AI-assisted pricing or eligibility decision before a regulator asks about it",
+      "Creating a decision record a new team member can reconstruct without asking the original approver",
+      "Preparing for an internal audit that samples AI-assisted decisions after the fact",
+      "Establishing a consistent defensibility standard across a governance program",
+    ],
+    bodySections: [
+      {
+        heading: "The Twelve-Field Defensibility Record",
+        bullets: [
+          "Decision purpose — what was being decided and why",
+          "Input question — what was actually asked of the AI panel",
+          "Model outputs — each model's independent conclusion",
+          "Claims relied upon — the specific assertions the decision depends on",
+          "Sources — what evidence backs those claims",
+          "Disagreement — where models split and on what",
+          "Reviewer challenge — what a human questioned before accepting the output",
+          "Changes made — what was revised as a result of the challenge",
+          "Approval rationale — why the final call was made, not just what it was",
+          "Unresolved uncertainty — what remained open at approval time",
+          "Final decision — the actual outcome",
+          "Decision owner — the named person accountable for it",
+        ],
+      },
+      {
+        heading: "Worked Example: The Vendor-Selection Challenge",
+        paragraphs: [
+          "A procurement team selects Vendor A over Vendor B using an AI-assisted comparison of capability claims. Eight months later, Vendor B's losing bid team formally disputes the selection and requests the basis for the decision.",
+          "A defensible record answers the dispute directly: the comparison question that was asked, each model's independent read of both vendors' claims, where models disagreed on Vendor A's stated integration timeline, what the reviewer verified directly with Vendor A before accepting that claim, the documented rationale for weighting integration speed over Vendor B's lower price, and the name of the procurement lead who signed off. Without that record, the team is left reconstructing an eight-month-old decision from memory.",
+        ],
+      },
+      {
+        heading: "Defensible Is Not the Same as Correct",
+        paragraphs: [
+          "A defensible process does not guarantee that the decision was correct. It shows that the reasoning and review can be examined. A defensible decision that turns out to be wrong is still defensible — the record shows a reasonable process was followed with the information available at the time. An indefensible decision that happens to turn out right is still a governance gap, because nothing shows why it was trusted.",
+          "Defensibility is a property of the process, not a guarantee about the outcome. Conflating the two is the most common mistake in building these records — treating a clean-looking decision record as proof the decision was right, rather than proof it was reasoned.",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "How is this different from building a defensible research synthesis?",
+        a: "A defensible research synthesis is a written analysis structured to preserve contested claims and uncertainty for a reader. A defensible decision record is the enterprise governance artifact around an actual approved decision — including the decision owner, the approval rationale, and who is accountable for it. They serve related but different purposes: one produces a document you publish or share; the other produces a record you can be asked to reproduce years later.",
+      },
+      {
+        q: "Do all twelve fields need to be filled in for every decision?",
+        a: "No. The depth of the record should scale with the decision's stakes. A routine, low-consequence decision may only need the input question, key claims, and final decision recorded. A decision with financial, legal, or reputational consequence warrants the full twelve fields, including named reviewer and decision owner.",
+      },
+      {
+        q: "What if there was no meaningful disagreement between models to document?",
+        a: "Record that explicitly rather than leaving the field blank. 'Models agreed on all load-bearing claims; no disagreement to document' is itself useful information — it distinguishes a decision that was never seriously contested from one where disagreement existed but was not captured.",
+      },
+      {
+        q: "Who should own the defensibility record — the reviewer or the decision owner?",
+        a: "The decision owner is accountable for the final call and should be named on the record. The reviewer's challenge and findings feed into the record but the decision owner is the person who should be able to answer for the decision later, including explaining why a reviewer's concern was or was not acted on.",
+      },
+      {
+        q: "Can a defensible record be reconstructed after the decision was already made?",
+        a: "Partially, and with real limitations. Model outputs and disagreement can sometimes be re-run, but the reviewer's actual reasoning at the time, what they considered, and what evidence they weighed cannot be reliably reconstructed from memory months later. The record is far more defensible when captured at the time of the decision, not rebuilt afterward.",
+      },
+      {
+        q: "Does ConvergePanel generate the defensibility record automatically?",
+        a: "ConvergePanel's panel output and audit bundle capture the model outputs, disagreement, evidence quality, and peer review decision automatically. The decision purpose, approval rationale, and decision-owner accountability are inputs the reviewer and decision owner still need to supply — they are organizational judgments, not AI outputs.",
+      },
+    ],
+    relatedLinks: [
+      { label: "Build a Defensible Answer from Conflicting AI Outputs", href: "/use-cases/build-a-defensible-answer-from-conflicting-ai-outputs" },
+      { label: "Create an AI Decision Assurance Record", href: "/use-cases/create-ai-decision-assurance-record" },
+      { label: "AI Evidence Sufficiency", href: "/use-cases/ai-evidence-sufficiency" },
+      { label: "How to Prove an AI Decision Was Reviewed", href: "/use-cases/how-to-prove-an-ai-decision-was-reviewed" },
+      { label: "What Is a Decision Receipt?", href: "/use-cases/what-is-a-decision-receipt" },
+      { label: "AI Peer Review for High-Stakes Workflows", href: "/use-cases/ai-peer-review-for-high-stakes-workflows" },
+      { label: "Document Disagreement Between AI and Human Reviewers", href: "/use-cases/document-ai-human-reviewer-disagreement" },
+    ],
+    cta: "Create a Defensible Decision Record",
+    category: "governance",
+    schemaType: "FAQPage",
+    metaDescription:
+      "Could you explain and support this AI-assisted decision six months later? Build a reviewable record of how it was reached, challenged, and approved.",
+  },
+
+  {
+    slug: "ai-challenge-record",
+    publishedAt: "2026-07-05",
+    title: "AI Challenge Record: Document How the Output Was Tested",
+    h1: "A Review Record Should Show More Than Approval",
+    audience: "Enterprise reviewers and risk analysts",
+    audienceDetail:
+      "Reviewers, risk analysts, and control owners who need to document how an AI-generated claim, analysis, or recommendation was actually questioned before it was used — not just that it was approved",
+    problem:
+      "An approval log tells you a decision was made and by whom. It does not tell you whether anyone tried to break the AI-generated output before accepting it — what claims they questioned, what alternative reading they tested, what they found when they pushed back.\n\nMost review records stop at the verdict: approved, rejected, escalated. That verdict is the least useful part of the record. What a later reviewer, auditor, or regulator actually wants to know is what was tested and what it withstood.",
+    solution:
+      "ConvergePanel's disagreement map and per-model evidence give a reviewer concrete material to challenge — specific claims, specific sources, specific splits between models. A challenge record turns that material into a structured artifact: what was reviewed, what was questioned, what changed, and what remained unresolved.",
+    workflow: [
+      "Identify the specific output being reviewed and what it will be used for",
+      "List the individual claims within the output that were challenged, not just the output as a whole",
+      "Record which cited sources were tested — checked directly, not accepted on citation alone",
+      "Note any alternative interpretation the reviewer considered and why it was or wasn't adopted",
+      "Record where models disagreed and how that disagreement factored into the challenge",
+      "Log the reviewer's specific questions and the responses or revisions they produced",
+      "State the final conclusion and any issues that remain unresolved",
+      "Record the reviewer's identity and the timestamp of the review",
+    ],
+    useCases: [
+      "Documenting how a risk analyst tested an AI-assisted risk score before accepting it",
+      "Recording the specific claims a compliance reviewer verified before sign-off",
+      "Showing that an approval followed genuine scrutiny, not a rubber stamp",
+      "Building a reviewable challenge history across a team's recurring review workload",
+      "Providing evidence, in a later dispute, of what was actually tested at the time",
+    ],
+    bodySections: [
+      {
+        heading: "What a Challenge Record Captures",
+        bullets: [
+          "Output reviewed — the specific claim, analysis, or recommendation under review",
+          "Claims challenged — which individual assertions were questioned",
+          "Sources tested — which cited sources were checked directly rather than accepted on citation",
+          "Alternative interpretation — what other reading the reviewer considered",
+          "Model disagreement — where the panel split and how that shaped the challenge",
+          "Reviewer questions — the specific questions raised",
+          "Response or revision — what changed as a result",
+          "Final conclusion — where the review landed",
+          "Unresolved issues — what remains open",
+          "Reviewer and timestamp — who challenged it, and when",
+        ],
+      },
+      {
+        heading: "Worked Example: Challenging a Regulatory Recommendation",
+        paragraphs: [
+          "A risk analyst receives an AI-assisted recommendation that a new product feature complies with a disclosure requirement. Before accepting it, the analyst notices that one model in the panel flagged a related disclosure obligation the recommendation didn't address — a missing regulatory assumption the majority output had smoothed over.",
+          "The challenge record captures this precisely: which model raised the concern, what the analyst asked the compliance team to verify, what the compliance team found (the obligation applied but was already satisfied by an existing process), and the analyst's final conclusion — approved, with the additional obligation now explicitly documented as considered rather than missed.",
+        ],
+      },
+      {
+        heading: "A Challenge Record Is Not the Same as an Approval Log",
+        paragraphs: [
+          "An approval log shows a decision and a timestamp. A challenge record shows the work that preceded the decision — what was tested, what was found, and what almost changed the outcome. A reviewer who approved an output without documenting any challenge has produced an approval log, not a challenge record, even if the underlying review was thorough. The distinction matters because only the challenge record demonstrates that the approval reflects genuine scrutiny rather than trust in the output's confident tone.",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "What's the difference between a challenge record and an approval log?",
+        a: "An approval log records the verdict — approved, rejected, escalated — and who made the call. A challenge record documents the substance of the review: which claims were questioned, which sources were tested, and what the reviewer found. A decision can have an approval log with no evidence of genuine challenge behind it.",
+      },
+      {
+        q: "Does every AI output need a challenge record?",
+        a: "No. Routine, low-stakes outputs can be reviewed and approved without a full challenge record. The practice matters most for outputs that inform consequential decisions — where a later question about 'was this actually checked?' needs a documented answer, not a recollection.",
+      },
+      {
+        q: "What if the reviewer found no basis to challenge the output?",
+        a: "Record that explicitly, including what was checked. 'Reviewed the three primary claims and underlying sources; found no discrepancy' is a valid, useful challenge record. It's meaningfully different from no record at all, because it shows the reviewer actually looked rather than approving on read-through.",
+      },
+      {
+        q: "How does a challenge record relate to model disagreement?",
+        a: "Model disagreement is one input to a challenge — a split between models is often exactly what prompts a reviewer to dig deeper. But a challenge record is broader than disagreement documentation: a reviewer can and should challenge outputs where all models agreed, since shared blind spots produce confident, uncontested wrong answers too.",
+      },
+      {
+        q: "Who should complete the challenge record?",
+        a: "The person who actually performed the review — ideally someone other than whoever generated or requested the original AI output, to avoid a self-review conflict. See reviewer independence for how to think through who is qualified to challenge a given output.",
+      },
+      {
+        q: "Can a challenge record be created after the fact?",
+        a: "It can be reconstructed partially, but a challenge record written after a decision has already been acted on is weaker evidence than one created contemporaneously. Reviewers reconstructing after the fact often unconsciously describe what they wish they had checked rather than what they actually did. Build the habit of recording the challenge as it happens.",
+      },
+    ],
+    relatedLinks: [
+      { label: "How to Document Model Disagreement", href: "/use-cases/how-to-document-model-disagreement" },
+      { label: "AI Peer Review for High-Stakes Workflows", href: "/use-cases/ai-peer-review-for-high-stakes-workflows" },
+      { label: "AI Reviewer Independence", href: "/use-cases/ai-reviewer-independence" },
+      { label: "How to Prove an AI Decision Was Reviewed", href: "/use-cases/how-to-prove-an-ai-decision-was-reviewed" },
+      { label: "AI Approval Drift", href: "/use-cases/ai-approval-drift" },
+      { label: "Create an AI Decision Assurance Record", href: "/use-cases/create-ai-decision-assurance-record" },
+    ],
+    cta: "Create a Challenge Record",
+    category: "governance",
+    schemaType: "FAQPage",
+    metaDescription:
+      "An approval log shows a decision was made. A challenge record shows what was tested first. Learn what to capture before you approve an AI-assisted output.",
+  },
+
+  {
+    slug: "ai-reviewer-independence",
+    publishedAt: "2026-07-05",
+    title: "AI Reviewer Independence: Who Should Challenge the Output?",
+    h1: "The Person Who Created the Output Should Not Be Its Only Reviewer",
+    audience: "Governance officers and control owners",
+    audienceDetail:
+      "Governance leads and control owners designing review workflows who need to decide who is qualified — and sufficiently independent — to challenge an AI-assisted output before it is approved",
+    problem:
+      "When the same person who requested an AI-assisted analysis is also the one who reviews and approves it, the review adds a timestamp but not a check. Self-review is the most common independence failure in AI-assisted workflows, and it is usually invisible in the audit log — the log shows a review happened, not who was actually positioned to catch a problem.\n\nIndependence isn't just about avoiding fraud. A well-intentioned analyst reviewing their own AI-assisted work is subject to the same motivated reasoning as anyone checking their own homework: they already believe the conclusion, so they read past its weak points rather than testing them.",
+    solution:
+      "ConvergePanel's governance layer lets you assign a designated reviewer role, separate from whoever ran the original query — but assigning a role is only the mechanism. Deciding who actually qualifies as independent for a given decision, and what conflicts of interest disqualify a reviewer, is an organizational judgment ConvergePanel does not make for you.",
+    workflow: [
+      "Identify who requested, generated, or has a stake in the AI-assisted output",
+      "Identify who is proposed to review it, and check for overlap with the above",
+      "Confirm the reviewer has the domain competence to actually evaluate the claims, not just the authority to sign off",
+      "Check for conflicts of interest beyond simple self-review — financial stake, reporting line, prior public position",
+      "Define the escalation path if the assigned reviewer is not sufficiently independent for the decision's stakes",
+      "Document who reviewed the output and their relationship, if any, to the original request",
+    ],
+    useCases: [
+      "Deciding whether an analyst can review their own AI-assisted forecast before it reaches a board pack",
+      "Designing a second-level review requirement for decisions above a materiality threshold",
+      "Auditing whether a governance program's 'reviewer' role has consistently been filled by non-independent staff",
+      "Setting escalation rules for when no internally independent reviewer is available",
+      "Training teams to recognize self-review risk that a policy alone won't catch",
+    ],
+    bodySections: [
+      {
+        heading: "Creator vs. Reviewer: Why the Distinction Matters",
+        paragraphs: [
+          "The person who requested an AI-assisted output already has a view on what the answer should be — that's usually why they asked the question. Reviewing their own output means checking whether the answer matches what they expected, not whether it's actually well-supported. A different reviewer starts from the output itself, not from an existing belief about what it should say.",
+          "This isn't a claim that self-interested people are dishonest. It's a claim about how confirmation bias works even for careful, well-intentioned reviewers. Independence is a structural safeguard against a cognitive pattern, not a character judgment.",
+        ],
+      },
+      {
+        heading: "Four Independence Failure Patterns",
+        bullets: [
+          "Self-review — the requester and the reviewer are the same person, or the reviewer reports directly to them with no real authority to push back",
+          "No domain competence — the assigned reviewer has sign-off authority but lacks the subject-matter knowledge to evaluate whether the claims are actually sound",
+          "Undisclosed conflict of interest — the reviewer has a financial, reputational, or prior-position stake in the output landing a particular way",
+          "No escalation path — when the only available reviewer isn't independent enough for the decision's stakes, there's no defined way to route it to someone who is",
+        ],
+      },
+      {
+        heading: "Worked Example: Reviewing Your Own Forecast",
+        paragraphs: [
+          "A finance analyst uses ConvergePanel to build an AI-assisted revenue forecast for next quarter's board pack. The analyst is then asked to 'review' the same forecast before it's finalized. On paper, a review happened. In practice, the analyst who built the forecast is reviewing whether their own work is correct — precisely the scenario an independent review exists to prevent.",
+          "A workable fix doesn't require a large team: a peer analyst who did not build the forecast, or the finance lead, reviews it instead — checking the underlying claims and model disagreement with no prior stake in what the number should be.",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "Is self-review always disqualifying?",
+        a: "For low-stakes, routine outputs, self-review with a basic sanity check may be proportionate. For decisions with financial, legal, or reputational consequence, self-review does not provide the independence a meaningful check requires — even when the reviewer is honest and careful.",
+      },
+      {
+        q: "How is this different from ConvergePanel's peer review feature?",
+        a: "Peer review is the mechanism — routing a flagged output to an assigned reviewer and logging their decision. Reviewer independence is the judgment underneath that mechanism: deciding who is actually qualified and sufficiently unconflicted to serve as that reviewer for a given decision. The feature works only as well as the independence judgment behind who is assigned to it.",
+      },
+      {
+        q: "What if no independent reviewer with the right domain knowledge is available?",
+        a: "That gap is itself a finding worth escalating, not a reason to proceed with a compromised reviewer. Document the gap, note the decision to proceed anyway if one is made, and treat closing that gap as a governance priority for future decisions of the same type.",
+      },
+      {
+        q: "Can a manager review their direct report's AI-assisted work and count as independent?",
+        a: "It depends on whether the manager has genuine authority and willingness to challenge the work, and whether they share an interest in the outcome — for example, a manager who requested the analysis and assigned it to a report is not meaningfully independent of the result, even though they didn't generate it personally.",
+      },
+      {
+        q: "Does reviewer independence apply to every AI-assisted output?",
+        a: "Apply it proportionally. Set a materiality or risk threshold above which independent review is required, and allow lighter-touch review below it. Treating every routine query as requiring a fully independent reviewer creates friction without a matching benefit.",
+      },
+      {
+        q: "Does ConvergePanel determine whether a reviewer is legally or professionally independent?",
+        a: "No. Independence requirements vary by organization, use case, and applicable professional or regulatory standards. ConvergePanel supports assigning and logging a distinct reviewer role — the determination of what independence actually requires for your context is an organizational and, where relevant, a legal or professional judgment.",
+      },
+    ],
+    relatedLinks: [
+      { label: "AI Peer Review for High-Stakes Workflows", href: "/use-cases/ai-peer-review-for-high-stakes-workflows" },
+      { label: "AI Challenge Record", href: "/use-cases/ai-challenge-record" },
+      { label: "AI Approval Drift", href: "/use-cases/ai-approval-drift" },
+      { label: "How to Prove an AI Decision Was Reviewed", href: "/use-cases/how-to-prove-an-ai-decision-was-reviewed" },
+      { label: "Document Disagreement Between AI and Human Reviewers", href: "/use-cases/document-ai-human-reviewer-disagreement" },
+    ],
+    cta: "Define the Review Responsibility",
+    category: "governance",
+    schemaType: "FAQPage",
+    metaDescription:
+      "The person who created an AI-assisted output should not be its only reviewer. Learn to identify self-review risk and set independence requirements that scale with stakes.",
+  },
+
+  {
+    slug: "ai-approval-drift",
+    publishedAt: "2026-07-05",
+    title: "AI Approval Drift: When Formal Review Becomes a Routine Click",
+    h1: "Approval Can Exist on Paper and Disappear in Practice",
+    audience: "Governance officers and internal auditors",
+    audienceDetail:
+      "Governance officers and internal auditors monitoring whether an approval control that looked sound at design time is still functioning as a genuine check months into operation",
+    problem:
+      "A control that requires human approval before an AI-assisted output is used can look identical at month one and month twelve — same policy, same workflow, same log entries showing 'approved.' What changes, often invisibly, is whether the approval still reflects a real check or has become a click a reviewer performs without reading the thing they're approving.\n\nApproval drift doesn't announce itself. No single approval looks obviously wrong. It's the pattern across dozens of approvals — shrinking review times, vanishing comments, approvals clustering around one person — that reveals a control eroding in practice while its policy documentation stays unchanged.",
+    solution:
+      "ConvergePanel's audit log timestamps every review and reviewer decision, which makes drift patterns visible if you look for them: review duration trending toward zero, reviewer comments disappearing, or the same person both generating and approving outputs. The pattern is a prompt to investigate — it is not, on its own, proof that a specific reviewer failed to exercise judgment.",
+    workflow: [
+      "Pull the approval history for the control over a meaningful period — a quarter or more",
+      "Check review duration trends: is time-to-approval shrinking toward near-zero over time",
+      "Check for reviewer comments and rationale: are they present, or has approval become a bare click",
+      "Check whether outputs are changing between review and approval, or passing through unmodified every time",
+      "Check whether approvals cluster around the same individual who also generated the outputs",
+      "Check for bypassed escalation — outputs that should have been flagged but weren't",
+      "Check whether documented exceptions exist for outputs that deviated from the standard approval path",
+      "Compare approval criteria across reviewers and time periods for consistency",
+    ],
+    useCases: [
+      "Auditing whether a 'manager sign-off required' control still functions six months after rollout",
+      "Investigating why review times for a governance control have steadily declined",
+      "Identifying whether one approver has become a bottleneck who rubber-stamps to clear a backlog",
+      "Distinguishing a genuinely fast, well-functioning review from an eroded one",
+      "Building a recurring drift-check into a governance program's periodic review cycle",
+    ],
+    bodySections: [
+      {
+        heading: "Eight Indicators of Approval Drift",
+        bullets: [
+          "Repeated instant approvals — review-to-approval time trending toward seconds regardless of output complexity",
+          "No reviewer comments — approvals with no rationale, question, or note attached, month after month",
+          "Unchanged outputs — nothing is ever revised, rejected, or sent back, regardless of what the output contains",
+          "Approvals by the output's own creator — the reviewer and requester converge into the same person over time",
+          "Bypassed escalation — outputs that meet a flagging threshold moving through without the required escalation",
+          "Undocumented exceptions — outputs approved outside the normal path with no recorded reason",
+          "Missing evidence review — approvals with no indication the underlying evidence or sources were checked",
+          "Inconsistent approval criteria — the same type of finding approved by one reviewer and escalated by another with no documented reason for the difference",
+        ],
+      },
+      {
+        heading: "Worked Example: The Six-Month Decline",
+        paragraphs: [
+          "A compliance team's approval control requires a manager to review any AI-assisted output flagged for regulatory sensitivity before it's used. In month one, average review time is 22 minutes, with reviewer comments on most items. By month six, average review time is under 90 seconds, comments have all but disappeared, and nearly every approval traces to the same manager — who is also, in a third of cases, the person who generated the flagged output in the first place.",
+          "None of this proves any single approval was wrong. It does show a control that has drifted from a genuine check into a formality, and it gives a governance team a specific, evidence-based starting point for intervention rather than a vague sense that 'reviews feel rushed.'",
+        ],
+      },
+      {
+        heading: "Approval Drift vs. Approval Failure",
+        paragraphs: [
+          "An approval failure is a single instance: a specific output that should have been caught and wasn't. Approval drift is the gradual erosion of a control's substance over time, even while every individual approval technically complies with the policy. Failure is investigated case by case. Drift is investigated as a pattern across the full approval history — which is exactly why it survives spot-checks that only sample a handful of recent approvals.",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "Is fast approval always a sign of drift?",
+        a: "No. Some outputs genuinely warrant a quick approval — low-stakes, well-supported, and unsurprising. The signal isn't speed alone; it's speed combined with disappearing comments, vanishing revisions, and approver-requester overlap across many approvals over time.",
+      },
+      {
+        q: "How do you detect approval drift without accusing a specific reviewer of bad faith?",
+        a: "Frame it as a pattern in the control, not an indictment of a person. Present the trend data — review duration, comment frequency, escalation rates over time — and treat it as evidence the control needs redesign or reinforcement, which is a very different conversation than accusing someone of not doing their job.",
+      },
+      {
+        q: "What's the difference between approval drift and a control simply becoming more efficient?",
+        a: "Efficiency shows up as faster reviews with the substance still present — comments, occasional revisions, and escalations still happening at a proportionate rate. Drift shows up as speed increasing while the substantive signals of review — comments, revisions, escalation — disappear together. Look at the combination, not review time alone.",
+      },
+      {
+        q: "Can approval drift happen even if the reviewer is technically independent?",
+        a: "Yes. Independence addresses who is reviewing; drift addresses whether that person's review has become substantive or ceremonial over time. An independent reviewer can still drift into a rubber stamp if the volume is high, the incentive is to clear a queue, or there's no accountability for review quality.",
+      },
+      {
+        q: "How often should a governance team check for approval drift?",
+        a: "At minimum quarterly for controls governing consequential AI-assisted decisions. Drift accumulates gradually, so infrequent, high-level policy reviews will miss it; the pattern only becomes visible when you look at the actual approval history over a meaningful stretch of time.",
+      },
+      {
+        q: "Does ConvergePanel flag approval drift automatically?",
+        a: "ConvergePanel's audit log captures the underlying data — timestamps, reviewer identity, comments, and revisions — needed to detect drift. Reviewing that data for the specific patterns described here, and deciding what response is warranted, is a governance function ConvergePanel does not perform on its own.",
+      },
+    ],
+    relatedLinks: [
+      { label: "AI Peer Review for High-Stakes Workflows", href: "/use-cases/ai-peer-review-for-high-stakes-workflows" },
+      { label: "How to Track AI Decision-Making", href: "/use-cases/how-to-track-ai-decision-making" },
+      { label: "Test Whether an AI Approval Control Is Working", href: "/use-cases/test-ai-approval-control-effectiveness" },
+      { label: "AI Reviewer Independence", href: "/use-cases/ai-reviewer-independence" },
+      { label: "AI Challenge Record", href: "/use-cases/ai-challenge-record" },
+    ],
+    cta: "Review the Approval Process",
+    category: "governance",
+    schemaType: "FAQPage",
+    metaDescription:
+      "Approval can exist on paper and disappear in practice. Learn the eight indicators that a formal AI approval control has drifted into a routine click.",
+  },
+
+  {
+    slug: "document-ai-human-reviewer-disagreement",
+    publishedAt: "2026-07-05",
+    title: "How to Document Disagreement Between AI and Human Reviewers",
+    h1: "The Final Decision Should Not Erase the Disagreement",
+    audience: "Reviewers, risk managers, and decision owners",
+    audienceDetail:
+      "Reviewers and decision owners who disagree with an AI-assisted conclusion or recommendation and need a record showing the disagreement itself, not just the final call that followed it",
+    problem:
+      "When a human reviewer overrules or downgrades an AI-assisted conclusion, the record that typically survives is the final decision — not the fact that a disagreement happened, what each side was based on, or why the human's view prevailed. Six months later, the decision looks like it always had unanimous backing.\n\nThat erasure is a governance loss. A documented disagreement between an AI panel and a human reviewer is exactly the kind of signal that shows judgment was actually exercised — that the human reviewer didn't simply defer to a confident-sounding output.",
+    solution:
+      "ConvergePanel's panel output shows each model's independent conclusion, which gives a reviewer a clear baseline to disagree with and document against. Recording that disagreement — not just the outcome — turns an invisible judgment call into a reviewable governance artifact.",
+    workflow: [
+      "State the AI panel's conclusion as it was actually presented",
+      "State the human reviewer's conclusion, in their own words",
+      "Record the specific reason for the disagreement — what the reviewer saw differently and why",
+      "Note the evidence each side relied on",
+      "Record whether the AI panel itself showed internal disagreement relevant to the dispute",
+      "Assess and record the risk implication of each position",
+      "Identify who held final authority over the decision",
+      "Document the decision rationale and any follow-up action required",
+    ],
+    useCases: [
+      "Recording why a risk analyst downgraded an AI-assisted risk score before it reached a report",
+      "Documenting a compliance reviewer's disagreement with an AI-assisted eligibility determination",
+      "Preserving the reasoning behind a human override for later audit or dispute",
+      "Building a pattern-level view of where human reviewers most often diverge from AI panel conclusions",
+      "Demonstrating that a final decision reflects considered judgment, not automatic deference",
+    ],
+    bodySections: [
+      {
+        heading: "What Belongs in a Human-vs-AI Disagreement Record",
+        bullets: [
+          "AI conclusion — what the panel actually concluded",
+          "Human conclusion — what the reviewer concluded instead",
+          "Reason for disagreement — the specific basis for the divergence",
+          "Evidence each relied upon — what each position is based on",
+          "Model disagreement — whether the AI panel itself was split, and how that bears on the dispute",
+          "Risk implication — what's at stake in each direction",
+          "Final authority — who has the standing to make the final call",
+          "Decision rationale — why that call was made",
+          "Follow-up action — what happens next, if anything",
+        ],
+      },
+      {
+        heading: "Worked Example: Overriding a Risk Score",
+        paragraphs: [
+          "ConvergePanel's panel returns a consensus 'low risk' rating for a proposed vendor relationship. A risk analyst disagrees, downgrading the classification to 'medium' based on a recent regulatory action against a similar vendor in the same sector that predates the models' most reliable training data and wasn't reflected in the panel's evidence.",
+          "The disagreement record captures both positions precisely: the panel's low-risk conclusion and its cited evidence, the analyst's medium-risk conclusion and the specific regulatory action it rests on, and the final authority — the analyst's manager — who accepted the downgrade and directed additional monitoring as a follow-up action. Nothing about the final 'medium risk' classification, read on its own six months later, would show that a disagreement ever existed.",
+        ],
+      },
+      {
+        heading: "Why the Disagreement Should Survive the Final Decision",
+        paragraphs: [
+          "A decision record that only shows the final call implies the call was always obvious. A record that preserves the disagreement shows a human reviewer actually engaged with the AI output, found a specific reason to diverge from it, and had the authority and evidence to do so. That is a stronger governance signal than an unchallenged approval — and it's the opposite of what most workflows capture by default, since final decisions naturally overwrite the deliberation that produced them.",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "How is this different from documenting model disagreement?",
+        a: "Documenting model disagreement records where AI models disagreed with each other. This is about a different disagreement entirely — between the AI panel's conclusion (whether or not the panel itself was internally split) and a human reviewer's independent conclusion. The two records can both be relevant to the same decision but capture different things.",
+      },
+      {
+        q: "Should every human override be documented this way?",
+        a: "For consequential decisions, yes. For routine, low-stakes overrides, a brief note may suffice. The standard should scale with what's riding on the decision — a disagreement over a high-materiality classification deserves the full record; a minor wording preference does not.",
+      },
+      {
+        q: "What if the human reviewer's disagreement turns out to be wrong later?",
+        a: "The record still has value. It shows the reasoning available at the time, which is what a defensible process requires — not that every judgment call turned out correct in hindsight. A documented, reasoned disagreement that later proves mistaken is a materially different governance position than an undocumented one.",
+      },
+      {
+        q: "Does this replace the need for a decision receipt?",
+        a: "No — it feeds into one. A decision receipt or assurance record documents the full decision; the human-AI disagreement record is one specific, often-missing component of that larger record for decisions where a reviewer diverged from the AI panel's conclusion.",
+      },
+      {
+        q: "Who has final authority when a human reviewer and the AI panel disagree?",
+        a: "That's an organizational governance decision, not something ConvergePanel determines. Some organizations give the human reviewer default authority since they carry accountability; others require escalation above a materiality threshold. What matters for the record is naming who actually held that authority for this specific decision.",
+      },
+      {
+        q: "Can documenting disagreement create legal exposure?",
+        a: "Undocumented disagreement is the greater exposure — it leaves no record that a reviewer's concern was considered and addressed. A documented disagreement, with the reasoning and final authority recorded, shows a defensible process was followed. Consult legal counsel on documentation practices specific to your regulatory context.",
+      },
+    ],
+    relatedLinks: [
+      { label: "How to Document Model Disagreement", href: "/use-cases/how-to-document-model-disagreement" },
+      { label: "AI Override Documentation", href: "/use-cases/ai-override-documentation" },
+      { label: "AI Decision Defensibility", href: "/use-cases/ai-decision-defensibility" },
+      { label: "How to Prove an AI Decision Was Reviewed", href: "/use-cases/how-to-prove-an-ai-decision-was-reviewed" },
+      { label: "AI Challenge Record", href: "/use-cases/ai-challenge-record" },
+    ],
+    cta: "Record the Disagreement",
+    category: "governance",
+    schemaType: "HowTo",
+    metaDescription:
+      "The final decision should not erase the disagreement that preceded it. Learn how to document where an AI panel and a human reviewer actually diverged, and why.",
+  },
+
+  {
+    slug: "test-ai-approval-control-effectiveness",
+    publishedAt: "2026-07-05",
+    title: "How to Test Whether an AI Approval Control Is Working",
+    h1: "A Control Is Not Effective Merely Because It Is Configured",
+    audience: "Internal auditors and controls testers",
+    audienceDetail:
+      "Internal auditors and controls testers evaluating whether an approval control governing AI-assisted outputs actually operated as designed over a period — not whether the policy exists on paper",
+    problem:
+      "A policy that says 'high-risk AI outputs require manager approval' is a control design. Whether that control actually operated — whether approvals happened, by the right person, with evidence of genuine review, consistently across the population of qualifying outputs — is a separate question that policy language cannot answer.\n\nMost teams check that the control is configured: the workflow routes flagged outputs to a reviewer, the system logs an approval. Few teams test whether that configured control produced the evidence a genuine control test requires.",
+    solution:
+      "ConvergePanel's audit log gives testers a population to sample from — every flagged output, its assigned reviewer, the review timestamp, and the decision. That data supports a proper operating-effectiveness test; it does not substitute for one. The test itself — sample selection, evidence inspection, and the effectiveness conclusion — remains the tester's professional work.",
+    workflow: [
+      "Define the control objective precisely — what is this approval control actually supposed to catch",
+      "Identify the expected approver for the control's population of outputs",
+      "Identify the full population of outputs that should have gone through the control over the test period",
+      "Select a sample from that population — risk-based, not just the most recent items",
+      "Inspect the evidence for each sampled item: was it actually reviewed, by whom, with what timing",
+      "Test timing — did approval happen before the output was used, not after",
+      "Inspect exceptions — items that bypassed the normal approval path, and whether that was documented",
+      "Evaluate consistency — were the same approval criteria applied across the sample",
+      "Document findings for each sampled item",
+      "Conclude on operating effectiveness for the period tested",
+    ],
+    useCases: [
+      "Testing whether a 'high-risk AI output requires sign-off' control operated consistently over a quarter",
+      "Sampling flagged outputs to check whether the assigned reviewer, not a substitute, actually approved them",
+      "Identifying exceptions that bypassed the approval path without documented justification",
+      "Distinguishing a control that is well-configured from one that is operating effectively",
+      "Building a repeatable test approach for approval controls across multiple AI-assisted workflows",
+    ],
+    bodySections: [
+      {
+        heading: "Worked Example: Testing a Quarter of Flagged Approvals",
+        paragraphs: [
+          "A controls tester is asked to evaluate whether a 'manager sign-off required for regulatory-sensitive AI outputs' control operated effectively last quarter. The population is 140 flagged outputs. The tester selects a risk-based sample of 25 — weighted toward the highest-materiality items rather than a simple random draw — and inspects each: who approved it, how long after flagging, whether reviewer comments exist, and whether any of the 25 bypassed the normal path.",
+          "Of the 25, 3 were approved by someone other than the named manager, 2 show approval times under 30 seconds with no comments, and 1 bypassed the flag entirely with no documented exception. The control is configured correctly — every item did route through the system — but the test finds it is not operating effectively for a meaningful share of the sample. That distinction is the entire point of testing operation, not just design.",
+        ],
+      },
+      {
+        heading: "Design vs. Operation vs. Evidence",
+        bullets: [
+          "Control design — does the policy, if followed exactly, address the risk it's meant to catch",
+          "Control implementation — was the workflow actually built to route outputs the way the policy describes",
+          "Control operation — did it actually run that way, consistently, across the real population",
+          "Control evidence — can each of the above be demonstrated with a record, not asserted from memory",
+        ],
+      },
+      {
+        heading: "How This Differs from Using AI to Help Test Internal Controls Generally",
+        paragraphs: [
+          "ConvergePanel's internal-controls research assistant helps auditors compare AI models' characterizations of control design expectations for any control — financial, operational, IT. This page is a different exercise: testing the operating effectiveness of the control that specifically governs AI-assisted outputs. The approval gate itself is the subject under test here, not a research method for testing something else.",
+        ],
+      },
+      {
+        heading: "Common Testing Mistakes",
+        bullets: [
+          "Sampling only the most recent approvals, which tend to look better than a representative sample",
+          "Treating 'the workflow routed it correctly' as proof the control operated, without inspecting the actual review evidence",
+          "Not checking timing — approvals recorded after the output was already acted on are not effective preventive controls",
+          "Skipping exception review — items that bypassed the control are often where the real gaps are",
+          "Concluding on effectiveness without a defined, risk-based sample size and selection method",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "What's the difference between testing this control and design testing?",
+        a: "Design testing asks whether the control, if followed exactly, would address the risk. Operating-effectiveness testing asks whether it actually was followed, consistently, across a real population over a period — which requires inspecting evidence, not reading policy.",
+      },
+      {
+        q: "How large should the sample be?",
+        a: "Sample size and selection methodology are professional testing judgments that depend on population size, risk, and your audit methodology's standards. ConvergePanel provides the population data to sample from; sample size determination is not something it prescribes.",
+      },
+      {
+        q: "Can ConvergePanel conclude on the control's effectiveness?",
+        a: "No. ConvergePanel provides workflow evidence — timestamps, reviewer identity, decisions, and exceptions. Designing the test, selecting the sample, evaluating the evidence, and reaching the operating-effectiveness conclusion require qualified assurance professional judgment.",
+      },
+      {
+        q: "What counts as an exception that needs investigating?",
+        a: "Any output that should have gone through the approval control based on the policy's stated scope, but didn't — or went through a different path than defined. Undocumented exceptions are frequently where control failures concentrate, so they warrant disproportionate testing attention relative to their share of the population.",
+      },
+      {
+        q: "How is this different from testing AI controls more broadly?",
+        a: "This page is scoped specifically to approval controls — the gate requiring human sign-off before an AI-assisted output is used. Broader AI control types, such as data-quality or model-monitoring controls, involve different evidence and different testing approaches outside this page's scope.",
+      },
+      {
+        q: "How often should this control be tested?",
+        a: "Frequency should match the risk of the decisions the control governs and your organization's audit cycle — commonly quarterly or annually for consequential controls. Testing only at rollout and never again is a common way approval drift goes undetected.",
+      },
+    ],
+    relatedLinks: [
+      { label: "AI Panel for Internal Controls Testing", href: "/use-cases/ai-panel-for-internal-controls-testing" },
+      { label: "AI Approval Drift", href: "/use-cases/ai-approval-drift" },
+      { label: "How to Track AI Decision-Making", href: "/use-cases/how-to-track-ai-decision-making" },
+      { label: "Audit Evidence Review with AI Models", href: "/use-cases/audit-evidence-review-with-ai-models" },
+      { label: "AI Peer Review for High-Stakes Workflows", href: "/use-cases/ai-peer-review-for-high-stakes-workflows" },
+    ],
+    cta: "Review the Approval Evidence",
+    category: "governance",
+    schemaType: "HowTo",
+    metaDescription:
+      "A control is not effective merely because it's configured. Learn the ten-step test for whether an AI approval control actually operated as designed.",
+  },
+
+  {
+    slug: "review-ai-evidence-before-approval",
+    publishedAt: "2026-07-05",
+    title: "How to Review AI Evidence Before Approving a Decision",
+    h1: "Do Not Approve the Conclusion Before Reviewing What Supports It",
+    audience: "Reviewers and approvers",
+    audienceDetail:
+      "Reviewers, approvers, and decision owners who need a structured evidence-review gate immediately before recording an approval on an AI-assisted decision",
+    problem:
+      "Approval workflows are usually built around the conclusion, not the evidence behind it: does the recommendation look reasonable, does it match expectations, sign here. The specific evidence supporting the recommendation — where it came from, whether it's independently corroborated, whether it's contradicted elsewhere — is rarely reviewed as its own distinct step before the approval is recorded.\n\nBy the time a reviewer is looking at a polished recommendation, the underlying evidence has already been synthesized away. Reviewing the conclusion is not the same as reviewing what it rests on.",
+    solution:
+      "ConvergePanel exposes the evidence behind a panel's conclusion directly — per-model claims, cited sources, and where models disagree or share a common source. A structured pre-approval evidence review uses that material deliberately, working through the underlying support before signing off on the conclusion it's meant to justify.",
+    workflow: [
+      "Define the decision that approval will finalize",
+      "Identify the material claims the decision actually depends on — not every claim the output contains",
+      "Review the authority of each source behind those claims",
+      "Confirm the source actually supports the specific claim made, not just a related topic",
+      "Identify whether multiple sources share one underlying origin rather than independent corroboration",
+      "Compare where the AI models disagreed on any of the material claims",
+      "Test the assumptions the recommendation relies on, not just its stated conclusion",
+      "Document any evidence that is missing but would normally be expected",
+      "Assess what uncertainty remains after this review",
+      "Approve, reject, or escalate based on the evidence review — not the recommendation's tone",
+    ],
+    useCases: [
+      "Reviewing the evidence behind an AI-assisted claims payout recommendation before sign-off",
+      "Checking source independence before approving a vendor-selection recommendation",
+      "Building a consistent pre-approval evidence gate across a governance program",
+      "Training new approvers to review evidence rather than just the polished conclusion",
+      "Creating a documented step that distinguishes real evidence review from a formality",
+    ],
+    bodySections: [
+      {
+        heading: "Worked Example: Approving a Claims Payout Recommendation",
+        paragraphs: [
+          "An insurance claims team receives an AI-assisted recommendation to approve a payout based on submitted documentation. Before signing, the reviewer works through the ten-step evidence review: the material claim is that the damage described matches the policy's covered causes. The source is the claimant's own submitted photos and a repair estimate — no independent inspection. The models agree on the recommendation, but that agreement is based on the same submitted documents, not independent verification.",
+          "The evidence review surfaces a gap the polished recommendation didn't highlight: no independent corroboration exists for the claimed cause of damage. The reviewer escalates for an independent inspection rather than approving on the strength of internally consistent, but single-source, documentation.",
+        ],
+      },
+      {
+        heading: "How This Differs from Reviewing an AI Recommendation Generally",
+        paragraphs: [
+          "Reviewing an AI-generated recommendation broadly checks whether to accept it at all — is the evidence real, is the recommendation complete, would a different framing change it. This page is a narrower, later-stage gate: the formal evidence check performed immediately before an approval is recorded, specifically for the material claims the decision depends on. The two overlap but serve different points in a workflow — one decides whether a recommendation is worth acting on; this one is the last check before that action is formally approved.",
+        ],
+      },
+      {
+        heading: "What to Do When Evidence Review Surfaces a Gap",
+        bullets: [
+          "Escalate to primary-source verification if a material claim rests on a single, unverified origin",
+          "Document the gap explicitly, even if you proceed with approval despite it",
+          "Route to a subject-matter expert if the assumption being tested falls outside the reviewer's own competence",
+          "Record the residual uncertainty rather than letting the approval imply the evidence was fully resolved",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "Isn't this the same as checking whether the AI's evidence is sufficient?",
+        a: "It's a closely related but distinct step. Evidence sufficiency is the underlying judgment — is what was found enough for this decision. This page is the procedural workflow for performing that judgment specifically at the approval gate, immediately before a decision is recorded, working through material claims one at a time.",
+      },
+      {
+        q: "How many claims need this level of review?",
+        a: "Only the material ones — the claims the decision actually depends on. Reviewing every incidental detail in an AI-assisted output at this depth is not proportionate; identifying which claims are load-bearing for the decision, and focusing the review there, is the point of the second workflow step.",
+      },
+      {
+        q: "What if two models cite the same source — does that count as corroboration?",
+        a: "No. If multiple sources or multiple models trace back to one underlying origin, that is a single point of evidence regardless of how many times it's cited. Checking for this shared-source pattern is one of the specific steps in this workflow because it's easy to mistake for independent corroboration.",
+      },
+      {
+        q: "Should this review happen before or after the recommendation is finalized?",
+        a: "Before. The value of this workflow is reviewing the evidence as a distinct step prior to approval — not retroactively justifying a decision that's already been made. Treating it as a pre-approval gate, not a post-hoc rationale, is what makes the record meaningful.",
+      },
+      {
+        q: "Can this evidence review be skipped for low-stakes decisions?",
+        a: "For genuinely low-stakes, low-materiality decisions, a lighter check may be proportionate. The full ten-step review is intended for decisions where getting the evidence wrong carries real financial, legal, or reputational consequence.",
+      },
+      {
+        q: "Who is accountable if the evidence review misses something?",
+        a: "The reviewer who performed the approval-gate check, and the decision owner accountable for the final approval. ConvergePanel provides the material to review; it does not perform the review or bear responsibility for what a human reviewer did or didn't catch.",
+      },
+    ],
+    relatedLinks: [
+      { label: "How to Review AI-Generated Recommendations", href: "/use-cases/how-to-review-ai-generated-recommendations" },
+      { label: "AI Evidence Sufficiency", href: "/use-cases/ai-evidence-sufficiency" },
+      { label: "Audit Evidence Review with AI Models", href: "/use-cases/audit-evidence-review-with-ai-models" },
+      { label: "What Is a Verification Gate?", href: "/use-cases/what-is-a-verification-gate" },
+      { label: "Test Whether an AI Approval Control Is Working", href: "/use-cases/test-ai-approval-control-effectiveness" },
+    ],
+    cta: "Review the Evidence Before Approval",
+    category: "governance",
+    schemaType: "HowTo",
+    metaDescription:
+      "Do not approve the conclusion before reviewing what supports it. A ten-step workflow for checking AI-assisted evidence at the approval gate.",
+  },
+
+  {
+    slug: "ai-override-documentation",
+    publishedAt: "2026-07-05",
+    title: "AI Override Documentation: Record Why a Human Changed the Recommendation",
+    h1: "The Human Override Needs a Reason, Not Just a Different Answer",
+    audience: "Decision owners and reviewers",
+    audienceDetail:
+      "Decision owners and reviewers who overrode an AI-assisted recommendation and need a documented rationale for the override itself — not just a log entry showing one occurred",
+    problem:
+      "Most systems that log AI-assisted recommendations also log when a human changed the outcome. Few capture why. 'Overridden by J. Smith, 2026-06-14' tells you an override happened. It does not tell you whether Smith had a specific, evidence-based reason, or was simply more comfortable with a different number.\n\nAn undocumented override is a governance blind spot in the opposite direction from an unchallenged AI output: instead of trusting the machine too much, it trusts the human's unstated judgment too much.",
+    solution:
+      "ConvergePanel's panel output gives the overriding reviewer a specific baseline to explain their departure from — the AI recommendation and its cited evidence. Override documentation captures that departure as a structured record: what changed, why, and what evidence or policy consideration justified it.",
+    workflow: [
+      "Record the AI panel's original recommendation exactly as presented",
+      "Record the reviewer's actual decision after the override",
+      "State the specific reason for the override — not a general disagreement, but the concrete basis",
+      "Record what evidence the reviewer used to justify the change",
+      "Note whether the AI panel showed internal model disagreement relevant to the override",
+      "Record any policy or risk consideration that factored into the decision",
+      "Name the approver who accepted the override, if different from the person who made it",
+      "State the expected consequence of the override",
+      "Schedule a follow-up review of the override itself",
+    ],
+    useCases: [
+      "Documenting why an underwriter reclassified an AI-assisted risk rating before issuing a policy",
+      "Recording the rationale for overriding an AI-assisted pricing or eligibility recommendation",
+      "Building a pattern-level view of how often and why overrides occur on a given workflow",
+      "Providing a defensible record if an overridden decision is later challenged",
+      "Distinguishing well-reasoned overrides from ones driven by unexamined preference",
+    ],
+    bodySections: [
+      {
+        heading: "What an Override Record Should Capture",
+        bullets: [
+          "AI recommendation — the panel's original output",
+          "Reviewer decision — what was decided instead",
+          "Reason for override — the specific basis for the change",
+          "Evidence used — what the reviewer relied on to justify it",
+          "Model disagreement — whether the panel itself was split in a way relevant to the override",
+          "Policy or risk consideration — any organizational rule or risk factor that applied",
+          "Approver — who signed off on the override, if not the same person",
+          "Expected consequence — what the override is expected to change or prevent",
+          "Follow-up review — when and how the override itself will be checked",
+        ],
+      },
+      {
+        heading: "Worked Example: Overriding an Underwriting Recommendation",
+        paragraphs: [
+          "ConvergePanel's panel recommends a 'standard' risk classification for a new policy application based on the submitted information. An underwriter overrides this to 'high risk,' citing a specific industry advisory — issued after the models' most reliable training data — flagging elevated claims activity in the applicant's sector that quarter.",
+          "The override record documents the panel's original 'standard' recommendation, the underwriter's 'high risk' decision, the specific advisory cited as the reason, the expected consequence (a higher premium and a shorter policy term), and a scheduled follow-up review in 90 days to check whether the advisory's concern actually materialized in claims activity.",
+        ],
+      },
+      {
+        heading: "Why Overrides Need Their Own Review",
+        paragraphs: [
+          "A human override is not automatically better than the AI recommendation. Its rationale and evidence still require review. A reviewer's discomfort with a number, an unexamined bias, or a desire to be cautious 'just in case' are not the same as a specific, evidence-based reason for departing from the panel's output — and an override record with no real reason recorded should be treated as its own governance flag, not as evidence the human judgment layer is working.",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "Does every override need this level of documentation?",
+        a: "Scale it to the decision's stakes. A routine override on a low-materiality item may need only a brief reason recorded. A high-consequence override — one affecting pricing, eligibility, or a regulatory determination — warrants the full record, including a scheduled follow-up.",
+      },
+      {
+        q: "What if the reviewer can't point to specific evidence for the override?",
+        a: "Record that honestly rather than manufacturing a rationale after the fact. An override based on general experience or intuition, with no specific evidence cited, is meaningfully different from one grounded in a specific fact the AI panel didn't have — and both should be visible in the record, not indistinguishable from each other.",
+      },
+      {
+        q: "How is override documentation different from a human-AI disagreement record?",
+        a: "A disagreement record captures the moment of divergence and the reasoning on both sides — it can result in escalation without necessarily changing the outcome. Override documentation is specifically about the decision to change the recommendation, including the expected consequence of that change and the plan to check whether the override was justified in hindsight.",
+      },
+      {
+        q: "Should the follow-up review check whether the override was 'right'?",
+        a: "It should check whether the expected consequence materialized and whether the evidence cited for the override held up — not simply whether the outcome felt correct in hindsight, which is a weaker and more biased standard than checking against what was actually predicted at the time.",
+      },
+      {
+        q: "Who should approve an override — the same reviewer who made it?",
+        a: "For consequential overrides, a second approver strengthens the record, for the same reason self-review is a weak control elsewhere: the person who made the override already believes it's correct.",
+      },
+      {
+        q: "Can override patterns reveal a problem with the AI panel itself?",
+        a: "Yes — a high rate of overrides on a specific claim type is a useful signal that the panel's training data or framing may be systematically missing something in that area, which is exactly why override records should be reviewed in aggregate, not just individually.",
+      },
+    ],
+    relatedLinks: [
+      { label: "Document Disagreement Between AI and Human Reviewers", href: "/use-cases/document-ai-human-reviewer-disagreement" },
+      { label: "How to Review AI-Generated Recommendations", href: "/use-cases/how-to-review-ai-generated-recommendations" },
+      { label: "AI Decision Defensibility", href: "/use-cases/ai-decision-defensibility" },
+      { label: "AI Reviewer Independence", href: "/use-cases/ai-reviewer-independence" },
+      { label: "How to Track AI Decision-Making", href: "/use-cases/how-to-track-ai-decision-making" },
+    ],
+    cta: "Document the Override",
+    category: "governance",
+    schemaType: "FAQPage",
+    metaDescription:
+      "A human override needs a reason, not just a different answer. Learn what to record when a reviewer changes an AI-assisted recommendation, and why.",
+  },
+
+  {
+    slug: "create-ai-decision-assurance-record",
+    publishedAt: "2026-07-05",
+    title: "How to Create an Assurance Record for an AI Decision",
+    h1: "An Audit Log Is Not Yet an Assurance Record",
+    audience: "Assurance, governance, and compliance teams",
+    audienceDetail:
+      "Assurance leads, governance officers, and compliance teams who need to assemble the complete evidence package proving an AI-assisted decision was sufficiently evidenced, meaningfully challenged, independently reviewed, and appropriately approved",
+    problem:
+      "An audit log proves that actions were recorded — a query happened, a model responded, a timestamp exists. It does not prove the conclusion was sufficiently supported, that anyone genuinely challenged it, or that the person who approved it was positioned to catch a problem. Those are separate questions, and most organizations discover the gap only when someone asks them directly.\n\nAn assurance record is the artifact that actually answers those questions — assembled from the evidence sufficiency check, the challenge record, the reviewer's independence, and the approval rationale, not generated automatically by the platform that ran the query.",
+    solution:
+      "ConvergePanel's audit bundle captures the underlying material — model outputs, disagreement, evidence quality, and peer review decisions. An assurance record is what a reviewer builds from that material, deliberately pulling in the evidence-sufficiency assessment, the challenge record, the reviewer-independence check, and the approval rationale into one evidence package for a specific decision.",
+    workflow: [
+      "State the decision's purpose",
+      "Capture the model outputs the decision was based on",
+      "List the claims relied upon and the source evidence for them",
+      "Record where models agreed and where they disagreed",
+      "Attach the challenge record showing what was tested",
+      "Note the reviewer's independence from the original request",
+      "Record any modifications made as a result of the challenge",
+      "State the approval decision and its rationale",
+      "Document any exceptions taken and their justification",
+      "Record what residual uncertainty remains",
+      "Name the final decision and the accountable decision owner",
+      "Timestamp every stage of the above",
+    ],
+    useCases: [
+      "Assembling the full evidence package for a decision selected in an internal audit sample",
+      "Preparing an assurance record proactively for decisions above a materiality threshold",
+      "Responding to a regulator's or board's request for evidence behind a specific AI-assisted decision",
+      "Standardizing what 'assurance-ready' documentation looks like across a governance program",
+      "Distinguishing genuinely reviewable decisions from ones with only a chat log behind them",
+    ],
+    bodySections: [
+      {
+        heading: "What an Assurance Record Contains",
+        bullets: [
+          "Decision purpose — what was being decided",
+          "Model outputs — each model's independent conclusion",
+          "Claims relied upon — the specific assertions the decision depends on",
+          "Source evidence — what backs those claims",
+          "Agreement and disagreement — where the panel converged or split",
+          "Reviewer challenge — what was tested before acceptance",
+          "Modifications — what changed as a result",
+          "Approval — the decision and its rationale",
+          "Exceptions — any departures from the standard path, and why",
+          "Residual uncertainty — what remains unresolved",
+          "Final decision and decision owner",
+          "Timestamps throughout",
+        ],
+      },
+      {
+        heading: "Audit Log vs. Decision Receipt vs. Assurance Record",
+      },
+      {
+        heading: "Assembling the Record from the Rest of the Review",
+        paragraphs: [
+          "An assurance record is not a new thing to produce from scratch — it's the assembly point for work that should already exist elsewhere in the review process. The evidence-sufficiency check answers whether the underlying support was strong enough. The challenge record shows what was actually tested. The reviewer-independence check shows who was positioned to catch a problem. Any override or exception gets documented on its own terms. Pulling these together, with timestamps and a named decision owner, is what turns scattered governance artifacts into one examinable record.",
+          "Building the habit of assembling this record only when someone asks for it means reconstructing it from memory, months later, with pieces missing. Building it as the decision is made means it already exists when the question comes.",
+        ],
+      },
+    ],
+    comparisonTable: {
+      headers: ["Artifact", "What It Proves", "What It Doesn't Prove"],
+      rows: [
+        ["Audit log", "Actions were recorded — a query ran, a model responded, a timestamp exists", "Whether the conclusion was sufficiently supported or genuinely reviewed"],
+        ["Decision receipt", "What was decided, on what evidence, and who reviewed it — for one specific decision", "That the evidence was sufficient or that the review was substantively challenging"],
+        ["Assurance record", "The decision was evidenced, challenged, independently reviewed, and appropriately approved", "That the conclusion was correct — it supports examination, not certification"],
+      ],
+    },
+    faq: [
+      {
+        q: "How is an assurance record different from a decision receipt?",
+        a: "A decision receipt documents what was decided, on what evidence, and who reviewed it. An assurance record goes further, explicitly assembling the evidence-sufficiency assessment, the challenge record, and the reviewer-independence check into one package built to withstand external examination — an auditor's, a regulator's, or a board's.",
+      },
+      {
+        q: "Isn't the audit log already an assurance record?",
+        a: "No. An audit log proves that actions were recorded — a query, a response, a timestamp. It doesn't prove the underlying evidence was sufficient, that anyone genuinely challenged the output, or that the reviewer was independent of the request. Those require the additional assembly work described here.",
+      },
+      {
+        q: "Does ConvergePanel generate the assurance record automatically?",
+        a: "ConvergePanel's audit bundle provides the raw material — model outputs, disagreement, evidence quality, and peer review decisions. Assembling that material into a complete assurance record, including the decision purpose, reviewer independence, and decision-owner accountability, is work a reviewer performs deliberately.",
+      },
+      {
+        q: "Does an assurance record count as an audit opinion or compliance certification?",
+        a: "No. An assurance record supports examination. It is not an audit opinion or certification, and ConvergePanel does not issue either. The record makes a decision reviewable by qualified professionals — it does not substitute for their conclusion.",
+      },
+      {
+        q: "Should every AI-assisted decision get a full assurance record?",
+        a: "No — reserve the full record for decisions above a materiality threshold your organization defines. Producing this level of documentation for every routine, low-stakes query would be disproportionate; the value is concentrated where a decision could plausibly be questioned later.",
+      },
+      {
+        q: "What if some components — like a challenge record — don't exist for a past decision?",
+        a: "Document the gap rather than fabricating the missing piece. 'No challenge record exists for this decision' is itself useful information for a governance review, and it's a stronger position than presenting an incomplete record as though it were whole.",
+      },
+    ],
+    relatedLinks: [
+      { label: "What Is a Decision Receipt?", href: "/use-cases/what-is-a-decision-receipt" },
+      { label: "AI Decision Audit Trail", href: "/use-cases/ai-decision-audit-trail" },
+      { label: "AI Audit Trail Software", href: "/use-cases/ai-audit-trail-software" },
+      { label: "AI Evidence Sufficiency", href: "/use-cases/ai-evidence-sufficiency" },
+      { label: "AI Challenge Record", href: "/use-cases/ai-challenge-record" },
+      { label: "AI Decision Defensibility", href: "/use-cases/ai-decision-defensibility" },
+      { label: "Research Panel for Assurance Workflows", href: "/use-cases/research-panel-for-assurance-workflows" },
+    ],
+    cta: "Create the Assurance Record",
+    category: "governance",
+    schemaType: "FAQPage",
+    metaDescription:
+      "An audit log is not yet an assurance record. Learn what it takes to prove an AI-assisted decision was evidenced, challenged, reviewed, and appropriately approved.",
   },
 ];
 
