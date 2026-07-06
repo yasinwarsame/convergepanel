@@ -282,9 +282,9 @@ export default function ProfilePage() {
   // Show loading state while checking auth or loading profile
   if (authLoading || loading) {
     return (
-      <main className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-slate-100 flex items-center justify-center">
-        <div className="flex min-h-[60vh] flex-col items-center justify-center gap-2 text-slate-300">
-          <div className="h-6 w-6 animate-spin rounded-full border-2 border-sky-400 border-t-transparent" />
+      <main className="min-h-screen bg-cp-bg text-cp-text flex items-center justify-center">
+        <div className="flex min-h-[60vh] flex-col items-center justify-center gap-2 text-cp-muted">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-cp-accent border-t-transparent" />
           <p className="text-sm tracking-wide">Loading ConvergePanel…</p>
         </div>
       </main>
@@ -297,15 +297,15 @@ export default function ProfilePage() {
   }
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-slate-100">
+    <main className="min-h-screen bg-cp-bg text-cp-text">
       <div className="mx-auto max-w-3xl px-4 py-10 sm:px-6 lg:px-8">
         {/* Back navigation: takes the user from the Profile page back to the main panel screen */}
         <button
           type="button"
           onClick={() => router.push("/")}
-          className="mb-4 inline-flex items-center gap-2 text-sm font-medium text-slate-300 hover:text-sky-400 transition-colors"
+          className="mb-4 inline-flex items-center gap-2 text-sm font-medium text-cp-muted hover:text-cp-accent transition-colors"
         >
-          <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-slate-800/80 ring-1 ring-slate-700">
+          <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-cp-raised ring-1 ring-cp-border">
             {/* Simple left arrow icon */}
             <span className="text-xs">&larr;</span>
           </span>
@@ -313,35 +313,35 @@ export default function ProfilePage() {
         </button>
 
         {/* Profile card */}
-        <div className="rounded-2xl bg-white/95 p-6 shadow-xl ring-1 ring-slate-900/5">
+        <div className="rounded-[14px] bg-cp-surface p-6 shadow-sm border border-cp-border">
           {/* Header */}
-          <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
+          <h1 className="text-2xl font-semibold tracking-tight text-cp-text">
             Profile
           </h1>
-          <p className="mt-1 text-sm text-slate-600">
+          <p className="mt-1 text-sm text-cp-muted">
             Update your personal details and how you use ConvergePanel.
           </p>
 
           {/* Plan & Usage Section */}
-          <div className="mt-6 mb-6 rounded-xl border border-slate-200 bg-slate-50 p-5">
-            <h2 className="text-sm font-medium uppercase tracking-wide text-slate-500 mb-3">
+          <div className="mt-6 mb-6 rounded-xl border border-cp-border bg-cp-raised p-5">
+            <h2 className="text-sm font-medium uppercase tracking-wide text-cp-faint mb-3">
               Plan & Usage
             </h2>
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div className="flex-1">
                 {!planLoading && plan ? (
                   <>
-                    <p className="text-lg font-semibold text-slate-900">
+                    <p className="text-lg font-semibold text-cp-text">
                       {formatPlanNameWithInterval(plan, billingInterval)}
                     </p>
                     {monthlyLimit !== null && (
-                      <p className="mt-1 text-sm text-slate-600">
+                      <p className="mt-1 text-sm text-cp-muted">
                         {getPlanConfig(plan).maxModelsPerRun} models · {runsThisMonth} / {monthlyLimit} runs this month
                       </p>
                     )}
                   </>
                 ) : (
-                  <p className="text-sm text-slate-500">Loading plan information...</p>
+                  <p className="text-sm text-cp-faint">Loading plan information...</p>
                 )}
               </div>
               {/* Upgrade link - show when user can upgrade */}
@@ -349,14 +349,14 @@ export default function ProfilePage() {
                 <div className="sm:ml-4 flex-shrink-0">
                   <Link
                     href="/billing"
-                    className="inline-flex items-center justify-center rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-sky-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500 transition-colors whitespace-nowrap"
+                    className="inline-flex items-center justify-center rounded-[11px] bg-cp-primary px-4 py-2 text-sm font-semibold text-white shadow-[0_2px_8px_rgba(37,99,235,0.3)] hover:bg-cp-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cp-accent transition-colors whitespace-nowrap"
                   >
                     {plan === "free" ? "Upgrade plan" : "Upgrade to Full Panel — 5 Models"}
                   </Link>
                 </div>
               )}
             </div>
-            
+
             {/* Cancel subscription link - show for all users, greyed out for free plan */}
             {!planLoading && (
               <div className="mt-4 flex justify-end">
@@ -366,8 +366,8 @@ export default function ProfilePage() {
                   disabled={plan === "free"}
                   className={`text-xs underline transition-colors ${
                     plan === "free"
-                      ? "text-slate-300 cursor-not-allowed no-underline"
-                      : "text-slate-400 hover:text-slate-600"
+                      ? "text-cp-faint cursor-not-allowed no-underline"
+                      : "text-cp-faint hover:text-cp-muted"
                   }`}
                   aria-label="Cancel subscription (opens Stripe portal)"
                 >
@@ -392,26 +392,26 @@ export default function ProfilePage() {
               aria-labelledby="cancel-dialog-title"
               aria-describedby="cancel-dialog-description"
             >
-              <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
-                <h2 className="text-lg font-semibold text-slate-900 mb-4" id="cancel-dialog-title">
+              <div className="bg-cp-surface rounded-lg p-6 max-w-md w-full mx-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
+                <h2 className="text-lg font-semibold text-cp-text mb-4" id="cancel-dialog-title">
                   Cancel subscription
                 </h2>
                 <div className="space-y-4">
-                  <p className="text-sm text-slate-600" id="cancel-dialog-description">
+                  <p className="text-sm text-cp-muted" id="cancel-dialog-description">
                     You&apos;ll be redirected to Stripe&apos;s secure portal to manage or cancel your subscription. If you don&apos;t have an active subscription, Stripe will show your current billing status.
                   </p>
-                  
+
                   {cancelError && (
                     <div className="bg-red-50 border border-red-200 rounded-lg p-3">
                       <p className="text-sm text-red-800 mb-2">
-                        {cancelError === "NO_STRIPE_CUSTOMER" 
+                        {cancelError === "NO_STRIPE_CUSTOMER"
                           ? "No active subscription found for this account. You can manage plans on the Billing page."
                           : cancelError}
                       </p>
                       {cancelError === "NO_STRIPE_CUSTOMER" && (
                         <Link
                           href="/billing"
-                          className="text-sm font-medium text-sky-600 hover:text-sky-700 underline"
+                          className="text-sm font-medium text-cp-accent underline"
                           onClick={() => setShowCancelDialog(false)}
                         >
                           View plans
@@ -419,7 +419,7 @@ export default function ProfilePage() {
                       )}
                     </div>
                   )}
-                  
+
                   <div className="flex gap-3 justify-end pt-4">
                     <button
                       type="button"
@@ -428,7 +428,7 @@ export default function ProfilePage() {
                         setCancelError(null);
                       }}
                       disabled={cancelLoading}
-                      className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      className="px-4 py-2 text-sm font-medium text-cp-text bg-cp-surface border border-cp-border rounded-lg hover:bg-cp-raised focus:outline-none focus:ring-2 focus:ring-cp-accent focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                     >
                       Keep subscription
                     </button>
@@ -436,7 +436,7 @@ export default function ProfilePage() {
                       type="button"
                       onClick={handleCancelSubscription}
                       disabled={cancelLoading}
-                      className="px-4 py-2 text-sm font-medium text-white bg-sky-600 rounded-lg hover:bg-sky-700 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors inline-flex items-center gap-2"
+                      className="px-4 py-2 text-sm font-medium text-white bg-cp-primary rounded-lg hover:bg-cp-accent focus:outline-none focus:ring-2 focus:ring-cp-accent focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors inline-flex items-center gap-2"
                     >
                       {cancelLoading ? (
                         <>
@@ -457,7 +457,7 @@ export default function ProfilePage() {
           <form onSubmit={handleSubmit} className="mt-6 space-y-6">
             {/* Account Info Section */}
             <div className="space-y-4">
-              <h2 className="text-lg font-semibold text-slate-900 border-b border-slate-200 pb-2">
+              <h2 className="text-lg font-semibold text-cp-text border-b border-cp-border-soft pb-2">
                 Account info
               </h2>
 
@@ -465,7 +465,7 @@ export default function ProfilePage() {
               <div>
                 <label
                   htmlFor="email"
-                  className="block text-xs font-medium uppercase tracking-wide text-slate-500"
+                  className="block text-xs font-medium uppercase tracking-wide text-cp-faint"
                 >
                   Email
                 </label>
@@ -475,7 +475,7 @@ export default function ProfilePage() {
                   value={profileEmail}
                   disabled
                   readOnly
-                  className="mt-1 block w-full rounded-xl border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-500 cursor-not-allowed"
+                  className="mt-1 block w-full rounded-xl border border-cp-border bg-cp-raised px-3 py-2 text-sm text-cp-faint cursor-not-allowed"
                 />
               </div>
 
@@ -483,7 +483,7 @@ export default function ProfilePage() {
               <div>
                 <label
                   htmlFor="name"
-                  className="block text-xs font-medium uppercase tracking-wide text-slate-500"
+                  className="block text-xs font-medium uppercase tracking-wide text-cp-faint"
                 >
                   Name
                 </label>
@@ -494,7 +494,7 @@ export default function ProfilePage() {
                   autoComplete="name"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  className="mt-1 block w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 shadow-sm outline-none placeholder:text-slate-400 focus:border-sky-500 focus:bg-white focus:ring-2 focus:ring-sky-500"
+                  className="mt-1 block w-full rounded-xl border border-cp-border bg-cp-raised px-3 py-2 text-sm text-cp-text shadow-sm outline-none placeholder:text-cp-faint focus:border-cp-accent focus:bg-cp-surface focus:ring-2 focus:ring-cp-primary-soft"
                   placeholder="Your full name"
                 />
               </div>
@@ -503,9 +503,9 @@ export default function ProfilePage() {
               <div>
                 <label
                   htmlFor="phone"
-                  className="block text-xs font-medium uppercase tracking-wide text-slate-500"
+                  className="block text-xs font-medium uppercase tracking-wide text-cp-faint"
                 >
-                  Phone <span className="text-slate-400 font-normal">(optional)</span>
+                  Phone <span className="text-cp-faint font-normal">(optional)</span>
                 </label>
                 <input
                   id="phone"
@@ -514,7 +514,7 @@ export default function ProfilePage() {
                   autoComplete="tel"
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
-                  className="mt-1 block w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 shadow-sm outline-none placeholder:text-slate-400 focus:border-sky-500 focus:bg-white focus:ring-2 focus:ring-sky-500"
+                  className="mt-1 block w-full rounded-xl border border-cp-border bg-cp-raised px-3 py-2 text-sm text-cp-text shadow-sm outline-none placeholder:text-cp-faint focus:border-cp-accent focus:bg-cp-surface focus:ring-2 focus:ring-cp-primary-soft"
                   placeholder="+1 (555) 123-4567"
                 />
               </div>
@@ -522,7 +522,7 @@ export default function ProfilePage() {
 
             {/* Address Section */}
             <div className="space-y-4">
-              <h2 className="text-lg font-semibold text-slate-900 border-b border-slate-200 pb-2">
+              <h2 className="text-lg font-semibold text-cp-text border-b border-cp-border-soft pb-2">
                 Address
               </h2>
 
@@ -530,7 +530,7 @@ export default function ProfilePage() {
               <div>
                 <label
                   htmlFor="address-line1"
-                  className="block text-xs font-medium uppercase tracking-wide text-slate-500"
+                  className="block text-xs font-medium uppercase tracking-wide text-cp-faint"
                 >
                   Address Line 1
                 </label>
@@ -541,7 +541,7 @@ export default function ProfilePage() {
                   autoComplete="street-address"
                   value={address.line1}
                   onChange={(e) => setAddress({ ...address, line1: e.target.value })}
-                  className="mt-1 block w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 shadow-sm outline-none placeholder:text-slate-400 focus:border-sky-500 focus:bg-white focus:ring-2 focus:ring-sky-500"
+                  className="mt-1 block w-full rounded-xl border border-cp-border bg-cp-raised px-3 py-2 text-sm text-cp-text shadow-sm outline-none placeholder:text-cp-faint focus:border-cp-accent focus:bg-cp-surface focus:ring-2 focus:ring-cp-primary-soft"
                   placeholder="Street address"
                 />
               </div>
@@ -550,9 +550,9 @@ export default function ProfilePage() {
               <div>
                 <label
                   htmlFor="address-line2"
-                  className="block text-xs font-medium uppercase tracking-wide text-slate-500"
+                  className="block text-xs font-medium uppercase tracking-wide text-cp-faint"
                 >
-                  Address Line 2 <span className="text-slate-400 font-normal">(optional)</span>
+                  Address Line 2 <span className="text-cp-faint font-normal">(optional)</span>
                 </label>
                 <input
                   id="address-line2"
@@ -561,7 +561,7 @@ export default function ProfilePage() {
                   autoComplete="address-line2"
                   value={address.line2}
                   onChange={(e) => setAddress({ ...address, line2: e.target.value })}
-                  className="mt-1 block w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 shadow-sm outline-none placeholder:text-slate-400 focus:border-sky-500 focus:bg-white focus:ring-2 focus:ring-sky-500"
+                  className="mt-1 block w-full rounded-xl border border-cp-border bg-cp-raised px-3 py-2 text-sm text-cp-text shadow-sm outline-none placeholder:text-cp-faint focus:border-cp-accent focus:bg-cp-surface focus:ring-2 focus:ring-cp-primary-soft"
                   placeholder="Apartment, suite, etc."
                 />
               </div>
@@ -571,7 +571,7 @@ export default function ProfilePage() {
                 <div>
                   <label
                     htmlFor="address-city"
-                    className="block text-xs font-medium uppercase tracking-wide text-slate-500"
+                    className="block text-xs font-medium uppercase tracking-wide text-cp-faint"
                   >
                     City
                   </label>
@@ -582,7 +582,7 @@ export default function ProfilePage() {
                     autoComplete="address-level2"
                     value={address.city}
                     onChange={(e) => setAddress({ ...address, city: e.target.value })}
-                    className="mt-1 block w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 shadow-sm outline-none placeholder:text-slate-400 focus:border-sky-500 focus:bg-white focus:ring-2 focus:ring-sky-500"
+                    className="mt-1 block w-full rounded-xl border border-cp-border bg-cp-raised px-3 py-2 text-sm text-cp-text shadow-sm outline-none placeholder:text-cp-faint focus:border-cp-accent focus:bg-cp-surface focus:ring-2 focus:ring-cp-primary-soft"
                     placeholder="City"
                   />
                 </div>
@@ -590,7 +590,7 @@ export default function ProfilePage() {
                 <div>
                   <label
                     htmlFor="address-state"
-                    className="block text-xs font-medium uppercase tracking-wide text-slate-500"
+                    className="block text-xs font-medium uppercase tracking-wide text-cp-faint"
                   >
                     State / Region
                   </label>
@@ -601,7 +601,7 @@ export default function ProfilePage() {
                     autoComplete="address-level1"
                     value={address.state}
                     onChange={(e) => setAddress({ ...address, state: e.target.value })}
-                    className="mt-1 block w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 shadow-sm outline-none placeholder:text-slate-400 focus:border-sky-500 focus:bg-white focus:ring-2 focus:ring-sky-500"
+                    className="mt-1 block w-full rounded-xl border border-cp-border bg-cp-raised px-3 py-2 text-sm text-cp-text shadow-sm outline-none placeholder:text-cp-faint focus:border-cp-accent focus:bg-cp-surface focus:ring-2 focus:ring-cp-primary-soft"
                     placeholder="State or region"
                   />
                 </div>
@@ -612,7 +612,7 @@ export default function ProfilePage() {
                 <div>
                   <label
                     htmlFor="address-postal"
-                    className="block text-xs font-medium uppercase tracking-wide text-slate-500"
+                    className="block text-xs font-medium uppercase tracking-wide text-cp-faint"
                   >
                     Postal Code
                   </label>
@@ -623,7 +623,7 @@ export default function ProfilePage() {
                     autoComplete="postal-code"
                     value={address.postalCode}
                     onChange={(e) => setAddress({ ...address, postalCode: e.target.value })}
-                    className="mt-1 block w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 shadow-sm outline-none placeholder:text-slate-400 focus:border-sky-500 focus:bg-white focus:ring-2 focus:ring-sky-500"
+                    className="mt-1 block w-full rounded-xl border border-cp-border bg-cp-raised px-3 py-2 text-sm text-cp-text shadow-sm outline-none placeholder:text-cp-faint focus:border-cp-accent focus:bg-cp-surface focus:ring-2 focus:ring-cp-primary-soft"
                     placeholder="Postal code"
                   />
                 </div>
@@ -631,7 +631,7 @@ export default function ProfilePage() {
                 <div>
                   <label
                     htmlFor="address-country"
-                    className="block text-xs font-medium uppercase tracking-wide text-slate-500"
+                    className="block text-xs font-medium uppercase tracking-wide text-cp-faint"
                   >
                     Country
                   </label>
@@ -642,7 +642,7 @@ export default function ProfilePage() {
                     autoComplete="country-name"
                     value={address.country}
                     onChange={(e) => setAddress({ ...address, country: e.target.value })}
-                    className="mt-1 block w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 shadow-sm outline-none placeholder:text-slate-400 focus:border-sky-500 focus:bg-white focus:ring-2 focus:ring-sky-500"
+                    className="mt-1 block w-full rounded-xl border border-cp-border bg-cp-raised px-3 py-2 text-sm text-cp-text shadow-sm outline-none placeholder:text-cp-faint focus:border-cp-accent focus:bg-cp-surface focus:ring-2 focus:ring-cp-primary-soft"
                     placeholder="Country"
                   />
                 </div>
@@ -651,7 +651,7 @@ export default function ProfilePage() {
 
             {/* Research Preferences Section */}
             <div className="space-y-4">
-              <h2 className="text-lg font-semibold text-slate-900 border-b border-slate-200 pb-2">
+              <h2 className="text-lg font-semibold text-cp-text border-b border-cp-border-soft pb-2">
                 How you use ConvergePanel
               </h2>
 
@@ -659,7 +659,7 @@ export default function ProfilePage() {
               <div>
                 <label
                   htmlFor="onboardingRole"
-                  className="block text-xs font-medium uppercase tracking-wide text-slate-500"
+                  className="block text-xs font-medium uppercase tracking-wide text-cp-faint"
                 >
                   Role
                 </label>
@@ -668,7 +668,7 @@ export default function ProfilePage() {
                   name="onboardingRole"
                   value={onboardingRole || ""}
                   onChange={(e) => setOnboardingRole(e.target.value as UserProfile["onboardingRole"] || undefined)}
-                  className="mt-1 block w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-sky-500 focus:bg-white focus:ring-2 focus:ring-sky-500"
+                  className="mt-1 block w-full rounded-xl border border-cp-border bg-cp-raised px-3 py-2 text-sm text-cp-text shadow-sm focus:border-cp-accent focus:bg-cp-surface focus:ring-2 focus:ring-cp-primary-soft"
                 >
                   <option value="">Select your role...</option>
                   <option value="founder_operator">Founder / Operator</option>
@@ -683,7 +683,7 @@ export default function ProfilePage() {
               <div>
                 <label
                   htmlFor="primaryUseCase"
-                  className="block text-xs font-medium uppercase tracking-wide text-slate-500"
+                  className="block text-xs font-medium uppercase tracking-wide text-cp-faint"
                 >
                   Primary Use Case
                 </label>
@@ -692,7 +692,7 @@ export default function ProfilePage() {
                   name="primaryUseCase"
                   value={primaryUseCase || ""}
                   onChange={(e) => setPrimaryUseCase(e.target.value as UserProfile["primaryUseCase"] || undefined)}
-                  className="mt-1 block w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-sky-500 focus:bg-white focus:ring-2 focus:ring-sky-500"
+                  className="mt-1 block w-full rounded-xl border border-cp-border bg-cp-raised px-3 py-2 text-sm text-cp-text shadow-sm focus:border-cp-accent focus:bg-cp-surface focus:ring-2 focus:ring-cp-primary-soft"
                 >
                   <option value="">Select your primary use case...</option>
                   <option value="market_research">Market or product research</option>
@@ -707,7 +707,7 @@ export default function ProfilePage() {
               <div>
                 <label
                   htmlFor="expectedUsage"
-                  className="block text-xs font-medium uppercase tracking-wide text-slate-500"
+                  className="block text-xs font-medium uppercase tracking-wide text-cp-faint"
                 >
                   Expected Usage
                 </label>
@@ -716,7 +716,7 @@ export default function ProfilePage() {
                   name="expectedUsage"
                   value={expectedUsage || ""}
                   onChange={(e) => setExpectedUsage(e.target.value as UserProfile["expectedUsage"] || undefined)}
-                  className="mt-1 block w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-sky-500 focus:bg-white focus:ring-2 focus:ring-sky-500"
+                  className="mt-1 block w-full rounded-xl border border-cp-border bg-cp-raised px-3 py-2 text-sm text-cp-text shadow-sm focus:border-cp-accent focus:bg-cp-surface focus:ring-2 focus:ring-cp-primary-soft"
                 >
                   <option value="">Select expected usage...</option>
                   <option value="few_per_month">A few times a month</option>
@@ -729,16 +729,16 @@ export default function ProfilePage() {
               <div>
                 <label
                   htmlFor="referralSource"
-                  className="block text-xs font-medium uppercase tracking-wide text-slate-500"
+                  className="block text-xs font-medium uppercase tracking-wide text-cp-faint"
                 >
-                  How did you hear about ConvergePanel? <span className="text-slate-400 font-normal">(optional)</span>
+                  How did you hear about ConvergePanel? <span className="text-cp-faint font-normal">(optional)</span>
                 </label>
                 <select
                   id="referralSource"
                   name="referralSource"
                   value={referralSource || ""}
                   onChange={(e) => setReferralSource(e.target.value as UserProfile["referralSource"] || undefined)}
-                  className="mt-1 block w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-sky-500 focus:bg-white focus:ring-2 focus:ring-sky-500"
+                  className="mt-1 block w-full rounded-xl border border-cp-border bg-cp-raised px-3 py-2 text-sm text-cp-text shadow-sm focus:border-cp-accent focus:bg-cp-surface focus:ring-2 focus:ring-cp-primary-soft"
                 >
                   <option value="">Select referral source...</option>
                   <option value="friend">Friend / colleague</option>
@@ -768,19 +768,19 @@ export default function ProfilePage() {
             <button
               type="submit"
               disabled={saving}
-              className="mt-6 inline-flex items-center justify-center rounded-full bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:opacity-50 disabled:cursor-not-allowed"
+              className="mt-6 inline-flex items-center justify-center rounded-[11px] bg-cp-primary px-4 py-2.5 text-sm font-semibold text-white shadow-[0_2px_8px_rgba(37,99,235,0.3)] transition hover:bg-cp-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-cp-surface disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {saving ? "Saving..." : "Save changes"}
             </button>
           </form>
 
           {/* Additional actions */}
-          <div className="mt-8 pt-6 border-t border-slate-200">
+          <div className="mt-8 pt-6 border-t border-cp-border">
             {isAdmin && (
               <div className="mb-4">
                 <Link
                   href="/admin"
-                  className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 transition-colors"
+                  className="inline-flex items-center justify-center rounded-[10px] border border-cp-border bg-cp-surface px-4 py-2 text-sm font-medium text-cp-text shadow-sm hover:bg-cp-raised transition-colors"
                 >
                   Admin Dashboard
                 </Link>

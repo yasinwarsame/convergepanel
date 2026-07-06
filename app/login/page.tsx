@@ -172,24 +172,24 @@ export default function LoginPage() {
    * Sign In: auth card + value summary (stacked on mobile, side-by-side from lg).
    */
   return (
-    <main className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-slate-100">
+    <main className="min-h-screen bg-cp-bg text-cp-text">
       {/* Centered flex container: stacks on mobile, side-by-side on desktop */}
       {/* lg:flex-row enables the 2-column layout on large screens */}
       <div className="mx-auto flex min-h-screen max-w-6xl flex-col items-stretch justify-center gap-10 px-4 py-10 lg:flex-row lg:items-start lg:gap-12 lg:px-8 lg:py-16">
         {/* Auth card first; value summary follows on mobile, sits beside on lg+ */}
         <div className="w-full max-w-md shrink-0 lg:mx-0 mx-auto">
-          <div className="rounded-2xl bg-white/95 p-6 shadow-xl ring-1 ring-slate-900/5">
-            <h2 className="text-xl lg:text-2xl font-semibold tracking-tight text-slate-900">
+          <div className="rounded-[14px] bg-cp-surface p-6 shadow-sm border border-cp-border">
+            <h2 className="text-xl lg:text-2xl font-semibold tracking-tight text-cp-text">
               Sign in to ConvergePanel
             </h2>
 
             {signedOut && (
               <div
-                className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700"
+                className="mt-4 rounded-xl border border-cp-border bg-cp-raised px-3 py-3 text-sm text-cp-muted"
                 role="status"
               >
-                <p className="font-medium text-slate-900">You&apos;ve been signed out.</p>
-                <p className="mt-1 text-slate-600">Thanks for using ConvergePanel. Sign back in below.</p>
+                <p className="font-medium text-cp-text">You&apos;ve been signed out.</p>
+                <p className="mt-1 text-cp-muted">Thanks for using ConvergePanel. Sign back in below.</p>
               </div>
             )}
 
@@ -197,7 +197,7 @@ export default function LoginPage() {
               <div>
                 <label
                   htmlFor="email"
-                  className="block text-xs font-medium uppercase tracking-wide text-slate-500"
+                  className="block text-xs font-medium uppercase tracking-wide text-cp-faint"
                 >
                   Email
                 </label>
@@ -209,7 +209,7 @@ export default function LoginPage() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
-                  className="mt-1 block w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 shadow-sm outline-none placeholder:text-slate-400 focus:border-sky-500 focus:bg-white focus:ring-2 focus:ring-sky-500"
+                  className="mt-1 block w-full rounded-xl border border-cp-border bg-cp-raised px-3 py-2 text-sm text-cp-text shadow-sm outline-none placeholder:text-cp-faint focus:border-cp-accent focus:bg-cp-surface focus:ring-2 focus:ring-cp-primary-soft"
                   placeholder="you@email.com"
                   autoFocus
                 />
@@ -218,7 +218,7 @@ export default function LoginPage() {
               <div>
                 <label
                   htmlFor="password"
-                  className="block text-xs font-medium uppercase tracking-wide text-slate-500"
+                  className="block text-xs font-medium uppercase tracking-wide text-cp-faint"
                 >
                   Password
                 </label>
@@ -230,7 +230,7 @@ export default function LoginPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
-                  className="mt-1 block w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 shadow-sm outline-none placeholder:text-slate-400 focus:border-sky-500 focus:bg-white focus:ring-2 focus:ring-sky-500"
+                  className="mt-1 block w-full rounded-xl border border-cp-border bg-cp-raised px-3 py-2 text-sm text-cp-text shadow-sm outline-none placeholder:text-cp-faint focus:border-cp-accent focus:bg-cp-surface focus:ring-2 focus:ring-cp-primary-soft"
                   placeholder="Enter your password"
                 />
               </div>
@@ -238,7 +238,7 @@ export default function LoginPage() {
               <div className="flex items-center justify-between text-xs">
                 <Link
                   href="/reset-password"
-                  className="text-sky-600 hover:text-sky-700"
+                  className="text-cp-accent hover:underline"
                 >
                   Forgot password?
                 </Link>
@@ -253,13 +253,13 @@ export default function LoginPage() {
               <button
                 type="submit"
                 disabled={loading}
-                className="mt-2 inline-flex w-full items-center justify-center rounded-full bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:opacity-50 disabled:cursor-not-allowed"
+                className="mt-2 inline-flex w-full items-center justify-center rounded-[11px] bg-cp-primary px-4 py-2.5 text-sm font-semibold text-white shadow-[0_2px_8px_rgba(37,99,235,0.3)] transition hover:bg-cp-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-cp-surface disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {loading ? "Signing in..." : "Sign In"}
               </button>
             </form>
 
-            <p className="mt-6 text-center text-sm text-slate-600">
+            <p className="mt-6 text-center text-sm text-cp-muted">
               New to ConvergePanel?{" "}
               <Link
                 href={
@@ -267,16 +267,16 @@ export default function LoginPage() {
                     ? `/signup?redirect=${encodeURIComponent(searchParams.get("redirect")!)}`
                     : "/signup"
                 }
-                className="font-medium text-sky-600 hover:text-sky-700"
+                className="font-medium text-cp-accent hover:underline"
               >
                 Sign up free
               </Link>{" "}
               — 8 runs per month on the free plan, no credit card required.
             </p>
 
-            <p className="mt-4 text-center text-[11px] leading-relaxed text-slate-500">
+            <p className="mt-4 text-center text-[11px] leading-relaxed text-cp-faint">
               By signing in, you agree to our{" "}
-              <Link href="/terms" className="text-sky-600 underline hover:text-sky-700">
+              <Link href="/terms" className="text-cp-accent underline hover:no-underline">
                 Terms of Service
               </Link>
               , including that AI-generated outputs may be wrong and that you are solely responsible
@@ -287,10 +287,10 @@ export default function LoginPage() {
         </div>
 
         <div className="w-full min-w-0 lg:max-w-md lg:pt-1 xl:max-w-lg">
-          <p className="text-sm font-semibold leading-snug text-slate-100">
+          <p className="text-sm font-semibold leading-snug text-cp-text">
             ConvergePanel — Multi-model research, claim verification, video verification, and governance
           </p>
-          <ValueFeatureList lines={LOGIN_VALUE_LINES} className="mt-4 text-slate-200" />
+          <ValueFeatureList lines={LOGIN_VALUE_LINES} className="mt-4 text-cp-muted" />
         </div>
       </div>
     </main>

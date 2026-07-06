@@ -30,7 +30,7 @@ function VideoVerificationMockup() {
         <Film className="h-3.5 w-3.5 shrink-0 text-cp-accent" aria-hidden />
         Video · frames · metadata
       </div>
-      <div className="mt-3 rounded-md border border-amber-900/40 bg-amber-950/20 px-3 py-2 text-xs font-medium text-amber-300/90">
+      <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
         Verdict · Inconclusive
       </div>
       <div className="mt-2 grid grid-cols-3 gap-1.5 font-mono text-[9px] text-cp-muted">
@@ -47,7 +47,7 @@ function ClaimVerificationMockup() {
   return (
     <div className="rounded-xl border border-cp-border bg-cp-raised p-4 text-left shadow-[0_4px_32px_rgba(0,0,0,0.4)]">
       <div className="rounded-md border border-cp-border bg-cp-surface px-3 py-2 text-xs font-medium text-cp-muted">
-        Aggregate verdict · <span className="text-amber-400/90">Unverifiable</span>
+        Aggregate verdict · <span className="text-amber-600">Unverifiable</span>
       </div>
       <div className="mt-3 grid grid-cols-2 gap-2 font-mono text-[10px]">
         <div className="rounded border border-cp-border bg-cp-surface p-2.5">
@@ -56,7 +56,7 @@ function ClaimVerificationMockup() {
         </div>
         <div className="rounded border border-cp-border bg-cp-surface p-2.5">
           <p className="text-[9px] text-cp-faint">Confidence</p>
-          <p className="font-semibold text-amber-400/90">Low</p>
+          <p className="font-semibold text-amber-600">Low</p>
         </div>
       </div>
       <p className="mt-3 font-mono text-[9px] text-cp-faint">Per-model evidence · Audit trail</p>
@@ -75,7 +75,7 @@ function ConsensusMockup() {
       <div className="mt-3 grid grid-cols-2 gap-2 font-mono text-[10px] text-cp-text">
         <div>
           <span className="text-[9px] text-cp-faint">Confidence</span>
-          <p className="font-medium text-sky-400">Medium</p>
+          <p className="font-medium text-sky-600">Medium</p>
         </div>
         <div>
           <span className="text-[9px] text-cp-faint">Evidence</span>
@@ -110,7 +110,7 @@ function GovernanceDashboardMockup() {
       <p className="font-mono text-[9px] font-semibold uppercase tracking-[0.18em] text-cp-faint">Governance</p>
       <p className="mt-2 text-xs font-medium text-cp-text">Policy · thresholds</p>
       <div className="mt-2 space-y-1 rounded border border-cp-border bg-cp-surface p-2.5 font-mono text-[10px] text-cp-muted">
-        <p className="text-amber-400/90">Needs review · 3 items</p>
+        <p className="text-amber-600">Needs review · 3 items</p>
         <p className="text-cp-faint">Approve · block · request changes</p>
       </div>
     </div>
@@ -122,7 +122,7 @@ function PeerReviewMockup() {
     <div className="rounded-xl border border-cp-border bg-cp-raised p-4 text-left shadow-[0_4px_32px_rgba(0,0,0,0.4)]">
       <p className="font-mono text-[9px] font-semibold uppercase tracking-[0.18em] text-cp-faint">Peer review</p>
       <p className="mt-2 text-xs text-cp-text">Reviewer assigned</p>
-      <div className="mt-2 rounded border border-sky-800/40 bg-sky-950/30 px-2.5 py-2 font-mono text-[10px] text-sky-300/80">
+      <div className="mt-2 rounded border border-sky-200 bg-sky-50 px-2.5 py-2 font-mono text-[10px] text-sky-800">
         Flagged run in their queue — decision logged
       </div>
     </div>
@@ -137,17 +137,17 @@ export default function LandingPage() {
       <section className="relative mx-auto max-w-6xl px-4 py-20 sm:py-28">
         {/* Subtle radial glow behind content */}
         <div className="pointer-events-none absolute inset-0 flex items-start justify-center overflow-hidden">
-          <div className="h-[500px] w-[800px] rounded-full bg-amber-900/10 blur-[120px]" />
+          <div className="h-[500px] w-[800px] rounded-full bg-cp-accent/10 blur-[120px]" />
         </div>
 
         <div className="relative grid grid-cols-1 items-center gap-14 lg:grid-cols-2">
           <div className="space-y-7 text-center lg:text-left">
-            <div className="inline-flex items-center gap-2 rounded-full border border-cp-accent/20 bg-amber-950/30 px-4 py-1.5 font-sans text-xs font-medium tracking-wide text-cp-accent">
+            <div className="inline-flex items-center gap-2 rounded-full border border-cp-accent/20 bg-cp-accent/10 px-4 py-1.5 font-sans text-xs font-medium tracking-wide text-cp-accent">
               <span className="h-1.5 w-1.5 rounded-full bg-cp-accent" />
               Research · Claims · Video · Governance
             </div>
 
-            <h1 className="font-serif text-5xl font-normal leading-[1.1] text-cp-text sm:text-6xl lg:text-7xl">
+            <h1 className="text-5xl font-normal leading-[1.1] text-cp-text sm:text-6xl lg:text-7xl">
               Don&apos;t trust one{" "}
               <span className="italic text-cp-accent">AI.</span>{" "}
               <br className="hidden sm:block" />
@@ -163,7 +163,7 @@ export default function LandingPage() {
             <div className="flex flex-col items-center gap-3 pt-1 sm:flex-row lg:items-start">
               <Link
                 href="/signup"
-                className="inline-flex w-full items-center justify-center rounded-xl bg-cp-accent px-8 py-3 font-sans text-base font-semibold text-cp-bg shadow-[0_0_24px_rgba(245,158,11,0.25)] transition-all hover:bg-amber-400 hover:shadow-[0_0_32px_rgba(245,158,11,0.35)] sm:w-auto"
+                className="inline-flex w-full items-center justify-center rounded-xl bg-cp-accent px-8 py-3 font-sans text-base font-semibold text-cp-bg shadow-[0_0_24px_rgba(37,99,235,0.25)] transition-all hover:bg-sky-600 hover:shadow-[0_0_32px_rgba(37,99,235,0.35)] sm:w-auto"
               >
                 Try it free
               </Link>
@@ -197,7 +197,7 @@ export default function LandingPage() {
       {/* Problem */}
       <section className="border-y border-cp-border bg-cp-surface py-16">
         <div className="mx-auto max-w-6xl px-4">
-          <h2 className="mb-2 text-center font-serif text-3xl font-normal text-cp-text">
+          <h2 className="mb-2 text-center text-3xl font-normal text-cp-text">
             The problem with asking one AI
           </h2>
           <p className="mb-10 text-center font-mono text-xs text-cp-faint">Every model is confident. Not every model is right.</p>
@@ -218,7 +218,7 @@ export default function LandingPage() {
             ].map(({ title, body }) => (
               <div key={title} className="rounded-xl border border-cp-border bg-cp-raised p-6">
                 <div className="mb-3 h-px w-8 bg-cp-accent/40" />
-                <h3 className="font-serif text-lg font-normal text-cp-text">{title}</h3>
+                <h3 className="text-lg font-normal text-cp-text">{title}</h3>
                 <p className="mt-3 font-sans text-sm leading-relaxed text-cp-muted">{body}</p>
               </div>
             ))}
@@ -229,7 +229,7 @@ export default function LandingPage() {
       {/* Features */}
       <section id="features" className="mx-auto max-w-6xl scroll-mt-24 px-4 py-20 sm:py-28">
         <div className="mb-16 text-center">
-          <h2 className="font-serif text-3xl font-normal text-cp-text sm:text-4xl">
+          <h2 className="text-3xl font-normal text-cp-text sm:text-4xl">
             Two modes. One trust layer.
           </h2>
           <div className="mx-auto mt-3 h-px w-16 bg-cp-accent/40" />
@@ -240,7 +240,7 @@ export default function LandingPage() {
           <div className="grid grid-cols-1 items-center gap-10 lg:grid-cols-2">
             <div>
               <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-cp-accent">01</span>
-              <h3 className="mt-2 font-serif text-2xl font-normal text-cp-text">Multi-model research panel</h3>
+              <h3 className="mt-2 text-2xl font-normal text-cp-text">Multi-model research panel</h3>
               <p className="mt-3 font-sans text-sm leading-relaxed text-cp-muted">
                 Ask a serious research question. Five leading models answer independently. ConvergePanel
                 synthesizes the results into a structured brief with consensus findings, disagreements, bias
@@ -255,7 +255,7 @@ export default function LandingPage() {
             <ClaimVerificationMockup />
             <div className="lg:order-first">
               <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-cp-accent">02</span>
-              <h3 className="mt-2 font-serif text-2xl font-normal text-cp-text">Claim verification</h3>
+              <h3 className="mt-2 text-2xl font-normal text-cp-text">Claim verification</h3>
               <p className="mt-3 font-sans text-sm leading-relaxed text-cp-muted">
                 Paste any claim — from a report, an AI output, a strategy doc, or an article. Five models
                 evaluate it independently. You get a clear verdict, a consensus score, per-model evidence,
@@ -268,7 +268,7 @@ export default function LandingPage() {
           <div className="grid grid-cols-1 items-center gap-10 lg:grid-cols-2">
             <div>
               <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-cp-accent">03</span>
-              <h3 className="mt-2 flex items-center gap-2 font-serif text-2xl font-normal text-cp-text">
+              <h3 className="mt-2 flex items-center gap-2 text-2xl font-normal text-cp-text">
                 <Film className="h-5 w-5 shrink-0 text-cp-accent" aria-hidden />
                 Video verification
               </h3>
@@ -288,7 +288,7 @@ export default function LandingPage() {
           <div className="grid grid-cols-1 items-center gap-10 lg:grid-cols-2">
             <div>
               <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-cp-accent">04</span>
-              <h3 className="mt-2 font-serif text-2xl font-normal text-cp-text">Consensus scoring</h3>
+              <h3 className="mt-2 text-2xl font-normal text-cp-text">Consensus scoring</h3>
               <p className="mt-3 font-sans text-sm leading-relaxed text-cp-muted">
                 Every run produces a consensus score from 0–100 that summarizes how defensible the result
                 is given model agreement and evidence signals. Strong agreement means move faster. Weak
@@ -303,7 +303,7 @@ export default function LandingPage() {
             <AuditMockup />
             <div className="lg:order-first">
               <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-cp-accent">05</span>
-              <h3 className="mt-2 font-serif text-2xl font-normal text-cp-text">Audit trail</h3>
+              <h3 className="mt-2 text-2xl font-normal text-cp-text">Audit trail</h3>
               <p className="mt-3 font-sans text-sm leading-relaxed text-cp-muted">
                 Claims and research runs produce a compact, exportable audit record: which models ran,
                 structured verdict signals, consensus score, and metadata. Built for teams that need to
@@ -316,7 +316,7 @@ export default function LandingPage() {
           <div className="grid grid-cols-1 items-center gap-10 lg:grid-cols-2">
             <div>
               <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-cp-accent">06</span>
-              <h3 className="mt-2 font-serif text-2xl font-normal text-cp-text">Governance Dashboard</h3>
+              <h3 className="mt-2 text-2xl font-normal text-cp-text">Governance Dashboard</h3>
               <p className="mt-3 font-sans text-sm leading-relaxed text-cp-muted">
                 Set consensus thresholds, flag weak evidence automatically, and review flagged runs before
                 they&apos;re acted on. Assign a peer reviewer, approve or block claims, and keep a complete
@@ -334,7 +334,7 @@ export default function LandingPage() {
             <PeerReviewMockup />
             <div className="lg:order-first">
               <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-cp-accent">07</span>
-              <h3 className="mt-2 font-serif text-2xl font-normal text-cp-text">Peer review</h3>
+              <h3 className="mt-2 text-2xl font-normal text-cp-text">Peer review</h3>
               <p className="mt-3 font-sans text-sm leading-relaxed text-cp-muted">
                 Assign a colleague as your reviewer. When research or claim verification scores below your
                 trust threshold, it shows up in their review queue. They can approve, block, or request
@@ -351,7 +351,7 @@ export default function LandingPage() {
       {/* Who it's for */}
       <section className="border-t border-cp-border bg-cp-surface py-16">
         <div className="mx-auto max-w-6xl px-4">
-          <h2 className="mb-2 text-center font-serif text-3xl font-normal text-cp-text">
+          <h2 className="mb-2 text-center text-3xl font-normal text-cp-text">
             Built for people who can&apos;t afford to be wrong
           </h2>
           <div className="mx-auto mb-10 mt-3 h-px w-16 bg-cp-accent/40" />
@@ -383,7 +383,7 @@ export default function LandingPage() {
               },
             ].map(({ label, body }) => (
               <div key={label} className="rounded-xl border border-cp-border bg-cp-raised p-5 transition-colors hover:border-cp-accent/20">
-                <h3 className="font-serif text-base font-normal text-cp-text">{label}</h3>
+                <h3 className="text-base font-normal text-cp-text">{label}</h3>
                 <p className="mt-2 font-sans text-sm leading-relaxed text-cp-muted">{body}</p>
               </div>
             ))}
@@ -394,7 +394,7 @@ export default function LandingPage() {
       {/* Popular verification workflows */}
       <section className="border-t border-cp-border bg-cp-bg py-14">
         <div className="mx-auto max-w-4xl px-4">
-          <h2 className="mb-1 text-center font-serif text-xl font-normal text-cp-text">
+          <h2 className="mb-1 text-center text-xl font-normal text-cp-text">
             Popular verification workflows
           </h2>
           <p className="mb-8 text-center font-mono text-xs text-cp-faint">
@@ -425,7 +425,7 @@ export default function LandingPage() {
             ))}
           </div>
           <p className="mt-6 text-center">
-            <Link href="/use-cases" className="font-mono text-xs text-cp-accent transition-colors hover:text-amber-300">
+            <Link href="/use-cases" className="font-mono text-xs text-cp-accent transition-colors hover:text-sky-700">
               View all use cases →
             </Link>
           </p>
@@ -435,7 +435,7 @@ export default function LandingPage() {
       {/* Pricing CTA */}
       <section className="border-t border-cp-border bg-cp-surface py-20">
         <div className="mx-auto max-w-2xl px-4 text-center">
-          <h2 className="font-serif text-3xl font-normal text-cp-text sm:text-4xl">
+          <h2 className="text-3xl font-normal text-cp-text sm:text-4xl">
             Start free. Upgrade when you need more.
           </h2>
           <p className="mx-auto mt-4 max-w-xl font-sans leading-relaxed text-cp-muted">
@@ -459,7 +459,7 @@ export default function LandingPage() {
           </ul>
           <Link
             href="/pricing"
-            className="mt-10 inline-flex items-center justify-center rounded-xl bg-cp-accent px-8 py-3 font-sans text-base font-semibold text-cp-bg shadow-[0_0_24px_rgba(245,158,11,0.2)] transition-all hover:bg-amber-400 hover:shadow-[0_0_32px_rgba(245,158,11,0.35)]"
+            className="mt-10 inline-flex items-center justify-center rounded-xl bg-cp-accent px-8 py-3 font-sans text-base font-semibold text-cp-bg shadow-[0_0_24px_rgba(37,99,235,0.2)] transition-all hover:bg-sky-600 hover:shadow-[0_0_32px_rgba(37,99,235,0.35)]"
           >
             View pricing
           </Link>

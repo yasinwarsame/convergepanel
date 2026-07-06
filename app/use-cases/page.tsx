@@ -24,7 +24,7 @@ const HUB_GROUPS: HubGroup[] = [
     id: "claim-verification",
     label: "Claim Verification",
     description: "Verify specific claims, quotes, and statistics across five AI models before publishing or acting.",
-    tailwindText: "text-blue-400",
+    tailwindText: "text-blue-600",
     tailwindBg: "bg-cp-raised",
     tailwindBorder: "border-cp-border",
     slugs: [
@@ -52,7 +52,7 @@ const HUB_GROUPS: HubGroup[] = [
     id: "ai-answer-verification",
     label: "AI Answer Verification",
     description: "Fact-check ChatGPT and other AI outputs for hallucinations, weak sources, missing context, and blind spots.",
-    tailwindText: "text-indigo-400",
+    tailwindText: "text-indigo-600",
     tailwindBg: "bg-cp-raised",
     tailwindBorder: "border-cp-border",
     slugs: [
@@ -77,7 +77,7 @@ const HUB_GROUPS: HubGroup[] = [
     id: "consensus-disagreement",
     label: "Consensus & Disagreement",
     description: "Compare model agreement, surface disagreement, and understand what AI splits mean for your decisions.",
-    tailwindText: "text-rose-400",
+    tailwindText: "text-rose-600",
     tailwindBg: "bg-cp-raised",
     tailwindBorder: "border-cp-border",
     slugs: [
@@ -98,7 +98,7 @@ const HUB_GROUPS: HubGroup[] = [
     id: "video-verification",
     label: "Video Verification",
     description: "Review suspicious or viral videos with three vision models. Surface manipulation signals, compare model assessments, and produce an advisory review record before acting on or publishing a clip.",
-    tailwindText: "text-violet-400",
+    tailwindText: "text-violet-600",
     tailwindBg: "bg-cp-raised",
     tailwindBorder: "border-cp-border",
     slugs: [
@@ -118,7 +118,7 @@ const HUB_GROUPS: HubGroup[] = [
     id: "governance-audit-trails",
     label: "AI Audit Trails & Governance",
     description: "Workflows for reviewing AI-assisted decisions, identifying risk signals, documenting disagreement, and creating audit trails or decision receipts for high-stakes work.",
-    tailwindText: "text-amber-400",
+    tailwindText: "text-amber-600",
     tailwindBg: "bg-cp-raised",
     tailwindBorder: "border-cp-border",
     slugs: [
@@ -144,7 +144,7 @@ const HUB_GROUPS: HubGroup[] = [
     id: "decision-receipts",
     label: "Decision Receipts & Trust",
     description: "Document AI-assisted decisions with structured receipts, confidence scores, and evidence records.",
-    tailwindText: "text-teal-400",
+    tailwindText: "text-teal-600",
     tailwindBg: "bg-cp-raised",
     tailwindBorder: "border-cp-border",
     slugs: [
@@ -160,7 +160,7 @@ const HUB_GROUPS: HubGroup[] = [
     id: "creator-workflows",
     label: "Creator Workflows",
     description: "Fact-checking and source verification for YouTubers, podcasters, and content teams before publishing.",
-    tailwindText: "text-pink-400",
+    tailwindText: "text-pink-600",
     tailwindBg: "bg-cp-raised",
     tailwindBorder: "border-cp-border",
     slugs: [
@@ -178,7 +178,7 @@ const HUB_GROUPS: HubGroup[] = [
     id: "journalist-workflows",
     label: "Journalist & Newsroom Workflows",
     description: "Verification workflows built for newsrooms, deadlines, editorial standards, and accountability.",
-    tailwindText: "text-sky-400",
+    tailwindText: "text-sky-600",
     tailwindBg: "bg-cp-raised",
     tailwindBorder: "border-cp-border",
     slugs: [
@@ -194,7 +194,7 @@ const HUB_GROUPS: HubGroup[] = [
     id: "founder-decision-support",
     label: "Founder & Decision Support",
     description: "Pressure-test business assumptions, pitch claims, and market research with multi-model AI.",
-    tailwindText: "text-orange-400",
+    tailwindText: "text-orange-600",
     tailwindBg: "bg-cp-raised",
     tailwindBorder: "border-cp-border",
     slugs: [
@@ -212,7 +212,7 @@ const HUB_GROUPS: HubGroup[] = [
     id: "research-quality",
     label: "Deep Research & Verification",
     description: "Run multi-model research, verify claims and sources, surface disagreement, and produce a documented synthesis. Generate and verify in one workflow — not two separate tools.",
-    tailwindText: "text-emerald-400",
+    tailwindText: "text-emerald-600",
     tailwindBg: "bg-cp-raised",
     tailwindBorder: "border-cp-border",
     slugs: [
@@ -230,7 +230,7 @@ const HUB_GROUPS: HubGroup[] = [
     id: "competitive-intelligence",
     label: "Competitive Intelligence",
     description: "Verify competitor claims, pressure-test market research, compare trend analysis, and review pricing intelligence across AI models.",
-    tailwindText: "text-cyan-400",
+    tailwindText: "text-cyan-600",
     tailwindBg: "bg-cp-raised",
     tailwindBorder: "border-cp-border",
     slugs: [
@@ -248,7 +248,7 @@ const HUB_GROUPS: HubGroup[] = [
     id: "procurement-vendor-due-diligence",
     label: "Procurement & Vendor Due Diligence",
     description: "Verify vendor claims, certifications, and capabilities using multiple AI models before committing to contracts or software purchases.",
-    tailwindText: "text-yellow-400",
+    tailwindText: "text-yellow-600",
     tailwindBg: "bg-cp-raised",
     tailwindBorder: "border-cp-border",
     slugs: [
@@ -268,7 +268,7 @@ const HUB_GROUPS: HubGroup[] = [
     id: "compliance-risk-operations",
     label: "Compliance & Risk Operations",
     description: "Review compliance claims, interpret policies, and check regulatory evidence using multiple AI models before expert sign-off.",
-    tailwindText: "text-red-400",
+    tailwindText: "text-red-600",
     tailwindBg: "bg-cp-raised",
     tailwindBorder: "border-cp-border",
     slugs: [
@@ -287,7 +287,7 @@ const HUB_GROUPS: HubGroup[] = [
     id: "internal-audit-controls",
     label: "Internal Audit & Controls",
     description: "Accelerate audit research, review control narratives, and check evidence sufficiency using multiple AI models.",
-    tailwindText: "text-lime-400",
+    tailwindText: "text-lime-600",
     tailwindBg: "bg-cp-raised",
     tailwindBorder: "border-cp-border",
     slugs: [
@@ -307,7 +307,7 @@ const HUB_GROUPS: HubGroup[] = [
     id: "cybersecurity-threat-intelligence",
     label: "Cybersecurity & Threat Intelligence",
     description: "Review cyber threat claims, fact-check threat reports, and validate security advisories using multiple AI models.",
-    tailwindText: "text-fuchsia-400",
+    tailwindText: "text-fuchsia-600",
     tailwindBg: "bg-cp-raised",
     tailwindBorder: "border-cp-border",
     slugs: [
@@ -327,7 +327,7 @@ const HUB_GROUPS: HubGroup[] = [
     id: "product-management-roadmap",
     label: "Product Management & Roadmap",
     description: "Verify product requirements, check user feedback themes, and pressure-test roadmap prioritization with multi-model AI.",
-    tailwindText: "text-purple-400",
+    tailwindText: "text-purple-600",
     tailwindBg: "bg-cp-raised",
     tailwindBorder: "border-cp-border",
     slugs: [
@@ -347,7 +347,7 @@ const HUB_GROUPS: HubGroup[] = [
     id: "customer-support-knowledge-base",
     label: "Customer Support & Knowledge Base",
     description: "Verify help center answers, audit knowledge base articles, and fact-check support content for accuracy using multiple AI models.",
-    tailwindText: "text-green-400",
+    tailwindText: "text-green-600",
     tailwindBg: "bg-cp-raised",
     tailwindBorder: "border-cp-border",
     slugs: [
@@ -367,7 +367,7 @@ const HUB_GROUPS: HubGroup[] = [
     id: "sales-enablement-account-research",
     label: "Sales Enablement & Account Research",
     description: "Fact-check battlecards, verify account research, and pressure-test competitive claims before they reach a prospect.",
-    tailwindText: "text-rose-300",
+    tailwindText: "text-rose-600",
     tailwindBg: "bg-cp-raised",
     tailwindBorder: "border-cp-border",
     slugs: [
@@ -387,7 +387,7 @@ const HUB_GROUPS: HubGroup[] = [
     id: "finance-operations-fpa",
     label: "Finance Operations & FP&A",
     description: "Verify financial model assumptions and review finance memo claims using multi-model AI research.",
-    tailwindText: "text-amber-300",
+    tailwindText: "text-amber-600",
     tailwindBg: "bg-cp-raised",
     tailwindBorder: "border-cp-border",
     slugs: [
@@ -406,7 +406,7 @@ const HUB_GROUPS: HubGroup[] = [
     id: "public-sector-policy",
     label: "Public Sector & Policy",
     description: "Verify public statements, official claims, and policy positions using multiple AI models before publishing or acting.",
-    tailwindText: "text-stone-400",
+    tailwindText: "text-stone-600",
     tailwindBg: "bg-cp-raised",
     tailwindBorder: "border-cp-border",
     slugs: [
@@ -417,7 +417,7 @@ const HUB_GROUPS: HubGroup[] = [
     id: "expert-knowledge-workflows",
     label: "Expert Knowledge Workflows",
     description: "Use ConvergePanel to compare expert-level AI responses, pressure-test complex explanations, synthesize multiple perspectives, and document review paths for serious knowledge work.",
-    tailwindText: "text-indigo-300",
+    tailwindText: "text-indigo-600",
     tailwindBg: "bg-cp-raised",
     tailwindBorder: "border-cp-border",
     slugs: [
@@ -434,7 +434,7 @@ const HUB_GROUPS: HubGroup[] = [
     id: "government-public-sector-research",
     label: "Government & Public Sector Research",
     description: "Use ConvergePanel to review policy claims, public program information, agency research, civic workflows, and government analysis with multiple AI models and documented review.",
-    tailwindText: "text-slate-300",
+    tailwindText: "text-slate-600",
     tailwindBg: "bg-cp-raised",
     tailwindBorder: "border-cp-border",
     slugs: [
@@ -452,7 +452,7 @@ const HUB_GROUPS: HubGroup[] = [
     id: "higher-ed-administration",
     label: "Higher Ed Administration & Academic Operations",
     description: "Use ConvergePanel to review university policy summaries, program information, student services research, and administrative knowledge before publishing or relying on it.",
-    tailwindText: "text-sky-300",
+    tailwindText: "text-sky-600",
     tailwindBg: "bg-cp-raised",
     tailwindBorder: "border-cp-border",
     slugs: [
@@ -469,7 +469,7 @@ const HUB_GROUPS: HubGroup[] = [
     id: "supply-chain-operations-planning",
     label: "Supply Chain & Operations Planning",
     description: "Use ConvergePanel to review logistics claims, operational assumptions, supply chain research, shipping risks, and planning decisions with multiple AI models.",
-    tailwindText: "text-orange-300",
+    tailwindText: "text-orange-600",
     tailwindBg: "bg-cp-raised",
     tailwindBorder: "border-cp-border",
     slugs: [
@@ -487,7 +487,7 @@ const HUB_GROUPS: HubGroup[] = [
     id: "translation-localization-content-qa",
     label: "Translation, Localization & Content QA",
     description: "Use ConvergePanel to compare multilingual content, translation quality, cultural context, and localization risks across multiple AI models.",
-    tailwindText: "text-teal-300",
+    tailwindText: "text-teal-600",
     tailwindBg: "bg-cp-raised",
     tailwindBorder: "border-cp-border",
     slugs: [
@@ -503,7 +503,7 @@ const HUB_GROUPS: HubGroup[] = [
     label: "Legal Operations & Contract Review",
     description:
       "Use ConvergePanel to compare how multiple AI models summarize contracts, explain clauses, and research matter background, so legal teams can spot disagreement before relying on a single answer. ConvergePanel does not provide legal advice.",
-    tailwindText: "text-indigo-300",
+    tailwindText: "text-indigo-600",
     tailwindBg: "bg-cp-raised",
     tailwindBorder: "border-cp-border",
     slugs: [
@@ -522,7 +522,7 @@ const HUB_GROUPS: HubGroup[] = [
     label: "Insurance & Claims Document Review",
     description:
       "Use ConvergePanel to compare how multiple AI models read claims and policy documents, so insurance teams can flag disagreement for human review. ConvergePanel does not make coverage or claims decisions.",
-    tailwindText: "text-rose-300",
+    tailwindText: "text-rose-600",
     tailwindBg: "bg-cp-raised",
     tailwindBorder: "border-cp-border",
     slugs: [
@@ -535,7 +535,7 @@ const HUB_GROUPS: HubGroup[] = [
     label: "AI Trust, Disagreement & Human Review",
     description:
       "Explore what model agreement, disagreement, weak sources, hidden assumptions, and human review reveal about whether an AI answer can be trusted.",
-    tailwindText: "text-sky-400",
+    tailwindText: "text-sky-600",
     tailwindBg: "bg-cp-raised",
     tailwindBorder: "border-cp-border",
     slugs: [
@@ -556,7 +556,7 @@ const HUB_GROUPS: HubGroup[] = [
     label: "AI Verification for Journalists & Fact-Checkers",
     description:
       "Review AI-generated claims, quotes, timelines, sources, summaries, and allegations before publication — and document why the newsroom accepted or rejected them.",
-    tailwindText: "text-rose-400",
+    tailwindText: "text-rose-600",
     tailwindBg: "bg-cp-raised",
     tailwindBorder: "border-cp-border",
     slugs: [
@@ -577,7 +577,7 @@ const HUB_GROUPS: HubGroup[] = [
     label: "Enterprise AI Assurance and Review",
     description:
       "Evaluate whether AI-assisted conclusions were supported by sufficient evidence, meaningfully challenged, independently reviewed, and appropriately approved.",
-    tailwindText: "text-blue-300",
+    tailwindText: "text-blue-600",
     tailwindBg: "bg-cp-raised",
     tailwindBorder: "border-cp-border",
     slugs: [
@@ -598,7 +598,7 @@ const HUB_GROUPS: HubGroup[] = [
     label: "AI Editorial Judgment & Evidence Review",
     description:
       "Review how AI changes certainty, framing, source selection, statistics, and causal claims — and how to document what's still unresolved before you publish.",
-    tailwindText: "text-amber-300",
+    tailwindText: "text-amber-600",
     tailwindBg: "bg-cp-raised",
     tailwindBorder: "border-cp-border",
     slugs: [
@@ -690,7 +690,7 @@ export default function UseCasesIndex() {
 
       {/* Footer CTA */}
       <div className="mt-16 rounded-2xl bg-cp-raised px-8 py-10 text-center">
-        <p className="mb-2 text-lg font-semibold text-white">
+        <p className="mb-2 text-lg font-semibold text-cp-text">
           Compare AI models, surface disagreement, and verify before you act
         </p>
         <p className="mb-6 text-sm text-cp-muted">

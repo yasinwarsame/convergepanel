@@ -9,9 +9,18 @@
  */
 
 import { ModelId } from "@/lib/types";
-import { PANEL_MODELS, PanelModelId, getPanelModelConfig } from "@/lib/panelModels";
+import { PANEL_MODELS, PanelModelId } from "@/lib/panelModels";
 import { useState } from "react";
 import { PlanId, getPlanConfig } from "@/lib/plans";
+import { Check } from "lucide-react";
+
+const MODEL_DOT_COLORS: Record<PanelModelId, string> = {
+  chatgpt: "bg-emerald-500",
+  claude: "bg-indigo-500",
+  grok: "bg-amber-500",
+  perplexity: "bg-sky-500",
+  gemini: "bg-rose-500",
+};
 
 interface ModelPickerProps {
   selectedModels: PanelModelId[];
@@ -126,20 +135,17 @@ export default function ModelPicker({
   const disableAnother = selectedModels.length >= effectiveMaxModels;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       {/* NOTE: For MVP testing, all five models (ChatGPT, Claude, Grok, Perplexity, Gemini 3 Pro)
           are fully enabled regardless of plan. Gating will be reintroduced later. */}
-      
+
       {/* Panel Preset Select */}
-      <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div className="text-sm text-slate-600">
-          <span className="font-medium text-slate-800">Panel preset:</span>
-          <span className="ml-2">Choose a default model set or customize below.</span>
-        </div>
+      <div>
+        <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-cp-faint">Preset</p>
         <select
           value={preset}
           onChange={(e) => handlePresetChange(e.target.value as PanelPreset)}
-          className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 shadow-sm focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-200"
+          className="block w-full rounded-[10px] border border-cp-border bg-cp-surface px-3 py-2.5 text-sm font-medium text-cp-text shadow-sm focus:border-cp-accent focus:outline-none focus:ring-1 focus:ring-cp-primary-soft"
         >
           {effectiveMaxModels >= 2 && <option value="two">2-Model Panel</option>}
           {effectiveMaxModels >= 3 && <option value="three">3-Model Panel</option>}
@@ -147,93 +153,75 @@ export default function ModelPicker({
         </select>
       </div>
 
-      {/* Model Buttons */}
+      {/* Model Rows */}
       {/* Use PANEL_MODELS as the single source of truth so Run Panel buttons
           and Agreement/Disagreement Map badges always match colors and labels. */}
-      <div className="mt-3 flex flex-wrap gap-3">
-        {PANEL_MODELS.map((model) => {
-          const isSelected = selectedModels.includes(model.id);
-          // Disable based on plan limits:
-          // - Disable unchecking if we're at minimum (2 models)
-          // - Disable checking if we're at maximum (plan limit)
-          const isDisabled = (isSelected && isMinimumReached) || (!isSelected && disableAnother);
-          
-          // Tooltip message for disabled unselected models (Free plan upgrade prompt)
-          const tooltipMessage = !isSelected && disableAnother && isFree
-            ? "Free plan allows up to 2 models per run. Upgrade to run 3 or 5 models."
-            : !isSelected && disableAnother
-            ? `Your plan allows up to ${effectiveMaxModels} models per run. Upgrade to run more.`
-            : isSelected && isMinimumReached
-            ? "You must select at least 2 models."
-            : null;
+      <div>
+        <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-cp-faint">Models</p>
+        <div className="flex flex-col gap-2">
+          {PANEL_MODELS.map((model) => {
+            const isSelected = selectedModels.includes(model.id);
+            // Disable based on plan limits:
+            // - Disable unchecking if we're at minimum (2 models)
+            // - Disable checking if we're at maximum (plan limit)
+            const isDisabled = (isSelected && isMinimumReached) || (!isSelected && disableAnother);
 
-          // Get model config - this is the single source of truth for colors and labels
-          const config = getPanelModelConfig(model.id);
-          
-          // Selected state colors (darker version of badge colors)
-          // These match the color scheme from PANEL_MODELS but use darker shades for selected state
-          const selectedColors = {
-            chatgpt: "bg-emerald-600 text-white border-emerald-600",
-            claude: "bg-indigo-600 text-white border-indigo-600",
-            grok: "bg-amber-500 text-white border-amber-500",
-            perplexity: "bg-sky-600 text-white border-sky-600",
-            gemini: "bg-rose-600 text-white border-rose-600",
-          }[model.id];
-          
-          const checkmarkColor = {
-            chatgpt: "bg-emerald-600",
-            claude: "bg-indigo-600",
-            grok: "bg-amber-500",
-            perplexity: "bg-sky-600",
-            gemini: "bg-rose-600",
-          }[model.id];
+            // Tooltip message for disabled unselected models (Free plan upgrade prompt)
+            const tooltipMessage = !isSelected && disableAnother && isFree
+              ? "Free plan allows up to 2 models per run. Upgrade to run 3 or 5 models."
+              : !isSelected && disableAnother
+              ? `Your plan allows up to ${effectiveMaxModels} models per run. Upgrade to run more.`
+              : isSelected && isMinimumReached
+              ? "You must select at least 2 models."
+              : null;
 
-          return (
-            <div key={model.id} className="relative group">
-              <button
-                type="button"
-                onClick={() => handleModelToggle(model.id)}
-                disabled={isDisabled}
-                className={`relative flex items-center gap-2 rounded-xl border px-4 py-2 text-sm font-medium transition focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-slate-400 ${
-                  isSelected
-                    ? `${selectedColors} shadow-sm`
-                    : `${config.colorClasses} hover:border-opacity-60 hover:bg-opacity-80`
-                } ${isDisabled ? "opacity-70 cursor-not-allowed" : "cursor-pointer"}`}
-                title={tooltipMessage || undefined}
-              >
-                <span className={`inline-flex h-4 w-4 items-center justify-center rounded-sm border ${
-                  isSelected ? "border-white" : "border-slate-300 bg-white"
-                }`}>
-                  {isSelected && <span className={`h-2 w-2 rounded-[2px] ${checkmarkColor}`} />}
-                </span>
-                {model.label}
-              </button>
-              {/* Tooltip for disabled models */}
-              {tooltipMessage && (
-                <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 hidden group-hover:block z-10">
-                  <div className="bg-slate-900 text-white text-xs rounded-lg py-2 px-3 whitespace-nowrap shadow-lg">
-                    {tooltipMessage}
-                    <div className="absolute top-full left-1/2 transform -translate-x-1/2 -mt-1">
-                      <div className="border-4 border-transparent border-t-slate-900"></div>
+            const dotColor = MODEL_DOT_COLORS[model.id];
+
+            return (
+              <div key={model.id} className="relative group">
+                <button
+                  type="button"
+                  onClick={() => handleModelToggle(model.id)}
+                  disabled={isDisabled}
+                  className={`relative flex w-full items-center gap-2.5 rounded-[10px] border px-3.5 py-2.5 text-left text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent focus-visible:ring-offset-2 ${
+                    isSelected
+                      ? "border-[1.5px] border-cp-primary bg-cp-primary-tint text-cp-text"
+                      : "border-cp-border bg-cp-surface text-cp-text hover:border-cp-faint"
+                  } ${isDisabled ? "opacity-60 cursor-not-allowed" : "cursor-pointer"}`}
+                  title={tooltipMessage || undefined}
+                >
+                  <span className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-[5px] border ${
+                    isSelected ? "border-cp-primary bg-cp-primary" : "border-cp-border bg-cp-surface"
+                  }`}>
+                    {isSelected && <Check className="h-3.5 w-3.5 text-white" strokeWidth={3} />}
+                  </span>
+                  <span className={`h-2 w-2 shrink-0 rounded-full ${dotColor}`} aria-hidden />
+                  <span className="flex-1">{model.label}</span>
+                </button>
+                {/* Tooltip for disabled models */}
+                {tooltipMessage && (
+                  <div className="absolute bottom-full left-1/2 z-10 mb-2 hidden -translate-x-1/2 transform group-hover:block">
+                    <div className="whitespace-nowrap rounded-lg bg-cp-text px-3 py-2 text-xs text-cp-bg shadow-lg">
+                      {tooltipMessage}
+                      <div className="absolute top-full left-1/2 -mt-1 -translate-x-1/2 transform">
+                        <div className="border-4 border-transparent border-t-cp-text"></div>
+                      </div>
                     </div>
                   </div>
-                </div>
-              )}
-            </div>
-          );
-        })}
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       {/* Helper Text */}
-      <p className="mt-1 text-xs text-slate-600">
-        Select at least <span className="font-semibold">2 models</span>.
-        {plan === "free" && (
-          <> Free plan allows up to <span className="font-semibold">2 models</span> per run.</>
-        )}
-        {plan && plan !== "free" && (
-          <> You can use up to <span className="font-semibold">{effectiveMaxModels} models</span> on your {getPlanConfig(plan).name} plan.</>
-        )}
-        {!plan && <> You can use up to {effectiveMaxModels} models at once.</>}
+      <p className="text-xs text-cp-muted">
+        {selectedModels.length} of up to {effectiveMaxModels} models selected.
+        {plan === "free" && " Free plan allows up to 2 models per run."}
+        {plan === "lite" && " 3-Model plan allows up to 3 per run."}
+        {plan === "full" && " Full Plan allows up to 5 per run."}
+        {!plan && ` You can use up to ${effectiveMaxModels} models at once.`}
       </p>
     </div>
   );

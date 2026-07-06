@@ -24,6 +24,7 @@
 import { useState, useEffect, Suspense, lazy, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 import dynamic from "next/dynamic";
 import { BookOpen, Film } from "lucide-react";
 import { useAuth } from "@/components/AuthProvider";
@@ -58,11 +59,11 @@ import type { SynthesisConsensusSummaryDetail } from "@/lib/verification/consens
 // Lazy load heavy components - defer until after first paint
 const ResultsDisplay = dynamic(() => import("@/components/ResultsDisplay"), {
   loading: () => (
-    <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-8">
+    <div className="bg-cp-surface rounded-2xl shadow-sm border border-cp-border p-8">
       <div className="animate-pulse space-y-4">
-        <div className="h-8 bg-slate-200 rounded w-1/3" />
-        <div className="h-32 bg-slate-200 rounded" />
-        <div className="h-24 bg-slate-200 rounded" />
+        <div className="h-8 bg-cp-border rounded w-1/3" />
+        <div className="h-32 bg-cp-border rounded" />
+        <div className="h-24 bg-cp-border rounded" />
       </div>
     </div>
   ),
@@ -265,7 +266,7 @@ function HistoryGovernanceChip({ status }: { status?: PanelHistoryGovernanceStat
         : { dot: "bg-amber-500", text: "Review", textCls: "text-amber-900" };
   return (
     <span
-      className={`inline-flex shrink-0 items-center gap-1.5 self-center rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold ${cfg.textCls}`}
+      className={`inline-flex shrink-0 items-center gap-1.5 self-center rounded-full border border-cp-border bg-cp-surface px-2 py-0.5 text-[10px] font-semibold ${cfg.textCls}`}
       aria-label={`Governance: ${cfg.text}`}
     >
       <span className={`h-2 w-2 rounded-full ${cfg.dot}`} aria-hidden />
@@ -1830,38 +1831,53 @@ export default function Home() {
   if (onboardingCompleted === false && !checkingOnboarding) {
     return (
       <main className="max-w-4xl mx-auto px-4 py-10">
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 px-6 py-8 text-center">
-          <div className="h-6 w-6 animate-spin rounded-full border-2 border-sky-400 border-t-transparent mx-auto mb-4" />
-          <p className="text-sm text-slate-600">Redirecting to onboarding…</p>
+        <div className="bg-cp-surface rounded-2xl shadow-sm border border-cp-border px-6 py-8 text-center">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-cp-accent border-t-transparent mx-auto mb-4" />
+          <p className="text-sm text-cp-muted">Redirecting to onboarding…</p>
         </div>
       </main>
     );
   }
 
   return (
-    <main className="max-w-4xl mx-auto px-4 py-10">
-      <section className="bg-white rounded-2xl shadow-sm border border-slate-200 px-6 py-5 md:px-8 md:py-6">
+    <main className="max-w-6xl mx-auto px-4 py-10">
+      <section>
+        {/* Header + tabs share the left column with the composer; Panel setup (right column) is
+            aligned via items-start so its top matches the header and its bottom lands near the
+            question box, not the full-height left column. Grid only applies for Research/Verify. */}
+        <div className={showMainComposer ? "lg:grid lg:grid-cols-[1fr_336px] lg:items-start lg:gap-6" : undefined}>
+        <div>
         {/* Header: title + meta tags (plan/usage lives on Profile & Billing) */}
         <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           <div className="flex-1 min-w-0">
-            {/* Title */}
-            <h1 className="text-3xl md:text-4xl font-semibold tracking-tight text-slate-900">
-              Ask your expert panel
-            </h1>
-            
+            {/* Logo + Title */}
+            <div className="flex items-center gap-3">
+              <span className="relative flex h-11 w-11 shrink-0 items-center justify-center">
+                <Image src="/logo-mark.png" alt="" width={44} height={44} className="h-11 w-11" priority />
+              </span>
+              <h1 className="text-3xl md:text-4xl font-semibold tracking-tight text-cp-text">
+                Ask your expert panel
+              </h1>
+            </div>
+
+            <p className="mt-3 max-w-2xl text-sm text-cp-muted md:text-base">
+              Run a multi-LLM panel and get back one synthesized, source-checked brief — with
+              consensus, disagreements, biases, and blind spots called out.
+            </p>
+
             {/* Subtitle with improved styling */}
             <div className="mt-3 flex flex-wrap items-center gap-2 text-sm md:text-base">
-              <span className="inline-flex items-center rounded-full bg-sky-50 px-3 py-1 text-sm font-semibold text-sky-700">
+              <span className="inline-flex items-center rounded-full bg-cp-primary-soft px-3 py-1 text-sm font-semibold text-cp-accent">
                 Deep research
               </span>
-              <span className="text-slate-400">·</span>
-              <span className="text-slate-700">Multi-LLM expert panel</span>
-              <span className="text-slate-400">·</span>
-              <span className="text-slate-700">Trust-focused answers</span>
+              <span className="text-cp-faint">·</span>
+              <span className="text-cp-muted">Multi-LLM expert panel</span>
+              <span className="text-cp-faint">·</span>
+              <span className="text-cp-muted">Trust-focused answers</span>
               {user && videoLimit > 0 && (
                 <>
-                  <span className="text-slate-400">·</span>
-                  <span className="text-slate-700">
+                  <span className="text-cp-faint">·</span>
+                  <span className="text-cp-muted">
                     Video: {videoRunsThisMonth}/{videoLimit} this month
                   </span>
                 </>
@@ -1873,7 +1889,7 @@ export default function Home() {
               <button
                 type="button"
                 onClick={() => router.push("/billing")}
-                className="text-sm font-medium text-sky-700 hover:text-sky-800 hover:underline transition-colors"
+                className="text-sm font-medium text-cp-accent hover:text-blue-700 hover:underline transition-colors"
               >
                 Upgrade plan
               </button>
@@ -1882,97 +1898,111 @@ export default function Home() {
         </div>
 
         {/* Divider between header and question area */}
-        <div className="border-b border-slate-100 mt-6 mb-6"></div>
+        <div className="border-b border-cp-border-soft mt-6 mb-6"></div>
 
         <div
-          className="mb-8 rounded-xl border-2 border-slate-200 bg-gradient-to-b from-slate-50 to-slate-100/80 p-2 shadow-sm"
+          className="mb-8 inline-flex flex-col gap-1 rounded-[11px] bg-[#ECEBE6] p-1 sm:flex-row"
           role="tablist"
           aria-label="Panel navigation"
         >
-          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={panelTab === "research"}
-              onClick={() => setPanelTab("research")}
-              className={`inline-flex flex-1 items-center justify-center gap-2.5 rounded-xl border-2 px-5 py-3.5 text-lg font-bold tracking-tight transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-2 md:text-xl sm:min-w-[160px] sm:flex-none ${
-                panelTab === "research"
-                  ? "border-sky-800 bg-sky-600 text-white shadow-md ring-2 ring-sky-500/40"
-                  : "border-slate-300 bg-white text-slate-700 shadow-sm hover:border-slate-400 hover:bg-slate-50"
-              }`}
+          <button
+            type="button"
+            role="tab"
+            aria-selected={panelTab === "research"}
+            onClick={() => setPanelTab("research")}
+            className={`inline-flex items-center justify-center gap-2 rounded-[9px] px-4 py-2.5 text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent focus-visible:ring-offset-2 ${
+              panelTab === "research"
+                ? "bg-cp-surface text-cp-text shadow-sm"
+                : "text-cp-muted hover:text-cp-text"
+            }`}
+          >
+            <BookOpen
+              className={`h-4 w-4 shrink-0 ${panelTab === "research" ? "text-cp-primary" : "text-cp-faint"}`}
+              aria-hidden
+            />
+            Research
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={panelTab === "verify"}
+            onClick={() => setPanelTab("verify")}
+            className={`inline-flex items-center justify-center gap-2 rounded-[9px] px-4 py-2.5 text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent focus-visible:ring-offset-2 ${
+              panelTab === "verify"
+                ? "bg-cp-surface text-cp-text shadow-sm"
+                : "text-cp-muted hover:text-cp-text"
+            }`}
+          >
+            <svg
+              className={`h-4 w-4 shrink-0 ${panelTab === "verify" ? "text-cp-primary" : "text-cp-faint"}`}
+              viewBox="0 0 24 24"
+              fill="none"
+              aria-hidden
             >
-              <BookOpen className="h-5 w-5 shrink-0 opacity-95" aria-hidden />
-              Research
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={panelTab === "verify"}
-              onClick={() => setPanelTab("verify")}
-              className={`inline-flex flex-1 items-center justify-center gap-2.5 rounded-xl border-2 px-5 py-3.5 text-lg font-bold tracking-tight transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-2 md:text-xl sm:min-w-[180px] sm:flex-none ${
-                panelTab === "verify"
-                  ? "border-sky-800 bg-sky-600 text-white shadow-md ring-2 ring-sky-500/40"
-                  : "border-slate-300 bg-white text-slate-700 shadow-sm hover:border-slate-400 hover:bg-slate-50"
-              }`}
+              <path
+                d="M12 3l7 4v5c0 5-3.5 9-7 10-3.5-1-7-5-7-10V7l7-4z"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinejoin="round"
+              />
+              <path
+                d="M9 12l2 2 4-4"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            Verify Claim
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={panelTab === "video"}
+            onClick={() => setPanelTab("video")}
+            className={`inline-flex items-center justify-center gap-2 rounded-[9px] px-4 py-2.5 text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent focus-visible:ring-offset-2 ${
+              panelTab === "video"
+                ? "bg-cp-surface text-cp-text shadow-sm"
+                : "text-cp-muted hover:text-cp-text"
+            }`}
+          >
+            <Film
+              className={`h-4 w-4 shrink-0 ${panelTab === "video" ? "text-cp-primary" : "text-cp-faint"}`}
+              aria-hidden
+            />
+            Verify Video
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={panelTab === "history"}
+            onClick={() => setPanelTab("history")}
+            className={`inline-flex items-center justify-center gap-2 rounded-[9px] px-4 py-2.5 text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent focus-visible:ring-offset-2 ${
+              panelTab === "history"
+                ? "bg-cp-surface text-cp-text shadow-sm"
+                : "text-cp-muted hover:text-cp-text"
+            }`}
+          >
+            <svg
+              className={`h-4 w-4 shrink-0 ${panelTab === "history" ? "text-cp-primary" : "text-cp-faint"}`}
+              viewBox="0 0 24 24"
+              fill="none"
+              aria-hidden
             >
-              <svg className="h-5 w-5 shrink-0 opacity-95" viewBox="0 0 24 24" fill="none" aria-hidden>
-                <path
-                  d="M12 3l7 4v5c0 5-3.5 9-7 10-3.5-1-7-5-7-10V7l7-4z"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinejoin="round"
-                />
-                <path
-                  d="M9 12l2 2 4-4"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-              Verify Claim
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={panelTab === "video"}
-              onClick={() => setPanelTab("video")}
-              className={`inline-flex flex-1 items-center justify-center gap-2.5 rounded-xl border-2 px-5 py-3.5 text-lg font-bold tracking-tight transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-2 md:text-xl sm:min-w-[180px] sm:flex-none ${
-                panelTab === "video"
-                  ? "border-sky-800 bg-sky-600 text-white shadow-md ring-2 ring-sky-500/40"
-                  : "border-slate-300 bg-white text-slate-700 shadow-sm hover:border-slate-400 hover:bg-slate-50"
-              }`}
-            >
-              <Film className="h-5 w-5 shrink-0 opacity-95" aria-hidden />
-              Verify Video
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={panelTab === "history"}
-              onClick={() => setPanelTab("history")}
-              className={`inline-flex flex-1 items-center justify-center gap-2.5 rounded-xl border-2 px-5 py-3.5 text-lg font-bold tracking-tight transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-2 md:text-xl sm:min-w-[160px] sm:flex-none ${
-                panelTab === "history"
-                  ? "border-sky-800 bg-sky-600 text-white shadow-md ring-2 ring-sky-500/40"
-                  : "border-slate-300 bg-white text-slate-700 shadow-sm hover:border-slate-400 hover:bg-slate-50"
-              }`}
-            >
-              <svg className="h-5 w-5 shrink-0 opacity-95" viewBox="0 0 24 24" fill="none" aria-hidden>
-                <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" />
-                <path d="M12 7v5l3 2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-              </svg>
-              History
-            </button>
-          </div>
+              <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" />
+              <path d="M12 7v5l3 2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+            </svg>
+            History
+          </button>
         </div>
 
         {panelTab === "history" ? (
-          <div className="rounded-2xl border border-slate-200 bg-white p-4 md:p-6">
+          <div className="rounded-2xl border border-cp-border bg-cp-surface p-4 md:p-6">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-              <h2 className="text-lg font-semibold text-slate-900">Activity history</h2>
+              <h2 className="text-lg font-semibold text-cp-text">Activity history</h2>
               {historyLoading && (
-                <span className="inline-flex items-center gap-2 text-sm text-slate-500">
-                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-sky-500 border-t-transparent" />
+                <span className="inline-flex items-center gap-2 text-sm text-cp-faint">
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-cp-accent border-t-transparent" />
                   Syncing…
                 </span>
               )}
@@ -1983,13 +2013,13 @@ export default function Home() {
               </p>
             )}
             {historyItems.length === 0 && !historyLoading ? (
-              <p className="text-sm text-slate-500">
+              <p className="text-sm text-cp-faint">
                 No runs yet. Complete a research panel, claim verification, or video verification to see it here. When
                 you&apos;re signed in, past runs from this account load automatically (up to {HISTORY_PAGE_SIZE} per
                 page).
               </p>
             ) : historyItems.length === 0 && historyLoading ? (
-              <p className="text-sm text-slate-500">Loading your history…</p>
+              <p className="text-sm text-cp-faint">Loading your history…</p>
             ) : (
               <>
                 <ul className="space-y-2">
@@ -1999,7 +2029,7 @@ export default function Home() {
                         type="button"
                         disabled={historyDetailLoadingId === item.id}
                         onClick={() => void openHistoryItem(item)}
-                        className="flex w-full items-start gap-3 rounded-xl border-2 border-slate-200 bg-slate-50 px-3 py-3 text-left transition-colors hover:border-sky-400 hover:bg-sky-50/60 disabled:cursor-wait disabled:opacity-70"
+                        className="flex w-full items-start gap-3 rounded-xl border-2 border-cp-border bg-cp-raised px-3 py-3 text-left transition-colors hover:border-cp-accent hover:bg-cp-primary-soft disabled:cursor-wait disabled:opacity-70"
                       >
                         <span className="mt-0.5 shrink-0" aria-hidden>
                           {item.type === "video_verification" ? (
@@ -2015,7 +2045,7 @@ export default function Home() {
                             <span
                               className={`rounded-md px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wider ${
                                 item.type === "video_verification"
-                                  ? "bg-indigo-100 text-indigo-800 ring-1 ring-indigo-300/70 dark:bg-indigo-900/30 dark:text-indigo-300"
+                                  ? "bg-indigo-100 text-indigo-800 ring-1 ring-indigo-300/70"
                                   : item.type === "verification"
                                     ? "bg-violet-200 text-violet-900 ring-1 ring-violet-400/60"
                                     : "bg-sky-200 text-sky-900 ring-1 ring-sky-400/60"
@@ -2027,14 +2057,14 @@ export default function Home() {
                                   ? "CLAIM"
                                   : "RESEARCH"}
                             </span>
-                            <span className="text-xs font-medium text-slate-500">
+                            <span className="text-xs font-medium text-cp-faint">
                               {new Date(item.at).toLocaleString()}
                             </span>
                           </span>
-                          <span className="mt-1 block text-sm font-medium text-slate-800 line-clamp-2">
+                          <span className="mt-1 block text-sm font-medium text-cp-text line-clamp-2">
                             {item.title}
                           </span>
-                          <span className="mt-1 block text-xs text-slate-600">
+                          <span className="mt-1 block text-xs text-cp-muted">
                             {item.type === "research" ? (
                               <>
                                 {item.modelsOk != null && item.modelsTotal != null ? (
@@ -2102,7 +2132,7 @@ export default function Home() {
                       type="button"
                       disabled={historyLoading}
                       onClick={() => void loadHistoryPage(historyPage + 1)}
-                      className="rounded-xl border-2 border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:border-sky-400 hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="rounded-xl border-2 border-cp-border bg-cp-surface px-5 py-2.5 text-sm font-semibold text-cp-muted shadow-sm transition-colors hover:border-cp-accent hover:bg-cp-primary-soft disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {historyLoading ? "Loading…" : "Load more"}
                     </button>
@@ -2114,36 +2144,36 @@ export default function Home() {
         ) : (
           <>
         {(showSavedResearchBanner || showVerifyLoadingBanner || showVideoHistoryLoadingBanner) && (
-          <div className="mb-6 rounded-2xl border-2 border-sky-200 bg-sky-50/90 px-4 py-4 shadow-sm">
+          <div className="mb-6 rounded-2xl border-2 border-cp-accent/20 bg-cp-primary-soft px-4 py-4 shadow-sm">
             {showSavedResearchBanner && historyDetailLoadingId && (
-              <div className="flex items-center gap-2 text-sm text-slate-700">
-                <span className="h-4 w-4 animate-spin rounded-full border-2 border-sky-600 border-t-transparent" />
+              <div className="flex items-center gap-2 text-sm text-cp-muted">
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-cp-accent border-t-transparent" />
                 Loading saved research run…
               </div>
             )}
             {showSavedResearchBanner && viewingHistoryRunId && !historyDetailLoadingId && (
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <p className="text-sm text-slate-700">
-                  <span className="font-semibold text-slate-900">Saved run</span> — panel responses and synthesis
+                <p className="text-sm text-cp-muted">
+                  <span className="font-semibold text-cp-text">Saved run</span> — panel responses and synthesis
                   below match what you saw when this run finished.
                 </p>
                 <button
                   type="button"
                   onClick={() => exitHistoryResearchView()}
-                  className="shrink-0 rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-sky-700"
+                  className="shrink-0 rounded-xl bg-cp-accent px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700"
                 >
                   Back to research
                 </button>
               </div>
             )}
             {showVerifyLoadingBanner && (
-              <div className="flex items-center gap-2 text-sm text-slate-700">
+              <div className="flex items-center gap-2 text-sm text-cp-muted">
                 <span className="h-4 w-4 animate-spin rounded-full border-2 border-violet-600 border-t-transparent" />
                 Loading saved claim…
               </div>
             )}
             {showVideoHistoryLoadingBanner && (
-              <div className="flex items-center gap-2 text-sm text-slate-700">
+              <div className="flex items-center gap-2 text-sm text-cp-muted">
                 <span className="h-4 w-4 animate-spin rounded-full border-2 border-indigo-600 border-t-transparent" />
                 Loading saved video verification…
               </div>
@@ -2151,14 +2181,14 @@ export default function Home() {
           </div>
         )}
 
-        {showMainComposer ? (
+        {showMainComposer && (
         <>
         {/* Question card: label + textarea + helper text */}
-        <div className="bg-slate-100 rounded-2xl p-6 md:p-8">
-          <div className="rounded-2xl bg-white shadow-sm border border-slate-200 focus-within:ring-2 focus-within:ring-sky-400 focus-within:border-sky-300 transition-all">
+        <div className="bg-cp-raised rounded-2xl p-6 md:p-8">
+          <div className="rounded-2xl bg-cp-surface shadow-sm border border-cp-border focus-within:ring-2 focus-within:ring-cp-accent focus-within:border-cp-accent transition-all">
             <label
               htmlFor={panelTab === "research" ? "question" : "claim"}
-              className="block text-xs font-semibold text-slate-700 uppercase tracking-wide mb-1 px-6 pt-5"
+              className="block text-xs font-semibold text-cp-muted uppercase tracking-wide mb-1 px-6 pt-5"
             >
               {panelTab === "research" ? "Question" : "Paste a claim to verify"}
             </label>
@@ -2177,7 +2207,7 @@ export default function Home() {
                 placeholder={
                   "Example: Question: How do economists explain the persistence of inflation after 2021?\nContext: Paste any relevant excerpts, notes, or data here. (Optional)"
                 }
-                className="w-full border-none outline-none bg-transparent resize-none text-base md:text-lg leading-relaxed text-slate-900 px-6 pb-4"
+                className="w-full border-none outline-none bg-transparent resize-none text-base md:text-lg leading-relaxed text-cp-text px-6 pb-4"
                 rows={4}
                 disabled={panelBusy}
               />
@@ -2194,21 +2224,21 @@ export default function Home() {
                   }
                 }}
                 placeholder={`e.g., ${EXAMPLE_CLAIM}`}
-                className="w-full border-none outline-none bg-transparent resize-none text-base md:text-lg leading-relaxed text-slate-900 px-6 pb-4"
+                className="w-full border-none outline-none bg-transparent resize-none text-base md:text-lg leading-relaxed text-cp-text px-6 pb-4"
                 rows={4}
                 disabled={panelBusy}
               />
             )}
 
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-6 pb-5 border-t border-slate-100 pt-3">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-6 pb-5 border-t border-cp-border-soft pt-3">
               {panelTab === "research" ? (
-                <p className="text-xs text-slate-600">
+                <p className="text-xs text-cp-muted">
                   Tip: Start with <span className="font-semibold">Question:</span> and, if needed, add an optional{" "}
                   <span className="font-semibold">Context:</span> section underneath. Anything after{" "}
                   <span className="font-mono">Context:</span> will be treated as source material for the panel.
                 </p>
               ) : (
-                <p className="text-xs text-slate-600">
+                <p className="text-xs text-cp-muted">
                   One sentence or multiple paragraphs — max {MAX_CLAIM_CHARS.toLocaleString()} characters (
                   {claimInput.length}/{MAX_CLAIM_CHARS}).
                 </p>
@@ -2273,15 +2303,68 @@ export default function Home() {
           </div>
         </div>
 
-        <p className="text-sm text-slate-600 mt-3">
+        <p className="text-sm text-cp-muted mt-3">
           Press <span className="font-semibold font-mono">Cmd/Ctrl + Enter</span> to{" "}
           {panelTab === "research" ? "run the panel" : "verify the claim"}.
         </p>
-        <p className="text-sm text-slate-600 leading-relaxed mt-1">
-          {panelTab === "research"
-            ? "Ask serious, research-level questions. ConvergePanel will run a multi-LLM panel, then return a synthesized deep-research brief with consensus, disagreements, biases, and blind spots."
-            : "Paste a factual claim. Each model evaluates accuracy, what it can confirm, and what it cannot verify — then ConvergePanel aggregates a claim verdict and consensus score."}
-        </p>
+
+        {panelTab === "research" && (
+          <div className="mt-4 flex flex-wrap gap-2 text-xs">
+            <span className="text-cp-faint">Try one:</span>
+            {EXAMPLE_QUESTIONS.map((q) => (
+              <button
+                key={q}
+                type="button"
+                onClick={() => setQuestion(q)}
+                className="rounded-full border border-cp-border bg-cp-surface px-3 py-1 text-cp-muted hover:border-cp-accent hover:text-cp-accent transition-colors"
+              >
+                {q}
+              </button>
+            ))}
+          </div>
+        )}
+        </>
+        )}
+        {showMainVideoComposer && (
+          <VideoUploader
+            plan={normalizedPlan}
+            videoLimit={videoLimit}
+            videoRunsThisMonth={videoRunsThisMonth}
+            onSuccess={(p) => {
+              setVideoVerificationPayload(p);
+              void refreshUsage();
+              setHistoryItems((h) => {
+                const newItem: HistoryItem = {
+                  id: p.verificationId,
+                  type: "video_verification" as const,
+                  title: truncateHistoryTitle(
+                    `Video: ${p.fileName} (${formatHistoryVideoDuration(p.metadata.duration)})`
+                  ),
+                  at: new Date().toISOString(),
+                  fileName: p.fileName,
+                  durationSeconds: p.metadata.duration,
+                  verdict: p.verdict,
+                  consensusScore: p.consensusScore,
+                  governanceStatus: p.governanceStatus ?? undefined,
+                };
+                const deduped = h.filter(
+                  (x) => x.id !== p.verificationId
+                );
+                return [newItem, ...deduped].slice(0, MAX_HISTORY_LOCAL_STORAGE);
+              });
+              trackEvent("video_verification", { plan: normalizedPlan });
+            }}
+            onUsageRefresh={() => void refreshUsage()}
+          />
+        )}
+          </>
+        )}
+        </div>
+
+        {showMainComposer && (
+        <div className="mt-6 lg:mt-0 rounded-2xl border border-cp-border bg-cp-surface shadow-sm p-6">
+          <h2 className="text-[15px] font-bold text-cp-text">Panel setup</h2>
+          <p className="mt-1 mb-5 text-sm text-cp-muted">Choose a preset or pick models.</p>
 
             {/* Model Picker */}
           {/* NOTE: For MVP testing, all five models (GPT 5.2, Claude Opus 4.5, Grok 4, Perplexity Pro, Gemini 3 Pro)
@@ -2310,8 +2393,8 @@ export default function Home() {
                   </p>
                 </div>
               )}
-              
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+
+            <div className="flex flex-col items-center gap-2">
                 {/* Visually distinguish the "running" state so users can tell when the panel is
                     thinking vs. when results are ready. */}
                 <button
@@ -2319,17 +2402,17 @@ export default function Home() {
                   onClick={panelTab === "research" ? handleRunPanel : () => void handleVerifyClaim()}
                 disabled={panelBusy || !canRun}
                 aria-busy={panelBusy}
-                className={`inline-flex w-full sm:w-auto items-center justify-center rounded-xl px-6 py-2.5 text-sm font-semibold shadow-sm transition-colors ${
+                className={`inline-flex w-full items-center justify-center gap-2 rounded-xl px-6 py-3 text-sm font-semibold shadow-sm transition-colors ${
                   panelBusy
-                    ? "bg-slate-400 text-white cursor-wait animate-pulse"
+                    ? "bg-cp-muted text-white cursor-wait animate-pulse"
                     : !canRun
-                    ? "bg-slate-300 text-white cursor-not-allowed opacity-50"
-                    : "bg-sky-600 text-white hover:bg-sky-700"
+                    ? "bg-cp-faint text-white cursor-not-allowed opacity-50"
+                    : "bg-cp-accent text-white hover:bg-blue-700"
                 }`}
               >
-                {panelBusy && (
+                {panelBusy ? (
                   <svg
-                    className="mr-2 h-4 w-4 animate-spin"
+                    className="h-4 w-4 shrink-0 animate-spin"
                     xmlns="http://www.w3.org/2000/svg"
                     fill="none"
                     viewBox="0 0 24 24"
@@ -2348,17 +2431,21 @@ export default function Home() {
                       d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
                     />
                   </svg>
+                ) : (
+                  <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                    <path d="M8 5v14l11-7z" />
+                  </svg>
                 )}
                 {panelBusy
                   ? panelTab === "research"
                     ? "Running panel…"
                     : "Verifying claim…"
                   : panelTab === "research"
-                    ? "Run Panel"
-                    : "Verify Claim"}
+                    ? "Run panel"
+                    : "Verify claim"}
                 </button>
-              <p className="text-xs text-slate-500">
-                You can also press <span className="font-semibold">Cmd/Ctrl + Enter</span>.
+              <p className="text-xs text-cp-faint">
+                or press <span className="font-semibold">⌘ Enter</span>
               </p>
             </div>
             {showLowRunsRemaining && (
@@ -2385,8 +2472,8 @@ export default function Home() {
 
             {/* Model Status Chips While Running */}
             {panelBusy && (
-              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                <span className="font-medium text-slate-700">Querying models:</span>
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-cp-faint">
+                <span className="font-medium text-cp-muted">Querying models:</span>
                 {selectedModels.map((modelId) => {
                   const status = modelStatuses[modelId] || "queued";
                   return (
@@ -2410,7 +2497,7 @@ export default function Home() {
                 <p>{getUserFriendlyError(error) || error}</p>
               </div>
             )}
-            
+
             {/* RUN_LIMIT_REACHED Error (Special Handling) */}
             {/* This errorCode gets special UI treatment with reset date and upgrade button */}
             {errorCode === "RUN_LIMIT_REACHED" && (
@@ -2446,7 +2533,7 @@ export default function Home() {
                 </div>
               </div>
             )}
-            
+
             {/* Quota Exceeded Error (Special Handling) */}
             {/* This errorCode gets special UI treatment with upgrade button */}
             {errorCode === "quota_exceeded" && (
@@ -2466,64 +2553,15 @@ export default function Home() {
             </div>
             )}
           </div>
-
-          {panelTab === "research" && showMainComposer && (
-          <div className="mt-4 flex flex-wrap gap-2 text-xs">
-            <span className="text-slate-500">Try one:</span>
-            {EXAMPLE_QUESTIONS.map((q) => (
-              <button
-                key={q}
-                type="button"
-                onClick={() => setQuestion(q)}
-                className="rounded-full border border-slate-200 bg-white px-3 py-1 text-slate-600 hover:border-sky-300 hover:text-sky-700 transition-colors"
-              >
-                {q}
-              </button>
-            ))}
         </div>
-          )}
-        </>
-        ) : null}
-        {showMainVideoComposer && (
-          <VideoUploader
-            plan={normalizedPlan}
-            videoLimit={videoLimit}
-            videoRunsThisMonth={videoRunsThisMonth}
-            onSuccess={(p) => {
-              setVideoVerificationPayload(p);
-              void refreshUsage();
-              setHistoryItems((h) => {
-                const newItem: HistoryItem = {
-                  id: p.verificationId,
-                  type: "video_verification" as const,
-                  title: truncateHistoryTitle(
-                    `Video: ${p.fileName} (${formatHistoryVideoDuration(p.metadata.duration)})`
-                  ),
-                  at: new Date().toISOString(),
-                  fileName: p.fileName,
-                  durationSeconds: p.metadata.duration,
-                  verdict: p.verdict,
-                  consensusScore: p.consensusScore,
-                  governanceStatus: p.governanceStatus ?? undefined,
-                };
-                const deduped = h.filter(
-                  (x) => x.id !== p.verificationId
-                );
-                return [newItem, ...deduped].slice(0, MAX_HISTORY_LOCAL_STORAGE);
-              });
-              trackEvent("video_verification", { plan: normalizedPlan });
-            }}
-            onUsageRefresh={() => void refreshUsage()}
-          />
         )}
-          </>
-        )}
+        </div>
       </section>
 
       {/* Status Pills (Legacy - for larger status display) */}
         {panelBusy && (
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
-          <h2 className="text-lg font-semibold mb-4 text-slate-900">Panel Status</h2>
+        <div className="bg-cp-surface rounded-2xl shadow-sm border border-cp-border p-6">
+          <h2 className="text-lg font-semibold mb-4 text-cp-text">Panel Status</h2>
             <div className="flex flex-wrap gap-3">
               {selectedModels.map((modelId) => {
                 const status = modelStatuses[modelId] || "queued";
@@ -2546,15 +2584,15 @@ export default function Home() {
         {verificationPayload && panelTab === "verify" && (
           <div className="mx-auto mt-8 w-full max-w-[900px]">
             <div className="mb-4 flex flex-col gap-3 rounded-2xl border-2 border-violet-200 bg-violet-50/90 px-4 py-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-sm text-slate-700">
-                <span className="font-semibold text-slate-900">Claim result</span>
+              <p className="text-sm text-cp-muted">
+                <span className="font-semibold text-cp-text">Claim result</span>
                 {" — "}
                 Saved to your history. Start another check from the button below, or return to the claim composer.
               </p>
               <button
                 type="button"
                 onClick={() => setVerificationPayload(null)}
-                className="shrink-0 rounded-xl border-2 border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:border-violet-300 hover:bg-violet-50/80"
+                className="shrink-0 rounded-xl border-2 border-cp-border bg-cp-surface px-4 py-2.5 text-sm font-semibold text-cp-muted shadow-sm transition-colors hover:border-violet-300 hover:bg-violet-50/80"
               >
                 Back to verify claim
               </button>
@@ -2573,15 +2611,15 @@ export default function Home() {
         {videoVerificationPayload && panelTab === "video" && (
           <div className="mx-auto mt-8 w-full max-w-[900px]">
             <div className="mb-4 flex flex-col gap-3 rounded-2xl border-2 border-indigo-200 bg-indigo-50/90 px-4 py-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-sm text-slate-700">
-                <span className="font-semibold text-slate-900">Video result</span>
+              <p className="text-sm text-cp-muted">
+                <span className="font-semibold text-cp-text">Video result</span>
                 {" — "}
                 Saved to your history. Verify another file below, or return to the upload screen.
               </p>
               <button
                 type="button"
                 onClick={() => setVideoVerificationPayload(null)}
-                className="shrink-0 rounded-xl border-2 border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:border-indigo-300 hover:bg-indigo-50/80"
+                className="shrink-0 rounded-xl border-2 border-cp-border bg-cp-surface px-4 py-2.5 text-sm font-semibold text-cp-muted shadow-sm transition-colors hover:border-indigo-300 hover:bg-indigo-50/80"
               >
                 Back to verify video
               </button>
@@ -2602,16 +2640,16 @@ export default function Home() {
           results.length > 0 && (
           <Suspense
             fallback={
-              <div className="mx-auto mt-8 w-full max-w-[900px] bg-white rounded-2xl shadow-sm border border-slate-200 p-8">
+              <div className="mx-auto mt-8 w-full max-w-[900px] bg-cp-surface rounded-2xl shadow-sm border border-cp-border p-8">
                 <div className="animate-pulse space-y-4">
-                  <div className="h-8 bg-slate-200 rounded w-1/3" />
-                  <div className="h-32 bg-slate-200 rounded" />
-                  <div className="h-24 bg-slate-200 rounded" />
+                  <div className="h-8 bg-cp-border rounded w-1/3" />
+                  <div className="h-32 bg-cp-border rounded" />
+                  <div className="h-24 bg-cp-border rounded" />
                 </div>
               </div>
             }
           >
-            <div className="mx-auto mt-8 w-full max-w-[900px] bg-white rounded-2xl shadow-sm border border-slate-200 p-8">
+            <div className="mx-auto mt-8 w-full max-w-[900px] bg-cp-surface rounded-2xl shadow-sm border border-cp-border p-8">
               <ResultsDisplay
                 results={results}
                 synthesizedReport={synthesizedReport}

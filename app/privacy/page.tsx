@@ -109,13 +109,13 @@ export default function PrivacyPage() {
           <ul className="list-disc list-inside text-cp-muted space-y-2">
             <li>
               <strong className="text-cp-text">Firebase (Google):</strong> Authentication and database.{" "}
-              <a href="https://firebase.google.com/support/privacy" target="_blank" rel="noopener noreferrer" className="text-sky-400 hover:underline">
+              <a href="https://firebase.google.com/support/privacy" target="_blank" rel="noopener noreferrer" className="text-sky-600 hover:underline">
                 Firebase Privacy Policy
               </a>
             </li>
             <li>
               <strong className="text-cp-text">Stripe:</strong> Payment processing.{" "}
-              <a href="https://stripe.com/privacy" target="_blank" rel="noopener noreferrer" className="text-sky-400 hover:underline">
+              <a href="https://stripe.com/privacy" target="_blank" rel="noopener noreferrer" className="text-sky-600 hover:underline">
                 Stripe Privacy Policy
               </a>
             </li>
@@ -123,10 +123,10 @@ export default function PrivacyPage() {
               <strong className="text-cp-text">AI Model Providers:</strong> Your questions are sent to
               OpenAI, Anthropic, X.AI, and Perplexity. These providers may log requests per their own policies:
               <ul className="list-disc list-inside ml-6 mt-2 space-y-1">
-                <li><a href="https://openai.com/policies/privacy-policy" target="_blank" rel="noopener noreferrer" className="text-sky-400 hover:underline">OpenAI Privacy Policy</a></li>
-                <li><a href="https://www.anthropic.com/legal/privacy" target="_blank" rel="noopener noreferrer" className="text-sky-400 hover:underline">Anthropic Privacy Policy</a></li>
-                <li><a href="https://x.ai/legal/privacy" target="_blank" rel="noopener noreferrer" className="text-sky-400 hover:underline">X.AI Privacy Policy</a></li>
-                <li><a href="https://www.perplexity.ai/privacy" target="_blank" rel="noopener noreferrer" className="text-sky-400 hover:underline">Perplexity Privacy Policy</a></li>
+                <li><a href="https://openai.com/policies/privacy-policy" target="_blank" rel="noopener noreferrer" className="text-sky-600 hover:underline">OpenAI Privacy Policy</a></li>
+                <li><a href="https://www.anthropic.com/legal/privacy" target="_blank" rel="noopener noreferrer" className="text-sky-600 hover:underline">Anthropic Privacy Policy</a></li>
+                <li><a href="https://x.ai/legal/privacy" target="_blank" rel="noopener noreferrer" className="text-sky-600 hover:underline">X.AI Privacy Policy</a></li>
+                <li><a href="https://www.perplexity.ai/privacy" target="_blank" rel="noopener noreferrer" className="text-sky-600 hover:underline">Perplexity Privacy Policy</a></li>
               </ul>
             </li>
           </ul>
@@ -157,7 +157,7 @@ export default function PrivacyPage() {
           </ul>
           <p className="text-cp-muted">
             To exercise these rights, contact us at{" "}
-            <a href="mailto:support@convergepanel.com" className="text-sky-400 hover:underline">
+            <a href="mailto:support@convergepanel.com" className="text-sky-600 hover:underline">
               support@convergepanel.com
             </a>.
           </p>
@@ -176,7 +176,7 @@ export default function PrivacyPage() {
           <h2 className="text-xl font-semibold text-cp-text mb-3">10. Contact</h2>
           <p className="text-cp-muted">
             Questions about this Privacy Policy? Contact us at{" "}
-            <a href="mailto:support@convergepanel.com" className="text-sky-400 hover:underline">
+            <a href="mailto:support@convergepanel.com" className="text-sky-600 hover:underline">
               support@convergepanel.com
             </a>.
           </p>
@@ -184,7 +184,7 @@ export default function PrivacyPage() {
       </div>
 
       <div className="mt-12 pt-6 border-t border-cp-border">
-        <Link href="/" className="text-sm text-sky-400 hover:underline font-medium">
+        <Link href="/" className="text-sm text-sky-600 hover:underline font-medium">
           ← Back to ConvergePanel
         </Link>
       </div>

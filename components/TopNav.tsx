@@ -69,28 +69,23 @@ export default function TopNav() {
   ];
 
   return (
-    <header className="sticky top-0 z-50 border-b border-cp-border bg-cp-surface/95 backdrop-blur-sm">
-      <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3">
+    <header className="sticky top-0 z-50 h-[74px] border-b border-cp-border bg-cp-surface/95 backdrop-blur-sm">
+      <div className="mx-auto flex h-full max-w-6xl items-center justify-between px-6">
 
         {/* Logo */}
         <Link href="/" className="flex items-center gap-3 transition-opacity hover:opacity-80">
-          <Image
-            src="/convergepanel-logo.png"
-            alt="ConvergePanel"
-            width={64}
-            height={64}
-            priority
-            className="h-14 w-auto"
-          />
-          <div className="flex flex-col">
-            <span className="font-serif text-2xl font-normal tracking-tight">
+          <span className="relative flex h-14 w-14 shrink-0 items-center justify-center">
+            <Image src="/logo-mark.png" alt="" width={56} height={56} className="h-14 w-14" priority />
+          </span>
+          <span className="flex flex-col justify-center leading-tight">
+            <span className="text-2xl font-normal tracking-tight">
               <span className="text-cp-text">Converge</span>
-              <span className="text-cp-accent">Panel</span>
+              <span className="text-cp-orange">Panel</span>
             </span>
-            <span className="font-sans text-[13px] font-medium tracking-[0.2em] uppercase text-cp-text">
-              Research · Verify · Govern
+            <span className="text-[11px] font-medium tracking-wider text-cp-muted">
+              RESEARCH • VERIFY • GOVERN
             </span>
-          </div>
+          </span>
         </Link>
 
         {/* Desktop nav */}
@@ -99,7 +94,7 @@ export default function TopNav() {
             <Link
               key={href}
               href={href}
-              className="rounded-md px-3 py-1.5 text-sm text-cp-text transition-colors hover:bg-cp-raised hover:text-white"
+              className="rounded-md px-3 py-1.5 text-[15px] font-medium text-cp-muted transition-colors hover:bg-cp-raised hover:text-cp-text"
             >
               {label}
             </Link>
@@ -108,49 +103,51 @@ export default function TopNav() {
           {!loading && user && !planLoading && isGovernanceUser && (
             <Link
               href="/governance"
-              className="rounded-md px-3 py-1.5 text-sm text-cp-text transition-colors hover:bg-cp-raised hover:text-white"
+              className="rounded-md px-3 py-1.5 text-[15px] font-medium text-cp-muted transition-colors hover:bg-cp-raised hover:text-cp-text"
             >
               Governance
             </Link>
           )}
 
           {!loading && (
-            <div className="ml-3 flex items-center gap-2">
+            <div className="ml-3 flex items-center gap-3">
               {!user ? (
                 <>
                   <Link
                     href="/login"
-                    className={`rounded-md px-3 py-1.5 text-sm transition-colors ${
+                    className={`rounded-md px-3 py-1.5 text-[15px] font-medium transition-colors ${
                       isLogin
                         ? "text-cp-accent"
-                        : "text-cp-text hover:text-white"
+                        : "text-cp-muted hover:text-cp-text"
                     }`}
                   >
                     Login
                   </Link>
                   <Link
                     href="/signup"
-                    className={`rounded-lg px-4 py-1.5 text-sm font-semibold transition-all ${
+                    className={`rounded-[11px] px-4 py-1.5 text-sm font-semibold transition-colors ${
                       isSignup
-                        ? "bg-amber-400 text-cp-bg shadow-[0_0_16px_rgba(245,158,11,0.3)]"
-                        : "bg-cp-accent text-cp-bg hover:bg-amber-400 hover:shadow-[0_0_16px_rgba(245,158,11,0.25)]"
+                        ? "bg-cp-primary text-white shadow-[0_2px_8px_rgba(37,99,235,0.3)]"
+                        : "bg-cp-primary text-white shadow-[0_2px_8px_rgba(37,99,235,0.3)] hover:bg-cp-accent"
                     }`}
                   >
                     Sign up
                   </Link>
                 </>
               ) : (
-                <div className="relative" ref={userMenuRef}>
+                <div className="flex items-center gap-3">
+                  <div className="h-5 w-px bg-cp-border" aria-hidden />
+                  <div className="relative" ref={userMenuRef}>
                   <button
                     onClick={() => setUserMenuOpen(!userMenuOpen)}
                     className="flex items-center gap-2 rounded-full px-2 py-1.5 transition-colors hover:bg-cp-raised"
                   >
-                    <div className="flex h-7 w-7 items-center justify-center rounded-full border border-cp-accent/40 bg-cp-raised">
-                      <span className="font-mono text-xs font-semibold text-cp-accent">
+                    <div className="flex h-7 w-7 items-center justify-center rounded-full border border-cp-orange bg-cp-orange-soft">
+                      <span className="font-mono text-xs font-semibold text-cp-orange">
                         {(user.displayName || user.email?.[0] || "U").toUpperCase()}
                       </span>
                     </div>
-                    <span className="text-sm text-cp-text">
+                    <span className="text-[15px] font-medium text-cp-text">
                       {user.displayName || user.email?.split("@")[0] || "User"}
                     </span>
                     <svg
@@ -167,11 +164,11 @@ export default function TopNav() {
                   </button>
 
                   {userMenuOpen && (
-                    <div className="absolute right-0 mt-2 w-48 overflow-hidden rounded-lg border border-cp-border bg-cp-raised shadow-[0_8px_32px_rgba(0,0,0,0.4)] py-1">
+                    <div className="absolute right-0 mt-2 w-48 overflow-hidden rounded-lg border border-cp-border bg-cp-surface shadow-[0_8px_32px_rgba(0,0,0,0.12)] py-1">
                       <Link
                         href="/profile"
                         onClick={() => setUserMenuOpen(false)}
-                        className="block px-4 py-2 text-sm text-cp-text transition-colors hover:bg-cp-surface hover:text-white"
+                        className="block px-4 py-2 text-sm text-cp-text transition-colors hover:bg-cp-raised"
                       >
                         Profile
                       </Link>
@@ -179,7 +176,7 @@ export default function TopNav() {
                         <Link
                           href="/admin"
                           onClick={() => setUserMenuOpen(false)}
-                          className="block px-4 py-2 text-sm text-cp-text transition-colors hover:bg-cp-surface hover:text-white"
+                          className="block px-4 py-2 text-sm text-cp-text transition-colors hover:bg-cp-raised"
                         >
                           Admin
                         </Link>
@@ -190,12 +187,13 @@ export default function TopNav() {
                           setUserMenuOpen(false);
                           handleLogout();
                         }}
-                        className="block w-full px-4 py-2 text-left text-sm text-cp-text transition-colors hover:bg-cp-surface hover:text-white"
+                        className="block w-full px-4 py-2 text-left text-sm text-cp-text transition-colors hover:bg-cp-raised"
                       >
                         Logout
                       </button>
                     </div>
                   )}
+                  </div>
                 </div>
               )}
             </div>
@@ -205,7 +203,7 @@ export default function TopNav() {
         {/* Mobile toggle */}
         <button
           onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-          className="rounded-md p-2 text-cp-text transition-colors hover:bg-cp-raised hover:text-white md:hidden"
+          className="rounded-md p-2 text-cp-muted transition-colors hover:bg-cp-raised hover:text-cp-text md:hidden"
           aria-label="Toggle menu"
         >
           <svg
@@ -235,7 +233,7 @@ export default function TopNav() {
                 key={href}
                 href={href}
                 onClick={() => setMobileMenuOpen(false)}
-                className="rounded-md px-3 py-2 text-sm text-cp-text transition-colors hover:bg-cp-raised hover:text-white"
+                className="rounded-md px-3 py-2 text-sm text-cp-text transition-colors hover:bg-cp-raised hover:text-cp-text"
               >
                 {label}
               </Link>
@@ -244,7 +242,7 @@ export default function TopNav() {
               <Link
                 href="/governance"
                 onClick={() => setMobileMenuOpen(false)}
-                className="rounded-md px-3 py-2 text-sm text-cp-text transition-colors hover:bg-cp-raised hover:text-white"
+                className="rounded-md px-3 py-2 text-sm text-cp-text transition-colors hover:bg-cp-raised hover:text-cp-text"
               >
                 Governance
               </Link>
@@ -257,7 +255,7 @@ export default function TopNav() {
                     href="/login"
                     onClick={() => setMobileMenuOpen(false)}
                     className={`rounded-md px-3 py-2 text-sm transition-colors ${
-                      isLogin ? "text-cp-accent" : "text-cp-text hover:bg-cp-raised hover:text-white"
+                      isLogin ? "text-cp-accent" : "text-cp-text hover:bg-cp-raised hover:text-cp-text"
                     }`}
                   >
                     Login
@@ -265,7 +263,7 @@ export default function TopNav() {
                   <Link
                     href="/signup"
                     onClick={() => setMobileMenuOpen(false)}
-                    className="mt-1 rounded-lg bg-cp-accent px-3 py-2 text-center text-sm font-semibold text-cp-bg transition-colors hover:bg-amber-400"
+                    className="mt-1 rounded-[11px] bg-cp-primary px-3 py-2 text-center text-sm font-semibold text-white shadow-[0_2px_8px_rgba(37,99,235,0.3)] transition-colors hover:bg-cp-accent"
                   >
                     Sign up free
                   </Link>
@@ -275,7 +273,7 @@ export default function TopNav() {
                   <Link
                     href="/profile"
                     onClick={() => setMobileMenuOpen(false)}
-                    className="rounded-md px-3 py-2 text-sm text-cp-text transition-colors hover:bg-cp-raised hover:text-white"
+                    className="rounded-md px-3 py-2 text-sm text-cp-text transition-colors hover:bg-cp-raised hover:text-cp-text"
                   >
                     Profile
                   </Link>
@@ -283,7 +281,7 @@ export default function TopNav() {
                     <Link
                       href="/admin"
                       onClick={() => setMobileMenuOpen(false)}
-                      className="rounded-md px-3 py-2 text-sm text-cp-text transition-colors hover:bg-cp-raised hover:text-white"
+                      className="rounded-md px-3 py-2 text-sm text-cp-text transition-colors hover:bg-cp-raised hover:text-cp-text"
                     >
                       Admin
                     </Link>
@@ -293,7 +291,7 @@ export default function TopNav() {
                       setMobileMenuOpen(false);
                       handleLogout();
                     }}
-                    className="rounded-md px-3 py-2 text-left text-sm text-cp-text transition-colors hover:bg-cp-raised hover:text-white"
+                    className="rounded-md px-3 py-2 text-left text-sm text-cp-text transition-colors hover:bg-cp-raised hover:text-cp-text"
                   >
                     Logout
                   </button>

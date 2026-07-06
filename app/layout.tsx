@@ -5,7 +5,7 @@
 import * as Sentry from "@sentry/nextjs";
 import type { Metadata } from "next";
 import Link from "next/link";
-import { DM_Serif_Display, Outfit, JetBrains_Mono } from "next/font/google";
+import { Hanken_Grotesk, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import TopNav from "@/components/TopNav";
 import { AuthProvider } from "@/components/AuthProvider";
@@ -13,17 +13,9 @@ import { ErrorBoundaryWrapper } from "@/components/ErrorBoundaryWrapper";
 import { ServiceWorkerUnregister } from "@/components/ServiceWorkerUnregister";
 import { PostHogProvider } from "@/components/PostHogProvider";
 
-const dmSerif = DM_Serif_Display({
-  weight: ["400"],
-  style: ["normal", "italic"],
+const hanken = Hanken_Grotesk({
   subsets: ["latin"],
-  variable: "--font-dm-serif",
-  display: "swap",
-});
-
-const outfit = Outfit({
-  subsets: ["latin"],
-  variable: "--font-outfit",
+  variable: "--font-hanken",
   display: "swap",
 });
 
@@ -87,7 +79,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${dmSerif.variable} ${outfit.variable} ${jetbrainsMono.variable} antialiased bg-cp-bg font-sans`}>
+      <body className={`${hanken.variable} ${jetbrainsMono.variable} antialiased bg-cp-bg font-sans`}>
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{
@@ -123,7 +115,7 @@ export default function RootLayout({
                 <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
                   {/* Brand + disclaimer */}
                   <div className="max-w-sm">
-                    <span className="font-serif text-base font-normal tracking-tight">
+                    <span className="text-base font-semibold tracking-tight">
                       <span className="text-cp-text">Converge</span>
                       <span className="text-cp-accent">Panel</span>
                     </span>

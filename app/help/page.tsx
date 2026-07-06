@@ -243,7 +243,7 @@ export default function HelpPage() {
             verification with its own monthly allowance (each video also uses one panel run), and longer
             history retention on paid tiers. The 5-Model plan adds governance dashboards, peer review,
             and the review audit log. See the{" "}
-            <Link href="/pricing" className="font-medium text-sky-400 hover:text-sky-300">
+            <Link href="/pricing" className="font-medium text-sky-600 hover:text-sky-700">
               pricing page
             </Link>{" "}
             for current numbers.
@@ -272,7 +272,7 @@ export default function HelpPage() {
       </div>
 
       <div className="mt-10 border-t border-cp-border pt-6">
-        <Link href="/" className="inline-flex items-center font-medium text-sky-400 hover:text-sky-300">
+        <Link href="/" className="inline-flex items-center font-medium text-sky-600 hover:text-sky-700">
           ← Back to panel
         </Link>
       </div>

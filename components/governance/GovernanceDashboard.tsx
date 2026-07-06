@@ -1298,7 +1298,7 @@ export default function GovernanceDashboard() {
         <div className="py-8 text-center text-cp-muted">
           <p className="text-sm">Redirecting to sign in…</p>
           <p className="mt-4 text-sm">
-            <Link href="/login" className="font-semibold text-cp-accent underline hover:text-amber-400">
+            <Link href="/login" className="font-semibold text-cp-accent underline hover:text-sky-700">
               Go to sign in
             </Link>
           </p>
@@ -2043,7 +2043,7 @@ function FragmentRow(props: {
         </td>
         <td className="px-3 py-2">
           {row.runType === "video" ? (
-            <span className="inline-flex rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300">
+            <span className="inline-flex rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-800">
               VIDEO
             </span>
           ) : (

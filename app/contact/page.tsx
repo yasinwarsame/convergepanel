@@ -27,7 +27,7 @@ export default function ContactPage() {
               <strong>Email:</strong>{" "}
               <a
                 href="mailto:support@convergepanel.com"
-                className="text-sky-400 hover:underline"
+                className="text-sky-600 hover:underline"
               >
                 support@convergepanel.com
               </a>
@@ -66,7 +66,7 @@ export default function ContactPage() {
       </div>
 
       <div className="mt-8 border-t border-cp-border pt-6">
-        <Link href="/" className="inline-flex items-center font-medium text-sky-400 hover:text-sky-300">
+        <Link href="/" className="inline-flex items-center font-medium text-sky-600 hover:text-sky-700">
           ← Back to Panel
         </Link>
       </div>

@@ -23,6 +23,16 @@ interface ModelChipProps {
   uppercase?: boolean;
 }
 
+// Small 2px identity dot per model — the only place model color shows up.
+// Neutral chip background/border/text everywhere else (no rainbow pills).
+const MODEL_DOT_COLORS: Record<string, string> = {
+  chatgpt: "bg-emerald-500",
+  claude: "bg-indigo-500",
+  grok: "bg-amber-500",
+  perplexity: "bg-sky-500",
+  gemini: "bg-rose-500",
+};
+
 export default function ModelChip({
   modelId,
   variant = "outline",
@@ -32,6 +42,7 @@ export default function ModelChip({
 }: ModelChipProps) {
   const config = getPanelModelConfig(modelId);
   const displayName = config.label;
+  const dotColor = MODEL_DOT_COLORS[modelId] ?? "bg-cp-faint";
 
   // Size classes
   const sizeClasses = {
@@ -40,30 +51,23 @@ export default function ModelChip({
     md: "px-4 py-2 text-base",
   };
 
-  // Variant classes - use colorClasses directly from panelModels.ts
+  // Variant classes - neutral surfaces; the dot carries model identity
   let variantClasses: string;
   if (variant === "outline") {
-    // Use the exact colorClasses from panelModels.ts (matches "Models in MVP" style)
-    variantClasses = `${config.colorClasses} rounded-full font-semibold`;
+    variantClasses = "bg-cp-surface text-cp-text border border-cp-border rounded-full font-semibold";
   } else if (variant === "solid") {
-    // Extract color and create solid variant
-    // Parse colorClasses to get the color name (e.g., "emerald-700" -> "emerald-600")
-    const colorMatch = config.colorClasses.match(/text-(\w+-\d+)/);
-    const colorName = colorMatch ? colorMatch[1].replace("-700", "-600") : "slate-600";
-    variantClasses = `bg-${colorName} text-white border border-${colorName} rounded-full font-semibold`;
+    variantClasses = "bg-cp-text text-cp-bg border border-cp-text rounded-full font-semibold";
   } else {
-    // Text variant - extract just the text color
-    const colorMatch = config.colorClasses.match(/text-(\w+-\d+)/);
-    const colorName = colorMatch ? colorMatch[1] : "slate-700";
-    variantClasses = `text-${colorName} font-semibold`;
+    variantClasses = "text-cp-text font-semibold";
   }
 
   const baseClasses = `${sizeClasses[size]} ${variantClasses}`;
   const trackingClass = uppercase ? "uppercase tracking-wide" : "";
-  const combinedClasses = `${baseClasses} ${trackingClass} ${className}`.trim();
+  const combinedClasses = `inline-flex items-center gap-1.5 ${baseClasses} ${trackingClass} ${className}`.trim();
 
   return (
     <span className={combinedClasses}>
+      <span className={`h-2 w-2 shrink-0 rounded-full ${dotColor}`} aria-hidden />
       {displayName}
     </span>
   );

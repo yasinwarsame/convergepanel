@@ -15,6 +15,36 @@ function fetchWithTimeout(url: string, options: RequestInit): Promise<Response> 
 }
 
 /**
+ * Turn a provider's raw HTTP error body into a short, human-readable message
+ * instead of surfacing the raw JSON (which otherwise ends up verbatim in the UI).
+ */
+function formatVisionApiError(provider: string, status: number, rawBody: string): string {
+  let providerMessage: string | undefined;
+  try {
+    const parsed = JSON.parse(rawBody) as { error?: { message?: string } | string; message?: string };
+    if (typeof parsed.error === "string") providerMessage = parsed.error;
+    else if (typeof parsed.error?.message === "string") providerMessage = parsed.error.message;
+    else if (typeof parsed.message === "string") providerMessage = parsed.message;
+  } catch {
+    providerMessage = rawBody.slice(0, 200).trim() || undefined;
+  }
+
+  if (status === 401 || status === 403) {
+    return `${provider} rejected the API key (${status}). Check that the key is valid and has access to this model.`;
+  }
+  if (status === 404) {
+    return `${provider} model is unavailable (404)${providerMessage ? `: ${providerMessage}` : ""}`;
+  }
+  if (status === 429) {
+    return `${provider} rate limit exceeded (429). Try again shortly.`;
+  }
+  if (status >= 500) {
+    return `${provider} is temporarily unavailable (${status}). Try again shortly.`;
+  }
+  return `${provider} request failed (${status})${providerMessage ? `: ${providerMessage}` : ""}`;
+}
+
+/**
  * Send video frames to OpenAI (GPT-4o) for authenticity analysis.
  *
  * Uses Chat Completions `v1/chat/completions` with `image_url` parts. Each frame is a **base64 data URL**
@@ -61,7 +91,7 @@ export async function callOpenAIVision(
 
   if (!response.ok) {
     const err = await response.text();
-    throw new Error(`OpenAI vision call failed (${response.status}): ${err.substring(0, 200)}`);
+    throw new Error(formatVisionApiError("OpenAI", response.status, err));
   }
 
   const data = (await response.json()) as {
@@ -101,7 +131,7 @@ export async function callClaudeVision(
       "anthropic-version": "2023-06-01",
     },
     body: JSON.stringify({
-      model: "claude-sonnet-4-20250514",
+      model: "claude-sonnet-5",
       max_tokens: 8192,
       messages: [
         {
@@ -124,7 +154,7 @@ export async function callClaudeVision(
 
   if (!response.ok) {
     const err = await response.text();
-    throw new Error(`Claude vision call failed (${response.status}): ${err.substring(0, 200)}`);
+    throw new Error(formatVisionApiError("Claude", response.status, err));
   }
 
   const data = (await response.json()) as {
@@ -157,7 +187,7 @@ export async function callGeminiVision(
   if (!apiKey) throw new Error("GEMINI_API_KEY not configured");
 
   const response = await fetchWithTimeout(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(apiKey)}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -182,7 +212,7 @@ export async function callGeminiVision(
 
   if (!response.ok) {
     const err = await response.text();
-    throw new Error(`Gemini vision call failed (${response.status}): ${err.substring(0, 200)}`);
+    throw new Error(formatVisionApiError("Gemini", response.status, err));
   }
 
   const data = (await response.json()) as {

@@ -156,7 +156,7 @@ function synthesisModelHealthNumberClass(healthy: number, total: number): string
 }
 
 const SYNTHESIS_METRIC_CARD_CLASS =
-  "rounded-lg bg-white/50 p-3 text-center shadow-sm ring-1 ring-black/5 dark:bg-gray-800/50 dark:ring-white/10";
+  "rounded-lg bg-white/50 p-3 text-center shadow-sm ring-1 ring-black/5";
 
 function SynthesisConsensusSummaryBox({
   summary,
@@ -1925,9 +1925,9 @@ export default function PanelSynthesisView({
           />
 
           {generatedPost ? (
-            <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800">
+            <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                <span className="text-sm font-medium text-slate-800 dark:text-slate-200">
+                <span className="text-sm font-medium text-slate-800">
                   {generatedPostType === "linkedin" ? "LinkedIn post" : "𝕏 post"} — ready to copy
                 </span>
                 <button
@@ -1943,7 +1943,7 @@ export default function PanelSynthesisView({
                   {copiedPost ? "Copied!" : "Copy to clipboard"}
                 </button>
               </div>
-              <pre className="whitespace-pre-wrap font-sans text-sm text-gray-700 dark:text-gray-300">
+              <pre className="whitespace-pre-wrap font-sans text-sm text-gray-700">
                 {generatedPost}
               </pre>
               <button
@@ -1953,7 +1953,7 @@ export default function PanelSynthesisView({
                   setGeneratedPostType(null);
                   setCopiedPost(false);
                 }}
-                className="mt-2 text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                className="mt-2 text-xs text-gray-400 hover:text-gray-600"
               >
                 Dismiss
               </button>

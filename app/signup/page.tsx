@@ -107,9 +107,9 @@ const FEATURE_SHOWCASE_ITEMS = [
 
 function FeatureShowcase(props: { variant: "onDark" | "onLight" }) {
   const { variant } = props;
-  const headingCls = variant === "onDark" ? "text-slate-100" : "text-slate-900";
-  const titleCls = variant === "onDark" ? "text-white" : "text-slate-900";
-  const bodyCls = variant === "onDark" ? "text-slate-400" : "text-slate-600";
+  const headingCls = variant === "onDark" ? "text-cp-text" : "text-cp-text";
+  const titleCls = variant === "onDark" ? "text-cp-text" : "text-cp-text";
+  const bodyCls = variant === "onDark" ? "text-cp-muted" : "text-cp-muted";
   const col1 = FEATURE_SHOWCASE_ITEMS.slice(0, 4);
   const col2 = FEATURE_SHOWCASE_ITEMS.slice(4);
 
@@ -160,7 +160,7 @@ function FeatureShowcase(props: { variant: "onDark" | "onLight" }) {
 
 function SignupValueCheckList(props: { lines: readonly string[] }) {
   return (
-    <ul className="mt-2 space-y-1.5 text-sm leading-snug text-slate-700">
+    <ul className="mt-2 space-y-1.5 text-sm leading-snug text-cp-text">
       {props.lines.map((line) => (
         <li key={line} className="flex gap-2.5">
           <span className="text-emerald-600/90 shrink-0 font-medium" aria-hidden>
@@ -267,11 +267,11 @@ export default function SignupPage() {
 
   /** Sign Up: hero image + feature showcase + narrative left; form and plan summary right (showcase repeats in-card on mobile after form). */
   return (
-    <main className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-slate-100">
+    <main className="min-h-screen bg-cp-bg text-cp-text">
       <div className="mx-auto flex min-h-screen max-w-6xl flex-col items-stretch px-4 py-10 lg:flex-row lg:px-8 lg:py-16 lg:gap-10">
         {/* Left: image (all breakpoints), then showcase + headline (desktop only) */}
         <div className="mb-8 w-full lg:mb-0 lg:w-1/2 lg:max-w-none lg:pr-4">
-          <div className="relative mb-6 aspect-[4/3] w-full overflow-hidden rounded-xl border border-slate-800/50 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 shadow-2xl lg:mb-8">
+          <div className="relative mb-6 aspect-[4/3] w-full overflow-hidden rounded-xl border border-cp-border bg-cp-raised shadow-sm lg:mb-8">
             <Image
               src="/research-hero.png"
               alt="AI research workspace with data visualizations, neural network graphics, and advanced analytics"
@@ -283,27 +283,27 @@ export default function SignupPage() {
                 (e.target as HTMLElement).parentElement?.classList.add("hidden");
               }}
             />
-            <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-slate-950/80 via-slate-950/20 to-transparent" />
+            <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-cp-bg/50 via-cp-bg/10 to-transparent" />
           </div>
 
           <div className="hidden lg:block">
-            <FeatureShowcase variant="onDark" />
-            <div className="mt-8 inline-flex items-center gap-2 rounded-full bg-slate-900/60 px-3 py-1 text-xs font-medium text-sky-300 ring-1 ring-sky-500/30">
-              <span className="h-1.5 w-1.5 rounded-full bg-sky-400" />
+            <FeatureShowcase variant="onLight" />
+            <div className="mt-8 inline-flex items-center gap-2 rounded-full bg-cp-primary-soft px-3 py-1 text-xs font-medium text-cp-accent ring-1 ring-cp-primary/20">
+              <span className="h-1.5 w-1.5 rounded-full bg-cp-primary" />
               Multi-model research · Claim verification · Video verification · Governance
             </div>
-            <h1 className="mt-6 text-3xl font-semibold text-white sm:text-4xl">
+            <h1 className="mt-6 text-3xl font-semibold text-cp-text sm:text-4xl">
               Don&apos;t trust one AI.
-              <span className="block text-sky-300">Verify with five.</span>
+              <span className="block text-cp-accent">Verify with five.</span>
             </h1>
-            <p className="mt-3 text-sm leading-relaxed text-slate-200 sm:text-base">
+            <p className="mt-3 text-sm leading-relaxed text-cp-muted sm:text-base">
               Research and claims go to multiple models at once—with consensus, governance signals, and
               audit trails you can rely on.
             </p>
-            <p className="mt-5 text-sm text-slate-400">
+            <p className="mt-5 text-sm text-cp-faint">
               <Link
                 href="/pricing"
-                className="font-medium text-sky-400 underline-offset-2 hover:text-sky-300 hover:underline"
+                className="font-medium text-cp-accent underline-offset-2 hover:underline"
               >
                 Compare plans
               </Link>{" "}
@@ -313,11 +313,11 @@ export default function SignupPage() {
         </div>
 
         <div className="w-full max-w-md lg:mx-0 lg:w-1/2 lg:max-w-none">
-          <div className="rounded-2xl bg-white/95 p-6 shadow-xl ring-1 ring-slate-900/5">
-            <h2 className="text-xl font-semibold tracking-tight text-slate-900 lg:text-2xl">
+          <div className="rounded-[14px] bg-cp-surface p-6 shadow-sm border border-cp-border">
+            <h2 className="text-xl font-semibold tracking-tight text-cp-text lg:text-2xl">
               Create your ConvergePanel account
             </h2>
-            <p className="mt-1 text-sm text-slate-600">
+            <p className="mt-1 text-sm text-cp-muted">
               Use the email you want for sign-in. You&apos;ll complete a short onboarding step next.
             </p>
 
@@ -325,7 +325,7 @@ export default function SignupPage() {
               <div>
                 <label
                   htmlFor="email"
-                  className="block text-xs font-medium uppercase tracking-wide text-slate-500"
+                  className="block text-xs font-medium uppercase tracking-wide text-cp-faint"
                 >
                   Email
                 </label>
@@ -337,7 +337,7 @@ export default function SignupPage() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
-                  className="mt-1 block w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 shadow-sm outline-none placeholder:text-slate-400 focus:border-sky-500 focus:bg-white focus:ring-2 focus:ring-sky-500"
+                  className="mt-1 block w-full rounded-xl border border-cp-border bg-cp-raised px-3 py-2 text-sm text-cp-text shadow-sm outline-none placeholder:text-cp-faint focus:border-cp-accent focus:bg-cp-surface focus:ring-2 focus:ring-cp-primary-soft"
                   placeholder="you@email.com"
                   autoFocus
                 />
@@ -346,9 +346,9 @@ export default function SignupPage() {
               <div>
                 <label
                   htmlFor="name"
-                  className="block text-xs font-medium uppercase tracking-wide text-slate-500"
+                  className="block text-xs font-medium uppercase tracking-wide text-cp-faint"
                 >
-                  Full Name <span className="text-slate-400 font-normal">(optional)</span>
+                  Full Name <span className="text-cp-faint font-normal">(optional)</span>
                 </label>
                 <input
                   id="name"
@@ -357,7 +357,7 @@ export default function SignupPage() {
                   autoComplete="name"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  className="mt-1 block w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 shadow-sm outline-none placeholder:text-slate-400 focus:border-sky-500 focus:bg-white focus:ring-2 focus:ring-sky-500"
+                  className="mt-1 block w-full rounded-xl border border-cp-border bg-cp-raised px-3 py-2 text-sm text-cp-text shadow-sm outline-none placeholder:text-cp-faint focus:border-cp-accent focus:bg-cp-surface focus:ring-2 focus:ring-cp-primary-soft"
                   placeholder="Your name"
                 />
               </div>
@@ -365,7 +365,7 @@ export default function SignupPage() {
               <div>
                 <label
                   htmlFor="password"
-                  className="block text-xs font-medium uppercase tracking-wide text-slate-500"
+                  className="block text-xs font-medium uppercase tracking-wide text-cp-faint"
                 >
                   Password
                 </label>
@@ -378,7 +378,7 @@ export default function SignupPage() {
                   onChange={(e) => setPassword(e.target.value)}
                   required
                   minLength={6}
-                  className="mt-1 block w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 shadow-sm outline-none placeholder:text-slate-400 focus:border-sky-500 focus:bg-white focus:ring-2 focus:ring-sky-500"
+                  className="mt-1 block w-full rounded-xl border border-cp-border bg-cp-raised px-3 py-2 text-sm text-cp-text shadow-sm outline-none placeholder:text-cp-faint focus:border-cp-accent focus:bg-cp-surface focus:ring-2 focus:ring-cp-primary-soft"
                   placeholder="At least 6 characters"
                 />
               </div>
@@ -386,7 +386,7 @@ export default function SignupPage() {
               <div>
                 <label
                   htmlFor="confirmPassword"
-                  className="block text-xs font-medium uppercase tracking-wide text-slate-500"
+                  className="block text-xs font-medium uppercase tracking-wide text-cp-faint"
                 >
                   Confirm Password
                 </label>
@@ -399,7 +399,7 @@ export default function SignupPage() {
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   required
                   minLength={6}
-                  className="mt-1 block w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 shadow-sm outline-none placeholder:text-slate-400 focus:border-sky-500 focus:bg-white focus:ring-2 focus:ring-sky-500"
+                  className="mt-1 block w-full rounded-xl border border-cp-border bg-cp-raised px-3 py-2 text-sm text-cp-text shadow-sm outline-none placeholder:text-cp-faint focus:border-cp-accent focus:bg-cp-surface focus:ring-2 focus:ring-cp-primary-soft"
                   placeholder="Confirm your password"
                 />
               </div>
@@ -413,32 +413,32 @@ export default function SignupPage() {
               <button
                 type="submit"
                 disabled={loading}
-                className="mt-2 inline-flex w-full items-center justify-center rounded-full bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:opacity-50 disabled:cursor-not-allowed"
+                className="mt-2 inline-flex w-full items-center justify-center rounded-[11px] bg-cp-primary px-4 py-2.5 text-sm font-semibold text-white shadow-[0_2px_8px_rgba(37,99,235,0.3)] transition hover:bg-cp-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-cp-surface disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {loading ? "Creating account..." : "Create account"}
               </button>
             </form>
 
-            <div className="mt-6 border-t border-slate-200 pt-6 lg:hidden">
+            <div className="mt-6 border-t border-cp-border-soft pt-6 lg:hidden">
               <FeatureShowcase variant="onLight" />
             </div>
 
-            <div className="mt-6 space-y-5 rounded-xl border border-slate-200 bg-slate-50 p-4 text-left text-sm text-slate-700">
+            <div className="mt-6 space-y-5 rounded-xl border border-cp-border bg-cp-raised p-4 text-left text-sm text-cp-text">
               <div>
-                <p className="font-semibold text-slate-900">Your free account includes:</p>
+                <p className="font-semibold text-cp-text">Your free account includes:</p>
                 <SignupValueCheckList lines={SIGNUP_FREE_LINES} />
-                <p className="mt-3 text-xs leading-relaxed text-slate-600">
+                <p className="mt-3 text-xs leading-relaxed text-cp-muted">
                   Want video verification, governance, and all 5 models?{" "}
-                  <Link href="/pricing" className="font-medium text-sky-700 underline hover:text-sky-800">
+                  <Link href="/pricing" className="font-medium text-cp-accent underline hover:no-underline">
                     See our plans
                   </Link>
                   .
                 </p>
               </div>
-              <div className="border-t border-slate-200 pt-4">
-                <p className="font-semibold text-slate-800">
+              <div className="border-t border-cp-border-soft pt-4">
+                <p className="font-semibold text-cp-text">
                   Upgrade to the{" "}
-                  <Link href="/pricing" className="text-sky-700 underline hover:text-sky-800">
+                  <Link href="/pricing" className="text-cp-accent underline hover:no-underline">
                     5-Model plan
                   </Link>{" "}
                   for:
@@ -447,16 +447,16 @@ export default function SignupPage() {
               </div>
             </div>
 
-            <p className="mt-6 text-center text-sm text-slate-500">
+            <p className="mt-6 text-center text-sm text-cp-faint">
               Already have an account?{" "}
-              <Link href="/login" className="font-medium text-sky-600 hover:text-sky-700">
+              <Link href="/login" className="font-medium text-cp-accent hover:underline">
                 Sign in
               </Link>
             </p>
 
-            <p className="mt-4 text-center text-[11px] leading-relaxed text-slate-500">
+            <p className="mt-4 text-center text-[11px] leading-relaxed text-cp-faint">
               By creating an account, you agree to our{" "}
-              <Link href="/terms" className="text-sky-600 underline hover:text-sky-700">
+              <Link href="/terms" className="text-cp-accent underline hover:no-underline">
                 Terms of Service
               </Link>
               , including that AI outputs may be inaccurate and that you alone are responsible for
@@ -465,23 +465,23 @@ export default function SignupPage() {
             </p>
           </div>
 
-          <div className="mt-10 space-y-5 border-t border-slate-800/40 pt-8 lg:hidden">
-            <div className="inline-flex items-center gap-2 rounded-full bg-slate-900/60 px-3 py-1 text-xs font-medium text-sky-300 ring-1 ring-sky-500/30">
-              <span className="h-1.5 w-1.5 rounded-full bg-sky-400" />
+          <div className="mt-10 space-y-5 border-t border-cp-border pt-8 lg:hidden">
+            <div className="inline-flex items-center gap-2 rounded-full bg-cp-primary-soft px-3 py-1 text-xs font-medium text-cp-accent ring-1 ring-cp-primary/20">
+              <span className="h-1.5 w-1.5 rounded-full bg-cp-primary" />
               Multi-model research · Claim verification · Video verification · Governance
             </div>
-            <h1 className="text-2xl font-semibold text-white sm:text-3xl">
+            <h1 className="text-2xl font-semibold text-cp-text sm:text-3xl">
               Don&apos;t trust one AI.
-              <span className="block text-sky-300">Verify with five.</span>
+              <span className="block text-cp-accent">Verify with five.</span>
             </h1>
-            <p className="text-sm leading-relaxed text-slate-200">
+            <p className="text-sm leading-relaxed text-cp-muted">
               Research and claims go to multiple models at once—with consensus, governance signals, and
               audit trails you can rely on.
             </p>
-            <p className="text-sm text-slate-400">
+            <p className="text-sm text-cp-faint">
               <Link
                 href="/pricing"
-                className="font-medium text-sky-400 underline-offset-2 hover:text-sky-300 hover:underline"
+                className="font-medium text-cp-accent underline-offset-2 hover:underline"
               >
                 Compare plans
               </Link>{" "}

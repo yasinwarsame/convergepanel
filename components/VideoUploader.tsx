@@ -407,9 +407,9 @@ export default function VideoUploader({
       </p>
 
       {!hasAcknowledged && (
-        <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 p-4 dark:border-amber-700 dark:bg-amber-900/20">
-          <p className="mb-2 text-sm font-medium text-amber-900 dark:text-amber-200">Before you verify a video</p>
-          <p className="mb-3 text-xs leading-relaxed text-amber-800 dark:text-amber-300/95">
+        <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 p-4">
+          <p className="mb-2 text-sm font-medium text-amber-900">Before you verify a video</p>
+          <p className="mb-3 text-xs leading-relaxed text-amber-800">
             Video verification uses AI vision models to identify potential indicators of manipulation or AI
             generation. This is not forensic analysis and results should not be used as legal evidence or the
             sole basis for consequential decisions. Results may contain false positives or false negatives. By
@@ -444,11 +444,11 @@ export default function VideoUploader({
       )}
 
       {hasAcknowledged && atVideoLimit && (
-        <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-700 mb-4">
-          <p className="font-medium text-amber-800 dark:text-amber-300">
+        <div className="p-3 rounded-lg bg-amber-50 border border-amber-300 mb-4">
+          <p className="font-medium text-amber-800">
             You&apos;ve used all {videoLimit} video verifications this month.
           </p>
-          <p className="text-sm text-amber-700 dark:text-amber-400 mt-1">
+          <p className="text-sm text-amber-700 mt-1">
             Resets on the first day of the next calendar month.
             {plan === "lite" && " Upgrade to the 5-Model plan for 20 video verifications."}
           </p>

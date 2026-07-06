@@ -168,9 +168,9 @@ export default function OnboardingPage() {
   // Show loading state while checking auth and onboarding status
   if (authLoading || checkingOnboarding) {
     return (
-      <main className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-slate-100 flex items-center justify-center">
-        <div className="flex min-h-[60vh] flex-col items-center justify-center gap-2 text-slate-300">
-          <div className="h-6 w-6 animate-spin rounded-full border-2 border-sky-400 border-t-transparent" />
+      <main className="min-h-screen bg-cp-bg text-cp-text flex items-center justify-center">
+        <div className="flex min-h-[60vh] flex-col items-center justify-center gap-2 text-cp-muted">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-cp-accent border-t-transparent" />
           <p className="text-sm tracking-wide">Loading ConvergePanel…</p>
         </div>
       </main>
@@ -183,7 +183,7 @@ export default function OnboardingPage() {
   }
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-slate-100">
+    <main className="min-h-screen bg-cp-bg text-cp-text">
       <div className="mx-auto flex min-h-screen max-w-6xl flex-col items-center justify-center px-4 py-10 lg:px-8">
         {/* Back navigation: allows users to skip onboarding and go to main panel */}
         {/* Note: Onboarding is recommended but not strictly mandatory - users can skip and complete it later from Profile */}
@@ -191,9 +191,9 @@ export default function OnboardingPage() {
           <button
             type="button"
             onClick={() => router.push("/")}
-            className="inline-flex items-center gap-2 text-sm font-medium text-slate-300 hover:text-sky-400 transition-colors"
+            className="inline-flex items-center gap-2 text-sm font-medium text-cp-muted hover:text-cp-accent transition-colors"
           >
-            <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-slate-800/80 ring-1 ring-slate-700">
+            <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-cp-raised ring-1 ring-cp-border">
               {/* Simple left arrow icon */}
               <span className="text-xs">&larr;</span>
             </span>
@@ -203,13 +203,13 @@ export default function OnboardingPage() {
 
         {/* Centered onboarding card */}
         <div className="w-full max-w-xl">
-          <div className="rounded-2xl bg-white/95 p-6 shadow-xl ring-1 ring-slate-900/5">
+          <div className="rounded-[14px] bg-cp-surface p-6 shadow-sm border border-cp-border">
             {/* Header */}
             <div className="mb-6">
-              <h1 className="text-2xl lg:text-3xl font-semibold tracking-tight text-slate-900">
+              <h1 className="text-2xl lg:text-3xl font-semibold tracking-tight text-cp-text">
                 Complete your setup
               </h1>
-              <p className="mt-1 text-sm text-slate-600">
+              <p className="mt-1 text-sm text-cp-muted">
                 Takes 30 seconds
               </p>
             </div>
@@ -218,7 +218,7 @@ export default function OnboardingPage() {
             <form onSubmit={handleSubmit} className="space-y-6">
               {/* Question 1: Role / Background */}
               <div>
-                <label className="block text-sm font-semibold text-slate-900 mb-3">
+                <label className="block text-sm font-semibold text-cp-text mb-3">
                   What best describes you? <span className="text-red-500">*</span>
                 </label>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -235,8 +235,8 @@ export default function OnboardingPage() {
                       onClick={() => setRole(option.value)}
                       className={`rounded-xl border px-3 py-2 text-sm text-left transition ${
                         role === option.value
-                          ? "bg-sky-50 border-sky-500 text-sky-700 font-medium"
-                          : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"
+                          ? "bg-cp-primary-tint border-cp-primary text-cp-accent font-medium"
+                          : "border-cp-border bg-cp-surface text-cp-text hover:border-cp-faint hover:bg-cp-raised"
                       }`}
                     >
                       {option.label}
@@ -247,7 +247,7 @@ export default function OnboardingPage() {
 
               {/* Question 2: Primary Use Case */}
               <div>
-                <label className="block text-sm font-semibold text-slate-900 mb-3">
+                <label className="block text-sm font-semibold text-cp-text mb-3">
                   What will you mostly use ConvergePanel for? <span className="text-red-500">*</span>
                 </label>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -264,8 +264,8 @@ export default function OnboardingPage() {
                       onClick={() => setUseCase(option.value)}
                       className={`rounded-xl border px-3 py-2 text-sm text-left transition ${
                         useCase === option.value
-                          ? "bg-sky-50 border-sky-500 text-sky-700 font-medium"
-                          : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"
+                          ? "bg-cp-primary-tint border-cp-primary text-cp-accent font-medium"
+                          : "border-cp-border bg-cp-surface text-cp-text hover:border-cp-faint hover:bg-cp-raised"
                       }`}
                     >
                       {option.label}
@@ -276,7 +276,7 @@ export default function OnboardingPage() {
 
               {/* Question 3: Expected Usage Frequency */}
               <div>
-                <label className="block text-sm font-semibold text-slate-900 mb-3">
+                <label className="block text-sm font-semibold text-cp-text mb-3">
                   How often do you expect to use ConvergePanel? <span className="text-red-500">*</span>
                 </label>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -291,8 +291,8 @@ export default function OnboardingPage() {
                       onClick={() => setUsage(option.value)}
                       className={`rounded-xl border px-3 py-2 text-sm text-center transition ${
                         usage === option.value
-                          ? "bg-sky-50 border-sky-500 text-sky-700 font-medium"
-                          : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"
+                          ? "bg-cp-primary-tint border-cp-primary text-cp-accent font-medium"
+                          : "border-cp-border bg-cp-surface text-cp-text hover:border-cp-faint hover:bg-cp-raised"
                       }`}
                     >
                       {option.label}
@@ -303,8 +303,8 @@ export default function OnboardingPage() {
 
               {/* Question 4: Referral Source (Optional) */}
               <div>
-                <label className="block text-sm font-semibold text-slate-900 mb-3">
-                  How did you hear about ConvergePanel? <span className="text-slate-400 font-normal">(optional)</span>
+                <label className="block text-sm font-semibold text-cp-text mb-3">
+                  How did you hear about ConvergePanel? <span className="text-cp-faint font-normal">(optional)</span>
                 </label>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {([
@@ -320,8 +320,8 @@ export default function OnboardingPage() {
                       onClick={() => setReferral(option.value)}
                       className={`rounded-xl border px-3 py-2 text-sm text-left transition ${
                         referral === option.value
-                          ? "bg-sky-50 border-sky-500 text-sky-700 font-medium"
-                          : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"
+                          ? "bg-cp-primary-tint border-cp-primary text-cp-accent font-medium"
+                          : "border-cp-border bg-cp-surface text-cp-text hover:border-cp-faint hover:bg-cp-raised"
                       }`}
                     >
                       {option.label}
@@ -341,7 +341,7 @@ export default function OnboardingPage() {
               <button
                 type="submit"
                 disabled={submitting || !role || !useCase || !usage}
-                className="mt-2 inline-flex w-full items-center justify-center rounded-full bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:opacity-50 disabled:cursor-not-allowed"
+                className="mt-2 inline-flex w-full items-center justify-center rounded-[11px] bg-cp-primary px-4 py-2.5 text-sm font-semibold text-white shadow-[0_2px_8px_rgba(37,99,235,0.3)] transition hover:bg-cp-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-cp-surface disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {submitting ? "Saving..." : "Complete setup"}
               </button>

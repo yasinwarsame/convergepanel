@@ -37,7 +37,7 @@ export const CATEGORIES: Record<string, PSEOCategory> = {
   "claim-verification": {
     label: "Claim Verification",
     color: "#2563eb",
-    tailwindText: "text-blue-400",
+    tailwindText: "text-blue-600",
     tailwindBg: "bg-cp-raised",
     tailwindBorder: "border-cp-border",
     tailwindDot: "bg-blue-500",
@@ -45,7 +45,7 @@ export const CATEGORIES: Record<string, PSEOCategory> = {
   "video-verification": {
     label: "Video Verification",
     color: "#7c3aed",
-    tailwindText: "text-violet-400",
+    tailwindText: "text-violet-600",
     tailwindBg: "bg-cp-raised",
     tailwindBorder: "border-cp-border",
     tailwindDot: "bg-violet-500",
@@ -53,7 +53,7 @@ export const CATEGORIES: Record<string, PSEOCategory> = {
   research: {
     label: "Research",
     color: "#059669",
-    tailwindText: "text-emerald-400",
+    tailwindText: "text-emerald-600",
     tailwindBg: "bg-cp-raised",
     tailwindBorder: "border-cp-border",
     tailwindDot: "bg-emerald-500",
@@ -61,7 +61,7 @@ export const CATEGORIES: Record<string, PSEOCategory> = {
   governance: {
     label: "Governance",
     color: "#d97706",
-    tailwindText: "text-amber-400",
+    tailwindText: "text-amber-600",
     tailwindBg: "bg-cp-raised",
     tailwindBorder: "border-cp-border",
     tailwindDot: "bg-amber-500",
@@ -69,7 +69,7 @@ export const CATEGORIES: Record<string, PSEOCategory> = {
   "thought-leadership": {
     label: "Thought Leadership",
     color: "#dc2626",
-    tailwindText: "text-red-400",
+    tailwindText: "text-red-600",
     tailwindBg: "bg-cp-raised",
     tailwindBorder: "border-cp-border",
     tailwindDot: "bg-red-500",
@@ -77,7 +77,7 @@ export const CATEGORIES: Record<string, PSEOCategory> = {
   glossary: {
     label: "Glossary",
     color: "#0891b2",
-    tailwindText: "text-cyan-400",
+    tailwindText: "text-cyan-600",
     tailwindBg: "bg-cp-raised",
     tailwindBorder: "border-cp-border",
     tailwindDot: "bg-cyan-500",
@@ -85,7 +85,7 @@ export const CATEGORIES: Record<string, PSEOCategory> = {
   "how-to": {
     label: "How-To",
     color: "#4f46e5",
-    tailwindText: "text-indigo-400",
+    tailwindText: "text-indigo-600",
     tailwindBg: "bg-cp-raised",
     tailwindBorder: "border-cp-border",
     tailwindDot: "bg-indigo-500",

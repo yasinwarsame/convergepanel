@@ -437,7 +437,7 @@ function PricingCard({ planId, billingInterval }: PricingCardProps) {
           className={`block w-full text-center rounded-xl px-6 py-3 text-base font-semibold transition-colors ${
             isHighlighted
               ? "bg-sky-600 text-white hover:bg-sky-700"
-              : "bg-cp-border text-cp-text hover:bg-slate-700"
+              : "bg-cp-border text-cp-text hover:bg-cp-raised"
           }`}
         >
           Start for free
@@ -448,7 +448,7 @@ function PricingCard({ planId, billingInterval }: PricingCardProps) {
           className={`block w-full text-center rounded-xl px-6 py-3 text-base font-semibold transition-colors ${
             isHighlighted
               ? "bg-sky-600 text-white hover:bg-sky-700"
-              : "bg-cp-border text-cp-text hover:bg-slate-700"
+              : "bg-cp-border text-cp-text hover:bg-cp-raised"
           }`}
         >
           {planId === "full" ? "Get Full Panel" : "Get Research Lite"}

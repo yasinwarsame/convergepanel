@@ -25,7 +25,7 @@ export default function PricingPage() {
           review decisions — plus all five models and higher monthly limits.
         </p>
         <p className="mt-4 text-sm text-cp-muted">
-          <Link href="/signup" className="font-medium text-sky-400 hover:text-sky-300">
+          <Link href="/signup" className="font-medium text-sky-600 hover:text-sky-700">
             Create a free account
           </Link>{" "}
           — no credit card required.
@@ -37,7 +37,7 @@ export default function PricingPage() {
           All verification features use third-party AI models and are provided for informational and
           decision-support purposes only. Results do not constitute forensic analysis, expert opinion, or legal
           evidence. See our{" "}
-          <Link href="/terms" className="font-medium text-sky-400 hover:text-sky-300 hover:underline">
+          <Link href="/terms" className="font-medium text-sky-600 hover:text-sky-700 hover:underline">
             Terms of Service
           </Link>{" "}
           for the full disclaimer and limitation of liability.

@@ -111,7 +111,7 @@ export default function AboutPage() {
           <p className="mt-3 leading-relaxed text-cp-muted">
             We keep improving structured review, policies, and audit visibility based on feedback.
             For questions or early-access conversations, email{" "}
-            <a href="mailto:contact@convergepanel.com" className="text-sky-400 hover:underline">
+            <a href="mailto:contact@convergepanel.com" className="text-sky-600 hover:underline">
               contact@convergepanel.com
             </a>
             .
@@ -158,13 +158,13 @@ export default function AboutPage() {
               { label: "How to Prove an AI Decision Was Reviewed", href: "/use-cases/how-to-prove-an-ai-decision-was-reviewed" },
             ].map(({ label, href }) => (
               <li key={href}>
-                <Link href={href} className="text-sm text-sky-400 hover:underline">
+                <Link href={href} className="text-sm text-sky-600 hover:underline">
                   {label} →
                 </Link>
               </li>
             ))}
             <li>
-              <Link href="/use-cases" className="text-sm font-semibold text-sky-400 hover:underline">
+              <Link href="/use-cases" className="text-sm font-semibold text-sky-600 hover:underline">
                 Browse all 100 use cases →
               </Link>
             </li>
@@ -173,7 +173,7 @@ export default function AboutPage() {
       </div>
 
       <div className="mt-8 border-t border-cp-border pt-6">
-        <Link href="/" className="inline-flex items-center font-medium text-sky-400 hover:text-sky-300">
+        <Link href="/" className="inline-flex items-center font-medium text-sky-600 hover:text-sky-700">
           ← Back to panel
         </Link>
       </div>

@@ -119,26 +119,26 @@ function ModelEvidenceCard({ model }: { model: VideoVerificationClientPayload["m
 
   const verdictColor =
     model.verdict === "authentic_captured" || model.verdict === "authentic"
-      ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300"
+      ? "bg-green-100 text-green-800"
       : model.verdict === "authentic_produced"
-        ? "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300"
+        ? "bg-blue-100 text-blue-800"
         : model.verdict === "likely_manipulated"
-          ? "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300"
+          ? "bg-red-100 text-red-800"
           : model.verdict === "inconclusive"
-            ? "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300"
-            : "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300";
+            ? "bg-amber-100 text-amber-800"
+            : "bg-gray-100 text-gray-800";
 
   const statusBadgeEl =
     model.status === "ok" ? null : model.status === "refused" ? (
-      <span className="text-xs px-2 py-0.5 rounded-full shrink-0 bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
+      <span className="text-xs px-2 py-0.5 rounded-full shrink-0 bg-amber-100 text-amber-800">
         Declined
       </span>
     ) : model.status === "parse_error" ? (
-      <span className="text-xs px-2 py-0.5 rounded-full shrink-0 bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300">
+      <span className="text-xs px-2 py-0.5 rounded-full shrink-0 bg-gray-100 text-gray-800">
         Parse error
       </span>
     ) : (
-      <span className="text-xs px-2 py-0.5 rounded-full shrink-0 bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300">
+      <span className="text-xs px-2 py-0.5 rounded-full shrink-0 bg-red-100 text-red-800">
         Error
       </span>
     );
@@ -166,7 +166,7 @@ function ModelEvidenceCard({ model }: { model: VideoVerificationClientPayload["m
       {expanded && (
         <div className="p-4 border-t border-slate-700 text-sm space-y-3">
           {model.status === "refused" && (
-            <p className="text-sm text-amber-600 dark:text-amber-400 italic">
+            <p className="text-sm text-amber-600 italic">
               This model declined to analyze the video due to its content policy. This is not a reflection on the
               video&apos;s authenticity — some models have restrictions on certain visual content.
             </p>
@@ -201,10 +201,10 @@ function ModelEvidenceCard({ model }: { model: VideoVerificationClientPayload["m
 
           {model.productionSignals && model.productionSignals.length > 0 && (
             <div>
-              <h5 className="font-medium text-blue-600 dark:text-blue-400 mb-1">Production signals</h5>
+              <h5 className="font-medium text-blue-600 mb-1">Production signals</h5>
               <ul className="list-disc list-inside space-y-0.5">
                 {model.productionSignals.map((s, j) => (
-                  <li key={j} className="text-blue-700 dark:text-blue-300">
+                  <li key={j} className="text-blue-700">
                     {s}
                   </li>
                 ))}
@@ -214,10 +214,10 @@ function ModelEvidenceCard({ model }: { model: VideoVerificationClientPayload["m
 
           {model.deceptionIndicators && model.deceptionIndicators.length > 0 && (
             <div>
-              <h5 className="font-medium text-red-600 dark:text-red-400 mb-1">Deception indicators</h5>
+              <h5 className="font-medium text-red-600 mb-1">Deception indicators</h5>
               <ul className="list-disc list-inside space-y-0.5">
                 {model.deceptionIndicators.map((s, j) => (
-                  <li key={j} className="text-red-700 dark:text-red-300">
+                  <li key={j} className="text-red-700">
                     {s}
                   </li>
                 ))}
@@ -494,7 +494,7 @@ export default function VideoVerificationResult({
               <h2 className="text-xl font-bold text-slate-50">{config.title}</h2>
               <p className="text-sm text-slate-200/90 mt-1">{config.subtitle}</p>
               {data.contentType && data.contentType !== "unknown" && (
-                <span className="mt-3 inline-block text-sm px-3 py-1 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300">
+                <span className="mt-3 inline-block text-sm px-3 py-1 rounded-full bg-gray-100 text-gray-700">
                   Content type: {contentTypeLabels[data.contentType] || data.contentType}
                 </span>
               )}

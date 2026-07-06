@@ -3,26 +3,20 @@
 @tailwind utilities;
 
 :root {
-  --bg:           #07090F;
-  --surface:      #0C0F1A;
-  --raised:       #131824;
-  --border:       #1C2236;
-  --accent:       #F59E0B;
-  --accent-hi:    #FCD34D;
-  --text:         #E2E8F4;
-  --text-muted:   #7B8BAF;
-  --text-faint:   #374058;
+  --bg:           #F6F6F3;
+  --surface:      #FFFFFF;
+  --raised:       #FBFBF9;
+  --border:       #E4E3DD;
+  --accent:       #2563EB;
+  --text:         #18181B;
+  --text-muted:   #65656E;
 }
 
 @layer base {
   body {
-    font-family: var(--font-outfit, 'Outfit', system-ui, sans-serif);
+    font-family: var(--font-hanken, 'Hanken Grotesk', system-ui, sans-serif);
     background-color: var(--bg);
     color: var(--text);
-  }
-
-  h1, h2, h3 {
-    font-family: var(--font-dm-serif, 'DM Serif Display', Georgia, serif);
   }
 }
 

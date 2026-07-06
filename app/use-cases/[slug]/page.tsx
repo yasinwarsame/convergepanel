@@ -323,9 +323,9 @@ export default async function UseCasePage({
                 <li key={i}>
                   <Link
                     href={href}
-                    className="group flex items-center gap-2 text-sm font-medium text-cp-text hover:text-sky-400 transition-colors"
+                    className="group flex items-center gap-2 text-sm font-medium text-cp-text hover:text-sky-600 transition-colors"
                   >
-                    <span className="text-cp-muted group-hover:text-sky-400 transition-colors">→</span>
+                    <span className="text-cp-muted group-hover:text-sky-600 transition-colors">→</span>
                     {label}
                   </Link>
                 </li>
@@ -336,7 +336,7 @@ export default async function UseCasePage({
 
         {/* CTA */}
         <div className="mb-10 rounded-2xl bg-cp-raised px-8 py-10 text-center">
-          <p className="mb-6 text-lg font-semibold text-white">{page.cta}</p>
+          <p className="mb-6 text-lg font-semibold text-cp-text">{page.cta}</p>
           <Link
             href="/signup"
             className="inline-block rounded-lg bg-sky-500 px-7 py-3 text-sm font-bold text-white shadow-sm hover:bg-sky-400 transition-colors"
@@ -381,7 +381,7 @@ function RelatedPages({ currentSlug, category }: { currentSlug: string; category
           >
             <span className={`mt-0.5 text-sm ${cat.tailwindText}`}>→</span>
             <div>
-              <p className="text-sm font-semibold text-cp-text group-hover:text-sky-400 transition-colors">
+              <p className="text-sm font-semibold text-cp-text group-hover:text-sky-600 transition-colors">
                 {p.title}
               </p>
               <p className="mt-0.5 text-xs text-cp-muted line-clamp-1">{p.metaDescription}</p>

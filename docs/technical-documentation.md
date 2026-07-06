@@ -507,6 +507,8 @@ All 234 use-case pages are defined as a single `PAGES: PSEOPage[]` array in `lib
 
 ---
 
-## Dark Theme
+## Theme
 
-The application uses a dark theme globally (`body { background: #07090F }`). All UI must use design tokens defined in `tailwind.config.ts` and `globals.css`. Never use light-mode Tailwind classes (`text-slate-*`, `bg-white`, `bg-gray-50`, etc.) — they are invisible or incorrect on the dark background. See `CLAUDE.md` for the full token reference.
+The application uses a light theme globally (`body { background: #F6F6F3 }`, Hanken Grotesk font), switched from an earlier dark theme in July 2026. All UI must use the `cp-*` design tokens defined in `tailwind.config.ts` and `globals.css` (`cp-bg`, `cp-surface`, `cp-raised`, `cp-text`, `cp-muted`, `cp-accent`/`cp-primary`, `cp-border`, etc.) — no `dark:` Tailwind variants (the app has no dark-mode toggle). See `CLAUDE.md` for the full token reference and readability conventions (e.g. `-600`/`-700` shades for colored text on light backgrounds, not `-300`/`-400`).
+
+Note: `app/page.tsx` (the main Research/Verify Claim/Verify Video dashboard) predates the token system and uses hardcoded Tailwind classes (`bg-white`, `text-slate-900`, etc.) instead of `cp-*` tokens — it happens to already match the light theme but won't pick up future token changes automatically.
