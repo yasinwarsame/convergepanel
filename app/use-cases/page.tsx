@@ -594,6 +594,27 @@ const HUB_GROUPS: HubGroup[] = [
     ],
   },
   {
+    id: "high-stakes-research-verification",
+    label: "High-Stakes Research Verification",
+    description:
+      "Review the assumptions, evidence, source quality, omissions, and conflicting interpretations behind AI-generated financial and scientific research.",
+    tailwindText: "text-emerald-600",
+    tailwindBg: "bg-cp-raised",
+    tailwindBorder: "border-cp-border",
+    slugs: [
+      "ai-thesis-fragility",
+      "ai-downside-omission",
+      "ai-comparable-company-mismatch",
+      "check-if-ai-mixed-gaap-and-non-gaap-metrics",
+      "verify-ai-interpretation-of-management-guidance",
+      "check-if-ai-ignored-liquidity-risk",
+      "ai-clinical-evidence-hierarchy",
+      "verify-ai-summary-of-clinical-trial-results",
+      "check-if-ai-treated-preprint-as-peer-reviewed",
+      "verify-ai-synthesis-of-conflicting-studies",
+    ],
+  },
+  {
     id: "editorial-judgment-evidence-review",
     label: "AI Editorial Judgment & Evidence Review",
     description:
