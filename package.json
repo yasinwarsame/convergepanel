@@ -22,7 +22,8 @@
     "verify:policies": "node scripts/dev-verify-policy-engine.mjs",
     "verify:consensus": "node scripts/dev-verify-consensus-scoring.mjs",
     "verify:governance": "node scripts/dev-verify-governance.mjs",
-    "verify:video": "node scripts/dev-verify-video-processing.mjs"
+    "verify:video": "node scripts/dev-verify-video-processing.mjs",
+    "seo:indexnow": "node scripts/submit-indexnow.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.20.0",

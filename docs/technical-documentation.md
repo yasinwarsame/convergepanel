@@ -505,6 +505,12 @@ All 234 use-case pages are defined as a single `PAGES: PSEOPage[]` array in `lib
 | `publishedAt` | string (ISO date) | Freshness signal for sitemap + JSON-LD |
 | `comparisonTable` | object (optional) | Comparison table data |
 
+### IndexNow
+
+Bing (and Yandex/Seznam/Naver via the shared protocol) only crawl on their own schedule unless pinged. `scripts/submit-indexnow.mjs` POSTs URLs to `https://api.indexnow.org/indexnow`; the key file at `public/97ce1cedaadd35047076e3cc65939bd8.txt` must be live in production for the endpoint to verify the submission (it fetches the file from `convergepanel.com` before accepting).
+
+Run `npm run seo:indexnow` after any PSEO edit session — it diffs `PAGES` against `scripts/.indexnow-state.json` (committed) and submits only slugs whose `publishedAt` changed since the last successful run. Use `npm run seo:indexnow -- --all` to resubmit every URL in the sitemap, or pass explicit slugs to submit only those. State is only persisted on a successful (2xx) response, so a failed submission (e.g. key not yet deployed) doesn't get silently marked as done. Reusable submission logic for future runtime use (e.g. firing from a publish API route) lives in `lib/pseo/indexnow.ts`.
+
 ---
 
 ## Theme
