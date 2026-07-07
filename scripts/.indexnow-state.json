@@ -271,5 +271,15 @@
   "test-ai-approval-control-effectiveness": "2026-07-05",
   "review-ai-evidence-before-approval": "2026-07-05",
   "ai-override-documentation": "2026-07-05",
-  "create-ai-decision-assurance-record": "2026-07-05"
+  "create-ai-decision-assurance-record": "2026-07-05",
+  "ai-thesis-fragility": "2026-07-07",
+  "ai-downside-omission": "2026-07-07",
+  "ai-comparable-company-mismatch": "2026-07-07",
+  "check-if-ai-mixed-gaap-and-non-gaap-metrics": "2026-07-07",
+  "verify-ai-interpretation-of-management-guidance": "2026-07-07",
+  "check-if-ai-ignored-liquidity-risk": "2026-07-07",
+  "ai-clinical-evidence-hierarchy": "2026-07-07",
+  "verify-ai-summary-of-clinical-trial-results": "2026-07-07",
+  "check-if-ai-treated-preprint-as-peer-reviewed": "2026-07-07",
+  "verify-ai-synthesis-of-conflicting-studies": "2026-07-07"
 }
