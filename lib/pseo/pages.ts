@@ -10170,6 +10170,7 @@ export const PAGES: PSEOPage[] = [
       { href: "/use-cases/consensus-scoring-for-vendor-evaluation", label: "Consensus Scoring for Vendor Evaluation" },
       { href: "/use-cases/ai-risk-review-tool", label: "AI Risk Review Tool" },
       { href: "/use-cases/what-is-a-consensus-score", label: "What Is a Consensus Score?" },
+      { href: "/use-cases/ai-related-party-blind-spot", label: "Review the relationship risk" },
     ],
   },
   {
@@ -11552,6 +11553,7 @@ export const PAGES: PSEOPage[] = [
       { href: "/use-cases/how-to-pressure-test-an-ai-response", label: "How to Pressure-Test an AI Response" },
       { href: "/use-cases/what-is-a-consensus-score", label: "What Is a Consensus Score?" },
       { href: "/use-cases/ai-thesis-fragility", label: "Stress-test the investment thesis" },
+      { href: "/use-cases/ai-valuation-assumption-check", label: "Review the valuation assumptions" },
     ],
   },
 
@@ -19813,7 +19815,7 @@ export const PAGES: PSEOPage[] = [
   },
   {
     slug: "verify-company-background-with-ai-models",
-    publishedAt: "2026-06-18",
+    publishedAt: "2026-07-07",
     title: "Verify Company Background with AI Models",
     h1: "Verifying Company Background with Multiple AI Models",
     metaDescription: "Compare multiple AI models to pressure-test a company's background — history, leadership, funding, and footprint — before relying on it for outreach or diligence.",
@@ -19853,6 +19855,27 @@ export const PAGES: PSEOPage[] = [
           "History — founding, milestones, and major changes",
           "Footprint — locations, size, and markets served",
           "Structure — subsidiaries, mergers, and rebrands",
+        ],
+      },
+      {
+        heading: "Verifying an Executive's Track Record Specifically",
+        paragraphs: [
+          "\"Leadership\" as a background category covers current names and titles. An executive's track record is a deeper, separate check: the specific roles held, the dates and outcomes attached to each one, and whether the person named is actually the person being described — same-name confusion is a real and common failure mode once an executive has a common name.",
+        ],
+        bullets: [
+          "Full name — confirmed against an authoritative source, not just as stated",
+          "Employer — the specific company, not a loosely-remembered affiliation",
+          "Title — the exact role held, and whether it was current or interim",
+          "Dates — start and end dates for each role",
+          "Responsibilities — what the role actually covered, versus an inflated description",
+          "Company outcome — what happened at the company during and after the tenure",
+          "Board role — any board seats, current or past, separate from executive roles",
+          "Education — credentials verified against the institution, not just the claim",
+          "Public statements — comments actually attributable to this person",
+          "Litigation or regulatory history — where lawful and relevant to the research purpose",
+          "Same-name confusion — confirming the record belongs to this specific individual, not someone who shares a name",
+          "Source authority — whether the claim traces to a primary record or a repeated secondary mention",
+          "Disputed claims — track-record details that different sources describe differently",
         ],
       },
       {
@@ -19914,6 +19937,10 @@ export const PAGES: PSEOPage[] = [
         q: "How does this differ from general account research?",
         a: "This page focuses specifically on company-background facts — history, leadership, funding, structure. Account-research verification is broader. Use this when the risk is outdated or invented company details.",
       },
+      {
+        q: "Can ConvergePanel verify an executive's identity or run a background check?",
+        a: "No. ConvergePanel supports research comparison — surfacing where AI models agree or disagree on an executive's stated track record. It does not perform identity verification, background screening, or legal due diligence. Those require authoritative records and a qualified professional.",
+      },
     ],
     relatedLinks: [
       { href: "/use-cases/verify-account-research-with-ai", label: "Verify Account Research with AI" },
@@ -19924,6 +19951,8 @@ export const PAGES: PSEOPage[] = [
       { href: "/use-cases/should-sales-teams-trust-one-ai-answer", label: "Should Sales Teams Trust One AI Answer?" },
       { href: "/use-cases/how-to-verify-an-ai-answer", label: "How to Verify an AI Answer" },
       { href: "/use-cases/how-to-verify-sources-from-ai-answers", label: "How to Verify Sources from AI Answers" },
+      { href: "/use-cases/ai-related-party-blind-spot", label: "Review the relationship risk" },
+      { href: "/use-cases/check-if-ai-confused-parent-company-with-subsidiary", label: "Verify the corporate entity" },
     ],
   },
   {
@@ -21307,6 +21336,7 @@ export const PAGES: PSEOPage[] = [
       { href: "/use-cases/ai-disagreement-analysis-tool", label: "AI Disagreement Analysis Tool" },
       { href: "/use-cases/ai-downside-omission", label: "Find the missing downside in an AI analysis" },
       { href: "/use-cases/verify-ai-interpretation-of-management-guidance", label: "Review the guidance interpretation" },
+      { href: "/use-cases/validate-ai-generated-scenario-analysis", label: "Validate the scenario analysis" },
     ],
   },
   {
@@ -27762,6 +27792,650 @@ export const PAGES: PSEOPage[] = [
     schemaType: "FAQPage",
     metaDescription:
       "'The evidence is mixed' explains nothing. Learn how to check whether an AI synthesis of conflicting studies actually explains the conflict or just flattens it.",
+  },
+  {
+    slug: "ai-valuation-assumption-check",
+    publishedAt: "2026-07-07",
+    title: "AI Valuation Assumption Check Before You Trust the Output",
+    h1: "The Valuation Is Only as Reliable as Its Assumptions",
+    audience: "Investment analysts and researchers",
+    audienceDetail: "Analysts reviewing an AI-generated valuation model where the output looks precise but the assumptions underneath it haven't been checked",
+    problem:
+      "A valuation model can produce a number to the exact cent while resting on a terminal growth rate that exceeds long-run GDP growth forever, or a discount rate that doesn't reflect the company's actual risk profile. The precision of the output has nothing to do with the soundness of the inputs — and an AI-generated valuation summary rarely surfaces which specific assumption is doing the most work.\n\nThe risk compounds because valuation math is genuinely sensitive to small assumption changes. A one-point shift in terminal growth or discount rate can move a valuation by a large percentage, and that sensitivity is exactly what a clean, confident-sounding output tends to hide.",
+    solution:
+      "ConvergePanel checks an AI-generated valuation against a specific assumption checklist across five models — growth, margin, discount rate, terminal value, share count, and currency — and flags where an assumption looks aggressive, internally inconsistent, or unstated. Where models disagree on whether an assumption is reasonable, that's the input to stress-test before trusting the output.",
+    workflow: [
+      "List every assumption feeding the valuation, not just the final output",
+      "Check the discount rate against the company's actual risk profile, not a generic industry average",
+      "Check the terminal growth rate against realistic long-run bounds",
+      "Confirm which comparable multiple was selected and why",
+      "Check share count for dilution from options, RSUs, or convertible instruments",
+      "Run the assumption set through ConvergePanel across five models",
+      "Flag assumptions where models disagree or where the AI didn't state a specific number",
+    ],
+    useCases: [
+      "Checking whether a DCF's terminal growth rate is realistic before trusting the output",
+      "Verifying a discount rate reflects the company's specific risk, not a generic benchmark",
+      "Confirming a per-share valuation accounts for dilution",
+      "Auditing an AI-generated valuation summary before it supports a position or recommendation",
+    ],
+    comparisonTable: {
+      headers: ["Assumption", "AI-Stated Value", "Reasonableness Check", "Sensitivity", "Reviewer Action"],
+      rows: [
+        ["Terminal growth rate", "4.5% in perpetuity", "Exceeds typical long-run nominal GDP growth used for terminal value", "A 1-point change here can move the valuation by a large percentage", "Cap terminal growth at a realistic long-run rate and rerun the output"],
+        ["Discount rate (WACC)", "7%, described as 'industry standard'", "Doesn't reflect this company's smaller size, leverage, or business risk", "Lower discount rates mechanically inflate present value", "Rebuild WACC from the company's own capital structure and risk profile"],
+        ["Share count", "Basic shares only", "Excludes outstanding options and RSUs from the per-share calculation", "Understates share count, overstates per-share value", "Recompute on a fully diluted basis before citing a per-share figure"],
+      ],
+    },
+    bodySections: [
+      {
+        heading: "Twelve inputs worth checking before trusting the output",
+        bullets: [
+          "Revenue growth — is the assumed trajectory grounded in a specific driver, not just extrapolation",
+          "Margin assumptions — do they expand faster than the business has demonstrated it can",
+          "Discount rate — does it reflect this company's actual risk, not an industry average",
+          "Terminal growth — is it bounded by realistic long-run economic growth",
+          "Multiple selection — is the chosen multiple justified against the comparable set",
+          "Capital intensity — does the model account for the capex the growth actually requires",
+          "Dilution — are options, RSUs, and convertibles reflected in share count",
+          "Debt — is the capital structure assumption consistent with actual filings",
+          "Share count — basic or fully diluted, and is it labeled",
+          "Currency — are cash flows and comparables converted on a consistent basis",
+          "Inflation — are nominal and real figures being mixed anywhere in the model",
+          "Comparable-company selection — see the comparable-company-mismatch check for this specifically",
+        ],
+      },
+      {
+        heading: "Precision is not the same as soundness",
+        paragraphs: [
+          "A valuation output carrying several decimal places creates an impression of rigor that has nothing to do with whether the underlying assumptions are defensible. The math is only ever as good as the inputs — and valuation math in particular is sensitive enough that a small, unstated assumption can move the conclusion more than any modeling error would.",
+          "Checking the assumption set isn't about rebuilding the model — it's about identifying which two or three inputs are doing most of the work, and confirming those specific numbers before the output is used for anything.",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "Why does the terminal growth rate matter so much in a valuation?",
+        a: "Because it compounds forever in the model's math, a small difference in this single assumption can move the valuation more than almost any other input — which is exactly why it deserves specific scrutiny rather than being accepted at face value.",
+      },
+      {
+        q: "Is a lower discount rate always a red flag?",
+        a: "Not automatically, but it should be justified against the company's specific risk profile — size, leverage, and business volatility — rather than borrowed from a generic industry figure that doesn't reflect this particular company.",
+      },
+      {
+        q: "How much does share count really affect a per-share valuation?",
+        a: "It can matter significantly for companies with substantial option or RSU programs — using basic shares instead of a fully diluted count can meaningfully overstate the per-share value.",
+      },
+      {
+        q: "Can several AI models validate the same flawed assumption?",
+        a: "Yes, particularly for assumptions that mirror commonly-repeated industry framing. That's why the check has to test specific numbers against reasonableness bounds, not just ask whether models find the assumption plausible-sounding.",
+      },
+      {
+        q: "Can ConvergePanel certify that a valuation is correct?",
+        a: "No. It can help compare assumptions across models and identify disagreement or internal inconsistency — it does not provide investment advice or certify a valuation. Building and defending a valuation model requires a qualified financial professional.",
+      },
+    ],
+    relatedLinks: [
+      { label: "Stress-test the investment thesis", href: "/use-cases/ai-thesis-fragility" },
+      { label: "Review the comparable set", href: "/use-cases/ai-comparable-company-mismatch" },
+      { label: "Validate the scenario analysis", href: "/use-cases/validate-ai-generated-scenario-analysis" },
+      { label: "Verify Financial Assumptions with AI", href: "/use-cases/verify-financial-assumptions-with-ai" },
+    ],
+    cta: "Review the Valuation Assumptions",
+    category: "research",
+    schemaType: "FAQPage",
+    metaDescription:
+      "A valuation can be precise and still rest on an unrealistic terminal growth rate or discount rate. Check the assumption set before trusting the output.",
+  },
+  {
+    slug: "validate-ai-generated-scenario-analysis",
+    publishedAt: "2026-07-07",
+    title: "How to Validate AI-Generated Scenario Analysis",
+    h1: "A Scenario Model Can Be Precise and Still Be Incomplete",
+    audience: "Investment analysts and researchers",
+    audienceDetail: "Analysts reviewing an AI-generated base/bull/bear scenario model before it informs a position or a decision",
+    problem:
+      "A base case, a bull case, and a bear case, each with a clean probability weight — a scenario analysis can look thorough while quietly treating its key drivers as independent when they actually move together, or omitting a scenario entirely because nothing in the source material suggested it. The structure looks complete. Whether it actually covers the plausible range of outcomes is a separate question the structure alone can't answer.",
+    solution:
+      "ConvergePanel checks an AI-generated scenario model across five models: are the drivers behind each scenario actually independent, does the probability weighting have a stated basis, and is there a plausible scenario the analysis left out entirely. Where models flag the same missing dependency or omitted scenario, that's the gap to close before the analysis is used.",
+    workflow: [
+      "List the stated scenarios and the key driver behind each one",
+      "Check whether drivers assumed to move independently are actually correlated",
+      "Check the probability weighting for a stated basis, not just an assigned number",
+      "Identify sensitivities the model treats as fixed but that could plausibly vary",
+      "Consider what scenario is plausible but wasn't modeled at all",
+      "Run the scenario set through ConvergePanel across five models",
+      "Flag correlated-assumption errors and omitted scenarios for review",
+    ],
+    useCases: [
+      "Checking whether a bull case assumes two drivers that can't both hold at once",
+      "Verifying that scenario probability weights have a stated rationale",
+      "Identifying a plausible downside scenario the analysis never modeled",
+      "Auditing an AI-generated scenario table before it supports a decision",
+    ],
+    comparisonTable: {
+      headers: ["Scenario", "Assumptions", "Missing Dependency", "Contradictory Evidence", "Model Disagreement", "Reviewer Conclusion"],
+      rows: [
+        ["Bull case", "Volume grows 15% and price holds flat", "Treats volume and pricing power as independent when a competitor response to volume gains is plausible", "Prior cycle showed competitors cutting price when share shifted quickly", "3 of 5 models flagged the volume/pricing correlation unprompted", "Rebuild the bull case with a linked volume-pricing sensitivity, not two independent assumptions"],
+        ["Base and bear cases only", "No scenario modeled for a supply-chain disruption", "N/A — the gap is an omitted scenario, not a flawed one", "Company's own risk disclosures name single-supplier dependency", "4 of 5 models noted the missing scenario when asked what wasn't modeled", "Add a supply-disruption scenario with its own probability weight before treating the range as complete"],
+      ],
+    },
+    bodySections: [
+      {
+        heading: "Twelve things a scenario table can quietly get wrong",
+        bullets: [
+          "Base case — is it genuinely the most likely path, or just the middle number",
+          "Bull case — what specifically has to go right, named explicitly",
+          "Bear case — what specifically has to go wrong, named explicitly",
+          "Probability weight — does it have a stated basis or just an assigned number",
+          "Key driver — the single factor each scenario actually depends on",
+          "Dependency — whether that driver is really independent of the others",
+          "Sensitivity — how much the conclusion moves if the driver shifts modestly",
+          "Nonlinear risk — whether a small input change could produce an outsized outcome change",
+          "Correlated assumptions — drivers that move together being modeled as if they don't",
+          "Omitted scenario — a plausible path with no row in the table at all",
+          "Terminal condition — what happens beyond the model's explicit forecast window",
+          "Decision implication — what actually changes based on which scenario proves closest to true",
+        ],
+      },
+      {
+        heading: "A complete-looking table isn't the same as a complete range",
+        paragraphs: [
+          "Three rows and three probability weights that sum to 100% create the visual impression of thoroughness regardless of whether the three scenarios actually bracket the plausible outcome space. The structure is easy to produce; checking whether it's the right structure takes more work, and that work is exactly what a scenario validation step is for.",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "How do I know if two assumptions are wrongly treated as independent?",
+        a: "Check whether a real-world mechanism would link them — a company gaining volume by cutting price, for instance, links volume and price directly. If the model varies one without adjusting the other, that's a correlated-assumption error worth flagging.",
+      },
+      {
+        q: "What if the omitted scenario seems unlikely?",
+        a: "Unlikely isn't the same as implausible — a low-probability scenario still belongs in the table with an honest weight, rather than being excluded because it's inconvenient or wasn't suggested by the source material.",
+      },
+      {
+        q: "Does a probability-weighted average of scenarios give a reliable expected value?",
+        a: "Only as reliable as the scenarios and weights feeding it. A probability-weighted average of three incomplete scenarios produces a precise-looking number built on an incomplete input set.",
+      },
+      {
+        q: "How many scenarios are enough?",
+        a: "There's no fixed number — three well-differentiated scenarios that actually bracket the plausible range beat five scenarios that are all variations on the same underlying assumption.",
+      },
+      {
+        q: "Can ConvergePanel assign the correct probability weights to each scenario?",
+        a: "No. It can compare how models characterize the scenario set and flag missing dependencies or omitted scenarios — assigning defensible probability weights is a judgment call for a qualified financial professional.",
+      },
+    ],
+    relatedLinks: [
+      { label: "Review the valuation assumptions", href: "/use-cases/ai-valuation-assumption-check" },
+      { label: "Find the missing downside in an AI analysis", href: "/use-cases/ai-downside-omission" },
+      { label: "Stress-test the investment thesis", href: "/use-cases/ai-thesis-fragility" },
+      { label: "Forecast Narrative Verification with AI", href: "/use-cases/forecast-narrative-verification-with-ai" },
+    ],
+    cta: "Validate the Scenario Analysis",
+    category: "how-to",
+    schemaType: "FAQPage",
+    metaDescription:
+      "A scenario table can look thorough and still miss a plausible outcome. Check an AI-generated base/bull/bear analysis for omitted scenarios and correlated assumptions.",
+  },
+  {
+    slug: "ai-endpoint-interpretation",
+    publishedAt: "2026-07-07",
+    title: "AI Endpoint Interpretation in Clinical Trial Summaries",
+    h1: "The Endpoint Determines What the Trial Actually Proved",
+    audience: "Healthcare and life sciences researchers",
+    audienceDetail: "Medical writers and researchers checking whether an AI summary correctly attributed a trial's result to the right endpoint type",
+    problem:
+      "A trial can hit its secondary endpoint, miss its primary endpoint, and still get summarized as \"the drug worked\" if the summary doesn't distinguish which endpoint actually produced the positive result. A surrogate endpoint — a biomarker change, say — getting reported with the same weight as an actual clinical outcome is a related and equally common compression.\n\nThe endpoint is what the trial was designed and powered to test. Reporting the result without naming the endpoint type strips out the single piece of context that determines how much the result should actually change anyone's confidence.",
+    solution:
+      "ConvergePanel checks an AI-generated trial summary against the endpoint structure across five models: was the reported result on the primary endpoint or a secondary one, was it prespecified or found post hoc, and does a surrogate endpoint get presented with the certainty of a hard clinical outcome. Where models disagree on which endpoint a claim is actually based on, that's the detail to trace back to the trial's own methods section.",
+    workflow: [
+      "Identify the trial's prespecified primary endpoint from its registration or methods section",
+      "Check whether the AI summary's headline claim is based on the primary endpoint or a secondary one",
+      "Check whether a surrogate endpoint is being presented as equivalent to a clinical outcome",
+      "Confirm whether a cited subgroup or secondary finding was prespecified or identified post hoc",
+      "Assess statistical significance separately from clinical relevance for each endpoint cited",
+      "Flag any summary that elevates a secondary or post hoc finding to the trial's main conclusion",
+    ],
+    useCases: [
+      "Checking whether a positive result comes from the primary endpoint or a secondary one",
+      "Verifying a surrogate endpoint isn't presented as a clinical outcome",
+      "Confirming a cited subgroup finding was prespecified, not identified after the fact",
+      "Auditing an AI-generated trial summary before it's cited in a report",
+    ],
+    comparisonTable: {
+      headers: ["Endpoint", "Type", "Result", "AI Interpretation", "Reviewer Conclusion"],
+      rows: [
+        ["Overall survival", "Primary, prespecified", "Not statistically significant", "Summary emphasizes a different result as the headline finding", "State plainly that the primary endpoint did not reach significance"],
+        ["Biomarker reduction", "Secondary, surrogate endpoint", "Statistically significant improvement", "Summary presents this as evidence the treatment 'worked' for patients", "Note this is a surrogate marker, not a demonstrated clinical outcome, until outcome data confirms it"],
+        ["Subgroup response in one age band", "Post hoc, not prespecified", "Statistically significant within the subgroup", "Summary cites this as a key finding without noting it wasn't prespecified", "Flag as exploratory and hypothesis-generating, not confirmatory"],
+      ],
+    },
+    bodySections: [
+      {
+        heading: "Ten endpoint distinctions that change what a result means",
+        bullets: [
+          "Primary endpoint — the trial's pre-specified main measure of success",
+          "Secondary endpoint — supporting measures, evidentiary weight is lower",
+          "Exploratory endpoint — hypothesis-generating, not designed to confirm anything",
+          "Surrogate endpoint — a marker (like a biomarker) standing in for a real clinical outcome",
+          "Composite endpoint — several outcomes combined into one measure, which can mask which component drove the result",
+          "Safety endpoint — measures harm, not efficacy, and deserves separate attention",
+          "Statistical significance — the result is unlikely to be due to chance",
+          "Clinical significance — the effect size is large enough to matter to a patient",
+          "Prespecified analysis — planned before the data was examined",
+          "Post hoc analysis — identified after looking at the data, and evidentiarily weaker as a result",
+        ],
+      },
+      {
+        heading: "Why a missed primary endpoint doesn't read as a miss",
+        paragraphs: [
+          "When a trial misses its primary endpoint but shows a positive secondary or post hoc result, the natural next step in a write-up is to lead with the positive finding — which is exactly how a missed primary endpoint stops reading as a miss. Nothing about the sentence is false; the reporting order alone determines the impression.",
+          "The check here isn't complicated: find the primary endpoint, find its actual result, and confirm the summary states that result plainly before anything else gets emphasized.",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "Does a positive secondary endpoint still count as evidence?",
+        a: "Yes, but with less weight than a primary endpoint result — trials are statistically powered around their primary endpoint, and secondary findings are more prone to chance and should be treated as supportive, not conclusive.",
+      },
+      {
+        q: "Why does it matter if an endpoint is a surrogate marker?",
+        a: "Because a surrogate marker moving in the right direction doesn't guarantee the actual clinical outcome it's meant to predict will follow — surrogate-to-outcome relationships sometimes fail to hold, which is exactly why regulators often require outcome data before treating a surrogate result as sufficient.",
+      },
+      {
+        q: "Is a post hoc subgroup finding worthless?",
+        a: "No — it's hypothesis-generating and can justify a follow-up trial. It's the wrong basis for a confirmed conclusion, which is the distinction that matters when a summary treats it as one.",
+      },
+      {
+        q: "How do I find a trial's actual prespecified primary endpoint?",
+        a: "Trial registries (where the study was registered before enrollment began) list the prespecified primary endpoint — checking the registration against the published summary is the most reliable way to catch a post hoc endpoint being presented as primary.",
+      },
+      {
+        q: "Can ConvergePanel determine whether an endpoint result is clinically meaningful?",
+        a: "No. It compares model interpretations of endpoint type and prespecification status — determining clinical meaningfulness requires a qualified clinician or biostatistician evaluating the actual effect size and patient context.",
+      },
+    ],
+    relatedLinks: [
+      { label: "Review the trial summary", href: "/use-cases/verify-ai-summary-of-clinical-trial-results" },
+      { label: "Review the evidence level", href: "/use-cases/ai-clinical-evidence-hierarchy" },
+      { label: "Check the evidence stage", href: "/use-cases/check-if-ai-generalized-animal-research-to-humans" },
+      { label: "Compare conflicting studies", href: "/use-cases/verify-ai-synthesis-of-conflicting-studies" },
+    ],
+    cta: "Review the Endpoint Interpretation",
+    category: "how-to",
+    schemaType: "FAQPage",
+    metaDescription:
+      "A missed primary endpoint doesn't always read as a miss. Check whether an AI trial summary attributed its headline claim to the right endpoint.",
+  },
+  {
+    slug: "check-if-ai-generalized-animal-research-to-humans",
+    publishedAt: "2026-07-07",
+    title: "How to Check If AI Generalized Animal Research to Humans",
+    h1: "A Result in Animals Is Not Yet a Human Clinical Conclusion",
+    audience: "Healthcare and life sciences researchers",
+    audienceDetail: "Researchers and medical writers checking whether an AI summary carried an animal or preclinical finding further than the evidence supports",
+    problem:
+      "\"A compound reduced tumor growth\" in a mouse model is real, published research. \"A compound may help treat cancer\" is a sentence about humans that the mouse study never tested. AI summaries make this leap constantly, because the two sentences share almost all the same words and only one of them is actually supported by the cited study.\n\nThe gap between preclinical and clinical evidence is exactly where dose scaling, species differences, and mechanism translation most often break down — a majority of promising animal findings never replicate in human trials, which is precisely why the distinction has to survive the summary, not just the original paper.",
+    solution:
+      "ConvergePanel checks an AI-generated summary against the evidence stage across five models: was this in vitro, animal, or human evidence, and did the summary's language stay within what that stage actually supports. Where a model's phrasing implies clinical relevance a preclinical study can't establish, that's the overstatement to correct before the claim is repeated.",
+    workflow: [
+      "Identify the exact study type behind the claim — in vitro, animal model, or a specific human trial phase",
+      "Check the species and whether the mechanism is known to translate to humans",
+      "Check the dose used against what would be required or tolerable in humans",
+      "Confirm whether any human trial has tested the same finding, and at what phase",
+      "Compare the study authors' own stated conclusion to the AI summary's conclusion",
+      "Flag any summary phrasing that implies human clinical relevance a preclinical study can't support",
+    ],
+    useCases: [
+      "Checking whether 'may treat' language is supported by human trial data or only animal data",
+      "Verifying a cited mechanism has been shown to translate from animal models to humans",
+      "Confirming a compound's development stage before repeating a claim about its potential",
+      "Auditing a science summary before it's used in a report or public-facing content",
+    ],
+    bodySections: [
+      {
+        heading: "The evidence ladder from bench to bedside",
+        bullets: [
+          "In vitro — cells in a dish, the earliest and most removed from a human outcome",
+          "Animal model — a living organism, but not a human, with its own species-specific biology",
+          "Preclinical — the umbrella term for in vitro and animal-stage research, before human testing begins",
+          "Phase I — first human testing, primarily assessing safety in a small group",
+          "Phase II — testing for efficacy signal and dosing in a larger group",
+          "Phase III — large-scale testing against a comparator, the basis for most approvals",
+          "Observational human evidence — real-world human data without a controlled intervention",
+          "Approved clinical use — the treatment has cleared regulatory review for the studied indication",
+        ],
+      },
+      {
+        heading: "Ten checks that catch the overreach",
+        bullets: [
+          "Study population — was it cells, animals, or humans",
+          "Species — which animal, and how well its biology models human disease",
+          "Mechanism — is there evidence this pathway behaves the same way in humans",
+          "Dose — was the dose used achievable or tolerable in a human context",
+          "Endpoint — what was actually measured, and in what system",
+          "Safety — preclinical safety data doesn't establish human safety",
+          "Human replication — has any human study tested this specific finding",
+          "Regulatory status — has this reached any approval stage, for any indication",
+          "Author conclusion — what the original researchers themselves claimed",
+          "AI conclusion — whether the summary's language matches or exceeds that claim",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "Is animal research meaningless for understanding a treatment's potential?",
+        a: "No — it's a necessary and legitimate early step. The issue isn't that animal research is uninformative, it's that its findings frequently don't replicate once tested in humans, which is exactly why the language describing it needs to stay conditional rather than predictive.",
+      },
+      {
+        q: "What's the difference between 'preclinical' and 'clinical' evidence?",
+        a: "Preclinical evidence comes from cells or animal models, before any human testing begins. Clinical evidence comes from human trials. Treating preclinical findings as though they were clinical is the single most common overreach in AI-generated science summaries.",
+      },
+      {
+        q: "How do I check if a finding has been tested in humans?",
+        a: "Search trial registries and the recent literature for the same compound and mechanism — if no human trial exists yet, the claim should be phrased as a preclinical finding, not a treatment prospect.",
+      },
+      {
+        q: "Does a successful Phase I trial mean a treatment works?",
+        a: "No. Phase I is primarily a safety and dosing study in a small group — efficacy is typically assessed starting in Phase II, and confirmed, if at all, in Phase III.",
+      },
+      {
+        q: "Can ConvergePanel confirm a compound will work the same way in humans?",
+        a: "No. Multi-model review can surface where a summary's language overstates what its evidence stage supports, but qualified scientific or clinical review remains necessary to assess actual translational potential.",
+      },
+    ],
+    relatedLinks: [
+      { label: "Review the evidence level", href: "/use-cases/ai-clinical-evidence-hierarchy" },
+      { label: "Review the endpoint interpretation", href: "/use-cases/ai-endpoint-interpretation" },
+      { label: "Review the trial summary", href: "/use-cases/verify-ai-summary-of-clinical-trial-results" },
+      { label: "Check the literature coverage", href: "/use-cases/ai-literature-coverage-gap" },
+    ],
+    cta: "Check the Evidence Stage",
+    category: "how-to",
+    schemaType: "FAQPage",
+    metaDescription:
+      "A result in mice is not a human clinical conclusion. Check whether an AI summary's language stayed within what preclinical evidence actually supports.",
+  },
+  {
+    slug: "ai-literature-coverage-gap",
+    publishedAt: "2026-07-07",
+    title: "AI Literature Coverage Gap: What Research Did the Review Miss?",
+    h1: "A Literature Review Can Look Complete While Missing the Evidence That Changes the Conclusion",
+    audience: "Academic and life sciences researchers",
+    audienceDetail: "Researchers relying on an AI-generated literature summary and needing to know what it didn't search, not just what it found",
+    problem:
+      "An AI-generated literature summary reads as thorough because it cites real papers with real findings — but citing real papers isn't the same as covering the field. A summary built mostly from recent, English-language, positive-result papers can look complete while missing the null-result studies, the foreign-language findings, or the retraction that would change the conclusion.\n\nThe gap is invisible from inside the summary itself. Nothing about a well-organized list of supporting citations signals what's missing from it — the only way to find the gap is to check what wasn't searched.",
+    solution:
+      "ConvergePanel checks an AI-generated literature summary against a coverage checklist across five models: what date range, what databases, what languages, and — critically — whether null and contradictory findings were represented alongside the positive ones. Where models disagree on whether coverage looks complete, that's the specific dimension to search directly before trusting the summary's conclusion.",
+    workflow: [
+      "Identify the research question the summary is meant to answer",
+      "Check the publication date range and databases the summary appears to draw from",
+      "Check for representation of null, negative, and contradictory findings — not just positive ones",
+      "Search directly for retractions or corrections on any cited paper",
+      "Check whether non-English or non-Western literature was represented, where relevant",
+      "Run the summary through ConvergePanel across five models to flag coverage gaps",
+    ],
+    useCases: [
+      "Checking whether a literature summary represents null results alongside positive findings",
+      "Verifying no cited paper has since been retracted or corrected",
+      "Confirming a summary's coverage isn't limited to recent English-language sources",
+      "Auditing an AI-generated literature review before it supports a report or paper",
+    ],
+    comparisonTable: {
+      headers: ["Evidence Category", "Included?", "Omitted?", "Likely Impact", "Reviewer Action"],
+      rows: [
+        ["Positive findings from recent English-language journals", "Yes — this is most of what the summary cites", "No", "None — this is the summary's actual basis", "No action needed on this category"],
+        ["Null-result studies on the same question", "No", "Yes — none cited", "Could meaningfully change how strong the overall evidence looks", "Search specifically for null-result publications before treating the summary as balanced"],
+        ["Retraction or correction status of cited papers", "Not checked", "Possibly", "A retracted paper cited as active evidence undermines the whole summary", "Check each cited paper's current status directly on the journal site"],
+      ],
+    },
+    bodySections: [
+      {
+        heading: "Twelve coverage dimensions worth checking",
+        bullets: [
+          "Publication date range — how recent, and does older foundational work get excluded",
+          "Databases searched — a single database misses what others index",
+          "Disciplines — whether adjacent fields with relevant findings were considered",
+          "Geography — whether research from outside one region was represented",
+          "Language — non-English findings are frequently invisible to English-only summaries",
+          "Study design — whether weaker and stronger designs are both represented or only one type",
+          "Positive findings — the easiest category to overrepresent",
+          "Null results — see the dedicated section below",
+          "Contradictory findings — studies that disagree with the summary's overall conclusion",
+          "Grey literature — theses, preprints, and reports that peer-reviewed searches can miss",
+          "Retractions — whether any cited paper has since been withdrawn or corrected",
+          "Replication studies — whether a finding has been independently confirmed or has failed to replicate",
+        ],
+      },
+      {
+        heading: "Why null results specifically disappear",
+        paragraphs: [
+          "Null-result studies — the ones that tested a hypothesis and found no effect — get published, cited, and searched less often than positive findings, a well-documented pattern called publication bias. An AI summary built from what's most discoverable inherits that same skew, and unlike an active misstatement, an omitted null result doesn't leave any trace in the summary that something's missing.",
+          "The distinction matters because a research question surrounded by five positive studies and three unpublished or under-cited null studies looks like much stronger evidence than it actually is. Checking specifically for null and negative findings — not just reading what the summary already cites — is the only way to catch this.",
+        ],
+        bullets: [
+          "Positive result — found the effect it was looking for",
+          "Null result — found no significant effect either way",
+          "Negative result — found evidence against the hypothesis",
+          "Underpowered study — too small a sample to reliably detect an effect, whether or not it found one",
+          "Failed replication — a later study couldn't reproduce an earlier positive finding",
+          "Publication bias — the tendency for positive results to get published and cited more than null ones",
+          "Selective reporting — a study reporting only its favorable outcome measures",
+          "Unpublished study — completed research that never appeared in a searchable venue at all",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "How do I search specifically for null-result studies?",
+        a: "Search trial registries directly rather than relying on published-literature searches alone — registries record studies whether or not their results were ever published, which is exactly where null results are most likely to be missing from a citation-based summary.",
+      },
+      {
+        q: "Does citing more papers mean better coverage?",
+        a: "Not necessarily. Ten papers that are all positive, recent, and English-language can represent worse coverage than three papers that include a null result and a contradictory finding, because the ten are missing an entire category of evidence.",
+      },
+      {
+        q: "What if I can't find any null-result studies on a topic?",
+        a: "That absence is itself worth noting explicitly — either they genuinely don't exist, which is useful context, or they exist and weren't discoverable through the search methods used, which is a coverage limitation to flag rather than assume away.",
+      },
+      {
+        q: "How often should I check cited papers for retractions?",
+        a: "Every time the summary is being used for something consequential — retraction databases are searchable and checking takes minutes, but an undetected retraction can undermine an entire argument built on that paper.",
+      },
+      {
+        q: "Can ConvergePanel guarantee a literature summary found everything relevant?",
+        a: "No. It can help surface disagreement and flag likely omitted evidence categories, but it cannot guarantee complete literature coverage — no automated check can substitute for a systematic search conducted by a qualified researcher.",
+      },
+    ],
+    relatedLinks: [
+      { label: "Review the evidence level", href: "/use-cases/ai-clinical-evidence-hierarchy" },
+      { label: "Check whether the paper was peer reviewed", href: "/use-cases/check-if-ai-treated-preprint-as-peer-reviewed" },
+      { label: "Compare conflicting studies", href: "/use-cases/verify-ai-synthesis-of-conflicting-studies" },
+      { label: "How to identify blind spots in AI answers", href: "/use-cases/how-to-identify-blind-spots-in-ai-answers" },
+    ],
+    cta: "Check the Literature Coverage",
+    category: "research",
+    schemaType: "FAQPage",
+    metaDescription:
+      "A literature summary can cite real papers and still miss the null results, retractions, or contradictory findings that would change the conclusion.",
+  },
+  {
+    slug: "ai-related-party-blind-spot",
+    publishedAt: "2026-07-07",
+    title: "AI Related-Party Blind Spot in Company Due Diligence",
+    h1: "The Risk May Sit in a Relationship the AI Did Not Surface",
+    audience: "Investigative researchers and due-diligence analysts",
+    audienceDetail: "Analysts and researchers conducting due diligence who need to check for hidden ownership, board, or transaction relationships an AI summary may not have surfaced",
+    problem:
+      "A company's largest \"supplier\" can be owned by the same person who controls the company itself, and nothing about the word \"supplier\" signals that relationship. An AI-generated background summary describes entities and transactions as it finds them named — it doesn't reliably trace who actually sits behind each name, which is exactly where related-party risk lives.\n\nThe risk isn't that the AI states something false. The transaction is real, the counterparty name is real. What's missing is the connective tissue: the shared ownership, the overlapping board seat, the family relationship — the specific thing that turns an ordinary-looking transaction into a related-party one.",
+    solution:
+      "ConvergePanel checks a company background summary across five models against a specific relationship checklist — ownership overlap, board overlap, family ties, supplier and customer dependency — and flags where a named counterparty might not be as independent as the summary implies. Where models disagree on whether a relationship looks arm's-length, that's the specific link to trace through public filings.",
+    workflow: [
+      "List every counterparty, supplier, customer, and shareholder named in the research",
+      "Check each for shared ownership, directors, or executives with the company itself",
+      "Check for family relationships among named principals",
+      "Check whether any named counterparty is unusually dependent on this one company, or vice versa",
+      "Run the relationship set through ConvergePanel across five models",
+      "Flag any relationship that looks less independent than the summary implies for direct filing review",
+    ],
+    useCases: [
+      "Checking whether a company's largest supplier is independently owned",
+      "Verifying that board or management overlap between two entities was disclosed",
+      "Confirming a related-party transaction is actually described as one",
+      "Auditing an AI-generated due-diligence summary before it informs a decision",
+    ],
+    bodySections: [
+      {
+        heading: "Twelve relationship categories worth checking by name",
+        bullets: [
+          "Parent company — who ultimately controls the entity",
+          "Subsidiary — what the entity itself controls",
+          "Controlling shareholder — who holds effective control, not just the largest single stated stake",
+          "Family relationship — principals connected by family ties across entities",
+          "Board overlap — the same individuals sitting on both sides of a transaction",
+          "Management overlap — executives holding roles at both entities",
+          "Common ownership — a third party or fund controlling both sides",
+          "Supplier relationship — whether a key supplier is independently owned",
+          "Customer dependency — whether a key customer relationship is arm's-length",
+          "Related-party transaction — a deal between entities that share ownership, board, or family ties",
+          "Financing relationship — loans or guarantees between connected entities",
+          "Beneficial ownership — who ultimately benefits, which can differ from the registered owner",
+        ],
+      },
+      {
+        heading: "Where a real example hid in plain sight",
+        paragraphs: [
+          "A due-diligence summary described a company's largest supplier by name, revenue share, and contract terms — all accurate. What it didn't surface was that the supplier's controlling shareholder was the same individual who controlled the company itself, making the arrangement a related-party transaction rather than an arm's-length one. The relationship was disclosed in a regulatory filing, just not in the summary that was actually read.",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "Why doesn't an AI summary catch related-party relationships automatically?",
+        a: "Because the relationship usually isn't stated in the same document as the transaction — it requires cross-referencing ownership filings, board rosters, or family relationships against a separately-named counterparty, which a single-pass summary doesn't reliably do.",
+      },
+      {
+        q: "Is every transaction with a connected party automatically a problem?",
+        a: "No — related-party transactions are common and often legitimate. The issue is when they're not disclosed as such, or when the terms wouldn't hold up against an independent counterparty, not the mere existence of the relationship.",
+      },
+      {
+        q: "Where do I check for beneficial ownership if it's not in the summary?",
+        a: "Regulatory ownership filings, corporate registries, and — where required — beneficial ownership disclosures are the primary sources; an AI summary's silence on ownership structure should be treated as unchecked, not as evidence there's nothing there.",
+      },
+      {
+        q: "How do I check for board or management overlap efficiently?",
+        a: "Compare the named individuals across both entities' disclosed board and executive rosters directly — this is a straightforward cross-reference once you have both lists, but it requires pulling both lists deliberately rather than trusting a summary to have already done it.",
+      },
+      {
+        q: "Can ConvergePanel guarantee it found every related-party relationship?",
+        a: "No. It can help compare research findings across models and flag relationships worth tracing further, but it does not guarantee complete beneficial-ownership or related-party discovery. That requires a qualified due-diligence professional working from primary filings.",
+      },
+    ],
+    relatedLinks: [
+      { label: "Verify the corporate entity", href: "/use-cases/check-if-ai-confused-parent-company-with-subsidiary" },
+      { label: "Verify Company Background with AI Models", href: "/use-cases/verify-company-background-with-ai-models" },
+      { label: "AI Vendor Due Diligence with Multiple Models", href: "/use-cases/ai-vendor-due-diligence-with-multiple-models" },
+      { label: "How to identify blind spots in AI answers", href: "/use-cases/how-to-identify-blind-spots-in-ai-answers" },
+    ],
+    cta: "Review the Relationship Risk",
+    category: "how-to",
+    schemaType: "FAQPage",
+    metaDescription:
+      "A supplier or customer can share hidden ownership with the company itself. Check an AI due-diligence summary for related-party relationships it may have missed.",
+  },
+  {
+    slug: "check-if-ai-confused-parent-company-with-subsidiary",
+    publishedAt: "2026-07-07",
+    title: "How to Check If AI Confused a Parent Company with a Subsidiary",
+    h1: "The Brand Name May Not Be the Legal Entity",
+    audience: "Investigative researchers and due-diligence analysts",
+    audienceDetail: "Analysts and researchers who need the exact legal entity behind a brand name, not just the name a company trades under",
+    problem:
+      "The name on the storefront, the name on the contract, and the name that actually reports financials to regulators can be three different legal entities stacked inside one corporate structure. An AI summary describing \"the company\" by its trade name can quietly attribute financials, liabilities, or contractual obligations to the wrong entity in that stack — the parent instead of the operating subsidiary, or vice versa.\n\nThis matters precisely because liability and financial exposure attach to a specific legal entity, not to a brand. Getting the entity wrong isn't a cosmetic error — it can mean researching the wrong balance sheet or assuming the wrong party bears a contractual obligation.",
+    solution:
+      "ConvergePanel checks a company research summary across five models against the actual corporate structure: which entity is named in filings, which one is the contract counterparty, and which one's financial statements are actually being described. Where models disagree on which entity in the structure a given fact applies to, that's the specific link to verify against a filing.",
+    workflow: [
+      "Identify the exact legal entity name, not just the trade name, from a regulatory filing or contract",
+      "Map the corporate structure — parent, intermediate holding entities, and operating subsidiaries",
+      "Check the ownership percentage at each level of the structure",
+      "Confirm which entity's financial statements are actually being cited",
+      "Confirm which entity is the actual party to a contract or the liability-bearing entity",
+      "Flag any summary detail attributed to the wrong entity in the structure",
+    ],
+    useCases: [
+      "Checking whether financial figures cited belong to the parent or a specific subsidiary",
+      "Verifying the correct legal entity name for a contract or filing",
+      "Confirming which entity in a corporate structure actually bears a given liability",
+      "Auditing an AI-generated company summary before it's used in diligence or outreach",
+    ],
+    comparisonTable: {
+      headers: ["Detail Cited", "Entity Implied", "Actual Entity", "Discrepancy", "Reviewer Action"],
+      rows: [
+        ["\"The company's revenue was $X\"", "The consumer-facing brand as a whole", "A specific reporting subsidiary within the group, not the consolidated parent", "Revenue figure applies to a narrower entity than the summary implies", "Confirm which entity's financial statements the figure actually comes from"],
+        ["\"The company signed the contract\"", "The parent, referred to by brand name", "A wholly-owned operating subsidiary is the actual named counterparty", "Liability and enforcement run against the subsidiary, not the parent", "Verify the contracting party's exact legal name before relying on the summary's attribution"],
+      ],
+    },
+    bodySections: [
+      {
+        heading: "Twelve checks that separate the brand from the entity",
+        bullets: [
+          "Legal entity name — the exact registered name, not the brand",
+          "Trade name — the name customers and the press actually use",
+          "Parent company — who sits above the entity in question",
+          "Subsidiary — what the entity in question sits above, if anything",
+          "Ownership percentage — wholly-owned versus majority versus minority stake",
+          "Operating entity — which entity actually runs the business described",
+          "Reporting entity — which entity's financials are being cited",
+          "Jurisdiction — where each entity is legally registered",
+          "Financial statements — consolidated group figures versus a single entity's figures",
+          "Regulator filing — which entity name appears on the actual filing",
+          "Contract party — the exact entity named as the counterparty",
+          "Liability-bearing entity — which entity is actually exposed if something goes wrong",
+        ],
+      },
+      {
+        heading: "Why the confusion is easy to make",
+        paragraphs: [
+          "Companies present themselves publicly by brand, and press coverage, marketing, and casual research follow the same convention — nobody outside a filing or a contract typically refers to the specific subsidiary by its full legal name. An AI model summarizing publicly available material inherits that same brand-first framing, with no built-in reason to distinguish which entity in the structure a given fact actually belongs to unless the source document forces the distinction.",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "Does it matter which subsidiary a fact is attributed to if the parent owns it entirely?",
+        a: "Often yes — even under full ownership, liability, contractual obligations, and financial reporting can attach specifically to the subsidiary rather than flow automatically to the parent, depending on how the structure and agreements are set up.",
+      },
+      {
+        q: "How do I find the exact legal entity name behind a brand?",
+        a: "Corporate registries, regulatory filings, and the fine print on contracts or terms of service typically state the full legal entity name — the brand name alone is rarely the reliable source for this.",
+      },
+      {
+        q: "What if the AI summary doesn't specify which entity it's describing?",
+        a: "Treat that as a flag rather than an assumption of the parent — trace the specific fact back to its source document to confirm which entity in the structure it actually applies to.",
+      },
+      {
+        q: "Is this only relevant for large, multi-entity corporations?",
+        a: "It shows up most often there, but even smaller companies frequently operate through a holding entity and an operating subsidiary, so the check is worth applying regardless of company size.",
+      },
+      {
+        q: "Can ConvergePanel confirm the exact legal structure of a company?",
+        a: "No. It can compare how models describe a company's structure and flag inconsistencies for you to verify — confirming the actual legal entity structure requires checking primary filings or corporate registries directly.",
+      },
+    ],
+    relatedLinks: [
+      { label: "Review the relationship risk", href: "/use-cases/ai-related-party-blind-spot" },
+      { label: "Verify Company Background with AI Models", href: "/use-cases/verify-company-background-with-ai-models" },
+      { label: "AI Vendor Due Diligence with Multiple Models", href: "/use-cases/ai-vendor-due-diligence-with-multiple-models" },
+      { label: "How to verify sources from AI answers", href: "/use-cases/how-to-verify-sources-from-ai-answers" },
+    ],
+    cta: "Verify the Corporate Entity",
+    category: "how-to",
+    schemaType: "FAQPage",
+    metaDescription:
+      "The brand name isn't always the legal entity. Check whether an AI summary attributed financials, contracts, or liability to the wrong company in the structure.",
   },
 ];
 
