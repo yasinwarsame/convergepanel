@@ -208,7 +208,7 @@
   "account-intelligence-validation-with-multiple-ai-models": "2026-06-18",
   "trustworthy-ai-for-revenue-teams": "2026-06-18",
   "research-panel-for-account-planning": "2026-06-18",
-  "verify-company-background-with-ai-models": "2026-06-18",
+  "verify-company-background-with-ai-models": "2026-07-07",
   "legal-ops-research-with-multiple-ai-models": "2026-06-18",
   "verify-contract-summary-claims-with-ai": "2026-06-18",
   "ai-consensus-for-clause-explanation": "2026-06-18",
@@ -281,5 +281,12 @@
   "ai-clinical-evidence-hierarchy": "2026-07-07",
   "verify-ai-summary-of-clinical-trial-results": "2026-07-07",
   "check-if-ai-treated-preprint-as-peer-reviewed": "2026-07-07",
-  "verify-ai-synthesis-of-conflicting-studies": "2026-07-07"
+  "verify-ai-synthesis-of-conflicting-studies": "2026-07-07",
+  "ai-valuation-assumption-check": "2026-07-07",
+  "validate-ai-generated-scenario-analysis": "2026-07-07",
+  "ai-endpoint-interpretation": "2026-07-07",
+  "check-if-ai-generalized-animal-research-to-humans": "2026-07-07",
+  "ai-literature-coverage-gap": "2026-07-07",
+  "ai-related-party-blind-spot": "2026-07-07",
+  "check-if-ai-confused-parent-company-with-subsidiary": "2026-07-07"
 }
