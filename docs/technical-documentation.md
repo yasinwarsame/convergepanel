@@ -480,7 +480,7 @@ CSP headers are defined in `next.config.js`. Adding calls to any new external do
 
 ## pSEO Architecture
 
-All 290 use-case pages are defined as a single `PAGES: PSEOPage[]` array in `lib/pseo/pages.ts`. There is no CMS. The dynamic route `app/use-cases/[slug]/page.tsx` renders every page. The hub at `app/use-cases/page.tsx` has a separate `HUB_GROUPS` array that controls which pages appear and how they are grouped in the hub UI.
+All 291 use-case pages are defined as a single `PAGES: PSEOPage[]` array in `lib/pseo/pages.ts`. There is no CMS. The dynamic route `app/use-cases/[slug]/page.tsx` renders every page. The hub at `app/use-cases/page.tsx` has a separate `HUB_GROUPS` array that controls which pages appear and how they are grouped in the hub UI.
 
 `app/sitemap.ts` auto-generates from `PAGES` using the `publishedAt` field as `lastModified`. The same `publishedAt` value populates `dateModified` in JSON-LD structured data — it is the only freshness signal available and should be updated on any meaningful content change.
 
