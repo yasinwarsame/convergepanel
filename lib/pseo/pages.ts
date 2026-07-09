@@ -116,6 +116,7 @@ export const PAGES: PSEOPage[] = [
       "Cross-referencing breaking news claims when primary sources are unavailable",
     ],
     relatedLinks: [
+      { label: "Verify claims through AI", href: "/use-cases/ai-claim-verification" },
       { label: "AI video verification for journalists", href: "/use-cases/ai-video-verification-for-journalists" },
       { label: "How to fact-check breaking news claims", href: "/use-cases/how-to-fact-check-breaking-news-claims" },
       { label: "Verification checklist for journalists", href: "/use-cases/verification-checklist-for-journalists" },
@@ -217,6 +218,7 @@ export const PAGES: PSEOPage[] = [
       },
     ],
     relatedLinks: [
+      { label: "Verify claims through AI", href: "/use-cases/ai-claim-verification" },
       { label: "What Is Source Grounding in AI?", href: "/use-cases/what-is-source-grounding-in-ai" },
       { label: "How to Verify Sources from AI Answers", href: "/use-cases/how-to-verify-sources-from-ai-answers" },
       { label: "How to Verify an AI Answer", href: "/use-cases/how-to-verify-an-ai-answer" },
@@ -4642,6 +4644,7 @@ export const PAGES: PSEOPage[] = [
       ],
     },
     relatedLinks: [
+      { label: "AI claim verification", href: "/use-cases/ai-claim-verification" },
       { label: "How to Fact-Check ChatGPT Responses", href: "/use-cases/how-to-fact-check-chatgpt-responses" },
       { label: "How to Verify Sources from AI Answers", href: "/use-cases/how-to-verify-sources-from-ai-answers" },
       { label: "What Is Source Grounding in AI?", href: "/use-cases/what-is-source-grounding-in-ai" },
@@ -6362,6 +6365,7 @@ export const PAGES: PSEOPage[] = [
       },
     ],
     relatedLinks: [
+      { label: "Verify claims through AI", href: "/use-cases/ai-claim-verification" },
       { label: "Ask Multiple AI Models One Question", href: "/use-cases/ask-multiple-ai-models-one-question" },
       { label: "AI Expert Panel Tool", href: "/use-cases/ai-expert-panel-tool" },
       { label: "How to Compare AI Model Outputs Side by Side", href: "/use-cases/how-to-compare-ai-model-outputs-side-by-side" },
@@ -22736,6 +22740,7 @@ export const PAGES: PSEOPage[] = [
       },
     ],
     relatedLinks: [
+      { label: "Verify claims through AI", href: "/use-cases/ai-claim-verification" },
       { label: "Deep research with multiple AI models", href: "/use-cases/deep-research-with-multiple-ai-models" },
       { label: "Best multi-model AI tool for research", href: "/use-cases/best-multi-model-ai-tool-for-research" },
       { label: "Multi-LLM answer comparison", href: "/use-cases/multi-llm-answer-comparison" },
@@ -22754,13 +22759,13 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "ai-video-verification",
-    title: "AI Video Verification with Multiple Vision Models",
-    h1: "Verify Suspicious and Viral Videos with Multiple AI Models",
+    title: "Verify Videos Through AI with Multiple Vision Models",
+    h1: "Verify Videos Through AI Before You Trust the Clip",
     audience: "Journalists, fact-checkers, researchers, content creators, and communications teams",
     audienceDetail: "Anyone who receives a suspicious, viral, or potentially manipulated video and needs a structured, documented review before acting on it or sharing it",
     publishedAt: "2026-06-20",
     problem:
-      "Video is one of the most persuasive forms of evidence and one of the easiest to manipulate. A clip that appears to show a public figure, a breaking news event, or a viral moment may be AI-generated, edited, decontextualized, or genuine footage presented with a false caption. A single review — whether by a person or an AI tool — produces a single opinion.\n\nThe cost of acting on a manipulated video is high: reputational damage, published misinformation, decisions made on false premises, or legal exposure. The cost of holding genuine footage unnecessarily is also real: delayed coverage, missed context, missed response opportunities.",
+      "A real-looking video can still be misleading. Video is one of the most persuasive forms of evidence and one of the easiest to manipulate — and to verify videos through AI is to run a clip past multiple independent reviewers instead of trusting a single glance. A clip that appears to show a public figure, a breaking news event, or a viral moment may be AI-generated, edited, decontextualized, or genuine footage presented with a false caption. A single review — whether by a person or an AI tool — produces a single opinion.\n\nThe cost of acting on a manipulated video is high: reputational damage, published misinformation, decisions made on false premises, or legal exposure. The cost of holding genuine footage unnecessarily is also real: delayed coverage, missed context, missed response opportunities.",
     solution:
       "ConvergePanel's Video Verification mode sends extracted video frames to three vision-capable AI models — GPT-4o, Claude, and Gemini — independently. Each model reviews the frames for manipulation signals, synthetic artifacts, visual inconsistencies, and context indicators. The results are compared to produce a consensus assessment and surfaced disagreements that indicate where further human review is warranted.\n\nThe output is explicitly advisory. ConvergePanel does not prove a video is authentic or confirm that manipulation occurred. It produces a structured, multi-model review — an advisory trust signal — alongside a documented record of what each model found. That record supports human review, editorial decisions, and documentation requirements.",
     workflow: [
@@ -22786,7 +22791,21 @@ export const PAGES: PSEOPage[] = [
     category: "video-verification",
     schemaType: "FAQPage",
     metaDescription:
-      "Review suspicious or viral videos with multiple vision models to surface manipulation signals, context gaps, and areas requiring human verification.",
+      "Verify videos through AI with multiple vision models — surface manipulation signals, context gaps, and disagreement before you trust or share a clip.",
+    comparisonTable: {
+      headers: ["Step", "What to Check", "Why It Matters", "Failure Signal", "How ConvergePanel Helps"],
+      rows: [
+        ["1. State the exact claim", "What does the caption or claim say this clip proves?", "Vague framing hides what actually needs checking", "You can't summarize the claim in one sentence", "You add the claim alongside the clip before review begins"],
+        ["2. Trace the source", "Who first published this video, and when?", "Old or mislabeled footage recirculates constantly", "No one can point to the earliest known appearance", "Per-model review flags visual cues inconsistent with a claimed recent date"],
+        ["3. Check the file itself", "Is this the original, uncompressed clip, or a re-upload?", "Compression artifacts can look like manipulation signals", "Only a heavily compressed re-share is available", "Vision models are shown the actual uploaded frames, not a description"],
+        ["4. Check for edits", "Are there cuts, transitions, or missing frames?", "An edited clip can change meaning without any single frame looking fake", "The clip jumps in a way that doesn't read as a single continuous take", "Models review scene continuity across extracted frames"],
+        ["5. Compare across models", "Run the same clip through multiple vision models", "One model's blind spot is invisible until compared", "Only one review was ever done", "Three vision models — GPT-4o, Claude, Gemini — review independently"],
+        ["6. Read the agreement", "Where do all three models converge?", "Convergence across independent reviewers is a real, if imperfect, signal", "Agreement was assumed rather than checked", "Panel view shows exactly where all three align"],
+        ["7. Read the disagreement", "Where do models diverge, and on what?", "Disagreement marks exactly where human attention is most needed", "A split result gets treated as a tie-breaker instead of a flag", "Disagreement map isolates the specific frames or signals in question"],
+        ["8. Separate video from caption", "Does the footage actually support the specific claim attached to it?", "Genuine footage can be real and still misattributed", "A clean authenticity result gets treated as proof the caption is true", "Explicit distinction between visual review and caption/context verification"],
+        ["9. Decide on escalation", "Does this clip's stakes level require forensic or expert review?", "Some decisions shouldn't rest on an advisory AI pass alone", "A high-stakes clip gets published on the AI review alone", "Review record documents what was checked, supporting a human escalation decision"],
+      ],
+    },
     bodySections: [
       {
         heading: "What AI Video Verification Reviews",
@@ -22822,22 +22841,6 @@ export const PAGES: PSEOPage[] = [
           "When all three vision models agree that a clip shows no significant manipulation signals, that consensus is an advisory signal worth documenting. It reduces but does not eliminate grounds for suspecting synthetic manipulation. It does not rule out context manipulation — old footage, mislabeled location, or false captions.",
           "When models disagree, that disagreement is meaningful. Different models may focus on different visual elements or interpret ambiguous artifacts differently. A split result indicates the clip presents ambiguous signals — further human or forensic review is warranted before acting on the footage.",
           "Agreement is never proof. Models can agree on a false negative — a sophisticated deepfake that evades all three models — or on a false positive — flagging compression artifacts on genuine footage. The advisory trust signal is a starting point for review, not an endpoint.",
-        ],
-      },
-      {
-        heading: "Video Verification Checklist",
-        bullets: [
-          "What exact claim or caption accompanies this clip? Write it down before reviewing.",
-          "Who first published this video and when? Trace it to the earliest known source.",
-          "Is the original, uncompressed video available? Compression affects review results.",
-          "Is the clip complete, or has it been edited? Look for cuts, transitions, or missing frames.",
-          "Are the date and location verifiable from visual or contextual evidence in the clip?",
-          "Does the audio match the visual scene naturally — or does it appear added or replaced?",
-          "Is the caption or claim independently verified, or only asserted by the source sharing the clip?",
-          "Do all three AI models agree on their assessment of the visual content?",
-          "What specific signals do models disagree on, and what might explain the disagreement?",
-          "Does this result require additional forensic analysis or specialist human review?",
-          "Is publication or amplification appropriate, or should it be held pending further verification?",
         ],
       },
       {
@@ -22922,16 +22925,23 @@ export const PAGES: PSEOPage[] = [
         q: "Who should use AI video verification?",
         a: "Journalists, fact-checkers, content creators, researchers, and communications teams who regularly encounter suspicious or viral video and need a structured, documented first-pass review. It is most valuable when you need to act quickly, document your review process, or establish a baseline before deciding whether forensic investigation is warranted. It is not appropriate as the only review step for high-stakes legal or public-safety decisions.",
       },
+      {
+        q: "Can a real, unedited video support a false caption?",
+        a: "Yes — and this is one of the most common ways video misleads. Genuine, unmanipulated footage can be paired with a caption that misstates the date, location, or event it shows. Vision models reviewing the video for manipulation signals will correctly find nothing wrong with the footage itself, because the footage is genuine. That clean result says nothing about whether the caption is accurate — caption verification is a separate check requiring reverse video search and source investigation.",
+      },
     ],
     relatedLinks: [
       { label: "Video authenticity review for fact-checkers", href: "/use-cases/video-authenticity-review-for-fact-checkers" },
       { label: "AI video verification for journalists", href: "/use-cases/ai-video-verification-for-journalists" },
+      { label: "AI video verification for content creators", href: "/use-cases/ai-video-verification-for-content-creators" },
       { label: "AI video review for media teams", href: "/use-cases/ai-video-review-for-media-teams" },
       { label: "How journalists can verify viral clips", href: "/use-cases/how-journalists-can-verify-viral-clips" },
       { label: "How to check if a viral video might be manipulated", href: "/use-cases/how-to-check-if-a-viral-video-might-be-manipulated" },
       { label: "How to verify a clip before publishing", href: "/use-cases/how-to-verify-a-clip-before-publishing" },
       { label: "Video authenticity review for researchers", href: "/use-cases/video-authenticity-review-for-researchers" },
       { label: "How to review a suspicious video with AI", href: "/use-cases/how-to-review-a-suspicious-video-with-ai" },
+      { label: "Does the video prove the caption?", href: "/use-cases/does-the-video-prove-the-caption" },
+      { label: "When video verification models disagree", href: "/use-cases/when-video-verification-models-disagree" },
       { label: "Verification checklist for journalists", href: "/use-cases/verification-checklist-for-journalists" },
       { label: "Newsroom AI verification workflow", href: "/use-cases/newsroom-ai-verification-workflow" },
     ],
@@ -28618,6 +28628,181 @@ export const PAGES: PSEOPage[] = [
       {
         q: "How long does verifying a piece of AI-generated content take?",
         a: "Extracting and checking the key claims in a typical piece takes a few minutes per claim, run in parallel across models. The larger time cost is usually deciding what to do with a flagged claim, not the check itself.",
+      },
+    ],
+  },
+  {
+    slug: "ai-claim-verification",
+    publishedAt: "2026-07-09",
+    title: "Verify Claims Through AI with Multiple Models",
+    h1: "Verify Claims Through AI Before You Trust Them",
+    audience: "Journalists, researchers, analysts, content creators, and knowledge workers",
+    audienceDetail: "Anyone who needs to check whether a specific claim — a statistic, quote, causal statement, or assertion — is actually supported before publishing, citing, or acting on it",
+    problem:
+      "A claim can sound convincing and still lack evidence. AI should not only generate answers — it should help you test the claim inside them. A single AI model asked \"is this true\" will usually answer, and the answer will usually sound confident. What it won't reliably tell you is how solid the ground under that confidence actually is: whether a real source backs the exact assertion, whether other independent models reach the same conclusion, or whether the claim is quietly contested.\n\nThe risk isn't limited to obviously suspicious claims. Ordinary, plausible-sounding assertions — a market statistic, a research finding, a quote attributed to a public figure — fail this check constantly, precisely because they don't read as suspicious. A claim needs to be pulled out of its paragraph and checked on its own before it's trusted, cited, or repeated.",
+    solution:
+      "Verifying claims through AI means treating the claim as the unit of review, not the paragraph it sits in. ConvergePanel's Claim Verification mode extracts the specific assertion, runs it through five independent AI models, and returns a structured result: a consensus score, per-model evidence, and an explicit map of where models agree and where they diverge.\n\nProper claim verification isn't just asking AI whether something is true — it's claim extraction, source support checking, model comparison, disagreement review, missing-evidence review, blind-spot detection, and documentation, in that order. ConvergePanel automates the comparison layer; the extraction, the final judgment on contested claims, and the decision to escalate to a human reviewer remain yours.",
+    workflow: [
+      "Extract the specific claim you need to verify — state it as one precise sentence",
+      "Submit it to ConvergePanel's Claim Verification mode",
+      "Review the consensus score: 80+ suggests broad model agreement, below 60 flags contested ground",
+      "Read the per-model evidence — what each model found, and whether it cites a real, specific source",
+      "Check that any cited source supports the exact claim, not just the general topic",
+      "Review the disagreement map for the specific points where models diverge",
+      "Identify blind spots — what would a knowledgeable reviewer expect to see that no model raised",
+      "Decide whether the claim's stakes require human or expert review before you act on it",
+      "Document the result — what was checked, what the consensus was, and what remains uncertain",
+    ],
+    useCases: [
+      "Verifying a statistic or research finding before including it in a published article or report",
+      "Checking a quote attributed to a public figure before repeating it",
+      "Pressure-testing a market, financial, or competitive claim before it informs a decision",
+      "Reviewing a health, legal, or policy claim where being wrong carries real consequences",
+      "Checking an AI-generated research summary's claims before citing them",
+      "Building a standing pre-publication or pre-decision claim-check habit into a team's workflow",
+    ],
+    comparisonTable: {
+      headers: ["Step", "What to Check", "Why It Matters", "Failure Signal", "How ConvergePanel Helps"],
+      rows: [
+        ["1. Extract the claim", "State the assertion as one precise sentence, separate from surrounding context", "A vague claim can't be checked against anything specific", "You can't summarize what's actually being asserted in one line", "Claim Verification mode is built around a single submitted assertion"],
+        ["2. Check for a source", "Does the claim name or imply a specific source?", "An unsourced claim has nothing to verify it against", "The claim is stated with confidence and zero attribution", "Evidence-quality ratings flag claims with no traceable source"],
+        ["3. Verify the source supports the exact claim", "Read the source directly — does it state the specific conclusion, or just discuss the topic", "A real source can still fail to support the specific claim made from it", "The source covers the general area but never states the specific figure or finding", "Per-model evidence shows exactly what each model cites and quotes"],
+        ["4. Check source quality and independence", "Is the source primary, current, and independent of the claim's origin?", "A weak or dependent source adds little real support", "The source is a secondary summary of a summary, or shares an author with the claim", "Source grounding signals distinguish cited evidence from unsupported assertion"],
+        ["5. Compare across models", "Run the same claim through multiple independent models", "One model's error or blind spot is invisible until compared", "Only one model was ever asked", "Five models — GPT, Claude, Gemini, Grok, Perplexity — assess independently"],
+        ["6. Read the disagreement", "Where do models reach different conclusions?", "Disagreement marks exactly where a claim is contested or under-evidenced", "Disagreement gets averaged away instead of investigated", "Disagreement map isolates the specific point of divergence"],
+        ["7. Identify blind spots", "What would a knowledgeable reviewer expect to see that's missing?", "A technically accurate claim can still mislead by omission", "No one checked what the claim leaves out", "Per-model comparison surfaces context one model raised that others didn't"],
+        ["8. Assess severity and risk", "How costly is it if this specific claim is wrong?", "Not every claim needs the same level of scrutiny", "A high-stakes claim gets the same light check as a trivial one", "Consensus score and evidence quality help triage where to spend review time"],
+        ["9. Decide on human review", "Does this claim's stakes level require a person to sign off?", "Some claims shouldn't be settled by an automated comparison alone", "A high-stakes claim proceeds with no human ever reviewing it", "Governance policies can flag low-consensus, high-risk claims for mandatory review"],
+        ["10. Document the result", "Record what was checked, the consensus, and what's still uncertain", "An undocumented check can't be defended if the claim is later challenged", "No record exists of what was verified or why it was accepted", "Audit export captures the full verification record automatically"],
+      ],
+    },
+    bodySections: [
+      {
+        heading: "What Does It Mean to Verify Claims Through AI?",
+        paragraphs: [
+          "Verifying a claim through AI means submitting a specific, isolated assertion to multiple independent models and comparing what each one finds — not asking a single model whether something sounds true. The unit under review is the claim itself: a statistic, a quote, a causal statement, a market or research assertion. Everything else — the paragraph it came from, the tone it's written in — is context, not evidence.",
+          "This is a different act from ordinary AI use. Most AI interactions ask a model to produce something: an answer, a summary, a draft. Claim verification asks models to evaluate something that already exists — a specific statement — and report whether the evidence available to them supports it, contradicts it, or leaves it unresolved.",
+        ],
+      },
+      {
+        heading: "Why One AI Answer Is Not Enough",
+        paragraphs: [
+          "A single model asked to assess a claim will produce an assessment — confidently, regardless of whether its training data on the topic is thin, contested, or simply wrong. There's no built-in signal that distinguishes a well-evidenced answer from a plausible-sounding guess; both arrive in the same fluent tone.",
+          "Comparing five independent models doesn't make any one of them more reliable on its own — it adds the missing signal. When models trained differently, on different data, converge on the same assessment, that convergence means something because it wasn't coordinated. When they split, the split tells you exactly where the claim is genuinely contested or thinly evidenced.",
+        ],
+      },
+      {
+        heading: "What Claims Should Be Verified?",
+        bullets: [
+          "Statistics and figures — market sizes, growth rates, survey results, any specific number",
+          "Quotes and attributions — statements assigned to a specific named person",
+          "Causal claims — assertions that one thing caused or led to another",
+          "\"Studies show\" assertions — claims that lean on unnamed or vague research support",
+          "Claims that support a conclusion too neatly — supporting evidence that seems to fit perfectly deserves the same scrutiny as evidence that seems to contradict",
+          "Claims in health, legal, financial, and policy domains — higher cost if wrong",
+          "Any claim that will be published, cited, presented, or used to justify a decision",
+        ],
+      },
+      {
+        heading: "Agreement, Disagreement, and Uncertainty",
+        paragraphs: [
+          "A high consensus score means multiple independent models reached the same assessment of a claim — that's a genuine confidence signal, not a coincidence. It is not proof. Models trained on overlapping public data can converge on the same claim because they share the same source, not because they independently confirmed it.",
+          "A low consensus score or a visible split between models is equally informative in the other direction: it tells you the claim is contested, thinly evidenced, or dependent on interpretation. Treat disagreement as the priority list for further checking, not as a reason to distrust the tool.",
+        ],
+      },
+      {
+        heading: "Source Support Versus Source Mentions",
+        paragraphs: [
+          "A source existing and a source supporting the exact claim are two different facts, and conflating them is the single most common verification error. A model can name a real report, a real study, or a real article — and still use it to support a conclusion that source never actually states.",
+          "Checking source support means reading the cited material and confirming it states the specific claim, not just that it discusses the general subject. A source about a market that never states the specific growth figure attributed to it is a source mention, not source support.",
+        ],
+      },
+      {
+        heading: "Illustrative example",
+        paragraphs: [
+          "A claim states, with a source linked, that a specific policy reduced a named outcome by a stated percentage. The source is real and does discuss the policy area. What it doesn't do is state that specific percentage — it's a broader report that touches the topic without ever landing on the precise figure being claimed. Run through five models, three rate the claim as unsupported once the source is checked against the specific number, one rates it partially supported citing a different report with a similar but not identical figure, and one flags the claim as contested pending a named study it can't independently confirm exists. The result: disagreement, not consensus — and a clear signal that this claim needs a human to trace the actual source before it's cited anywhere.",
+        ],
+      },
+      {
+        heading: "Example: A Claim Verification Workflow",
+        steps: [
+          "Extract the claim: \"Policy X reduced outcome Y by Z% according to a named study\"",
+          "Submit it to ConvergePanel's Claim Verification mode",
+          "Review the consensus score — a low or moderate score flags this as contested",
+          "Read what each model cites — note that citations reference the policy area but not the exact figure",
+          "Check the named study directly, if it can be located, to see what it actually reports",
+          "Document that the claim is unsupported as stated, pending direct confirmation of the source",
+          "Decide: revise the claim to match what's actually supported, or escalate for expert review",
+        ],
+      },
+      {
+        heading: "What ConvergePanel Helps Review",
+        bullets: [
+          "Multi-model comparison: the same claim assessed by five independent AI models simultaneously",
+          "Consensus score: a 0–100 signal reflecting how much models agree on a claim's support",
+          "Per-model evidence: what each model found, cited, and how it reached its assessment",
+          "Disagreement map: exactly where models diverge, so you know what to check first",
+          "Source grounding signals: distinguishing models that cite specific evidence from those reasoning without it",
+          "Audit export: a documented record of the claim, the models used, and the result",
+        ],
+      },
+      {
+        heading: "What AI Claim Verification Cannot Prove",
+        paragraphs: [
+          "ConvergePanel helps review claims across models and sources, but it does not guarantee that a claim is true. High-stakes claims still require qualified human review. A high consensus score narrows the range of reasonable doubt; it does not certify accuracy, and it cannot substitute for primary-source confirmation on a claim where being wrong carries real consequences.",
+        ],
+        bullets: [
+          "It cannot confirm claims resting on information outside what any model's training or retrieval can reach",
+          "It cannot resolve a genuinely contested claim — it can only tell you that it's contested",
+          "It cannot replace the judgment of a qualified expert on claims within their specific domain",
+          "It cannot verify a claim's currency — a fact can be accurately reported and still outdated",
+        ],
+      },
+    ],
+    relatedLinks: [
+      { label: "Verify an AI answer before you trust it", href: "/use-cases/how-to-verify-an-ai-answer" },
+      { label: "Check whether the source supports the claim", href: "/use-cases/how-to-verify-sources-from-ai-answers" },
+      { label: "Fact-check a ChatGPT response", href: "/use-cases/how-to-fact-check-chatgpt-responses" },
+      { label: "What is source grounding in AI?", href: "/use-cases/what-is-source-grounding-in-ai" },
+      { label: "Compare multiple AI models", href: "/use-cases/multi-llm-answer-comparison" },
+      { label: "Claim verification for journalists", href: "/use-cases/claim-verification-for-journalists" },
+      { label: "Claim verification for researchers", href: "/use-cases/claim-verification-for-researchers" },
+      { label: "AI claim verification for content creators", href: "/use-cases/ai-claim-verification-for-content-creators" },
+      { label: "Deep Research and AI Verification", href: "/use-cases/deep-research-and-ai-verification" },
+    ],
+    cta: "Verify a Claim Through AI",
+    category: "claim-verification",
+    schemaType: "FAQPage",
+    metaDescription:
+      "Use multiple AI models to review claims, check source support, surface disagreement, identify blind spots, and decide what still needs human review.",
+    faq: [
+      {
+        q: "Can AI verify whether a claim is true?",
+        a: "AI can help review evidence, compare interpretations, and flag disagreement, but it should not be treated as proof. High-stakes claims still require human judgment and authoritative sources.",
+      },
+      {
+        q: "Why should I use multiple models to verify a claim?",
+        a: "A single model's blind spot is invisible until you have something to compare it against. Five independently-trained models are far less likely to share the exact same gap or error, so agreement across them is a meaningful signal in a way one model's confidence isn't.",
+      },
+      {
+        q: "What does model disagreement mean?",
+        a: "It means the claim is contested, thinly evidenced, or dependent on interpretation. That's not a malfunction — it's the clearest signal the tool gives you about where to focus manual verification before you rely on the claim.",
+      },
+      {
+        q: "Does model agreement prove the claim?",
+        a: "No. Agreement across models narrows the range of reasonable doubt, but models trained on overlapping public data can converge on the same claim because they share a source, not because they independently confirmed it.",
+      },
+      {
+        q: "How do I know whether a source supports the claim?",
+        a: "Read the source directly and check whether it states the specific claim — the exact figure, the exact conclusion — not just whether it discusses the general topic. A source that's relevant to the subject but silent on the specific assertion is a source mention, not source support.",
+      },
+      {
+        q: "Can ConvergePanel replace human review?",
+        a: "No. It compares model assessments and surfaces disagreement, evidence quality, and blind spots — it does not replace the judgment of a qualified human reviewer, particularly for claims with real consequences if wrong.",
+      },
+      {
+        q: "What types of claims should be escalated for human or expert review?",
+        a: "Claims with low consensus scores, claims in health, legal, financial, or policy domains, claims central to a published or cited conclusion, and any claim where the cost of being wrong is high or hard to reverse.",
       },
     ],
   },

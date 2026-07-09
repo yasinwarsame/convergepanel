@@ -28,6 +28,7 @@ const HUB_GROUPS: HubGroup[] = [
     tailwindBg: "bg-cp-raised",
     tailwindBorder: "border-cp-border",
     slugs: [
+      "ai-claim-verification",
       "verify-ai-content-now",
       "ai-claim-verification-for-content-creators",
       "claim-verification-for-journalists",
