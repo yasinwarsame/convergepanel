@@ -850,6 +850,13 @@ export const PAGES: PSEOPage[] = [
         ],
       },
       {
+        heading: "Source Grounding vs. Relying on Model Memory",
+        paragraphs: [
+          "An ungrounded answer draws entirely on parametric memory — the patterns encoded in a model's weights during training, with no document behind it you can go check. For a casual question, that's usually fine. For a high-stakes claim, it means you're trusting the model's recall instead of an inspectable source, and recall is exactly where hallucination happens.",
+          "Do not rely only on model memory for high-stakes claims. The practical rule is simple: if a claim is going to be published, cited, or acted on, it should be tied to a source you can open and check yourself — not resting on a model's confident-sounding recollection of something it was never shown a document for.",
+        ],
+      },
+      {
         heading: "Why Multi-Model Comparison Reveals Grounding Quality",
         paragraphs: [
           "When you run the same question through five models, grounding differences become visible. One model may cite three specific studies; another may assert the same claim without any evidence. A third may express uncertainty. These differences are not a problem — they are information about where the evidence is strong and where you should verify before acting.",
@@ -887,6 +894,33 @@ export const PAGES: PSEOPage[] = [
           "Grounding is an audit path, not a guarantee — it tells you what to check, not that checking is unnecessary",
         ],
       },
+      {
+        heading: "Illustrative example",
+        paragraphs: [
+          "An AI answer states that a named report proves a specific market claim, with a citation attached. The report is real and does discuss the market. What it doesn't do is state the specific conclusion being attributed to it — it's a broader overview that touches the topic without landing on that exact figure. Run through multiple models, one treats the citation as sufficient and repeats the claim as supported; another flags that the source doesn't actually state that number and marks the claim unsupported. The models disagree not because one hallucinated, but because \"the source exists and covers the topic\" and \"the source states this exact claim\" are different questions — and the reviewer has to decide, based on that gap, whether to revise the claim to match what's actually supported or reject it outright.",
+        ],
+      },
+      {
+        heading: "Source Grounding Checklist",
+        bullets: [
+          "What exact claim is being made? State it precisely, not the general topic.",
+          "Which source is cited? Name the specific document, not just an institution.",
+          "Does the source mention the same claim, or just the same general subject?",
+          "Does the source support the same level of certainty the AI expressed?",
+          "Is the source current, or has it been superseded or retracted?",
+          "Is the source independent, or does it share an author or origin with the claim?",
+          "Are there conflicting sources the answer doesn't mention?",
+          "Do multiple models agree on whether the source actually supports the claim?",
+          "Given the above, does this claim need human review before you rely on it?",
+        ],
+      },
+      {
+        heading: "How ConvergePanel Helps — and What It Doesn't Guarantee",
+        paragraphs: [
+          "ConvergePanel compares how five independent models assess the same source-support question, surfaces where they agree or disagree on whether a source actually backs a claim, and flags unsupported assertions before you rely on them. Where supported, the review can be preserved as a record of what was checked.",
+          "Source grounding helps review whether an answer is supported by sources, but it does not guarantee that the answer is true. High-stakes claims still require qualified human review.",
+        ],
+      },
     ],
     relatedLinks: [
       { label: "How to Verify Sources from AI Answers", href: "/use-cases/how-to-verify-sources-from-ai-answers" },
@@ -897,8 +931,12 @@ export const PAGES: PSEOPage[] = [
       { label: "How to Pressure-Test an AI Response", href: "/use-cases/how-to-pressure-test-an-ai-response" },
       { label: "AI Disagreement Analysis Tool", href: "/use-cases/ai-disagreement-analysis-tool" },
       { label: "Claim Verification for Researchers", href: "/use-cases/claim-verification-for-researchers" },
+      { label: "Journalist verification checklist", href: "/use-cases/verification-checklist-for-journalists" },
+      { label: "Verify a viral claim before sharing it", href: "/use-cases/how-to-verify-a-viral-claim-before-sharing-it" },
+      { label: "What is a consensus score?", href: "/use-cases/what-is-a-consensus-score" },
+      { label: "Deep Research and AI Verification", href: "/use-cases/deep-research-and-ai-verification" },
     ],
-    cta: "Review Source Grounding Across Models",
+    cta: "Check Source Support",
     category: "glossary",
     schemaType: "FAQPage",
     faq: [
@@ -930,9 +968,21 @@ export const PAGES: PSEOPage[] = [
         q: "Why compare multiple models for source grounding specifically?",
         a: "Because grounding quality varies model to model even on the same question — one model may cite a specific document while another asserts the same claim with no evidence at all. Comparing surfaces that gap. It also catches the case where all models cite the same weak or shared source, which looks like agreement but is really just one source repeated.",
       },
+      {
+        q: "Is source grounding the same as citation?",
+        a: "No. Citation is one specific form of grounding — the model names a source. Grounding is the broader principle that a claim should be traceable to evidence at all, whether through a named citation or a retrievable document the model draws on without formally citing it.",
+      },
+      {
+        q: "What's the difference between source grounding and claim verification?",
+        a: "Source grounding tells you whether an AI's answer is tied to a retrievable document. Claim verification is the broader process of checking whether a specific claim actually holds up — which includes grounding, but also model comparison, disagreement review, and checking for missing context. Grounding is an input to verification, not a substitute for it.",
+      },
+      {
+        q: "Does ConvergePanel guarantee source accuracy?",
+        a: "No. ConvergePanel compares how models assess source support and flags disagreement or missing evidence — it does not certify that a source is accurate or that the underlying claim is true. Verifying a source's own accuracy, and deciding what to do with a high-stakes claim, remains a human judgment.",
+      },
     ],
     metaDescription:
-      "Source grounding connects an AI answer to evidence — but a grounded answer can still be incomplete or wrong. See how to check it across 5 models.",
+      "Source grounding means checking whether a source actually supports the claim — not just whether one exists. See how to check it, and where it falls short.",
   },
   {
     slug: "single-model-vs-multi-model-verification",
@@ -1916,6 +1966,7 @@ export const PAGES: PSEOPage[] = [
       { label: "Verification Checklist for Journalists", href: "/use-cases/verification-checklist-for-journalists" },
       { label: "How to Fact-Check Breaking News Claims", href: "/use-cases/how-to-fact-check-breaking-news-claims" },
       { label: "What Is a Consensus Score?", href: "/use-cases/what-is-a-consensus-score" },
+      { label: "Source grounding in AI", href: "/use-cases/what-is-source-grounding-in-ai" },
     ],
     faq: [
       {
@@ -2665,6 +2716,7 @@ export const PAGES: PSEOPage[] = [
       { label: "How to Pressure-Test an AI Response", href: "/use-cases/how-to-pressure-test-an-ai-response" },
       { label: "AI Disagreement Analysis Tool", href: "/use-cases/ai-disagreement-analysis-tool" },
       { label: "How to Verify a Viral Claim Before Sharing It", href: "/use-cases/how-to-verify-a-viral-claim-before-sharing-it" },
+      { label: "Check source support before you post", href: "/use-cases/what-is-source-grounding-in-ai" },
       { label: "AI Video Verification for Content Creators", href: "/use-cases/ai-video-verification-for-content-creators" },
       { label: "Verify AI content for a business or team newsletter", href: "/use-cases/verify-ai-content-now" },
     ],
@@ -4069,6 +4121,7 @@ export const PAGES: PSEOPage[] = [
       { label: "Multi-LLM Answer Comparison", href: "/use-cases/multi-llm-answer-comparison" },
       { label: "How to Compare AI Answers Before Deciding", href: "/use-cases/how-to-compare-ai-answers-before-deciding" },
       { label: "Single AI Model vs. Multi-Model Verification", href: "/use-cases/single-ai-model-vs-multi-model-verification" },
+      { label: "Source-supported AI answers", href: "/use-cases/what-is-source-grounding-in-ai" },
       { label: "Why Not Trust One AI Model for Serious Decisions?", href: "/use-cases/why-not-trust-one-ai-model-for-serious-decisions" },
       { label: "AI Consensus for Government Analysis", href: "/use-cases/ai-consensus-for-government-analysis" },
       { label: "AI Trust Dashboard for Decision Support", href: "/use-cases/ai-trust-dashboard-for-decision-support" },
@@ -4959,6 +5012,10 @@ export const PAGES: PSEOPage[] = [
           "Outdated sources — the research existed but has been superseded or retracted",
           "Wrong attribution — a real finding incorrectly assigned to the wrong researcher or organization",
           "Overstated confidence — a preliminary finding cited as established consensus",
+          "Source supports the opposite claim — the cited material actually contradicts what the AI asserts",
+          "Source is not independent — the citation shares an author, funder, or origin with the claim itself",
+          "Source is a summary of another source — a secondary write-up cited as if it were the primary evidence",
+          "Model ignores conflicting evidence — other sources dispute the claim and the answer doesn't mention it",
         ],
       },
       {
@@ -5038,12 +5095,12 @@ export const PAGES: PSEOPage[] = [
     metaDescription:
       "Check whether an AI-cited source is real, current, authoritative and relevant—and whether it actually supports the claim.",
     comparisonTable: {
-      headers: ["AI Claim", "Cited Source", "What the Source Says", "Supports Claim?", "Reviewer Action"],
+      headers: ["AI Claim", "Cited Source", "What the Source Says", "Supports Claim?", "Risk", "Reviewer Action"],
       rows: [
-        ["\"Adoption doubled year over year\"", "A named industry report", "The report shows a 40% increase, not a doubling", "No", "Correct the figure or cite the report's actual number"],
-        ["\"Experts agree that X causes Y\"", "No specific source given", "N/A — nothing to check", "No", "Treat as unsupported until a specific source is found"],
-        ["\"According to a 2023 study...\"", "A study that exists and covers the topic", "Discusses the general area, never states this specific finding", "No", "Flag as a source mention, not source support — trace the actual claim"],
-        ["\"Revenue grew 12% per the company's filing\"", "The actual filing, cited by name", "States exactly 12% growth for the period claimed", "Yes", "Confirmed — safe to cite as-is"],
+        ["\"Adoption doubled year over year\"", "A named industry report", "The report shows a 40% increase, not a doubling", "No", "High — overstated figure could be repeated downstream", "Correct the figure or cite the report's actual number"],
+        ["\"Experts agree that X causes Y\"", "No specific source given", "N/A — nothing to check", "No", "High — no way to trace or challenge the claim at all", "Treat as unsupported until a specific source is found"],
+        ["\"According to a 2023 study...\"", "A study that exists and covers the topic", "Discusses the general area, never states this specific finding", "No", "Moderate — sounds sourced but isn't, easy to miss", "Flag as a source mention, not source support — trace the actual claim"],
+        ["\"Revenue grew 12% per the company's filing\"", "The actual filing, cited by name", "States exactly 12% growth for the period claimed", "Yes", "Low — verified against the primary document", "Confirmed — safe to cite as-is"],
       ],
     },
     schemaType: "FAQPage",
@@ -5330,6 +5387,7 @@ export const PAGES: PSEOPage[] = [
       { label: "How to Check If AI Hallucinated", href: "/use-cases/how-to-check-if-ai-hallucinated" },
       { label: "How to Identify Risks Before Deciding", href: "/use-cases/how-to-identify-risks-before-deciding" },
       { label: "How to Check If a Decision Is Based on Weak Information", href: "/use-cases/how-to-check-if-a-decision-is-based-on-weak-information" },
+      { label: "Review whether the source supports the claim", href: "/use-cases/what-is-source-grounding-in-ai" },
       { label: "Find the missing downside in an AI analysis", href: "/use-cases/ai-downside-omission" },
     ],
     cta: "Check for AI Blind Spots — surface what AI answers left out before you decide",
