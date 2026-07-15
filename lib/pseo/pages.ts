@@ -1472,8 +1472,8 @@ export const PAGES: PSEOPage[] = [
         a: "No. Five models can agree on something that is wrong if they all share the same training data bias or all drew from the same flawed source. Consensus is a confidence signal — it means the answer is not idiosyncratic to one model — but it does not guarantee correctness. For high-stakes claims, consensus should inform your judgment, not replace source verification.",
       },
       {
-        q: "What should I do when AI models disagree?",
-        a: "Treat the disagreement as a research signal. Identify the specific claim where models diverge, examine what each model's reasoning is based on, and investigate the contested point further — ideally through primary sources. Disagreement often reveals genuinely uncertain or contested evidence, which is more useful to know than a false consensus.",
+        q: "What if ChatGPT, Claude, Gemini, Grok, and Perplexity all give different answers?",
+        a: "Look at what specifically differs — is it a factual claim, a causal interpretation, or just emphasis? A factual split (one model states a different statistic or date) is a signal to check primary sources directly. A split in emphasis or framing is less urgent but still worth noting in your synthesis. Treat the disagreement as the map of where your research question is genuinely unsettled, not as a reason to just pick the model you trust most by habit.",
       },
       {
         q: "How does multi-model research reduce hallucination risk?",
@@ -6682,8 +6682,8 @@ export const PAGES: PSEOPage[] = [
         a: "Verification typically combines reverse video search, metadata analysis, geolocation, source investigation, and AI-assisted visual analysis. Multi-model AI video verification adds a fast, structured first layer — three vision models analyze the clip independently and flag potential manipulation signals before deeper investigation begins.",
       },
       {
-        q: "How long does AI video verification take?",
-        a: "ConvergePanel's multi-model video verification typically returns results in 30 to 90 seconds for clips under 60 seconds. It's designed to fit within the tight timelines of newsroom workflows without replacing the fuller investigation that high-stakes clips warrant.",
+        q: "Is AI video verification fast enough for a breaking viral clip?",
+        a: "Yes — ConvergePanel's three-model verdict typically comes back in 30 to 90 seconds for clips under 60 seconds, which fits inside the window before a publish-or-hold decision has to be made. It's a first-pass triage step, not the end of the process: a clean result supports moving forward with normal editorial confidence, while any flagged signal should trigger the fuller verification a high-stakes clip warrants before it runs.",
       },
       {
         q: "Can AI video verification detect all manipulated clips?",
@@ -15945,8 +15945,8 @@ export const PAGES: PSEOPage[] = [
     cta: "Review a Finance Memo",
     faq: [
       {
-        q: "Does ConvergePanel provide financial advice?",
-        a: "No. ConvergePanel does not provide financial advice, investment advice, or financial analysis of any kind. It runs finance memo claims and assumptions through multiple AI models and surfaces where model characterizations agree or disagree. All finance memo content requires review by qualified finance professionals before circulation or use in decisions.",
+        q: "Can this replace the finance team's sign-off before a memo circulates?",
+        a: "No. ConvergePanel checks how multiple AI models characterize a memo's assumptions, benchmarks, and market claims, and flags where they disagree — it does not provide financial advice or certify that a memo is accurate. The model comparison is a pre-circulation review step; a qualified finance professional still needs to sign off before the memo goes out.",
       },
       {
         q: "What types of finance memo claims can AI help review?",
