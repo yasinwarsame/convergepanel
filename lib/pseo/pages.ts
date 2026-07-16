@@ -1691,6 +1691,14 @@ export const PAGES: PSEOPage[] = [
       "Understanding what specific AI manipulation signals look like in practice",
       "Adding a fast sanity check to your workflow before sharing content with your audience",
     ],
+    comparisonTable: {
+      headers: ["Review Question", "Model 1 Observation", "Model 2 Observation", "Model 3 Observation", "Agreement", "Disagreement", "Reviewer Action"],
+      rows: [
+        ["Any signs of synthetic generation?", "No artifacts flagged", "No artifacts flagged", "Flags a texture inconsistency near the jawline in two frames", "2 of 3 find no signal", "One model flags a possible artifact the others don't see", "Isolate the flagged frames and check whether the artifact is consistent with compression or with generation"],
+        ["Is scene continuity consistent?", "Consistent lighting and shadows across frames", "Consistent", "Consistent", "All three agree", "None", "No further authenticity concern from this question; move to caption review"],
+        ["Does the footage match the caption's claim?", "Visually consistent with the claim", "Visually consistent", "Cannot confirm location from visual cues alone", "2 of 3 find visual consistency", "One model can't confirm a location detail the caption asserts", "Treat the location claim as unconfirmed pending reverse video search"],
+      ],
+    },
     bodySections: [
       {
         heading: "When a Video Deserves Extra Review",
@@ -1731,6 +1739,12 @@ export const PAGES: PSEOPage[] = [
         ],
       },
       {
+        heading: "Multi-Model Video Review Matrix",
+        paragraphs: [
+          "Laying out each model's observation side by side, question by question, makes agreement and disagreement visible at a glance instead of buried across three separate reports. Use a matrix like this one to track the review before you decide whether to share, hold, or escalate.",
+        ],
+      },
+      {
         heading: "How ConvergePanel Helps",
         bullets: [
           "Video Verification mode — three vision models independently review extracted frames for manipulation signals",
@@ -1760,6 +1774,7 @@ export const PAGES: PSEOPage[] = [
       { label: "How to Fact-Check a Reaction Video", href: "/use-cases/how-to-fact-check-a-reaction-video" },
       { label: "Video Authenticity Review for Researchers", href: "/use-cases/video-authenticity-review-for-researchers" },
       { label: "How to Verify a Clip Before Publishing", href: "/use-cases/how-to-verify-a-clip-before-publishing" },
+      { label: "AI Video Verification Checklist", href: "/use-cases/ai-video-verification-checklist" },
     ],
     cta: "Review a Suspicious Video",
     category: "how-to",
@@ -23074,6 +23089,7 @@ export const PAGES: PSEOPage[] = [
       { label: "When video verification models disagree", href: "/use-cases/when-video-verification-models-disagree" },
       { label: "Verification checklist for journalists", href: "/use-cases/verification-checklist-for-journalists" },
       { label: "Newsroom AI verification workflow", href: "/use-cases/newsroom-ai-verification-workflow" },
+      { label: "AI video verification checklist", href: "/use-cases/ai-video-verification-checklist" },
     ],
   },
 
@@ -23577,6 +23593,14 @@ export const PAGES: PSEOPage[] = [
       {
         q: "Does ConvergePanel assess whether a caption is accurate?",
         a: "Partially. Vision models can flag obvious mismatches between visual content and an associated caption. They cannot independently verify location, date, causal claims, or contextual accuracy. Caption verification requires methods beyond AI frame analysis: source tracing, reverse video search, geolocation, and domain expertise.",
+      },
+      {
+        q: "How do I check if a video caption is false?",
+        a: "Start from the caption's specific claim — date, location, who's shown, what caused what — and check each part against the footage and its original source separately. A caption can be false even when the video itself is completely genuine; the eight caption-to-video checks above are the same checks whether you're calling this 'caption verification' or asking whether a caption is simply false.",
+      },
+      {
+        q: "Is checking whether a video supports a claim the same as video claim verification?",
+        a: "Yes — this is what video claim verification means in practice: not just confirming the clip is unmanipulated, but confirming the footage actually demonstrates the specific claim attached to it. A video can pass an authenticity review and still fail a claim-verification review if it doesn't show what it's said to show.",
       },
     ],
     relatedLinks: [
@@ -24141,6 +24165,101 @@ export const PAGES: PSEOPage[] = [
     schemaType: "FAQPage",
     metaDescription:
       "When three vision models give different video verdicts, the split is a reason to slow down. Learn what disagreement means in video review and how to respond to it.",
+  },
+  {
+    slug: "ai-video-verification-checklist",
+    publishedAt: "2026-07-16",
+    title: "AI Video Verification Checklist Before You Share or Publish",
+    h1: "A Practical Checklist for Reviewing Suspicious Videos",
+    audience: "Journalists, fact-checkers, content creators, communications teams",
+    audienceDetail: "Anyone who needs a fast, scannable checklist to run before sharing, publishing, or reacting to a video — without reading a full explainer first",
+    problem:
+      "Before you publish or share a suspicious video, check what the clip actually shows and what the caption claims it shows. Those are two different checks, and most people run neither one before hitting share.\n\nA full video-verification workflow has a lot of steps worth understanding in depth. Sometimes what you need first is not the explanation — it's the checklist itself, in a form you can run through in under two minutes before you decide whether to share, hold, or escalate.",
+    solution:
+      "This is the condensed version: nine checks, in order, covering what the caption claims, what the footage actually shows, and whether the vision models reviewing it agree. Each item links to the fuller explanation if you need it — but the checklist itself is the point.",
+    workflow: [
+      "What does the caption claim? Write down the specific assertion before you look at anything else",
+      "What does the video actually show? Watch it once for content alone, separate from the claim",
+      "Is the date known? Look for a verifiable timestamp or dateable visual detail",
+      "Is the location known? Check for signage, landmarks, or other place-identifying detail",
+      "Is there original source context? Find the earliest known post, not the version in front of you",
+      "Are there visible inconsistencies? Note anything that looks visually off before running an AI review",
+      "Are there signs of editing? Check for cuts, jumps, or missing frames that could change meaning",
+      "Do vision models disagree? Run the clip through multiple models and check where they split",
+      "Does the clip require human verification? Decide based on the above whether this needs more than an AI pass",
+    ],
+    useCases: [
+      "Running a fast pre-share check on a video landing in a group chat or social feed",
+      "Using a consistent checklist across a newsroom or content team before publication",
+      "Training new fact-checkers or moderators on the minimum checks for suspicious video",
+      "Documenting that a structured checklist was followed before a publish-or-hold decision",
+    ],
+    comparisonTable: {
+      headers: ["Checklist Item", "What You're Checking", "If the Answer Is No or Unclear"],
+      rows: [
+        ["Caption claim", "What the video is being said to prove, stated as one sentence", "You can't check a claim you haven't pinned down precisely — write it out before continuing"],
+        ["Actual content", "What the footage shows, independent of the caption", "If content and caption already look mismatched, treat this as a caption problem before an authenticity one"],
+        ["Date", "Whether a timestamp or dateable detail exists", "Treat the date as unconfirmed and search for the earliest known posting"],
+        ["Location", "Whether signage, landmarks, or geography confirm the claimed place", "Treat the location as unconfirmed; don't repeat it as fact"],
+        ["Original source", "Whether you can trace this to its earliest known appearance", "Reverse video search before trusting the version you have"],
+        ["Visible inconsistencies", "Anything that looks visually unusual on a plain watch-through", "Note it specifically and check it against the AI review's findings"],
+        ["Editing signs", "Cuts, jumps, or missing frames that could change meaning", "Assume the clip may be incomplete and look for the fuller version"],
+        ["Vision model agreement", "Whether multiple models reviewing the clip reach the same assessment", "Treat a split as a signal to slow down, not as noise to average away"],
+        ["Human verification need", "Whether the stakes justify escalation beyond an AI pass", "When in doubt on a high-stakes clip, escalate rather than publish on the checklist alone"],
+      ],
+    },
+    bodySections: [
+      {
+        heading: "Why a checklist and a full workflow are both useful",
+        paragraphs: [
+          "The checklist above is deliberately compressed — it's built for the moment right before you decide whether to share or publish, not for understanding why each check matters. For the reasoning behind each item, the fuller explainer on reviewing a suspicious video with AI walks through the same nine checks with context and examples.",
+          "Authenticity and caption accuracy are different questions, and this checklist covers both because most video misinformation involves real footage with a false claim attached, not a synthetic clip. Checking only for manipulation and skipping the caption check is the single most common shortcut worth avoiding.",
+        ],
+      },
+      {
+        heading: "What ConvergePanel Adds to This Checklist",
+        bullets: [
+          "Multi-model visual review: three vision models — GPT-4o, Claude, and Gemini — independently review extracted frames",
+          "Per-model observations: see what each model specifically flagged, not just a single verdict",
+          "Agreement and disagreement surfaced explicitly, so a split result is visible rather than averaged away",
+          "A documented review record you can attach to an editorial file or escalation note",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "Is this checklist a substitute for the full video verification workflow?",
+        a: "No — it's the compressed version for a fast pre-share decision. For the reasoning behind each check and worked examples, see the full guide on reviewing a suspicious video with AI.",
+      },
+      {
+        q: "Which item on this checklist matters most?",
+        a: "Separating the caption claim from what the video actually shows. Most viral video misinformation involves authentic footage misattributed to the wrong date, place, or event — not a synthetic fake — so the caption check catches more real cases than the authenticity check alone.",
+      },
+      {
+        q: "What should I do if vision models disagree on a clip?",
+        a: "Treat the split as a reason to slow down, not a tie to break. A disagreement means the clip presents ambiguous signals that deserve human review before you act on it either way.",
+      },
+      {
+        q: "Can I run this checklist without an AI verification tool?",
+        a: "Yes for most of it — caption claim, content, date, location, and source can all be checked manually. The vision-model agreement check specifically requires running the clip through multiple AI models, which is what ConvergePanel's Video Verification mode automates.",
+      },
+      {
+        q: "Does completing this checklist prove a video is authentic?",
+        a: "No. It structures a fast review; it doesn't provide forensic proof of authenticity or certify that the caption is accurate. High-stakes clips — legal, public-safety, or election-related — warrant escalation beyond this checklist.",
+      },
+    ],
+    relatedLinks: [
+      { label: "Verify Videos Through AI with Multiple Vision Models", href: "/use-cases/ai-video-verification" },
+      { label: "How to Review a Suspicious Video with AI", href: "/use-cases/how-to-review-a-suspicious-video-with-ai" },
+      { label: "Does the Video Actually Prove the Caption?", href: "/use-cases/does-the-video-prove-the-caption" },
+      { label: "What to Do When Video Verification Models Disagree", href: "/use-cases/when-video-verification-models-disagree" },
+      { label: "How to Check If a Viral Video Might Be Manipulated", href: "/use-cases/how-to-check-if-a-viral-video-might-be-manipulated" },
+    ],
+    cta: "Run a Video Verification Checklist",
+    category: "video-verification",
+    schemaType: "FAQPage",
+    metaDescription:
+      "Use a 9-item AI video verification checklist to check captions, visible details, context, edits, source claims, model disagreement, and human-review needs.",
   },
 
   // ── Journalist & Fact-Checker Cluster ─────────────────────────────────────
@@ -27819,6 +27938,7 @@ export const PAGES: PSEOPage[] = [
       { label: "Review the evidence level", href: "/use-cases/ai-clinical-evidence-hierarchy" },
       { label: "Check whether the paper was peer reviewed", href: "/use-cases/check-if-ai-treated-preprint-as-peer-reviewed" },
       { label: "Compare conflicting studies", href: "/use-cases/verify-ai-synthesis-of-conflicting-studies" },
+      { label: "Check whether adverse events were dropped", href: "/use-cases/check-if-ai-ignored-adverse-events" },
       { label: "Verify Statistics Generated by AI", href: "/use-cases/verify-statistics-generated-by-ai" },
     ],
     cta: "Review the Trial Summary",
@@ -27912,6 +28032,112 @@ export const PAGES: PSEOPage[] = [
     schemaType: "HowTo",
     metaDescription:
       "A published preprint is not the same as peer-reviewed evidence. Learn the 9-step check for whether an AI-cited study has actually completed peer review.",
+  },
+  {
+    slug: "check-if-ai-ignored-adverse-events",
+    publishedAt: "2026-07-16",
+    title: "How to Check If AI Ignored Adverse Events",
+    h1: "A Positive Result Is Incomplete Without the Safety Findings",
+    audience: "Healthcare and life sciences researchers",
+    audienceDetail: "Medical writers, biotech analysts, and researchers checking whether an AI clinical or research summary carried the efficacy finding forward while the safety data quietly dropped out",
+    problem:
+      "\"The treatment significantly reduced symptoms\" can be an accurate sentence about a trial where 22% of patients in the treatment arm discontinued due to side effects and one serious adverse event occurred that the control arm didn't see. Nothing in the efficacy sentence is false. It just isn't the whole result — and an AI summary optimizing for a clean, citable takeaway will reliably keep the first half of that picture and drop the second.\n\nThe omission compounds because safety data is structurally harder to summarize than efficacy data. A primary endpoint is one number. Adverse events are a list — categorized by severity, frequency, and arm — that resists collapsing into a single confident sentence. AI models take the path of least resistance: they report the number that summarizes cleanly and treat the list as supporting detail, or drop it entirely.",
+    solution:
+      "ConvergePanel checks an AI-generated summary against a specific safety checklist across five models: were adverse events mentioned at all, were serious adverse events distinguished from minor ones, was the discontinuation rate reported, and does the summary's overall tone match what the safety data actually shows. Where models disagree on whether the safety picture was adequately represented, that disagreement is the flag to trace back to the source paper before the summary is used.",
+    workflow: [
+      "Read the AI summary and note whether adverse events are mentioned at all",
+      "Find the trial's actual adverse event table in the source paper or registry, not a secondary summary of it",
+      "Check for serious adverse events specifically, not just adverse events in aggregate",
+      "Compare discontinuation and dropout rates between the treatment and comparator arms",
+      "Check whether severity and frequency are both reported, not just a single aggregate count",
+      "Confirm the follow-up duration is long enough for the safety signal being described",
+      "Check whether any subgroup carried disproportionate risk that an aggregate figure would hide",
+      "Run the summary through ConvergePanel across five models and compare how each characterizes the safety picture",
+      "Flag summaries where the stated tone is more positive than the safety data supports for qualified review",
+    ],
+    useCases: [
+      "Checking whether an AI summary of a trial result mentioned adverse events at all",
+      "Verifying that a discontinuation rate imbalance between arms wasn't dropped from a summary",
+      "Confirming a subgroup-specific safety signal wasn't averaged away in an aggregate figure",
+      "Auditing an AI-generated clinical or research summary before it's cited in a report or public-facing claim",
+    ],
+    comparisonTable: {
+      headers: ["Safety Item", "Where to Check", "What AI Said", "What the Source Said", "Risk", "Reviewer Action"],
+      rows: [
+        ["Serious adverse events", "Trial's safety results section or registry entry", "Summary states the treatment was 'well tolerated'", "One serious adverse event occurred in the treatment arm, none in placebo", "High — 'well tolerated' overstates a result with a serious safety signal", "Correct the summary to name the specific event and its frequency"],
+        ["Discontinuation rate", "Adverse event table, by arm", "Not mentioned in the summary", "22% discontinued in the treatment arm vs. 9% in placebo", "High — a large tolerability gap is invisible in an efficacy-only summary", "Add the discontinuation differential alongside the efficacy claim"],
+        ["Subgroup risk", "Subgroup or exploratory safety analysis", "Aggregate adverse event rate cited as the whole picture", "One age subgroup showed meaningfully higher event rates than the aggregate suggests", "Moderate — averaging can hide a risk concentrated in one group", "Report the subgroup finding alongside the aggregate, flagged as exploratory"],
+      ],
+    },
+    bodySections: [
+      {
+        heading: "Eleven checks that separate a complete result from a partial one",
+        bullets: [
+          "Adverse event — was it mentioned at all, not just implied by omission",
+          "Serious adverse event — distinguished from minor or expected side effects",
+          "Treatment-related event — attributed to the intervention, not just co-occurring",
+          "Discontinuation — did patients leave the trial because of the treatment",
+          "Mortality — reported explicitly if it occurred in either arm",
+          "Severity — graded, not just counted as a single aggregate number",
+          "Frequency — how common the event was, by arm",
+          "Comparator group — whether the same event rate applies to placebo or standard of care",
+          "Follow-up duration — long enough to catch a delayed safety signal",
+          "Subgroup risk — whether one population carried disproportionate risk the aggregate hides",
+          "Study limitation — whether the authors themselves flagged a safety-reporting constraint",
+        ],
+      },
+      {
+        heading: "Why the omission reads as thoroughness, not as a gap",
+        paragraphs: [
+          "A summary that states an effect size, a p-value, and a confidence interval reads as rigorous — the presence of that much specificity doesn't invite a reader to ask what's missing. Safety data drops out of exactly this kind of summary without leaving a visible seam, because the sentence structure that reports efficacy cleanly has no natural place for a categorized list of adverse events.",
+          "The check that catches this isn't about doubting the efficacy number. It's about treating 'no adverse events were mentioned' as a specific claim to verify against the source, rather than reading silence on safety as evidence that nothing happened.",
+        ],
+      },
+      {
+        heading: "Illustrative example",
+        paragraphs: [
+          "An AI-generated summary describes a new therapy as producing \"a significant and well-tolerated improvement in symptoms.\" The source trial shows a genuine, statistically significant improvement on the primary endpoint. It also shows an 18% discontinuation rate in the treatment arm against 7% in placebo, driven largely by a gastrointestinal side effect, and one serious adverse event that the paper's own discussion section flags as requiring monitoring in any follow-on study.",
+          "Every word in the AI summary's efficacy claim is accurate. \"Well-tolerated\" is the word doing the damage — it's a characterization the safety data doesn't support, sitting next to a genuinely accurate efficacy statement. Reviewed across five models, three repeat the same \"well tolerated\" framing from the abstract's own language, and two flag the discontinuation differential unprompted when asked specifically about safety. That split is the signal to go back to the adverse-event table before the summary is used anywhere.",
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: "Can an AI summary be accurate about efficacy and still misleading overall?",
+        a: "Yes. Omitting or downplaying safety data doesn't make the efficacy claim false — it makes the overall impression the summary creates inaccurate. A reader who only sees the efficacy sentence forms a more favorable view of the treatment than the full trial result supports.",
+      },
+      {
+        q: "Why do AI summaries drop adverse events more often than efficacy results?",
+        a: "Efficacy is usually a single pre-specified number that summarizes cleanly into one sentence. Safety data is a categorized list — by severity, frequency, and arm — that resists that same compression, so it's more likely to be trimmed or dropped when a model produces a short summary.",
+      },
+      {
+        q: "Does mentioning 'the treatment was well tolerated' count as adequate safety reporting?",
+        a: "Not on its own. That phrase is a characterization, not a data point — it should be checked against the actual discontinuation rate, serious adverse event count, and severity grading in the source, not accepted as a substitute for reporting them.",
+      },
+      {
+        q: "What if different AI models describe the safety profile differently?",
+        a: "Treat the disagreement as a reason to check the source directly. Models can inherit a characterization like 'well tolerated' from a paper's own abstract without independently checking it against the safety tables in the results section — divergence across models is often where that gap becomes visible.",
+      },
+      {
+        q: "How much does a subgroup-specific risk matter if the aggregate rate looks low?",
+        a: "It can matter considerably. An aggregate adverse event rate can look acceptable while concealing a meaningfully higher rate in one subgroup — age, comorbidity, or dosing group — that the average smooths over.",
+      },
+      {
+        q: "Can ConvergePanel determine whether a treatment's safety profile is acceptable?",
+        a: "No. ConvergePanel supports evidence review and comparison — checking whether an AI summary represented the safety data completely — but it does not provide medical advice, clinical recommendations, or a determination of safety or efficacy. That judgment requires a qualified clinician or safety reviewer.",
+      },
+    ],
+    relatedLinks: [
+      { label: "Review the trial summary", href: "/use-cases/verify-ai-summary-of-clinical-trial-results" },
+      { label: "Review the evidence level", href: "/use-cases/ai-clinical-evidence-hierarchy" },
+      { label: "Review the endpoint interpretation", href: "/use-cases/ai-endpoint-interpretation" },
+      { label: "Check whether the paper was peer reviewed", href: "/use-cases/check-if-ai-treated-preprint-as-peer-reviewed" },
+    ],
+    cta: "Review the Safety Findings",
+    category: "how-to",
+    schemaType: "FAQPage",
+    metaDescription:
+      "A positive trial result can look complete while the adverse events quietly drop out of the summary. Check whether an AI summary represented the safety data fully.",
   },
   {
     slug: "verify-ai-synthesis-of-conflicting-studies",
@@ -28272,6 +28498,7 @@ export const PAGES: PSEOPage[] = [
       { label: "Review the evidence level", href: "/use-cases/ai-clinical-evidence-hierarchy" },
       { label: "Check the evidence stage", href: "/use-cases/check-if-ai-generalized-animal-research-to-humans" },
       { label: "Compare conflicting studies", href: "/use-cases/verify-ai-synthesis-of-conflicting-studies" },
+      { label: "Check whether adverse events were dropped", href: "/use-cases/check-if-ai-ignored-adverse-events" },
     ],
     cta: "Review the Endpoint Interpretation",
     category: "how-to",

@@ -114,6 +114,7 @@ const HUB_GROUPS: HubGroup[] = [
       "how-to-sanity-check-a-viral-clip",
       "how-to-verify-a-clip-before-publishing",
       "how-journalists-can-verify-viral-clips",
+      "ai-video-verification-checklist",
     ],
   },
   {
@@ -616,6 +617,7 @@ const HUB_GROUPS: HubGroup[] = [
       "ai-endpoint-interpretation",
       "check-if-ai-generalized-animal-research-to-humans",
       "verify-ai-summary-of-clinical-trial-results",
+      "check-if-ai-ignored-adverse-events",
       "check-if-ai-treated-preprint-as-peer-reviewed",
       "verify-ai-synthesis-of-conflicting-studies",
       "ai-literature-coverage-gap",
