@@ -75,7 +75,7 @@ export default function TopNav() {
         {/* Logo */}
         <Link href="/" className="flex items-center gap-3 transition-opacity hover:opacity-80">
           <span className="relative flex h-14 w-14 shrink-0 items-center justify-center">
-            <Image src="/logo-mark.png" alt="" width={56} height={56} className="h-14 w-14" priority />
+            <Image src="/logo-mark.png" alt="ConvergePanel logo" width={56} height={56} className="h-14 w-14" priority />
           </span>
           <span className="flex flex-col justify-center leading-tight">
             <span className="text-2xl font-normal tracking-tight">

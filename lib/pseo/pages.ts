@@ -1310,7 +1310,7 @@ export const PAGES: PSEOPage[] = [
   {
     slug: "how-to-compare-chatgpt-claude-gemini-grok-perplexity-for-research",
     publishedAt: "2026-05-29",
-    title: "Compare ChatGPT, Claude, Gemini, Grok, and Perplexity for Research",
+    title: "Compare ChatGPT, Claude, Gemini, Grok, Perplexity",
     h1: "How to Compare ChatGPT, Claude, Gemini, Grok, and Perplexity for Research",
     audience: "Researchers, analysts, journalists, founders, and knowledge workers",
     audienceDetail: "Anyone doing serious research who wants to compare AI models side by side instead of trusting a single response",
