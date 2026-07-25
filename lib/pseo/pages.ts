@@ -1201,7 +1201,7 @@ export const PAGES: PSEOPage[] = [
       },
     ],
     metaDescription:
-      "Use multiple vision models to sanity-check viral clips, visual claims, source context, and uncertainty before publishing. Not forensic proof — a structured review layer.",
+      "Check whether a viral video targeting your brand or executives is authentic. Three AI vision models flag manipulation signals before you respond.",
   },
   {
     slug: "ai-peer-review-for-high-stakes-workflows",
