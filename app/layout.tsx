@@ -12,6 +12,7 @@ import { AuthProvider } from "@/components/AuthProvider";
 import { ErrorBoundaryWrapper } from "@/components/ErrorBoundaryWrapper";
 import { ServiceWorkerUnregister } from "@/components/ServiceWorkerUnregister";
 import { PostHogProvider } from "@/components/PostHogProvider";
+import { GOOGLE_SITE_VERIFICATION, BING_SITE_VERIFICATION } from "@/lib/env";
 
 const hanken = Hanken_Grotesk({
   subsets: ["latin"],
@@ -61,6 +62,10 @@ export function generateMetadata(): Metadata {
     },
     other: {
       ...Sentry.getTraceData(),
+    },
+    verification: {
+      ...(GOOGLE_SITE_VERIFICATION ? { google: GOOGLE_SITE_VERIFICATION } : {}),
+      ...(BING_SITE_VERIFICATION ? { other: { "msvalidate.01": BING_SITE_VERIFICATION } } : {}),
     },
   };
 }

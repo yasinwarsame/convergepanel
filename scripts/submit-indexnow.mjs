@@ -1,10 +1,11 @@
-// Submits PSEO + static URLs to IndexNow (fans out to Bing, Yandex, Seznam, Naver)
-// so pages get crawled promptly instead of waiting on Bing's own crawl schedule.
+// Submits pSEO + solutions/learn + static URLs to IndexNow (fans out to Bing,
+// Yandex, Seznam, Naver) so pages get crawled promptly instead of waiting on
+// each engine's own crawl schedule.
 //
 // Usage:
-//   node scripts/submit-indexnow.mjs              # submit only new/changed use-case pages since last run
-//   node scripts/submit-indexnow.mjs --all         # submit every URL in the sitemap
-//   node scripts/submit-indexnow.mjs slug-a slug-b # submit specific use-case slugs
+//   node scripts/submit-indexnow.mjs              # submit only new/changed pages since last run
+//   node scripts/submit-indexnow.mjs --all         # submit every URL across all sources
+//   node scripts/submit-indexnow.mjs slug-a slug-b # submit specific slugs (any source)
 //
 // Key file: public/<key>.txt must match INDEXNOW_KEY below (served at
 // https://convergepanel.com/<key>.txt for protocol verification).
@@ -23,8 +24,15 @@ const STATIC_URLS = [
   "", "/pricing", "/about", "/contact", "/help", "/use-cases", "/terms", "/privacy",
 ];
 
-function parsePages() {
-  const src = readFileSync(join(root, "lib/pseo/pages.ts"), "utf8");
+// Each source file's slug/publishedAt fields, mapped to its route prefix.
+const SOURCES = [
+  { file: "lib/pseo/pages.ts", prefix: "/use-cases" },
+  { file: "lib/solutions/pages.ts", prefix: "/solutions" },
+  { file: "lib/learn/pages.ts", prefix: "/learn" },
+];
+
+function parsePages(file, prefix) {
+  const src = readFileSync(join(root, file), "utf8");
   const lines = src.split("\n");
   const pages = [];
   let current = null;
@@ -32,7 +40,7 @@ function parsePages() {
     const slugMatch = lines[i].match(/^\s*slug:\s*"([^"]+)"/);
     if (slugMatch) {
       if (current) pages.push(current);
-      current = { slug: slugMatch[1], publishedAt: null };
+      current = { slug: slugMatch[1], publishedAt: null, prefix };
       continue;
     }
     if (current) {
@@ -42,6 +50,18 @@ function parsePages() {
   }
   if (current) pages.push(current);
   return pages;
+}
+
+function loadAllPages() {
+  return SOURCES.flatMap(({ file, prefix }) => parsePages(file, prefix));
+}
+
+function stateKey(p) {
+  return `${p.prefix}/${p.slug}`;
+}
+
+function urlFor(p) {
+  return `${BASE}${p.prefix}/${p.slug}`;
 }
 
 function loadState() {
@@ -83,14 +103,14 @@ async function submit(urls) {
 }
 
 const args = process.argv.slice(2);
-const pages = parsePages();
+const pages = loadAllPages();
 
 if (args.includes("--all")) {
-  const urls = [...STATIC_URLS.map((p) => `${BASE}${p}`), ...pages.map((p) => `${BASE}/use-cases/${p.slug}`)];
+  const urls = [...STATIC_URLS.map((p) => `${BASE}${p}`), ...pages.map(urlFor)];
   const ok = await submit(urls);
   if (ok) {
     const state = {};
-    for (const p of pages) state[p.slug] = p.publishedAt;
+    for (const p of pages) state[stateKey(p)] = p.publishedAt;
     saveState(state);
   }
 } else if (args.length > 0) {
@@ -98,19 +118,19 @@ if (args.includes("--all")) {
   const matched = pages.filter((p) => requested.has(p.slug));
   const missing = args.filter((slug) => !pages.some((p) => p.slug === slug));
   if (missing.length > 0) console.warn(`Warning: unknown slug(s), skipping: ${missing.join(", ")}`);
-  const ok = await submit(matched.map((p) => `${BASE}/use-cases/${p.slug}`));
+  const ok = await submit(matched.map(urlFor));
   if (ok) {
     const state = loadState();
-    for (const p of matched) state[p.slug] = p.publishedAt;
+    for (const p of matched) state[stateKey(p)] = p.publishedAt;
     saveState(state);
   }
 } else {
   const state = loadState();
-  const changed = pages.filter((p) => state[p.slug] !== p.publishedAt);
-  const ok = await submit(changed.map((p) => `${BASE}/use-cases/${p.slug}`));
+  const changed = pages.filter((p) => state[stateKey(p)] !== p.publishedAt);
+  const ok = await submit(changed.map(urlFor));
   if (ok) {
     const newState = { ...state };
-    for (const p of pages) newState[p.slug] = p.publishedAt;
+    for (const p of pages) newState[stateKey(p)] = p.publishedAt;
     saveState(newState);
   }
 }

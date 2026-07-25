@@ -1,5 +1,7 @@
 import type { MetadataRoute } from "next";
 import { PAGES } from "@/lib/pseo/pages";
+import { PILLARS } from "@/lib/solutions/pages";
+import { LEARN_PAGES } from "@/lib/learn/pages";
 
 const BASE = "https://convergepanel.com";
 
@@ -29,5 +31,19 @@ export default function sitemap(): MetadataRoute.Sitemap {
     priority: 0.7,
   }));
 
-  return [...staticEntries, ...useCaseEntries];
+  const solutionEntries: MetadataRoute.Sitemap = PILLARS.map((page) => ({
+    url: `${BASE}/solutions/${page.slug}`,
+    lastModified: new Date(page.publishedAt),
+    changeFrequency: "monthly" as const,
+    priority: 0.8,
+  }));
+
+  const learnEntries: MetadataRoute.Sitemap = LEARN_PAGES.map((page) => ({
+    url: `${BASE}/learn/${page.slug}`,
+    lastModified: new Date(page.publishedAt),
+    changeFrequency: "monthly" as const,
+    priority: 0.7,
+  }));
+
+  return [...staticEntries, ...useCaseEntries, ...solutionEntries, ...learnEntries];
 }

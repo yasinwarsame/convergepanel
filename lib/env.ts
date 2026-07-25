@@ -63,6 +63,17 @@ export const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 export const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
 
 /**
+ * Search engine site-verification tokens.
+ *
+ * Optional — when unset, the corresponding verification meta tag is simply
+ * omitted from the page (see app/layout.tsx generateMetadata). Set these in
+ * Vercel project env vars after claiming the property in Google Search
+ * Console / Bing Webmaster Tools. See README-SEO.md for the exact steps.
+ */
+export const GOOGLE_SITE_VERIFICATION = process.env.GOOGLE_SITE_VERIFICATION;
+export const BING_SITE_VERIFICATION = process.env.BING_SITE_VERIFICATION;
+
+/**
  * Grok Model Configuration
  * 
  * Controls which Grok model ConvergePanel uses.
