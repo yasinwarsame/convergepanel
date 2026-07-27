@@ -17,11 +17,18 @@ import { z } from "zod";
 import { callGemini } from "@/lib/connectors/gemini";
 import { GEMINI_API_KEY } from "@/lib/env";
 import { logger } from "@/lib/logger";
-import { QueryClassification, QueryType, AnswerShape } from "./types";
+import { QueryClassification, QueryClassificationFallbackReason, QueryType, AnswerShape } from "./types";
 import { CLASSIFIER_SYSTEM_PROMPT } from "./classifierPrompt";
 import { stripJsonFences, withTimeout } from "./util";
 
-const CLASSIFIER_TIMEOUT_MS = 3000;
+// Was 3000ms — far tighter than every other Gemini call in this module
+// (cluster 8000ms, backfill 6000ms, synthesis 10000ms, bias 12000ms) despite
+// sharing the same rate-limited GEMINI_API_KEY under concurrent panel load.
+// Observed in production (2026-07-27): under concurrent load this budget was
+// too tight and the classifier silently fell through to "generic" for
+// legitimately contested_empirical questions. Raised to match the other
+// short Gemini calls in this module.
+const CLASSIFIER_TIMEOUT_MS = 8000;
 const CLASSIFIER_MAX_OUTPUT_TOKENS = 300;
 const CONFIDENCE_THRESHOLD = 0.6;
 const CACHE_MAX_ENTRIES = 200;
@@ -66,7 +73,7 @@ const ClassificationSchema = z.object({
   confidence: z.number().min(0).max(1),
 });
 
-function genericFallback(confidence = 0): QueryClassification {
+function genericFallback(reason: QueryClassificationFallbackReason, confidence = 0): QueryClassification {
   return {
     queryType: "generic",
     domain: "unknown",
@@ -75,6 +82,7 @@ function genericFallback(confidence = 0): QueryClassification {
     timeSensitivity: "low",
     userIntent: "get_answer",
     confidence,
+    fallbackReason: reason,
   };
 }
 
@@ -123,7 +131,7 @@ export async function classifyQuery(query: string): Promise<QueryClassification>
   const queryHash = hashQuery(trimmedQuery);
 
   if (!trimmedQuery) {
-    return genericFallback();
+    return genericFallback("empty_query");
   }
 
   const cacheKey = normalizeQueryForCache(trimmedQuery);
@@ -150,7 +158,7 @@ export async function classifyQuery(query: string): Promise<QueryClassification>
         latencyMs,
         reason: result.status,
       });
-      const fallback = genericFallback();
+      const fallback = genericFallback("connector_error");
       classificationCache.set(cacheKey, fallback);
       return fallback;
     }
@@ -163,7 +171,7 @@ export async function classifyQuery(query: string): Promise<QueryClassification>
         queryHash,
         latencyMs,
       });
-      const fallback = genericFallback();
+      const fallback = genericFallback("malformed_json");
       classificationCache.set(cacheKey, fallback);
       return fallback;
     }
@@ -175,7 +183,7 @@ export async function classifyQuery(query: string): Promise<QueryClassification>
         latencyMs,
         issues: parsed.error.issues.map((i) => i.path.join(".")),
       });
-      const fallback = genericFallback();
+      const fallback = genericFallback("schema_invalid");
       classificationCache.set(cacheKey, fallback);
       return fallback;
     }
@@ -189,7 +197,7 @@ export async function classifyQuery(query: string): Promise<QueryClassification>
         attemptedQueryType: classification.queryType,
         confidence: classification.confidence,
       });
-      const fallback = genericFallback(classification.confidence);
+      const fallback = genericFallback("low_confidence", classification.confidence);
       classificationCache.set(cacheKey, fallback);
       return fallback;
     }
@@ -211,6 +219,6 @@ export async function classifyQuery(query: string): Promise<QueryClassification>
       error: err?.message,
     });
     // Never cache transient failures — a later call might succeed.
-    return genericFallback();
+    return genericFallback("timeout");
   }
 }

@@ -144,5 +144,20 @@ describe("finalizeAdaptiveRun with ADAPTIVE_VERIFICATION_ENABLED=true (carbon-ta
       ["chatgpt", "claude", "gemini", "grok", "perplexity"].sort()
     );
     expect(typeof output.trustSummary!.overallTrust).toBe("number");
+
+    // Restored narrative layer: executive summary + a real disagreement card
+    // built from the dense pricing-mechanism row's actual excerpts, plus a
+    // deterministic verdict card restating the question.
+    expect(output.synthesisReport!.executiveSummary).toBeTruthy();
+    const pricingDisagreement = output.synthesisReport!.disagreements.find((d) =>
+      d.topic.includes("Carbon taxes are more effective")
+    );
+    expect(pricingDisagreement).toBeDefined();
+    expect(pricingDisagreement!.positions.length).toBeGreaterThanOrEqual(3);
+    expect(pricingDisagreement!.positions.some((p) => p.modelId === "grok" && p.position.includes("Cap-and-trade"))).toBe(
+      true
+    );
+    expect(output.synthesisReport!.verdictCard).toBeTruthy();
+    expect(output.synthesisReport!.verdictCard.question).toBe("Do carbon taxes outperform cap-and-trade?");
   });
 });

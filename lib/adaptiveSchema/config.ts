@@ -7,7 +7,7 @@
  * adapter) should hardcode a number that belongs here — tune it here instead.
  */
 
-import { ClaimConfidence, ClaimEvidenceType } from "./types";
+import { AdaptiveGateStatus, ClaimConfidence, ClaimEvidenceType } from "./types";
 
 // ─── Certainty formula (R1b) ────────────────────────────────────────────
 // certaintyScore = coverageWeight*coverage + agreementWeight*agreement + statedConfidenceWeight*statedConfidence
@@ -74,3 +74,28 @@ export const TRUST_WEIGHTS_BY_SCHEMA: Record<string, { citation: number; consist
 export function getTrustWeights(schemaId: string) {
   return TRUST_WEIGHTS_BY_SCHEMA[schemaId] ?? TRUST_WEIGHTS_BY_SCHEMA.generic;
 }
+
+// ─── Bias & Blind Spots (Synthesis Report Polish, Part A3) ──────────────
+/** Cap on bias/blind-spot findings surfaced per run. */
+export const MAX_BIAS_FINDINGS = 3;
+/** Hard cap on each evidence excerpt quoted from a model's own response. */
+export const BIAS_EVIDENCE_EXCERPT_MAX_CHARS = 240;
+
+// ─── Panel Verdict Card (Part A4) ────────────────────────────────────────
+/** Gate-dependent guidance shown in the verdict card, max 3 per gate status. */
+export const VERDICT_NEXT_STEPS: Record<AdaptiveGateStatus, string[]> = {
+  pass: [
+    "Use this synthesis as a starting point — spot-check the top consensus claim against one primary source before acting on it.",
+    "Revisit if new information emerges that could shift the load-bearing claims.",
+  ],
+  caution: [
+    "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
+    "Re-run with additional models or a narrower question if this decision is time-sensitive.",
+    "Flag the caveat below to anyone else relying on this synthesis.",
+  ],
+  fail: [
+    "Don't act on this synthesis as-is — the panel did not converge on a reliable answer.",
+    "Independently verify the unresolved claims before using any of them.",
+    "Consider rephrasing the question or supplying more context, then re-running the panel.",
+  ],
+};

@@ -12,9 +12,12 @@ const config: Config = {
     "^@/(.*)$": "<rootDir>/$1",
   },
   transform: {
-    "^.+\\.tsx?$": ["ts-jest", { tsconfig: { module: "commonjs" } }],
+    // jsx: "react-jsx" overrides tsconfig.json's "preserve" (needed by Next's
+    // own build pipeline) — ts-jest compiles straight to executable JS with
+    // no bundler afterward, so JSX must be transformed here, not left as-is.
+    "^.+\\.tsx?$": ["ts-jest", { tsconfig: { module: "commonjs", jsx: "react-jsx" } }],
   },
-  testMatch: ["**/__tests__/**/*.spec.ts", "**/__tests__/**/*.test.ts", "**/synthesis/**/*.test.ts"],
+  testMatch: ["**/__tests__/**/*.spec.ts", "**/__tests__/**/*.test.ts", "**/__tests__/**/*.spec.tsx", "**/synthesis/**/*.test.ts"],
   testPathIgnorePatterns: ["lib/__tests__/agreementMap.test.ts"],
 };
 

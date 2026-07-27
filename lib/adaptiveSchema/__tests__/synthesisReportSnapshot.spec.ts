@@ -20,9 +20,19 @@ const mockedCallGemini = callGemini as jest.MockedFunction<typeof callGemini>;
 import { buildAdaptiveSynthesisReport } from "@/lib/adaptiveSchema/synthesisReport";
 import { AlignedClaim, AlignedClaimCell, QueryType } from "@/lib/adaptiveSchema/types";
 import { SCHEMA_REGISTRY } from "@/lib/adaptiveSchema/schemaRegistry";
+import { ModelResult } from "@/lib/types";
 
 function cell(modelId: string, stance: AlignedClaimCell["stance"]): AlignedClaimCell {
   return { modelId: modelId as any, stance, rawStance: "asserts", confidence: "majority_view", excerpt: `${modelId} excerpt` };
+}
+
+function fixtureResults(): ModelResult[] {
+  return ["chatgpt", "claude", "grok", "perplexity", "gemini"].map((modelId) => ({
+    modelId: modelId as any,
+    status: "ok",
+    rawText: "fixture response text",
+    latencyMs: 5,
+  }));
 }
 
 function fixtureRows(): AlignedClaim[] {
@@ -60,12 +70,14 @@ describe("buildAdaptiveSynthesisReport structure snapshots (per schema type)", (
 
   const schemaIds = Object.keys(SCHEMA_REGISTRY) as QueryType[];
 
-  it.each(schemaIds)("has all 5 required sections for schema %s", async (schemaId) => {
-    const report = await buildAdaptiveSynthesisReport("Test question", schemaId, fixtureRows(), 5);
+  it.each(schemaIds)("has all required sections for schema %s", async (schemaId) => {
+    const report = await buildAdaptiveSynthesisReport("Test question", schemaId, fixtureRows(), fixtureResults());
 
     expect(report).toMatchSnapshot({
       // unifiedAnswer/panelVerdict/certaintyAssessment text is deterministic
-      // given the fixture above, so no need to loosen those.
+      // given the fixture above, so no need to loosen those. Bias detection
+      // also hits the mocked (failing) callGemini, so biasAndBlindSpots is
+      // deterministically empty too.
     });
 
     // Structural invariants every schema must satisfy, independent of the snapshot file.
@@ -75,6 +87,10 @@ describe("buildAdaptiveSynthesisReport structure snapshots (per schema type)", (
     expect(Array.isArray(report.whereModelsAgree)).toBe(true);
     expect(Array.isArray(report.whereModelsDisagree)).toBe(true);
     expect(typeof report.certaintyAssessment).toBe("string");
+    expect(typeof report.executiveSummary).toBe("string");
+    expect(Array.isArray(report.disagreements)).toBe(true);
+    expect(Array.isArray(report.biasAndBlindSpots)).toBe(true);
+    expect(report.verdictCard).toBeTruthy();
     expect(report.degraded).toBe(true);
   });
 });

@@ -35,6 +35,15 @@ export type AnswerShape =
   | "gallery"
   | "generic_sections";
 
+/** Why the classifier fell back to the defensive "generic" default instead of a genuine model classification. */
+export type QueryClassificationFallbackReason =
+  | "timeout"
+  | "connector_error"
+  | "malformed_json"
+  | "schema_invalid"
+  | "low_confidence"
+  | "empty_query";
+
 export interface QueryClassification {
   queryType: QueryType;
   domain: string;
@@ -48,6 +57,14 @@ export interface QueryClassification {
     | "learn_process"
     | "generate_content";
   confidence: number;
+  /**
+   * Set ONLY when this classification is the defensive "generic" fallback,
+   * not a genuine model classification (which may itself legitimately be
+   * "generic"). Lets the debug panel distinguish "generic (classifier
+   * timeout)" — a silent failure — from "generic (classified)" — the
+   * classifier ran fine and generic was the right call.
+   */
+  fallbackReason?: QueryClassificationFallbackReason;
 }
 
 // ─── Atomic comparable units ───────────────────────────────────────────────
@@ -237,15 +254,71 @@ export interface AdaptiveGateResult {
   loadBearingClaims: AlignedClaim[];
 }
 
+/** Decision-impact tier — mirrors lib/verificationGate/claimSeverity.ts's ClaimSeverity vocabulary. */
+export type AdaptiveStakes = "low" | "important" | "decision-critical";
+
+export interface AdaptiveDisagreementPosition {
+  modelId: ModelId;
+  /** The model's own excerpt for this claim (AlignedClaimCell.excerpt) — a real quote, never model-invented text. */
+  position: string;
+}
+
+export interface AdaptiveDisagreement {
+  /** The disputed claim's canonical text. */
+  topic: string;
+  /** One-sentence explanation of WHY models diverge — model-generated from the excerpts, validated against the model roster. */
+  whyTheyDiffer: string;
+  positions: AdaptiveDisagreementPosition[];
+  /** Model-assigned: would this claim change a decision the asker is likely making? */
+  stakes: AdaptiveStakes;
+}
+
+export interface AdaptiveBiasEvidence {
+  modelId: ModelId;
+  /** Direct quote from the model's own response, max BIAS_EVIDENCE_EXCERPT_MAX_CHARS chars. */
+  excerpt: string;
+  rationale: string;
+}
+
+export interface AdaptiveBiasFinding {
+  biasType: string;
+  description: string;
+  modelsImplicated: ModelId[];
+  evidence: AdaptiveBiasEvidence[];
+  likelyCauses: string[];
+  impact: string;
+  mitigationSteps: string[];
+}
+
+export interface AdaptiveVerdictCard {
+  question: string;
+  topConsensus: string;
+  consensusModelCount: number;
+  keyDisagreement: string | null;
+  disagreementDetail: string | null;
+  disagreementModelCount: number;
+  /** Top bias/blind spot description, one sentence; null if none were confidently attributable. */
+  caveat: string | null;
+  /** Gate-dependent guidance, max 3 — see VERDICT_NEXT_STEPS in config.ts. */
+  recommendedNextSteps: string[];
+}
+
 export interface AdaptiveSynthesisReport {
   unifiedAnswer: string;
   panelVerdict: string;
   gate: AdaptiveGateStatus;
   runCertainty: number;
   whereModelsAgree: string[];
+  /** Flat topic list, kept for the debug panel/backward-compat — the UI renders `disagreements` (richer) instead. */
   whereModelsDisagree: string[];
   certaintyAssessment: string;
   narrativeSections: { title: string; body: string }[];
+  /** Restored narrative layer (Synthesis Report Polish pass). */
+  executiveSummary: string;
+  disagreements: AdaptiveDisagreement[];
+  /** Capped at MAX_BIAS_FINDINGS; empty when none were confidently attributable. */
+  biasAndBlindSpots: AdaptiveBiasFinding[];
+  verdictCard: AdaptiveVerdictCard;
   degraded: boolean;
 }
 

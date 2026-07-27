@@ -8,7 +8,7 @@
  */
 
 import { ModelId } from "@/lib/types";
-import { AdaptiveModelResult } from "@/lib/adaptiveSchema/types";
+import { AdaptiveModelResult, AdaptiveStakes } from "@/lib/adaptiveSchema/types";
 import { getPanelModelConfig, getModelDisplayNameSafe } from "@/lib/panelModels";
 import ModelChip from "@/components/ModelChip";
 
@@ -109,5 +109,37 @@ export function ProbabilityBar({ probability, colorClass = "bg-sky-500" }: { pro
     <div className="h-2 w-full rounded-full bg-slate-100 overflow-hidden">
       <div className={`h-full ${colorClass}`} style={{ width: `${pct}%` }} />
     </div>
+  );
+}
+
+const STAKES_LABELS: Record<AdaptiveStakes, string> = {
+  low: "Low stakes",
+  important: "Important",
+  "decision-critical": "Decision-critical",
+};
+
+const STAKES_STYLES: Record<AdaptiveStakes, { bg: string; text: string; dot: string }> = {
+  low: { bg: "bg-slate-100", text: "text-slate-600", dot: "bg-slate-400" },
+  important: { bg: "bg-amber-50", text: "text-amber-700", dot: "bg-amber-400" },
+  "decision-critical": { bg: "bg-rose-50", text: "text-rose-700", dot: "bg-rose-500" },
+};
+
+const STAKES_TOOLTIPS: Record<AdaptiveStakes, string> = {
+  "decision-critical": "May affect action, compliance, safety, or strategic decisions",
+  important: "Materially shapes interpretation or follow-up",
+  low: "Supporting context or low-impact observation",
+};
+
+/** Mirrors the legacy SeverityBadge (PanelSynthesisView.tsx) — same tiers, same tooltip copy. */
+export function StakesBadge({ stakes }: { stakes: AdaptiveStakes }) {
+  const style = STAKES_STYLES[stakes] ?? STAKES_STYLES.low;
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium ${style.bg} ${style.text}`}
+      title={STAKES_TOOLTIPS[stakes]}
+    >
+      <span className={`h-1.5 w-1.5 rounded-full ${style.dot}`} />
+      {STAKES_LABELS[stakes]}
+    </span>
   );
 }

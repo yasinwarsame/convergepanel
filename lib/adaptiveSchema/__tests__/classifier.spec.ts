@@ -27,19 +27,59 @@ describe("classifyQuery", () => {
     jest.useRealTimers();
   });
 
-  it("falls back to generic when the classifier call times out", async () => {
+  it("falls back to generic when the classifier call times out, and tags the fallback reason", async () => {
     jest.useFakeTimers();
     mockedCallGemini.mockImplementation(() => new Promise(() => {})); // never resolves
 
     const promise = classifyQuery("will this ever resolve in time?");
-    await jest.advanceTimersByTimeAsync(3100);
+    await jest.advanceTimersByTimeAsync(8100);
     const result = await promise;
 
     expect(result.queryType).toBe("generic");
     expect(result.answerShape).toBe("generic_sections");
+    expect(result.fallbackReason).toBe("timeout");
   });
 
-  it("falls back to generic when confidence is below threshold", async () => {
+  it("does NOT fall back when the classifier call is slow but resolves within the timeout budget", async () => {
+    // Regression test: CLASSIFIER_TIMEOUT_MS was previously 3000ms — far
+    // tighter than every other Gemini call in this module — and under
+    // concurrent production load, real classifier latency exceeded that
+    // budget, silently misclassifying legitimately contested_empirical
+    // questions as "generic". Budget is now 8000ms; a 5s response must
+    // still classify correctly.
+    jest.useFakeTimers();
+    mockedCallGemini.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          setTimeout(
+            () =>
+              resolve(
+                okResult(
+                  JSON.stringify({
+                    queryType: "contested_empirical",
+                    domain: "macroeconomics",
+                    answerShape: "consensus_map",
+                    quantExpected: false,
+                    timeSensitivity: "low",
+                    userIntent: "understand_debate",
+                    confidence: 0.9,
+                  })
+                )
+              ),
+            5000
+          );
+        })
+    );
+
+    const promise = classifyQuery("slow but successful classifier call");
+    await jest.advanceTimersByTimeAsync(5100);
+    const result = await promise;
+
+    expect(result.queryType).toBe("contested_empirical");
+    expect(result.fallbackReason).toBeUndefined();
+  });
+
+  it("falls back to generic when confidence is below threshold, and tags the fallback reason", async () => {
     mockedCallGemini.mockResolvedValue(
       okResult(
         JSON.stringify({
@@ -58,17 +98,19 @@ describe("classifyQuery", () => {
 
     expect(result.queryType).toBe("generic");
     expect(result.confidence).toBe(0.42);
+    expect(result.fallbackReason).toBe("low_confidence");
   });
 
-  it("falls back to generic on malformed JSON", async () => {
+  it("falls back to generic on malformed JSON, and tags the fallback reason", async () => {
     mockedCallGemini.mockResolvedValue(okResult("this is not json"));
 
     const result = await classifyQuery("malformed json case");
 
     expect(result.queryType).toBe("generic");
+    expect(result.fallbackReason).toBe("malformed_json");
   });
 
-  it("falls back to generic when the connector returns a non-ok status", async () => {
+  it("falls back to generic when the connector returns a non-ok status, and tags the fallback reason", async () => {
     mockedCallGemini.mockResolvedValue({
       modelId: "gemini",
       status: "error",
@@ -80,6 +122,33 @@ describe("classifyQuery", () => {
     const result = await classifyQuery("connector error case");
 
     expect(result.queryType).toBe("generic");
+    expect(result.fallbackReason).toBe("connector_error");
+  });
+
+  it("classifies the reported regression question as contested_empirical (required case)", async () => {
+    // Literal question from the reported bug: the classifier silently fell
+    // through to "generic" for this exact question in production because
+    // CLASSIFIER_TIMEOUT_MS (3000ms) was too tight under concurrent load.
+    mockedCallGemini.mockResolvedValue(
+      okResult(
+        JSON.stringify({
+          queryType: "contested_empirical",
+          domain: "macroeconomics",
+          answerShape: "consensus_map",
+          quantExpected: false,
+          timeSensitivity: "low",
+          userIntent: "understand_debate",
+          confidence: 0.93,
+        })
+      )
+    );
+
+    const result = await classifyQuery(
+      "What are the main causes of inflation in the US, and where do economists disagree?"
+    );
+
+    expect(result.queryType).toBe("contested_empirical");
+    expect(result.fallbackReason).toBeUndefined();
   });
 
   it("returns the classification for a valid, high-confidence response", async () => {

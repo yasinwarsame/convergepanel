@@ -13,7 +13,7 @@
 
 import "server-only";
 import { ModelId } from "@/lib/types";
-import { MODEL_INFO } from "@/lib/modelInfo";
+import { getModelDisplayNameSafe } from "@/lib/panelModels";
 import { AlignedClaim } from "./types";
 import { AdaptiveGateResult } from "./gate";
 import { claimSalience } from "./scoring";
@@ -26,15 +26,30 @@ export interface AdaptivePanelVerdict {
   totalModelCount: number;
 }
 
+/**
+ * Resolves a model's display name from panelModels.ts — the single
+ * non-deprecated source of truth. Do NOT read lib/modelInfo.ts's MODEL_INFO
+ * map directly here: it's stale (e.g. it lists gemini as "Gemini 3 Pro" when
+ * the actual configured model is "Gemini 2.0 Flash") and was the root cause
+ * of a model-name mismatch bug in generated synthesis text.
+ */
 function modelLabel(modelId: ModelId): string {
-  return MODEL_INFO[modelId]?.displayName ?? modelId;
+  return getModelDisplayNameSafe(modelId);
 }
 
-function coreFindingClaim(rows: AlignedClaim[]): AlignedClaim | null {
+/** Exported for reuse by verdictCard.ts's topConsensus field — same "highest-salience consensus/majority claim" rule. */
+export function coreFindingClaim(rows: AlignedClaim[]): AlignedClaim | null {
   const candidates = rows.filter((r) => r.status === "consensus" || r.status === "majority");
   const pool = candidates.length > 0 ? candidates : rows;
   if (pool.length === 0) return null;
   return [...pool].sort((a, b) => claimSalience(b) - claimSalience(a))[0];
+}
+
+/** Exported for reuse by verdictCard.ts's keyDisagreement field — highest-salience split claim. */
+export function topSplitClaim(rows: AlignedClaim[]): AlignedClaim | null {
+  const splits = rows.filter((r) => r.status === "split");
+  if (splits.length === 0) return null;
+  return [...splits].sort((a, b) => claimSalience(b) - claimSalience(a))[0];
 }
 
 export function buildAdaptiveVerdict(

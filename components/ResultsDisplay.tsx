@@ -435,6 +435,23 @@ function claimScoreBreakdown(claim: AlignedClaim, totalModels: number) {
   return { coverage, statedConfidence };
 }
 
+const FALLBACK_REASON_LABELS: Record<string, string> = {
+  timeout: "classifier timeout",
+  connector_error: "classifier error",
+  malformed_json: "malformed classifier response",
+  schema_invalid: "invalid classifier response",
+  low_confidence: "low confidence",
+  empty_query: "empty query",
+};
+
+/** "generic (classifier timeout)" for a silent-failure fallback vs "contested_empirical (classified)" for a genuine model classification — makes fallbacks visible instead of indistinguishable from a real "generic" call. */
+function classificationLabel(classification: QueryClassification): string {
+  if (classification.fallbackReason) {
+    return `${classification.queryType} (${FALLBACK_REASON_LABELS[classification.fallbackReason] ?? classification.fallbackReason})`;
+  }
+  return `${classification.queryType} (classified)`;
+}
+
 function AdaptiveDebugPanel({ adaptive }: { adaptive: AdaptivePanelPayload }) {
   const totalModels = adaptive.results.length;
 
@@ -445,7 +462,9 @@ function AdaptiveDebugPanel({ adaptive }: { adaptive: AdaptivePanelPayload }) {
       </summary>
       <div className="mt-3 space-y-3">
         <div>
-          <p className="font-semibold">Classification</p>
+          <p className="font-semibold">
+            Classification: <span className={adaptive.classification.fallbackReason ? "text-red-700" : ""}>{classificationLabel(adaptive.classification)}</span>
+          </p>
           <pre className="mt-1 overflow-x-auto rounded bg-white/70 p-2">
             {JSON.stringify(adaptive.classification, null, 2)}
           </pre>
@@ -906,6 +925,8 @@ export default function ResultsDisplay({
           gate={adaptive.gate}
           synthesisReport={adaptive.synthesisReport}
           trustSummary={adaptive.trustSummary}
+          question={question}
+          runId={runId}
         />
       </div>
     );

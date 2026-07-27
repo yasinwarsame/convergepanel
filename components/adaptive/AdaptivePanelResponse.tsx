@@ -42,10 +42,12 @@ export interface AdaptivePanelResponseProps extends AdaptiveRendererProps {
   gate?: AdaptiveGateResult;
   synthesisReport?: AdaptiveSynthesisReport;
   trustSummary?: AdaptiveTrustSummary;
+  question: string;
+  runId?: string | null;
 }
 
 export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps) {
-  const { schema, results, alignedClaims, gate, synthesisReport, trustSummary } = props;
+  const { schema, results, alignedClaims, gate, synthesisReport, trustSummary, question, runId } = props;
   const [viewMode, setViewMode] = useState<PanelViewMode>("list");
 
   if (!gate || !synthesisReport) {
@@ -99,6 +101,9 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
           gate={gate}
           alignedClaims={alignedClaims}
           trustSummary={trustSummary}
+          question={question}
+          modelsUsed={modelIds}
+          runId={runId}
         />
       )}
     </div>

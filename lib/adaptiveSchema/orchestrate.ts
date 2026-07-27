@@ -178,7 +178,7 @@ export async function finalizeAdaptiveRun(
 
   const runCertainty = computeRunCertainty(scored, schema.id);
   const gate = computeAdaptiveGate(scored, runCertainty, schema.id);
-  const synthesisReport = await buildAdaptiveSynthesisReport(question || "", schema.id, scored, results.length);
+  const synthesisReport = await buildAdaptiveSynthesisReport(question || "", schema.id, scored, results);
   const trustSummary = buildAdaptiveTrustSummary(schema, adaptiveResults, scored);
 
   return {
