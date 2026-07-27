@@ -5,7 +5,7 @@
 import { buildAdaptiveTrustSummary } from "@/lib/adaptiveSchema/trustSummary";
 import { SCHEMA_REGISTRY } from "@/lib/adaptiveSchema/schemaRegistry";
 import { AdaptiveModelResult, AlignedClaim, AlignedClaimCell } from "@/lib/adaptiveSchema/types";
-import { getTrustWeights } from "@/lib/adaptiveSchema/config";
+import { getTrustWeights, TRUST_SCORE_CAP_BY_HEALTH } from "@/lib/adaptiveSchema/config";
 
 function cell(overrides: Partial<AlignedClaimCell> & Pick<AlignedClaimCell, "modelId" | "stance">): AlignedClaimCell {
   return { rawStance: "asserts", confidence: "settled", excerpt: "x", ...overrides };
@@ -149,5 +149,46 @@ describe("buildAdaptiveTrustSummary", () => {
     // citationScore=1 (sourced), majorityAlignment=1 (no comparable rows), contradictionSubScore=1 (no participated rows).
     const expected = weights.citation * 1 + weights.consistency * 1 + weights.contradiction * 1;
     expect(m.trustScore).toBeCloseTo(expected, 5);
+    expect(m.capped).toBe(false);
+  });
+
+  it("B4: a degraded-health model's trust score cannot exceed the configured cap, even with perfect citation/consistency/contradiction inputs", () => {
+    const schema = SCHEMA_REGISTRY.factual_lookup;
+    const cap = TRUST_SCORE_CAP_BY_HEALTH.degraded!;
+    // Best possible inputs on every sub-score: sourced answer, no comparable
+    // rows (majorityAlignment/contradictionSubScore default to neutral 1) —
+    // an "ok" model with these inputs would score at or near 1.0.
+    const results: AdaptiveModelResult[] = [
+      result({
+        modelId: "chatgpt",
+        schemaId: "factual_lookup",
+        data: { answer: "42", source: "official record", caveat: "none" },
+        truncatedFields: ["answer"], // -> parseHealth "degraded"
+      }),
+    ];
+
+    const summary = buildAdaptiveTrustSummary(schema, results, []);
+    const m = summary.perModel[0];
+
+    expect(m.parseHealth).toBe("degraded");
+    expect(m.trustScore).toBeLessThanOrEqual(cap);
+    expect(m.trustScore).toBeCloseTo(cap, 5);
+    expect(m.capped).toBe(true);
+  });
+
+  it("B4: a failed-health model is capped at 0 regardless of inputs, and capped is false when nothing needed capping", () => {
+    const schema = SCHEMA_REGISTRY.generic;
+    const results: AdaptiveModelResult[] = [
+      result({ modelId: "chatgpt", ok: false, data: null, parseError: "invalid JSON" }),
+      result({ modelId: "claude", data: { summary: "x", keyClaims: [] } }),
+    ];
+
+    const summary = buildAdaptiveTrustSummary(schema, results, []);
+    const failed = summary.perModel.find((m) => m.modelId === "chatgpt")!;
+    const ok = summary.perModel.find((m) => m.modelId === "claude")!;
+
+    expect(failed.trustScore).toBe(0);
+    expect(failed.capped).toBe(true);
+    expect(ok.capped).toBe(false);
   });
 });

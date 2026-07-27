@@ -64,6 +64,7 @@ const trustSummary: AdaptiveTrustSummary = {
     contradictionCount: i === 0 ? 1 : 0,
     parseHealth: "ok",
     trustScore: 0.75,
+    capped: false,
   })),
   overallTrust: 0.75,
 };
@@ -262,5 +263,36 @@ describe("AdaptiveSynthesisReportView — B2 low-coverage handling", () => {
     expect(mapHtml).toContain("1 silent");
     // Never the old same-denominator "N/N" fraction style.
     expect(mapHtml).not.toMatch(/>\s*\d+\/\d+\s*</);
+  });
+});
+
+describe("AdaptiveSynthesisReportView — B4 trust score cap tooltip", () => {
+  const b4Gate: AdaptiveGateResult = { status: "pass", runCertainty: 0.8, loadBearingSplitCount: 0, loadBearingClaims: [] };
+  const b4TrustSummary: AdaptiveTrustSummary = {
+    perModel: [
+      { modelId: "chatgpt" as any, claimsContributed: 3, majorityAlignment: 1, citationScore: 1, contradictionCount: 0, parseHealth: "ok", trustScore: 0.95, capped: false },
+      { modelId: "claude" as any, claimsContributed: 2, majorityAlignment: 1, citationScore: 1, contradictionCount: 0, parseHealth: "degraded", trustScore: 0.75, capped: true },
+    ],
+    overallTrust: 0.85,
+  };
+
+  it("shows a tooltip on a capped (degraded) model's trust score and not on an uncapped model's", () => {
+    const html = renderToStaticMarkup(
+      createElement(AdaptiveSynthesisReportView, {
+        report,
+        gate: b4Gate,
+        alignedClaims: [],
+        trustSummary: b4TrustSummary,
+        question: QUESTION,
+        modelsUsed: MODELS as unknown as any[],
+        runId: "test-run-id",
+      })
+    );
+
+    const trustHtml = sectionSlice(html, "trust-summary");
+    expect(trustHtml).toContain("75%");
+    expect(trustHtml).toContain("capped at 75%");
+    // Only one tooltip trigger — the degraded model's, not the ok model's.
+    expect((trustHtml.match(/title="/g) || []).length).toBe(1);
   });
 });

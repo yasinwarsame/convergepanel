@@ -29,6 +29,7 @@ import {
   AdaptiveTrustSummary,
   ModelTrustSummary,
 } from "@/lib/adaptiveSchema/types";
+import { TRUST_SCORE_CAP_REASON } from "@/lib/adaptiveSchema/config";
 
 /** Canonical, ordered list of `data-section` values rendered below — the single source of truth the snapshot test asserts against, so a future edit can't silently drop a section without also updating this list. */
 export const ADAPTIVE_SYNTHESIS_SECTION_IDS = [
@@ -134,7 +135,17 @@ function TrustSummaryTable({ trustSummary }: { trustSummary: AdaptiveTrustSummar
                 <td className="py-2 pr-4">
                   <ModelChip modelId={m.modelId} size="xs" />
                 </td>
-                <td className="py-2 pr-4 font-medium text-slate-800">{Math.round(m.trustScore * 100)}%</td>
+                <td className="py-2 pr-4 font-medium text-slate-800">
+                  {Math.round(m.trustScore * 100)}%
+                  {m.capped && TRUST_SCORE_CAP_REASON[m.parseHealth] && (
+                    <span
+                      className="ml-1 inline-flex h-3.5 w-3.5 items-center justify-center rounded-full bg-amber-100 text-[9px] font-bold text-amber-700 cursor-help align-text-top"
+                      title={TRUST_SCORE_CAP_REASON[m.parseHealth]!}
+                    >
+                      !
+                    </span>
+                  )}
+                </td>
                 <td className="py-2 pr-4 text-slate-700">{m.claimsContributed}</td>
                 <td className="py-2 pr-4 text-slate-700">{Math.round(m.majorityAlignment * 100)}%</td>
                 <td className="py-2 pr-4 text-slate-700">{Math.round(m.citationScore * 100)}%</td>

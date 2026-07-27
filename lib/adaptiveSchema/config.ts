@@ -7,7 +7,7 @@
  * adapter) should hardcode a number that belongs here — tune it here instead.
  */
 
-import { AdaptiveGateStatus, ClaimConfidence, ClaimEvidenceType } from "./types";
+import { AdaptiveGateStatus, ClaimConfidence, ClaimEvidenceType, ModelTrustSummary } from "./types";
 
 // ─── Certainty formula (R1b) ────────────────────────────────────────────
 // certaintyScore = coverageWeight*coverage + agreementWeight*agreement + statedConfidenceWeight*statedConfidence
@@ -74,6 +74,30 @@ export const TRUST_WEIGHTS_BY_SCHEMA: Record<string, { citation: number; consist
 export function getTrustWeights(schemaId: string) {
   return TRUST_WEIGHTS_BY_SCHEMA[schemaId] ?? TRUST_WEIGHTS_BY_SCHEMA.generic;
 }
+
+// ─── Trust score health caps (Part B4) ──────────────────────────────────
+/**
+ * A model's composite trust score is capped by its parse health, regardless
+ * of how well it otherwise scored on citations/consistency/contradictions —
+ * a degraded parse means some of what fed that score is already suspect.
+ * `null` means no cap (the raw weighted score stands). "failed" is 0 both
+ * here and via trustSummary.ts's existing hard override; kept here too so
+ * every health state's cap is visible in one place.
+ */
+export const TRUST_SCORE_CAP_BY_HEALTH: Record<ModelTrustSummary["parseHealth"], number | null> = {
+  ok: null,
+  degraded: 0.75,
+  failed: 0,
+};
+
+/** Tooltip copy shown next to a capped trust score, explaining why it can't read higher. */
+export const TRUST_SCORE_CAP_REASON: Record<ModelTrustSummary["parseHealth"], string | null> = {
+  ok: null,
+  degraded: `Response was degraded (one or more fields were soft-truncated) — trust score is capped at ${Math.round(
+    (TRUST_SCORE_CAP_BY_HEALTH.degraded ?? 0) * 100
+  )}% regardless of citation/consistency scoring.`,
+  failed: "Response failed to parse or validate — trust score is 0.",
+};
 
 // ─── Bias & Blind Spots (Synthesis Report Polish, Part A3) ──────────────
 /** Cap on bias/blind-spot findings surfaced per run. */

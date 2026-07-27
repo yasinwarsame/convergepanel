@@ -15,7 +15,7 @@
 import "server-only";
 import { ModelId } from "@/lib/types";
 import { AdaptiveModelResult, AdaptiveTrustSummary, AlignedClaim, Metric, ModelTrustSummary, ResultSchema } from "./types";
-import { getTrustWeights } from "./config";
+import { getTrustWeights, TRUST_SCORE_CAP_BY_HEALTH } from "./config";
 
 export type { AdaptiveTrustSummary, ModelTrustSummary };
 
@@ -137,10 +137,15 @@ export function buildAdaptiveTrustSummary(
     const contradictionRate = participatedRows > 0 ? contradictionCount / participatedRows : 0;
     const contradictionSubScore = 1 - contradictionRate;
 
-    const trustScore =
-      parseHealth === "failed"
-        ? 0
-        : weights.citation * citationScore + weights.consistency * majorityAlignment + weights.contradiction * contradictionSubScore;
+    const rawTrustScore =
+      weights.citation * citationScore + weights.consistency * majorityAlignment + weights.contradiction * contradictionSubScore;
+
+    // Health caps the score regardless of how well citations/consistency
+    // scored — a degraded or failed parse means some of what fed that raw
+    // score is already suspect. See TRUST_SCORE_CAP_BY_HEALTH (config.ts).
+    const cap = TRUST_SCORE_CAP_BY_HEALTH[parseHealth];
+    const trustScore = cap === null ? rawTrustScore : Math.min(rawTrustScore, cap);
+    const capped = cap !== null && rawTrustScore > cap;
 
     return {
       modelId: result.modelId,
@@ -150,6 +155,7 @@ export function buildAdaptiveTrustSummary(
       contradictionCount,
       parseHealth,
       trustScore,
+      capped,
     };
   });
 

@@ -337,8 +337,15 @@ export interface ModelTrustSummary {
   /** Count of rows where this model disputed a row that the panel otherwise resolved as "split". */
   contradictionCount: number;
   parseHealth: "ok" | "degraded" | "failed";
-  /** 0–1 composite: citation/consistency/contradiction weighted per TRUST_WEIGHTS_BY_SCHEMA. 0 when parseHealth is "failed". */
+  /**
+   * 0–1 composite: citation/consistency/contradiction weighted per
+   * TRUST_WEIGHTS_BY_SCHEMA, then capped per parseHealth
+   * (TRUST_SCORE_CAP_BY_HEALTH in config.ts — 0 when "failed", 75% ceiling
+   * when "degraded"). This is the post-cap, display value.
+   */
   trustScore: number;
+  /** True when the health cap actually lowered the raw weighted score — drives the UI tooltip explaining why the score can't read higher. */
+  capped: boolean;
 }
 
 export interface AdaptiveTrustSummary {
