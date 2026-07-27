@@ -41,6 +41,31 @@ import ModelChip from "@/components/ModelChip";
 import { sanitizeModelText, truncateForSynthesis, MAX_CHARS_SYNTHESIS_PER_MODEL } from "@/lib/panel/sanitizeText";
 import { classifyClusterType, isAnalysisReady } from "@/lib/synthesis/trustSummary";
 import { useAuth } from "@/components/AuthProvider";
+import type {
+  AdaptiveGateResult,
+  AdaptiveModelResult,
+  AdaptiveSynthesisReport,
+  AdaptiveTrustSummary,
+  AlignedClaim,
+  QueryClassification,
+  QueryType,
+} from "@/lib/adaptiveSchema/types";
+import { getResultSchema } from "@/lib/adaptiveSchema/schemaRegistry";
+import { STATED_CONFIDENCE_SCORE as CONFIDENCE_SCORE_MAP } from "@/lib/adaptiveSchema/config";
+import AdaptivePanelResponse from "@/components/adaptive/AdaptivePanelResponse";
+
+export interface AdaptivePanelPayload {
+  classification: QueryClassification;
+  schemaId: QueryType;
+  results: AdaptiveModelResult[];
+  alignedClaims?: AlignedClaim[];
+  /** Present only when ADAPTIVE_VERIFICATION_ENABLED was on for this run. */
+  gate?: AdaptiveGateResult;
+  /** Present only when ADAPTIVE_VERIFICATION_ENABLED was on for this run. */
+  synthesisReport?: AdaptiveSynthesisReport;
+  /** Present only when ADAPTIVE_VERIFICATION_ENABLED was on for this run. */
+  trustSummary?: AdaptiveTrustSummary;
+}
 
 /**
  * Deduplicate claims by modelId and text
@@ -396,6 +421,108 @@ function CollapsibleMarkdown({
   );
 }
 
+/**
+ * Dev-only debug panel for tuning the query classifier: shows the
+ * classification result, chosen schema, and per-model validation status.
+ * Never rendered in production (gated by the caller on NODE_ENV).
+ */
+/** Mirrors scoring.ts's certainty formula for display only — config.ts is client-safe (no "server-only" guard) so the weights/confidence map are imported directly rather than duplicated. */
+function claimScoreBreakdown(claim: AlignedClaim, totalModels: number) {
+  const cells = claim.cells.filter((c): c is NonNullable<typeof c> => !!c);
+  const coverage = totalModels > 0 ? cells.length / totalModels : 0;
+  const statedConfidence =
+    cells.length > 0 ? cells.reduce((sum, c) => sum + (CONFIDENCE_SCORE_MAP[c.confidence] ?? 0), 0) / cells.length : 0;
+  return { coverage, statedConfidence };
+}
+
+function AdaptiveDebugPanel({ adaptive }: { adaptive: AdaptivePanelPayload }) {
+  const totalModels = adaptive.results.length;
+
+  return (
+    <details className="rounded-xl border border-dashed border-purple-300 bg-purple-50 px-4 py-3 text-xs text-purple-900">
+      <summary className="cursor-pointer font-semibold uppercase tracking-wide">
+        Adaptive schema debug (dev only)
+      </summary>
+      <div className="mt-3 space-y-3">
+        <div>
+          <p className="font-semibold">Classification</p>
+          <pre className="mt-1 overflow-x-auto rounded bg-white/70 p-2">
+            {JSON.stringify(adaptive.classification, null, 2)}
+          </pre>
+        </div>
+        <div>
+          <p className="font-semibold">Schema: {adaptive.schemaId}</p>
+        </div>
+        {adaptive.gate && (
+          <div>
+            <p className="font-semibold">
+              Gate: {adaptive.gate.status} · Run certainty: {(adaptive.gate.runCertainty * 100).toFixed(1)}% · Load-bearing splits: {adaptive.gate.loadBearingSplitCount}
+            </p>
+          </div>
+        )}
+        <div>
+          <p className="font-semibold mb-1">Per-model validation status</p>
+          <table className="w-full border-collapse">
+            <thead>
+              <tr className="text-left">
+                <th className="pr-4">Model</th>
+                <th className="pr-4">Status</th>
+                <th>Detail</th>
+              </tr>
+            </thead>
+            <tbody>
+              {adaptive.results.map((r) => (
+                <tr key={r.modelId} className="border-t border-purple-200">
+                  <td className="py-1 pr-4">{r.modelId}</td>
+                  <td className="py-1 pr-4">{r.ok ? "ok" : "parseError"}</td>
+                  <td className="py-1">
+                    {r.parseError || (r.truncatedFields?.length ? `truncated: ${r.truncatedFields.join(", ")}` : "—")}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {adaptive.alignedClaims && (
+          <div>
+            <p className="font-semibold mb-1">Per-claim score breakdown ({adaptive.alignedClaims.length} claims)</p>
+            <table className="w-full border-collapse">
+              <thead>
+                <tr className="text-left">
+                  <th className="pr-3">Claim</th>
+                  <th className="pr-3">Status</th>
+                  <th className="pr-3">Coverage</th>
+                  <th className="pr-3">Agreement</th>
+                  <th className="pr-3">Stated conf.</th>
+                  <th>Certainty</th>
+                </tr>
+              </thead>
+              <tbody>
+                {adaptive.alignedClaims.map((claim) => {
+                  const { coverage, statedConfidence } = claimScoreBreakdown(claim, totalModels);
+                  return (
+                    <tr key={claim.id} className="border-t border-purple-200">
+                      <td className="py-1 pr-3 max-w-[16rem] truncate">{claim.claimText}</td>
+                      <td className="py-1 pr-3">
+                        {claim.status}
+                        {claim.disagreementType ? ` (${claim.disagreementType})` : ""}
+                      </td>
+                      <td className="py-1 pr-3">{coverage.toFixed(2)}</td>
+                      <td className="py-1 pr-3">{claim.agreementScore.toFixed(2)}</td>
+                      <td className="py-1 pr-3">{statedConfidence.toFixed(2)}</td>
+                      <td className="py-1">{claim.certaintyScore.toFixed(2)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </details>
+  );
+}
+
 export type TeamGovernanceBannerProps = {
   governanceReviewRequired?: boolean;
   blockedByPolicy?: boolean;
@@ -417,6 +544,13 @@ interface ResultsDisplayProps {
   teamGovernance?: TeamGovernanceBannerProps;
   /** Org governance evaluation (paid plans); optional chip in synthesis view. */
   orgGovernanceStatus?: "approved" | "needs_review" | "blocked" | null;
+  /**
+   * Adaptive Result Schema System (flag-gated). When present, this run was
+   * classified and answered against a typed schema instead of the fixed
+   * markdown template — rendering bypasses Trust Summary / Agreement Map /
+   * legacy List-Compare-Synthesis entirely in favor of AdaptiveResultsView.
+   */
+  adaptive?: AdaptivePanelPayload | null;
 }
 
 /**
@@ -448,6 +582,7 @@ export default function ResultsDisplay({
   runId,
   teamGovernance,
   orgGovernanceStatus,
+  adaptive,
 }: ResultsDisplayProps) {
   const { user, authReady } = useAuth();
   const results = Array.isArray(resultsProp) ? resultsProp : [];
@@ -695,7 +830,8 @@ export default function ResultsDisplay({
       runId &&
       !autoTriggeredRunIdsRef.current.has(runId) &&
       synthesisStatus === "idle" &&
-      !preGeneratedSynthesisReport
+      !preGeneratedSynthesisReport &&
+      !adaptive
     ) {
       console.log("[ResultsDisplay] Auto-triggering structured synthesis generation", {
         runId,
@@ -743,7 +879,7 @@ export default function ResultsDisplay({
           });
       }
     }
-  }, [results, runId, synthesisStatus, preGeneratedSynthesisReport, question]);
+  }, [results, runId, synthesisStatus, preGeneratedSynthesisReport, question, adaptive]);
 
   if (results.length === 0) {
     return (
@@ -751,6 +887,26 @@ export default function ResultsDisplay({
         <p className="text-sm text-slate-500">
           No panel results to display yet. Run a panel to see the analysis.
         </p>
+      </div>
+    );
+  }
+
+  // Adaptive Result Schema System: bypass Trust Summary / Agreement Map /
+  // legacy List-Compare-Synthesis entirely — the classified schema drives
+  // its own renderer instead.
+  if (adaptive) {
+    return (
+      <div className="space-y-4">
+        {process.env.NODE_ENV !== "production" && <AdaptiveDebugPanel adaptive={adaptive} />}
+        <AdaptivePanelResponse
+          schema={getResultSchema(adaptive.schemaId)}
+          classification={adaptive.classification}
+          results={adaptive.results}
+          alignedClaims={adaptive.alignedClaims}
+          gate={adaptive.gate}
+          synthesisReport={adaptive.synthesisReport}
+          trustSummary={adaptive.trustSummary}
+        />
       </div>
     );
   }

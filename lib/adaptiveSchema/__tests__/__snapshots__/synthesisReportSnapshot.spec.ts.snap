@@ -1,0 +1,163 @@
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+
+exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has all 5 required sections for schema contested_empirical 1`] = `
+{
+  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "degraded": true,
+  "gate": "caution",
+  "narrativeSections": [],
+  "panelVerdict": "3/5 models converge on Consensus claim; certainty 66%; gate: caution.",
+  "runCertainty": 0.66,
+  "unifiedAnswer": "Consensus claim (GPT 5.2, Claude Opus 4.5, Grok 4).",
+  "whereModelsAgree": [
+    "Consensus claim",
+  ],
+  "whereModelsDisagree": [
+    "Split claim",
+  ],
+}
+`;
+
+exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has all 5 required sections for schema creative_generative 1`] = `
+{
+  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "degraded": true,
+  "gate": "caution",
+  "narrativeSections": [],
+  "panelVerdict": "3/5 models converge on Consensus claim; certainty 66%; gate: caution.",
+  "runCertainty": 0.66,
+  "unifiedAnswer": "Consensus claim (GPT 5.2, Claude Opus 4.5, Grok 4).",
+  "whereModelsAgree": [
+    "Consensus claim",
+  ],
+  "whereModelsDisagree": [
+    "Split claim",
+  ],
+}
+`;
+
+exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has all 5 required sections for schema factual_lookup 1`] = `
+{
+  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "degraded": true,
+  "gate": "caution",
+  "narrativeSections": [],
+  "panelVerdict": "3/5 models converge on Consensus claim; certainty 66%; gate: caution.",
+  "runCertainty": 0.66,
+  "unifiedAnswer": "Consensus claim (GPT 5.2, Claude Opus 4.5, Grok 4).",
+  "whereModelsAgree": [
+    "Consensus claim",
+  ],
+  "whereModelsDisagree": [
+    "Split claim",
+  ],
+}
+`;
+
+exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has all 5 required sections for schema financial_valuation 1`] = `
+{
+  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "degraded": true,
+  "gate": "caution",
+  "narrativeSections": [],
+  "panelVerdict": "3/5 models converge on Consensus claim; certainty 66%; gate: caution.",
+  "runCertainty": 0.66,
+  "unifiedAnswer": "Consensus claim (GPT 5.2, Claude Opus 4.5, Grok 4).",
+  "whereModelsAgree": [
+    "Consensus claim",
+  ],
+  "whereModelsDisagree": [
+    "Split claim",
+  ],
+}
+`;
+
+exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has all 5 required sections for schema forecast_speculative 1`] = `
+{
+  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "degraded": true,
+  "gate": "caution",
+  "narrativeSections": [],
+  "panelVerdict": "3/5 models converge on Consensus claim; certainty 66%; gate: caution.",
+  "runCertainty": 0.66,
+  "unifiedAnswer": "Consensus claim (GPT 5.2, Claude Opus 4.5, Grok 4).",
+  "whereModelsAgree": [
+    "Consensus claim",
+  ],
+  "whereModelsDisagree": [
+    "Split claim",
+  ],
+}
+`;
+
+exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has all 5 required sections for schema generic 1`] = `
+{
+  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "degraded": true,
+  "gate": "caution",
+  "narrativeSections": [],
+  "panelVerdict": "3/5 models converge on Consensus claim; certainty 66%; gate: caution.",
+  "runCertainty": 0.66,
+  "unifiedAnswer": "Consensus claim (GPT 5.2, Claude Opus 4.5, Grok 4).",
+  "whereModelsAgree": [
+    "Consensus claim",
+  ],
+  "whereModelsDisagree": [
+    "Split claim",
+  ],
+}
+`;
+
+exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has all 5 required sections for schema legal_regulatory 1`] = `
+{
+  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "degraded": true,
+  "gate": "caution",
+  "narrativeSections": [],
+  "panelVerdict": "3/5 models converge on Consensus claim; certainty 66%; gate: caution.",
+  "runCertainty": 0.66,
+  "unifiedAnswer": "Consensus claim (GPT 5.2, Claude Opus 4.5, Grok 4).",
+  "whereModelsAgree": [
+    "Consensus claim",
+  ],
+  "whereModelsDisagree": [
+    "Split claim",
+  ],
+}
+`;
+
+exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has all 5 required sections for schema medical_health 1`] = `
+{
+  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "degraded": true,
+  "gate": "caution",
+  "narrativeSections": [],
+  "panelVerdict": "3/5 models converge on Consensus claim; certainty 66%; gate: caution.",
+  "runCertainty": 0.6599999999999999,
+  "unifiedAnswer": "Consensus claim (GPT 5.2, Claude Opus 4.5, Grok 4).",
+  "whereModelsAgree": [
+    "Consensus claim",
+  ],
+  "whereModelsDisagree": [
+    "Split claim",
+  ],
+}
+`;
+
+exports[`buildAdaptiveSynthesisReport structure snapshots (per schema type) has all 5 required sections for schema procedural 1`] = `
+{
+  "certaintyAssessment": "Run certainty 66% (gate: caution). 1 claim(s) at consensus/majority, 1 split.",
+  "degraded": true,
+  "gate": "caution",
+  "narrativeSections": [],
+  "panelVerdict": "3/5 models converge on Consensus claim; certainty 66%; gate: caution.",
+  "runCertainty": 0.66,
+  "unifiedAnswer": "Consensus claim (GPT 5.2, Claude Opus 4.5, Grok 4).",
+  "whereModelsAgree": [
+    "Consensus claim",
+  ],
+  "whereModelsDisagree": [
+    "Split claim",
+  ],
+}
+`;

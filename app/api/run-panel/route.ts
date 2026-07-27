@@ -28,6 +28,8 @@ import { sanitizeModelText, truncateForSynthesis, MAX_CHARS_SYNTHESIS_PER_MODEL 
 import { PanelResultPublic } from "@/lib/panel/schemas";
 import { normalizeModelResultPublic, assertPublicStatus } from "@/lib/panel/normalize";
 import { logger } from "@/lib/logger";
+import { ADAPTIVE_SCHEMAS_ENABLED } from "@/lib/env";
+import { planAdaptiveRun, finalizeAdaptiveRun, AdaptivePromptPlan } from "@/lib/adaptiveSchema/orchestrate";
 
 // Ensure Node.js runtime (Firebase Admin requires Node.js, not Edge)
 export const runtime = "nodejs";
@@ -232,6 +234,23 @@ export async function POST(req: NextRequest) {
     const requestedModelCount = selectedModels.length;
 
     // ============================================
+    // ADAPTIVE RESULT SCHEMA — CLASSIFICATION (flag-gated, never blocks the run)
+    // ============================================
+    let adaptivePlan: AdaptivePromptPlan | null = null;
+    if (ADAPTIVE_SCHEMAS_ENABLED) {
+      try {
+        adaptivePlan = await planAdaptiveRun(trimmedQuestion, selectedModels as ModelId[], context);
+      } catch (adaptiveError: any) {
+        // classifyQuery/buildModelPrompt never throw by contract, but guard defensively:
+        // a classification failure must never block the legacy run.
+        logger.warn("[run-panel] Adaptive planning failed, continuing with legacy prompt", {
+          error: adaptiveError?.message,
+        });
+        adaptivePlan = null;
+      }
+    }
+
+    // ============================================
     // SUBSCRIPTION VALIDATION (for paid plans)
     // ============================================
     
@@ -336,7 +355,13 @@ export async function POST(req: NextRequest) {
     // runPanel handles per-model errors internally, so partial failures are OK.
     let results: ModelResult[] = [];
     try {
-      results = await runPanel(trimmedQuestion, selectedModels as ModelId[], apiKeys, context);
+      results = await runPanel(
+        trimmedQuestion,
+        selectedModels as ModelId[],
+        apiKeys,
+        context,
+        adaptivePlan?.promptOverrides
+      );
     } catch (panelError: any) {
       // CRITICAL: Even if runPanel throws (shouldn't happen with Promise.allSettled),
       // we still need to finalize tokens for any results we got before the error
@@ -735,13 +760,49 @@ export async function POST(req: NextRequest) {
     });
 
     logger.debug("[run-panel] Public results count", { count: normalizedResults.length });
-    
+
+    // ============================================
+    // ADAPTIVE RESULT SCHEMA — VALIDATION + CLAIM ALIGNMENT (flag-gated)
+    // ============================================
+    let adaptivePayload: {
+      classification: AdaptivePromptPlan["classification"];
+      schemaId: string;
+      results: Awaited<ReturnType<typeof finalizeAdaptiveRun>>["adaptiveResults"];
+      alignedClaims?: Awaited<ReturnType<typeof finalizeAdaptiveRun>>["alignedClaims"];
+      gate?: Awaited<ReturnType<typeof finalizeAdaptiveRun>>["gate"];
+      synthesisReport?: Awaited<ReturnType<typeof finalizeAdaptiveRun>>["synthesisReport"];
+      trustSummary?: Awaited<ReturnType<typeof finalizeAdaptiveRun>>["trustSummary"];
+    } | null = null;
+
+    if (adaptivePlan) {
+      try {
+        const adaptiveOutput = await finalizeAdaptiveRun(adaptivePlan.schema, results, trimmedQuestion);
+        adaptivePayload = {
+          classification: adaptivePlan.classification,
+          schemaId: adaptiveOutput.schemaId,
+          results: adaptiveOutput.adaptiveResults,
+          alignedClaims: adaptiveOutput.alignedClaims,
+          gate: adaptiveOutput.gate,
+          synthesisReport: adaptiveOutput.synthesisReport,
+          trustSummary: adaptiveOutput.trustSummary,
+        };
+      } catch (adaptiveFinalizeError: any) {
+        // Validation/alignment never throw by contract, but guard defensively:
+        // a failure here must never take down an otherwise-successful run.
+        logger.warn("[run-panel] Adaptive finalize failed, falling back to legacy results only", {
+          error: adaptiveFinalizeError?.message,
+        });
+        adaptivePayload = null;
+      }
+    }
+
     return NextResponse.json(
-      { 
+      {
         ok: true,
         results: normalizedResults, // Normalized: includes both rawTextFull and rawText
         runId, // Include runId so client can pass it to synthesis API
         ...(panelGovernanceStatus ? { governanceStatus: panelGovernanceStatus } : {}),
+        ...(adaptivePayload ? { adaptive: adaptivePayload } : {}),
         usage: {
           runsThisMonth: usage.runsThisMonth,
           maxRunsPerMonth: usage.maxRunsPerMonth,

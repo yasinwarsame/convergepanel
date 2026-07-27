@@ -4,6 +4,7 @@
 
 import { ModelId, ModelResult, ConnectorStatus } from "@/lib/types";
 import { CONNECTOR_MAP } from "@/lib/connectors";
+import type { ConnectorCallOptions } from "@/lib/connectors/types";
 import { isSuspiciouslyShort } from "@/lib/textLimits";
 import { callDeepSeek, DEEPSEEK_MODEL } from "@/lib/connectors/deepseek";
 import { DEEPSEEK_API_KEY } from "@/lib/env";
@@ -126,7 +127,18 @@ export async function runPanel(
   question: string,
   selectedModels: ModelId[],
   apiKeys: ApiKeys,
-  context?: string | null
+  context?: string | null,
+  /**
+   * Adaptive Result Schema System: optional per-model system prompt override
+   * (see lib/adaptiveSchema/promptBuilder.ts). When provided for a modelId,
+   * that model's PRIMARY call uses this prompt instead of buildPanelPrompt.
+   * The DeepSeek fallback path (used only if the primary fails) does not
+   * support prompt overrides, so a substituted slot falls back to its
+   * default markdown template even in adaptive mode — the adaptive
+   * validator treats that as a parseError (rendered as a failed cell)
+   * rather than crashing the comparison.
+   */
+  perModelPromptOverrides?: Partial<Record<ModelId, string>>
 ): Promise<ModelResult[]> {
   const normalizedQuestion = question.trim();
   const normalizedContext = context ? context.trim() : null;
@@ -146,7 +158,13 @@ export async function runPanel(
 
   const settledResults = await Promise.allSettled(
     selectedModels.map((modelId) =>
-      runSlotWithFallback(modelId, normalizedQuestion, normalizedContext, apiKeys)
+      runSlotWithFallback(
+        modelId,
+        normalizedQuestion,
+        normalizedContext,
+        apiKeys,
+        perModelPromptOverrides?.[modelId]
+      )
     )
   );
 
@@ -216,11 +234,13 @@ async function runSlotWithFallback(
   modelId: ModelId,
   question: string,
   context: string | null,
-  apiKeys: ApiKeys
+  apiKeys: ApiKeys,
+  systemPromptOverride?: string
 ): Promise<ModelResult> {
   const connector = CONNECTOR_MAP[modelId];
   const provider = getPanelModelConfig(modelId).provider;
   const requestedModel = ACTUAL_MODEL_STRINGS[modelId] || modelId;
+  const opts: ConnectorCallOptions | undefined = systemPromptOverride ? { systemPromptOverride } : undefined;
 
   if (!connector) {
     console.error(`[runPanel] No connector defined for modelId="${modelId}"`);
@@ -238,7 +258,7 @@ async function runSlotWithFallback(
   const apiKey = apiKeys[modelId];
 
   // --- Primary attempt ---
-  let primaryResult = await safePrimaryCall(connector, modelId, question, context, apiKey);
+  let primaryResult = await safePrimaryCall(connector, modelId, question, context, apiKey, opts);
 
   if (primaryResult.status === "ok") {
     return applyShortCheck({
@@ -253,7 +273,7 @@ async function runSlotWithFallback(
   if (!isNonRetryable(primaryResult) && isRetryableResult(primaryResult)) {
     for (let attempt = 1; attempt <= 2; attempt++) {
       if (isDev()) console.log(`[runPanel] Retrying ${modelId} (attempt ${attempt}/2)`);
-      primaryResult = await safePrimaryCall(connector, modelId, question, context, apiKey);
+      primaryResult = await safePrimaryCall(connector, modelId, question, context, apiKey, opts);
       if (primaryResult.status === "ok") {
         return applyShortCheck({
           ...primaryResult,
@@ -321,14 +341,15 @@ async function runSlotWithFallback(
 }
 
 async function safePrimaryCall(
-  connector: (q: string, ctx?: string | null, key?: string) => Promise<ModelResult>,
+  connector: (q: string, ctx?: string | null, key?: string, opts?: ConnectorCallOptions) => Promise<ModelResult>,
   modelId: ModelId,
   question: string,
   context: string | null,
-  apiKey: string | undefined
+  apiKey: string | undefined,
+  opts?: ConnectorCallOptions
 ): Promise<ModelResult> {
   try {
-    return await connector(question, context, apiKey);
+    return await connector(question, context, apiKey, opts);
   } catch (err: any) {
     console.error(`[runPanel] Unexpected throw from ${modelId}:`, err);
     return {

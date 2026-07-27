@@ -166,6 +166,40 @@ Built by `buildPanelPrompt()` in `lib/panelPrompt.ts`. The prompt instructs each
 
 Target output length: 900–1,400 words per model.
 
+### Adaptive Result Schema System (flag-gated, off by default)
+
+Alternative to the fixed 10-section template above. Behind `ADAPTIVE_SCHEMAS_ENABLED` (`lib/env.ts`, defaults `false`). When on, `/api/run-panel` classifies the query once before fan-out and has every model answer a typed JSON schema instead of the markdown template — comparable atomic units (claims, metrics, steps, scenarios) instead of free-text sections.
+
+A second flag, `ADAPTIVE_VERIFICATION_ENABLED` (also `lib/env.ts`, defaults `false`, independent of the first), turns on the full verification layer on top of the aligned matrix: agreement/certainty scoring, the pass/caution/fail gate, the Synthesis Report, and the Trust Summary. With `ADAPTIVE_SCHEMAS_ENABLED=true` alone, adaptive runs render only the bare per-schema comparison view (`AdaptiveResultsView`) with an unscored claims matrix — no tabs, no gate, no synthesis. Both flags need to be on for the restored three-tab experience described below.
+
+All modules live in `lib/adaptiveSchema/` and the renderers in `components/adaptive/`:
+
+| Step | Module | What it does |
+|------|--------|---------------|
+| 1. Classify | `classifier.ts` | One Gemini call (`callGemini` + `systemPromptOverride`), 3s timeout, LRU-cached. Falls back to `"generic"` on timeout/error/malformed JSON/confidence < 0.6. Never blocks the run. |
+| 2. Select schema | `schemaRegistry.ts` | 9 `QueryType`s (`contested_empirical`, `legal_regulatory`, `financial_valuation`, `factual_lookup`, `procedural`, `medical_health`, `forecast_speculative`, `creative_generative`, `generic`), each with a fixed field list — no optional "(if applicable)" sections. |
+| 3. Build prompt | `promptBuilder.ts` | Renders only the schema's fields into the model's system prompt, with per-field word/item caps and inline interface docs for `Claim`/`Metric`/`Step`/`Scenario`. |
+| 4. Validate | `validator.ts` | Zod-validates each model's raw JSON; soft-truncates over-cap fields (logged); malformed JSON becomes a `parseError` result (rendered as a failed cell, never crashes). |
+| 5. Align claims | `alignment.ts` + `fieldAlignment.ts` | `claim[]` fields: exact/fuzzy slug match first, then a cheap-model clustering call for whatever didn't cross-match (clusters by *proposition*, so opposing stances on the same question merge into one row), then a batched per-model stance-extraction backfill pass so a null cell means true silence, not a missed match. `metric[]`/`step[]`/`scenario[]`/scalar fields go through dedicated structural unitizers. All produce `AlignedClaim[]` — one universal matrix regardless of source field type. |
+| 6. Score agreement | `agreementComparators.ts` | Schema-specific agreement semantics: numeric tolerance bands (financial), jurisdiction hard-key mismatch (legal), scenario probability bands (forecast), evidence-tier weighting (medical), order-sensitive step matching (procedural), stance-based (contested/generic). |
+| 7. Score certainty | `scoring.ts` | Per-claim: `0.35*coverage + 0.45*agreement + 0.20*statedConfidence`. Per-run: salience-weighted mean, with a 3x evidence-tier multiplier for medical_health. Weights in `config.ts`. |
+| 8. Gate | `gate.ts` | pass/caution/fail from run certainty + load-bearing (top-3 by salience) claim splits. Thresholds in `config.ts`. |
+| 9. Synthesize | `synthesisReport.ts` | One model call producing Unified Answer (only from consensus/majority claims, with model attribution), Panel Verdict, agree/disagree lists, and schema-aware narrative sections. Degrades to "Panel could not converge" on a `fail` gate. |
+| 10. Trust summary | `trustSummary.ts` | Per model: claims contributed, majority alignment, citation presence (`Metric.source`/`factual_lookup.source`, neutral 1.0 for schemas with no sourceable field), contradiction count, parse health, and a composite `trustScore` weighted per schema (`TRUST_WEIGHTS_BY_SCHEMA` in `config.ts`). |
+| 11. Orchestrate | `orchestrate.ts` | Glue called from `app/api/run-panel/route.ts`: `planAdaptiveRun()` before `runPanel()`, `finalizeAdaptiveRun()` after — steps 6–10 only run when `ADAPTIVE_VERIFICATION_ENABLED` is on. |
+
+`runPanel()` (`lib/panel.ts`) takes an additional optional 5th argument, `perModelPromptOverrides`, threaded through to each model's **primary** call only — the DeepSeek fallback path doesn't support prompt overrides, so a substituted slot in adaptive mode falls back to the legacy template and gets validated as a `parseError` (a failed cell, not a crash).
+
+The API response includes an `adaptive` object (`classification`, `schemaId`, `results`, `alignedClaims?`, and — when `ADAPTIVE_VERIFICATION_ENABLED` — `gate`, `synthesisReport`, `trustSummary`) alongside the normal `results` array. On the client, `ResultsDisplay.tsx` renders `AdaptivePanelResponse` — a three-tab shell (List View / Compare View / Synthesis Report, mirroring the legacy layout) that falls back to the bare `AdaptiveResultsView` when `gate`/`synthesisReport` are absent. This entirely replaces Trust Summary / Agreement Map / legacy List-Compare-Synthesis and skips the client-side `synthesizeReport()` call and the `/api/synthesize-panel` auto-trigger — that whole markdown-parsing consensus engine (`lib/agreementMap.ts`, `lib/consensus.ts`, `lib/synthesis/*`) is untouched and still used for the flag-off path.
+
+**Known gaps:**
+- Adaptive results aren't persisted for history replay yet — they're only available on the run that produced them, in-memory on the client.
+- The classifier/cluster/backfill helper calls (all Gemini-based) can time out under real concurrent load (observed live: classifier falling back to `"generic"`, cluster/backfill leaving pass-1 groups as-is) — each degrades gracefully (never blocks the run) but reduces classification/clustering quality rather than failing loudly. Worth tuning timeouts or moving to a dedicated fast model if this shows up often in production.
+
+A dev-only debug panel (`AdaptiveDebugPanel` in `components/ResultsDisplay.tsx`, gated on `NODE_ENV !== "production"`) shows the classification, schema id, gate status, and per-claim score breakdown (coverage/agreement/statedConfidence) for tuning weights.
+
+Tests: `lib/adaptiveSchema/__tests__/*.spec.ts` — classifier fallback, prompt snapshots per schema, validator caps/truncation, alignment (including an R3 regression fixture merging opposing-stance claims about the same proposition under unrelated slugs), field alignment, agreement comparators per schema, certainty/gate/trust-summary formulas, synthesis report snapshots per schema, and two integration tests (flag-off unscored-matrix path, flag-on full pipeline producing a dense matrix + gate + synthesis report + trust summary for all 5 models).
+
 ---
 
 ## Synthesis
@@ -441,6 +475,8 @@ All exported from `lib/env.ts`.
 | `GROK_MODEL` | Override Grok model string (default: `grok-4-1-fast-reasoning`) |
 | `GEMINI_MAX_OUTPUT_TOKENS` | Override Gemini token limit (default: `8192`) |
 | `PANEL_DEEPSEEK_FALLBACK_FOR` | Comma-separated provider names to enable DeepSeek fallback for (default: `openai,anthropic,google`) |
+| `ADAPTIVE_SCHEMAS_ENABLED` | Set to `"true"` to enable the Adaptive Result Schema System (see Deep Research section above). Defaults off. |
+| `ADAPTIVE_VERIFICATION_ENABLED` | Set to `"true"` to enable the verification layer (gate/synthesis report/trust summary) on top of adaptive runs. Requires `ADAPTIVE_SCHEMAS_ENABLED` to also be on. Defaults off. |
 
 **Firebase:**
 

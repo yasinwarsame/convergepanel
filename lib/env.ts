@@ -63,6 +63,31 @@ export const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 export const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
 
 /**
+ * Adaptive Result Schema System feature flag (defaults off).
+ *
+ * When enabled, /api/run-panel classifies the query and builds per-model
+ * prompts from lib/adaptiveSchema/schemaRegistry.ts instead of the fixed
+ * 11-section template in lib/panelPrompt.ts. The legacy path (and the
+ * markdown-parsing synthesis/agreement-map pipeline) is untouched when this
+ * is off.
+ */
+export const ADAPTIVE_SCHEMAS_ENABLED = process.env.ADAPTIVE_SCHEMAS_ENABLED === "true";
+
+/**
+ * Adaptive Verification Engine feature flag (defaults off, requires
+ * ADAPTIVE_SCHEMAS_ENABLED to have any effect).
+ *
+ * When enabled, adaptive runs get the full restored verification layer on
+ * top of the aligned claims matrix: schema-adaptive agreement scoring,
+ * certainty scoring, the pass/caution/fail verification gate, the Synthesis
+ * Report (Unified Answer + Panel Verdict), and the three-tab List/Compare/
+ * Synthesis UI. When off, adaptive runs keep today's behavior — the raw
+ * aligned-claims matrix rendered by AdaptiveResultsView only, no scoring —
+ * so this can be rolled out independently of ADAPTIVE_SCHEMAS_ENABLED.
+ */
+export const ADAPTIVE_VERIFICATION_ENABLED = process.env.ADAPTIVE_VERIFICATION_ENABLED === "true";
+
+/**
  * Search engine site-verification tokens.
  *
  * Optional — when unset, the corresponding verification meta tag is simply

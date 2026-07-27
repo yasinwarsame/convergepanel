@@ -53,7 +53,7 @@ import FileAttachButton from "@/components/FileAttachButton";
 import type { ClaimVerificationClientPayload } from "@/lib/verification/claimVerificationClientPayload";
 import type { VideoVerificationClientPayload } from "@/lib/verification/videoVerificationClientPayload";
 import type { PanelHistoryGovernanceStatus, PanelHistoryItem } from "@/lib/user/panelHistory";
-import type { TeamGovernanceBannerProps } from "@/components/ResultsDisplay";
+import type { TeamGovernanceBannerProps, AdaptivePanelPayload } from "@/components/ResultsDisplay";
 import type { SynthesisConsensusSummaryDetail } from "@/lib/verification/consensusScoring";
 
 // Lazy load heavy components - defer until after first paint
@@ -427,7 +427,10 @@ export default function Home() {
   
   // Raw results from each model (after panel completes)
   const [results, setResults] = useState<ModelResult[]>([]);
-  
+
+  // Adaptive Result Schema System payload (flag-gated; null on legacy runs)
+  const [adaptivePanel, setAdaptivePanel] = useState<AdaptivePanelPayload | null>(null);
+
   // Synthesized consensus report (only generated if ≥2 models respond successfully)
   const [synthesizedReport, setSynthesizedReport] =
     useState<SynthesizedReport | null>(null);
@@ -753,6 +756,7 @@ export default function Home() {
     setError(null);
     setRunStatus("running");
     setResults([]);
+    setAdaptivePanel(null);
     setSynthesizedReport(null);
     setResearchAttachedFile(null);
     // Reset synthesis state for new run
@@ -990,6 +994,7 @@ export default function Home() {
       }
       
       setResults(data.results);
+      setAdaptivePanel((data as any).adaptive ?? null);
 
       // Update final statuses for each model
       // Status can be: ok, error, timeout, or refused
@@ -1030,10 +1035,13 @@ export default function Home() {
         (r: ModelResult) => r.status === "ok"
       ).length;
 
-      if (successfulCount >= 2) {
+      if (successfulCount >= 2 && !(data as any).adaptive) {
         // Run consensus engine to analyze responses
         // This extracts claims, clusters them, and identifies agreements/disagreements
         // Add defensive error handling so synthesis failures don't crash the UI
+        // Skipped entirely for adaptive runs — AdaptiveResultsView is the sole
+        // comparison surface there, and this engine expects the fixed markdown
+        // template, not typed JSON.
         try {
         const report = synthesizeReport(data.results);
         setSynthesizedReport(report);
@@ -2663,6 +2671,7 @@ export default function Home() {
                 runId={currentRunId}
                 teamGovernance={synthesisGovernance}
                 orgGovernanceStatus={orgGovernanceStatus}
+                adaptive={adaptivePanel}
               />
             </div>
           </Suspense>
