@@ -105,6 +105,25 @@ export const MAX_BIAS_FINDINGS = 3;
 /** Hard cap on each evidence excerpt quoted from a model's own response. */
 export const BIAS_EVIDENCE_EXCERPT_MAX_CHARS = 240;
 
+// ─── Uncertainties / Follow-ups dedup (Part B6) ─────────────────────────
+/** Cap on merged Uncertainties shown in the generic_sections renderer. */
+export const UNCERTAINTIES_MAX_ITEMS = 8;
+/** Cap on merged Follow-ups shown in the generic_sections renderer. */
+export const FOLLOW_UPS_MAX_ITEMS = 6;
+/**
+ * Near-duplicate thresholds for merging Uncertainties/Follow-ups across
+ * models — deliberately a HIGHER bar (stricter Levenshtein ratio, higher
+ * token-overlap floor) than alignment.ts's claim-id slugsMatch, since these
+ * are full prose sentences (a mistaken merge silently drops a genuinely
+ * distinct point) and there's no downstream LLM reconciliation pass to
+ * catch an under-merge the way claim alignment's pass 2 does — this cheap
+ * pass IS the whole merge decision.
+ */
+export const TEXT_DEDUP_THRESHOLDS = {
+  levenshteinMaxRatio: 0.2,
+  tokenOverlapMin: 0.7,
+};
+
 // ─── Panel Verdict Card (Part A4) ────────────────────────────────────────
 /** Gate-dependent guidance shown in the verdict card, max 3 per gate status. */
 export const VERDICT_NEXT_STEPS: Record<AdaptiveGateStatus, string[]> = {

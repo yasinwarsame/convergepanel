@@ -36,6 +36,9 @@ import { GEMINI_API_KEY } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import { AlignedClaim, AlignedClaimCell, Claim, ClaimCellStance, ClaimStance } from "./types";
 import { stripJsonFences, withTimeout } from "./util";
+import { slugsMatch, normalizeSlug, UnionFind } from "./textSimilarity";
+
+export { slugsMatch };
 
 const CLUSTER_CALL_TIMEOUT_MS = 8000;
 const CLUSTER_MAX_OUTPUT_TOKENS = 2000;
@@ -77,72 +80,6 @@ function formatFullResponseForPrompt(data: Record<string, unknown> | null | unde
     }
   }
   return lines.join("\n");
-}
-
-const STOPWORDS = new Set([
-  "the", "a", "an", "of", "and", "or", "in", "on", "to", "is", "are", "for", "with", "by", "vs",
-]);
-
-function normalizeSlug(slug: string): string {
-  return slug
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
-function slugTokens(slug: string): string[] {
-  return normalizeSlug(slug)
-    .split("-")
-    .filter((t) => t.length > 0 && !STOPWORDS.has(t));
-}
-
-function levenshtein(a: string, b: string): number {
-  const dp: number[][] = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
-  for (let i = 0; i <= a.length; i++) dp[i][0] = i;
-  for (let j = 0; j <= b.length; j++) dp[0][j] = j;
-  for (let i = 1; i <= a.length; i++) {
-    for (let j = 1; j <= b.length; j++) {
-      dp[i][j] = a[i - 1] === b[j - 1] ? dp[i - 1][j - 1] : 1 + Math.min(dp[i - 1][j - 1], dp[i - 1][j], dp[i][j - 1]);
-    }
-  }
-  return dp[a.length][b.length];
-}
-
-/** Exact match, normalized Levenshtein ≤ 0.3, or ≥50% shared token stem. */
-export function slugsMatch(slugA: string, slugB: string): boolean {
-  const normA = normalizeSlug(slugA);
-  const normB = normalizeSlug(slugB);
-  if (!normA || !normB) return false;
-  if (normA === normB) return true;
-
-  const maxLen = Math.max(normA.length, normB.length);
-  if (maxLen > 0 && levenshtein(normA, normB) / maxLen <= 0.3) {
-    return true;
-  }
-
-  const tokensA = slugTokens(slugA);
-  const tokensB = slugTokens(slugB);
-  if (tokensA.length === 0 || tokensB.length === 0) return false;
-  const setB = new Set(tokensB);
-  const overlap = tokensA.filter((t) => setB.has(t)).length;
-  return overlap / Math.min(tokensA.length, tokensB.length) >= 0.5;
-}
-
-class UnionFind {
-  private parent: number[];
-  constructor(size: number) {
-    this.parent = Array.from({ length: size }, (_, i) => i);
-  }
-  find(i: number): number {
-    if (this.parent[i] !== i) this.parent[i] = this.find(this.parent[i]);
-    return this.parent[i];
-  }
-  union(i: number, j: number): void {
-    const ri = this.find(i);
-    const rj = this.find(j);
-    if (ri !== rj) this.parent[ri] = rj;
-  }
 }
 
 interface ClaimNode {
