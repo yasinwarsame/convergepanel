@@ -110,12 +110,13 @@ function TrustSummaryTable({ trustSummary }: { trustSummary: AdaptiveTrustSummar
   if (trustSummary.perModel.length === 0) return null;
   return (
     <Card>
-      <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+      <div className="flex items-center justify-between mb-1 flex-wrap gap-2">
         <SectionLabel>Trust summary</SectionLabel>
         <span className="text-xs font-semibold text-slate-600">
-          Overall trust: {Math.round(trustSummary.overallTrust * 100)}%
+          Panel reliability: {Math.round(trustSummary.overallTrust * 100)}%
         </span>
       </div>
+      <p className="text-xs text-slate-500 mb-2">How well the models behaved — citations, consistency, contradictions — not how sure the panel is about the answer.</p>
       <div className="overflow-x-auto">
         <table className="w-full text-sm border-collapse">
           <thead>
@@ -552,7 +553,8 @@ export default function AdaptiveSynthesisReportView({
 
       <div data-section="certainty">
         <Card>
-          <SectionLabel>Certainty</SectionLabel>
+          <SectionLabel>Answer certainty</SectionLabel>
+          <p className="text-xs text-slate-500 mb-2">How sure the panel is about the answer itself — not how well the models behaved (see Trust summary below).</p>
           <div className="flex items-center gap-3">
             <div className="flex-1">
               <ProbabilityBar probability={report.runCertainty} colorClass={agreementColorClass(report.runCertainty)} />

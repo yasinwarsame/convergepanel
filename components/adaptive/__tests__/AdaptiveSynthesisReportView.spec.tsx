@@ -142,7 +142,7 @@ describe("AdaptiveSynthesisReportView — inflation fixture", () => {
     expect(html).toContain("Unified answer");
     expect(html).toContain(report.unifiedAnswer);
     expect(html).toContain("Trust summary");
-    expect(html).toContain("Overall trust: 75%");
+    expect(html).toContain("Panel reliability: 75%");
   });
 
   it("omits the trust-summary section when trustSummary is not provided", () => {
@@ -294,5 +294,39 @@ describe("AdaptiveSynthesisReportView — B4 trust score cap tooltip", () => {
     expect(trustHtml).toContain("capped at 75%");
     // Only one tooltip trigger — the degraded model's, not the ok model's.
     expect((trustHtml.match(/title="/g) || []).length).toBe(1);
+  });
+});
+
+describe("AdaptiveSynthesisReportView — B5 headline metric labels", () => {
+  it("labels answer certainty and panel reliability distinctly, each with a caption, never as two bare percentages", () => {
+    const html = renderToStaticMarkup(
+      createElement(AdaptiveSynthesisReportView, {
+        report,
+        gate,
+        alignedClaims,
+        trustSummary,
+        question: QUESTION,
+        modelsUsed: MODELS as unknown as any[],
+        runId: "test-run-id",
+      })
+    );
+
+    const certaintyHtml = sectionSlice(html, "certainty");
+    const trustHtml = sectionSlice(html, "trust-summary");
+
+    // The run-certainty headline is labeled "Answer certainty", not the
+    // old bare "Certainty" (which reads as identical to Trust Summary's
+    // headline number without a caption to disambiguate them).
+    expect(certaintyHtml).toContain("Answer certainty");
+    expect(certaintyHtml).toContain("62%");
+    expect(certaintyHtml).toMatch(/how sure the panel is about the answer/i);
+
+    // The overall-trust headline is labeled "Panel reliability", not
+    // "Overall trust" (a different metric — how the MODELS behaved, not
+    // how sure the panel is about the answer).
+    expect(trustHtml).toContain("Panel reliability");
+    expect(trustHtml).not.toContain("Overall trust");
+    expect(trustHtml).toContain("75%");
+    expect(trustHtml).toMatch(/how well the models behaved/i);
   });
 });

@@ -73,7 +73,7 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
             </span>
           </div>
           <div className="flex items-center gap-3">
-            <span className="text-xs text-slate-500">Certainty {Math.round(synthesisReport.runCertainty * 100)}%</span>
+            <span className="text-xs text-slate-500">Answer certainty {Math.round(synthesisReport.runCertainty * 100)}%</span>
             <span
               className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${GATE_CHIP_STYLES[gate.status]}`}
             >
