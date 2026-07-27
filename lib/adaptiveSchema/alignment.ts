@@ -18,10 +18,14 @@
  *    group a stance relative to a neutral canonical proposition. Best-effort:
  *    on any failure, groups are kept as-is (degraded but never crashes).
  * 3. Stance-extraction backfill: for every (claim, model) pair still null
- *    after pass 2, one batched call per silent model asks whether ANY of its
- *    own claims speak to that canonical proposition. Only a genuine "no
- *    position" answer (or a failed/degraded call) leaves the cell null —
- *    the goal is that null means true silence, not a matching miss.
+ *    after pass 2, one batched call per silent model asks whether ANY part
+ *    of its FULL response — its claims list AND its other fields (summary,
+ *    answer, thesis, etc.) — speaks to that canonical proposition. A stance
+ *    is often only implied in prose (a `summary` asserting something the
+ *    model never separately listed as a Claim); checking claims alone
+ *    under-reports it as silence. Only a genuine "no position anywhere in
+ *    the response" answer (or a failed/degraded call) leaves the cell null
+ *    — the goal is that null means true silence, not a matching miss.
  */
 
 import "server-only";
@@ -41,6 +45,38 @@ const BACKFILL_MAX_OUTPUT_TOKENS = 1200;
 export interface ModelClaims {
   modelId: ModelId;
   claims: Claim[];
+  /**
+   * The model's full validated response data (every schema field — summary,
+   * scalar answers, string[] lists — not just its claim[] fields). Passed
+   * through to the stance-extraction backfill (pass 3) so a stance implied
+   * only in prose (e.g. a `summary` field asserting something the model
+   * never separately listed as a Claim) isn't missed. Optional so existing
+   * callers/tests that only care about claim[]-based alignment (pass 1/2)
+   * aren't forced to supply it.
+   */
+  fullResponseData?: Record<string, unknown> | null;
+}
+
+/**
+ * Renders the non-claim[] fields of a model's full response as short
+ * "key: value" lines for the backfill prompt — the surface most likely to
+ * carry an implied-but-unlisted stance (summary/answer/thesis prose,
+ * string[] lists like openQuestions/riskFactors). claim[]/metric[]/step[]/
+ * scenario[] array-of-object fields are skipped: claims are already passed
+ * separately in full detail, and the others aren't prose a stance could be
+ * "implied" in the way this pass is meant to catch.
+ */
+function formatFullResponseForPrompt(data: Record<string, unknown> | null | undefined): string {
+  if (!data) return "";
+  const lines: string[] = [];
+  for (const [key, value] of Object.entries(data)) {
+    if (typeof value === "string" && value.trim()) {
+      lines.push(`${key}: "${value.trim()}"`);
+    } else if (Array.isArray(value) && value.every((v) => typeof v === "string")) {
+      if (value.length > 0) lines.push(`${key}: ${(value as string[]).join("; ")}`);
+    }
+  }
+  return lines.join("\n");
 }
 
 const STOPWORDS = new Set([
@@ -323,30 +359,36 @@ const BackfillResponseSchema = z.object({
 });
 
 /**
- * Ask one model, given its own full claim list, whether it takes a position
- * on each canonical proposition it didn't already cluster into. Never
- * throws; returns null (leave cells null — true silence assumed) on any
- * failure or degraded response.
+ * Ask one model, given its own full structured response (not just its
+ * Claim[] list — a stance can be implied only in prose, e.g. a `summary`
+ * field, without the model ever separately listing it as a Claim), whether
+ * it takes a position on each canonical proposition it didn't already
+ * cluster into. Never throws; returns null (leave cells null — true silence
+ * assumed) on any failure or degraded response.
  */
 async function backfillOneModel(
   modelClaims: Claim[],
-  targets: { key: string; text: string }[]
+  targets: { key: string; text: string }[],
+  fullResponseData?: Record<string, unknown> | null
 ): Promise<Map<string, StanceAnswer & { hasPosition: true }> | null> {
   if (targets.length === 0 || modelClaims.length === 0) return new Map();
 
   const claimsBlock = modelClaims
     .map((c) => `- "${c.claim}" (stance: ${c.stance}, confidence: ${c.confidence})`)
     .join("\n");
+  const fullResponseBlock = formatFullResponseForPrompt(fullResponseData);
   const questionsBlock = targets.map((t) => `${t.key}: ${t.text}`).join("\n");
-  const userMessage = `This model's claims:\n${claimsBlock}\n\nCanonical propositions to check:\n${questionsBlock}`;
+  const userMessage = `This model's structured claims list:\n${claimsBlock}${
+    fullResponseBlock ? `\n\nThis model's FULL response (other fields — summary, answer, lists — may imply a stance not captured above):\n${fullResponseBlock}` : ""
+  }\n\nCanonical propositions to check:\n${questionsBlock}`;
 
-  const systemPrompt = `You are given one AI model's full list of claims from a multi-model research panel, and a list of canonical propositions raised by OTHER models in the same panel that this model's claims were not automatically matched to.
+  const systemPrompt = `You are given one AI model's full response from a multi-model research panel — its structured claims list AND its other response fields (summary, answer, thesis, lists, etc.) — plus a list of canonical propositions raised by OTHER models in the same panel that this model's claims were not automatically matched to.
 
-For each canonical proposition, decide: does this model's claim list take ANY position on it — directly, or as a clear necessary implication — even if worded very differently?
-- If yes: "hasPosition": true, plus "stance" toward the proposition ("agrees" | "disputes" | "partial" | "unclear") and a short "excerpt" (<=15 words) from or paraphrasing this model's own claims.
-- If this model's claims are genuinely silent on it: "hasPosition": false, and omit "stance"/"excerpt".
+For each canonical proposition, decide: does ANY part of this model's response — its claims list, OR its summary/answer/other fields — take a position on it, directly or as a clear implication, even if worded very differently or never listed as a separate claim?
+- If yes: "hasPosition": true, plus "stance" toward the proposition ("agrees" | "disputes" | "partial" | "unclear") and a short "excerpt" (<=15 words) quoting or closely paraphrasing whichever part of the response implies it (claims list OR summary/other fields).
+- Only answer "hasPosition": false when the response genuinely never touches the topic anywhere — in the claims list OR the other fields. Do not default to false just because the claims list alone is silent; check the full response first.
 
-Do not invent a position the claims don't support — when in doubt, say "hasPosition": false.
+Do not invent a position the response doesn't support — when the full response truly never touches the topic, say "hasPosition": false.
 
 Return ONLY JSON: { "answers": [ { "key": "q0", "hasPosition": true, "stance": "agrees", "excerpt": "..." } ] }
 Every question key must appear exactly once. No prose, no markdown fences.`;
@@ -401,6 +443,7 @@ async function backfillSilentCells(
   modelOrder: ModelId[]
 ): Promise<AlignedClaim[]> {
   const claimsByModel = new Map(perModelClaims.map((m) => [m.modelId, m.claims]));
+  const fullResponseByModel = new Map(perModelClaims.map((m) => [m.modelId, m.fullResponseData]));
 
   const perModelResults = await Promise.all(
     modelOrder.map(async (modelId, modelIdx) => {
@@ -414,7 +457,7 @@ async function backfillSilentCells(
       if (nullClusterIdxs.length === 0) return null;
 
       const targets = nullClusterIdxs.map((ci, i) => ({ key: `q${i}`, text: clusters[ci].claimText }));
-      const answers = await backfillOneModel(modelClaims, targets);
+      const answers = await backfillOneModel(modelClaims, targets, fullResponseByModel.get(modelId));
       if (!answers) return null;
 
       return { modelId, modelIdx, nullClusterIdxs, answers };

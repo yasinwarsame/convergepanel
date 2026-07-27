@@ -156,7 +156,11 @@ export async function finalizeAdaptiveRun(
   if (claimFieldKeys.length > 0) {
     const perModelClaims: ModelClaims[] = adaptiveResults.map((r) => {
       const claims: Claim[] = r.ok && r.data ? claimFieldKeys.flatMap((key) => (r.data![key] as Claim[] | undefined) || []) : [];
-      return { modelId: r.modelId, claims };
+      // Full response (not just claim[] fields) so the stance-extraction
+      // backfill (alignment.ts pass 3) can catch a stance implied only in
+      // prose — e.g. a `summary` field — that the model never separately
+      // listed as a Claim.
+      return { modelId: r.modelId, claims, fullResponseData: r.ok ? r.data : null };
     });
     alignedClaims.push(...(await alignClaims(perModelClaims)));
   }

@@ -281,4 +281,75 @@ describe("alignClaims", () => {
     // one null cell to check against the other cluster).
     expect(mockedCallGemini).toHaveBeenCalledTimes(6);
   });
+
+  it("B3 regression: a model's summary asserting a claim it never listed explicitly backfills as stance=agrees with the summary excerpt", async () => {
+    // chatgpt and grok both explicitly list "the policy is broadly
+    // effective" (exact slug match, no model call needed for that row).
+    // claude never lists that claim, but its `summary` field (part of its
+    // full response, not its claims array) plainly asserts it — this is
+    // the exact reported bug: extraction only looked at claims[], so the
+    // implied stance in prose was missed and claude showed "—" on that row.
+    const perModelClaims: ModelClaims[] = [
+      {
+        modelId: "chatgpt",
+        claims: [claim({ id: "policy-broadly-effective", claim: "The policy is broadly effective at cutting emissions." })],
+      },
+      {
+        modelId: "claude",
+        claims: [claim({ id: "totally-unrelated-topic", claim: "Something about coal plant closures." })],
+        fullResponseData: {
+          summary: "The policy has proven broadly effective at cutting emissions across most regions studied.",
+        },
+      },
+      {
+        modelId: "grok",
+        claims: [claim({ id: "policy-broadly-effective", claim: "The policy broadly works to cut emissions." })],
+      },
+    ];
+
+    mockedCallGemini.mockImplementation(async (userMessage: any) => {
+      const text = String(userMessage);
+      if (text.includes("c0:")) {
+        // Force the semantic cluster call to fail so pass-1 groups
+        // (chatgpt+grok merged by exact slug match, claude separate) stay
+        // unmerged — isolates this test to pass-3 backfill behavior.
+        return { modelId: "gemini", status: "error", rawText: null, errorMessage: "forced failure for isolation", latencyMs: 5 };
+      }
+      if (text.includes("q0: The policy is broadly effective at cutting emissions")) {
+        // claude's backfill check against the policy-effectiveness row (the
+        // proposition it's being ASKED about, not merely mentioned in its
+        // own claims list — that phrasing also appears in chatgpt/grok's
+        // unrelated backfill calls since it's part of THEIR claims list).
+        return {
+          modelId: "gemini",
+          status: "ok",
+          rawText: JSON.stringify({
+            answers: [{ key: "q0", hasPosition: true, stance: "agrees", excerpt: "Policy has proven broadly effective at cutting emissions" }],
+          }),
+          latencyMs: 5,
+        };
+      }
+      // chatgpt/grok's backfill checks against claude's coal-plant row — not under test.
+      return { modelId: "gemini", status: "error", rawText: null, errorMessage: "not under test", latencyMs: 5 };
+    });
+
+    const result = await alignClaims(perModelClaims);
+
+    const policyRow = result.find((r) => r.claimText === "The policy is broadly effective at cutting emissions.");
+    expect(policyRow).toBeDefined();
+
+    const claudeCell = policyRow!.cells.find((c) => c?.modelId === "claude");
+    expect(claudeCell).toMatchObject({ stance: "agrees", backfilled: true });
+    expect(claudeCell!.excerpt).toContain("broadly effective");
+
+    // Prove the FULL response (not just the claims array) was actually sent
+    // to the model — the fix this test guards against regressing.
+    const claudeBackfillCall = mockedCallGemini.mock.calls.find(([msg]: [unknown]) =>
+      String(msg).includes("q0: The policy is broadly effective at cutting emissions")
+    );
+    expect(claudeBackfillCall).toBeDefined();
+    const claudeBackfillMessage = String(claudeBackfillCall![0]);
+    expect(claudeBackfillMessage).toContain("summary:");
+    expect(claudeBackfillMessage).toContain("broadly effective at cutting emissions across most regions studied");
+  });
 });
