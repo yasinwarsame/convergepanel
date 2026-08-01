@@ -73,7 +73,7 @@ type AdaptiveReviewPanelGateResult = { blocked: false } | { blocked: true; statu
  *   silently falls back to single-reviewer behavior on corrupted data).
  * - firestore_unavailable / read_failed → blocked, 503 (fail closed).
  */
-export async function evaluateAdaptiveReviewPanelGate(runId: string): Promise<AdaptiveReviewPanelGateResult> {
+async function evaluateAdaptiveReviewPanelGate(runId: string): Promise<AdaptiveReviewPanelGateResult> {
   const result = await getAdaptiveHumanReviewPanel(runId);
   switch (result.status) {
     case "absent":
