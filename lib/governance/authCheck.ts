@@ -8,8 +8,8 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { isAdminEmail } from "@/lib/admin/config";
 import { getEffectiveEntitlements } from "@/lib/admin/entitlements";
-import { verifySessionCookie } from "@/lib/firebase/auth-helpers";
-import { verifyIdToken } from "@/lib/firebase/auth";
+import { resolveRequestIdentity } from "@/lib/auth/resolveRequestIdentity";
+import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelemetry";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import { parseGovernanceReviewerFor } from "@/lib/governance/reviewerFields";
 
@@ -113,6 +113,19 @@ export function governanceAccessForbiddenResponse(access: GovernanceAccessResult
   );
 }
 
+/**
+ * Auth Identity Consistency Remediation, Step 7.15 — found during the
+ * post-migration cross-route search, NOT in the originally-disclosed
+ * 14-route inventory (that inventory only searched `app/api` directly;
+ * this is a shared `lib/` helper five governance routes call indirectly).
+ * Same root-cause pattern: previously checked the `__session` cookie
+ * first and, on ANY thrown error (not just "absent"), silently swallowed
+ * it and fell through to bearer — but if the cookie resolved to a valid
+ * uid, bearer was NEVER even inspected, so a stale cookie still won
+ * unconditionally over a fresh, different bearer token. Now a thin
+ * wrapper around the shared `resolveRequestIdentity()`, same as every
+ * other migrated route.
+ */
 export async function resolveGovernanceRequestUser(
   request: NextRequest
 ): Promise<{ ok: true; uid: string; email: string } | { ok: false; status: 401 }> {
@@ -120,33 +133,15 @@ export async function resolveGovernanceRequestUser(
     return { ok: false, status: 401 };
   }
 
-  let uid: string | null = null;
-  try {
-    const session = await verifySessionCookie(request);
-    if (session?.uid) uid = session.uid;
-  } catch {
-    /* invalid session cookie — try bearer */
-  }
-
-  if (!uid) {
-    const authHeader = request.headers.get("authorization");
-    if (authHeader?.startsWith("Bearer ")) {
-      try {
-        const decoded = await verifyIdToken(authHeader.slice(7));
-        uid = decoded.uid;
-      } catch {
-        return { ok: false, status: 401 };
-      }
-    }
-  }
-
-  if (!uid) {
+  const identity = await resolveRequestIdentity(request);
+  if (identity.status !== "authenticated") {
+    logIdentityResolutionFailure({ route: "resolveGovernanceRequestUser", failureCategory: identity.reason });
     return { ok: false, status: 401 };
   }
 
   try {
-    const u = await adminAuth.getUser(uid);
-    return { ok: true, uid, email: u.email ?? "" };
+    const u = await adminAuth.getUser(identity.uid);
+    return { ok: true, uid: identity.uid, email: u.email ?? "" };
   } catch {
     return { ok: false, status: 401 };
   }

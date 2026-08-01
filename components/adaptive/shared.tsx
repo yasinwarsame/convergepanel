@@ -53,11 +53,19 @@ export function FailedResultsNote({ failed }: { failed: AdaptiveModelResult[] })
       <p className="font-semibold mb-1">
         {failed.length} model{failed.length === 1 ? "" : "s"} couldn&apos;t be compared
       </p>
-      <ul className="space-y-0.5">
+      <ul className="space-y-1">
         {failed.map((r) => (
-          <li key={r.modelId} className="flex items-center gap-2">
+          <li key={r.modelId} className="flex items-start gap-2">
             <ModelChip modelId={r.modelId} size="xs" />
-            <span className="text-red-700">{r.parseError || "Response could not be parsed."}</span>
+            <div className="text-red-700">
+              <p>{getModelLabel(r.modelId)} returned an incompatible format and was excluded from comparison.</p>
+              {r.parseError && (
+                <details className="mt-0.5">
+                  <summary className="cursor-pointer text-xs text-red-600">Details</summary>
+                  <p className="mt-0.5 text-xs text-red-600">{r.parseError}</p>
+                </details>
+              )}
+            </div>
           </li>
         ))}
       </ul>
@@ -129,6 +137,95 @@ const STAKES_TOOLTIPS: Record<AdaptiveStakes, string> = {
   important: "Materially shapes interpretation or follow-up",
   low: "Supporting context or low-impact observation",
 };
+
+export type BadgeTone = "warning" | "accent" | "danger";
+
+const BADGE_TONE_STYLES: Record<BadgeTone, string> = {
+  warning: "bg-amber-50 text-amber-700 border-amber-200",
+  accent: "bg-sky-50 text-sky-700 border-sky-200",
+  danger: "bg-red-50 text-red-700 border-red-200",
+};
+
+/** Generic tinted pill — same visual language as StakesBadge/ConfidencePill, for any deviation callout on a row (e.g. List View's per-model differentiator badges). */
+export function TintBadge({ tone, children, title }: { tone: BadgeTone; children: React.ReactNode; title?: string }) {
+  return (
+    <span
+      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium whitespace-nowrap ${BADGE_TONE_STYLES[tone]}`}
+      title={title}
+    >
+      {children}
+    </span>
+  );
+}
+
+/**
+ * Milestone 2 UI consistency cleanup — one shared phrasing for every
+ * "N of M models did X" badge across the 9 adaptive renderers. Prevents the
+ * wording drift a static review found (some renderers said "models agree",
+ * others just "models", others a bare "N/M") by making the mode explicit
+ * and matching the ACTUAL metric each schema computes:
+ *   - "covered": how many models raised/mentioned this item at all (the vast
+ *     majority of Milestone 2 coverage counts — none of these schemas score
+ *     genuine stance agreement, that's AlignedClaim's job).
+ *   - "agreed": reserved for a schema that has an actual cross-model VALUE
+ *     agreement signal (e.g. comparison_matrix's cell `agreement` enum,
+ *     which is consensus/majority/split, not mere mention coverage).
+ *   - "assessed": how many models populated a specific cross-referenced cell
+ *     (comparison_matrix's cells, decision_support's assessments) — distinct
+ *     from axis-level "covered".
+ *   - "converged": recommendation-level convergence (decision_support's
+ *     recommendation support count) — never a certainty score by itself,
+ *     callers append that caveat separately.
+ */
+export type ModelCoverageMode = "covered" | "agreed" | "assessed" | "converged";
+
+const MODEL_COVERAGE_VERB: Record<ModelCoverageMode, string> = {
+  covered: "covered this",
+  agreed: "agreed",
+  assessed: "assessed this",
+  converged: "converged on this",
+};
+
+export function formatModelCoverage({ covered, total, mode }: { covered: number; total: number; mode: ModelCoverageMode }): string {
+  return `${covered} of ${total} models ${MODEL_COVERAGE_VERB[mode]}`;
+}
+
+/**
+ * Milestone 2 UI consistency cleanup — the three-state empty-result
+ * distinction `bias_blindspot_audit`/`decision_support` introduced (after a
+ * real bug was caught during the former's build), backported to every
+ * renderer. `"no_models"` means the run had nothing to work with at all
+ * (every connector failed/timed out); `"models_no_usable_output"` means
+ * models responded but no usable structured result survived validation —
+ * a materially different, more actionable distinction for debugging
+ * connector outages vs. validator failures.
+ */
+export type RendererEmptyState = "no_models" | "models_no_usable_output" | "has_content";
+
+export function classifyRendererEmptyState(totalModels: number, hasContent: boolean): RendererEmptyState {
+  if (totalModels === 0) return "no_models";
+  if (!hasContent) return "models_no_usable_output";
+  return "has_content";
+}
+
+/** Generic copy for `"no_models"` — always the same across every renderer, since the run-level cause is identical regardless of schema. `"models_no_usable_output"` prefers a schema-specific message (every renderer already has one); the generic fallback only covers a renderer that doesn't. */
+export function EmptyStateCard({
+  state,
+  schemaSpecificMessage,
+}: {
+  state: Exclude<RendererEmptyState, "has_content">;
+  schemaSpecificMessage?: string;
+}) {
+  const message =
+    state === "no_models"
+      ? "No model responses were available for this run."
+      : schemaSpecificMessage || "Models responded, but no usable structured result could be produced.";
+  return (
+    <Card>
+      <p className="text-sm text-slate-500 italic">{message}</p>
+    </Card>
+  );
+}
 
 /** Mirrors the legacy SeverityBadge (PanelSynthesisView.tsx) — same tiers, same tooltip copy. */
 export function StakesBadge({ stakes }: { stakes: AdaptiveStakes }) {

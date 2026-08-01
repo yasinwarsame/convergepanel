@@ -68,6 +68,13 @@ describe("buildAdaptiveSynthesisReport", () => {
     expect(Array.isArray(report.biasAndBlindSpots)).toBe(true);
     expect(report.verdictCard).toBeTruthy();
     expect(report.verdictCard.question).toBe("What happened?");
+    // Bias & Blind Spots Tiers fix: Tier 2/3 fields always present.
+    expect(Array.isArray(report.panelCoverageGaps)).toBe(true);
+    expect(report.diagnostics).toBeTruthy();
+    expect(report.diagnostics.totalClaimCount).toBe(0);
+    expect(["insufficient_models", "call_failed", "invalid_response", "below_threshold", null]).toContain(
+      report.biasEmptyReason
+    );
   });
 
   it("degrades to the template report when the narrative call fails, without crashing", async () => {
@@ -167,10 +174,12 @@ describe("buildAdaptiveSynthesisReport", () => {
   });
 
   it("regenerates once, then strips, when the narrative call hallucinates a model name not in the roster", async () => {
-    // Call order inside buildAdaptiveSynthesisReport: bias detection first,
-    // then the narrative call, then (if hallucination is found) one regenerate.
+    // Call order inside buildAdaptiveSynthesisReport: bias detection, then
+    // the panel coverage audit, then the narrative call, then (if an issue
+    // is found) one regenerate.
     mockedCallGemini
       .mockResolvedValueOnce({ modelId: "gemini", status: "error", rawText: null, errorMessage: "n/a", latencyMs: 5 }) // bias detection
+      .mockResolvedValueOnce({ modelId: "gemini", status: "error", rawText: null, errorMessage: "n/a", latencyMs: 5 }) // coverage audit
       .mockResolvedValueOnce({
         modelId: "gemini",
         status: "ok",
@@ -188,10 +197,65 @@ describe("buildAdaptiveSynthesisReport", () => {
     // Roster only has "chatgpt"/"gemini" — the raw modelIds, not any prose name like "Gemini 3 Pro".
     const report = await buildAdaptiveSynthesisReport("Q", "generic", rows, results(["chatgpt", "gemini"]));
 
-    expect(mockedCallGemini).toHaveBeenCalledTimes(3); // bias + narrative + one regenerate
+    expect(mockedCallGemini).toHaveBeenCalledTimes(4); // bias + coverage audit + narrative + one regenerate
     expect(report.executiveSummary).not.toContain("Gemini 3 Pro"); // stripped after regenerate still failed
     // "GPT 5.2" is left alone — it's chatgpt's REAL roster display name, not a hallucination.
     expect(report.executiveSummary).toContain("GPT 5.2");
+  });
+
+  it("regenerates once, then strips, when the narrative call leaks raw markdown syntax", async () => {
+    mockedCallGemini
+      .mockResolvedValueOnce({ modelId: "gemini", status: "error", rawText: null, errorMessage: "n/a", latencyMs: 5 }) // bias detection
+      .mockResolvedValueOnce({ modelId: "gemini", status: "error", rawText: null, errorMessage: "n/a", latencyMs: 5 }) // coverage audit
+      .mockResolvedValueOnce({
+        modelId: "gemini",
+        status: "ok",
+        rawText: narrativeResponse({ executiveSummary: "Models **strongly** agree carbon pricing reduces emissions." }),
+        latencyMs: 5,
+      }) // narrative, 1st attempt — markdown leak
+      .mockResolvedValueOnce({
+        modelId: "gemini",
+        status: "ok",
+        rawText: narrativeResponse({ executiveSummary: "Models **still strongly** agree carbon pricing reduces emissions." }),
+        latencyMs: 5,
+      }); // narrative, regenerate attempt — still leaks
+
+    const rows = [row("Consensus claim", "consensus", [cell("chatgpt"), cell("claude")])];
+    const report = await buildAdaptiveSynthesisReport("Q", "generic", rows, results(["chatgpt", "claude"]));
+
+    expect(mockedCallGemini).toHaveBeenCalledTimes(4);
+    expect(report.executiveSummary).not.toContain("**");
+    expect(report.executiveSummary).toContain("still strongly agree carbon pricing");
+  });
+
+  it("regenerates once, then strips, when the narrative call leaks an internal agreement/certainty tuple", async () => {
+    mockedCallGemini
+      .mockResolvedValueOnce({ modelId: "gemini", status: "error", rawText: null, errorMessage: "n/a", latencyMs: 5 }) // bias detection
+      .mockResolvedValueOnce({ modelId: "gemini", status: "error", rawText: null, errorMessage: "n/a", latencyMs: 5 }) // coverage audit
+      .mockResolvedValueOnce({
+        modelId: "gemini",
+        status: "ok",
+        rawText: narrativeResponse({
+          executiveSummary: "Models converge (consensus, agreement 1.00, certainty 0.92) on this claim.",
+        }),
+        latencyMs: 5,
+      }) // narrative, 1st attempt — metric tuple leak
+      .mockResolvedValueOnce({
+        modelId: "gemini",
+        status: "ok",
+        rawText: narrativeResponse({
+          executiveSummary: "Models still converge (consensus, agreement 1.00, certainty 0.92) on this claim.",
+        }),
+        latencyMs: 5,
+      }); // narrative, regenerate attempt — still leaks
+
+    const rows = [row("Consensus claim", "consensus", [cell("chatgpt"), cell("claude")])];
+    const report = await buildAdaptiveSynthesisReport("Q", "generic", rows, results(["chatgpt", "claude"]));
+
+    expect(mockedCallGemini).toHaveBeenCalledTimes(4);
+    expect(report.executiveSummary).not.toMatch(/agreement\s*1\.00/i);
+    expect(report.executiveSummary).not.toMatch(/certainty\s*0\.92/i);
+    expect(report.executiveSummary).toContain("Models still converge");
   });
 
   it("returns bias findings and threads them into the verdict card's caveat", async () => {
@@ -228,5 +292,38 @@ describe("buildAdaptiveSynthesisReport", () => {
     expect(report.biasAndBlindSpots).toHaveLength(1);
     expect(report.biasAndBlindSpots[0].biasType).toBe("Evidence-base skew");
     expect(report.verdictCard.caveat).toBe("Models over-rely on Western regulatory examples.");
+  });
+
+  it("threads Tier 2 panel-coverage gaps and Tier 3 diagnostics through into the report", async () => {
+    mockedCallGemini
+      .mockResolvedValueOnce({ modelId: "gemini", status: "error", rawText: null, errorMessage: "n/a", latencyMs: 5 }) // bias detection
+      .mockResolvedValueOnce({
+        modelId: "gemini",
+        status: "ok",
+        rawText: JSON.stringify({
+          gaps: [
+            {
+              dimension: "Global energy price shocks",
+              whyItMatters: "A domain expert would weigh the 2022 energy shock against domestic demand drivers.",
+              followUpQuestion: "How much did global energy prices contribute versus domestic demand?",
+            },
+          ],
+        }),
+        latencyMs: 5,
+      }) // coverage audit
+      .mockResolvedValueOnce({ modelId: "gemini", status: "ok", rawText: narrativeResponse(), latencyMs: 5 }); // narrative
+
+    const rows = [
+      row("Consensus claim", "consensus", [cell("chatgpt"), cell("claude")]),
+      row("Second claim", "consensus", [cell("chatgpt"), cell("claude")]),
+    ];
+    const report = await buildAdaptiveSynthesisReport("Q", "generic", rows, results(["chatgpt", "claude"]));
+
+    expect(report.panelCoverageGaps).toHaveLength(1);
+    expect(report.panelCoverageGaps[0].dimension).toBe("Global energy price shocks");
+    expect(report.diagnostics.totalClaimCount).toBe(2);
+    // No cell in this fixture carries a Metric.raw with a source, and both rows score 0.9 (row()'s "consensus" default) — below the homogeneity bar.
+    expect(report.diagnostics.homogeneityFlag).toBe(false);
+    expect(report.biasEmptyReason).toBe("call_failed");
   });
 });

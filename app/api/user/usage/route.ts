@@ -6,8 +6,8 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { verifySessionCookie } from "@/lib/firebase/auth-helpers";
-import { verifyIdToken } from "@/lib/firebase/auth";
+import { resolveRequestIdentity } from "@/lib/auth/resolveRequestIdentity";
+import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelemetry";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import { PlanId, BillingInterval, getPlanConfig } from "@/lib/plans";
 import { UserProfile } from "@/lib/types";
@@ -66,41 +66,26 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(req: NextRequest) {
   try {
-    // Authenticate user
-    let uid: string;
-    try {
-      const auth = await verifySessionCookie(req);
-      
-      if (auth) {
-        uid = auth.uid;
-      } else {
-        // Fallback to Bearer token
-        const authHeader = req.headers.get("authorization");
-        if (!authHeader?.startsWith("Bearer ")) {
-          return NextResponse.json(
-            {
-              ok: false,
-              errorCode: "unauthorized",
-              message: "Please sign in to view usage.",
-            },
-            { status: 401 }
-          );
-        }
-        const token = authHeader.split("Bearer ")[1];
-        const decodedToken = await verifyIdToken(token);
-        uid = decodedToken.uid;
+    // Authenticate user — Auth Identity Consistency Remediation, Step 7:
+    // resolves via the shared, hardened resolver (considers cookie AND
+    // bearer, fails closed on a confirmed identity mismatch) rather than
+    // this route's own duplicated cookie-first logic. Response shape for
+    // auth failures is unchanged: {ok:false, errorCode, message}.
+    const identity = await resolveRequestIdentity(req);
+    if (identity.status !== "authenticated") {
+      logIdentityResolutionFailure({ route: "GET /api/user/usage", method: "GET", failureCategory: identity.reason });
+      if (identity.reason === "missing_credentials") {
+        return NextResponse.json(
+          { ok: false, errorCode: "unauthorized", message: "Please sign in to view usage." },
+          { status: 401 }
+        );
       }
-    } catch (authError: any) {
-      logger.error("[user/usage] Authentication error", { error: authError?.message });
       return NextResponse.json(
-        {
-          ok: false,
-          errorCode: "auth_error",
-          message: "Authentication failed. Please sign in again.",
-        },
+        { ok: false, errorCode: "auth_error", message: "Authentication failed. Please sign in again." },
         { status: 401 }
       );
     }
+    const uid = identity.uid;
 
     if (!adminDb) {
       logger.error("[user/usage] Firestore is not available");

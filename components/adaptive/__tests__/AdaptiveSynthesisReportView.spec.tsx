@@ -115,6 +115,15 @@ const report: AdaptiveSynthesisReport = {
       "Treat the key disagreement as unresolved — don't rely on either side without independent verification.",
     ],
   },
+  biasEmptyReason: null,
+  panelCoverageGaps: [],
+  diagnostics: {
+    citedClaimCount: 0,
+    totalClaimCount: 2,
+    evidenceMix: { empirical: 0, theoretical: 0, anecdotal: 0, authoritative: 0 },
+    homogeneityFlag: false,
+    meanAgreement: 0.6,
+  },
   degraded: false,
 };
 
@@ -328,5 +337,104 @@ describe("AdaptiveSynthesisReportView — B5 headline metric labels", () => {
     expect(trustHtml).not.toContain("Overall trust");
     expect(trustHtml).toContain("75%");
     expect(trustHtml).toMatch(/how well the models behaved/i);
+  });
+});
+
+describe("AdaptiveSynthesisReportView — Bias & Blind Spots three-tier rendering", () => {
+  it("renders a Tier 2 'what the panel didn't cover' card with a working Run follow-up action, alongside Tier 1 and Tier 3", () => {
+    const reportWithGap: AdaptiveSynthesisReport = {
+      ...report,
+      panelCoverageGaps: [
+        {
+          dimension: "Global energy price shocks",
+          whyItMatters: "A domain expert would expect the 2022 energy shock to be weighed against domestic drivers.",
+          followUpQuestion: "How much did global energy prices contribute to US inflation versus domestic demand?",
+        },
+      ],
+    };
+
+    const html = renderToStaticMarkup(
+      createElement(AdaptiveSynthesisReportView, {
+        report: reportWithGap,
+        gate,
+        alignedClaims,
+        trustSummary,
+        question: QUESTION,
+        modelsUsed: MODELS as unknown as any[],
+        runId: "test-run-id",
+        onRunFollowUp: () => {},
+      })
+    );
+
+    const biasHtml = sectionSlice(html, "bias-blind-spots");
+    // Tier 1 (unchanged, still renders).
+    expect(biasHtml).toContain("US-centric framing");
+    // Tier 2 card.
+    expect(biasHtml).toContain("What the panel didn&#x27;t cover");
+    expect(biasHtml).toContain("Global energy price shocks");
+    expect(biasHtml).toContain("How much did global energy prices contribute");
+    expect(biasHtml).toContain("Run follow-up");
+    // Tier 3 compact strip (rendered as a strip, not cards — no per-item card wrapper class repeated).
+    expect(biasHtml).toContain("claims cite a source");
+  });
+
+  it("states the actual reason when Tier 1, 2, and 3 are all empty — never generic advice", () => {
+    const allEmptyReport: AdaptiveSynthesisReport = {
+      ...report,
+      biasAndBlindSpots: [],
+      biasEmptyReason: "call_failed",
+      panelCoverageGaps: [],
+      diagnostics: {
+        citedClaimCount: 0,
+        totalClaimCount: 0,
+        evidenceMix: { empirical: 0, theoretical: 0, anecdotal: 0, authoritative: 0 },
+        homogeneityFlag: false,
+        meanAgreement: 0,
+      },
+    };
+
+    const html = renderToStaticMarkup(
+      createElement(AdaptiveSynthesisReportView, {
+        report: allEmptyReport,
+        gate,
+        alignedClaims: [],
+        question: QUESTION,
+        modelsUsed: MODELS as unknown as any[],
+        runId: "test-run-id",
+      })
+    );
+
+    const biasHtml = sectionSlice(html, "bias-blind-spots");
+    expect(biasHtml).toContain("the bias-detection call failed or timed out");
+    expect(biasHtml).not.toContain("Consider adding constraints");
+  });
+});
+
+describe("AdaptiveSynthesisReportView — Where models agree dedup (Part 4)", () => {
+  it("merges three near-duplicate supply-chain paraphrases into one bullet", () => {
+    const reportWithDupes: AdaptiveSynthesisReport = {
+      ...report,
+      whereModelsAgree: [
+        "It's unclear how much of the inflation spike came from supply chain disruption versus monetary policy.",
+        "The relative contribution of supply chain disruption vs monetary policy to inflation is unclear.",
+        "How much of the inflation spike was driven by supply chain disruption versus monetary policy is unclear.",
+      ],
+    };
+
+    const html = renderToStaticMarkup(
+      createElement(AdaptiveSynthesisReportView, {
+        report: reportWithDupes,
+        gate,
+        alignedClaims,
+        trustSummary,
+        question: QUESTION,
+        modelsUsed: MODELS as unknown as any[],
+        runId: "test-run-id",
+      })
+    );
+
+    const agreeHtml = sectionSlice(html, "where-models-agree");
+    expect((agreeHtml.match(/<li>/g) || []).length).toBe(1);
+    expect(agreeHtml).toContain("supply chain disruption");
   });
 });

@@ -158,6 +158,31 @@ export const AGREEMENT_COMPARATORS: Record<QueryType, AgreementComparator> = {
   forecast_speculative: structuralFieldComparator,
   creative_generative: defaultStanceBasedScore,
   generic: defaultStanceBasedScore,
+  // Query-routing redesign additions (Milestone 1): none of these schemas
+  // have claim[] fields today — active graceful_limitation is scalar-only,
+  // and disabled/handoff entries have no fields at all — so this comparator
+  // is never actually exercised for them. Mapped to the generic fallback
+  // purely for Record<QueryType, ...> exhaustiveness; revisit when any of
+  // these schemas goes active with real claim[] fields.
+  graceful_limitation: defaultStanceBasedScore,
+  claim_verification: defaultStanceBasedScore,
+  media_authenticity_review: defaultStanceBasedScore,
+  document_qa: defaultStanceBasedScore,
+  document_comparison: defaultStanceBasedScore,
+  data_analysis: defaultStanceBasedScore,
+  current_live_information: defaultStanceBasedScore,
+  definition_explanation: defaultStanceBasedScore,
+  causal_explanation: defaultStanceBasedScore,
+  ranked_enumeration: defaultStanceBasedScore,
+  checklist_taxonomy: defaultStanceBasedScore,
+  comparison_matrix: defaultStanceBasedScore,
+  deep_research: defaultStanceBasedScore,
+  evidence_review: defaultStanceBasedScore,
+  bias_blindspot_audit: defaultStanceBasedScore,
+  decision_support: defaultStanceBasedScore,
+  scenario_analysis: defaultStanceBasedScore,
+  step_by_step_plan: defaultStanceBasedScore,
+  transformation: defaultStanceBasedScore,
 };
 
 /** Evidence-tier weight for a row, used only by scoring.ts's run-level aggregation for medical_health. Defaults to the median weight (theoretical) when no cell carries an evidenceType. */

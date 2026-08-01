@@ -92,6 +92,27 @@ export function textsAreNearDuplicates(
   return overlap / Math.min(tokensA.length, tokensB.length) >= opts.tokenOverlapMin;
 }
 
+/**
+ * Exact token-SET equality (order-independent) — unlike
+ * textsAreNearDuplicates' overlap-coefficient (overlap / min-length), which
+ * scores 1.0 for ANY subset relationship no matter how high tokenOverlapMin
+ * is set (a smaller set fully contained in a larger one always has
+ * overlap/min = 1). That makes textsAreNearDuplicates unsuitable whenever a
+ * subset match must NOT be treated as identity — e.g. comparisonAlignment.ts's
+ * subject axis, where "iPhone 15" and "iPhone 15 Pro" are different real
+ * products and no tokenOverlapMin value can keep them apart via that
+ * formula. This checks the token sets are exactly equal instead, so it still
+ * catches reordering ("Tesla Model 3" vs "Model 3 Tesla") without merging
+ * genuine supersets.
+ */
+export function hasIdenticalTokenSet(a: string, b: string): boolean {
+  const tokensA = new Set(slugTokens(a));
+  const tokensB = new Set(slugTokens(b));
+  if (tokensA.size === 0 || tokensB.size === 0 || tokensA.size !== tokensB.size) return false;
+  for (const t of tokensA) if (!tokensB.has(t)) return false;
+  return true;
+}
+
 export class UnionFind {
   private parent: number[];
   constructor(size: number) {
@@ -157,4 +178,23 @@ export function mergeAndRankTextItems(
 
   // Stable-ish rank: descending modelCount, ties keep first-group-seen order (Array.from(Map) preserves insertion order).
   return merged.sort((a, b) => b.modelCount - a.modelCount).slice(0, opts.cap);
+}
+
+/**
+ * Convenience wrapper for plain string lists with no natural per-item model
+ * attribution — e.g. AdaptiveSynthesisReport.whereModelsAgree, which is one
+ * synthesis model's own list of consensus sentences, not one item per
+ * source model. Gives each item a synthetic per-index "source" so the SAME
+ * clustering pass still merges near-duplicate phrasings (Part B6's dedup,
+ * reused for the "Where Models Agree" list) — the merge-group size then
+ * ranks how many near-duplicate variants were folded together, which is
+ * still a reasonable "how consistently was this stated" signal even without
+ * real per-model attribution.
+ */
+export function dedupeTextList(
+  items: string[],
+  opts: { levenshteinMaxRatio: number; tokenOverlapMin: number; cap: number }
+): string[] {
+  const sources: TextItemSource[] = items.map((text, idx) => ({ modelId: `item-${idx}` as ModelId, text }));
+  return mergeAndRankTextItems(sources, opts).map((m) => m.text);
 }

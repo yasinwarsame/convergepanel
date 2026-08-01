@@ -49,9 +49,18 @@ import type {
   AlignedClaim,
   QueryClassification,
   QueryType,
+  RankedEnumerationResult,
+  ComparisonMatrixResult,
+  DefinitionExplanationResult,
+  CausalExplanationResult,
+  ChecklistTaxonomyResult,
+  DeepResearchResult,
+  EvidenceReviewResult,
+  BiasBlindspotAuditResult,
+  DecisionSupportResult,
 } from "@/lib/adaptiveSchema/types";
 import { getResultSchema } from "@/lib/adaptiveSchema/schemaRegistry";
-import { STATED_CONFIDENCE_SCORE as CONFIDENCE_SCORE_MAP } from "@/lib/adaptiveSchema/config";
+import { STATED_CONFIDENCE_SCORE as CONFIDENCE_SCORE_MAP, BIAS_EMPTY_REASON_LABELS } from "@/lib/adaptiveSchema/config";
 import AdaptivePanelResponse from "@/components/adaptive/AdaptivePanelResponse";
 
 export interface AdaptivePanelPayload {
@@ -65,6 +74,24 @@ export interface AdaptivePanelPayload {
   synthesisReport?: AdaptiveSynthesisReport;
   /** Present only when ADAPTIVE_VERIFICATION_ENABLED was on for this run. */
   trustSummary?: AdaptiveTrustSummary;
+  /** Present only for schemaId === "ranked_enumeration" (Milestone 2). */
+  rankedEnumeration?: RankedEnumerationResult;
+  /** Present only for schemaId === "comparison_matrix" (Milestone 2). */
+  comparisonMatrix?: ComparisonMatrixResult;
+  /** Present only for schemaId === "definition_explanation" (Milestone 2). */
+  definitionExplanation?: DefinitionExplanationResult;
+  /** Present only for schemaId === "causal_explanation" (Milestone 2). */
+  causalExplanation?: CausalExplanationResult;
+  /** Present only for schemaId === "checklist_taxonomy" (Milestone 2). */
+  checklistTaxonomy?: ChecklistTaxonomyResult;
+  /** Present only for schemaId === "deep_research" (Milestone 2). */
+  deepResearch?: DeepResearchResult;
+  /** Present only for schemaId === "evidence_review" (Milestone 2). */
+  evidenceReview?: EvidenceReviewResult;
+  /** Present only for schemaId === "bias_blindspot_audit" (Milestone 2). */
+  biasBlindspotAudit?: BiasBlindspotAuditResult;
+  /** Present only for schemaId === "decision_support" (Milestone 2). */
+  decisionSupport?: DecisionSupportResult;
 }
 
 /**
@@ -479,6 +506,28 @@ function AdaptiveDebugPanel({ adaptive }: { adaptive: AdaptivePanelPayload }) {
             </p>
           </div>
         )}
+        {adaptive.synthesisReport && (
+          <div>
+            <p className="font-semibold mb-1">Bias &amp; Blind Spots tiers</p>
+            <p>
+              T1 findings: {adaptive.synthesisReport.biasAndBlindSpots.length}
+              {adaptive.synthesisReport.biasAndBlindSpots.length === 0 && (
+                <span className="text-red-700">
+                  {" "}
+                  (empty — {adaptive.synthesisReport.biasEmptyReason
+                    ? BIAS_EMPTY_REASON_LABELS[adaptive.synthesisReport.biasEmptyReason]
+                    : "unknown reason"}
+                  )
+                </span>
+              )}
+              {" · "}T2 coverage gaps: {adaptive.synthesisReport.panelCoverageGaps.length}
+              {" · "}T3 diagnostics: {adaptive.synthesisReport.diagnostics.citedClaimCount}/
+              {adaptive.synthesisReport.diagnostics.totalClaimCount} cited, homogeneity{" "}
+              {adaptive.synthesisReport.diagnostics.homogeneityFlag ? "flagged" : "not flagged"} (mean agreement{" "}
+              {adaptive.synthesisReport.diagnostics.meanAgreement.toFixed(2)})
+            </p>
+          </div>
+        )}
         <div>
           <p className="font-semibold mb-1">Per-model validation status</p>
           <table className="w-full border-collapse">
@@ -492,16 +541,55 @@ function AdaptiveDebugPanel({ adaptive }: { adaptive: AdaptivePanelPayload }) {
             <tbody>
               {adaptive.results.map((r) => (
                 <tr key={r.modelId} className="border-t border-purple-200">
-                  <td className="py-1 pr-4">{r.modelId}</td>
-                  <td className="py-1 pr-4">{r.ok ? "ok" : "parseError"}</td>
+                  <td className="py-1 pr-4">
+                    {r.modelId}
+                    {r.retried ? " (retried)" : ""}
+                  </td>
+                  <td className="py-1 pr-4">{r.ok ? (r.invalidFields?.length ? "salvaged" : "ok") : "parseError"}</td>
                   <td className="py-1">
-                    {r.parseError || (r.truncatedFields?.length ? `truncated: ${r.truncatedFields.join(", ")}` : "—")}
+                    {[
+                      r.parseError,
+                      r.invalidFields?.length ? `invalid fields: ${r.invalidFields.join(", ")}` : null,
+                      r.truncatedFields?.length ? `truncated: ${r.truncatedFields.join(", ")}` : null,
+                      r.coercions?.length ? `${r.coercions.length} enum coercion(s)` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ") || "—"}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+        {adaptive.results.some((r) => r.coercions && r.coercions.length > 0) && (
+          <div>
+            <p className="font-semibold mb-1">Enum coercions (raw model output normalized before validation)</p>
+            <table className="w-full border-collapse">
+              <thead>
+                <tr className="text-left">
+                  <th className="pr-3">Model</th>
+                  <th className="pr-3">Path</th>
+                  <th className="pr-3">Field</th>
+                  <th className="pr-3">Raw</th>
+                  <th>Coerced</th>
+                </tr>
+              </thead>
+              <tbody>
+                {adaptive.results.flatMap((r) =>
+                  (r.coercions || []).map((c, idx) => (
+                    <tr key={`${r.modelId}-${idx}`} className="border-t border-purple-200">
+                      <td className="py-1 pr-3">{r.modelId}</td>
+                      <td className="py-1 pr-3">{c.path}</td>
+                      <td className="py-1 pr-3">{c.field}</td>
+                      <td className="py-1 pr-3">{c.raw}</td>
+                      <td className="py-1">{c.coerced}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
         {adaptive.alignedClaims && (
           <div>
             <p className="font-semibold mb-1">Per-claim score breakdown ({adaptive.alignedClaims.length} claims)</p>
@@ -570,6 +658,8 @@ interface ResultsDisplayProps {
    * legacy List-Compare-Synthesis entirely in favor of AdaptiveResultsView.
    */
   adaptive?: AdaptivePanelPayload | null;
+  /** Bias & Blind Spots Tier 2 cards' "Run follow-up" action (Synthesis Report) — pre-fills the question box, never auto-runs. */
+  onRunFollowUp?: (question: string) => void;
 }
 
 /**
@@ -602,6 +692,7 @@ export default function ResultsDisplay({
   teamGovernance,
   orgGovernanceStatus,
   adaptive,
+  onRunFollowUp,
 }: ResultsDisplayProps) {
   const { user, authReady } = useAuth();
   const results = Array.isArray(resultsProp) ? resultsProp : [];
@@ -925,8 +1016,18 @@ export default function ResultsDisplay({
           gate={adaptive.gate}
           synthesisReport={adaptive.synthesisReport}
           trustSummary={adaptive.trustSummary}
+          rankedEnumeration={adaptive.rankedEnumeration}
+          comparisonMatrix={adaptive.comparisonMatrix}
+          definitionExplanation={adaptive.definitionExplanation}
+          causalExplanation={adaptive.causalExplanation}
+          checklistTaxonomy={adaptive.checklistTaxonomy}
+          deepResearch={adaptive.deepResearch}
+          evidenceReview={adaptive.evidenceReview}
+          biasBlindspotAudit={adaptive.biasBlindspotAudit}
+          decisionSupport={adaptive.decisionSupport}
           question={question}
           runId={runId}
+          onRunFollowUp={onRunFollowUp}
         />
       </div>
     );

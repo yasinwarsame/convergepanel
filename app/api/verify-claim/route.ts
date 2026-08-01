@@ -6,8 +6,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { ModelId, ModelResult } from "@/lib/types";
 import { OPENAI_API_KEY, ANTHROPIC_API_KEY, XAI_API_KEY, PERPLEXITY_API_KEY, GEMINI_API_KEY } from "@/lib/env";
-import { verifySessionCookie } from "@/lib/firebase/auth-helpers";
-import { verifyIdToken } from "@/lib/firebase/auth";
+import { resolveRequestIdentity } from "@/lib/auth/resolveRequestIdentity";
+import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelemetry";
 import { checkAndIncrementUsageForRun } from "@/lib/stripe/usageCheck";
 import { validateUserSubscription } from "@/lib/stripe/subscriptionValidation";
 import { runClaimVerificationPanel } from "@/lib/verification/runClaimVerificationPanel";
@@ -62,30 +62,22 @@ function totalTokensFromResult(result: ModelResult): number {
 
 export async function POST(req: NextRequest) {
   try {
-    let uid: string;
-    try {
-      const auth = await verifySessionCookie(req);
-      if (auth) {
-        uid = auth.uid;
-      } else {
-        const authHeader = req.headers.get("authorization");
-        if (!authHeader?.startsWith("Bearer ")) {
-          return NextResponse.json(
-            { ok: false, errorCode: "unauthorized", message: "Please sign in to verify a claim." },
-            { status: 401 }
-          );
-        }
-        const token = authHeader.split("Bearer ")[1];
-        const decodedToken = await verifyIdToken(token);
-        uid = decodedToken.uid;
-      }
-    } catch (authError: any) {
-      logger.error("[verify-claim] Authentication error", { error: authError?.message });
+    // Auth Identity Consistency Remediation, Step 7 — resolves via the
+    // shared, hardened resolver (considers cookie AND bearer, fails
+    // closed on a confirmed identity mismatch) rather than this route's
+    // own duplicated cookie-first logic. Claim verification business
+    // logic below (parsing, model dispatch, verdict computation, quota,
+    // token accounting, audit) is completely untouched — only identity
+    // resolution changed.
+    const identity = await resolveRequestIdentity(req);
+    if (identity.status !== "authenticated") {
+      logIdentityResolutionFailure({ route: "POST /api/verify-claim", method: "POST", failureCategory: identity.reason });
       return NextResponse.json(
         { ok: false, errorCode: "unauthorized", message: "Please sign in to verify a claim." },
         { status: 401 }
       );
     }
+    const uid = identity.uid;
 
     const { checkRateLimit } = await import("@/lib/security/rateLimit");
     const rateLimitResult = await checkRateLimit({

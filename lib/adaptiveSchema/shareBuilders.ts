@@ -12,6 +12,13 @@ import { ModelId } from "@/lib/types";
 import { getModelDisplayNameSafe } from "@/lib/panelModels";
 import { MemoInput } from "@/lib/verification/generateMemo";
 import { AdaptiveGateStatus, AdaptiveSynthesisReport } from "./types";
+import { dedupeTextList } from "./textSimilarity";
+import { TEXT_DEDUP_THRESHOLDS, WHERE_MODELS_AGREE_MAX_ITEMS } from "./config";
+
+/** Same merge pass the Synthesis Report view applies to "Where models agree" (Bias & Blind Spots Tiers fix, Part 4) — keeps exported markdown/memo/social copy free of the same near-duplicate paraphrases. */
+function dedupedAgreementItems(report: AdaptiveSynthesisReport): string[] {
+  return dedupeTextList(report.whereModelsAgree, { ...TEXT_DEDUP_THRESHOLDS, cap: WHERE_MODELS_AGREE_MAX_ITEMS });
+}
 
 const GATE_CONFIDENCE_LABEL: Record<AdaptiveGateStatus, string> = {
   pass: "High",
@@ -39,9 +46,10 @@ export function buildAdaptiveSynthesisMarkdown(question: string, report: Adaptiv
   lines.push(report.executiveSummary);
   lines.push("");
 
-  if (report.whereModelsAgree.length > 0) {
+  const agreementItems = dedupedAgreementItems(report);
+  if (agreementItems.length > 0) {
     lines.push("## Where models agree");
-    report.whereModelsAgree.forEach((a) => lines.push(`- ${a}`));
+    agreementItems.forEach((a) => lines.push(`- ${a}`));
     lines.push("");
   }
 
@@ -82,8 +90,8 @@ export function buildAdaptiveMemoInput(
     consensusScore: Math.round(report.runCertainty * 100),
     confidenceLabel: GATE_CONFIDENCE_LABEL[report.gate],
     evidenceQuality: "mixed",
-    keyFindings: report.whereModelsAgree.slice(0, 8),
-    synthesisAgreements: report.whereModelsAgree,
+    keyFindings: dedupedAgreementItems(report).slice(0, 8),
+    synthesisAgreements: dedupedAgreementItems(report),
     synthesisDisagreements: report.disagreements.map((d) => `${d.topic}: ${d.whyTheyDiffer}`),
     confidenceAssessment: report.executiveSummary || report.certaintyAssessment,
     modelsUsed: modelsUsed.map((id) => getModelDisplayNameSafe(id)),
@@ -98,9 +106,10 @@ export function buildAdaptiveLinkedInPost(question: string, report: AdaptiveSynt
   lines.push(`Certainty: ${Math.round(report.runCertainty * 100)}% (gate: ${report.gate})`);
   lines.push("");
 
-  if (report.whereModelsAgree.length > 0) {
+  const agreementItems = dedupedAgreementItems(report);
+  if (agreementItems.length > 0) {
     lines.push("Where models agree:");
-    report.whereModelsAgree.slice(0, 2).forEach((a) => lines.push(`→ ${truncate(a, 140)}`));
+    agreementItems.slice(0, 2).forEach((a) => lines.push(`→ ${truncate(a, 140)}`));
     lines.push("");
   }
 

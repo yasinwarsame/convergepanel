@@ -8,15 +8,23 @@ import { signOut } from "firebase/auth";
 import { auth } from "@/lib/firebase/client";
 import { useAuth } from "./AuthProvider";
 import { useUserPlan } from "@/hooks/useUserPlan";
+import { clearServerSession } from "@/lib/client/sessionSync";
 
 export default function TopNav() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
-  const { user, loading, isAdmin } = useAuth();
-  const { governanceDashboardEligible, plan: userPlan, loading: planLoading } = useUserPlan();
+  const { user, loading, isAdmin, beginLogout } = useAuth();
+  const { governanceDashboardEligible, plan: userPlan, loading: planLoading, teamRole } = useUserPlan();
   const isGovernanceUser = governanceDashboardEligible || userPlan === "full";
+  /**
+   * Query-Routing Redesign, Phase 2A, Step 7, Part E1 — `teamRole` is
+   * already reliable, existing role context from `useUserPlan()` (backed
+   * by `users/{uid}.teamRole`), so this reuses it directly rather than
+   * duplicating role-checking logic client-side.
+   */
+  const isTeamReviewUser = teamRole === "owner" || teamRole === "admin";
   const userMenuRef = useRef<HTMLDivElement>(null);
 
   const isLogin = pathname === "/login" || pathname === "/signin";
@@ -44,14 +52,43 @@ export default function TopNav() {
     }
   }, [user]);
 
+  /**
+   * Auth Lifecycle Hardening, Step 6.7 — this previously called ONLY
+   * `signOut(auth)` (the Firebase CLIENT SDK), never clearing the server
+   * `__session` cookie at all. Since every protected API route checks that
+   * cookie before falling back to a request's bearer token
+   * (`getRequestUid()`, `lib/teams/teamApiAuth.ts`), the cookie stayed
+   * valid — for up to its full 5-day lifetime — even after the UI showed
+   * "signed out," and would silently authorize a LATER sign-in on the same
+   * browser as the wrong identity if that sign-in's own session-sync
+   * happened to race (see `AuthProvider.tsx`'s module doc for the full
+   * root-cause writeup). Required sequence now: disable protected UI
+   * immediately (`beginLogout`) → await the server cookie's deletion →
+   * sign the Firebase client out → navigate. If the server clear fails,
+   * this does NOT present a signed-out state while the cookie may still
+   * authorize requests — it stays on the current page with an error
+   * instead of navigating to a page that would look safely logged out.
+   */
   const handleLogout = async () => {
     if (logoutInProgressRef.current) return;
     logoutInProgressRef.current = true;
+    setUserMenuOpen(false);
+    setMobileMenuOpen(false);
+    beginLogout();
     try {
-      setUserMenuOpen(false);
-      setMobileMenuOpen(false);
+      const cleared = await clearServerSession();
       await signOut(auth);
-      router.replace("/login?signedOut=1");
+      if (!cleared) {
+        // Fail safely: the Firebase client is signed out (so the UI won't
+        // show stale protected content), but do NOT claim a clean
+        // sign-out via the normal redirect — surface it as an error so
+        // the user (or support) knows the server session may not have
+        // been fully revoked, rather than silently trusting it.
+        console.error("[TopNav] Server session could not be cleared during logout");
+        router.replace("/login?signedOut=1&sessionClearFailed=1");
+      } else {
+        router.replace("/login?signedOut=1");
+      }
       setTimeout(() => {
         logoutInProgressRef.current = false;
       }, 1000);
@@ -106,6 +143,15 @@ export default function TopNav() {
               className="rounded-md px-3 py-1.5 text-[15px] font-medium text-cp-muted transition-colors hover:bg-cp-raised hover:text-cp-text"
             >
               Governance
+            </Link>
+          )}
+
+          {!loading && user && !planLoading && isTeamReviewUser && (
+            <Link
+              href="/team/reviews"
+              className="rounded-md px-3 py-1.5 text-[15px] font-medium text-cp-muted transition-colors hover:bg-cp-raised hover:text-cp-text"
+            >
+              Team Reviews
             </Link>
           )}
 
@@ -245,6 +291,15 @@ export default function TopNav() {
                 className="rounded-md px-3 py-2 text-sm text-cp-text transition-colors hover:bg-cp-raised hover:text-cp-text"
               >
                 Governance
+              </Link>
+            )}
+            {!loading && user && !planLoading && isTeamReviewUser && (
+              <Link
+                href="/team/reviews"
+                onClick={() => setMobileMenuOpen(false)}
+                className="rounded-md px-3 py-2 text-sm text-cp-text transition-colors hover:bg-cp-raised hover:text-cp-text"
+              >
+                Team Reviews
               </Link>
             )}
             <div className="my-2 border-t border-cp-border" />

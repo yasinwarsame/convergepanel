@@ -23,7 +23,9 @@
     "verify:consensus": "node scripts/dev-verify-consensus-scoring.mjs",
     "verify:governance": "node scripts/dev-verify-governance.mjs",
     "verify:video": "node scripts/dev-verify-video-processing.mjs",
-    "seo:indexnow": "node scripts/submit-indexnow.mjs"
+    "seo:indexnow": "node scripts/submit-indexnow.mjs",
+    "governance:seed": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/seed-adaptive-multi-reviewer-e2e.ts",
+    "governance:seed:cleanup": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/cleanup-adaptive-multi-reviewer-e2e.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.20.0",

@@ -248,6 +248,26 @@ type AuditInlineTrailState = {
   error: string | null;
 } | null;
 
+/**
+ * Immutable Adaptive Review History and Admin Audit Integration — additive
+ * label override for the new `adaptive_human_review_decided` action. Every
+ * other action falls through unchanged to the existing generic
+ * `action.replace(/_/g, " ").toUpperCase()` transform at its one call site
+ * below — this function does not change how any legacy action renders.
+ */
+function governanceAuditActionDisplayLabel(action: string): string | null {
+  if (action === "adaptive_human_review_decided") return "Adaptive review decided";
+  // Part E3 — Single-Reviewer Assignment for Adaptive Human Review.
+  if (action === "adaptive_human_review_reviewer_assigned") return "Reviewer assigned";
+  if (action === "adaptive_human_review_reviewer_reassigned") return "Reviewer reassigned";
+  if (action === "adaptive_human_review_reviewer_unassigned") return "Reviewer unassigned";
+  // Transactional Multi-Reviewer Finalization, Part E.
+  if (action === "adaptive_review_panel_finalized") return "Panel finalized";
+  // Multi-Reviewer Owner Override, Part F.
+  if (action === "adaptive_review_panel_owner_overridden") return "Panel overridden by owner";
+  return null;
+}
+
 function auditActionBadgeLg(action: string): string {
   const base =
     "inline-flex items-center rounded-md px-3 py-1 text-xs font-bold uppercase tracking-wide";
@@ -403,7 +423,7 @@ function AuditLogEventCard(props: {
       ? Math.round(ev.consensusScore)
       : null;
   const showTrailBtn = Boolean(ev.runId && ev.runId !== "policy");
-  const actionLabel = ev.action.replace(/_/g, " ").toUpperCase();
+  const actionLabel = (governanceAuditActionDisplayLabel(ev.action) ?? ev.action.replace(/_/g, " ")).toUpperCase();
 
   return (
     <li className={`rounded-xl border border-cp-border bg-cp-surface shadow-sm border-l-4 ${border}`}>

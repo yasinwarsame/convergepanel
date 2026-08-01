@@ -20,10 +20,11 @@ function usableResult(modelId: string, rawText: string): ModelResult {
 describe("detectAdaptiveBiases", () => {
   afterEach(() => jest.clearAllMocks());
 
-  it("returns [] without calling the model when fewer than 2 usable responses exist", async () => {
+  it("returns [] with emptyReason 'insufficient_models' without calling the model when fewer than 2 usable responses exist", async () => {
     const results = [usableResult("chatgpt", "some text")];
-    const findings = await detectAdaptiveBiases("Q", "generic", results, ["chatgpt" as any]);
-    expect(findings).toEqual([]);
+    const result = await detectAdaptiveBiases("Q", "generic", results, ["chatgpt" as any]);
+    expect(result.findings).toEqual([]);
+    expect(result.emptyReason).toBe("insufficient_models");
     expect(mockedCallGemini).not.toHaveBeenCalled();
   });
 
@@ -51,14 +52,15 @@ describe("detectAdaptiveBiases", () => {
     });
 
     const results = [usableResult("chatgpt", "In the US and EU, policy works."), usableResult("claude", "Policy works generally.")];
-    const findings = await detectAdaptiveBiases("Q", "generic", results, ["chatgpt" as any, "claude" as any]);
+    const result = await detectAdaptiveBiases("Q", "generic", results, ["chatgpt" as any, "claude" as any]);
 
-    expect(findings).toHaveLength(1);
-    expect(findings[0].biasType).toBe("Western-centric framing");
+    expect(result.findings).toHaveLength(1);
+    expect(result.emptyReason).toBeNull();
+    expect(result.findings[0].biasType).toBe("Western-centric framing");
     // "invented-model" is filtered out of both modelsImplicated and evidence — never trust the model's own IDs blindly.
-    expect(findings[0].modelsImplicated).toEqual(["chatgpt"]);
-    expect(findings[0].evidence).toHaveLength(1);
-    expect(findings[0].evidence[0].modelId).toBe("chatgpt");
+    expect(result.findings[0].modelsImplicated).toEqual(["chatgpt"]);
+    expect(result.findings[0].evidence).toHaveLength(1);
+    expect(result.findings[0].evidence[0].modelId).toBe("chatgpt");
   });
 
   it("drops a finding entirely if roster-filtering leaves no valid evidence", async () => {
@@ -82,19 +84,38 @@ describe("detectAdaptiveBiases", () => {
     });
 
     const results = [usableResult("chatgpt", "text"), usableResult("claude", "text")];
-    const findings = await detectAdaptiveBiases("Q", "generic", results, ["chatgpt" as any, "claude" as any]);
-    expect(findings).toEqual([]);
+    const result = await detectAdaptiveBiases("Q", "generic", results, ["chatgpt" as any, "claude" as any]);
+    expect(result.findings).toEqual([]);
+    // Roster-filtering left nothing — the call itself succeeded and returned a shape, so this is a genuine null result, not a call failure.
+    expect(result.emptyReason).toBe("below_threshold");
   });
 
-  it("degrades to [] on timeout/error, never throws", async () => {
+  it("degrades to [] with emptyReason 'call_failed' on timeout/error, never throws", async () => {
     mockedCallGemini.mockResolvedValue({ modelId: "gemini", status: "error", rawText: null, errorMessage: "boom", latencyMs: 5 });
     const results = [usableResult("chatgpt", "text"), usableResult("claude", "text")];
-    await expect(detectAdaptiveBiases("Q", "generic", results, ["chatgpt" as any, "claude" as any])).resolves.toEqual([]);
+    const result = await detectAdaptiveBiases("Q", "generic", results, ["chatgpt" as any, "claude" as any]);
+    expect(result.findings).toEqual([]);
+    expect(result.emptyReason).toBe("call_failed");
   });
 
-  it("degrades to [] on malformed JSON, never throws", async () => {
+  it("degrades to [] with emptyReason 'call_failed' on unparseable JSON, never throws", async () => {
     mockedCallGemini.mockResolvedValue({ modelId: "gemini", status: "ok", rawText: "not json at all", latencyMs: 5 });
     const results = [usableResult("chatgpt", "text"), usableResult("claude", "text")];
-    await expect(detectAdaptiveBiases("Q", "generic", results, ["chatgpt" as any, "claude" as any])).resolves.toEqual([]);
+    const result = await detectAdaptiveBiases("Q", "generic", results, ["chatgpt" as any, "claude" as any]);
+    expect(result.findings).toEqual([]);
+    expect(result.emptyReason).toBe("call_failed");
+  });
+
+  it("degrades to [] with emptyReason 'invalid_response' when the JSON parses but doesn't match the expected shape", async () => {
+    mockedCallGemini.mockResolvedValue({
+      modelId: "gemini",
+      status: "ok",
+      rawText: JSON.stringify({ someOtherField: "not the biasAndBlindSpots shape at all" }),
+      latencyMs: 5,
+    });
+    const results = [usableResult("chatgpt", "text"), usableResult("claude", "text")];
+    const result = await detectAdaptiveBiases("Q", "generic", results, ["chatgpt" as any, "claude" as any]);
+    expect(result.findings).toEqual([]);
+    expect(result.emptyReason).toBe("invalid_response");
   });
 });

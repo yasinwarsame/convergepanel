@@ -21,6 +21,22 @@ function okResult(rawText: string) {
   return { modelId: "gemini" as const, status: "ok" as const, rawText, latencyMs: 10 };
 }
 
+/** Query-routing redesign, Milestone 1: fills in the new required QueryClassification metadata fields with neutral defaults, so each test below only needs to override what it's actually asserting on. */
+function classification(overrides: Record<string, any>) {
+  return JSON.stringify({
+    riskLevel: "professional",
+    evidenceRequirement: "medium",
+    freshness: "timeless",
+    inputType: "text",
+    verificationMethod: "cross_model_consistency",
+    requestedCount: null,
+    requiresClarification: false,
+    clarificationQuestion: null,
+    rationale: "test fixture",
+    ...overrides,
+  });
+}
+
 describe("classifyQuery", () => {
   afterEach(() => {
     jest.clearAllMocks();
@@ -55,7 +71,7 @@ describe("classifyQuery", () => {
             () =>
               resolve(
                 okResult(
-                  JSON.stringify({
+                  classification({
                     queryType: "contested_empirical",
                     domain: "macroeconomics",
                     answerShape: "consensus_map",
@@ -82,7 +98,7 @@ describe("classifyQuery", () => {
   it("falls back to generic when confidence is below threshold, and tags the fallback reason", async () => {
     mockedCallGemini.mockResolvedValue(
       okResult(
-        JSON.stringify({
+        classification({
           queryType: "financial_valuation",
           domain: "equities",
           answerShape: "metrics_grid",
@@ -131,7 +147,7 @@ describe("classifyQuery", () => {
     // CLASSIFIER_TIMEOUT_MS (3000ms) was too tight under concurrent load.
     mockedCallGemini.mockResolvedValue(
       okResult(
-        JSON.stringify({
+        classification({
           queryType: "contested_empirical",
           domain: "macroeconomics",
           answerShape: "consensus_map",
@@ -154,7 +170,7 @@ describe("classifyQuery", () => {
   it("returns the classification for a valid, high-confidence response", async () => {
     mockedCallGemini.mockResolvedValue(
       okResult(
-        JSON.stringify({
+        classification({
           queryType: "procedural",
           domain: "personal finance",
           answerShape: "step_diff",
@@ -176,6 +192,16 @@ describe("classifyQuery", () => {
       timeSensitivity: "low",
       userIntent: "learn_process",
       confidence: 0.88,
+      riskLevel: "professional",
+      evidenceRequirement: "medium",
+      freshness: "timeless",
+      inputType: "text",
+      verificationMethod: "cross_model_consistency",
+      requestedCount: null,
+      requiresClarification: false,
+      clarificationQuestion: null,
+      rationale: "test fixture",
+      handoffTarget: undefined,
     });
   });
 
@@ -183,7 +209,7 @@ describe("classifyQuery", () => {
     mockedCallGemini.mockResolvedValue(
       okResult(
         "```json\n" +
-          JSON.stringify({
+          classification({
             queryType: "creative_generative",
             domain: "marketing copy",
             answerShape: "gallery",
@@ -204,7 +230,7 @@ describe("classifyQuery", () => {
   it("caches classification for a repeated query", async () => {
     mockedCallGemini.mockResolvedValue(
       okResult(
-        JSON.stringify({
+        classification({
           queryType: "factual_lookup",
           domain: "history",
           answerShape: "verdict_card",

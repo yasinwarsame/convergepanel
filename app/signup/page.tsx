@@ -4,14 +4,16 @@
  * Sign up: email/password registration and initial profile setup.
  */
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
-import { createUserWithEmailAndPassword } from "firebase/auth";
+import { createUserWithEmailAndPassword, signOut } from "firebase/auth";
 import { auth, db } from "@/lib/firebase/client";
 import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { safeRedirect } from "@/lib/utils/safeRedirect";
+import { useAuth } from "@/components/AuthProvider";
+import { clearServerSession } from "@/lib/client/sessionSync";
 import posthog from "posthog-js";
 
 /**
@@ -182,6 +184,45 @@ export default function SignupPage() {
   const [loading, setLoading] = useState(false);
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { syncState, user: authedUser } = useAuth();
+
+  // Auth Lifecycle Hardening, Step 6.5 — same pending-sync pattern as
+  // app/login/page.tsx: redirect only once syncState === "authenticated"
+  // for THIS uid, never merely because Firebase resolved a credential.
+  // `pendingSignupUid` MUST be React state, not a ref — see the detailed
+  // comment in app/login/page.tsx: AuthProvider's own sync can finish
+  // before this handler arms the expected uid, and only a state update
+  // (not a ref mutation) re-runs the watching effect to notice.
+  const [pendingSignupUid, setPendingSignupUid] = useState<string | null>(null);
+  const pendingRedirectRef = useRef<string | null>(null);
+  const pendingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearPendingSignup = () => {
+    setPendingSignupUid(null);
+    pendingRedirectRef.current = null;
+    if (pendingTimeoutRef.current) {
+      clearTimeout(pendingTimeoutRef.current);
+      pendingTimeoutRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    if (!pendingSignupUid) return;
+    if (syncState === "authenticated" && authedUser?.uid === pendingSignupUid) {
+      const next = pendingRedirectRef.current ?? "/onboarding";
+      clearPendingSignup();
+      setLoading(false);
+      router.push(next);
+      router.refresh();
+    } else if (syncState === "session_error") {
+      clearPendingSignup();
+      setLoading(false);
+      setError("Account created, but sign-in could not be completed. Please sign in.");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingSignupUid, syncState, authedUser, router]);
+
+  useEffect(() => () => clearPendingSignup(), []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -200,6 +241,14 @@ export default function SignupPage() {
     setLoading(true);
 
     try {
+      // Auth Lifecycle Hardening, Step 6.6 — signing up while a DIFFERENT
+      // session is already active in this browser is an account switch;
+      // invalidate the old one first (same as app/login/page.tsx).
+      if (auth.currentUser) {
+        await clearServerSession();
+        await signOut(auth);
+      }
+
       // Sign up with Firebase Auth (client-side only for MVP)
       const userCredential = await createUserWithEmailAndPassword(
         auth,
@@ -233,18 +282,9 @@ export default function SignupPage() {
         isDisabled: false,
       }));
 
-      // Create session cookie so middleware can gate /admin/* without redirecting
-      // authenticated users to login. Non-blocking.
-      try {
-        const idToken = await user.getIdToken();
-        await fetch("/api/auth/session", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ idToken }),
-        });
-      } catch {
-        // Session cookie is best-effort; admin layout enforces real access control
-      }
+      // Session-cookie creation/verification now happens reactively in
+      // AuthProvider's onIdTokenChanged listener — see the pending-sync
+      // effect above, which waits for it before redirecting.
 
       posthog.identify(user.uid, { email: user.email ?? undefined, name: name.trim() || undefined });
       posthog.capture("user_signed_up", { method: "email" });
@@ -256,11 +296,22 @@ export default function SignupPage() {
       const onboardingUrl = postOnboardingRedirect !== "/"
         ? `/onboarding?redirect=${encodeURIComponent(postOnboardingRedirect)}`
         : "/onboarding";
-      router.push(onboardingUrl);
-      router.refresh(); // Refresh to update auth state
+
+      pendingRedirectRef.current = onboardingUrl;
+      setPendingSignupUid(user.uid);
+      pendingTimeoutRef.current = setTimeout(() => {
+        setPendingSignupUid((current) => {
+          if (current === user.uid) {
+            pendingRedirectRef.current = null;
+            setLoading(false);
+            setError("Account created, but sign-in is taking longer than expected. Please sign in.");
+            return null;
+          }
+          return current;
+        });
+      }, 10000);
     } catch (err: any) {
       setError(err.message || "Failed to create account");
-    } finally {
       setLoading(false);
     }
   };

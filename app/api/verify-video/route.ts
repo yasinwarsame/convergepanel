@@ -25,8 +25,8 @@ import { randomUUID } from "crypto";
 import { FieldValue, type DocumentData } from "firebase-admin/firestore";
 
 import { adminDb } from "@/lib/firebase/admin";
-import { verifySessionCookie } from "@/lib/firebase/auth-helpers";
-import { verifyIdToken } from "@/lib/firebase/auth";
+import { resolveRequestIdentity } from "@/lib/auth/resolveRequestIdentity";
+import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelemetry";
 import { getEffectiveEntitlements } from "@/lib/admin/entitlements";
 import { getVideoLimit } from "@/lib/billing/planConfig";
 import { sanitizeForFirestore } from "@/lib/firestore/sanitizeForFirestore";
@@ -150,34 +150,27 @@ type VisionModelRow = {
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
 
-  let uid: string;
-  let authEmail = "";
-  // Same session-cookie-first, Bearer-fallback pattern as verify-claim routes.
-  try {
-    const auth = await verifySessionCookie(request);
-    if (auth) {
-      uid = auth.uid;
-    } else {
-      const authHeader = request.headers.get("authorization");
-      if (!authHeader?.startsWith("Bearer ")) {
-        return NextResponse.json(
-          { ok: false, error: { code: "unauthorized", message: "Please sign in to verify a video." } },
-          { status: 401 }
-        );
-      }
-      const token = authHeader.split("Bearer ")[1];
-      const decodedToken = await verifyIdToken(token);
-      uid = decodedToken.uid;
-      authEmail = decodedToken.email || "";
-    }
-  } catch (authError: unknown) {
-    const authMsg = authError instanceof Error ? authError.message : String(authError);
-    logger.error("[verify-video] Authentication error", { error: authMsg });
+  // Auth Identity Consistency Remediation, Step 7 — resolves via the
+  // shared, hardened resolver (considers cookie AND bearer, fails closed
+  // on a confirmed identity mismatch) rather than this route's own
+  // duplicated cookie-first logic. Video verification business logic
+  // below (upload handling, vision-model dispatch, verdict computation,
+  // quota, token accounting, audit) is completely untouched — only
+  // identity resolution changed. `authEmail` (a rare fallback used only
+  // when Firestore's own `users/{uid}.email` is ALSO absent — see line
+  // ~214) is now always "", matching what the cookie-authenticated path
+  // already did in every common case; the shared resolver does not
+  // expose the bearer token's own claims back to callers.
+  const identity = await resolveRequestIdentity(request);
+  if (identity.status !== "authenticated") {
+    logIdentityResolutionFailure({ route: "POST /api/verify-video", method: "POST", failureCategory: identity.reason });
     return NextResponse.json(
       { ok: false, error: { code: "unauthorized", message: "Please sign in to verify a video." } },
       { status: 401 }
     );
   }
+  const uid = identity.uid;
+  const authEmail = "";
 
   if (!adminDb) {
     return NextResponse.json(

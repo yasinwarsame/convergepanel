@@ -10,12 +10,14 @@
  * - Minimal dependencies to ensure fast first paint
  */
 
-import { useState } from "react";
-import { signInWithEmailAndPassword } from "firebase/auth";
+import { useEffect, useRef, useState } from "react";
+import { signInWithEmailAndPassword, signOut } from "firebase/auth";
 import { auth } from "@/lib/firebase/client";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { safeRedirect } from "@/lib/utils/safeRedirect";
+import { useAuth } from "@/components/AuthProvider";
+import { clearServerSession } from "@/lib/client/sessionSync";
 import posthog from "posthog-js";
 
 const LOGIN_VALUE_LINES = [
@@ -53,6 +55,62 @@ export default function LoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const signedOut = searchParams.get("signedOut") === "1" || searchParams.get("signedOut") === "true";
+  const { syncState, user: authedUser } = useAuth();
+
+  /**
+   * Auth Lifecycle Hardening, Step 6.5 — "login is not application-complete
+   * until server session uid equals Firebase client uid." Session
+   * synchronization itself now happens reactively in `AuthProvider`
+   * (`components/AuthProvider.tsx`, driven by `onIdTokenChanged`); this
+   * effect just waits for THAT specific sign-in's uid to reach
+   * `syncState === "authenticated"` before redirecting. Checking `uid`
+   * (not just `syncState`) is what makes this safe even if a stale
+   * `"authenticated"` state from a PREVIOUS session is still settling when
+   * this new sign-in starts — a mismatched uid never triggers the redirect.
+   *
+   * `pendingLoginUid` MUST be React state, not a ref: `AuthProvider`'s own
+   * sync runs independently of (and can finish before) this handler's own
+   * Firestore work below, so `syncState` can already have reached
+   * `"authenticated"` by the time this uid is armed. A ref mutation does
+   * not re-run the watching effect, so an already-settled `syncState`
+   * would never be re-checked — the redirect would simply never fire,
+   * silently, until the bounded timeout below force-fails it. `setState`
+   * triggers a fresh render (and thus a fresh effect run) at the moment
+   * it's armed, evaluating against whatever `syncState` already is right
+   * then, closing that race regardless of which side finishes first.
+   */
+  const [pendingLoginUid, setPendingLoginUid] = useState<string | null>(null);
+  const pendingRedirectRef = useRef<string | null>(null);
+  const pendingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearPendingLogin = () => {
+    setPendingLoginUid(null);
+    pendingRedirectRef.current = null;
+    if (pendingTimeoutRef.current) {
+      clearTimeout(pendingTimeoutRef.current);
+      pendingTimeoutRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    if (!pendingLoginUid) return;
+    if (syncState === "authenticated" && authedUser?.uid === pendingLoginUid) {
+      const next = pendingRedirectRef.current ?? "/";
+      clearPendingLogin();
+      setLoading(false);
+      router.push(next);
+      router.refresh();
+    } else if (syncState === "session_error") {
+      clearPendingLogin();
+      setLoading(false);
+      setError("Sign-in could not be completed. Please try again.");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingLoginUid, syncState, authedUser, router]);
+
+  // Unmount safety only — the bounded wait itself is armed explicitly in
+  // handleSubmit (see below).
+  useEffect(() => () => clearPendingLogin(), []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -60,6 +118,15 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
+      // Auth Lifecycle Hardening, Step 6.6 — if a DIFFERENT session is
+      // already active in this browser, invalidate it (server cookie +
+      // Firebase client) BEFORE starting the new sign-in, rather than
+      // relying solely on AuthProvider's reactive uid-change fallback.
+      if (auth.currentUser) {
+        await clearServerSession();
+        await signOut(auth);
+      }
+
       // Sign in with Firebase Auth (client-side only for MVP)
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
@@ -95,18 +162,12 @@ export default function LoginPage() {
       
       await setDoc(userDocRef, updateData, { merge: true });
 
-      // Create session cookie so middleware can gate /admin/* without redirecting
-      // authenticated users. Non-blocking — client-side admin gate still applies.
-      try {
-        const idToken = await user.getIdToken();
-        await fetch("/api/auth/session", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ idToken }),
-        });
-      } catch {
-        // Session cookie is best-effort; admin layout enforces real access control
-      }
+      // Session-cookie creation/verification is no longer done here — it now
+      // happens reactively in AuthProvider's onIdTokenChanged listener
+      // (lib/client/sessionSync.ts's establishServerSession), which is the
+      // single place that call is made from. This handler waits for that to
+      // reach syncState === "authenticated" for THIS uid (see effect above)
+      // before redirecting.
 
       // Validate subscription status for paid plans (best-effort, non-blocking)
       // This ensures Firestore stays in sync with Stripe even if webhooks fail
@@ -149,21 +210,36 @@ export default function LoginPage() {
       posthog.identify(user.uid, { email: user.email ?? undefined });
       posthog.capture("user_logged_in", { method: "email" });
 
-      // Redirect to the page user was trying to access (or home)
-      // Supports both "redirect" (from extension/verify flow) and "next" (legacy)
+      // Redirect to the page user was trying to access (or home) — deferred
+      // until the effect above confirms syncState === "authenticated" for
+      // THIS uid. `loading` stays true (button disabled) until then.
       const rawRedirect = searchParams.get("redirect") || searchParams.get("next");
       const next = safeRedirect(rawRedirect, "/");
 
       if (process.env.NODE_ENV !== "production") {
-        console.debug("[login] Post-login redirect:", { rawRedirect, resolved: next });
+        console.debug("[login] Awaiting session sync before redirect:", { rawRedirect, resolved: next });
       }
 
-      router.push(next);
-      router.refresh(); // Refresh to update auth state
+      pendingRedirectRef.current = next;
+      setPendingLoginUid(user.uid);
+      // Bounded wait — never hang the button forever if sync stalls
+      // (network partition, a hung fetch). No retry loop here; a single
+      // fail-closed timeout surfaces an error and lets the user submit
+      // again, consistent with "no infinite retry."
+      pendingTimeoutRef.current = setTimeout(() => {
+        setPendingLoginUid((current) => {
+          if (current === user.uid) {
+            pendingRedirectRef.current = null;
+            setLoading(false);
+            setError("Sign-in is taking longer than expected. Please try again.");
+            return null;
+          }
+          return current;
+        });
+      }, 10000);
     } catch (err: any) {
       console.error("Login error:", err);
       setError(err.message || "Failed to sign in");
-    } finally {
       setLoading(false);
     }
   };

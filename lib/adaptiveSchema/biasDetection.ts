@@ -11,12 +11,19 @@
  * every model ID (implicated + evidence) is filtered against the run's
  * actual roster before returning — a finding that ends up with no valid
  * evidence after filtering is dropped rather than shown half-populated.
+ *
+ * Returns an `emptyReason` alongside `findings` (Bias & Blind Spots Tiers
+ * fix, Part T1) so an empty result is never ambiguous: "below_threshold"
+ * means the call ran fine and genuinely found nothing confidently
+ * attributable, vs "insufficient_models"/"call_failed"/"invalid_response"
+ * meaning the call never really got a chance to find anything. Surfaced in
+ * the dev debug panel (ResultsDisplay.tsx's AdaptiveDebugPanel).
  */
 
 import "server-only";
 import { z } from "zod";
 import { ModelId, ModelResult } from "@/lib/types";
-import { AdaptiveBiasFinding, QueryType } from "./types";
+import { AdaptiveBiasFinding, BiasEmptyReason, QueryType } from "./types";
 import { callGemini } from "@/lib/connectors/gemini";
 import { GEMINI_API_KEY } from "@/lib/env";
 import { logger } from "@/lib/logger";
@@ -47,6 +54,12 @@ const BiasResponseSchema = z.object({
   biasAndBlindSpots: z.array(BiasFindingSchema),
 });
 
+export interface AdaptiveBiasDetectionResult {
+  findings: AdaptiveBiasFinding[];
+  /** Null when findings is non-empty. */
+  emptyReason: BiasEmptyReason | null;
+}
+
 /**
  * Identifies shared blind spots (evidence-base skew, framing bias, missing
  * perspectives) across a panel run. Never throws; degrades to an empty array
@@ -58,9 +71,9 @@ export async function detectAdaptiveBiases(
   schemaId: QueryType,
   results: ModelResult[],
   modelRoster: ModelId[]
-): Promise<AdaptiveBiasFinding[]> {
+): Promise<AdaptiveBiasDetectionResult> {
   const usable = results.filter((r) => (r.status === "ok" || r.status === "substituted") && r.rawText);
-  if (usable.length < 2) return [];
+  if (usable.length < 2) return { findings: [], emptyReason: "insufficient_models" };
 
   const rosterList = modelRoster.join(", ");
   const responsesBlock = usable
@@ -101,18 +114,18 @@ No markdown fences, no commentary outside the JSON.`;
 
     if (result.status !== "ok" || !result.rawText) {
       logger.info("[adaptiveSchema] Bias detection call failed, returning no findings", { status: result.status });
-      return [];
+      return { findings: [], emptyReason: "call_failed" };
     }
 
     const parsed = BiasResponseSchema.safeParse(JSON.parse(stripJsonFences(result.rawText)));
     if (!parsed.success) {
       logger.info("[adaptiveSchema] Bias detection response failed validation, returning no findings");
-      return [];
+      return { findings: [], emptyReason: "invalid_response" };
     }
 
     const rosterSet = new Set<string>(modelRoster);
 
-    return parsed.data.biasAndBlindSpots
+    const findings = parsed.data.biasAndBlindSpots
       .slice(0, MAX_BIAS_FINDINGS)
       .map((b) => ({
         biasType: b.biasType,
@@ -130,10 +143,12 @@ No markdown fences, no commentary outside the JSON.`;
         mitigationSteps: b.mitigationSteps,
       }))
       .filter((b) => b.modelsImplicated.length > 0 && b.evidence.length > 0);
+
+    return { findings, emptyReason: findings.length > 0 ? null : "below_threshold" };
   } catch (err: any) {
     logger.warn("[adaptiveSchema] Bias detection call threw/timed out, returning no findings", {
       error: err?.message,
     });
-    return [];
+    return { findings: [], emptyReason: "call_failed" };
   }
 }

@@ -10,8 +10,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { stripe } from "@/lib/stripe/client";
 import { getStripePriceId, PlanId, BillingInterval } from "@/lib/plans";
 import { adminDb } from "@/lib/firebase/admin";
-import { verifyIdToken } from "@/lib/firebase/auth";
-import { verifySessionCookie } from "@/lib/firebase/auth-helpers";
+import { resolveRequestIdentity } from "@/lib/auth/resolveRequestIdentity";
+import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelemetry";
 import { STRIPE_PRICE_3_MODELS, STRIPE_3_MODELS_ANNUAL, STRIPE_PRICE_5_MODELS, STRIPE_5_MODELS_ANNUAL } from "@/lib/env";
 import { getPostHogClient } from "@/lib/posthog-server";
 import { logger } from "@/lib/logger";
@@ -22,31 +22,28 @@ export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
   try {
-    // Verify authentication (try session cookie first, then Bearer token)
-    const auth = await verifySessionCookie(req);
-    let uid: string;
+    // Auth Identity Consistency Remediation, Step 7 — resolves via the
+    // shared, hardened resolver (considers cookie AND bearer, fails
+    // closed on a confirmed identity mismatch) rather than this route's
+    // own duplicated cookie-first logic. `userEmail` is now always
+    // sourced from Firestore (matching what the cookie-authenticated path
+    // already did) rather than occasionally from the bearer token's own
+    // claims — functionally equivalent for Stripe checkout purposes,
+    // since `users/{uid}.email` is kept in sync with the Firebase Auth
+    // account at every login.
+    const identity = await resolveRequestIdentity(req);
+    if (identity.status !== "authenticated") {
+      logIdentityResolutionFailure({ route: "POST /api/billing/create-checkout-session", method: "POST", failureCategory: identity.reason });
+      return NextResponse.json(
+        { error: "Unauthorized. Please sign in." },
+        { status: 401 }
+      );
+    }
+    const uid = identity.uid;
     let userEmail: string | undefined;
-
-    if (auth) {
-      uid = auth.uid;
-      // Get email from Firestore if needed
-      if (adminDb) {
-        const userDoc = await adminDb.collection("users").doc(uid).get();
-        userEmail = userDoc.data()?.email;
-      }
-    } else {
-      // Fallback to Bearer token
-      const authHeader = req.headers.get("authorization");
-      if (!authHeader?.startsWith("Bearer ")) {
-        return NextResponse.json(
-          { error: "Unauthorized. Please sign in." },
-          { status: 401 }
-        );
-      }
-      const token = authHeader.split("Bearer ")[1];
-      const decodedToken = await verifyIdToken(token);
-      uid = decodedToken.uid;
-      userEmail = decodedToken.email;
+    if (adminDb) {
+      const userDoc = await adminDb.collection("users").doc(uid).get();
+      userEmail = userDoc.data()?.email;
     }
 
     // Parse request body

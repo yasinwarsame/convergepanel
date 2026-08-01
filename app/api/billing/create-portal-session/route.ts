@@ -8,8 +8,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { stripe } from "@/lib/stripe/client";
 import { adminDb } from "@/lib/firebase/admin";
-import { verifyIdToken } from "@/lib/firebase/auth";
-import { verifySessionCookie } from "@/lib/firebase/auth-helpers";
+import { resolveRequestIdentity } from "@/lib/auth/resolveRequestIdentity";
+import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelemetry";
 import { logger } from "@/lib/logger";
 
 // Ensure Node.js runtime (Firebase Admin requires Node.js, not Edge)
@@ -17,25 +17,18 @@ export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
   try {
-    // Verify authentication (try session cookie first, then Bearer token)
-    const auth = await verifySessionCookie(req);
-    let uid: string;
-
-    if (auth) {
-      uid = auth.uid;
-    } else {
-      // Fallback to Bearer token
-      const authHeader = req.headers.get("authorization");
-      if (!authHeader?.startsWith("Bearer ")) {
-        return NextResponse.json(
-          { error: "Unauthorized. Please sign in." },
-          { status: 401 }
-        );
-      }
-      const token = authHeader.split("Bearer ")[1];
-      const decodedToken = await verifyIdToken(token);
-      uid = decodedToken.uid;
+    // Auth Identity Consistency Remediation, Step 7 — resolves via the
+    // shared, hardened resolver rather than this route's own duplicated
+    // cookie-first logic.
+    const identity = await resolveRequestIdentity(req);
+    if (identity.status !== "authenticated") {
+      logIdentityResolutionFailure({ route: "POST /api/billing/create-portal-session", method: "POST", failureCategory: identity.reason });
+      return NextResponse.json(
+        { error: "Unauthorized. Please sign in." },
+        { status: 401 }
+      );
     }
+    const uid = identity.uid;
 
     if (!stripe) {
       return NextResponse.json(

@@ -17,7 +17,18 @@ import { z } from "zod";
 import { callGemini } from "@/lib/connectors/gemini";
 import { GEMINI_API_KEY } from "@/lib/env";
 import { logger } from "@/lib/logger";
-import { QueryClassification, QueryClassificationFallbackReason, QueryType, AnswerShape } from "./types";
+import {
+  QueryClassification,
+  QueryClassificationFallbackReason,
+  QueryType,
+  AnswerShape,
+  RiskLevel,
+  EvidenceRequirement,
+  FreshnessRequirement,
+  ClassificationInputType,
+  VerificationMethod,
+  HandoffTarget,
+} from "./types";
 import { CLASSIFIER_SYSTEM_PROMPT } from "./classifierPrompt";
 import { stripJsonFences, withTimeout } from "./util";
 
@@ -33,6 +44,15 @@ const CLASSIFIER_MAX_OUTPUT_TOKENS = 300;
 const CONFIDENCE_THRESHOLD = 0.6;
 const CACHE_MAX_ENTRIES = 200;
 
+// Every queryType the classifier may output — the full 28-type taxonomy,
+// not just the 10 "active" ones. Classification and routing are
+// deliberately separate concerns: the classifier's job is to say what a
+// question IS as accurately as possible; routeClassifiedQuery.ts (reading
+// schemaRegistry.ts's implementationStatus) is what decides whether it's
+// safe to actually execute. Under-teaching the classifier to avoid
+// "wasting" accuracy on disabled types would just make disabled types
+// silently misclassify as "generic" instead of correctly routing to
+// graceful_limitation — the exact bug this redesign exists to prevent.
 const QUERY_TYPES: QueryType[] = [
   "contested_empirical",
   "legal_regulatory",
@@ -43,6 +63,25 @@ const QUERY_TYPES: QueryType[] = [
   "forecast_speculative",
   "creative_generative",
   "generic",
+  "graceful_limitation",
+  "claim_verification",
+  "media_authenticity_review",
+  "document_qa",
+  "document_comparison",
+  "data_analysis",
+  "current_live_information",
+  "definition_explanation",
+  "causal_explanation",
+  "ranked_enumeration",
+  "checklist_taxonomy",
+  "comparison_matrix",
+  "deep_research",
+  "evidence_review",
+  "bias_blindspot_audit",
+  "decision_support",
+  "scenario_analysis",
+  "step_by_step_plan",
+  "transformation",
 ];
 
 const ANSWER_SHAPES: AnswerShape[] = [
@@ -55,7 +94,51 @@ const ANSWER_SHAPES: AnswerShape[] = [
   "scenario_tree",
   "gallery",
   "generic_sections",
+  "direct_answer",
+  "limitation_notice",
+  "ranked_list",
+  "comparison_grid",
+  "definition_card",
+  "causal_map",
+  "checklist_taxonomy_view",
+  "deep_research_view",
+  "evidence_review_view",
+  "bias_blindspot_audit_view",
+  "decision_support_view",
 ];
+
+const RISK_LEVELS: RiskLevel[] = ["casual", "professional", "high_stakes", "safety_critical"];
+const EVIDENCE_REQUIREMENTS: EvidenceRequirement[] = ["low", "medium", "high", "regulated"];
+const FRESHNESS_LEVELS: FreshnessRequirement[] = ["timeless", "date_sensitive", "recent", "live"];
+const INPUT_TYPES: ClassificationInputType[] = [
+  "text",
+  "url",
+  "document",
+  "documents",
+  "image",
+  "video",
+  "audio",
+  "dataset",
+  "mixed",
+];
+const VERIFICATION_METHODS: VerificationMethod[] = [
+  "cross_model_consistency",
+  "claim_stance_agreement",
+  "semantic_item_overlap",
+  "rank_correlation",
+  "source_support",
+  "numerical_consistency",
+  "document_alignment",
+  "visual_signal_comparison",
+  "human_review",
+  "none",
+];
+
+/** Maps a classified handoff queryType to its dedicated-feature target — kept in sync with schemaRegistry.ts's handoffEntry() calls. */
+const HANDOFF_TARGET_BY_QUERY_TYPE: Partial<Record<QueryType, HandoffTarget>> = {
+  claim_verification: "claim_verification",
+  media_authenticity_review: "video_verification",
+};
 
 const ClassificationSchema = z.object({
   queryType: z.enum(QUERY_TYPES as [QueryType, ...QueryType[]]),
@@ -71,8 +154,18 @@ const ClassificationSchema = z.object({
     "generate_content",
   ]),
   confidence: z.number().min(0).max(1),
+  riskLevel: z.enum(RISK_LEVELS as [RiskLevel, ...RiskLevel[]]),
+  evidenceRequirement: z.enum(EVIDENCE_REQUIREMENTS as [EvidenceRequirement, ...EvidenceRequirement[]]),
+  freshness: z.enum(FRESHNESS_LEVELS as [FreshnessRequirement, ...FreshnessRequirement[]]),
+  inputType: z.enum(INPUT_TYPES as [ClassificationInputType, ...ClassificationInputType[]]),
+  verificationMethod: z.enum(VERIFICATION_METHODS as [VerificationMethod, ...VerificationMethod[]]),
+  requestedCount: z.number().nullable().optional(),
+  requiresClarification: z.boolean(),
+  clarificationQuestion: z.string().nullable().optional(),
+  rationale: z.string(),
 });
 
+/** Fills the new Milestone-1 metadata fields with safe, conservative defaults for the defensive "generic" fallback path — never blocks the pipeline waiting on a real classification. */
 function genericFallback(reason: QueryClassificationFallbackReason, confidence = 0): QueryClassification {
   return {
     queryType: "generic",
@@ -83,6 +176,14 @@ function genericFallback(reason: QueryClassificationFallbackReason, confidence =
     userIntent: "get_answer",
     confidence,
     fallbackReason: reason,
+    riskLevel: "professional",
+    evidenceRequirement: "medium",
+    freshness: "timeless",
+    inputType: "text",
+    verificationMethod: "cross_model_consistency",
+    requestedCount: null,
+    requiresClarification: false,
+    rationale: `Fell back to generic: ${reason}.`,
   };
 }
 
@@ -188,7 +289,10 @@ export async function classifyQuery(query: string): Promise<QueryClassification>
       return fallback;
     }
 
-    const classification = parsed.data;
+    const classification: QueryClassification = {
+      ...parsed.data,
+      handoffTarget: HANDOFF_TARGET_BY_QUERY_TYPE[parsed.data.queryType],
+    };
 
     if (classification.confidence < CONFIDENCE_THRESHOLD) {
       logger.info("[adaptiveSchema] Classification confidence below threshold, falling back to generic", {
