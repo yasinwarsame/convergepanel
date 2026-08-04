@@ -248,9 +248,9 @@ describe("GET .../review-panel — authorization", () => {
 });
 
 describe("GET .../review-panel — contract", () => {
-  it("returns panel: null when absent", async () => {
+  it("returns panel: null when absent, with canCreatePanel true for an authorized admin with both gates enabled", async () => {
     const { json } = await callGet();
-    expect(json).toEqual({ ok: true, version: 1, panel: null });
+    expect(json).toEqual({ ok: true, version: 1, panel: null, canCreatePanel: true });
   });
 
   it("returns the full panel shape with resolved reviewer display names when found", async () => {
@@ -658,6 +658,87 @@ describe("GET .../review-panel — Part F rich read model", () => {
       expect(json.panel.canCancelPanel).toBe(false);
       expect(json.panel.canOverride).toBe(false);
     });
+  });
+});
+
+// §F19 — the GET-only, no-panel-case capability flag that gates the
+// client's "Create a multi-reviewer panel" button, so the client never has
+// to re-derive "can I create a panel" from the env flag or team settings
+// itself. Mirrors PUT's own creation gate exactly (isTeamAdmin + reviewable
+// + global gate + team opt-in) — see `mapPanelMutationFailure`'s sibling
+// PUT tests below for the server-side authorization this flag mirrors,
+// which this change does NOT alter.
+describe("GET .../review-panel — canCreatePanel (§F19)", () => {
+  it("false when the global MULTI_REVIEWER_GOVERNANCE_ENABLED gate is disabled, even with team opt-in enabled and an authorized owner", async () => {
+    mockEnv.MULTI_REVIEWER_GOVERNANCE_ENABLED = false;
+    mockedGetRequestUid.mockResolvedValueOnce("owner-uid");
+    mockedMemberRole.mockReturnValueOnce("owner");
+    mockedIsTeamAdmin.mockReturnValueOnce(true);
+    const { json } = await callGet();
+    expect(json.panel).toBeNull();
+    expect(json.canCreatePanel).toBe(false);
+  });
+
+  it("false when the team has not opted in, even with the global gate enabled and an authorized owner", async () => {
+    mockedGetRequestUid.mockResolvedValueOnce("owner-uid");
+    mockedMemberRole.mockReturnValueOnce("owner");
+    mockedIsTeamAdmin.mockReturnValueOnce(true);
+    mockedLoadUserAndTeam.mockResolvedValueOnce({
+      user: { email: "owner@test.com" },
+      team: team({ adaptiveMultiReviewerSettings: { enabled: false, mode: "majority_quorum" } }),
+    });
+    const { json } = await callGet();
+    expect(json.panel).toBeNull();
+    expect(json.canCreatePanel).toBe(false);
+  });
+
+  it("an unauthorized (plain member) role is rejected at the route's own admin gate — never receives canCreatePanel at all, true or false", async () => {
+    mockedGetRequestUid.mockResolvedValueOnce("member-uid");
+    mockedMemberRole.mockReturnValueOnce("member");
+    mockedIsTeamAdmin.mockReturnValueOnce(false);
+    const { res, json } = await callGet();
+    expect(res.status).toBe(403);
+    expect(json.panel).toBeUndefined();
+    expect(json.canCreatePanel).toBeUndefined();
+    expect(mockedGetPanel).not.toHaveBeenCalled();
+  });
+
+  it("true when both the global gate and team opt-in are enabled and the caller is an authorized admin/owner", async () => {
+    const { json } = await callGet();
+    expect(json.panel).toBeNull();
+    expect(json.canCreatePanel).toBe(true);
+  });
+
+  it("is entirely absent from the response once a panel already exists — the create flag never leaks into the existing-panel shape", async () => {
+    mockedGetRequestUid.mockResolvedValueOnce("owner-uid");
+    mockedMemberRole.mockReturnValueOnce("owner");
+    mockedIsTeamAdmin.mockReturnValueOnce(true);
+    mockedGetPanel.mockResolvedValueOnce({
+      status: "found" as const,
+      panel: {
+        schemaVersion: 1,
+        kind: "adaptive_review_panel",
+        teamId: TEAM_ID,
+        runId: RUN_ID,
+        mode: "majority_quorum",
+        reviewerUserIds: ["owner-uid", "admin-uid", "admin-2-uid"],
+        requiredReviewerCount: 3,
+        quorum: 2,
+        status: "open",
+        revision: 1,
+        createdAt: "2026-07-31T00:00:00.000Z",
+        createdByUserId: "admin-uid",
+        updatedAt: "2026-07-31T00:00:00.000Z",
+        updatedByUserId: "admin-uid",
+      },
+    });
+    mockedGetVote.mockResolvedValue({ status: "absent" });
+    const { json } = await callGet();
+    expect(json.panel).not.toBeNull();
+    expect(json.canCreatePanel).toBeUndefined();
+    // The existing panel's own creation-adjacent flag (reconfiguration of
+    // an ALREADY-open panel) is unaffected by this change.
+    expect(json.panel.canReconfigurePanel).toBe(true);
   });
 });
 
