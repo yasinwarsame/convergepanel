@@ -168,6 +168,15 @@ export async function GET(req: NextRequest, { params }: { params: { runId: strin
   if ("errorRes" in ctx) return ctx.errorRes;
   const { uid, team, role, callerEmail, governanceRecord } = ctx;
 
+  // Hoisted above the panel-absent check (§F19) — both depend only on
+  // `team`/`governanceRecord`, already resolved by `authorizeAndLoadContext`,
+  // so `canCreatePanel` (no-panel case) and `canReconfigurePanel` (existing-
+  // panel case, below) can share the exact same two authoritative checks
+  // rather than the client re-deriving them from the global env flag or
+  // team settings directly.
+  const reviewable = isHumanReviewStatusReviewable((governanceRecord as GovernanceRecordV1).humanReview.status);
+  const optInAndGloballyEnabled = MULTI_REVIEWER_GOVERNANCE_ENABLED && Boolean(team.adaptiveMultiReviewerSettings?.enabled);
+
   const panelResult = await getAdaptiveHumanReviewPanel(params.runId, team.id);
   if (panelResult.status === "firestore_unavailable" || panelResult.status === "read_failed") {
     return errorResponse(503, "firestore_unavailable", "Could not load the review panel.");
@@ -176,11 +185,14 @@ export async function GET(req: NextRequest, { params }: { params: { runId: strin
     return errorResponse(409, "adaptive_review_panel_invalid", "This run's review panel could not be read.");
   }
   if (panelResult.status === "absent") {
-    return NextResponse.json({ ok: true, version: 1, panel: null });
+    // §F19 — mirrors PUT's own creation gate exactly (isTeamAdmin + reviewable
+    // + global gate + team opt-in), so the client never has to re-derive
+    // "can I create a panel" from the env flag or team settings itself.
+    const canCreatePanel = isTeamAdmin(role) && reviewable && optInAndGloballyEnabled;
+    return NextResponse.json({ ok: true, version: 1, panel: null, canCreatePanel });
   }
 
   const panel: AdaptiveHumanReviewPanelV1 = panelResult.panel;
-  const reviewable = isHumanReviewStatusReviewable((governanceRecord as GovernanceRecordV1).humanReview.status);
 
   // ---- Live vote status per reviewer (§F10/§F14) — bounded, deterministic
   // reads, never a collection query (≤9, the same pattern GET .../votes
@@ -281,7 +293,8 @@ export async function GET(req: NextRequest, { params }: { params: { runId: strin
   // previously a single `canManagePanel` flag; splitting them is what
   // actually fixes the release-boundary bug the audit found (disabling
   // opt-in used to block cancellation too, stranding the panel).
-  const optInAndGloballyEnabled = MULTI_REVIEWER_GOVERNANCE_ENABLED && Boolean(team.adaptiveMultiReviewerSettings?.enabled);
+  // `optInAndGloballyEnabled` is hoisted above (§F19) — shared with
+  // `canCreatePanel` in the panel-absent branch.
   const canReconfigurePanel = isTeamAdmin(role) && panel.status === "open" && reviewable && optInAndGloballyEnabled;
   const canCancelPanel = isTeamAdmin(role) && panel.status === "open" && reviewable;
   const canVote = isTeamAdmin(role) && currentUserIsReviewer && panel.status === "open" && reviewable && !currentUserVoted;

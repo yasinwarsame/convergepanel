@@ -91,6 +91,10 @@ export default function AdaptiveMultiReviewerPanelSection({
   const [panel, setPanel] = useState<RichPanel | null | undefined>(undefined);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [eligibleReviewers, setEligibleReviewers] = useState<EligiblePanelReviewer[]>([]);
+  // Server-derived (§F19) — never re-derived from the global env flag or
+  // team settings client-side. Only meaningful while `panel === null`; the
+  // GET route only computes/returns it in that exact branch.
+  const [canCreatePanel, setCanCreatePanel] = useState(false);
 
   const [showConfigForm, setShowConfigForm] = useState(false);
   const [selectedReviewerIds, setSelectedReviewerIds] = useState<string[]>([]);
@@ -142,6 +146,7 @@ export default function AdaptiveMultiReviewerPanelSection({
         return;
       }
       setPanel(json.panel);
+      setCanCreatePanel(json.panel === null ? Boolean(json.canCreatePanel) : false);
       onPanelStatusChange?.(json.panel ? json.panel.status : null);
     } catch {
       if (controller.signal.aborted) return;
@@ -290,40 +295,42 @@ export default function AdaptiveMultiReviewerPanelSection({
         <p className="mt-2 text-sm text-cp-muted">
           No multi-reviewer panel exists for this run. The reviewer above handles this review directly.
         </p>
-        {!showConfigForm ? (
-          <button
-            type="button"
-            onClick={openConfigForm}
-            className="mt-3 rounded-lg border border-cp-border px-3 py-2 text-sm font-medium text-cp-text hover:bg-cp-raised focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent"
-          >
-            Create a multi-reviewer panel
-          </button>
-        ) : (
-          <div className="mt-3 space-y-3">
-            <p className="rounded-lg bg-cp-raised px-3 py-2 text-xs text-cp-muted">
-              Creating an open panel replaces direct single-reviewer review for this run — reviewers vote instead.
-            </p>
-            <AdaptiveReviewerSelectionList eligibleReviewers={eligibleReviewers} selected={selectedReviewerIds} onChange={setSelectedReviewerIds} disabled={configSubmitting} />
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={submitConfig}
-                disabled={configSubmitting || !canMutate}
-                className="rounded-lg bg-cp-primary px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-cp-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent disabled:opacity-50"
-              >
-                {configSubmitting ? "Creating…" : "Create panel"}
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowConfigForm(false)}
-                disabled={configSubmitting}
-                className="rounded-lg border border-cp-border px-3 py-2 text-sm font-medium text-cp-text hover:bg-cp-raised focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent disabled:opacity-50"
-              >
-                Cancel
-              </button>
+        {canCreatePanel ? (
+          !showConfigForm ? (
+            <button
+              type="button"
+              onClick={openConfigForm}
+              className="mt-3 rounded-lg border border-cp-border px-3 py-2 text-sm font-medium text-cp-text hover:bg-cp-raised focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent"
+            >
+              Create a multi-reviewer panel
+            </button>
+          ) : (
+            <div className="mt-3 space-y-3">
+              <p className="rounded-lg bg-cp-raised px-3 py-2 text-xs text-cp-muted">
+                Creating an open panel replaces direct single-reviewer review for this run — reviewers vote instead.
+              </p>
+              <AdaptiveReviewerSelectionList eligibleReviewers={eligibleReviewers} selected={selectedReviewerIds} onChange={setSelectedReviewerIds} disabled={configSubmitting} />
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={submitConfig}
+                  disabled={configSubmitting || !canMutate}
+                  className="rounded-lg bg-cp-primary px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-cp-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent disabled:opacity-50"
+                >
+                  {configSubmitting ? "Creating…" : "Create panel"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowConfigForm(false)}
+                  disabled={configSubmitting}
+                  className="rounded-lg border border-cp-border px-3 py-2 text-sm font-medium text-cp-text hover:bg-cp-raised focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+              </div>
             </div>
-          </div>
-        )}
+          )
+        ) : null}
         {configMessage ? (
           <p className={`mt-3 text-xs font-medium ${configMessage.kind === "success" ? "text-emerald-400" : configMessage.kind === "error" ? "text-red-400" : "text-cp-muted"}`} role={configMessage.kind === "error" ? "alert" : "status"} aria-live="polite">
             {configMessage.text}
