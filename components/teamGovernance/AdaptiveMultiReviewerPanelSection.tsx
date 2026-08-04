@@ -27,7 +27,7 @@
  * or absent (§F11's coexistence requirement).
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import { MIN_ADAPTIVE_PANEL_REVIEWERS, MAX_ADAPTIVE_PANEL_REVIEWERS } from "@/lib/governance/adaptiveHumanReviewPanel";
 import { mapAdaptivePanelErrorCode } from "@/lib/client/adaptivePanelSubmission";
@@ -101,15 +101,28 @@ export default function AdaptiveMultiReviewerPanelSection({
   const [finalizing, setFinalizing] = useState(false);
   const [finalizeMessage, setFinalizeMessage] = useState<{ kind: "error" | "info"; text: string } | null>(null);
 
+  // A stale in-flight request from a PREVIOUS runId (e.g. still resolving
+  // after the operator navigates from one review to another, without a full
+  // page reload — `AdaptiveReviewDetail`/this component are never remounted
+  // by that client-side transition, only re-rendered with a new `runId`
+  // prop) must never be allowed to overwrite state a newer request already
+  // set — mirrors `TeamReviewQueue.tsx`'s own `abortRef` pattern, the
+  // established fix for this exact class of race in this codebase.
+  const abortRef = useRef<AbortController | null>(null);
+
   const load = useCallback(async () => {
     if (!user || !authReady) return;
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
     setLoadError(null);
     try {
       const { authedFetch } = await import("@/lib/client/authedFetch");
       const [panelRes, assignmentRes] = await Promise.all([
-        authedFetch(`/api/teams/adaptive-runs/${encodeURIComponent(runId)}/review-panel`, { user, authReady, method: "GET", cache: "no-store" }),
-        authedFetch(`/api/teams/adaptive-runs/${encodeURIComponent(runId)}/assignment`, { user, authReady, method: "GET", cache: "no-store" }),
+        authedFetch(`/api/teams/adaptive-runs/${encodeURIComponent(runId)}/review-panel`, { user, authReady, method: "GET", cache: "no-store", signal: controller.signal }),
+        authedFetch(`/api/teams/adaptive-runs/${encodeURIComponent(runId)}/assignment`, { user, authReady, method: "GET", cache: "no-store", signal: controller.signal }),
       ]);
+      if (controller.signal.aborted) return;
 
       if (assignmentRes.ok) {
         const assignmentJson = await assignmentRes.json();
@@ -122,6 +135,7 @@ export default function AdaptiveMultiReviewerPanelSection({
         return;
       }
       const json = await panelRes.json();
+      if (controller.signal.aborted) return;
       if (!json.ok) {
         setLoadError("The multi-reviewer panel is temporarily unavailable.");
         onPanelStatusChange?.(null);
@@ -130,6 +144,7 @@ export default function AdaptiveMultiReviewerPanelSection({
       setPanel(json.panel);
       onPanelStatusChange?.(json.panel ? json.panel.status : null);
     } catch {
+      if (controller.signal.aborted) return;
       setLoadError("The multi-reviewer panel is temporarily unavailable.");
       onPanelStatusChange?.(null);
     }
@@ -138,6 +153,7 @@ export default function AdaptiveMultiReviewerPanelSection({
 
   useEffect(() => {
     void load();
+    return () => abortRef.current?.abort();
   }, [load]);
 
   const submitConfig = async () => {
