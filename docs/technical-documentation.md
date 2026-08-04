@@ -85,6 +85,12 @@ No cookie-first or invalid-credential-fallback path remains anywhere in the repo
 
 A REHEARSAL — not a real production rollout — of the multi-reviewer governance canary rollout, run entirely against the non-production `gov-e2e-seed-*` harness on localhost; no production env var was changed and no real team was touched. Full detail, including the live four-path lifecycle rehearsal (ready/deadlock-override/stale-two-tab/rollback-drain) and the repair-drill result: `docs/operations/multi-reviewer-governance-runbook.md` §11. Auth-layer re-verification recorded separately: `docs/operations/auth-session-sync-runbook.md` (Step 8 section) — no auth code changed in this step, only re-exercised live under real multi-identity traffic. Outcome: no defect found; recommendation is limited expansion (canary + 1–2 volunteer teams) before general availability, per the playbook's own default.
 
+### Production deployment via PR #1 and branch protection (2026-08-04)
+
+PR #1 ("Add adaptive governance, multi-reviewer review, and repository-wide auth hardening" — 310 files, Steps 6/7/8 above plus the full Multi-Reviewer Governance system below) merged into `main` and auto-deployed to production **before its requested independent review had completed** — the reviewer's approval was never actually recorded at merge time. The repository-wide auth identity hardening (Step 7's `resolveRequestIdentity()`, all 34 protected routes) went live and ungated as a result; the multi-reviewer governance feature itself stayed inert, since `MULTI_REVIEWER_GOVERNANCE_ENABLED` was never set in the production environment. A post-merge production smoke test (sign-in/out, account-switch, Research, Claim Verification, Video Verification, Team Reviews, protected-route auth-boundary rejection, Vercel log spike check) came back clean. Full incident record, what shipped vs. stayed gated, and why no rollback was performed: `docs/operations/pr1-merge-process-exception.md`.
+
+**Corrective action — branch protection is now enforced on `main`**: 1 required approving review, stale reviews dismissed on new commits, required status checks (`Vercel`, `Vercel Preview Comments`), unresolved PR conversations block merge, and `enforce_admins: true` — direct pushes to `main` are blocked for every account, including repository owners/admins. Every subsequent change (including the process-exception doc itself, and the `canCreatePanel` fix below) has gone through this protected flow. `MULTI_REVIEWER_GOVERNANCE_ENABLED` remains unset in production as of this writing — no team has opted in, and the production canary described in Step 8 has not started (only the rehearsal above has run).
+
 ---
 
 ## Rate Limiting
@@ -817,6 +823,20 @@ Writes append-only events to the `admin_audit_logs` Firestore collection via `wr
 
 Action types: `evaluated` · `approved` · `blocked` · `changes_requested` · `policy_updated` · `admin_override` · `admin_deleted`
 
+### Multi-Reviewer Governance (adaptive runs, team plan)
+
+A separate, panel-based review workflow layered on top of the adaptive schema system's `governanceRecord.humanReview`, distinct from the single-reviewer policy engine above. Lives at `runs/{runId}/humanReviewPanel/current` (one active panel per run) plus `runs/{runId}/humanReviewVotes/{revision}:{reviewerUid}` and `runs/{runId}/humanReviewPanelHistory/{revision}:{event}`. Panel lifecycle: create (`PUT`) → reviewers vote (`POST .../votes`) → aggregation reaches `waiting` / `deadlocked` / `ready` → finalize (`POST .../finalize`, majority aggregation) or owner override (`POST .../override`, breaks a deadlock) → cancel (`DELETE`) is available at any open-panel state as a drain operation. Route: `app/api/teams/adaptive-runs/[runId]/review-panel/`.
+
+**Two-gate release model** — both required for any NEW panel activity (create/reconfigure): the global `MULTI_REVIEWER_GOVERNANCE_ENABLED` env var (`lib/env.ts`, defaults false, unset in production as of 2026-08-04 — see Authentication § above) AND the team's own Firestore opt-in (`team.adaptiveMultiReviewerSettings.enabled`). Cancelling an already-open panel and an owner's override are deliberately gated on **neither** — both are drain/escape-hatch operations that must stay available even after the feature is disabled team-wide or globally, so a panel can never become stranded by a rollback.
+
+**Capability flags are entirely server-derived**, never re-derived client-side from the env flag or team settings: `GET .../review-panel` computes `canReconfigurePanel` / `canCancelPanel` / `canVote` / `canFinalize` / `canOverride` (existing-panel case) and `canCreatePanel` (no-panel case, added 2026-08-05 — see below) directly from `isTeamAdmin(role)`, the reviewability of the governance record, and the two-gate check; `components/teamGovernance/AdaptiveMultiReviewerPanelSection.tsx` only ever renders a control when the matching flag is true.
+
+**`canCreatePanel` fix (2026-08-05):** the "Create a multi-reviewer panel" button used to render unconditionally whenever no panel existed, regardless of either gate — the server already rejected the resulting `PUT` with `403 multi_reviewer_disabled`, so this was a UX gap, not a security gap. `GET .../review-panel`'s panel-absent branch now returns `canCreatePanel` (mirrors `PUT`'s own creation gate exactly), and the client hides the button unless the server confirms creation is actually possible.
+
+**Stale-`runId`-on-navigation fix (2026-08-04):** `AdaptiveMultiReviewerPanelSection` is never remounted by a client-side navigation between two runs under `/team/reviews/[runId]` — only its `runId` prop changes — so a slow, still-in-flight fetch for the PREVIOUS run could resolve after the new run's fetch and silently overwrite the panel state with the wrong run's data. Fixed with an `AbortController` per load, mirroring the pattern already established in `TeamReviewQueue.tsx`.
+
+**Seed/test harness:** `scripts/seed-adaptive-multi-reviewer-e2e.ts` / `scripts/cleanup-adaptive-multi-reviewer-e2e.ts` — six deterministic scenarios (A–F) under the `gov-e2e-seed-` namespace, safe to run against production since this repo has no separate dev/staging Firebase project (`ALLOW_NON_PROD_GOVERNANCE_SEED=true` + `--confirm-project=convergepanel` both required). Cleanup defaults to dry-run; every candidate path is namespace-checked independently before any delete.
+
 ---
 
 ## Firestore Data Model
@@ -829,8 +849,11 @@ Primary database. Firebase Admin SDK is server-only — import with `"server-onl
 | `runs/{runId}` | Panel run: `userId`, `question`, `selectedModels`, `status`, `results`, `resultsCompact`, `totalTokens`, `tokensByProvider`, `synthesizedReportV2`, `synthesizedStructuredReport` |
 | `videoVerifications/{id}` | Video verification result with frames metadata, vision model outputs, verdict, consensus score |
 | `admin_audit_logs/{id}` | Append-only governance audit events |
-| `teams/{teamId}` | Team document with members, policyRules, settings |
+| `teams/{teamId}` | Team document with members, policyRules, settings, `adaptiveMultiReviewerSettings.enabled` (team opt-in) |
 | `teamRuns/{runId}` | Team run audit bundles with human decisions |
+| `runs/{runId}/humanReviewPanel/current` | Active multi-reviewer panel: reviewers, quorum, status (`open`/`cancelled`/`finalized`), revision |
+| `runs/{runId}/humanReviewVotes/{revision}:{reviewerUid}` | One vote per reviewer per panel revision |
+| `runs/{runId}/humanReviewPanelHistory/{revision}:{event}` | Append-only finalization/override history entries |
 | `appConfig/modelKeys` | Operator-managed API keys (runtime fallback to env vars if absent) |
 
 ### API key resolution
@@ -850,6 +873,10 @@ At runtime, `lib/env.ts` is the single source of truth for all server-side envir
 | `/api/stripe/webhook` | POST | Stripe webhook — sync subscription state to Firestore |
 | `/api/stripe/checkout` | POST | Create Stripe checkout session |
 | `/api/governance/*` | Various | Policy management, peer review queue, human decisions |
+| `/api/teams/adaptive-runs/[runId]/review-panel` | GET/PUT/DELETE | Read panel + capability flags (incl. `canCreatePanel`) · create/reconfigure (two-gate) · cancel (drain, ungated) |
+| `/api/teams/adaptive-runs/[runId]/review-panel/finalize` | POST | Finalize via majority aggregation |
+| `/api/teams/adaptive-runs/[runId]/review-panel/override` | POST | Owner-only override, breaks a deadlock (ungated) |
+| `/api/teams/adaptive-runs/[runId]/votes` | POST | Submit a reviewer's vote |
 | `/api/admin/*` | Various | Admin management (requires `admin: true` custom claim) |
 | `/api/user/*` | Various | User profile read/update |
 
