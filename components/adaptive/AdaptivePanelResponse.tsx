@@ -20,21 +20,28 @@
  * order-sensitive comparators) would have no visible surface at all.
  */
 
-import { AnswerShape } from "@/lib/adaptiveSchema/types";
+import { AnswerShape, BiasBlindspotAuditResult, CausalExplanationResult, ChecklistTaxonomyResult, ComparisonMatrixResult, DecisionSupportResult, DeepResearchResult, DefinitionExplanationResult, EvidenceReviewResult, RankedEnumerationResult } from "@/lib/adaptiveSchema/types";
 import { AdaptiveGateResult, AdaptiveSynthesisReport, AdaptiveTrustSummary } from "@/lib/adaptiveSchema/types";
 import { AdaptiveRendererProps } from "./types";
 import AdaptiveResultsView from "./AdaptiveResultsView";
 import AdaptiveSynthesisReportView from "./AdaptiveSynthesisReportView";
 import ClaimMatrix from "./ClaimMatrix";
+import ListView from "./ListView";
+import DirectAnswerCard from "./DirectAnswerCard";
+import LimitationNotice from "./LimitationNotice";
+import RankedListView from "./RankedListView";
+import ComparisonMatrixView from "./ComparisonMatrixView";
+import DefinitionExplanationView from "./DefinitionExplanationView";
+import CausalExplanationView from "./CausalExplanationView";
+import ChecklistTaxonomyView from "./ChecklistTaxonomyView";
+import DeepResearchView from "./DeepResearchView";
+import EvidenceReviewView from "./EvidenceReviewView";
+import BiasBlindspotAuditView from "./BiasBlindspotAuditView";
+import DecisionSupportView from "./DecisionSupportView";
 import { Card, SectionLabel } from "./shared";
 import PanelViewTabs, { PanelViewMode } from "./PanelViewTabs";
-import { useState } from "react";
-
-const GATE_CHIP_STYLES: Record<AdaptiveGateResult["status"], string> = {
-  pass: "bg-green-50 text-green-700 border-green-200",
-  caution: "bg-amber-50 text-amber-700 border-amber-200",
-  fail: "bg-red-50 text-red-700 border-red-200",
-};
+import { routeClassifiedQuery } from "@/lib/adaptiveSchema/routeClassifiedQuery";
+import { useEffect, useState } from "react";
 
 const RENDER_HINTS_WITHOUT_MATRIX = new Set<AnswerShape>(["metrics_grid", "verdict_card", "step_diff", "scenario_tree"]);
 
@@ -42,45 +49,224 @@ export interface AdaptivePanelResponseProps extends AdaptiveRendererProps {
   gate?: AdaptiveGateResult;
   synthesisReport?: AdaptiveSynthesisReport;
   trustSummary?: AdaptiveTrustSummary;
+  /** Present only for schema.renderHint === "ranked_list" (Milestone 2). */
+  rankedEnumeration?: RankedEnumerationResult;
+  /** Present only for schema.renderHint === "comparison_grid" (Milestone 2). */
+  comparisonMatrix?: ComparisonMatrixResult;
+  /** Present only for schema.renderHint === "definition_card" (Milestone 2). */
+  definitionExplanation?: DefinitionExplanationResult;
+  /** Present only for schema.renderHint === "causal_map" (Milestone 2). */
+  causalExplanation?: CausalExplanationResult;
+  /** Present only for schema.renderHint === "checklist_taxonomy_view" (Milestone 2). */
+  checklistTaxonomy?: ChecklistTaxonomyResult;
+  /** Present only for schema.renderHint === "deep_research_view" (Milestone 2). */
+  deepResearch?: DeepResearchResult;
+  /** Present only for schema.renderHint === "evidence_review_view" (Milestone 2). */
+  evidenceReview?: EvidenceReviewResult;
+  /** Present only for schema.renderHint === "bias_blindspot_audit_view" (Milestone 2). */
+  biasBlindspotAudit?: BiasBlindspotAuditResult;
+  /** Present only for schema.renderHint === "decision_support_view" (Milestone 2). */
+  decisionSupport?: DecisionSupportResult;
   question: string;
   runId?: string | null;
+  /** Threaded down to the Synthesis Report's Bias & Blind Spots Tier 2 cards' "Run follow-up" action. */
+  onRunFollowUp?: (question: string) => void;
 }
 
 export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps) {
-  const { schema, results, alignedClaims, gate, synthesisReport, trustSummary, question, runId } = props;
+  const {
+    schema,
+    classification,
+    results,
+    alignedClaims,
+    gate,
+    synthesisReport,
+    trustSummary,
+    rankedEnumeration,
+    comparisonMatrix,
+    definitionExplanation,
+    causalExplanation,
+    checklistTaxonomy,
+    deepResearch,
+    evidenceReview,
+    biasBlindspotAudit,
+    decisionSupport,
+    question,
+    runId,
+    onRunFollowUp,
+  } = props;
   const [viewMode, setViewMode] = useState<PanelViewMode>("list");
+  const [pendingScrollSection, setPendingScrollSection] = useState<string | null>(null);
+
+  // List View's Panel Pulse cards jump into the Synthesis Report at a
+  // specific section — switch tabs, then scroll once that tab has mounted.
+  useEffect(() => {
+    if (viewMode !== "synthesis" || !pendingScrollSection) return;
+    const el = document.querySelector(`[data-section="${pendingScrollSection}"]`);
+    el?.scrollIntoView({ behavior: "smooth", block: "start" });
+    setPendingScrollSection(null);
+  }, [viewMode, pendingScrollSection]);
+
+  // Query-routing redesign, Milestone 1/1.5 — the routing guarantee. Must
+  // run BEFORE any other branch below: a classification that isn't
+  // "active" (disabled, handoff, clarification, unanswerable, or
+  // unrecognized) may never reach GenericSectionsView,
+  // AdaptiveSynthesisReportView, ClaimMatrix, or any other schema-specific
+  // renderer — only LimitationNotice. Same routeClassifiedQuery() call the
+  // server used (via planAdaptiveRun) to decide whether to run the panel
+  // at all — client and server can never diverge since it's one function.
+  const routing = routeClassifiedQuery(classification);
+  if (routing.kind !== "active") {
+    return <LimitationNotice limitation={routing.response} />;
+  }
+
+  // factual_lookup (Milestone 1): lightweight single card, not the full
+  // synthesis-report shell. Fields/prompt/parser/verification are
+  // unchanged — only this rendering choice differs from every other active
+  // schema below.
+  if (schema.renderHint === "direct_answer") {
+    return <DirectAnswerCard results={results} alignedClaims={alignedClaims} gate={gate} />;
+  }
+
+  // ranked_enumeration (Milestone 2): its own standalone view — coverage/
+  // rank/rank-correlation, not the claims-matrix/synthesis-report shell.
+  // rankedEnumeration should always be present here (orchestrate.ts always
+  // computes it for this schema), but fail safe to the generic view rather
+  // than crash if it's ever missing.
+  if (schema.renderHint === "ranked_list") {
+    if (rankedEnumeration) {
+      return <RankedListView rankedEnumeration={rankedEnumeration} />;
+    }
+    return <AdaptiveResultsView {...props} />;
+  }
+
+  // comparison_matrix (Milestone 2): its own standalone view — a two-axis
+  // (subject, attribute) grid, not the claims-matrix/synthesis-report shell.
+  // comparisonMatrix should always be present here (orchestrate.ts always
+  // computes it for this schema), but fail safe to the generic view rather
+  // than crash if it's ever missing.
+  if (schema.renderHint === "comparison_grid") {
+    if (comparisonMatrix) {
+      return <ComparisonMatrixView comparisonMatrix={comparisonMatrix} />;
+    }
+    return <AdaptiveResultsView {...props} />;
+  }
+
+  // definition_explanation (Milestone 2): its own standalone, answer-first
+  // view — no Trust Summary/Agreement Map/Panel Verdict, since this schema
+  // never computes a claim-agreement score. definitionExplanation should
+  // always be present here (orchestrate.ts always computes it for this
+  // schema), but fail safe to the generic view rather than crash if it's
+  // ever missing.
+  if (schema.renderHint === "definition_card") {
+    if (definitionExplanation) {
+      return <DefinitionExplanationView definitionExplanation={definitionExplanation} />;
+    }
+    return <AdaptiveResultsView {...props} />;
+  }
+
+  // causal_explanation (Milestone 2): its own standalone view — coverage
+  // badges say "N of M models agree", never a certainty/confidence score,
+  // since panel convergence is never proof of causality. No Trust Summary/
+  // Agreement Map/Panel Verdict/claim matrix. causalExplanation should
+  // always be present here (orchestrate.ts always computes it for this
+  // schema), but fail safe to the generic view rather than crash if it's
+  // ever missing.
+  if (schema.renderHint === "causal_map") {
+    if (causalExplanation) {
+      return <CausalExplanationView causalExplanation={causalExplanation} riskLevel={classification.riskLevel} />;
+    }
+    return <AdaptiveResultsView {...props} />;
+  }
+
+  // checklist_taxonomy (Milestone 2): its own standalone view — a flat
+  // checklist or a categorized taxonomy depending on what the panel
+  // actually produced, never a claims matrix. checklistTaxonomy should
+  // always be present here (orchestrate.ts always computes it for this
+  // schema), but fail safe to the generic view rather than crash if it's
+  // ever missing.
+  if (schema.renderHint === "checklist_taxonomy_view") {
+    if (checklistTaxonomy) {
+      return <ChecklistTaxonomyView checklistTaxonomy={checklistTaxonomy} />;
+    }
+    return <AdaptiveResultsView {...props} />;
+  }
+
+  // deep_research (Milestone 2): its own standalone view — grouped
+  // findings, a separate disagreements section, source coverage, and
+  // expandable panel blind spots, never a claims matrix or a single
+  // certainty score. deepResearch should always be present here
+  // (orchestrate.ts always computes it for this schema), but fail safe to
+  // the generic view rather than crash if it's ever missing.
+  if (schema.renderHint === "deep_research_view") {
+    if (deepResearch) {
+      return <DeepResearchView deepResearch={deepResearch} />;
+    }
+    return <AdaptiveResultsView {...props} />;
+  }
+
+  // evidence_review (Milestone 2): its own standalone view — dimension
+  // breakdown, red flags/strengths, never a claims matrix or a single
+  // certainty score. evidenceReview should always be present here
+  // (orchestrate.ts always computes it for this schema), but fail safe to
+  // the generic view rather than crash if it's ever missing.
+  if (schema.renderHint === "evidence_review_view") {
+    if (evidenceReview) {
+      return <EvidenceReviewView evidenceReview={evidenceReview} riskLevel={classification.riskLevel} />;
+    }
+    return <AdaptiveResultsView {...props} />;
+  }
+
+  // bias_blindspot_audit (Milestone 2): its own standalone, three-tier
+  // view — never a claims matrix, Panel Verdict Card, or a "bias score".
+  // biasBlindspotAudit should always be present here (orchestrate.ts
+  // always computes it for this schema), but fail safe to the generic view
+  // rather than crash if it's ever missing.
+  if (schema.renderHint === "bias_blindspot_audit_view") {
+    if (biasBlindspotAudit) {
+      return <BiasBlindspotAuditView biasBlindspotAudit={biasBlindspotAudit} onRunFollowUp={onRunFollowUp} />;
+    }
+    return <AdaptiveResultsView {...props} />;
+  }
+
+  // decision_support (Milestone 2): its own standalone, recommendation-first
+  // view — never a claims matrix, Panel Verdict Card, or a numeric
+  // decision-certainty score. decisionSupport should always be present here
+  // (orchestrate.ts always computes it for this schema), but fail safe to
+  // the generic view rather than crash if it's ever missing.
+  if (schema.renderHint === "decision_support_view") {
+    if (decisionSupport) {
+      return <DecisionSupportView decisionSupport={decisionSupport} />;
+    }
+    return <AdaptiveResultsView {...props} />;
+  }
 
   if (!gate || !synthesisReport) {
     return <AdaptiveResultsView {...props} />;
   }
 
   const modelIds = results.map((r) => r.modelId);
-  const okCount = results.filter((r) => r.ok).length;
   const showExtraMatrix = RENDER_HINTS_WITHOUT_MATRIX.has(schema.renderHint) && !!alignedClaims && alignedClaims.length > 0;
+
+  const navigateToSynthesisSection = (sectionId: string) => {
+    setPendingScrollSection(sectionId);
+    setViewMode("synthesis");
+  };
 
   return (
     <div className="space-y-4">
       <PanelViewTabs viewMode={viewMode} onChange={setViewMode} />
 
       {viewMode === "list" && (
-        <Card className="flex items-center justify-between flex-wrap gap-3">
-          <div className="flex items-center gap-2">
-            <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-600">
-              {schema.id.replace(/_/g, " ")}
-            </span>
-            <span className="text-sm text-slate-700">
-              {okCount}/{results.length} models responded
-            </span>
-          </div>
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-slate-500">Answer certainty {Math.round(synthesisReport.runCertainty * 100)}%</span>
-            <span
-              className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${GATE_CHIP_STYLES[gate.status]}`}
-            >
-              {gate.status}
-            </span>
-          </div>
-        </Card>
+        <ListView
+          schema={schema}
+          results={results}
+          alignedClaims={alignedClaims}
+          gate={gate}
+          synthesisReport={synthesisReport}
+          trustSummary={trustSummary}
+          onNavigateToSynthesis={navigateToSynthesisSection}
+        />
       )}
 
       {viewMode === "compare" && (
@@ -104,6 +290,7 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
           question={question}
           modelsUsed={modelIds}
           runId={runId}
+          onRunFollowUp={onRunFollowUp}
         />
       )}
     </div>

@@ -1,5 +1,38 @@
 {
-  "extends": "next/core-web-vitals"
+  "extends": "next/core-web-vitals",
+  "overrides": [
+    {
+      "files": ["lib/adaptiveSchema/**/*.ts", "lib/adaptiveSchema/**/*.tsx", "components/adaptive/**/*.ts", "components/adaptive/**/*.tsx"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "@/lib/video",
+                  "@/lib/video/*",
+                  "@/app/api/verify-video",
+                  "@/app/api/verify-video/*",
+                  "@/components/VideoVerificationResult",
+                  "@/app/api/verify-claim",
+                  "@/app/api/verify-claim/*",
+                  "@/components/ClaimVerificationResult",
+                  "@/lib/verification/runClaimVerificationPanel",
+                  "@/lib/verification/claimVerificationPrompt",
+                  "@/lib/verification/claimVerdict",
+                  "@/lib/verification/claimVerificationClientPayload",
+                  "@/lib/verification/cleanJsonResponse",
+                  "@/lib/verification/parseVerificationJson",
+                  "@/lib/verification/agreementDigest",
+                  "@/lib/verification/auditBundle"
+                ],
+                "message": "lib/adaptiveSchema and components/adaptive must never depend on the dedicated Claim Verification / Video Verification implementations — those are protected, out-of-scope features (query-routing redesign). Use the handoff intents (claim_verification / media_authenticity_review) and routeClassifiedQuery instead. Note: lib/verificationGate/* and cross-feature shared utilities in lib/verification/ (generateMemo.ts, shareText.ts, consensusScoring.ts) are fine — they're shared infrastructure the adaptive UI already legitimately reuses, not claim-verification-internal."
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
 }
-
-

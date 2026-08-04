@@ -54,6 +54,8 @@ import type { ClaimVerificationClientPayload } from "@/lib/verification/claimVer
 import type { VideoVerificationClientPayload } from "@/lib/verification/videoVerificationClientPayload";
 import type { PanelHistoryGovernanceStatus, PanelHistoryItem } from "@/lib/user/panelHistory";
 import type { TeamGovernanceBannerProps, AdaptivePanelPayload } from "@/components/ResultsDisplay";
+import type { PersistedAdaptiveOutput } from "@/lib/adaptiveSchema/persistedOutput";
+import { adaptPersistedOutputToPanelPayload } from "@/lib/user/adaptivePersistedOutputAdapter";
 import type { SynthesisConsensusSummaryDetail } from "@/lib/verification/consensusScoring";
 
 // Lazy load heavy components - defer until after first paint
@@ -430,6 +432,12 @@ export default function Home() {
 
   // Adaptive Result Schema System payload (flag-gated; null on legacy runs)
   const [adaptivePanel, setAdaptivePanel] = useState<AdaptivePanelPayload | null>(null);
+  // Query-Routing Redesign, Phase 1 — non-destructive notice shown when a
+  // reloaded run's persisted adaptive envelope is malformed or from an
+  // unsupported version. Never shown for "absent" (the normal, expected
+  // case for pre-Phase-1 runs and legacy-active schemas) — that's just the
+  // existing legacy raw-model rendering path, unchanged.
+  const [adaptiveRestoreNotice, setAdaptiveRestoreNotice] = useState<string | null>(null);
 
   // Synthesized consensus report (only generated if ≥2 models respond successfully)
   const [synthesizedReport, setSynthesizedReport] =
@@ -757,6 +765,7 @@ export default function Home() {
     setRunStatus("running");
     setResults([]);
     setAdaptivePanel(null);
+    setAdaptiveRestoreNotice(null);
     setSynthesizedReport(null);
     setResearchAttachedFile(null);
     // Reset synthesis state for new run
@@ -1087,7 +1096,14 @@ export default function Home() {
       // AUTO-GENERATE SYNTHESIS: Start synthesis generation in background immediately after panel completes
       // This ensures synthesis is ready when user clicks "Generate Synthesis" button
       // Only auto-generate if we have >=2 successful results and a runId
-      if (data.runId && successfulCount >= 2) {
+      // Query-Routing Redesign, Phase 2A, Step 6 — mirrors the SAME
+      // !(data as any).adaptive guard the client-side synthesizeReport()
+      // call above already uses (it was previously missing here, letting
+      // a Milestone-2 run's structured JSON output reach legacy
+      // claims-matrix synthesis; see docs/governance-decision-receipts-design.md
+      // §14.4/§16). The server (/api/synthesize-panel) now also rejects
+      // this defensively, independent of this client guard.
+      if (data.runId && successfulCount >= 2 && !(data as any).adaptive) {
         // Trigger synthesis generation in background (non-blocking)
         // Use void to explicitly ignore the promise - we don't want to block or handle errors here
         void generateSynthesisAutomatically(data.runId, question, data.results, synthesizedReport);
@@ -1487,11 +1503,33 @@ export default function Home() {
           } | null;
           governance?: TeamGovernanceBannerProps;
           governanceStatus?: "approved" | "needs_review" | "blocked" | null;
+          adaptive?: { status: string; output: PersistedAdaptiveOutput | null };
         };
         if (!res.ok || !data.ok || !data.results?.length) {
           throw new Error(typeof data.message === "string" ? data.message : "Could not load this run.");
         }
         setQuestion(data.question ?? item.question);
+
+        // Query-Routing Redesign, Phase 1 — restore the persisted adaptive
+        // envelope through the SAME renderer routing a live run uses. Never
+        // reclassifies the old question and never invokes the model panel —
+        // "absent" (no envelope was ever persisted for this run) silently
+        // falls back to the existing legacy rendering below, exactly as it
+        // already did before this phase; only "malformed"/
+        // "unsupported_version" get a non-destructive notice.
+        if (data.adaptive?.status === "valid" && data.adaptive.output) {
+          setAdaptivePanel(adaptPersistedOutputToPanelPayload(data.adaptive.output));
+          setAdaptiveRestoreNotice(null);
+        } else {
+          setAdaptivePanel(null);
+          setAdaptiveRestoreNotice(
+            data.adaptive?.status === "malformed"
+              ? "This run's structured result couldn't be restored — showing the raw model responses instead."
+              : data.adaptive?.status === "unsupported_version"
+                ? "This run's structured result was saved by a newer version of ConvergePanel — showing the raw model responses instead."
+                : null
+          );
+        }
         setSelectedModels(
           Array.isArray(data.selectedModels) && data.selectedModels.length > 0
             ? data.selectedModels
@@ -1515,11 +1553,26 @@ export default function Home() {
         setModelStatuses(st);
 
         let consensusForSynthesis: SynthesizedReport | null = null;
-        try {
-          consensusForSynthesis = synthesizeReport(data.results as ModelResult[]);
-          setSynthesizedReport(consensusForSynthesis);
-        } catch {
-          consensusForSynthesis = null;
+        // Query-Routing Redesign, Phase 2A, Step 6 — this call site had no
+        // adaptive guard at all (unlike the live-run synthesizeReport()
+        // call, which already checks !(data as any).adaptive). The history
+        // response shape is different here (`data.adaptive?.status`, not a
+        // truthy/falsy adaptive payload object — `data.adaptive` is an
+        // object even when status is "absent", so a naive `!data.adaptive`
+        // check would incorrectly treat every history reload as adaptive).
+        // Only a genuinely "absent" adaptiveOutput marker runs legacy
+        // client-side synthesis; "valid"/"malformed"/"unsupported_version"
+        // all skip it — a malformed/unsupported marker is not proof the
+        // run is legacy (see docs/governance-decision-receipts-design.md §14.4/§16).
+        if (data.adaptive?.status === "absent" || !data.adaptive) {
+          try {
+            consensusForSynthesis = synthesizeReport(data.results as ModelResult[]);
+            setSynthesizedReport(consensusForSynthesis);
+          } catch {
+            consensusForSynthesis = null;
+            setSynthesizedReport(null);
+          }
+        } else {
           setSynthesizedReport(null);
         }
 
@@ -1550,7 +1603,14 @@ export default function Home() {
           setSynthesisConsensusSummary(null);
           setSynthesisGeneratedForRunId(null);
           setSynthesisGovernance(null);
-          if (data.runId && (data.results as ModelResult[]).filter((r) => isUsableResult(r)).length >= 2) {
+          // Query-Routing Redesign, Phase 2A, Step 6 — same guard as the
+          // synthesizeReport() call above: only a genuinely "absent"
+          // adaptiveOutput marker triggers legacy auto-synthesis here.
+          if (
+            data.runId &&
+            (data.results as ModelResult[]).filter((r) => isUsableResult(r)).length >= 2 &&
+            (data.adaptive?.status === "absent" || !data.adaptive)
+          ) {
             void generateSynthesisAutomatically(
               data.runId,
               data.question ?? item.question,
@@ -1734,6 +1794,19 @@ export default function Home() {
    */
   const handleRerun = () => {
     handleRunPanel();
+  };
+
+  /**
+   * Synthesis Report's Bias & Blind Spots Tier 2 "Run follow-up" action —
+   * pre-fills the question box with a coverage-gap follow-up question and
+   * scrolls it into view. Deliberately does NOT auto-submit: the user should
+   * see and confirm the question before spending a panel run on it.
+   */
+  const handleRunFollowUp = (followUpQuestion: string) => {
+    setQuestion(followUpQuestion);
+    const el = document.getElementById("question");
+    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+    if (el instanceof HTMLTextAreaElement) el.focus();
   };
 
   /**
@@ -2642,6 +2715,12 @@ export default function Home() {
           </div>
         )}
 
+        {!verificationPayload && panelTab === "research" && runStatus === "complete" && adaptiveRestoreNotice && (
+          <div className="mx-auto mt-8 w-full max-w-[900px] rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            {adaptiveRestoreNotice}
+          </div>
+        )}
+
         {!verificationPayload &&
           panelTab === "research" &&
           runStatus === "complete" &&
@@ -2672,6 +2751,7 @@ export default function Home() {
                 teamGovernance={synthesisGovernance}
                 orgGovernanceStatus={orgGovernanceStatus}
                 adaptive={adaptivePanel}
+                onRunFollowUp={handleRunFollowUp}
               />
             </div>
           </Suspense>

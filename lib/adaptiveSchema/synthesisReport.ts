@@ -9,10 +9,15 @@
  * code-enforced and quoted positions must never be invented. The narrative
  * elaboration (executive summary prose, why each disagreement exists,
  * schema-adaptive framing) comes from one synthesis-model call; Bias & Blind
- * Spots comes from a SEPARATE dedicated call (biasDetection.ts) since it
- * needs each model's full raw response, not just its aligned claims. Every
- * model call degrades to a deterministic template on failure/timeout — never
- * a crash, never a blank section, never a silently-confident guess.
+ * Spots is a THREE-TIER system (see the Bias & Blind Spots Tiers fix): Tier 1
+ * is the original per-model attributed-bias call (biasDetection.ts, needs
+ * each model's full raw response); Tier 2 is a separate panel-level coverage
+ * audit (coverageAudit.ts, one call over the aligned claims, asking what NO
+ * model addressed); Tier 3 is deterministic diagnostics (diagnostics.ts, no
+ * model call at all). All three render independently — Tier 1 being empty
+ * doesn't hide Tier 2/3, and vice versa. Every model call degrades to a
+ * deterministic template/empty-array on failure/timeout — never a crash,
+ * never a blank section, never a silently-confident guess.
  */
 
 import "server-only";
@@ -35,6 +40,8 @@ import { computeAdaptiveGate } from "./gate";
 import { buildAdaptiveVerdict, buildAdaptiveUnifiedAnswer } from "./verdict";
 import { buildAdaptiveVerdictCard } from "./verdictCard";
 import { detectAdaptiveBiases } from "./biasDetection";
+import { auditPanelCoverage } from "./coverageAudit";
+import { computeAdaptiveDiagnostics } from "./diagnostics";
 import { findUnrecognizedModelNames, stripUnrecognizedModelNames } from "./modelNameValidator";
 
 const SYNTHESIS_CALL_TIMEOUT_MS = 10000;
@@ -60,6 +67,29 @@ const SCHEMA_NARRATIVE_HINTS: Record<QueryType, string> = {
   creative_generative:
     "This is creative output, not a factual comparison — skip agreement/disagreement framing and briefly note stylistic differences instead.",
   generic: "Standard synthesis narrative, no special framing required.",
+  // Query-routing redesign additions (Milestone 1): not reachable by the
+  // live pipeline yet (active graceful_limitation never has claims to
+  // synthesize; disabled/handoff entries have no fields at all). Mapped to
+  // the generic hint purely for Record<QueryType, ...> exhaustiveness.
+  graceful_limitation: "Standard synthesis narrative, no special framing required.",
+  claim_verification: "Standard synthesis narrative, no special framing required.",
+  media_authenticity_review: "Standard synthesis narrative, no special framing required.",
+  document_qa: "Standard synthesis narrative, no special framing required.",
+  document_comparison: "Standard synthesis narrative, no special framing required.",
+  data_analysis: "Standard synthesis narrative, no special framing required.",
+  current_live_information: "Standard synthesis narrative, no special framing required.",
+  definition_explanation: "Standard synthesis narrative, no special framing required.",
+  causal_explanation: "Standard synthesis narrative, no special framing required.",
+  ranked_enumeration: "Standard synthesis narrative, no special framing required.",
+  checklist_taxonomy: "Standard synthesis narrative, no special framing required.",
+  comparison_matrix: "Standard synthesis narrative, no special framing required.",
+  deep_research: "Standard synthesis narrative, no special framing required.",
+  evidence_review: "Standard synthesis narrative, no special framing required.",
+  bias_blindspot_audit: "Standard synthesis narrative, no special framing required.",
+  decision_support: "Standard synthesis narrative, no special framing required.",
+  scenario_analysis: "Standard synthesis narrative, no special framing required.",
+  step_by_step_plan: "Standard synthesis narrative, no special framing required.",
+  transformation: "Standard synthesis narrative, no special framing required.",
 };
 
 const StakesEnum = z.enum(["low", "important", "decision-critical"]);
@@ -96,46 +126,114 @@ function buildTemplateExecutiveSummary(unifiedAnswer: string, agreeCount: number
   return parts.join(" ");
 }
 
-/**
- * Validates executive-summary/disagreement-explanation text against the
- * model roster, regenerating the narrative call once if a hallucinated name
- * is found, then falling back to stripping the offending token(s). Returns
- * cleaned text; never throws.
- */
-async function validateAndCleanNarrativeText(
-  texts: string[],
-  modelRoster: ModelId[],
-  regenerate: () => Promise<string[] | null>
-): Promise<string[]> {
-  const offending = texts.flatMap((t) => findUnrecognizedModelNames(t, modelRoster));
-  if (offending.length === 0) return texts;
+// ─── Narrative quality validators (Synthesis Report Polish, markdown-leak /
+// metric-tuple-leak fixes) ──────────────────────────────────────────────
+// Same regenerate-once-then-sanitize pattern as the pre-existing model-name
+// hallucination guard, extended to cover two more failure modes seen in
+// production: raw markdown syntax leaking into prose, and internal
+// agreement/certainty scores leaking into sentences as bare numbers. All
+// three checks share one regenerate call (never three separate ones) and
+// run over every narrative text field, not just the executive summary.
 
-  logger.info("[adaptiveSchema] Synthesis narrative used an unrecognized model name, regenerating once", {
-    offending,
-  });
+/** Raw markdown bold syntax leaking into prose (e.g. "**strongly** agree"). */
+const MARKDOWN_LEAK_PATTERN = /\*\*/;
+/** An internal agreement/certainty score leaking into a sentence as a bare number, e.g. "(consensus, agreement 1.00, certainty 0.92)". */
+const METRIC_TUPLE_PATTERN = /\bagreement\b[\s:=]*\d|\bcertainty\b[\s:=]*\d/i;
 
-  let regenerated: string[] | null = null;
-  try {
-    regenerated = await regenerate();
-  } catch (err: any) {
-    // A failed/thrown regenerate must degrade to stripping the ORIGINAL
-    // first-attempt text, not propagate up and lose the whole narrative
-    // call's otherwise-good output (whyModelsDisagree, narrativeSections, etc).
-    logger.warn("[adaptiveSchema] Regenerate call threw/timed out, stripping original text instead", {
-      error: err?.message,
-    });
-  }
+interface NormalizedNarrative {
+  executiveSummary: string;
+  whereModelsAgreeNarrative: string[];
+  whyModelsDisagree: string[];
+  disagreementStakes: AdaptiveStakes[];
+  certaintyAssessment: string;
+  narrativeSections: { title: string; body: string }[];
+}
 
-  if (regenerated) {
-    const stillOffending = regenerated.flatMap((t) => findUnrecognizedModelNames(t, modelRoster));
-    if (stillOffending.length === 0) return regenerated;
-    logger.warn("[adaptiveSchema] Regenerated synthesis narrative still used an unrecognized model name, stripping", {
-      stillOffending,
-    });
-    return regenerated.map((t) => stripUnrecognizedModelNames(t, modelRoster));
-  }
+/** Pads/repairs whyModelsDisagree + disagreementStakes to disagreementTopics.length, same fallback as before this refactor. */
+function normalizeNarrative(
+  parsed: z.infer<typeof NarrativeResponseSchema>,
+  disagreementTopics: string[]
+): NormalizedNarrative {
+  const whyModelsDisagree =
+    parsed.whyModelsDisagree.length === disagreementTopics.length
+      ? parsed.whyModelsDisagree
+      : disagreementTopics.map(() => DEFAULT_DISAGREEMENT_EXPLANATION);
+  const disagreementStakes =
+    parsed.disagreementStakes.length === disagreementTopics.length
+      ? parsed.disagreementStakes
+      : disagreementTopics.map(() => "important" as AdaptiveStakes);
 
-  return texts.map((t) => stripUnrecognizedModelNames(t, modelRoster));
+  return {
+    executiveSummary: parsed.executiveSummary,
+    whereModelsAgreeNarrative: parsed.whereModelsAgreeNarrative,
+    whyModelsDisagree,
+    disagreementStakes,
+    certaintyAssessment: parsed.certaintyAssessment,
+    narrativeSections: parsed.narrativeSections,
+  };
+}
+
+/** Every free-text field the model generated, flattened — the full surface both leak checks and the model-name check run over. */
+function collectNarrativeTexts(n: NormalizedNarrative): string[] {
+  return [
+    n.executiveSummary,
+    n.certaintyAssessment,
+    ...n.whereModelsAgreeNarrative,
+    ...n.whyModelsDisagree,
+    ...n.narrativeSections.flatMap((s) => [s.title, s.body]),
+  ];
+}
+
+interface NarrativeIssues {
+  hallucinatedNames: string[];
+  hasMarkdownLeak: boolean;
+  hasMetricLeak: boolean;
+}
+
+function detectNarrativeIssues(texts: string[], modelRoster: ModelId[]): NarrativeIssues {
+  return {
+    hallucinatedNames: texts.flatMap((t) => findUnrecognizedModelNames(t, modelRoster)),
+    hasMarkdownLeak: texts.some((t) => MARKDOWN_LEAK_PATTERN.test(t)),
+    hasMetricLeak: texts.some((t) => METRIC_TUPLE_PATTERN.test(t)),
+  };
+}
+
+function hasNarrativeIssues(issues: NarrativeIssues): boolean {
+  return issues.hallucinatedNames.length > 0 || issues.hasMarkdownLeak || issues.hasMetricLeak;
+}
+
+/** Strips literal ** markers, keeping the wrapped text — last-resort safety net for the markdown-leak fix. */
+function stripMarkdownArtifacts(text: string): string {
+  return text.replace(/\*\*(.*?)\*\*/g, "$1").replace(/\*\*/g, "");
+}
+
+/** Removes a leaked "agreement 1.00" / "certainty: 0.92" style fragment, parenthetical or bare — last-resort safety net for the metric-tuple-leak fix. */
+function stripMetricTuples(text: string): string {
+  return text
+    .replace(/\(\s*[^)]*\b(agreement|certainty)\b[^)]*\)/gi, "")
+    .replace(/\b(agreement|certainty)\b\s*[:=]?\s*[\d.]+%?/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s+([,.;])/g, "$1")
+    .trim();
+}
+
+function sanitizeNarrativeText(text: string, modelRoster: ModelId[]): string {
+  return stripUnrecognizedModelNames(stripMetricTuples(stripMarkdownArtifacts(text)), modelRoster);
+}
+
+/** Last-resort fallback after a failed/still-bad regenerate: strip whatever issues remain from every field. */
+function sanitizeNarrative(n: NormalizedNarrative, modelRoster: ModelId[]): NormalizedNarrative {
+  return {
+    executiveSummary: sanitizeNarrativeText(n.executiveSummary, modelRoster),
+    whereModelsAgreeNarrative: n.whereModelsAgreeNarrative.map((t) => sanitizeNarrativeText(t, modelRoster)),
+    whyModelsDisagree: n.whyModelsDisagree.map((t) => sanitizeNarrativeText(t, modelRoster)),
+    disagreementStakes: n.disagreementStakes,
+    certaintyAssessment: sanitizeNarrativeText(n.certaintyAssessment, modelRoster),
+    narrativeSections: n.narrativeSections.map((s) => ({
+      title: sanitizeNarrativeText(s.title, modelRoster),
+      body: sanitizeNarrativeText(s.body, modelRoster),
+    })),
+  };
 }
 
 function buildNarrativePrompt(schemaId: QueryType, modelRoster: ModelId[], disagreementTopics: string[]): string {
@@ -143,6 +241,10 @@ function buildNarrativePrompt(schemaId: QueryType, modelRoster: ModelId[], disag
   return `You are writing the narrative portion of a multi-LLM research panel's Synthesis Report. The scoring (agreement, certainty, status) is ALREADY computed and the disagreement topics/positions are ALREADY determined — your job is only to narrate, not to re-judge the claims.
 
 Only refer to models by these exact IDs, verbatim: ${rosterList}. Never invent, alter, or guess a model name or version.
+
+Write PLAIN TEXT ONLY — no markdown syntax at all (no **bold**, no _italic_, no # headings, no bullet dashes). Every field below is prose or a plain sentence, not formatted text.
+
+Never include a numeric agreement/certainty value in any sentence (e.g. never write "agreement 1.00" or "certainty 0.85" in prose). Those scores are already shown elsewhere with labeled context — express support in words instead: "all five models", "most models", "a minority", "one model".
 
 ${SCHEMA_NARRATIVE_HINTS[schemaId] ?? SCHEMA_NARRATIVE_HINTS.generic}
 
@@ -188,8 +290,17 @@ export async function buildAdaptiveSynthesisReport(
   const disagreeRows = rows.filter((r) => r.status === "split");
   const deterministicDisagreements = buildDeterministicDisagreements(disagreeRows);
 
-  // Independent of the narrative call below — needs full raw responses, not aligned rows.
-  const bias = await detectAdaptiveBiases(question, schemaId, rawResults, modelRoster);
+  // Bias & Blind Spots' three tiers — all independent of the narrative call
+  // below. Tier 1 needs full raw responses (not aligned rows); Tier 2 needs
+  // the aligned rows (not raw responses); Tier 3 is pure and needs only the
+  // aligned rows. Run sequentially (same style as the pre-existing Tier 1
+  // call) rather than in parallel, to keep call ordering simple to reason
+  // about and to test.
+  const biasResult = await detectAdaptiveBiases(question, schemaId, rawResults, modelRoster);
+  const bias = biasResult.findings;
+  const coverageGaps = await auditPanelCoverage(question, schemaId, rows.map((r) => r.claimText));
+  const diagnostics = computeAdaptiveDiagnostics(rows);
+
   const verdictCard = buildAdaptiveVerdictCard(question, rows, gate, bias);
 
   const templateDisagreements: AdaptiveDisagreement[] = deterministicDisagreements.map((d) => ({
@@ -210,6 +321,9 @@ export async function buildAdaptiveSynthesisReport(
     executiveSummary: buildTemplateExecutiveSummary(unifiedAnswer, agreeRows.length, disagreeRows.length, gate.status),
     disagreements: templateDisagreements,
     biasAndBlindSpots: bias,
+    biasEmptyReason: biasResult.emptyReason,
+    panelCoverageGaps: coverageGaps,
+    diagnostics,
     verdictCard,
     degraded: true,
   };
@@ -264,33 +378,50 @@ Gate: ${gate.status}`;
     const parsed = await callNarrative();
     if (!parsed) return baseReport;
 
-    const whyList =
-      parsed.whyModelsDisagree.length === disagreementTopics.length
-        ? parsed.whyModelsDisagree
-        : disagreementTopics.map(() => DEFAULT_DISAGREEMENT_EXPLANATION);
-    const stakesList =
-      parsed.disagreementStakes.length === disagreementTopics.length
-        ? parsed.disagreementStakes
-        : disagreementTopics.map(() => "important" as AdaptiveStakes);
+    let narrative = normalizeNarrative(parsed, disagreementTopics);
+    const issues = detectNarrativeIssues(collectNarrativeTexts(narrative), modelRoster);
 
-    const [cleanedExecutiveSummary, ...cleanedWhyList] = await validateAndCleanNarrativeText(
-      [parsed.executiveSummary, ...whyList],
-      modelRoster,
-      async () => {
-        const retry = await callNarrative();
-        if (!retry) return null;
-        const retryWhy =
-          retry.whyModelsDisagree.length === disagreementTopics.length
-            ? retry.whyModelsDisagree
-            : disagreementTopics.map(() => DEFAULT_DISAGREEMENT_EXPLANATION);
-        return [retry.executiveSummary, ...retryWhy];
+    if (hasNarrativeIssues(issues)) {
+      logger.info("[adaptiveSchema] Synthesis narrative had leak issues, regenerating once", {
+        hallucinatedNames: issues.hallucinatedNames,
+        hasMarkdownLeak: issues.hasMarkdownLeak,
+        hasMetricLeak: issues.hasMetricLeak,
+      });
+
+      let regeneratedRaw: z.infer<typeof NarrativeResponseSchema> | null = null;
+      try {
+        regeneratedRaw = await callNarrative();
+      } catch (err: any) {
+        // A failed/thrown regenerate must degrade to sanitizing the ORIGINAL
+        // first-attempt text, not propagate up and lose the whole narrative
+        // call's otherwise-good output (whyModelsDisagree, narrativeSections, etc).
+        logger.warn("[adaptiveSchema] Regenerate call threw/timed out, sanitizing original text instead", {
+          error: err?.message,
+        });
       }
-    );
+
+      if (regeneratedRaw) {
+        const regenerated = normalizeNarrative(regeneratedRaw, disagreementTopics);
+        const regenIssues = detectNarrativeIssues(collectNarrativeTexts(regenerated), modelRoster);
+        if (!hasNarrativeIssues(regenIssues)) {
+          narrative = regenerated;
+        } else {
+          logger.warn("[adaptiveSchema] Regenerated synthesis narrative still had leak issues, sanitizing", {
+            hallucinatedNames: regenIssues.hallucinatedNames,
+            hasMarkdownLeak: regenIssues.hasMarkdownLeak,
+            hasMetricLeak: regenIssues.hasMetricLeak,
+          });
+          narrative = sanitizeNarrative(regenerated, modelRoster);
+        }
+      } else {
+        narrative = sanitizeNarrative(narrative, modelRoster);
+      }
+    }
 
     const disagreements: AdaptiveDisagreement[] = deterministicDisagreements.map((d, i) => ({
       ...d,
-      whyTheyDiffer: cleanedWhyList[i] ?? DEFAULT_DISAGREEMENT_EXPLANATION,
-      stakes: stakesList[i] ?? "important",
+      whyTheyDiffer: narrative.whyModelsDisagree[i] ?? DEFAULT_DISAGREEMENT_EXPLANATION,
+      stakes: narrative.disagreementStakes[i] ?? "important",
     }));
 
     return {
@@ -300,15 +431,19 @@ Gate: ${gate.status}`;
       panelVerdict: verdict.summary,
       gate: gate.status,
       runCertainty,
-      whereModelsAgree: parsed.whereModelsAgreeNarrative.length > 0 ? parsed.whereModelsAgreeNarrative : baseReport.whereModelsAgree,
+      whereModelsAgree:
+        narrative.whereModelsAgreeNarrative.length > 0 ? narrative.whereModelsAgreeNarrative : baseReport.whereModelsAgree,
       whereModelsDisagree: baseReport.whereModelsDisagree,
-      certaintyAssessment: parsed.certaintyAssessment || baseReport.certaintyAssessment,
-      narrativeSections: parsed.narrativeSections,
+      certaintyAssessment: narrative.certaintyAssessment || baseReport.certaintyAssessment,
+      narrativeSections: narrative.narrativeSections,
       // On gate "fail", never let the model's prose read as confident — same
       // rule as buildAdaptiveUnifiedAnswer's deterministic override.
-      executiveSummary: gate.status === "fail" ? baseReport.executiveSummary : cleanedExecutiveSummary || baseReport.executiveSummary,
+      executiveSummary: gate.status === "fail" ? baseReport.executiveSummary : narrative.executiveSummary || baseReport.executiveSummary,
       disagreements,
       biasAndBlindSpots: bias,
+      biasEmptyReason: biasResult.emptyReason,
+      panelCoverageGaps: coverageGaps,
+      diagnostics,
       verdictCard,
       degraded: false,
     };

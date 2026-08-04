@@ -11,8 +11,8 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { verifySessionCookie } from "@/lib/firebase/auth-helpers";
-import { verifyIdToken } from "@/lib/firebase/auth";
+import { resolveRequestIdentity } from "@/lib/auth/resolveRequestIdentity";
+import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelemetry";
 import { validateUserSubscription } from "@/lib/stripe/subscriptionValidation";
 
 // Ensure Node.js runtime (Firebase Admin requires Node.js, not Edge)
@@ -23,42 +23,18 @@ export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
   try {
-    // Authenticate user
-    let uid: string;
-    try {
-      const auth = await verifySessionCookie(req);
-      
-      if (auth) {
-        uid = auth.uid;
-      } else {
-        // Fallback to Bearer token
-        const authHeader = req.headers.get("authorization");
-        if (!authHeader?.startsWith("Bearer ")) {
-          return NextResponse.json(
-            { error: "Unauthorized. Please sign in." },
-            { status: 401 }
-          );
-        }
-        const token = authHeader.split("Bearer ")[1];
-        if (!token) {
-          return NextResponse.json(
-            { error: "Unauthorized. Please sign in." },
-            { status: 401 }
-          );
-        }
-        const decodedToken = await verifyIdToken(token);
-        uid = decodedToken.uid;
-      }
-    } catch (authError: any) {
-      console.error("[validate-subscription] Authentication error:", {
-        message: authError?.message,
-        code: authError?.code,
-      });
+    // Auth Identity Consistency Remediation, Step 7 — resolves via the
+    // shared, hardened resolver rather than this route's own duplicated
+    // cookie-first logic.
+    const identity = await resolveRequestIdentity(req);
+    if (identity.status !== "authenticated") {
+      logIdentityResolutionFailure({ route: "POST /api/billing/validate-subscription", method: "POST", failureCategory: identity.reason });
       return NextResponse.json(
         { error: "Unauthorized. Please sign in." },
         { status: 401 }
       );
     }
+    const uid = identity.uid;
 
     // Validate subscription (defensive - never throws)
     const validationResult = await validateUserSubscription(uid);

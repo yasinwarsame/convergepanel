@@ -3,12 +3,12 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { verifySessionCookie } from "@/lib/firebase/auth-helpers";
-import { verifyIdToken } from "@/lib/firebase/auth";
+import { resolveRequestIdentity } from "@/lib/auth/resolveRequestIdentity";
+import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelemetry";
 import { adminDb } from "@/lib/firebase/admin";
 import { logger } from "@/lib/logger";
 import type { ClaimVerificationFirestoreDoc } from "@/lib/firestore/verifications";
-import type { PanelHistoryItem } from "@/lib/user/panelHistory";
+import type { PanelHistoryItem, PanelHistoryResearchItem } from "@/lib/user/panelHistory";
 import type { ModelId } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -34,27 +34,23 @@ function firestoreMillis(value: unknown): number {
   return 0;
 }
 
+// Auth Identity Consistency Remediation, Step 7 — resolves via the
+// shared, hardened resolver rather than this route's own duplicated
+// cookie-first logic. Response shape for auth failures is unchanged.
 async function getUid(req: NextRequest): Promise<string | NextResponse> {
-  try {
-    const auth = await verifySessionCookie(req);
-    if (auth) return auth.uid;
-    const authHeader = req.headers.get("authorization");
-    if (!authHeader?.startsWith("Bearer ")) {
-      return NextResponse.json(
-        { ok: false, errorCode: "unauthorized", message: "Please sign in." },
-        { status: 401 }
-      );
-    }
-    const token = authHeader.split("Bearer ")[1];
-    const decoded = await verifyIdToken(token);
-    return decoded.uid;
-  } catch (e: unknown) {
-    logger.error("[user/panel-history] auth failed", { error: (e as Error)?.message });
+  const identity = await resolveRequestIdentity(req);
+  if (identity.status === "authenticated") return identity.uid;
+  logIdentityResolutionFailure({ route: "GET /api/user/panel-history", method: "GET", failureCategory: identity.reason });
+  if (identity.reason === "missing_credentials") {
     return NextResponse.json(
-      { ok: false, errorCode: "auth_error", message: "Authentication failed." },
+      { ok: false, errorCode: "unauthorized", message: "Please sign in." },
       { status: 401 }
     );
   }
+  return NextResponse.json(
+    { ok: false, errorCode: "auth_error", message: "Authentication failed." },
+    { status: 401 }
+  );
 }
 
 export async function GET(req: NextRequest) {
@@ -120,6 +116,13 @@ export async function GET(req: NextRequest) {
       const synthesisConsensusScore =
         typeof synSum?.overallConsensusScore === "number" ? synSum.overallConsensusScore : undefined;
 
+      // Query-Routing Redesign, Phase 1 — summary-only: read just the
+      // discriminator field off the persisted envelope, never the full
+      // result/meta. Absent (not false) when no envelope exists at all.
+      const adaptiveOutput = data.adaptiveOutput as { schemaId?: unknown } | undefined;
+      const hasAdaptiveOutput = !!adaptiveOutput && typeof adaptiveOutput.schemaId === "string";
+      const adaptiveSchemaId = hasAdaptiveOutput ? (adaptiveOutput!.schemaId as PanelHistoryResearchItem["adaptiveSchemaId"]) : undefined;
+
       merged.push({
         sortKey,
         item: {
@@ -133,6 +136,7 @@ export async function GET(req: NextRequest) {
           modelsTotal: modelsTotal || undefined,
           synthesisConsensusScore,
           governanceStatus: normalizeGovernanceStatus(data.governanceStatus),
+          ...(hasAdaptiveOutput ? { hasAdaptiveOutput, adaptiveSchemaId } : {}),
         },
       });
     }

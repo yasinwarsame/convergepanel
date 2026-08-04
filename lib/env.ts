@@ -88,6 +88,31 @@ export const ADAPTIVE_SCHEMAS_ENABLED = process.env.ADAPTIVE_SCHEMAS_ENABLED ===
 export const ADAPTIVE_VERIFICATION_ENABLED = process.env.ADAPTIVE_VERIFICATION_ENABLED === "true";
 
 /**
+ * Multi-Reviewer Governance production-readiness hardening (Step 5.11) —
+ * a global, server-side-only kill switch for NEW multi-reviewer panel
+ * activity, defaulting OFF in every environment unless explicitly set to
+ * the literal string `"true"` (same fail-closed convention as
+ * `ADAPTIVE_SCHEMAS_ENABLED` above). This is deliberately a SECOND,
+ * independent layer on top of each team's own `adaptiveMultiReviewerSettings.enabled`
+ * opt-in (`lib/governance/adaptiveTeamReview.ts`) — never a replacement for
+ * it. Its only purpose is incident-response speed: flipping ONE env var
+ * (requiring a redeploy/restart, not a Firestore write) can instantly stop
+ * NEW panel creation/reconfiguration across every team at once, without
+ * needing to locate and edit N separate team documents.
+ *
+ * Scope is deliberately narrow, matching the same "block new activity,
+ * never block draining an existing panel" policy the team-level opt-in
+ * itself now follows (see the review-panel PUT route): this flag is
+ * checked ONLY at panel creation/reconfiguration. It is NEVER checked by
+ * vote submission, finalization, owner override, or panel cancellation —
+ * an already-open panel must always remain completable or cancellable
+ * regardless of this flag's value, so no panel can ever become stranded by
+ * an incident-response kill-switch flip. Read access (`GET .../review-panel`)
+ * is likewise never gated by this flag.
+ */
+export const MULTI_REVIEWER_GOVERNANCE_ENABLED = process.env.MULTI_REVIEWER_GOVERNANCE_ENABLED === "true";
+
+/**
  * Search engine site-verification tokens.
  *
  * Optional — when unset, the corresponding verification meta tag is simply

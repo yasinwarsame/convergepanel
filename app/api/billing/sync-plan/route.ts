@@ -10,8 +10,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { stripe } from "@/lib/stripe/client";
 import { adminDb, firebaseAdmin } from "@/lib/firebase/admin";
-import { verifySessionCookie } from "@/lib/firebase/auth-helpers";
-import { verifyIdToken } from "@/lib/firebase/auth";
+import { resolveRequestIdentity } from "@/lib/auth/resolveRequestIdentity";
+import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelemetry";
 import { getPlanIdFromPriceId, getPlanConfigById, BillingPlanId, STRIPE_PRICE_TO_PLAN } from "@/lib/billing/planConfig";
 import { BillingInterval } from "@/lib/plans";
 import { resetUsageForNewPlan } from "@/lib/stripe/usage";
@@ -22,65 +22,31 @@ export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
   try {
-    // Authenticate user - same pattern as /api/user/usage
-    // Try session cookie first, then fallback to Bearer token
-    let uid: string;
-    try {
-      const auth = await verifySessionCookie(req);
-      
-      if (auth) {
-        uid = auth.uid;
-        console.log("[sync-plan] Authenticated via session cookie:", uid);
-      } else {
-        // Fallback to Bearer token (for client-side requests)
-        const authHeader = req.headers.get("authorization");
-        if (!authHeader?.startsWith("Bearer ")) {
-          console.error("[sync-plan] ❌ No ID token provided - missing Authorization header");
-          return NextResponse.json(
-            { error: "Unauthorized. Please sign in." },
-            { status: 401 }
-          );
-        }
-        const token = authHeader.split("Bearer ")[1];
-        if (!token) {
-          console.error("[sync-plan] ❌ No ID token provided - empty token");
-          return NextResponse.json(
-            { error: "Unauthorized. Please sign in." },
-            { status: 401 }
-          );
-        }
-        const decodedToken = await verifyIdToken(token);
-        uid = decodedToken.uid;
-        console.log("[sync-plan] Authenticated via Bearer token:", uid);
-      }
-    } catch (authError: any) {
-      // Log specific auth error details
-      console.error("[sync-plan] ❌ Authentication error:", {
-        message: authError?.message,
-        code: authError?.code,
-        cause: authError?.cause?.message,
-      });
-      
-      // Check if this is a token verification error
-      const isTokenError = 
-        authError?.message === "INVALID_ID_TOKEN" ||
-        authError?.message?.includes("ID token") ||
-        authError?.message?.includes("aud") ||
-        authError?.message?.includes("audience") ||
-        authError?.message?.includes("expired") ||
-        authError?.code === "auth/argument-error" ||
-        authError?.code === "auth/id-token-expired" ||
-        authError?.code === "auth/id-token-revoked";
-      
+    // Auth Identity Consistency Remediation, Step 7 — resolves via the
+    // shared, hardened resolver (considers cookie AND bearer, fails
+    // closed on a confirmed identity mismatch) rather than this route's
+    // own duplicated cookie-first logic. Also removes this route's
+    // pre-existing direct `console.log`/`console.error` of raw uid
+    // values, which violated this step's "no uid is ever logged"
+    // invariant — replaced with the shared, safe telemetry wrapper.
+    const identity = await resolveRequestIdentity(req);
+    if (identity.status !== "authenticated") {
+      logIdentityResolutionFailure({ route: "POST /api/billing/sync-plan", method: "POST", failureCategory: identity.reason });
+      const isTokenError =
+        identity.reason === "invalid_bearer_token" ||
+        identity.reason === "invalid_session_cookie" ||
+        identity.reason === "expired_session" ||
+        identity.reason === "revoked_session";
       return NextResponse.json(
-        { 
-          error: isTokenError 
+        {
+          error: isTokenError
             ? "Authentication failed. Please sign in again."
-            : "Unauthorized. Please sign in." 
+            : "Unauthorized. Please sign in.",
         },
         { status: 401 }
       );
     }
+    const uid = identity.uid;
 
     if (!adminDb) {
       console.error("[sync-plan] ❌ Firestore not available");

@@ -14,7 +14,18 @@ import { resolveGovernanceRequestUser } from "@/lib/governance/authCheck";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-type AuditAction = "evaluated" | "approved" | "blocked" | "changes_requested" | "policy_updated";
+type AuditAction =
+  | "evaluated"
+  | "approved"
+  | "blocked"
+  | "changes_requested"
+  | "policy_updated"
+  | "adaptive_human_review_decided"
+  | "adaptive_human_review_reviewer_assigned"
+  | "adaptive_human_review_reviewer_reassigned"
+  | "adaptive_human_review_reviewer_unassigned"
+  | "adaptive_review_panel_finalized"
+  | "adaptive_review_panel_owner_overridden";
 
 type AuditEvent = {
   id: string;
@@ -43,6 +54,24 @@ const GOVERNANCE_ACTIONS = new Set<string>([
   "blocked",
   "changes_requested",
   "policy_updated",
+  // Immutable Adaptive Review History and Admin Audit Integration —
+  // additive. Written by writeAdaptiveAdminAuditEvent()
+  // (lib/governance/auditLog.ts) for adaptive human-review decisions.
+  "adaptive_human_review_decided",
+  // Part E3 — Single-Reviewer Assignment for Adaptive Human Review —
+  // additive. Written by writeAdaptiveAssignmentAdminAuditEvent()
+  // (lib/governance/auditLog.ts) for assignment mutations.
+  "adaptive_human_review_reviewer_assigned",
+  "adaptive_human_review_reviewer_reassigned",
+  "adaptive_human_review_reviewer_unassigned",
+  // Transactional Multi-Reviewer Finalization, Part E — additive. Written
+  // by writeAdaptivePanelFinalizationAdminAuditEvent() (lib/governance/auditLog.ts)
+  // for panel finalization.
+  "adaptive_review_panel_finalized",
+  // Multi-Reviewer Owner Override, Part F — additive. Written by
+  // writeAdaptivePanelOverrideAdminAuditEvent() (lib/governance/auditLog.ts)
+  // for owner override finalization.
+  "adaptive_review_panel_owner_overridden",
 ]);
 
 /** Shown in the governance Audit Log tab (human decisions + policy; no system evaluations). */
@@ -51,6 +80,12 @@ const AUDIT_LOG_DISPLAY_ACTIONS = new Set<string>([
   "blocked",
   "changes_requested",
   "policy_updated",
+  "adaptive_human_review_decided",
+  "adaptive_human_review_reviewer_assigned",
+  "adaptive_human_review_reviewer_reassigned",
+  "adaptive_human_review_reviewer_unassigned",
+  "adaptive_review_panel_finalized",
+  "adaptive_review_panel_owner_overridden",
 ]);
 
 function isGovernanceAuditDoc(raw: Record<string, unknown>): boolean {

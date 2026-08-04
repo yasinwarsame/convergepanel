@@ -64,8 +64,8 @@ import { createErrorResponse, ERROR_CODES } from "@/lib/api/errorResponse";
 import { extractOpenAIText, isPartialResponse } from "@/lib/openai/extractResponse";
 import { extractModelText } from "@/lib/openai/extractModelText";
 import { getTokenParams } from "@/lib/openai/tokenParams";
-import { verifySessionCookie } from "@/lib/firebase/auth-helpers";
-import { verifyIdToken } from "@/lib/firebase/auth";
+import { resolveRequestIdentity } from "@/lib/auth/resolveRequestIdentity";
+import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelemetry";
 import { checkRateLimit } from "@/lib/security/rateLimit";
 import { validateSynthesisRequest, validateRequestBodySize, MAX_REQUEST_BODY_SIZE } from "@/lib/security/requestValidation";
 import { sanitizeModelText, truncateForSynthesis, MAX_CHARS_SYNTHESIS_PER_MODEL } from "@/lib/panel/sanitizeText";
@@ -76,6 +76,7 @@ import { buildSubstitutionBlock, normalizeModelResultPublic, coerceStatus } from
 import type { UserProfile } from "@/lib/types";
 import { evaluateAndStoreGovernance } from "@/lib/governance/evaluateAndStore";
 import { governanceInputFromResearchRun } from "@/lib/governance/governanceInputFromDocs";
+import { parsePersistedAdaptiveOutput } from "@/lib/adaptiveSchema/persistedOutput";
 import {
   applyTeamGovernancePipeline,
   mergeGovernanceIntoBody,
@@ -287,38 +288,19 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // Authenticate user (same as POST)
-  let uid: string;
-  try {
-    const auth = await verifySessionCookie(req);
-    if (auth) {
-      uid = auth.uid;
-    } else {
-      const authHeader = req.headers.get("authorization");
-      if (!authHeader?.startsWith("Bearer ")) {
-        return NextResponse.json(
-          createErrorResponse(
-            ERROR_CODES.UNAUTHORIZED,
-            "Please sign in to view synthesis reports.",
-            requestId
-          ),
-          { status: 401 }
-        );
-      }
-      const token = authHeader.split("Bearer ")[1];
-      const decodedToken = await verifyIdToken(token);
-      uid = decodedToken.uid;
-    }
-  } catch (authError: any) {
-    return NextResponse.json(
-      createErrorResponse(
-        ERROR_CODES.UNAUTHORIZED,
-        "Authentication failed. Please sign in again.",
-        requestId
-      ),
-      { status: 401 }
-    );
+  // Auth Identity Consistency Remediation, Step 7 — resolves via the
+  // shared, hardened resolver rather than this route's own duplicated
+  // cookie-first logic.
+  const identityForGet = await resolveRequestIdentity(req);
+  if (identityForGet.status !== "authenticated") {
+    logIdentityResolutionFailure({ route: "GET /api/synthesize-panel", method: "GET", failureCategory: identityForGet.reason });
+    const message =
+      identityForGet.reason === "missing_credentials"
+        ? "Please sign in to view synthesis reports."
+        : "Authentication failed. Please sign in again.";
+    return NextResponse.json(createErrorResponse(ERROR_CODES.UNAUTHORIZED, message, requestId), { status: 401 });
   }
+  const uid = identityForGet.uid;
 
   // Verify ownership
   if (adminDb) {
@@ -421,74 +403,24 @@ export async function POST(req: NextRequest) {
   }
 
   // ============================================
-  // AUTHENTICATION (Standardized with run-panel)
+  // AUTHENTICATION — Auth Identity Consistency Remediation, Step 7
   // ============================================
-  // Verify authentication (try session cookie first, then Bearer token)
-  // Wrap in try/catch to return 401 instead of 500 for auth failures
-  let uid: string;
-  try {
-    const auth = await verifySessionCookie(req);
-    
-    if (auth) {
-      uid = auth.uid;
-    } else {
-      // Fallback to Bearer token
-      const authHeader = req.headers.get("authorization");
-      if (!authHeader?.startsWith("Bearer ")) {
-        // Diagnostics for 401: log what auth methods were attempted
-        const hasSessionCookie = !!req.cookies.get("__session")?.value;
-        const hasAuthHeader = !!authHeader;
-        logger.warn(`[${requestId}] [synthesize-panel] Authentication failed - no valid credentials`, {
-          requestId,
-          hasSessionCookie,
-          hasAuthHeader,
-          authHeaderPrefix: authHeader ? authHeader.substring(0, 10) : null,
-        });
-        
-        return NextResponse.json(
-          createErrorResponse(
-            ERROR_CODES.UNAUTHORIZED,
-            "Please sign in to generate synthesis reports.",
-            requestId
-          ),
-          { status: 401 }
-        );
-      }
-      const token = authHeader.split("Bearer ")[1];
-      const decodedToken = await verifyIdToken(token);
-      uid = decodedToken.uid;
-    }
-  } catch (authError: any) {
-    // Auth-specific errors should return 401, not 500
-    // Diagnostics for 401: log what auth methods were attempted
-    const hasSessionCookie = !!req.cookies.get("__session")?.value;
-    const authHeader = req.headers.get("authorization");
-    const hasAuthHeader = !!authHeader?.startsWith("Bearer ");
-    
-    logger.error(`[${requestId}] [synthesize-panel] Authentication error`, {
-      requestId,
-      error: authError?.message,
-      code: authError?.code,
-      cause: authError?.cause?.message,
-      hasSessionCookie,
-      hasAuthHeader,
-    });
-    
-    // Check if this is a token verification error (including INVALID_ID_TOKEN)
-    const isTokenError = 
-      authError?.message === "INVALID_ID_TOKEN" ||
-      authError?.message?.includes("ID token") ||
-      authError?.message?.includes("aud") ||
-      authError?.message?.includes("audience") ||
-      authError?.message?.includes("expired") ||
-      authError?.code === "auth/argument-error" ||
-      authError?.code === "auth/id-token-expired" ||
-      authError?.code === "auth/id-token-revoked";
-    
+  // Resolves via the shared, hardened resolver (considers cookie AND
+  // bearer, fails closed on a confirmed identity mismatch) rather than
+  // this route's own duplicated cookie-first logic. Also drops this
+  // route's pre-existing `authHeaderPrefix` diagnostic (a partial
+  // Authorization-header leak into logs) — the boolean
+  // hasSessionCookie/hasAuthHeader diagnostics are preserved via the
+  // shared telemetry wrapper's `failureCategory`, which conveys the same
+  // operational signal without any credential fragment.
+  const identity = await resolveRequestIdentity(req);
+  if (identity.status !== "authenticated") {
+    logIdentityResolutionFailure({ route: "POST /api/synthesize-panel", method: "POST", failureCategory: identity.reason });
+    const isTokenError = identity.reason !== "missing_credentials";
     return NextResponse.json(
       createErrorResponse(
         isTokenError ? "AUTH_ERROR" : ERROR_CODES.UNAUTHORIZED,
-        isTokenError 
+        isTokenError
           ? "Authentication failed. Please sign in again."
           : "Please sign in to generate synthesis reports.",
         requestId
@@ -496,6 +428,7 @@ export async function POST(req: NextRequest) {
       { status: 401 }
     );
   }
+  const uid = identity.uid;
 
   // Parse request body once (can only be read once) and get runId for deduplication
   let body: any;
@@ -698,13 +631,34 @@ export async function POST(req: NextRequest) {
     // ============================================
     // Verify the user owns the run they're trying to synthesize
     // Use runId from body (already parsed above)
+    // `runLookupStatus` and `runDataForAdaptiveCheck` are hoisted so the
+    // adaptive-run check below (Query-Routing Redesign, Phase 2A, Step 6)
+    // can reuse this SAME document read rather than issuing a second
+    // Firestore read for the same run, and so the two genuinely different
+    // "no data" cases stay distinguishable:
+    //   - "not_found": the run document doesn't exist. Not a read failure —
+    //     the read succeeded and found nothing. Has no adaptiveOutput field
+    //     by construction, so the adaptive check below treats this exactly
+    //     like a run that exists but lacks the field — continue as legacy.
+    //   - "read_failed": the read itself threw, OR runId is present but
+    //     Firestore isn't configured at all. Whether this run has a
+    //     persisted adaptiveOutput could not be determined — the adaptive
+    //     check below fails CLOSED for this state (Step 6, post-review
+    //     correction — see docs/governance-decision-receipts-design.md §16a).
+    // "not_attempted" (no runId at all — nothing to look up) is left out of
+    // this distinction entirely: it isn't a lookup failure, just the
+    // absence of a run reference, so it continues exactly as it always has.
+    let runLookupStatus: "found" | "not_found" | "read_failed" | "not_attempted" = "not_attempted";
+    let runDataForAdaptiveCheck: Record<string, unknown> | undefined;
     if (runId && adminDb) {
       try {
         const runDoc = await adminDb.collection("runs").doc(runId).get();
         if (runDoc.exists) {
           const runData = runDoc.data();
+          runDataForAdaptiveCheck = runData;
+          runLookupStatus = "found";
           const runUserId = runData?.userId;
-          
+
           // Backward compatibility: if no userId exists in run doc, allow access for now
           // (old runs may not have userId field)
           // But log it for monitoring
@@ -724,20 +678,103 @@ export async function POST(req: NextRequest) {
               { status: 403 }
             );
           }
-          
+
           if (!runUserId) {
             // Log missing userId for monitoring (old runs)
             logger.debug(`[${requestId}] [synthesize-panel] Run has no userId field (old run), allowing access`, { requestId, runId });
           }
+        } else {
+          // Run doesn't exist — a real, successful lookup that found
+          // nothing, NOT a read failure. Continues below as "absent"
+          // (no adaptiveOutput field by construction), same as always.
+          runLookupStatus = "not_found";
         }
-        // If run doesn't exist, continue - will be caught by validation below
       } catch (ownershipError: any) {
-        // Non-fatal: log but continue (Firestore error shouldn't block synthesis)
-        logger.warn(`[${requestId}] [synthesize-panel] Could not verify run ownership`, {
+        // Query-Routing Redesign, Phase 2A, Step 6, post-review correction:
+        // this used to be non-fatal ("Firestore error shouldn't block
+        // synthesis"). That leniency is no longer applied to the adaptive
+        // check below — whether THIS run has a persisted adaptiveOutput
+        // could not be determined, so it must fail closed, not continue.
+        // Still logged the same way for ownership-monitoring purposes.
+        logger.warn(`[${requestId}] [synthesize-panel] Could not verify run ownership or adaptive status`, {
           requestId,
           error: ownershipError?.message,
         });
+        runLookupStatus = "read_failed";
       }
+    }
+
+    if (runLookupStatus === "read_failed") {
+      logger.warn(`[${requestId}] [synthesize-panel] Rejected: run lookup unavailable, cannot verify adaptiveOutput status — failing closed`, {
+        requestId,
+        runId,
+      });
+      return NextResponse.json(
+        createErrorResponse(
+          ERROR_CODES.RUN_LOOKUP_UNAVAILABLE,
+          "Could not verify this run right now. Please try again shortly.",
+          requestId
+        ),
+        { status: 503 }
+      );
+    }
+
+    // ============================================
+    // QUERY-ROUTING REDESIGN, PHASE 2A, STEP 6 — REJECT ADAPTIVE RUNS
+    // ============================================
+    // Defensive, server-side, durable-data-based guard — never trusts a
+    // client-supplied "adaptive: false" flag (none is even sent; this
+    // checks Firestore directly). Closes a confirmed pre-existing bug:
+    // app/page.tsx's automatic synthesis trigger had no equivalent guard,
+    // so a Milestone-2 adaptive run's structured JSON output could reach
+    // this route and be processed as ordinary prose (see
+    // docs/governance-decision-receipts-design.md §14.4/§16).
+    //
+    // Runs strictly BEFORE input validation, LLM client construction,
+    // claims extraction, consensus scoring, any run-document write, and
+    // any governance call — nothing past this point can execute for a run
+    // this check rejects.
+    //
+    // A malformed or unsupported-version adaptiveOutput marker is NOT
+    // proof the run is legacy — both fail safe (reject), exactly like a
+    // genuinely valid one. Only a run whose document has no
+    // `adaptiveOutput` field at all (the real, common case for every
+    // legacy-active/pre-Phase-1 run, and for a run that doesn't exist —
+    // "not_found") continues to legacy synthesis, unchanged. A lookup
+    // failure ("read_failed") never reaches this point — it was already
+    // rejected with 503 above.
+    if (runLookupStatus === "found") {
+      const parsedAdaptive = parsePersistedAdaptiveOutput(runDataForAdaptiveCheck?.adaptiveOutput);
+      if (parsedAdaptive.ok) {
+        logger.warn(`[${requestId}] [synthesize-panel] Rejected: run has a persisted adaptive output; legacy synthesis is not supported`, {
+          requestId,
+          runId,
+        });
+        return NextResponse.json(
+          createErrorResponse(
+            ERROR_CODES.ADAPTIVE_RUN_NOT_SUPPORTED,
+            "This run used the structured adaptive result view and does not support legacy synthesis.",
+            requestId
+          ),
+          { status: 409 }
+        );
+      }
+      if (parsedAdaptive.reason === "malformed" || parsedAdaptive.reason === "unsupported_version") {
+        logger.warn(`[${requestId}] [synthesize-panel] Rejected: run's adaptiveOutput marker could not be verified; failing safe rather than assuming legacy`, {
+          requestId,
+          runId,
+          reason: parsedAdaptive.reason,
+        });
+        return NextResponse.json(
+          createErrorResponse(
+            parsedAdaptive.reason === "malformed" ? ERROR_CODES.ADAPTIVE_RUN_INVALID : ERROR_CODES.ADAPTIVE_RUN_UNSUPPORTED_VERSION,
+            "This run's result data could not be verified as legacy-compatible.",
+            requestId
+          ),
+          { status: 409 }
+        );
+      }
+      // parsedAdaptive.reason === "absent" — no adaptiveOutput field on this run; continue as legacy, unchanged.
     }
 
     // ============================================

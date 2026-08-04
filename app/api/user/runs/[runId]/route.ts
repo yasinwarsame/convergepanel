@@ -4,39 +4,35 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { verifySessionCookie } from "@/lib/firebase/auth-helpers";
-import { verifyIdToken } from "@/lib/firebase/auth";
+import { resolveRequestIdentity } from "@/lib/auth/resolveRequestIdentity";
+import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelemetry";
 import { adminDb } from "@/lib/firebase/admin";
-import { logger } from "@/lib/logger";
 import type { RunDocument } from "@/lib/panel/schemas";
 import type { ModelId } from "@/lib/types";
 import { runDocumentToPublicResults } from "@/lib/user/runDocumentToPublicResults";
 import { publicizePanelResults } from "@/lib/panel/publicize";
+import { parsePersistedAdaptiveOutput } from "@/lib/adaptiveSchema/persistedOutput";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// Auth Identity Consistency Remediation, Step 7 — resolves via the
+// shared, hardened resolver rather than this route's own duplicated
+// cookie-first logic. Response shape for auth failures is unchanged.
 async function getUid(req: NextRequest): Promise<string | NextResponse> {
-  try {
-    const auth = await verifySessionCookie(req);
-    if (auth) return auth.uid;
-    const authHeader = req.headers.get("authorization");
-    if (!authHeader?.startsWith("Bearer ")) {
-      return NextResponse.json(
-        { ok: false, errorCode: "unauthorized", message: "Please sign in." },
-        { status: 401 }
-      );
-    }
-    const token = authHeader.split("Bearer ")[1];
-    const decoded = await verifyIdToken(token);
-    return decoded.uid;
-  } catch (e: unknown) {
-    logger.error("[user/runs/id] auth failed", { error: (e as Error)?.message });
+  const identity = await resolveRequestIdentity(req);
+  if (identity.status === "authenticated") return identity.uid;
+  logIdentityResolutionFailure({ route: "GET /api/user/runs/[runId]", method: "GET", failureCategory: identity.reason });
+  if (identity.reason === "missing_credentials") {
     return NextResponse.json(
-      { ok: false, errorCode: "auth_error", message: "Authentication failed." },
+      { ok: false, errorCode: "unauthorized", message: "Please sign in." },
       { status: 401 }
     );
   }
+  return NextResponse.json(
+    { ok: false, errorCode: "auth_error", message: "Authentication failed." },
+    { status: 401 }
+  );
 }
 
 export async function GET(req: NextRequest, context: { params: Promise<{ runId: string }> }) {
@@ -118,6 +114,16 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
         }
       : null;
 
+  // Query-Routing Redesign, Phase 1 — validate the persisted adaptive
+  // envelope (if any) through the real runtime parser, never an unchecked
+  // cast of Firestore data. Never reruns models or reclassifies to recover
+  // from absent/malformed/unsupported-version data — those three states
+  // are all legitimate, non-error outcomes the client renders distinctly.
+  const parsedAdaptive = parsePersistedAdaptiveOutput(data.adaptiveOutput);
+  const adaptive = parsedAdaptive.ok
+    ? { status: "valid" as const, output: parsedAdaptive.output }
+    : { status: parsedAdaptive.reason, output: null };
+
   return NextResponse.json({
     ok: true,
     runId,
@@ -128,5 +134,6 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
     synthesisCache,
     governance,
     governanceStatus: orgGovernanceStatus,
+    adaptive,
   });
 }

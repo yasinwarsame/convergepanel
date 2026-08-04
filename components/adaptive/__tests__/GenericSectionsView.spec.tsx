@@ -19,6 +19,14 @@ const classification: QueryClassification = {
   timeSensitivity: "low",
   userIntent: "get_answer",
   confidence: 0.9,
+  riskLevel: "casual",
+  evidenceRequirement: "low",
+  freshness: "timeless",
+  inputType: "text",
+  verificationMethod: "cross_model_consistency",
+  requestedCount: null,
+  requiresClarification: false,
+  rationale: "test fixture",
 };
 
 function result(modelId: string, uncertainties: string[], followUps: string[] = []): AdaptiveModelResult {

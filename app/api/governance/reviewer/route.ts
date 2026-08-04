@@ -8,8 +8,8 @@ import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import { getEffectiveEntitlements } from "@/lib/admin/entitlements";
 import { getPlanConfig } from "@/lib/plans";
 import type { UserProfile } from "@/lib/types";
-import { verifySessionCookie } from "@/lib/firebase/auth-helpers";
-import { verifyIdToken } from "@/lib/firebase/auth";
+import { resolveRequestIdentity } from "@/lib/auth/resolveRequestIdentity";
+import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelemetry";
 import { logger } from "@/lib/logger";
 import { parseGovernanceReviewerFor } from "@/lib/governance/reviewerFields";
 
@@ -20,29 +20,27 @@ function planLabel(planId: "free" | "lite" | "full"): string {
   return getPlanConfig(planId).name;
 }
 
+/**
+ * Auth Identity Consistency Remediation, Step 7 — resolves via the
+ * shared, hardened resolver rather than this route's own duplicated
+ * cookie-first logic. Note: this route's PREVIOUS implementation
+ * swallowed a THROWN cookie-verification error and fell through to
+ * trying the bearer token — the only one of the 14 migrated routes that
+ * did so; every other route (and the shared resolver) fails closed on an
+ * invalid cookie without ever trying bearer. Migrating this route onto
+ * the shared resolver makes it consistent with the other 13 and with
+ * `getRequestUid()` — strictly safer, not a functional regression (a
+ * cookie that fails verification is not distinguishable, from this
+ * route's caller's perspective, from "please sign in again").
+ */
 async function resolveUid(req: NextRequest): Promise<string | NextResponse> {
-  try {
-    const session = await verifySessionCookie(req);
-    if (session?.uid) return session.uid;
-  } catch {
-    /* bearer */
-  }
-  const h = req.headers.get("authorization");
-  if (!h?.startsWith("Bearer ")) {
-    return NextResponse.json(
-      { ok: false, error: { code: "unauthorized", message: "Authentication required." } },
-      { status: 401 }
-    );
-  }
-  try {
-    const decoded = await verifyIdToken(h.slice(7));
-    return decoded.uid;
-  } catch {
-    return NextResponse.json(
-      { ok: false, error: { code: "unauthorized", message: "Authentication required." } },
-      { status: 401 }
-    );
-  }
+  const identity = await resolveRequestIdentity(req);
+  if (identity.status === "authenticated") return identity.uid;
+  logIdentityResolutionFailure({ route: "/api/governance/reviewer", failureCategory: identity.reason });
+  return NextResponse.json(
+    { ok: false, error: { code: "unauthorized", message: "Authentication required." } },
+    { status: 401 }
+  );
 }
 
 async function authEmailForUid(uid: string): Promise<string> {

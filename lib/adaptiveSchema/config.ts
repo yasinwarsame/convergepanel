@@ -7,7 +7,7 @@
  * adapter) should hardcode a number that belongs here — tune it here instead.
  */
 
-import { AdaptiveGateStatus, ClaimConfidence, ClaimEvidenceType, ModelTrustSummary } from "./types";
+import { AdaptiveGateStatus, BiasEmptyReason, ClaimConfidence, ClaimEvidenceType, ModelTrustSummary } from "./types";
 
 // ─── Certainty formula (R1b) ────────────────────────────────────────────
 // certaintyScore = coverageWeight*coverage + agreementWeight*agreement + statedConfidenceWeight*statedConfidence
@@ -122,6 +122,24 @@ export const FOLLOW_UPS_MAX_ITEMS = 6;
 export const TEXT_DEDUP_THRESHOLDS = {
   levenshteinMaxRatio: 0.2,
   tokenOverlapMin: 0.7,
+};
+
+/** Cap on merged "Where models agree" items shown in the Synthesis Report (Bias & Blind Spots Tiers fix, Part 4). */
+export const WHERE_MODELS_AGREE_MAX_ITEMS = 8;
+
+// ─── Bias & Blind Spots — three-tier system ─────────────────────────────
+/** Cap on panel-coverage-gap findings (Tier 2) surfaced per run. */
+export const MAX_COVERAGE_GAPS = 3;
+/** Mean agreementScore across ALL claim rows above which Tier 3 flags the run as unusually uniform. Deliberately high — single-source rows (agreementScore 0) pull the mean down, so this only fires when the panel converged nearly everywhere, not just on its best claims. */
+export const HOMOGENEITY_AGREEMENT_THRESHOLD = 0.95;
+/** Citation-coverage ratio (citedClaimCount / totalClaimCount) below which the Tier 3 stat renders with a danger tint. */
+export const CITATION_COVERAGE_DANGER_THRESHOLD = 0.3;
+
+export const BIAS_EMPTY_REASON_LABELS: Record<BiasEmptyReason, string> = {
+  insufficient_models: "fewer than two models returned usable responses, so bias detection couldn't run",
+  call_failed: "the bias-detection call failed or timed out",
+  invalid_response: "the bias-detection response couldn't be validated",
+  below_threshold: "no model-specific bias signals were confidently attributable",
 };
 
 // ─── Panel Verdict Card (Part A4) ────────────────────────────────────────

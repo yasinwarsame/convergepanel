@@ -3,35 +3,31 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { verifySessionCookie } from "@/lib/firebase/auth-helpers";
-import { verifyIdToken } from "@/lib/firebase/auth";
+import { resolveRequestIdentity } from "@/lib/auth/resolveRequestIdentity";
+import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelemetry";
 import { adminDb } from "@/lib/firebase/admin";
 import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// Auth Identity Consistency Remediation, Step 7 — resolves via the
+// shared, hardened resolver rather than this route's own duplicated
+// cookie-first logic. Response shape for auth failures is unchanged.
 async function getUid(req: NextRequest): Promise<string | NextResponse> {
-  try {
-    const auth = await verifySessionCookie(req);
-    if (auth) return auth.uid;
-    const authHeader = req.headers.get("authorization");
-    if (!authHeader?.startsWith("Bearer ")) {
-      return NextResponse.json(
-        { ok: false, errorCode: "unauthorized", message: "Please sign in." },
-        { status: 401 }
-      );
-    }
-    const token = authHeader.split("Bearer ")[1];
-    const decoded = await verifyIdToken(token);
-    return decoded.uid;
-  } catch (e: unknown) {
-    logger.error("[user/run-governance] auth failed", { error: (e as Error)?.message });
+  const identity = await resolveRequestIdentity(req);
+  if (identity.status === "authenticated") return identity.uid;
+  logIdentityResolutionFailure({ route: "GET /api/user/run-governance", method: "GET", failureCategory: identity.reason });
+  if (identity.reason === "missing_credentials") {
     return NextResponse.json(
-      { ok: false, errorCode: "auth_error", message: "Authentication failed." },
+      { ok: false, errorCode: "unauthorized", message: "Please sign in." },
       { status: 401 }
     );
   }
+  return NextResponse.json(
+    { ok: false, errorCode: "auth_error", message: "Authentication failed." },
+    { status: 401 }
+  );
 }
 
 export async function GET(req: NextRequest) {

@@ -29,7 +29,8 @@ import {
   AdaptiveTrustSummary,
   ModelTrustSummary,
 } from "@/lib/adaptiveSchema/types";
-import { TRUST_SCORE_CAP_REASON } from "@/lib/adaptiveSchema/config";
+import { TRUST_SCORE_CAP_REASON, TEXT_DEDUP_THRESHOLDS, WHERE_MODELS_AGREE_MAX_ITEMS, CITATION_COVERAGE_DANGER_THRESHOLD, BIAS_EMPTY_REASON_LABELS } from "@/lib/adaptiveSchema/config";
+import { dedupeTextList } from "@/lib/adaptiveSchema/textSimilarity";
 
 /** Canonical, ordered list of `data-section` values rendered below — the single source of truth the snapshot test asserts against, so a future edit can't silently drop a section without also updating this list. */
 export const ADAPTIVE_SYNTHESIS_SECTION_IDS = [
@@ -49,7 +50,7 @@ export const ADAPTIVE_SYNTHESIS_SECTION_IDS = [
   "disclaimer",
   "export-actions",
 ] as const;
-import { Card, SectionLabel, ProbabilityBar, StakesBadge, getModelLabel } from "./shared";
+import { Card, SectionLabel, ProbabilityBar, StakesBadge, TintBadge, getModelLabel } from "./shared";
 import ModelChip from "@/components/ModelChip";
 import { classifyClaimSeverity } from "@/lib/verificationGate/claimSeverity";
 import { VerificationActions } from "@/components/VerificationActions";
@@ -359,60 +360,169 @@ function DisagreementsSection({ report }: { report: AdaptiveSynthesisReport }) {
   );
 }
 
-function BiasBlindSpotsSection({ report }: { report: AdaptiveSynthesisReport }) {
+/** T1: unchanged per-model attributed-bias cards. */
+/** Exported for reuse by BiasBlindspotAuditView.tsx (Milestone 2) — the standalone bias_blindspot_audit schema's Tier 1 uses the exact same `AdaptiveBiasFinding[]` shape (reusing `detectAdaptiveBiases` verbatim), so this renders identically in both places rather than being duplicated. */
+export function BiasFindingCards({ findings }: { findings: AdaptiveSynthesisReport["biasAndBlindSpots"] }) {
+  return (
+    <div className="space-y-3">
+      {findings.map((b, idx) => (
+        <div key={idx} className="relative rounded-lg bg-slate-50 border border-slate-300 p-4">
+          <div className="absolute left-0 top-0 h-full w-1 rounded-l-lg bg-amber-400" />
+          <div className="pl-4">
+            <div className="flex flex-wrap items-center gap-2 mb-2">
+              {b.modelsImplicated.map((m) => (
+                <ModelChip key={m} modelId={m} size="xs" />
+              ))}
+            </div>
+            <h3 className="text-slate-900 font-semibold mb-1">{b.biasType}</h3>
+            <p className="text-sm text-slate-700 mb-3">{b.description}</p>
+
+            {b.evidence.length > 0 && (
+              <div className="space-y-2 mb-3">
+                {b.evidence.map((e, evIdx) => (
+                  <div key={evIdx} className="pl-3 border-l-2 border-slate-300">
+                    <p className="text-sm text-slate-700">
+                      <span className="font-medium">{getModelLabel(e.modelId)}:</span> &ldquo;{e.excerpt}&rdquo;
+                    </p>
+                    <p className="text-xs text-slate-500 mt-0.5">{e.rationale}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {b.likelyCauses.length > 0 && (
+              <p className="text-xs text-slate-600 mb-1">
+                <span className="font-medium">Likely causes:</span> {b.likelyCauses.join("; ")}
+              </p>
+            )}
+            {b.impact && (
+              <p className="text-xs text-slate-600 mb-1">
+                <span className="font-medium">Impact:</span> {b.impact}
+              </p>
+            )}
+            {b.mitigationSteps.length > 0 && (
+              <p className="text-xs text-slate-600">
+                <span className="font-medium">Mitigation:</span> {b.mitigationSteps.join("; ")}
+              </p>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** T2: one "what the panel didn't cover" card per coverage gap, with an optional Run follow-up action that pre-fills the question box. */
+function CoverageGapCard({
+  gap,
+  onRunFollowUp,
+}: {
+  gap: AdaptiveSynthesisReport["panelCoverageGaps"][number];
+  onRunFollowUp?: (question: string) => void;
+}) {
+  return (
+    <div className="rounded-lg bg-sky-50 border border-sky-200 p-4">
+      <h3 className="text-sky-900 font-semibold mb-1">{gap.dimension}</h3>
+      <p className="text-sm text-sky-800 mb-3">{gap.whyItMatters}</p>
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <p className="text-xs text-sky-700 italic flex-1 min-w-[12rem]">&ldquo;{gap.followUpQuestion}&rdquo;</p>
+        {onRunFollowUp && (
+          <button
+            type="button"
+            onClick={() => onRunFollowUp(gap.followUpQuestion)}
+            className="shrink-0 rounded-lg border border-sky-300 bg-white px-2.5 py-1 text-xs font-medium text-sky-700 hover:bg-sky-100"
+          >
+            Run follow-up
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** T3: a single compact strip of inline stats — never cards, per spec. */
+function DiagnosticsStrip({ diagnostics }: { diagnostics: AdaptiveSynthesisReport["diagnostics"] }) {
+  const citationPct = diagnostics.totalClaimCount > 0 ? diagnostics.citedClaimCount / diagnostics.totalClaimCount : null;
+  const citationDanger = citationPct !== null && citationPct < CITATION_COVERAGE_DANGER_THRESHOLD;
+
+  const evidenceParts = (
+    [
+      ["empirical", diagnostics.evidenceMix.empirical],
+      ["theoretical", diagnostics.evidenceMix.theoretical],
+      ["anecdotal", diagnostics.evidenceMix.anecdotal],
+      ["authoritative", diagnostics.evidenceMix.authoritative],
+    ] as const
+  )
+    .filter(([, count]) => count > 0)
+    .map(([label, count]) => `${count} ${label}`);
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {citationPct !== null && (
+        <TintBadge tone={citationDanger ? "danger" : "accent"}>
+          Citations: {diagnostics.citedClaimCount} of {diagnostics.totalClaimCount} claims cite a source
+        </TintBadge>
+      )}
+      {evidenceParts.length > 0 && <TintBadge tone="accent">Evidence mix: {evidenceParts.join(", ")}</TintBadge>}
+      {diagnostics.homogeneityFlag && (
+        <TintBadge
+          tone="accent"
+          title="Models share training data — strong consensus is not independent verification."
+        >
+          Unusually uniform agreement
+        </TintBadge>
+      )}
+    </div>
+  );
+}
+
+/** Composed only when T1+T2+T3 are ALL empty — states the actual reason(s), never generic advice. */
+function biasSectionEmptyMessage(report: AdaptiveSynthesisReport): string {
+  const biasPart = report.biasEmptyReason
+    ? BIAS_EMPTY_REASON_LABELS[report.biasEmptyReason]
+    : "no model-specific bias signals were confidently attributable";
+  const claimsPart =
+    report.diagnostics.totalClaimCount === 0
+      ? "no claims were extracted this run, so there was nothing for the coverage audit or diagnostics to analyze"
+      : "the panel's coverage looked complete and its diagnostics showed nothing notable";
+  return `No bias, coverage, or diagnostic signals to show this run: ${biasPart}, and ${claimsPart}.`;
+}
+
+function BiasBlindSpotsSection({
+  report,
+  onRunFollowUp,
+}: {
+  report: AdaptiveSynthesisReport;
+  onRunFollowUp?: (question: string) => void;
+}) {
+  const hasT1 = report.biasAndBlindSpots.length > 0;
+  const hasT2 = report.panelCoverageGaps.length > 0;
+  const hasT3 = report.diagnostics.totalClaimCount > 0;
+  const allEmpty = !hasT1 && !hasT2 && !hasT3;
+
   return (
     <Card>
       <SectionLabel>Bias &amp; blind spots</SectionLabel>
-      {report.biasAndBlindSpots.length === 0 ? (
-        <p className="text-sm text-slate-500 italic">
-          No model-specific bias signals were confidently attributable from this run. Consider adding constraints or
-          counter-sources.
-        </p>
+      {allEmpty ? (
+        <p className="text-sm text-slate-500 italic">{biasSectionEmptyMessage(report)}</p>
       ) : (
-        <div className="space-y-3">
-          {report.biasAndBlindSpots.map((b, idx) => (
-            <div key={idx} className="relative rounded-lg bg-slate-50 border border-slate-300 p-4">
-              <div className="absolute left-0 top-0 h-full w-1 rounded-l-lg bg-amber-400" />
-              <div className="pl-4">
-                <div className="flex flex-wrap items-center gap-2 mb-2">
-                  {b.modelsImplicated.map((m) => (
-                    <ModelChip key={m} modelId={m} size="xs" />
-                  ))}
-                </div>
-                <h3 className="text-slate-900 font-semibold mb-1">{b.biasType}</h3>
-                <p className="text-sm text-slate-700 mb-3">{b.description}</p>
-
-                {b.evidence.length > 0 && (
-                  <div className="space-y-2 mb-3">
-                    {b.evidence.map((e, evIdx) => (
-                      <div key={evIdx} className="pl-3 border-l-2 border-slate-300">
-                        <p className="text-sm text-slate-700">
-                          <span className="font-medium">{getModelLabel(e.modelId)}:</span> &ldquo;{e.excerpt}&rdquo;
-                        </p>
-                        <p className="text-xs text-slate-500 mt-0.5">{e.rationale}</p>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {b.likelyCauses.length > 0 && (
-                  <p className="text-xs text-slate-600 mb-1">
-                    <span className="font-medium">Likely causes:</span> {b.likelyCauses.join("; ")}
-                  </p>
-                )}
-                {b.impact && (
-                  <p className="text-xs text-slate-600 mb-1">
-                    <span className="font-medium">Impact:</span> {b.impact}
-                  </p>
-                )}
-                {b.mitigationSteps.length > 0 && (
-                  <p className="text-xs text-slate-600">
-                    <span className="font-medium">Mitigation:</span> {b.mitigationSteps.join("; ")}
-                  </p>
-                )}
+        <div className="space-y-4">
+          {hasT1 && <BiasFindingCards findings={report.biasAndBlindSpots} />}
+          {hasT2 && (
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-sky-700 mb-2">What the panel didn&apos;t cover</p>
+              <div className="space-y-2">
+                {report.panelCoverageGaps.map((gap, idx) => (
+                  <CoverageGapCard key={idx} gap={gap} onRunFollowUp={onRunFollowUp} />
+                ))}
               </div>
             </div>
-          ))}
+          )}
+          {hasT3 && (
+            <div className={hasT1 || hasT2 ? "pt-3 border-t border-slate-100" : ""}>
+              <DiagnosticsStrip diagnostics={report.diagnostics} />
+            </div>
+          )}
         </div>
       )}
     </Card>
@@ -505,6 +615,7 @@ export default function AdaptiveSynthesisReportView({
   question,
   modelsUsed,
   runId,
+  onRunFollowUp,
 }: {
   report: AdaptiveSynthesisReport;
   gate: AdaptiveGateResult;
@@ -513,9 +624,15 @@ export default function AdaptiveSynthesisReportView({
   question: string;
   modelsUsed: ModelId[];
   runId?: string | null;
+  /** Bias & Blind Spots Tier 2 cards' "Run follow-up" action — pre-fills the question box, never auto-runs. */
+  onRunFollowUp?: (question: string) => void;
 }) {
   const rows = alignedClaims || [];
   const [generatedPost, setGeneratedPost] = useState<{ type: "linkedin" | "x"; text: string } | null>(null);
+  const dedupedWhereModelsAgree = dedupeTextList(report.whereModelsAgree, {
+    ...TEXT_DEDUP_THRESHOLDS,
+    cap: WHERE_MODELS_AGREE_MAX_ITEMS,
+  });
 
   const handleCopy = useCallback(async () => {
     const markdown = buildAdaptiveSynthesisMarkdown(question, report);
@@ -579,12 +696,12 @@ export default function AdaptiveSynthesisReportView({
         <SingleModelInsightsList claims={rows} />
       </div>
 
-      {report.whereModelsAgree.length > 0 && (
+      {dedupedWhereModelsAgree.length > 0 && (
         <div data-section="where-models-agree">
           <Card>
             <SectionLabel>Where models agree</SectionLabel>
             <ul className="list-disc list-outside pl-5 space-y-1 text-sm leading-relaxed text-slate-800">
-              {report.whereModelsAgree.map((item, idx) => (
+              {dedupedWhereModelsAgree.map((item, idx) => (
                 <li key={idx}>{item}</li>
               ))}
             </ul>
@@ -597,7 +714,7 @@ export default function AdaptiveSynthesisReportView({
       </div>
 
       <div data-section="bias-blind-spots">
-        <BiasBlindSpotsSection report={report} />
+        <BiasBlindSpotsSection report={report} onRunFollowUp={onRunFollowUp} />
       </div>
 
       {report.narrativeSections.length > 0 && (

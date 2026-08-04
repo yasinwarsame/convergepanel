@@ -2,61 +2,98 @@
 
 /**
  * Authentication Provider Component
- * 
- * This component provides global authentication state to the entire application
- * using React Context. It:
- * - Listens to Firebase auth state changes (login, logout, token refresh)
- * - Extracts admin status from Firebase custom claims
- * - Provides auth state to all child components via useAuth() hook
- * 
- * PERFORMANCE: Optimized to not block initial render. Auth state resolves
- * asynchronously while the UI shell renders immediately.
- * 
+ *
+ * Auth Lifecycle Hardening, Step 6.3/6.6/6.8 — this is now the single owner
+ * of the client/server session-synchronization state machine
+ * (`lib/client/authSessionStateMachine.ts`), not just a passthrough for
+ * Firebase's client auth state. Root cause this exists to fix: previously,
+ * `user` became non-null (and the whole app treated the visitor as signed
+ * in) the instant Firebase's client SDK resolved a credential — with no
+ * awareness of whether the server's `__session` cookie had been
+ * established for that SAME identity yet. Since every protected API route
+ * resolves identity via the `__session` cookie FIRST and only falls back to
+ * a request's Bearer token if no cookie is present (`getRequestUid()`,
+ * `lib/teams/teamApiAuth.ts`), a cookie left over from a PREVIOUS session
+ * could silently keep authorizing requests as the wrong user for as long as
+ * it remained valid — regardless of what the UI displayed.
+ *
+ * This component now:
+ * - Listens to `onIdTokenChanged` (a superset of `onAuthStateChanged`: also
+ *   fires on silent token refresh), not `onAuthStateChanged`.
+ * - Treats every callback with a DIFFERENT uid than previously tracked
+ *   (including the very first callback after mount) as a new identity that
+ *   must be synchronized with the server before `syncState` can become
+ *   `"authenticated"` — this is what makes a direct account switch (no
+ *   explicit logout in between) safe, per Step 6.6's fallback path.
+ * - Treats a callback with the SAME uid as a routine token refresh, which
+ *   keeps `syncState` at `"authenticated"` throughout (no UI flicker) but
+ *   still re-syncs the cookie's expiry.
+ * - Guards every async result with an operation-generation counter
+ *   (`lib/client/authGeneration.ts`) so a stale response — an old login
+ *   after a newer one, a refresh after logout, a rapid A→B→A — can never
+ *   overwrite state a later operation has already established.
+ * - On ANY sync failure or uid mismatch, defensively signs the Firebase
+ *   client out too (the server session was already cleared by
+ *   `establishServerSession` itself) — the previous identity is never
+ *   retained in either place.
+ *
+ * `user`/`loading`/`authReady`/`isAdmin`/`adminResolved` are kept for
+ * backward compatibility with existing consumers that only need to know
+ * "is someone signed in" for display purposes (nav links, etc). Any
+ * consumer gating a PROTECTED MUTATION must check the new `syncState`
+ * (`=== "authenticated"`, or the `canPerformProtectedMutation` helper) —
+ * `user` alone is no longer sufficient proof the server agrees.
+ *
  * Usage:
- *   const { user, loading, isAdmin } = useAuth();
+ *   const { user, loading, authReady, isAdmin, syncState } = useAuth();
  */
 
-import { createContext, useContext, useEffect, useState, ReactNode } from "react";
-import { User, onAuthStateChanged, getIdTokenResult } from "firebase/auth";
+import { createContext, useContext, useEffect, useRef, useReducer, useState, ReactNode } from "react";
+import { User, onIdTokenChanged, getIdTokenResult, signOut } from "firebase/auth";
 import { auth } from "@/lib/firebase/client";
 import { perf } from "@/lib/utils/performance";
+import { nextSessionSyncState, canPerformProtectedMutation, type SessionSyncState } from "@/lib/client/authSessionStateMachine";
+import { createGenerationGuard } from "@/lib/client/authGeneration";
+import { establishServerSession, clearServerSession } from "@/lib/client/sessionSync";
+import { logAuthSessionClientEvent } from "@/lib/client/authSessionTelemetry";
 
-/**
- * Authentication context type definition
- * 
- * - user: Current Firebase user object (null if not logged in)
- * - loading: Whether auth state is still being determined (prevents flash of wrong UI)
- * - authReady: Whether the first onAuthStateChanged callback has executed (regardless of user state)
- *   This is the signal that auth initialization is complete and API calls are safe.
- * - isAdmin: Whether current user has admin custom claim (from Firebase token)
- * - adminResolved: Whether the admin claim check has completed (prevents premature admin gate decisions)
- */
 interface AuthContextType {
   user: User | null;
   loading: boolean;
   authReady: boolean;
   isAdmin: boolean;
   adminResolved: boolean;
+  /** Step 6.3 state machine — `"authenticated"` is the ONLY state in which client uid and server session uid are confirmed to match. */
+  syncState: SessionSyncState;
+  /** `syncState === "authenticated"` — convenience for gating protected mutations. */
+  canMutate: boolean;
+  /**
+   * Step 6.7 — call at the very start of an explicit logout, BEFORE the
+   * async `clearServerSession()`/`signOut()` calls, so protected mutation
+   * UI (gated on `canMutate`) disables immediately rather than only after
+   * those calls resolve. The reactive `onIdTokenChanged(null)` callback
+   * that follows `signOut()` still drives the actual transition to
+   * `signed_out` — this just closes the gap before that fires.
+   */
+  beginLogout: () => void;
 }
 
-/**
- * Default context value (used before auth state is determined)
- */
+const noop = () => {};
+
 const AuthContext = createContext<AuthContextType>({
   user: null,
   loading: true,
   authReady: false,
   isAdmin: false,
   adminResolved: false,
+  syncState: "signed_out",
+  canMutate: false,
+  beginLogout: noop,
 });
 
 /**
- * Hook to access authentication context
- * 
- * Use this in any component to get current auth state:
- *   const { user, loading, authReady, isAdmin } = useAuth();
- * 
- * IMPORTANT: For protected API calls, wait for authReady && user before making requests.
+ * Hook to access authentication context.
+ * IMPORTANT: for protected mutations, gate on `canMutate`/`syncState`, not just `user`.
  */
 export function useAuth() {
   return useContext(AuthContext);
@@ -66,46 +103,23 @@ interface AuthProviderProps {
   children: ReactNode;
 }
 
-/**
- * AuthProvider Component
- * 
- * Wraps the app and provides authentication state to all children.
- * Should be placed high in the component tree (typically in root layout).
- */
 export function AuthProvider({ children }: AuthProviderProps) {
-  // State to track current user, loading status, auth readiness, and admin status
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [authReady, setAuthReady] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [adminResolved, setAdminResolved] = useState(false);
+  const [syncState, dispatchSync] = useReducer(nextSessionSyncState, "signed_out");
 
-  /**
-   * Set up Firebase auth state listener
-   * 
-   * PERFORMANCE: Optimized for fast initial render:
-   * - Sets loading=false after a short timeout (3s) to unblock shell rendering
-   * - Auth state resolves asynchronously without blocking UI
-   * - Admin check happens after render (non-blocking)
-   * 
-   * authReady becomes true after the first onAuthStateChanged callback executes,
-   * which is the signal that auth initialization is complete and API calls are safe.
-   * 
-   * onAuthStateChanged fires whenever:
-   * - User signs in
-   * - User signs out
-   * - Token is refreshed
-   * - App initializes (to check if user is already logged in)
-   */
   useEffect(() => {
     perf.mark('auth_check_start');
-    
+
     let isMounted = true;
     let resolved = false;
     let authReadySet = false;
+    const generationGuard = createGenerationGuard();
+    const prevUidRef = { current: null as string | null };
 
-    // Aggressive timeout: unblock shell after 3 seconds
-    // This prevents blocking even if Firebase is slow
     const timeoutId = setTimeout(() => {
       if (!resolved && isMounted) {
         console.warn("[AuthProvider] Auth check timeout (3s) - unblocking shell, assuming no user");
@@ -113,7 +127,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
         setLoading(false);
         setIsAdmin(false);
         setAdminResolved(true);
-        // Mark auth as ready even on timeout so API calls can proceed (with null user)
         if (!authReadySet) {
           setAuthReady(true);
           authReadySet = true;
@@ -125,76 +138,115 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
     }, 3000);
 
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+    const unsubscribe = onIdTokenChanged(auth, async (nextUser) => {
       if (!isMounted) return;
-      
-      // Mark auth as ready after first callback (regardless of user state)
+
+      const myGeneration = generationGuard.next();
+
       if (!authReadySet) {
         setAuthReady(true);
         authReadySet = true;
-        if (process.env.NODE_ENV !== "production") {
-          console.debug("[AuthProvider] Auth ready:", { hasUser: !!user });
-        }
       }
-      
       if (!resolved) {
-        // Clear the timeout since auth state change fired
         clearTimeout(timeoutId);
         resolved = true;
         perf.mark('auth_check_resolved');
         perf.measure('auth_check_duration', 'auth_check_start', 'auth_check_resolved');
       }
-      
-      // Update user state immediately
-      setUser(user);
-      
-      // Set loading to false immediately so UI can render
-      // This allows the shell to render while we check admin status
+
+      // ── Signed out (explicit logout, revoked session, or the SDK could not refresh) ──
+      if (!nextUser) {
+        prevUidRef.current = null;
+        dispatchSync({ type: "client_signed_out" });
+        setUser(null);
+        setLoading(false);
+        setIsAdmin(false);
+        setAdminResolved(true);
+        // Defensive cleanup: whatever caused Firebase to report no user, make
+        // sure the server cookie doesn't outlive it. Safe to call even if
+        // logout already cleared it (idempotent). Guarded so a login that
+        // starts WHILE this is in flight can't have its own sync clobbered.
+        await clearServerSession();
+        if (!generationGuard.isCurrent(myGeneration)) {
+          logAuthSessionClientEvent("stale_auth_operation_discarded", { operationGeneration: myGeneration });
+        }
+        return;
+      }
+
+      // ── Signed in: distinguish a new identity from a same-uid token refresh ──
+      const isNewIdentity = prevUidRef.current === null || prevUidRef.current !== nextUser.uid;
+      setUser(nextUser);
       setLoading(false);
-      
-      // Check admin status asynchronously (non-blocking)
-      // This happens after initial render, so it doesn't delay shell
-      if (user) {
+
+      if (isNewIdentity) {
+        dispatchSync({ type: "client_signed_in", uid: nextUser.uid });
+        dispatchSync({ type: "session_sync_started" });
+      } else {
+        dispatchSync({ type: "token_refresh_started" });
+      }
+
+      const outcome = await establishServerSession(nextUser, { generation: myGeneration });
+
+      if (!generationGuard.isCurrent(myGeneration)) {
+        // A newer callback (another refresh, a switch, a logout) has already
+        // started since this one began — its own processing owns state now.
+        logAuthSessionClientEvent("stale_auth_operation_discarded", { operationGeneration: myGeneration });
+        return;
+      }
+
+      if (outcome.ok) {
+        prevUidRef.current = outcome.uid;
+        dispatchSync({ type: isNewIdentity ? "session_sync_succeeded" : "token_refresh_succeeded" });
+
+        // Admin claim check — only meaningful once the server agrees this is
+        // the current identity. Non-blocking for isMounted races: guarded by
+        // the SAME generation check above before this point.
         try {
-          // Force refresh token first to get latest custom claims
-          // This ensures we get the most up-to-date admin claim
-          await user.getIdToken(true); // Force refresh
-          const tokenResult = await getIdTokenResult(user);
-          if (isMounted) {
+          const tokenResult = await getIdTokenResult(nextUser);
+          if (isMounted && generationGuard.isCurrent(myGeneration)) {
             setIsAdmin(tokenResult.claims.admin === true);
             setAdminResolved(true);
-            if (process.env.NODE_ENV !== "production") {
-              console.log("[AuthProvider] Admin status:", tokenResult.claims.admin === true);
-            }
           }
-        } catch (error) {
-          console.error("[AuthProvider] Error getting token result:", error);
-          if (isMounted) {
+        } catch {
+          if (isMounted && generationGuard.isCurrent(myGeneration)) {
             setIsAdmin(false);
             setAdminResolved(true);
           }
         }
       } else {
+        // Fail closed: `establishServerSession` already cleared the server
+        // cookie. The previous identity must never be retained on the
+        // client either, so sign Firebase out too — this itself fires
+        // another onIdTokenChanged(null) callback that completes the
+        // transition to `signed_out`.
+        prevUidRef.current = null;
+        dispatchSync({ type: isNewIdentity ? "session_sync_failed" : "token_refresh_failed" });
         setIsAdmin(false);
         setAdminResolved(true);
+        try {
+          await signOut(auth);
+        } catch {
+          // If sign-out itself fails, the state machine is already in
+          // session_error (never authenticated), which is the fail-closed
+          // outcome this branch exists to guarantee.
+        }
       }
     });
 
-    // Cleanup: unsubscribe from auth state changes and clear timeout
     return () => {
       isMounted = false;
       clearTimeout(timeoutId);
       unsubscribe();
     };
-  }, []); // Empty dependency array - this effect should only run once on mount
+  }, []);
 
-  /**
-   * Provide auth state to all child components via Context
-   */
+  const beginLogout = () => dispatchSync({ type: "logout_started" });
+
   return (
-    <AuthContext.Provider value={{ user, loading, authReady, isAdmin, adminResolved }}>
+    <AuthContext.Provider
+      value={{ user, loading, authReady, isAdmin, adminResolved, syncState, canMutate: canPerformProtectedMutation(syncState), beginLogout }}
+    >
       {children}
     </AuthContext.Provider>
   );
 }
-

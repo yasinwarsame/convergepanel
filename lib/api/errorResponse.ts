@@ -71,12 +71,20 @@ export const ERROR_CODES = {
   RATE_LIMIT_EXCEEDED: "RATE_LIMIT_EXCEEDED",
   REQUEST_TOO_LARGE: "REQUEST_TOO_LARGE",
   EMPTY_MODEL_OUTPUT: "EMPTY_MODEL_OUTPUT",
-  
+  /** Query-Routing Redesign, Phase 2A, Step 6 — the run has a valid, persisted Milestone-2 adaptiveOutput; legacy claims-matrix synthesis is not supported for it. */
+  ADAPTIVE_RUN_NOT_SUPPORTED: "ADAPTIVE_RUN_NOT_SUPPORTED",
+  /** The run's adaptiveOutput marker exists but failed structural validation — never assumed to mean "legacy," fails safe instead. */
+  ADAPTIVE_RUN_INVALID: "ADAPTIVE_RUN_INVALID",
+  /** The run's adaptiveOutput marker is a version this server doesn't recognize — never assumed to mean "legacy," fails safe instead. */
+  ADAPTIVE_RUN_UNSUPPORTED_VERSION: "ADAPTIVE_RUN_UNSUPPORTED_VERSION",
+
   // Server errors (5xx)
   INTERNAL_ERROR: "INTERNAL_ERROR",
   TIMEOUT: "TIMEOUT",
   NO_CONTENT: "NO_CONTENT",
   OPENAI_API_ERROR: "OPENAI_API_ERROR",
   FIRESTORE_ERROR: "FIRESTORE_ERROR",
+  /** Query-Routing Redesign, Phase 2A, Step 6 — the run document could not be read, so whether it has a persisted adaptiveOutput could not be determined. Fails CLOSED (never proceeds to legacy synthesis) rather than assuming absence. */
+  RUN_LOOKUP_UNAVAILABLE: "RUN_LOOKUP_UNAVAILABLE",
 } as const;
 

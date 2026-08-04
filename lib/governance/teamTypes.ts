@@ -21,6 +21,41 @@ export type TeamSettings = {
   flagThreshold: number;
 };
 
+/**
+ * Query-Routing Redesign, Phase 2A, Step 7, Part C
+ * (docs/governance-decision-receipts-design.md §21.3) — a NEW, additive,
+ * top-level field, deliberately NOT nested inside `TeamSettings` above:
+ * `minimumConsensusForAction`/`flagThreshold` are a consensus-threshold
+ * axis with no adaptive meaning (§20.5 — every legacy team-policy rule
+ * requires a `ConsensusSummary`); adaptive review eligibility is a
+ * conceptually separate axis. Optional and defaulting to fully disabled
+ * when absent or malformed — existing teams are never silently enrolled.
+ */
+export type AdaptiveReviewMode = "flagged_only" | "human_review_needed" | "all";
+
+export type AdaptiveReviewSettings = {
+  enabled: boolean;
+  mode: AdaptiveReviewMode;
+};
+
+/**
+ * Multi-Reviewer Panel Foundation, Part B (docs/governance-decision-receipts-design.md
+ * §29, §30) — a SEPARATE opt-in axis from `AdaptiveReviewSettings` above
+ * (which only governs whether a `teamRuns` projection is created at all).
+ * This setting governs a materially different, higher-stakes capability
+ * (a run's ENTIRE decision-submission path can be blocked while an open
+ * panel exists) — deliberately not folded into `AdaptiveReviewSettings` so
+ * the two can never be confused or accidentally enabled together. `mode`
+ * is restricted to `"majority_quorum"` only in Part B — no other mode
+ * exists to select yet.
+ */
+export type AdaptiveMultiReviewerMode = "majority_quorum";
+
+export type AdaptiveMultiReviewerSettings = {
+  enabled: boolean;
+  mode: AdaptiveMultiReviewerMode;
+};
+
 export type TeamDocument = {
   id: string;
   name: string;
@@ -29,6 +64,10 @@ export type TeamDocument = {
   members: TeamMember[];
   policyRules: PolicyRule[];
   settings: TeamSettings;
+  /** Absent for every existing team until explicitly configured — never assumed enabled. */
+  adaptiveReviewSettings?: AdaptiveReviewSettings;
+  /** Absent for every existing team until explicitly configured — never assumed enabled. Missing or malformed always means disabled, never a silent permissive default. */
+  adaptiveMultiReviewerSettings?: AdaptiveMultiReviewerSettings;
 };
 
 // TODO: move members to subcollection for teams > 100 (Firestore 1MB doc limit)

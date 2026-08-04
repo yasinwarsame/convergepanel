@@ -92,6 +92,42 @@ function initFirebaseAdmin() {
 
   adminAuth = getAuth(app);
   adminDb = getFirestore(app);
+  // Multi-Reviewer Production-Readiness Hardening, Step 5.6 — discovered via
+  // a real (non-mocked) Firestore write during seeded end-to-end
+  // verification: the Admin SDK rejects ANY `undefined` field value by
+  // default (`Cannot use "undefined" as a Firestore value`), but many
+  // production builders throughout this codebase legitimately produce
+  // `undefined` for absent optional fields (e.g. a vote's `comment` when
+  // none was given, `governanceRecord.humanReview.conditions` for a plain
+  // approval, `automatedGovernanceStatus` before automated evaluation ever
+  // ran). This was NEVER caught by the existing Jest suite because every
+  // test uses an in-memory Firestore-shaped fake that doesn't enforce this
+  // real SDK restriction. `ignoreUndefinedProperties: true` is the
+  // standard, Google-documented fix — it strips `undefined` keys before
+  // writing rather than throwing, matching this codebase's own existing
+  // convention of using `undefined` (never `null`) to mean "absent" on
+  // every optional field. Purely additive: no write that previously
+  // succeeded is affected, since it only changes behavior for a write that
+  // would otherwise have thrown.
+  //
+  // `.settings()` may only be called ONCE, ever, on a given Firestore
+  // instance — calling it again throws "Firestore has already been
+  // initialized." Under Next.js dev-mode Fast Refresh, THIS module can be
+  // re-evaluated (resetting the module-level `app`/`adminAuth`/`adminDb`
+  // `let` bindings to `undefined`) while the underlying Firebase Admin app
+  // — and its Firestore instance — persists across the reload in the SDK's
+  // own global registry (`getApps()`), already configured from the FIRST
+  // evaluation. Without this guard, that second, spurious `.settings()`
+  // call throws, which the outer try/catch below then treats as a total
+  // init failure — wiping out `adminAuth` too, even though auth was never
+  // actually broken. Swallowing ONLY this specific, benign
+  // already-configured case (never a genuinely unexpected error) fixes it.
+  try {
+    adminDb.settings({ ignoreUndefinedProperties: true });
+  } catch (settingsError: any) {
+    const alreadySet = typeof settingsError?.message === "string" && settingsError.message.includes("already been initialized");
+    if (!alreadySet) throw settingsError;
+  }
 
   console.log("[firebase-admin] Initialized successfully");
 }

@@ -70,7 +70,16 @@ export async function GET(req: NextRequest) {
 
   const snap = await adminDb.collection("teamRuns").where("teamId", "==", ctx.team.id).get();
 
-  const rows = snap.docs
+  // Query-Routing Redesign, Phase 2A, Step 7, Part E1 — adaptive
+  // projections coexist in this SAME collection (§24.1/§25) and are
+  // EXPLICITLY excluded here, by the real `adaptive` discriminator field —
+  // never by relying on adaptive rows simply lacking legacy fields like
+  // `query`/`consensusScore`. A real adaptive export contract (what
+  // columns, what's safe to include) is a genuine design decision deferred
+  // to a future step, per §21.14/§25 — not built here.
+  const legacyDocs = snap.docs.filter((d) => d.data().adaptive !== true);
+
+  const rows = legacyDocs
     .map((d) => {
       const x = d.data();
       const t = tsMillis(x.timestamp);

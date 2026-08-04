@@ -3,6 +3,7 @@
  */
 
 import type { ModelId } from "@/lib/types";
+import type { QueryType } from "@/lib/adaptiveSchema/types";
 
 /** Stored on run / verification docs when org governance evaluation ran. */
 export type PanelHistoryGovernanceStatus = "approved" | "needs_review" | "blocked";
@@ -19,6 +20,15 @@ export type PanelHistoryResearchItem = {
   /** From stored synthesis consensus summary when available (0–100). */
   synthesisConsensusScore?: number;
   governanceStatus?: PanelHistoryGovernanceStatus;
+  /**
+   * Query-Routing Redesign, Phase 1 — summary-only signal that a versioned
+   * adaptive envelope exists on this run, so the history list can badge it
+   * without fetching the full envelope (that's the detail endpoint's job —
+   * see app/api/user/runs/[runId]/route.ts). Absent for runs from before
+   * this phase and for the 10 legacy-active schemas, which never build one.
+   */
+  hasAdaptiveOutput?: boolean;
+  adaptiveSchemaId?: QueryType;
 };
 
 export type PanelHistoryVerificationItem = {
