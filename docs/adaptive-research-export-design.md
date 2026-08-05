@@ -62,6 +62,8 @@ The brief is explicit that "the primary screen should show the reviewed conclusi
 
 **Recommendation:** Phase 1's deliverable should be a `ReportStatusBanner` component (name illustrative, not prescriptive) that both the in-app result view and the future export renderer consume — same status enum, same source data, computed once server-side and never re-derived client-side (matching the `canManagePanel`-style precedent).
 
+**Superseded by `docs/adaptive-synthesis-report-design.md` (2026-08-05).** That document's §4.1 "top summary bar" is this Phase 1 deliverable, generalized across all 19 active schemas rather than built export-first — build it there, not as a separate export-only component. This export document's own Phases 3–7 should not begin implementation until that document's §5 category-specific report components ship; see its §8 for the reconciled sequence.
+
 ---
 
 ## 4. Report status model (Constraint #2)
@@ -332,7 +334,8 @@ Matching this repo's existing density (every Milestone 2 schema shipped with 15�
 
 All 5 open questions are resolved as of 2026-08-05 (§12) — decisions 3 and 4 there were made in the absence of a separate product stakeholder and are worth a final confirmation pass before code is written, but no longer block starting:
 
-1. Begin Phase 1 (`ReportStatusBanner` + governance-status-on-primary-view, using the two-way "Unreviewed — pending" / "Not reviewed — no review configured" split from §4.1) as the first implementation PR — it's the one piece of this design that's useful even if export itself is deprioritized, and it's the shared dependency both the in-app UI and every later export phase need.
-2. Monitor the ongoing de facto canary window (§12.1) in parallel — not a blocker, but worth a status check before Phase 4 (PDF pilot) starts.
+1. Begin `docs/adaptive-synthesis-report-design.md` implementation first (its §4.1 top summary bar is this document's former Phase 1, generalized) — its own §8 is now the authoritative sequence for both documents.
+2. Do not start this document's Phases 3–7 (PDF/DOCX/JSON-CSV/async) until `adaptive-synthesis-report-design.md`'s §5 category-specific report components ship.
+3. Monitor the ongoing de facto canary window (§12.1) in parallel — not a blocker, but worth a status check before Phase 4 (PDF pilot) starts.
 
 **This document stops here.** No export routes, components, services, storage, templates, permissions, or database changes were made while producing it.
