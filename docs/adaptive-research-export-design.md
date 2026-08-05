@@ -70,11 +70,13 @@ The brief is explicit that "the primary screen should show the reviewed conclusi
 
 ### 4.1 Status derivation table
 
-The brief lists 7 states; grounding them against `GovernanceRecordV1.humanReview.status` (`unreviewed | pending | approved | approved_with_conditions | changes_requested | rejected`) plus `decidedVia` surfaces **one state the brief didn't separate and two states that don't exist in the source data yet:**
+The brief lists 7 states; grounding them against `GovernanceRecordV1.humanReview.status` (`unreviewed | pending | approved | approved_with_conditions | changes_requested | rejected`) plus `decidedVia` surfaces **one state the brief didn't separate and two states that don't exist in the source data yet.**
+
+**Correction found on review (2026-08-05):** `"pending"` is defined in the type and has documented semantics (`governanceRecordParser.ts`: *"a review has been started/assigned but has not yet reached a substantive human decision"*), but confirmed via code search — no write site anywhere sets `humanReview.status: "pending"`; `initializeAdaptiveGovernanceRecord()` always initializes to `"unreviewed"`, and reviewer assignment (Part E3) explicitly never touches `humanReview.status`. In practice, only 5 values ever occur. This document's derived label **"Unreviewed — pending"** below is this document's own UI label, not a reference to the raw `"pending"` enum value — renamed to **"Unreviewed — in queue"** to remove the collision, since a future reader could otherwise assume the label maps to that (currently unreachable) status value.
 
 | Brief status | Derived from | Notes |
 |---|---|---|
-| Unreviewed — pending | `humanReview.status === "unreviewed"` AND the run was actually routed toward review (`adaptiveTeamReviewProjectionStatus` ∈ `{"created", "already_exists"}`, i.e. `routeAdaptiveTeamReview()` returned `flagged`/`blocked`/`human_review_needed`/`all_runs`) | **Resolved 2026-08-05, see §12.2.** Confirmed by code read (`app/api/run-panel/route.ts`'s governance-initialization block): `GovernanceRecordV1` is initialized **unconditionally** for every adaptive run whose `adaptiveOutput` persisted — solo/Free/Lite runs get one too, with no team or reviewer ever assigned. Split into two labels so "Unreviewed" doesn't misrepresent runs that were never going to be reviewed. |
+| Unreviewed — in queue | `humanReview.status === "unreviewed"` AND the run was actually routed toward review (`adaptiveTeamReviewProjectionStatus` ∈ `{"created", "already_exists"}`, i.e. `routeAdaptiveTeamReview()` returned `flagged`/`blocked`/`human_review_needed`/`all_runs`) | **Resolved 2026-08-05, see §12.2.** Confirmed by code read (`app/api/run-panel/route.ts`'s governance-initialization block): `GovernanceRecordV1` is initialized **unconditionally** for every adaptive run whose `adaptiveOutput` persisted — solo/Free/Lite runs get one too, with no team or reviewer ever assigned. Split into two labels so "Unreviewed" doesn't misrepresent runs that were never going to be reviewed. |
 | Not reviewed — no review configured | `humanReview.status === "unreviewed"` AND `adaptiveTeamReviewProjectionStatus` ∈ `{"disabled", "not_eligible"}` (or absent — no team) | The common case for Free/Lite/solo Full-plan users. Must not read as an outstanding action item. |
 | Reviewed and approved | `humanReview.status === "approved"` | — |
 | Reviewed with conditions | `humanReview.status === "approved_with_conditions"` | Export must show `humanReview.conditions[]` verbatim per Constraint #2's "must be unmistakable" — never summarized. |
@@ -181,7 +183,7 @@ interface AdaptiveResearchExportV1 {
 
   classification: "public" | "internal" | "confidential" | "restricted";
   reportStatus:                      // the §4.1 status, frozen at generation time
-    | "unreviewed_pending" | "not_reviewed_no_review_configured"
+    | "unreviewed_in_queue" | "not_reviewed_no_review_configured"
     | "approved" | "approved_with_conditions"
     | "changes_requested" | "rejected" | "owner_override"
     | "incomplete" | "superseded";
