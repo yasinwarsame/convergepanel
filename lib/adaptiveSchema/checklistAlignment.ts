@@ -75,6 +75,14 @@ function modeOrLongest(values: string[]): string {
   return best;
 }
 
+/** Same mode-or-first rule, but for an OPTIONAL field — returns undefined rather than picking an arbitrary value when no model supplied one. */
+function modeOrFirstDefined<T>(values: (T | undefined)[]): T | undefined {
+  const present = values.filter((v): v is T => v !== undefined);
+  if (present.length === 0) return undefined;
+  if (typeof present[0] !== "string") return present[0];
+  return modeOrLongest(present as unknown as string[]) as unknown as T;
+}
+
 function normalizeCategory(category: string | undefined): string {
   if (!category) return GENERAL_CATEGORY;
   const trimmed = category.trim();
@@ -153,6 +161,13 @@ export function buildChecklistTaxonomyResult(
       totalModels,
       coverageRatio: totalModels > 0 ? coverageCount / totalModels : 0,
       contributingModels: Array.from(criticalByModel.keys()),
+      severity: modeOrFirstDefined(group.map((e) => e.item.severity)),
+      likelihood: modeOrFirstDefined(group.map((e) => e.item.likelihood)),
+      impact: group.find((e) => e.item.impact && e.item.impact.trim().length > 0)?.item.impact,
+      evidence: group.find((e) => e.item.evidence && e.item.evidence.trim().length > 0)?.item.evidence,
+      mitigation: group.find((e) => e.item.mitigation && e.item.mitigation.trim().length > 0)?.item.mitigation,
+      monitoringSignal: group.find((e) => e.item.monitoringSignal && e.item.monitoringSignal.trim().length > 0)?.item.monitoringSignal,
+      residualRisk: group.find((e) => e.item.residualRisk && e.item.residualRisk.trim().length > 0)?.item.residualRisk,
       firstSeenIndex: Math.min(...group.map((e) => e.index)),
     });
   }

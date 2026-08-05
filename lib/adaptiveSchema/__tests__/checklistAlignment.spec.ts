@@ -11,7 +11,7 @@
  */
 
 import { buildChecklistTaxonomyResult, ChecklistTaxonomyFields } from "@/lib/adaptiveSchema/checklistAlignment";
-import { ChecklistItem } from "@/lib/adaptiveSchema/types";
+import { ChecklistItem, isRiskShapedChecklistResult } from "@/lib/adaptiveSchema/types";
 import { ModelId } from "@/lib/types";
 
 function item(overrides: Partial<ChecklistItem> & { id: string; label: string }): ChecklistItem {
@@ -180,5 +180,123 @@ describe("buildChecklistTaxonomyResult — empty input", () => {
     const result = buildChecklistTaxonomyResult([]);
     expect(result.categories).toEqual([]);
     expect(result.totalModels).toBe(0);
+  });
+});
+
+describe("buildChecklistTaxonomyResult — risk register fields", () => {
+  it("carries severity/likelihood/impact/evidence/mitigation/monitoringSignal/residualRisk through to the aggregated item", () => {
+    const result = buildChecklistTaxonomyResult(
+      perModel([
+        [
+          "chatgpt",
+          fields({
+            items: [
+              item({
+                id: "vendor-lock-in",
+                label: "Vendor lock-in",
+                category: "Operational",
+                severity: "high",
+                likelihood: "medium",
+                impact: "Switching providers later becomes expensive.",
+                evidence: "Proprietary data formats with no export tooling.",
+                mitigation: "Negotiate a data-portability clause up front.",
+                monitoringSignal: "Rising switching-cost estimates in vendor reviews.",
+                residualRisk: "Low, once the portability clause is signed.",
+              }),
+            ],
+          }),
+        ],
+      ])
+    );
+    const aggregated = result.categories.flatMap((c) => c.items)[0];
+    expect(aggregated.severity).toBe("high");
+    expect(aggregated.likelihood).toBe("medium");
+    expect(aggregated.impact).toBe("Switching providers later becomes expensive.");
+    expect(aggregated.evidence).toBe("Proprietary data formats with no export tooling.");
+    expect(aggregated.mitigation).toBe("Negotiate a data-portability clause up front.");
+    expect(aggregated.monitoringSignal).toBe("Rising switching-cost estimates in vendor reviews.");
+    expect(aggregated.residualRisk).toBe("Low, once the portability clause is signed.");
+  });
+
+  it("leaves risk fields undefined for an ordinary checklist item that never set them", () => {
+    const result = buildChecklistTaxonomyResult(
+      perModel([["chatgpt", fields({ items: [item({ id: "dpa", label: "Sign a data processing agreement" })] })]])
+    );
+    const aggregated = result.categories.flatMap((c) => c.items)[0];
+    expect(aggregated.severity).toBeUndefined();
+    expect(aggregated.likelihood).toBeUndefined();
+    expect(aggregated.mitigation).toBeUndefined();
+  });
+
+  it("picks the majority severity/likelihood when models disagree, one vote per model", () => {
+    const result = buildChecklistTaxonomyResult(
+      perModel([
+        ["chatgpt", fields({ items: [item({ id: "outage", label: "Provider outage", severity: "high", likelihood: "low" })] })],
+        ["claude", fields({ items: [item({ id: "outage", label: "Provider outage", severity: "high", likelihood: "low" })] })],
+        ["gemini", fields({ items: [item({ id: "outage", label: "Provider outage", severity: "medium", likelihood: "medium" })] })],
+      ])
+    );
+    const aggregated = result.categories.flatMap((c) => c.items)[0];
+    expect(aggregated.severity).toBe("high");
+    expect(aggregated.likelihood).toBe("low");
+  });
+});
+
+describe("isRiskShapedChecklistResult", () => {
+  it("is false for an ordinary checklist where no item carries a risk field", () => {
+    const result = buildChecklistTaxonomyResult(
+      perModel([
+        [
+          "chatgpt",
+          fields({
+            items: [
+              item({ id: "dpa", label: "Sign a data processing agreement" }),
+              item({ id: "backup", label: "Set up automated backups" }),
+            ],
+          }),
+        ],
+      ])
+    );
+    expect(isRiskShapedChecklistResult(result)).toBe(false);
+  });
+
+  it("is true when at least half the items carry a risk field", () => {
+    const result = buildChecklistTaxonomyResult(
+      perModel([
+        [
+          "chatgpt",
+          fields({
+            items: [
+              item({ id: "outage", label: "Provider outage", severity: "high", likelihood: "medium" }),
+              item({ id: "lock-in", label: "Vendor lock-in", severity: "medium", likelihood: "low" }),
+            ],
+          }),
+        ],
+      ])
+    );
+    expect(isRiskShapedChecklistResult(result)).toBe(true);
+  });
+
+  it("is false when only a small minority of items happen to carry a risk field", () => {
+    const result = buildChecklistTaxonomyResult(
+      perModel([
+        [
+          "chatgpt",
+          fields({
+            items: [
+              item({ id: "one", label: "One" }),
+              item({ id: "two", label: "Two" }),
+              item({ id: "three", label: "Three" }),
+              item({ id: "four", label: "Four", severity: "low" }),
+            ],
+          }),
+        ],
+      ])
+    );
+    expect(isRiskShapedChecklistResult(result)).toBe(false);
+  });
+
+  it("is false for a totally empty result", () => {
+    expect(isRiskShapedChecklistResult(buildChecklistTaxonomyResult([]))).toBe(false);
   });
 });

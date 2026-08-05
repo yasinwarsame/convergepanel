@@ -205,6 +205,62 @@ describe("classifyQuery", () => {
     });
   });
 
+  it("calls Gemini with thinkingBudget: 0 (regression: gemini-2.5-flash shares its thinking-token budget with maxOutputTokens, so a small maxOutputTokens silently starved the actual JSON response, truncating it to nothing and falling back to generic for every query regardless of type)", async () => {
+    mockedCallGemini.mockResolvedValue(
+      okResult(
+        classification({
+          queryType: "comparison_matrix",
+          domain: "AI models",
+          answerShape: "comparison_grid",
+          quantExpected: false,
+          timeSensitivity: "low",
+          userIntent: "make_decision",
+          confidence: 0.9,
+        })
+      )
+    );
+
+    await classifyQuery("compare chatgpt and claude");
+
+    expect(mockedCallGemini).toHaveBeenCalledWith(
+      expect.any(String),
+      null,
+      undefined,
+      expect.objectContaining({ thinkingBudget: 0 })
+    );
+  });
+
+  it("degrades a single invalid cross-cutting metadata field to a safe default instead of discarding an otherwise-correct classification (regression: the model occasionally returned a freshness-shaped value like \"recent\" for timeSensitivity, which used to fail the ENTIRE classification via strict schema validation and silently downgrade a correctly-identified queryType to generic)", async () => {
+    mockedCallGemini.mockResolvedValue(
+      okResult(
+        JSON.stringify({
+          queryType: "comparison_matrix",
+          domain: "AI models",
+          answerShape: "comparison_grid",
+          quantExpected: false,
+          timeSensitivity: "recent", // invalid — not in the low/medium/high enum
+          userIntent: "make_decision",
+          confidence: 0.9,
+          riskLevel: "professional",
+          evidenceRequirement: "high",
+          freshness: "recent",
+          inputType: "text",
+          verificationMethod: "cross_model_consistency",
+          requestedCount: null,
+          requiresClarification: false,
+          clarificationQuestion: null,
+          rationale: "side-by-side comparison of named AI models",
+        })
+      )
+    );
+
+    const result = await classifyQuery("compare chatgpt, claude, gemini, perplexity, and grok for professional research");
+
+    expect(result.queryType).toBe("comparison_matrix");
+    expect(result.fallbackReason).toBeUndefined();
+    expect(result.timeSensitivity).toBe("low");
+  });
+
   it("strips markdown fences before parsing", async () => {
     mockedCallGemini.mockResolvedValue(
       okResult(

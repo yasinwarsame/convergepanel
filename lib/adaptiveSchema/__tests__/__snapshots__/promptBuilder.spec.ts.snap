@@ -87,16 +87,24 @@ Domain: test-domain. The user's intent: get_answer.
 interface ChecklistItem {
   id: string;           // short kebab-case slug from the item's label, e.g. "data-processing-agreement"
   label: string;         // the item itself, in your own words
-  category?: string;     // groups this item under a named category (e.g. "Legal") — omit or use "none" for a flat checklist with no natural categories
+  category?: string;     // groups this item under a named category (e.g. "Legal") — omit or use "none" for a flat checklist with no natural categories. For a risk-shaped taxonomy, this is the risk category.
   rationale?: string;    // one short sentence on why this item matters, if useful
   critical?: boolean;    // true for a must-have/blocking item, omit or false for a nice-to-have/situational one
+  // The 7 fields below are ONLY for items that are genuinely RISKS — leave every one of them unset for an ordinary checklist/taxonomy item.
+  severity?: "low" | "medium" | "high" | "critical";  // how bad this risk would be if it materialized
+  likelihood?: "low" | "medium" | "high";              // how likely this risk is to materialize
+  impact?: string;       // the concrete consequence if it materializes — one short sentence, not a restatement of label
+  evidence?: string;     // what supports treating this as a real risk, if anything
+  mitigation?: string;   // a concrete step that would reduce this risk's likelihood or impact
+  monitoringSignal?: string; // an observable signal worth tracking that this risk is materializing
+  residualRisk?: string; // the risk remaining after mitigation — state "low" explicitly rather than implying zero
 }
 
-List order does not matter — do not imply importance or sequence through position in the list. Use \`category\` only when the question genuinely asks for a categorized taxonomy (types/kinds of something); for an ordinary checklist, leave every item's category unset. Mark \`critical\` only for genuinely must-have/blocking items, not everything.
+List order does not matter — do not imply importance or sequence through position in the list. Use \`category\` only when the question genuinely asks for a categorized taxonomy (types/kinds of something); for an ordinary checklist, leave every item's category unset. Mark \`critical\` only for genuinely must-have/blocking items, not everything. If the question is asking what could go wrong — risks, dangers, downsides, failure modes — fill in every item's severity/likelihood/impact/evidence/mitigation/monitoringSignal/residualRisk too, so it reads as a real risk register, not a bare list; leave all seven unset for a non-risk checklist.
 
 Required JSON keys:
 - "summary" (string): One or two sentences framing what this checklist/taxonomy covers and who it's for. Max 40 words.
-- "items" (ChecklistItem[]): The checklist items or taxonomy entries. Order does not matter — do not imply a ranking. If the question asks for a categorized taxonomy (types/kinds of something), group items under a \`category\`; for a plain checklist with no natural categories, omit \`category\` (or use "none") on every item. Max 30 items.
+- "items" (ChecklistItem[]): The checklist items or taxonomy entries. Order does not matter — do not imply a ranking. If the question asks for a categorized taxonomy (types/kinds of something), group items under a \`category\`; for a plain checklist with no natural categories, omit \`category\` (or use "none") on every item. When the items ARE RISKS (the question asks what could go wrong, what the dangers/risks/downsides of something are), also assess each item's severity, likelihood, impact, evidence, mitigation, monitoringSignal, and residualRisk — this turns the same checklist into a real risk register instead of a bare list. Leave those fields unset entirely for an ordinary checklist where they don't apply. Max 30 items.
 - "notes" (string[]): Important caveats — e.g. this list isn't exhaustive, jurisdiction/context dependence, or when to consult a professional. Empty array if none apply. Max 3 items.
 
 QUESTION:
@@ -137,10 +145,14 @@ interface ComparisonCell {
   sources?: string[];     // plain labels for anything you're drawing on, if applicable — omit if none
 }
 
-Identify the specific named things being compared and the dimensions worth comparing them on directly from the question. Emit one cell per (subject, attribute) pair you can responsibly assess — it is fine to leave a pair out rather than guess. Do not invent a subject or attribute the question doesn't call for just to fill the grid.
+Identify the specific named things being compared and the dimensions worth comparing them on directly from the question. Emit one cell per (subject, attribute) pair you can responsibly assess — it is fine to leave a pair out rather than guess. Do not invent a subject or attribute the question doesn't call for just to fill the grid. directConclusion/tradeoffs/bestUseRecommendations/uncertainties sit above the grid and must stand on their own without it — write them so they're useful to someone who reads only those, not just as a caption for the cells.
 
 Required JSON keys:
 - "cells" (ComparisonCell[]): Every (subject, attribute) comparison point you can responsibly assess. Reuse the exact same subject name across all its cells, and the exact same attribute name across all its cells, so your response stays internally consistent. Max 60 items.
+- "directConclusion" (string): Your answer-first takeaway from the comparison, before any grid detail — e.g. which subject comes out ahead overall, or that it genuinely depends on priority. Never just restate that you compared the subjects. Max 40 words.
+- "tradeoffs" (string[]): Cross-cutting trade-offs that don't reduce to a single cell — patterns across the whole comparison (e.g. "the cheaper options tend to have weaker customer support"). Empty array if the comparison has no such patterns. Max 6 items.
+- "bestUseRecommendations" (string[]): Which subject to pick under which circumstance, one self-contained sentence per recommendation (e.g. "Perplexity — best when citation-backed answers matter more than depth"). Not a single overall winner — this is conditional, per-use-case guidance. Max 6 items.
+- "uncertainties" (string[]): Genuinely missing information that limits how confident this comparison can be — e.g. pricing that changes frequently, or a subject you have limited knowledge of. Empty array if none apply. Max 5 items.
 
 QUESTION:
 """What is the answer?"""

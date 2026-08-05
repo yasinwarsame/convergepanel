@@ -13,7 +13,7 @@
  */
 
 import { AggregatedComparisonAttribute, AggregatedComparisonSubject, ComparisonMatrixResult } from "@/lib/adaptiveSchema/types";
-import { Card, EmptyStateCard, SectionLabel, TintBadge, formatModelCoverage } from "./shared";
+import { BulletList, Card, EmptyStateCard, SectionLabel, TintBadge, formatModelCoverage } from "./shared";
 
 /**
  * Always shown for comparison_matrix — no live verified pricing/spec/data
@@ -116,7 +116,17 @@ function LowConfidenceAxisList({ label, items }: { label: string; items: { label
 }
 
 export default function ComparisonMatrixView({ comparisonMatrix }: { comparisonMatrix: ComparisonMatrixResult }) {
-  const { subjects, lowConfidenceSubjects, attributes, lowConfidenceAttributes, totalModels } = comparisonMatrix;
+  const {
+    subjects,
+    lowConfidenceSubjects,
+    attributes,
+    lowConfidenceAttributes,
+    totalModels,
+    directConclusion,
+    tradeoffs,
+    bestUseRecommendations,
+    uncertainties,
+  } = comparisonMatrix;
 
   if (totalModels === 0) {
     return <EmptyStateCard state="no_models" />;
@@ -124,6 +134,13 @@ export default function ComparisonMatrixView({ comparisonMatrix }: { comparisonM
 
   return (
     <div className="space-y-3">
+      {directConclusion && (
+        <Card className="bg-sky-50/60 border-sky-200">
+          <SectionLabel>Direct conclusion</SectionLabel>
+          <p className="text-sm text-slate-900 leading-relaxed">{directConclusion}</p>
+        </Card>
+      )}
+
       <Card className="bg-sky-50/60 border-sky-200">
         <p className="text-xs text-sky-900 leading-relaxed">{HONESTY_BANNER}</p>
       </Card>
@@ -170,6 +187,31 @@ export default function ComparisonMatrixView({ comparisonMatrix }: { comparisonM
           </div>
         )}
       </Card>
+
+      {bestUseRecommendations.length > 0 && (
+        <Card>
+          <SectionLabel>Best-use recommendations</SectionLabel>
+          <BulletList items={bestUseRecommendations} />
+        </Card>
+      )}
+
+      {tradeoffs.length > 0 && (
+        <Card>
+          <SectionLabel>Trade-offs</SectionLabel>
+          <BulletList items={tradeoffs} />
+        </Card>
+      )}
+
+      {uncertainties.length > 0 && (
+        <Card className="bg-amber-50 border-amber-200">
+          <SectionLabel>Uncertainties</SectionLabel>
+          <ul className="list-disc list-outside pl-5 space-y-1 text-xs text-amber-900">
+            {uncertainties.map((u, idx) => (
+              <li key={idx}>{u}</li>
+            ))}
+          </ul>
+        </Card>
+      )}
 
       <LowConfidenceAxisList label="subjects" items={lowConfidenceSubjects} />
       <LowConfidenceAxisList label="attributes" items={lowConfidenceAttributes} />

@@ -139,6 +139,10 @@ const comparisonMatrixResult: ComparisonMatrixResult = {
   ],
   hasVerifiedSourceData: false,
   totalModels: 2,
+  directConclusion: "",
+  tradeoffs: [],
+  bestUseRecommendations: [],
+  uncertainties: [],
 };
 
 const definitionExplanationResult: DefinitionExplanationResult = {

@@ -503,6 +503,11 @@ export async function finalizeAdaptiveRun(
     const perModelCells = adaptiveResults.map((r) => ({
       modelId: r.modelId,
       cells: r.ok && r.data ? cellFieldKeys.flatMap((key) => (r.data![key] as ComparisonCell[] | undefined) || []) : [],
+      directConclusion: r.ok && r.data && typeof r.data.directConclusion === "string" ? r.data.directConclusion : undefined,
+      tradeoffs: r.ok && r.data && Array.isArray(r.data.tradeoffs) ? (r.data.tradeoffs as string[]) : undefined,
+      bestUseRecommendations:
+        r.ok && r.data && Array.isArray(r.data.bestUseRecommendations) ? (r.data.bestUseRecommendations as string[]) : undefined,
+      uncertainties: r.ok && r.data && Array.isArray(r.data.uncertainties) ? (r.data.uncertainties as string[]) : undefined,
     }));
     const comparisonMatrix = buildComparisonMatrixResult(perModelCells);
     const envelope = attachAdaptiveEnvelope("comparison_matrix", schema, classification, results, adaptiveResults, comparisonMatrix);

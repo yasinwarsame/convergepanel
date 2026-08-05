@@ -37,7 +37,7 @@ import {
   ComparisonCell,
   ComparisonMatrixResult,
 } from "./types";
-import { hasIdenticalTokenSet, normalizeSlug, textsAreNearDuplicates, UnionFind } from "./textSimilarity";
+import { dedupeTextList, hasIdenticalTokenSet, normalizeSlug, textsAreNearDuplicates, UnionFind } from "./textSimilarity";
 
 /** Attributes are dimension labels ("battery life" vs "battery") where a missed merge is low-cost — same bar as enumAlignment.ts's ranked-list item labels. Subset containment merging (e.g. "battery" into "battery life") is acceptable here, unlike subjects below. */
 const ATTRIBUTE_DEDUP_THRESHOLDS = { levenshteinMaxRatio: 0.25, tokenOverlapMin: 0.6 };
@@ -69,6 +69,11 @@ function valuesMatch(a: string, b: string): boolean {
 
 /** Below this coverage, a subject/attribute moves to its low-confidence bucket — but only when the panel actually had more than 2 models to potentially cover it. A 2-model run's full coverage (2/2) must not be misread as "low confidence" just because 2 <= 2. Mirrors enumAlignment.ts's identical rule. */
 const LOW_CONFIDENCE_MAX_COVERAGE = 2;
+/** Trade-offs/best-use-recommendations/uncertainties are short, self-contained sentences — same bar checklistAlignment.ts uses for its Notes list. */
+const NARRATIVE_DEDUP_THRESHOLDS = { levenshteinMaxRatio: 0.3, tokenOverlapMin: 0.5 };
+const TRADEOFFS_CAP = 6;
+const BEST_USE_RECOMMENDATIONS_CAP = 6;
+const UNCERTAINTIES_CAP = 5;
 
 interface RawEntry {
   index: number;
@@ -185,9 +190,31 @@ function stripFirstSeenIndex<T extends { firstSeenIndex: number }>(items: T[]): 
  * empty result, not an error.
  */
 export function buildComparisonMatrixResult(
-  perModel: { modelId: ModelId; cells: ComparisonCell[] }[]
+  perModel: {
+    modelId: ModelId;
+    cells: ComparisonCell[];
+    directConclusion?: string;
+    tradeoffs?: string[];
+    bestUseRecommendations?: string[];
+    uncertainties?: string[];
+  }[]
 ): ComparisonMatrixResult {
   const totalModels = perModel.length;
+  const directConclusion =
+    modeOrLongest(perModel.map((p) => p.directConclusion || "").filter((s) => s.trim().length > 0)) || "";
+  const tradeoffs = dedupeTextList(perModel.flatMap((p) => p.tradeoffs || []), {
+    ...NARRATIVE_DEDUP_THRESHOLDS,
+    cap: TRADEOFFS_CAP,
+  });
+  const bestUseRecommendations = dedupeTextList(perModel.flatMap((p) => p.bestUseRecommendations || []), {
+    ...NARRATIVE_DEDUP_THRESHOLDS,
+    cap: BEST_USE_RECOMMENDATIONS_CAP,
+  });
+  const uncertainties = dedupeTextList(perModel.flatMap((p) => p.uncertainties || []), {
+    ...NARRATIVE_DEDUP_THRESHOLDS,
+    cap: UNCERTAINTIES_CAP,
+  });
+
   let runningIndex = 0;
   const rawCells: RawEntry[] = perModel.flatMap(({ modelId, cells }) =>
     cells.map((cell) => ({ index: runningIndex++, modelId, cell }))
@@ -202,6 +229,10 @@ export function buildComparisonMatrixResult(
       cells: [],
       hasVerifiedSourceData: false,
       totalModels,
+      directConclusion,
+      tradeoffs,
+      bestUseRecommendations,
+      uncertainties,
     };
   }
 
@@ -323,5 +354,9 @@ export function buildComparisonMatrixResult(
     cells: aggregatedCells,
     hasVerifiedSourceData: false,
     totalModels,
+    directConclusion,
+    tradeoffs,
+    bestUseRecommendations,
+    uncertainties,
   };
 }

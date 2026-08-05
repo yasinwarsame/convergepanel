@@ -102,6 +102,13 @@ const ChecklistItemZod = z.object({
   category: z.string().optional(),
   rationale: z.string().optional(),
   critical: z.boolean().optional(),
+  severity: z.enum(["low", "medium", "high", "critical"]).optional(),
+  likelihood: z.enum(["low", "medium", "high"]).optional(),
+  impact: z.string().optional(),
+  evidence: z.string().optional(),
+  mitigation: z.string().optional(),
+  monitoringSignal: z.string().optional(),
+  residualRisk: z.string().optional(),
 });
 
 const ResearchFindingZod = z.object({
