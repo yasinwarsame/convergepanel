@@ -133,4 +133,57 @@ describe("alignScalarField (factual_lookup exact match, legal jurisdiction hard 
     expect(byModel.get("chatgpt")!.stance).toBe("agrees");
     expect(byModel.get("grok")!.stance).toBe("disputes");
   });
+
+  it("sets claimText to the actual majority-agreed answer, not the field's display label", () => {
+    const row = alignScalarField(
+      [
+        { modelId: "chatgpt", value: "Paris, France." },
+        { modelId: "claude", value: "paris, france" },
+      ],
+      "answer",
+      "Answer",
+      "exact_normalized"
+    );
+    expect(row.claimText).toBe("Paris, France.");
+    expect(row.claimText).not.toBe("Answer");
+  });
+
+  it("prefers the longest raw value among models that share the majority normalized form", () => {
+    const row = alignScalarField(
+      [
+        { modelId: "chatgpt", value: "5.25%-5.50%" },
+        { modelId: "claude", value: "5.25%-5.50%!" },
+      ],
+      "answer",
+      "Answer",
+      "exact_normalized"
+    );
+    expect(row.claimText).toBe("5.25%-5.50%!");
+  });
+
+  it("falls back to the first present value when models disagree with no majority", () => {
+    const row = alignScalarField(
+      [
+        { modelId: "chatgpt", value: "California" },
+        { modelId: "claude", value: "US federal" },
+      ],
+      "jurisdiction",
+      "Jurisdiction",
+      "hard_key"
+    );
+    expect(row.claimText).toBe("California");
+  });
+
+  it("returns an empty claimText (not the label) when no model returned a value", () => {
+    const row = alignScalarField(
+      [
+        { modelId: "chatgpt", value: null },
+        { modelId: "claude", value: "" },
+      ],
+      "answer",
+      "Answer",
+      "exact_normalized"
+    );
+    expect(row.claimText).toBe("");
+  });
 });
