@@ -47,6 +47,7 @@ import type {
   AdaptiveSynthesisReport,
   AdaptiveTrustSummary,
   AlignedClaim,
+  CommonResponseMeta,
   QueryClassification,
   QueryType,
   RankedEnumerationResult,
@@ -61,6 +62,7 @@ import type {
 } from "@/lib/adaptiveSchema/types";
 import { getResultSchema } from "@/lib/adaptiveSchema/schemaRegistry";
 import { STATED_CONFIDENCE_SCORE as CONFIDENCE_SCORE_MAP, BIAS_EMPTY_REASON_LABELS } from "@/lib/adaptiveSchema/config";
+import { ReportStatusInput } from "@/lib/adaptiveSchema/reportStatus";
 import AdaptivePanelResponse from "@/components/adaptive/AdaptivePanelResponse";
 
 export interface AdaptivePanelPayload {
@@ -74,6 +76,13 @@ export interface AdaptivePanelPayload {
   synthesisReport?: AdaptiveSynthesisReport;
   /** Present only when ADAPTIVE_VERIFICATION_ENABLED was on for this run. */
   trustSummary?: AdaptiveTrustSummary;
+  // ── Adaptive Synthesis Report, Phase 1 (docs/adaptive-synthesis-report-design.md
+  // §4.1) — top summary bar inputs. See TopSummaryBar.tsx/reportStatus.ts.
+  generatedAt?: string;
+  persistenceStatus?: ReportStatusInput["persistenceStatus"];
+  humanReview?: ReportStatusInput["humanReview"];
+  reviewRouting?: ReportStatusInput["reviewRouting"];
+  meta?: CommonResponseMeta;
   /** Present only for schemaId === "ranked_enumeration" (Milestone 2). */
   rankedEnumeration?: RankedEnumerationResult;
   /** Present only for schemaId === "comparison_matrix" (Milestone 2). */
@@ -1025,6 +1034,11 @@ export default function ResultsDisplay({
           evidenceReview={adaptive.evidenceReview}
           biasBlindspotAudit={adaptive.biasBlindspotAudit}
           decisionSupport={adaptive.decisionSupport}
+          generatedAt={adaptive.generatedAt}
+          persistenceStatus={adaptive.persistenceStatus}
+          humanReview={adaptive.humanReview}
+          reviewRouting={adaptive.reviewRouting}
+          meta={adaptive.meta}
           question={question}
           runId={runId}
           onRunFollowUp={onRunFollowUp}

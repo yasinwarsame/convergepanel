@@ -35,6 +35,7 @@ import { applyAutomatedGovernanceUpdate } from "@/lib/adaptiveSchema/governanceR
 import { evaluateAdaptiveGovernance } from "@/lib/governance/evaluateAdaptiveGovernance";
 import { loadGovernancePolicy } from "@/lib/governance/governancePolicyStore";
 import { GovernanceRecordV1 } from "@/lib/adaptiveSchema/governanceRecord";
+import { CommonResponseMeta } from "@/lib/adaptiveSchema/types";
 import { loadUserAndTeam } from "@/lib/teams/teamApiAuth";
 import { routeAdaptiveTeamReview, buildAdaptiveTeamRunProjection } from "@/lib/governance/adaptiveTeamReview";
 import { createAdaptiveTeamRunProjection } from "@/lib/firestore/teamRuns";
@@ -820,6 +821,16 @@ export async function POST(req: NextRequest) {
        */
       adaptiveOutput?: Awaited<ReturnType<typeof finalizeAdaptiveRun>>["persistedOutput"];
       /**
+       * Adaptive Synthesis Report, Phase 1 (docs/adaptive-synthesis-report-design.md
+       * §4.1) — top-level so the client never needs to reach into
+       * `adaptiveOutput` (undefined for the original-9/factual_lookup
+       * family). `meta` is likewise undefined for that family — see
+       * reportSummary.ts's own module doc for why (buildCommonResponseMeta
+       * only runs for the 9 Milestone-2 schemas).
+       */
+      generatedAt?: string;
+      meta?: CommonResponseMeta;
+      /**
        * Whether `adaptiveOutput` was durably saved.
        * - "not_applicable": legacy schema / no envelope was ever built.
        * - "omitted_size_limit": a genuinely distinct, expected outcome —
@@ -867,6 +878,25 @@ export async function POST(req: NextRequest) {
        * detail, governance reasons, or raw Firestore errors — status only.
        */
       adaptiveTeamReviewProjectionStatus?: "created" | "already_exists" | "disabled" | "not_eligible" | "failed";
+      /**
+       * Adaptive Synthesis Report, Phase 1 (docs/adaptive-synthesis-report-design.md
+       * §4.1) — compact human-review state for the top summary bar. Never
+       * reviewer name or comment text (same discipline as humanReviewHistory).
+       * Omitted whenever no real GovernanceRecordV1 was captured this request.
+       */
+      humanReview?: {
+        status: GovernanceRecordV1["humanReview"]["status"];
+        conditions?: string[];
+        decidedVia?: GovernanceRecordV1["humanReview"]["decidedVia"];
+      };
+      /**
+       * Derived from `adaptiveTeamReviewProjectionStatus` above, not an
+       * independent source of truth — "in_queue" when a review projection
+       * was created/already existed, "not_configured" when routing decided
+       * against one, "unknown" when routing was never attempted (legacy
+       * schema, or the block above never ran).
+       */
+      reviewRouting?: "in_queue" | "not_configured" | "unknown";
     } | null = null;
 
     if (adaptivePlan) {
@@ -901,6 +931,13 @@ export async function POST(req: NextRequest) {
           decisionSupport: adaptiveOutput.decisionSupport,
           adaptiveOutput: adaptiveOutput.persistedOutput,
           persistenceStatus: "not_applicable",
+          // Adaptive Synthesis Report, Phase 1 — top-level so the client
+          // never needs to reach into `.adaptiveOutput` (undefined for the
+          // original-9/factual_lookup family, which has no persisted
+          // envelope at all). Falls back to "now" for that family only —
+          // the run genuinely did just complete at response-build time.
+          generatedAt: adaptiveOutput.persistedOutput?.generatedAt ?? new Date().toISOString(),
+          meta: adaptiveOutput.persistedOutput?.meta,
         };
 
         // Query-Routing Redesign, Phase 1 — additive persistence, same
@@ -1177,6 +1214,29 @@ export async function POST(req: NextRequest) {
               });
             }
           }
+
+          // Adaptive Synthesis Report, Phase 1 (docs/adaptive-synthesis-report-design.md
+          // §4.1) — compact fields for the top summary bar's "Status".
+          // `humanReview` mirrors the exact same shape GET /api/user/runs/[runId]
+          // now returns on reload (never reviewer name/comment text — same
+          // discipline as humanReviewHistory). `reviewRouting` is derived from
+          // the SAME adaptiveTeamReviewProjectionStatus this block just set,
+          // not re-computed independently — one source of truth.
+          if (initResultForAutomatedGovernance?.record?.humanReview) {
+            adaptivePayload.humanReview = {
+              status: initResultForAutomatedGovernance.record.humanReview.status,
+              conditions: initResultForAutomatedGovernance.record.humanReview.conditions,
+              decidedVia: initResultForAutomatedGovernance.record.humanReview.decidedVia,
+            };
+          }
+          adaptivePayload.reviewRouting =
+            adaptivePayload.adaptiveTeamReviewProjectionStatus === "created" ||
+            adaptivePayload.adaptiveTeamReviewProjectionStatus === "already_exists"
+              ? "in_queue"
+              : adaptivePayload.adaptiveTeamReviewProjectionStatus === "disabled" ||
+                  adaptivePayload.adaptiveTeamReviewProjectionStatus === "not_eligible"
+                ? "not_configured"
+                : "unknown";
         }
 
         if (adaptiveOutput.rankedEnumeration?.shortfallNote && adaptiveOutput.rankedEnumeration.requestedCount != null) {

@@ -65,7 +65,11 @@ describe("app/page.tsx — client-side adaptive guard regression (source-level)"
     // guard regexes matched above, and by their own unconditional call
     // sites existing independently.
     expect(PAGE_SOURCE).toMatch(/setAdaptivePanel\(\(data as any\)\.adaptive \?\? null\);/);
-    expect(PAGE_SOURCE).toMatch(/setAdaptivePanel\(adaptPersistedOutputToPanelPayload\(data\.adaptive\.output\)\);/);
+    // Adaptive Synthesis Report, Phase 1 — this call site now also passes a
+    // second `governance` argument (humanReview/reviewRouting for the top
+    // summary bar), so the exact single-line literal no longer matches;
+    // still asserts it's the same unconditional adaptPersistedOutputToPanelPayload(data.adaptive.output, ...) call, not nested in a guard.
+    expect(PAGE_SOURCE).toMatch(/setAdaptivePanel\(\s*adaptPersistedOutputToPanelPayload\(data\.adaptive\.output,/);
   });
 });
 
