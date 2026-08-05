@@ -15,6 +15,7 @@ import { parsePersistedAdaptiveOutput } from "@/lib/adaptiveSchema/persistedOutp
 import { parseGovernanceRecord } from "@/lib/adaptiveSchema/governanceRecordParser";
 import { loadUserAndTeam } from "@/lib/teams/teamApiAuth";
 import { getAdaptiveTeamRunProjection } from "@/lib/firestore/teamRuns";
+import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -149,17 +150,73 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
   // rather than a discarded/"unknown" placeholder — a team run's queue
   // membership is real, durable Firestore state, not something only known
   // at the moment the run completed.
+  //
+  // "not_configured" is returned ONLY when the absence of review routing is
+  // positively confirmed (no team, or a confirmed-missing projection).
+  // Every other outcome — a Firestore read failure
+  // (getAdaptiveTeamRunProjection never throws; "firestore_unavailable"/
+  // "read_failed" come back as ordinary return values, not exceptions, so
+  // they must be checked explicitly here, not just caught), a malformed or
+  // forged projection document (same defensive field-checking
+  // getAdaptiveTeamRunProjection's own doc comment requires of every
+  // caller, mirroring app/api/teams/adaptive-runs/[runId]/route.ts's
+  // authorization check), or an unexpected thrown error — resolves to
+  // "unknown", never "not_configured". reportStatus.ts already renders
+  // "unknown" identically to "in_queue" ("Unreviewed — in queue"), so this
+  // fails closed toward "still needs attention" rather than the false
+  // "no review configured" claim a positive-sounding default would make.
+  // This block is read-only: it never creates or mutates a teamRuns
+  // projection, and never touches governanceRecord.
   let reviewRouting: "in_queue" | "not_configured" | "unknown" = "unknown";
   if (humanReview && (humanReview.status === "unreviewed" || humanReview.status === "pending")) {
+    const requestId = req.headers.get("x-vercel-id") ?? req.headers.get("x-request-id") ?? undefined;
     try {
       const teamCtx = await loadUserAndTeam(uid);
       if (!teamCtx?.team) {
         reviewRouting = "not_configured";
       } else {
-        const projection = await getAdaptiveTeamRunProjection(teamCtx.team.id, runId);
-        reviewRouting = projection.status === "found" ? "in_queue" : "not_configured";
+        const projectionResult = await getAdaptiveTeamRunProjection(teamCtx.team.id, runId);
+        if (projectionResult.status === "not_found") {
+          reviewRouting = "not_configured";
+        } else if (projectionResult.status === "found") {
+          const projection = projectionResult.projection;
+          const projectionValid =
+            projection.projectionVersion === 1 &&
+            projection.adaptive === true &&
+            typeof projection.teamId === "string" &&
+            projection.teamId === teamCtx.team.id &&
+            typeof projection.runId === "string" &&
+            projection.runId === runId;
+          if (projectionValid) {
+            reviewRouting = "in_queue";
+          } else {
+            logger.warn("[user/runs] Malformed or forged adaptive team-run projection during history reload", {
+              runId,
+              teamId: teamCtx.team.id,
+              errorCategory: "malformed_projection",
+              requestId,
+            });
+            reviewRouting = "unknown";
+          }
+        } else {
+          // "firestore_unavailable" / "read_failed" — a genuine, unresolved
+          // lookup failure, not a confirmed absence of review config.
+          logger.warn("[user/runs] Adaptive team-run projection lookup failed during history reload", {
+            runId,
+            teamId: teamCtx.team.id,
+            errorCategory: projectionResult.status,
+            requestId,
+          });
+          reviewRouting = "unknown";
+        }
       }
-    } catch {
+    } catch (err: unknown) {
+      logger.warn("[user/runs] reviewRouting resolution threw during history reload", {
+        runId,
+        errorCategory: "unresolved_lookup_error",
+        errorMessage: err instanceof Error ? err.message : "unknown_error",
+        requestId,
+      });
       reviewRouting = "unknown";
     }
   }
