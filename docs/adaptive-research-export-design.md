@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-05
 **Scope:** design only, per explicit instruction. Existing code, schemas, permissions, governance records, UI components, and legacy export logic were read and audited; **no export routes, components, services, storage, templates, permissions, or database changes were made.**
-**Precondition:** this document assumes the classifier fix (PR #5) and the production-flag enablement (PR #6, docs) are the "current PR, deployment, and production canary" referenced in the brief — both are merged and verified live as of this writing. A production canary period (real traffic on the now-enabled `ADAPTIVE_SCHEMAS_ENABLED`/`ADAPTIVE_VERIFICATION_ENABLED` flags) has **not** run yet; see [Open Questions](#12-open-questions) §12.1.
+**Precondition — resolved 2026-08-05 (see §12.1):** the classifier fix (PR #5) and the production-flag enablement (PR #6, docs) are merged and verified live. **No structured canary was run** — both flags were enabled at 100% immediately (not a limited-team rollout), verified only by two manual live spot-checks (the originally reported Comparison and Risk Analysis queries). This differs from this project's own established canary convention (`docs/operations/multi-reviewer-governance-runbook.md` §11: limited team + one business week of monitoring before wider rollout). Given the flags are already fully live and reverting is a bigger disruption than monitoring forward, the resolution is to treat the next real business week of production traffic as the de facto monitoring window (via existing `admin_audit_logs`/governance telemetry, no new tooling needed) rather than re-run a formal canary retroactively. Phase 1 implementation may proceed in parallel with that monitoring window — it does not block on it.
 **Method:** every finding below is grounded in a fresh read of the actual code (`lib/adaptiveSchema/*.ts`, `lib/governance/*.ts`, `lib/plans.ts`, `lib/verification/generateMemo.ts`/`shareText.ts`, `app/api/teams/audit-export/route.ts`), not assumed from the brief's own framing.
 
 ---
@@ -62,21 +62,26 @@ The brief is explicit that "the primary screen should show the reviewed conclusi
 
 **Recommendation:** Phase 1's deliverable should be a `ReportStatusBanner` component (name illustrative, not prescriptive) that both the in-app result view and the future export renderer consume — same status enum, same source data, computed once server-side and never re-derived client-side (matching the `canManagePanel`-style precedent).
 
+**Superseded by `docs/adaptive-synthesis-report-design.md` (2026-08-05).** That document's §4.1 "top summary bar" is this Phase 1 deliverable, generalized across all 19 active schemas rather than built export-first — build it there, not as a separate export-only component. This export document's own Phases 3–7 should not begin implementation until that document's §5 category-specific report components ship; see its §8 for the reconciled sequence.
+
 ---
 
 ## 4. Report status model (Constraint #2)
 
 ### 4.1 Status derivation table
 
-The brief lists 7 states; grounding them against `GovernanceRecordV1.humanReview.status` (`unreviewed | pending | approved | approved_with_conditions | changes_requested | rejected`) plus `decidedVia` surfaces **one state the brief didn't separate and two states that don't exist in the source data yet:**
+The brief lists 7 states; grounding them against `GovernanceRecordV1.humanReview.status` (`unreviewed | pending | approved | approved_with_conditions | changes_requested | rejected`) plus `decidedVia` surfaces **one state the brief didn't separate and two states that don't exist in the source data yet.**
+
+**Correction found on review (2026-08-05):** `"pending"` is defined in the type and has documented semantics (`governanceRecordParser.ts`: *"a review has been started/assigned but has not yet reached a substantive human decision"*), but confirmed via code search — no write site anywhere sets `humanReview.status: "pending"`; `initializeAdaptiveGovernanceRecord()` always initializes to `"unreviewed"`, and reviewer assignment (Part E3) explicitly never touches `humanReview.status`. In practice, only 5 values ever occur. This document's derived label **"Unreviewed — pending"** below is this document's own UI label, not a reference to the raw `"pending"` enum value — renamed to **"Unreviewed — in queue"** to remove the collision, since a future reader could otherwise assume the label maps to that (currently unreachable) status value.
 
 | Brief status | Derived from | Notes |
 |---|---|---|
-| Unreviewed | `humanReview.status === "unreviewed"`, or `governanceRecord` absent entirely | See §12.2 — solo (non-team) runs may never enter a review queue at all; "Unreviewed" must not imply "review is pending action" for those. |
+| Unreviewed — in queue | `humanReview.status === "unreviewed"` AND the run was actually routed toward review (`adaptiveTeamReviewProjectionStatus` ∈ `{"created", "already_exists"}`, i.e. `routeAdaptiveTeamReview()` returned `flagged`/`blocked`/`human_review_needed`/`all_runs`) | **Resolved 2026-08-05, see §12.2.** Confirmed by code read (`app/api/run-panel/route.ts`'s governance-initialization block): `GovernanceRecordV1` is initialized **unconditionally** for every adaptive run whose `adaptiveOutput` persisted — solo/Free/Lite runs get one too, with no team or reviewer ever assigned. Split into two labels so "Unreviewed" doesn't misrepresent runs that were never going to be reviewed. |
+| Not reviewed — no review configured | `humanReview.status === "unreviewed"` AND `adaptiveTeamReviewProjectionStatus` ∈ `{"disabled", "not_eligible"}` (or absent — no team) | The common case for Free/Lite/solo Full-plan users. Must not read as an outstanding action item. |
 | Reviewed and approved | `humanReview.status === "approved"` | — |
 | Reviewed with conditions | `humanReview.status === "approved_with_conditions"` | Export must show `humanReview.conditions[]` verbatim per Constraint #2's "must be unmistakable" — never summarized. |
 | Rejected | `humanReview.status === "rejected"` | — |
-| *(not in brief, but real)* Changes requested | `humanReview.status === "changes_requested"` | **Open question, flagged not assumed:** the brief's list has no slot for this. Recommend treating it as its own 8th status, distinct from "Rejected" — a rejection is terminal, `changes_requested` implies a resubmission path exists. Collapsing it into "Rejected" would misrepresent an in-progress state as final. See §12.3. |
+| Changes requested *(not in brief — resolved as its own status)* | `humanReview.status === "changes_requested"` | **Resolved 2026-08-05, see §12.3:** kept as its own 8th status, distinct from "Rejected." A rejection is terminal; `changes_requested` implies a resubmission path exists. Collapsing it into "Rejected" would misrepresent an in-progress state as final. |
 | Owner override | `humanReview.decidedVia === "multi_reviewer_owner_override"` | Combine with the underlying `status` (e.g. "Owner override — Approved"), since override sets a real terminal status too. |
 | **Incomplete** *(new — no source field yet)* | Recommend: `PersistedAdaptiveOutputV1` absent/`persistenceStatus !== "saved"` (mirrors the existing `"saved" \| "failed" \| "omitted_size_limit" \| "not_applicable"` field already returned by `persistAdaptiveOutput()`), OR the classification routed to `graceful_limitation`/`disabled`/`handoff` (no real report was ever produced), OR fewer than N models produced usable output. **No such computed flag exists today** — needs to be added in Phase 2/3, not invented ad hoc at export time. |
 | **Superseded** *(new — no source field yet)* | Recommend: computed at export-list time by comparing this export's frozen `generatedAt`/`reportVersion` against the run's *current* `humanReview.updatedAt`/`adaptiveOutput.generatedAt` — if either moved on since this export was generated, the export is Superseded. **Does not require new mutable-record versioning** (see §1's central finding) — it's a comparison the export listing UI does at read time against two timestamps that already exist. |
@@ -128,14 +133,16 @@ Computed server-side as a single `exportCapabilities` object per request, mirror
 
 ### 5.3 Data classification model
 
-The brief's text is truncated mid-list ("Confidcontrol:") — reconstructing a clean 4-tier model rather than guessing at the cut-off word, and flagging this as an assumption to confirm:
+**Resolved 2026-08-05, see §12.4.** The brief's text was truncated mid-list ("Confidcontrol:"). Rather than leave the reconstructed 4-tier model as an invented, unconfirmed guess, it's now anchored to a real, already-computed signal: `QueryClassification.riskLevel` (`"casual" | "professional" | "high_stakes" | "safety_critical"`), set by the classifier for every run today (`lib/adaptiveSchema/classifier.ts`) and already used to drive `humanReviewNeeded` elsewhere in the governance pipeline. No new taxonomy is introduced — the classification tier is a direct, fixed mapping from `riskLevel`, matching this codebase's own "reuse an existing computed signal, don't invent a parallel one" convention (the same discipline `canManagePanel`-style capability flags follow):
 
-| Tier | Meaning | Formats allowed | Reviewer identity | Raw output | Watermark | Retention |
+| `riskLevel` (existing, computed per run) | Classification tier (new) | Formats allowed | Reviewer identity | Raw output | Watermark | Retention |
 |---|---|---|---|---|---|---|
-| **Public** | Safe for external sharing (e.g. a blog citation) | PDF only | Never | Never | Required | Same as plan default |
-| **Internal** | Default tier — org-internal decision use | PDF, DOCX, JSON, CSV (tabular sections only) | Masked | Never (default) | Optional | Same as plan default |
-| **Confidential** | Contains reviewer identity, raw outputs, or internal notes — explicit opt-in required | PDF, DOCX, JSON | Full (if `export_reviewer_identity` granted) | If `export_raw_model_outputs` granted | Required | Shorter than plan default, admin-configurable |
-| **Restricted** | Audit/legal-hold exports only — governance evidence + manifest, admin-only | JSON (manifest) + PDF (evidence bundle) | Full | Never (evidence is about the *process*, not raw content) | Required | Legal-hold rules, not plan-tier rules |
+| `casual` | **Public**-eligible (still requires explicit user action to mark Public — never defaults there) | PDF only | Never | Never | Required | Same as plan default |
+| `professional` | **Internal** (default) | PDF, DOCX, JSON, CSV (tabular sections only) | Masked | Never (default) | Optional | Same as plan default |
+| `high_stakes` | **Confidential** (recommended default; admin may only raise, never lower) | PDF, DOCX, JSON | Full (if `export_reviewer_identity` granted) | If `export_raw_model_outputs` granted | Required | Shorter than plan default, admin-configurable |
+| `safety_critical` | **Restricted** (recommended default; admin may only raise, never lower) | JSON (manifest) + PDF (evidence bundle) | Full | Never (evidence is about the *process*, not raw content) | Required | Legal-hold rules, not plan-tier rules |
+
+An admin may raise a run's classification tier above its `riskLevel`-derived default (e.g. mark a `professional` run Confidential because it discusses an unannounced product), but never lower it below the default — the computed signal is a floor, not a ceiling, matching Constraint #3's least-privilege default.
 
 ### 5.4 Sensitive-export warnings (UX)
 
@@ -176,7 +183,8 @@ interface AdaptiveResearchExportV1 {
 
   classification: "public" | "internal" | "confidential" | "restricted";
   reportStatus:                      // the §4.1 status, frozen at generation time
-    | "unreviewed" | "approved" | "approved_with_conditions"
+    | "unreviewed_in_queue" | "not_reviewed_no_review_configured"
+    | "approved" | "approved_with_conditions"
     | "changes_requested" | "rejected" | "owner_override"
     | "incomplete" | "superseded";
 
@@ -252,7 +260,7 @@ interface ExportManifest {
 
 Recommendations, flagged as decisions to confirm rather than settled defaults:
 
-- **Download links expire** — recommend 24h for Internal, 1h for Confidential/Restricted.
+- **Download links expire** — 24h for Internal, 1h for Confidential/Restricted. **Resolved 2026-08-05, see §12.5:** confirmed via codebase search that no signed-URL/object-storage infrastructure exists anywhere today (no prior art to align with — this is genuinely greenfield, matching §1's finding that no export/storage system exists at all). These numbers stand as the initial defaults, admin-configurable per §5.3's classification table, not derived from an existing policy.
 - **Exports may be regenerated**, always producing a new `exportId`/`reportVersion` — never overwrite an existing export artifact in place (that would itself violate Constraint #1).
 - **Exports may be revoked** by an admin — revocation invalidates the signed URL and logs `adaptive_export_revoked`; the artifact's manifest is retained for audit even after revocation (the file, not the metadata, becomes inaccessible).
 - **Users can see their own export history** — a list view driven by `admin_audit_logs`' `adaptive_export_*` actions, scoped to their own `requestingUser`.
@@ -297,13 +305,19 @@ The export service depends on the existing records but never mutates them, and n
 
 ---
 
-## 12. Open questions
+## 12. Open questions — resolved 2026-08-05
 
-1. **§Precondition** — has the production canary for `ADAPTIVE_SCHEMAS_ENABLED`/`ADAPTIVE_VERIFICATION_ENABLED` actually run yet, or does this document's own precondition still need to be satisfied before Phase 1 implementation starts? (Not re-verified as part of writing this document — this document is analysis only, per instruction not to implement or re-run production checks.)
-2. **§4.1** — does `GovernanceRecordV1` get initialized for solo (non-team, Free/Lite-plan) runs at all today, or only for Full-plan team runs? If solo runs never get a `governanceRecord`, "Unreviewed" needs a distinct sub-state ("Not applicable — no review configured") so it doesn't read as an action item to a user who was never going to get a reviewer.
-3. **§4.1** — should `changes_requested` be its own 8th status distinct from "Rejected" (recommended above), or does product want it folded into "Rejected" for simplicity? This changes the status enum's cardinality, worth resolving before Phase 3's `reportStatus` type is finalized.
-4. **§5.3** — the brief's classification list is truncated ("Confidcontrol:"). The reconstructed 4-tier model (Public/Internal/Confidential/Restricted) is this document's best-faith completion, not a confirmed requirement — needs explicit sign-off.
-5. **§9** — expiry windows (24h/1h) are placeholder recommendations, not derived from any existing retention policy in the codebase (the closest precedent, `historyRetentionDays`, governs run *visibility*, not *export-file* lifetime, and shouldn't be assumed to transfer directly).
+All 5 are resolved below. Each resolution is either a **fact**, confirmed by reading the actual code (not re-running or changing anything in production), or a **design decision**, made explicitly in the absence of a separate product stakeholder in this conversation — flagged as such rather than presented as settled fact, so it can still be overridden on review.
+
+1. **§Precondition — fact.** No structured canary was run for `ADAPTIVE_SCHEMAS_ENABLED`/`ADAPTIVE_VERIFICATION_ENABLED`. Both flags were set directly to 100% production traffic (not a limited-team rollout matching this project's own `docs/operations/multi-reviewer-governance-runbook.md` §11 convention), verified only by two manual live spot-checks. Resolution: treat the next real business week of production traffic as the monitoring window going forward (existing `admin_audit_logs`/telemetry, no new tooling); Phase 1 implementation is not blocked on it. See the updated Precondition line above.
+
+2. **§4.1 — fact, confirmed by code read.** `app/api/run-panel/route.ts`'s governance-initialization block gates `initializeAdaptiveGovernanceRecord()` on `adaptivePayload.persistenceStatus === "saved"` only — no team, plan, or `teamGovernanceAccess` check. Every adaptive run on every plan gets a `GovernanceRecordV1` with `humanReview.status: "unreviewed"`, whether or not it was ever routed to a reviewer. Resolution: "Unreviewed" is split into two status labels (§4.1's table), disambiguated by `adaptiveTeamReviewProjectionStatus` / `routeAdaptiveTeamReview()`'s reason — this is a genuine, reusable existing signal, not a new field.
+
+3. **§4.1 — design decision.** `changes_requested` is kept as its own 8th status, distinct from "Rejected." Rationale unchanged from the original recommendation: rejection is terminal, `changes_requested` implies a resubmission path exists, and collapsing the two would misrepresent an in-progress state as final — inconsistent with Constraint #2's "unmistakable" requirement, which cuts both ways (a status must be exactly as final as it actually is).
+
+4. **§5.3 — design decision, but now grounded rather than invented.** Instead of confirming the brief's cut-off classification list as literally written (impossible — the text is genuinely truncated), the reconstructed 4-tier model is now anchored to `QueryClassification.riskLevel`, an already-computed, already-used signal (`casual`/`professional`/`high_stakes`/`safety_critical`) rather than a new taxonomy invented from scratch. This is a stronger resolution than either guessing at the brief's missing word or leaving the tier boundaries undefined — see the updated §5.3 table.
+
+5. **§9 — fact, confirmed by code search.** No signed-URL, object-storage, or export-file infrastructure exists anywhere in the codebase today (`grep` for `getSignedUrl`/`signedUrl`/`Storage()` returns nothing) — there is no existing retention precedent to align with or contradict. The 24h/1h defaults stand as the initial recommendation, admin-configurable, not derived from prior art because none exists.
 
 ---
 
@@ -320,8 +334,10 @@ Matching this repo's existing density (every Milestone 2 schema shipped with 15�
 
 ## 14. Recommended next steps (no implementation started)
 
-1. Resolve Open Questions §12.2–12.4 with product — they change the shape of `reportStatus` and the classification model before any code is written.
-2. Confirm the production canary precondition (§Precondition) is actually satisfied.
-3. Begin Phase 1 (`ReportStatusBanner` + governance-status-on-primary-view) as the first implementation PR — it's the one piece of this design that's useful even if export itself is deprioritized, and it's the shared dependency both the in-app UI and every later export phase need.
+All 5 open questions are resolved as of 2026-08-05 (§12) — decisions 3 and 4 there were made in the absence of a separate product stakeholder and are worth a final confirmation pass before code is written, but no longer block starting:
+
+1. Begin `docs/adaptive-synthesis-report-design.md` implementation first (its §4.1 top summary bar is this document's former Phase 1, generalized) — its own §8 is now the authoritative sequence for both documents.
+2. Do not start this document's Phases 3–7 (PDF/DOCX/JSON-CSV/async) until `adaptive-synthesis-report-design.md`'s §5 category-specific report components ship.
+3. Monitor the ongoing de facto canary window (§12.1) in parallel — not a blocker, but worth a status check before Phase 4 (PDF pilot) starts.
 
 **This document stops here.** No export routes, components, services, storage, templates, permissions, or database changes were made while producing it.
