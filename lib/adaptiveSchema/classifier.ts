@@ -40,7 +40,17 @@ import { stripJsonFences, withTimeout } from "./util";
 // legitimately contested_empirical questions. Raised to match the other
 // short Gemini calls in this module.
 const CLASSIFIER_TIMEOUT_MS = 8000;
-const CLASSIFIER_MAX_OUTPUT_TOKENS = 300;
+// Was 300 — too tight for gemini-2.5-flash, which shares its "thinking"
+// token budget with maxOutputTokens on this SDK/model combination. At 300,
+// thinking alone routinely consumed the entire budget (finishReason
+// MAX_TOKENS with a handful of visible completion tokens), truncating the
+// JSON response to nothing and silently falling through to "generic" for
+// every query, regardless of its actual type — the same "silently fell
+// through to generic" failure class as the CLASSIFIER_TIMEOUT_MS fix above,
+// just via truncation instead of timeout. thinkingBudget: 0 below (now
+// supported by the Gemini connector) is the primary fix — this raise is
+// defense in depth in case thinking can't be fully suppressed.
+const CLASSIFIER_MAX_OUTPUT_TOKENS = 1024;
 const CONFIDENCE_THRESHOLD = 0.6;
 const CACHE_MAX_ENTRIES = 200;
 
@@ -140,25 +150,37 @@ const HANDOFF_TARGET_BY_QUERY_TYPE: Partial<Record<QueryType, HandoffTarget>> = 
   media_authenticity_review: "video_verification",
 };
 
+// queryType/answerShape are render-critical — they select the schema, so
+// they stay strictly validated and a bad value correctly fails the whole
+// classification. The remaining enums are cross-cutting metadata (never
+// used to pick a renderer) and the model can conflate two similarly-named
+// ones under real conditions — observed in production: "timeSensitivity"
+// (low/medium/high) returned a "freshness"-shaped value like "recent"
+// instead. Previously that single mismatched field failed the ENTIRE
+// classification via safeParse and threw away a perfectly correct
+// queryType, silently downgrading the run to "generic" no differently than
+// a real misclassification would. `.catch()` degrades just that one field
+// to a safe default instead, so a genuinely correct queryType still reaches
+// its dedicated schema/renderer.
 const ClassificationSchema = z.object({
   queryType: z.enum(QUERY_TYPES as [QueryType, ...QueryType[]]),
   domain: z.string(),
   answerShape: z.enum(ANSWER_SHAPES as [AnswerShape, ...AnswerShape[]]),
   quantExpected: z.boolean(),
-  timeSensitivity: z.enum(["low", "medium", "high"]),
-  userIntent: z.enum([
-    "understand_debate",
-    "get_answer",
-    "make_decision",
-    "learn_process",
-    "generate_content",
-  ]),
+  timeSensitivity: z.enum(["low", "medium", "high"]).catch("low"),
+  userIntent: z
+    .enum(["understand_debate", "get_answer", "make_decision", "learn_process", "generate_content"])
+    .catch("get_answer"),
   confidence: z.number().min(0).max(1),
-  riskLevel: z.enum(RISK_LEVELS as [RiskLevel, ...RiskLevel[]]),
-  evidenceRequirement: z.enum(EVIDENCE_REQUIREMENTS as [EvidenceRequirement, ...EvidenceRequirement[]]),
-  freshness: z.enum(FRESHNESS_LEVELS as [FreshnessRequirement, ...FreshnessRequirement[]]),
-  inputType: z.enum(INPUT_TYPES as [ClassificationInputType, ...ClassificationInputType[]]),
-  verificationMethod: z.enum(VERIFICATION_METHODS as [VerificationMethod, ...VerificationMethod[]]),
+  riskLevel: z.enum(RISK_LEVELS as [RiskLevel, ...RiskLevel[]]).catch("professional"),
+  evidenceRequirement: z
+    .enum(EVIDENCE_REQUIREMENTS as [EvidenceRequirement, ...EvidenceRequirement[]])
+    .catch("medium"),
+  freshness: z.enum(FRESHNESS_LEVELS as [FreshnessRequirement, ...FreshnessRequirement[]]).catch("timeless"),
+  inputType: z.enum(INPUT_TYPES as [ClassificationInputType, ...ClassificationInputType[]]).catch("text"),
+  verificationMethod: z
+    .enum(VERIFICATION_METHODS as [VerificationMethod, ...VerificationMethod[]])
+    .catch("cross_model_consistency"),
   requestedCount: z.number().nullable().optional(),
   requiresClarification: z.boolean(),
   clarificationQuestion: z.string().nullable().optional(),
@@ -247,6 +269,10 @@ export async function classifyQuery(query: string): Promise<QueryClassification>
       callGemini(trimmedQuery, null, GEMINI_API_KEY, {
         systemPromptOverride: CLASSIFIER_SYSTEM_PROMPT,
         maxOutputTokens: CLASSIFIER_MAX_OUTPUT_TOKENS,
+        // Classification is a short structured-JSON task with no benefit
+        // from extended reasoning — disable thinking so the full output
+        // budget goes to the actual answer, not invisible thought tokens.
+        thinkingBudget: 0,
       }),
       CLASSIFIER_TIMEOUT_MS
     );
@@ -289,8 +315,19 @@ export async function classifyQuery(query: string): Promise<QueryClassification>
       return fallback;
     }
 
+    // zod v4 types a .catch()'d field as optional on the inferred object type
+    // (the runtime value is never actually undefined — catch always supplies
+    // its default) — the `??` fallbacks below satisfy QueryClassification's
+    // required fields without a blanket cast past real type errors elsewhere.
     const classification: QueryClassification = {
       ...parsed.data,
+      timeSensitivity: parsed.data.timeSensitivity ?? "low",
+      userIntent: parsed.data.userIntent ?? "get_answer",
+      riskLevel: parsed.data.riskLevel ?? "professional",
+      evidenceRequirement: parsed.data.evidenceRequirement ?? "medium",
+      freshness: parsed.data.freshness ?? "timeless",
+      inputType: parsed.data.inputType ?? "text",
+      verificationMethod: parsed.data.verificationMethod ?? "cross_model_consistency",
       handoffTarget: HANDOFF_TARGET_BY_QUERY_TYPE[parsed.data.queryType],
     };
 

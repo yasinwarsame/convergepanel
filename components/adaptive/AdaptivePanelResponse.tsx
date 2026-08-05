@@ -20,7 +20,7 @@
  * order-sensitive comparators) would have no visible surface at all.
  */
 
-import { AnswerShape, BiasBlindspotAuditResult, CausalExplanationResult, ChecklistTaxonomyResult, ComparisonMatrixResult, DecisionSupportResult, DeepResearchResult, DefinitionExplanationResult, EvidenceReviewResult, RankedEnumerationResult } from "@/lib/adaptiveSchema/types";
+import { AnswerShape, BiasBlindspotAuditResult, CausalExplanationResult, ChecklistTaxonomyResult, ComparisonMatrixResult, DecisionSupportResult, DeepResearchResult, DefinitionExplanationResult, EvidenceReviewResult, RankedEnumerationResult, isRiskShapedChecklistResult } from "@/lib/adaptiveSchema/types";
 import { AdaptiveGateResult, AdaptiveSynthesisReport, AdaptiveTrustSummary } from "@/lib/adaptiveSchema/types";
 import { AdaptiveRendererProps } from "./types";
 import AdaptiveResultsView from "./AdaptiveResultsView";
@@ -34,6 +34,7 @@ import ComparisonMatrixView from "./ComparisonMatrixView";
 import DefinitionExplanationView from "./DefinitionExplanationView";
 import CausalExplanationView from "./CausalExplanationView";
 import ChecklistTaxonomyView from "./ChecklistTaxonomyView";
+import RiskAnalysisView from "./RiskAnalysisView";
 import DeepResearchView from "./DeepResearchView";
 import EvidenceReviewView from "./EvidenceReviewView";
 import BiasBlindspotAuditView from "./BiasBlindspotAuditView";
@@ -187,7 +188,15 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
   // ever missing.
   if (schema.renderHint === "checklist_taxonomy_view") {
     if (checklistTaxonomy) {
-      return <ChecklistTaxonomyView checklistTaxonomy={checklistTaxonomy} />;
+      // A checklist_taxonomy result whose items are genuinely risks (severity/
+      // likelihood/mitigation/etc. populated) renders as a risk register
+      // instead of a bare checklist — see isRiskShapedChecklistResult's doc
+      // comment for why this stays checklist_taxonomy rather than a new schema.
+      return isRiskShapedChecklistResult(checklistTaxonomy) ? (
+        <RiskAnalysisView checklistTaxonomy={checklistTaxonomy} />
+      ) : (
+        <ChecklistTaxonomyView checklistTaxonomy={checklistTaxonomy} />
+      );
     }
     return <AdaptiveResultsView {...props} />;
   }

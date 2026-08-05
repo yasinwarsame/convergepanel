@@ -103,7 +103,13 @@ describe("Registry composition matches the approved Milestone 1 + Milestone 2 al
   it("comparison_matrix (Milestone 2) is active and renders through comparison_grid, not the generic claims shell", () => {
     expect(SCHEMA_REGISTRY.comparison_matrix.implementationStatus).toBe("active");
     expect(SCHEMA_REGISTRY.comparison_matrix.renderHint).toBe("comparison_grid");
-    expect(SCHEMA_REGISTRY.comparison_matrix.fields.map((f) => f.key)).toEqual(["cells"]);
+    expect(SCHEMA_REGISTRY.comparison_matrix.fields.map((f) => f.key)).toEqual([
+      "cells",
+      "directConclusion",
+      "tradeoffs",
+      "bestUseRecommendations",
+      "uncertainties",
+    ]);
   });
 
   it("definition_explanation (Milestone 2) is active and renders through definition_card, not the generic claims shell", () => {

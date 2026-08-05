@@ -250,7 +250,16 @@ export async function callGemini(
           generationConfig: {
             maxOutputTokens: effectiveMaxOutput,
             temperature: 0.7,
-          },
+            // thinkingConfig isn't in this SDK version's GenerationConfig type
+            // (installed @google/generative-ai predates it), but the REST API
+            // accepts it and gemini-2.5-flash shares its thinking-token budget
+            // with maxOutputTokens — without this, a small maxOutputTokens
+            // (e.g. the classifier's) can be silently consumed entirely by
+            // thinking, truncating the actual response to nothing.
+            ...(typeof opts?.thinkingBudget === "number"
+              ? { thinkingConfig: { thinkingBudget: opts.thinkingBudget } }
+              : {}),
+          } as any,
         });
 
         result = await Promise.race([generatePromise, timeoutPromise]);
@@ -350,7 +359,7 @@ export async function callGemini(
       
       // Check if response was truncated due to max output tokens
       // Gemini uses "MAX_OUTPUT_TOKENS" as finish reason when hitting the limit
-      const wasTruncated = finishReason === "MAX_OUTPUT_TOKENS";
+      const wasTruncated = finishReason === "MAX_TOKENS" || finishReason === "MAX_OUTPUT_TOKENS";
       
       // If empty, return provider error (do not silently return empty string)
       if (!text || text.length === 0) {

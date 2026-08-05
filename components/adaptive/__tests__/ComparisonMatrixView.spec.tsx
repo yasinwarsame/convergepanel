@@ -161,4 +161,34 @@ describe("ComparisonMatrixView", () => {
     const html = renderToStaticMarkup(createElement(ComparisonMatrixView, { comparisonMatrix: result }));
     expect(html).toMatch(/no model responses were available/i);
   });
+
+  it("renders the direct conclusion, trade-offs, best-use recommendations, and uncertainties as their own sections", () => {
+    const result = buildComparisonMatrixResult([
+      {
+        modelId: "chatgpt" as ModelId,
+        cells: [cell({ subject: "ChatGPT", attribute: "Citations", value: "Weak" })],
+        directConclusion: "Perplexity leads for citation-backed research; ChatGPT leads for depth.",
+        tradeoffs: ["Cheaper options tend to have weaker source citations."],
+        bestUseRecommendations: ["Perplexity — best when citations matter most."],
+        uncertainties: ["Pricing changes frequently and was not independently verified."],
+      },
+    ]);
+    const html = renderToStaticMarkup(createElement(ComparisonMatrixView, { comparisonMatrix: result }));
+    expect(html).toMatch(/direct conclusion/i);
+    expect(html).toContain("Perplexity leads for citation-backed research; ChatGPT leads for depth.");
+    expect(html).toMatch(/trade-offs/i);
+    expect(html).toContain("Cheaper options tend to have weaker source citations.");
+    expect(html).toMatch(/best-use recommendations/i);
+    expect(html).toContain("Perplexity — best when citations matter most.");
+    expect(html).toMatch(/uncertainties/i);
+    expect(html).toContain("Pricing changes frequently and was not independently verified.");
+  });
+
+  it("omits the narrative sections entirely when no model supplied them", () => {
+    const result = buildComparisonMatrixResult(perModel([["chatgpt", [cell({ subject: "X", attribute: "Price", value: "$1" })]]]));
+    const html = renderToStaticMarkup(createElement(ComparisonMatrixView, { comparisonMatrix: result }));
+    expect(html).not.toMatch(/direct conclusion/i);
+    expect(html).not.toMatch(/trade-offs/i);
+    expect(html).not.toMatch(/best-use recommendations/i);
+  });
 });

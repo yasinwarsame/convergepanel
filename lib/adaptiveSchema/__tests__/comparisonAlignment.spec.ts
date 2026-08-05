@@ -219,3 +219,44 @@ describe("buildComparisonMatrixResult — empty input", () => {
     expect(result.cells).toEqual([]);
   });
 });
+
+describe("buildComparisonMatrixResult — narrative synthesis fields", () => {
+  it("defaults directConclusion to empty string and the lists to empty arrays when no model supplies them", () => {
+    const result = buildComparisonMatrixResult(perModel([["chatgpt", [cell({ subject: "X", attribute: "Price", value: "$1" })]]]));
+    expect(result.directConclusion).toBe("");
+    expect(result.tradeoffs).toEqual([]);
+    expect(result.bestUseRecommendations).toEqual([]);
+    expect(result.uncertainties).toEqual([]);
+  });
+
+  it("picks the modal directConclusion when multiple models agree, ignoring models that supplied none", () => {
+    const result = buildComparisonMatrixResult([
+      { modelId: "chatgpt" as ModelId, cells: [cell({ subject: "X", attribute: "P", value: "1" })], directConclusion: "A leads overall." },
+      { modelId: "claude" as ModelId, cells: [cell({ subject: "X", attribute: "P", value: "1" })], directConclusion: "A leads overall." },
+      { modelId: "gemini" as ModelId, cells: [cell({ subject: "X", attribute: "P", value: "1" })] },
+    ]);
+    expect(result.directConclusion).toBe("A leads overall.");
+  });
+
+  it("merges and deduplicates near-duplicate trade-offs/recommendations/uncertainties across models", () => {
+    const result = buildComparisonMatrixResult([
+      {
+        modelId: "chatgpt" as ModelId,
+        cells: [cell({ subject: "X", attribute: "P", value: "1" })],
+        tradeoffs: ["Cheaper options have weaker support."],
+        bestUseRecommendations: ["X is the right pick for a small budget-conscious team."],
+        uncertainties: ["Pricing changes often."],
+      },
+      {
+        modelId: "claude" as ModelId,
+        cells: [cell({ subject: "X", attribute: "P", value: "1" })],
+        tradeoffs: ["Cheaper options tend to have weaker support."],
+        bestUseRecommendations: ["Y is the right pick for regulated enterprise procurement workflows."],
+        uncertainties: [],
+      },
+    ]);
+    expect(result.tradeoffs.length).toBe(1);
+    expect(result.bestUseRecommendations.length).toBe(2);
+    expect(result.uncertainties).toEqual(["Pricing changes often."]);
+  });
+});

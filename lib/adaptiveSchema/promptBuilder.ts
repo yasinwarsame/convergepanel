@@ -89,9 +89,17 @@ const PROCESS_STEP_INTERFACE = `interface ProcessStep {
 const CHECKLIST_ITEM_INTERFACE = `interface ChecklistItem {
   id: string;           // short kebab-case slug from the item's label, e.g. "data-processing-agreement"
   label: string;         // the item itself, in your own words
-  category?: string;     // groups this item under a named category (e.g. "Legal") — omit or use "none" for a flat checklist with no natural categories
+  category?: string;     // groups this item under a named category (e.g. "Legal") — omit or use "none" for a flat checklist with no natural categories. For a risk-shaped taxonomy, this is the risk category.
   rationale?: string;    // one short sentence on why this item matters, if useful
   critical?: boolean;    // true for a must-have/blocking item, omit or false for a nice-to-have/situational one
+  // The 7 fields below are ONLY for items that are genuinely RISKS — leave every one of them unset for an ordinary checklist/taxonomy item.
+  severity?: "low" | "medium" | "high" | "critical";  // how bad this risk would be if it materialized
+  likelihood?: "low" | "medium" | "high";              // how likely this risk is to materialize
+  impact?: string;       // the concrete consequence if it materializes — one short sentence, not a restatement of label
+  evidence?: string;     // what supports treating this as a real risk, if anything
+  mitigation?: string;   // a concrete step that would reduce this risk's likelihood or impact
+  monitoringSignal?: string; // an observable signal worth tracking that this risk is materializing
+  residualRisk?: string; // the risk remaining after mitigation — state "low" explicitly rather than implying zero
 }`;
 
 const RESEARCH_FINDING_INTERFACE = `interface ResearchFinding {
@@ -223,7 +231,7 @@ Domain: ${classification.domain}. The user's intent: ${classification.userIntent
   }
 
   if (usedTypes.has("comparisonCell[]")) {
-    prompt += `\n\nIdentify the specific named things being compared and the dimensions worth comparing them on directly from the question. Emit one cell per (subject, attribute) pair you can responsibly assess — it is fine to leave a pair out rather than guess. Do not invent a subject or attribute the question doesn't call for just to fill the grid.`;
+    prompt += `\n\nIdentify the specific named things being compared and the dimensions worth comparing them on directly from the question. Emit one cell per (subject, attribute) pair you can responsibly assess — it is fine to leave a pair out rather than guess. Do not invent a subject or attribute the question doesn't call for just to fill the grid. directConclusion/tradeoffs/bestUseRecommendations/uncertainties sit above the grid and must stand on their own without it — write them so they're useful to someone who reads only those, not just as a caption for the cells.`;
   }
 
   if (schema.id === "definition_explanation") {
@@ -231,7 +239,7 @@ Domain: ${classification.domain}. The user's intent: ${classification.userIntent
   }
 
   if (usedTypes.has("checklistItem[]")) {
-    prompt += `\n\nList order does not matter — do not imply importance or sequence through position in the list. Use \`category\` only when the question genuinely asks for a categorized taxonomy (types/kinds of something); for an ordinary checklist, leave every item's category unset. Mark \`critical\` only for genuinely must-have/blocking items, not everything.`;
+    prompt += `\n\nList order does not matter — do not imply importance or sequence through position in the list. Use \`category\` only when the question genuinely asks for a categorized taxonomy (types/kinds of something); for an ordinary checklist, leave every item's category unset. Mark \`critical\` only for genuinely must-have/blocking items, not everything. If the question is asking what could go wrong — risks, dangers, downsides, failure modes — fill in every item's severity/likelihood/impact/evidence/mitigation/monitoringSignal/residualRisk too, so it reads as a real risk register, not a bare list; leave all seven unset for a non-risk checklist.`;
   }
 
   if (schema.id === "deep_research") {

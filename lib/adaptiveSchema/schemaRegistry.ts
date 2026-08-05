@@ -351,6 +351,34 @@ const comparisonMatrixFields: FieldSpec[] = [
     description:
       "Every (subject, attribute) comparison point you can responsibly assess. Reuse the exact same subject name across all its cells, and the exact same attribute name across all its cells, so your response stays internally consistent.",
   },
+  {
+    key: "directConclusion",
+    type: "string",
+    maxWords: 40,
+    description:
+      "Your answer-first takeaway from the comparison, before any grid detail — e.g. which subject comes out ahead overall, or that it genuinely depends on priority. Never just restate that you compared the subjects.",
+  },
+  {
+    key: "tradeoffs",
+    type: "string[]",
+    maxItems: 6,
+    description:
+      "Cross-cutting trade-offs that don't reduce to a single cell — patterns across the whole comparison (e.g. \"the cheaper options tend to have weaker customer support\"). Empty array if the comparison has no such patterns.",
+  },
+  {
+    key: "bestUseRecommendations",
+    type: "string[]",
+    maxItems: 6,
+    description:
+      "Which subject to pick under which circumstance, one self-contained sentence per recommendation (e.g. \"Perplexity — best when citation-backed answers matter more than depth\"). Not a single overall winner — this is conditional, per-use-case guidance.",
+  },
+  {
+    key: "uncertainties",
+    type: "string[]",
+    maxItems: 5,
+    description:
+      "Genuinely missing information that limits how confident this comparison can be — e.g. pricing that changes frequently, or a subject you have limited knowledge of. Empty array if none apply.",
+  },
 ];
 
 /**
@@ -556,7 +584,7 @@ const checklistTaxonomyFields: FieldSpec[] = [
     type: "checklistItem[]",
     maxItems: 30,
     description:
-      "The checklist items or taxonomy entries. Order does not matter — do not imply a ranking. If the question asks for a categorized taxonomy (types/kinds of something), group items under a `category`; for a plain checklist with no natural categories, omit `category` (or use \"none\") on every item.",
+      "The checklist items or taxonomy entries. Order does not matter — do not imply a ranking. If the question asks for a categorized taxonomy (types/kinds of something), group items under a `category`; for a plain checklist with no natural categories, omit `category` (or use \"none\") on every item. When the items ARE RISKS (the question asks what could go wrong, what the dangers/risks/downsides of something are), also assess each item's severity, likelihood, impact, evidence, mitigation, monitoringSignal, and residualRisk — this turns the same checklist into a real risk register instead of a bare list. Leave those fields unset entirely for an ordinary checklist where they don't apply.",
   },
   {
     key: "notes",

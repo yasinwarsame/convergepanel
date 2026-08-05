@@ -332,6 +332,14 @@ export interface ComparisonMatrixResult {
   hasVerifiedSourceData: false;
   /** Models actually attempted for this run — added in the Milestone 2 UI consistency cleanup so the renderer can distinguish "no models ran at all" from "models ran but found nothing comparable" (same distinction bias_blindspot_audit/decision_support already had). */
   totalModels: number;
+  /** The panel's answer-first takeaway from the comparison, before the grid — modal/longest phrasing across models that supplied one. Empty string if no model did. */
+  directConclusion: string;
+  /** Cross-cutting trade-offs that don't reduce to a single cell (e.g. "cheaper options tend to have weaker support"), merged/deduped across models. */
+  tradeoffs: string[];
+  /** Which subject to pick under which circumstance (e.g. "Perplexity — best when citations matter more than depth"), merged/deduped across models. */
+  bestUseRecommendations: string[];
+  /** Genuinely missing information that limits confidence in this comparison, merged/deduped across models. */
+  uncertainties: string[];
 }
 
 // ─── definition_explanation atomic units (Milestone 2) ─────────────────────
@@ -499,19 +507,51 @@ export interface CausalExplanationResult {
 // `rank` field (unlike EnumItem) — order does not matter here, which is
 // exactly what distinguishes this schema from ranked_enumeration.
 
-export interface ChecklistItem {
+export type ChecklistItemSeverity = "low" | "medium" | "high" | "critical";
+export type ChecklistItemLikelihood = "low" | "medium" | "high";
+
+/**
+ * Risk-register fields, all optional — checklist_taxonomy covers both plain
+ * checklists ("what to check before launching a SaaS product") and
+ * risk-shaped taxonomies ("what are the main risks of X"). Rather than a
+ * separate schema/category (query-routing redesign policy: no new schema
+ * per answer shape without a real capability gap), a risk-shaped question
+ * still classifies as checklist_taxonomy — these fields let the model
+ * additionally populate a real risk register when the items genuinely ARE
+ * risks, and RiskAnalysisView.tsx renders that register when enough items
+ * carry them (see checklistAlignment.ts's isRiskShapedResult). Left unset
+ * entirely for an ordinary checklist.
+ */
+export interface ChecklistItemRiskFields {
+  /** How severe this risk would be if it materialized. */
+  severity?: ChecklistItemSeverity;
+  /** How likely this risk is to materialize. */
+  likelihood?: ChecklistItemLikelihood;
+  /** The concrete consequence if this risk materializes — one short sentence, not a restatement of the label. */
+  impact?: string;
+  /** What in the panel's own knowledge supports treating this as a real risk, if anything. */
+  evidence?: string;
+  /** A concrete step that would reduce this risk's likelihood or impact. */
+  mitigation?: string;
+  /** An observable signal worth tracking that this risk is materializing. */
+  monitoringSignal?: string;
+  /** The risk that remains after the mitigation above is applied — never omit just because mitigation looks complete; state "low" residual risk explicitly rather than implying zero. */
+  residualRisk?: string;
+}
+
+export interface ChecklistItem extends ChecklistItemRiskFields {
   /** Short kebab-case slug from the item's label, e.g. "data-processing-agreement" — same convention as EnumItem.id, used for cross-model clustering. */
   id: string;
   label: string;
-  /** Groups this item under a named category (e.g. "Legal", "Technical") — omit/leave "none" for a flat checklist with no meaningful categories. */
+  /** Groups this item under a named category (e.g. "Legal", "Technical") — omit/leave "none" for a flat checklist with no meaningful categories. For a risk-shaped taxonomy, this is the risk category. */
   category?: string;
   rationale?: string;
   /** True for a must-have/blocking item, false or omitted for a nice-to-have/situational one. */
   critical?: boolean;
 }
 
-/** One merged, cross-model checklist/taxonomy item. Client-safe (rendered directly by ChecklistTaxonomyView.tsx). */
-export interface AggregatedChecklistItem {
+/** One merged, cross-model checklist/taxonomy item. Client-safe (rendered directly by ChecklistTaxonomyView.tsx/RiskAnalysisView.tsx). */
+export interface AggregatedChecklistItem extends ChecklistItemRiskFields {
   id: string;
   label: string;
   /** "General" sentinel when the panel provided no meaningful category for this item. */
@@ -541,6 +581,29 @@ export interface ChecklistTaxonomyResult {
   lowConfidenceItems: AggregatedChecklistItem[];
   notes: string[];
   totalModels: number;
+}
+
+/** Below this share of items carrying at least one risk field, the result renders as an ordinary checklist rather than a risk register — a couple of stray risk-flavored items in an otherwise plain checklist shouldn't flip the whole presentation. */
+const RISK_SHAPE_MIN_RATIO = 0.5;
+
+/**
+ * True when this checklist_taxonomy result is actually a risk register in
+ * disguise — determined from the DATA the panel actually produced (did
+ * models populate severity/likelihood/mitigation/etc.), never from the
+ * question's own wording, since the schema/prompt already steers the model
+ * to leave every risk field unset for an ordinary checklist. Pure/
+ * client-safe (no "server-only") — used by AdaptivePanelResponse.tsx (a
+ * client component) to pick RiskAnalysisView over ChecklistTaxonomyView
+ * without adding a new queryType/schema, and could equally be called
+ * server-side (e.g. for analytics) without an import-boundary issue.
+ */
+export function isRiskShapedChecklistResult(result: ChecklistTaxonomyResult): boolean {
+  const items = [...result.categories.flatMap((c) => c.items), ...result.lowConfidenceItems];
+  if (items.length === 0) return false;
+  const riskyCount = items.filter(
+    (item) => item.severity !== undefined || item.likelihood !== undefined || !!item.mitigation || !!item.residualRisk
+  ).length;
+  return riskyCount / items.length >= RISK_SHAPE_MIN_RATIO;
 }
 
 // ─── deep_research atomic units (Milestone 2) ───────────────────────────────
