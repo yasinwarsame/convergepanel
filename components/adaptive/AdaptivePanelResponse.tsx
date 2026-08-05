@@ -20,9 +20,11 @@
  * order-sensitive comparators) would have no visible surface at all.
  */
 
-import { AnswerShape, BiasBlindspotAuditResult, CausalExplanationResult, ChecklistTaxonomyResult, ComparisonMatrixResult, DecisionSupportResult, DeepResearchResult, DefinitionExplanationResult, EvidenceReviewResult, RankedEnumerationResult, isRiskShapedChecklistResult } from "@/lib/adaptiveSchema/types";
+import { AnswerShape, BiasBlindspotAuditResult, CausalExplanationResult, ChecklistTaxonomyResult, CommonResponseMeta, ComparisonMatrixResult, DecisionSupportResult, DeepResearchResult, DefinitionExplanationResult, EvidenceReviewResult, RankedEnumerationResult, isRiskShapedChecklistResult } from "@/lib/adaptiveSchema/types";
 import { AdaptiveGateResult, AdaptiveSynthesisReport, AdaptiveTrustSummary } from "@/lib/adaptiveSchema/types";
+import { ReportStatusInput } from "@/lib/adaptiveSchema/reportStatus";
 import { AdaptiveRendererProps } from "./types";
+import TopSummaryBar from "./TopSummaryBar";
 import AdaptiveResultsView from "./AdaptiveResultsView";
 import AdaptiveSynthesisReportView from "./AdaptiveSynthesisReportView";
 import ClaimMatrix from "./ClaimMatrix";
@@ -72,6 +74,17 @@ export interface AdaptivePanelResponseProps extends AdaptiveRendererProps {
   runId?: string | null;
   /** Threaded down to the Synthesis Report's Bias & Blind Spots Tier 2 cards' "Run follow-up" action. */
   onRunFollowUp?: (question: string) => void;
+
+  // ── Adaptive Synthesis Report, Phase 1 (docs/adaptive-synthesis-report-design.md
+  // §4.1) — the top summary bar's own inputs. All optional so this component
+  // still renders (with an "Incomplete"/"Not scored" degrade) for any caller
+  // that hasn't threaded them through yet.
+  generatedAt?: string;
+  persistenceStatus?: ReportStatusInput["persistenceStatus"];
+  humanReview?: ReportStatusInput["humanReview"];
+  reviewRouting?: ReportStatusInput["reviewRouting"];
+  /** PersistedAdaptiveOutputV1.meta — present for the 9 Milestone-2 schemas only (see reportSummary.ts). */
+  meta?: CommonResponseMeta;
 }
 
 export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps) {
@@ -121,12 +134,46 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
     return <LimitationNotice limitation={routing.response} />;
   }
 
+  // Adaptive Synthesis Report, Phase 1 (docs/adaptive-synthesis-report-design.md
+  // §4.1/§4.2) — rendered above EVERY schema-specific report below, uniformly,
+  // via the shared `withBar()` wrapper rather than duplicated per branch.
+  // Deliberately after the routing guard above: a classification that never
+  // reaches an active schema has no report to summarize.
+  const summaryBar = (
+    <TopSummaryBar
+      schemaId={schema.id}
+      results={results}
+      generatedAt={props.generatedAt}
+      persistenceStatus={props.persistenceStatus}
+      humanReview={props.humanReview}
+      reviewRouting={props.reviewRouting}
+      gate={gate}
+      trustSummary={trustSummary}
+      meta={props.meta}
+      comparisonMatrix={comparisonMatrix}
+      checklistTaxonomy={checklistTaxonomy}
+      decisionSupport={decisionSupport}
+      causalExplanation={causalExplanation}
+      definitionExplanation={definitionExplanation}
+      rankedEnumeration={rankedEnumeration}
+      deepResearch={deepResearch}
+      evidenceReview={evidenceReview}
+      biasBlindspotAudit={biasBlindspotAudit}
+    />
+  );
+  const withBar = (body: React.ReactNode) => (
+    <div className="space-y-4">
+      {summaryBar}
+      {body}
+    </div>
+  );
+
   // factual_lookup (Milestone 1): lightweight single card, not the full
   // synthesis-report shell. Fields/prompt/parser/verification are
   // unchanged — only this rendering choice differs from every other active
   // schema below.
   if (schema.renderHint === "direct_answer") {
-    return <DirectAnswerCard results={results} alignedClaims={alignedClaims} gate={gate} />;
+    return withBar(<DirectAnswerCard results={results} alignedClaims={alignedClaims} gate={gate} />);
   }
 
   // ranked_enumeration (Milestone 2): its own standalone view — coverage/
@@ -136,9 +183,9 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
   // than crash if it's ever missing.
   if (schema.renderHint === "ranked_list") {
     if (rankedEnumeration) {
-      return <RankedListView rankedEnumeration={rankedEnumeration} />;
+      return withBar(<RankedListView rankedEnumeration={rankedEnumeration} />);
     }
-    return <AdaptiveResultsView {...props} />;
+    return withBar(<AdaptiveResultsView {...props} />);
   }
 
   // comparison_matrix (Milestone 2): its own standalone view — a two-axis
@@ -148,9 +195,9 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
   // than crash if it's ever missing.
   if (schema.renderHint === "comparison_grid") {
     if (comparisonMatrix) {
-      return <ComparisonMatrixView comparisonMatrix={comparisonMatrix} />;
+      return withBar(<ComparisonMatrixView comparisonMatrix={comparisonMatrix} />);
     }
-    return <AdaptiveResultsView {...props} />;
+    return withBar(<AdaptiveResultsView {...props} />);
   }
 
   // definition_explanation (Milestone 2): its own standalone, answer-first
@@ -161,9 +208,9 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
   // ever missing.
   if (schema.renderHint === "definition_card") {
     if (definitionExplanation) {
-      return <DefinitionExplanationView definitionExplanation={definitionExplanation} />;
+      return withBar(<DefinitionExplanationView definitionExplanation={definitionExplanation} />);
     }
-    return <AdaptiveResultsView {...props} />;
+    return withBar(<AdaptiveResultsView {...props} />);
   }
 
   // causal_explanation (Milestone 2): its own standalone view — coverage
@@ -175,9 +222,9 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
   // ever missing.
   if (schema.renderHint === "causal_map") {
     if (causalExplanation) {
-      return <CausalExplanationView causalExplanation={causalExplanation} riskLevel={classification.riskLevel} />;
+      return withBar(<CausalExplanationView causalExplanation={causalExplanation} riskLevel={classification.riskLevel} />);
     }
-    return <AdaptiveResultsView {...props} />;
+    return withBar(<AdaptiveResultsView {...props} />);
   }
 
   // checklist_taxonomy (Milestone 2): its own standalone view — a flat
@@ -192,13 +239,15 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
       // likelihood/mitigation/etc. populated) renders as a risk register
       // instead of a bare checklist — see isRiskShapedChecklistResult's doc
       // comment for why this stays checklist_taxonomy rather than a new schema.
-      return isRiskShapedChecklistResult(checklistTaxonomy) ? (
-        <RiskAnalysisView checklistTaxonomy={checklistTaxonomy} />
-      ) : (
-        <ChecklistTaxonomyView checklistTaxonomy={checklistTaxonomy} />
+      return withBar(
+        isRiskShapedChecklistResult(checklistTaxonomy) ? (
+          <RiskAnalysisView checklistTaxonomy={checklistTaxonomy} />
+        ) : (
+          <ChecklistTaxonomyView checklistTaxonomy={checklistTaxonomy} />
+        )
       );
     }
-    return <AdaptiveResultsView {...props} />;
+    return withBar(<AdaptiveResultsView {...props} />);
   }
 
   // deep_research (Milestone 2): its own standalone view — grouped
@@ -209,9 +258,9 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
   // the generic view rather than crash if it's ever missing.
   if (schema.renderHint === "deep_research_view") {
     if (deepResearch) {
-      return <DeepResearchView deepResearch={deepResearch} />;
+      return withBar(<DeepResearchView deepResearch={deepResearch} />);
     }
-    return <AdaptiveResultsView {...props} />;
+    return withBar(<AdaptiveResultsView {...props} />);
   }
 
   // evidence_review (Milestone 2): its own standalone view — dimension
@@ -221,9 +270,9 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
   // the generic view rather than crash if it's ever missing.
   if (schema.renderHint === "evidence_review_view") {
     if (evidenceReview) {
-      return <EvidenceReviewView evidenceReview={evidenceReview} riskLevel={classification.riskLevel} />;
+      return withBar(<EvidenceReviewView evidenceReview={evidenceReview} riskLevel={classification.riskLevel} />);
     }
-    return <AdaptiveResultsView {...props} />;
+    return withBar(<AdaptiveResultsView {...props} />);
   }
 
   // bias_blindspot_audit (Milestone 2): its own standalone, three-tier
@@ -233,9 +282,9 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
   // rather than crash if it's ever missing.
   if (schema.renderHint === "bias_blindspot_audit_view") {
     if (biasBlindspotAudit) {
-      return <BiasBlindspotAuditView biasBlindspotAudit={biasBlindspotAudit} onRunFollowUp={onRunFollowUp} />;
+      return withBar(<BiasBlindspotAuditView biasBlindspotAudit={biasBlindspotAudit} onRunFollowUp={onRunFollowUp} />);
     }
-    return <AdaptiveResultsView {...props} />;
+    return withBar(<AdaptiveResultsView {...props} />);
   }
 
   // decision_support (Milestone 2): its own standalone, recommendation-first
@@ -245,13 +294,13 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
   // the generic view rather than crash if it's ever missing.
   if (schema.renderHint === "decision_support_view") {
     if (decisionSupport) {
-      return <DecisionSupportView decisionSupport={decisionSupport} />;
+      return withBar(<DecisionSupportView decisionSupport={decisionSupport} />);
     }
-    return <AdaptiveResultsView {...props} />;
+    return withBar(<AdaptiveResultsView {...props} />);
   }
 
   if (!gate || !synthesisReport) {
-    return <AdaptiveResultsView {...props} />;
+    return withBar(<AdaptiveResultsView {...props} />);
   }
 
   const modelIds = results.map((r) => r.modelId);
@@ -264,6 +313,7 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
 
   return (
     <div className="space-y-4">
+      {summaryBar}
       <PanelViewTabs viewMode={viewMode} onChange={setViewMode} />
 
       {viewMode === "list" && (

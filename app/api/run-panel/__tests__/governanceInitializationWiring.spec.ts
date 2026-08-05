@@ -474,6 +474,50 @@ describe("POST /api/run-panel — Step 5C governance initialization wiring", () 
     });
   });
 
+  describe("Adaptive Synthesis Report, Phase 1 — humanReview/reviewRouting response fields", () => {
+    it("surfaces the initialized record's humanReview compactly, and derives reviewRouting from adaptiveTeamReviewProjectionStatus", async () => {
+      mockFinalizeWithPersistedOutput();
+      mockedPersistAdaptiveOutput.mockResolvedValueOnce({ saved: true });
+      mockedReadGovernanceRecord.mockResolvedValueOnce({ status: "absent" });
+      mockedInitializeGovernance.mockResolvedValueOnce({
+        status: "created",
+        record: { humanReview: { status: "unreviewed" }, decisionReceipt: { humanReviewNeeded: false } },
+      });
+
+      const body = await runDecisionSupportRequest();
+
+      // No team is configured in this test's mocked auth context, so
+      // loadUserAndTeam() resolves to no team and routing lands on
+      // "disabled" -> "not_configured" — never leaks "in_queue" for a run
+      // that was never actually routed anywhere.
+      expect(body.adaptive.humanReview).toEqual({ status: "unreviewed", conditions: undefined, decidedVia: undefined });
+      expect(body.adaptive.reviewRouting).toBe("not_configured");
+    });
+
+    it("omits humanReview entirely (never a fabricated default) when the mocked record has no humanReview at all", async () => {
+      mockFinalizeWithPersistedOutput();
+      mockedPersistAdaptiveOutput.mockResolvedValueOnce({ saved: true });
+      mockedReadGovernanceRecord.mockResolvedValueOnce({ status: "absent" });
+      mockedInitializeGovernance.mockResolvedValueOnce({ status: "created", record: {} });
+
+      const body = await runDecisionSupportRequest();
+
+      expect(body.adaptive.humanReview).toBeUndefined();
+    });
+
+    it("sets reviewRouting to unknown when governance was never initialized for this run (legacy schema shape)", async () => {
+      mockFinalizeWithPersistedOutput();
+      mockedPersistAdaptiveOutput.mockResolvedValueOnce({ saved: true });
+      mockedReadGovernanceRecord.mockResolvedValueOnce({ status: "absent" });
+      mockedInitializeGovernance.mockResolvedValueOnce({ status: "not_applicable" });
+
+      const body = await runDecisionSupportRequest();
+
+      expect(body.adaptive.humanReview).toBeUndefined();
+      expect(body.adaptive.reviewRouting).toBe("unknown");
+    });
+  });
+
   describe("response shape", () => {
     it("keeps all existing adaptive response fields unchanged alongside the new governance field", async () => {
       mockFinalizeWithPersistedOutput();

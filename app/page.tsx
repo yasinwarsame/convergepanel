@@ -55,6 +55,7 @@ import type { VideoVerificationClientPayload } from "@/lib/verification/videoVer
 import type { PanelHistoryGovernanceStatus, PanelHistoryItem } from "@/lib/user/panelHistory";
 import type { TeamGovernanceBannerProps, AdaptivePanelPayload } from "@/components/ResultsDisplay";
 import type { PersistedAdaptiveOutput } from "@/lib/adaptiveSchema/persistedOutput";
+import type { ReportStatusInput } from "@/lib/adaptiveSchema/reportStatus";
 import { adaptPersistedOutputToPanelPayload } from "@/lib/user/adaptivePersistedOutputAdapter";
 import type { SynthesisConsensusSummaryDetail } from "@/lib/verification/consensusScoring";
 
@@ -1503,7 +1504,12 @@ export default function Home() {
           } | null;
           governance?: TeamGovernanceBannerProps;
           governanceStatus?: "approved" | "needs_review" | "blocked" | null;
-          adaptive?: { status: string; output: PersistedAdaptiveOutput | null };
+          adaptive?: {
+            status: string;
+            output: PersistedAdaptiveOutput | null;
+            humanReview?: ReportStatusInput["humanReview"];
+            reviewRouting?: ReportStatusInput["reviewRouting"];
+          };
         };
         if (!res.ok || !data.ok || !data.results?.length) {
           throw new Error(typeof data.message === "string" ? data.message : "Could not load this run.");
@@ -1518,7 +1524,12 @@ export default function Home() {
         // already did before this phase; only "malformed"/
         // "unsupported_version" get a non-destructive notice.
         if (data.adaptive?.status === "valid" && data.adaptive.output) {
-          setAdaptivePanel(adaptPersistedOutputToPanelPayload(data.adaptive.output));
+          setAdaptivePanel(
+            adaptPersistedOutputToPanelPayload(data.adaptive.output, {
+              humanReview: data.adaptive.humanReview,
+              reviewRouting: data.adaptive.reviewRouting,
+            })
+          );
           setAdaptiveRestoreNotice(null);
         } else {
           setAdaptivePanel(null);

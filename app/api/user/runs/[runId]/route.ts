@@ -12,6 +12,9 @@ import type { ModelId } from "@/lib/types";
 import { runDocumentToPublicResults } from "@/lib/user/runDocumentToPublicResults";
 import { publicizePanelResults } from "@/lib/panel/publicize";
 import { parsePersistedAdaptiveOutput } from "@/lib/adaptiveSchema/persistedOutput";
+import { parseGovernanceRecord } from "@/lib/adaptiveSchema/governanceRecordParser";
+import { loadUserAndTeam } from "@/lib/teams/teamApiAuth";
+import { getAdaptiveTeamRunProjection } from "@/lib/firestore/teamRuns";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -120,9 +123,50 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
   // from absent/malformed/unsupported-version data — those three states
   // are all legitimate, non-error outcomes the client renders distinctly.
   const parsedAdaptive = parsePersistedAdaptiveOutput(data.adaptiveOutput);
+
+  // Adaptive Synthesis Report, Phase 1 (docs/adaptive-synthesis-report-design.md
+  // §4.1) — the top summary bar's "Status" field needs the real human-review
+  // state on reload, not just whether a record exists. Only ever meaningful
+  // when a real adaptiveOutput was persisted (governance is never initialized
+  // otherwise — see governanceInitialization.ts). Compact fields only, same
+  // discipline as humanReviewHistory: never reviewer name or comment text.
+  const parsedGovernance = parsedAdaptive.ok ? parseGovernanceRecord(data.governanceRecord) : { ok: false as const };
+  const humanReview = parsedGovernance.ok
+    ? {
+        status: parsedGovernance.record.humanReview.status,
+        conditions: parsedGovernance.record.humanReview.conditions,
+        decidedVia: parsedGovernance.record.humanReview.decidedVia,
+      }
+    : null;
+
+  // `reviewRouting` distinguishes "still awaiting a reviewer" from "no
+  // review was ever configured for this run" (see reportStatus.ts) — only
+  // resolved when it actually changes the displayed status (still
+  // unreviewed/pending); a decided run's status is unambiguous without it,
+  // so this skips the extra reads for the common case of an already-decided
+  // reload. Checks the SAME persisted teamRuns projection the live run
+  // response's "in_queue" was derived from (getAdaptiveTeamRunProjection),
+  // rather than a discarded/"unknown" placeholder — a team run's queue
+  // membership is real, durable Firestore state, not something only known
+  // at the moment the run completed.
+  let reviewRouting: "in_queue" | "not_configured" | "unknown" = "unknown";
+  if (humanReview && (humanReview.status === "unreviewed" || humanReview.status === "pending")) {
+    try {
+      const teamCtx = await loadUserAndTeam(uid);
+      if (!teamCtx?.team) {
+        reviewRouting = "not_configured";
+      } else {
+        const projection = await getAdaptiveTeamRunProjection(teamCtx.team.id, runId);
+        reviewRouting = projection.status === "found" ? "in_queue" : "not_configured";
+      }
+    } catch {
+      reviewRouting = "unknown";
+    }
+  }
+
   const adaptive = parsedAdaptive.ok
-    ? { status: "valid" as const, output: parsedAdaptive.output }
-    : { status: parsedAdaptive.reason, output: null };
+    ? { status: "valid" as const, output: parsedAdaptive.output, humanReview, reviewRouting }
+    : { status: parsedAdaptive.reason, output: null, humanReview: null, reviewRouting: "unknown" as const };
 
   return NextResponse.json({
     ok: true,

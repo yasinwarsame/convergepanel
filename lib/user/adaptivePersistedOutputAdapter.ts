@@ -19,12 +19,35 @@
 
 import type { AdaptivePanelPayload } from "@/components/ResultsDisplay";
 import type { PersistedAdaptiveOutput } from "@/lib/adaptiveSchema/persistedOutput";
+import type { ReportStatusInput } from "@/lib/adaptiveSchema/reportStatus";
 
-export function adaptPersistedOutputToPanelPayload(output: PersistedAdaptiveOutput): AdaptivePanelPayload {
+/**
+ * Adaptive Synthesis Report, Phase 1 (docs/adaptive-synthesis-report-design.md
+ * §4.1) — governance fields come from a SIBLING field on GET
+ * /api/user/runs/[runId]'s response (`data.adaptive.humanReview`/
+ * `.reviewRouting`), not from `output` itself (PersistedAdaptiveOutput has
+ * no governance data — that's GovernanceRecordV1, a separate document
+ * field). Optional so existing callers that haven't threaded these through
+ * yet still compile — TopSummaryBar degrades to "Incomplete" when absent.
+ */
+export interface AdaptiveGovernanceContext {
+  humanReview?: ReportStatusInput["humanReview"];
+  reviewRouting?: ReportStatusInput["reviewRouting"];
+}
+
+export function adaptPersistedOutputToPanelPayload(
+  output: PersistedAdaptiveOutput,
+  governance?: AdaptiveGovernanceContext
+): AdaptivePanelPayload {
   const base = {
     classification: output.classification,
     schemaId: output.schemaId,
     results: [],
+    generatedAt: output.generatedAt,
+    meta: output.meta,
+    persistenceStatus: "saved" as const,
+    humanReview: governance?.humanReview,
+    reviewRouting: governance?.reviewRouting,
   };
 
   switch (output.schemaId) {

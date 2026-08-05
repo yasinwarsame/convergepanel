@@ -138,12 +138,13 @@ const STAKES_TOOLTIPS: Record<AdaptiveStakes, string> = {
   low: "Supporting context or low-impact observation",
 };
 
-export type BadgeTone = "warning" | "accent" | "danger";
+export type BadgeTone = "warning" | "accent" | "danger" | "success";
 
 const BADGE_TONE_STYLES: Record<BadgeTone, string> = {
   warning: "bg-amber-50 text-amber-700 border-amber-200",
   accent: "bg-sky-50 text-sky-700 border-sky-200",
   danger: "bg-red-50 text-red-700 border-red-200",
+  success: "bg-green-50 text-green-700 border-green-200",
 };
 
 /** Generic tinted pill — same visual language as StakesBadge/ConfidencePill, for any deviation callout on a row (e.g. List View's per-model differentiator badges). */
