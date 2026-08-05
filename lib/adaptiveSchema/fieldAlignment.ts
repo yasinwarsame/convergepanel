@@ -255,15 +255,28 @@ function normalizeForComparison(value: string): string {
  * callers needing legal_regulatory's jurisdiction_mismatch semantics set
  * AlignedClaim.disagreementType afterward (agreementComparators.ts), since
  * that's a scoring decision, not an alignment one.
+ *
+ * `row.claimText` — the field every caller actually reads
+ * (DirectAnswerCard's headline answer, the legacy List/Compare views' row
+ * text) — must be the real synthesized value, matching the claimText
+ * contract every other AlignedClaim producer in this module and in
+ * alignment.ts follows. The field's display label (e.g. "Answer") is
+ * accepted for call-site symmetry with `alignMetrics`/`alignScenarios`
+ * (which DO use their label as claimText — a valid, different pattern,
+ * since each of their rows groups same-named items and the label IS the
+ * identifying content) but is intentionally unused here: this function has
+ * only one row per call, so its claimText must be the value, never a
+ * label. Previously this echoed the label unconditionally, so e.g. every
+ * factual_lookup answer rendered as the literal word "Answer" instead of
+ * the actual answer.
  */
 export function alignScalarField(
   perModel: { modelId: ModelId; value: string | null }[],
   rowId: string,
-  claimText: string,
+  _label: string,
   _mode: ScalarComparisonMode
 ): AlignedClaim {
   const modelOrder = perModel.map((m) => m.modelId);
-  const row = emptyRow(rowId, claimText, modelOrder);
 
   const present = perModel.filter((m) => m.value && m.value.trim().length > 0);
   const normalizedCounts = new Map<string, number>();
@@ -279,6 +292,27 @@ export function alignScalarField(
       majorityCount = count;
     }
   }
+
+  // The row's canonical text: the longest raw value among the models that
+  // hold the majority normalized form (fullest phrasing, still an actual
+  // model's own answer, not a blend). Falls back to the first present value
+  // when models disagree with no majority, and to "" — never the label —
+  // when no model returned a value, so callers' own "no answer" fallback
+  // chains (e.g. DirectAnswerCard's `|| "No answer returned."`) fire
+  // correctly instead of displaying a fabricated label as if it were data.
+  let claimText = "";
+  if (majorityNorm !== null) {
+    const majorityValues = present.filter((m) => normalizeForComparison(m.value!) === majorityNorm).map((m) => m.value!.trim());
+    claimText = majorityValues.reduce((longest, v) => (v.length > longest.length ? v : longest), majorityValues[0]);
+  } else if (present.length > 0) {
+    claimText = present[0].value!.trim();
+  }
+
+  // No `|| fallbackLabel` here: an empty claimText is deliberately falsy so
+  // DirectAnswerCard's own `answerRow?.claimText || ... || "No answer
+  // returned."` chain cascades correctly when every model failed, instead
+  // of displaying the field's label as if it were a real (if empty) answer.
+  const row = emptyRow(rowId, claimText, modelOrder);
 
   const cellByModel = new Map<ModelId, AlignedClaimCell>();
   for (const { modelId, value } of perModel) {
