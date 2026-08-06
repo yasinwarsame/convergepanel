@@ -146,7 +146,12 @@ export default function ComparisonMatrixView({ comparisonMatrix }: { comparisonM
       </Card>
 
       <Card>
-        <SectionLabel>Comparison</SectionLabel>
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <SectionLabel>Comparison</SectionLabel>
+          {subjects.length > 0 && attributes.length > 0 && (
+            <span className="text-[11px] text-slate-400 md:hidden">Scroll to see all options &rarr;</span>
+          )}
+        </div>
         {subjects.length === 0 || attributes.length === 0 ? (
           <p className="text-sm text-slate-500 italic">
             {subjects.length === 0 && lowConfidenceSubjects.length === 0
@@ -154,15 +159,36 @@ export default function ComparisonMatrixView({ comparisonMatrix }: { comparisonM
               : "The panel didn't converge on enough shared subjects and attributes for a comparison grid."}
           </p>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-left">
+          // Contained horizontal scroll with a sticky first (criteria) column,
+          // not stacked cards: the semantic table already carries scope/th
+          // associations cleanly, and this pattern keeps the criteria label
+          // in view while scrolling through options — no duplicated markup,
+          // no separate mobile-only layout to keep in sync with the table.
+          <div
+            role="region"
+            aria-label="Comparison table, scroll horizontally to see all options"
+            tabIndex={0}
+            className="overflow-x-auto rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-2"
+          >
+            {/* border-separate (not border-collapse) deliberately: Chrome
+                mispaints position:sticky table cells under border-collapse
+                — the sticky column's layout box is pinned correctly but its
+                background/content paints behind the scrolling columns,
+                letting their text bleed through visually. Only bottom
+                borders are used here, so border-spacing-0 renders
+                identically to collapsed borders without the bug. */}
+            <table className="w-full border-separate border-spacing-0 text-left">
               <thead>
                 <tr>
-                  <th className="border-b border-slate-200 p-2 text-xs font-semibold uppercase tracking-wide text-slate-500" />
+                  <th
+                    scope="col"
+                    className="sticky left-0 z-10 border-b border-slate-200 bg-white p-2 text-xs font-semibold uppercase tracking-wide text-slate-500"
+                  />
                   {subjects.map((subject) => (
                     <th
                       key={subject.id}
-                      className="border-b border-slate-200 p-2 text-sm font-semibold text-slate-900 whitespace-nowrap"
+                      scope="col"
+                      className="min-w-[7rem] max-w-[10rem] whitespace-normal break-words border-b border-slate-200 bg-white p-2 text-sm font-semibold text-slate-900"
                     >
                       {subject.label}
                     </th>
@@ -172,7 +198,10 @@ export default function ComparisonMatrixView({ comparisonMatrix }: { comparisonM
               <tbody>
                 {attributes.map((attribute) => (
                   <tr key={attribute.id}>
-                    <th className="border-b border-slate-100 p-2 align-top text-sm font-medium text-slate-700 whitespace-nowrap">
+                    <th
+                      scope="row"
+                      className="sticky left-0 z-10 min-w-[6rem] max-w-[9rem] whitespace-normal break-words border-b border-slate-100 bg-white p-2 align-top text-sm font-medium text-slate-700"
+                    >
                       {attribute.label}
                     </th>
                     {subjects.map((subject) => (

@@ -191,4 +191,120 @@ describe("ComparisonMatrixView", () => {
     expect(html).not.toMatch(/trade-offs/i);
     expect(html).not.toMatch(/best-use recommendations/i);
   });
+
+  describe("mobile-accessible comparison table (contained horizontal scroll + sticky criteria column)", () => {
+    function fiveOptionResult() {
+      const subjects = ["Alpha", "Bravo", "Charlie", "Delta", "Echo"];
+      return buildComparisonMatrixResult(
+        perModel([
+          ["chatgpt", subjects.map((s) => cell({ subject: s, attribute: "Price", value: `${s} price` }))],
+        ])
+      );
+    }
+
+    it("keeps the scroll region contained: overflow-x-auto on the table's own wrapper, not a page-level class", () => {
+      const html = renderToStaticMarkup(createElement(ComparisonMatrixView, { comparisonMatrix: fiveOptionResult() }));
+      expect(html).toMatch(/class="[^"]*overflow-x-auto[^"]*"[^>]*>\s*<table/);
+    });
+
+    it("gives the scroll region an accessible label and role, independent of any table caption", () => {
+      const html = renderToStaticMarkup(createElement(ComparisonMatrixView, { comparisonMatrix: fiveOptionResult() }));
+      expect(html).toMatch(/role="region"/);
+      expect(html).toMatch(/aria-label="Comparison table, scroll horizontally to see all options"/);
+    });
+
+    it("makes the scroll region keyboard-reachable via a positive-order tabIndex on the scrollable container", () => {
+      const html = renderToStaticMarkup(createElement(ComparisonMatrixView, { comparisonMatrix: fiveOptionResult() }));
+      expect(html).toMatch(/role="region"[^>]*tabindex="0"|tabindex="0"[^>]*role="region"/);
+    });
+
+    it("keeps a visible focus indicator on the scroll region rather than suppressing outline entirely", () => {
+      const html = renderToStaticMarkup(createElement(ComparisonMatrixView, { comparisonMatrix: fiveOptionResult() }));
+      expect(html).toMatch(/focus-visible:ring/);
+    });
+
+    it("marks subject headers scope=col and the criteria header scope=row, so header/value association survives horizontal scroll for assistive tech", () => {
+      const html = renderToStaticMarkup(createElement(ComparisonMatrixView, { comparisonMatrix: fiveOptionResult() }));
+      expect(html).toMatch(/<th scope="col"/);
+      expect(html).toMatch(/<th scope="row"/);
+    });
+
+    it("pins the criteria (first) column with sticky positioning so it stays readable while scrolling through options", () => {
+      const html = renderToStaticMarkup(createElement(ComparisonMatrixView, { comparisonMatrix: fiveOptionResult() }));
+      expect(html).toMatch(/scope="row"[^>]*class="[^"]*sticky[^"]*left-0/);
+    });
+
+    it("keeps every subject column in the rendered DOM regardless of count — nothing is dropped for a 5-option comparison", () => {
+      const html = renderToStaticMarkup(createElement(ComparisonMatrixView, { comparisonMatrix: fiveOptionResult() }));
+      for (const label of ["Alpha", "Bravo", "Charlie", "Delta", "Echo"]) {
+        expect(html).toContain(label);
+      }
+    });
+
+    it("shows a narrow-viewport scroll hint that's hidden at desktop widths (md:hidden), not a permanent desktop element", () => {
+      const html = renderToStaticMarkup(createElement(ComparisonMatrixView, { comparisonMatrix: fiveOptionResult() }));
+      expect(html).toMatch(/md:hidden/);
+      expect(html).toMatch(/Scroll to see all options/);
+    });
+
+    it("wraps a very long option name instead of forcing unbounded column width", () => {
+      const longName = "The Extremely Long Hypothetical Product Name That Keeps Going And Going";
+      const result = buildComparisonMatrixResult(
+        perModel([["chatgpt", [cell({ subject: longName, attribute: "Price", value: "$1" })]]])
+      );
+      const html = renderToStaticMarkup(createElement(ComparisonMatrixView, { comparisonMatrix: result }));
+      expect(html).toContain(longName);
+      expect(html).toMatch(/whitespace-normal break-words/);
+    });
+
+    it("wraps very long cell content safely rather than relying on nowrap", () => {
+      const longValue =
+        "This is an unusually long cell value describing many nuanced tradeoffs in detail so it will definitely need to wrap across multiple lines on any reasonably narrow column width.";
+      const result = buildComparisonMatrixResult(
+        perModel([["chatgpt", [cell({ subject: "X", attribute: "Notes", value: longValue })]]])
+      );
+      const html = renderToStaticMarkup(createElement(ComparisonMatrixView, { comparisonMatrix: result }));
+      expect(html).toContain(longValue);
+    });
+
+    it("keeps disagreement badges visible (text-based, not color-only) alongside per-model values in a split cell", () => {
+      const result = buildComparisonMatrixResult(
+        perModel([
+          ["chatgpt", [cell({ subject: "X", attribute: "Verdict", value: "Best overall choice" })]],
+          ["claude", [cell({ subject: "X", attribute: "Verdict", value: "Not recommended at all" })]],
+        ])
+      );
+      const html = renderToStaticMarkup(createElement(ComparisonMatrixView, { comparisonMatrix: result }));
+      expect(html).toMatch(/models disagree/i);
+      expect(html).toContain("Best overall choice");
+      expect(html).toContain("Not recommended at all");
+    });
+
+    it("does not gain any page-level (non-contained) overflow class — the only overflow-x-auto is on the table wrapper", () => {
+      const html = renderToStaticMarkup(createElement(ComparisonMatrixView, { comparisonMatrix: fiveOptionResult() }));
+      const matches = html.match(/overflow-x-auto/g) || [];
+      expect(matches.length).toBe(1);
+    });
+
+    it("preserves desktop table structure: a real <table> with <thead>/<tbody>, not stacked cards", () => {
+      const html = renderToStaticMarkup(createElement(ComparisonMatrixView, { comparisonMatrix: fiveOptionResult() }));
+      expect(html).toMatch(/<table[^>]*class="[^"]*w-full[^"]*"/);
+      expect(html).toContain("<thead>");
+      expect(html).toContain("<tbody>");
+    });
+
+    it("still fails safely (no crash, no scroll-region markup) for empty comparison data", () => {
+      const result = buildComparisonMatrixResult([]);
+      const html = renderToStaticMarkup(createElement(ComparisonMatrixView, { comparisonMatrix: result }));
+      expect(html).toMatch(/no model responses were available/i);
+      expect(html).not.toMatch(/role="region"/);
+    });
+
+    it("still fails safely for partial comparison data (models responded, nothing comparable)", () => {
+      const result = { ...buildComparisonMatrixResult([]), totalModels: 2 };
+      const html = renderToStaticMarkup(createElement(ComparisonMatrixView, { comparisonMatrix: result }));
+      expect(html).toMatch(/no comparable subjects/i);
+      expect(html).not.toMatch(/role="region"/);
+    });
+  });
 });
