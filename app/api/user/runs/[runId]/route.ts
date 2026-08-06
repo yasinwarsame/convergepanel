@@ -11,7 +11,7 @@ import type { RunDocument } from "@/lib/panel/schemas";
 import type { ModelId } from "@/lib/types";
 import { runDocumentToPublicResults } from "@/lib/user/runDocumentToPublicResults";
 import { publicizePanelResults } from "@/lib/panel/publicize";
-import { parsePersistedAdaptiveOutput } from "@/lib/adaptiveSchema/persistedOutput";
+import { parsePersistedAdaptiveOutput, parsePersistedLegacyAdaptiveOutput } from "@/lib/adaptiveSchema/persistedOutput";
 import { parseGovernanceRecord } from "@/lib/adaptiveSchema/governanceRecordParser";
 import { loadUserAndTeam } from "@/lib/teams/teamApiAuth";
 import { getAdaptiveTeamRunProjection } from "@/lib/firestore/teamRuns";
@@ -225,6 +225,20 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
     ? { status: "valid" as const, output: parsedAdaptive.output, humanReview, reviewRouting }
     : { status: parsedAdaptive.reason, output: null, humanReview: null, reviewRouting: "unknown" as const };
 
+  // Phase 2 pilot history-reload fix — validate the SEPARATE
+  // `legacyAdaptiveOutput` field (procedural only; see persistedOutput.ts's
+  // PersistedLegacyAdaptiveOutputV1 doc) through its own real runtime
+  // parser, same discipline as `adaptive` above. Never conflated with
+  // `adaptive.status` — a run can be `adaptive.status === "absent"` (no
+  // Milestone-2 envelope, correctly, since procedural never has one) while
+  // `legacyAdaptive.status === "valid"` at the same time; the client uses
+  // `legacyAdaptive` as the true signal that this WAS a schema-routed run,
+  // never `adaptive.status` alone (see app/page.tsx's openHistoryItem).
+  const parsedLegacyAdaptive = parsePersistedLegacyAdaptiveOutput(data.legacyAdaptiveOutput);
+  const legacyAdaptive = parsedLegacyAdaptive.ok
+    ? { status: "valid" as const, output: parsedLegacyAdaptive.output }
+    : { status: parsedLegacyAdaptive.reason, output: null };
+
   return NextResponse.json({
     ok: true,
     runId,
@@ -236,5 +250,6 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
     governance,
     governanceStatus: orgGovernanceStatus,
     adaptive,
+    legacyAdaptive,
   });
 }

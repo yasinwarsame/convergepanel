@@ -409,6 +409,40 @@ export async function persistAdaptiveOutput(
 }
 
 /**
+ * Phase 2 pilot history-reload fix — the `procedural`-only sibling of
+ * `persistAdaptiveOutput` above. Writes to a SEPARATE field
+ * (`legacyAdaptiveOutput`), never `adaptiveOutput`, so the two envelopes
+ * can never collide and every existing `adaptiveOutput` consumer
+ * (parsePersistedAdaptiveOutput, governance initialization, etc.) is
+ * completely unaffected by this write. Same size-safety posture,
+ * deliberately kept consistent rather than "improved" here for the same
+ * reason persistGovernanceRecord's doc comment gives for its own copy of
+ * this logic.
+ */
+export async function persistLegacyAdaptiveOutput(
+  runId: string,
+  output: unknown
+): Promise<{ saved: true } | { saved: false; reason: AdaptiveOutputPersistenceFailureReason }> {
+  if (!adminDb) {
+    return { saved: false, reason: "firestore_unavailable" };
+  }
+
+  const estimatedSize = estimateDocumentSize({ legacyAdaptiveOutput: output });
+  if (estimatedSize > MAX_TOTAL_DOC_SIZE) {
+    console.warn(`[firestore/runs] legacyAdaptiveOutput for run ${runId} estimated at ${estimatedSize} chars, exceeds safety budget — omitting`);
+    return { saved: false, reason: "oversized" };
+  }
+
+  try {
+    await adminDb.collection("runs").doc(runId).set({ legacyAdaptiveOutput: output }, { merge: true });
+    return { saved: true };
+  } catch (err: unknown) {
+    console.warn(`[firestore/runs] Failed to persist legacyAdaptiveOutput for run ${runId}:`, (err as Error)?.message);
+    return { saved: false, reason: "write_failed" };
+  }
+}
+
+/**
  * Query-Routing Redesign, Phase 2A, Step 5, Part B — additive persistence
  * for `GovernanceRecordV1` (governanceRecord.ts's contract), embedded
  * directly on `runs/{runId}.governanceRecord` — a second, independent

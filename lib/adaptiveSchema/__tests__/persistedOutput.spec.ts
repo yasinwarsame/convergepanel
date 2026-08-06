@@ -9,7 +9,7 @@
  * survive round-trip, and the parser never throws regardless of input shape.
  */
 
-import { parsePersistedAdaptiveOutput, PersistedAdaptiveSchemaId, SCHEMA_ANSWER_SHAPE } from "@/lib/adaptiveSchema/persistedOutput";
+import { parsePersistedAdaptiveOutput, parsePersistedLegacyAdaptiveOutput, PersistedAdaptiveSchemaId, SCHEMA_ANSWER_SHAPE } from "@/lib/adaptiveSchema/persistedOutput";
 
 const BASE_CLASSIFICATION = {
   queryType: "decision_support",
@@ -250,6 +250,130 @@ describe("parsePersistedAdaptiveOutput — rejection cases", () => {
   ])("returns 'malformed' (never throws) for %s", (_label, malformed) => {
     expect(() => parsePersistedAdaptiveOutput(malformed)).not.toThrow();
     const parsed = parsePersistedAdaptiveOutput(malformed);
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.reason).toBe("malformed");
+  });
+});
+
+/**
+ * Phase 2 pilot history-reload fix — parsePersistedLegacyAdaptiveOutput()
+ * tests. Same posture as the 9-schema suite above (round-trips through
+ * JSON, fails safe on absent/malformed/unsupported-version input, never
+ * throws) for the separate `procedural`-only envelope.
+ */
+const LEGACY_CLASSIFICATION = {
+  queryType: "procedural",
+  domain: "test",
+  answerShape: "step_diff",
+  quantExpected: false,
+  timeSensitivity: "low",
+  userIntent: "learn_process",
+  confidence: 0.9,
+  riskLevel: "professional",
+  evidenceRequirement: "medium",
+  freshness: "timeless",
+  inputType: "text",
+  verificationMethod: "cross_model_consistency",
+  requestedCount: null,
+  requiresClarification: false,
+  rationale: "test fixture",
+};
+
+const LEGACY_SYNTHESIS_REPORT = {
+  unifiedAnswer: "Do the thing in order.",
+  panelVerdict: "Panel converges.",
+  gate: "pass",
+  runCertainty: 0.8,
+  whereModelsAgree: [],
+  whereModelsDisagree: [],
+  certaintyAssessment: "Run certainty 80% (gate: pass).",
+  narrativeSections: [],
+  executiveSummary: "Summary.",
+  disagreements: [],
+  biasAndBlindSpots: [],
+  biasEmptyReason: "insufficient_models",
+  panelCoverageGaps: [],
+  diagnostics: {
+    citedClaimCount: 0,
+    totalClaimCount: 0,
+    evidenceMix: { empirical: 0, theoretical: 0, anecdotal: 0, authoritative: 0 },
+    homogeneityFlag: false,
+    meanAgreement: 0.8,
+  },
+  verdictCard: {
+    question: "A question",
+    topConsensus: "Step 1 agreed.",
+    consensusModelCount: 2,
+    keyDisagreement: null,
+    disagreementDetail: null,
+    disagreementModelCount: 0,
+    caveat: null,
+    recommendedNextSteps: [],
+  },
+  degraded: false,
+};
+
+const LEGACY_GATE = { status: "pass", runCertainty: 0.8, loadBearingSplitCount: 0, loadBearingClaims: [] };
+
+function buildLegacyEnvelope(overrides: Record<string, unknown> = {}) {
+  return {
+    version: 1,
+    schemaId: "procedural" as const,
+    classification: LEGACY_CLASSIFICATION,
+    generatedAt: "2026-08-06T00:00:00.000Z",
+    results: [{ modelId: "chatgpt", schemaId: "procedural", ok: true, data: { goal: "x", prerequisites: [], steps: [], commonFailures: [] } }],
+    alignedClaims: [],
+    gate: LEGACY_GATE,
+    synthesisReport: LEGACY_SYNTHESIS_REPORT,
+    trustSummary: { perModel: [], overallTrust: 0.8 },
+    ...overrides,
+  };
+}
+
+describe("parsePersistedLegacyAdaptiveOutput — procedural-only envelope", () => {
+  it("a well-formed envelope round-trips through JSON and parses as valid", () => {
+    const parsed = parsePersistedLegacyAdaptiveOutput(roundTrip(buildLegacyEnvelope()));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.output.schemaId).toBe("procedural");
+      expect(parsed.output.results).toHaveLength(1);
+      expect(parsed.output.synthesisReport.unifiedAnswer).toBe("Do the thing in order.");
+    }
+  });
+
+  it("trustSummary is optional — a well-formed envelope without it still parses as valid", () => {
+    const envelope = buildLegacyEnvelope() as Record<string, unknown>;
+    delete envelope.trustSummary;
+    const parsed = parsePersistedLegacyAdaptiveOutput(roundTrip(envelope));
+    expect(parsed.ok).toBe(true);
+  });
+
+  it("returns 'absent' for null or undefined — the expected, common case for every procedural run made before this fix shipped", () => {
+    expect(parsePersistedLegacyAdaptiveOutput(null)).toEqual({ ok: false, reason: "absent" });
+    expect(parsePersistedLegacyAdaptiveOutput(undefined)).toEqual({ ok: false, reason: "absent" });
+  });
+
+  it("returns 'unsupported_version' for a version other than 1, never throwing", () => {
+    expect(parsePersistedLegacyAdaptiveOutput(buildLegacyEnvelope({ version: 2 }))).toEqual({ ok: false, reason: "unsupported_version" });
+  });
+
+  it("rejects a schemaId other than 'procedural' (this envelope is deliberately scoped to one schema only)", () => {
+    expect(parsePersistedLegacyAdaptiveOutput(buildLegacyEnvelope({ schemaId: "generic" }))).toEqual({ ok: false, reason: "malformed" });
+  });
+
+  it.each([
+    ["a bare string", "not an object"],
+    ["a number", 42],
+    ["an array", []],
+    ["an object missing classification", (() => { const e = buildLegacyEnvelope() as Record<string, unknown>; delete e.classification; return e; })()],
+    ["an object with a non-string generatedAt", buildLegacyEnvelope({ generatedAt: 12345 })],
+    ["an object whose results is not an array", buildLegacyEnvelope({ results: "not-an-array" })],
+    ["an object whose alignedClaims is not an array", buildLegacyEnvelope({ alignedClaims: "not-an-array" })],
+    ["an object whose gate is missing status", buildLegacyEnvelope({ gate: { runCertainty: 0.8 } })],
+    ["an object whose synthesisReport is missing unifiedAnswer", buildLegacyEnvelope({ synthesisReport: { panelVerdict: "x" } })],
+  ])("returns 'malformed' (never throws) for %s — this is the exact 'incomplete or malformed persisted data fails safely' guarantee the history-reload fix depends on", (_label, malformed) => {
+    expect(() => parsePersistedLegacyAdaptiveOutput(malformed)).not.toThrow();
+    const parsed = parsePersistedLegacyAdaptiveOutput(malformed);
     expect(parsed.ok).toBe(false);
     if (!parsed.ok) expect(parsed.reason).toBe("malformed");
   });

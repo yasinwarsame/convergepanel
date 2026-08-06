@@ -54,9 +54,9 @@ import type { ClaimVerificationClientPayload } from "@/lib/verification/claimVer
 import type { VideoVerificationClientPayload } from "@/lib/verification/videoVerificationClientPayload";
 import type { PanelHistoryGovernanceStatus, PanelHistoryItem } from "@/lib/user/panelHistory";
 import type { TeamGovernanceBannerProps, AdaptivePanelPayload } from "@/components/ResultsDisplay";
-import type { PersistedAdaptiveOutput } from "@/lib/adaptiveSchema/persistedOutput";
+import type { PersistedAdaptiveOutput, PersistedLegacyAdaptiveOutputV1 } from "@/lib/adaptiveSchema/persistedOutput";
 import type { ReportStatusInput } from "@/lib/adaptiveSchema/reportStatus";
-import { adaptPersistedOutputToPanelPayload } from "@/lib/user/adaptivePersistedOutputAdapter";
+import { adaptPersistedOutputToPanelPayload, adaptPersistedLegacyOutputToPanelPayload } from "@/lib/user/adaptivePersistedOutputAdapter";
 import type { SynthesisConsensusSummaryDetail } from "@/lib/verification/consensusScoring";
 
 // Lazy load heavy components - defer until after first paint
@@ -1510,19 +1510,40 @@ export default function Home() {
             humanReview?: ReportStatusInput["humanReview"];
             reviewRouting?: ReportStatusInput["reviewRouting"];
           };
+          /**
+           * Phase 2 pilot history-reload fix — a SEPARATE signal from
+           * `adaptive` above, for `procedural` runs only (see
+           * persistedOutput.ts's PersistedLegacyAdaptiveOutputV1 doc).
+           * `adaptive.status === "absent"` alone is NOT proof a run is
+           * legacy/non-adaptive — it's also the (correct, by-design)
+           * status for every procedural run, which never populates that
+           * envelope. `legacyAdaptive` is the true signal for "was this a
+           * schema-routed run whose structured result can be restored."
+           */
+          legacyAdaptive?: {
+            status: string;
+            output: PersistedLegacyAdaptiveOutputV1 | null;
+          };
         };
         if (!res.ok || !data.ok || !data.results?.length) {
           throw new Error(typeof data.message === "string" ? data.message : "Could not load this run.");
         }
         setQuestion(data.question ?? item.question);
 
-        // Query-Routing Redesign, Phase 1 — restore the persisted adaptive
-        // envelope through the SAME renderer routing a live run uses. Never
-        // reclassifies the old question and never invokes the model panel —
-        // "absent" (no envelope was ever persisted for this run) silently
-        // falls back to the existing legacy rendering below, exactly as it
-        // already did before this phase; only "malformed"/
-        // "unsupported_version" get a non-destructive notice.
+        // Query-Routing Redesign, Phase 1 / Phase 2 pilot history-reload fix
+        // — restore the persisted adaptive envelope through the SAME
+        // renderer routing a live run uses. Never reclassifies the old
+        // question and never invokes the model panel. Two independent
+        // envelopes are checked, in order: the Milestone-2 `adaptive`
+        // envelope (9 dedicated schemas) first, then the procedural-only
+        // `legacyAdaptive` envelope — never both, a run only ever
+        // populates one or the other. Both "absent" (no envelope was ever
+        // persisted for this run — true for every schema-routed run made
+        // before this fix shipped, and for every non-procedural
+        // legacy-active schema always) silently falls back to the
+        // existing legacy rendering below, exactly as it already did
+        // before Phase 1; only "malformed"/"unsupported_version" on
+        // either envelope gets a non-destructive notice.
         if (data.adaptive?.status === "valid" && data.adaptive.output) {
           setAdaptivePanel(
             adaptPersistedOutputToPanelPayload(data.adaptive.output, {
@@ -1531,12 +1552,18 @@ export default function Home() {
             })
           );
           setAdaptiveRestoreNotice(null);
+        } else if (data.legacyAdaptive?.status === "valid" && data.legacyAdaptive.output) {
+          // procedural has no GovernanceRecordV1 (Milestone-2 only) — no
+          // humanReview/reviewRouting to thread through, exactly matching
+          // live rendering, where this schema never has either.
+          setAdaptivePanel(adaptPersistedLegacyOutputToPanelPayload(data.legacyAdaptive.output));
+          setAdaptiveRestoreNotice(null);
         } else {
           setAdaptivePanel(null);
           setAdaptiveRestoreNotice(
-            data.adaptive?.status === "malformed"
+            data.adaptive?.status === "malformed" || data.legacyAdaptive?.status === "malformed"
               ? "This run's structured result couldn't be restored — showing the raw model responses instead."
-              : data.adaptive?.status === "unsupported_version"
+              : data.adaptive?.status === "unsupported_version" || data.legacyAdaptive?.status === "unsupported_version"
                 ? "This run's structured result was saved by a newer version of ConvergePanel — showing the raw model responses instead."
                 : null
           );
@@ -1575,7 +1602,22 @@ export default function Home() {
         // client-side synthesis; "valid"/"malformed"/"unsupported_version"
         // all skip it — a malformed/unsupported marker is not proof the
         // run is legacy (see docs/governance-decision-receipts-design.md §14.4/§16).
-        if (data.adaptive?.status === "absent" || !data.adaptive) {
+        //
+        // Phase 2 pilot history-reload fix — this is the exact bug fix:
+        // `data.adaptive?.status === "absent"` is ALSO true for every
+        // procedural run (that envelope never applies to it — see
+        // orchestrate.ts's attachAdaptiveEnvelope), so the check above
+        // alone previously misrouted every procedural history reload into
+        // this prose-oriented synthesizer, which has no notion of the
+        // structured JSON procedural models emit — the literal cause of
+        // the JSON-leak bug this fix addresses. `legacyAdaptive` is the
+        // true "was this a schema-routed run" signal for that family;
+        // only run legacy synthesis when BOTH envelopes are genuinely
+        // absent (this run predates BOTH persistence paths, or is a
+        // non-procedural legacy-active schema that was never routed
+        // through either — both correctly fall through here unchanged).
+        const legacyAdaptiveAbsent = !data.legacyAdaptive || data.legacyAdaptive.status === "absent";
+        if ((data.adaptive?.status === "absent" || !data.adaptive) && legacyAdaptiveAbsent) {
           try {
             consensusForSynthesis = synthesizeReport(data.results as ModelResult[]);
             setSynthesizedReport(consensusForSynthesis);

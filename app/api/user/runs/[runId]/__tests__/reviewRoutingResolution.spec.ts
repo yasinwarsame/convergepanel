@@ -49,8 +49,15 @@ jest.mock("@/lib/panel/publicize", () => ({
 }));
 
 const mockedParsePersistedAdaptiveOutput = jest.fn();
+// Phase 2 pilot history-reload fix — the route now also imports and calls
+// parsePersistedLegacyAdaptiveOutput (procedural-only envelope, unrelated
+// to this file's own reviewRouting-derivation scope). Mocked to a fixed
+// "absent" default below so the route's new call succeeds without this
+// file needing to know anything about that envelope's shape.
+const mockedParsePersistedLegacyAdaptiveOutput = jest.fn();
 jest.mock("@/lib/adaptiveSchema/persistedOutput", () => ({
   parsePersistedAdaptiveOutput: (...args: any[]) => mockedParsePersistedAdaptiveOutput(...args),
+  parsePersistedLegacyAdaptiveOutput: (...args: any[]) => mockedParsePersistedLegacyAdaptiveOutput(...args),
 }));
 
 const mockedParseGovernanceRecord = jest.fn();
@@ -111,6 +118,7 @@ beforeEach(() => {
   mockedRunDocumentToPublicResults.mockReset();
   mockedPublicizePanelResults.mockReset();
   mockedParsePersistedAdaptiveOutput.mockReset();
+  mockedParsePersistedLegacyAdaptiveOutput.mockReset();
   mockedParseGovernanceRecord.mockReset();
   mockedLoadUserAndTeam.mockReset();
   mockedGetProjection.mockReset();
@@ -123,6 +131,7 @@ beforeEach(() => {
   });
   mockedRunDocumentToPublicResults.mockReturnValue([{ modelId: "chatgpt" }]);
   mockedParsePersistedAdaptiveOutput.mockReturnValue({ ok: true, output: VALID_OUTPUT });
+  mockedParsePersistedLegacyAdaptiveOutput.mockReturnValue({ ok: false, reason: "absent" });
   mockedParseGovernanceRecord.mockReturnValue({
     ok: true,
     record: { humanReview: { status: "unreviewed", conditions: undefined, decidedVia: undefined } },
