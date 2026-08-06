@@ -42,7 +42,7 @@ import { buildEvidenceReviewResult, extractEvidenceReviewFields } from "./eviden
 import { buildBiasBlindspotAuditResult, extractBiasBlindspotFields } from "./biasBlindspotAlignment";
 import { buildDecisionSupportResult, extractDecisionSupportFields } from "./decisionSupportAlignment";
 import { AdaptiveSchemaResult, buildCommonResponseMeta } from "./commonResponseMeta";
-import { PersistedAdaptiveOutputV1, PersistedAdaptiveSchemaId, SCHEMA_ANSWER_SHAPE } from "./persistedOutput";
+import { PersistedAdaptiveOutputV1, PersistedAdaptiveSchemaId, PersistedLegacyAdaptiveOutputV1, SCHEMA_ANSWER_SHAPE } from "./persistedOutput";
 import { scoreAgreement } from "./agreementComparators";
 import { scoreClaimCertainty, computeRunCertainty } from "./scoring";
 import { computeAdaptiveGate, AdaptiveGateResult } from "./gate";
@@ -123,6 +123,41 @@ function attachAdaptiveEnvelope(
   } as unknown as PersistedAdaptiveOutputV1;
 
   return { commonResponseMeta, persistedOutput };
+}
+
+/**
+ * Phase 2 pilot history-reload fix — the `procedural`-only sibling of
+ * `attachAdaptiveEnvelope` above. Not merged into that function: it takes
+ * the claim-matrix pipeline's own outputs (`alignedClaims`/`gate`/
+ * `synthesisReport`/`trustSummary`) rather than a single aggregated
+ * Milestone-2 `schemaResult`, and returns `PersistedLegacyAdaptiveOutputV1`
+ * — a distinct type, see persistedOutput.ts for why. Same
+ * `!classification` guard as `attachAdaptiveEnvelope` (persistence only
+ * ever applies to a real, classified run).
+ */
+function attachLegacyAdaptiveEnvelope(
+  classification: QueryClassification | undefined,
+  adaptiveResults: AdaptiveModelResult[],
+  alignedClaims: AlignedClaim[],
+  gate: AdaptiveGateResult,
+  synthesisReport: AdaptiveSynthesisReport,
+  trustSummary: AdaptiveTrustSummary
+): { persistedLegacyOutput?: PersistedLegacyAdaptiveOutputV1 } {
+  if (!classification) return {};
+
+  const persistedLegacyOutput: PersistedLegacyAdaptiveOutputV1 = {
+    version: 1,
+    schemaId: "procedural",
+    classification,
+    generatedAt: new Date().toISOString(),
+    results: adaptiveResults,
+    alignedClaims,
+    gate,
+    synthesisReport,
+    trustSummary,
+  };
+
+  return { persistedLegacyOutput };
 }
 
 /** Bounds the single retry call so one slow model can't stall the whole run. */
@@ -400,6 +435,16 @@ export interface AdaptivePanelResult {
   commonResponseMeta?: CommonResponseMeta;
   /** The full versioned envelope `commonResponseMeta` was built as part of — what route.ts persists and returns as `adaptiveOutput`. */
   persistedOutput?: PersistedAdaptiveOutputV1;
+  /**
+   * Phase 2 pilot history-reload fix — populated ONLY for schema.id ===
+   * "procedural", and only when `classification` was passed and the
+   * verification engine actually ran (alignedClaims/gate/synthesisReport
+   * all present). What route.ts persists and returns as
+   * `legacyAdaptiveOutput` — see persistedOutput.ts's
+   * PersistedLegacyAdaptiveOutputV1 doc for why this is a separate type
+   * from `persistedOutput` above, not a tenth Milestone-2-shaped variant.
+   */
+  persistedLegacyOutput?: PersistedLegacyAdaptiveOutputV1;
 }
 
 /** Schema-specific scalar fields worth aligning across models as a single-row comparison — not every string field, only ones with a genuine cross-model comparison semantic. */
@@ -665,6 +710,16 @@ export async function finalizeAdaptiveRun(
   const synthesisReport = await buildAdaptiveSynthesisReport(question || "", schema.id, scored, results);
   const trustSummary = buildAdaptiveTrustSummary(schema, adaptiveResults, scored);
 
+  // Phase 2 pilot history-reload fix — narrowly scoped to schema.id ===
+  // "procedural" only (the one legacy-active schema this pilot needs
+  // history parity for; see persistedLegacyOutput's doc on
+  // AdaptivePanelResult). Every other legacy-active schema's return here
+  // is unchanged from before this fix.
+  const legacyEnvelope =
+    schema.id === "procedural"
+      ? attachLegacyAdaptiveEnvelope(classification, adaptiveResults, scored, gate, synthesisReport, trustSummary)
+      : {};
+
   return {
     schemaId: schema.id,
     adaptiveResults,
@@ -672,6 +727,7 @@ export async function finalizeAdaptiveRun(
     gate,
     synthesisReport,
     trustSummary,
+    ...legacyEnvelope,
   };
 }
 

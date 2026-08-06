@@ -29,6 +29,19 @@ export default function StepDiffView({ results }: AdaptiveRendererProps) {
         ))}
       </div>
 
+      {/* Adaptive Synthesis Report, Phase 2 pilot — prerequisites was
+          already collected by proceduralFields but never rendered anywhere
+          in this view. Merged across models (near-duplicate items are
+          common when each model restates the same prerequisite) rather
+          than shown per-model, since a prerequisite is either needed or
+          not, unlike a step's ordered content. */}
+      {ok.some((r) => ((r.data?.prerequisites as string[] | undefined)?.length ?? 0) > 0) && (
+        <Card>
+          <SectionLabel>Prerequisites</SectionLabel>
+          <BulletList items={Array.from(new Set(ok.flatMap((r) => (r.data?.prerequisites as string[] | undefined) || [])))} />
+        </Card>
+      )}
+
       <Card>
         <SectionLabel>Steps</SectionLabel>
         <div className="space-y-2">

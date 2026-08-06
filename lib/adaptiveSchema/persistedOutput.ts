@@ -21,6 +21,11 @@
  */
 
 import {
+  AdaptiveGateResult,
+  AdaptiveModelResult,
+  AdaptiveSynthesisReport,
+  AdaptiveTrustSummary,
+  AlignedClaim,
   AnswerShape,
   BiasBlindspotAuditResult,
   CausalExplanationResult,
@@ -170,4 +175,76 @@ export function parsePersistedAdaptiveOutput(raw: unknown): ParsePersistedAdapti
   }
 
   return { ok: true, output: raw as unknown as PersistedAdaptiveOutput };
+}
+
+/**
+ * Phase 2 pilot history-reload fix — a second, narrowly-scoped envelope for
+ * `procedural` only (the one legacy-active schema this pilot needs history
+ * parity for). Deliberately NOT folded into `PersistedAdaptiveOutputV1`
+ * above: that union's `result` is always a single finished, aggregated
+ * object (one per Milestone 2 schema); `procedural` instead needs the raw
+ * per-model `results` (so Model Responses can show real per-model output,
+ * not a re-derivation) alongside the claim-matrix pipeline's own
+ * `alignedClaims`/`gate`/`synthesisReport`/`trustSummary` — a materially
+ * different shape that would force every Milestone-2-only assumption
+ * elsewhere in this file (SCHEMA_ANSWER_SHAPE, RESULT_SHAPE_CHECKS) to grow
+ * a special case. A parallel type + parser is the smaller, honest fix.
+ *
+ * Persisted on `runs/{runId}.legacyAdaptiveOutput` — a distinct Firestore
+ * field from `adaptiveOutput`, so the two envelopes never collide and
+ * `parsePersistedAdaptiveOutput` above needs no changes at all.
+ */
+export interface PersistedLegacyAdaptiveOutputV1 {
+  version: 1;
+  schemaId: "procedural";
+  classification: PersistedQueryClassification;
+  generatedAt: string;
+  results: AdaptiveModelResult[];
+  alignedClaims: AlignedClaim[];
+  gate: AdaptiveGateResult;
+  synthesisReport: AdaptiveSynthesisReport;
+  trustSummary?: AdaptiveTrustSummary;
+}
+
+export type ParsePersistedLegacyAdaptiveOutputResult =
+  | { ok: true; output: PersistedLegacyAdaptiveOutputV1 }
+  | { ok: false; reason: PersistedAdaptiveOutputFailureReason };
+
+/**
+ * Same validation posture as `parsePersistedAdaptiveOutput` above — a
+ * lightweight structural check, never a full re-derivation, never throws.
+ */
+export function parsePersistedLegacyAdaptiveOutput(raw: unknown): ParsePersistedLegacyAdaptiveOutputResult {
+  if (raw === null || raw === undefined) {
+    return { ok: false, reason: "absent" };
+  }
+  if (!isPlainObject(raw)) {
+    return { ok: false, reason: "malformed" };
+  }
+  if (raw.version !== 1) {
+    return { ok: false, reason: "unsupported_version" };
+  }
+  if (raw.schemaId !== "procedural") {
+    return { ok: false, reason: "malformed" };
+  }
+  if (!isPlainObject(raw.classification) || typeof raw.classification.queryType !== "string") {
+    return { ok: false, reason: "malformed" };
+  }
+  if (typeof raw.generatedAt !== "string") {
+    return { ok: false, reason: "malformed" };
+  }
+  if (!Array.isArray(raw.results)) {
+    return { ok: false, reason: "malformed" };
+  }
+  if (!Array.isArray(raw.alignedClaims)) {
+    return { ok: false, reason: "malformed" };
+  }
+  if (!isPlainObject(raw.gate) || typeof raw.gate.status !== "string") {
+    return { ok: false, reason: "malformed" };
+  }
+  if (!isPlainObject(raw.synthesisReport) || typeof raw.synthesisReport.unifiedAnswer !== "string") {
+    return { ok: false, reason: "malformed" };
+  }
+
+  return { ok: true, output: raw as unknown as PersistedLegacyAdaptiveOutputV1 };
 }

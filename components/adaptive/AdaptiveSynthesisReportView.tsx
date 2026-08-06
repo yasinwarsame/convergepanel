@@ -92,7 +92,8 @@ function agreementColorClass(score: number): string {
   return "bg-red-500";
 }
 
-function UnifiedAnswerCard({ answer }: { answer: string }) {
+/** Exported for reuse by PanelEvidenceSection.tsx (Adaptive Synthesis Report, Phase 2 pilot) — same unmodified rendering, relocated as curated "supporting synthesis context" rather than the primary landing view for procedural/generic. */
+export function UnifiedAnswerCard({ answer }: { answer: string }) {
   return (
     <Card className="bg-sky-50/60 border-sky-200">
       <SectionLabel>Unified answer</SectionLabel>
@@ -107,7 +108,8 @@ const PARSE_HEALTH_STYLES: Record<ModelTrustSummary["parseHealth"], string> = {
   failed: "bg-red-50 text-red-700 border-red-200",
 };
 
-function TrustSummaryTable({ trustSummary }: { trustSummary: AdaptiveTrustSummary }) {
+/** Exported — see UnifiedAnswerCard's export doc above. */
+export function TrustSummaryTable({ trustSummary }: { trustSummary: AdaptiveTrustSummary }) {
   if (trustSummary.perModel.length === 0) return null;
   return (
     <Card>
@@ -219,7 +221,8 @@ function AgreementSegmentBar({ agreeCount, disputeCount, silentCount, total }: {
 
 const STATUS_SORT_ORDER: Record<"consensus" | "majority" | "split", number> = { consensus: 0, majority: 1, split: 2 };
 
-function AgreementDisagreementMap({ claims, modelsUsed }: { claims: AlignedClaim[]; modelsUsed: ModelId[] }) {
+/** Exported — see UnifiedAnswerCard's export doc above. */
+export function AgreementDisagreementMap({ claims, modelsUsed }: { claims: AlignedClaim[]; modelsUsed: ModelId[] }) {
   // Coverage-1 claims (a single model's own claim, never corroborated or
   // disputed by anyone else) aren't agreement data — they're rendered
   // separately by SingleModelInsightsList below this section.
@@ -298,7 +301,8 @@ function AgreementDisagreementMap({ claims, modelsUsed }: { claims: AlignedClaim
 }
 
 /** Coverage-1 claims — a single model's own observation, never corroborated or disputed by any other model — pulled out of the Agreement/Disagreement Map since a lone claim isn't agreement data. */
-function SingleModelInsightsList({ claims }: { claims: AlignedClaim[] }) {
+/** Exported — see UnifiedAnswerCard's export doc above. */
+export function SingleModelInsightsList({ claims }: { claims: AlignedClaim[] }) {
   const singleSource = claims.filter((c) => c.status === "single_source");
   if (singleSource.length === 0) return null;
 
@@ -323,7 +327,8 @@ function SingleModelInsightsList({ claims }: { claims: AlignedClaim[] }) {
   );
 }
 
-function DisagreementsSection({ report }: { report: AdaptiveSynthesisReport }) {
+/** Exported — see UnifiedAnswerCard's export doc above. */
+export function DisagreementsSection({ report }: { report: AdaptiveSynthesisReport }) {
   if (report.disagreements.length === 0) return null;
 
   return (
@@ -488,7 +493,8 @@ function biasSectionEmptyMessage(report: AdaptiveSynthesisReport): string {
   return `No bias, coverage, or diagnostic signals to show this run: ${biasPart}, and ${claimsPart}.`;
 }
 
-function BiasBlindSpotsSection({
+/** Exported — see UnifiedAnswerCard's export doc above. Exported instead of the already-exported bare BiasFindingCards, since that alone would drop the Tier-2 (coverage gaps)/Tier-3 (diagnostics)/empty-state handling this wraps uniformly. */
+export function BiasBlindSpotsSection({
   report,
   onRunFollowUp,
 }: {
@@ -529,7 +535,8 @@ function BiasBlindSpotsSection({
   );
 }
 
-function PanelVerdictCard({ report, gate }: { report: AdaptiveSynthesisReport; gate: AdaptiveGateResult }) {
+/** Exported — see UnifiedAnswerCard's export doc above. */
+export function PanelVerdictCard({ report, gate }: { report: AdaptiveSynthesisReport; gate: AdaptiveGateResult }) {
   const v = report.verdictCard;
   return (
     <div className="relative rounded-xl border border-slate-200 bg-white p-6 overflow-hidden">

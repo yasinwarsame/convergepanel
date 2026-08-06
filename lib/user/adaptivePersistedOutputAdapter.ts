@@ -18,7 +18,7 @@
  */
 
 import type { AdaptivePanelPayload } from "@/components/ResultsDisplay";
-import type { PersistedAdaptiveOutput } from "@/lib/adaptiveSchema/persistedOutput";
+import type { PersistedAdaptiveOutput, PersistedLegacyAdaptiveOutputV1 } from "@/lib/adaptiveSchema/persistedOutput";
 import type { ReportStatusInput } from "@/lib/adaptiveSchema/reportStatus";
 
 /**
@@ -70,4 +70,32 @@ export function adaptPersistedOutputToPanelPayload(
     case "decision_support":
       return { ...base, decisionSupport: output.result };
   }
+}
+
+/**
+ * Phase 2 pilot history-reload fix — the `procedural`-only sibling of
+ * `adaptPersistedOutputToPanelPayload` above, for
+ * `PersistedLegacyAdaptiveOutputV1` (a separate type/Firestore field, see
+ * persistedOutput.ts's doc). Unlike the Milestone-2 adapter above,
+ * `results` is NOT empty here — this envelope persists the real per-model
+ * `AdaptiveModelResult[]` precisely so Model Responses' raw-output section
+ * renders identically to a live run, not a placeholder.
+ */
+export function adaptPersistedLegacyOutputToPanelPayload(
+  output: PersistedLegacyAdaptiveOutputV1,
+  governance?: AdaptiveGovernanceContext
+): AdaptivePanelPayload {
+  return {
+    classification: output.classification,
+    schemaId: output.schemaId,
+    results: output.results,
+    alignedClaims: output.alignedClaims,
+    gate: output.gate,
+    synthesisReport: output.synthesisReport,
+    trustSummary: output.trustSummary,
+    generatedAt: output.generatedAt,
+    persistenceStatus: "saved" as const,
+    humanReview: governance?.humanReview,
+    reviewRouting: governance?.reviewRouting,
+  };
 }

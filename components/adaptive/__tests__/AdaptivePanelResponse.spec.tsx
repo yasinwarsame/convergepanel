@@ -18,7 +18,7 @@ import AdaptivePanelResponse from "@/components/adaptive/AdaptivePanelResponse";
 import { SCHEMA_REGISTRY } from "@/lib/adaptiveSchema/schemaRegistry";
 import { buildComparisonMatrixResult } from "@/lib/adaptiveSchema/comparisonAlignment";
 import { buildChecklistTaxonomyResult, ChecklistTaxonomyFields } from "@/lib/adaptiveSchema/checklistAlignment";
-import { AdaptiveModelResult, ChecklistItem, ComparisonCell, QueryClassification, QueryType } from "@/lib/adaptiveSchema/types";
+import { AdaptiveModelResult, AdaptiveSynthesisReport as AdaptiveSynthesisReportType, ChecklistItem, ComparisonCell, QueryClassification, QueryType } from "@/lib/adaptiveSchema/types";
 import { ModelId } from "@/lib/types";
 
 function baseClassification(queryType: QueryType, overrides: Partial<QueryClassification> = {}): QueryClassification {
@@ -82,6 +82,11 @@ describe("AdaptivePanelResponse — comparison_matrix routes to ComparisonMatrix
     expect(html).not.toMatch(/trust summary/i);
     expect(html).not.toMatch(/verification gate/i);
     expect(html).not.toMatch(/agreement.*disagreement map/i);
+    // Adaptive Synthesis Report, Phase 2 pilot — Model Responses/Panel
+    // Evidence/Review & Governance now render below the primary view.
+    expect(html).toMatch(/model responses/i);
+    expect(html).toMatch(/panel agreement/i);
+    expect(html).toMatch(/review status/i);
   });
 });
 
@@ -149,8 +154,70 @@ describe("AdaptivePanelResponse — risk-shaped checklist_taxonomy routes to Ris
   });
 });
 
-describe("AdaptivePanelResponse — legacy/original-9 schemas keep the List/Compare/Synthesis shell", () => {
-  it("still renders the tabbed List/Compare/Synthesis shell for a generic-schema run with verification data", () => {
+/** Minimal-but-complete AdaptiveSynthesisReport fixture — every field the
+ * Phase 2 pilot's PanelEvidenceSection actually reads (unlike the old
+ * pre-pilot fixture, which only needed to survive a tab that was never
+ * rendered by default and so could get away with an incomplete object). */
+function synthesisReportFixture(overrides: Partial<AdaptiveSynthesisReportType> = {}): AdaptiveSynthesisReportType {
+  return {
+    unifiedAnswer: "The panel's synthesized answer.",
+    panelVerdict: "Panel converges on the core answer.",
+    gate: "pass",
+    runCertainty: 0.8,
+    whereModelsAgree: ["Models agree on the basics."],
+    whereModelsDisagree: [],
+    certaintyAssessment: "Run certainty 80% (gate: pass).",
+    narrativeSections: [],
+    executiveSummary: "Executive summary of the run.",
+    disagreements: [],
+    biasAndBlindSpots: [],
+    biasEmptyReason: "insufficient_models",
+    panelCoverageGaps: [],
+    diagnostics: {
+      citedClaimCount: 0,
+      totalClaimCount: 0,
+      evidenceMix: { empirical: 0, theoretical: 0, anecdotal: 0, authoritative: 0 },
+      homogeneityFlag: false,
+      meanAgreement: 0.8,
+    },
+    verdictCard: {
+      question: "A question",
+      topConsensus: "Models agree on the basics.",
+      consensusModelCount: 1,
+      keyDisagreement: null,
+      disagreementDetail: null,
+      disagreementModelCount: 0,
+      caveat: null,
+      recommendedNextSteps: [],
+    },
+    degraded: false,
+    ...overrides,
+  };
+}
+
+describe("AdaptivePanelResponse — legacy/original-9 schemas keep the List/Compare/Synthesis shell for the 6 non-piloted schemas", () => {
+  it("still renders the tabbed List/Compare/Synthesis shell for legal_regulatory (not in the Phase 2 pilot)", () => {
+    const schema = SCHEMA_REGISTRY.legal_regulatory;
+    const classification = baseClassification("legal_regulatory");
+    const results = [modelResult("chatgpt", "legal_regulatory", { summary: "Some answer" })];
+
+    const html = renderToStaticMarkup(
+      createElement(AdaptivePanelResponse, {
+        schema,
+        classification,
+        results,
+        gate: { status: "pass", runCertainty: 0.8, loadBearingSplitCount: 0, loadBearingClaims: [] } as any,
+        synthesisReport: synthesisReportFixture(),
+        question: "A legal question",
+      })
+    );
+
+    expect(html).toMatch(/list|compare|synthesis/i);
+  });
+});
+
+describe("AdaptivePanelResponse — Phase 2 pilot: generic gets the promoted view + stacked sections, not tabs", () => {
+  it("renders GenericSectionsView as the default surface with Panel Evidence/Review & Governance below, no tab UI", () => {
     const schema = SCHEMA_REGISTRY.generic;
     const classification = baseClassification("generic");
     const results = [modelResult("chatgpt", "generic", { summary: "Some answer" })];
@@ -160,20 +227,165 @@ describe("AdaptivePanelResponse — legacy/original-9 schemas keep the List/Comp
         schema,
         classification,
         results,
-        gate: { status: "pass", runCertainty: 0.8, loadBearingSplitCount: 0, caveat: undefined } as any,
-        synthesisReport: {
-          executiveSummary: "Summary",
-          runCertainty: 0.8,
-          whereModelsAgree: [],
-          keyDisagreement: undefined,
-          confidenceBreakdown: [],
-          uncertainties: [],
-          followUpQuestions: [],
-        } as any,
+        gate: { status: "pass", runCertainty: 0.8, loadBearingSplitCount: 0, loadBearingClaims: [] } as any,
+        synthesisReport: synthesisReportFixture(),
         question: "A generic question",
       })
     );
 
-    expect(html).toMatch(/list|compare|synthesis/i);
+    expect(html).toMatch(/review status/i);
+    expect(html).toMatch(/full synthesis report/i);
+    expect(html).not.toMatch(/list view|compare view/i);
+  });
+});
+
+describe("AdaptivePanelResponse — Phase 2 pilot: procedural gets the promoted view + stacked sections, not tabs", () => {
+  it("renders StepDiffView as the default surface, relocates the cross-model comparison block, no tab UI", () => {
+    const schema = SCHEMA_REGISTRY.procedural;
+    const classification = baseClassification("procedural");
+    const results = [modelResult("chatgpt", "procedural", { goal: "Set up 2FA", steps: [] })];
+    const alignedClaims = [
+      {
+        id: "step-1",
+        claimText: "Step 1: Enable two-factor authentication",
+        cells: [{ modelId: "chatgpt" as ModelId, stance: "agrees" as const, rawStance: "asserts" as const, confidence: "majority_view" as const, excerpt: "step" }],
+        agreementScore: 1,
+        certaintyScore: 1,
+        status: "consensus" as const,
+      },
+    ];
+
+    const html = renderToStaticMarkup(
+      createElement(AdaptivePanelResponse, {
+        schema,
+        classification,
+        results,
+        alignedClaims,
+        gate: { status: "pass", runCertainty: 0.8, loadBearingSplitCount: 0, loadBearingClaims: [] } as any,
+        synthesisReport: synthesisReportFixture(),
+        question: "How do I set up two-factor authentication?",
+      })
+    );
+
+    expect(html).toMatch(/review status/i);
+    expect(html).toMatch(/cross-model comparison/i);
+    expect(html).not.toMatch(/list view|compare view/i);
+  });
+});
+
+/**
+ * Progressive-disclosure contract (post-review redesign of the Phase 2
+ * pilot): "never hidden behind tabs" does not mean "show everything
+ * expanded on one long page." Pins the exact acceptance criteria from that
+ * review — a reader must be able to answer "what's the answer / how
+ * confident / what do models agree on / what do they disagree on" from the
+ * unexpanded page, while Model Responses/Panel Evidence/Review & Governance
+ * stay reachable but collapsed by default.
+ */
+describe("AdaptivePanelResponse — Phase 2 pilot progressive disclosure", () => {
+  const collapsibleLabels = [/model responses/i, /panel evidence/i, /review.{0,10}governance/i];
+
+  function assertCollapsedByDefault(html: string) {
+    for (const label of collapsibleLabels) {
+      expect(html).toMatch(label);
+    }
+    // No <details> anywhere in the output is open by default.
+    expect(html).not.toMatch(/<details[^>]*\bopen\b/);
+  }
+
+  it("procedural: the answer, consensus, and disagreement are visible without expanding anything, secondary sections are present but collapsed", () => {
+    const schema = SCHEMA_REGISTRY.procedural;
+    const classification = baseClassification("procedural");
+    const results = [modelResult("chatgpt", "procedural", { goal: "Set up 2FA", steps: [], prerequisites: ["A GitHub account"] })];
+
+    const html = renderToStaticMarkup(
+      createElement(AdaptivePanelResponse, {
+        schema,
+        classification,
+        results,
+        gate: { status: "pass", runCertainty: 0.8, loadBearingSplitCount: 0, loadBearingClaims: [] } as any,
+        synthesisReport: synthesisReportFixture({
+          unifiedAnswer: "Enable two-factor authentication in your account security settings.",
+          verdictCard: {
+            question: "How do I set up 2FA?",
+            topConsensus: "All models agree 2FA should be enabled via account security settings",
+            consensusModelCount: 2,
+            keyDisagreement: "Whether SMS or an authenticator app is the recommended second factor",
+            disagreementDetail: "One model recommends SMS, another recommends an authenticator app.",
+            disagreementModelCount: 2,
+            caveat: null,
+            recommendedNextSteps: [],
+          },
+        }),
+        question: "How do I set up two-factor authentication?",
+      })
+    );
+
+    // Answerable without expanding anything (PrimarySynthesisStrip, always visible):
+    expect(html).toMatch(/Enable two-factor authentication in your account security settings/);
+    expect(html).toMatch(/All models agree 2FA should be enabled/);
+    expect(html).toMatch(/Whether SMS or an authenticator app/);
+    // Consensus scoring visible in the primary experience (TopSummaryBar, always visible):
+    expect(html).toMatch(/consensus/i);
+    // Prerequisites — real schema data StepDiffView previously never rendered:
+    expect(html).toMatch(/Prerequisites/i);
+    expect(html).toMatch(/A GitHub account/);
+
+    assertCollapsedByDefault(html);
+  });
+
+  it("generic: remains a controlled fallback (no fabricated schema-specific structure), still gets the shared strip and collapsed secondary sections", () => {
+    const schema = SCHEMA_REGISTRY.generic;
+    const classification = baseClassification("generic");
+    const results = [modelResult("chatgpt", "generic", { summary: "A generic answer.", uncertainties: [], followUps: [] })];
+
+    const html = renderToStaticMarkup(
+      createElement(AdaptivePanelResponse, {
+        schema,
+        classification,
+        results,
+        gate: { status: "pass", runCertainty: 0.8, loadBearingSplitCount: 0, loadBearingClaims: [] } as any,
+        synthesisReport: synthesisReportFixture({ unifiedAnswer: "The direct synthesized answer." }),
+        question: "An ambiguous question",
+      })
+    );
+
+    expect(html).toMatch(/The direct synthesized answer/);
+    assertCollapsedByDefault(html);
+  });
+
+  it("comparison_matrix: needs no PrimarySynthesisStrip (ComparisonMatrixView already leads with directConclusion), secondary sections still collapsed", () => {
+    const schema = SCHEMA_REGISTRY.comparison_matrix;
+    const classification = baseClassification("comparison_matrix");
+    const results = [modelResult("chatgpt", "comparison_matrix", { cells: [] })];
+    const comparisonMatrix = {
+      subjects: [],
+      lowConfidenceSubjects: [],
+      attributes: [],
+      lowConfidenceAttributes: [],
+      totalModels: 1,
+      hasVerifiedSourceData: false as const,
+      directConclusion: "ChatGPT leads on depth.",
+      tradeoffs: [],
+      bestUseRecommendations: [],
+      uncertainties: [],
+      cells: [],
+    };
+
+    const html = renderToStaticMarkup(
+      createElement(AdaptivePanelResponse, {
+        schema,
+        classification,
+        results,
+        comparisonMatrix,
+        question: "Compare ChatGPT and Claude",
+      })
+    );
+
+    expect(html).toMatch(/direct conclusion/i);
+    // No PrimarySynthesisStrip markup ("Answer" as its own headline card) —
+    // ComparisonMatrixView's own Direct Conclusion already serves this role.
+    expect(html).not.toMatch(/models agree.*models disagree/is);
+    assertCollapsedByDefault(html);
   });
 });

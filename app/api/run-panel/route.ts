@@ -26,6 +26,7 @@ import {
   completeRun,
   markRunError,
   persistAdaptiveOutput,
+  persistLegacyAdaptiveOutput,
   readGovernanceRecordForInitialization,
   persistAutomatedGovernanceUpdate,
   writeAdaptiveGovernanceEvent,
@@ -939,6 +940,37 @@ export async function POST(req: NextRequest) {
           generatedAt: adaptiveOutput.persistedOutput?.generatedAt ?? new Date().toISOString(),
           meta: adaptiveOutput.persistedOutput?.meta,
         };
+
+        // Phase 2 pilot history-reload fix — additive persistence, same
+        // request, after finalization succeeded. Only ever populated for
+        // schema.id === "procedural" (see orchestrate.ts's
+        // attachLegacyAdaptiveEnvelope) — every other schema's
+        // adaptiveOutput.persistedLegacyOutput is undefined and this block
+        // never runs. Deliberately independent of the persistedOutput
+        // block below: a separate Firestore field, a separate try/catch, a
+        // separate failure mode that never touches persistenceStatus or
+        // governance (procedural has no GovernanceRecordV1 — unchanged by
+        // this fix). A write failure here NEVER fails the run response:
+        // the live payload above was already computed in memory and is
+        // returned either way.
+        if (adaptiveOutput.persistedLegacyOutput) {
+          try {
+            const legacyOutcome = await persistLegacyAdaptiveOutput(runId, adaptiveOutput.persistedLegacyOutput);
+            if (!legacyOutcome.saved) {
+              logger.warn("[run-panel] legacyAdaptiveOutput persistence did not save", {
+                runId,
+                schemaId: adaptiveOutput.schemaId,
+                reason: legacyOutcome.reason,
+              });
+            }
+          } catch (legacyPersistError: any) {
+            logger.warn("[run-panel] legacyAdaptiveOutput persistence threw, run response unaffected", {
+              runId,
+              schemaId: adaptiveOutput.schemaId,
+              error: legacyPersistError?.message,
+            });
+          }
+        }
 
         // Query-Routing Redesign, Phase 1 — additive persistence, same
         // request, after finalization succeeded. Only applies to the 9

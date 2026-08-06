@@ -47,7 +47,19 @@ describe("app/page.tsx — client-side adaptive guard regression (source-level)"
   });
 
   it("history-reload synthesizeReport() call site now checks the adaptive status before running legacy client-side synthesis", () => {
-    const match = PAGE_SOURCE.match(/if \(data\.adaptive\?\.status === "absent" \|\| !data\.adaptive\) \{\s*try \{\s*consensusForSynthesis = synthesizeReport\(/);
+    // Phase 2 pilot history-reload fix — the adaptive-status check alone
+    // was found to be an incomplete guard (it's also true for every
+    // procedural run, misrouting those into this prose-oriented
+    // synthesizer and producing a JSON-leak bug). The call site now also
+    // requires legacyAdaptiveAbsent — see
+    // app/__tests__/legacyAdaptiveHistoryReload.spec.ts for the dedicated,
+    // thorough regression coverage of that fix; this assertion is updated
+    // here only so it reflects the current, correct condition rather than
+    // false-flagging the fix as a regression of this Step 6 guard's intent
+    // (an adaptive-status check gates this call site at all — still true).
+    const match = PAGE_SOURCE.match(
+      /if \(\(data\.adaptive\?\.status === "absent" \|\| !data\.adaptive\) && legacyAdaptiveAbsent\) \{\s*try \{\s*consensusForSynthesis = synthesizeReport\(/
+    );
     expect(match).not.toBeNull();
   });
 
