@@ -26,6 +26,8 @@ export default function TopNav() {
    */
   const isTeamReviewUser = teamRole === "owner" || teamRole === "admin";
   const userMenuRef = useRef<HTMLDivElement>(null);
+  const userMenuButtonRef = useRef<HTMLButtonElement>(null);
+  const mobileMenuButtonRef = useRef<HTMLButtonElement>(null);
 
   const isLogin = pathname === "/login" || pathname === "/signin";
   const isSignup = pathname === "/signup";
@@ -45,6 +47,30 @@ export default function TopNav() {
       document.removeEventListener("mousedown", handleClickOutside);
     };
   }, [userMenuOpen]);
+
+  /**
+   * Header overflow fix, tablet-width responsive pass — Escape closes
+   * whichever disclosure (mobile nav panel or the desktop user dropdown) is
+   * open and returns focus to its own trigger button, per WAI-ARIA
+   * disclosure-pattern expectations. Outside-click close (above) doesn't
+   * need this: the user's click already moved focus somewhere on the page.
+   */
+  useEffect(() => {
+    if (!mobileMenuOpen && !userMenuOpen) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (mobileMenuOpen) {
+        setMobileMenuOpen(false);
+        mobileMenuButtonRef.current?.focus();
+      }
+      if (userMenuOpen) {
+        setUserMenuOpen(false);
+        userMenuButtonRef.current?.focus();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [mobileMenuOpen, userMenuOpen]);
 
   useEffect(() => {
     if (!user) {
@@ -125,8 +151,14 @@ export default function TopNav() {
           </span>
         </Link>
 
-        {/* Desktop nav */}
-        <div className="hidden items-center gap-1 md:flex">
+        {/* Desktop nav — lg (1024px), not md (768px): at 768px the logo
+            (56px mark + wordmark + tagline) plus every nav link, the
+            Governance/Team Reviews conditionals, and the auth controls
+            don't fit on one row and force page-level horizontal overflow.
+            The mobile menu below is already complete (same links + auth
+            actions), so moving the cutover to lg is the smallest fix —
+            no links hidden, no text shrunk, no overflow-hidden hacks. */}
+        <div className="hidden items-center gap-1 lg:flex">
           {navLinks.map(({ label, href }) => (
             <Link
               key={href}
@@ -185,7 +217,12 @@ export default function TopNav() {
                   <div className="h-5 w-px bg-cp-border" aria-hidden />
                   <div className="relative" ref={userMenuRef}>
                   <button
+                    id="user-menu-button"
+                    ref={userMenuButtonRef}
                     onClick={() => setUserMenuOpen(!userMenuOpen)}
+                    aria-expanded={userMenuOpen}
+                    aria-haspopup="true"
+                    aria-controls="user-menu"
                     className="flex items-center gap-2 rounded-full px-2 py-1.5 transition-colors hover:bg-cp-raised"
                   >
                     <div className="flex h-7 w-7 items-center justify-center rounded-full border border-cp-orange bg-cp-orange-soft">
@@ -210,7 +247,16 @@ export default function TopNav() {
                   </button>
 
                   {userMenuOpen && (
-                    <div className="absolute right-0 mt-2 w-48 overflow-hidden rounded-lg border border-cp-border bg-cp-surface shadow-[0_8px_32px_rgba(0,0,0,0.12)] py-1">
+                    // Deliberately no role="menu": these are plain links/a
+                    // logout action, not an application menu widget, and
+                    // role="menu" per WAI-ARIA APG implies arrow-key/Home/
+                    // End keyboard navigation this component doesn't
+                    // implement — aria-expanded/aria-controls on the
+                    // trigger is the correct disclosure-pattern contract.
+                    <div
+                      id="user-menu"
+                      className="absolute right-0 mt-2 w-48 overflow-hidden rounded-lg border border-cp-border bg-cp-surface shadow-[0_8px_32px_rgba(0,0,0,0.12)] py-1"
+                    >
                       <Link
                         href="/profile"
                         onClick={() => setUserMenuOpen(false)}
@@ -246,11 +292,14 @@ export default function TopNav() {
           )}
         </div>
 
-        {/* Mobile toggle */}
+        {/* Mobile/tablet toggle — shown below lg, matching the desktop nav's own lg:flex cutover above */}
         <button
+          ref={mobileMenuButtonRef}
           onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-          className="rounded-md p-2 text-cp-muted transition-colors hover:bg-cp-raised hover:text-cp-text md:hidden"
+          className="rounded-md p-2 text-cp-muted transition-colors hover:bg-cp-raised hover:text-cp-text lg:hidden"
           aria-label="Toggle menu"
+          aria-expanded={mobileMenuOpen}
+          aria-controls="mobile-menu"
         >
           <svg
             className="h-5 w-5"
@@ -270,9 +319,9 @@ export default function TopNav() {
         </button>
       </div>
 
-      {/* Mobile menu */}
+      {/* Mobile/tablet menu — below lg, mirrors the desktop nav's own lg:flex cutover */}
       {mobileMenuOpen && (
-        <div className="border-t border-cp-border bg-cp-surface px-4 pb-4 pt-3 md:hidden">
+        <div id="mobile-menu" className="border-t border-cp-border bg-cp-surface px-4 pb-4 pt-3 lg:hidden">
           <div className="flex flex-col gap-1">
             {navLinks.map(({ label, href }) => (
               <Link
