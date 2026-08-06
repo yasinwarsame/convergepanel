@@ -20,7 +20,7 @@
  * order-sensitive comparators) would have no visible surface at all.
  */
 
-import { AnswerShape, BiasBlindspotAuditResult, CausalExplanationResult, ChecklistTaxonomyResult, CommonResponseMeta, ComparisonMatrixResult, DecisionSupportResult, DeepResearchResult, DefinitionExplanationResult, EvidenceReviewResult, RankedEnumerationResult, isRiskShapedChecklistResult } from "@/lib/adaptiveSchema/types";
+import { AnswerShape, BiasBlindspotAuditResult, CausalExplanationResult, ChecklistTaxonomyResult, CommonResponseMeta, ComparisonMatrixResult, DecisionSupportResult, DeepResearchResult, DefinitionExplanationResult, EvidenceReviewResult, QueryType, RankedEnumerationResult, isRiskShapedChecklistResult } from "@/lib/adaptiveSchema/types";
 import { AdaptiveGateResult, AdaptiveSynthesisReport, AdaptiveTrustSummary } from "@/lib/adaptiveSchema/types";
 import { ReportStatusInput } from "@/lib/adaptiveSchema/reportStatus";
 import { AdaptiveRendererProps } from "./types";
@@ -41,12 +41,19 @@ import DeepResearchView from "./DeepResearchView";
 import EvidenceReviewView from "./EvidenceReviewView";
 import BiasBlindspotAuditView from "./BiasBlindspotAuditView";
 import DecisionSupportView from "./DecisionSupportView";
+import ModelResponsesSection from "./ModelResponsesSection";
+import PanelEvidenceSection from "./PanelEvidenceSection";
+import ReviewGovernanceSection from "./ReviewGovernanceSection";
+import PrimarySynthesisStrip from "./PrimarySynthesisStrip";
 import { Card, SectionLabel } from "./shared";
 import PanelViewTabs, { PanelViewMode } from "./PanelViewTabs";
 import { routeClassifiedQuery } from "@/lib/adaptiveSchema/routeClassifiedQuery";
 import { useEffect, useState } from "react";
 
 const RENDER_HINTS_WITHOUT_MATRIX = new Set<AnswerShape>(["metrics_grid", "verdict_card", "step_diff", "scenario_tree"]);
+
+/** Adaptive Synthesis Report, Phase 2 — 3-schema pilot (see AdaptivePanelResponse's own comment at the branch below). Deliberately not all 18 schemas yet. */
+const PHASE2_PILOT_SCHEMAS = new Set<QueryType>(["procedural", "generic"]);
 
 export interface AdaptivePanelResponseProps extends AdaptiveRendererProps {
   gate?: AdaptiveGateResult;
@@ -193,9 +200,25 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
   // comparisonMatrix should always be present here (orchestrate.ts always
   // computes it for this schema), but fail safe to the generic view rather
   // than crash if it's ever missing.
+  //
+  // Adaptive Synthesis Report, Phase 2 (3-schema pilot) — Model Responses/
+  // Panel Evidence/Review & Governance render below the primary view, never
+  // replacing it. This is the pilot's one Milestone-2 schema.
   if (schema.renderHint === "comparison_grid") {
     if (comparisonMatrix) {
-      return withBar(<ComparisonMatrixView comparisonMatrix={comparisonMatrix} />);
+      return withBar(
+        <div className="space-y-4">
+          <ComparisonMatrixView comparisonMatrix={comparisonMatrix} />
+          <ModelResponsesSection schema={schema} results={results} />
+          <PanelEvidenceSection schemaId={schema.id} comparisonMatrix={comparisonMatrix} modelsUsed={results.map((r) => r.modelId)} />
+          <ReviewGovernanceSection
+            humanReview={props.humanReview}
+            reviewRouting={props.reviewRouting}
+            persistenceStatus={props.persistenceStatus}
+            runId={runId}
+          />
+        </div>
+      );
     }
     return withBar(<AdaptiveResultsView {...props} />);
   }
@@ -304,6 +327,60 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
   }
 
   const modelIds = results.map((r) => r.modelId);
+
+  // Adaptive Synthesis Report, Phase 2 — 3-schema pilot. procedural and
+  // generic get a progressive-disclosure layout: PrimarySynthesisStrip
+  // (the answer-first headline — unifiedAnswer plus the single top
+  // consensus/disagreement point, so a reader can answer "what's the
+  // answer / how confident / what do models agree-disagree on" without
+  // expanding anything) + the schema's own primary view
+  // (StepDiffView/GenericSectionsView, unchanged) together make up the
+  // primary report — then Model Responses/Panel Evidence/Review &
+  // Governance, each its OWN collapsed section (never expanded by
+  // default — "never hidden behind tabs" does not mean "show everything
+  // at once"), hold the full record behind that headline. Explicit,
+  // self-documenting allowlist — trivially reversible, and provably scoped
+  // to exactly these 2 schemas; the other 6 original schemas
+  // (contested_empirical/legal_regulatory/financial_valuation/
+  // medical_health/forecast_speculative/creative_generative) fall through
+  // to the unchanged tri-tab shell below. Broader rollout to the remaining
+  // 15 schemas is deliberately deferred to a follow-up pass — see
+  // docs/adaptive-synthesis-report-design.md.
+  if (PHASE2_PILOT_SCHEMAS.has(schema.id)) {
+    return withBar(
+      <div className="space-y-4">
+        <PrimarySynthesisStrip synthesisReport={synthesisReport} />
+        <AdaptiveResultsView {...props} />
+        <ModelResponsesSection
+          schema={schema}
+          results={results}
+          listView={{ alignedClaims, gate, synthesisReport, trustSummary }}
+        />
+        <PanelEvidenceSection
+          schemaId={schema.id}
+          gate={gate}
+          synthesisReport={synthesisReport}
+          trustSummary={trustSummary}
+          alignedClaims={alignedClaims}
+          modelsUsed={modelIds}
+          showClaimMatrix={schema.renderHint === "step_diff"}
+        />
+        <ReviewGovernanceSection
+          humanReview={props.humanReview}
+          reviewRouting={props.reviewRouting}
+          persistenceStatus={props.persistenceStatus}
+          runId={runId}
+          gate={gate}
+          synthesisReport={synthesisReport}
+          trustSummary={trustSummary}
+          alignedClaims={alignedClaims}
+          modelsUsed={modelIds}
+          question={question}
+          onRunFollowUp={onRunFollowUp}
+        />
+      </div>
+    );
+  }
   const showExtraMatrix = RENDER_HINTS_WITHOUT_MATRIX.has(schema.renderHint) && !!alignedClaims && alignedClaims.length > 0;
 
   const navigateToSynthesisSection = (sectionId: string) => {
