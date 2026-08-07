@@ -1,0 +1,58 @@
+name: ConvergePanel Quality Gate
+
+# Vercel's own status checks only prove the app builds well enough to deploy
+# — they don't run typecheck, lint, or the Jest suite. This workflow closes
+# that gap so a PR can't merge on a green Vercel build alone while shipping
+# a type error, a lint regression, or a broken test. Every command here was
+# verified locally to run cleanly with zero environment variables/secrets
+# (lib/env.ts only warns on missing API keys, never throws; `prisma
+# generate` doesn't need DATABASE_URL; every test file that touches
+# Firebase/Firestore mocks @/lib/firebase/admin at the module level — see
+# the PR description for the full audit), so nothing here needs production
+# credentials.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# Cancel a superseded run when a PR gets new commits, so we're never paying
+# for or blocking on stale runs.
+concurrency:
+  group: quality-gate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Quality Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          # Matches package.json's "engines.node": "24.x".
+          node-version: "24.x"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npx jest --runInBand
