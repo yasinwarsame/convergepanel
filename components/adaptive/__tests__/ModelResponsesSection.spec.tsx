@@ -78,8 +78,19 @@ describe("ModelResponsesSection", () => {
     expect(html).toMatch(/returned an incompatible format and was excluded/i);
   });
 
-  it("renders nothing (not a crash) when there are no results at all", () => {
+  it("Phase 2A — clearly represents the absence of raw model responses (never fabricates them) when results is empty, instead of silently rendering nothing", () => {
     const html = renderToStaticMarkup(createElement(ModelResponsesSection, { schema, results: [] }));
-    expect(html).toBe("");
+    // The section itself still renders — collapsed, per every other section's convention —
+    // so a reader who expands it sees an explicit explanation, not a vanished section.
+    expect(html).toMatch(/<details/);
+    expect(html).not.toMatch(/<details[^>]*\bopen\b/);
+    expect(html).toMatch(/aren&#x27;t saved for this schema|isn't available|not available/i);
+    // Never a raw JSON dump or fabricated model entry standing in for the missing data.
+    expect(html).not.toMatch(/"modelId"|"data":/);
+  });
+
+  it("does not crash and produces no visible model cards when results is empty", () => {
+    const html = renderToStaticMarkup(createElement(ModelResponsesSection, { schema, results: [] }));
+    expect(html).not.toMatch(/Raw model output \(/);
   });
 });

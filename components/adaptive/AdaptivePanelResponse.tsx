@@ -229,9 +229,25 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
   // always be present here (orchestrate.ts always computes it for this
   // schema), but fail safe to the generic view rather than crash if it's
   // ever missing.
+  //
+  // Adaptive Synthesis Report, Phase 2A (batch 1) — Model Responses/Panel
+  // Evidence/Review & Governance render below the primary view, never
+  // replacing it, same pattern comparison_matrix established in the pilot.
   if (schema.renderHint === "definition_card") {
     if (definitionExplanation) {
-      return withBar(<DefinitionExplanationView definitionExplanation={definitionExplanation} />);
+      return withBar(
+        <div className="space-y-4">
+          <DefinitionExplanationView definitionExplanation={definitionExplanation} />
+          <ModelResponsesSection schema={schema} results={results} />
+          <PanelEvidenceSection schemaId={schema.id} definitionExplanation={definitionExplanation} modelsUsed={results.map((r) => r.modelId)} />
+          <ReviewGovernanceSection
+            humanReview={props.humanReview}
+            reviewRouting={props.reviewRouting}
+            persistenceStatus={props.persistenceStatus}
+            runId={runId}
+          />
+        </div>
+      );
     }
     return withBar(<AdaptiveResultsView {...props} />);
   }
@@ -243,9 +259,24 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
   // always be present here (orchestrate.ts always computes it for this
   // schema), but fail safe to the generic view rather than crash if it's
   // ever missing.
+  //
+  // Adaptive Synthesis Report, Phase 2A (batch 1) — same secondary-section
+  // pattern as definition_card above.
   if (schema.renderHint === "causal_map") {
     if (causalExplanation) {
-      return withBar(<CausalExplanationView causalExplanation={causalExplanation} riskLevel={classification.riskLevel} />);
+      return withBar(
+        <div className="space-y-4">
+          <CausalExplanationView causalExplanation={causalExplanation} riskLevel={classification.riskLevel} />
+          <ModelResponsesSection schema={schema} results={results} />
+          <PanelEvidenceSection schemaId={schema.id} causalExplanation={causalExplanation} modelsUsed={results.map((r) => r.modelId)} />
+          <ReviewGovernanceSection
+            humanReview={props.humanReview}
+            reviewRouting={props.reviewRouting}
+            persistenceStatus={props.persistenceStatus}
+            runId={runId}
+          />
+        </div>
+      );
     }
     return withBar(<AdaptiveResultsView {...props} />);
   }
@@ -279,9 +310,23 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
   // certainty score. deepResearch should always be present here
   // (orchestrate.ts always computes it for this schema), but fail safe to
   // the generic view rather than crash if it's ever missing.
+  // Adaptive Synthesis Report, Phase 2A (batch 1) — same secondary-section
+  // pattern as definition_card/causal_map above.
   if (schema.renderHint === "deep_research_view") {
     if (deepResearch) {
-      return withBar(<DeepResearchView deepResearch={deepResearch} />);
+      return withBar(
+        <div className="space-y-4">
+          <DeepResearchView deepResearch={deepResearch} />
+          <ModelResponsesSection schema={schema} results={results} />
+          <PanelEvidenceSection schemaId={schema.id} deepResearch={deepResearch} modelsUsed={results.map((r) => r.modelId)} />
+          <ReviewGovernanceSection
+            humanReview={props.humanReview}
+            reviewRouting={props.reviewRouting}
+            persistenceStatus={props.persistenceStatus}
+            runId={runId}
+          />
+        </div>
+      );
     }
     return withBar(<AdaptiveResultsView {...props} />);
   }
@@ -315,9 +360,23 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
   // decision-certainty score. decisionSupport should always be present here
   // (orchestrate.ts always computes it for this schema), but fail safe to
   // the generic view rather than crash if it's ever missing.
+  // Adaptive Synthesis Report, Phase 2A (batch 1) — same secondary-section
+  // pattern as definition_card/causal_map/deep_research_view above.
   if (schema.renderHint === "decision_support_view") {
     if (decisionSupport) {
-      return withBar(<DecisionSupportView decisionSupport={decisionSupport} />);
+      return withBar(
+        <div className="space-y-4">
+          <DecisionSupportView decisionSupport={decisionSupport} />
+          <ModelResponsesSection schema={schema} results={results} />
+          <PanelEvidenceSection schemaId={schema.id} decisionSupport={decisionSupport} modelsUsed={results.map((r) => r.modelId)} />
+          <ReviewGovernanceSection
+            humanReview={props.humanReview}
+            reviewRouting={props.reviewRouting}
+            persistenceStatus={props.persistenceStatus}
+            runId={runId}
+          />
+        </div>
+      );
     }
     return withBar(<AdaptiveResultsView {...props} />);
   }

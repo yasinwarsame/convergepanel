@@ -86,9 +86,29 @@ function FieldValue({ field, value }: { field: FieldSpec; value: unknown }) {
   return Array.isArray(value) ? <GenericObjectArrayList items={value as Record<string, unknown>[]} /> : null;
 }
 
+/**
+ * Phase 2A — raw per-model output is never persisted for the Milestone-2
+ * schema family (PersistedAdaptiveOutputV1 stores only the single
+ * aggregated `result`, deliberately — see persistedOutput.ts's module doc),
+ * so a History-reopened run for any of these schemas always passes
+ * `results: []` here. Rather than silently render nothing (the pilot's
+ * original behavior, which just made the whole "Model Responses" section
+ * vanish on reload with no explanation), say so plainly — "do not fabricate
+ * them, clearly represent their absence instead" applies to a missing
+ * SECTION just as much as to missing content inside one.
+ */
+function RawResponsesUnavailableNotice() {
+  return (
+    <p className="text-sm text-slate-500 italic">
+      Raw per-model responses aren&apos;t saved for this schema, so they&apos;re not available on a reopened run — only the finished result
+      above and in Panel Evidence is preserved.
+    </p>
+  );
+}
+
 function RawModelOutputList({ schema, results }: { schema: ResultSchema; results: AdaptiveModelResult[] }) {
   const { ok, failed } = splitResults(results);
-  if (ok.length === 0 && failed.length === 0) return null;
+  if (ok.length === 0 && failed.length === 0) return <RawResponsesUnavailableNotice />;
 
   return (
     <div>
@@ -129,9 +149,6 @@ export interface ModelResponsesSectionProps {
 }
 
 export default function ModelResponsesSection({ schema, results, listView }: ModelResponsesSectionProps) {
-  const { ok, failed } = splitResults(results);
-  if (ok.length === 0 && failed.length === 0 && !listView) return null;
-
   return (
     <details className="rounded-xl border border-slate-200 bg-white px-4 py-3">
       <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-slate-500">Model Responses</summary>
