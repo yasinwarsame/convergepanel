@@ -42,7 +42,14 @@ import { buildEvidenceReviewResult, extractEvidenceReviewFields } from "./eviden
 import { buildBiasBlindspotAuditResult, extractBiasBlindspotFields } from "./biasBlindspotAlignment";
 import { buildDecisionSupportResult, extractDecisionSupportFields } from "./decisionSupportAlignment";
 import { AdaptiveSchemaResult, buildCommonResponseMeta } from "./commonResponseMeta";
-import { PersistedAdaptiveOutputV1, PersistedAdaptiveSchemaId, PersistedLegacyAdaptiveOutputV1, SCHEMA_ANSWER_SHAPE } from "./persistedOutput";
+import {
+  isPersistedLegacyAdaptiveSchemaId,
+  PersistedAdaptiveOutputV1,
+  PersistedAdaptiveSchemaId,
+  PersistedLegacyAdaptiveOutputV1,
+  PersistedLegacyAdaptiveSchemaId,
+  SCHEMA_ANSWER_SHAPE,
+} from "./persistedOutput";
 import { scoreAgreement } from "./agreementComparators";
 import { scoreClaimCertainty, computeRunCertainty } from "./scoring";
 import { computeAdaptiveGate, AdaptiveGateResult } from "./gate";
@@ -126,28 +133,42 @@ function attachAdaptiveEnvelope(
 }
 
 /**
- * Phase 2 pilot history-reload fix — the `procedural`-only sibling of
- * `attachAdaptiveEnvelope` above. Not merged into that function: it takes
- * the claim-matrix pipeline's own outputs (`alignedClaims`/`gate`/
- * `synthesisReport`/`trustSummary`) rather than a single aggregated
- * Milestone-2 `schemaResult`, and returns `PersistedLegacyAdaptiveOutputV1`
- * — a distinct type, see persistedOutput.ts for why. Same
- * `!classification` guard as `attachAdaptiveEnvelope` (persistence only
- * ever applies to a real, classified run).
+ * Phase 2 pilot history-reload fix — the sibling of `attachAdaptiveEnvelope`
+ * above for the legacy-active schema family. Not merged into that function:
+ * it takes the claim-matrix pipeline's own outputs
+ * (`alignedClaims`/`gate`/`synthesisReport`/`trustSummary`) rather than a
+ * single aggregated Milestone-2 `schemaResult`, and returns
+ * `PersistedLegacyAdaptiveOutputV1` — a distinct type, see
+ * persistedOutput.ts for why. Same `!classification` guard as
+ * `attachAdaptiveEnvelope` (persistence only ever applies to a real,
+ * classified run).
+ *
+ * Batch 3 persistence foundation (2C-1) — originally hardcoded to
+ * `schemaId: "procedural"` (Phase 2 pilot); `schemaId` is now the caller's
+ * own `schema.id`, already narrowed to `PersistedLegacyAdaptiveSchemaId` at
+ * both call sites below. No recomputation — this packages exactly the
+ * already-computed claims-matrix result for persistence, same as before.
+ *
+ * `gate`/`synthesisReport`/`trustSummary` are optional parameters: the
+ * empty-`alignedClaims` call site below (creative_generative's actual live
+ * behavior — see persistedOutput.ts's interface doc) never computes them at
+ * all, and passes `undefined` through rather than fabricating placeholder
+ * values.
  */
 function attachLegacyAdaptiveEnvelope(
+  schemaId: PersistedLegacyAdaptiveSchemaId,
   classification: QueryClassification | undefined,
   adaptiveResults: AdaptiveModelResult[],
   alignedClaims: AlignedClaim[],
-  gate: AdaptiveGateResult,
-  synthesisReport: AdaptiveSynthesisReport,
-  trustSummary: AdaptiveTrustSummary
+  gate?: AdaptiveGateResult,
+  synthesisReport?: AdaptiveSynthesisReport,
+  trustSummary?: AdaptiveTrustSummary
 ): { persistedLegacyOutput?: PersistedLegacyAdaptiveOutputV1 } {
   if (!classification) return {};
 
   const persistedLegacyOutput: PersistedLegacyAdaptiveOutputV1 = {
     version: 1,
-    schemaId: "procedural",
+    schemaId,
     classification,
     generatedAt: new Date().toISOString(),
     results: adaptiveResults,
@@ -693,7 +714,16 @@ export async function finalizeAdaptiveRun(
   alignedClaims.push(...buildNonClaimRows(schema, adaptiveResults));
 
   if (alignedClaims.length === 0) {
-    return { schemaId: schema.id, adaptiveResults };
+    // Batch 3 persistence foundation (2C-1) — a schema with no
+    // claim/metric/scenario/step/scalar-alignment fields (today, only
+    // creative_generative) never computes gate/synthesisReport, live or
+    // historical; still attach the envelope so its raw per-model results
+    // persist for History parity, matching what AdaptivePanelResponse.tsx's
+    // existing `!gate || !synthesisReport` fallback already renders live.
+    const legacyEnvelope = isPersistedLegacyAdaptiveSchemaId(schema.id)
+      ? attachLegacyAdaptiveEnvelope(schema.id, classification, adaptiveResults, alignedClaims)
+      : {};
+    return { schemaId: schema.id, adaptiveResults, ...legacyEnvelope };
   }
 
   if (!ADAPTIVE_VERIFICATION_ENABLED) {
@@ -710,15 +740,15 @@ export async function finalizeAdaptiveRun(
   const synthesisReport = await buildAdaptiveSynthesisReport(question || "", schema.id, scored, results);
   const trustSummary = buildAdaptiveTrustSummary(schema, adaptiveResults, scored);
 
-  // Phase 2 pilot history-reload fix — narrowly scoped to schema.id ===
-  // "procedural" only (the one legacy-active schema this pilot needs
-  // history parity for; see persistedLegacyOutput's doc on
-  // AdaptivePanelResult). Every other legacy-active schema's return here
-  // is unchanged from before this fix.
-  const legacyEnvelope =
-    schema.id === "procedural"
-      ? attachLegacyAdaptiveEnvelope(classification, adaptiveResults, scored, gate, synthesisReport, trustSummary)
-      : {};
+  // Batch 3 persistence foundation (2C-1) — originally narrowly scoped to
+  // schema.id === "procedural" only (Phase 2 pilot); now covers the full
+  // 8-member legacy-active family (isPersistedLegacyAdaptiveSchemaId), per
+  // docs/adaptive-synthesis-batch3-persistence-audit.md. Every schema in
+  // that family reaches this exact same claims-matrix fall-through, so no
+  // other branching changes — only which schemas get the envelope widens.
+  const legacyEnvelope = isPersistedLegacyAdaptiveSchemaId(schema.id)
+    ? attachLegacyAdaptiveEnvelope(schema.id, classification, adaptiveResults, scored, gate, synthesisReport, trustSummary)
+    : {};
 
   return {
     schemaId: schema.id,

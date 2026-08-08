@@ -9,7 +9,15 @@
  * survive round-trip, and the parser never throws regardless of input shape.
  */
 
-import { parsePersistedAdaptiveOutput, parsePersistedLegacyAdaptiveOutput, PersistedAdaptiveSchemaId, SCHEMA_ANSWER_SHAPE } from "@/lib/adaptiveSchema/persistedOutput";
+import {
+  isPersistedLegacyAdaptiveSchemaId,
+  parsePersistedAdaptiveOutput,
+  parsePersistedLegacyAdaptiveOutput,
+  PERSISTED_LEGACY_ADAPTIVE_SCHEMA_IDS,
+  PersistedAdaptiveSchemaId,
+  PersistedLegacyAdaptiveSchemaId,
+  SCHEMA_ANSWER_SHAPE,
+} from "@/lib/adaptiveSchema/persistedOutput";
 
 const BASE_CLASSIFICATION = {
   queryType: "decision_support",
@@ -330,14 +338,61 @@ function buildLegacyEnvelope(overrides: Record<string, unknown> = {}) {
   };
 }
 
-describe("parsePersistedLegacyAdaptiveOutput — procedural-only envelope", () => {
-  it("a well-formed envelope round-trips through JSON and parses as valid", () => {
+describe("isPersistedLegacyAdaptiveSchemaId — Batch 3 persistence foundation (2C-1) type guard", () => {
+  it.each(PERSISTED_LEGACY_ADAPTIVE_SCHEMA_IDS.map((id) => [id]))("returns true for the supported schema '%s'", (id) => {
+    expect(isPersistedLegacyAdaptiveSchemaId(id)).toBe(true);
+  });
+
+  it.each([
+    ["a Milestone-2 schema (comparison_matrix)", "comparison_matrix"],
+    ["generic", "generic"],
+    ["graceful_limitation", "graceful_limitation"],
+    ["an arbitrary unrecognized string", "not_a_real_schema"],
+    ["a non-string value", 42],
+    ["null", null],
+    ["undefined", undefined],
+  ])("returns false for %s — this allowlist is deliberately not 'every QueryType'", (_label, value) => {
+    expect(isPersistedLegacyAdaptiveSchemaId(value)).toBe(false);
+  });
+
+  it("exposes exactly the 8 documented schema IDs — procedural plus the 7 remaining Batch 3 schemas, no more, no fewer", () => {
+    expect([...PERSISTED_LEGACY_ADAPTIVE_SCHEMA_IDS].sort()).toEqual(
+      [
+        "procedural",
+        "contested_empirical",
+        "legal_regulatory",
+        "financial_valuation",
+        "factual_lookup",
+        "medical_health",
+        "forecast_speculative",
+        "creative_generative",
+      ].sort()
+    );
+  });
+});
+
+describe("parsePersistedLegacyAdaptiveOutput — legacy-active schema family envelope (widened in Batch 3 persistence foundation, 2C-1)", () => {
+  it("a well-formed procedural envelope round-trips through JSON and parses as valid", () => {
     const parsed = parsePersistedLegacyAdaptiveOutput(roundTrip(buildLegacyEnvelope()));
     expect(parsed.ok).toBe(true);
     if (parsed.ok) {
       expect(parsed.output.schemaId).toBe("procedural");
       expect(parsed.output.results).toHaveLength(1);
       expect(parsed.output.synthesisReport.unifiedAnswer).toBe("Do the thing in order.");
+    }
+  });
+
+  it.each(
+    PERSISTED_LEGACY_ADAPTIVE_SCHEMA_IDS.filter((id) => id !== "procedural").map((id) => [id])
+  )("a well-formed envelope for the Batch 3 schema '%s' round-trips through JSON and parses as valid, with schema identity surviving", (id) => {
+    const parsed = parsePersistedLegacyAdaptiveOutput(roundTrip(buildLegacyEnvelope({ schemaId: id })));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.output.schemaId).toBe(id);
+      expect(parsed.output.alignedClaims).toEqual([]);
+      expect(parsed.output.gate).toEqual(LEGACY_GATE);
+      expect(parsed.output.synthesisReport.unifiedAnswer).toBe("Do the thing in order.");
+      expect(parsed.output.trustSummary).toEqual({ perModel: [], overallTrust: 0.8 });
     }
   });
 
@@ -348,7 +403,7 @@ describe("parsePersistedLegacyAdaptiveOutput — procedural-only envelope", () =
     expect(parsed.ok).toBe(true);
   });
 
-  it("returns 'absent' for null or undefined — the expected, common case for every procedural run made before this fix shipped", () => {
+  it("returns 'absent' for null or undefined — the expected, common case for every run made before this fix shipped (procedural before Phase 2, and every Batch 3 schema before 2C-1)", () => {
     expect(parsePersistedLegacyAdaptiveOutput(null)).toEqual({ ok: false, reason: "absent" });
     expect(parsePersistedLegacyAdaptiveOutput(undefined)).toEqual({ ok: false, reason: "absent" });
   });
@@ -357,8 +412,13 @@ describe("parsePersistedLegacyAdaptiveOutput — procedural-only envelope", () =
     expect(parsePersistedLegacyAdaptiveOutput(buildLegacyEnvelope({ version: 2 }))).toEqual({ ok: false, reason: "unsupported_version" });
   });
 
-  it("rejects a schemaId other than 'procedural' (this envelope is deliberately scoped to one schema only)", () => {
-    expect(parsePersistedLegacyAdaptiveOutput(buildLegacyEnvelope({ schemaId: "generic" }))).toEqual({ ok: false, reason: "malformed" });
+  it.each([
+    ["a Milestone-2 schema (comparison_matrix)", "comparison_matrix"],
+    ["generic", "generic"],
+    ["graceful_limitation", "graceful_limitation"],
+    ["an arbitrary unrecognized string", "not_a_real_schema"],
+  ])("rejects a schemaId outside the supported allowlist (%s) — this envelope is deliberately scoped to the 8-member legacy-active family, not every QueryType", (_label, schemaId) => {
+    expect(parsePersistedLegacyAdaptiveOutput(buildLegacyEnvelope({ schemaId }))).toEqual({ ok: false, reason: "malformed" });
   });
 
   it.each([
