@@ -26,9 +26,24 @@ import { ModelId } from "@/lib/types";
 const HONESTY_BANNER =
   "No model has live query-log data. This ranking reflects what the panel independently estimates to be most important, relevant, or common. Treat it as an informed estimate, not measured search or usage data.";
 
+/**
+ * Phase 2B — below this population variance of an item's per-model ranks,
+ * models are treated as having placed it at materially different
+ * positions, not just off by one. Same 0/round-number-threshold idiom
+ * reportSummary.ts's tierFromRatio already uses elsewhere in this schema
+ * family — reused as-is by PanelEvidenceSection's full disputed-rank list
+ * so the primary-view badge and the secondary-section list never disagree
+ * about which items count as disputed.
+ */
+export const RANK_DISAGREEMENT_MIN_VARIANCE = 1;
+
+/** How close two adjacent items' coverageRatio must be (already-computed field, no new scoring) to call the top of the list a close call rather than a clear lead. */
+const CLOSE_CALL_MAX_COVERAGE_GAP = 0.15;
+
 function RankItemRow({ item }: { item: AggregatedEnumItem }) {
   const modelIds = Object.keys(item.sourceRanks) as ModelId[];
   const hasSources = !!item.sources && item.sources.length > 0;
+  const hasRankDisagreement = item.rankVariance !== undefined && item.rankVariance >= RANK_DISAGREEMENT_MIN_VARIANCE;
   return (
     <li className="flex items-start gap-3 py-2.5 border-b border-slate-100 last:border-0">
       <span className="mt-0.5 shrink-0 inline-flex h-6 w-6 items-center justify-center rounded-full bg-sky-50 text-xs font-semibold text-sky-700 border border-sky-200">
@@ -45,6 +60,11 @@ function RankItemRow({ item }: { item: AggregatedEnumItem }) {
           <TintBadge tone={item.coverageRatio >= 0.6 ? "accent" : "warning"}>
             {formatModelCoverage({ covered: item.coverageCount, total: item.totalModels, mode: "covered" })}
           </TintBadge>
+          {hasRankDisagreement && (
+            <TintBadge tone="danger" title="Models that covered this item placed it at noticeably different ranks — see Panel Evidence for the full list.">
+              Rank disputed
+            </TintBadge>
+          )}
         </div>
         {item.rationale && <p className="mt-1 text-xs text-slate-600">{item.rationale}</p>}
         <div className="mt-1.5 flex flex-wrap items-center gap-1">
@@ -77,11 +97,23 @@ export default function RankedListView({ rankedEnumeration }: { rankedEnumeratio
     return <EmptyStateCard state="no_models" />;
   }
 
+  const isCloseCall =
+    items.length >= 2 && Math.abs(items[0].coverageRatio - items[1].coverageRatio) <= CLOSE_CALL_MAX_COVERAGE_GAP;
+
   return (
     <div className="space-y-3">
       <Card className="bg-sky-50/60 border-sky-200">
         <p className="text-xs text-sky-900 leading-relaxed">{HONESTY_BANNER}</p>
       </Card>
+
+      {isCloseCall && (
+        <Card className="bg-amber-50 border-amber-200">
+          <p className="text-xs text-amber-900 leading-relaxed">
+            The top two items had closely matched model coverage — treat &ldquo;{items[0].label}&rdquo; as narrowly ahead of &ldquo;
+            {items[1].label}&rdquo;, not a clear-cut lead.
+          </p>
+        </Card>
+      )}
 
       {shortfallNote && (
         <Card className="bg-amber-50 border-amber-200">

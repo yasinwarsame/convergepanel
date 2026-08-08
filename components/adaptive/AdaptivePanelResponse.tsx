@@ -188,9 +188,24 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
   // rankedEnumeration should always be present here (orchestrate.ts always
   // computes it for this schema), but fail safe to the generic view rather
   // than crash if it's ever missing.
+  //
+  // Adaptive Synthesis Report, Phase 2B (batch 2) — same secondary-section
+  // pattern as the batch 1 schemas above.
   if (schema.renderHint === "ranked_list") {
     if (rankedEnumeration) {
-      return withBar(<RankedListView rankedEnumeration={rankedEnumeration} />);
+      return withBar(
+        <div className="space-y-4">
+          <RankedListView rankedEnumeration={rankedEnumeration} />
+          <ModelResponsesSection schema={schema} results={results} />
+          <PanelEvidenceSection schemaId={schema.id} rankedEnumeration={rankedEnumeration} modelsUsed={results.map((r) => r.modelId)} />
+          <ReviewGovernanceSection
+            humanReview={props.humanReview}
+            reviewRouting={props.reviewRouting}
+            persistenceStatus={props.persistenceStatus}
+            runId={runId}
+          />
+        </div>
+      );
     }
     return withBar(<AdaptiveResultsView {...props} />);
   }
@@ -287,6 +302,15 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
   // always be present here (orchestrate.ts always computes it for this
   // schema), but fail safe to the generic view rather than crash if it's
   // ever missing.
+  //
+  // Adaptive Synthesis Report, Phase 2B (batch 2) — same secondary-section
+  // pattern as the other batch 1/batch 2 schemas, added to BOTH the
+  // risk-shaped and plain-checklist primary views. isRiskShapedChecklistResult
+  // still decides ONLY which primary view renders (RiskAnalysisView vs
+  // ChecklistTaxonomyView) — never re-derived, never used to decide whether
+  // secondary sections exist (they always do, for both paths). Panel Evidence
+  // reads that same isRiskShapedChecklistResult check itself to pick its own
+  // matching tally, so the two presentations stay visibly distinct end to end.
   if (schema.renderHint === "checklist_taxonomy_view") {
     if (checklistTaxonomy) {
       // A checklist_taxonomy result whose items are genuinely risks (severity/
@@ -294,11 +318,21 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
       // instead of a bare checklist — see isRiskShapedChecklistResult's doc
       // comment for why this stays checklist_taxonomy rather than a new schema.
       return withBar(
-        isRiskShapedChecklistResult(checklistTaxonomy) ? (
-          <RiskAnalysisView checklistTaxonomy={checklistTaxonomy} />
-        ) : (
-          <ChecklistTaxonomyView checklistTaxonomy={checklistTaxonomy} />
-        )
+        <div className="space-y-4">
+          {isRiskShapedChecklistResult(checklistTaxonomy) ? (
+            <RiskAnalysisView checklistTaxonomy={checklistTaxonomy} />
+          ) : (
+            <ChecklistTaxonomyView checklistTaxonomy={checklistTaxonomy} />
+          )}
+          <ModelResponsesSection schema={schema} results={results} />
+          <PanelEvidenceSection schemaId={schema.id} checklistTaxonomy={checklistTaxonomy} modelsUsed={results.map((r) => r.modelId)} />
+          <ReviewGovernanceSection
+            humanReview={props.humanReview}
+            reviewRouting={props.reviewRouting}
+            persistenceStatus={props.persistenceStatus}
+            runId={runId}
+          />
+        </div>
       );
     }
     return withBar(<AdaptiveResultsView {...props} />);
@@ -336,9 +370,24 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
   // certainty score. evidenceReview should always be present here
   // (orchestrate.ts always computes it for this schema), but fail safe to
   // the generic view rather than crash if it's ever missing.
+  //
+  // Adaptive Synthesis Report, Phase 2B (batch 2) — same secondary-section
+  // pattern as the other batch 1/batch 2 schemas above.
   if (schema.renderHint === "evidence_review_view") {
     if (evidenceReview) {
-      return withBar(<EvidenceReviewView evidenceReview={evidenceReview} riskLevel={classification.riskLevel} />);
+      return withBar(
+        <div className="space-y-4">
+          <EvidenceReviewView evidenceReview={evidenceReview} riskLevel={classification.riskLevel} />
+          <ModelResponsesSection schema={schema} results={results} />
+          <PanelEvidenceSection schemaId={schema.id} evidenceReview={evidenceReview} modelsUsed={results.map((r) => r.modelId)} />
+          <ReviewGovernanceSection
+            humanReview={props.humanReview}
+            reviewRouting={props.reviewRouting}
+            persistenceStatus={props.persistenceStatus}
+            runId={runId}
+          />
+        </div>
+      );
     }
     return withBar(<AdaptiveResultsView {...props} />);
   }
@@ -348,9 +397,24 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
   // biasBlindspotAudit should always be present here (orchestrate.ts
   // always computes it for this schema), but fail safe to the generic view
   // rather than crash if it's ever missing.
+  //
+  // Adaptive Synthesis Report, Phase 2B (batch 2) — same secondary-section
+  // pattern as the other batch 1/batch 2 schemas above.
   if (schema.renderHint === "bias_blindspot_audit_view") {
     if (biasBlindspotAudit) {
-      return withBar(<BiasBlindspotAuditView biasBlindspotAudit={biasBlindspotAudit} onRunFollowUp={onRunFollowUp} />);
+      return withBar(
+        <div className="space-y-4">
+          <BiasBlindspotAuditView biasBlindspotAudit={biasBlindspotAudit} onRunFollowUp={onRunFollowUp} />
+          <ModelResponsesSection schema={schema} results={results} />
+          <PanelEvidenceSection schemaId={schema.id} biasBlindspotAudit={biasBlindspotAudit} modelsUsed={results.map((r) => r.modelId)} />
+          <ReviewGovernanceSection
+            humanReview={props.humanReview}
+            reviewRouting={props.reviewRouting}
+            persistenceStatus={props.persistenceStatus}
+            runId={runId}
+          />
+        </div>
+      );
     }
     return withBar(<AdaptiveResultsView {...props} />);
   }
