@@ -9,11 +9,15 @@ import PanelEvidenceSection from "@/components/adaptive/PanelEvidenceSection";
 import {
   AdaptiveGateResult,
   AdaptiveSynthesisReport,
+  BiasBlindspotAuditResult,
   CausalExplanationResult,
+  ChecklistTaxonomyResult,
   ComparisonMatrixResult,
   DecisionSupportResult,
   DeepResearchResult,
   DefinitionExplanationResult,
+  EvidenceReviewResult,
+  RankedEnumerationResult,
 } from "@/lib/adaptiveSchema/types";
 import { ModelId } from "@/lib/types";
 
@@ -471,6 +475,234 @@ describe("PanelEvidenceSection — Phase 2A batch 1 (deep_research/decision_supp
       { schemaId: "decision_support" as const, decisionSupport: decisionSupportFixture() },
       { schemaId: "causal_explanation" as const, causalExplanation: causalExplanationFixture() },
       { schemaId: "definition_explanation" as const, definitionExplanation: definitionExplanationFixture() },
+    ]) {
+      const html = renderToStaticMarkup(createElement(PanelEvidenceSection, { ...props, modelsUsed: ["chatgpt"] as ModelId[] }));
+      expect(html).toMatch(/<details/);
+      expect(html).not.toMatch(/<details[^>]*\bopen\b/);
+    }
+  });
+});
+
+describe("PanelEvidenceSection — Phase 2B batch 2 (ranked_enumeration/checklist_taxonomy/evidence_review/bias_blindspot_audit)", () => {
+  function rankedEnumerationFixture(overrides: Partial<RankedEnumerationResult> = {}): RankedEnumerationResult {
+    return {
+      items: [
+        { id: "a", label: "Item A", panelRank: 1, coverageCount: 2, totalModels: 2, coverageRatio: 1, sourceRanks: { chatgpt: 1, claude: 1 } as any, rankVariance: 0 },
+        { id: "b", label: "Item B", panelRank: 2.5, coverageCount: 2, totalModels: 2, coverageRatio: 1, sourceRanks: { chatgpt: 2, claude: 3 } as any, rankVariance: 0.25 },
+      ],
+      lowConfidenceItems: [],
+      requestedCount: null,
+      actualCount: 2,
+      rankCorrelation: 0.8,
+      hasLiveQueryLogData: false,
+      totalModels: 2,
+      ...overrides,
+    };
+  }
+
+  it("ranked_enumeration: tallies items by coverage tier and notes when no item has disputed rank", () => {
+    const html = renderToStaticMarkup(
+      createElement(PanelEvidenceSection, {
+        schemaId: "ranked_enumeration",
+        rankedEnumeration: rankedEnumerationFixture(),
+        modelsUsed: ["chatgpt", "claude"] as ModelId[],
+      })
+    );
+    expect(html).toMatch(/item coverage/i);
+    expect(html).toMatch(/strong coverage.*2/i);
+    expect(html).toMatch(/did not place any item at materially different ranks/i);
+  });
+
+  it("ranked_enumeration: lists items with disputed rank in full, using the same variance threshold the primary view badge uses", () => {
+    const html = renderToStaticMarkup(
+      createElement(PanelEvidenceSection, {
+        schemaId: "ranked_enumeration",
+        rankedEnumeration: rankedEnumerationFixture({
+          items: [
+            { id: "a", label: "Item A", panelRank: 1, coverageCount: 2, totalModels: 2, coverageRatio: 1, sourceRanks: { chatgpt: 1, claude: 4 } as any, rankVariance: 2.25 },
+          ],
+        }),
+        modelsUsed: ["chatgpt", "claude"] as ModelId[],
+      })
+    );
+    expect(html).toMatch(/models disagreed on the exact rank/i);
+    expect(html).toContain("Item A");
+    expect(html).toMatch(/rank variance 2\.25/);
+  });
+
+  function checklistTaxonomyFixture(overrides: Partial<ChecklistTaxonomyResult> = {}): ChecklistTaxonomyResult {
+    return {
+      summary: "s",
+      categories: [
+        {
+          category: "General",
+          items: [
+            { id: "i1", label: "Item 1", category: "General", critical: true, coverageCount: 2, totalModels: 2, coverageRatio: 1, contributingModels: ["chatgpt", "claude"] as any },
+            { id: "i2", label: "Item 2", category: "General", critical: false, coverageCount: 1, totalModels: 2, coverageRatio: 0.5, contributingModels: ["chatgpt"] as any },
+          ],
+        },
+      ],
+      lowConfidenceItems: [],
+      notes: [],
+      totalModels: 2,
+      ...overrides,
+    };
+  }
+
+  it("checklist_taxonomy (plain): tallies items by coverage tier and reports the critical-item count", () => {
+    const html = renderToStaticMarkup(
+      createElement(PanelEvidenceSection, {
+        schemaId: "checklist_taxonomy",
+        checklistTaxonomy: checklistTaxonomyFixture(),
+        modelsUsed: ["chatgpt", "claude"] as ModelId[],
+      })
+    );
+    expect(html).toMatch(/item coverage/i);
+    expect(html).toMatch(/1 of 2 items? (is|are) flagged must-have\/blocking/i);
+    // The plain-checklist branch must never show a severity tally — that's the risk-shaped branch's own vocabulary.
+    expect(html).not.toMatch(/risk severity/i);
+  });
+
+  it("checklist_taxonomy (risk-shaped): tallies items by severity instead of coverage tier, proving the two branches stay visibly distinct", () => {
+    const riskChecklist = checklistTaxonomyFixture({
+      categories: [
+        {
+          category: "General",
+          items: [
+            { id: "r1", label: "Risk 1", category: "General", critical: false, coverageCount: 1, totalModels: 2, coverageRatio: 0.5, contributingModels: ["chatgpt"] as any, severity: "high", mitigation: "Do X" },
+            { id: "r2", label: "Risk 2", category: "General", critical: false, coverageCount: 1, totalModels: 2, coverageRatio: 0.5, contributingModels: ["claude"] as any, severity: "critical" },
+          ],
+        },
+      ],
+    });
+    const html = renderToStaticMarkup(
+      createElement(PanelEvidenceSection, {
+        schemaId: "checklist_taxonomy",
+        checklistTaxonomy: riskChecklist,
+        modelsUsed: ["chatgpt", "claude"] as ModelId[],
+      })
+    );
+    expect(html).toMatch(/risk severity/i);
+    expect(html).toMatch(/critical.*1/i);
+    expect(html).toMatch(/high.*1/i);
+    expect(html).toMatch(/1 of 2 risks? (has|have) no stated mitigation/i);
+    // The risk-shaped branch must never show the plain-checklist "must-have/blocking" tally.
+    expect(html).not.toMatch(/flagged must-have\/blocking/i);
+  });
+
+  function evidenceReviewFixture(overrides: Partial<EvidenceReviewResult> = {}): EvidenceReviewResult {
+    return {
+      overallAssessment: "Moderately strong evidence.",
+      overallStrength: "moderate",
+      dimensions: [
+        { id: "d1", dimension: "Sample size", assessment: "Large sample.", strength: "strong", coverageCount: 2, totalModels: 2, coverageRatio: 1, contributingModels: ["chatgpt", "claude"] as any },
+        { id: "d2", dimension: "Peer review", assessment: "Not peer reviewed.", strength: "weak", coverageCount: 2, totalModels: 2, coverageRatio: 1, contributingModels: ["chatgpt", "claude"] as any },
+      ],
+      lowConfidenceDimensions: [],
+      redFlags: [],
+      strengths: [],
+      applicabilityCaveats: [],
+      recommendedChecks: [],
+      sourceBacked: true,
+      totalModels: 2,
+      ...overrides,
+    };
+  }
+
+  it("evidence_review: tallies dimensions by evidence strength — high model consensus never gets promoted to strong evidence", () => {
+    // Two dimensions, both with full 2-of-2 coverage (consensus), but one is
+    // explicitly "weak" evidence — the tally must reflect the WEAK strength,
+    // never blend coverage/consensus into a stronger-looking evidence read.
+    const html = renderToStaticMarkup(
+      createElement(PanelEvidenceSection, {
+        schemaId: "evidence_review",
+        evidenceReview: evidenceReviewFixture(),
+        modelsUsed: ["chatgpt", "claude"] as ModelId[],
+      })
+    );
+    expect(html).toMatch(/dimension evidence strength/i);
+    expect(html).toMatch(/strong.*1/i);
+    expect(html).toMatch(/weak.*1/i);
+  });
+
+  it("evidence_review: lists lower-confidence dimensions in full (not just a count) when present", () => {
+    const html = renderToStaticMarkup(
+      createElement(PanelEvidenceSection, {
+        schemaId: "evidence_review",
+        evidenceReview: evidenceReviewFixture({
+          lowConfidenceDimensions: [
+            { id: "d3", dimension: "Funding disclosure", assessment: "Raised by only one model.", strength: "unknown", coverageCount: 1, totalModels: 3, coverageRatio: 0.33, contributingModels: ["chatgpt"] as any },
+          ],
+        }),
+        modelsUsed: ["chatgpt", "claude", "grok"] as ModelId[],
+      })
+    );
+    expect(html).toMatch(/lower-confidence dimensions/i);
+    expect(html).toContain("Funding disclosure");
+    expect(html).toContain("Raised by only one model.");
+  });
+
+  function biasBlindspotAuditFixture(overrides: Partial<BiasBlindspotAuditResult> = {}): BiasBlindspotAuditResult {
+    return {
+      summary: "s",
+      attributedBiases: [],
+      biasEmptyReason: "below_threshold",
+      panelBlindSpots: [],
+      sharedAssumptions: [],
+      missingStakeholders: [],
+      structuralDiagnostics: {
+        citationCoverage: { modelsWithSources: 0, totalModels: 2, ratio: 0 },
+        geographicBiasConcerns: [],
+        sourceConcentrationConcerns: [],
+        evidenceTypeConcerns: [],
+        homogeneityFlag: false,
+      },
+      followUpQuestions: [],
+      totalModels: 2,
+      ...overrides,
+    };
+  }
+
+  it("bias_blindspot_audit: reports no Tier 3 concerns when the structural diagnostics found none", () => {
+    const html = renderToStaticMarkup(
+      createElement(PanelEvidenceSection, {
+        schemaId: "bias_blindspot_audit",
+        biasBlindspotAudit: biasBlindspotAuditFixture(),
+        modelsUsed: ["chatgpt", "claude"] as ModelId[],
+      })
+    );
+    expect(html).toMatch(/no geographic, source-concentration, or evidence-type concerns/i);
+  });
+
+  it("bias_blindspot_audit: surfaces Tier 3 concerns explicitly labeled as speculative, never as confirmed bias", () => {
+    const html = renderToStaticMarkup(
+      createElement(PanelEvidenceSection, {
+        schemaId: "bias_blindspot_audit",
+        biasBlindspotAudit: biasBlindspotAuditFixture({
+          structuralDiagnostics: {
+            citationCoverage: { modelsWithSources: 1, totalModels: 2, ratio: 0.5 },
+            geographicBiasConcerns: ["Analysis is US-centric"],
+            sourceConcentrationConcerns: ["All sources are from the same research group"],
+            evidenceTypeConcerns: [],
+            homogeneityFlag: false,
+          },
+        }),
+        modelsUsed: ["chatgpt", "claude"] as ModelId[],
+      })
+    );
+    expect(html).toContain("Analysis is US-centric");
+    expect(html).toContain("All sources are from the same research group");
+    // Must be framed as speculative/deterministic, not asserted as confirmed bias.
+    expect(html).toMatch(/not confirmed bias/i);
+    expect(html).toMatch(/speculative/i);
+  });
+
+  it("all 4 batch-2 branches are collapsed by default, matching every other Panel Evidence branch", () => {
+    for (const props of [
+      { schemaId: "ranked_enumeration" as const, rankedEnumeration: rankedEnumerationFixture() },
+      { schemaId: "checklist_taxonomy" as const, checklistTaxonomy: checklistTaxonomyFixture() },
+      { schemaId: "evidence_review" as const, evidenceReview: evidenceReviewFixture() },
+      { schemaId: "bias_blindspot_audit" as const, biasBlindspotAudit: biasBlindspotAuditFixture() },
     ]) {
       const html = renderToStaticMarkup(createElement(PanelEvidenceSection, { ...props, modelsUsed: ["chatgpt"] as ModelId[] }));
       expect(html).toMatch(/<details/);
