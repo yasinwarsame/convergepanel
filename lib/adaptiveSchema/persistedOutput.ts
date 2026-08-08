@@ -296,16 +296,33 @@ export function parsePersistedLegacyAdaptiveOutput(raw: unknown): ParsePersisted
   if (!Array.isArray(raw.alignedClaims)) {
     return { ok: false, reason: "malformed" };
   }
-  // gate/synthesisReport are optional (see the interface doc above) — when
-  // PRESENT they must still be well-shaped; when absent (creative_generative,
-  // whose live path never computes them either) that's valid, not malformed.
-  if (raw.gate !== undefined && (!isPlainObject(raw.gate) || typeof raw.gate.status !== "string")) {
-    return { ok: false, reason: "malformed" };
-  }
-  if (
-    raw.synthesisReport !== undefined &&
-    (!isPlainObject(raw.synthesisReport) || typeof raw.synthesisReport.unifiedAnswer !== "string")
+  // gate/synthesisReport are optional, but NOT independently of
+  // alignedClaims — orchestrate.ts only ever produces this envelope two
+  // ways: (1) alignedClaims non-empty, scored, WITH gate/synthesisReport
+  // both computed in the same branch, or (2) alignedClaims empty (today,
+  // always creative_generative; in principle any schema whose models
+  // returned no comparable claims at all) with gate/synthesisReport never
+  // computed. "Non-empty alignedClaims with no gate/synthesisReport" is a
+  // combination the real orchestrator can never produce — accepting it
+  // here would silently trust a corrupted or hand-edited record, so it
+  // must fail closed rather than pass through as valid, regardless of
+  // schemaId. This is a structural invariant, not a creative_generative
+  // special case — the check is on alignedClaims.length, never on schemaId.
+  const hasClaims = raw.alignedClaims.length > 0;
+  if (hasClaims) {
+    if (!isPlainObject(raw.gate) || typeof raw.gate.status !== "string") {
+      return { ok: false, reason: "malformed" };
+    }
+    if (!isPlainObject(raw.synthesisReport) || typeof raw.synthesisReport.unifiedAnswer !== "string") {
+      return { ok: false, reason: "malformed" };
+    }
+  } else if (
+    (raw.gate !== undefined && (!isPlainObject(raw.gate) || typeof raw.gate.status !== "string")) ||
+    (raw.synthesisReport !== undefined &&
+      (!isPlainObject(raw.synthesisReport) || typeof raw.synthesisReport.unifiedAnswer !== "string"))
   ) {
+    // Defensive: if a gate/synthesisReport IS present on an empty-claims
+    // record, it must still be well-shaped — never silently accepted.
     return { ok: false, reason: "malformed" };
   }
 

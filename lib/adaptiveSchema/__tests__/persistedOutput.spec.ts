@@ -421,6 +421,72 @@ describe("parsePersistedLegacyAdaptiveOutput — legacy-active schema family env
     expect(parsePersistedLegacyAdaptiveOutput(buildLegacyEnvelope({ schemaId }))).toEqual({ ok: false, reason: "malformed" });
   });
 
+  /**
+   * gate/synthesisReport optionality is a STRUCTURAL invariant tied to
+   * alignedClaims, never a schemaId special case — orchestrate.ts can only
+   * ever produce "non-empty alignedClaims WITH gate/synthesisReport" or
+   * "empty alignedClaims WITHOUT them," never a mix. A record claiming
+   * non-empty alignedClaims but missing gate/synthesisReport cannot come
+   * from the real orchestrator — accepting it would silently trust
+   * corrupted or hand-edited data. These tests pin that this stays strict
+   * for every schema, including the claims-matrix ones, and is not
+   * accidentally weakened just because creative_generative needed the
+   * fields to be optional in the type.
+   */
+  it.each(
+    PERSISTED_LEGACY_ADAPTIVE_SCHEMA_IDS.filter((id) => id !== "creative_generative").map((id) => [id])
+  )(
+    "rejects a '%s' record with non-empty alignedClaims but a missing gate — this combination the real orchestrator can never produce",
+    (schemaId) => {
+      const envelope = buildLegacyEnvelope({
+        schemaId,
+        alignedClaims: [{ id: "c1", claimText: "x", cells: [], agreementScore: 1, certaintyScore: 1, status: "consensus" }],
+      }) as Record<string, unknown>;
+      delete envelope.gate;
+      expect(parsePersistedLegacyAdaptiveOutput(envelope)).toEqual({ ok: false, reason: "malformed" });
+    }
+  );
+
+  it("rejects a claims-matrix record (contested_empirical) with non-empty alignedClaims but a missing synthesisReport", () => {
+    const envelope = buildLegacyEnvelope({
+      schemaId: "contested_empirical",
+      alignedClaims: [{ id: "c1", claimText: "x", cells: [], agreementScore: 1, certaintyScore: 1, status: "consensus" }],
+    }) as Record<string, unknown>;
+    delete envelope.synthesisReport;
+    expect(parsePersistedLegacyAdaptiveOutput(envelope)).toEqual({ ok: false, reason: "malformed" });
+  });
+
+  it("rejects ANY schema (not just creative_generative) with non-empty alignedClaims but missing gate — proves the check keys on alignedClaims.length, never on schemaId", () => {
+    const envelope = buildLegacyEnvelope({
+      schemaId: "creative_generative",
+      alignedClaims: [{ id: "c1", claimText: "x", cells: [], agreementScore: 1, certaintyScore: 1, status: "consensus" }],
+    }) as Record<string, unknown>;
+    delete envelope.gate;
+    delete envelope.synthesisReport;
+    // Even creative_generative must be rejected here — this state (non-empty
+    // claims, no gate) is impossible from the real pipeline for ANY schema,
+    // so schemaId alone must never be what makes it pass.
+    expect(parsePersistedLegacyAdaptiveOutput(envelope)).toEqual({ ok: false, reason: "malformed" });
+  });
+
+  it("accepts a creative_generative record with EMPTY alignedClaims and no gate/synthesisReport — the one genuinely valid absent-fields state", () => {
+    const envelope = buildLegacyEnvelope({ schemaId: "creative_generative", alignedClaims: [] }) as Record<string, unknown>;
+    delete envelope.gate;
+    delete envelope.synthesisReport;
+    delete envelope.trustSummary;
+    const parsed = parsePersistedLegacyAdaptiveOutput(envelope);
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.output.gate).toBeUndefined();
+      expect(parsed.output.synthesisReport).toBeUndefined();
+    }
+  });
+
+  it("rejects an empty-alignedClaims record whose gate IS present but malformed — 'absent' is valid, 'present but broken' never is", () => {
+    const envelope = buildLegacyEnvelope({ schemaId: "creative_generative", alignedClaims: [], gate: { runCertainty: 0.8 } });
+    expect(parsePersistedLegacyAdaptiveOutput(envelope)).toEqual({ ok: false, reason: "malformed" });
+  });
+
   it.each([
     ["a bare string", "not an object"],
     ["a number", 42],
