@@ -195,11 +195,11 @@ function synthesisReportFixture(overrides: Partial<AdaptiveSynthesisReportType> 
   };
 }
 
-describe("AdaptivePanelResponse — legacy/original-9 schemas keep the List/Compare/Synthesis shell for the 6 non-piloted schemas", () => {
-  it("still renders the tabbed List/Compare/Synthesis shell for legal_regulatory (not in the Phase 2 pilot)", () => {
-    const schema = SCHEMA_REGISTRY.legal_regulatory;
-    const classification = baseClassification("legal_regulatory");
-    const results = [modelResult("chatgpt", "legal_regulatory", { summary: "Some answer" })];
+describe("AdaptivePanelResponse — legacy/original-9 schemas keep the List/Compare/Synthesis shell for the 3 not-yet-promoted schemas (Phase 2C-3)", () => {
+  it("still renders the tabbed List/Compare/Synthesis shell for financial_valuation (not promoted until Phase 2C-3)", () => {
+    const schema = SCHEMA_REGISTRY.financial_valuation;
+    const classification = baseClassification("financial_valuation");
+    const results = [modelResult("chatgpt", "financial_valuation", { thesis: "Some answer" })];
 
     const html = renderToStaticMarkup(
       createElement(AdaptivePanelResponse, {
@@ -208,7 +208,7 @@ describe("AdaptivePanelResponse — legacy/original-9 schemas keep the List/Comp
         results,
         gate: { status: "pass", runCertainty: 0.8, loadBearingSplitCount: 0, loadBearingClaims: [] } as any,
         synthesisReport: synthesisReportFixture(),
-        question: "A legal question",
+        question: "A financial question",
       })
     );
 

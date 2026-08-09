@@ -45,6 +45,7 @@ import ModelResponsesSection from "./ModelResponsesSection";
 import PanelEvidenceSection from "./PanelEvidenceSection";
 import ReviewGovernanceSection from "./ReviewGovernanceSection";
 import PrimarySynthesisStrip from "./PrimarySynthesisStrip";
+import SchemaKeyFactsStrip from "./SchemaKeyFactsStrip";
 import { Card, SectionLabel } from "./shared";
 import PanelViewTabs, { PanelViewMode } from "./PanelViewTabs";
 import { routeClassifiedQuery } from "@/lib/adaptiveSchema/routeClassifiedQuery";
@@ -52,8 +53,23 @@ import { useEffect, useState } from "react";
 
 const RENDER_HINTS_WITHOUT_MATRIX = new Set<AnswerShape>(["metrics_grid", "verdict_card", "step_diff", "scenario_tree"]);
 
-/** Adaptive Synthesis Report, Phase 2 — 3-schema pilot (see AdaptivePanelResponse's own comment at the branch below). Deliberately not all 18 schemas yet. */
-const PHASE2_PILOT_SCHEMAS = new Set<QueryType>(["procedural", "generic"]);
+/**
+ * Adaptive Synthesis Report — the progressive-disclosure promotion
+ * allowlist (see AdaptivePanelResponse's own comment at the branch below).
+ * Phase 2 pilot: procedural, generic. Phase 2C-2: contested_empirical,
+ * legal_regulatory, medical_health (2C-1's persistence foundation covers
+ * all 8 legacy-active schemas, but renderer promotion is deliberately
+ * staged — factual_lookup already has its own dedicated primary branch
+ * above and needs no promotion; financial_valuation, forecast_speculative,
+ * creative_generative are 2C-3). Deliberately not all 18 schemas yet.
+ */
+const PHASE2_PILOT_SCHEMAS = new Set<QueryType>([
+  "procedural",
+  "generic",
+  "contested_empirical",
+  "legal_regulatory",
+  "medical_health",
+]);
 
 export interface AdaptivePanelResponseProps extends AdaptiveRendererProps {
   gate?: AdaptiveGateResult;
@@ -451,28 +467,35 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
 
   const modelIds = results.map((r) => r.modelId);
 
-  // Adaptive Synthesis Report, Phase 2 — 3-schema pilot. procedural and
-  // generic get a progressive-disclosure layout: PrimarySynthesisStrip
-  // (the answer-first headline — unifiedAnswer plus the single top
+  // Adaptive Synthesis Report, Phase 2 pilot + Phase 2C-2 — these 5 schemas
+  // get a progressive-disclosure layout: PrimarySynthesisStrip (the
+  // answer-first headline — unifiedAnswer plus the single top
   // consensus/disagreement point, so a reader can answer "what's the
   // answer / how confident / what do models agree-disagree on" without
-  // expanding anything) + the schema's own primary view
-  // (StepDiffView/GenericSectionsView, unchanged) together make up the
-  // primary report — then Model Responses/Panel Evidence/Review &
-  // Governance, each its OWN collapsed section (never expanded by
-  // default — "never hidden behind tabs" does not mean "show everything
-  // at once"), hold the full record behind that headline. Explicit,
-  // self-documenting allowlist — trivially reversible, and provably scoped
-  // to exactly these 2 schemas; the other 6 original schemas
-  // (contested_empirical/legal_regulatory/financial_valuation/
-  // medical_health/forecast_speculative/creative_generative) fall through
-  // to the unchanged tri-tab shell below. Broader rollout to the remaining
-  // 15 schemas is deliberately deferred to a follow-up pass — see
+  // expanding anything), then SchemaKeyFactsStrip (a schema-specific
+  // callout for the two schemas whose most decision-relevant fact isn't
+  // already prominent in their dedicated view — jurisdiction for
+  // legal_regulatory, red flags for medical_health; returns null for every
+  // other schema, including contested_empirical), then the schema's own
+  // dedicated primary view (unchanged — ConsensusMapView/RuleApplicationView/
+  // EvidenceTiersView/StepDiffView/GenericSectionsView — this IS the primary
+  // structured answer, per Phase 2C-2's "the dedicated schema renderer
+  // becomes the primary answer") together make up the primary report — then
+  // Model Responses/Panel Evidence/Review & Governance, each its OWN
+  // collapsed section (never expanded by default — "never hidden behind
+  // tabs" does not mean "show everything at once"), hold the full record
+  // behind that headline. Explicit, self-documenting allowlist — trivially
+  // reversible, and provably scoped to exactly these 5 schemas;
+  // factual_lookup already has its own dedicated primary branch above and
+  // needs no promotion; financial_valuation/forecast_speculative/
+  // creative_generative fall through to the unchanged tri-tab shell below,
+  // deferred to Phase 2C-3 — see
   // docs/adaptive-synthesis-report-design.md.
   if (PHASE2_PILOT_SCHEMAS.has(schema.id)) {
     return withBar(
       <div className="space-y-4">
         <PrimarySynthesisStrip synthesisReport={synthesisReport} />
+        <SchemaKeyFactsStrip schemaId={schema.id} results={results} alignedClaims={alignedClaims} />
         <AdaptiveResultsView {...props} />
         <ModelResponsesSection
           schema={schema}
