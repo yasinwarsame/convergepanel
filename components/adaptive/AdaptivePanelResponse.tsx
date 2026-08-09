@@ -57,11 +57,17 @@ const RENDER_HINTS_WITHOUT_MATRIX = new Set<AnswerShape>(["metrics_grid", "verdi
  * Adaptive Synthesis Report — the progressive-disclosure promotion
  * allowlist (see AdaptivePanelResponse's own comment at the branch below).
  * Phase 2 pilot: procedural, generic. Phase 2C-2: contested_empirical,
- * legal_regulatory, medical_health (2C-1's persistence foundation covers
- * all 8 legacy-active schemas, but renderer promotion is deliberately
- * staged — factual_lookup already has its own dedicated primary branch
- * above and needs no promotion; financial_valuation, forecast_speculative,
- * creative_generative are 2C-3). Deliberately not all 18 schemas yet.
+ * legal_regulatory, medical_health. Phase 2C-3 (final legacy-active batch):
+ * financial_valuation, forecast_speculative, creative_generative —
+ * completing all 8 legacy-active schemas 2C-1's persistence foundation
+ * covers. factual_lookup already has its own dedicated primary branch
+ * above and needs no promotion. creative_generative is structurally
+ * different from every other member: it never produces alignedClaims/
+ * gate/synthesisReport (no claim/metric/scenario fields — see
+ * persistedOutput.ts's PersistedLegacyAdaptiveOutputV1 doc), so the branch
+ * below renders it with PrimarySynthesisStrip/ModelResponsesSection's
+ * listView omitted rather than crashing or fabricating them — every other
+ * member of this set always has both by the time this branch is reached.
  */
 const PHASE2_PILOT_SCHEMAS = new Set<QueryType>([
   "procedural",
@@ -69,6 +75,9 @@ const PHASE2_PILOT_SCHEMAS = new Set<QueryType>([
   "contested_empirical",
   "legal_regulatory",
   "medical_health",
+  "financial_valuation",
+  "forecast_speculative",
+  "creative_generative",
 ]);
 
 export interface AdaptivePanelResponseProps extends AdaptiveRendererProps {
@@ -461,46 +470,50 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
     return withBar(<AdaptiveResultsView {...props} />);
   }
 
-  if (!gate || !synthesisReport) {
-    return withBar(<AdaptiveResultsView {...props} />);
-  }
-
   const modelIds = results.map((r) => r.modelId);
 
-  // Adaptive Synthesis Report, Phase 2 pilot + Phase 2C-2 — these 5 schemas
-  // get a progressive-disclosure layout: PrimarySynthesisStrip (the
-  // answer-first headline — unifiedAnswer plus the single top
+  // Adaptive Synthesis Report, Phase 2 pilot + Phase 2C-2 + Phase 2C-3 —
+  // these 8 schemas get a progressive-disclosure layout: PrimarySynthesisStrip
+  // (the answer-first headline — unifiedAnswer plus the single top
   // consensus/disagreement point, so a reader can answer "what's the
   // answer / how confident / what do models agree-disagree on" without
   // expanding anything), then SchemaKeyFactsStrip (a schema-specific
   // callout for the two schemas whose most decision-relevant fact isn't
   // already prominent in their dedicated view — jurisdiction for
   // legal_regulatory, red flags for medical_health; returns null for every
-  // other schema, including contested_empirical), then the schema's own
-  // dedicated primary view (unchanged — ConsensusMapView/RuleApplicationView/
-  // EvidenceTiersView/StepDiffView/GenericSectionsView — this IS the primary
-  // structured answer, per Phase 2C-2's "the dedicated schema renderer
-  // becomes the primary answer") together make up the primary report — then
-  // Model Responses/Panel Evidence/Review & Governance, each its OWN
+  // other schema), then the schema's own dedicated primary view (unchanged —
+  // ConsensusMapView/RuleApplicationView/EvidenceTiersView/MetricsGridView/
+  // ScenarioTreeView/GalleryView/StepDiffView/GenericSectionsView — this IS
+  // the primary structured answer) together make up the primary report —
+  // then Model Responses/Panel Evidence/Review & Governance, each its OWN
   // collapsed section (never expanded by default — "never hidden behind
   // tabs" does not mean "show everything at once"), hold the full record
   // behind that headline. Explicit, self-documenting allowlist — trivially
-  // reversible, and provably scoped to exactly these 5 schemas;
+  // reversible, and provably scoped to exactly these 8 schemas;
   // factual_lookup already has its own dedicated primary branch above and
-  // needs no promotion; financial_valuation/forecast_speculative/
-  // creative_generative fall through to the unchanged tri-tab shell below,
-  // deferred to Phase 2C-3 — see
-  // docs/adaptive-synthesis-report-design.md.
+  // needs no promotion.
+  //
+  // Checked BEFORE the generic `!gate || !synthesisReport` fallback below
+  // (unlike Phase 2 pilot/2C-2, where that check ran first) because
+  // creative_generative — the one Phase 2C-3 addition with no
+  // claim/metric/scenario fields — never computes gate/synthesisReport at
+  // all (see persistedOutput.ts's module doc), live or historical, so it
+  // would otherwise never reach this block. Every field below that isn't
+  // guaranteed for every member of this set is rendered conditionally
+  // rather than assumed present — PanelEvidenceSection/ReviewGovernanceSection
+  // already degrade gracefully on their own when gate/synthesisReport are
+  // undefined (both accept them as optional props), so no changes were
+  // needed there.
   if (PHASE2_PILOT_SCHEMAS.has(schema.id)) {
     return withBar(
       <div className="space-y-4">
-        <PrimarySynthesisStrip synthesisReport={synthesisReport} />
+        {synthesisReport && <PrimarySynthesisStrip synthesisReport={synthesisReport} />}
         <SchemaKeyFactsStrip schemaId={schema.id} results={results} alignedClaims={alignedClaims} />
         <AdaptiveResultsView {...props} />
         <ModelResponsesSection
           schema={schema}
           results={results}
-          listView={{ alignedClaims, gate, synthesisReport, trustSummary }}
+          listView={gate && synthesisReport ? { alignedClaims, gate, synthesisReport, trustSummary } : undefined}
         />
         <PanelEvidenceSection
           schemaId={schema.id}
@@ -527,6 +540,11 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
       </div>
     );
   }
+
+  if (!gate || !synthesisReport) {
+    return withBar(<AdaptiveResultsView {...props} />);
+  }
+
   const showExtraMatrix = RENDER_HINTS_WITHOUT_MATRIX.has(schema.renderHint) && !!alignedClaims && alignedClaims.length > 0;
 
   const navigateToSynthesisSection = (sectionId: string) => {
