@@ -73,13 +73,16 @@ export function adaptPersistedOutputToPanelPayload(
 }
 
 /**
- * Phase 2 pilot history-reload fix — the `procedural`-only sibling of
- * `adaptPersistedOutputToPanelPayload` above, for
+ * Phase 2 pilot history-reload fix, widened in Batch 3 persistence
+ * foundation (2C-1) — the sibling of `adaptPersistedOutputToPanelPayload`
+ * above for the legacy-active schema family, for
  * `PersistedLegacyAdaptiveOutputV1` (a separate type/Firestore field, see
  * persistedOutput.ts's doc). Unlike the Milestone-2 adapter above,
  * `results` is NOT empty here — this envelope persists the real per-model
  * `AdaptiveModelResult[]` precisely so Model Responses' raw-output section
- * renders identically to a live run, not a placeholder.
+ * renders identically to a live run, not a placeholder. Already fully
+ * schema-agnostic (reads `output.schemaId` directly) — no change was
+ * needed here for 2C-1 beyond the widened type it now accepts.
  */
 export function adaptPersistedLegacyOutputToPanelPayload(
   output: PersistedLegacyAdaptiveOutputV1,

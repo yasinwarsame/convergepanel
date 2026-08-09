@@ -8,7 +8,14 @@
  */
 
 import { adaptPersistedOutputToPanelPayload, adaptPersistedLegacyOutputToPanelPayload } from "@/lib/user/adaptivePersistedOutputAdapter";
-import { PersistedAdaptiveOutput, PersistedAdaptiveSchemaId, PersistedLegacyAdaptiveOutputV1, SCHEMA_ANSWER_SHAPE } from "@/lib/adaptiveSchema/persistedOutput";
+import {
+  parsePersistedLegacyAdaptiveOutput,
+  PERSISTED_LEGACY_ADAPTIVE_SCHEMA_IDS,
+  PersistedAdaptiveOutput,
+  PersistedAdaptiveSchemaId,
+  PersistedLegacyAdaptiveOutputV1,
+  SCHEMA_ANSWER_SHAPE,
+} from "@/lib/adaptiveSchema/persistedOutput";
 
 const CLASSIFICATION = {
   queryType: "decision_support",
@@ -170,5 +177,201 @@ describe("adaptPersistedLegacyOutputToPanelPayload", () => {
     for (const fieldName of Object.values(RESULT_FIELD_BY_SCHEMA)) {
       expect((payload as Record<string, unknown>)[fieldName]).toBeUndefined();
     }
+  });
+});
+
+/**
+ * Batch 3 persistence foundation (2C-1) — History-chain tests (Part 9-D).
+ * Traces the real chain a persisted Batch 3 run goes through on History
+ * reload: a raw Firestore-shaped envelope → JSON round-trip → the real
+ * parsePersistedLegacyAdaptiveOutput() → the real
+ * adaptPersistedLegacyOutputToPanelPayload() → the resulting panel payload.
+ * Proves schema identity, aligned claims, gate, synthesis report, and trust
+ * summary all survive the full chain for every one of the 8 schemas this
+ * envelope now covers — not just that each function works in isolation.
+ */
+const CHAIN_TEST_SYNTHESIS_REPORT = {
+  panelVerdict: "Panel converges.",
+  gate: "pass",
+  runCertainty: 0.8,
+  whereModelsAgree: [],
+  whereModelsDisagree: [],
+  certaintyAssessment: "x",
+  narrativeSections: [],
+  executiveSummary: "x",
+  disagreements: [],
+  biasAndBlindSpots: [],
+  biasEmptyReason: "insufficient_models",
+  panelCoverageGaps: [],
+  diagnostics: { citedClaimCount: 0, totalClaimCount: 0, evidenceMix: { empirical: 0, theoretical: 0, anecdotal: 0, authoritative: 0 }, homogeneityFlag: false, meanAgreement: 0.8 },
+  verdictCard: { question: "q", topConsensus: "x", consensusModelCount: 2, keyDisagreement: null, disagreementDetail: null, disagreementModelCount: 0, caveat: null, recommendedNextSteps: [] },
+  degraded: false,
+};
+
+const CHAIN_TEST_PROCEDURAL_OUTPUT = {
+  version: 1,
+  schemaId: "procedural",
+  classification: CLASSIFICATION,
+  generatedAt: "2026-08-06T00:00:00.000Z",
+  results: [{ modelId: "chatgpt", schemaId: "procedural", ok: true, data: { goal: "Set up a repo.", prerequisites: ["Git"], steps: [], commonFailures: [] } }],
+  alignedClaims: [{ id: "c1", claimText: "Step 1", cells: [], agreementScore: 1, certaintyScore: 1, status: "consensus" }],
+  gate: { status: "pass", runCertainty: 0.8, loadBearingSplitCount: 0, loadBearingClaims: [] },
+  synthesisReport: { ...CHAIN_TEST_SYNTHESIS_REPORT, unifiedAnswer: "Do the thing in order." },
+  trustSummary: { perModel: [], overallTrust: 0.8 },
+} as unknown as PersistedLegacyAdaptiveOutputV1;
+
+describe("History chain — persisted envelope → parser → adapter → panel payload (Batch 3 persistence foundation, 2C-1)", () => {
+  function buildRawLegacyEnvelope(schemaId: PersistedLegacyAdaptiveOutputV1["schemaId"]) {
+    const base: Record<string, unknown> = {
+      version: 1,
+      schemaId,
+      classification: { ...CLASSIFICATION, queryType: schemaId },
+      generatedAt: "2026-08-08T00:00:00.000Z",
+      results: [{ modelId: "chatgpt", schemaId, ok: true, data: { marker: schemaId } }],
+      alignedClaims: [{ id: "c1", claimText: `Claim for ${schemaId}`, cells: [], agreementScore: 1, certaintyScore: 1, status: "consensus" }],
+    };
+    // creative_generative never computes gate/synthesisReport, live or
+    // historical (see persistedOutput.ts's PersistedLegacyAdaptiveOutputV1
+    // doc) — every other schema in the family does.
+    if (schemaId !== "creative_generative") {
+      base.gate = { status: "pass", runCertainty: 0.8, loadBearingSplitCount: 0, loadBearingClaims: [] };
+      base.synthesisReport = { ...CHAIN_TEST_SYNTHESIS_REPORT, unifiedAnswer: `Unified answer for ${schemaId}` };
+      base.trustSummary = { perModel: [], overallTrust: 0.8 };
+    } else {
+      base.alignedClaims = [];
+    }
+    return base;
+  }
+
+  it.each(PERSISTED_LEGACY_ADAPTIVE_SCHEMA_IDS.map((id) => [id]))(
+    "'%s': schema identity, version, and every claim-matrix field survive persisted-envelope -> JSON round-trip -> parser -> adapter -> panel payload",
+    (schemaId) => {
+      const raw = JSON.parse(JSON.stringify(buildRawLegacyEnvelope(schemaId)));
+
+      const parsed = parsePersistedLegacyAdaptiveOutput(raw);
+      expect(parsed.ok).toBe(true);
+      if (!parsed.ok) return;
+
+      expect(parsed.output.schemaId).toBe(schemaId);
+      expect(parsed.output.classification.queryType).toBe(schemaId);
+
+      const payload = adaptPersistedLegacyOutputToPanelPayload(parsed.output);
+
+      expect(payload.schemaId).toBe(schemaId);
+      expect(payload.classification.queryType).toBe(schemaId);
+      expect(payload.results.length).toBeGreaterThan(0);
+      expect(payload.alignedClaims).toEqual(parsed.output.alignedClaims);
+
+      if (schemaId === "creative_generative") {
+        expect(payload.gate).toBeUndefined();
+        expect(payload.synthesisReport).toBeUndefined();
+        expect(payload.trustSummary).toBeUndefined();
+      } else {
+        expect(payload.gate).toEqual(parsed.output.gate);
+        expect(payload.synthesisReport?.unifiedAnswer).toBe(`Unified answer for ${schemaId}`);
+        expect(payload.trustSummary).toEqual(parsed.output.trustSummary);
+      }
+
+      // Every Milestone-2-only field must stay unset — a legacy-family
+      // history restore must never also populate rankedEnumeration, etc.
+      for (const fieldName of Object.values(RESULT_FIELD_BY_SCHEMA)) {
+        expect((payload as Record<string, unknown>)[fieldName]).toBeUndefined();
+      }
+    }
+  );
+
+  it("an old procedural-only record (no other schema present) still parses and adapts exactly as it did before this widening — backward compatibility", () => {
+    const raw = JSON.parse(JSON.stringify(CHAIN_TEST_PROCEDURAL_OUTPUT));
+    const parsed = parsePersistedLegacyAdaptiveOutput(raw);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const payload = adaptPersistedLegacyOutputToPanelPayload(parsed.output);
+    expect(payload.schemaId).toBe("procedural");
+    expect(payload.gate).toEqual(CHAIN_TEST_PROCEDURAL_OUTPUT.gate);
+  });
+});
+
+/**
+ * Batch 3 persistence foundation (2C-1), Part 7/9-F — factual_lookup
+ * regression protection. Proves the persisted structured result still
+ * represents the actual direct answer — not a generic "Answer" or
+ * "Jurisdiction" placeholder label — after the FULL chain: a real
+ * `alignScalarField`-shaped claim row (id: "answer", claimText: the real
+ * model answer text — see fieldAlignment.ts's own doc on why claimText is
+ * never the label) → JSON round-trip → parser → adapter → panel payload.
+ * DirectAnswerCard.tsx's headline logic is
+ * `alignedClaims?.find(c => c.id === "answer")?.claimText || ok[0]?.data?.answer`
+ * — this test proves that lookup still resolves to the real answer after
+ * reload, the exact regression the historical "Answer"/"Jurisdiction" label
+ * bug this fix must never reintroduce.
+ */
+describe("factual_lookup — Claim Text regression protection (Batch 3 persistence foundation, 2C-1)", () => {
+  const FACTUAL_LOOKUP_OUTPUT = {
+    version: 1,
+    schemaId: "factual_lookup",
+    classification: { ...CLASSIFICATION, queryType: "factual_lookup" },
+    generatedAt: "2026-08-08T00:00:00.000Z",
+    results: [
+      { modelId: "chatgpt", schemaId: "factual_lookup", ok: true, data: { answer: "The Eiffel Tower is 330 meters tall.", source: "widely cited reference", caveat: "none" } },
+      { modelId: "claude", schemaId: "factual_lookup", ok: true, data: { answer: "The Eiffel Tower is 330 meters tall.", source: "widely cited reference", caveat: "none" } },
+    ],
+    // Real alignScalarField output shape: id is the row id ("answer"), never
+    // the display label ("Answer") — claimText is the real model text.
+    alignedClaims: [
+      {
+        id: "answer",
+        claimText: "The Eiffel Tower is 330 meters tall.",
+        cells: [],
+        agreementScore: 1,
+        certaintyScore: 1,
+        status: "consensus",
+      },
+    ],
+    gate: { status: "pass", runCertainty: 0.9, loadBearingSplitCount: 0, loadBearingClaims: [] },
+    synthesisReport: { ...CHAIN_TEST_SYNTHESIS_REPORT, unifiedAnswer: "The Eiffel Tower is 330 meters tall." },
+    trustSummary: { perModel: [], overallTrust: 0.9 },
+  } as unknown as PersistedLegacyAdaptiveOutputV1;
+
+  it("the real answer text survives persisted-envelope -> JSON round-trip -> parser -> adapter, at the exact id ('answer') DirectAnswerCard looks up", () => {
+    const raw = JSON.parse(JSON.stringify(FACTUAL_LOOKUP_OUTPUT));
+    const parsed = parsePersistedLegacyAdaptiveOutput(raw);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+
+    const payload = adaptPersistedLegacyOutputToPanelPayload(parsed.output);
+
+    // The exact lookup DirectAnswerCard.tsx performs.
+    const answerRow = payload.alignedClaims?.find((c) => c.id === "answer");
+    const headlineAnswer = answerRow?.claimText || (payload.results[0]?.data as Record<string, unknown> | undefined)?.["answer"];
+
+    expect(headlineAnswer).toBe("The Eiffel Tower is 330 meters tall.");
+  });
+
+  it("regression pin: the reconstructed headline never falls back to the generic 'Answer' or 'Jurisdiction' labels — the historical bug this fix must not reintroduce", () => {
+    const raw = JSON.parse(JSON.stringify(FACTUAL_LOOKUP_OUTPUT));
+    const parsed = parsePersistedLegacyAdaptiveOutput(raw);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+
+    const payload = adaptPersistedLegacyOutputToPanelPayload(parsed.output);
+    const answerRow = payload.alignedClaims?.find((c) => c.id === "answer");
+    const headlineAnswer = answerRow?.claimText || (payload.results[0]?.data as Record<string, unknown> | undefined)?.["answer"];
+
+    expect(headlineAnswer).not.toBe("Answer");
+    expect(headlineAnswer).not.toBe("Jurisdiction");
+    expect(String(headlineAnswer)).not.toMatch(/^(Answer|Jurisdiction)$/);
+  });
+
+  it("schema identity ('factual_lookup') and the full claims-matrix shape survive the chain intact, same guarantee every other Batch 3 schema gets", () => {
+    const raw = JSON.parse(JSON.stringify(FACTUAL_LOOKUP_OUTPUT));
+    const parsed = parsePersistedLegacyAdaptiveOutput(raw);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+
+    expect(parsed.output.schemaId).toBe("factual_lookup");
+    const payload = adaptPersistedLegacyOutputToPanelPayload(parsed.output);
+    expect(payload.schemaId).toBe("factual_lookup");
+    expect(payload.gate).toEqual(FACTUAL_LOOKUP_OUTPUT.gate);
+    expect(payload.synthesisReport?.unifiedAnswer).toBe("The Eiffel Tower is 330 meters tall.");
   });
 });

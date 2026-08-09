@@ -225,15 +225,18 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
     ? { status: "valid" as const, output: parsedAdaptive.output, humanReview, reviewRouting }
     : { status: parsedAdaptive.reason, output: null, humanReview: null, reviewRouting: "unknown" as const };
 
-  // Phase 2 pilot history-reload fix — validate the SEPARATE
-  // `legacyAdaptiveOutput` field (procedural only; see persistedOutput.ts's
+  // Phase 2 pilot history-reload fix, widened in Batch 3 persistence
+  // foundation (2C-1) — validate the SEPARATE `legacyAdaptiveOutput` field
+  // (the 8-member legacy-active schema family; see persistedOutput.ts's
   // PersistedLegacyAdaptiveOutputV1 doc) through its own real runtime
   // parser, same discipline as `adaptive` above. Never conflated with
   // `adaptive.status` — a run can be `adaptive.status === "absent"` (no
-  // Milestone-2 envelope, correctly, since procedural never has one) while
+  // Milestone-2 envelope, correctly, since this family never has one) while
   // `legacyAdaptive.status === "valid"` at the same time; the client uses
   // `legacyAdaptive` as the true signal that this WAS a schema-routed run,
-  // never `adaptive.status` alone (see app/page.tsx's openHistoryItem).
+  // never `adaptive.status` alone (see app/page.tsx's openHistoryItem). No
+  // change needed here or in the adapter/client — both already read
+  // `schemaId` generically off the parsed output.
   const parsedLegacyAdaptive = parsePersistedLegacyAdaptiveOutput(data.legacyAdaptiveOutput);
   const legacyAdaptive = parsedLegacyAdaptive.ok
     ? { status: "valid" as const, output: parsedLegacyAdaptive.output }

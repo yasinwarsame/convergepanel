@@ -179,12 +179,14 @@ export function parsePersistedAdaptiveOutput(raw: unknown): ParsePersistedAdapti
 
 /**
  * Phase 2 pilot history-reload fix — a second, narrowly-scoped envelope for
- * `procedural` only (the one legacy-active schema this pilot needs history
- * parity for). Deliberately NOT folded into `PersistedAdaptiveOutputV1`
- * above: that union's `result` is always a single finished, aggregated
- * object (one per Milestone 2 schema); `procedural` instead needs the raw
- * per-model `results` (so Model Responses can show real per-model output,
- * not a re-derivation) alongside the claim-matrix pipeline's own
+ * the legacy-active schema family (the query-routing "LEGACY_FALLBACK"
+ * schemas that still run the claims-matrix pipeline instead of a Milestone
+ * 2 dedicated aggregator). Deliberately NOT folded into
+ * `PersistedAdaptiveOutputV1` above: that union's `result` is always a
+ * single finished, aggregated object (one per Milestone 2 schema); this
+ * family instead needs the raw per-model `results` (so Model Responses can
+ * show real per-model output, not a re-derivation) alongside the
+ * claim-matrix pipeline's own
  * `alignedClaims`/`gate`/`synthesisReport`/`trustSummary` — a materially
  * different shape that would force every Milestone-2-only assumption
  * elsewhere in this file (SCHEMA_ANSWER_SHAPE, RESULT_SHAPE_CHECKS) to grow
@@ -193,16 +195,71 @@ export function parsePersistedAdaptiveOutput(raw: unknown): ParsePersistedAdapti
  * Persisted on `runs/{runId}.legacyAdaptiveOutput` — a distinct Firestore
  * field from `adaptiveOutput`, so the two envelopes never collide and
  * `parsePersistedAdaptiveOutput` above needs no changes at all.
+ *
+ * Batch 3 persistence foundation (2C-1) — originally scoped to `procedural`
+ * only (Phase 2 pilot); widened here to the full 8-member legacy-active
+ * family below, per docs/adaptive-synthesis-batch3-persistence-audit.md.
+ * Every schema in this family reaches the exact same claims-matrix
+ * fall-through in orchestrate.ts and produces byte-identical shape to what
+ * `procedural` already persisted successfully — this is a widened
+ * allowlist, not a new mechanism.
+ */
+
+/**
+ * The fixed set of schemas this envelope covers. Verified directly against
+ * `schemaRegistry.ts`'s `fallbackQueryType: LEGACY_FALLBACK` schemas (8
+ * total, `procedural` plus these 7) — deliberately NOT "every QueryType."
+ * `factual_lookup` already has its own dedicated primary-view renderer
+ * (DirectAnswerCard) but persists through this exact same envelope, since
+ * its structured result has the identical claims-matrix shape. The 9
+ * Milestone-2 schemas, `generic`, and `graceful_limitation` are
+ * intentionally excluded — widening this set to a new schema requires a
+ * conscious edit here, never an accidental default.
+ */
+export const PERSISTED_LEGACY_ADAPTIVE_SCHEMA_IDS = [
+  "procedural",
+  "contested_empirical",
+  "legal_regulatory",
+  "financial_valuation",
+  "factual_lookup",
+  "medical_health",
+  "forecast_speculative",
+  "creative_generative",
+] as const;
+
+export type PersistedLegacyAdaptiveSchemaId = (typeof PERSISTED_LEGACY_ADAPTIVE_SCHEMA_IDS)[number];
+
+const PERSISTED_LEGACY_ADAPTIVE_SCHEMA_ID_SET = new Set<string>(PERSISTED_LEGACY_ADAPTIVE_SCHEMA_IDS);
+
+/** Explicit allowlist check — never a bare `typeof === "string"` — so an arbitrary or malformed schemaId is rejected, not merely type-narrowed. */
+export function isPersistedLegacyAdaptiveSchemaId(schemaId: unknown): schemaId is PersistedLegacyAdaptiveSchemaId {
+  return typeof schemaId === "string" && PERSISTED_LEGACY_ADAPTIVE_SCHEMA_ID_SET.has(schemaId);
+}
+
+/**
+ * `gate`/`synthesisReport` are optional — narrow type correction discovered
+ * during Batch 3 persistence foundation (2C-1): `creative_generative` has
+ * no `claim[]`/`metric[]`/`scenario[]`/`step[]` fields and no
+ * `SCALAR_ALIGNMENT_FIELDS` entry, so `orchestrate.ts`'s shared
+ * claims-matrix path returns with an empty `alignedClaims` before gate/
+ * synthesis are ever computed — live rendering already handles this via
+ * `AdaptivePanelResponse.tsx`'s existing `if (!gate || !synthesisReport)`
+ * fallback to `AdaptiveResultsView` (which for this schema is
+ * `GalleryView`, reading only raw `results`). Making these fields
+ * optional here lets the envelope still carry `results` for History parity
+ * on that one schema, matching what live rendering already tolerates —
+ * not a new computation, no new scoring, just an honest type for data that
+ * was always allowed to be absent.
  */
 export interface PersistedLegacyAdaptiveOutputV1 {
   version: 1;
-  schemaId: "procedural";
+  schemaId: PersistedLegacyAdaptiveSchemaId;
   classification: PersistedQueryClassification;
   generatedAt: string;
   results: AdaptiveModelResult[];
   alignedClaims: AlignedClaim[];
-  gate: AdaptiveGateResult;
-  synthesisReport: AdaptiveSynthesisReport;
+  gate?: AdaptiveGateResult;
+  synthesisReport?: AdaptiveSynthesisReport;
   trustSummary?: AdaptiveTrustSummary;
 }
 
@@ -224,7 +281,7 @@ export function parsePersistedLegacyAdaptiveOutput(raw: unknown): ParsePersisted
   if (raw.version !== 1) {
     return { ok: false, reason: "unsupported_version" };
   }
-  if (raw.schemaId !== "procedural") {
+  if (!isPersistedLegacyAdaptiveSchemaId(raw.schemaId)) {
     return { ok: false, reason: "malformed" };
   }
   if (!isPlainObject(raw.classification) || typeof raw.classification.queryType !== "string") {
@@ -239,10 +296,33 @@ export function parsePersistedLegacyAdaptiveOutput(raw: unknown): ParsePersisted
   if (!Array.isArray(raw.alignedClaims)) {
     return { ok: false, reason: "malformed" };
   }
-  if (!isPlainObject(raw.gate) || typeof raw.gate.status !== "string") {
-    return { ok: false, reason: "malformed" };
-  }
-  if (!isPlainObject(raw.synthesisReport) || typeof raw.synthesisReport.unifiedAnswer !== "string") {
+  // gate/synthesisReport are optional, but NOT independently of
+  // alignedClaims — orchestrate.ts only ever produces this envelope two
+  // ways: (1) alignedClaims non-empty, scored, WITH gate/synthesisReport
+  // both computed in the same branch, or (2) alignedClaims empty (today,
+  // always creative_generative; in principle any schema whose models
+  // returned no comparable claims at all) with gate/synthesisReport never
+  // computed. "Non-empty alignedClaims with no gate/synthesisReport" is a
+  // combination the real orchestrator can never produce — accepting it
+  // here would silently trust a corrupted or hand-edited record, so it
+  // must fail closed rather than pass through as valid, regardless of
+  // schemaId. This is a structural invariant, not a creative_generative
+  // special case — the check is on alignedClaims.length, never on schemaId.
+  const hasClaims = raw.alignedClaims.length > 0;
+  if (hasClaims) {
+    if (!isPlainObject(raw.gate) || typeof raw.gate.status !== "string") {
+      return { ok: false, reason: "malformed" };
+    }
+    if (!isPlainObject(raw.synthesisReport) || typeof raw.synthesisReport.unifiedAnswer !== "string") {
+      return { ok: false, reason: "malformed" };
+    }
+  } else if (
+    (raw.gate !== undefined && (!isPlainObject(raw.gate) || typeof raw.gate.status !== "string")) ||
+    (raw.synthesisReport !== undefined &&
+      (!isPlainObject(raw.synthesisReport) || typeof raw.synthesisReport.unifiedAnswer !== "string"))
+  ) {
+    // Defensive: if a gate/synthesisReport IS present on an empty-claims
+    // record, it must still be well-shaped — never silently accepted.
     return { ok: false, reason: "malformed" };
   }
 
