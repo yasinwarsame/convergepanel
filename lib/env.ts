@@ -113,6 +113,21 @@ export const ADAPTIVE_VERIFICATION_ENABLED = process.env.ADAPTIVE_VERIFICATION_E
 export const MULTI_REVIEWER_GOVERNANCE_ENABLED = process.env.MULTI_REVIEWER_GOVERNANCE_ENABLED === "true";
 
 /**
+ * Adaptive Research Export, Phase 1 — release gate (defaults off, same
+ * fail-closed convention as every flag above). A dedicated flag, never the
+ * legacy `MemoInput`/`generateMemo.ts` export path's gating (there isn't
+ * one — that path has no flag at all) and never reused from any other
+ * feature — per docs/adaptive-research-export-design.md's own finding,
+ * this is a genuinely new, independent capability.
+ *
+ * Both the export API route and the export UI entry point check this flag
+ * independently — it is not a substitute for `canExportAdaptiveResearch()`
+ * (lib/adaptiveSchema/exportAuthorization.ts)'s per-request authorization;
+ * both must pass.
+ */
+export const ADAPTIVE_RESEARCH_EXPORT_ENABLED = process.env.ADAPTIVE_RESEARCH_EXPORT_ENABLED === "true";
+
+/**
  * Search engine site-verification tokens.
  *
  * Optional — when unset, the corresponding verification meta tag is simply

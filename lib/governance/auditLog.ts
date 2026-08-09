@@ -284,3 +284,71 @@ export async function writeAdaptivePanelOverrideAdminAuditEvent(args: {
     return { status: "failed" };
   }
 }
+
+/**
+ * Adaptive Research Export, Phase 1 (docs/adaptive-research-export-design.md
+ * §5.5) — deterministic, idempotent admin audit event for an export
+ * generation attempt. Same `.doc(id).create()` idempotency discipline as
+ * every writer above; deterministic ID `adaptive-export:${exportId}:${action}`
+ * per the design doc's own §5.5 spec, so a retried write after a transient
+ * failure can never create a duplicate entry.
+ *
+ * Booleans only for classification/format — never report content, never
+ * private reviewer comments, never secrets (Part 14). `outcome` distinguishes
+ * a successful generation from a failed one (Part 14's "failed attempts
+ * should be distinguishable from successful exports").
+ */
+export type AdaptiveExportAuditAction = "adaptive_export_generated" | "adaptive_export_generation_failed";
+
+export async function writeAdaptiveExportAdminAuditEvent(args: {
+  exportId: string;
+  action: AdaptiveExportAuditAction;
+  actorUid: string;
+  runId: string;
+  schemaId: string;
+  schemaFamily: "milestone2" | "legacy";
+  classification: string;
+  format: string;
+  reportVersion: number;
+  governanceStatusAtExport: string;
+  at: string;
+  failureReason?: string;
+}): Promise<AdaptiveAdminAuditWriteResult> {
+  if (!adminDb) {
+    return { status: "failed" };
+  }
+
+  const docId = `adaptive-export:${args.exportId}:${args.action}`;
+  try {
+    await adminDb
+      .collection("admin_audit_logs")
+      .doc(docId)
+      .create({
+        action: args.action,
+        byUid: args.actorUid,
+        at: args.at,
+        runId: args.runId,
+        collection: "runs",
+        exportId: args.exportId,
+        schemaId: args.schemaId,
+        schemaFamily: args.schemaFamily,
+        classification: args.classification,
+        formatRequested: args.format,
+        reportVersion: args.reportVersion,
+        governanceStatusAtExport: args.governanceStatusAtExport,
+        outcome: args.action === "adaptive_export_generated" ? "success" : "failure",
+        ...(args.failureReason ? { failureReason: args.failureReason } : {}),
+        source: "adaptive_research_export",
+      });
+    return { status: "recorded" };
+  } catch (err: unknown) {
+    const code = (err as { code?: number | string })?.code;
+    const message = (err as Error)?.message ?? "";
+    const alreadyExists = code === 6 || code === "ALREADY_EXISTS" || message.includes("ALREADY_EXISTS") || message.includes("already exists");
+    if (alreadyExists) {
+      return { status: "already_exists" };
+    }
+    console.error("[governance/audit] Failed to write adaptive export admin audit event:", { runId: args.runId, exportId: args.exportId });
+    return { status: "failed" };
+  }
+}

@@ -41,12 +41,15 @@ import {
   SOURCE_GROUNDING_LABELS,
 } from "@/lib/adaptiveSchema/reportSummary";
 import { BadgeTone, Card, TintBadge } from "./shared";
+import AdaptiveExportButton from "./AdaptiveExportButton";
 
 type ReportStatusKind = ReturnType<typeof deriveReportStatus>["kind"];
 
 export interface TopSummaryBarProps {
   schemaId: QueryType;
   results: AdaptiveModelResult[];
+  /** Adaptive Research Export, Phase 1 — threaded through only so AdaptiveExportButton can target the right run; TopSummaryBar itself does nothing else with it. */
+  runId?: string | null;
   generatedAt?: string;
   persistenceStatus?: ReportStatusInput["persistenceStatus"];
   humanReview?: ReportStatusInput["humanReview"];
@@ -101,7 +104,7 @@ function formatGeneratedAt(iso?: string): string {
 }
 
 export default function TopSummaryBar(props: TopSummaryBarProps) {
-  const { schemaId, results, generatedAt, persistenceStatus, humanReview, reviewRouting, gate, trustSummary, meta } = props;
+  const { schemaId, results, runId, generatedAt, persistenceStatus, humanReview, reviewRouting, gate, trustSummary, meta } = props;
 
   const status = deriveReportStatus({ humanReview, reviewRouting, persistenceStatus });
   const consensus = deriveConsensusLevel({
@@ -158,6 +161,8 @@ export default function TopSummaryBar(props: TopSummaryBarProps) {
             <span className="text-sm font-medium text-slate-800">{statusLabel}</span>
           </span>
         </SummaryField>
+
+        <AdaptiveExportButton runId={runId} />
       </div>
 
       <div className="mt-3 grid grid-cols-2 gap-3 border-t border-slate-200 pt-3 sm:grid-cols-4">
