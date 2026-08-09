@@ -186,35 +186,25 @@ export async function POST(req: NextRequest, context: { params: Promise<{ runId:
     exportMetadata: { ...recordBase.exportMetadata, finalReportVersion: reportVersion },
   };
 
+  // Only PDF generation itself is "the operation that can genuinely fail"
+  // here — the narrowest possible try/catch. markAdaptiveExportReady,
+  // supersedeOlderAdaptiveExports, and the audit write are all
+  // post-generation bookkeeping around an ALREADY-successful export; none
+  // of them may ever cause a successful export to be reported to the
+  // client as failed, and a transient failure in any of them must not
+  // rewrite the canonical record from "ready" back to "failed" (final
+  // review Step 17 — this used to sit inside the same try/catch as PDF
+  // generation, which would have misclassified a successful export as
+  // failed had any of those calls ever thrown; they don't today because
+  // each already swallows its own errors into a result object, but the
+  // control flow itself should not have depended on that implementation
+  // detail).
+  let bytes: Buffer;
+  let sha256: string;
   try {
-    const { bytes, sha256 } = await renderAdaptiveResearchPdf(fullRecord);
-
-    await markAdaptiveExportReady(runId, exportId, sha256);
-    await supersedeOlderAdaptiveExports(runId, exportId);
-
-    await writeAdaptiveExportAdminAuditEvent({
-      exportId,
-      action: "adaptive_export_generated",
-      actorUid: uid,
-      runId,
-      schemaId,
-      schemaFamily,
-      classification,
-      format: validatedFormat,
-      reportVersion,
-      governanceStatusAtExport: governanceStatusAtExport.family === "milestone2" ? governanceStatusAtExport.kind : `legacy:${governanceStatusAtExport.status ?? "not_evaluated"}`,
-      at: nowIso,
-    });
-
-    const fileName = `convergepanel-export-${runId}-v${reportVersion}.pdf`;
-    return new NextResponse(new Uint8Array(bytes), {
-      status: 200,
-      headers: {
-        "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="${fileName}"`,
-        "Content-Length": String(bytes.length),
-      },
-    });
+    const rendered = await renderAdaptiveResearchPdf(fullRecord);
+    bytes = rendered.bytes;
+    sha256 = rendered.sha256;
   } catch (err: unknown) {
     const failureReason = err instanceof Error ? err.message : "unknown_error";
     logger.error("[adaptive-export] PDF generation failed", { runId, exportId, errorMessage: failureReason });
@@ -237,4 +227,54 @@ export async function POST(req: NextRequest, context: { params: Promise<{ runId:
 
     return errorResponse(500, "pdf_generation_failed", "PDF generation failed. Please try again.");
   }
+
+  // The PDF genuinely exists at this point. Everything below is
+  // best-effort bookkeeping around an already-successful export. All three
+  // helpers already swallow their own errors into a result object today
+  // (never throwing), but this block does not rely on that — it's wrapped
+  // defensively so that even a future regression in one of them can never
+  // propagate into the response the client receives below.
+  try {
+    const readyResult = await markAdaptiveExportReady(runId, exportId, sha256);
+    if (!readyResult.ok) {
+      logger.error("[adaptive-export] failed to mark export ready after successful generation", { runId, exportId, reason: readyResult.reason });
+    }
+
+    const supersedeResult = await supersedeOlderAdaptiveExports(runId, exportId);
+    if (!supersedeResult.ok) {
+      logger.error("[adaptive-export] failed to supersede older exports", { runId, exportId, reason: supersedeResult.reason });
+    }
+
+    await writeAdaptiveExportAdminAuditEvent({
+      exportId,
+      action: "adaptive_export_generated",
+      actorUid: uid,
+      runId,
+      schemaId,
+      schemaFamily,
+      classification,
+      format: validatedFormat,
+      reportVersion,
+      governanceStatusAtExport: governanceStatusAtExport.family === "milestone2" ? governanceStatusAtExport.kind : `legacy:${governanceStatusAtExport.status ?? "not_evaluated"}`,
+      at: nowIso,
+    });
+  } catch (bookkeepingErr: unknown) {
+    // A successful export must never be reported as failed to the client
+    // because of a problem in post-generation bookkeeping — log and move on.
+    logger.error("[adaptive-export] post-generation bookkeeping failed (export itself still succeeded)", {
+      runId,
+      exportId,
+      errorMessage: bookkeepingErr instanceof Error ? bookkeepingErr.message : "unknown_error",
+    });
+  }
+
+  const fileName = `convergepanel-export-${runId}-v${reportVersion}.pdf`;
+  return new NextResponse(new Uint8Array(bytes), {
+    status: 200,
+    headers: {
+      "Content-Type": "application/pdf",
+      "Content-Disposition": `attachment; filename="${fileName}"`,
+      "Content-Length": String(bytes.length),
+    },
+  });
 }

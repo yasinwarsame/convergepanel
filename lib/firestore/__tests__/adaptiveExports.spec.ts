@@ -18,6 +18,22 @@
  * mocked) since its recursive deep-copy is exactly what gives this fake the
  * same "writes don't alias the caller's object" guarantee real Firestore
  * provides.
+ *
+ * `runTransaction`'s fake is NOT a bare "call the callback once" stub — an
+ * earlier version of this fake was exactly that, which would have let a
+ * genuine lost-update bug in `createAdaptiveExportRecord` pass silently
+ * (two "concurrent" transactions both reading `adaptiveExportCounter` at
+ * the same value before either commits would both compute the same
+ * `nextVersion`, and JS's single-threaded scheduling makes that interleaving
+ * deterministic-ish rather than a real stress test). Real Firestore
+ * transactions use optimistic concurrency control: every document a
+ * transaction reads is version-tracked, and if any of them changed before
+ * the transaction commits, the SDK transparently retries the entire
+ * callback against fresh data. This fake reproduces exactly that — per-key
+ * version counters, per-attempt read tracking, conflict detection before
+ * "commit", and automatic retry — so a concurrency test against it is
+ * actually proving something about `createAdaptiveExportRecord`'s real
+ * transaction usage, not just exercising happy-path sequencing.
  */
 
 class FakeFieldValue {
@@ -55,6 +71,15 @@ function applyMergeDotPath(target: Record<string, any>, updates: Record<string, 
 function makeFakeAdminDb() {
   const runs = new Map<string, Record<string, any>>();
   const exportDocs = new Map<string, Map<string, any>>();
+  /** Per-document-key version counter, bumped on every committed write — the basis for optimistic-concurrency contention detection below. */
+  const versions = new Map<string, number>();
+
+  function bumpVersion(key: string) {
+    versions.set(key, (versions.get(key) ?? 0) + 1);
+  }
+  function currentVersion(key: string): number {
+    return versions.get(key) ?? 0;
+  }
 
   function exportsForRun(runId: string) {
     if (!exportDocs.has(runId)) exportDocs.set(runId, new Map());
@@ -62,9 +87,17 @@ function makeFakeAdminDb() {
   }
 
   function runDocRef(runId: string) {
+    const key = `runs/${runId}`;
     return {
+      __key: key,
       async get() {
-        return { exists: runs.has(runId), data: () => runs.get(runId) };
+        // A real DocumentSnapshot is frozen at read time — .data() must
+        // keep returning what was true at that moment even if the
+        // document is written again afterward. A lazy `() => runs.get(id)`
+        // closure would silently read the LATEST state instead, which
+        // would mask exactly the stale-read race this fake exists to catch.
+        const snapshot = runs.has(runId) ? { ...runs.get(runId) } : undefined;
+        return { exists: runs.has(runId), data: () => snapshot };
       },
       set(data: any, opts?: { merge?: boolean }) {
         const prev = runs.get(runId) ?? {};
@@ -75,15 +108,19 @@ function makeFakeAdminDb() {
         } else {
           runs.set(runId, data);
         }
+        bumpVersion(key);
       },
       collection(name: string) {
         if (name !== "exports") throw new Error(`unexpected subcollection ${name}`);
         const docs = exportsForRun(runId);
         function docRef(exportId: string) {
+          const exportKey = `runs/${runId}/exports/${exportId}`;
           return {
+            __key: exportKey,
             id: exportId,
             async get() {
-              return { exists: docs.has(exportId), data: () => docs.get(exportId) };
+              const snapshot = docs.has(exportId) ? { ...docs.get(exportId) } : undefined;
+              return { exists: docs.has(exportId), data: () => snapshot };
             },
             set(data: any, opts?: { merge?: boolean }) {
               const prev = docs.get(exportId) ?? {};
@@ -94,6 +131,7 @@ function makeFakeAdminDb() {
               } else {
                 docs.set(exportId, data);
               }
+              bumpVersion(exportKey);
             },
           };
         }
@@ -119,12 +157,39 @@ function makeFakeAdminDb() {
       if (name !== "runs") throw new Error(`unexpected collection ${name}`);
       return { doc: (runId: string) => runDocRef(runId) };
     },
+    /**
+     * Real optimistic-concurrency simulation: each attempt tracks the
+     * version of every doc it reads; if any of those docs were written by
+     * another attempt before this one "commits", the whole callback is
+     * retried against fresh data (matching real Firestore's transparent
+     * retry-on-contention behavior) rather than silently committing a
+     * stale computation. Writes are buffered and only applied once no
+     * conflict is detected, so a losing attempt never partially commits.
+     */
     async runTransaction(fn: (txn: any) => Promise<any>) {
-      const txn = {
-        get: (ref: any) => ref.get(),
-        set: (ref: any, data: any, opts?: any) => ref.set(data, opts),
-      };
-      return fn(txn);
+      const MAX_ATTEMPTS = 25;
+      for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+        const readVersions = new Map<string, number>();
+        const pendingWrites: Array<{ ref: any; data: any; opts?: any }> = [];
+        const txn = {
+          get: async (ref: any) => {
+            if (!readVersions.has(ref.__key)) readVersions.set(ref.__key, currentVersion(ref.__key));
+            return ref.get();
+          },
+          set: (ref: any, data: any, opts?: any) => {
+            pendingWrites.push({ ref, data, opts });
+          },
+        };
+
+        const result = await fn(txn);
+
+        const conflict = [...readVersions].some(([key, versionAtRead]) => currentVersion(key) !== versionAtRead);
+        if (conflict) continue; // another transaction committed first — retry against fresh data, exactly like real Firestore
+
+        for (const { ref, data, opts } of pendingWrites) ref.set(data, opts);
+        return result;
+      }
+      throw new Error(`runTransaction: exceeded ${MAX_ATTEMPTS} attempts under simulated contention`);
     },
     batch() {
       const ops: Array<() => void> = [];
@@ -257,5 +322,52 @@ describe("adaptiveExports Firestore persistence — snapshot immutability (Part 
     const superseded = await getAdaptiveExportRecord(runId, "exp-x");
     expect(superseded.ok).toBe(true);
     expect(superseded.ok && superseded.record.reportSnapshot.question).toBe("X");
+  });
+});
+
+describe("adaptiveExports Firestore persistence — reportVersion concurrency (critical integrity review)", () => {
+  it("two genuinely concurrent export creations for the same run never receive the same reportVersion — no lost update", async () => {
+    const runId = "run-concurrent-1";
+
+    // Fired via Promise.all with no await between them: both calls execute
+    // synchronously up to their first internal `await txn.get(runRef)`,
+    // which is exactly the interleaving window a lost-update bug would need
+    // — both transactions would read `adaptiveExportCounter` at the same
+    // value before either has committed. The fake's contention-detecting
+    // runTransaction (above) forces whichever one loses the race to retry
+    // against the post-commit value, matching real Firestore's guarantee.
+    const [a, b] = await Promise.all([
+      createAdaptiveExportRecord(buildInput(runId, "exp-concurrent-a", "Question A")),
+      createAdaptiveExportRecord(buildInput(runId, "exp-concurrent-b", "Question B")),
+    ]);
+
+    expect(a.ok).toBe(true);
+    expect(b.ok).toBe(true);
+    const versions = [a.ok && a.reportVersion, b.ok && b.reportVersion].sort();
+    expect(versions).toEqual([1, 2]); // distinct, ordered, no collision
+
+    // Both records persisted independently, each with its own distinct version.
+    const recA = await getAdaptiveExportRecord(runId, "exp-concurrent-a");
+    const recB = await getAdaptiveExportRecord(runId, "exp-concurrent-b");
+    expect(recA.ok && recB.ok && recA.record.reportVersion).not.toBe(recB.ok && recB.record.reportVersion);
+  });
+
+  it("ten genuinely concurrent export creations for the same run each receive a distinct reportVersion 1..10 — no lost update under higher contention", async () => {
+    const runId = "run-concurrent-many";
+    const results = await Promise.all(
+      Array.from({ length: 10 }, (_, i) => createAdaptiveExportRecord(buildInput(runId, `exp-many-${i}`, `Question ${i}`)))
+    );
+    expect(results.every((r) => r.ok)).toBe(true);
+    const versions = results.map((r) => r.ok && r.reportVersion).sort((x, y) => (x as number) - (y as number));
+    expect(versions).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  });
+
+  it("concurrent export creations for DIFFERENT runs do not contend with each other — each independently starts at reportVersion 1", async () => {
+    const [a, b] = await Promise.all([
+      createAdaptiveExportRecord(buildInput("run-independent-a", "exp-1", "Q")),
+      createAdaptiveExportRecord(buildInput("run-independent-b", "exp-1", "Q")),
+    ]);
+    expect(a).toEqual({ ok: true, reportVersion: 1 });
+    expect(b).toEqual({ ok: true, reportVersion: 1 });
   });
 });

@@ -85,7 +85,16 @@ export async function createAdaptiveExportRecord(input: CreateAdaptiveExportInpu
 
 export type UpdateAdaptiveExportResult = { ok: true } | { ok: false; reason: "firestore_unavailable" | "write_failed" };
 
-/** Transitions a "generating" record to "ready" once PDF generation genuinely succeeded — never called before the bytes are actually produced (Part 19). */
+/**
+ * Transitions a "generating" record to "ready" once PDF generation
+ * genuinely succeeded — never called before the bytes are actually
+ * produced (Part 19). "Ready" describes the frozen snapshot record and the
+ * fact that a PDF was successfully generated and streamed to the
+ * requester at that moment — it does NOT mean the PDF bytes themselves are
+ * durably stored anywhere; this repo has no object storage, and the bytes
+ * are discarded once the response completes (see researchExport.ts's
+ * `AdaptiveExportArtifactStatus` doc comment).
+ */
 export async function markAdaptiveExportReady(
   runId: string,
   exportId: string,
@@ -122,8 +131,13 @@ export async function markAdaptiveExportFailed(
  * Marks every OTHER "ready" export for this run as "superseded" — never
  * touches `reportSnapshot`/`exportMetadata` (content), only
  * `artifactStatus` (Part 3: superseded is a lifecycle transition, not a
- * content mutation; the artifact remains historically retrievable).
- * Called only after the new export reaches "ready".
+ * content mutation). The superseded export's frozen `reportSnapshot`
+ * record stays readable and unmutated via `getAdaptiveExportRecord()` —
+ * that is the full extent of "historical" support in Phase 1. It does NOT
+ * mean a PDF can be re-downloaded later: no PDF bytes are stored, and no
+ * retrieval-by-export-ID endpoint exists that would render one from the
+ * preserved snapshot on demand. Called only after the new export reaches
+ * "ready".
  */
 export async function supersedeOlderAdaptiveExports(runId: string, currentExportId: string): Promise<UpdateAdaptiveExportResult> {
   if (!adminDb) return { ok: false, reason: "firestore_unavailable" };
@@ -147,6 +161,16 @@ export type GetAdaptiveExportResult =
   | { ok: true; record: AdaptiveResearchExportV1 }
   | { ok: false; reason: "not_found" | "firestore_unavailable" | "read_failed" };
 
+/**
+ * Reads back a frozen export record (metadata + `reportSnapshot`) — never
+ * a PDF. Not wired to any API route in Phase 1 (no
+ * `GET /.../export/{exportId}` endpoint exists yet); used directly by this
+ * module's own tests to verify snapshot immutability. A future
+ * render-from-snapshot or metadata-listing endpoint would build on this,
+ * but does not exist in Phase 1 — "historical export" support today means
+ * this record stays intact and readable, not that a PDF can be
+ * re-downloaded through any current API surface.
+ */
 export async function getAdaptiveExportRecord(runId: string, exportId: string): Promise<GetAdaptiveExportResult> {
   if (!adminDb) return { ok: false, reason: "firestore_unavailable" };
   try {

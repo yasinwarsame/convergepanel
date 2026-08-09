@@ -69,9 +69,19 @@ export type AdaptiveExportFormat = "pdf";
 /**
  * Artifact lifecycle — deliberately separate from governance status (Part
  * 3). "superseded" does not mean invalid; it means a newer export exists
- * for this run and this one is no longer the current snapshot, but it
- * remains historically retrievable (its own record is never mutated once
- * `ready`).
+ * for this run and this one is no longer the current snapshot.
+ *
+ * Precise Phase 1 guarantee (no object storage exists — see this file's
+ * header comment): "ready" means the frozen `reportSnapshot`/metadata
+ * record was durably persisted AND a PDF was successfully generated from
+ * it at that moment and streamed to the requester. It does NOT mean a PDF
+ * binary is sitting in durable storage available for a later download —
+ * there is no such storage, and no retrieval-by-export-ID endpoint exists
+ * in Phase 1. "Historically retrievable" for a superseded/ready record
+ * means its `reportSnapshot` JSON stays readable and unmutated
+ * (`getAdaptiveExportRecord`) — re-generating a PDF FROM that snapshot
+ * would require a dedicated render-from-snapshot endpoint, which Phase 1
+ * does not build. Do not let future code/UI/docs imply otherwise.
  */
 export type AdaptiveExportArtifactStatus = "generating" | "ready" | "failed" | "superseded";
 

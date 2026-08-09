@@ -277,6 +277,24 @@ describe("POST /api/user/runs/[runId]/export — success path (Part 12/19 sequen
     expect(auditCall.schemaFamily).toBe("legacy");
     expect(auditCall.governanceStatusAtExport).toBe("legacy:approved");
   });
+
+  it("a failure in post-generation bookkeeping (markReady/supersede/audit) never rewrites an already-successful export as failed — the client still gets a 200 with the real PDF (final review Step 17 regression)", async () => {
+    // These three calls are all best-effort bookkeeping AFTER the PDF
+    // genuinely exists. Even if every one of them fails, the export must
+    // never be marked "failed" and the response must still be the real,
+    // successfully generated PDF — not a 500.
+    mockedMarkAdaptiveExportReady.mockResolvedValue({ ok: false, reason: "write_failed" });
+    mockedSupersedeOlderAdaptiveExports.mockResolvedValue({ ok: false, reason: "write_failed" });
+    mockedWriteAdaptiveExportAdminAuditEvent.mockRejectedValue(new Error("transient audit write error"));
+
+    const res = await callRoute();
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toBe("application/pdf");
+    const buf = Buffer.from(await res.arrayBuffer());
+    expect(buf.toString()).toBe("%PDF-fake");
+    expect(mockedMarkAdaptiveExportFailed).not.toHaveBeenCalled();
+  });
 });
 
 describe("POST /api/user/runs/[runId]/export — failure path (Part 19: never a partial/successful download)", () => {

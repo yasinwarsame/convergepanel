@@ -341,3 +341,39 @@ describe("AdaptiveResearchDocument — security (Part 18)", () => {
     expect(() => extractPdfElementText(AdaptiveResearchDocument({ record }))).not.toThrow();
   });
 });
+
+describe("AdaptiveResearchDocument — frozen-snapshot purity (final review Step 2's critical scenario)", () => {
+  it("rendering a frozen record never throws, and produces byte-for-byte identical text output no matter how many times it's called — the composer takes ONLY the record argument, so there is no 'current run' state it could drift onto even if one existed elsewhere in the process", () => {
+    const record: AdaptiveResearchExportV1 = baseRecord();
+    Object.freeze(record);
+    Object.freeze(record.reportSnapshot);
+    Object.freeze(record.reportSnapshot.milestone2);
+    Object.freeze(record.reportSnapshot.milestone2!.decisionReceipt);
+
+    // A frozen object throws in strict mode if the composer ever tries to
+    // mutate it — this alone proves the render path is read-only over its
+    // input, not just "happens not to mutate it today".
+    expect(() => AdaptiveResearchDocument({ record })).not.toThrow();
+
+    const first = extractPdfElementText(AdaptiveResearchDocument({ record }));
+    const second = extractPdfElementText(AdaptiveResearchDocument({ record }));
+    const third = extractPdfElementText(AdaptiveResearchDocument({ record }));
+    expect(first).toBe(second);
+    expect(second).toBe(third);
+  });
+
+  it("two DIFFERENT frozen snapshots for the same run/schema render their own distinct content — confirms output is a pure function of the passed-in record, not of any shared/ambient state", () => {
+    const recordA = baseRecord({ reportVersion: 1 });
+    recordA.reportSnapshot.question = "Original question at export time";
+    const recordB = baseRecord({ reportVersion: 2 });
+    recordB.reportSnapshot.question = "Run has since changed — this is export B's own question";
+
+    const textA = extractPdfElementText(AdaptiveResearchDocument({ record: recordA }));
+    const textB = extractPdfElementText(AdaptiveResearchDocument({ record: recordB }));
+
+    expect(textA).toContain("Original question at export time");
+    expect(textA).not.toContain("Run has since changed");
+    expect(textB).toContain("Run has since changed — this is export B's own question");
+    expect(textB).not.toContain("Original question at export time");
+  });
+});
