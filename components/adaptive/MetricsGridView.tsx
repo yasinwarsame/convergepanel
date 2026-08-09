@@ -49,14 +49,54 @@ export default function MetricsGridView({ results }: AdaptiveRendererProps) {
 
       {labelOrder.length > 0 && (
         <Card>
-          <SectionLabel>Metrics</SectionLabel>
-          <div className="overflow-x-auto">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <SectionLabel>Metrics</SectionLabel>
+            {modelIds.length > 0 && (
+              <span className="text-[11px] text-slate-400 md:hidden">Scroll to see all models &rarr;</span>
+            )}
+          </div>
+          {/* Contained horizontal scroll with a CSS-only right-edge scroll
+              shadow (no JS overflow measurement — this repo's adaptive
+              components render via renderToStaticMarkup/server-rendering,
+              with no real browser layout available at test time, so a
+              runtime-state affordance would be untestable here; a pure-CSS
+              approach is also the naturally correct choice since it derives
+              directly from actual scroll position, never a guess). Two
+              background layers on the scroll container itself: a "cover"
+              gradient anchored to the CONTENT's right edge that scrolls
+              WITH the table (background-attachment: local) — once fully
+              scrolled, this cover sits flush with the visible edge and no
+              longer masks anything; and a shadow "indicator" pinned to the
+              VIEWPORT's right edge (background-attachment: scroll) that the
+              cover only reveals while there's more content to the right.
+              Same role/aria-label/tabIndex/focus-ring contract as
+              ComparisonMatrixView's equivalent scroll region. */}
+          <div
+            role="region"
+            aria-label="Metrics table, scroll horizontally to see all models"
+            tabIndex={0}
+            className="overflow-x-auto rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-2"
+            style={{
+              backgroundImage:
+                "linear-gradient(to left, white 30%, rgba(255,255,255,0)), radial-gradient(farthest-side at 100% 50%, rgba(15,23,42,0.18), rgba(15,23,42,0))",
+              backgroundRepeat: "no-repeat",
+              backgroundSize: "40px 100%, 14px 100%",
+              backgroundPosition: "100% 0, 100% 0",
+              backgroundAttachment: "local, scroll",
+            }}
+          >
             <table className="w-full text-sm border-collapse">
               <thead>
                 <tr className="border-b border-slate-200">
-                  <th className="text-left font-semibold text-slate-600 py-2 pr-4">Metric</th>
+                  <th scope="col" className="text-left font-semibold text-slate-600 py-2 pr-4">
+                    Metric
+                  </th>
                   {modelIds.map((modelId) => (
-                    <th key={modelId} className="text-left font-semibold text-slate-600 py-2 px-2 whitespace-nowrap">
+                    <th
+                      key={modelId}
+                      scope="col"
+                      className="text-left font-semibold text-slate-600 py-2 px-2 whitespace-nowrap"
+                    >
                       {getModelLabel(modelId)}
                     </th>
                   ))}
@@ -73,7 +113,9 @@ export default function MetricsGridView({ results }: AdaptiveRendererProps) {
 
                   return (
                     <tr key={key} className="border-b border-slate-100">
-                      <td className="py-2.5 pr-4 text-slate-900 font-medium">{labelDisplay.get(key)}</td>
+                      <th scope="row" className="py-2.5 pr-4 text-left text-slate-900 font-medium">
+                        {labelDisplay.get(key)}
+                      </th>
                       {modelIds.map((modelId) => {
                         const cell = row.get(modelId);
                         if (!cell) {
