@@ -31,6 +31,7 @@
     "@anthropic-ai/sdk": "^0.20.0",
     "@google/generative-ai": "^0.24.1",
     "@prisma/client": "^5.19.0",
+    "@react-pdf/renderer": "^4.6.0",
     "@sentry/nextjs": "^10.56.0",
     "@stripe/stripe-js": "^8.5.3",
     "firebase": "^12.6.0",

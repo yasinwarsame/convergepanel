@@ -25,7 +25,9 @@ type AuditAction =
   | "adaptive_human_review_reviewer_reassigned"
   | "adaptive_human_review_reviewer_unassigned"
   | "adaptive_review_panel_finalized"
-  | "adaptive_review_panel_owner_overridden";
+  | "adaptive_review_panel_owner_overridden"
+  | "adaptive_export_generated"
+  | "adaptive_export_generation_failed";
 
 type AuditEvent = {
   id: string;
@@ -72,6 +74,11 @@ const GOVERNANCE_ACTIONS = new Set<string>([
   // writeAdaptivePanelOverrideAdminAuditEvent() (lib/governance/auditLog.ts)
   // for owner override finalization.
   "adaptive_review_panel_owner_overridden",
+  // Adaptive Research Export, Phase 1 — additive. Written by
+  // writeAdaptiveExportAdminAuditEvent() (lib/governance/auditLog.ts) for
+  // export generation attempts (success and failure).
+  "adaptive_export_generated",
+  "adaptive_export_generation_failed",
 ]);
 
 /** Shown in the governance Audit Log tab (human decisions + policy; no system evaluations). */
@@ -86,6 +93,8 @@ const AUDIT_LOG_DISPLAY_ACTIONS = new Set<string>([
   "adaptive_human_review_reviewer_unassigned",
   "adaptive_review_panel_finalized",
   "adaptive_review_panel_owner_overridden",
+  "adaptive_export_generated",
+  "adaptive_export_generation_failed",
 ]);
 
 function isGovernanceAuditDoc(raw: Record<string, unknown>): boolean {

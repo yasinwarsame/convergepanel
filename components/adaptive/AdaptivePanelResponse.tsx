@@ -175,6 +175,7 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
     <TopSummaryBar
       schemaId={schema.id}
       results={results}
+      runId={runId}
       generatedAt={props.generatedAt}
       persistenceStatus={props.persistenceStatus}
       humanReview={props.humanReview}
