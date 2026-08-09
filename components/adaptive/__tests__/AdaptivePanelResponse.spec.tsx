@@ -195,20 +195,29 @@ function synthesisReportFixture(overrides: Partial<AdaptiveSynthesisReportType> 
   };
 }
 
-describe("AdaptivePanelResponse — legacy/original-9 schemas keep the List/Compare/Synthesis shell for the 3 not-yet-promoted schemas (Phase 2C-3)", () => {
-  it("still renders the tabbed List/Compare/Synthesis shell for financial_valuation (not promoted until Phase 2C-3)", () => {
-    const schema = SCHEMA_REGISTRY.financial_valuation;
-    const classification = baseClassification("financial_valuation");
-    const results = [modelResult("chatgpt", "financial_valuation", { thesis: "Some answer" })];
+/**
+ * Phase 2C-3 completed the last 3 legacy-active schemas (financial_valuation,
+ * forecast_speculative, creative_generative), so all 8 legacy-active
+ * schemas are now promoted — there is no longer a real, naturally-reached
+ * legacy-active schema left to pin against the old tri-tab shell. What
+ * genuinely remains reachable is the shared `!gate || !synthesisReport`
+ * fallback itself (e.g. ADAPTIVE_VERIFICATION_ENABLED off), which now
+ * applies uniformly to every promoted schema, not just the not-yet-promoted
+ * ones — this test pins that fallback directly rather than via an
+ * increasingly-stale "still not promoted" example.
+ */
+describe("AdaptivePanelResponse — the tabbed List/Compare/Synthesis shell remains reachable via the shared gate/synthesisReport-absent fallback", () => {
+  it("still renders the tabbed shell for a promoted schema (contested_empirical) when gate/synthesisReport are genuinely absent", () => {
+    const schema = SCHEMA_REGISTRY.contested_empirical;
+    const classification = baseClassification("contested_empirical");
+    const results = [modelResult("chatgpt", "contested_empirical", { summary: "Some answer" })];
 
     const html = renderToStaticMarkup(
       createElement(AdaptivePanelResponse, {
         schema,
         classification,
         results,
-        gate: { status: "pass", runCertainty: 0.8, loadBearingSplitCount: 0, loadBearingClaims: [] } as any,
-        synthesisReport: synthesisReportFixture(),
-        question: "A financial question",
+        question: "A contested empirical question",
       })
     );
 
