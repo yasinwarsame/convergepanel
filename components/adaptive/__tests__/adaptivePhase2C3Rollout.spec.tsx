@@ -160,6 +160,12 @@ function renderSchema(
   return renderToStaticMarkup(createElement(AdaptivePanelResponse, props as any));
 }
 
+const REPORT_TYPE_LABEL: Record<(typeof ALL_2C3_SCHEMAS)[number], RegExp> = {
+  financial_valuation: /financial analysis/i,
+  forecast_speculative: /trend analysis/i,
+  creative_generative: /creative output/i,
+};
+
 describe("Phase 2C-3 — dedicated renderer, report type, no tab UI, no JSON leak", () => {
   it.each(ALL_2C3_SCHEMAS)("%s: renders its dedicated view, no List/Compare tab UI, no serialized JSON", (schemaId) => {
     const html = renderSchema(schemaId);
@@ -167,6 +173,11 @@ describe("Phase 2C-3 — dedicated renderer, report type, no tab UI, no JSON lea
     expect(html).not.toMatch(/list view|compare view/i);
     expect(html).not.toMatch(/\\"thesis\\"/);
     expect(html).not.toMatch(/\\"output\\"/);
+  });
+
+  it.each(ALL_2C3_SCHEMAS)("%s: TopSummaryBar shows the correct report type label", (schemaId) => {
+    const html = renderSchema(schemaId);
+    expect(html).toMatch(REPORT_TYPE_LABEL[schemaId]);
   });
 });
 
@@ -301,15 +312,25 @@ describe("creative_generative — empty-claims / absent-gate rendering, no fabri
     expect(html).not.toMatch(/models disagree/i);
   });
 
+  it("never renders 'Unified answer' anywhere — unlike financial_valuation/forecast_speculative (gate+synthesisReport-driven, so ReviewGovernanceSection's collapsed 'Full synthesis report' fallback legitimately contains it), creative_generative has no gate/synthesisReport at all, so that fallback never renders for it", () => {
+    const html = renderSchema("creative_generative");
+    expect(html).not.toMatch(/unified answer/i);
+    expect(html).not.toMatch(/full synthesis report/i);
+  });
+
   it("never renders a claims matrix or agreement/disagreement map — there are no claims to compare", () => {
     const html = renderSchema("creative_generative");
     expect(html).not.toMatch(/cross-model comparison/i);
     expect(html).not.toMatch(/agreement.{0,5}disagreement/i);
   });
 
-  it("does not crash or render a broken empty Panel Evidence section — it simply omits content it doesn't have, per the existing PanelEvidenceSection null-return", () => {
+  it("Panel Evidence section is cleanly omitted entirely (not shown broken/empty) — PanelEvidenceSection's own hasContent check returns null when gate+synthesisReport are both absent", () => {
     const html = renderSchema("creative_generative");
-    // No literal empty/broken matrix table markup.
+    // Not just "no broken matrix markup" — the section itself (heading and
+    // all) must not render at all, per PanelEvidenceSection.tsx's
+    // `if (!hasContent) return null` for a schema with no
+    // comparisonMatrix/deepResearch/etc. AND no gate+synthesisReport pair.
+    expect(html).not.toMatch(/panel evidence/i);
     expect(html).not.toMatch(/no claims to compare/i);
   });
 

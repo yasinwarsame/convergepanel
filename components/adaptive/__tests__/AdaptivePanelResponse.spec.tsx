@@ -196,33 +196,109 @@ function synthesisReportFixture(overrides: Partial<AdaptiveSynthesisReportType> 
 }
 
 /**
- * Phase 2C-3 completed the last 3 legacy-active schemas (financial_valuation,
- * forecast_speculative, creative_generative), so all 8 legacy-active
- * schemas are now promoted — there is no longer a real, naturally-reached
- * legacy-active schema left to pin against the old tri-tab shell. What
- * genuinely remains reachable is the shared `!gate || !synthesisReport`
- * fallback itself (e.g. ADAPTIVE_VERIFICATION_ENABLED off), which now
- * applies uniformly to every promoted schema, not just the not-yet-promoted
- * ones — this test pins that fallback directly rather than via an
- * increasingly-stale "still not promoted" example.
+ * Corrected during Phase 2C-3 final review: the ORIGINAL version of this
+ * test (pre-review) claimed contested_empirical "still renders the tabbed
+ * shell" when gate/synthesisReport are absent, asserting only the loose
+ * `/list|compare|synthesis/i` — which incidentally still matches text
+ * inside the PROMOTED layout (e.g. "Panel Evidence", "Full synthesis
+ * report") and therefore never actually caught that the tri-tab
+ * `PanelViewTabs` shell is NOT what renders here.
+ *
+ * The real control flow (AdaptivePanelResponse.tsx): `PHASE2_PILOT_SCHEMAS`
+ * is now checked BEFORE the generic `!gate || !synthesisReport` fallback
+ * (reordered in 2C-3 specifically so creative_generative — which never
+ * computes gate/synthesisReport — reaches its promoted layout instead of
+ * the bare AdaptiveResultsView fallback). Since ALL 8 legacy-active schemas
+ * are now in PHASE2_PILOT_SCHEMAS, and every Milestone-2/factual_lookup
+ * schema returns via its own earlier renderHint branch, there is currently
+ * NO registered QueryType that can still reach either (a) the bare
+ * `AdaptiveResultsView`-only fallback at line ~544, or (b) the tri-tab
+ * `PanelViewTabs` shell below it — both are dead code for real traffic
+ * today (reachable only if a future QueryType were added to the registry
+ * without also being added to PHASE2_PILOT_SCHEMAS or given an explicit
+ * earlier branch).
+ *
+ * This means gate/synthesisReport-absence for ANY of the 8 promoted
+ * schemas — not just creative_generative — now renders the SAME promoted
+ * progressive-disclosure layout, with PrimarySynthesisStrip and
+ * ModelResponsesSection's listView omitted (both already conditional) and
+ * PanelEvidenceSection/ReviewGovernanceSection degrading gracefully (both
+ * already accept gate/synthesisReport as optional props). This is safe —
+ * confirmed here by asserting each schema's OWN dedicated view still
+ * renders, the tri-tab shell never appears, and no consensus/disagreement
+ * language is fabricated from the missing synthesisReport — but it is a
+ * real, previously-untested behavioral change for the other 7 schemas
+ * that the pre-review test's weak assertion would not have caught.
  */
-describe("AdaptivePanelResponse — the tabbed List/Compare/Synthesis shell remains reachable via the shared gate/synthesisReport-absent fallback", () => {
-  it("still renders the tabbed shell for a promoted schema (contested_empirical) when gate/synthesisReport are genuinely absent", () => {
-    const schema = SCHEMA_REGISTRY.contested_empirical;
-    const classification = baseClassification("contested_empirical");
-    const results = [modelResult("chatgpt", "contested_empirical", { summary: "Some answer" })];
+describe("AdaptivePanelResponse — gate/synthesisReport-absence for ANY of the 8 promoted schemas renders the promoted layout safely, never the tri-tab shell, never fabricated consensus", () => {
+  const FIXTURE_BY_SCHEMA: Record<
+    "procedural" | "generic" | "contested_empirical" | "legal_regulatory" | "medical_health" | "financial_valuation" | "forecast_speculative" | "creative_generative",
+    { data: Record<string, unknown>; dedicatedMarker: RegExp }
+  > = {
+    procedural: { data: { goal: "Set up 2FA", steps: [] }, dedicatedMarker: /set up 2fa/i },
+    generic: { data: { summary: "A generic answer." }, dedicatedMarker: /a generic answer/i },
+    contested_empirical: {
+      data: { summary: "Experts broadly agree the effect exists but disagree on magnitude.", settledClaims: [], disputedClaims: [], keyMetrics: [], openQuestions: [] },
+      dedicatedMarker: /where the models land/i,
+    },
+    legal_regulatory: {
+      data: { applicableRule: "Reasonable accommodation must be provided absent undue hardship.", jurisdiction: "US federal", elements: [], keyAuthority: [], exceptions: [], unsettledIssues: [], attorneyQuestions: [] },
+      dedicatedMarker: /applicable rule/i,
+    },
+    medical_health: {
+      data: { summary: "Regular exercise reduces cardiovascular risk.", mechanism: "x", evidenceByTier: [], guidelinePositions: ["AHA recommends 150 minutes/week."], redFlags: [], clinicianQuestions: [] },
+      dedicatedMarker: /guideline positions/i,
+    },
+    financial_valuation: {
+      data: { thesis: "The company is undervalued.", metrics: [{ label: "P/E", value: 18, unit: "x", asOf: "2026", source: "10-Q" }], bullCase: "Margin expansion.", bearCase: "Growth slows.", keyAssumptions: [], riskFactors: [] },
+      dedicatedMarker: /bull case/i,
+    },
+    forecast_speculative: {
+      data: { scenarios: [{ label: "Baseline", probability: 0.6, narrative: "Trends continue.", leadingIndicators: [] }], baseRates: ["Historically ~40%."], keyUncertainties: [] },
+      dedicatedMarker: /base rates/i,
+    },
+    creative_generative: {
+      data: { output: "A short poem about autumn leaves falling gently to the ground.", styleNotes: [] },
+      dedicatedMarker: /autumn leaves falling gently/i,
+    },
+  };
 
-    const html = renderToStaticMarkup(
-      createElement(AdaptivePanelResponse, {
-        schema,
-        classification,
-        results,
-        question: "A contested empirical question",
-      })
-    );
+  it.each(Object.keys(FIXTURE_BY_SCHEMA) as (keyof typeof FIXTURE_BY_SCHEMA)[])(
+    "%s: gate/synthesisReport absent + alignedClaims=[] — renders the promoted layout (own dedicated view), never the tri-tab shell, never fabricates consensus",
+    (schemaId) => {
+      const schema = SCHEMA_REGISTRY[schemaId];
+      const { data, dedicatedMarker } = FIXTURE_BY_SCHEMA[schemaId];
+      const classification = baseClassification(schemaId);
+      const results = [modelResult("chatgpt", schemaId, data), modelResult("claude", schemaId, data)];
 
-    expect(html).toMatch(/list|compare|synthesis/i);
-  });
+      let html = "";
+      expect(() => {
+        html = renderToStaticMarkup(
+          createElement(AdaptivePanelResponse, {
+            schema,
+            classification,
+            results,
+            alignedClaims: [],
+            question: "A representative question",
+          })
+        );
+      }).not.toThrow();
+
+      // The schema's own dedicated view is what actually renders — proves
+      // this isn't a blank page or a silent crash swallowed by the fallback.
+      expect(html).toMatch(dedicatedMarker);
+      // The tri-tab shell (List View / Compare View / Synthesis Report
+      // button labels from PanelViewTabs) never renders for any of the 8.
+      expect(html).not.toMatch(/list view|compare view/i);
+      // No consensus/disagreement language fabricated from an absent
+      // synthesisReport.
+      expect(html).not.toMatch(/models agree/i);
+      expect(html).not.toMatch(/models disagree/i);
+      // Secondary sections still present (collapsed), not silently dropped.
+      expect(html).toMatch(/model responses/i);
+      expect(html).toMatch(/review.{0,10}governance/i);
+    }
+  );
 });
 
 describe("AdaptivePanelResponse — Phase 2 pilot: generic gets the promoted view + stacked sections, not tabs", () => {
