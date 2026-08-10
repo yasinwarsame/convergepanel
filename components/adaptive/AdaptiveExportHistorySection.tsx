@@ -10,11 +10,19 @@
  * "Regenerate PDF" action fully independent of every other row's state
  * (Part 14 — one failed regeneration must never affect other rows).
  *
- * Wording is deliberately "Regenerate PDF" rather than "Download PDF" —
- * PDF bytes are never stored (see researchExport.ts's header comment), so
- * every click genuinely re-renders the document from its frozen snapshot;
- * "Download" would imply a file sitting in storage waiting to be fetched,
- * which is not what happens here.
+ * Wording is deliberately "Regenerate PDF"/"Regenerate DOCX" rather than
+ * "Download PDF/DOCX" — bytes are never stored (see researchExport.ts's
+ * header comment), so every click genuinely re-renders the document from
+ * its frozen snapshot; "Download" would imply a file sitting in storage
+ * waiting to be fetched, which is not what happens here.
+ *
+ * Phase 3 — a historical row's OWN `item.format` drives its action label
+ * and file extension; there is no control to change a historical export's
+ * format during regeneration (Part 13). A row created as PDF always
+ * regenerates PDF; a row created as DOCX always regenerates DOCX — this
+ * is enforced server-side (the regeneration route reads `record.format`,
+ * never anything client-supplied), this label is purely descriptive of
+ * that server-side truth.
  */
 
 import { useState } from "react";
@@ -45,6 +53,13 @@ interface AdaptiveExportListItem {
 }
 
 type ListState = "idle" | "loading" | "loaded" | "error";
+
+/** "pdf" -> "PDF", "docx" -> "DOCX" — falls back to an uppercased raw value for any future format this component hasn't been taught about yet, rather than rendering nothing. */
+function formatLabel(format: string): string {
+  if (format === "pdf") return "PDF";
+  if (format === "docx") return "DOCX";
+  return format.toUpperCase();
+}
 
 function formatCreatedAt(iso: string): string {
   const date = new Date(iso);
@@ -89,14 +104,14 @@ function ExportHistoryRow({ runId, item }: { runId: string; item: AdaptiveExport
       });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        setErrorMessage(body?.message || "Couldn't regenerate this PDF. Please try again.");
+        setErrorMessage(body?.message || `Couldn't regenerate this ${formatLabel(item.format)}. Please try again.`);
         setState("error");
         return;
       }
       const blob = await res.blob();
       const disposition = res.headers.get("Content-Disposition") || "";
       const fileNameMatch = disposition.match(/filename="([^"]+)"/);
-      const fileName = fileNameMatch?.[1] || `convergepanel-export-${runId}-v${item.reportVersion}.pdf`;
+      const fileName = fileNameMatch?.[1] || `convergepanel-export-${runId}-v${item.reportVersion}.${item.format}`;
 
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -109,7 +124,7 @@ function ExportHistoryRow({ runId, item }: { runId: string; item: AdaptiveExport
 
       setState("idle");
     } catch {
-      setErrorMessage("Couldn't regenerate this PDF. Please check your connection and try again.");
+      setErrorMessage(`Couldn't regenerate this ${formatLabel(item.format)}. Please check your connection and try again.`);
       setState("error");
     }
   }
@@ -128,7 +143,7 @@ function ExportHistoryRow({ runId, item }: { runId: string; item: AdaptiveExport
           </span>
         </div>
         <p className="mt-0.5 text-xs text-slate-500">
-          {formatCreatedAt(item.createdAt)} · {governanceLabel(item.governanceStatusAtExport)}
+          {formatCreatedAt(item.createdAt)} · {formatLabel(item.format)} · {governanceLabel(item.governanceStatusAtExport)}
         </p>
       </div>
 
@@ -138,7 +153,7 @@ function ExportHistoryRow({ runId, item }: { runId: string; item: AdaptiveExport
           onClick={handleRegenerate}
           disabled={state === "loading" || notReady}
           aria-busy={state === "loading"}
-          aria-label={`Regenerate the PDF for export version ${item.reportVersion}`}
+          aria-label={`Regenerate the ${formatLabel(item.format)} for export version ${item.reportVersion}`}
           className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {state === "loading" ? (
@@ -147,7 +162,7 @@ function ExportHistoryRow({ runId, item }: { runId: string; item: AdaptiveExport
               Regenerating…
             </>
           ) : (
-            "Regenerate PDF"
+            `Regenerate ${formatLabel(item.format)}`
           )}
         </button>
         {state === "error" && errorMessage && (

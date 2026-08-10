@@ -22,9 +22,13 @@ jest.mock("@/lib/auth/identityResolutionTelemetry", () => ({
 }));
 
 let mockFlagEnabled = true;
+let mockDocxFlagEnabled = true;
 jest.mock("@/lib/env", () => ({
   get ADAPTIVE_RESEARCH_EXPORT_ENABLED() {
     return mockFlagEnabled;
+  },
+  get ADAPTIVE_RESEARCH_DOCX_EXPORT_ENABLED() {
+    return mockDocxFlagEnabled;
   },
 }));
 
@@ -113,6 +117,7 @@ async function callRoute(runId: string = RUN_ID, body: unknown = { format: "pdf"
 
 beforeEach(() => {
   mockFlagEnabled = true;
+  mockDocxFlagEnabled = true;
   mockedResolveRequestIdentity.mockReset().mockResolvedValue({ status: "authenticated", uid: UID });
   mockedRunGet.mockReset();
   mockedParsePersistedAdaptiveOutput.mockReset().mockReturnValue({ ok: false, reason: "absent" });
@@ -154,12 +159,30 @@ describe("POST /api/user/runs/[runId]/export — auth and gating", () => {
     expect(res.status).toBe(404);
   });
 
-  it("400s when format is not exactly \"pdf\" — DOCX/JSON/CSV rejected outright, Phase 1 supports PDF only", async () => {
+  it("400s on an unrecognized format string (JSON/CSV) regardless of any flag", async () => {
+    const res = await callRoute(RUN_ID, { format: "json" });
+    const json = await res.json();
+    expect(res.status).toBe(400);
+    expect(json.errorCode).toBe("unsupported_format");
+    expect(mockedCreateAdaptiveExportRecord).not.toHaveBeenCalled();
+  });
+
+  it("400s on format: \"docx\" when ADAPTIVE_RESEARCH_DOCX_EXPORT_ENABLED is off — identical to a wholly unrecognized format, never a distinguishing message that reveals the feature exists", async () => {
+    mockDocxFlagEnabled = false;
     const res = await callRoute(RUN_ID, { format: "docx" });
     const json = await res.json();
     expect(res.status).toBe(400);
     expect(json.errorCode).toBe("unsupported_format");
     expect(mockedCreateAdaptiveExportRecord).not.toHaveBeenCalled();
+  });
+
+  it("accepts format: \"docx\" when ADAPTIVE_RESEARCH_DOCX_EXPORT_ENABLED is on", async () => {
+    mockedRenderAdaptiveResearchPdf.mockResolvedValue({ bytes: Buffer.from("PK-fake-docx"), sha256: "docxsha" });
+    const res = await callRoute(RUN_ID, { format: "docx" });
+    expect(res.status).toBe(200);
+    expect(mockedCreateAdaptiveExportRecord).toHaveBeenCalled();
+    const callArg = mockedCreateAdaptiveExportRecord.mock.calls[0][0];
+    expect(callArg.record.format).toBe("docx");
   });
 
   it("400s on an invalid JSON body", async () => {
@@ -237,6 +260,17 @@ describe("POST /api/user/runs/[runId]/export — success path (Part 12/19 sequen
     expect(buf.toString()).toBe("%PDF-fake");
   });
 
+  it("returns the generated DOCX bytes with the correct format-specific headers when format: \"docx\" is requested", async () => {
+    mockedRenderAdaptiveResearchPdf.mockResolvedValue({ bytes: Buffer.from("PK-fake-docx"), sha256: "docxsha" });
+    const res = await callRoute(RUN_ID, { format: "docx" });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toBe("application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+    expect(res.headers.get("Content-Disposition")).toMatch(/attachment/);
+    expect(res.headers.get("Content-Disposition")).toMatch(/\.docx"/);
+    const buf = Buffer.from(await res.arrayBuffer());
+    expect(buf.toString()).toBe("PK-fake-docx");
+  });
+
   it("marks the export ready and supersedes older exports only AFTER PDF generation genuinely succeeds — never before", async () => {
     await callRoute();
     expect(mockedRenderAdaptiveResearchPdf).toHaveBeenCalledTimes(1);
@@ -304,7 +338,7 @@ describe("POST /api/user/runs/[runId]/export — failure path (Part 19: never a 
     expect(res.status).toBe(500);
     expect(res.headers.get("Content-Type")).not.toBe("application/pdf");
     const json = await res.json();
-    expect(json.errorCode).toBe("pdf_generation_failed");
+    expect(json.errorCode).toBe("export_generation_failed");
   });
 
   it("marks the record failed, never ready, and never supersedes anything on failure", async () => {

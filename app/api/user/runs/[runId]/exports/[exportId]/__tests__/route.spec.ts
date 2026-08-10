@@ -265,6 +265,43 @@ describe("GET /api/user/runs/[runId]/exports/[exportId] — schema family covera
   });
 });
 
+describe("GET /api/user/runs/[runId]/exports/[exportId] — format-specific regeneration (Phase 3)", () => {
+  it("a DOCX-format export regenerates with DOCX headers, never PDF's", async () => {
+    const record = buildRecord({ format: "docx" });
+    mockedGetAdaptiveExportRecord.mockResolvedValue({ ok: true, record });
+    mockedRenderAdaptiveResearchExport.mockResolvedValue({ bytes: Buffer.from("PK-regenerated-docx"), sha256: "docxsha" });
+
+    const res = await callRoute();
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toBe("application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+    expect(res.headers.get("Content-Disposition")).toMatch(/\.docx"/);
+    expect(res.headers.get("Content-Disposition")).not.toMatch(/\.pdf"/);
+    const buf = Buffer.from(await res.arrayBuffer());
+    expect(buf.toString()).toBe("PK-regenerated-docx");
+  });
+
+  it("a PDF-format export still regenerates with PDF headers, unaffected by DOCX now existing as a format", async () => {
+    const record = buildRecord({ format: "pdf" });
+    mockedGetAdaptiveExportRecord.mockResolvedValue({ ok: true, record });
+    const res = await callRoute();
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toBe("application/pdf");
+    expect(res.headers.get("Content-Disposition")).toMatch(/\.pdf"/);
+  });
+
+  it("never lets any client-supplied input coerce a historical export's format — the route reads format exclusively from the frozen record, there is no request body/query param it could come from", async () => {
+    const record = buildRecord({ format: "docx" });
+    mockedGetAdaptiveExportRecord.mockResolvedValue({ ok: true, record });
+    mockedRenderAdaptiveResearchExport.mockResolvedValue({ bytes: Buffer.from("PK-regenerated-docx"), sha256: "docxsha" });
+    // The regeneration route is a bare GET with no body — buildRequest/
+    // callRoute never construct one — so this test's real assertion is
+    // structural: renderAdaptiveResearchExport is called with the exact
+    // frozen record object (format included), never a derived/mutated copy.
+    await callRoute();
+    expect(mockedRenderAdaptiveResearchExport).toHaveBeenCalledWith(record);
+  });
+});
+
 describe("GET /api/user/runs/[runId]/exports/[exportId] — version dispatch failure", () => {
   it("500s cleanly when the version-aware renderer rejects an unsupported/unknown contract version", async () => {
     mockedRenderAdaptiveResearchExport.mockRejectedValue(new Error("Unsupported AdaptiveResearchExport contract version: 2"));

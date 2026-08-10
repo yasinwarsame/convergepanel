@@ -63,8 +63,40 @@ import {
 import { PersistedAdaptiveSchemaId, PersistedLegacyAdaptiveSchemaId } from "./persistedOutput";
 import { ModelId } from "../types";
 
-/** Phase 1 supports PDF only — reject any other value at the API boundary. Widened in a later phase, never here. */
-export type AdaptiveExportFormat = "pdf";
+/**
+ * Phase 1 shipped PDF only. Phase 3 adds DOCX, additively — existing PDF
+ * records are untouched by this widening (their `format` field was
+ * already `"pdf"`, still is, still deserializes the same way). Reject any
+ * other value at the API boundary.
+ */
+export type AdaptiveExportFormat = "pdf" | "docx";
+
+/** The one place MIME type/file extension per format lives — both the creation and regeneration routes call this rather than each hardcoding their own copy. */
+export function adaptiveExportContentType(format: AdaptiveExportFormat): string {
+  switch (format) {
+    case "pdf":
+      return "application/pdf";
+    case "docx":
+      return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    default: {
+      const unsupported: never = format;
+      throw new Error(`Unsupported AdaptiveResearchExport format: ${String(unsupported)}`);
+    }
+  }
+}
+
+export function adaptiveExportFileExtension(format: AdaptiveExportFormat): string {
+  switch (format) {
+    case "pdf":
+      return "pdf";
+    case "docx":
+      return "docx";
+    default: {
+      const unsupported: never = format;
+      throw new Error(`Unsupported AdaptiveResearchExport format: ${String(unsupported)}`);
+    }
+  }
+}
 
 /**
  * Artifact lifecycle — deliberately separate from governance status (Part
@@ -190,13 +222,18 @@ export interface AdaptiveExportManifest {
 }
 
 /**
- * The export artifact itself. `version` is this CONTRACT's own version
- * (the export format), deliberately distinct from `reportVersion` (a
- * monotonic per-run counter powering "Superseded", incremented once per
- * export generation) and from the frozen `schemaVersion` inside
- * `reportSnapshot`'s source data (`PersistedAdaptiveOutputV1.version` /
- * `PersistedLegacyAdaptiveOutputV1.version` at capture time) — three
- * genuinely different concepts, never conflated (Part 4).
+ * The export artifact itself. `version` is this CONTRACT's own version —
+ * the shape of this TypeScript interface and its persisted JSON — never
+ * to be confused with the file `format` (pdf/docx, Phase 3) it renders to,
+ * with `reportVersion` (a monotonic per-run counter powering "Superseded",
+ * incremented once per export generation), or with the frozen
+ * `schemaVersion` inside `reportSnapshot`'s source data
+ * (`PersistedAdaptiveOutputV1.version` / `PersistedLegacyAdaptiveOutputV1.version`
+ * at capture time) — four genuinely different, independent concepts, never
+ * conflated (Part 4). Adding a second `format` value in Phase 3 does not
+ * bump `version`: the same `AdaptiveResearchExportV1` shape now simply
+ * renders through one of two format-specific renderers, chosen by
+ * `format`, both still operating on the exact same `reportSnapshot`.
  */
 export interface AdaptiveResearchExportV1 {
   version: 1;
