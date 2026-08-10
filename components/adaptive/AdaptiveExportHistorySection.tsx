@@ -54,10 +54,11 @@ interface AdaptiveExportListItem {
 
 type ListState = "idle" | "loading" | "loaded" | "error";
 
-/** "pdf" -> "PDF", "docx" -> "DOCX" — falls back to an uppercased raw value for any future format this component hasn't been taught about yet, rather than rendering nothing. */
+/** "pdf" -> "PDF", "docx" -> "DOCX", "json" -> "JSON" — falls back to an uppercased raw value for any future format this component hasn't been taught about yet, rather than rendering nothing. */
 function formatLabel(format: string): string {
   if (format === "pdf") return "PDF";
   if (format === "docx") return "DOCX";
+  if (format === "json") return "JSON";
   return format.toUpperCase();
 }
 

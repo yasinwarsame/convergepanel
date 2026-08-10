@@ -64,12 +64,12 @@ import { PersistedAdaptiveSchemaId, PersistedLegacyAdaptiveSchemaId } from "./pe
 import { ModelId } from "../types";
 
 /**
- * Phase 1 shipped PDF only. Phase 3 adds DOCX, additively — existing PDF
- * records are untouched by this widening (their `format` field was
- * already `"pdf"`, still is, still deserializes the same way). Reject any
- * other value at the API boundary.
+ * Phase 1 shipped PDF only. Phase 3 added DOCX, Phase 4 adds JSON — both
+ * additively. Existing PDF/DOCX records are untouched by this widening
+ * (their `format` field was already `"pdf"`/`"docx"`, still is, still
+ * deserializes the same way). Reject any other value at the API boundary.
  */
-export type AdaptiveExportFormat = "pdf" | "docx";
+export type AdaptiveExportFormat = "pdf" | "docx" | "json";
 
 /** The one place MIME type/file extension per format lives — both the creation and regeneration routes call this rather than each hardcoding their own copy. */
 export function adaptiveExportContentType(format: AdaptiveExportFormat): string {
@@ -78,6 +78,8 @@ export function adaptiveExportContentType(format: AdaptiveExportFormat): string 
       return "application/pdf";
     case "docx":
       return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    case "json":
+      return "application/json; charset=utf-8";
     default: {
       const unsupported: never = format;
       throw new Error(`Unsupported AdaptiveResearchExport format: ${String(unsupported)}`);
@@ -91,6 +93,8 @@ export function adaptiveExportFileExtension(format: AdaptiveExportFormat): strin
       return "pdf";
     case "docx":
       return "docx";
+    case "json":
+      return "json";
     default: {
       const unsupported: never = format;
       throw new Error(`Unsupported AdaptiveResearchExport format: ${String(unsupported)}`);
@@ -224,16 +228,16 @@ export interface AdaptiveExportManifest {
 /**
  * The export artifact itself. `version` is this CONTRACT's own version —
  * the shape of this TypeScript interface and its persisted JSON — never
- * to be confused with the file `format` (pdf/docx, Phase 3) it renders to,
+ * to be confused with the file `format` (pdf/docx/json) it renders to,
  * with `reportVersion` (a monotonic per-run counter powering "Superseded",
  * incremented once per export generation), or with the frozen
  * `schemaVersion` inside `reportSnapshot`'s source data
  * (`PersistedAdaptiveOutputV1.version` / `PersistedLegacyAdaptiveOutputV1.version`
  * at capture time) — four genuinely different, independent concepts, never
- * conflated (Part 4). Adding a second `format` value in Phase 3 does not
- * bump `version`: the same `AdaptiveResearchExportV1` shape now simply
- * renders through one of two format-specific renderers, chosen by
- * `format`, both still operating on the exact same `reportSnapshot`.
+ * conflated (Part 4). Adding a new `format` value (DOCX in Phase 3, JSON in
+ * Phase 4) never bumps `version`: the same `AdaptiveResearchExportV1` shape
+ * simply renders through one more format-specific renderer, chosen by
+ * `format`, all still operating on the exact same `reportSnapshot`.
  */
 export interface AdaptiveResearchExportV1 {
   version: 1;

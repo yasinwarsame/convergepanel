@@ -1,11 +1,12 @@
 /**
  * Adaptive Research Export — POST /api/user/runs/[runId]/export.
- * `format: "pdf"` (Phase 1, always accepted) or `format: "docx"` (Phase 3,
- * accepted only while `ADAPTIVE_RESEARCH_DOCX_EXPORT_ENABLED` is on — see
- * that flag's own doc comment in lib/env.ts). JSON/CSV still rejected —
- * out of scope for this phase too. Route organization mirrors the
- * existing `GET /api/user/runs/[runId]` convention (same auth pattern,
- * same run-ownership check).
+ * `format: "pdf"` (Phase 1, always accepted), `format: "docx"` (Phase 3,
+ * accepted only while `ADAPTIVE_RESEARCH_DOCX_EXPORT_ENABLED` is on), or
+ * `format: "json"` (Phase 4, accepted only while
+ * `ADAPTIVE_RESEARCH_JSON_EXPORT_ENABLED` is on — see each flag's own doc
+ * comment in lib/env.ts). CSV still rejected — out of scope for this phase
+ * too. Route organization mirrors the existing `GET /api/user/runs/[runId]`
+ * convention (same auth pattern, same run-ownership check).
  *
  * Flow (Part 12): authenticate → load run → authorize access to run →
  * check ADAPTIVE_RESEARCH_EXPORT_ENABLED → validate the requested format
@@ -31,7 +32,7 @@ import { randomUUID } from "crypto";
 import { resolveRequestIdentity } from "@/lib/auth/resolveRequestIdentity";
 import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelemetry";
 import { adminDb } from "@/lib/firebase/admin";
-import { ADAPTIVE_RESEARCH_EXPORT_ENABLED, ADAPTIVE_RESEARCH_DOCX_EXPORT_ENABLED } from "@/lib/env";
+import { ADAPTIVE_RESEARCH_EXPORT_ENABLED, ADAPTIVE_RESEARCH_DOCX_EXPORT_ENABLED, ADAPTIVE_RESEARCH_JSON_EXPORT_ENABLED } from "@/lib/env";
 import { parsePersistedAdaptiveOutput, parsePersistedLegacyAdaptiveOutput } from "@/lib/adaptiveSchema/persistedOutput";
 import { parseGovernanceRecord } from "@/lib/adaptiveSchema/governanceRecordParser";
 import { buildExportSnapshot } from "@/lib/adaptiveSchema/exportSnapshot";
@@ -81,12 +82,15 @@ export async function POST(req: NextRequest, context: { params: Promise<{ runId:
     return errorResponse(400, "invalid_request", "Request body must be valid JSON.");
   }
   const format = (body as { format?: unknown })?.format;
-  // DOCX (Phase 3) sits behind its OWN release flag, checked here rather
-  // than folded into the format-validity check below — a request for
-  // "docx" while the flag is off must be rejected the same way an
-  // unrecognized format string would be (never a flag-specific error
-  // message that would reveal the feature exists but is disabled).
-  const validFormats: AdaptiveExportFormat[] = ADAPTIVE_RESEARCH_DOCX_EXPORT_ENABLED ? ["pdf", "docx"] : ["pdf"];
+  // DOCX (Phase 3) and JSON (Phase 4) each sit behind their OWN release
+  // flag, checked here rather than folded into the format-validity check
+  // below — a request for a not-yet-enabled format must be rejected the
+  // same way an unrecognized format string would be (never a
+  // flag-specific error message that would reveal the feature exists but
+  // is disabled).
+  const validFormats: AdaptiveExportFormat[] = ["pdf"];
+  if (ADAPTIVE_RESEARCH_DOCX_EXPORT_ENABLED) validFormats.push("docx");
+  if (ADAPTIVE_RESEARCH_JSON_EXPORT_ENABLED) validFormats.push("json");
   if (typeof format !== "string" || !validFormats.includes(format as AdaptiveExportFormat)) {
     return errorResponse(400, "unsupported_format", `Only format: ${validFormats.map((f) => `"${f}"`).join(" or ")} is supported.`);
   }
