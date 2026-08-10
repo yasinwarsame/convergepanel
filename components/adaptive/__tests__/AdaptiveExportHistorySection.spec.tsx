@@ -2,10 +2,10 @@
  * Adaptive Research Export, Phase 2 — AdaptiveExportHistorySection
  * structural render tests. renderToStaticMarkup (no jsdom), matching the
  * convention used by every other adaptive renderer test in this repo, and
- * the same level of coverage already accepted for AdaptiveExportButton
- * (Phase 1) — full interactive fetch/regenerate flows are covered by the
- * API route tests instead; this only verifies the collapsed shell renders
- * correctly under the flag/runId gates.
+ * the same level of coverage used by AdaptiveExportButton.spec.tsx /
+ * AdaptiveExportButtonDocx.spec.tsx — full interactive fetch/regenerate
+ * flows are covered by the API route tests instead; this only verifies
+ * the collapsed shell renders correctly under the flag/runId gates.
  *
  * The flag is a module-scope constant (`EXPORT_FLAG_ENABLED`), read once at
  * import time — set via `process.env` before the static import below runs,

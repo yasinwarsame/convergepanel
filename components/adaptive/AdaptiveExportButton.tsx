@@ -7,10 +7,15 @@
  * Phase 1 shipped a single "Export PDF" button, no format menu. Phase 3
  * adds a format choice — but ONLY when
  * `NEXT_PUBLIC_ADAPTIVE_RESEARCH_DOCX_EXPORT_ENABLED` is on. With that
- * flag off (the default), this component renders byte-for-byte the same
- * single-button UI Phase 1 shipped — Part 14's "ships dark" requirement
- * means zero visible change until DOCX is deliberately turned on, not
- * just zero DOCX capability.
+ * flag off (the default), this component renders the same single-button
+ * UI Phase 1 shipped — identical text (aria-label, button label, loading
+ * label), classes, and behavior. The button is now always wrapped in one
+ * extra `<div className="flex items-center gap-1.5">` (it hosts the
+ * conditional `<select>` sibling when the flag is on); with a single
+ * child and the flag off that wrapper has no box-model effect, so this is
+ * visually a no-op, not literal byte-for-byte DOM identity — Part 14's
+ * "ships dark" requirement (zero visible change until DOCX is
+ * deliberately turned on) still holds.
  *
  * A native `<select>` (not a custom dropdown/menu component — none exists
  * in this design system, and a native select is trivially keyboard-
