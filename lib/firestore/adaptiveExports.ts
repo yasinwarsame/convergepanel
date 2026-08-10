@@ -163,13 +163,13 @@ export type GetAdaptiveExportResult =
 
 /**
  * Reads back a frozen export record (metadata + `reportSnapshot`) — never
- * a PDF. Not wired to any API route in Phase 1 (no
- * `GET /.../export/{exportId}` endpoint exists yet); used directly by this
- * module's own tests to verify snapshot immutability. A future
- * render-from-snapshot or metadata-listing endpoint would build on this,
- * but does not exist in Phase 1 — "historical export" support today means
- * this record stays intact and readable, not that a PDF can be
- * re-downloaded through any current API surface.
+ * a PDF. Phase 1 used this only in its own immutability tests (no
+ * retrieval endpoint existed yet). Phase 2's regeneration route
+ * (`GET /api/user/runs/[runId]/exports/[exportId]`) now calls this
+ * directly: authorize → load via this function → render the returned
+ * `reportSnapshot` through the version-aware PDF dispatcher
+ * (`renderAdaptiveResearchExport`) → stream bytes. The record itself is
+ * never mutated by regeneration.
  */
 export async function getAdaptiveExportRecord(runId: string, exportId: string): Promise<GetAdaptiveExportResult> {
   if (!adminDb) return { ok: false, reason: "firestore_unavailable" };
@@ -177,6 +177,29 @@ export async function getAdaptiveExportRecord(runId: string, exportId: string): 
     const snap = await exportsCollection(runId).doc(exportId).get();
     if (!snap.exists) return { ok: false, reason: "not_found" };
     return { ok: true, record: snap.data() as AdaptiveResearchExportV1 };
+  } catch {
+    return { ok: false, reason: "read_failed" };
+  }
+}
+
+export type ListAdaptiveExportsResult =
+  | { ok: true; records: AdaptiveResearchExportV1[] }
+  | { ok: false; reason: "firestore_unavailable" | "read_failed" };
+
+/**
+ * Adaptive Research Export, Phase 2 — lists every export record for a run,
+ * newest `reportVersion` first, including `superseded` and `failed` ones
+ * (Part 8: superseded ≠ invalid ≠ hidden). Returns FULL records — callers
+ * that expose this over an API (the history-list route) are responsible for
+ * projecting down to metadata-only fields before responding; this function
+ * itself stays a general-purpose reader, matching `getAdaptiveExportRecord`'s
+ * own shape one level up.
+ */
+export async function listAdaptiveExportRecords(runId: string): Promise<ListAdaptiveExportsResult> {
+  if (!adminDb) return { ok: false, reason: "firestore_unavailable" };
+  try {
+    const snap = await exportsCollection(runId).orderBy("reportVersion", "desc").get();
+    return { ok: true, records: snap.docs.map((d) => d.data() as AdaptiveResearchExportV1) };
   } catch {
     return { ok: false, reason: "read_failed" };
   }

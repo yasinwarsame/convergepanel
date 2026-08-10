@@ -33,7 +33,7 @@ import { buildExportSnapshot } from "@/lib/adaptiveSchema/exportSnapshot";
 import { resolveAdaptiveExportVerdict } from "@/lib/adaptiveSchema/exportAuthorization";
 import { AdaptiveResearchExportV1, AdaptiveExportFormat } from "@/lib/adaptiveSchema/researchExport";
 import { createAdaptiveExportRecord, markAdaptiveExportReady, markAdaptiveExportFailed, supersedeOlderAdaptiveExports } from "@/lib/firestore/adaptiveExports";
-import { renderAdaptiveResearchPdf } from "@/lib/pdf/renderAdaptiveResearchPdf";
+import { renderAdaptiveResearchExport } from "@/lib/pdf/renderAdaptiveResearchPdf";
 import { writeAdaptiveExportAdminAuditEvent } from "@/lib/governance/auditLog";
 import { logger } from "@/lib/logger";
 import type { ModelId } from "@/lib/types";
@@ -202,7 +202,7 @@ export async function POST(req: NextRequest, context: { params: Promise<{ runId:
   let bytes: Buffer;
   let sha256: string;
   try {
-    const rendered = await renderAdaptiveResearchPdf(fullRecord);
+    const rendered = await renderAdaptiveResearchExport(fullRecord);
     bytes = rendered.bytes;
     sha256 = rendered.sha256;
   } catch (err: unknown) {

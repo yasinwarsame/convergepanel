@@ -27,7 +27,8 @@ type AuditAction =
   | "adaptive_review_panel_finalized"
   | "adaptive_review_panel_owner_overridden"
   | "adaptive_export_generated"
-  | "adaptive_export_generation_failed";
+  | "adaptive_export_generation_failed"
+  | "adaptive_export_regenerated";
 
 type AuditEvent = {
   id: string;
@@ -79,6 +80,9 @@ const GOVERNANCE_ACTIONS = new Set<string>([
   // export generation attempts (success and failure).
   "adaptive_export_generated",
   "adaptive_export_generation_failed",
+  // Adaptive Research Export, Phase 2 — additive. Written by the same
+  // helper for historical PDF regeneration attempts.
+  "adaptive_export_regenerated",
 ]);
 
 /** Shown in the governance Audit Log tab (human decisions + policy; no system evaluations). */
@@ -95,6 +99,7 @@ const AUDIT_LOG_DISPLAY_ACTIONS = new Set<string>([
   "adaptive_review_panel_owner_overridden",
   "adaptive_export_generated",
   "adaptive_export_generation_failed",
+  "adaptive_export_regenerated",
 ]);
 
 function isGovernanceAuditDoc(raw: Record<string, unknown>): boolean {

@@ -42,6 +42,7 @@ import {
 } from "@/lib/adaptiveSchema/reportSummary";
 import { BadgeTone, Card, TintBadge } from "./shared";
 import AdaptiveExportButton from "./AdaptiveExportButton";
+import AdaptiveExportHistorySection from "./AdaptiveExportHistorySection";
 
 type ReportStatusKind = ReturnType<typeof deriveReportStatus>["kind"];
 
@@ -143,7 +144,8 @@ export default function TopSummaryBar(props: TopSummaryBarProps) {
   const statusLabel = status.isOwnerOverride ? `Owner override — ${REPORT_STATUS_LABELS[status.kind]}` : REPORT_STATUS_LABELS[status.kind];
 
   return (
-    <Card className="bg-slate-50/60">
+    <>
+      <Card className="bg-slate-50/60">
       {/* Report type / Status get their own row — both can run long ("Owner
           override — Reviewed with conditions" is the longest possible
           status label) and must WRAP, never overflow into a neighboring
@@ -184,6 +186,9 @@ export default function TopSummaryBar(props: TopSummaryBarProps) {
           <span className="text-sm text-slate-800">{formatGeneratedAt(generatedAt)}</span>
         </SummaryField>
       </div>
-    </Card>
+      </Card>
+
+      <AdaptiveExportHistorySection runId={runId} />
+    </>
   );
 }

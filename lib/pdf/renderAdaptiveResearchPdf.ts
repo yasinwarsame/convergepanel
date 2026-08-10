@@ -7,16 +7,15 @@
  * snapshot itself — no run/Firestore lookups — so it can never drift onto
  * the current mutable run state.
  *
- * This purity/determinism is what would let a FUTURE render-from-snapshot
- * endpoint reproduce byte-identical output from an old, preserved export
- * record without ever having stored the PDF bytes themselves. Phase 1 does
- * not build that endpoint — the only caller today is the single POST
- * export route, which always renders from a snapshot it just built from
- * the current run. Do not describe this as an already-implemented
- * "redownload"/"regenerate a past export" capability; it isn't one yet
- * (see researchExport.ts's `AdaptiveExportArtifactStatus` doc comment for
- * the precise Phase 1 guarantee: the snapshot is the durable artifact, the
- * PDF bytes are not).
+ * This purity/determinism is exactly what lets Phase 2's regeneration route
+ * reproduce byte-identical output from an old, preserved export record
+ * without ever having stored the PDF bytes themselves — see
+ * `renderAdaptiveResearchExport` below, the version-aware entry point both
+ * the creation route (Phase 1) and the regeneration route (Phase 2) call.
+ * The PDF bytes are still never durably stored anywhere (see
+ * researchExport.ts's `AdaptiveExportArtifactStatus` doc comment): the
+ * snapshot is the durable artifact, regeneration just re-derives the PDF
+ * from it on demand, every time.
  */
 
 import "server-only";
@@ -30,7 +29,7 @@ export interface RenderedAdaptivePdf {
   sha256: string;
 }
 
-export async function renderAdaptiveResearchPdf(record: AdaptiveResearchExportV1): Promise<RenderedAdaptivePdf> {
+async function renderAdaptiveResearchPdfV1(record: AdaptiveResearchExportV1): Promise<RenderedAdaptivePdf> {
   // renderToBuffer's type signature wants a literal <Document> element, not
   // a wrapper component reference — calling the composer function directly
   // (rather than createElement(AdaptiveResearchDocument, {record})) gives
@@ -38,4 +37,26 @@ export async function renderAdaptiveResearchPdf(record: AdaptiveResearchExportV1
   const bytes = await renderToBuffer(AdaptiveResearchDocument({ record }));
   const sha256 = createHash("sha256").update(bytes).digest("hex");
   return { bytes, sha256 };
+}
+
+/**
+ * Adaptive Research Export, Phase 2 — version-aware regeneration dispatch.
+ * Historical export records carry their own `version` (the
+ * `AdaptiveResearchExportV1` contract's format version, per
+ * researchExport.ts's own doc comment — distinct from `reportVersion` and
+ * `schemaVersion`). A future contract version must get its own renderer
+ * branch here; it must never silently fall through to the V1 renderer just
+ * because that happens to be the only one that exists today; an
+ * unrecognized version fails loudly rather than guessing at semantics a
+ * later contract version might have changed.
+ */
+export async function renderAdaptiveResearchExport(record: AdaptiveResearchExportV1): Promise<RenderedAdaptivePdf> {
+  switch (record.version) {
+    case 1:
+      return renderAdaptiveResearchPdfV1(record);
+    default: {
+      const unsupportedVersion: never = record.version;
+      throw new Error(`Unsupported AdaptiveResearchExport contract version: ${String(unsupportedVersion)}`);
+    }
+  }
 }
