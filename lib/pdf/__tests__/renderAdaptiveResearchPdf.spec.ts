@@ -1,12 +1,20 @@
 /**
- * Adaptive Research Export, Phase 2 — version-aware regeneration dispatch
- * (`renderAdaptiveResearchExport`). The frozen `AdaptiveResearchExportV1`
- * contract's own `version` field (distinct from `reportVersion` and
- * `schemaVersion` — see researchExport.ts) must route to the matching
- * renderer, and an unrecognized version must fail loudly rather than
- * silently being rendered as if it were V1. This is the mechanism that
- * keeps regenerating a very old historical export safe if a future
- * contract version ever changes PDF semantics.
+ * Adaptive Research Export — version-AND-format-aware regeneration
+ * dispatch (`renderAdaptiveResearchExport`). The frozen
+ * `AdaptiveResearchExportV1` contract's own `version` field (distinct
+ * from `reportVersion` and `schemaVersion` — see researchExport.ts) must
+ * route to the matching renderer, and an unrecognized version must fail
+ * loudly rather than silently being rendered as if it were V1. Within a
+ * supported version, `format` (Phase 3: "pdf" | "docx") selects the
+ * renderer the same way — an unrecognized format must never silently
+ * fall back to PDF or DOCX. This is the mechanism that keeps
+ * regenerating a very old historical export safe if a future contract
+ * version or format value ever changes semantics.
+ *
+ * Only `@react-pdf/renderer` is mocked here (ESM-only, needs mocking
+ * under ts-jest — see this file's own established pattern); `docx` is
+ * NOT mocked — it works cleanly under Jest without the ESM-parse issue,
+ * so the format: "docx" tests below exercise the real DOCX renderer.
  */
 
 jest.mock("@react-pdf/renderer", () => ({
@@ -75,5 +83,17 @@ describe("renderAdaptiveResearchExport — version-aware dispatch", () => {
     const first = await renderAdaptiveResearchExport(record);
     const second = await renderAdaptiveResearchExport(record);
     expect(first.sha256).toBe(second.sha256);
+  });
+
+  it("format: \"docx\" dispatches to the real DOCX renderer, not PDF — produces a valid ZIP/OOXML package", async () => {
+    const record = baseRecord({ format: "docx" });
+    const result = await renderAdaptiveResearchExport(record);
+    expect(result.bytes.subarray(0, 2).toString()).toBe("PK");
+    expect(result.sha256).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it("an unrecognized format on an otherwise-valid V1 record fails loudly — never silently falls back to PDF or DOCX (a malformed/forged stored record, bypassing TypeScript, is the realistic threat model here)", async () => {
+    const record = baseRecord({ format: "json" as unknown as "pdf" });
+    await expect(renderAdaptiveResearchExport(record)).rejects.toThrow(/[Uu]nsupported.*format/);
   });
 });

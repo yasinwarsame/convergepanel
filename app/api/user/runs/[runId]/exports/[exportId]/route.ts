@@ -35,6 +35,7 @@ import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelem
 import { adminDb } from "@/lib/firebase/admin";
 import { ADAPTIVE_RESEARCH_EXPORT_ENABLED } from "@/lib/env";
 import { getAdaptiveExportRecord } from "@/lib/firestore/adaptiveExports";
+import { adaptiveExportContentType, adaptiveExportFileExtension } from "@/lib/adaptiveSchema/researchExport";
 import { resolveAdaptiveExportVerdict } from "@/lib/adaptiveSchema/exportAuthorization";
 import { renderAdaptiveResearchExport } from "@/lib/pdf/renderAdaptiveResearchPdf";
 import { writeAdaptiveExportAdminAuditEvent } from "@/lib/governance/auditLog";
@@ -143,11 +144,15 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
     });
   }
 
-  const fileName = `convergepanel-export-${runId}-v${record.reportVersion}.pdf`;
+  // Part 13 invariant — a historical record regenerates in its OWN frozen
+  // format, never a client-chosen one: `record.format` (not any request
+  // input) drives both the renderer dispatch above and these headers. A
+  // PDF export can never be coerced into a DOCX response or vice versa.
+  const fileName = `convergepanel-export-${runId}-v${record.reportVersion}.${adaptiveExportFileExtension(record.format)}`;
   return new NextResponse(new Uint8Array(bytes), {
     status: 200,
     headers: {
-      "Content-Type": "application/pdf",
+      "Content-Type": adaptiveExportContentType(record.format),
       "Content-Disposition": `attachment; filename="${fileName}"`,
       "Content-Length": String(bytes.length),
     },

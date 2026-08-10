@@ -128,6 +128,22 @@ export const MULTI_REVIEWER_GOVERNANCE_ENABLED = process.env.MULTI_REVIEWER_GOVE
 export const ADAPTIVE_RESEARCH_EXPORT_ENABLED = process.env.ADAPTIVE_RESEARCH_EXPORT_ENABLED === "true";
 
 /**
+ * Adaptive Research Export, Phase 3 — a SEPARATE release flag for DOCX,
+ * deliberately not reusing `ADAPTIVE_RESEARCH_EXPORT_ENABLED`. That flag
+ * already gates PDF in production; if DOCX were gated behind the same
+ * flag, it would go live immediately on merge, before this phase's own
+ * verification/rollout is ready. Default OFF. PDF export is completely
+ * unaffected by this flag's value either way — `format: "pdf"` requests
+ * only ever check `ADAPTIVE_RESEARCH_EXPORT_ENABLED`.
+ *
+ * Same two-flag independence discipline as the PDF flag above: this is a
+ * release/rollout gate, never a substitute for
+ * `canExportAdaptiveResearch()`'s per-request authorization — both must
+ * still pass for a DOCX request to succeed.
+ */
+export const ADAPTIVE_RESEARCH_DOCX_EXPORT_ENABLED = process.env.ADAPTIVE_RESEARCH_DOCX_EXPORT_ENABLED === "true";
+
+/**
  * Search engine site-verification tokens.
  *
  * Optional — when unset, the corresponding verification meta tag is simply

@@ -1,24 +1,29 @@
 /**
- * Adaptive Research Export, Phase 1 — POST /api/user/runs/[runId]/export.
- * PDF only (`format: "pdf"`); DOCX/JSON/CSV rejected. Route organization
- * mirrors the existing `GET /api/user/runs/[runId]` convention (same auth
- * pattern, same run-ownership check).
+ * Adaptive Research Export — POST /api/user/runs/[runId]/export.
+ * `format: "pdf"` (Phase 1, always accepted) or `format: "docx"` (Phase 3,
+ * accepted only while `ADAPTIVE_RESEARCH_DOCX_EXPORT_ENABLED` is on — see
+ * that flag's own doc comment in lib/env.ts). JSON/CSV still rejected —
+ * out of scope for this phase too. Route organization mirrors the
+ * existing `GET /api/user/runs/[runId]` convention (same auth pattern,
+ * same run-ownership check).
  *
  * Flow (Part 12): authenticate → load run → authorize access to run →
- * check ADAPTIVE_RESEARCH_EXPORT_ENABLED → verify plan/role/governance
- * eligibility (canExportAdaptiveResearch) → freeze report snapshot →
- * create versioned export artifact ("generating") → generate PDF →
- * persist artifact metadata ("ready") → supersede older exports → record
- * audit event → stream the PDF back directly (no separate download step —
- * Phase 1's storage decision means the bytes are never durably stored, see
- * researchExport.ts's header comment).
+ * check ADAPTIVE_RESEARCH_EXPORT_ENABLED → validate the requested format
+ * → verify plan/role/governance eligibility (canExportAdaptiveResearch,
+ * format-independent) → freeze report snapshot → create versioned export
+ * artifact ("generating") → render the requested format → persist
+ * artifact metadata ("ready") → supersede older exports → record audit
+ * event → stream the file back directly (no separate download step — the
+ * storage decision means the bytes are never durably stored, see
+ * researchExport.ts's header comment — true for DOCX exactly as it was
+ * for PDF).
  *
- * Failure semantics (Part 19): the export record is created BEFORE PDF
- * generation is attempted, in "generating" state. If PDF generation throws,
- * the record is marked "failed" with a reason, a failure audit event is
+ * Failure semantics (Part 19): the export record is created BEFORE
+ * rendering is attempted, in "generating" state. If rendering throws, the
+ * record is marked "failed" with a reason, a failure audit event is
  * recorded, and the response is a clean error — never a partial/corrupt
- * download. The record is never marked "ready" until the PDF bytes were
- * genuinely produced.
+ * download. The record is never marked "ready" until the file's bytes
+ * were genuinely produced.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -26,12 +31,12 @@ import { randomUUID } from "crypto";
 import { resolveRequestIdentity } from "@/lib/auth/resolveRequestIdentity";
 import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelemetry";
 import { adminDb } from "@/lib/firebase/admin";
-import { ADAPTIVE_RESEARCH_EXPORT_ENABLED } from "@/lib/env";
+import { ADAPTIVE_RESEARCH_EXPORT_ENABLED, ADAPTIVE_RESEARCH_DOCX_EXPORT_ENABLED } from "@/lib/env";
 import { parsePersistedAdaptiveOutput, parsePersistedLegacyAdaptiveOutput } from "@/lib/adaptiveSchema/persistedOutput";
 import { parseGovernanceRecord } from "@/lib/adaptiveSchema/governanceRecordParser";
 import { buildExportSnapshot } from "@/lib/adaptiveSchema/exportSnapshot";
 import { resolveAdaptiveExportVerdict } from "@/lib/adaptiveSchema/exportAuthorization";
-import { AdaptiveResearchExportV1, AdaptiveExportFormat } from "@/lib/adaptiveSchema/researchExport";
+import { AdaptiveResearchExportV1, AdaptiveExportFormat, adaptiveExportContentType, adaptiveExportFileExtension } from "@/lib/adaptiveSchema/researchExport";
 import { createAdaptiveExportRecord, markAdaptiveExportReady, markAdaptiveExportFailed, supersedeOlderAdaptiveExports } from "@/lib/firestore/adaptiveExports";
 import { renderAdaptiveResearchExport } from "@/lib/pdf/renderAdaptiveResearchPdf";
 import { writeAdaptiveExportAdminAuditEvent } from "@/lib/governance/auditLog";
@@ -76,10 +81,16 @@ export async function POST(req: NextRequest, context: { params: Promise<{ runId:
     return errorResponse(400, "invalid_request", "Request body must be valid JSON.");
   }
   const format = (body as { format?: unknown })?.format;
-  if (format !== "pdf") {
-    return errorResponse(400, "unsupported_format", "Only format: \"pdf\" is supported.");
+  // DOCX (Phase 3) sits behind its OWN release flag, checked here rather
+  // than folded into the format-validity check below — a request for
+  // "docx" while the flag is off must be rejected the same way an
+  // unrecognized format string would be (never a flag-specific error
+  // message that would reveal the feature exists but is disabled).
+  const validFormats: AdaptiveExportFormat[] = ADAPTIVE_RESEARCH_DOCX_EXPORT_ENABLED ? ["pdf", "docx"] : ["pdf"];
+  if (typeof format !== "string" || !validFormats.includes(format as AdaptiveExportFormat)) {
+    return errorResponse(400, "unsupported_format", `Only format: ${validFormats.map((f) => `"${f}"`).join(" or ")} is supported.`);
   }
-  const validatedFormat: AdaptiveExportFormat = "pdf";
+  const validatedFormat: AdaptiveExportFormat = format as AdaptiveExportFormat;
 
   // ── Load run + authorize access (mirrors GET /api/user/runs/[runId]) ──
   const snap = await adminDb.collection("runs").doc(runId).get();
@@ -179,22 +190,22 @@ export async function POST(req: NextRequest, context: { params: Promise<{ runId:
   }
   const reportVersion = createResult.reportVersion;
 
-  // ── Generate the PDF (deterministic, pure function of the frozen snapshot) ──
+  // ── Generate the file (deterministic, pure function of the frozen snapshot) ──
   const fullRecord: AdaptiveResearchExportV1 = {
     ...recordBase,
     reportVersion,
     exportMetadata: { ...recordBase.exportMetadata, finalReportVersion: reportVersion },
   };
 
-  // Only PDF generation itself is "the operation that can genuinely fail"
-  // here — the narrowest possible try/catch. markAdaptiveExportReady,
+  // Only rendering itself is "the operation that can genuinely fail" here
+  // — the narrowest possible try/catch. markAdaptiveExportReady,
   // supersedeOlderAdaptiveExports, and the audit write are all
   // post-generation bookkeeping around an ALREADY-successful export; none
   // of them may ever cause a successful export to be reported to the
   // client as failed, and a transient failure in any of them must not
   // rewrite the canonical record from "ready" back to "failed" (final
-  // review Step 17 — this used to sit inside the same try/catch as PDF
-  // generation, which would have misclassified a successful export as
+  // review Step 17 — this used to sit inside the same try/catch as
+  // rendering, which would have misclassified a successful export as
   // failed had any of those calls ever thrown; they don't today because
   // each already swallows its own errors into a result object, but the
   // control flow itself should not have depended on that implementation
@@ -207,7 +218,7 @@ export async function POST(req: NextRequest, context: { params: Promise<{ runId:
     sha256 = rendered.sha256;
   } catch (err: unknown) {
     const failureReason = err instanceof Error ? err.message : "unknown_error";
-    logger.error("[adaptive-export] PDF generation failed", { runId, exportId, errorMessage: failureReason });
+    logger.error("[adaptive-export] export generation failed", { runId, exportId, format: validatedFormat, errorMessage: failureReason });
 
     await markAdaptiveExportFailed(runId, exportId, failureReason);
     await writeAdaptiveExportAdminAuditEvent({
@@ -225,10 +236,10 @@ export async function POST(req: NextRequest, context: { params: Promise<{ runId:
       failureReason,
     });
 
-    return errorResponse(500, "pdf_generation_failed", "PDF generation failed. Please try again.");
+    return errorResponse(500, "export_generation_failed", "Export generation failed. Please try again.");
   }
 
-  // The PDF genuinely exists at this point. Everything below is
+  // The file genuinely exists at this point. Everything below is
   // best-effort bookkeeping around an already-successful export. All three
   // helpers already swallow their own errors into a result object today
   // (never throwing), but this block does not rely on that — it's wrapped
@@ -268,11 +279,11 @@ export async function POST(req: NextRequest, context: { params: Promise<{ runId:
     });
   }
 
-  const fileName = `convergepanel-export-${runId}-v${reportVersion}.pdf`;
+  const fileName = `convergepanel-export-${runId}-v${reportVersion}.${adaptiveExportFileExtension(validatedFormat)}`;
   return new NextResponse(new Uint8Array(bytes), {
     status: 200,
     headers: {
-      "Content-Type": "application/pdf",
+      "Content-Type": adaptiveExportContentType(validatedFormat),
       "Content-Disposition": `attachment; filename="${fileName}"`,
       "Content-Length": String(bytes.length),
     },

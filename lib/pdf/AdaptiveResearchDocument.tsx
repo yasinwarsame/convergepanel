@@ -27,20 +27,17 @@
 
 import { Document, Page, View, Text } from "@react-pdf/renderer";
 import { AdaptiveResearchExportV1 } from "@/lib/adaptiveSchema/researchExport";
-import { REPORT_STATUS_LABELS } from "@/lib/adaptiveSchema/reportStatus";
 import { CONSENSUS_LABELS, SOURCE_GROUNDING_LABELS } from "@/lib/adaptiveSchema/reportSummary";
 import { SCHEMA_REGISTRY } from "@/lib/adaptiveSchema/schemaRegistry";
 import { FieldSpec } from "@/lib/adaptiveSchema/types";
 import { getModelDisplayNameSafe } from "@/lib/panelModels";
+import {
+  fieldLabel,
+  formatExportTimestamp as formatTimestamp,
+  formatNestedFieldValue,
+  governanceStatusDisplay,
+} from "@/lib/adaptiveSchema/exportContentDerivation";
 import { COLORS, badgeStyle, pdfStyles } from "./theme";
-
-function formatTimestamp(iso: string): string {
-  try {
-    return new Date(iso).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" });
-  } catch {
-    return iso;
-  }
-}
 
 function Bullets({ items }: { items: string[] }) {
   if (!items || items.length === 0) return null;
@@ -63,35 +60,6 @@ function SectionCard({ label, children }: { label: string; children: React.React
       {children}
     </View>
   );
-}
-
-function governanceStatusDisplay(record: AdaptiveResearchExportV1): { label: string; tone: "success" | "warning" | "danger" | "neutral" } {
-  const status = record.governanceStatusAtExport;
-  if (status.family === "milestone2") {
-    if (status.kind === "superseded") return { label: "Superseded by a newer export", tone: "neutral" };
-    const label = REPORT_STATUS_LABELS[status.kind];
-    const tone =
-      status.kind === "approved" || status.kind === "approved_with_conditions"
-        ? "success"
-        : status.kind === "rejected"
-        ? "danger"
-        : status.kind === "changes_requested"
-        ? "warning"
-        : "neutral";
-    return { label: status.isOwnerOverride ? `Owner override — ${label}` : label, tone };
-  }
-  // Legacy family — the real, distinct 3-value model this schema family
-  // actually has. Never relabeled to match the 8-status vocabulary above.
-  switch (status.status) {
-    case "approved":
-      return { label: "Reviewed and approved", tone: "success" };
-    case "needs_review":
-      return { label: "Needs review", tone: "warning" };
-    case "blocked":
-      return { label: "Blocked by policy", tone: "danger" };
-    default:
-      return { label: "Not yet evaluated", tone: "neutral" };
-  }
 }
 
 function CoverHeader({ record }: { record: AdaptiveResearchExportV1 }) {
@@ -269,30 +237,6 @@ function MetricRows({ items }: { items: Record<string, unknown>[] }) {
   );
 }
 
-/**
- * Formats one object-field's VALUE for display — never JSON.stringify, and
- * never a bare Array.prototype.join() default toString() call, which for
- * an array of objects (e.g. AlignedClaimCell.camps: {label, position}[])
- * silently renders the literal string "[object Object]" per item (a real
- * bug caught during manual PDF inspection). A nested array of primitives
- * joins normally; a nested array of objects extracts each object's own
- * string-valued fields instead.
- */
-function formatNestedFieldValue(v: unknown): string {
-  if (!Array.isArray(v)) return String(v);
-  if (v.length === 0) return "";
-  return v
-    .map((item) => {
-      if (item != null && typeof item === "object") {
-        return Object.values(item as Record<string, unknown>)
-          .filter((x) => typeof x === "string" || typeof x === "number")
-          .join(" — ");
-      }
-      return String(item);
-    })
-    .join("; ");
-}
-
 /** Generic fallback for any other array-of-object field (claim[]/step[]/scenario[]/etc.) — one bounded block per item, key: value pairs. Matches ModelResponsesSection.tsx's own GenericObjectArrayList fallback. */
 function GenericObjectArrayPdf({ items }: { items: Record<string, unknown>[] }) {
   return (
@@ -329,10 +273,6 @@ function FieldValuePdf({ field, value }: { field: FieldSpec; value: unknown }) {
     return <GenericObjectArrayPdf items={value as Record<string, unknown>[]} />;
   }
   return null;
-}
-
-function fieldLabel(key: string): string {
-  return key.replace(/([A-Z])/g, " $1").replace(/^./, (c) => c.toUpperCase());
 }
 
 function LegacyContent({ record }: { record: AdaptiveResearchExportV1 }) {
