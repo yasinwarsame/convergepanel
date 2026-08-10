@@ -103,8 +103,14 @@ describe("PDF output — content-regression pin (Part 22: adding DOCX changes no
     // Real-renderer verification (see this file's header comment) proved
     // the actual PDF bytes for this fixture are unchanged
     // (f84d06ee265e91d84100ec31963101c3d68eafa7c728eaea7805a471c410409c,
-    // 8179 bytes) — this snapshot is this test's own ongoing proxy for
-    // that same guarantee going forward.
-    expect(text).toMatchSnapshot();
+    // 8179 bytes). Deliberately NOT a `toMatchSnapshot()` here: this
+    // record's timestamps go through `formatExportTimestamp`'s
+    // `toLocaleString(...)` formatting, which renders differently across
+    // machines in different timezones (confirmed the hard way — this
+    // exact snapshot passed twice locally, then failed in CI, which runs
+    // in a different timezone than the dev machine that generated the
+    // snapshot). The explicit `toContain`/`toMatch` assertions above
+    // check the record's own static string content directly, which is
+    // NOT timezone-dependent, and are the real regression guard.
   });
 });
