@@ -74,7 +74,7 @@ jest.mock("@/lib/firestore/adaptiveExports", () => ({
 
 const mockedRenderAdaptiveResearchPdf = jest.fn();
 jest.mock("@/lib/pdf/renderAdaptiveResearchPdf", () => ({
-  renderAdaptiveResearchPdf: (...args: any[]) => mockedRenderAdaptiveResearchPdf(...args),
+  renderAdaptiveResearchExport: (...args: any[]) => mockedRenderAdaptiveResearchPdf(...args),
 }));
 
 const mockedWriteAdaptiveExportAdminAuditEvent = jest.fn();

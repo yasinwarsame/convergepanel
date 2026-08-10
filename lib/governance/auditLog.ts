@@ -3,6 +3,7 @@
  */
 
 import "server-only";
+import { randomUUID } from "crypto";
 import type { DocumentData } from "firebase-admin/firestore";
 import { adminDb } from "@/lib/firebase/admin";
 import { sanitizeForFirestore } from "@/lib/firestore/sanitizeForFirestore";
@@ -286,19 +287,34 @@ export async function writeAdaptivePanelOverrideAdminAuditEvent(args: {
 }
 
 /**
- * Adaptive Research Export, Phase 1 (docs/adaptive-research-export-design.md
- * §5.5) — deterministic, idempotent admin audit event for an export
- * generation attempt. Same `.doc(id).create()` idempotency discipline as
- * every writer above; deterministic ID `adaptive-export:${exportId}:${action}`
+ * Adaptive Research Export (docs/adaptive-research-export-design.md §5.5)
+ * — deterministic, idempotent admin audit event for an export generation
+ * or regeneration attempt.
+ *
+ * `adaptive_export_generated`/`adaptive_export_generation_failed` (Phase 1)
+ * keep the original deterministic ID `adaptive-export:${exportId}:${action}`
  * per the design doc's own §5.5 spec, so a retried write after a transient
- * failure can never create a duplicate entry.
+ * failure can never create a duplicate entry for the SAME creation attempt.
+ *
+ * `adaptive_export_regenerated` (Phase 2) is deliberately different: each
+ * regeneration of the same historical export is its own genuine access
+ * event worth its own audit row (that's the entire point of an audit trail
+ * for historical retrieval) — deduping by exportId+action the same way
+ * would silently collapse every regeneration after the first into
+ * `already_exists` and lose that history. Its ID includes a fresh
+ * `randomUUID()` component instead, so idempotency here only protects
+ * against a single request's own internal retry (the caller would reuse
+ * the same generated id within one request), never across genuinely
+ * separate regenerations.
  *
  * Booleans only for classification/format — never report content, never
  * private reviewer comments, never secrets (Part 14). `outcome` distinguishes
- * a successful generation from a failed one (Part 14's "failed attempts
- * should be distinguishable from successful exports").
+ * a successful generation/regeneration from a failed one (Part 14's "failed
+ * attempts should be distinguishable from successful exports").
  */
-export type AdaptiveExportAuditAction = "adaptive_export_generated" | "adaptive_export_generation_failed";
+export type AdaptiveExportAuditAction = "adaptive_export_generated" | "adaptive_export_generation_failed" | "adaptive_export_regenerated";
+
+const ADAPTIVE_EXPORT_SUCCESS_ACTIONS: ReadonlySet<AdaptiveExportAuditAction> = new Set(["adaptive_export_generated", "adaptive_export_regenerated"]);
 
 export async function writeAdaptiveExportAdminAuditEvent(args: {
   exportId: string;
@@ -318,7 +334,10 @@ export async function writeAdaptiveExportAdminAuditEvent(args: {
     return { status: "failed" };
   }
 
-  const docId = `adaptive-export:${args.exportId}:${args.action}`;
+  const docId =
+    args.action === "adaptive_export_regenerated"
+      ? `adaptive-export-regenerate:${args.exportId}:${randomUUID()}`
+      : `adaptive-export:${args.exportId}:${args.action}`;
   try {
     await adminDb
       .collection("admin_audit_logs")
@@ -336,7 +355,7 @@ export async function writeAdaptiveExportAdminAuditEvent(args: {
         formatRequested: args.format,
         reportVersion: args.reportVersion,
         governanceStatusAtExport: args.governanceStatusAtExport,
-        outcome: args.action === "adaptive_export_generated" ? "success" : "failure",
+        outcome: ADAPTIVE_EXPORT_SUCCESS_ACTIONS.has(args.action) ? "success" : "failure",
         ...(args.failureReason ? { failureReason: args.failureReason } : {}),
         source: "adaptive_research_export",
       });

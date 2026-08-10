@@ -147,6 +147,17 @@ function makeFakeAdminDb() {
               },
             };
           },
+          orderBy(field: string, direction: "asc" | "desc" = "asc") {
+            return {
+              async get() {
+                const sorted = [...docs.entries()].sort(([, a], [, b]) => {
+                  const cmp = (a[field] ?? 0) < (b[field] ?? 0) ? -1 : (a[field] ?? 0) > (b[field] ?? 0) ? 1 : 0;
+                  return direction === "desc" ? -cmp : cmp;
+                });
+                return { docs: sorted.map(([id, d]) => ({ id, data: () => ({ ...d }) })) };
+              },
+            };
+          },
         };
       },
     };
@@ -217,6 +228,7 @@ import {
   markAdaptiveExportReady,
   supersedeOlderAdaptiveExports,
   getAdaptiveExportRecord,
+  listAdaptiveExportRecords,
   CreateAdaptiveExportInput,
 } from "@/lib/firestore/adaptiveExports";
 
@@ -369,5 +381,40 @@ describe("adaptiveExports Firestore persistence — reportVersion concurrency (c
     ]);
     expect(a).toEqual({ ok: true, reportVersion: 1 });
     expect(b).toEqual({ ok: true, reportVersion: 1 });
+  });
+});
+
+describe("listAdaptiveExportRecords (Phase 2 — historical export listing)", () => {
+  it("returns every export for a run, newest reportVersion first, including superseded ones (Part 8: superseded is never hidden)", async () => {
+    const runId = "run-list-1";
+    await createAdaptiveExportRecord(buildInput(runId, "exp-l1", "Q1"));
+    await markAdaptiveExportReady(runId, "exp-l1", "sha-1");
+    await createAdaptiveExportRecord(buildInput(runId, "exp-l2", "Q2"));
+    await markAdaptiveExportReady(runId, "exp-l2", "sha-2");
+    await supersedeOlderAdaptiveExports(runId, "exp-l2");
+    await createAdaptiveExportRecord(buildInput(runId, "exp-l3", "Q3"));
+    await markAdaptiveExportReady(runId, "exp-l3", "sha-3");
+    await supersedeOlderAdaptiveExports(runId, "exp-l3");
+
+    const result = await listAdaptiveExportRecords(runId);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.records.map((r) => r.exportId)).toEqual(["exp-l3", "exp-l2", "exp-l1"]);
+    expect(result.records.map((r) => r.reportVersion)).toEqual([3, 2, 1]);
+    expect(result.records.map((r) => r.artifactStatus)).toEqual(["ready", "superseded", "superseded"]);
+  });
+
+  it("returns an empty list for a run with no exports, never an error", async () => {
+    const result = await listAdaptiveExportRecords("run-list-empty");
+    expect(result).toEqual({ ok: true, records: [] });
+  });
+
+  it("list results are independent per run — a run's list never includes another run's exports", async () => {
+    await createAdaptiveExportRecord(buildInput("run-list-a", "exp-a1", "QA"));
+    await createAdaptiveExportRecord(buildInput("run-list-b", "exp-b1", "QB"));
+    const listA = await listAdaptiveExportRecords("run-list-a");
+    const listB = await listAdaptiveExportRecords("run-list-b");
+    expect(listA.ok && listA.records.map((r) => r.exportId)).toEqual(["exp-a1"]);
+    expect(listB.ok && listB.records.map((r) => r.exportId)).toEqual(["exp-b1"]);
   });
 });

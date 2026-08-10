@@ -461,7 +461,11 @@ function PageFooter() {
 
 export function AdaptiveResearchDocument({ record }: { record: AdaptiveResearchExportV1 }) {
   return (
-    <Document title={`${record.reportSnapshot.reportTypeLabel} — ConvergePanel Export`} author="ConvergePanel">
+    <Document
+      title={`${record.reportSnapshot.reportTypeLabel} — ConvergePanel Export`}
+      author="ConvergePanel"
+      creationDate={new Date(record.createdAt)}
+    >
       <Page size="A4" style={pdfStyles.page} wrap>
         <CoverHeader record={record} />
         <StatusSummary record={record} />
