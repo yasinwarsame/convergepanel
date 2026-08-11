@@ -26,6 +26,51 @@ function exportsCollection(runId: string) {
   return adminDb!.collection("runs").doc(runId).collection("exports");
 }
 
+/**
+ * Integrity hotfix — the ONLY compatibility boundary for malformed
+ * historical export records written before this fix (see
+ * `markAdaptiveExportReady`'s own doc comment for the root cause: a
+ * dotted-key `.set(..., {merge:true})` call stored `fileHash` as a
+ * literal top-level field named `"exportMetadata.fileHash"` instead of
+ * nesting it inside `exportMetadata`).
+ *
+ * Every raw Firestore document read anywhere in this codebase passes
+ * through here before being handed back as an `AdaptiveResearchExportV1`
+ * — callers (the history-list route, the regeneration route, tests) can
+ * always trust `record.exportMetadata.fileHash` and never need to know
+ * this history. This is deliberately NOT treated as part of the canonical
+ * schema — `AdaptiveExportManifest`/`AdaptiveResearchExportV1` are not
+ * changed to include the legacy literal field; it is read here, once, and
+ * discarded.
+ *
+ * The genuinely nested field always wins if a record somehow has both
+ * (should not normally happen, but a real nested value is definitionally
+ * the more correct/recent write — never overwritten by a stale legacy
+ * fallback).
+ */
+function normalizeAdaptiveExportRecord(raw: FirebaseFirestore.DocumentData): AdaptiveResearchExportV1 {
+  // Final review, Step 5/8: no current caller spreads/serializes the raw
+  // record wholesale (both read paths use an explicit field-by-field
+  // projection), so this was never actually reachable in an API response —
+  // but `{ ...raw, ... }` alone would still carry the literal
+  // `"exportMetadata.fileHash"` key forward onto the returned object,
+  // since object spread copies every own enumerable property regardless of
+  // whether its name contains a dot. Explicitly deleting it makes the
+  // compatibility boundary airtight rather than relying on "no caller
+  // happens to spread this today" — a future caller (e.g. debug logging
+  // via `JSON.stringify(record)`) must never be able to leak this
+  // internal-only artifact.
+  const legacyFileHash = raw["exportMetadata.fileHash"] as string | undefined;
+  if (legacyFileHash === undefined) {
+    return raw as AdaptiveResearchExportV1;
+  }
+  const { "exportMetadata.fileHash": _legacy, ...rest } = raw;
+  if (rest.exportMetadata && rest.exportMetadata.fileHash === undefined) {
+    rest.exportMetadata = { ...rest.exportMetadata, fileHash: legacyFileHash };
+  }
+  return rest as AdaptiveResearchExportV1;
+}
+
 export interface CreateAdaptiveExportInput {
   runId: string;
   exportId: string;
@@ -94,6 +139,39 @@ export type UpdateAdaptiveExportResult = { ok: true } | { ok: false; reason: "fi
  * durably stored anywhere; this repo has no object storage, and the bytes
  * are discarded once the response completes (see researchExport.ts's
  * `AdaptiveExportArtifactStatus` doc comment).
+ *
+ * Integrity hotfix — this previously wrote `"exportMetadata.fileHash"` as a
+ * DOTTED TOP-LEVEL KEY: `.set({ "exportMetadata.fileHash": fileHash },
+ * { merge: true })`. Unlike `.update()`, Firestore's `.set(data, { merge:
+ * true })` does NOT parse dotted string keys in `data` as nested field
+ * paths — it stores them literally, as a field genuinely named
+ * `"exportMetadata.fileHash"` (a sibling of `exportMetadata`, containing a
+ * literal dot character), never nested inside the `exportMetadata` map.
+ * Every reader (`getAdaptiveExportRecord`, the history-list route) does
+ * real nested property access — `record.exportMetadata.fileHash` — so this
+ * meant `fileHash` was silently absent from every export record ever
+ * created, in every environment, since Phase 1. Confirmed directly against
+ * real production Firestore documents before this fix.
+ *
+ * The fix passes a genuinely nested plain object instead:
+ * `{ exportMetadata: { fileHash } }`. `.set(data, { merge: true })` (no
+ * `mergeFields` restriction) performs a RECURSIVE merge on nested maps —
+ * this adds/overwrites only the `fileHash` key inside the existing
+ * `exportMetadata` map, leaving every sibling field
+ * (`exportId`/`reportVersion`/`schemaId`/`schemaFamily`/`requestingUser`/
+ * `exportedSections`/`finalReportVersion`) completely untouched. Verified
+ * directly with a dedicated regression test — see
+ * `adaptiveExports.spec.ts`'s "sibling exportMetadata fields survive
+ * markAdaptiveExportReady" test.
+ *
+ * `.update()` was considered instead (its dotted-path semantics are
+ * correct) but not used, to stay consistent with every other function in
+ * this file, which all use `.set(..., { merge: true })` — and because
+ * `.update()` requires the target document to already exist, a guarantee
+ * this function already relies on implicitly (it is only ever called
+ * after `createAdaptiveExportRecord` has already written the document in
+ * "generating" state), so switching write methods would add a stricter
+ * failure mode for no behavioral benefit.
  */
 export async function markAdaptiveExportReady(
   runId: string,
@@ -103,7 +181,7 @@ export async function markAdaptiveExportReady(
   if (!adminDb) return { ok: false, reason: "firestore_unavailable" };
   try {
     await exportsCollection(runId).doc(exportId).set(
-      { artifactStatus: "ready", "exportMetadata.fileHash": fileHash },
+      { artifactStatus: "ready", exportMetadata: { fileHash } },
       { merge: true }
     );
     return { ok: true };
@@ -176,7 +254,7 @@ export async function getAdaptiveExportRecord(runId: string, exportId: string): 
   try {
     const snap = await exportsCollection(runId).doc(exportId).get();
     if (!snap.exists) return { ok: false, reason: "not_found" };
-    return { ok: true, record: snap.data() as AdaptiveResearchExportV1 };
+    return { ok: true, record: normalizeAdaptiveExportRecord(snap.data()!) };
   } catch {
     return { ok: false, reason: "read_failed" };
   }
@@ -233,7 +311,7 @@ export async function listAdaptiveExportRecords(runId: string, options: ListAdap
     }
     const snap = await query.get();
     const hasMore = snap.docs.length > limit;
-    const records = snap.docs.slice(0, limit).map((d) => d.data() as AdaptiveResearchExportV1);
+    const records = snap.docs.slice(0, limit).map((d) => normalizeAdaptiveExportRecord(d.data()));
     return { ok: true, records, hasMore };
   } catch {
     return { ok: false, reason: "read_failed" };
