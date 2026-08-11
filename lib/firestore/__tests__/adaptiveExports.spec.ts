@@ -466,6 +466,26 @@ describe("Integrity hotfix — markAdaptiveExportReady persists fileHash correct
     const record = await getAdaptiveExportRecord(runId, "exp-none");
     expect(record.ok && record.record.exportMetadata.fileHash).toBeUndefined();
   });
+
+  it("final review, Step 5/8 — the malformed literal 'exportMetadata.fileHash' key is never present on the object returned by the compatibility boundary, from either read path — it is not merely functionally overridden, it is genuinely absent, so no future caller can leak it by spreading/serializing the record wholesale", async () => {
+    const runId = "run-filehash-no-leak";
+    await createAdaptiveExportRecord(buildInput(runId, "exp-no-leak", "No-leak question"));
+    const raw = exportDocs.get(runId)!.get("exp-no-leak");
+    raw.artifactStatus = "ready";
+    raw["exportMetadata.fileHash"] = "should-never-appear-as-a-top-level-key";
+    exportDocs.get(runId)!.set("exp-no-leak", raw);
+
+    const viaGet = await getAdaptiveExportRecord(runId, "exp-no-leak");
+    expect(viaGet.ok && Object.prototype.hasOwnProperty.call(viaGet.record, "exportMetadata.fileHash")).toBe(false);
+    expect(viaGet.ok && Object.keys(viaGet.record)).not.toContain("exportMetadata.fileHash");
+
+    const viaList = await listAdaptiveExportRecords(runId);
+    const listedRecord = viaList.ok ? viaList.records.find((r) => r.exportId === "exp-no-leak") : undefined;
+    expect(listedRecord && Object.prototype.hasOwnProperty.call(listedRecord, "exportMetadata.fileHash")).toBe(false);
+
+    // The value is still correctly readable via the canonical nested path — this test is about the STRAY key's absence, not the value's presence (covered by the earlier tests).
+    expect(viaGet.ok && viaGet.record.exportMetadata.fileHash).toBe("should-never-appear-as-a-top-level-key");
+  });
 });
 
 describe("adaptiveExports Firestore persistence — reportVersion concurrency (critical integrity review)", () => {

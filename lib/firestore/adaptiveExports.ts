@@ -49,14 +49,26 @@ function exportsCollection(runId: string) {
  * fallback).
  */
 function normalizeAdaptiveExportRecord(raw: FirebaseFirestore.DocumentData): AdaptiveResearchExportV1 {
+  // Final review, Step 5/8: no current caller spreads/serializes the raw
+  // record wholesale (both read paths use an explicit field-by-field
+  // projection), so this was never actually reachable in an API response —
+  // but `{ ...raw, ... }` alone would still carry the literal
+  // `"exportMetadata.fileHash"` key forward onto the returned object,
+  // since object spread copies every own enumerable property regardless of
+  // whether its name contains a dot. Explicitly deleting it makes the
+  // compatibility boundary airtight rather than relying on "no caller
+  // happens to spread this today" — a future caller (e.g. debug logging
+  // via `JSON.stringify(record)`) must never be able to leak this
+  // internal-only artifact.
   const legacyFileHash = raw["exportMetadata.fileHash"] as string | undefined;
-  if (legacyFileHash !== undefined && raw.exportMetadata && raw.exportMetadata.fileHash === undefined) {
-    return {
-      ...raw,
-      exportMetadata: { ...raw.exportMetadata, fileHash: legacyFileHash },
-    } as AdaptiveResearchExportV1;
+  if (legacyFileHash === undefined) {
+    return raw as AdaptiveResearchExportV1;
   }
-  return raw as AdaptiveResearchExportV1;
+  const { "exportMetadata.fileHash": _legacy, ...rest } = raw;
+  if (rest.exportMetadata && rest.exportMetadata.fileHash === undefined) {
+    rest.exportMetadata = { ...rest.exportMetadata, fileHash: legacyFileHash };
+  }
+  return rest as AdaptiveResearchExportV1;
 }
 
 export interface CreateAdaptiveExportInput {
