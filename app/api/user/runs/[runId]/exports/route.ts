@@ -62,14 +62,29 @@ export interface AdaptiveExportListItem {
    * computed at generation time and already persisted on
    * `exportMetadata.fileHash` since Phase 1; simply exposed here now.
    * Absent for "generating"/"failed" records (no bytes were ever produced).
-   * For PDF/JSON this hash is fully reproducible by regenerating the same
-   * frozen record. For DOCX it is NOT reproducible across renders (the
-   * `docx` library stamps `docProps/core.xml` timestamps unconditionally)
-   * — present for reference/logging, never usable as a DOCX
-   * byte-for-byte-identity check. See docs/adaptive-research-export-architecture.md.
+   *
+   * `hashReproducible` is the machine-readable companion a consumer MUST
+   * check before treating `fileHash` as a historical-integrity hash (final
+   * review, Step 3): `true` for PDF/JSON, whose renderers are pure
+   * functions of the frozen record — regenerating reproduces the identical
+   * hash. `false` for DOCX — the `docx` library stamps `docProps/core.xml`
+   * and every ZIP entry's local file header with `new Date()`
+   * unconditionally, so a fresh regeneration's whole-file hash will differ
+   * from this one even though the frozen record and visible content are
+   * unchanged. A `false` value does not mean the hash is useless — it is
+   * still a valid identifier of the exact bytes originally generated and
+   * streamed at creation/regeneration time — only that it cannot be used
+   * to verify a later regeneration reproduces "the same" file. See
+   * docs/adaptive-research-export-architecture.md §4.
    */
   fileHash?: string;
   hashAlgorithm?: "sha256";
+  hashReproducible?: boolean;
+}
+
+/** Derived purely from `format` — never persisted, so no migration and no change to the frozen `AdaptiveResearchExportV1`/`exportMetadata` shape. See `AdaptiveExportListItem.hashReproducible`'s own doc comment for what this means. */
+function isHashReproducible(format: string): boolean {
+  return format !== "docx";
 }
 
 export async function GET(req: NextRequest, context: { params: Promise<{ runId: string }> }) {
@@ -96,10 +111,21 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
     return errorResponse(403, "forbidden", "You do not have access to this run.");
   }
 
+  // Final review, Step 6: `Number.isFinite` (not `!Number.isNaN`) rejects
+  // Infinity/-Infinity too, and `Math.trunc` guards against a fractional
+  // value ever reaching Firestore's `.limit()`/`.where("<", ...)` — a
+  // non-integer `limit` was previously passed through unmodified (e.g.
+  // `?limit=10.5` survived the old `!Number.isNaN` check as a valid
+  // number and was never floored before being added to 1 and handed to
+  // `.limit()`). Malformed/unparseable values fall back to `undefined`
+  // (first page, default page size) rather than erroring — a bad cursor
+  // never removes the server-side cap.
   const cursorParam = req.nextUrl.searchParams.get("cursor");
   const limitParam = req.nextUrl.searchParams.get("limit");
-  const beforeReportVersion = cursorParam !== null && !Number.isNaN(Number(cursorParam)) ? Number(cursorParam) : undefined;
-  const limit = limitParam !== null && !Number.isNaN(Number(limitParam)) ? Number(limitParam) : undefined;
+  const parsedCursor = cursorParam !== null ? Number(cursorParam) : NaN;
+  const parsedLimit = limitParam !== null ? Number(limitParam) : NaN;
+  const beforeReportVersion = Number.isFinite(parsedCursor) ? Math.trunc(parsedCursor) : undefined;
+  const limit = Number.isFinite(parsedLimit) ? Math.trunc(parsedLimit) : undefined;
 
   const listResult = await listAdaptiveExportRecords(runId, { limit, beforeReportVersion });
   if (!listResult.ok) {
@@ -117,7 +143,9 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
     createdBy: r.createdBy,
     governanceStatusAtExport: r.governanceStatusAtExport,
     classification: r.classification,
-    ...(r.exportMetadata.fileHash ? { fileHash: r.exportMetadata.fileHash, hashAlgorithm: "sha256" as const } : {}),
+    ...(r.exportMetadata.fileHash
+      ? { fileHash: r.exportMetadata.fileHash, hashAlgorithm: "sha256" as const, hashReproducible: isHashReproducible(r.format) }
+      : {}),
   }));
 
   const nextCursor = listResult.hasMore && items.length > 0 ? items[items.length - 1].reportVersion : null;

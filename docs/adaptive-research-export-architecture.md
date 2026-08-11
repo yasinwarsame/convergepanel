@@ -10,6 +10,18 @@ There is no object storage anywhere in this codebase (no signed URLs, no `@verce
 
 This is why "ready" describes the record, not a file sitting in storage: it means the snapshot was durably persisted **and** a file was successfully generated and streamed at that moment. There is no "re-download the same bytes" — every download, including a historical one, is a fresh render from the frozen snapshot. UI copy says "Regenerate PDF/DOCX/JSON", never "Download", for exactly this reason.
 
+### Feature flags
+
+Each format is gated independently, and never gates the others — enabling JSON does not require DOCX, disabling DOCX does not affect PDF. Each has a server/client pair (`lib/env.ts` / `NEXT_PUBLIC_*`), default off:
+
+| Format | Server flag | Client flag |
+|---|---|---|
+| PDF (base export system) | `ADAPTIVE_RESEARCH_EXPORT_ENABLED` | `NEXT_PUBLIC_ADAPTIVE_RESEARCH_EXPORT_ENABLED` |
+| DOCX | `ADAPTIVE_RESEARCH_DOCX_EXPORT_ENABLED` | `NEXT_PUBLIC_ADAPTIVE_RESEARCH_DOCX_EXPORT_ENABLED` |
+| JSON | `ADAPTIVE_RESEARCH_JSON_EXPORT_ENABLED` | `NEXT_PUBLIC_ADAPTIVE_RESEARCH_JSON_EXPORT_ENABLED` |
+
+The server flag is the actual authority — it gates whether the creation route (`POST /api/user/runs/[runId]/export`) accepts the format at all (`app/api/user/runs/[runId]/export/route.ts`'s `validFormats` array). The client flag only controls whether the UI *offers* the option; a request for a server-disabled format is rejected the same generic `unsupported_format` way an unrecognized format string would be, never with a flag-specific message that would reveal the feature exists but is off. All three format flags are currently enabled in production (verified live in the Phase 3/4 production canaries referenced in this repo's session history).
+
 ## 2. Three version concepts — never conflated
 
 | Concept | Field | Meaning |
@@ -36,7 +48,11 @@ Adding a new `format` value (DOCX, then JSON) never bumps the export contract ve
 - Changing the *semantic meaning* of an existing field without changing its shape (e.g. redefining what `consensus.level` measures).
 - Changing the discriminant values of the `result` union (`schemaFamily`) or removing a branch.
 
-**Enum policy:** enums in this contract (`ConsensusLevel`, `SourceGroundingLevel`, `AdaptiveExportClassification`, governance `kind`/`status`) are documented as **open sets** consumers should not exhaustively switch on without a default case — ConvergePanel adds schema IDs and model IDs over time, and those propagate into `panel.models[].modelId` and `report.schemaId` without a version bump.
+**Enum policy — two distinct categories, not one (final review, Step 20 — an earlier draft of this section conflated them):**
+- **Actively growing today:** `report.schemaId` and `panel.models[].modelId`. ConvergePanel adds new schemas and model integrations over time; new values appear in these fields as a routine, expected consequence of product growth — this is additive by definition, not merely "reserved."
+- **Fixed today, but reserved as forward-compatible under this policy:** `ConsensusLevel` (`"strong"|"moderate"|"weak"|"split"|"unscored"`, `lib/adaptiveSchema/reportSummary.ts`), `SourceGroundingLevel` (`"strong"|"moderate"|"weak"|"unscored"`), `AdaptiveExportClassification` (`"public"|"internal"|"confidential"|"restricted"`), and governance `kind`/`status`. These are closed, fully-enumerated sets in the current implementation — none of them grow automatically the way schema/model IDs do. They are still declared open under this policy (a new value could be added later — e.g. a new governance review state — and per §"Additive changes" above, adding an enum member does **not** bump `formatVersion`) so that such a future addition is not accidentally a breaking change in practice.
+
+**Consumers integrating against JSON v1 MUST NOT exhaustively `switch`/pattern-match any enum field in this contract without a default/fallback case that tolerates an unrecognized value.** This applies to every enum listed above, including the ones that are closed today — the policy explicitly reserves the right to add a value to any of them without a `formatVersion` bump, so client code that would throw, crash, or silently misbehave on an unrecognized string is not written to this contract's actual compatibility guarantee, even if every value it currently sees is one from the list above.
 
 **Optional-field policy:** a field is optional in the contract if and only if the underlying data can genuinely be absent (e.g. `decisionReceipt` when no governance record exists yet). Optional fields are omitted, never emitted as `null`, when absent (`JSON.stringify`'s own default behavior, since `buildAdaptiveResearchJsonExport` only sets a key when the source value is present).
 
@@ -54,9 +70,19 @@ The `docx` library (v9.7.1) unconditionally stamps `docProps/core.xml` timestamp
 
 What **is** guaranteed for DOCX: the visible content — every heading, paragraph, table cell, governance label, provenance field inside `word/document.xml` — is a pure, deterministic function of the record, because the composer never uses `Hyperlink`/`ExternalHyperlink`/`Bookmark` (the library's other source of per-render randomness via `nanoid()`-based relationship IDs). A content-level integrity check (hashing `word/document.xml` alone, not the whole `.docx`) would be fully reliable; this phase does not build one, since no consumer need for it has surfaced yet, and the existing `exportMetadata.fileHash` (a whole-file hash) is still useful for basic single-response tamper/corruption detection — it is documented here as **not** a "did regeneration reproduce export A" proof for DOCX, unlike PDF/JSON.
 
+### `hashReproducible`: the machine-readable field that distinguishes them (final review, Step 3)
+
+`GET /api/user/runs/[runId]/exports` now includes, per list item, `fileHash` (sha256 hex), `hashAlgorithm: "sha256"`, and **`hashReproducible: boolean`** — all three present together only when the export reached `"ready"` (absent for `"generating"`/`"failed"` records, which never produced bytes). `hashReproducible` is `true` for PDF/JSON, `false` for DOCX. This is not prose-only documentation of the distinction above — it is a field a machine consumer can branch on before treating `fileHash` as a "did this regeneration reproduce the original" check. An earlier draft of this API exposed `fileHash`/`hashAlgorithm` identically for all three formats with no such field, which would have let a consumer reasonably (and incorrectly) assume DOCX's hash was reproducible the same way PDF/JSON's is — caught and fixed during final review before merge.
+
+`hashReproducible` is derived on the fly from `format` in the route (`format !== "docx"`) — it is never persisted, so this required no change to `AdaptiveResearchExportV1`/`exportMetadata`'s frozen shape and needs no migration; see the "Hash fields: persisted vs. projected" note below.
+
 ### Exposing `fileHash` is additive, not a contract change
 
-`GET /api/user/runs/[runId]/exports` now includes `fileHash`/`hashAlgorithm: "sha256"` per list item when the export reached `"ready"` (absent for `"generating"`/`"failed"` records, which never produced bytes). This is a new optional field on an already-internal, ownership-gated response — not a change to the public `AdaptiveResearchJsonExportV1` contract (which does not include `fileHash` at all; it's meaningless for JSON's own self-referential output, since a JSON export doesn't need to prove it matches "a JSON export" — the bytes and their hash are the same request). No version bump.
+This is a new optional field set on an already-internal, ownership-gated response — not a change to the public `AdaptiveResearchJsonExportV1` contract (which does not include `fileHash` at all; it's meaningless for JSON's own self-referential output, since a JSON export doesn't need to prove it matches "a JSON export" — the bytes and their hash are the same request). Neither the JSON contract's `formatVersion` nor the internal export contract's `version` needed to change for this.
+
+### Hash fields: persisted vs. projected
+
+`fileHash` (the sha256 itself) is **persisted** — it has lived on `exportMetadata.fileHash` since Phase 1, written by `markAdaptiveExportReady()`, unchanged by Phase 5. `hashAlgorithm` is a constant literal, not a stored field. `hashReproducible` is **purely projected** — computed from `format` at response-serialization time in the history route, never written to Firestore. No migration is required for existing export records: every one of them already has whatever `fileHash` it had before, and the two new response fields are derived, not read from a new column that old records would lack.
 
 ### Historical regeneration and hash comparison
 
@@ -213,6 +239,12 @@ Concretely: a historical export created while a run was `needs_review` stays `ne
 
 `AdaptiveExportHistorySection.tsx` consumes `hasMore`/`nextCursor` and renders a "Load more" button that appends the next page — no infinite scroll, matching the phase's own "simple Load more is acceptable" guidance.
 
+**Cursor safety and tie-breaking (final review, Steps 7-9), independently verified with deterministic tests** (`lib/firestore/__tests__/adaptiveExports.spec.ts`):
+- **Timestamp collisions cannot cause skips/duplicates.** The sort key and cursor are both `reportVersion` — an integer, unique per run by construction (the atomic creation transaction, §14) — never `createdAt`. Multiple records sharing the exact same `createdAt` string (a real possibility: low-resolution timestamps, or several formats created in the same request burst) paginate correctly because ordering never depends on `createdAt` at all. Proven with 12 records sharing one identical `createdAt`, paginated in pages of 5: all 12 returned exactly once, in strict descending order.
+- **A cursor cannot cross a run boundary.** The Firestore collection reference is always `runs/{runId}/exports`, where `runId` comes from the URL path (already ownership-checked earlier in the same request) — never from the cursor. The cursor is only ever a numeric `<` filter *within* that already-scoped collection; a `reportVersion` value that happens to coincide with a real version in a different run cannot leak that other run's records, because the query never targets that other run's collection. Proven directly: supplying a large cursor value against one run while a structurally-identical `reportVersion` exists in a different run returns only the first run's own records.
+- **Malformed limit/cursor values degrade safely, never remove the cap.** Verified at both the route's query-param-parsing layer and the Firestore-layer function itself (defense in depth — the function doesn't trust its caller already sanitized): non-numeric, `Infinity`, `NaN`, `0`, negative, and fractional values for both `limit` and `cursor` all either clamp into range or fall back to the default first page — none can produce an unbounded read or a thrown error. (Server max is a hard `50`; page size is clamped independently of what a client requests.)
+- **Pagination is live, newest-first, not snapshot-isolated** — this is a deliberate, documented choice, not an oversight. A new export created between two page fetches becomes the new head of the list but sorts *above* whatever cursor an in-progress pagination is using, so it can never appear on an already-cursored older page and can never cause an older page's items to duplicate or be silently skipped. Proven directly: fetch page 1, create a new export, fetch page 2 with page 1's cursor — no duplicates across the two pages, and the newly-created item never appears on page 2.
+
 ## 11. Lifecycle wording
 
 `AdaptiveExportArtifactStatus` = `"generating" | "ready" | "failed" | "superseded"`. Audited for language implying permanent storage (`"archived PDF"`, `"stored document"`, `"permanent download"`, `"saved to storage"`) — none found anywhere in components/lib/docs. "Ready" is documented, and UI copy reflects, that it means a file was successfully generated and streamed **at that moment**, never that a file sits in storage waiting. "Superseded" is a lifecycle transition (a newer export exists), not an invalidation — a superseded record's frozen `reportSnapshot` remains fully readable and regenerable.
@@ -239,10 +271,10 @@ Reviewed across all three export routes. Codes in use: `invalid_request` (400), 
 
 Evaluated whether the creation endpoint needs server-side idempotency (e.g. an idempotency key to collapse duplicate double-submitted requests into one export). Evidence considered:
 - **Client-side protection already exists:** `AdaptiveExportButton`'s export control is `disabled` for the full duration of `state === "loading"`, so a double-click on the same session's button cannot fire two concurrent creation requests.
-- **No audit evidence of real duplicates:** nothing in this engagement's testing (including the earlier production canaries) surfaced `reportVersion` gaps or audit-log patterns suggesting accidental duplicate submissions.
-- **A duplicate, if it ever happened, is not a correctness or security problem** — the atomic `reportVersion` transaction (§14) guarantees each request still gets its own valid, non-colliding, fully-formed export. The worst case is an extra row in the history list, not data corruption or a security gap.
+- **Read-only audit-log scan (final review, Step 19):** queried every `adaptive_export_generated` event in `admin_audit_logs` (55 events total across this engagement's history), grouped by run+format, looking for creations under 5 seconds apart on the same run+format — the signature of an accidental double-submit rather than a legitimate later re-export. **One cluster found:** two PDF creations for the same run, 146ms apart, both from this engagement's own test account during earlier canary testing (consistent with a scripted back-to-back test call, not a real user's accidental double-click — the disabled-button protection specifically defends against the latter). No other clusters exist across the full history. This is a single, explainable, self-generated data point, not evidence of a live customer-facing duplicate-submission problem.
+- **The one real near-duplicate found was handled correctly:** both requests received their own valid, non-colliding, fully-formed export (`reportVersion` 9 and 10) — direct confirmation that even when a duplicate genuinely occurs, the atomic `reportVersion` transaction (§14) prevents any corruption or collision. The worst case is an extra row in the history list, not data corruption or a security gap.
 
-Given no evidence of a real problem and an existing lightweight mitigation, **server-side idempotency is deferred, not built.** This should be revisited if production telemetry later shows a genuine pattern of duplicate submissions (e.g. from retried requests on flaky connections) that the client-side button-disable doesn't catch — a network-layer retry, unlike a double-click, bypasses the disabled-button protection.
+Given the one real data point is explainable and non-problematic, and the atomic transaction already makes a genuine duplicate harmless, **server-side idempotency is deferred, not built.** This should be revisited if production telemetry later shows a genuine pattern of duplicate submissions from real user traffic (e.g. from retried requests on flaky connections) that the client-side button-disable doesn't catch — a network-layer retry, unlike a double-click, bypasses the disabled-button protection.
 
 ## Non-goals
 

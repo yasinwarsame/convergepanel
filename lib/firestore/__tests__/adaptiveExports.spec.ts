@@ -469,4 +469,143 @@ describe("listAdaptiveExportRecords (Phase 2 — historical export listing)", ()
     expect(listA.ok && listA.records.map((r) => r.exportId)).toEqual(["exp-a1"]);
     expect(listB.ok && listB.records.map((r) => r.exportId)).toEqual(["exp-b1"]);
   });
+
+  describe("Phase 5 final review, Step 6 — malformed pagination inputs never remove the server-side cap", () => {
+    const runId = "run-list-malformed-inputs";
+    beforeAll(async () => {
+      for (let i = 0; i < 60; i++) {
+        await createAdaptiveExportRecord(buildInput(runId, `exp-malformed-${i}`, `Q${i}`));
+      }
+    });
+
+    it("no limit — defaults to 30", async () => {
+      const r = await listAdaptiveExportRecords(runId);
+      expect(r.ok && r.records.length).toBe(30);
+    });
+    it("limit=1", async () => {
+      const r = await listAdaptiveExportRecords(runId, { limit: 1 });
+      expect(r.ok && r.records.length).toBe(1);
+    });
+    it("limit=50 (the max)", async () => {
+      const r = await listAdaptiveExportRecords(runId, { limit: 50 });
+      expect(r.ok && r.records.length).toBe(50);
+    });
+    it("limit=9999 — clamped to 50, never unbounded", async () => {
+      const r = await listAdaptiveExportRecords(runId, { limit: 9999 });
+      expect(r.ok && r.records.length).toBe(50);
+    });
+    it("limit=0 — clamped up to the minimum of 1, never an empty/unbounded read", async () => {
+      const r = await listAdaptiveExportRecords(runId, { limit: 0 });
+      expect(r.ok && r.records.length).toBe(1);
+    });
+    it("limit=-5 (negative) — clamped up to 1", async () => {
+      const r = await listAdaptiveExportRecords(runId, { limit: -5 });
+      expect(r.ok && r.records.length).toBe(1);
+    });
+    it("limit=10.9 (fractional) — truncated to a valid integer Firestore limit, never passed through as a fraction", async () => {
+      const r = await listAdaptiveExportRecords(runId, { limit: 10.9 });
+      expect(r.ok && r.records.length).toBe(10);
+    });
+    it("limit=Infinity — rejected as non-finite, falls back to the default page size", async () => {
+      const r = await listAdaptiveExportRecords(runId, { limit: Infinity });
+      expect(r.ok && r.records.length).toBe(30);
+    });
+    it("limit=NaN — rejected, falls back to the default page size", async () => {
+      const r = await listAdaptiveExportRecords(runId, { limit: NaN });
+      expect(r.ok && r.records.length).toBe(30);
+    });
+    it("beforeReportVersion=NaN (simulating a non-numeric cursor slipping through) — rejected, behaves as the first page", async () => {
+      const r = await listAdaptiveExportRecords(runId, { beforeReportVersion: NaN });
+      expect(r.ok && r.records.length).toBe(30);
+      expect(r.ok && r.records[0].reportVersion).toBe(60);
+    });
+    it("beforeReportVersion=2.9 (fractional cursor) — truncated, never throws", async () => {
+      const r = await listAdaptiveExportRecords(runId, { beforeReportVersion: 2.9 });
+      // Truncates to 2, so only reportVersion 1 is strictly less than 2.
+      expect(r.ok && r.records.map((x) => x.reportVersion)).toEqual([1]);
+    });
+  });
+
+  describe("Phase 5 final review, Step 7 — pagination is stable across identical createdAt timestamps (sort/cursor key is reportVersion, never createdAt)", () => {
+    it("many records sharing the exact same createdAt string paginate with no duplicates and no omissions", async () => {
+      const runId = "run-list-timestamp-collision";
+      const SAME_TIMESTAMP = "2026-08-11T12:00:00.000Z";
+      for (let i = 0; i < 12; i++) {
+        const input = buildInput(runId, `exp-tie-${i}`, `Q${i}`);
+        input.record.createdAt = SAME_TIMESTAMP;
+        input.record.exportMetadata.createdAt = SAME_TIMESTAMP;
+        await createAdaptiveExportRecord(input);
+      }
+      // Every record genuinely shares createdAt — a createdAt-ordered cursor would be ambiguous here.
+      const all = await listAdaptiveExportRecords(runId);
+      expect(all.ok && new Set(all.ok ? all.records.map((r) => r.createdAt) : []).size).toBe(1);
+
+      // Paginate in pages of 5 using the real cursor contract, exactly as the API route does.
+      const seen: number[] = [];
+      let cursor: number | undefined = undefined;
+      for (let page = 0; page < 10; page++) {
+        const r = await listAdaptiveExportRecords(runId, { limit: 5, beforeReportVersion: cursor });
+        if (!r.ok) throw new Error("unexpected read failure");
+        seen.push(...r.records.map((x) => x.reportVersion));
+        if (!r.hasMore) break;
+        cursor = r.records[r.records.length - 1].reportVersion;
+      }
+      const expected = Array.from({ length: 12 }, (_, i) => 12 - i); // 12..1 descending
+      expect(seen).toEqual(expected); // no duplicates, no omissions, deterministic order despite the timestamp tie
+    });
+  });
+
+  describe("Phase 5 final review, Step 8 — a cursor can never cross a run boundary (structural: the collection query is always scoped by the URL-path runId, the cursor is only ever a numeric filter within it)", () => {
+    it("a cursor value that happens to also be a valid reportVersion in ANOTHER run never leaks that other run's records", async () => {
+      await createAdaptiveExportRecord(buildInput("run-cursor-victim", "exp-v1", "victim Q1"));
+      await createAdaptiveExportRecord(buildInput("run-cursor-victim", "exp-v2", "victim Q2"));
+      // run-cursor-attacker has its OWN reportVersion 1/2, structurally unrelated to the victim run's.
+      await createAdaptiveExportRecord(buildInput("run-cursor-attacker", "exp-atk-1", "attacker Q1"));
+
+      // "Attacker" supplies a cursor for run-cursor-attacker's own list call — even a maximally
+      // permissive cursor value (a huge reportVersion, i.e. "give me everything before this")
+      // can only ever read from the collection scoped to THAT run's own path.
+      const result = await listAdaptiveExportRecords("run-cursor-attacker", { beforeReportVersion: 999999 });
+      expect(result.ok).toBe(true);
+      expect(result.ok && result.records.every((r) => r.runId === "run-cursor-attacker")).toBe(true);
+      expect(result.ok && result.records.some((r) => r.runId === "run-cursor-victim")).toBe(false);
+    });
+
+    it("a cursor for a deleted/nonexistent export version (a gap in the sequence) still returns the correct remaining records, never an error", async () => {
+      const runId = "run-cursor-gap";
+      await createAdaptiveExportRecord(buildInput(runId, "exp-gap-1", "Q1"));
+      await createAdaptiveExportRecord(buildInput(runId, "exp-gap-2", "Q2"));
+      await createAdaptiveExportRecord(buildInput(runId, "exp-gap-3", "Q3"));
+      // Cursor references reportVersion 2 even if that exact record were later removed —
+      // "< 2" is a pure numeric filter, not a lookup of the cursor's own document.
+      const result = await listAdaptiveExportRecords(runId, { beforeReportVersion: 2 });
+      expect(result.ok && result.records.map((r) => r.reportVersion)).toEqual([1]);
+    });
+  });
+
+  describe("Phase 5 final review, Step 9 — pagination behavior under concurrent insertion (newest-first, live, not snapshot-isolated)", () => {
+    it("fetching page 2 with page 1's cursor after a NEW export was created never duplicates or silently skips any of page 1's original items", async () => {
+      const runId = "run-concurrent-insert-pagination";
+      for (let i = 0; i < 6; i++) {
+        await createAdaptiveExportRecord(buildInput(runId, `exp-ci-${i}`, `Q${i}`));
+      }
+      const page1 = await listAdaptiveExportRecords(runId, { limit: 3 });
+      expect(page1.ok && page1.records.map((r) => r.reportVersion)).toEqual([6, 5, 4]);
+      const cursor = page1.ok ? page1.records[page1.records.length - 1].reportVersion : undefined;
+
+      // A newer export is created between page 1 and page 2 — this is explicitly
+      // "live, newest-first" pagination (documented below), not a fixed snapshot:
+      // the new export becomes the new head of the list, but it sorts ABOVE the
+      // cursor (reportVersion 7 > 4), so it can never appear on page 2 and can
+      // never cause any of page 1's original 3 items to be duplicated or skipped.
+      await createAdaptiveExportRecord(buildInput(runId, "exp-ci-new", "New Q"));
+
+      const page2 = await listAdaptiveExportRecords(runId, { limit: 3, beforeReportVersion: cursor });
+      expect(page2.ok && page2.records.map((r) => r.reportVersion)).toEqual([3, 2, 1]);
+
+      const allSeen = [...(page1.ok ? page1.records : []), ...(page2.ok ? page2.records : [])].map((r) => r.reportVersion);
+      expect(new Set(allSeen).size).toBe(allSeen.length); // no duplicates across the two pages
+      expect(allSeen).not.toContain(7); // the newly-inserted head item never leaks into an already-cursored older page
+    });
+  });
 });

@@ -152,4 +152,101 @@ describe("GET /api/user/runs/[runId]/exports", () => {
     const res = await callRoute();
     expect(res.status).toBe(500);
   });
+
+  describe("Phase 5 final review, Step 3 — hashReproducible must accurately distinguish DOCX from PDF/JSON", () => {
+    it("PDF: fileHash present with hashReproducible=true", async () => {
+      mockedListAdaptiveExportRecords.mockResolvedValue({
+        ok: true,
+        records: [buildRecord({ format: "pdf", exportMetadata: { ...buildRecord().exportMetadata, fileHash: "sha-pdf" } })],
+        hasMore: false,
+      });
+      const res = await callRoute();
+      const json = await res.json();
+      expect(json.exports[0]).toMatchObject({ fileHash: "sha-pdf", hashAlgorithm: "sha256", hashReproducible: true });
+    });
+
+    it("JSON: fileHash present with hashReproducible=true", async () => {
+      mockedListAdaptiveExportRecords.mockResolvedValue({
+        ok: true,
+        records: [buildRecord({ format: "json", exportMetadata: { ...buildRecord().exportMetadata, fileHash: "sha-json" } })],
+        hasMore: false,
+      });
+      const res = await callRoute();
+      const json = await res.json();
+      expect(json.exports[0]).toMatchObject({ fileHash: "sha-json", hashAlgorithm: "sha256", hashReproducible: true });
+    });
+
+    it("DOCX: fileHash present with hashReproducible=FALSE — must never look identical to PDF/JSON's reproducible hash", async () => {
+      mockedListAdaptiveExportRecords.mockResolvedValue({
+        ok: true,
+        records: [buildRecord({ format: "docx", exportMetadata: { ...buildRecord().exportMetadata, fileHash: "sha-docx" } })],
+        hasMore: false,
+      });
+      const res = await callRoute();
+      const json = await res.json();
+      expect(json.exports[0]).toMatchObject({ fileHash: "sha-docx", hashAlgorithm: "sha256", hashReproducible: false });
+    });
+
+    it("absent fileHash (generating/failed) — no fileHash/hashAlgorithm/hashReproducible fields at all, for any format", async () => {
+      mockedListAdaptiveExportRecords.mockResolvedValue({
+        ok: true,
+        records: [buildRecord({ format: "docx", artifactStatus: "failed", exportMetadata: { ...buildRecord().exportMetadata, fileHash: undefined } })],
+        hasMore: false,
+      });
+      const res = await callRoute();
+      const json = await res.json();
+      expect(json.exports[0].fileHash).toBeUndefined();
+      expect(json.exports[0].hashAlgorithm).toBeUndefined();
+      expect(json.exports[0].hashReproducible).toBeUndefined();
+    });
+  });
+
+  describe("Phase 5 final review, Steps 6/14 — cursor/limit query params are parsed and forwarded correctly, malformed values degrade safely", () => {
+    function callRouteWithQuery(qs: string) {
+      const req = new NextRequest(`http://localhost/api/user/runs/${RUN_ID}/exports${qs}`);
+      return GET(req, { params: Promise.resolve({ runId: RUN_ID }) });
+    }
+
+    it("no query params — calls the Firestore layer with limit/beforeReportVersion both undefined", async () => {
+      await callRouteWithQuery("");
+      expect(mockedListAdaptiveExportRecords).toHaveBeenCalledWith(RUN_ID, { limit: undefined, beforeReportVersion: undefined });
+    });
+
+    it("?cursor=5&limit=10 — forwarded as parsed numbers", async () => {
+      await callRouteWithQuery("?cursor=5&limit=10");
+      expect(mockedListAdaptiveExportRecords).toHaveBeenCalledWith(RUN_ID, { limit: 10, beforeReportVersion: 5 });
+    });
+
+    it("?cursor=not-a-number — degrades to undefined (first page), never throws, never 500s", async () => {
+      const res = await callRouteWithQuery("?cursor=not-a-number");
+      expect(res.status).toBe(200);
+      expect(mockedListAdaptiveExportRecords).toHaveBeenCalledWith(RUN_ID, { limit: undefined, beforeReportVersion: undefined });
+    });
+
+    it("?limit=10.7 (fractional) — truncated before being forwarded, never passed through as a fraction", async () => {
+      await callRouteWithQuery("?limit=10.7");
+      expect(mockedListAdaptiveExportRecords).toHaveBeenCalledWith(RUN_ID, { limit: 10, beforeReportVersion: undefined });
+    });
+
+    it("?limit=Infinity — rejected as non-finite, forwarded as undefined", async () => {
+      await callRouteWithQuery("?limit=Infinity");
+      expect(mockedListAdaptiveExportRecords).toHaveBeenCalledWith(RUN_ID, { limit: undefined, beforeReportVersion: undefined });
+    });
+
+    it("hasMore/nextCursor from the Firestore layer are passed through in the response body", async () => {
+      mockedListAdaptiveExportRecords.mockResolvedValue({ ok: true, records: [buildRecord({ reportVersion: 5 })], hasMore: true });
+      const res = await callRoute();
+      const json = await res.json();
+      expect(json.hasMore).toBe(true);
+      expect(json.nextCursor).toBe(5);
+    });
+
+    it("hasMore=false — nextCursor is null, never a stale/leftover cursor value", async () => {
+      mockedListAdaptiveExportRecords.mockResolvedValue({ ok: true, records: [buildRecord({ reportVersion: 5 })], hasMore: false });
+      const res = await callRoute();
+      const json = await res.json();
+      expect(json.hasMore).toBe(false);
+      expect(json.nextCursor).toBeNull();
+    });
+  });
 });

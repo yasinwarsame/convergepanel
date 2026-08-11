@@ -218,10 +218,18 @@ export interface ListAdaptiveExportsOptions {
 export async function listAdaptiveExportRecords(runId: string, options: ListAdaptiveExportsOptions = {}): Promise<ListAdaptiveExportsResult> {
   if (!adminDb) return { ok: false, reason: "firestore_unavailable" };
   try {
-    const limit = Math.min(Math.max(1, options.limit ?? DEFAULT_EXPORT_LIST_PAGE_SIZE), MAX_EXPORT_LIST_PAGE_SIZE);
+    // Final review, Step 6: this function is a general-purpose reader (per
+    // its own doc comment above) — it must not assume every caller already
+    // sanitized `options`. `Math.trunc` + a finite fallback guards against
+    // a fractional or non-finite `limit`/`beforeReportVersion` ever
+    // reaching Firestore's `.limit()`/`.where("<", ...)`, independent of
+    // whatever the route layer already does.
+    const rawLimit = options.limit;
+    const safeLimit = rawLimit !== undefined && Number.isFinite(rawLimit) ? Math.trunc(rawLimit) : DEFAULT_EXPORT_LIST_PAGE_SIZE;
+    const limit = Math.min(Math.max(1, safeLimit), MAX_EXPORT_LIST_PAGE_SIZE);
     let query = exportsCollection(runId).orderBy("reportVersion", "desc").limit(limit + 1);
-    if (options.beforeReportVersion !== undefined) {
-      query = query.where("reportVersion", "<", options.beforeReportVersion);
+    if (options.beforeReportVersion !== undefined && Number.isFinite(options.beforeReportVersion)) {
+      query = query.where("reportVersion", "<", Math.trunc(options.beforeReportVersion));
     }
     const snap = await query.get();
     const hasMore = snap.docs.length > limit;
