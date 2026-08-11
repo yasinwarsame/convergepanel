@@ -55,16 +55,37 @@ function isIncrementSentinel(v: unknown): v is FakeFieldValue {
   return v instanceof FakeFieldValue && typeof (v as FakeFieldValue).__increment === "number";
 }
 
-function applyMergeDotPath(target: Record<string, any>, updates: Record<string, any>) {
+/**
+ * Integrity hotfix — this used to be `applyMergeDotPath`, which SPLIT
+ * top-level string keys on "." and treated them as nested paths (e.g.
+ * `"exportMetadata.fileHash"` became a nested write). That is real
+ * Firestore `.update()` behavior, but NOT `.set(data, {merge:true})`
+ * behavior — real `.set(..., {merge:true})` stores a dotted top-level key
+ * LITERALLY (a field genuinely named with a dot in it), and instead
+ * performs a RECURSIVE merge on any top-level value that is itself a
+ * plain nested object. The old (wrong) mock is exactly why the
+ * `markAdaptiveExportReady` field-path bug (see that function's own doc
+ * comment in lib/firestore/adaptiveExports.ts) went undetected through
+ * three phases — every test here ran against a mock that was MORE lenient
+ * than real Firestore, silently accepting code that real Firestore would
+ * not have merged the way the code intended. This corrected version
+ * matches real `.set(..., {merge:true})` semantics precisely: literal
+ * top-level keys (dots and all), recursive merge for nested plain objects.
+ */
+function isPlainObject(v: unknown): v is Record<string, any> {
+  return v !== null && typeof v === "object" && !Array.isArray(v) && !(v instanceof FakeFieldValue) && !(v instanceof FakeTimestamp);
+}
+
+function deepMergeAssign(target: Record<string, any>, updates: Record<string, any>) {
   for (const [key, value] of Object.entries(updates)) {
-    const parts = key.split(".");
-    let node = target;
-    for (let i = 0; i < parts.length - 1; i++) {
-      node[parts[i]] = node[parts[i]] ?? {};
-      node = node[parts[i]];
+    if (isIncrementSentinel(value)) {
+      target[key] = (typeof target[key] === "number" ? target[key] : 0) + value.__increment;
+    } else if (isPlainObject(value)) {
+      if (!isPlainObject(target[key])) target[key] = {};
+      deepMergeAssign(target[key], value);
+    } else {
+      target[key] = value;
     }
-    const leaf = parts[parts.length - 1];
-    node[leaf] = isIncrementSentinel(value) ? (typeof node[leaf] === "number" ? node[leaf] : 0) + value.__increment : value;
   }
 }
 
@@ -103,7 +124,7 @@ function makeFakeAdminDb() {
         const prev = runs.get(runId) ?? {};
         if (opts?.merge) {
           const next = { ...prev };
-          applyMergeDotPath(next, data);
+          deepMergeAssign(next, data);
           runs.set(runId, next);
         } else {
           runs.set(runId, data);
@@ -126,7 +147,7 @@ function makeFakeAdminDb() {
               const prev = docs.get(exportId) ?? {};
               if (opts?.merge) {
                 const next = { ...prev };
-                applyMergeDotPath(next, data);
+                deepMergeAssign(next, data);
                 docs.set(exportId, next);
               } else {
                 docs.set(exportId, data);
@@ -353,6 +374,97 @@ describe("adaptiveExports Firestore persistence — snapshot immutability (Part 
     const superseded = await getAdaptiveExportRecord(runId, "exp-x");
     expect(superseded.ok).toBe(true);
     expect(superseded.ok && superseded.record.reportSnapshot.question).toBe("X");
+  });
+});
+
+describe("Integrity hotfix — markAdaptiveExportReady persists fileHash correctly (fixes the dotted-key .set(merge:true) bug)", () => {
+  it("persists fileHash NESTED inside exportMetadata in the raw stored document — never as a literal top-level 'exportMetadata.fileHash' field (Step 4, mandatory: tests the persisted representation itself, not just the public DTO)", async () => {
+    const runId = "run-filehash-persisted-shape";
+    await createAdaptiveExportRecord(buildInput(runId, "exp-hash-1", "Q"));
+    await markAdaptiveExportReady(runId, "exp-hash-1", "sha-nested-check");
+
+    // Bypass getAdaptiveExportRecord's own normalization entirely — inspect
+    // the RAW stored document, exactly as it exists in the fake Firestore's
+    // backing store, the same way `snap.data()` would return it from real
+    // Firestore. This is the one assertion that would have caught the
+    // original bug: before the fix, `raw.exportMetadata.fileHash` was
+    // `undefined` and `raw["exportMetadata.fileHash"]` held the real hash.
+    const raw = exportDocs.get(runId)!.get("exp-hash-1");
+    expect(raw.exportMetadata.fileHash).toBe("sha-nested-check");
+    expect(raw["exportMetadata.fileHash"]).toBeUndefined();
+  });
+
+  it("sibling exportMetadata fields survive markAdaptiveExportReady — exportId/reportVersion/schemaId/schemaFamily/requestingUser/exportedSections/finalReportVersion are all preserved, not wiped by the merge", async () => {
+    const runId = "run-filehash-siblings-preserved";
+    await createAdaptiveExportRecord(buildInput(runId, "exp-siblings", "Sibling-preservation question"));
+    const beforeReady = exportDocs.get(runId)!.get("exp-siblings");
+    const exportMetadataBefore = { ...beforeReady.exportMetadata };
+
+    await markAdaptiveExportReady(runId, "exp-siblings", "sha-siblings");
+
+    const raw = exportDocs.get(runId)!.get("exp-siblings");
+    expect(raw.exportMetadata).toMatchObject({
+      exportId: exportMetadataBefore.exportId,
+      runId: exportMetadataBefore.runId,
+      schemaVersion: exportMetadataBefore.schemaVersion,
+      exportedSections: exportMetadataBefore.exportedSections,
+      createdAt: exportMetadataBefore.createdAt,
+      requestingUser: exportMetadataBefore.requestingUser,
+      finalReportVersion: exportMetadataBefore.finalReportVersion,
+      fileHash: "sha-siblings",
+    });
+    // Also confirm via the normalized public reader, matching what the history route/UI actually see.
+    const record = await getAdaptiveExportRecord(runId, "exp-siblings");
+    expect(record.ok && record.record.exportMetadata).toEqual(raw.exportMetadata);
+  });
+
+  it("legacy malformed record (literal top-level 'exportMetadata.fileHash', no nested hash) is still readable through getAdaptiveExportRecord via the backward-compatibility boundary", async () => {
+    const runId = "run-filehash-legacy-malformed";
+    await createAdaptiveExportRecord(buildInput(runId, "exp-legacy", "Legacy question"));
+    // Simulate a record written by the OLD buggy code path — bypass
+    // markAdaptiveExportReady entirely and write the malformed shape
+    // directly into the fake store, exactly as real historical production
+    // documents actually look (confirmed by direct Firestore inspection
+    // before this fix).
+    const raw = exportDocs.get(runId)!.get("exp-legacy");
+    raw.artifactStatus = "ready";
+    raw["exportMetadata.fileHash"] = "legacy-literal-hash";
+    exportDocs.get(runId)!.set("exp-legacy", raw);
+
+    const record = await getAdaptiveExportRecord(runId, "exp-legacy");
+    expect(record.ok && record.record.exportMetadata.fileHash).toBe("legacy-literal-hash");
+  });
+
+  it("legacy malformed record is also readable through listAdaptiveExportRecords (the history-list path), not just getAdaptiveExportRecord", async () => {
+    const runId = "run-filehash-legacy-list";
+    await createAdaptiveExportRecord(buildInput(runId, "exp-legacy-list", "Legacy list question"));
+    const raw = exportDocs.get(runId)!.get("exp-legacy-list");
+    raw.artifactStatus = "ready";
+    raw["exportMetadata.fileHash"] = "legacy-list-hash";
+    exportDocs.get(runId)!.set("exp-legacy-list", raw);
+
+    const result = await listAdaptiveExportRecords(runId);
+    expect(result.ok && result.records[0].exportMetadata.fileHash).toBe("legacy-list-hash");
+  });
+
+  it("when a record has BOTH a genuinely nested fileHash and a stale legacy literal field, the nested (canonical, more recent) value always wins", async () => {
+    const runId = "run-filehash-nested-wins";
+    await createAdaptiveExportRecord(buildInput(runId, "exp-both", "Both-fields question"));
+    const raw = exportDocs.get(runId)!.get("exp-both");
+    raw.artifactStatus = "ready";
+    raw.exportMetadata = { ...raw.exportMetadata, fileHash: "correct-nested-hash" };
+    raw["exportMetadata.fileHash"] = "stale-legacy-hash-should-be-ignored";
+    exportDocs.get(runId)!.set("exp-both", raw);
+
+    const record = await getAdaptiveExportRecord(runId, "exp-both");
+    expect(record.ok && record.record.exportMetadata.fileHash).toBe("correct-nested-hash");
+  });
+
+  it("a record with no fileHash at all (never marked ready, or genuinely never hashed) has fileHash undefined — the compatibility boundary never fabricates a value", async () => {
+    const runId = "run-filehash-absent";
+    await createAdaptiveExportRecord(buildInput(runId, "exp-none", "No hash question"));
+    const record = await getAdaptiveExportRecord(runId, "exp-none");
+    expect(record.ok && record.record.exportMetadata.fileHash).toBeUndefined();
   });
 });
 
