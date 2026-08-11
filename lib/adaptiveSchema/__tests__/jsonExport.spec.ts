@@ -457,3 +457,37 @@ describe("renderAdaptiveResearchJsonV1 — MIME/output shape", () => {
     expect(() => JSON.parse(rendered.bytes.toString("utf-8"))).not.toThrow();
   });
 });
+
+describe("renderAdaptiveResearchJsonV1 — non-finite numbers (Part 9): fail loudly, never a silent misleading null", () => {
+  it.each([
+    ["NaN", NaN],
+    ["Infinity", Infinity],
+    ["-Infinity", -Infinity],
+  ])("a %s metric value throws rather than silently serializing as null", (_label, badValue) => {
+    const record = financialValuationRecord();
+    (record.reportSnapshot.legacy!.modelResponses![0].data as any).metrics[0].value = badValue;
+    expect(() => renderAdaptiveResearchJsonV1(record)).toThrow(/non-finite/i);
+  });
+
+  it("a genuinely finite number (including 0 and negative values) is completely unaffected", () => {
+    const record = financialValuationRecord();
+    (record.reportSnapshot.legacy!.modelResponses![0].data as any).metrics[0].value = 0;
+    const rendered = renderAdaptiveResearchJsonV1(record);
+    const parsed = JSON.parse(rendered.bytes.toString("utf-8"));
+    expect(parsed.result.modelResponses[0].data.metrics[0].value).toBe(0);
+
+    const record2 = financialValuationRecord();
+    (record2.reportSnapshot.legacy!.modelResponses![0].data as any).metrics[0].value = -18.5;
+    const rendered2 = renderAdaptiveResearchJsonV1(record2);
+    const parsed2 = JSON.parse(rendered2.bytes.toString("utf-8"));
+    expect(parsed2.result.modelResponses[0].data.metrics[0].value).toBe(-18.5);
+  });
+
+  it("null itself (a genuinely absent metric value, per MetricZod's own .nullable()) still passes through as null — only non-finite NUMBERS are rejected, not legitimate nulls", () => {
+    const record = financialValuationRecord();
+    (record.reportSnapshot.legacy!.modelResponses![0].data as any).metrics[0].value = null;
+    const rendered = renderAdaptiveResearchJsonV1(record);
+    const parsed = JSON.parse(rendered.bytes.toString("utf-8"));
+    expect(parsed.result.modelResponses[0].data.metrics[0].value).toBeNull();
+  });
+});

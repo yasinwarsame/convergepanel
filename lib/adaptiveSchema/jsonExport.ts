@@ -208,7 +208,26 @@ export function buildAdaptiveResearchJsonExport(record: AdaptiveResearchExportV1
  * assignment in a loop would. No object spreading, no `for...in`, no
  * merging into a shared/trusted object anywhere in this function.
  */
+/**
+ * Non-finite numbers (Part 9 — reviewed as a real risk, not a hypothetical
+ * one: `MetricZod`/`ScenarioZod` in validator.ts use bare `z.number()`,
+ * which accepts `NaN`/`Infinity` just as happily as any other JS number —
+ * neither Zod nor `RESULT_SHAPE_CHECKS` in persistedOutput.ts guard against
+ * them). `JSON.stringify` silently turns all three into `null`, which is
+ * indistinguishable from a field that was legitimately never populated —
+ * unacceptable for a public data contract downstream integrations may
+ * parse programmatically. Fails loudly instead, reusing the exact same
+ * failure path the size guard below already exercises (caught by the
+ * export route's existing try/catch → `markAdaptiveExportFailed` + a
+ * failure audit event + a clean 500 — never a silently-misleading `null`
+ * shipped as if it were valid report data).
+ */
+class NonFiniteNumberError extends Error {}
+
 export function canonicalizeForSerialization(value: unknown): unknown {
+  if (typeof value === "number" && !Number.isFinite(value)) {
+    throw new NonFiniteNumberError(`JSON export encountered a non-finite number (${value}) — refusing to silently serialize it as null`);
+  }
   if (Array.isArray(value)) {
     return value.map(canonicalizeForSerialization);
   }
