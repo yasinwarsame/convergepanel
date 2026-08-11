@@ -135,30 +135,49 @@ function makeFakeAdminDb() {
             },
           };
         }
-        return {
-          doc: docRef,
-          where(field: string, op: string, value: unknown) {
-            return {
-              async get() {
-                const matched = [...docs.entries()]
-                  .filter(([, d]) => (op === "==" ? d[field] === value : true))
-                  .map(([id]) => ({ id, ref: docRef(id) }));
-                return { docs: matched };
-              },
-            };
-          },
-          orderBy(field: string, direction: "asc" | "desc" = "asc") {
-            return {
-              async get() {
-                const sorted = [...docs.entries()].sort(([, a], [, b]) => {
+        // Chainable in any order (orderBy/.where/.limit), matching how real
+        // Firestore Query objects work — each call returns a new query
+        // description; filtering/sorting/limiting are all applied together
+        // at `.get()` time. Needed since Phase 5's pagination chains
+        // `.orderBy(...).limit(...).where(...)` (limit before where),
+        // the reverse of this collection's original `.where(...).get()` /
+        // `.orderBy(...).get()` single-clause-only shape.
+        function buildQuery(state: { filters: Array<[string, string, unknown]>; order?: [string, "asc" | "desc"]; limitN?: number }) {
+          return {
+            where(field: string, op: string, value: unknown) {
+              return buildQuery({ ...state, filters: [...state.filters, [field, op, value]] });
+            },
+            orderBy(field: string, direction: "asc" | "desc" = "asc") {
+              return buildQuery({ ...state, order: [field, direction] });
+            },
+            limit(n: number) {
+              return buildQuery({ ...state, limitN: n });
+            },
+            async get() {
+              let entries = [...docs.entries()];
+              for (const [field, op, value] of state.filters) {
+                entries = entries.filter(([, d]) => {
+                  if (op === "==") return d[field] === value;
+                  if (op === "<") return (d[field] ?? 0) < (value as number);
+                  if (op === "<=") return (d[field] ?? 0) <= (value as number);
+                  if (op === ">") return (d[field] ?? 0) > (value as number);
+                  if (op === ">=") return (d[field] ?? 0) >= (value as number);
+                  return true;
+                });
+              }
+              if (state.order) {
+                const [field, direction] = state.order;
+                entries = entries.sort(([, a], [, b]) => {
                   const cmp = (a[field] ?? 0) < (b[field] ?? 0) ? -1 : (a[field] ?? 0) > (b[field] ?? 0) ? 1 : 0;
                   return direction === "desc" ? -cmp : cmp;
                 });
-                return { docs: sorted.map(([id, d]) => ({ id, data: () => ({ ...d }) })) };
-              },
-            };
-          },
-        };
+              }
+              if (state.limitN !== undefined) entries = entries.slice(0, state.limitN);
+              return { docs: entries.map(([id, d]) => ({ id, ref: docRef(id), data: () => ({ ...d }) })) };
+            },
+          };
+        }
+        return { doc: docRef, ...buildQuery({ filters: [] }) };
       },
     };
   }
@@ -382,6 +401,39 @@ describe("adaptiveExports Firestore persistence — reportVersion concurrency (c
     expect(a).toEqual({ ok: true, reportVersion: 1 });
     expect(b).toEqual({ ok: true, reportVersion: 1 });
   });
+
+  it("Phase 5 (Part 20) — three concurrent MIXED-format export creations (pdf/docx/json) for the same run never collide on reportVersion; the transaction never inspects format", async () => {
+    const runId = "run-concurrent-mixed-format";
+    const pdfInput = buildInput(runId, "exp-mixed-pdf", "PDF question");
+    const docxInput = buildInput(runId, "exp-mixed-docx", "DOCX question");
+    docxInput.record.format = "docx";
+    const jsonInput = buildInput(runId, "exp-mixed-json", "JSON question");
+    jsonInput.record.format = "json";
+
+    const [pdf, docx, json] = await Promise.all([
+      createAdaptiveExportRecord(pdfInput),
+      createAdaptiveExportRecord(docxInput),
+      createAdaptiveExportRecord(jsonInput),
+    ]);
+
+    expect(pdf.ok).toBe(true);
+    expect(docx.ok).toBe(true);
+    expect(json.ok).toBe(true);
+    const versions = [pdf.ok && pdf.reportVersion, docx.ok && docx.reportVersion, json.ok && json.reportVersion].sort(
+      (a, b) => (a as number) - (b as number)
+    );
+    expect(versions).toEqual([1, 2, 3]); // distinct, no duplicates, format-agnostic
+
+    const pdfRec = await getAdaptiveExportRecord(runId, "exp-mixed-pdf");
+    const docxRec = await getAdaptiveExportRecord(runId, "exp-mixed-docx");
+    const jsonRec = await getAdaptiveExportRecord(runId, "exp-mixed-json");
+    expect(pdfRec.ok && pdfRec.record.format).toBe("pdf");
+    expect(docxRec.ok && docxRec.record.format).toBe("docx");
+    expect(jsonRec.ok && jsonRec.record.format).toBe("json");
+    // Each format's own reportVersion still matches one of the distinct assigned versions above.
+    const recordedVersions = [pdfRec.ok && pdfRec.record.reportVersion, docxRec.ok && docxRec.record.reportVersion, jsonRec.ok && jsonRec.record.reportVersion];
+    expect(new Set(recordedVersions).size).toBe(3);
+  });
 });
 
 describe("listAdaptiveExportRecords (Phase 2 — historical export listing)", () => {
@@ -406,7 +458,7 @@ describe("listAdaptiveExportRecords (Phase 2 — historical export listing)", ()
 
   it("returns an empty list for a run with no exports, never an error", async () => {
     const result = await listAdaptiveExportRecords("run-list-empty");
-    expect(result).toEqual({ ok: true, records: [] });
+    expect(result).toEqual({ ok: true, records: [], hasMore: false });
   });
 
   it("list results are independent per run — a run's list never includes another run's exports", async () => {

@@ -183,23 +183,50 @@ export async function getAdaptiveExportRecord(runId: string, exportId: string): 
 }
 
 export type ListAdaptiveExportsResult =
-  | { ok: true; records: AdaptiveResearchExportV1[] }
+  | { ok: true; records: AdaptiveResearchExportV1[]; hasMore: boolean }
   | { ok: false; reason: "firestore_unavailable" | "read_failed" };
 
+/** Hard ceiling independent of whatever a caller requests — prevents a single history read from ever pulling an unbounded number of documents, regardless of route-level validation. */
+const MAX_EXPORT_LIST_PAGE_SIZE = 50;
+const DEFAULT_EXPORT_LIST_PAGE_SIZE = 30;
+
+export interface ListAdaptiveExportsOptions {
+  /** Caps the page at this many records (clamped to [1, MAX_EXPORT_LIST_PAGE_SIZE]). Defaults to DEFAULT_EXPORT_LIST_PAGE_SIZE. */
+  limit?: number;
+  /** Cursor = the `reportVersion` of the last record from the previous page. Returns records with a strictly smaller reportVersion (list stays newest-first). Omit for the first page. */
+  beforeReportVersion?: number;
+}
+
 /**
- * Adaptive Research Export, Phase 2 — lists every export record for a run,
+ * Adaptive Research Export, Phase 2 — lists export records for a run,
  * newest `reportVersion` first, including `superseded` and `failed` ones
  * (Part 8: superseded ≠ invalid ≠ hidden). Returns FULL records — callers
  * that expose this over an API (the history-list route) are responsible for
  * projecting down to metadata-only fields before responding; this function
  * itself stays a general-purpose reader, matching `getAdaptiveExportRecord`'s
  * own shape one level up.
+ *
+ * Phase 5 (Part 14) — cursor-based pagination, bounded by
+ * MAX_EXPORT_LIST_PAGE_SIZE regardless of caller input. Before this, the
+ * query had no `.limit()` at all: a run with dozens/hundreds of exports
+ * (easily reached — a single review/testing session can generate 20+) would
+ * read and return every one of them on every history-panel open. `reportVersion`
+ * is already the query's own sort key, so paginating on it needs no new
+ * index — Firestore auto-indexes single-field range+order queries on the
+ * same field.
  */
-export async function listAdaptiveExportRecords(runId: string): Promise<ListAdaptiveExportsResult> {
+export async function listAdaptiveExportRecords(runId: string, options: ListAdaptiveExportsOptions = {}): Promise<ListAdaptiveExportsResult> {
   if (!adminDb) return { ok: false, reason: "firestore_unavailable" };
   try {
-    const snap = await exportsCollection(runId).orderBy("reportVersion", "desc").get();
-    return { ok: true, records: snap.docs.map((d) => d.data() as AdaptiveResearchExportV1) };
+    const limit = Math.min(Math.max(1, options.limit ?? DEFAULT_EXPORT_LIST_PAGE_SIZE), MAX_EXPORT_LIST_PAGE_SIZE);
+    let query = exportsCollection(runId).orderBy("reportVersion", "desc").limit(limit + 1);
+    if (options.beforeReportVersion !== undefined) {
+      query = query.where("reportVersion", "<", options.beforeReportVersion);
+    }
+    const snap = await query.get();
+    const hasMore = snap.docs.length > limit;
+    const records = snap.docs.slice(0, limit).map((d) => d.data() as AdaptiveResearchExportV1);
+    return { ok: true, records, hasMore };
   } catch {
     return { ok: false, reason: "read_failed" };
   }

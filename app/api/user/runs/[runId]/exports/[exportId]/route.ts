@@ -110,6 +110,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
 
   // ── Version-aware regeneration — pure function of the frozen record, never the current run (Part 4/6/7) ──
   let bytes: Buffer;
+  const renderStartedAt = Date.now();
   try {
     const rendered = await renderAdaptiveResearchExport(record);
     bytes = rendered.bytes;
@@ -118,6 +119,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
     logger.error("[adaptive-export] regeneration failed", { runId, exportId, errorMessage: failureReason });
     return errorResponse(500, "regeneration_failed", "Could not regenerate this PDF. Please try again.");
   }
+  const renderDurationMs = Date.now() - renderStartedAt;
 
   // Best-effort audit — a failure here must never turn an already-successful
   // regeneration into a failed response (same reliability semantics as the
@@ -135,6 +137,8 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
       reportVersion: record.reportVersion,
       governanceStatusAtExport: record.governanceStatusAtExport.family === "milestone2" ? record.governanceStatusAtExport.kind : `legacy:${record.governanceStatusAtExport.status ?? "not_evaluated"}`,
       at: new Date().toISOString(),
+      durationMs: renderDurationMs,
+      byteSize: bytes.length,
     });
   } catch (auditErr: unknown) {
     logger.error("[adaptive-export] regeneration audit write failed (regeneration itself still succeeded)", {

@@ -23,6 +23,13 @@
  * is enforced server-side (the regeneration route reads `record.format`,
  * never anything client-supplied), this label is purely descriptive of
  * that server-side truth.
+ *
+ * Phase 5 (Part 14/26) — the list route is now cursor-paginated
+ * server-side (a run with many exports no longer returns them all in one
+ * unbounded read). This component tracks `hasMore`/`nextCursor` from the
+ * response and appends one more page on "Load more" rather than assuming
+ * the first response is everything — the simple, non-infinite-scroll
+ * pattern the phase instructions call for.
  */
 
 import { useState } from "react";
@@ -181,31 +188,52 @@ export default function AdaptiveExportHistorySection({ runId }: AdaptiveExportHi
   const [listState, setListState] = useState<ListState>("idle");
   const [items, setItems] = useState<AdaptiveExportListItem[]>([]);
   const [listError, setListError] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [nextCursor, setNextCursor] = useState<number | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   if (!EXPORT_FLAG_ENABLED) return null;
   if (!runId) return null;
+
+  async function fetchPage(cursor: number | null) {
+    const query = cursor !== null ? `?cursor=${encodeURIComponent(cursor)}` : "";
+    const res = await authedFetch(`/api/user/runs/${encodeURIComponent(runId!)}/exports${query}`, {
+      method: "GET",
+      user,
+      authReady,
+    });
+    if (!res.ok) throw new Error("list_failed");
+    return res.json();
+  }
 
   async function loadHistory() {
     if (listState === "loading" || listState === "loaded") return;
     setListState("loading");
     setListError(null);
     try {
-      const res = await authedFetch(`/api/user/runs/${encodeURIComponent(runId!)}/exports`, {
-        method: "GET",
-        user,
-        authReady,
-      });
-      if (!res.ok) {
-        setListError("Couldn't load export history.");
-        setListState("error");
-        return;
-      }
-      const body = await res.json();
+      const body = await fetchPage(null);
       setItems(Array.isArray(body.exports) ? body.exports : []);
+      setHasMore(Boolean(body.hasMore));
+      setNextCursor(typeof body.nextCursor === "number" ? body.nextCursor : null);
       setListState("loaded");
     } catch {
       setListError("Couldn't load export history. Please check your connection.");
       setListState("error");
+    }
+  }
+
+  async function loadMore() {
+    if (loadingMore || nextCursor === null) return;
+    setLoadingMore(true);
+    try {
+      const body = await fetchPage(nextCursor);
+      setItems((prev) => [...prev, ...(Array.isArray(body.exports) ? body.exports : [])]);
+      setHasMore(Boolean(body.hasMore));
+      setNextCursor(typeof body.nextCursor === "number" ? body.nextCursor : null);
+    } catch {
+      setListError("Couldn't load more exports. Please try again.");
+    } finally {
+      setLoadingMore(false);
     }
   }
 
@@ -224,7 +252,22 @@ export default function AdaptiveExportHistorySection({ runId }: AdaptiveExportHi
             </p>
           )}
           {listState === "loaded" && items.length === 0 && <p className="text-sm text-slate-500">No previous exports for this report yet.</p>}
-          {listState === "loaded" && items.length > 0 && <ul>{items.map((item) => <ExportHistoryRow key={item.exportId} runId={runId} item={item} />)}</ul>}
+          {listState === "loaded" && items.length > 0 && (
+            <>
+              <ul>{items.map((item) => <ExportHistoryRow key={item.exportId} runId={runId} item={item} />)}</ul>
+              {hasMore && (
+                <button
+                  type="button"
+                  onClick={loadMore}
+                  disabled={loadingMore}
+                  aria-busy={loadingMore}
+                  className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {loadingMore ? "Loading…" : "Load more"}
+                </button>
+              )}
+            </>
+          )}
         </div>
       </details>
     </Card>

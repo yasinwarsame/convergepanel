@@ -1,3 +1,14 @@
+> **Superseded (2026-08-11).** This document is the original pre-implementation
+> design proposal — it predates Phase 1 and describes a permission matrix,
+> object-storage/signed-URL model, and phase sequence that were revised
+> during actual implementation and do not reflect what was built. For the
+> accurate, as-built architecture (Phases 1-5: PDF/DOCX/JSON export, no
+> object storage, single least-privilege authorization function, Firestore
+> snapshot persistence, history pagination, integrity hashes), see
+> [`docs/adaptive-research-export-architecture.md`](./adaptive-research-export-architecture.md).
+> Kept here for historical record of the original design reasoning, not as
+> a source of truth.
+
 # Adaptive Research Results and Export — Product, Privacy, Permissions, and Architecture Design
 
 **Date:** 2026-08-05
