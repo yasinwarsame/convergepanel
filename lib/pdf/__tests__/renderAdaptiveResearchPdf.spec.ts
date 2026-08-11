@@ -5,16 +5,17 @@
  * from `reportVersion` and `schemaVersion` — see researchExport.ts) must
  * route to the matching renderer, and an unrecognized version must fail
  * loudly rather than silently being rendered as if it were V1. Within a
- * supported version, `format` (Phase 3: "pdf" | "docx") selects the
- * renderer the same way — an unrecognized format must never silently
- * fall back to PDF or DOCX. This is the mechanism that keeps
- * regenerating a very old historical export safe if a future contract
- * version or format value ever changes semantics.
+ * supported version, `format` (Phase 3: "pdf" | "docx"; Phase 4 adds
+ * "json") selects the renderer the same way — an unrecognized format must
+ * never silently fall back to any real format. This is the mechanism that
+ * keeps regenerating a very old historical export safe if a future
+ * contract version or format value ever changes semantics.
  *
  * Only `@react-pdf/renderer` is mocked here (ESM-only, needs mocking
- * under ts-jest — see this file's own established pattern); `docx` is
- * NOT mocked — it works cleanly under Jest without the ESM-parse issue,
- * so the format: "docx" tests below exercise the real DOCX renderer.
+ * under ts-jest — see this file's own established pattern); `docx` and
+ * `json` are NOT mocked — both work cleanly under Jest without the
+ * ESM-parse issue, so their dispatch tests below exercise the real
+ * renderers.
  */
 
 jest.mock("@react-pdf/renderer", () => ({
@@ -92,8 +93,16 @@ describe("renderAdaptiveResearchExport — version-aware dispatch", () => {
     expect(result.sha256).toMatch(/^[a-f0-9]{64}$/);
   });
 
-  it("an unrecognized format on an otherwise-valid V1 record fails loudly — never silently falls back to PDF or DOCX (a malformed/forged stored record, bypassing TypeScript, is the realistic threat model here)", async () => {
-    const record = baseRecord({ format: "json" as unknown as "pdf" });
+  it("format: \"json\" dispatches to the real JSON serializer, not PDF/DOCX — produces valid, parseable JSON", async () => {
+    const record = baseRecord({ format: "json" });
+    const result = await renderAdaptiveResearchExport(record);
+    expect(result.bytes.subarray(0, 1).toString()).toBe("{");
+    expect(() => JSON.parse(result.bytes.toString("utf-8"))).not.toThrow();
+    expect(result.sha256).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it("an unrecognized format on an otherwise-valid V1 record fails loudly — never silently falls back to PDF/DOCX/JSON (a malformed/forged stored record, bypassing TypeScript, is the realistic threat model here)", async () => {
+    const record = baseRecord({ format: "csv" as unknown as "pdf" });
     await expect(renderAdaptiveResearchExport(record)).rejects.toThrow(/[Uu]nsupported.*format/);
   });
 });

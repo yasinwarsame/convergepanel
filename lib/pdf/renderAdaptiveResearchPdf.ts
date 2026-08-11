@@ -17,10 +17,13 @@
  *
  * `renderAdaptiveResearchExport` below is the shared, version-AND-format
  * -aware entry point every caller uses (the PDF-only Phase 1 creation
- * route, the Phase 2 regeneration route, and Phase 3's now-format-aware
+ * route, the Phase 2 regeneration route, and Phase 3/4's now-format-aware
  * creation route) — kept in this file (not moved to a new "neutral"
  * location) purely to avoid rewiring every existing caller's import path;
- * its role is genuinely format-agnostic despite the filename.
+ * its role is genuinely format-agnostic despite the filename. Phase 4's
+ * JSON serializer (`renderAdaptiveResearchJsonV1`) is synchronous — this
+ * function still returns a Promise uniformly for every format so callers
+ * never need to branch on which renderer happens to be async.
  */
 
 import "server-only";
@@ -29,6 +32,7 @@ import { createHash } from "crypto";
 import { AdaptiveResearchExportV1 } from "@/lib/adaptiveSchema/researchExport";
 import { AdaptiveResearchDocument } from "./AdaptiveResearchDocument";
 import { renderAdaptiveResearchDocxV1 } from "@/lib/docx/renderAdaptiveResearchDocx";
+import { renderAdaptiveResearchJsonV1 } from "@/lib/adaptiveSchema/jsonExport";
 
 export interface RenderedAdaptivePdf {
   bytes: Buffer;
@@ -68,6 +72,8 @@ export async function renderAdaptiveResearchExport(record: AdaptiveResearchExpor
           return renderAdaptiveResearchPdfV1(record);
         case "docx":
           return renderAdaptiveResearchDocxV1(record);
+        case "json":
+          return renderAdaptiveResearchJsonV1(record);
         default: {
           const unsupportedFormat: never = record.format;
           throw new Error(`Unsupported AdaptiveResearchExport format: ${String(unsupportedFormat)}`);

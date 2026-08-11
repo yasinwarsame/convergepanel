@@ -144,6 +144,18 @@ export const ADAPTIVE_RESEARCH_EXPORT_ENABLED = process.env.ADAPTIVE_RESEARCH_EX
 export const ADAPTIVE_RESEARCH_DOCX_EXPORT_ENABLED = process.env.ADAPTIVE_RESEARCH_DOCX_EXPORT_ENABLED === "true";
 
 /**
+ * Adaptive Research Export, Phase 4 — a SEPARATE release flag for JSON,
+ * same independence discipline as the DOCX flag above: neither
+ * `ADAPTIVE_RESEARCH_EXPORT_ENABLED` (PDF) nor
+ * `ADAPTIVE_RESEARCH_DOCX_EXPORT_ENABLED` gate JSON, and this flag gates
+ * only JSON — PDF and DOCX are completely unaffected by its value either
+ * way. Default OFF. Never a substitute for `canExportAdaptiveResearch()`'s
+ * per-request authorization — both must still pass for a JSON request to
+ * succeed.
+ */
+export const ADAPTIVE_RESEARCH_JSON_EXPORT_ENABLED = process.env.ADAPTIVE_RESEARCH_JSON_EXPORT_ENABLED === "true";
+
+/**
  * Search engine site-verification tokens.
  *
  * Optional — when unset, the corresponding verification meta tag is simply

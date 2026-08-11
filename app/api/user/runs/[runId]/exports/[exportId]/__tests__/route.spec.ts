@@ -280,13 +280,35 @@ describe("GET /api/user/runs/[runId]/exports/[exportId] — format-specific rege
     expect(buf.toString()).toBe("PK-regenerated-docx");
   });
 
-  it("a PDF-format export still regenerates with PDF headers, unaffected by DOCX now existing as a format", async () => {
+  it("a PDF-format export still regenerates with PDF headers, unaffected by DOCX/JSON now existing as formats", async () => {
     const record = buildRecord({ format: "pdf" });
     mockedGetAdaptiveExportRecord.mockResolvedValue({ ok: true, record });
     const res = await callRoute();
     expect(res.status).toBe(200);
     expect(res.headers.get("Content-Type")).toBe("application/pdf");
     expect(res.headers.get("Content-Disposition")).toMatch(/\.pdf"/);
+  });
+
+  it("a JSON-format export regenerates with JSON headers, never PDF's or DOCX's (Phase 4)", async () => {
+    const record = buildRecord({ format: "json" });
+    mockedGetAdaptiveExportRecord.mockResolvedValue({ ok: true, record });
+    mockedRenderAdaptiveResearchExport.mockResolvedValue({ bytes: Buffer.from('{"regenerated":true}'), sha256: "jsonsha" });
+
+    const res = await callRoute();
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toBe("application/json; charset=utf-8");
+    expect(res.headers.get("Content-Disposition")).toMatch(/\.json"/);
+    expect(res.headers.get("Content-Disposition")).not.toMatch(/\.(pdf|docx)"/);
+    const buf = Buffer.from(await res.arrayBuffer());
+    expect(buf.toString()).toBe('{"regenerated":true}');
+  });
+
+  it("no format tampering: an old PDF export cannot be coerced to regenerate as JSON via any client input (structural — no format param exists on this route)", async () => {
+    const record = buildRecord({ format: "pdf" });
+    mockedGetAdaptiveExportRecord.mockResolvedValue({ ok: true, record });
+    await callRoute();
+    expect(mockedRenderAdaptiveResearchExport).toHaveBeenCalledWith(record);
+    expect((mockedRenderAdaptiveResearchExport.mock.calls[0][0] as any).format).toBe("pdf");
   });
 
   it("never lets any client-supplied input coerce a historical export's format — the route reads format exclusively from the frozen record, there is no request body/query param it could come from", async () => {

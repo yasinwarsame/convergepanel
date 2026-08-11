@@ -23,12 +23,16 @@ jest.mock("@/lib/auth/identityResolutionTelemetry", () => ({
 
 let mockFlagEnabled = true;
 let mockDocxFlagEnabled = true;
+let mockJsonFlagEnabled = true;
 jest.mock("@/lib/env", () => ({
   get ADAPTIVE_RESEARCH_EXPORT_ENABLED() {
     return mockFlagEnabled;
   },
   get ADAPTIVE_RESEARCH_DOCX_EXPORT_ENABLED() {
     return mockDocxFlagEnabled;
+  },
+  get ADAPTIVE_RESEARCH_JSON_EXPORT_ENABLED() {
+    return mockJsonFlagEnabled;
   },
 }));
 
@@ -118,6 +122,7 @@ async function callRoute(runId: string = RUN_ID, body: unknown = { format: "pdf"
 beforeEach(() => {
   mockFlagEnabled = true;
   mockDocxFlagEnabled = true;
+  mockJsonFlagEnabled = true;
   mockedResolveRequestIdentity.mockReset().mockResolvedValue({ status: "authenticated", uid: UID });
   mockedRunGet.mockReset();
   mockedParsePersistedAdaptiveOutput.mockReset().mockReturnValue({ ok: false, reason: "absent" });
@@ -159,8 +164,8 @@ describe("POST /api/user/runs/[runId]/export — auth and gating", () => {
     expect(res.status).toBe(404);
   });
 
-  it("400s on an unrecognized format string (JSON/CSV) regardless of any flag", async () => {
-    const res = await callRoute(RUN_ID, { format: "json" });
+  it("400s on an unrecognized format string (CSV, or any string that isn't a real format) regardless of any flag", async () => {
+    const res = await callRoute(RUN_ID, { format: "csv" });
     const json = await res.json();
     expect(res.status).toBe(400);
     expect(json.errorCode).toBe("unsupported_format");
@@ -183,6 +188,34 @@ describe("POST /api/user/runs/[runId]/export — auth and gating", () => {
     expect(mockedCreateAdaptiveExportRecord).toHaveBeenCalled();
     const callArg = mockedCreateAdaptiveExportRecord.mock.calls[0][0];
     expect(callArg.record.format).toBe("docx");
+  });
+
+  it("400s on format: \"json\" when ADAPTIVE_RESEARCH_JSON_EXPORT_ENABLED is off — identical to a wholly unrecognized format, never a distinguishing message that reveals the feature exists", async () => {
+    mockJsonFlagEnabled = false;
+    const res = await callRoute(RUN_ID, { format: "json" });
+    const json = await res.json();
+    expect(res.status).toBe(400);
+    expect(json.errorCode).toBe("unsupported_format");
+    expect(mockedCreateAdaptiveExportRecord).not.toHaveBeenCalled();
+  });
+
+  it("accepts format: \"json\" when ADAPTIVE_RESEARCH_JSON_EXPORT_ENABLED is on", async () => {
+    mockedRenderAdaptiveResearchPdf.mockResolvedValue({ bytes: Buffer.from('{"fake":true}'), sha256: "jsonsha" });
+    const res = await callRoute(RUN_ID, { format: "json" });
+    expect(res.status).toBe(200);
+    expect(mockedCreateAdaptiveExportRecord).toHaveBeenCalled();
+    const callArg = mockedCreateAdaptiveExportRecord.mock.calls[0][0];
+    expect(callArg.record.format).toBe("json");
+  });
+
+  it("the DOCX and JSON flags are independent — DOCX off + JSON on still accepts json and still rejects docx", async () => {
+    mockDocxFlagEnabled = false;
+    mockJsonFlagEnabled = true;
+    mockedRenderAdaptiveResearchPdf.mockResolvedValue({ bytes: Buffer.from('{"fake":true}'), sha256: "jsonsha" });
+    const jsonRes = await callRoute(RUN_ID, { format: "json" });
+    expect(jsonRes.status).toBe(200);
+    const docxRes = await callRoute(RUN_ID, { format: "docx" });
+    expect(docxRes.status).toBe(400);
   });
 
   it("400s on an invalid JSON body", async () => {
@@ -269,6 +302,17 @@ describe("POST /api/user/runs/[runId]/export — success path (Part 12/19 sequen
     expect(res.headers.get("Content-Disposition")).toMatch(/\.docx"/);
     const buf = Buffer.from(await res.arrayBuffer());
     expect(buf.toString()).toBe("PK-fake-docx");
+  });
+
+  it("returns the generated JSON bytes with the correct format-specific headers when format: \"json\" is requested", async () => {
+    mockedRenderAdaptiveResearchPdf.mockResolvedValue({ bytes: Buffer.from('{"fake":true}'), sha256: "jsonsha" });
+    const res = await callRoute(RUN_ID, { format: "json" });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toBe("application/json; charset=utf-8");
+    expect(res.headers.get("Content-Disposition")).toMatch(/attachment/);
+    expect(res.headers.get("Content-Disposition")).toMatch(/\.json"/);
+    const buf = Buffer.from(await res.arrayBuffer());
+    expect(buf.toString()).toBe('{"fake":true}');
   });
 
   it("marks the export ready and supersedes older exports only AFTER PDF generation genuinely succeeds — never before", async () => {
