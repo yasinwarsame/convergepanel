@@ -857,6 +857,14 @@ A separate, panel-based review workflow layered on top of the adaptive schema sy
 
 ---
 
+## Adaptive Research Export
+
+Full architecture, JSON schema field documentation, sanitized examples, compatibility policy, and integrity model: **[`docs/adaptive-research-export-architecture.md`](./adaptive-research-export-architecture.md)**. `docs/adaptive-research-export-design.md` is the original pre-implementation proposal, superseded and kept only for historical record.
+
+Summary: three formats — PDF (Phase 1), DOCX (Phase 3), JSON (Phase 4) — each independently flag-gated (`ADAPTIVE_RESEARCH_EXPORT_ENABLED`, `ADAPTIVE_RESEARCH_DOCX_EXPORT_ENABLED`, `ADAPTIVE_RESEARCH_JSON_EXPORT_ENABLED`, `lib/env.ts`). No object storage exists in this codebase — the durable artifact is a frozen `AdaptiveResearchExportV1` record at `runs/{runId}/exports/{exportId}` (`lib/adaptiveSchema/researchExport.ts`); file bytes are always regenerated on demand, never persisted. Creation: `POST /api/user/runs/[runId]/export`. Regeneration/history-item render: `GET /api/user/runs/[runId]/exports/[exportId]` (current entitlement, frozen classification/governance content). History list (cursor-paginated, `?cursor=`/`?limit=`, max page size 50): `GET /api/user/runs/[runId]/exports`. Single central authorization function: `canExportAdaptiveResearch()` / `resolveAdaptiveExportVerdict()` (`lib/adaptiveSchema/exportAuthorization.ts`).
+
+---
+
 ## Firestore Data Model
 
 Primary database. Firebase Admin SDK is server-only — import with `"server-only"`.

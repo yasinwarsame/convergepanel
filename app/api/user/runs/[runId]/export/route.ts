@@ -216,6 +216,7 @@ export async function POST(req: NextRequest, context: { params: Promise<{ runId:
   // detail).
   let bytes: Buffer;
   let sha256: string;
+  const renderStartedAt = Date.now();
   try {
     const rendered = await renderAdaptiveResearchExport(fullRecord);
     bytes = rendered.bytes;
@@ -238,10 +239,12 @@ export async function POST(req: NextRequest, context: { params: Promise<{ runId:
       governanceStatusAtExport: governanceStatusAtExport.family === "milestone2" ? governanceStatusAtExport.kind : `legacy:${governanceStatusAtExport.status ?? "not_evaluated"}`,
       at: new Date().toISOString(),
       failureReason,
+      durationMs: Date.now() - renderStartedAt,
     });
 
     return errorResponse(500, "export_generation_failed", "Export generation failed. Please try again.");
   }
+  const renderDurationMs = Date.now() - renderStartedAt;
 
   // The file genuinely exists at this point. Everything below is
   // best-effort bookkeeping around an already-successful export. All three
@@ -272,6 +275,8 @@ export async function POST(req: NextRequest, context: { params: Promise<{ runId:
       reportVersion,
       governanceStatusAtExport: governanceStatusAtExport.family === "milestone2" ? governanceStatusAtExport.kind : `legacy:${governanceStatusAtExport.status ?? "not_evaluated"}`,
       at: nowIso,
+      durationMs: renderDurationMs,
+      byteSize: bytes.length,
     });
   } catch (bookkeepingErr: unknown) {
     // A successful export must never be reported as failed to the client

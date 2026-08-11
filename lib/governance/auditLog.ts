@@ -311,6 +311,13 @@ export async function writeAdaptivePanelOverrideAdminAuditEvent(args: {
  * private reviewer comments, never secrets (Part 14). `outcome` distinguishes
  * a successful generation/regeneration from a failed one (Part 14's "failed
  * attempts should be distinguishable from successful exports").
+ *
+ * Phase 5 (Part 17) — `durationMs` (render wall-clock time) and `byteSize`
+ * (generated artifact size, success only — a failed render produced no
+ * bytes) are optional, purely numeric operational metadata, never the
+ * report body itself. They let an admin answer "is export generation
+ * getting slower or larger over time" from `admin_audit_logs` alone,
+ * without needing a separate metrics pipeline.
  */
 export type AdaptiveExportAuditAction = "adaptive_export_generated" | "adaptive_export_generation_failed" | "adaptive_export_regenerated";
 
@@ -329,6 +336,8 @@ export async function writeAdaptiveExportAdminAuditEvent(args: {
   governanceStatusAtExport: string;
   at: string;
   failureReason?: string;
+  durationMs?: number;
+  byteSize?: number;
 }): Promise<AdaptiveAdminAuditWriteResult> {
   if (!adminDb) {
     return { status: "failed" };
@@ -357,6 +366,8 @@ export async function writeAdaptiveExportAdminAuditEvent(args: {
         governanceStatusAtExport: args.governanceStatusAtExport,
         outcome: ADAPTIVE_EXPORT_SUCCESS_ACTIONS.has(args.action) ? "success" : "failure",
         ...(args.failureReason ? { failureReason: args.failureReason } : {}),
+        ...(args.durationMs !== undefined ? { durationMs: args.durationMs } : {}),
+        ...(args.byteSize !== undefined ? { byteSize: args.byteSize } : {}),
         source: "adaptive_research_export",
       });
     return { status: "recorded" };
