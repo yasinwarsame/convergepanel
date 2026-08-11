@@ -190,6 +190,62 @@ describe("buildRankedEnumerationResult — rank correlation", () => {
   });
 });
 
+describe("buildRankedEnumerationResult — producer canonicalization (absent vs. explicit-undefined own-property)", () => {
+  it("omits category, rankVariance, rationale, and sources as genuinely absent keys when no model supplies them", () => {
+    const result = buildRankedEnumerationResult(
+      perModel([["chatgpt", [item({ id: "x", label: "X", rank: 1 })]]]),
+      null
+    );
+    const x = result.items[0];
+    expect(Object.prototype.hasOwnProperty.call(x, "category")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(x, "rankVariance")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(x, "rationale")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(x, "sources")).toBe(false);
+    expect(Object.keys(JSON.parse(JSON.stringify(x)))).not.toEqual(
+      expect.arrayContaining(["category", "rankVariance", "rationale", "sources"])
+    );
+  });
+
+  it("preserves category, rankVariance, rationale, and sources as real own-properties when supplied", () => {
+    const result = buildRankedEnumerationResult(
+      perModel([
+        ["chatgpt", [item({ id: "x", label: "X", rank: 1, category: "Tools", rationale: "Most popular.", sources: ["https://a.example"] })]],
+        ["claude", [item({ id: "x", label: "X", rank: 3 })]],
+      ]),
+      null
+    );
+    const x = result.items[0];
+    expect(Object.prototype.hasOwnProperty.call(x, "category")).toBe(true);
+    expect(x.category).toBe("Tools");
+    expect(Object.prototype.hasOwnProperty.call(x, "rankVariance")).toBe(true);
+    expect(x.rankVariance).toBe(1);
+    expect(Object.prototype.hasOwnProperty.call(x, "rationale")).toBe(true);
+    expect(x.rationale).toBe("Most popular.");
+    expect(Object.prototype.hasOwnProperty.call(x, "sources")).toBe(true);
+    expect(x.sources).toEqual(["https://a.example"]);
+  });
+
+  it("omits shortfallNote as a genuinely absent key (not just undefined-valued) on both the empty-entries and non-empty shortfall return paths", () => {
+    const empty = buildRankedEnumerationResult(perModel([["chatgpt", []]]), null);
+    expect(Object.prototype.hasOwnProperty.call(empty, "shortfallNote")).toBe(false);
+
+    const metCount = buildRankedEnumerationResult(perModel([["chatgpt", [item({ id: "x", label: "X", rank: 1 })]]]), 1);
+    expect(Object.prototype.hasOwnProperty.call(metCount, "shortfallNote")).toBe(false);
+  });
+
+  it("preserves shortfallNote as a real own-property on both the empty-entries-with-requestedCount and non-empty-shortfall return paths", () => {
+    const emptyWithRequest = buildRankedEnumerationResult(perModel([["chatgpt", []]]), 5);
+    expect(Object.prototype.hasOwnProperty.call(emptyWithRequest, "shortfallNote")).toBe(true);
+    expect(emptyWithRequest.shortfallNote).toMatch(/5/);
+
+    const shortfall = buildRankedEnumerationResult(
+      perModel([["chatgpt", [item({ id: "x", label: "X", rank: 1 })]]]),
+      5
+    );
+    expect(Object.prototype.hasOwnProperty.call(shortfall, "shortfallNote")).toBe(true);
+  });
+});
+
 describe("buildRankedEnumerationResult — empty input", () => {
   it("never throws and returns an empty result when no model produced usable items", () => {
     const result = buildRankedEnumerationResult(perModel([["chatgpt", []], ["claude", []]]), 10);

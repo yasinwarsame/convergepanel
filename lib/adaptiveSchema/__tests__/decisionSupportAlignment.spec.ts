@@ -304,6 +304,82 @@ describe("buildDecisionSupportResult — risks, assumptions, uncertainties, sens
   });
 });
 
+describe("buildDecisionSupportResult — producer canonicalization (absent vs. explicit-undefined own-property)", () => {
+  it("omits risk optionId/likelihood/impact/mitigation as genuinely absent keys when not supplied", () => {
+    const result = buildDecisionSupportResult(
+      perModel([["chatgpt", fields({ risks: [risk({ label: "Vendor lock-in" })] })]])
+    );
+    const r = result.risks[0];
+    expect(Object.prototype.hasOwnProperty.call(r, "optionId")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(r, "likelihood")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(r, "impact")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(r, "mitigation")).toBe(false);
+    expect(Object.keys(JSON.parse(JSON.stringify(r)))).not.toEqual(
+      expect.arrayContaining(["optionId", "likelihood", "impact", "mitigation"])
+    );
+  });
+
+  it("preserves risk likelihood/impact/mitigation as real own-properties when supplied", () => {
+    const result = buildDecisionSupportResult(
+      perModel([
+        ["chatgpt", fields({ risks: [risk({ label: "Vendor lock-in", likelihood: "medium", impact: "high", mitigation: "Negotiate an exit clause." })] })],
+      ])
+    );
+    const r = result.risks[0];
+    expect(Object.prototype.hasOwnProperty.call(r, "likelihood")).toBe(true);
+    expect(r.likelihood).toBe("medium");
+    expect(Object.prototype.hasOwnProperty.call(r, "impact")).toBe(true);
+    expect(r.impact).toBe("high");
+    expect(Object.prototype.hasOwnProperty.call(r, "mitigation")).toBe(true);
+    expect(r.mitigation).toBe("Negotiate an exit clause.");
+  });
+
+  it("omits recommendedOptionId and reversibleNextStep as genuinely absent keys when not resolvable/supplied", () => {
+    const result = buildDecisionSupportResult(
+      perModel([
+        ["chatgpt", fields({ options: ["HubSpot", "Salesforce"], recommendationAction: "choose_option", recommendedOption: "HubSpot" })],
+        ["claude", fields({ options: ["HubSpot", "Salesforce"], recommendationAction: "choose_option", recommendedOption: "Salesforce" })],
+      ])
+    );
+    expect(Object.prototype.hasOwnProperty.call(result.recommendation, "recommendedOptionId")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(result, "reversibleNextStep")).toBe(false);
+    expect(Object.keys(JSON.parse(JSON.stringify(result.recommendation)))).not.toEqual(
+      expect.arrayContaining(["recommendedOptionId"])
+    );
+    expect(Object.keys(JSON.parse(JSON.stringify(result)))).not.toEqual(expect.arrayContaining(["reversibleNextStep"]));
+  });
+
+  it("preserves recommendedOptionId and reversibleNextStep as real own-properties when resolvable/supplied", () => {
+    const result = buildDecisionSupportResult(
+      perModel([
+        [
+          "chatgpt",
+          fields({
+            options: ["HubSpot", "Salesforce"],
+            recommendationAction: "choose_option",
+            recommendedOption: "HubSpot",
+            reversibleNextStep: "Run a 30-day pilot.",
+          }),
+        ],
+        [
+          "claude",
+          fields({
+            options: ["HubSpot", "Salesforce"],
+            recommendationAction: "choose_option",
+            recommendedOption: "HubSpot",
+            reversibleNextStep: "Run a 30-day pilot.",
+          }),
+        ],
+      ])
+    );
+    const hubspot = result.options.find((o) => o.label === "HubSpot")!;
+    expect(Object.prototype.hasOwnProperty.call(result.recommendation, "recommendedOptionId")).toBe(true);
+    expect(result.recommendation.recommendedOptionId).toBe(hubspot.id);
+    expect(Object.prototype.hasOwnProperty.call(result, "reversibleNextStep")).toBe(true);
+    expect(result.reversibleNextStep).toBe("Run a 30-day pilot.");
+  });
+});
+
 describe("buildDecisionSupportResult — model coverage", () => {
   it("uses the full attempted model count as the coverage denominator, not just the successful ones", () => {
     const result = buildDecisionSupportResult(perModel([["chatgpt", fields({ options: ["HubSpot"] })]]), 2);

@@ -110,10 +110,13 @@ export function buildRankedEnumerationResult(
       lowConfidenceItems: [],
       requestedCount,
       actualCount: 0,
-      shortfallNote:
-        requestedCount != null
-          ? `You asked for ${requestedCount} items; the panel could not identify any distinct items for this question.`
-          : undefined,
+      // Producer canonicalization: `shortfallNote` is genuinely absent
+      // when no requestedCount was given — conditional spread (not a
+      // ternary-to-undefined) so the key is never an own-property with
+      // value undefined (see buildComparisonMatrixResult's own comment).
+      ...(requestedCount != null
+        ? { shortfallNote: `You asked for ${requestedCount} items; the panel could not identify any distinct items for this question.` }
+        : {}),
       rankCorrelation: null,
       hasLiveQueryLogData: false,
       totalModels,
@@ -159,15 +162,15 @@ export function buildRankedEnumerationResult(
     const aggregated: AggregatedEnumItem = {
       id: slugifyLabel(label),
       label,
-      category,
+      ...(category !== undefined ? { category } : {}),
       panelRank: ranks.reduce((sum, r) => sum + r, 0) / ranks.length,
       coverageCount,
       totalModels,
       coverageRatio: totalModels > 0 ? coverageCount / totalModels : 0,
       sourceRanks: Object.fromEntries(sourceRanks) as Record<ModelId, number>,
-      rankVariance: coverageCount >= 2 ? populationVariance(ranks) : undefined,
-      rationale,
-      sources: sources.length > 0 ? sources : undefined,
+      ...(coverageCount >= 2 ? { rankVariance: populationVariance(ranks) } : {}),
+      ...(rationale !== undefined ? { rationale } : {}),
+      ...(sources.length > 0 ? { sources } : {}),
     };
 
     clusters.push({ aggregated, sourceRanks });
@@ -187,17 +190,16 @@ export function buildRankedEnumerationResult(
     .sort(sortByRankThenCoverage);
 
   const actualCount = items.length + lowConfidenceItems.length;
-  const shortfallNote =
-    requestedCount != null && actualCount < requestedCount
-      ? `You asked for ${requestedCount} items; the panel could only responsibly identify ${actualCount} distinct item${actualCount === 1 ? "" : "s"} across all models.`
-      : undefined;
+  const shortfallReached = requestedCount != null && actualCount < requestedCount;
 
   return {
     items,
     lowConfidenceItems,
     requestedCount,
     actualCount,
-    shortfallNote,
+    ...(shortfallReached
+      ? { shortfallNote: `You asked for ${requestedCount} items; the panel could only responsibly identify ${actualCount} distinct item${actualCount === 1 ? "" : "s"} across all models.` }
+      : {}),
     rankCorrelation: computeRankCorrelation(clusters.map((c) => ({ sourceRanks: c.sourceRanks }))),
     hasLiveQueryLogData: false,
     totalModels,

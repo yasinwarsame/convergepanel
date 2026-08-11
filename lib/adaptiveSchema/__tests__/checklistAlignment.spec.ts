@@ -242,6 +242,51 @@ describe("buildChecklistTaxonomyResult — risk register fields", () => {
   });
 });
 
+describe("buildChecklistTaxonomyResult — producer canonicalization (absent vs. explicit-undefined own-property)", () => {
+  const RISK_FIELDS = ["rationale", "severity", "likelihood", "impact", "evidence", "mitigation", "monitoringSignal", "residualRisk"];
+
+  it("omits rationale/severity/likelihood/impact/evidence/mitigation/monitoringSignal/residualRisk as genuinely absent keys when no model supplies them", () => {
+    const result = buildChecklistTaxonomyResult(
+      perModel([["chatgpt", fields({ items: [item({ id: "dpa", label: "Sign a data processing agreement" })] })]])
+    );
+    const aggregated = result.categories.flatMap((c) => c.items)[0];
+    for (const key of RISK_FIELDS) {
+      expect(Object.prototype.hasOwnProperty.call(aggregated, key)).toBe(false);
+    }
+    expect(Object.keys(JSON.parse(JSON.stringify(aggregated)))).not.toEqual(expect.arrayContaining(RISK_FIELDS));
+  });
+
+  it("preserves rationale/severity/likelihood/impact/evidence/mitigation/monitoringSignal/residualRisk as real own-properties when supplied", () => {
+    const result = buildChecklistTaxonomyResult(
+      perModel([
+        [
+          "chatgpt",
+          fields({
+            items: [
+              item({
+                id: "vendor-lock-in",
+                label: "Vendor lock-in",
+                rationale: "Common failure mode.",
+                severity: "high",
+                likelihood: "medium",
+                impact: "Switching providers later becomes expensive.",
+                evidence: "Proprietary data formats with no export tooling.",
+                mitigation: "Negotiate a data-portability clause up front.",
+                monitoringSignal: "Rising switching-cost estimates in vendor reviews.",
+                residualRisk: "Low, once the portability clause is signed.",
+              }),
+            ],
+          }),
+        ],
+      ])
+    );
+    const aggregated = result.categories.flatMap((c) => c.items)[0];
+    for (const key of RISK_FIELDS) {
+      expect(Object.prototype.hasOwnProperty.call(aggregated, key)).toBe(true);
+    }
+  });
+});
+
 describe("isRiskShapedChecklistResult", () => {
   it("is false for an ordinary checklist where no item carries a risk field", () => {
     const result = buildChecklistTaxonomyResult(

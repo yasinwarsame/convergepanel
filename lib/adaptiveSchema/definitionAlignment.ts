@@ -183,9 +183,13 @@ function buildInterpretation(entries: RawEntry[], totalModels: number): Aggregat
 
   // Analogy text + its limits must come from the SAME model — never mix an
   // analogy from one model with a limitation caveat from a different model.
+  // `limits` (nested one level inside `analogy`) is itself optional-not-
+  // -nullable — the same conditional-spread treatment applies inside this
+  // nested object too, not just at the top level.
   const analogySource = entries.find((e) => noneToUndefined(e.fields.analogyText));
+  const analogyLimits = analogySource ? noneToUndefined(analogySource.fields.analogyLimits) : undefined;
   const analogy = analogySource
-    ? { text: noneToUndefined(analogySource.fields.analogyText)!, limits: noneToUndefined(analogySource.fields.analogyLimits) }
+    ? { text: noneToUndefined(analogySource.fields.analogyText)!, ...(analogyLimits !== undefined ? { limits: analogyLimits } : {}) }
     : undefined;
 
   const distinctions = mergeDistinctions(entries.flatMap((e) => e.fields.distinctions), DISTINCTIONS_CAP);
@@ -201,6 +205,10 @@ function buildInterpretation(entries: RawEntry[], totalModels: number): Aggregat
   });
   const sources = Array.from(new Set(entries.flatMap((e) => e.fields.sources))).slice(0, SOURCES_CAP);
 
+  // Producer canonicalization: example/analogy/advancedDetail are all
+  // genuinely absent when every model used the "none" sentinel — conditional
+  // spread keeps the key genuinely absent rather than an own-property with
+  // value undefined (see buildComparisonMatrixResult's own comment).
   return {
     coverageCount: entries.length,
     totalModels,
@@ -210,11 +218,11 @@ function buildInterpretation(entries: RawEntry[], totalModels: number): Aggregat
     directAnswer,
     explanation,
     keyPoints,
-    example,
-    analogy,
+    ...(example !== undefined ? { example } : {}),
+    ...(analogy !== undefined ? { analogy } : {}),
     distinctions,
     processSteps,
-    advancedDetail,
+    ...(advancedDetail !== undefined ? { advancedDetail } : {}),
     commonMisconceptions,
     relatedConcepts,
     sources,

@@ -325,6 +325,50 @@ describe("buildBiasBlindspotAuditResult — Tier 3 (structural diagnostics)", ()
   });
 });
 
+describe("buildBiasBlindspotAuditResult — producer canonicalization (absent vs. explicit-undefined own-property)", () => {
+  afterEach(() => jest.clearAllMocks());
+
+  it("omits sourceConcentration and homogeneityMessage as genuinely absent keys when no model cites sources / summaries aren't homogeneous", async () => {
+    mockTierCalls();
+    const results = rawResults(["chatgpt", "claude"]);
+    const result = await buildBiasBlindspotAuditResult(
+      perModel([
+        ["chatgpt", fields({ summary: "Inflation is primarily driven by demand-side pressures." })],
+        ["claude", fields({ summary: "Rising energy costs are the dominant explanation this cycle." })],
+      ]),
+      2,
+      "q",
+      results
+    );
+    expect(Object.prototype.hasOwnProperty.call(result.structuralDiagnostics, "sourceConcentration")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(result.structuralDiagnostics, "homogeneityMessage")).toBe(false);
+    expect(Object.keys(JSON.parse(JSON.stringify(result.structuralDiagnostics)))).not.toEqual(
+      expect.arrayContaining(["sourceConcentration", "homogeneityMessage"])
+    );
+  });
+
+  it("preserves sourceConcentration and homogeneityMessage as real own-properties when sources are cited / homogeneity is flagged", async () => {
+    mockTierCalls();
+    const identical = "Inflation is primarily driven by demand-side pressures in this period.";
+    const results = rawResults(["chatgpt", "claude", "grok", "perplexity"]);
+    const result = await buildBiasBlindspotAuditResult(
+      perModel([
+        ["chatgpt", fields({ sources: ["Federal Reserve report"], summary: identical })],
+        ["claude", fields({ sources: ["Federal Reserve report"], summary: identical })],
+        ["grok", fields({ summary: identical })],
+        ["perplexity", fields({ summary: identical })],
+      ]),
+      4,
+      "q",
+      results
+    );
+    expect(Object.prototype.hasOwnProperty.call(result.structuralDiagnostics, "sourceConcentration")).toBe(true);
+    expect(result.structuralDiagnostics.sourceConcentration).toEqual({ distinctSources: 1, totalCitations: 2, concentrationRatio: 1 });
+    expect(Object.prototype.hasOwnProperty.call(result.structuralDiagnostics, "homogeneityMessage")).toBe(true);
+    expect(result.structuralDiagnostics.homogeneityMessage).toMatch(/not independent verification/);
+  });
+});
+
 describe("buildBiasBlindspotAuditResult — coverage denominator and malformed input", () => {
   afterEach(() => jest.clearAllMocks());
 

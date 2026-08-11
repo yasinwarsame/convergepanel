@@ -396,13 +396,19 @@ export function buildDecisionSupportResult(
           if (cluster2) optionId = cluster2.id;
         }
       }
+      const likelihood = mergeEnumRead(likelihoodByModel, "unknown");
+      const impact = mergeEnumRead(impactByModel, "unknown");
+      // Producer canonicalization: optionId/likelihood/impact/mitigation
+      // are all genuinely absent in the common case — conditional spread
+      // keeps the key genuinely absent rather than an own-property with
+      // value undefined (see buildComparisonMatrixResult's own comment).
       return {
         id: slugify(cluster.label, usedRiskIds),
         label: cluster.label,
-        optionId,
-        likelihood: mergeEnumRead(likelihoodByModel, "unknown"),
-        impact: mergeEnumRead(impactByModel, "unknown"),
-        mitigation,
+        ...(optionId !== undefined ? { optionId } : {}),
+        ...(likelihood !== undefined ? { likelihood } : {}),
+        ...(impact !== undefined ? { impact } : {}),
+        ...(mitigation !== undefined ? { mitigation } : {}),
         coverageCount: contributingModels.length,
         totalModels,
         contributingModels,
@@ -507,9 +513,12 @@ export function buildDecisionSupportResult(
   }
   const humanReviewNeeded = isHighStakes || isContested || weakEvidenceOnRecommended || action === "escalate" || action === "defer";
 
+  // Producer canonicalization: recommendedOptionId/reversibleNextStep are
+  // both genuinely absent in the common case — conditional spread, same
+  // reasoning as above.
   const recommendation: DecisionRecommendation = {
     action,
-    recommendedOptionId,
+    ...(recommendedOptionId !== undefined ? { recommendedOptionId } : {}),
     rationale,
     caveats,
     isContested,
@@ -527,7 +536,7 @@ export function buildDecisionSupportResult(
     uncertainties,
     risks,
     sensitivityFindings,
-    reversibleNextStep,
+    ...(reversibleNextStep !== undefined ? { reversibleNextStep } : {}),
     humanReviewNeeded,
     sourceBacked,
     totalModels,

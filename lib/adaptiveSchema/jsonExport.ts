@@ -124,8 +124,124 @@ export interface AdaptiveResearchJsonExportV1 {
  * the same logical object (byte-identical once canonically serialized —
  * see `canonicalJsonStringify` below).
  */
+/**
+ * Determinism fix — creation-time rendering and regeneration rendering
+ * observe two DIFFERENT in-memory representations of "the same" frozen
+ * record: creation renders from the raw, never-persisted object built in
+ * the route handler; regeneration always renders from the record as read
+ * back from Firestore. `sanitizeForFirestore()` (lib/firestore/
+ * sanitizeForFirestore.ts) recursively converts every `undefined` to
+ * `null` before writing, because Firestore rejects `undefined` outright —
+ * so any field that is genuinely absent (`undefined`) at creation time
+ * comes back as an explicit `null` after the round-trip, even though
+ * `null` was never a value this contract's schema permits for that field
+ * (`AdaptiveExportModelSummary.ok`, milestone2 `conditions`/
+ * `decisionReceipt`, legacy `gate`/`synthesisReport`/`trustSummary`/
+ * `modelResponses` are all Zod `.optional()` WITHOUT `.nullable()` — `null`
+ * has no legitimate meaning for any of them).
+ *
+ * `null` is treated as "absent" ONLY for this bounded, explicitly-named
+ * set of fields — never a blanket `null → undefined` across the whole
+ * snapshot tree, which would risk destroying a field where `null` IS a
+ * real, distinct value (e.g. `AdaptiveExportGovernanceStatus`'s legacy
+ * branch: `status: "approved" | "needs_review" | "blocked" | null`, where
+ * `null` means "not yet evaluated" — genuinely different from any of the
+ * three string states, and must never be coerced away). This normalization
+ * lives in exactly one place (this function, the single JSON projection
+ * boundary both the creation and regeneration routes call through) and
+ * runs identically regardless of whether the input came from the raw
+ * in-memory object (already `undefined`, so this is a no-op) or from
+ * Firestore (was `undefined`, is now `null`, gets treated as absent) —
+ * both converge on the same "omitted" output, making creation and
+ * regeneration byte-identical without changing the internal
+ * `AdaptiveResearchExportV1`/Firestore-persisted shape at all.
+ */
+function omitIfNull<T>(value: T | null | undefined): T | undefined {
+  return value === null ? undefined : value;
+}
+
+function normalizeModelSummaries(models: AdaptiveExportModelSummary[]): AdaptiveExportModelSummary[] {
+  return models.map((m) => ({ modelId: m.modelId, ...(omitIfNull(m.ok) !== undefined ? { ok: omitIfNull(m.ok) } : {}) }));
+}
+
+function normalizeGovernanceStatus(status: AdaptiveExportGovernanceStatus): AdaptiveExportGovernanceStatus {
+  if (status.family !== "milestone2") return status; // legacy's `status: ... | null` is a real, distinct value — never touched.
+  const conditions = omitIfNull(status.conditions);
+  return { family: "milestone2", kind: status.kind, isOwnerOverride: status.isOwnerOverride, ...(conditions !== undefined ? { conditions } : {}) };
+}
+
+/**
+ * Final review, Step 3 — `legacy.modelResponses` is passed through into the
+ * JSON contract via `z.array(z.unknown())` (the Zod schema deliberately
+ * does not validate its internal shape — per-model-schema producer
+ * concern, not this export layer's). But each entry's TypeScript shape,
+ * `AdaptiveModelResult`, is NOT opaque to this file (already imported,
+ * already concretely typed) and has five of its own optional-not-nullable
+ * fields subject to the exact same undefined-to-null Firestore round-trip
+ * drift as the outer fields above: `parseError?`, `truncatedFields?`,
+ * `invalidFields?`, `coercions?`, `retried?`. Confirmed live with a
+ * fixture before this fix: `retried: undefined` at creation produced
+ * `"retried": null` after a round-trip, breaking byte-identity exactly
+ * like `ok` did. `data: Record<...> | null` is deliberately excluded —
+ * its type already includes `null` as a real, distinct value, never an
+ * artifact of persistence.
+ *
+ * Producer canonicalization follow-up (Milestone-2 Producer Canonicalization
+ * pass): `milestone2.result` is no longer a theoretical risk — it was
+ * audited field-by-field (all 9 active Milestone-2 alignment producers:
+ * comparisonAlignment.ts, enumAlignment.ts, definitionAlignment.ts,
+ * causalAlignment.ts, checklistAlignment.ts, deepResearchAlignment.ts,
+ * evidenceReviewAlignment.ts, biasBlindspotAlignment.ts,
+ * decisionSupportAlignment.ts) and 6 of the 9 were confirmed to construct
+ * explicit-undefined own-properties; all 6 have since been fixed at their
+ * own producer boundary (conditional-spread, matching this file's own
+ * pattern) — see each file's "Producer canonicalization" comment. The
+ * other 3 were read in full and confirmed already safe by construction.
+ * `modelResponses[].data`'s own per-model raw fields (Claim/Metric/Step/
+ * Scenario/etc.) were separately confirmed safe: they come from Zod
+ * `.optional()` parsing (validator.ts), which genuinely omits an absent
+ * key rather than ever setting it to explicit `undefined` — verified
+ * directly against Zod's own parse behavior, not inferred from types.
+ * `AdaptiveModelResult`'s own top-level optional fields (`parseError?`,
+ * `truncatedFields?`, `invalidFields?`, `coercions?`, `retried?` — the
+ * fields `normalizeModelResponses` below exists to guard) were likewise
+ * confirmed safe at their producer boundary (validator.ts's
+ * `validateAdaptiveResponse` return statements, orchestrate.ts's
+ * `mergeRetriedResult`/`finalizeAdaptiveRun`) — all already use
+ * conditional spread or assign only real values, never an explicit
+ * `undefined`. Given all of this, `normalizeModelResponses` is now
+ * REDUNDANT for any NEW write (the producer never emits the bad shape in
+ * the first place) but is explicitly RETAINED here — unchanged — because
+ * it is still load-bearing for regenerating a JSON export from a
+ * Firestore record persisted before this producer fix, where the old
+ * `undefined`-own-property shape may already be sitting on disk as
+ * `null`. This file's own outer-contract normalization (`ok`/
+ * `conditions`/`decisionReceipt`/`gate`/`synthesisReport`/`trustSummary`)
+ * is unrelated to Milestone-2 alignment and comes from separate pipeline
+ * stages (export snapshot freezing in researchExport.ts/exportSnapshot.ts,
+ * decision receipt building, governance record management) — those
+ * producers were never in scope for this pass and remain unaudited, so
+ * their normalization here is unchanged and still necessary regardless of
+ * write recency.
+ */
+function normalizeModelResponses(modelResponses: AdaptiveModelResult[]): AdaptiveModelResult[] {
+  return modelResponses.map((m) => {
+    const { parseError, truncatedFields, invalidFields, coercions, retried, ...rest } = m;
+    return {
+      ...rest,
+      ...(omitIfNull(parseError) !== undefined ? { parseError: omitIfNull(parseError) } : {}),
+      ...(omitIfNull(truncatedFields) !== undefined ? { truncatedFields: omitIfNull(truncatedFields) } : {}),
+      ...(omitIfNull(invalidFields) !== undefined ? { invalidFields: omitIfNull(invalidFields) } : {}),
+      ...(omitIfNull(coercions) !== undefined ? { coercions: omitIfNull(coercions) } : {}),
+      ...(omitIfNull(retried) !== undefined ? { retried: omitIfNull(retried) } : {}),
+    } as AdaptiveModelResult;
+  });
+}
+
 export function buildAdaptiveResearchJsonExport(record: AdaptiveResearchExportV1): AdaptiveResearchJsonExportV1 {
   const snapshot = record.reportSnapshot;
+  const governanceStatusAtExport = normalizeGovernanceStatus(record.governanceStatusAtExport);
+  const models = normalizeModelSummaries(snapshot.models);
 
   const result: AdaptiveResearchJsonExportResult =
     record.schemaFamily === "milestone2" && snapshot.milestone2
@@ -133,17 +249,17 @@ export function buildAdaptiveResearchJsonExport(record: AdaptiveResearchExportV1
           schemaFamily: "milestone2",
           schemaId: snapshot.milestone2.schemaId,
           result: snapshot.milestone2.result,
-          ...(snapshot.milestone2.decisionReceipt !== undefined ? { decisionReceipt: snapshot.milestone2.decisionReceipt } : {}),
+          ...(omitIfNull(snapshot.milestone2.decisionReceipt) !== undefined ? { decisionReceipt: snapshot.milestone2.decisionReceipt! } : {}),
         }
       : record.schemaFamily === "legacy" && snapshot.legacy
         ? {
             schemaFamily: "legacy",
             schemaId: snapshot.legacy.schemaId,
             alignedClaims: snapshot.legacy.alignedClaims,
-            ...(snapshot.legacy.gate !== undefined ? { gate: snapshot.legacy.gate } : {}),
-            ...(snapshot.legacy.synthesisReport !== undefined ? { synthesisReport: snapshot.legacy.synthesisReport } : {}),
-            ...(snapshot.legacy.trustSummary !== undefined ? { trustSummary: snapshot.legacy.trustSummary } : {}),
-            ...(snapshot.legacy.modelResponses !== undefined ? { modelResponses: snapshot.legacy.modelResponses } : {}),
+            ...(omitIfNull(snapshot.legacy.gate) !== undefined ? { gate: snapshot.legacy.gate! } : {}),
+            ...(omitIfNull(snapshot.legacy.synthesisReport) !== undefined ? { synthesisReport: snapshot.legacy.synthesisReport! } : {}),
+            ...(omitIfNull(snapshot.legacy.trustSummary) !== undefined ? { trustSummary: snapshot.legacy.trustSummary! } : {}),
+            ...(omitIfNull(snapshot.legacy.modelResponses) !== undefined ? { modelResponses: normalizeModelResponses(snapshot.legacy.modelResponses!) } : {}),
           }
         : // Structurally unreachable — `schemaFamily` and the matching `reportSnapshot` branch are always set together at freeze time (researchExport.ts's own invariant). Fails loudly rather than silently emitting an empty/wrong-shaped result if that invariant is ever violated by a corrupted record.
           (() => {
@@ -167,11 +283,11 @@ export function buildAdaptiveResearchJsonExport(record: AdaptiveResearchExportV1
       generatedAt: snapshot.reportGeneratedAt,
     },
     panel: {
-      models: snapshot.models,
+      models,
       consensus: { level: snapshot.consensusLevel },
       sourceGrounding: { level: snapshot.sourceGroundingLevel },
     },
-    governance: record.governanceStatusAtExport,
+    governance: governanceStatusAtExport,
     classification: record.classification,
     result,
     provenance: {
@@ -184,8 +300,8 @@ export function buildAdaptiveResearchJsonExport(record: AdaptiveResearchExportV1
       schemaFamily: record.schemaFamily,
       generatedAt: snapshot.reportGeneratedAt,
       exportedAt: record.createdAt,
-      models: snapshot.models,
-      governanceStatusAtExport: record.governanceStatusAtExport,
+      models,
+      governanceStatusAtExport,
       classification: record.classification,
     },
   };
