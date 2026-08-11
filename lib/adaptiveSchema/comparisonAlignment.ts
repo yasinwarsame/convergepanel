@@ -320,6 +320,18 @@ export function buildComparisonMatrixResult(
       verdictTally[verdict] = (verdictTally[verdict] ?? 0) + 1;
     }
 
+    // Producer canonicalization (Milestone-2 JSON determinism follow-up):
+    // consensusValue/verdictTally/rationale/sources are all genuinely
+    // absent for many cells (e.g. a "split" cell has no consensusValue; a
+    // cell with no verdicts has no verdictTally). Previously these were
+    // assigned via a bare object-shorthand/ternary that produced an
+    // explicit `undefined` OWN PROPERTY rather than omitting the key —
+    // `sanitizeForFirestore()` converts that own-`undefined` to `null` on
+    // write, so a cell rendered fresh (key absent) and the same cell
+    // rendered after a Firestore round-trip (key present, `null`) differed
+    // byte-for-byte in every export format, not just JSON. Conditional
+    // spread here ensures the key is only ever present when a real value
+    // exists — canonical at the source, not patched downstream.
     aggregatedCells.push({
       subjectId: subject.id,
       subject: subject.label,
@@ -330,10 +342,10 @@ export function buildComparisonMatrixResult(
       totalModels,
       coverageRatio: totalModels > 0 ? coverageCount / totalModels : 0,
       agreement,
-      consensusValue,
-      verdictTally: Object.keys(verdictTally).length > 0 ? verdictTally : undefined,
-      rationale,
-      sources: sourcesSet.size > 0 ? Array.from(sourcesSet).slice(0, 5) : undefined,
+      ...(consensusValue !== undefined ? { consensusValue } : {}),
+      ...(Object.keys(verdictTally).length > 0 ? { verdictTally } : {}),
+      ...(rationale !== undefined ? { rationale } : {}),
+      ...(sourcesSet.size > 0 ? { sources: Array.from(sourcesSet).slice(0, 5) } : {}),
     });
   }
 

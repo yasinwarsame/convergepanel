@@ -9,6 +9,7 @@ import { createHash } from "crypto";
 import { AdaptiveResearchExportV1 } from "@/lib/adaptiveSchema/researchExport";
 import { buildAdaptiveResearchJsonExport, canonicalJsonStringify, canonicalizeForSerialization, renderAdaptiveResearchJsonV1 } from "@/lib/adaptiveSchema/jsonExport";
 import { adaptiveResearchJsonExportV1Schema } from "@/lib/adaptiveSchema/jsonExportSchema";
+import { sanitizeForFirestore } from "@/lib/firestore/sanitizeForFirestore";
 
 function comparisonMatrixRecord(overrides: Partial<AdaptiveResearchExportV1> = {}): AdaptiveResearchExportV1 {
   return {
@@ -401,6 +402,240 @@ describe("canonicalizeForSerialization / canonicalJsonStringify — determinism 
   });
 });
 
+describe("JSON export determinism across the Firestore round-trip (undefined -> null fix)", () => {
+  // sanitizeForFirestore recursively converts every `undefined` to `null`
+  // (Firestore rejects `undefined` outright) — this is exactly what
+  // createAdaptiveExportRecord applies before persisting, and exactly what
+  // a record looks like after being read back for regeneration. These
+  // tests simulate that real round-trip directly, without needing a real
+  // or fake Firestore.
+  function roundTrip(record: AdaptiveResearchExportV1): AdaptiveResearchExportV1 {
+    return sanitizeForFirestore(record) as AdaptiveResearchExportV1;
+  }
+
+  it("MANDATORY (Step 7) — panel.models[].ok undefined at creation time produces byte-identical JSON before and after the Firestore round-trip; this exact test must fail if the fix is reverted", () => {
+    const record = comparisonMatrixRecord({
+      reportSnapshot: {
+        ...comparisonMatrixRecord().reportSnapshot,
+        models: [{ modelId: "chatgpt" as any, ok: undefined }, { modelId: "claude" as any, ok: true }],
+      },
+    });
+    const creation = renderAdaptiveResearchJsonV1(record);
+    const regenerated = renderAdaptiveResearchJsonV1(roundTrip(record));
+
+    expect(Buffer.compare(creation.bytes, regenerated.bytes)).toBe(0);
+    expect(creation.sha256).toBe(regenerated.sha256);
+
+    const text = creation.bytes.toString("utf-8");
+    expect(text).not.toMatch(/"ok":\s*null/);
+    // The genuinely-undefined model's "ok" key is omitted entirely, not merely null.
+    const parsed = JSON.parse(text);
+    const chatgptEntry = parsed.panel.models.find((m: any) => m.modelId === "chatgpt");
+    expect(Object.prototype.hasOwnProperty.call(chatgptEntry, "ok")).toBe(false);
+  });
+
+  it("Step 8 — an explicit ok: false survives the round-trip as a real false, never omitted and never coerced to null", () => {
+    const record = comparisonMatrixRecord({
+      reportSnapshot: {
+        ...comparisonMatrixRecord().reportSnapshot,
+        models: [{ modelId: "chatgpt" as any, ok: false }],
+      },
+    });
+    const regenerated = renderAdaptiveResearchJsonV1(roundTrip(record));
+    const parsed = JSON.parse(regenerated.bytes.toString("utf-8"));
+    expect(parsed.panel.models[0].ok).toBe(false);
+  });
+
+  it("Step 9 — an explicit ok: true survives the round-trip as a real true", () => {
+    const record = comparisonMatrixRecord({
+      reportSnapshot: {
+        ...comparisonMatrixRecord().reportSnapshot,
+        models: [{ modelId: "chatgpt" as any, ok: true }],
+      },
+    });
+    const regenerated = renderAdaptiveResearchJsonV1(roundTrip(record));
+    const parsed = JSON.parse(regenerated.bytes.toString("utf-8"));
+    expect(parsed.panel.models[0].ok).toBe(true);
+  });
+
+  it("Step 10 — a LEGITIMATE null (legacy governance status, not yet evaluated) is never touched by the fix — remains explicit null after the round-trip, guarding against over-normalization", () => {
+    const record = financialValuationRecord();
+    const withNullStatus: AdaptiveResearchExportV1 = { ...record, governanceStatusAtExport: { family: "legacy", status: null } };
+    const creation = renderAdaptiveResearchJsonV1(withNullStatus);
+    const regenerated = renderAdaptiveResearchJsonV1(roundTrip(withNullStatus));
+
+    expect(Buffer.compare(creation.bytes, regenerated.bytes)).toBe(0);
+    const parsed = JSON.parse(regenerated.bytes.toString("utf-8"));
+    expect(parsed.governance).toEqual({ family: "legacy", status: null });
+    expect(parsed.provenance.governanceStatusAtExport).toEqual({ family: "legacy", status: null });
+  });
+
+  it("milestone2 governance conditions: undefined at creation (kind !== approved_with_conditions) survives the round-trip identically, omitted rather than null", () => {
+    const record = comparisonMatrixRecord({ governanceStatusAtExport: { family: "milestone2", kind: "approved", isOwnerOverride: false, conditions: undefined } });
+    const creation = renderAdaptiveResearchJsonV1(record);
+    const regenerated = renderAdaptiveResearchJsonV1(roundTrip(record));
+    expect(Buffer.compare(creation.bytes, regenerated.bytes)).toBe(0);
+    const parsed = JSON.parse(regenerated.bytes.toString("utf-8"));
+    expect(Object.prototype.hasOwnProperty.call(parsed.governance, "conditions")).toBe(false);
+  });
+
+  it("milestone2 governance conditions: a genuinely present conditions array survives the round-trip as a real array, never dropped", () => {
+    const record = comparisonMatrixRecord({ governanceStatusAtExport: { family: "milestone2", kind: "approved_with_conditions", isOwnerOverride: false, conditions: ["Verify pricing before acting on this."] } });
+    const regenerated = renderAdaptiveResearchJsonV1(roundTrip(record));
+    const parsed = JSON.parse(regenerated.bytes.toString("utf-8"));
+    expect(parsed.governance.conditions).toEqual(["Verify pricing before acting on this."]);
+  });
+
+  it("milestone2 decisionReceipt: undefined at creation survives the round-trip identically, omitted rather than null", () => {
+    const record = comparisonMatrixRecord();
+    const withoutReceipt: AdaptiveResearchExportV1 = {
+      ...record,
+      reportSnapshot: { ...record.reportSnapshot, milestone2: { ...record.reportSnapshot.milestone2!, decisionReceipt: undefined } },
+    };
+    const creation = renderAdaptiveResearchJsonV1(withoutReceipt);
+    const regenerated = renderAdaptiveResearchJsonV1(roundTrip(withoutReceipt));
+    expect(Buffer.compare(creation.bytes, regenerated.bytes)).toBe(0);
+    const parsed = JSON.parse(regenerated.bytes.toString("utf-8"));
+    expect(Object.prototype.hasOwnProperty.call(parsed.result, "decisionReceipt")).toBe(false);
+  });
+
+  it("legacy gate/synthesisReport/trustSummary: undefined at creation survive the round-trip identically, omitted rather than null", () => {
+    const record = financialValuationRecord(); // gate/synthesisReport/trustSummary all genuinely absent in this fixture
+    const creation = renderAdaptiveResearchJsonV1(record);
+    const regenerated = renderAdaptiveResearchJsonV1(roundTrip(record));
+    expect(Buffer.compare(creation.bytes, regenerated.bytes)).toBe(0);
+    const parsed = JSON.parse(regenerated.bytes.toString("utf-8"));
+    expect(Object.prototype.hasOwnProperty.call(parsed.result, "gate")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(parsed.result, "synthesisReport")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(parsed.result, "trustSummary")).toBe(false);
+  });
+
+  it("Step 11 — a HISTORICAL record already persisted with the drift (ok: null on disk, simulating a pre-fix export) regenerates with ok omitted, exactly as a correct creation would have — the same normalization applies uniformly regardless of input source", () => {
+    const record = comparisonMatrixRecord({
+      reportSnapshot: {
+        ...comparisonMatrixRecord().reportSnapshot,
+        // Simulates what's ACTUALLY on disk for a pre-fix historical record: null, not undefined.
+        models: [{ modelId: "chatgpt" as any, ok: null as any }, { modelId: "claude" as any, ok: true }],
+      },
+    });
+    const regenerated = renderAdaptiveResearchJsonV1(record); // no roundTrip() needed — already simulating the post-Firestore-read shape directly
+    const parsed = JSON.parse(regenerated.bytes.toString("utf-8"));
+    const chatgptEntry = parsed.panel.models.find((m: any) => m.modelId === "chatgpt");
+    expect(Object.prototype.hasOwnProperty.call(chatgptEntry, "ok")).toBe(false);
+  });
+
+  it.each([
+    ["financial_valuation", financialValuationRecord],
+    ["forecast_speculative", forecastRecord],
+    ["creative_generative", creativeGenerativeRecord],
+    ["comparison_matrix", comparisonMatrixRecord],
+  ])("Step 13 — %s: creation and Firestore-round-trip regeneration are byte-identical for the schema's own real fixture", (_label, buildRecord) => {
+    const record = buildRecord();
+    const creation = renderAdaptiveResearchJsonV1(record);
+    const regenerated = renderAdaptiveResearchJsonV1(roundTrip(record));
+    expect(Buffer.compare(creation.bytes, regenerated.bytes)).toBe(0);
+    expect(creation.sha256).toBe(regenerated.sha256);
+  });
+
+  it("final review, Step 3 — legacy.modelResponses[] entries (AdaptiveModelResult) have their OWN optional-not-nullable fields (parseError/truncatedFields/invalidFields/coercions/retried) subject to the identical round-trip drift; these must also survive the round-trip identically, omitted rather than null", () => {
+    const record = financialValuationRecord();
+    const withUndefinedFields: AdaptiveResearchExportV1 = {
+      ...record,
+      reportSnapshot: {
+        ...record.reportSnapshot,
+        legacy: {
+          ...record.reportSnapshot.legacy!,
+          modelResponses: [
+            { ...record.reportSnapshot.legacy!.modelResponses![0], retried: undefined, parseError: undefined, truncatedFields: undefined, invalidFields: undefined, coercions: undefined },
+          ],
+        },
+      },
+    };
+    const creation = renderAdaptiveResearchJsonV1(withUndefinedFields);
+    const regenerated = renderAdaptiveResearchJsonV1(roundTrip(withUndefinedFields));
+    expect(Buffer.compare(creation.bytes, regenerated.bytes)).toBe(0);
+    const parsed = JSON.parse(regenerated.bytes.toString("utf-8"));
+    const entry = parsed.result.modelResponses[0];
+    for (const key of ["retried", "parseError", "truncatedFields", "invalidFields", "coercions"]) {
+      expect(Object.prototype.hasOwnProperty.call(entry, key)).toBe(false);
+    }
+  });
+
+  it("legacy.modelResponses[].retried: explicit false/true both survive the round-trip as real booleans, never omitted, never coerced to null", () => {
+    const record = financialValuationRecord();
+    const withBooleans: AdaptiveResearchExportV1 = {
+      ...record,
+      reportSnapshot: {
+        ...record.reportSnapshot,
+        legacy: {
+          ...record.reportSnapshot.legacy!,
+          modelResponses: [
+            { ...record.reportSnapshot.legacy!.modelResponses![0], modelId: "chatgpt" as any, retried: false },
+            { ...record.reportSnapshot.legacy!.modelResponses![0], modelId: "claude" as any, retried: true },
+          ],
+        },
+      },
+    };
+    const regenerated = renderAdaptiveResearchJsonV1(roundTrip(withBooleans));
+    const parsed = JSON.parse(regenerated.bytes.toString("utf-8"));
+    expect(parsed.result.modelResponses[0].retried).toBe(false);
+    expect(parsed.result.modelResponses[1].retried).toBe(true);
+  });
+
+  it("legacy.modelResponses[].data: null is a LEGITIMATE, distinct value in AdaptiveModelResult's own type — must never be touched by this normalization, survives the round-trip as explicit null", () => {
+    const record = financialValuationRecord();
+    const withNullData: AdaptiveResearchExportV1 = {
+      ...record,
+      reportSnapshot: {
+        ...record.reportSnapshot,
+        legacy: {
+          ...record.reportSnapshot.legacy!,
+          modelResponses: [{ ...record.reportSnapshot.legacy!.modelResponses![0], data: null }],
+        },
+      },
+    };
+    const creation = renderAdaptiveResearchJsonV1(withNullData);
+    const regenerated = renderAdaptiveResearchJsonV1(roundTrip(withNullData));
+    expect(Buffer.compare(creation.bytes, regenerated.bytes)).toBe(0);
+    const parsed = JSON.parse(regenerated.bytes.toString("utf-8"));
+    expect(parsed.result.modelResponses[0].data).toBeNull();
+  });
+
+  it("Milestone-2 Producer Canonicalization, Step 14 — a HISTORICAL milestone2.result already persisted with a pre-fix null (e.g. comparisonAlignment's old consensusValue: undefined -> null drift) passes through this opaque, unvalidated field verbatim: it does not crash, produces valid JSON, and is still self-consistent (same persisted record -> same byte output on every regeneration) — this is the file's own documented, disclosed scope boundary (milestone2.result is intentionally never normalized here; see buildAdaptiveResearchJsonExport's own comment), not a gap introduced by the producer fix. New writes never produce this null in the first place because the producer itself no longer emits the explicit-undefined own-property.", () => {
+    const record = comparisonMatrixRecord({
+      reportSnapshot: {
+        ...comparisonMatrixRecord().reportSnapshot,
+        milestone2: {
+          ...comparisonMatrixRecord().reportSnapshot.milestone2!,
+          result: {
+            subjects: ["GPT-5.2"],
+            attributes: ["Cost"],
+            cells: [{ subject: "GPT-5.2", attribute: "Cost", agreement: "consensus", consensusValue: null }],
+            totalModels: 2,
+          },
+        },
+      },
+    });
+    const first = renderAdaptiveResearchJsonV1(record);
+    const second = renderAdaptiveResearchJsonV1(record);
+    expect(Buffer.compare(first.bytes, second.bytes)).toBe(0);
+    const parsed = JSON.parse(first.bytes.toString("utf-8"));
+    expect(parsed.result.result.cells[0].consensusValue).toBeNull();
+  });
+
+  it("does not require a formatVersion bump — the public contract shape is unchanged, only which values are present for already-optional fields", () => {
+    const record = comparisonMatrixRecord({
+      reportSnapshot: {
+        ...comparisonMatrixRecord().reportSnapshot,
+        models: [{ modelId: "chatgpt" as any, ok: undefined }],
+      },
+    });
+    const parsed = JSON.parse(renderAdaptiveResearchJsonV1(roundTrip(record)).bytes.toString("utf-8"));
+    expect(parsed.formatVersion).toBe("1");
+    expect(() => adaptiveResearchJsonExportV1Schema.parse(parsed)).not.toThrow();
+  });
+});
+
 describe("canonicalizeForSerialization — prototype pollution safety (Part 19)", () => {
   it("a record containing __proto__/constructor/prototype-named keys never pollutes Object.prototype", () => {
     const before = ({} as any).polluted;
@@ -489,5 +724,53 @@ describe("renderAdaptiveResearchJsonV1 — non-finite numbers (Part 9): fail lou
     const rendered = renderAdaptiveResearchJsonV1(record);
     const parsed = JSON.parse(rendered.bytes.toString("utf-8"));
     expect(parsed.result.modelResponses[0].data.metrics[0].value).toBeNull();
+  });
+});
+
+describe("Final review, Step 14 — buildAdaptiveResearchJsonExport (and its determinism-fix helpers) is a pure projection, never mutates the frozen source record", () => {
+  it("deep-freezing the entire record before rendering never throws — proves no property of record/reportSnapshot/models/governanceStatusAtExport/legacy/modelResponses is ever assigned to", () => {
+    function deepFreeze<T>(obj: T): T {
+      if (obj !== null && typeof obj === "object") {
+        Object.values(obj as object).forEach(deepFreeze);
+        Object.freeze(obj);
+      }
+      return obj;
+    }
+    const comparisonRecord = deepFreeze(comparisonMatrixRecord({
+      reportSnapshot: {
+        ...comparisonMatrixRecord().reportSnapshot,
+        models: [{ modelId: "chatgpt" as any, ok: undefined }],
+      },
+      governanceStatusAtExport: { family: "milestone2", kind: "approved", isOwnerOverride: false, conditions: undefined },
+    }));
+    const legacyRecordSource = financialValuationRecord();
+    const legacyRecord = deepFreeze({
+      ...legacyRecordSource,
+      reportSnapshot: {
+        ...legacyRecordSource.reportSnapshot,
+        legacy: {
+          ...legacyRecordSource.reportSnapshot.legacy!,
+          modelResponses: [{ ...legacyRecordSource.reportSnapshot.legacy!.modelResponses![0], retried: undefined }],
+        },
+      },
+    });
+
+    expect(() => renderAdaptiveResearchJsonV1(comparisonRecord)).not.toThrow();
+    expect(() => renderAdaptiveResearchJsonV1(legacyRecord)).not.toThrow();
+  });
+
+  it("rendering the same record object twice never changes what the SECOND render observes on the source object itself (reference/value stability, not just output stability)", () => {
+    const record = comparisonMatrixRecord({
+      reportSnapshot: {
+        ...comparisonMatrixRecord().reportSnapshot,
+        models: [{ modelId: "chatgpt" as any, ok: undefined }, { modelId: "claude" as any, ok: true }],
+      },
+    });
+    const modelsRefBefore = record.reportSnapshot.models;
+    const model0Before = record.reportSnapshot.models[0];
+    renderAdaptiveResearchJsonV1(record);
+    expect(record.reportSnapshot.models).toBe(modelsRefBefore);
+    expect(record.reportSnapshot.models[0]).toBe(model0Before);
+    expect(record.reportSnapshot.models[0].ok).toBeUndefined(); // still genuinely undefined on the source, never overwritten to omit the key via delete or similar
   });
 });

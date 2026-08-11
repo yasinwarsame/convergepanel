@@ -151,23 +151,36 @@ export function buildChecklistTaxonomyResult(
     const critical = criticalByModel.size > 0 && criticalVotes / criticalByModel.size >= 0.5;
 
     const coverageCount = criticalByModel.size;
+    const severity = modeOrFirstDefined(group.map((e) => e.item.severity));
+    const likelihood = modeOrFirstDefined(group.map((e) => e.item.likelihood));
+    const impact = group.find((e) => e.item.impact && e.item.impact.trim().length > 0)?.item.impact;
+    const evidence = group.find((e) => e.item.evidence && e.item.evidence.trim().length > 0)?.item.evidence;
+    const mitigation = group.find((e) => e.item.mitigation && e.item.mitigation.trim().length > 0)?.item.mitigation;
+    const monitoringSignal = group.find((e) => e.item.monitoringSignal && e.item.monitoringSignal.trim().length > 0)?.item.monitoringSignal;
+    const residualRisk = group.find((e) => e.item.residualRisk && e.item.residualRisk.trim().length > 0)?.item.residualRisk;
+
+    // Producer canonicalization: rationale/severity/likelihood/impact/
+    // evidence/mitigation/monitoringSignal/residualRisk are all genuinely
+    // absent when no group member supplied one — conditional spread keeps
+    // the key genuinely absent rather than an own-property with value
+    // undefined (see buildComparisonMatrixResult's own comment for why).
     aggregated.push({
       id: slugifyLabel(label),
       label,
       category,
-      rationale,
+      ...(rationale !== undefined ? { rationale } : {}),
       critical,
       coverageCount,
       totalModels,
       coverageRatio: totalModels > 0 ? coverageCount / totalModels : 0,
       contributingModels: Array.from(criticalByModel.keys()),
-      severity: modeOrFirstDefined(group.map((e) => e.item.severity)),
-      likelihood: modeOrFirstDefined(group.map((e) => e.item.likelihood)),
-      impact: group.find((e) => e.item.impact && e.item.impact.trim().length > 0)?.item.impact,
-      evidence: group.find((e) => e.item.evidence && e.item.evidence.trim().length > 0)?.item.evidence,
-      mitigation: group.find((e) => e.item.mitigation && e.item.mitigation.trim().length > 0)?.item.mitigation,
-      monitoringSignal: group.find((e) => e.item.monitoringSignal && e.item.monitoringSignal.trim().length > 0)?.item.monitoringSignal,
-      residualRisk: group.find((e) => e.item.residualRisk && e.item.residualRisk.trim().length > 0)?.item.residualRisk,
+      ...(severity !== undefined ? { severity } : {}),
+      ...(likelihood !== undefined ? { likelihood } : {}),
+      ...(impact !== undefined ? { impact } : {}),
+      ...(evidence !== undefined ? { evidence } : {}),
+      ...(mitigation !== undefined ? { mitigation } : {}),
+      ...(monitoringSignal !== undefined ? { monitoringSignal } : {}),
+      ...(residualRisk !== undefined ? { residualRisk } : {}),
       firstSeenIndex: Math.min(...group.map((e) => e.index)),
     });
   }

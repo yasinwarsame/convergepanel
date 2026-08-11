@@ -180,6 +180,54 @@ describe("buildDefinitionExplanationResult — sub-field merging within a cluste
   });
 });
 
+describe("buildDefinitionExplanationResult — producer canonicalization (absent vs. explicit-undefined own-property)", () => {
+  it("omits example, analogy, and advancedDetail as genuinely absent keys (not the 'none' sentinel) when every model used 'none'", () => {
+    const result = buildDefinitionExplanationResult(perModel([["chatgpt", fields({ directAnswer: "X is Y." })]]), 1);
+    const primary = result.primary!;
+    expect(Object.prototype.hasOwnProperty.call(primary, "example")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(primary, "analogy")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(primary, "advancedDetail")).toBe(false);
+    expect(Object.keys(JSON.parse(JSON.stringify(primary)))).not.toEqual(
+      expect.arrayContaining(["example", "analogy", "advancedDetail"])
+    );
+  });
+
+  it("preserves example, analogy, and advancedDetail as real own-properties when supplied", () => {
+    const result = buildDefinitionExplanationResult(
+      perModel([
+        [
+          "chatgpt",
+          fields({
+            directAnswer: "X is Y.",
+            example: "A worked example.",
+            analogyText: "It's like a banking ledger.",
+            analogyLimits: "Ledgers don't self-update, though.",
+            advancedDetail: "A deeper technical aside.",
+          }),
+        ],
+      ]),
+      1
+    );
+    const primary = result.primary!;
+    expect(Object.prototype.hasOwnProperty.call(primary, "example")).toBe(true);
+    expect(primary.example).toBe("A worked example.");
+    expect(Object.prototype.hasOwnProperty.call(primary, "analogy")).toBe(true);
+    expect(primary.analogy).toEqual({ text: "It's like a banking ledger.", limits: "Ledgers don't self-update, though." });
+    expect(Object.prototype.hasOwnProperty.call(primary, "advancedDetail")).toBe(true);
+    expect(primary.advancedDetail).toBe("A deeper technical aside.");
+  });
+
+  it("omits the nested analogy.limits key when the analogy has text but no limits", () => {
+    const result = buildDefinitionExplanationResult(
+      perModel([["chatgpt", fields({ directAnswer: "X is Y.", analogyText: "It's like a banking ledger." })]]),
+      1
+    );
+    const analogy = result.primary!.analogy!;
+    expect(Object.prototype.hasOwnProperty.call(analogy, "limits")).toBe(false);
+    expect(Object.keys(JSON.parse(JSON.stringify(analogy)))).not.toEqual(expect.arrayContaining(["limits"]));
+  });
+});
+
 describe("buildDefinitionExplanationResult — source-backed detection", () => {
   it("is sourceBacked when the primary interpretation has at least one source", () => {
     const result = buildDefinitionExplanationResult(perModel([["chatgpt", fields({ directAnswer: "X is Y.", sources: ["NIST glossary"] })]]), 1);

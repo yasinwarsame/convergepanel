@@ -211,14 +211,21 @@ function computeStructuralDiagnostics(
     homogeneityFlag = largestCluster.length / summaries.length >= HOMOGENEITY_AGREEMENT_THRESHOLD;
   }
 
+  // Producer canonicalization: sourceConcentration/homogeneityMessage are
+  // genuinely absent in the common case (no sources cited / not
+  // homogeneous) — conditional spread keeps the key genuinely absent
+  // rather than an own-property with value undefined (see
+  // buildComparisonMatrixResult's own comment for why this matters).
+  // `biasEmptyReason` elsewhere in this file is `| null`, required, and
+  // deliberately untouched — a real, distinct value, not this bug class.
   return {
     citationCoverage: { modelsWithSources, totalModels, ratio: totalModels > 0 ? modelsWithSources / totalModels : 0 },
-    sourceConcentration,
+    ...(sourceConcentration !== undefined ? { sourceConcentration } : {}),
     geographicBiasConcerns,
     sourceConcentrationConcerns,
     evidenceTypeConcerns,
     homogeneityFlag,
-    homogeneityMessage: homogeneityFlag ? HOMOGENEITY_MESSAGE : undefined,
+    ...(homogeneityFlag ? { homogeneityMessage: HOMOGENEITY_MESSAGE } : {}),
   };
 }
 

@@ -220,6 +220,45 @@ describe("buildComparisonMatrixResult — empty input", () => {
   });
 });
 
+describe("buildComparisonMatrixResult — producer canonicalization (absent vs. explicit-undefined own-property)", () => {
+  it("omits consensusValue, verdictTally, rationale, and sources as genuinely absent keys — not explicit-undefined own-properties — when no model supplies them", () => {
+    const result = buildComparisonMatrixResult(
+      perModel([
+        ["chatgpt", [cell({ subject: "X", attribute: "Verdict", value: "Best overall choice" })]],
+        ["claude", [cell({ subject: "X", attribute: "Verdict", value: "Not recommended at all" })]],
+      ])
+    );
+    const c = result.cells[0];
+    expect(c.agreement).toBe("split");
+    expect(Object.prototype.hasOwnProperty.call(c, "consensusValue")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(c, "verdictTally")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(c, "rationale")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(c, "sources")).toBe(false);
+    // JSON.stringify only omits genuinely-absent keys — an explicit-undefined
+    // own-property would be silently dropped too, so this is a secondary,
+    // not a primary, proof — hasOwnProperty above is the real assertion.
+    expect(Object.keys(JSON.parse(JSON.stringify(c)))).not.toEqual(expect.arrayContaining(["consensusValue", "verdictTally", "rationale", "sources"]));
+  });
+
+  it("preserves consensusValue, verdictTally, rationale, and sources as real own-properties when models do supply them", () => {
+    const result = buildComparisonMatrixResult(
+      perModel([
+        ["chatgpt", [cell({ subject: "X", attribute: "Price", value: "$799", verdict: "better", rationale: "Cheapest option.", sources: ["https://a.example"] })]],
+        ["claude", [cell({ subject: "X", attribute: "Price", value: "$799", verdict: "better" })]],
+      ])
+    );
+    const c = result.cells[0];
+    expect(Object.prototype.hasOwnProperty.call(c, "consensusValue")).toBe(true);
+    expect(c.consensusValue).toBe("$799");
+    expect(Object.prototype.hasOwnProperty.call(c, "verdictTally")).toBe(true);
+    expect(c.verdictTally).toEqual({ better: 2 });
+    expect(Object.prototype.hasOwnProperty.call(c, "rationale")).toBe(true);
+    expect(c.rationale).toBe("Cheapest option.");
+    expect(Object.prototype.hasOwnProperty.call(c, "sources")).toBe(true);
+    expect(c.sources).toEqual(["https://a.example"]);
+  });
+});
+
 describe("buildComparisonMatrixResult — narrative synthesis fields", () => {
   it("defaults directConclusion to empty string and the lists to empty arrays when no model supplies them", () => {
     const result = buildComparisonMatrixResult(perModel([["chatgpt", [cell({ subject: "X", attribute: "Price", value: "$1" })]]]));
