@@ -22,7 +22,7 @@ import {
   statusAllowsConditions,
   statusRequiresComment,
 } from "@/lib/governance/adaptiveReviewFormContract";
-import { submitAdaptiveReviewDecision, AdaptiveReviewSubmissionResult as SubmissionResult } from "@/lib/client/adaptiveReviewSubmission";
+import { submitAdaptiveReviewDecision, AdaptiveReviewSubmissionResult as SubmissionResult, AdaptiveReviewDecisionScope } from "@/lib/client/adaptiveReviewSubmission";
 import AdaptiveReviewDecisionOption from "./AdaptiveReviewDecisionOption";
 import AdaptiveReviewConditionsEditor from "./AdaptiveReviewConditionsEditor";
 import AdaptiveReviewSubmissionResult from "./AdaptiveReviewSubmissionResult";
@@ -39,11 +39,14 @@ export default function AdaptiveReviewDecisionForm({
   expectedUpdatedAt,
   onSuccess,
   onRequestReload,
+  scope,
 }: {
   runId: string;
   expectedUpdatedAt: string;
   onSuccess: (result: Extract<SubmissionResult, { kind: "success" }>) => void;
   onRequestReload: () => void;
+  /** Personal Reviewer Inbox + Action Flow — defaults to "team" (unchanged for every existing caller). The personal reviewer detail page passes "personal". Decision-route URL construction itself stays entirely inside submitAdaptiveReviewDecision. */
+  scope?: AdaptiveReviewDecisionScope;
 }) {
   const { user, authReady, canMutate } = useAuth();
   const [form, setForm] = useState<AdaptiveReviewFormState>(EMPTY_ADAPTIVE_REVIEW_FORM_STATE);
@@ -82,6 +85,7 @@ export default function AdaptiveReviewDecisionForm({
       const outcome = await submitAdaptiveReviewDecision({
         runId,
         request: payload,
+        scope,
         postJson: async (url, body) => {
           const { authedFetch } = await import("@/lib/client/authedFetch");
           return authedFetch(url, {

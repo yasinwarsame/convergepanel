@@ -16,6 +16,7 @@ import { parseGovernanceRecord } from "@/lib/adaptiveSchema/governanceRecordPars
 import { loadUserAndTeam } from "@/lib/teams/teamApiAuth";
 import { getAdaptiveTeamRunProjection } from "@/lib/firestore/teamRuns";
 import { getAdaptiveHumanReviewAssignment } from "@/lib/firestore/runs";
+import { resolveAdaptiveRunAccess } from "@/lib/governance/adaptiveRunAccess";
 import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
@@ -63,11 +64,35 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
 
   const data = snap.data() as Record<string, unknown>;
   const owner = String(data.userId ?? "");
+
+  // Personal Reviewer Inbox + Action Flow — a non-owner is granted access
+  // ONLY when the canonical per-run assignment currently names them
+  // (resolveAdaptiveRunAccess never consults users/{owner}.governanceReviewerUid
+  // directly — see that module's own doc comment for why). The response
+  // shape below is identical for both roles (no owner-only fields exist in
+  // it — results/synthesis/adaptive output/governance status are exactly
+  // the content a reviewer needs to review); `viewerRole` lets the client
+  // know which one it got so it can hide owner-only controls (export,
+  // rerun) and show the review decision UI instead.
+  let viewerRole: "owner" | "personal_reviewer" = "owner";
   if (owner !== uid) {
-    return NextResponse.json(
-      { ok: false, errorCode: "forbidden", message: "You do not have access to this run." },
-      { status: 403 }
-    );
+    const [assignmentResult, preAccessGovernance] = await Promise.all([
+      getAdaptiveHumanReviewAssignment(runId),
+      Promise.resolve(parseGovernanceRecord(data.governanceRecord)),
+    ]);
+    const access = resolveAdaptiveRunAccess({
+      uid,
+      runOwnerUid: owner,
+      assignment: assignmentResult.status === "found" ? assignmentResult.assignment : null,
+      humanReviewStatus: preAccessGovernance.ok ? preAccessGovernance.record.humanReview.status : null,
+    });
+    if (access.role !== "personal_reviewer") {
+      return NextResponse.json(
+        { ok: false, errorCode: "forbidden", message: "You do not have access to this run." },
+        { status: 403 }
+      );
+    }
+    viewerRole = "personal_reviewer";
   }
 
   const runDocument = data.runDocument as RunDocument | undefined;
@@ -172,7 +197,14 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
   if (humanReview && (humanReview.status === "unreviewed" || humanReview.status === "pending")) {
     const requestId = req.headers.get("x-vercel-id") ?? req.headers.get("x-request-id") ?? undefined;
     try {
-      const teamCtx = await loadUserAndTeam(uid);
+      // Always the RUN OWNER's team/assignment context, never the
+      // viewer's — reviewRouting describes the run's own review-routing
+      // state, which is identical no matter who is looking at it. Using
+      // `uid` here would be wrong whenever the viewer is an assigned
+      // personal reviewer (a different account from the owner): it would
+      // resolve the REVIEWER's own team membership instead, which has
+      // nothing to do with this run.
+      const teamCtx = await loadUserAndTeam(owner);
       if (!teamCtx?.team) {
         // Reviewer Assignment Propagation — a personal (non-team) run can
         // still have a real, canonical humanReviewAssignment (see
@@ -265,6 +297,12 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
   return NextResponse.json({
     ok: true,
     runId,
+    // Personal Reviewer Inbox + Action Flow — lets the client distinguish
+    // "this is my own report" from "I am reviewing someone else's report"
+    // so it can hide owner-only controls (export, rerun) and show the
+    // review decision UI instead. Never a signal of anything beyond that
+    // — the rest of the response is identical either way.
+    viewerRole,
     question,
     selectedModels,
     status,

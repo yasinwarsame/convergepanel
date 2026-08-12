@@ -49,6 +49,29 @@ export function buildAdaptiveReviewDecisionId(teamId: string, runId: string, rev
   return `dec_${digest}`;
 }
 
+/**
+ * Personal Reviewer Inbox + Action Flow — the personal (teamId: null)
+ * equivalent of buildAdaptiveReviewDecisionId above. Deliberately a
+ * SEPARATE function rather than widening the team one to accept `null`:
+ * that function's own `if (!teamId...) throw` is a real safety net for
+ * team callers (an accidentally-empty teamId there is a caller bug worth
+ * crashing loudly on) which widening to `string | null` would silently
+ * weaken. A personal run has no team at all, so "personal" is used as a
+ * fixed, distinct namespace prefix instead — `runId` alone is already
+ * globally unique, so this loses no collision-resistance (a personal
+ * decision and a team decision for the same runId/reviewedAt/newStatus,
+ * if that were ever even possible, would still hash to different values).
+ */
+export function buildPersonalReviewDecisionId(runId: string, reviewedAt: string, newStatus: string): string {
+  if (!runId || !runId.trim()) throw new Error("buildPersonalReviewDecisionId: runId must not be empty");
+  if (!reviewedAt || !reviewedAt.trim()) throw new Error("buildPersonalReviewDecisionId: reviewedAt must not be empty");
+  if (!newStatus || !newStatus.trim()) throw new Error("buildPersonalReviewDecisionId: newStatus must not be empty");
+
+  const material = `personal:${runId}:${reviewedAt}:${newStatus}`;
+  const digest = createHash("sha256").update(material).digest("hex").slice(0, 32);
+  return `dec_${digest}`;
+}
+
 // ============================================
 // Immutable history record contract
 // ============================================
@@ -69,7 +92,8 @@ export type AdaptiveHumanReviewHistoryV1 = {
   historyId: string;
   decisionId: string;
   runId: string;
-  teamId: string;
+  /** `null` for a personal (non-team) review — see buildPersonalReviewDecisionId. Never read back by classifyAdaptiveHumanReviewHistoryRow (not part of the exposed history-row shape), so widening this carries no downstream parsing risk. */
+  teamId: string | null;
   schemaId: PersistedAdaptiveSchemaId;
   answerShape: AnswerShape;
   priorStatus: AdaptiveReviewNonTerminalStatus;
@@ -95,7 +119,7 @@ export type AdaptiveHumanReviewHistoryV1 = {
 export function buildAdaptiveHumanReviewHistoryEntry(args: {
   decisionId: string;
   runId: string;
-  teamId: string;
+  teamId: string | null;
   schemaId: PersistedAdaptiveSchemaId;
   answerShape: AnswerShape;
   priorStatus: AdaptiveReviewNonTerminalStatus;

@@ -65,7 +65,7 @@ export type AdaptiveAdminAuditWriteResult = { status: "recorded" } | { status: "
 export async function writeAdaptiveAdminAuditEvent(args: {
   decisionId: string;
   actorUid: string;
-  teamId: string;
+  teamId: string | null;
   runId: string;
   schemaId: string;
   answerShape: string;
@@ -95,7 +95,13 @@ export async function writeAdaptiveAdminAuditEvent(args: {
         nextStatus: args.newStatus,
         decisionId: args.decisionId,
         outcome: "success",
-        source: "adaptive_team_review",
+        // Personal Reviewer Inbox + Action Flow — was hardcoded to
+        // "adaptive_team_review" (accurate for every caller until this
+        // feature added a second, non-team one). `teamId` on this SAME
+        // record already disambiguates programmatically, but a fixed,
+        // wrong label here would still mislead anyone reading the audit
+        // trail by eye.
+        source: args.teamId === null ? "adaptive_personal_review" : "adaptive_team_review",
       });
     return { status: "recorded" };
   } catch (err: unknown) {
