@@ -15,6 +15,7 @@ import { parsePersistedAdaptiveOutput, parsePersistedLegacyAdaptiveOutput } from
 import { parseGovernanceRecord } from "@/lib/adaptiveSchema/governanceRecordParser";
 import { loadUserAndTeam } from "@/lib/teams/teamApiAuth";
 import { getAdaptiveTeamRunProjection } from "@/lib/firestore/teamRuns";
+import { getAdaptiveHumanReviewAssignment } from "@/lib/firestore/runs";
 import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
@@ -173,7 +174,26 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
     try {
       const teamCtx = await loadUserAndTeam(uid);
       if (!teamCtx?.team) {
-        reviewRouting = "not_configured";
+        // Reviewer Assignment Propagation — a personal (non-team) run can
+        // still have a real, canonical humanReviewAssignment (see
+        // lib/governance/personalReviewerAssignment.ts). Checked here too,
+        // not just at run-completion time, so a reload never regresses to
+        // the false "no review configured" claim for a run that already
+        // has one. A genuine read failure degrades to "unknown" (fails
+        // closed), never "not_configured" — same discipline as the team
+        // branch below.
+        const assignmentResult = await getAdaptiveHumanReviewAssignment(runId);
+        if (assignmentResult.status === "found" && assignmentResult.assignment.assignedReviewerUserId) {
+          reviewRouting = "in_queue";
+        } else if (assignmentResult.status === "unassigned") {
+          reviewRouting = "not_configured";
+        } else {
+          logger.warn("[user/runs] Personal reviewer-assignment lookup failed during history reload", {
+            runId,
+            errorCategory: assignmentResult.status,
+          });
+          reviewRouting = "unknown";
+        }
       } else {
         const projectionResult = await getAdaptiveTeamRunProjection(teamCtx.team.id, runId);
         if (projectionResult.status === "not_found") {

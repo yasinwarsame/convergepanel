@@ -1,0 +1,330 @@
+/**
+ * Reviewer Assignment Propagation — personalReviewerAssignment.ts tests.
+ */
+
+const mockSubmitAdaptiveHumanReviewAssignment = jest.fn();
+const mockCreateAdaptiveHumanReviewAssignmentHistory = jest.fn();
+jest.mock("@/lib/firestore/runs", () => ({
+  submitAdaptiveHumanReviewAssignment: (...args: unknown[]) => mockSubmitAdaptiveHumanReviewAssignment(...args),
+  createAdaptiveHumanReviewAssignmentHistory: (...args: unknown[]) => mockCreateAdaptiveHumanReviewAssignmentHistory(...args),
+}));
+
+const mockWriteAdaptiveAssignmentAdminAuditEvent = jest.fn();
+jest.mock("@/lib/governance/auditLog", () => ({
+  writeAdaptiveAssignmentAdminAuditEvent: (...args: unknown[]) => mockWriteAdaptiveAssignmentAdminAuditEvent(...args),
+}));
+
+const userDocs = new Map<string, Record<string, unknown>>();
+const mockAdminDb = {
+  collection: (name: string) => ({
+    doc: (id: string) => ({
+      get: async () => ({
+        exists: userDocs.has(`${name}/${id}`),
+        data: () => userDocs.get(`${name}/${id}`),
+      }),
+    }),
+  }),
+};
+jest.mock("@/lib/firebase/admin", () => ({
+  get adminDb() {
+    return mockAdminDb;
+  },
+}));
+
+jest.mock("@/lib/logger", () => ({
+  logger: { warn: jest.fn(), error: jest.fn(), info: jest.fn() },
+}));
+
+import {
+  ownerConfiguredReviewerUid,
+  reviewerStillAvailable,
+  propagatePersonalReviewerAssignment,
+} from "@/lib/governance/personalReviewerAssignment";
+
+function setUser(uid: string, data: Record<string, unknown>) {
+  userDocs.set(`users/${uid}`, data);
+}
+
+beforeEach(() => {
+  userDocs.clear();
+  mockSubmitAdaptiveHumanReviewAssignment.mockReset();
+  mockCreateAdaptiveHumanReviewAssignmentHistory.mockReset();
+  mockWriteAdaptiveAssignmentAdminAuditEvent.mockReset();
+  mockCreateAdaptiveHumanReviewAssignmentHistory.mockResolvedValue({ status: "recorded" });
+  mockWriteAdaptiveAssignmentAdminAuditEvent.mockResolvedValue({ status: "recorded" });
+});
+
+describe("ownerConfiguredReviewerUid", () => {
+  it("returns the configured reviewer uid when both uid and email are present", () => {
+    expect(ownerConfiguredReviewerUid({ governanceReviewerUid: "reviewer-1", governanceReviewerEmail: "r@example.com" })).toBe(
+      "reviewer-1"
+    );
+  });
+
+  it("returns null when governanceReviewerUid is absent", () => {
+    expect(ownerConfiguredReviewerUid({ governanceReviewerEmail: "r@example.com" })).toBeNull();
+  });
+
+  it("returns null when governanceReviewerEmail is absent (reviewer-capable alone is never enough)", () => {
+    expect(ownerConfiguredReviewerUid({ governanceReviewerUid: "reviewer-1" })).toBeNull();
+  });
+
+  it("returns null for an empty/whitespace-only uid", () => {
+    expect(ownerConfiguredReviewerUid({ governanceReviewerUid: "   ", governanceReviewerEmail: "r@example.com" })).toBeNull();
+  });
+
+  it("returns null for an undefined or null profile", () => {
+    expect(ownerConfiguredReviewerUid(undefined)).toBeNull();
+    expect(ownerConfiguredReviewerUid(null)).toBeNull();
+  });
+});
+
+describe("reviewerStillAvailable", () => {
+  it("is true only when governanceReviewerEnabled is exactly true", () => {
+    expect(reviewerStillAvailable({ governanceReviewerEnabled: true })).toBe(true);
+  });
+
+  it("is false when the reviewer has disabled availability", () => {
+    expect(reviewerStillAvailable({ governanceReviewerEnabled: false })).toBe(false);
+  });
+
+  it("is false when the flag is absent (a merely reviewer-capable but never-enabled account)", () => {
+    expect(reviewerStillAvailable({})).toBe(false);
+    expect(reviewerStillAvailable(undefined)).toBe(false);
+  });
+});
+
+describe("propagatePersonalReviewerAssignment", () => {
+  it("returns not_configured when the owner has no reviewer configured", async () => {
+    setUser("owner-1", {});
+    const result = await propagatePersonalReviewerAssignment({ runId: "run-1", ownerUserId: "owner-1" });
+    expect(result).toEqual({ status: "not_configured" });
+    expect(mockSubmitAdaptiveHumanReviewAssignment).not.toHaveBeenCalled();
+  });
+
+  it("returns reviewer_unavailable when the configured reviewer has since disabled availability", async () => {
+    setUser("owner-1", { governanceReviewerUid: "reviewer-1", governanceReviewerEmail: "r@example.com" });
+    setUser("reviewer-1", { governanceReviewerEnabled: false });
+    const result = await propagatePersonalReviewerAssignment({ runId: "run-1", ownerUserId: "owner-1" });
+    expect(result).toEqual({ status: "reviewer_unavailable" });
+    expect(mockSubmitAdaptiveHumanReviewAssignment).not.toHaveBeenCalled();
+  });
+
+  it("Step 6: returns reviewer_unavailable when the configured reviewer's account no longer exists at all (deleted, not merely disabled)", async () => {
+    setUser("owner-1", { governanceReviewerUid: "reviewer-deleted", governanceReviewerEmail: "gone@example.com" });
+    // No setUser("reviewer-deleted", ...) — the doc genuinely does not exist.
+    const result = await propagatePersonalReviewerAssignment({ runId: "run-1", ownerUserId: "owner-1" });
+    expect(result).toEqual({ status: "reviewer_unavailable" });
+    expect(mockSubmitAdaptiveHumanReviewAssignment).not.toHaveBeenCalled();
+  });
+
+  it("Step 6: refuses a self-assignment data anomaly even if a config somehow named the owner as their own reviewer", async () => {
+    setUser("owner-1", {
+      governanceReviewerUid: "owner-1",
+      governanceReviewerEmail: "self@example.com",
+      governanceReviewerEnabled: true,
+    });
+    const result = await propagatePersonalReviewerAssignment({ runId: "run-1", ownerUserId: "owner-1" });
+    expect(result).toEqual({ status: "not_configured" });
+    expect(mockSubmitAdaptiveHumanReviewAssignment).not.toHaveBeenCalled();
+  });
+
+  it("assigns the configured, still-available reviewer and records history + audit", async () => {
+    setUser("owner-1", { governanceReviewerUid: "reviewer-1", governanceReviewerEmail: "r@example.com" });
+    setUser("reviewer-1", { governanceReviewerEnabled: true });
+    mockSubmitAdaptiveHumanReviewAssignment.mockResolvedValue({
+      ok: true,
+      assignment: {
+        schemaVersion: 1,
+        teamId: null,
+        runId: "run-1",
+        assignedReviewerUserId: "reviewer-1",
+        assignedAt: "2026-08-12T18:00:00.000Z",
+        assignedByUserId: "owner-1",
+        updatedAt: "2026-08-12T18:00:00.000Z",
+        updatedByUserId: "owner-1",
+        revision: 1,
+      },
+      previousReviewerUserId: null,
+    });
+
+    const result = await propagatePersonalReviewerAssignment({ runId: "run-1", ownerUserId: "owner-1" });
+
+    expect(result).toEqual({ status: "assigned", reviewerUserId: "reviewer-1" });
+    expect(mockSubmitAdaptiveHumanReviewAssignment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: "run-1",
+        teamId: null,
+        newReviewerUserId: "reviewer-1",
+        actorUserId: "owner-1",
+        expectedRevision: 0,
+      })
+    );
+    expect(mockCreateAdaptiveHumanReviewAssignmentHistory).toHaveBeenCalledTimes(1);
+    expect(mockWriteAdaptiveAssignmentAdminAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "adaptive_human_review_reviewer_assigned", teamId: null, runId: "run-1" })
+    );
+  });
+
+  it("Step 7: a later reviewer-configuration change affects only future runs — an existing run's assignment is never re-derived or touched", async () => {
+    // Run A is created while Reviewer A is configured.
+    setUser("owner-1", { governanceReviewerUid: "reviewer-A", governanceReviewerEmail: "a@example.com" });
+    setUser("reviewer-A", { governanceReviewerEnabled: true });
+    mockSubmitAdaptiveHumanReviewAssignment.mockResolvedValueOnce({
+      ok: true,
+      assignment: {
+        schemaVersion: 1,
+        teamId: null,
+        runId: "run-A",
+        assignedReviewerUserId: "reviewer-A",
+        assignedAt: "2026-08-12T18:00:00.000Z",
+        assignedByUserId: "owner-1",
+        updatedAt: "2026-08-12T18:00:00.000Z",
+        updatedByUserId: "owner-1",
+        revision: 1,
+      },
+      previousReviewerUserId: null,
+    });
+    const resultA = await propagatePersonalReviewerAssignment({ runId: "run-A", ownerUserId: "owner-1" });
+    expect(resultA).toEqual({ status: "assigned", reviewerUserId: "reviewer-A" });
+    expect(mockSubmitAdaptiveHumanReviewAssignment).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ runId: "run-A", newReviewerUserId: "reviewer-A" })
+    );
+
+    // The owner's configuration is later changed to Reviewer B (mirrors
+    // remove_reviewer + assign_reviewer in app/api/governance/reviewer/route.ts).
+    setUser("owner-1", { governanceReviewerUid: "reviewer-B", governanceReviewerEmail: "b@example.com" });
+    setUser("reviewer-B", { governanceReviewerEnabled: true });
+
+    // Run B is a genuinely NEW, later run for the same owner.
+    mockSubmitAdaptiveHumanReviewAssignment.mockResolvedValueOnce({
+      ok: true,
+      assignment: {
+        schemaVersion: 1,
+        teamId: null,
+        runId: "run-B",
+        assignedReviewerUserId: "reviewer-B",
+        assignedAt: "2026-08-12T19:00:00.000Z",
+        assignedByUserId: "owner-1",
+        updatedAt: "2026-08-12T19:00:00.000Z",
+        updatedByUserId: "owner-1",
+        revision: 1,
+      },
+      previousReviewerUserId: null,
+    });
+    const resultB = await propagatePersonalReviewerAssignment({ runId: "run-B", ownerUserId: "owner-1" });
+    expect(resultB).toEqual({ status: "assigned", reviewerUserId: "reviewer-B" });
+
+    // Exactly two calls total, each scoped to its own runId — the second
+    // call for run-B never references run-A at all, proving there is no
+    // "update all of this owner's runs" path that could have silently
+    // rewritten run A's already-settled assignment when the config changed.
+    expect(mockSubmitAdaptiveHumanReviewAssignment).toHaveBeenCalledTimes(2);
+    expect(mockSubmitAdaptiveHumanReviewAssignment).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ runId: "run-B", newReviewerUserId: "reviewer-B" })
+    );
+  });
+
+  it("returns already_assigned (never overwrites) when the transaction reports a stale revision — e.g. a concurrent/duplicate trigger", async () => {
+    setUser("owner-1", { governanceReviewerUid: "reviewer-1", governanceReviewerEmail: "r@example.com" });
+    setUser("reviewer-1", { governanceReviewerEnabled: true });
+    mockSubmitAdaptiveHumanReviewAssignment.mockResolvedValue({ ok: false, reason: "stale_revision" });
+
+    const result = await propagatePersonalReviewerAssignment({ runId: "run-1", ownerUserId: "owner-1" });
+    expect(result).toEqual({ status: "already_assigned" });
+    expect(mockCreateAdaptiveHumanReviewAssignmentHistory).not.toHaveBeenCalled();
+  });
+
+  it("Step 11: two genuinely concurrent (Promise.all) triggers against the same fresh run produce exactly one effective assignment", async () => {
+    setUser("owner-1", { governanceReviewerUid: "reviewer-1", governanceReviewerEmail: "r@example.com" });
+    setUser("reviewer-1", { governanceReviewerEnabled: true });
+
+    // Mirrors what the REAL submitAdaptiveHumanReviewAssignment transaction
+    // guarantees under contention (lib/firestore/runs.ts's own optimistic-
+    // concurrency re-read): whichever call's transaction commits first
+    // succeeds at revision 1; the other observes the now-stale
+    // expectedRevision: 0 and is rejected. Simulated here at the mock
+    // boundary since that transaction itself is existing, unchanged,
+    // already-tested code — this test's job is to prove THIS module's own
+    // orchestration has no shared mutable state that could turn "one
+    // winner, one stale_revision" into two assignments or two audit writes.
+    let calls = 0;
+    mockSubmitAdaptiveHumanReviewAssignment.mockImplementation(async () => {
+      calls += 1;
+      if (calls === 1) {
+        return {
+          ok: true,
+          assignment: {
+            schemaVersion: 1,
+            teamId: null,
+            runId: "run-concurrent",
+            assignedReviewerUserId: "reviewer-1",
+            assignedAt: "2026-08-12T18:00:00.000Z",
+            assignedByUserId: "owner-1",
+            updatedAt: "2026-08-12T18:00:00.000Z",
+            updatedByUserId: "owner-1",
+            revision: 1,
+          },
+          previousReviewerUserId: null,
+        };
+      }
+      return { ok: false, reason: "stale_revision" };
+    });
+
+    const [resultOne, resultTwo] = await Promise.all([
+      propagatePersonalReviewerAssignment({ runId: "run-concurrent", ownerUserId: "owner-1" }),
+      propagatePersonalReviewerAssignment({ runId: "run-concurrent", ownerUserId: "owner-1" }),
+    ]);
+
+    const statuses = [resultOne.status, resultTwo.status].sort();
+    expect(statuses).toEqual(["already_assigned", "assigned"]);
+    // History/audit are written exactly once — for the winning call only.
+    expect(mockCreateAdaptiveHumanReviewAssignmentHistory).toHaveBeenCalledTimes(1);
+    expect(mockWriteAdaptiveAssignmentAdminAuditEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns not_pending when the run's review is no longer pending (terminal-state protection)", async () => {
+    setUser("owner-1", { governanceReviewerUid: "reviewer-1", governanceReviewerEmail: "r@example.com" });
+    setUser("reviewer-1", { governanceReviewerEnabled: true });
+    mockSubmitAdaptiveHumanReviewAssignment.mockResolvedValue({ ok: false, reason: "not_pending" });
+
+    const result = await propagatePersonalReviewerAssignment({ runId: "run-1", ownerUserId: "owner-1" });
+    expect(result).toEqual({ status: "not_pending" });
+  });
+
+  it("returns failed (never throws) on any other submit failure reason", async () => {
+    setUser("owner-1", { governanceReviewerUid: "reviewer-1", governanceReviewerEmail: "r@example.com" });
+    setUser("reviewer-1", { governanceReviewerEnabled: true });
+    mockSubmitAdaptiveHumanReviewAssignment.mockResolvedValue({ ok: false, reason: "write_failed" });
+
+    const result = await propagatePersonalReviewerAssignment({ runId: "run-1", ownerUserId: "owner-1" });
+    expect(result).toEqual({ status: "failed" });
+  });
+
+  it("never throws when history or audit writes fail after a successful assignment (assignment itself still reported as assigned)", async () => {
+    setUser("owner-1", { governanceReviewerUid: "reviewer-1", governanceReviewerEmail: "r@example.com" });
+    setUser("reviewer-1", { governanceReviewerEnabled: true });
+    mockSubmitAdaptiveHumanReviewAssignment.mockResolvedValue({
+      ok: true,
+      assignment: {
+        schemaVersion: 1,
+        teamId: null,
+        runId: "run-1",
+        assignedReviewerUserId: "reviewer-1",
+        assignedAt: "2026-08-12T18:00:00.000Z",
+        assignedByUserId: "owner-1",
+        updatedAt: "2026-08-12T18:00:00.000Z",
+        updatedByUserId: "owner-1",
+        revision: 1,
+      },
+      previousReviewerUserId: null,
+    });
+    mockCreateAdaptiveHumanReviewAssignmentHistory.mockRejectedValue(new Error("boom"));
+    mockWriteAdaptiveAssignmentAdminAuditEvent.mockRejectedValue(new Error("boom"));
+
+    const result = await propagatePersonalReviewerAssignment({ runId: "run-1", ownerUserId: "owner-1" });
+    expect(result).toEqual({ status: "assigned", reviewerUserId: "reviewer-1" });
+  });
+});

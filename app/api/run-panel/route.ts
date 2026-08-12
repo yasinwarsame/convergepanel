@@ -39,6 +39,7 @@ import { GovernanceRecordV1 } from "@/lib/adaptiveSchema/governanceRecord";
 import { CommonResponseMeta } from "@/lib/adaptiveSchema/types";
 import { loadUserAndTeam } from "@/lib/teams/teamApiAuth";
 import { routeAdaptiveTeamReview, buildAdaptiveTeamRunProjection } from "@/lib/governance/adaptiveTeamReview";
+import { propagatePersonalReviewerAssignment } from "@/lib/governance/personalReviewerAssignment";
 import { createAdaptiveTeamRunProjection } from "@/lib/firestore/teamRuns";
 import { PersistedAdaptiveSchemaId } from "@/lib/adaptiveSchema/persistedOutput";
 import { incrementUserTokenUsage } from "@/lib/firestore/userTokens";
@@ -880,6 +881,15 @@ export async function POST(req: NextRequest) {
        */
       adaptiveTeamReviewProjectionStatus?: "created" | "already_exists" | "disabled" | "not_eligible" | "failed";
       /**
+       * Reviewer Assignment Propagation — status of the automatic
+       * personal (non-team) reviewer-assignment attempt. Only ever set
+       * when the owner has no team (adaptiveTeamReviewProjectionStatus
+       * === "disabled" for that reason) AND governance was freshly
+       * created this request. Omitted for team runs and for reload/
+       * already-initialized runs — never re-attempted or re-derived.
+       */
+      personalReviewerAssignmentStatus?: "assigned" | "not_configured" | "reviewer_unavailable" | "already_assigned" | "not_pending" | "failed";
+      /**
        * Adaptive Synthesis Report, Phase 1 (docs/adaptive-synthesis-report-design.md
        * §4.1) — compact human-review state for the top summary bar. Never
        * reviewer name or comment text (same discipline as humanReviewHistory).
@@ -1195,6 +1205,26 @@ export async function POST(req: NextRequest) {
               const teamCtx = await loadUserAndTeam(uid);
               if (!teamCtx?.team) {
                 adaptivePayload.adaptiveTeamReviewProjectionStatus = "disabled";
+
+                // Reviewer Assignment Propagation — the personal (non-team)
+                // equivalent of the team projection/assignment path below.
+                // Gated on "created" specifically (not "already_exists" or
+                // "blocked_reviewed"): a genuinely NEW governance record,
+                // exactly once per run, never on reload/retry. See
+                // lib/governance/personalReviewerAssignment.ts for why this
+                // exists and what it does and does not do.
+                if (initResultForAutomatedGovernance.status === "created") {
+                  try {
+                    const propagationResult = await propagatePersonalReviewerAssignment({ runId, ownerUserId: uid });
+                    adaptivePayload.personalReviewerAssignmentStatus = propagationResult.status;
+                  } catch (personalAssignError: unknown) {
+                    adaptivePayload.personalReviewerAssignmentStatus = "failed";
+                    logger.warn("[run-panel] Personal reviewer-assignment propagation threw, run response unaffected", {
+                      runId,
+                      schemaId: adaptiveOutput.schemaId,
+                    });
+                  }
+                }
               } else {
                 const routingResult = routeAdaptiveTeamReview({
                   humanReviewNeeded: record.decisionReceipt.humanReviewNeeded,
@@ -1263,7 +1293,15 @@ export async function POST(req: NextRequest) {
           }
           adaptivePayload.reviewRouting =
             adaptivePayload.adaptiveTeamReviewProjectionStatus === "created" ||
-            adaptivePayload.adaptiveTeamReviewProjectionStatus === "already_exists"
+            adaptivePayload.adaptiveTeamReviewProjectionStatus === "already_exists" ||
+            // A personal account with a canonical assignment now in place
+            // (fresh this request, or already present from an earlier
+            // request) is exactly as "routed for review" as a team run
+            // with a queue projection — reuses the same "in_queue" value
+            // and label (Reviewer Assignment Propagation, Step 17)
+            // deliberately, rather than inventing a second one.
+            adaptivePayload.personalReviewerAssignmentStatus === "assigned" ||
+            adaptivePayload.personalReviewerAssignmentStatus === "already_assigned"
               ? "in_queue"
               : adaptivePayload.adaptiveTeamReviewProjectionStatus === "disabled" ||
                   adaptivePayload.adaptiveTeamReviewProjectionStatus === "not_eligible"
