@@ -316,6 +316,72 @@ describe("buildReviewGovernanceViewModel — milestone2, peer-review panel", () 
   });
 });
 
+describe("buildReviewGovernanceViewModel — comment/justification text never leaks, across every lifecycle state (final review request)", () => {
+  it("changes_requested vote comment never appears in the output", async () => {
+    const panel = makePanel();
+    const votes = [
+      makeVote({ reviewerUserId: "reviewer-1", status: "changes_requested", comment: "PRIVATE: the pricing table looks wrong", commentPresent: true }),
+    ];
+    const result = await buildReviewGovernanceViewModel(baseInput({ governanceRecord: makeGovernanceRecord(), panel, votes }));
+    expect(JSON.stringify(result)).not.toContain("PRIVATE");
+    expect(JSON.stringify(result)).not.toContain("pricing table");
+  });
+
+  it("rejected vote comment never appears in the output", async () => {
+    const panel = makePanel();
+    const votes = [makeVote({ reviewerUserId: "reviewer-1", status: "rejected", comment: "PRIVATE: reject for legal reasons", commentPresent: true })];
+    const result = await buildReviewGovernanceViewModel(baseInput({ governanceRecord: makeGovernanceRecord(), panel, votes }));
+    expect(JSON.stringify(result)).not.toContain("PRIVATE");
+    expect(JSON.stringify(result)).not.toContain("legal reasons");
+  });
+
+  it("owner override justification text never appears in the output, even though the canonical record carries it", async () => {
+    const panel = makePanel({
+      status: "finalized",
+      finalStatus: "rejected",
+      finalizedAt: "2026-08-12T10:55:00.000Z",
+      finalizedByUserId: "admin-1",
+      finalDecisionId: "decision-1",
+      aggregationPolicyVersion: 1,
+      finalizedVia: "owner_override",
+      overrideJustificationPresent: true,
+      overrideByUserId: "admin-1",
+    });
+    const record = makeGovernanceRecord({
+      status: "rejected",
+      reviewerId: "admin-1",
+      decidedVia: "multi_reviewer_owner_override",
+      overrideJustification: "PRIVATE: overriding because reviewer-1 has a conflict of interest",
+    });
+    const result = await buildReviewGovernanceViewModel(baseInput({ governanceRecord: record, panel, votes: [] }));
+    expect(JSON.stringify(result)).not.toContain("PRIVATE");
+    expect(JSON.stringify(result)).not.toContain("conflict of interest");
+  });
+
+  it("single-reviewer comment never appears in the output", async () => {
+    const record = makeGovernanceRecord({
+      status: "approved_with_conditions",
+      reviewerId: "reviewer-1",
+      conditions: ["Verify figures"],
+      comment: "PRIVATE: reviewer's internal note to self",
+      decidedVia: "single_reviewer",
+    });
+    const result = await buildReviewGovernanceViewModel(baseInput({ governanceRecord: record }));
+    expect(JSON.stringify(result)).not.toContain("PRIVATE");
+    expect(JSON.stringify(result)).not.toContain("internal note to self");
+  });
+
+  it("cancelled panel: no vote comment text leaks even if a vote happened to exist before cancellation", async () => {
+    const panel = makePanel({ status: "cancelled" });
+    // A cancelled panel's votes are never fetched by the real route (confirmed
+    // in route.spec.ts), but the builder itself must also be safe even if a
+    // caller mistakenly passed votes through.
+    const votes = [makeVote({ reviewerUserId: "reviewer-1", status: "approved", comment: "PRIVATE: should never appear even here", commentPresent: true })];
+    const result = await buildReviewGovernanceViewModel(baseInput({ governanceRecord: makeGovernanceRecord(), panel, votes }));
+    expect(JSON.stringify(result)).not.toContain("PRIVATE");
+  });
+});
+
 describe("buildReviewGovernanceViewModel — regression: no teamRuns/routing input exists to derive from", () => {
   it("produces an identical result regardless of any extraneous teamRuns-shaped field smuggled onto the input", async () => {
     const input = baseInput({ governanceRecord: makeGovernanceRecord({ status: "approved", reviewerId: "reviewer-1" }) });

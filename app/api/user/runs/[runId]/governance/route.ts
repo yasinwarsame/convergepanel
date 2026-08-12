@@ -35,7 +35,7 @@ import { getAdaptiveHumanReviewAssignment, getAdaptiveHumanReviewPanel, getAdapt
 import type { AdaptiveHumanReviewAssignmentV1 } from "@/lib/governance/adaptiveHumanReviewAssignment";
 import type { AdaptiveHumanReviewPanelV1 } from "@/lib/governance/adaptiveHumanReviewPanel";
 import type { AdaptiveHumanReviewVoteV1 } from "@/lib/governance/adaptiveHumanReviewVote";
-import { resolveReviewerDisplayName } from "@/lib/governance/reviewerIdentity";
+import { resolveReviewerDisplayNames, UNKNOWN_REVIEWER_LABEL } from "@/lib/governance/reviewerIdentity";
 import { loadUserAndTeam } from "@/lib/teams/teamApiAuth";
 import { logger } from "@/lib/logger";
 
@@ -134,7 +134,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
   }
 
   // The run owner (this endpoint's only caller) has no team-admin context
-  // by default — sourced here purely to give resolveReviewerDisplayName a
+  // by default — sourced here purely to give the identity resolver a
   // roster of member emails for its masked-email fallback, never to gate
   // authorization (the owner check above already did that) and never to
   // change family classification.
@@ -142,7 +142,24 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
   const callerEmail = teamCtx?.user?.email;
   const emailByUid = new Map((teamCtx?.team?.members ?? []).map((m) => [m.uid, m.email] as const));
 
-  const resolveDisplayName = (reviewerUid: string) => resolveReviewerDisplayName(reviewerUid, emailByUid.get(reviewerUid), callerEmail);
+  // Batch-resolve every uid this response could possibly need in ONE
+  // Firestore round-trip (resolveReviewerDisplayNames -> db.getAll()),
+  // rather than one independent read per reviewer — the candidate set is
+  // collected up front since assignment/panel/governance are all already
+  // in hand at this point. Bounded by MAX_ADAPTIVE_PANEL_REVIEWERS (9) in
+  // practice; deduplicated internally by the resolver.
+  const candidateUids = new Set<string>();
+  if (legacy?.reviewedByUid) candidateUids.add(legacy.reviewedByUid);
+  if (govParse.ok && govParse.record.humanReview.reviewerId) candidateUids.add(govParse.record.humanReview.reviewerId);
+  if (assignment?.assignedReviewerUserId) candidateUids.add(assignment.assignedReviewerUserId);
+  if (assignment?.assignedByUserId) candidateUids.add(assignment.assignedByUserId);
+  if (panel) {
+    for (const reviewerId of panel.reviewerUserIds) candidateUids.add(reviewerId);
+    if (panel.overrideByUserId) candidateUids.add(panel.overrideByUserId);
+  }
+
+  const resolvedNames = await resolveReviewerDisplayNames(Array.from(candidateUids), emailByUid, callerEmail);
+  const resolveDisplayName = async (reviewerUid: string) => resolvedNames.get(reviewerUid) ?? UNKNOWN_REVIEWER_LABEL;
 
   const governance = await buildReviewGovernanceViewModel({
     governanceRecord: govParse.ok ? govParse.record : null,
