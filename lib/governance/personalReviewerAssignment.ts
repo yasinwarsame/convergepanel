@@ -83,6 +83,20 @@ export type PropagatePersonalReviewerAssignmentResult =
   | { status: "failed" };
 
 /**
+ * Defense-in-depth: app/api/governance/reviewer/route.ts's own
+ * `assign_reviewer` action already refuses to let a user configure
+ * themselves as their own reviewer, so `ownerUserId === reviewerUserId`
+ * should be structurally impossible in a real, API-written config. This
+ * check exists anyway — cheap, and it means a data anomaly (a stale/
+ * tampered doc, a future config-writing bug) can never silently produce a
+ * "reviewed by yourself" assignment, rather than trusting that upstream
+ * validation forever holds.
+ */
+function isSelfAssignment(ownerUserId: string, reviewerUserId: string): boolean {
+  return ownerUserId === reviewerUserId;
+}
+
+/**
  * Never throws. Called at most once per run, only immediately after a
  * FRESH governance-record creation (the caller gates on
  * `initResult.status === "created"`) — never on "already_exists" or a
@@ -105,6 +119,12 @@ export async function propagatePersonalReviewerAssignment(args: {
     const ownerSnap = await adminDb.collection("users").doc(args.ownerUserId).get();
     const reviewerUserId = ownerConfiguredReviewerUid(ownerSnap.data());
     if (!reviewerUserId) {
+      return { status: "not_configured" };
+    }
+    if (isSelfAssignment(args.ownerUserId, reviewerUserId)) {
+      logger.warn("[personalReviewerAssignment] Refusing a self-assignment data anomaly (should be unreachable via the normal config route)", {
+        runId: args.runId,
+      });
       return { status: "not_configured" };
     }
 
