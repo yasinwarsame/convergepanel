@@ -18,7 +18,13 @@
 import type { AdaptiveReviewDecisionRequest, AdaptiveReviewDecisionStatus } from "../governance/adaptiveReviewFormContract";
 
 export type AdaptiveReviewSubmissionResult =
-  | { kind: "success"; status: AdaptiveReviewDecisionStatus; reviewedAt: string; projectionSyncStatus: "synced" | "failed" }
+  | {
+      kind: "success";
+      status: AdaptiveReviewDecisionStatus;
+      reviewedAt: string;
+      /** Undefined for a personal-reviewer submission — no teamRuns projection exists to sync for a personal run, so the field is simply absent rather than a misleading "synced". */
+      projectionSyncStatus?: "synced" | "failed";
+    }
   | { kind: "validation_error" }
   | { kind: "stale" }
   | { kind: "terminal" }
@@ -36,14 +42,32 @@ export interface PostJsonResponseLike {
   json: () => Promise<any>;
 }
 
+/**
+ * Personal Reviewer Inbox + Action Flow — "team" (default, every existing
+ * caller) submits to the team decision route; "personal" submits to the
+ * personal (teamId: null) one. Deliberately an enum, not a caller-supplied
+ * URL string or builder function — this keeps decision-route URL
+ * construction consolidated in exactly this one file, which
+ * adaptiveReviewDecisionFormIsolation.spec.ts's "referenced from exactly
+ * one client file" test exists specifically to guarantee.
+ */
+export type AdaptiveReviewDecisionScope = "team" | "personal";
+
+function decisionRouteUrl(scope: AdaptiveReviewDecisionScope, runId: string): string {
+  const encoded = encodeURIComponent(runId);
+  return scope === "personal" ? `/api/user/runs/${encoded}/decision` : `/api/teams/adaptive-runs/${encoded}/decision`;
+}
+
 export async function submitAdaptiveReviewDecision(args: {
   runId: string;
   request: AdaptiveReviewDecisionRequest;
   postJson: (url: string, body: unknown) => Promise<PostJsonResponseLike>;
+  scope?: AdaptiveReviewDecisionScope;
 }): Promise<AdaptiveReviewSubmissionResult> {
+  const url = decisionRouteUrl(args.scope ?? "team", args.runId);
   let res: PostJsonResponseLike;
   try {
-    res = await args.postJson(`/api/teams/adaptive-runs/${encodeURIComponent(args.runId)}/decision`, args.request);
+    res = await args.postJson(url, args.request);
   } catch {
     return { kind: "network_error" };
   }
@@ -60,7 +84,7 @@ export async function submitAdaptiveReviewDecision(args: {
       kind: "success",
       status: body.review?.status,
       reviewedAt: body.review?.reviewedAt,
-      projectionSyncStatus: body.projectionSyncStatus === "synced" ? "synced" : "failed",
+      projectionSyncStatus: body.projectionSyncStatus === "synced" ? "synced" : body.projectionSyncStatus === "failed" ? "failed" : undefined,
     };
   }
 

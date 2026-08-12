@@ -36,6 +36,7 @@ import type { AdaptiveHumanReviewAssignmentV1 } from "@/lib/governance/adaptiveH
 import type { AdaptiveHumanReviewPanelV1 } from "@/lib/governance/adaptiveHumanReviewPanel";
 import type { AdaptiveHumanReviewVoteV1 } from "@/lib/governance/adaptiveHumanReviewVote";
 import { resolveReviewerDisplayNames, UNKNOWN_REVIEWER_LABEL } from "@/lib/governance/reviewerIdentity";
+import { resolveAdaptiveRunAccess } from "@/lib/governance/adaptiveRunAccess";
 import { loadUserAndTeam } from "@/lib/teams/teamApiAuth";
 import { logger } from "@/lib/logger";
 
@@ -75,9 +76,6 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
 
   const data = snap.data() as Record<string, unknown>;
   const owner = String(data.userId ?? "");
-  if (owner !== uid) {
-    return NextResponse.json({ ok: false, errorCode: "forbidden", message: "You do not have access to this run." }, { status: 403 });
-  }
 
   const govParse = parseGovernanceRecord(data.governanceRecord);
   if (!govParse.ok && govParse.reason !== "absent") {
@@ -88,6 +86,37 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
     // not_configured).
     logger.warn("[user/runs/governance] Unreadable governanceRecord", { runId, reason: govParse.reason });
     return NextResponse.json({ ok: false, errorCode: "governance_data_invalid", message: "Review information unavailable." }, { status: 500 });
+  }
+
+  let assignment: AdaptiveHumanReviewAssignmentV1 | null = null;
+  let panel: AdaptiveHumanReviewPanelV1 | null = null;
+  let votes: AdaptiveHumanReviewVoteV1[] = [];
+
+  // Personal Reviewer Inbox + Action Flow — the assignment read moved
+  // earlier (unconditional on govParse.ok) so it can also serve the
+  // authorization check below for a non-owner caller. Same response shape
+  // either way — no owner-only fields exist in this endpoint's output
+  // (assignment/singleReviewer/panel are exactly what a reviewer needs to
+  // see about their own review).
+  const assignmentResult = await getAdaptiveHumanReviewAssignment(runId);
+  if (assignmentResult.status === "found") {
+    assignment = assignmentResult.assignment;
+  } else if (assignmentResult.status === "read_failed" || assignmentResult.status === "firestore_unavailable") {
+    logger.warn("[user/runs/governance] Assignment read failed; degrading to no-assignment", { runId, status: assignmentResult.status });
+  }
+
+  let viewerRole: "owner" | "personal_reviewer" = "owner";
+  if (owner !== uid) {
+    const access = resolveAdaptiveRunAccess({
+      uid,
+      runOwnerUid: owner,
+      assignment,
+      humanReviewStatus: govParse.ok ? govParse.record.humanReview.status : null,
+    });
+    if (access.role !== "personal_reviewer") {
+      return NextResponse.json({ ok: false, errorCode: "forbidden", message: "You do not have access to this run." }, { status: 403 });
+    }
+    viewerRole = "personal_reviewer";
   }
 
   const rawLegacyStatus = data.governanceStatus;
@@ -101,18 +130,8 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
         }
       : null;
 
-  let assignment: AdaptiveHumanReviewAssignmentV1 | null = null;
-  let panel: AdaptiveHumanReviewPanelV1 | null = null;
-  let votes: AdaptiveHumanReviewVoteV1[] = [];
-
   if (govParse.ok) {
-    const [assignmentResult, panelResult] = await Promise.all([getAdaptiveHumanReviewAssignment(runId), getAdaptiveHumanReviewPanel(runId)]);
-
-    if (assignmentResult.status === "found") {
-      assignment = assignmentResult.assignment;
-    } else if (assignmentResult.status === "read_failed" || assignmentResult.status === "firestore_unavailable") {
-      logger.warn("[user/runs/governance] Assignment read failed; degrading to no-assignment", { runId, status: assignmentResult.status });
-    }
+    const panelResult = await getAdaptiveHumanReviewPanel(runId);
 
     if (panelResult.status === "found") {
       panel = panelResult.panel;
@@ -170,5 +189,34 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
     resolveDisplayName,
   });
 
-  return NextResponse.json({ ok: true, governance });
+  return NextResponse.json({
+    ok: true,
+    viewerRole,
+    // Personal Reviewer Inbox + Action Flow — the same optimistic-
+    // concurrency token the team decision form already sends as
+    // `expectedUpdatedAt` (submitAdaptiveHumanReview matches it against
+    // governanceRecord.updatedAt inside its own transaction). Not
+    // sensitive — a plain timestamp — and required for the personal
+    // decision form to function at all.
+    governanceUpdatedAt: govParse.ok ? govParse.record.updatedAt : undefined,
+    // The single source of truth this route's own callers (the personal
+    // reviewer detail page) use to decide whether the decision form should
+    // render — reads directly off the parsed governanceRecord, never
+    // gated behind /api/user/runs/[runId]'s separate, stricter
+    // parsePersistedAdaptiveOutput validation of the full adaptiveOutput
+    // envelope. Those are two different concerns (full report content vs.
+    // the compact governance record) and must not be conflated — a run
+    // can have a perfectly valid, reviewable governanceRecord even if
+    // some other part of its adaptiveOutput envelope is in an unexpected
+    // shape.
+    humanReviewStatus: govParse.ok ? govParse.record.humanReview.status : undefined,
+    // Mirrors AdaptiveReviewDetailResponseV1's own decisionReceipt exposure
+    // (the team detail route) — conclusion/basis/assumptions/uncertainties/
+    // limitations/sourceBacked/humanReviewNeeded are exactly what a
+    // reviewer needs to make a decision, and none of it is owner-only.
+    decisionReceipt: govParse.ok ? govParse.record.decisionReceipt : undefined,
+    schemaId: govParse.ok ? govParse.record.schemaId : undefined,
+    answerShape: govParse.ok ? govParse.record.answerShape : undefined,
+    governance,
+  });
 }

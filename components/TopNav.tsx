@@ -187,6 +187,15 @@ export default function TopNav() {
             </Link>
           )}
 
+          {!loading && user && (
+            <Link
+              href="/reviews"
+              className="rounded-md px-3 py-1.5 text-[15px] font-medium text-cp-muted transition-colors hover:bg-cp-raised hover:text-cp-text"
+            >
+              My Reviews
+            </Link>
+          )}
+
           {!loading && (
             <div className="ml-3 flex items-center gap-3">
               {!user ? (

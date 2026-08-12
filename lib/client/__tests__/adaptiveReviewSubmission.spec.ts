@@ -25,6 +25,18 @@ describe("submitAdaptiveReviewDecision", () => {
     expect(postJson).toHaveBeenCalledWith("/api/teams/adaptive-runs/run-1/decision", REQUEST);
   });
 
+  it("Personal Reviewer Inbox + Action Flow: scope 'personal' posts to the personal decision route instead", async () => {
+    const postJson = jest.fn().mockResolvedValue(fakeResponse(200, { ok: true, review: { status: "approved", reviewedAt: "x" } }));
+    await submitAdaptiveReviewDecision({ runId: "run-1", request: REQUEST, postJson, scope: "personal" });
+    expect(postJson).toHaveBeenCalledWith("/api/user/runs/run-1/decision", REQUEST);
+  });
+
+  it("a personal-scoped success response with no projectionSyncStatus field maps to projectionSyncStatus: undefined, never a misleading 'failed'", async () => {
+    const postJson = jest.fn().mockResolvedValue(fakeResponse(200, { ok: true, review: { status: "approved", reviewedAt: "x" } }));
+    const result = await submitAdaptiveReviewDecision({ runId: "run-1", request: REQUEST, postJson, scope: "personal" });
+    expect(result).toEqual({ kind: "success", status: "approved", reviewedAt: "x", projectionSyncStatus: undefined });
+  });
+
   it("maps a successful response", async () => {
     const postJson = jest
       .fn()

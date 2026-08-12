@@ -531,3 +531,115 @@ describe("GET /api/user/runs/[runId]/governance — canonical governance precede
     expect(json.governance.assignment).toBeNull();
   });
 });
+
+describe("GET /api/user/runs/[runId]/governance — personal reviewer access", () => {
+  const REVIEWER_UID = "reviewer-1";
+  const OTHER_UID = "other-1";
+
+  function personalAssignment(overrides: Record<string, unknown> = {}) {
+    return {
+      schemaVersion: 1,
+      teamId: null,
+      runId: RUN_ID,
+      assignedReviewerUserId: REVIEWER_UID,
+      assignedAt: "2026-08-12T18:00:00.000Z",
+      assignedByUserId: UID,
+      updatedAt: "2026-08-12T18:00:00.000Z",
+      updatedByUserId: UID,
+      revision: 1,
+      ...overrides,
+    };
+  }
+
+  it("the currently-assigned personal reviewer is granted access, viewerRole: personal_reviewer, and sees their own assignment", async () => {
+    mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: REVIEWER_UID });
+    mockedRunGet.mockResolvedValue({
+      exists: true,
+      data: () => ({ userId: UID, governanceRecord: baseGovernanceRecord() }),
+    });
+    mockedGetAssignment.mockResolvedValue({ status: "found", assignment: personalAssignment() });
+
+    const { res, json } = await callRoute();
+    expect(res.status).toBe(200);
+    expect(json.viewerRole).toBe("personal_reviewer");
+    expect(json.governance.family).toBe("milestone2");
+    expect(json.governance.assignment).toMatchObject({ reviewerUserId: REVIEWER_UID });
+  });
+
+  it("an unrelated user (not owner, no assignment) is denied and leaks nothing", async () => {
+    mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: OTHER_UID });
+    mockedRunGet.mockResolvedValue({
+      exists: true,
+      data: () => ({ userId: UID, governanceRecord: baseGovernanceRecord({ humanReview: { status: "approved", reviewerId: REVIEWER_UID } }) }),
+    });
+    mockedGetAssignment.mockResolvedValue({ status: "unassigned" });
+
+    const { res, json } = await callRoute();
+    expect(res.status).toBe(403);
+    expect(json.governance).toBeUndefined();
+    expect(JSON.stringify(json)).not.toContain(REVIEWER_UID);
+  });
+
+  it("Part 21 cross-run IDOR: a reviewer assigned to a different run (assignment names someone else) is denied for this run", async () => {
+    mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: OTHER_UID });
+    mockedRunGet.mockResolvedValue({
+      exists: true,
+      data: () => ({ userId: UID, governanceRecord: baseGovernanceRecord() }),
+    });
+    mockedGetAssignment.mockResolvedValue({ status: "found", assignment: personalAssignment({ assignedReviewerUserId: REVIEWER_UID }) });
+
+    const { res } = await callRoute();
+    expect(res.status).toBe(403);
+  });
+
+  it("a TEAM assignment (real teamId) never grants access through this owner-only-plus-personal route", async () => {
+    mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: REVIEWER_UID });
+    mockedRunGet.mockResolvedValue({
+      exists: true,
+      data: () => ({ userId: UID, governanceRecord: baseGovernanceRecord() }),
+    });
+    mockedGetAssignment.mockResolvedValue({ status: "found", assignment: personalAssignment({ teamId: "team-abc" }) });
+
+    const { res } = await callRoute();
+    expect(res.status).toBe(403);
+  });
+
+  it("exposes decisionReceipt/schemaId/answerShape/governanceUpdatedAt for a personal reviewer (Part 10/11) — needed for the review detail page and decision form's optimistic-concurrency token", async () => {
+    mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: REVIEWER_UID });
+    mockedRunGet.mockResolvedValue({
+      exists: true,
+      data: () => ({ userId: UID, governanceRecord: baseGovernanceRecord({ decisionReceipt: { conclusion: "The panel recommends X.", basis: [], assumptions: [], uncertainties: [], limitations: [], sources: [], sourceBacked: true, humanReviewNeeded: true } }) }),
+    });
+    mockedGetAssignment.mockResolvedValue({ status: "found", assignment: personalAssignment() });
+
+    const { json } = await callRoute();
+    expect(json.decisionReceipt.conclusion).toBe("The panel recommends X.");
+    expect(json.schemaId).toBe("deep_research");
+    expect(json.governanceUpdatedAt).toBe("2026-08-01T00:00:00.000Z");
+    expect(json.humanReviewStatus).toBe("unreviewed");
+  });
+
+  it("humanReviewStatus is sourced from the parsed governanceRecord directly — never gated behind a separate adaptiveOutput envelope check the way /api/user/runs/[runId] is (a real regression this feature introduced and fixed)", async () => {
+    mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: REVIEWER_UID });
+    mockedRunGet.mockResolvedValue({
+      exists: true,
+      data: () => ({ userId: UID, governanceRecord: baseGovernanceRecord({ humanReview: { status: "approved", reviewerId: REVIEWER_UID } }) }),
+    });
+    mockedGetAssignment.mockResolvedValue({ status: "found", assignment: personalAssignment() });
+    const { json } = await callRoute();
+    expect(json.humanReviewStatus).toBe("approved");
+  });
+
+  it("Part 22: an OLD assignment's reviewer keeps access to that run even though this test never touches any 'current default reviewer' concept at all — access is purely per-run canonical assignment", async () => {
+    mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: REVIEWER_UID });
+    mockedRunGet.mockResolvedValue({
+      exists: true,
+      data: () => ({ userId: UID, governanceRecord: baseGovernanceRecord({ humanReview: { status: "approved", reviewerId: REVIEWER_UID, decidedVia: "single_reviewer" } }) }),
+    });
+    mockedGetAssignment.mockResolvedValue({ status: "found", assignment: personalAssignment() });
+
+    const { res, json } = await callRoute();
+    expect(res.status).toBe(200);
+    expect(json.governance.singleReviewer).toMatchObject({ userId: REVIEWER_UID });
+  });
+});

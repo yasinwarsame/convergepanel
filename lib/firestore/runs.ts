@@ -845,7 +845,7 @@ export async function submitAdaptiveHumanReview(args: {
  */
 export async function writeAdaptiveHumanReviewEvent(args: {
   runId: string;
-  teamId: string;
+  teamId: string | null;
   schemaId: GovernanceRecordV1["schemaId"];
   answerShape: GovernanceRecordV1["answerShape"];
   reviewerId: string;
