@@ -51,6 +51,20 @@ export interface LegacyTeamRunListItemV1 {
   humanDecision?: {
     action: "approved" | "rejected" | "escalated";
     decidedAt: string;
+    /**
+     * Review Page Reviewer Display — raw decider uid, carried through
+     * classification ONLY so the route's enrichment step
+     * (`lib/governance/teamReviewQueueEnrichment.ts`) can resolve it to a
+     * safe display name. This is an internal, server-side-only field: the
+     * route MUST always pass every legacy item through
+     * `enrichLegacyTeamRunListItem()` before building the HTTP response,
+     * which replaces this raw uid with a resolved `reviewer` object and
+     * never re-exposes it. `TeamRunDocument.humanDecision.decidedBy` is
+     * itself the canonical decider for this legacy (System B, team-queue)
+     * governance path — see teamReviewQueueEnrichment.ts's own header
+     * comment for why this differs from the Milestone-2 projection case.
+     */
+    decidedBy?: string;
   };
 }
 
@@ -218,7 +232,8 @@ function classifyLegacyRow(teamRunId: string, data: Record<string, unknown>): Pa
     const action = data.humanDecision.action;
     const decidedAt = data.humanDecision.decidedAt;
     if ((action === "approved" || action === "rejected" || action === "escalated") && isNonEmptyString(decidedAt)) {
-      humanDecision = { action, decidedAt };
+      const decidedBy = isNonEmptyString(data.humanDecision.decidedBy) ? data.humanDecision.decidedBy : undefined;
+      humanDecision = { action, decidedAt, decidedBy };
     }
   }
 

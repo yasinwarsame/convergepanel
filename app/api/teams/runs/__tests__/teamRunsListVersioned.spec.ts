@@ -7,20 +7,60 @@
  */
 
 const teamRunDocs = new Map<string, Record<string, any>>();
+// Path-keyed store for the enrichment reads this route now performs:
+// "runs/{runId}" (governanceRecord), "runs/{runId}/humanReviewAssignment/current",
+// "runs/{runId}/humanReviewPanel/current", "runs/{runId}/humanReviewVotes/{voteId}".
+const pathStore = new Map<string, Record<string, any>>();
+let getAllShouldThrow = false;
+
+function makeDocRef(path: string): any {
+  return {
+    __path: path,
+    id: path.split("/").pop(),
+    get: async () => ({ exists: pathStore.has(path), data: () => pathStore.get(path) }),
+    collection: (name: string) => makeCollectionRef(`${path}/${name}`),
+  };
+}
+
+function makeCollectionRef(path: string): any {
+  return {
+    doc: (id: string) => makeDocRef(`${path}/${id}`),
+  };
+}
 
 const mockAdminDb = {
-  collection: (name: string) => ({
-    where: (field: string, _op: string, value: unknown) => ({
-      get: async () => {
-        const matches = [...teamRunDocs.entries()].filter(([, data]) => data[field] === value);
-        return { docs: matches.map(([id, data]) => ({ id, data: () => data })) };
-      },
-    }),
-  }),
+  collection: (name: string) => {
+    if (name === "teamRuns") {
+      return {
+        where: (field: string, _op: string, value: unknown) => ({
+          get: async () => {
+            const matches = [...teamRunDocs.entries()].filter(([, data]) => data[field] === value);
+            return { docs: matches.map(([id, data]) => ({ id, data: () => data })) };
+          },
+        }),
+      };
+    }
+    return makeCollectionRef(name);
+  },
+  getAll: async (...refs: Array<{ __path: string }>) => {
+    if (getAllShouldThrow) throw new Error("batch read boom");
+    return refs.map((ref) => ({ exists: pathStore.has(ref.__path), data: () => pathStore.get(ref.__path) }));
+  },
 };
 
 jest.mock("@/lib/firebase/admin", () => ({
   adminDb: mockAdminDb,
+}));
+
+// Identity resolution is already covered end-to-end by
+// lib/governance/__tests__/reviewerIdentity.spec.ts (including its own
+// db.getAll() batching) — mocked here so this file can assert precisely
+// on WHICH uids the route collects and batches, independent of the
+// resolver's own internal correctness.
+const mockedResolveReviewerDisplayNames = jest.fn();
+jest.mock("@/lib/governance/reviewerIdentity", () => ({
+  resolveReviewerDisplayNames: (...args: any[]) => mockedResolveReviewerDisplayNames(...args),
+  UNKNOWN_REVIEWER_LABEL: "Unknown reviewer",
 }));
 
 const mockedGetRequestUid = jest.fn();
@@ -88,17 +128,101 @@ function buildRequest(qs: string): NextRequest {
 
 beforeEach(() => {
   teamRunDocs.clear();
+  pathStore.clear();
+  getAllShouldThrow = false;
   mockLoggerWarn.mockClear();
   mockedGetRequestUid.mockReset();
   mockedLoadUserAndTeam.mockReset();
   mockedMemberRole.mockReset();
   mockedIsTeamAdmin.mockReset();
+  mockedResolveReviewerDisplayNames.mockReset();
 
   mockedGetRequestUid.mockResolvedValue("caller-uid");
-  mockedLoadUserAndTeam.mockResolvedValue({ user: {}, team: { id: TEAM_ID } });
+  mockedLoadUserAndTeam.mockResolvedValue({ user: { email: "caller@test.com" }, team: { id: TEAM_ID, members: [] } });
   mockedMemberRole.mockReturnValue("admin");
   mockedIsTeamAdmin.mockReturnValue(true);
+  mockedResolveReviewerDisplayNames.mockImplementation(async (uids: string[]) => new Map(uids.map((uid) => [uid, `Name-${uid}`])));
 });
+
+/** Seeds a canonical governanceRecord for an adaptive row's runId. */
+function setGovernanceRecord(runId: string, humanReview: Record<string, unknown>) {
+  pathStore.set(`runs/${runId}`, {
+    governanceRecord: {
+      version: 1,
+      schemaId: "decision_support",
+      answerShape: "decision_support_view",
+      adaptiveOutputVersion: 1,
+      humanReview,
+      decisionReceipt: {
+        conclusion: "c",
+        basis: [],
+        assumptions: [],
+        uncertainties: [],
+        limitations: [],
+        sources: [],
+        sourceBacked: false,
+        humanReviewNeeded: false,
+      },
+      createdAt: "2026-08-01T00:00:00.000Z",
+      updatedAt: "2026-08-01T00:00:00.000Z",
+    },
+  });
+}
+
+/** Seeds a humanReviewAssignment/current doc for a runId. */
+function setAssignment(runId: string, overrides: Record<string, unknown> = {}) {
+  pathStore.set(`runs/${runId}/humanReviewAssignment/current`, {
+    schemaVersion: 1,
+    teamId: TEAM_ID,
+    runId,
+    assignedReviewerUserId: "reviewer-1",
+    assignedAt: "2026-08-12T10:31:00.000Z",
+    assignedByUserId: "admin-1",
+    updatedAt: "2026-08-12T10:31:00.000Z",
+    updatedByUserId: "admin-1",
+    revision: 1,
+    ...overrides,
+  });
+}
+
+/** Seeds a humanReviewPanel/current doc for a runId. */
+function setPanel(runId: string, overrides: Record<string, unknown> = {}) {
+  pathStore.set(`runs/${runId}/humanReviewPanel/current`, {
+    schemaVersion: 1,
+    kind: "adaptive_review_panel",
+    teamId: TEAM_ID,
+    runId,
+    mode: "majority_quorum",
+    reviewerUserIds: ["reviewer-1", "reviewer-2"],
+    requiredReviewerCount: 2,
+    quorum: 2,
+    status: "open",
+    revision: 1,
+    createdAt: "2026-08-12T10:00:00.000Z",
+    createdByUserId: "admin-1",
+    updatedAt: "2026-08-12T10:00:00.000Z",
+    updatedByUserId: "admin-1",
+    ...overrides,
+  });
+}
+
+/** Seeds a humanReviewVotes/{voteId} doc — voteId matches buildAdaptiveHumanReviewVoteId's own `r{revision}:{encodeURIComponent(reviewerId)}` format. */
+function setVote(runId: string, panelRevision: number, reviewerUserId: string, overrides: Record<string, unknown> = {}) {
+  const voteId = `r${panelRevision}:${encodeURIComponent(reviewerUserId)}`;
+  pathStore.set(`runs/${runId}/humanReviewVotes/${voteId}`, {
+    schemaVersion: 1,
+    kind: "adaptive_human_review_vote",
+    teamId: TEAM_ID,
+    runId,
+    panelRevision,
+    reviewerUserId,
+    status: "approved",
+    commentPresent: false,
+    conditionsCount: 0,
+    submittedAt: "2026-08-12T10:44:00.000Z",
+    ...overrides,
+  });
+}
 
 describe("GET /api/teams/runs?version=1 — authorization", () => {
   it("rejects an unauthenticated request", async () => {
@@ -183,6 +307,20 @@ describe("GET /api/teams/runs?version=1 — response contract", () => {
     teamRunDocs.set("a1", adaptiveDoc());
     teamRunDocs.set("l1", legacyDoc());
     const serialized = JSON.stringify(await (await GET(buildRequest(""))).json());
+    // NOTE (final review, PR #31): `reviewerId`/`reviewerName` remain in
+    // this forbidden list as a guard against ever spreading a RAW
+    // governanceRecord/humanReview field verbatim into the response — but
+    // this specific test seeds no assignment/panel/governance data, so it
+    // never exercises the new enrichment path at all. It is NOT the test
+    // that governs reviewer-identity exposure policy going forward; see
+    // "GET /api/teams/runs?version=1 — reviewer display (final task)"
+    // below, which is the deliberate, disclosed change (same pattern as
+    // PR #30): resolved `displayName` fields ARE now present by design
+    // (`reviewerUserId`/`reviewerDisplayName`/`reviewer.displayName` —
+    // none of which match the raw-field substrings checked here), while
+    // comment/justification text and raw internal metadata remain
+    // forbidden everywhere, including in the enriched path (see the
+    // dedicated "privacy on enriched fields" describe block).
     for (const forbidden of ["consensusSummary", "auditBundle", "claims", "rawModelOutput", "reviewerId", "reviewerName", "comment", "conditions", "sources", "basis", "assumptions", "uncertainties"]) {
       expect(serialized).not.toContain(forbidden);
     }
@@ -358,5 +496,252 @@ describe("GET /api/teams/runs?version=1 — failure handling", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.items).toHaveLength(1);
+  });
+});
+
+describe("GET /api/teams/runs?version=1 — reviewer display (final task)", () => {
+  it("shows the assigned reviewer for an adaptive row awaiting review", async () => {
+    teamRunDocs.set("a1", adaptiveDoc({ runId: "run-assigned" }));
+    setGovernanceRecord("run-assigned", { status: "unreviewed" });
+    setAssignment("run-assigned");
+    const body = await (await GET(buildRequest(""))).json();
+    const item = body.items.find((i: any) => i.runId === "run-assigned");
+    expect(item.assignment).toMatchObject({ reviewerUserId: "reviewer-1", reviewerDisplayName: "Name-reviewer-1" });
+    expect(item.singleReviewer).toBeNull();
+  });
+
+  it("shows the completed single-reviewer result and timestamp", async () => {
+    teamRunDocs.set("a1", adaptiveDoc({ runId: "run-done", humanReviewStatus: "approved" }));
+    setGovernanceRecord("run-done", { status: "approved", reviewerId: "reviewer-1", reviewedAt: "2026-08-12T10:44:00.000Z", decidedVia: "single_reviewer" });
+    const body = await (await GET(buildRequest(""))).json();
+    const item = body.items.find((i: any) => i.runId === "run-done");
+    expect(item.singleReviewer).toEqual({ userId: "reviewer-1", displayName: "Name-reviewer-1", reviewedAt: "2026-08-12T10:44:00.000Z" });
+  });
+
+  it("shows peer-review panel progress with individual reviewer results", async () => {
+    teamRunDocs.set("a1", adaptiveDoc({ runId: "run-panel" }));
+    setGovernanceRecord("run-panel", { status: "unreviewed" });
+    setPanel("run-panel");
+    setVote("run-panel", 1, "reviewer-1", { status: "approved" });
+    const body = await (await GET(buildRequest(""))).json();
+    const item = body.items.find((i: any) => i.runId === "run-panel");
+    expect(item.panel).toMatchObject({ status: "open", requiredReviewerCount: 2, quorum: 2, submittedCount: 1, approvalCount: 1 });
+    expect(item.panel.reviewers).toEqual([
+      { userId: "reviewer-1", displayName: "Name-reviewer-1", hasVoted: true, voteStatus: "approved", submittedAt: "2026-08-12T10:44:00.000Z" },
+      { userId: "reviewer-2", displayName: "Name-reviewer-2", hasVoted: false },
+    ]);
+  });
+
+  it("shows owner override distinctly from an ordinary finalized result", async () => {
+    teamRunDocs.set("a1", adaptiveDoc({ runId: "run-override", humanReviewStatus: "rejected" }));
+    setGovernanceRecord("run-override", { status: "rejected", reviewerId: "admin-1", decidedVia: "multi_reviewer_owner_override" });
+    setPanel("run-override", {
+      status: "finalized",
+      updatedAt: "2026-08-12T10:55:00.000Z",
+      finalStatus: "rejected",
+      finalizedAt: "2026-08-12T10:55:00.000Z",
+      finalizedByUserId: "admin-1",
+      finalDecisionId: "decision-1",
+      aggregationPolicyVersion: 1,
+      finalizedVia: "owner_override",
+      overrideJustificationPresent: true,
+      overrideByUserId: "admin-1",
+    });
+    const body = await (await GET(buildRequest(""))).json();
+    const item = body.items.find((i: any) => i.runId === "run-override");
+    expect(item.panel).toMatchObject({ finalizedVia: "owner_override", overrideBy: { userId: "admin-1", displayName: "Name-admin-1" } });
+    expect(item.singleReviewer).toBeNull(); // override identity surfaces via panel.overrideBy, never duplicated
+  });
+
+  it("shows cancellation and does not present a stale assignment as active", async () => {
+    teamRunDocs.set("a1", adaptiveDoc({ runId: "run-cancelled" }));
+    setGovernanceRecord("run-cancelled", { status: "unreviewed" });
+    setAssignment("run-cancelled"); // pre-existing single-reviewer assignment, superseded by the panel
+    setPanel("run-cancelled", { status: "cancelled" });
+    const body = await (await GET(buildRequest(""))).json();
+    const item = body.items.find((i: any) => i.runId === "run-cancelled");
+    expect(item.panel.status).toBe("cancelled");
+  });
+
+  it("resolves a legacy row's decider to a safe display name", async () => {
+    teamRunDocs.set("l1", legacyDoc({ humanDecision: { action: "approved", decidedAt: "2026-08-12T10:00:00.000Z", decidedBy: "reviewer-1" } }));
+    const body = await (await GET(buildRequest(""))).json();
+    const item = body.items.find((i: any) => i.kind === "legacy");
+    expect(item.humanDecision).toEqual({ action: "approved", decidedAt: "2026-08-12T10:00:00.000Z", reviewer: { displayName: "Name-reviewer-1" } });
+  });
+
+  it("a legacy row with no decision yet has no humanDecision object at all (not a fake 'pending reviewer')", async () => {
+    teamRunDocs.set("l1", legacyDoc());
+    const body = await (await GET(buildRequest(""))).json();
+    const item = body.items.find((i: any) => i.kind === "legacy");
+    expect(item.humanDecision).toBeUndefined();
+  });
+});
+
+describe("GET /api/teams/runs?version=1 — identity batching, never N+1 (final task, Step 12)", () => {
+  it("resolves every reviewer identity on the page in exactly ONE call, across multiple rows and reviewers", async () => {
+    teamRunDocs.set("a1", adaptiveDoc({ runId: "run-1" }));
+    setGovernanceRecord("run-1", { status: "unreviewed" });
+    setAssignment("run-1", { assignedReviewerUserId: "reviewer-1", assignedByUserId: "admin-1" });
+
+    teamRunDocs.set("a2", adaptiveDoc({ runId: "run-2" }));
+    setGovernanceRecord("run-2", { status: "unreviewed" });
+    setPanel("run-2", { reviewerUserIds: ["reviewer-2", "reviewer-3"], requiredReviewerCount: 2, quorum: 2 });
+
+    teamRunDocs.set("l1", legacyDoc({ humanDecision: { action: "approved", decidedAt: "2026-08-12T10:00:00.000Z", decidedBy: "reviewer-4" } }));
+
+    await GET(buildRequest(""));
+
+    expect(mockedResolveReviewerDisplayNames).toHaveBeenCalledTimes(1);
+    const [calledUids] = mockedResolveReviewerDisplayNames.mock.calls[0];
+    expect(new Set(calledUids)).toEqual(new Set(["reviewer-1", "admin-1", "reviewer-2", "reviewer-3", "reviewer-4"]));
+  });
+
+  it("issues a bounded number of batched Firestore reads for governance/assignment/panel data, not one read per row", async () => {
+    for (let i = 0; i < 5; i++) {
+      teamRunDocs.set(`a${i}`, adaptiveDoc({ runId: `run-${i}` }));
+      setGovernanceRecord(`run-${i}`, { status: "unreviewed" });
+    }
+    const getAllSpy = jest.spyOn(mockAdminDb, "getAll");
+    await GET(buildRequest(""));
+    // One batched db.getAll() call per read TYPE (runs, assignment, panel —
+    // each its own chunked batch, ≤10 refs so 1 call each here) = 3 total,
+    // no votes (no panels exist) — never one call per ROW (which would be
+    // 5), let alone one per row per field (15 individual .get() calls).
+    expect(getAllSpy.mock.calls.length).toBe(3);
+    getAllSpy.mockRestore();
+  });
+
+  it("does not call the identity resolver at all when the page has zero adaptive/legacy reviewer data", async () => {
+    teamRunDocs.set("a1", adaptiveDoc({ runId: "run-empty" }));
+    setGovernanceRecord("run-empty", { status: "unreviewed" });
+    teamRunDocs.set("l1", legacyDoc());
+    await GET(buildRequest(""));
+    expect(mockedResolveReviewerDisplayNames).toHaveBeenCalledWith([], expect.anything(), expect.anything());
+  });
+});
+
+describe("GET /api/teams/runs?version=1 — canonical precedence over the adaptive teamRuns projection (Step 12/13)", () => {
+  it("a stale/contradictory teamRuns.humanReviewStatus never overrides the canonical governanceRecord-derived reviewer/result, and the displayed status badge itself is corrected to match", async () => {
+    // teamRuns projection claims "unreviewed" (as if still pending) and, as
+    // a downstream consequence, "reviewable" (matching the stale status)...
+    teamRunDocs.set("a1", adaptiveDoc({ runId: "run-mismatch", humanReviewStatus: "unreviewed", reviewable: true }));
+    // ...but the canonical governanceRecord says it was actually approved by reviewer-1.
+    setGovernanceRecord("run-mismatch", { status: "approved", reviewerId: "reviewer-1", reviewedAt: "2026-08-12T10:44:00.000Z", decidedVia: "single_reviewer" });
+
+    const body = await (await GET(buildRequest(""))).json();
+    const item = body.items.find((i: any) => i.runId === "run-mismatch");
+    // The enriched, canonical-derived detail fields show the real, approved state...
+    expect(item.singleReviewer).toEqual({ userId: "reviewer-1", displayName: "Name-reviewer-1", reviewedAt: "2026-08-12T10:44:00.000Z" });
+    // ...and the top-level status badge/reviewable flag are corrected to
+    // match rather than left at the stale discovery-projection value. This
+    // mirrors the established precedent in
+    // app/api/teams/adaptive-runs/[runId]/route.ts ("the response is
+    // always built from `record` alone") — a row must never show an
+    // "Unreviewed" badge next to reviewer/result detail that says
+    // Approved. See lib/governance/teamReviewQueueEnrichment.ts's
+    // enrichAdaptiveTeamRunListItem for the override logic.
+    expect(item.humanReviewStatus).toBe("approved");
+    expect(item.reviewable).toBe(false);
+  });
+
+  it("leaves humanReviewStatus/reviewable at the projection's own value when no governanceRecord exists yet (nothing more canonical is available)", async () => {
+    teamRunDocs.set("a1", adaptiveDoc({ runId: "run-ungoverned", humanReviewStatus: "unreviewed", reviewable: true }));
+    const body = await (await GET(buildRequest(""))).json();
+    const item = body.items.find((i: any) => i.runId === "run-ungoverned");
+    expect(item.humanReviewStatus).toBe("unreviewed");
+    expect(item.reviewable).toBe(true);
+  });
+
+  it("by contrast, a LEGACY row's teamRuns.humanDecision is surfaced with no canonical-override at all — teamRuns genuinely IS the only decision record for that older subsystem", async () => {
+    // Milestone-2 (above): teamRuns is a discovery projection of a SEPARATE
+    // canonical source (runs/{runId}.governanceRecord) and can go stale, so
+    // the enriched fields are corrected/overridden from that separate
+    // source. Legacy System B has no such separate source — the decision
+    // route (app/api/teams/runs/[runId]/decision/route.ts) writes
+    // `humanDecision` directly onto this SAME teamRuns doc and nowhere
+    // else, so there is nothing else it could ever diverge from. This test
+    // pins that asymmetry: unlike the adaptive case, a legacy row's
+    // decision detail is taken from teamRuns as-is (only the raw
+    // `decidedBy` uid is resolved to a display name — the decision content
+    // itself is never re-derived or second-guessed against another read).
+    teamRunDocs.set("l1", legacyDoc({ humanDecision: { action: "rejected", decidedAt: "2026-08-12T11:00:00.000Z", decidedBy: "reviewer-9" } }));
+    const body = await (await GET(buildRequest(""))).json();
+    const item = body.items.find((i: any) => i.kind === "legacy");
+    expect(item.humanDecision).toEqual({
+      action: "rejected",
+      decidedAt: "2026-08-12T11:00:00.000Z",
+      reviewer: { displayName: "Name-reviewer-9" },
+    });
+  });
+});
+
+describe("GET /api/teams/runs?version=1 — privacy on enriched fields (Step 10)", () => {
+  it("never leaks vote comment, override justification, or internal governance metadata even when fully populated", async () => {
+    teamRunDocs.set("a1", adaptiveDoc({ runId: "run-priv" }));
+    setGovernanceRecord("run-priv", {
+      status: "rejected",
+      reviewerId: "admin-1",
+      decidedVia: "multi_reviewer_owner_override",
+      overrideJustification: "PRIVATE justification text",
+      comment: "PRIVATE reviewer comment",
+    });
+    setPanel("run-priv", {
+      status: "finalized",
+      updatedAt: "2026-08-12T10:55:00.000Z",
+      finalStatus: "rejected",
+      finalizedAt: "2026-08-12T10:55:00.000Z",
+      finalizedByUserId: "admin-1",
+      finalDecisionId: "decision-secret-id",
+      aggregationPolicyVersion: 1,
+      finalizedVia: "owner_override",
+      overrideJustificationPresent: true,
+      overrideByUserId: "admin-1",
+    });
+    setVote("run-priv", 1, "reviewer-1", { comment: "PRIVATE vote comment", commentPresent: true });
+
+    const raw = JSON.stringify(await (await GET(buildRequest(""))).json());
+    for (const forbidden of ["PRIVATE", "decision-secret-id", "overrideJustification", '"comment"', "schemaVersion", "aggregationPolicyVersion"]) {
+      expect(raw).not.toContain(forbidden);
+    }
+  });
+
+  it("never renders a raw reviewer uid anywhere except inside an already-resolved reviewer object's own userId field (never as free text)", async () => {
+    teamRunDocs.set("a1", adaptiveDoc({ runId: "run-uid-check" }));
+    setGovernanceRecord("run-uid-check", { status: "unreviewed" });
+    setAssignment("run-uid-check", { assignedReviewerUserId: "reviewer-1", assignedByUserId: "admin-1" });
+    const body = await (await GET(buildRequest(""))).json();
+    const item = body.items.find((i: any) => i.runId === "run-uid-check");
+    // The uid is only ever present alongside its own resolved displayName.
+    expect(item.assignment.reviewerUserId).toBe("reviewer-1");
+    expect(item.assignment.reviewerDisplayName).toBe("Name-reviewer-1");
+  });
+});
+
+describe("GET /api/teams/runs?version=1 — enrichment failure resilience (Step 17 loading/error behavior)", () => {
+  it("a batched-read failure degrades enrichment for affected rows without removing them from the queue or failing the request", async () => {
+    teamRunDocs.set("a1", adaptiveDoc({ runId: "run-enrich-fail" }));
+    setGovernanceRecord("run-enrich-fail", { status: "approved", reviewerId: "reviewer-1", decidedVia: "single_reviewer" });
+    getAllShouldThrow = true;
+
+    const res = await GET(buildRequest(""));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    const item = body.items.find((i: any) => i.runId === "run-enrich-fail");
+    expect(item).toBeDefined(); // row is NOT removed from the queue
+    expect(item.singleReviewer).toBeNull(); // enrichment degraded, not fabricated
+    // Distinguishable from a genuine "nothing configured" row — Step 17.
+    expect(item.enrichmentUnavailable).toBe(true);
+  });
+
+  it("does NOT set enrichmentUnavailable for a row that genuinely has no assignment/panel configured (real absence, not a failure)", async () => {
+    teamRunDocs.set("a1", adaptiveDoc({ runId: "run-genuinely-unconfigured" }));
+    setGovernanceRecord("run-genuinely-unconfigured", { status: "unreviewed" });
+    const body = await (await GET(buildRequest(""))).json();
+    const item = body.items.find((i: any) => i.runId === "run-genuinely-unconfigured");
+    expect(item.enrichmentUnavailable).toBeUndefined();
+    expect(item.singleReviewer).toBeNull();
+    expect(item.assignment).toBeNull();
+    expect(item.panel).toBeNull();
   });
 });
