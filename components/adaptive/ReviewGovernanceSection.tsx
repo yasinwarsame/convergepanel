@@ -1,43 +1,46 @@
 "use client";
 
 /**
- * Adaptive Synthesis Report, Phase 2 (3-schema pilot) — "Review & Governance"
- * section: review status, decisions, conditions, the Verification Gate,
- * Panel Verdict, and review history — all collapsed by default (TopSummaryBar
- * already carries the compact, always-visible status dot/label; this is the
- * full detail behind it). Self-wraps in one <details>, reusable as-is once
- * the remaining 15 schemas roll out, since it consumes only props already
- * threaded to every AdaptivePanelResponse call site.
+ * Adaptive Synthesis Report — "Review & Governance" section: review
+ * status, assignment, peer-review panel/quorum/vote progress, final
+ * decision, owner override, cancellation, conditions, the Verification
+ * Gate, Panel Verdict, and review history — collapsed by default, with a
+ * compact one-line status summary visible in the `<summary>` itself so a
+ * user never has to expand the section just to see whether anything
+ * meaningful is inside it (e.g. "Approved · Jane Smith", "Assigned ·
+ * Jane Smith", "Not configured").
  *
- * Four parts:
- * - Status summary (no fetch, always renders once expanded): reuses
- *   deriveReportStatus() — the exact function TopSummaryBar's Status field
- *   already calls — expanded into the full label + owner-override flag +
- *   conditions (verbatim, never summarized) + raw humanReview status/decidedVia.
- * - Verification Gate + Panel Verdict (gate/synthesisReport-driven family
- *   only): relocated verbatim from AdaptiveSynthesisReportView — a
- *   governance artifact (the panel's own verdict on itself), not raw
- *   evidence, so it lives here rather than in Panel Evidence.
- * - Review history: a read-only fetch against
- *   GET /api/teams/adaptive-runs/{runId}/history, adapted from
- *   AdaptiveReviewHistorySection.tsx. Gated on `humanReview != null` —
- *   GovernanceRecordV1 only ever exists for the 9 Milestone-2 schemas, so
- *   this fetch is only ever meaningful for comparison_matrix this pilot.
- * - A collapsed "Full synthesis report" fallback (gate/synthesisReport
- *   family only) wrapping the complete, unmodified <AdaptiveSynthesisReportView>
- *   — the only place Executive Summary/Certainty/"Where models agree"/
- *   narrative sections/load-bearing claims/disclaimer/export actions
- *   remain reachable now that the tri-tab shell is gone for these 2
- *   schemas. Deliberately the LAST, most-collapsed element (nested inside
- *   an already-collapsed section) precisely because its content already
- *   overlaps what's shown above it — a disclosed, minimal exception to "no
- *   duplication," kept only because removing it would make export actions
- *   permanently unreachable for procedural/generic, which no part of this
- *   pilot was asked to do.
+ * DELIBERATE, DISCLOSED CONTRACT CHANGE from the prior version of this
+ * file: this component now renders resolved REVIEWER IDENTITY (names),
+ * fetched from the new `GET /api/user/runs/[runId]/governance` endpoint
+ * (`lib/adaptiveSchema/reviewGovernanceViewModel.ts`'s DTO). Comment and
+ * override-justification TEXT remain permanently hidden — the data model
+ * has no public/private split for them, so the whole concept is treated
+ * as non-report-visible, exactly as before. Only identity changed.
  *
- * Read-only throughout: no mutation surface, no decision form, no link to
- * the /team/reviews/{runId} detail page — matches
- * AdaptiveReviewHistorySection's own read-only guarantee.
+ * Split into a data-fetching shell (`ReviewGovernanceSection`, the
+ * default export — a thin `"use client"` hook wrapper) and a pure,
+ * presentational body (`ReviewGovernanceBody`, exported for direct
+ * testing) that takes already-resolved `loading`/`unavailable`/`detail`
+ * as plain props — this project's Jest config runs under
+ * `testEnvironment: "node"` (no jsdom), so `useEffect` never fires under
+ * `renderToStaticMarkup`; testing every status scenario (not just the
+ * pre-fetch initial render) requires exercising the presentational body
+ * directly with hand-built view-model fixtures, never a mocked fetch.
+ *
+ * Family-aware throughout (see reviewGovernanceViewModel.ts): a
+ * Milestone-2 result is never rendered from a legacy-only field or vice
+ * versa. The existing `StatusSummary` (Milestone-2-only, driven by the
+ * compact `humanReview`/`reviewRouting`/`persistenceStatus` props every
+ * report call site already threads down) is used ONLY for the milestone2
+ * family; the legacy family gets its own `LegacyReviewCard`, since
+ * `humanReview` is always null for legacy-active schemas and showing
+ * `StatusSummary` for them would misleadingly read "Incomplete" for a
+ * run that actually has a real legacy `governanceStatus`.
+ *
+ * Read-only throughout: no mutation surface, no decision form, no link
+ * to a decision-mutation endpoint — matches AdaptiveReviewHistorySection's
+ * own read-only guarantee.
  */
 
 import { useEffect, useState } from "react";
@@ -46,6 +49,7 @@ import { useAuth } from "@/components/AuthProvider";
 import type { AdaptiveReviewHistoryResponseV1 } from "@/lib/governance/adaptiveHumanReviewHistory";
 import { humanReviewStatusLabel } from "@/lib/governance/teamReviewLabels";
 import { deriveReportStatus, REPORT_STATUS_LABELS, ReportStatusInput } from "@/lib/adaptiveSchema/reportStatus";
+import { decidedViaLabel, ReviewGovernanceReviewerView, ReviewGovernanceViewModel } from "@/lib/adaptiveSchema/reviewGovernanceViewModel";
 import { AdaptiveGateResult, AdaptiveSynthesisReport } from "@/lib/adaptiveSchema/types";
 import { Card, SectionLabel } from "./shared";
 import AdaptiveSynthesisReportView, { PanelVerdictCard } from "./AdaptiveSynthesisReportView";
@@ -56,6 +60,12 @@ const GATE_STYLES: Record<AdaptiveGateResult["status"], { label: string; classNa
   pass: { label: "Verified — panel converges", className: "bg-green-50 text-green-800 border-green-200" },
   caution: { label: "Caution — partial convergence", className: "bg-amber-50 text-amber-800 border-amber-200" },
   fail: { label: "Could not verify — panel split", className: "bg-red-50 text-red-800 border-red-200" },
+};
+
+const LEGACY_STATUS_LABELS: Record<"approved" | "needs_review" | "blocked", string> = {
+  approved: "Approved",
+  needs_review: "Needs review",
+  blocked: "Blocked by policy",
 };
 
 function formatDatetime(iso: string): string {
@@ -72,9 +82,7 @@ function StatusSummary({ humanReview, reviewRouting, persistenceStatus }: Report
     <Card>
       <SectionLabel>Review status</SectionLabel>
       <p className="text-sm font-medium text-slate-900">{label}</p>
-      {humanReview?.decidedVia && (
-        <p className="mt-1 text-xs text-slate-500">Decided via: {humanReview.decidedVia.replace(/_/g, " ")}</p>
-      )}
+      {humanReview?.decidedVia && <p className="mt-1 text-xs text-slate-500">Decided via: {decidedViaLabel(humanReview.decidedVia)}</p>}
       {status.conditions && status.conditions.length > 0 && (
         <div className="mt-2">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1">Conditions</p>
@@ -89,12 +97,173 @@ function StatusSummary({ humanReview, reviewRouting, persistenceStatus }: Report
   );
 }
 
-function VerificationGate({ gate }: { gate: AdaptiveGateResult["status"] }) {
-  const style = GATE_STYLES[gate];
+function NotConfiguredCard() {
+  return (
+    <Card>
+      <SectionLabel>Review status</SectionLabel>
+      <p className="text-sm font-medium text-slate-900">Not configured</p>
+    </Card>
+  );
+}
+
+function LoadingStatusCard() {
+  return (
+    <Card>
+      <SectionLabel>Review status</SectionLabel>
+      <p className="text-sm text-slate-500" aria-live="polite">
+        Loading review status…
+      </p>
+    </Card>
+  );
+}
+
+function UnavailableStatusCard() {
+  return (
+    <Card>
+      <SectionLabel>Review status</SectionLabel>
+      <p className="text-sm text-slate-500" role="status">
+        Review information unavailable.
+      </p>
+    </Card>
+  );
+}
+
+function LegacyReviewCard({ legacy }: { legacy: Extract<ReviewGovernanceViewModel, { family: "legacy" }> }) {
+  return (
+    <Card>
+      <SectionLabel>Review status</SectionLabel>
+      <p className="text-sm font-medium text-slate-900">{LEGACY_STATUS_LABELS[legacy.status]}</p>
+      {legacy.reviewer && <p className="mt-1 text-xs text-slate-500">Reviewer: {legacy.reviewer.displayName}</p>}
+      {legacy.reviewedAt && <p className="mt-0.5 text-xs text-slate-500">Reviewed {formatDatetime(legacy.reviewedAt)}</p>}
+      {legacy.reasons.length > 0 && (
+        <div className="mt-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1">Reasons</p>
+          <ul className="list-disc list-outside pl-5 space-y-0.5 text-sm text-slate-700">
+            {legacy.reasons.map((r, idx) => (
+              <li key={idx}>{r}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+type Milestone2Assignment = Extract<ReviewGovernanceViewModel, { family: "milestone2" }>["assignment"];
+type Milestone2SingleReviewer = Extract<ReviewGovernanceViewModel, { family: "milestone2" }>["singleReviewer"];
+type Milestone2Panel = Extract<ReviewGovernanceViewModel, { family: "milestone2" }>["panel"];
+
+/** Assignment (pre-decision) and single-reviewer identity (post-decision) share one card — never both at once, since a decided run's assignment record still exists but its identity is more precisely shown via `singleReviewer`. */
+function SingleReviewerIdentityCard({ assignment, singleReviewer }: { assignment: Milestone2Assignment; singleReviewer: Milestone2SingleReviewer }) {
+  if (singleReviewer) {
+    return (
+      <Card>
+        <SectionLabel>Reviewer</SectionLabel>
+        <p className="text-sm font-medium text-slate-900">{singleReviewer.displayName}</p>
+        {singleReviewer.reviewedAt && <p className="mt-1 text-xs text-slate-500">Completed {formatDatetime(singleReviewer.reviewedAt)}</p>}
+      </Card>
+    );
+  }
+  if (assignment) {
+    return (
+      <Card>
+        <SectionLabel>Assigned reviewer</SectionLabel>
+        <p className="text-sm font-medium text-slate-900">{assignment.reviewerDisplayName}</p>
+        {assignment.assignedAt && (
+          <p className="mt-1 text-xs text-slate-500">
+            Assigned {formatDatetime(assignment.assignedAt)}
+            {assignment.assignedByDisplayName ? ` by ${assignment.assignedByDisplayName}` : ""}
+          </p>
+        )}
+      </Card>
+    );
+  }
+  return null;
+}
+
+function AwaitingAssignmentNote() {
+  return <p className="text-xs text-slate-500 italic">Awaiting assignment to a reviewer.</p>;
+}
+
+function ReviewerRow({ reviewer }: { reviewer: ReviewGovernanceReviewerView }) {
+  return (
+    <li className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="font-medium text-slate-900">{reviewer.displayName}</span>
+        <span className="text-xs text-slate-600">{reviewer.hasVoted ? humanReviewStatusLabel(reviewer.voteStatus) : "Awaiting vote"}</span>
+      </div>
+      {reviewer.submittedAt && <p className="mt-0.5 text-xs text-slate-500">Completed {formatDatetime(reviewer.submittedAt)}</p>}
+    </li>
+  );
+}
+
+function PeerReviewProgress({ panel }: { panel: NonNullable<Milestone2Panel> }) {
+  const pct = panel.quorum > 0 ? Math.min(100, (panel.submittedCount / panel.quorum) * 100) : 0;
+  const pending = Math.max(0, panel.requiredReviewerCount - panel.submittedCount);
+  return (
+    <Card>
+      <SectionLabel>Peer review</SectionLabel>
+      <p className="text-sm text-slate-700">
+        {panel.submittedCount} of {panel.quorum} needed ({panel.requiredReviewerCount} total reviewer{panel.requiredReviewerCount === 1 ? "" : "s"})
+      </p>
+      <div className="mt-2 h-2 w-full rounded-full bg-slate-100 overflow-hidden" role="progressbar" aria-valuenow={panel.submittedCount} aria-valuemin={0} aria-valuemax={panel.quorum}>
+        <div className="h-full bg-sky-500" style={{ width: `${pct}%` }} />
+      </div>
+      <p className="mt-2 text-xs text-slate-500">
+        Approved: {panel.approvalCount} · Changes requested/Rejected: {panel.blockingCount} · Pending: {pending}
+      </p>
+    </Card>
+  );
+}
+
+function ReviewerList({ reviewers }: { reviewers: ReviewGovernanceReviewerView[] }) {
+  if (reviewers.length === 0) return null;
   return (
     <div>
-      <SectionLabel>Verification gate</SectionLabel>
-      <div className={`rounded-xl border px-4 py-3 text-sm font-medium ${style.className}`}>{style.label}</div>
+      <SectionLabel>Reviewers</SectionLabel>
+      <ul className="space-y-2" aria-label="Reviewers">
+        {reviewers.map((r) => (
+          <ReviewerRow key={r.userId} reviewer={r} />
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function FinalDecisionCard({ panel }: { panel: NonNullable<Milestone2Panel> }) {
+  if (!panel.finalStatus) return null;
+  return (
+    <Card className="border-green-200 bg-green-50">
+      <SectionLabel>Final review result</SectionLabel>
+      <p className="text-sm font-semibold text-slate-900">{humanReviewStatusLabel(panel.finalStatus)}</p>
+      {panel.finalizedAt && <p className="mt-1 text-xs text-slate-600">Finalized {formatDatetime(panel.finalizedAt)}</p>}
+      {panel.finalizedVia && (
+        <p className="mt-0.5 text-xs text-slate-500">Decided via: {panel.finalizedVia === "aggregation" ? "Reviewer panel (majority)" : "Owner override"}</p>
+      )}
+    </Card>
+  );
+}
+
+function OwnerOverrideBanner({ panel }: { panel: NonNullable<Milestone2Panel> }) {
+  if (!panel.finalStatus) return null;
+  return (
+    <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3">
+      <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">Owner override</p>
+      <p className="mt-1 text-sm font-semibold text-slate-900">{humanReviewStatusLabel(panel.finalStatus)}</p>
+      {panel.overrideBy && (
+        <p className="mt-1 text-xs text-amber-800">
+          Decided by {panel.overrideBy.displayName}
+          {panel.finalizedAt ? ` on ${formatDatetime(panel.finalizedAt)}` : ""}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function CancellationBanner() {
+  return (
+    <div className="rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-700" role="status">
+      Peer review was cancelled. This run reverted to the single-reviewer review path.
     </div>
   );
 }
@@ -190,6 +359,52 @@ function ReviewHistory({ runId, canonicalTerminal }: { runId: string; canonicalT
   );
 }
 
+function collapsedSummaryLabel(args: {
+  loading: boolean;
+  unavailable: boolean;
+  detail: ReviewGovernanceViewModel | null;
+  humanReview: ReportStatusInput["humanReview"];
+  reviewRouting: ReportStatusInput["reviewRouting"];
+  persistenceStatus: ReportStatusInput["persistenceStatus"];
+}): string {
+  const { loading, unavailable, detail, humanReview, reviewRouting, persistenceStatus } = args;
+  const prefix = "Review & Governance";
+
+  if (persistenceStatus === "failed" || persistenceStatus === "omitted_size_limit") return `${prefix} — Incomplete`;
+  if (loading) return `${prefix} — loading…`;
+  if (unavailable) return `${prefix} — status unavailable`;
+  if (!detail || detail.family === "not_configured") return `${prefix} — Not configured`;
+
+  if (detail.family === "legacy") {
+    const label = LEGACY_STATUS_LABELS[detail.status];
+    return detail.reviewer ? `${prefix} — ${label} · ${detail.reviewer.displayName}` : `${prefix} — ${label}`;
+  }
+
+  // milestone2 — reuse the exact same status derivation StatusSummary
+  // itself calls, so the collapsed line and the expanded body can never
+  // disagree on the status label.
+  const topStatus = deriveReportStatus({ humanReview, reviewRouting, persistenceStatus });
+  let label = topStatus.isOwnerOverride ? `Owner override — ${REPORT_STATUS_LABELS[topStatus.kind]}` : REPORT_STATUS_LABELS[topStatus.kind];
+
+  let who: string | undefined;
+  if (topStatus.kind === "unreviewed_in_queue" && detail.assignment) {
+    // "Assigned" is more useful than the more precise "Unreviewed — in
+    // queue" for this one compact line specifically — the expanded
+    // StatusSummary below still shows the precise wording; REPORT_STATUS_LABELS
+    // itself is never changed.
+    label = "Assigned";
+    who = detail.assignment.reviewerDisplayName;
+  } else if (detail.panel?.overrideBy) {
+    who = detail.panel.overrideBy.displayName;
+  } else if (detail.singleReviewer) {
+    who = detail.singleReviewer.displayName;
+  } else if (detail.panel && detail.panel.status === "open" && detail.assignment) {
+    who = detail.assignment.reviewerDisplayName;
+  }
+
+  return who ? `${prefix} — ${label} · ${who}` : `${prefix} — ${label}`;
+}
+
 export interface ReviewGovernanceSectionProps extends ReportStatusInput {
   runId?: string | null;
   /** gate/synthesisReport-driven family only (procedural/generic this pilot) — Verification Gate + Panel Verdict + the "Full synthesis report" fallback all require these. comparison_matrix passes neither. */
@@ -202,7 +417,14 @@ export interface ReviewGovernanceSectionProps extends ReportStatusInput {
   onRunFollowUp?: (question: string) => void;
 }
 
-export default function ReviewGovernanceSection({
+interface ReviewGovernanceBodyProps extends ReviewGovernanceSectionProps {
+  loading: boolean;
+  unavailable: boolean;
+  detail: ReviewGovernanceViewModel | null;
+}
+
+/** Pure presentational body — no fetch, no hooks. Exported so every status scenario can be tested directly with a hand-built `detail` fixture (see the test suite's own doc comment on why this split exists). */
+export function ReviewGovernanceBody({
   humanReview,
   reviewRouting,
   persistenceStatus,
@@ -214,15 +436,50 @@ export default function ReviewGovernanceSection({
   modelsUsed,
   question,
   onRunFollowUp,
-}: ReviewGovernanceSectionProps) {
+  loading,
+  unavailable,
+  detail,
+}: ReviewGovernanceBodyProps) {
   const status = deriveReportStatus({ humanReview, reviewRouting, persistenceStatus });
   const canonicalTerminal = TERMINAL_STATUS_KINDS.has(status.kind);
+  const isIncomplete = persistenceStatus === "failed" || persistenceStatus === "omitted_size_limit";
+
+  const summaryLabel = collapsedSummaryLabel({ loading, unavailable, detail, humanReview, reviewRouting, persistenceStatus });
 
   return (
     <details className="rounded-xl border border-slate-200 bg-white px-4 py-3">
-      <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-slate-500">Review &amp; Governance</summary>
+      <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-slate-500">{summaryLabel}</summary>
       <div className="mt-3 space-y-3">
-        <StatusSummary humanReview={humanReview} reviewRouting={reviewRouting} persistenceStatus={persistenceStatus} />
+        {isIncomplete ? (
+          <StatusSummary humanReview={humanReview} reviewRouting={reviewRouting} persistenceStatus={persistenceStatus} />
+        ) : loading ? (
+          <LoadingStatusCard />
+        ) : unavailable ? (
+          <UnavailableStatusCard />
+        ) : !detail || detail.family === "not_configured" ? (
+          <NotConfiguredCard />
+        ) : detail.family === "legacy" ? (
+          <LegacyReviewCard legacy={detail} />
+        ) : (
+          <>
+            <StatusSummary humanReview={humanReview} reviewRouting={reviewRouting} persistenceStatus={persistenceStatus} />
+
+            {!detail.panel && (detail.assignment || detail.singleReviewer) && (
+              <SingleReviewerIdentityCard assignment={detail.assignment} singleReviewer={detail.singleReviewer} />
+            )}
+            {!detail.panel && !detail.assignment && !detail.singleReviewer && status.kind === "unreviewed_in_queue" && <AwaitingAssignmentNote />}
+
+            {detail.panel && (
+              <>
+                <PeerReviewProgress panel={detail.panel} />
+                <ReviewerList reviewers={detail.panel.reviewers} />
+                {detail.panel.status === "finalized" && detail.panel.finalizedVia === "owner_override" && <OwnerOverrideBanner panel={detail.panel} />}
+                {detail.panel.status === "finalized" && detail.panel.finalizedVia !== "owner_override" && <FinalDecisionCard panel={detail.panel} />}
+                {detail.panel.status === "cancelled" && <CancellationBanner />}
+              </>
+            )}
+          </>
+        )}
 
         {gate && <VerificationGate gate={gate.status} />}
         {gate && synthesisReport && <PanelVerdictCard report={synthesisReport} gate={gate} />}
@@ -234,9 +491,7 @@ export default function ReviewGovernanceSection({
 
         {gate && synthesisReport && modelsUsed && question && (
           <details className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-            <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-slate-500">
-              Full synthesis report
-            </summary>
+            <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-slate-500">Full synthesis report</summary>
             <div className="mt-3">
               <AdaptiveSynthesisReportView
                 report={synthesisReport}
@@ -254,4 +509,79 @@ export default function ReviewGovernanceSection({
       </div>
     </details>
   );
+}
+
+function VerificationGate({ gate }: { gate: AdaptiveGateResult["status"] }) {
+  const style = GATE_STYLES[gate];
+  return (
+    <div>
+      <SectionLabel>Verification gate</SectionLabel>
+      <div className={`rounded-xl border px-4 py-3 text-sm font-medium ${style.className}`}>{style.label}</div>
+    </div>
+  );
+}
+
+/** Fetches the presentation-safe governance DTO once per `runId`, at this level — so both the collapsed summary line and the expanded body read the SAME fetched state without a double-fetch. `<details>` children already mount and run effects regardless of open/closed state (the existing `ReviewHistory` fetch above already relies on this), so hoisting the fetch here (rather than nesting it inside a child, as `ReviewHistory` does) is what lets the collapsed `<summary>` show a reviewer name before the section is ever expanded. */
+function useGovernanceDetail(runId: string | undefined | null) {
+  const { user, authReady } = useAuth();
+  const [detail, setDetail] = useState<ReviewGovernanceViewModel | null>(null);
+  // Initialized from `runId`'s presence (not unconditionally `true`) so the
+  // very first synchronous render is already accurate when no runId exists
+  // — there is nothing to fetch, so it must never claim "loading".
+  const [loading, setLoading] = useState<boolean>(!!runId);
+  const [unavailable, setUnavailable] = useState(false);
+
+  useEffect(() => {
+    if (!runId) {
+      setLoading(false);
+      return;
+    }
+    if (!user || !authReady) return;
+    let cancelled = false;
+
+    (async () => {
+      setLoading(true);
+      setUnavailable(false);
+      try {
+        const { authedFetch } = await import("@/lib/client/authedFetch");
+        const res = await authedFetch(`/api/user/runs/${encodeURIComponent(runId)}/governance`, {
+          user,
+          authReady,
+          method: "GET",
+          cache: "no-store",
+        });
+        if (cancelled) return;
+        if (!res.ok) {
+          setUnavailable(true);
+          setDetail(null);
+          return;
+        }
+        const json = await res.json();
+        if (json.ok) {
+          setDetail(json.governance as ReviewGovernanceViewModel);
+        } else {
+          setUnavailable(true);
+          setDetail(null);
+        }
+      } catch {
+        if (!cancelled) {
+          setUnavailable(true);
+          setDetail(null);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [runId, user, authReady]);
+
+  return { detail, loading, unavailable };
+}
+
+export default function ReviewGovernanceSection(props: ReviewGovernanceSectionProps) {
+  const { detail, loading, unavailable } = useGovernanceDetail(props.runId);
+  return <ReviewGovernanceBody {...props} loading={loading} unavailable={unavailable} detail={detail} />;
 }
