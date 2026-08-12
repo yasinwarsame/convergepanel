@@ -132,7 +132,7 @@ export type AdaptiveAssignmentAdminAuditAction =
 export async function writeAdaptiveAssignmentAdminAuditEvent(args: {
   action: AdaptiveAssignmentAdminAuditAction;
   actorUid: string;
-  teamId: string;
+  teamId: string | null;
   runId: string;
   previousReviewerUserId: string | null;
   newReviewerUserId: string | null;

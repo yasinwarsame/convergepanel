@@ -41,7 +41,8 @@ export function hasAdaptiveReviewSubmissionOverride(role: string | null): boolea
 
 export type AdaptiveHumanReviewAssignmentV1 = {
   schemaVersion: 1;
-  teamId: string;
+  /** `null` for a personal (non-team) run's assignment — see personalReviewerAssignment.ts. Never used for authorization anywhere (that's always the separate teamRuns projection's own teamId) — purely descriptive/audit metadata. */
+  teamId: string | null;
   runId: string;
 
   assignedReviewerUserId: string | null;
@@ -73,7 +74,7 @@ export function classifyAssignmentEventType(
  * validated eligibility, revision, and pending-review state.
  */
 export function buildNextAdaptiveHumanReviewAssignment(args: {
-  teamId: string;
+  teamId: string | null;
   runId: string;
   newReviewerUserId: string | null;
   actorUserId: string;
@@ -111,7 +112,7 @@ export function buildNextAdaptiveHumanReviewAssignment(args: {
 export type AdaptiveHumanReviewAssignmentHistoryV1 = {
   schemaVersion: 1;
   eventId: string;
-  teamId: string;
+  teamId: string | null;
   runId: string;
   eventType: AdaptiveHumanReviewAssignmentEventType;
   previousReviewerUserId: string | null;
@@ -122,7 +123,7 @@ export type AdaptiveHumanReviewAssignmentHistoryV1 = {
 };
 
 export function buildAdaptiveHumanReviewAssignmentHistoryEntry(args: {
-  teamId: string;
+  teamId: string | null;
   runId: string;
   previousReviewerUserId: string | null;
   newReviewerUserId: string | null;

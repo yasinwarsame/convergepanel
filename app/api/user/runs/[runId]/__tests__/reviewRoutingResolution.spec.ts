@@ -75,6 +75,11 @@ jest.mock("@/lib/firestore/teamRuns", () => ({
   getAdaptiveTeamRunProjection: (...args: any[]) => mockedGetProjection(...args),
 }));
 
+const mockedGetPersonalAssignment = jest.fn();
+jest.mock("@/lib/firestore/runs", () => ({
+  getAdaptiveHumanReviewAssignment: (...args: any[]) => mockedGetPersonalAssignment(...args),
+}));
+
 const mockLoggerWarn = jest.fn();
 jest.mock("@/lib/logger", () => ({
   logger: { warn: (...args: unknown[]) => mockLoggerWarn(...args), info: jest.fn(), error: jest.fn(), debug: jest.fn() },
@@ -122,6 +127,7 @@ beforeEach(() => {
   mockedParseGovernanceRecord.mockReset();
   mockedLoadUserAndTeam.mockReset();
   mockedGetProjection.mockReset();
+  mockedGetPersonalAssignment.mockReset();
   mockLoggerWarn.mockClear();
 
   mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: UID });
@@ -138,13 +144,47 @@ beforeEach(() => {
   });
   mockedLoadUserAndTeam.mockResolvedValue({ user: {}, team: { id: TEAM_ID } });
   mockedGetProjection.mockResolvedValue({ status: "found", projection: validProjection() });
+  mockedGetPersonalAssignment.mockResolvedValue({ status: "unassigned" });
 });
 
 describe("GET /api/user/runs/[runId] — reviewRouting resolution", () => {
-  it("confirmed no review configured (no team) -> not_configured", async () => {
+  it("confirmed no review configured (no team, no personal assignment) -> not_configured", async () => {
     mockedLoadUserAndTeam.mockResolvedValueOnce({ user: {}, team: null });
     const { json } = await callRoute();
     expect(json.adaptive.reviewRouting).toBe("not_configured");
+    expect(mockedGetProjection).not.toHaveBeenCalled();
+  });
+
+  it("Reviewer Assignment Propagation: no team, but a personal humanReviewAssignment exists -> in_queue", async () => {
+    mockedLoadUserAndTeam.mockResolvedValueOnce({ user: {}, team: null });
+    mockedGetPersonalAssignment.mockResolvedValueOnce({
+      status: "found",
+      assignment: { assignedReviewerUserId: "reviewer-1", revision: 1 },
+    });
+    const { json } = await callRoute();
+    expect(json.adaptive.reviewRouting).toBe("in_queue");
+  });
+
+  it("Reviewer Assignment Propagation: no team, assignment document exists but is explicitly unassigned (assignedReviewerUserId null) -> unknown, not a confident claim either way", async () => {
+    mockedLoadUserAndTeam.mockResolvedValueOnce({ user: {}, team: null });
+    mockedGetPersonalAssignment.mockResolvedValueOnce({
+      status: "found",
+      assignment: { assignedReviewerUserId: null, revision: 1 },
+    });
+    const { json } = await callRoute();
+    // Ambiguous state (a document exists, distinct from "never configured
+    // at all") — fails toward "unknown" rather than confidently asserting
+    // "not_configured", same fail-safe discipline as every other branch
+    // in this file.
+    expect(json.adaptive.reviewRouting).toBe("unknown");
+  });
+
+  it("Reviewer Assignment Propagation: no team, personal-assignment read failure -> unknown, never the false not_configured claim", async () => {
+    mockedLoadUserAndTeam.mockResolvedValueOnce({ user: {}, team: null });
+    mockedGetPersonalAssignment.mockResolvedValueOnce({ status: "read_failed" });
+    const { json } = await callRoute();
+    expect(json.adaptive.reviewRouting).toBe("unknown");
+    expect(json.adaptive.reviewRouting).not.toBe("not_configured");
   });
 
   it("confirmed no review configured (projection genuinely not_found) -> not_configured", async () => {

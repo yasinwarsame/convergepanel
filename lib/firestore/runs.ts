@@ -988,7 +988,7 @@ export type SubmitAdaptiveHumanReviewAssignmentResult =
 
 export async function submitAdaptiveHumanReviewAssignment(args: {
   runId: string;
-  teamId: string;
+  teamId: string | null;
   newReviewerUserId: string | null;
   actorUserId: string;
   expectedRevision: number;
