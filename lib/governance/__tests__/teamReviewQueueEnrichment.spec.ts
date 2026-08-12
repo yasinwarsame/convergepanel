@@ -187,6 +187,21 @@ describe("enrichAdaptiveTeamRunListItem", () => {
     ]);
   });
 
+  it("corrects a stale/contradictory projection humanReviewStatus and reviewable to the canonical governanceRecord status", async () => {
+    const item = baseAdaptiveItem({ humanReviewStatus: "unreviewed", reviewable: true });
+    const governanceRecord = makeGovernanceRecord({ status: "approved", reviewerId: "reviewer-1", reviewedAt: "2026-08-12T10:44:00.000Z", decidedVia: "single_reviewer" });
+    const result = await enrichAdaptiveTeamRunListItem(item, { governanceRecord, assignment: null, panel: null, votes: [] }, resolveDisplayName);
+    expect(result.humanReviewStatus).toBe("approved");
+    expect(result.reviewable).toBe(false);
+  });
+
+  it("leaves humanReviewStatus/reviewable at the projection's own value when no governanceRecord exists", async () => {
+    const item = baseAdaptiveItem({ humanReviewStatus: "unreviewed", reviewable: true });
+    const result = await enrichAdaptiveTeamRunListItem(item, { governanceRecord: null, assignment: null, panel: null, votes: [] }, resolveDisplayName);
+    expect(result.humanReviewStatus).toBe("unreviewed");
+    expect(result.reviewable).toBe(true);
+  });
+
   it("never leaks comment/justification text through the adaptive enrichment path", async () => {
     const item = baseAdaptiveItem();
     const governanceRecord = makeGovernanceRecord({

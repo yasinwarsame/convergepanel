@@ -37,6 +37,7 @@ import {
   buildReviewGovernanceViewModel,
   ReviewGovernanceViewModel,
 } from "../adaptiveSchema/reviewGovernanceViewModel";
+import { isHumanReviewStatusReviewable } from "../adaptiveSchema/governanceRecordParser";
 import type { GovernanceRecordV1 } from "../adaptiveSchema/governanceRecord";
 import type { AdaptiveHumanReviewAssignmentV1 } from "./adaptiveHumanReviewAssignment";
 import type { AdaptiveHumanReviewPanelV1 } from "./adaptiveHumanReviewPanel";
@@ -113,6 +114,20 @@ export async function enrichLegacyTeamRunListItem(
  * null, assignment: null, panel: null` exactly as that function already
  * guarantees for its "not_configured"/family-mismatch branches, never a
  * thrown error and never a fabricated result.
+ *
+ * Also corrects `humanReviewStatus`/`reviewable` (inherited from the base
+ * `item`, which is sourced from the `teamRuns` adaptive projection — see
+ * this file's header) to the canonical `governanceRecord.humanReview.status`
+ * whenever a governance record was actually read. This mirrors the
+ * established precedent in `app/api/teams/adaptive-runs/[runId]/route.ts`
+ * ("the canonical parent record is authoritative... the response is
+ * always built from `record` alone") — that route only *logs* a
+ * projection/parent disagreement and never displays the stale value; this
+ * builder applies the same rule so the queue's status badge can never
+ * show a status that contradicts the reviewer/panel detail rendered right
+ * next to it, which is already unconditionally canonical. When no
+ * governance record exists, the projection's own value is the only
+ * information available and is left as-is.
  */
 export async function enrichAdaptiveTeamRunListItem(
   item: AdaptiveTeamRunListItemV1,
@@ -135,8 +150,13 @@ export async function enrichAdaptiveTeamRunListItem(
 
   const milestone2 = viewModel.family === "milestone2" ? viewModel : { singleReviewer: null, assignment: null, panel: null };
 
+  const canonicalStatus = data.governanceRecord?.humanReview.status;
+  const humanReviewStatus = canonicalStatus ?? item.humanReviewStatus;
+
   return {
     ...item,
+    humanReviewStatus,
+    reviewable: canonicalStatus ? isHumanReviewStatusReviewable(canonicalStatus) : item.reviewable,
     singleReviewer: milestone2.singleReviewer,
     assignment: milestone2.assignment,
     panel: milestone2.panel,

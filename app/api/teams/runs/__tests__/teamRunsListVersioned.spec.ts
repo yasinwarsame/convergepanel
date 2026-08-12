@@ -307,6 +307,20 @@ describe("GET /api/teams/runs?version=1 — response contract", () => {
     teamRunDocs.set("a1", adaptiveDoc());
     teamRunDocs.set("l1", legacyDoc());
     const serialized = JSON.stringify(await (await GET(buildRequest(""))).json());
+    // NOTE (final review, PR #31): `reviewerId`/`reviewerName` remain in
+    // this forbidden list as a guard against ever spreading a RAW
+    // governanceRecord/humanReview field verbatim into the response — but
+    // this specific test seeds no assignment/panel/governance data, so it
+    // never exercises the new enrichment path at all. It is NOT the test
+    // that governs reviewer-identity exposure policy going forward; see
+    // "GET /api/teams/runs?version=1 — reviewer display (final task)"
+    // below, which is the deliberate, disclosed change (same pattern as
+    // PR #30): resolved `displayName` fields ARE now present by design
+    // (`reviewerUserId`/`reviewerDisplayName`/`reviewer.displayName` —
+    // none of which match the raw-field substrings checked here), while
+    // comment/justification text and raw internal metadata remain
+    // forbidden everywhere, including in the enriched path (see the
+    // dedicated "privacy on enriched fields" describe block).
     for (const forbidden of ["consensusSummary", "auditBundle", "claims", "rawModelOutput", "reviewerId", "reviewerName", "comment", "conditions", "sources", "basis", "assumptions", "uncertainties"]) {
       expect(serialized).not.toContain(forbidden);
     }
@@ -608,22 +622,57 @@ describe("GET /api/teams/runs?version=1 — identity batching, never N+1 (final 
 });
 
 describe("GET /api/teams/runs?version=1 — canonical precedence over the adaptive teamRuns projection (Step 12/13)", () => {
-  it("a stale/contradictory teamRuns.humanReviewStatus never overrides the canonical governanceRecord-derived reviewer/result", async () => {
-    // teamRuns projection claims "unreviewed" (as if still pending)...
-    teamRunDocs.set("a1", adaptiveDoc({ runId: "run-mismatch", humanReviewStatus: "unreviewed" }));
+  it("a stale/contradictory teamRuns.humanReviewStatus never overrides the canonical governanceRecord-derived reviewer/result, and the displayed status badge itself is corrected to match", async () => {
+    // teamRuns projection claims "unreviewed" (as if still pending) and, as
+    // a downstream consequence, "reviewable" (matching the stale status)...
+    teamRunDocs.set("a1", adaptiveDoc({ runId: "run-mismatch", humanReviewStatus: "unreviewed", reviewable: true }));
     // ...but the canonical governanceRecord says it was actually approved by reviewer-1.
     setGovernanceRecord("run-mismatch", { status: "approved", reviewerId: "reviewer-1", reviewedAt: "2026-08-12T10:44:00.000Z", decidedVia: "single_reviewer" });
 
     const body = await (await GET(buildRequest(""))).json();
     const item = body.items.find((i: any) => i.runId === "run-mismatch");
-    // The enriched, canonical-derived fields show the real, approved state...
+    // The enriched, canonical-derived detail fields show the real, approved state...
     expect(item.singleReviewer).toEqual({ userId: "reviewer-1", displayName: "Name-reviewer-1", reviewedAt: "2026-08-12T10:44:00.000Z" });
-    // ...even though the discovery/base field from teamRuns itself is left
-    // untouched (this route has never redefined humanReviewStatus's own
-    // meaning — it is a projection field, disclosed as such; the important
-    // guarantee is that the NEW canonical-derived fields are never
-    // overridden by it).
+    // ...and the top-level status badge/reviewable flag are corrected to
+    // match rather than left at the stale discovery-projection value. This
+    // mirrors the established precedent in
+    // app/api/teams/adaptive-runs/[runId]/route.ts ("the response is
+    // always built from `record` alone") — a row must never show an
+    // "Unreviewed" badge next to reviewer/result detail that says
+    // Approved. See lib/governance/teamReviewQueueEnrichment.ts's
+    // enrichAdaptiveTeamRunListItem for the override logic.
+    expect(item.humanReviewStatus).toBe("approved");
+    expect(item.reviewable).toBe(false);
+  });
+
+  it("leaves humanReviewStatus/reviewable at the projection's own value when no governanceRecord exists yet (nothing more canonical is available)", async () => {
+    teamRunDocs.set("a1", adaptiveDoc({ runId: "run-ungoverned", humanReviewStatus: "unreviewed", reviewable: true }));
+    const body = await (await GET(buildRequest(""))).json();
+    const item = body.items.find((i: any) => i.runId === "run-ungoverned");
     expect(item.humanReviewStatus).toBe("unreviewed");
+    expect(item.reviewable).toBe(true);
+  });
+
+  it("by contrast, a LEGACY row's teamRuns.humanDecision is surfaced with no canonical-override at all — teamRuns genuinely IS the only decision record for that older subsystem", async () => {
+    // Milestone-2 (above): teamRuns is a discovery projection of a SEPARATE
+    // canonical source (runs/{runId}.governanceRecord) and can go stale, so
+    // the enriched fields are corrected/overridden from that separate
+    // source. Legacy System B has no such separate source — the decision
+    // route (app/api/teams/runs/[runId]/decision/route.ts) writes
+    // `humanDecision` directly onto this SAME teamRuns doc and nowhere
+    // else, so there is nothing else it could ever diverge from. This test
+    // pins that asymmetry: unlike the adaptive case, a legacy row's
+    // decision detail is taken from teamRuns as-is (only the raw
+    // `decidedBy` uid is resolved to a display name — the decision content
+    // itself is never re-derived or second-guessed against another read).
+    teamRunDocs.set("l1", legacyDoc({ humanDecision: { action: "rejected", decidedAt: "2026-08-12T11:00:00.000Z", decidedBy: "reviewer-9" } }));
+    const body = await (await GET(buildRequest(""))).json();
+    const item = body.items.find((i: any) => i.kind === "legacy");
+    expect(item.humanDecision).toEqual({
+      action: "rejected",
+      decidedAt: "2026-08-12T11:00:00.000Z",
+      reviewer: { displayName: "Name-reviewer-9" },
+    });
   });
 });
 
