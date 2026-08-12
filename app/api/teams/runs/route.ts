@@ -3,6 +3,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import type { DocumentReference, DocumentSnapshot, Firestore } from "firebase-admin/firestore";
 import { adminDb } from "@/lib/firebase/admin";
 import {
   getRequestUid,
@@ -18,8 +19,20 @@ import {
   sortTeamRunListItems,
   paginateTeamRunListItems,
   TeamRunListItemV1,
-  TeamRunListResponseV1,
+  AdaptiveTeamRunListItemV1,
 } from "@/lib/governance/teamRunListContract";
+import {
+  enrichLegacyTeamRunListItem,
+  enrichAdaptiveTeamRunListItem,
+  EnrichedTeamRunListItemV1,
+  EnrichedTeamRunListResponseV1,
+} from "@/lib/governance/teamReviewQueueEnrichment";
+import { parseGovernanceRecord } from "@/lib/adaptiveSchema/governanceRecordParser";
+import { parseAdaptiveHumanReviewPanel, AdaptiveHumanReviewPanelV1 } from "@/lib/governance/adaptiveHumanReviewPanel";
+import { parseAdaptiveHumanReviewVote, buildAdaptiveHumanReviewVoteId, AdaptiveHumanReviewVoteV1 } from "@/lib/governance/adaptiveHumanReviewVote";
+import type { AdaptiveHumanReviewAssignmentV1 } from "@/lib/governance/adaptiveHumanReviewAssignment";
+import type { GovernanceRecordV1 } from "@/lib/adaptiveSchema/governanceRecord";
+import { resolveReviewerDisplayNames, UNKNOWN_REVIEWER_LABEL } from "@/lib/governance/reviewerIdentity";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -41,6 +54,172 @@ type TeamRunListRow = {
   humanDecision?: unknown;
   [key: string]: unknown;
 };
+
+/**
+ * Review Page Reviewer Display — batches an arbitrary set of document
+ * reads into `db.getAll()` calls, chunked at 10 (matching the precedent
+ * already established in `app/api/admin/runs/route.ts` and
+ * `lib/governance/reviewerIdentity.ts` for the identical "many unrelated
+ * doc reads, one round-trip" shape). A whole-chunk read failure degrades
+ * every ref in that chunk to `undefined` (never found) rather than
+ * failing the entire page — a temporary governance-data outage must never
+ * take down the whole review queue, only omit enrichment for the affected
+ * rows (queue items themselves came from the already-successful `teamRuns`
+ * query and are never dropped because of this).
+ */
+type BatchReadResult = { snap: DocumentSnapshot | undefined; failed: boolean };
+
+async function batchGetAll(db: Firestore, refs: DocumentReference[]): Promise<BatchReadResult[]> {
+  if (refs.length === 0) return [];
+  const CHUNK_SIZE = 10;
+  const results: BatchReadResult[] = [];
+  for (let i = 0; i < refs.length; i += CHUNK_SIZE) {
+    const chunk = refs.slice(i, i + CHUNK_SIZE);
+    try {
+      const snaps = await db.getAll(...chunk);
+      results.push(...snaps.map((snap) => ({ snap, failed: false })));
+    } catch (err) {
+      logger.warn("[teams/runs] Batched governance-enrichment read failed for a chunk; degrading affected rows", {
+        chunkSize: chunk.length,
+        errorMessage: err instanceof Error ? err.message : "unknown_error",
+      });
+      results.push(...chunk.map(() => ({ snap: undefined, failed: true })));
+    }
+  }
+  return results;
+}
+
+/**
+ * Review Page Reviewer Display — enriches a PAGE of already-classified,
+ * already-paginated list items with canonical reviewer/assignment/panel
+ * detail, bounded to exactly the rows being returned (never the full
+ * team's history). Every multi-row read (runs/assignment/panel/votes/
+ * identity) is batched into a small, fixed number of `db.getAll()` calls
+ * regardless of page size — never one Firestore read per row per field,
+ * and never one identity read per reviewer per row (Step 12's explicit
+ * requirement, mirroring PR #30's report-level fix).
+ *
+ * Never reads `teamRuns` fields as canonical for adaptive rows — the
+ * adaptive item's own `teamRunId`/discovery data is already in hand from
+ * the caller; this function only ever reads `runs/{runId}.governanceRecord`
+ * and its subcollections. For legacy rows, `humanDecision.decidedBy` is
+ * already present on the `TeamRunListItemV1` the caller passes in (no
+ * extra read needed) — see teamReviewQueueEnrichment.ts for why `teamRuns`
+ * IS canonical for that specific legacy sub-system.
+ */
+async function enrichPageItems(
+  db: Firestore,
+  pageItems: TeamRunListItemV1[],
+  callerEmail: string | undefined,
+  emailByUid: Map<string, string>
+): Promise<EnrichedTeamRunListItemV1[]> {
+  const adaptiveItems = pageItems.filter((i): i is AdaptiveTeamRunListItemV1 => i.kind === "adaptive");
+
+  const runRefs = adaptiveItems.map((i) => db.collection("runs").doc(i.runId));
+  const assignmentRefs = adaptiveItems.map((i) => db.collection("runs").doc(i.runId).collection("humanReviewAssignment").doc("current"));
+  const panelRefs = adaptiveItems.map((i) => db.collection("runs").doc(i.runId).collection("humanReviewPanel").doc("current"));
+
+  const [runSnaps, assignmentSnaps, panelSnaps] = await Promise.all([
+    batchGetAll(db, runRefs),
+    batchGetAll(db, assignmentRefs),
+    batchGetAll(db, panelRefs),
+  ]);
+
+  const governanceByRunId = new Map<string, GovernanceRecordV1 | null>();
+  const assignmentByRunId = new Map<string, AdaptiveHumanReviewAssignmentV1 | null>();
+  const panelByRunId = new Map<string, AdaptiveHumanReviewPanelV1 | null>();
+  // Step 17 — tracks a genuine read failure (never "nothing configured")
+  // per runId, so the UI can show "Review details unavailable" rather
+  // than an indistinguishable "not assigned" state.
+  const enrichmentFailedRunIds = new Set<string>();
+
+  adaptiveItems.forEach((item, idx) => {
+    const runResult = runSnaps[idx];
+    if (runResult.failed) enrichmentFailedRunIds.add(item.runId);
+    const parsedGov = parseGovernanceRecord(runResult.snap?.exists ? runResult.snap.data()?.governanceRecord : undefined);
+    governanceByRunId.set(item.runId, parsedGov.ok ? parsedGov.record : null);
+
+    const assignmentResult = assignmentSnaps[idx];
+    if (assignmentResult.failed) enrichmentFailedRunIds.add(item.runId);
+    assignmentByRunId.set(item.runId, assignmentResult.snap?.exists ? (assignmentResult.snap.data() as AdaptiveHumanReviewAssignmentV1) : null);
+
+    const panelResult = panelSnaps[idx];
+    if (panelResult.failed) enrichmentFailedRunIds.add(item.runId);
+    const parsedPanel = parseAdaptiveHumanReviewPanel(panelResult.snap?.exists ? panelResult.snap.data() : undefined, { expectedRunId: item.runId });
+    panelByRunId.set(item.runId, parsedPanel.status === "valid" ? parsedPanel.panel : null);
+  });
+
+  // Votes need each row's panel revision first (resolved above), so this
+  // is a second batched pass — still one db.getAll() per chunk across
+  // EVERY row's votes together, never per-row.
+  const voteRefEntries: { runId: string; reviewerId: string; ref: DocumentReference }[] = [];
+  for (const item of adaptiveItems) {
+    const panel = panelByRunId.get(item.runId);
+    if (!panel || panel.status === "cancelled") continue;
+    const voteRevision = panel.status === "open" ? panel.revision : panel.revision - 1;
+    for (const reviewerId of panel.reviewerUserIds) {
+      const voteId = buildAdaptiveHumanReviewVoteId(voteRevision, reviewerId);
+      voteRefEntries.push({ runId: item.runId, reviewerId, ref: db.collection("runs").doc(item.runId).collection("humanReviewVotes").doc(voteId) });
+    }
+  }
+  const voteResults = await batchGetAll(db, voteRefEntries.map((v) => v.ref));
+  const votesByRunId = new Map<string, AdaptiveHumanReviewVoteV1[]>();
+  voteRefEntries.forEach((entry, idx) => {
+    const result = voteResults[idx];
+    if (result.failed) enrichmentFailedRunIds.add(entry.runId);
+    if (!result.snap?.exists) return;
+    const parsed = parseAdaptiveHumanReviewVote(result.snap.data(), { expectedRunId: entry.runId, expectedReviewerUserId: entry.reviewerId });
+    if (parsed.status !== "valid") return;
+    const arr = votesByRunId.get(entry.runId) ?? [];
+    arr.push(parsed.vote);
+    votesByRunId.set(entry.runId, arr);
+  });
+
+  // Collect every candidate uid across the WHOLE page (adaptive + legacy)
+  // for exactly ONE batched identity resolution call — the specific fix
+  // Step 12 requires, reusing the shared resolver unchanged.
+  const candidateUids = new Set<string>();
+  for (const item of pageItems) {
+    if (item.kind === "legacy") {
+      if (item.humanDecision?.decidedBy) candidateUids.add(item.humanDecision.decidedBy);
+      continue;
+    }
+    const gov = governanceByRunId.get(item.runId);
+    if (gov?.humanReview.reviewerId) candidateUids.add(gov.humanReview.reviewerId);
+    const assignment = assignmentByRunId.get(item.runId);
+    if (assignment?.assignedReviewerUserId) candidateUids.add(assignment.assignedReviewerUserId);
+    if (assignment?.assignedByUserId) candidateUids.add(assignment.assignedByUserId);
+    const panel = panelByRunId.get(item.runId);
+    if (panel) {
+      for (const reviewerId of panel.reviewerUserIds) candidateUids.add(reviewerId);
+      if (panel.overrideByUserId) candidateUids.add(panel.overrideByUserId);
+    }
+  }
+
+  const resolvedNames = await resolveReviewerDisplayNames(Array.from(candidateUids), emailByUid, callerEmail);
+  const resolveDisplayName = async (uid: string) => resolvedNames.get(uid) ?? UNKNOWN_REVIEWER_LABEL;
+
+  const enriched: EnrichedTeamRunListItemV1[] = [];
+  for (const item of pageItems) {
+    if (item.kind === "legacy") {
+      enriched.push(await enrichLegacyTeamRunListItem(item, item.humanDecision?.decidedBy, resolveDisplayName));
+    } else {
+      const enrichedItem = await enrichAdaptiveTeamRunListItem(
+        item,
+        {
+          governanceRecord: governanceByRunId.get(item.runId) ?? null,
+          assignment: assignmentByRunId.get(item.runId) ?? null,
+          panel: panelByRunId.get(item.runId) ?? null,
+          votes: votesByRunId.get(item.runId) ?? [],
+        },
+        resolveDisplayName
+      );
+      if (enrichmentFailedRunIds.has(item.runId)) enrichedItem.enrichmentUnavailable = true;
+      enriched.push(enrichedItem);
+    }
+  }
+  return enriched;
+}
 
 export async function GET(req: NextRequest) {
   const uidOrRes = await getRequestUid(req);
@@ -112,10 +291,20 @@ export async function GET(req: NextRequest) {
     const sortedItems = sortTeamRunListItems(filteredItems);
     const { pageItems, pagination } = paginateTeamRunListItems(sortedItems, filters.page, filters.limit);
 
-    const response: TeamRunListResponseV1 = {
+    // Review Page Reviewer Display — enrichment is bounded to exactly the
+    // page being returned (never the full team's `teamRuns` history), and
+    // is best-effort: a governance-enrichment failure never removes a row
+    // from the queue or fails the whole request (see enrichPageItems'/
+    // batchGetAll's own degrade-per-chunk behavior) — worst case a row's
+    // reviewer/assignment/panel fields are simply absent, matching a
+    // genuinely "not yet configured" row's own shape.
+    const emailByUid = new Map((ctx.team.members ?? []).map((m) => [m.uid, m.email] as const));
+    const enrichedItems = await enrichPageItems(adminDb, pageItems, ctx.user?.email, emailByUid);
+
+    const response: EnrichedTeamRunListResponseV1 = {
       ok: true,
       version: 1,
-      items: pageItems,
+      items: enrichedItems,
       pagination,
     };
     return NextResponse.json(response);

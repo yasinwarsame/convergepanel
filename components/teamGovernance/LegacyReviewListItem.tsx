@@ -1,13 +1,13 @@
 "use client";
 
 /**
- * Query-Routing Redesign, Phase 2A, Step 7, Part E1 — one legacy row in the
- * team-review queue. Display-only: legacy rows have no adaptive-style
- * detail page in this step, so no "Open review" action is rendered here
- * (matching §25.17's own field list for the legacy row, which excludes it).
+ * Review Page Reviewer Display — one legacy row in the team-review
+ * queue. Display-only: legacy rows have no adaptive-style detail page in
+ * this step, so no "Open review" action is rendered here (matching
+ * §25.17's own field list for the legacy row, which excludes it).
  */
 
-import type { LegacyTeamRunListItemV1 } from "@/lib/governance/teamRunListContract";
+import type { EnrichedLegacyTeamRunListItemV1 } from "@/lib/governance/teamReviewQueueEnrichment";
 
 function formatCreatedAt(iso: string): string {
   const d = new Date(iso);
@@ -15,7 +15,7 @@ function formatCreatedAt(iso: string): string {
   return d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
-export default function LegacyReviewListItem({ item }: { item: LegacyTeamRunListItemV1 }) {
+export default function LegacyReviewListItem({ item }: { item: EnrichedLegacyTeamRunListItemV1 }) {
   const decisionLabel = item.humanDecision
     ? item.humanDecision.action.charAt(0).toUpperCase() + item.humanDecision.action.slice(1)
     : "No decision yet";
@@ -41,6 +41,17 @@ export default function LegacyReviewListItem({ item }: { item: LegacyTeamRunList
         <span aria-hidden>&middot;</span>
         <span>{decisionLabel}</span>
       </div>
+
+      {item.humanDecision && (
+        <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-0.5 rounded-lg border border-cp-border bg-cp-raised px-3 py-2 text-xs">
+          <span className="font-medium text-cp-text">{item.humanDecision.reviewer ? item.humanDecision.reviewer.displayName : "Unknown reviewer"}</span>
+          <span aria-hidden className="text-cp-muted">
+            &middot;
+          </span>
+          <span className="text-cp-muted">{decisionLabel}</span>
+          <span className="w-full text-cp-muted">Completed {formatCreatedAt(item.humanDecision.decidedAt)}</span>
+        </div>
+      )}
     </li>
   );
 }

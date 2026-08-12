@@ -14,7 +14,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { useAuth } from "@/components/AuthProvider";
 import { useUserPlan } from "@/hooks/useUserPlan";
-import type { TeamRunListItemV1, TeamRunListResponseV1 } from "@/lib/governance/teamRunListContract";
+import type { TeamRunListResponseV1 } from "@/lib/governance/teamRunListContract";
+import type { EnrichedTeamRunListItemV1, EnrichedTeamRunListResponseV1 } from "@/lib/governance/teamReviewQueueEnrichment";
 import TeamReviewFilters, { TeamReviewQueueFiltersState } from "./TeamReviewFilters";
 import TeamReviewListItem from "./TeamReviewListItem";
 import ReviewEmptyState from "./ReviewEmptyState";
@@ -55,7 +56,7 @@ export default function TeamReviewQueue() {
     return Number.isInteger(raw) && raw >= 1 ? raw : 1;
   }, [searchParams]);
 
-  const [items, setItems] = useState<TeamRunListItemV1[]>([]);
+  const [items, setItems] = useState<EnrichedTeamRunListItemV1[]>([]);
   const [pagination, setPagination] = useState<TeamRunListResponseV1["pagination"] | null>(null);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -105,7 +106,7 @@ export default function TeamReviewQueue() {
           return;
         }
 
-        const data = (await res.json()) as TeamRunListResponseV1;
+        const data = (await res.json()) as EnrichedTeamRunListResponseV1;
         if (data.ok && data.version === 1) {
           setItems(data.items);
           setPagination(data.pagination);

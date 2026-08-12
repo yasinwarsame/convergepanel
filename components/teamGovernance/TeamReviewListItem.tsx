@@ -7,11 +7,11 @@
  * to carry exactly one `kind`.
  */
 
-import type { TeamRunListItemV1 } from "@/lib/governance/teamRunListContract";
+import type { EnrichedTeamRunListItemV1 } from "@/lib/governance/teamReviewQueueEnrichment";
 import AdaptiveReviewListItem from "./AdaptiveReviewListItem";
 import LegacyReviewListItem from "./LegacyReviewListItem";
 
-export default function TeamReviewListItem({ item }: { item: TeamRunListItemV1 }) {
+export default function TeamReviewListItem({ item }: { item: EnrichedTeamRunListItemV1 }) {
   if (item.kind === "adaptive") return <AdaptiveReviewListItem item={item} />;
   return <LegacyReviewListItem item={item} />;
 }

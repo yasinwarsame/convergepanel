@@ -156,7 +156,15 @@ describe("classifyTeamRunRow — legacy", () => {
     if (result.status === "valid") {
       const item = result.item as LegacyTeamRunListItemV1;
       expect(item.governanceReviewRequired).toBe(false);
-      expect(item.humanDecision).toEqual({ action: "approved", decidedAt: "2026-07-28T00:00:00.000Z" });
+      // DELIBERATE, DISCLOSED CHANGE (Review Page Reviewer Display): `decidedBy`
+      // is now carried through classification so the route's enrichment step
+      // can resolve it to a safe display name — it is an internal, server-side
+      // field only; the route always replaces it with a resolved `reviewer`
+      // object before the HTTP response is built (see
+      // lib/governance/teamReviewQueueEnrichment.ts). `notes` (the private
+      // decision justification) is still never carried through.
+      expect(item.humanDecision).toEqual({ action: "approved", decidedAt: "2026-07-28T00:00:00.000Z", decidedBy: "u1" });
+      expect(JSON.stringify(item)).not.toContain("notes");
     }
   });
 
