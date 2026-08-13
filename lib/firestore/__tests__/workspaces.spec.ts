@@ -4,16 +4,35 @@
  * adaptiveHumanReviewAssignment.spec.ts (adjacent in this directory).
  */
 
+import { Status } from "google-gax";
+
+/**
+ * Verified against the ACTUAL installed dependency, not assumed: this
+ * repo's `firebase-admin@12.7.0` uses `@google-cloud/firestore@7.11.6`,
+ * whose `write-batch.js` throws server errors via `wrapError(err, stack)`
+ * (`util.js`) — which appends stack-trace context but returns the SAME
+ * error object, leaving `.code` exactly as set by the underlying
+ * `google-gax` `GoogleError` (`code?: Status`, a real numeric gRPC status
+ * enum — `Status.ALREADY_EXISTS === 6`, imported directly here, not
+ * hand-typed). This confirms `.code === 6` is the real, stable shape a
+ * genuine `DocumentReference.create()` conflict throws — never a
+ * mock-specific invention. `createPersonalWorkspace()`'s primary
+ * detection (`code === 6`) is checked against this real numeric constant
+ * below; the `code === "ALREADY_EXISTS"` / message-substring checks in
+ * the implementation are pure secondary defense-in-depth, matching this
+ * codebase's own established convention (`createAdaptiveHumanReviewHistory`
+ * in `lib/firestore/runs.ts` uses the identical fallback chain).
+ */
 function alreadyExistsError() {
-  const err: any = new Error("6 ALREADY_EXISTS");
-  err.code = 6;
+  const err: any = new Error(`${Status.ALREADY_EXISTS} ALREADY_EXISTS: Document already exists: projects/test/databases/(default)/documents/workspaces/x`);
+  err.code = Status.ALREADY_EXISTS;
   return err;
 }
 
 const workspaceDocs = new Map<string, Record<string, unknown>>();
 const firestoreUnavailableFlag = { value: false };
 const throwOnRead = { value: false };
-const throwOnCreate = { value: false as false | "generic" };
+const throwOnCreate = { value: false as false | "generic" | "other_grpc_code" };
 
 const mockAdminDb: any = {
   collection: (name: string) => ({
@@ -25,6 +44,13 @@ const mockAdminDb: any = {
       }),
       create: jest.fn().mockImplementation(async (value: Record<string, unknown>) => {
         if (throwOnCreate.value === "generic") throw new Error("simulated write outage");
+        if (throwOnCreate.value === "other_grpc_code") {
+          // A DIFFERENT real gRPC status — proves detection doesn't
+          // false-positive on just "any error with a numeric .code".
+          const err: any = new Error(`${Status.PERMISSION_DENIED} PERMISSION_DENIED: Missing or insufficient permissions.`);
+          err.code = Status.PERMISSION_DENIED;
+          throw err;
+        }
         const key = `${name}/${id}`;
         if (workspaceDocs.has(key)) throw alreadyExistsError();
         workspaceDocs.set(key, value);
@@ -198,6 +224,13 @@ describe("createPersonalWorkspace", () => {
     throwOnCreate.value = "generic";
     const result = await createPersonalWorkspace("owner-1");
     expect(result).toEqual({ status: "create_failed" });
+  });
+
+  it("returns create_failed — never mistaken for a duplicate — for a DIFFERENT real gRPC status code (PERMISSION_DENIED, code 7)", async () => {
+    throwOnCreate.value = "other_grpc_code";
+    const result = await createPersonalWorkspace("owner-1");
+    expect(result).toEqual({ status: "create_failed" });
+    expect(workspaceDocs.size).toBe(0);
   });
 
   it("two different uids create two independent documents with no crossover", async () => {

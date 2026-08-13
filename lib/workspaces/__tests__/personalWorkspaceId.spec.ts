@@ -30,6 +30,12 @@ describe("getPersonalWorkspaceId", () => {
     ["is exactly '.'", "."],
     ["is exactly '..'", ".."],
     ["exceeds Firestore's document id byte limit", "u".repeat(1500)],
+    ["contains a newline", "uid\n1"],
+    ["contains a carriage return", "uid\r1"],
+    ["contains a tab", "uid\t1"],
+    ["contains a null byte", "uid\x001"],
+    ["contains a DEL control character", "uid\x7f1"],
+    ["contains a C0 control character mid-string", "ui\x0bd1"],
   ])("rejects: %s", (_label, uid) => {
     expect(getPersonalWorkspaceId(uid)).toEqual({ ok: false, reason: "invalid_uid" });
   });
@@ -38,5 +44,17 @@ describe("getPersonalWorkspaceId", () => {
     const a = getPersonalWorkspaceId("uid-a");
     const b = getPersonalWorkspaceId("uid-b");
     expect(a.ok && b.ok && a.workspaceId !== b.workspaceId).toBe(true);
+  });
+
+  it("accepts a backslash — not a forbidden Firestore document-id character, unlike forward slash", () => {
+    expect(getPersonalWorkspaceId("a\\b")).toEqual({ ok: true, workspaceId: "personal-a\\b" });
+  });
+
+  it("never produces an id matching Firestore's reserved __.*__ pattern, by construction (the personal- prefix never starts with __)", () => {
+    const result = getPersonalWorkspaceId("__proto__");
+    expect(result).toEqual({ ok: true, workspaceId: "personal-__proto__" });
+    if (result.ok) {
+      expect(/^__.*__$/.test(result.workspaceId)).toBe(false);
+    }
   });
 });

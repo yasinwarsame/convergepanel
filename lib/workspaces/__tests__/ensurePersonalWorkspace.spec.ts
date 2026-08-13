@@ -21,13 +21,22 @@
  * distributed system was exercised.
  */
 
+import { Status } from "google-gax";
+
 const workspaceDocs = new Map<string, Record<string, unknown>>();
 const flagValue = { value: false };
 const readDelayEnabled = { value: false };
 
+/**
+ * Uses the real numeric `Status.ALREADY_EXISTS` (6) from `google-gax` —
+ * the actual dependency `firebase-admin@12.7.0`'s Firestore client uses
+ * internally, verified by direct source inspection (see
+ * `lib/firestore/__tests__/workspaces.spec.ts`'s own header comment). Not
+ * a mock-invented shape.
+ */
 function alreadyExistsError() {
-  const err: any = new Error("6 ALREADY_EXISTS");
-  err.code = 6;
+  const err: any = new Error(`${Status.ALREADY_EXISTS} ALREADY_EXISTS: Document already exists.`);
+  err.code = Status.ALREADY_EXISTS;
   return err;
 }
 

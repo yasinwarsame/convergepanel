@@ -254,6 +254,19 @@ They must be able to move independently. Most importantly: **disabling `PERSONAL
 
 `ensurePersonalWorkspace()` checks its own flag first, before even validating `uid` — when off, zero Firestore reads or writes occur.
 
+#### The four-combination matrix
+
+Verified structurally, not just narratively: `ensurePersonalWorkspace.ts` never imports `WORKSPACES_ENABLED`, and `workspaceResolver.ts`/`workspaceAccess.ts` never import `PERSONAL_WORKSPACE_PROVISIONING_ENABLED` (confirmed by grep — zero cross-references). The two flags govern completely disjoint code paths, which is what makes every combination below safe to reason about independently:
+
+| `WORKSPACES_ENABLED` | `PERSONAL_WORKSPACE_PROVISIONING_ENABLED` | Provisioning | Resolution of an existing `runs/{id}` (no `workspaceId` field, today's only real case) | Resolution of a hypothetical future workspace-bound resource |
+|---|---|---|---|---|
+| false | false | Disabled — no new workspace created | `legacy` (unaffected either way) | `workspaces_disabled` (deny) |
+| false | **true** | **Active** — a real `workspaces/personal-{uid}` document CAN be created | `legacy` (unaffected — see below) | `workspaces_disabled` (deny) |
+| true | false | Disabled — no new workspace created | `legacy` (unaffected either way) | resolves for real (`resolved`/`not_found`/`malformed`/etc.) |
+| true | true | Active | `legacy` (unaffected either way) | resolves for real |
+
+**Why `W=false, P=true` (the legitimate controlled-dark-provisioning state) is safe, not merely "not yet broken":** provisioning a Personal Workspace changes nothing about any existing resource, because `ensurePersonalWorkspace()` writes to exactly one place — `workspaces/{id}` — and nowhere else (verified structurally: no import path to `runs`/governance/export/history writes). A resource's resolution outcome depends entirely on its OWN `workspaceId` field, never on "does a workspace happen to exist for this owner." Since Phase 2 writes `workspaceId` onto zero existing resources, creating a workspace under `W=false` cannot make anything "immediately unusable" — there is nothing yet that references the new workspace for `W` to gate access to. The workspace document sits inert until a future phase (3+) deliberately binds a resource to it — at which point, if `W` is still false at that time, that specific bound resource fails closed (`workspaces_disabled`, a deny) exactly as designed, never a security downgrade. **Provisioning a workspace never automatically authorizes any existing run through it** — there is no code path from "workspace exists" to "run X is now workspace-governed."
+
 ### Not wired into any automatic flow
 
 `POST /api/user/workspace` is a real, callable, fully-tested authenticated route — and, in this PR, its only caller. It is not invoked by login, signup, session refresh, auth middleware, the homepage, the research route, or the history route. Provisioning remains explicitly-callable-only until a later phase deliberately wires it in and re-validates that decision on its own merits.
