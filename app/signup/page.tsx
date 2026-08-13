@@ -294,17 +294,22 @@ export default function SignupPage() {
       // review: AWAITED (not fire-and-forget) — this is the very first
       // opportunity to provision a brand-new user's Personal Workspace.
       // POST /api/user/workspace is Phase 2's existing self-provisioning
-      // endpoint. Two outcomes proceed to onboarding exactly as before
-      // this hardening: a real success ("created"/"existing"), and
-      // "provisioning_disabled" (503) — what this endpoint always returns
-      // today, since PERSONAL_WORKSPACE_PROVISIONING_ENABLED is off in
-      // production, so flags-off signup behavior is unchanged (just one
-      // extra fast round trip). Any OTHER outcome (a genuine failure while
-      // the flag IS on) does NOT delete the just-created Auth account or
-      // profile — provisioning is idempotent, so the correct recovery is
-      // "try again," not "start over." The error directs the user to sign
-      // in, which re-attempts provisioning as app/login/page.tsx's own
-      // hardened self-heal — no separate retry UI needed.
+      // endpoint.
+      //
+      // Only a WELL-FORMED, non-"provisioning_disabled" error response
+      // blocks onboarding — never a network-level failure (fetch
+      // throwing). See app/login/page.tsx's identical block for the full
+      // reasoning: a thrown error carries no information about whether
+      // PERSONAL_WORKSPACE_PROVISIONING_ENABLED is even on server-side, so
+      // treating it as a hard block would give signup a new failure
+      // dependency on this one endpoint even while Phase 3 is entirely
+      // dark. Logged for observability; the residual gap is fully
+      // contained server-side (a first research request without a
+      // Workspace still fails safely and clearly — no run, no tokens
+      // spent). Provisioning is idempotent, so the correct recovery for a
+      // genuine failure is "try again" (directed to sign in, which
+      // re-attempts via login's own hardened self-heal), never "start
+      // over" — the just-created Auth account/profile is never deleted.
       let personalWorkspaceReady = true;
       try {
         const { authedFetch } = await import("@/lib/client/authedFetch");
@@ -314,9 +319,10 @@ export default function SignupPage() {
           personalWorkspaceReady = workspaceBody?.errorCode === "provisioning_disabled";
         }
       } catch (err: any) {
-        personalWorkspaceReady = false;
+        // Network-level failure — never block signup on this alone (see
+        // comment above). Only surfaced in logs.
         if (process.env.NODE_ENV !== "production") {
-          console.warn("[signup] Personal Workspace provisioning request failed:", err?.message);
+          console.warn("[signup] Personal Workspace provisioning request failed (non-blocking network error):", err?.message);
         }
       }
       if (!personalWorkspaceReady) {

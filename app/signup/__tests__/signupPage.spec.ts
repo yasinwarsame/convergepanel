@@ -85,5 +85,16 @@ describe("Signup page — source-level wiring guarantees", () => {
       expect(afterCall).not.toMatch(/deleteUser/);
       expect(afterCall).not.toMatch(/signOut/);
     });
+
+    it("a network-level failure (fetch throwing) does NOT block signup — only a well-formed non-disabled error response does. A prior version of this hardening regressed this: any thrown error unconditionally blocked signup even while Phase 3 is entirely dark", () => {
+      const workspaceCallIndex = source.indexOf('authedFetch("/api/user/workspace"');
+      const tryBlockStart = source.lastIndexOf("try {", workspaceCallIndex);
+      const catchBlockEnd = source.indexOf("if (!personalWorkspaceReady)", workspaceCallIndex);
+      const tryCatchBlock = source.slice(tryBlockStart, catchBlockEnd);
+      const catchIndex = tryCatchBlock.indexOf("} catch (err: any) {");
+      expect(catchIndex).toBeGreaterThan(-1);
+      const catchBody = tryCatchBlock.slice(catchIndex);
+      expect(catchBody).not.toMatch(/personalWorkspaceReady\s*=\s*false/);
+    });
   });
 });

@@ -99,5 +99,19 @@ describe("Login page — source-level wiring guarantees", () => {
       expect(afterCall).not.toMatch(/clearServerSession\(\)/);
       expect(afterCall).not.toMatch(/signOut\(auth\)/);
     });
+
+    it("a network-level failure (fetch throwing) does NOT block login — only a well-formed non-disabled error response does. A prior version of this hardening regressed this: any thrown error unconditionally blocked login even while Phase 3 is entirely dark", () => {
+      const workspaceCallIndex = source.indexOf('authedFetch("/api/user/workspace"');
+      const tryBlockStart = source.lastIndexOf("try {", workspaceCallIndex);
+      const catchBlockEnd = source.indexOf("if (!personalWorkspaceReady)", workspaceCallIndex);
+      const tryCatchBlock = source.slice(tryBlockStart, catchBlockEnd);
+      const catchIndex = tryCatchBlock.indexOf("} catch (err: any) {");
+      expect(catchIndex).toBeGreaterThan(-1);
+      const catchBody = tryCatchBlock.slice(catchIndex);
+      // The catch body must not assign personalWorkspaceReady = false —
+      // only the !workspaceRes.ok branch (a real HTTP response) may do
+      // that, and only when errorCode !== "provisioning_disabled".
+      expect(catchBody).not.toMatch(/personalWorkspaceReady\s*=\s*false/);
+    });
   });
 });
