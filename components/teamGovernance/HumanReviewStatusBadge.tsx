@@ -16,7 +16,7 @@ function toneClasses(status: string | undefined | null): string {
       return "bg-blue-900/30 text-blue-400 ring-1 ring-blue-700/40";
     case "approved":
     case "approved_with_conditions":
-      return "bg-emerald-900/30 text-emerald-400 ring-1 ring-emerald-700/40";
+      return "bg-green-100 text-green-800 ring-1 ring-green-300";
     case "changes_requested":
       return "bg-amber-900/30 text-amber-400 ring-1 ring-amber-700/40";
     case "rejected":
