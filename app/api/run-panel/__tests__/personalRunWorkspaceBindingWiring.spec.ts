@@ -252,13 +252,27 @@ describe("POST /api/run-panel — Personal Run Workspace Binding wiring (hardene
       expect(workspaceIdArg).toBeUndefined();
     });
 
-    it("flag off (RW=false), adaptive request: resolvePersonalRunWorkspaceBinding is never called", async () => {
+    it("flag off (RW=false, W=false), adaptive request: resolvePersonalRunWorkspaceBinding is never called", async () => {
       mockEnvFlags.RW = false;
+      mockEnvFlags.W = false;
       const { response, body } = await runAdaptiveRequest();
 
       expect(response.status).toBe(200);
       expect(body.ok).toBe(true);
       expect(mockedResolveBinding).not.toHaveBeenCalled();
+      const [, , , , workspaceIdArg] = mockedCreateRun.mock.calls[0];
+      expect(workspaceIdArg).toBeUndefined();
+    });
+
+    it("RW=false is completely inert even when W=true — W alone must never make new run creation Workspace-associated", async () => {
+      mockEnvFlags.RW = false;
+      mockEnvFlags.W = true;
+      const { response, body } = await runAdaptiveRequest();
+
+      expect(response.status).toBe(200);
+      expect(body.ok).toBe(true);
+      expect(mockedResolveBinding).not.toHaveBeenCalled();
+      expect(mockedLoadUserAndTeam).not.toHaveBeenCalled();
       const [, , , , workspaceIdArg] = mockedCreateRun.mock.calls[0];
       expect(workspaceIdArg).toBeUndefined();
     });
