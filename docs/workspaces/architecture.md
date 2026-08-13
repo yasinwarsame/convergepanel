@@ -1,23 +1,25 @@
-# Workspace Compatibility Foundation — Phase 1 Architecture
+# Workspace & Projects Program — Architecture
 
-**Status: Phase 1 implemented. No route wiring. No production data touched. Not user-visible.**
+**Status: Phase 1 implemented, merged, in production. Phase 2 implemented, PR open, not yet merged. No workspace-aware route wiring. No production data mutated by Phase 2 (no bulk provisioning has been run). Not user-visible.**
 
-This document describes what Phase 1 actually built, why, and the invariants later phases must preserve. It is implementation-specific, not aspirational product prose. For the pre-existing data-model/authorization audit this design is built on, see `docs/team-workspaces-architecture-audit.md`.
+This document describes what each phase actually built, why, and the invariants later phases must preserve. It is implementation-specific, not aspirational product prose. For the pre-existing data-model/authorization audit this design is built on, see `docs/team-workspaces-architecture-audit.md`.
 
 ## Program context
 
-This is Phase 1 of an 8-phase program:
+This is an 8-phase program:
 
-1. **Workspace Compatibility Foundation** (this document)
-2. Personal Workspace Provisioning + Backfill
-3. Workspace-Aware Writes
-4. Workspace-Aware Reads + History
-5. Workspace UI
-6. Projects Foundation
-7. Projects UI
-8. Shared Workspace / Collaboration
+1. **Workspace Compatibility Foundation** — COMPLETE, in production (merge commit `4ee808c3d041192fc276002fe24f284c17ffc91f`)
+2. **Personal Workspace Provisioning** — implemented, this document's newest section, PR open
+3. Workspace-Aware Writes — not started
+4. Workspace-Aware Reads + History — not started
+5. Workspace UI — not started
+6. Projects Foundation — not started
+7. Projects UI — not started
+8. Shared Workspace / Collaboration — not started
 
-Phase 1's only job: introduce the minimum architecture required for ConvergePanel to *understand* the concept of a Workspace, in a way that is additive, backward-compatible, dark by default, and independently releasable — with zero effect on any existing user or route today.
+Phase 1's job: introduce the minimum architecture required for ConvergePanel to *understand* the concept of a Workspace, additive, backward-compatible, dark by default, independently releasable — zero effect on any existing user or route.
+
+Phase 2's job: prove that exactly one Personal Workspace document can be safely, idempotently, concurrency-safely created for a uid — and nothing more. Phase 2 explicitly does NOT bind any existing resource to a workspace, does not backfill, does not wire authorization, and does not change what any user sees. Provisioning a Personal Workspace and binding a run to that workspace are deliberately separate operations; only the former exists after Phase 2.
 
 ## Domain model
 
@@ -39,7 +41,7 @@ interface WorkspaceV1 {
 
 **`WorkspaceType: "team"` does not imply integration with this codebase's existing `teams/{teamId}` governance system.** They are unrelated so far: `type: "team"` is a placeholder value in a domain vocabulary nothing can create yet, while `teams/{teamId}` (§1a of `docs/team-workspaces-architecture-audit.md`) is a real, narrow, review-only system with its own membership/role model, one-team-per-user constraint, and Full-plan gate. Whether a future "team workspace" ever wraps, replaces, or stays entirely separate from the existing `teams` system is an explicit open question for a later phase (see the resource classification table's `teams/{teamId}` row) — not something this phase decides, implies, or should be read as implying.
 
-No `Workspace` document is ever created, updated, or deleted by Phase 1 code. `lib/firestore/workspaces.ts` exports exactly one function, `getWorkspace()` — a read. There is no `createWorkspace`, no `provisionPersonalWorkspace`, nowhere in the codebase. The capability to write a workspace document does not exist yet, not merely "exists but unused."
+No `Workspace` document was created, updated, or deleted by Phase 1 code — `lib/firestore/workspaces.ts` exported exactly one function, `getWorkspace()`, a read. **Phase 2 adds exactly one narrow write capability** — see "Phase 2 — Personal Workspace Provisioning" below. There is still no generic `createWorkspace(data)`, no update function, no delete function, and still no way to create anything other than a `type: "personal"` workspace for the caller's own authenticated uid.
 
 ## Personal Workspace concept
 
@@ -178,9 +180,9 @@ Exports must **freeze `workspaceId` at export creation time**, exactly like `Ada
 
 **One genuine open question, not resolved here:** `firestore.indexes.json` already has a `collectionGroup: "humanReviewAssignment"` index keyed on `(assignedReviewerUserId, teamId, assignedAt)` — the query behind the personal-reviewer inbox ("show me everything assigned to me across all runs"). If a future phase wants to scope that to "show me everything assigned to me *within workspace X*," the assignment subcollection docs would need their own denormalized `workspaceId` — an explicit, narrow exception to the general "inherit from run, never denormalize" rule for **B**-classified resources, needed only because this one query already crosses run boundaries by design. **Flagged as an explicit Phase-4 design question. Not decided, not implemented, here.**
 
-## Personal Workspace identity strategy — decision required before Phase 2
+## Personal Workspace identity strategy — decided in Phase 1, implemented in Phase 2
 
-Phase 1 states each user may eventually have one Personal Workspace, but a naive `workspaces/{randomId}` + `ownerUserId` shape does not, by itself, enforce "exactly one." This is a load-bearing decision for Phase 2's provisioning design, made now — while it's cheap — rather than after real records exist:
+Phase 1 states each user may eventually have one Personal Workspace, but a naive `workspaces/{randomId}` + `ownerUserId` shape does not, by itself, enforce "exactly one." This was a load-bearing decision for Phase 2's provisioning design, made during Phase 1's review — while it was cheap — rather than after real records existed. Phase 2 implements exactly this decision, unchanged:
 
 **Decision: deterministic Personal Workspace document IDs, of the form `personal-{uid}`.**
 
@@ -193,6 +195,103 @@ Considered and rejected: random workspace IDs + a `.where("ownerUserId","==",uid
 Enumeration/privacy: not a practical concern given the existing Firestore rules posture (see Firestore Rules below) — `workspaces/*` is already unreadable by any client SDK regardless of whether ids are predictable, and the id never appears in any URL (see Domain model / No user-visible change).
 
 **This decision governs Phase 2's implementation; Phase 1 implements no provisioning. `WorkspaceV1`'s shape and `getWorkspace()`'s behavior are already id-scheme-agnostic and require no change for this decision to take effect later.**
+
+## Phase 2 — Personal Workspace Provisioning
+
+### Architecture
+
+```
+getPersonalWorkspaceId(uid)              lib/workspaces/personalWorkspaceId.ts
+  -> createPersonalWorkspace(uid)        lib/firestore/workspaces.ts (Firestore .create() primitive)
+  -> getWorkspace(id)                    lib/firestore/workspaces.ts (Phase 1, reused as-is)
+    -> ensurePersonalWorkspace(uid)      lib/workspaces/ensurePersonalWorkspace.ts (the service — all business logic lives here)
+      -> POST /api/user/workspace        app/api/user/workspace/route.ts (the only caller)
+```
+
+`getPersonalWorkspaceId(uid)` is the single canonical id-construction function — no route or module builds the `personal-{uid}` string itself. It validates `uid` before constructing anything: rejects non-string, empty/whitespace-only, incidental leading/trailing whitespace, values containing `/`, the reserved `.`/`..` segments, and anything that would exceed Firestore's document-id byte limit. A uid this guard rejects can never have come from a genuinely verified Firebase Auth token — this is defense in depth, not an expected runtime path.
+
+### Exactly-one guarantee
+
+Deterministic id (`personal-{uid}`) + Firestore `.create()` — never query-then-create. `createPersonalWorkspace()` calls `.collection("workspaces").doc(id).create(workspace)`, exactly the `ALREADY_EXISTS`-is-idempotent-success pattern already established by `createAdaptiveHumanReviewHistory()`/`createAdaptiveHumanReviewAssignmentHistory()` (`lib/firestore/runs.ts`) — never `.set()`, which would silently overwrite. Firestore's own atomicity for `.create()` at a fixed document id is the entire uniqueness mechanism; no transaction, no pre-check query, no lock.
+
+### ALREADY_EXISTS / conflict handling — fail closed, never repair
+
+When `.create()` throws `ALREADY_EXISTS`, `ensurePersonalWorkspace()` reads the existing document back via `getWorkspace()` (Phase 1's function, reused unmodified) and validates it strictly before treating provisioning as successful:
+
+| Existing document state | Result | Existing document mutated? |
+|---|---|---|
+| Valid: `id` matches, `schemaVersion: 1`, `type: "personal"`, `ownerUserId === uid` | `{status: "existing", workspace}` — success | No |
+| `ownerUserId` is a different uid | `{status: "conflict", reason: "wrong_owner"}` | No |
+| `type` is `"team"` | `{status: "conflict", reason: "wrong_type"}` | No |
+| Structurally malformed, embedded `id` mismatched, or unsupported `schemaVersion` | `{status: "conflict", reason: "malformed"}` | No |
+
+The three "malformed" sub-cases collapse into one reason deliberately: `getWorkspace()`'s own `isWellFormedWorkspaceV1()` guard and document-id-match check (both Phase 1, unmodified) already collapse them into a single `malformed` lookup status — Phase 2 does not invent a finer split the data layer has no way to actually distinguish. Each underlying cause is still individually tested (`lib/workspaces/__tests__/ensurePersonalWorkspace.spec.ts`).
+
+**No conflict case ever overwrites, repairs, or deletes the existing document.** Repair tooling, if ever needed, is an explicitly separate, controlled workflow — not something provisioning does as a side effect.
+
+### Idempotency
+
+Sequential calls to `ensurePersonalWorkspace(uid)` — 1st, 2nd, 3rd, ... — always converge on exactly one Firestore document: the first call creates it; every subsequent call observes `ALREADY_EXISTS`, reads it back, validates it, and returns the identical `WorkspaceV1` (same id, owner, `createdAt`, `updatedAt`). No `.set()` or `.update()` call exists anywhere in the provisioning path (confirmed both by test and by direct source inspection — `createPersonalWorkspace` and `ensurePersonalWorkspace` between them contain exactly one Firestore write call, the initial `.create()`). Provisioning never rewrites the document merely because it already exists.
+
+### Concurrency
+
+Tested: 10 simultaneous `ensurePersonalWorkspace(uid)` calls for the same uid, dispatched via a single `Promise.all`, against a realistic in-memory Firestore mock that reproduces `.create()`'s real atomicity contract (synchronous check-and-set at a fixed document id — never yielded mid-check, exactly matching what real Firestore's server-side atomicity guarantees). Result: exactly 1 `created`, 9 `existing`, 0 failures, exactly 1 document, and — critically — every one of the 10 callers, winner and losers alike, observes byte-for-byte the same `WorkspaceV1`. A separate cross-user test dispatches 5 concurrent calls for user A interleaved with 5 for user B: exactly 2 documents, `personal-{A}` and `personal-{B}`, zero ownership crossover.
+
+**Disclosed limitation, not overstated:** this repository has no Firestore emulator or `@firebase/rules-unit-testing` infrastructure (confirmed: no `emulators` block in `firebase.json`, no such dependency in `package.json` — the same finding Phase 1's review already made for rules testing). The concurrency tests above are a realistic, stateful, single-process mock exercising genuine `Promise.all` interleaving with an artificial delay on the read path only (never on the atomic create-check-set itself, which would misrepresent what real Firestore actually guarantees) — not a distributed-system test. It validates that `ensurePersonalWorkspace()`'s own logic correctly handles the two real outcomes real Firestore's atomicity produces (`.create()` succeeds / `.create()` throws `ALREADY_EXISTS`); it does not validate Firestore's server-side atomicity itself, which is Google's contract, not this codebase's to test.
+
+### Timestamps
+
+`createdAt`/`updatedAt` are both set to `Timestamp.now()` (`firebase-admin/firestore`) at creation time — matching the exact convention already used for creating a new top-level document elsewhere in this codebase (`TeamDocument.createdAt` in `app/api/teams/route.ts`). Both fields are set once, at creation, and never touched again by any idempotent re-provisioning call.
+
+### Feature flag — separate from `WORKSPACES_ENABLED`, by design
+
+`PERSONAL_WORKSPACE_PROVISIONING_ENABLED` (`lib/env.ts`), default OFF, same fail-closed convention. Deliberately a SECOND, independent flag from Phase 1's `WORKSPACES_ENABLED`:
+
+- `WORKSPACES_ENABLED` is an **authorization/security-boundary** concern — does the resolver honor a persisted `workspaceId`?
+- `PERSONAL_WORKSPACE_PROVISIONING_ENABLED` is a **rollout** concern — is the system currently allowed to *create* new Personal Workspace documents?
+
+They must be able to move independently. Most importantly: **disabling `PERSONAL_WORKSPACE_PROVISIONING_ENABLED` only stops NEW workspace creation — it has zero effect on how the Phase 1 resolver treats an already-existing workspace document.** `resolveWorkspaceContext()`/`checkWorkspaceAccess()` never read `PERSONAL_WORKSPACE_PROVISIONING_ENABLED` at all (confirmed: neither Phase 1 module imports `lib/env.ts`'s new export). The forbidden failure mode this design rules out: "provisioning flag off" being misread anywhere as "treat an existing workspace as legacy" — that would conflate a rollout switch with a security boundary, exactly the kind of confusion this two-flag split exists to prevent.
+
+`ensurePersonalWorkspace()` checks its own flag first, before even validating `uid` — when off, zero Firestore reads or writes occur.
+
+### Not wired into any automatic flow
+
+`POST /api/user/workspace` is a real, callable, fully-tested authenticated route — and, in this PR, its only caller. It is not invoked by login, signup, session refresh, auth middleware, the homepage, the research route, or the history route. Provisioning remains explicitly-callable-only until a later phase deliberately wires it in and re-validates that decision on its own merits.
+
+### Authorization
+
+Self-provisioning only. The route derives `uid` exclusively from `resolveRequestIdentity()` (the same hardened, shared resolver every other `/api/user/**` route uses) and passes only that string to `ensurePersonalWorkspace()` — the request body is never parsed at all, so a client-supplied `uid`, `ownerUserId`, `workspaceId`, `type`, or `schemaVersion` field has no code path to reach anywhere. Unauthenticated requests 401 before `ensurePersonalWorkspace` is ever called (tested).
+
+### Privacy
+
+The `WorkspaceV1` document contains exactly: `schemaVersion`, `id`, `type: "personal"`, `name: "Personal Workspace"` (a fixed, non-personalized default — provisioning requires no display name, no email-derived name, and works identically for an account with an incomplete profile), `ownerUserId` (the uid, already the same identifier every other owned resource in this codebase uses), `createdAt`, `updatedAt`. No email, phone, Firebase Auth metadata, billing/subscription data, token usage, profile bio, or reviewer configuration is ever written. `ensurePersonalWorkspace()` requires no read of `users/{uid}` at all — provisioning works even if that document is missing or incomplete.
+
+### No user-profile or run mutation
+
+Provisioning creates exactly one document, at `workspaces/{personal-{uid}}`. Nothing in `lib/workspaces/ensurePersonalWorkspace.ts`, `lib/firestore/workspaces.ts`'s new function, or `app/api/user/workspace/route.ts` imports from `lib/firestore/runs.ts` or any governance/export/verification module (asserted by a structural test that greps the actual source, not merely inferred). No `users/{uid}.personalWorkspaceId` field is written — deterministic ids make that mapping unnecessary, avoiding the two-sided-reference drift risk documented above. No existing `runs`/`verifications`/`videoVerifications`/export/governance/history document gains a `workspaceId` field as a result of provisioning, ever.
+
+### The provisioned-but-unbound state (expected, tested)
+
+After Phase 2, this is a valid, expected state:
+
+```
+User
+├── Personal Workspace exists (workspaces/personal-{uid})
+└── Every existing run still has no workspaceId field at all
+```
+
+Workspace *existence* does not automatically change any existing resource's authorization. A user's old runs remain governed entirely by the Phase 1 legacy path (`workspaceId === undefined -> legacy compatibility`) regardless of whether that user has a Personal Workspace — proven end-to-end, not just asserted, by `lib/workspaces/__tests__/provisionedButUnbound.spec.ts`: provision a real workspace for a uid, then resolve a workspace context for a record with no `workspaceId` and that same uid as `legacyOwnerUserId` — the resolution is `legacy`, unaffected. Binding existing runs to a workspace is explicitly out of scope until a later, separately authorized and tested phase.
+
+### Security review questions — answered
+
+1. **Can User A cause User B's Personal Workspace to be created?** No. `ensurePersonalWorkspace(uid)` only ever operates on the uid it's given, and the only caller (`POST /api/user/workspace`) derives that uid exclusively from the authenticated identity — never from any request parameter.
+2. **Can User A control `ownerUserId`?** No. `createPersonalWorkspace()` sets `ownerUserId: uid` server-side from its own parameter; nothing reads a request body for this field.
+3. **Can a duplicate Personal Workspace exist for one uid?** No. The deterministic id + `.create()` guarantee makes a second document at the same id impossible; a duplicate would require a different id entirely, which nothing in this codebase constructs for a Personal Workspace.
+4. **Can concurrency create two?** No — proven by the 10-way concurrency test: exactly one document, regardless of how many simultaneous calls are made.
+5. **Can an existing conflicting document be overwritten?** No. Every conflict path (`wrong_owner`, `wrong_type`, `malformed`) returns a `conflict` result and leaves the existing document byte-for-byte untouched (tested).
+6. **Can provisioning mutate existing runs?** No — structurally impossible; the provisioning module has no import path to any run/history/export/governance write function (tested).
+7. **Can disabling provisioning weaken access to an existing workspace?** No. `PERSONAL_WORKSPACE_PROVISIONING_ENABLED` is read only by `ensurePersonalWorkspace()`; the Phase 1 resolver/access modules never read it and are entirely unaffected by its value.
+8. **Can malformed existing data be silently repaired?** No. Every malformed/mismatched conflict case fails closed with `{status: "conflict", reason: "malformed"}` and leaves the document exactly as found. Repair is explicitly out of scope for this phase.
 
 ## Future Project relationship
 
@@ -231,7 +330,13 @@ Phase 1's only Firestore operation is a direct `workspaces/{id}` document `.get(
 
 ## Rollback
 
-Phase 1 introduces no migration and has no route depending on it. **Code rollback is sufficient; no data rollback is required.** Reverting the deployment removes `lib/workspaces/*`, `lib/firestore/workspaces.ts`, and the `WORKSPACES_ENABLED` flag from the running build; since nothing ever wrote a `workspaces/{id}` document or a `workspaceId` field in production, there is nothing in the database that depends on this code existing. The only artifact left behind by a rollback would be an empty `workspaces` collection that was never populated — inert, not a compatibility concern.
+**Phase 1:** introduced no migration and had no route depending on it. Code rollback was sufficient; no data rollback was required. Reverting removes `lib/workspaces/*`, `lib/firestore/workspaces.ts`, and `WORKSPACES_ENABLED` from the running build; nothing wrote a `workspaces/{id}` document or a `workspaceId` field in production, so nothing in the database depended on this code existing.
+
+**Phase 2, before any production provisioning is executed (this PR's state):** identical — code rollback is sufficient. No production Personal Workspace has been created; `PERSONAL_WORKSPACE_PROVISIONING_ENABLED` is off in production and this PR does not flip it. Reverting removes the provisioning code path entirely with nothing left behind.
+
+**Phase 2, after the controlled canary described below (Stage B–D) creates exactly one test Personal Workspace:** two rollback classes exist —
+1. *Code rollback* — always sufficient; reverting the deployment stops any further provisioning immediately.
+2. *Single test-Workspace cleanup* — safe to delete ONLY because, during Phase 2, no run/export/governance/history record can be bound to any workspace (that capability doesn't exist until Phase 3+). Deleting a Phase-2-era test `workspaces/{id}` document therefore orphans nothing. **This safety property stops being true the moment a later phase starts binding real resources to a workspace** — from that point on, deleting a Workspace document requires the migration analysis those phases must define; Phase 2 deliberately never reaches that state.
 
 ## Runtime validation policy
 
@@ -252,10 +357,21 @@ All of the above is asserted directly by tests, not merely described here (`lib/
 4. **Flag-safety downgrade** (workspaceId present + `WORKSPACES_ENABLED` disabled) — denies (`workspaces_disabled`), never falls back to legacy owner check, even when the calling uid is genuinely both the legacy owner AND the real workspace owner. See Feature Flag Safety above. Tested.
 5. **Forged/claimed ownership** — access is computed purely from the server-resolved `WorkspaceContext.ownerUserId`, never from any client-supplied claim. Tested.
 6. **Uid comparison is exact** — no case-insensitivity, prefix, substring, or whitespace-tolerant matching. Tested.
-7. **No implicit creation** — no function in `lib/firestore/workspaces.ts` or `lib/workspaces/*` writes anything. Verified both structurally by test (module export enumeration) and by direct source inspection (no `.set(`/`.create(`/`.update(`/`.delete(`/`.add(`/`batch.`/`transaction.` calls anywhere in the new source files).
+7. **No implicit creation (Phase 1)** — as of Phase 1, no function in `lib/firestore/workspaces.ts` or `lib/workspaces/*` wrote anything. Phase 2 adds exactly one narrow, semantic write (`createPersonalWorkspace`, called only via `ensurePersonalWorkspace`) — see item 8.
+8. **No implicit/automatic creation (Phase 2)** — `ensurePersonalWorkspace()` is never called except by `POST /api/user/workspace`, which is never called except by an explicit, authenticated client request. Nothing in login, signup, session refresh, middleware, or any existing route invokes it (verified by diff — no existing file outside the new provisioning files was touched). No Personal Workspace has been created automatically for any user. Provisioning-side guarantees (idempotency, concurrency safety, conflict fail-closed behavior, no run/user-profile mutation) are all tested — see "Phase 2 — Personal Workspace Provisioning" above.
 
-## Rollout phases (for context; not part of Phase 1's scope)
+## Rollout phases
 
-Phase 1 (this document) → Phase 2 provisions Personal Workspaces + backfill → Phase 3 makes writes workspace-aware → Phase 4 makes reads/history workspace-aware → Phase 5 ships Workspace UI → Phase 6 introduces Projects → Phase 7 ships Projects UI → Phase 8 adds shared/collaborative workspaces.
+Phase 1 (COMPLETE, in production) → **Phase 2 (this document's latest section) provisions Personal Workspaces only — explicitly NOT backfill; backfilling existing runs is a separate, later, separately-authorized step** → Phase 3 makes writes workspace-aware → Phase 4 makes reads/history workspace-aware → Phase 5 ships Workspace UI → Phase 6 introduces Projects → Phase 7 ships Projects UI → Phase 8 adds shared/collaborative workspaces.
 
-Phase 1 is independently releasable and reversible without any dependency on a later phase ever shipping.
+Both Phase 1 and Phase 2 are independently releasable and reversible without any dependency on a later phase ever shipping.
+
+## Phase 2 production rollout plan — prepared, not executed
+
+No production provisioning has been executed as part of this PR. The controlled plan for after merge:
+
+- **Stage A** — deploy with `PERSONAL_WORKSPACE_PROVISIONING_ENABLED=false`. Verify zero behavior change (identical to how Phase 1 shipped).
+- **Stage B** — enable provisioning for a controlled internal test account only (or invoke `POST /api/user/workspace` directly, authenticated as that one account). Provision exactly one Personal Workspace. Verify: deterministic id, correct owner, correct schema, zero run mutation, zero UI change.
+- **Stage C** — repeat provisioning for the same test user several times. Require: `existing` result every time, same document, no timestamp mutation.
+- **Stage D** — concurrent controlled calls for the same test user. Require: one document.
+- **Stage E** — stop. No bulk provisioning of production users. No run backfill. Both remain explicitly out of scope until a later, separately authorized rollout step with its own plan and its own review.

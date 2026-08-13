@@ -133,3 +133,34 @@ export type WorkspaceResourceAccessOutcome =
       granted: false;
       reason: "not_owner" | "workspace_not_found" | "workspace_malformed" | "unsupported_workspace_type" | "lookup_failed" | "workspaces_disabled";
     };
+
+/**
+ * Personal Workspace Provisioning, Phase 2 — every way an existing
+ * document found at the deterministic `personal-{uid}` id can conflict
+ * with what provisioning for THIS uid expects. `malformed` deliberately
+ * covers three distinct underlying causes (a structurally invalid
+ * document, a document/request id mismatch, and an unsupported
+ * `schemaVersion`) because `getWorkspace()` — reused as-is, not
+ * re-implemented — already collapses all three into its own single
+ * `malformed` status; Phase 2 does not invent a finer split the data
+ * layer has no way to actually distinguish. Each underlying cause is
+ * still tested individually (see `ensurePersonalWorkspace.spec.ts`), just
+ * not surfaced as separate top-level reasons.
+ */
+export type EnsurePersonalWorkspaceConflictReason = "wrong_owner" | "wrong_type" | "malformed";
+
+/**
+ * Never a bare `null`/boolean — every outcome is a named, distinguishable
+ * status, per the explicit "do not collapse meaningful failure states"
+ * requirement. `created` and `existing` are BOTH success — provisioning
+ * is idempotent by design; callers that only care "do I have a workspace
+ * now" should treat both as success and read `.workspace`.
+ */
+export type EnsurePersonalWorkspaceResult =
+  | { status: "created"; workspace: WorkspaceV1 }
+  | { status: "existing"; workspace: WorkspaceV1 }
+  | { status: "disabled" }
+  | { status: "invalid_uid" }
+  | { status: "conflict"; reason: EnsurePersonalWorkspaceConflictReason }
+  | { status: "lookup_failed" }
+  | { status: "create_failed" };

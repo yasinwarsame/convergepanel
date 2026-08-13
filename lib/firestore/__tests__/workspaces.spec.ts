@@ -4,9 +4,16 @@
  * adaptiveHumanReviewAssignment.spec.ts (adjacent in this directory).
  */
 
+function alreadyExistsError() {
+  const err: any = new Error("6 ALREADY_EXISTS");
+  err.code = 6;
+  return err;
+}
+
 const workspaceDocs = new Map<string, Record<string, unknown>>();
 const firestoreUnavailableFlag = { value: false };
 const throwOnRead = { value: false };
+const throwOnCreate = { value: false as false | "generic" };
 
 const mockAdminDb: any = {
   collection: (name: string) => ({
@@ -15,6 +22,12 @@ const mockAdminDb: any = {
         if (throwOnRead.value) throw new Error("simulated Firestore outage");
         const key = `${name}/${id}`;
         return { exists: workspaceDocs.has(key), data: () => workspaceDocs.get(key) };
+      }),
+      create: jest.fn().mockImplementation(async (value: Record<string, unknown>) => {
+        if (throwOnCreate.value === "generic") throw new Error("simulated write outage");
+        const key = `${name}/${id}`;
+        if (workspaceDocs.has(key)) throw alreadyExistsError();
+        workspaceDocs.set(key, value);
       }),
     }),
   }),
@@ -30,7 +43,7 @@ jest.mock("@/lib/logger", () => ({
   logger: { warn: jest.fn(), info: jest.fn(), error: jest.fn(), debug: jest.fn() },
 }));
 
-import { getWorkspace } from "@/lib/firestore/workspaces";
+import { getWorkspace, createPersonalWorkspace } from "@/lib/firestore/workspaces";
 
 function seedWorkspace(id: string, overrides: Record<string, unknown> = {}) {
   workspaceDocs.set(`workspaces/${id}`, {
@@ -50,6 +63,7 @@ describe("getWorkspace", () => {
     workspaceDocs.clear();
     firestoreUnavailableFlag.value = false;
     throwOnRead.value = false;
+    throwOnCreate.value = false;
   });
 
   it("returns found with the well-formed workspace when the document exists", async () => {
@@ -135,10 +149,75 @@ describe("getWorkspace", () => {
   });
 });
 
-describe("Phase 1 has no workspace write path", () => {
-  it("exports no create/update/delete function from lib/firestore/workspaces.ts", () => {
+describe("createPersonalWorkspace", () => {
+  beforeEach(() => {
+    workspaceDocs.clear();
+    firestoreUnavailableFlag.value = false;
+    throwOnRead.value = false;
+    throwOnCreate.value = false;
+  });
+
+  it("creates a fresh Personal Workspace with server-derived values only", async () => {
+    const result = await createPersonalWorkspace("owner-1");
+    expect(result.status).toBe("created");
+    if (result.status === "created") {
+      expect(result.workspace).toMatchObject({
+        schemaVersion: 1,
+        id: "personal-owner-1",
+        type: "personal",
+        name: "Personal Workspace",
+        ownerUserId: "owner-1",
+      });
+      expect(result.workspace.createdAt).toBeDefined();
+      expect(result.workspace.updatedAt).toBeDefined();
+    }
+    expect(workspaceDocs.has("workspaces/personal-owner-1")).toBe(true);
+  });
+
+  it("returns already_exists (never overwrites) when the deterministic id is already taken", async () => {
+    await createPersonalWorkspace("owner-1");
+    const before = workspaceDocs.get("workspaces/personal-owner-1");
+    const result = await createPersonalWorkspace("owner-1");
+    expect(result).toEqual({ status: "already_exists" });
+    expect(workspaceDocs.get("workspaces/personal-owner-1")).toEqual(before); // untouched
+  });
+
+  it("returns invalid_uid without touching Firestore for a structurally invalid uid", async () => {
+    const result = await createPersonalWorkspace("");
+    expect(result).toEqual({ status: "invalid_uid" });
+    expect(workspaceDocs.size).toBe(0);
+  });
+
+  it("returns firestore_unavailable when adminDb is null", async () => {
+    firestoreUnavailableFlag.value = true;
+    const result = await createPersonalWorkspace("owner-1");
+    expect(result).toEqual({ status: "firestore_unavailable" });
+  });
+
+  it("returns create_failed (never throws) for a non-ALREADY_EXISTS write failure", async () => {
+    throwOnCreate.value = "generic";
+    const result = await createPersonalWorkspace("owner-1");
+    expect(result).toEqual({ status: "create_failed" });
+  });
+
+  it("two different uids create two independent documents with no crossover", async () => {
+    const a = await createPersonalWorkspace("owner-a");
+    const b = await createPersonalWorkspace("owner-b");
+    expect(a.status).toBe("created");
+    expect(b.status).toBe("created");
+    if (a.status === "created" && b.status === "created") {
+      expect(a.workspace.id).toBe("personal-owner-a");
+      expect(b.workspace.id).toBe("personal-owner-b");
+      expect(a.workspace.ownerUserId).toBe("owner-a");
+      expect(b.workspace.ownerUserId).toBe("owner-b");
+    }
+  });
+});
+
+describe("Workspace Firestore write surface stays minimal", () => {
+  it("exports exactly getWorkspace + createPersonalWorkspace — no update/delete function anywhere", () => {
     const mod = require("@/lib/firestore/workspaces");
-    const exportNames = Object.keys(mod);
-    expect(exportNames).toEqual(["getWorkspace"]);
+    const exportNames = Object.keys(mod).sort();
+    expect(exportNames).toEqual(["createPersonalWorkspace", "getWorkspace"]);
   });
 });
