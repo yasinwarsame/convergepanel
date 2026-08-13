@@ -33,7 +33,7 @@ jest.mock("@/lib/firebase/admin", () => ({
   },
 }));
 
-import { resolveReviewerDisplayName, resolveReviewerDisplayNames, UNKNOWN_REVIEWER_LABEL } from "@/lib/governance/reviewerIdentity";
+import { resolveReviewerDisplayName, resolveReviewerDisplayNames, UNKNOWN_REVIEWER_LABEL, REVIEWER_UNAVAILABLE_LABEL } from "@/lib/governance/reviewerIdentity";
 
 beforeEach(() => {
   userDocs.clear();
@@ -214,5 +214,55 @@ describe("resolveReviewerDisplayName — masked-email edge cases (final review r
     const name = await resolveReviewerDisplayName("u1", "jane.smith@example.com", undefined);
     expect(name).toBe("Jane Smith");
     expect(name).not.toContain("@");
+  });
+});
+
+describe("resolveReviewerDisplayName — self-sourced email fallback (personal-review-reviewer-identity fix)", () => {
+  it("falls back to the uid's OWN account email (from its users/{uid} doc) when no name is set and no roster/fallbackEmail was supplied — this is the actual personal-reviewer bug: a reviewer not on the caller's team roster has no fallbackEmail source at all", async () => {
+    userDocs.set("u1", { email: "personal.reviewer@example.com" });
+    const name = await resolveReviewerDisplayName("u1", undefined, undefined);
+    expect(name).toBe("per***@example.com");
+    expect(name).not.toBe(UNKNOWN_REVIEWER_LABEL);
+  });
+
+  it("prefers the uid's own account email over a caller-supplied fallbackEmail when both exist (own account is always authoritative for that uid)", async () => {
+    userDocs.set("u1", { email: "own.account@example.com" });
+    const name = await resolveReviewerDisplayName("u1", "stale.roster.email@example.com", undefined);
+    expect(name).toBe("own***@example.com");
+  });
+
+  it("still degrades to unresolvedLabel when the doc exists but has neither name nor email, and no fallbackEmail was supplied", async () => {
+    userDocs.set("u1", {});
+    const name = await resolveReviewerDisplayName("u1", undefined, undefined);
+    expect(name).toBe(UNKNOWN_REVIEWER_LABEL);
+  });
+
+  it("accepts a custom unresolvedLabel (e.g. REVIEWER_UNAVAILABLE_LABEL) in place of the default UNKNOWN_REVIEWER_LABEL — a known assignment with a failed lookup must never say the generic 'Unknown reviewer'", async () => {
+    const name = await resolveReviewerDisplayName("u1", undefined, undefined, REVIEWER_UNAVAILABLE_LABEL);
+    expect(name).toBe("Reviewer unavailable");
+    expect(name).not.toBe(UNKNOWN_REVIEWER_LABEL);
+  });
+});
+
+describe("resolveReviewerDisplayNames (batched) — self-sourced email fallback (personal-review-reviewer-identity fix)", () => {
+  it("resolves a personal reviewer's own account email even with an empty emailByUid map (no team roster) — the exact scenario GET /api/user/reviews and the governance/review-history routes hit for a non-team-member reviewer", async () => {
+    userDocs.set("u1", { email: "reviewer.self@example.com" });
+    const result = await resolveReviewerDisplayNames(["u1"], new Map(), undefined);
+    expect(result.get("u1")).toBe("rev***@example.com");
+    expect(result.get("u1")).not.toBe(UNKNOWN_REVIEWER_LABEL);
+  });
+
+  it("accepts a custom unresolvedLabel applied uniformly across a whole batch", async () => {
+    const result = await resolveReviewerDisplayNames(["u1", "u2"], new Map(), undefined, REVIEWER_UNAVAILABLE_LABEL);
+    expect(result.get("u1")).toBe("Reviewer unavailable");
+    expect(result.get("u2")).toBe("Reviewer unavailable");
+  });
+
+  it("cross-surface consistency: resolving the same uid via the single and batched variants with the same underlying doc yields the identical display name", async () => {
+    userDocs.set("u1", { email: "consistent@example.com" });
+    const single = await resolveReviewerDisplayName("u1", undefined, undefined);
+    const batched = await resolveReviewerDisplayNames(["u1"], new Map(), undefined);
+    expect(single).toBe(batched.get("u1"));
+    expect(single).toBe("con***@example.com");
   });
 });

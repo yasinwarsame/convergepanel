@@ -153,13 +153,24 @@ type Milestone2Assignment = Extract<ReviewGovernanceViewModel, { family: "milest
 type Milestone2SingleReviewer = Extract<ReviewGovernanceViewModel, { family: "milestone2" }>["singleReviewer"];
 type Milestone2Panel = Extract<ReviewGovernanceViewModel, { family: "milestone2" }>["panel"];
 
-/** Assignment (pre-decision) and single-reviewer identity (post-decision) share one card — never both at once, since a decided run's assignment record still exists but its identity is more precisely shown via `singleReviewer`. */
+/**
+ * Assignment (pre-decision) and single-reviewer identity (post-decision)
+ * share one card — never both at once, since a decided run's assignment
+ * record still exists but its identity is more precisely shown via
+ * `singleReviewer`. Reviewer identity is independent of completion status
+ * by construction: whichever of the two props is populated always renders
+ * a name, never "Unknown"/blank, for as long as the canonical assignment
+ * or decision record exists — the status-aware "Assigned to"/"Reviewed
+ * by" prefix changes, but the underlying identity source and its safe
+ * name→masked-email→"Reviewer unavailable" fallback chain (server-side,
+ * reviewGovernanceViewModel.ts) never does.
+ */
 function SingleReviewerIdentityCard({ assignment, singleReviewer }: { assignment: Milestone2Assignment; singleReviewer: Milestone2SingleReviewer }) {
   if (singleReviewer) {
     return (
       <Card>
         <SectionLabel>Reviewer</SectionLabel>
-        <p className="text-sm font-medium text-slate-900">{singleReviewer.displayName}</p>
+        <p className="text-sm font-medium text-slate-900">Reviewed by {singleReviewer.displayName}</p>
         {singleReviewer.reviewedAt && <p className="mt-1 text-xs text-slate-500">Completed {formatDatetime(singleReviewer.reviewedAt)}</p>}
       </Card>
     );
@@ -168,7 +179,7 @@ function SingleReviewerIdentityCard({ assignment, singleReviewer }: { assignment
     return (
       <Card>
         <SectionLabel>Assigned reviewer</SectionLabel>
-        <p className="text-sm font-medium text-slate-900">{assignment.reviewerDisplayName}</p>
+        <p className="text-sm font-medium text-slate-900">Assigned to {assignment.reviewerDisplayName}</p>
         {assignment.assignedAt && (
           <p className="mt-1 text-xs text-slate-500">
             Assigned {formatDatetime(assignment.assignedAt)}

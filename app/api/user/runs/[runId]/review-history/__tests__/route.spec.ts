@@ -24,6 +24,7 @@ const mockedResolveReviewerDisplayNames = jest.fn();
 jest.mock("@/lib/governance/reviewerIdentity", () => ({
   resolveReviewerDisplayNames: (...args: any[]) => mockedResolveReviewerDisplayNames(...args),
   UNKNOWN_REVIEWER_LABEL: "Unknown reviewer",
+  REVIEWER_UNAVAILABLE_LABEL: "Reviewer unavailable",
 }));
 
 const mockedLoadUserAndTeam = jest.fn();
@@ -301,5 +302,27 @@ describe("GET /api/user/runs/[runId]/review-history — Part 8 safe DTO / Part 1
     const { json } = await callRoute();
     expect(json.items).toBeUndefined();
     expect(JSON.stringify(json)).not.toContain(REVIEWER_UID);
+  });
+});
+
+describe("GET /api/user/runs/[runId]/review-history — reviewer identity fallback (personal-review-reviewer-identity fix)", () => {
+  it("passes REVIEWER_UNAVAILABLE_LABEL as the resolver's unresolved-label fallback, never the generic UNKNOWN_REVIEWER_LABEL", async () => {
+    mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: OWNER_UID });
+    await callRoute();
+    const call = mockedResolveReviewerDisplayNames.mock.calls[0];
+    expect(call[3]).toBe("Reviewer unavailable");
+  });
+
+  it("a canonical history row whose reviewerId genuinely fails to resolve shows 'Reviewer unavailable', never 'Unknown reviewer'", async () => {
+    mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: OWNER_UID });
+    // Simulates the real resolver's own terminal-fallback behavior (it
+    // always fills every requested uid using whatever unresolvedLabel it
+    // was given — see reviewerIdentity.spec.ts) rather than ever omitting
+    // an entry, so the route's own `?? REVIEWER_UNAVAILABLE_LABEL` default
+    // is a pure defensive backstop, not the primary path under test here.
+    mockedResolveReviewerDisplayNames.mockImplementation(async (uids: string[], _emailByUid: unknown, _callerEmail: unknown, unresolvedLabel: string) => new Map(uids.map((uid) => [uid, unresolvedLabel])));
+    const { json } = await callRoute();
+    expect(json.items[0].reviewerDisplayName).toBe("Reviewer unavailable");
+    expect(json.items[0].reviewerDisplayName).not.toBe("Unknown reviewer");
   });
 });
