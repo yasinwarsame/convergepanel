@@ -37,6 +37,8 @@ interface WorkspaceV1 {
 
 `lib/workspaces/types.ts`. `WorkspaceType` includes `"team"` as a documented future value so the document shape never needs a breaking change later — but Phase 1's resolver can only *authorize* `"personal"` (see Error Semantics below). No memberships, invitations, roles, project permissions, billing ownership, or team seats are introduced in this phase.
 
+**`WorkspaceType: "team"` does not imply integration with this codebase's existing `teams/{teamId}` governance system.** They are unrelated so far: `type: "team"` is a placeholder value in a domain vocabulary nothing can create yet, while `teams/{teamId}` (§1a of `docs/team-workspaces-architecture-audit.md`) is a real, narrow, review-only system with its own membership/role model, one-team-per-user constraint, and Full-plan gate. Whether a future "team workspace" ever wraps, replaces, or stays entirely separate from the existing `teams` system is an explicit open question for a later phase (see the resource classification table's `teams/{teamId}` row) — not something this phase decides, implies, or should be read as implying.
+
 No `Workspace` document is ever created, updated, or deleted by Phase 1 code. `lib/firestore/workspaces.ts` exports exactly one function, `getWorkspace()` — a read. There is no `createWorkspace`, no `provisionPersonalWorkspace`, nowhere in the codebase. The capability to write a workspace document does not exist yet, not merely "exists but unused."
 
 ## Personal Workspace concept
