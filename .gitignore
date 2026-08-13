@@ -55,3 +55,6 @@ next-env.d.ts
 # Setup reports
 SEO_AUDIT.md
 posthog-setup-report.md
+
+# Workspace provisioning result artifacts (contain real user ids)
+workspace-provisioning-*.json

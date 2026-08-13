@@ -375,9 +375,11 @@ All of the above is asserted directly by tests, not merely described here (`lib/
 
 ## Rollout phases
 
-Phase 1 (COMPLETE, in production) → **Phase 2 (this document's latest section) provisions Personal Workspaces only — explicitly NOT backfill; backfilling existing runs is a separate, later, separately-authorized step** → Phase 3 makes writes workspace-aware → Phase 4 makes reads/history workspace-aware → Phase 5 ships Workspace UI → Phase 6 introduces Projects → Phase 7 ships Projects UI → Phase 8 adds shared/collaborative workspaces.
+Phase 1 (COMPLETE, in production) → Phase 2 (COMPLETE, in production — provisions Personal Workspaces one-at-a-time on self-service demand only) → **Phase 2B (this document's latest section) bulk-provisions Personal Workspaces for the existing user population — explicitly NOT run backfill** → Phase 3 makes writes workspace-aware for new runs → Phase 4 makes reads/history workspace-aware and backfills historical runs → Phase 5 ships Workspace UI → Phase 6 introduces Projects → Phase 7 ships Projects UI → Phase 8 adds shared/collaborative workspaces.
 
-Both Phase 1 and Phase 2 are independently releasable and reversible without any dependency on a later phase ever shipping.
+The Phase 2B → Phase 3 ordering is a deliberate strategic choice: existing users are made Workspace-ready (provisioned) before any run gains workspace-aware writes. This keeps Phase 3 simple — new-run creation never needs to provision a Workspace and create a run in the same hot-path operation, because by the time Phase 3 starts, provisioning coverage should already be at or near 100%.
+
+Phase 1, Phase 2, and Phase 2B are each independently releasable and reversible without any dependency on a later phase ever shipping.
 
 ## Phase 2 production rollout plan — prepared, not executed
 
@@ -388,3 +390,74 @@ No production provisioning has been executed as part of this PR. The controlled 
 - **Stage C** — repeat provisioning for the same test user several times. Require: `existing` result every time, same document, no timestamp mutation.
 - **Stage D** — concurrent controlled calls for the same test user. Require: one document.
 - **Stage E** — stop. No bulk provisioning of production users. No run backfill. Both remain explicitly out of scope until a later, separately authorized rollout step with its own plan and its own review.
+
+## Phase 2B — Controlled Existing-User Personal Workspace Provisioning
+
+Phase 2B adds exactly one capability: a bulk CLI that provisions Personal Workspaces for the *existing* user population, ahead of Phase 3 making any run write workspace-aware. It reuses `ensurePersonalWorkspace()` verbatim — there is no reimplemented create, conflict, or deterministic-id logic anywhere in Phase 2B's own code. Nothing about run authorization, the Phase 1 resolver, or the `WORKSPACES_ENABLED` flag changes.
+
+### Eligibility source: Firebase Auth, not `users/{uid}`
+
+Firebase Auth (`adminAuth.listUsers()`) is the canonical population source, not the `users/{uid}` Firestore collection. This was verified against the actual repo, not assumed: signup is **not atomic** between the two — `app/signup/page.tsx` calls `createUserWithEmailAndPassword()` and then a separate `setDoc()` for the Firestore profile, so a user can hold a real Auth account with no Firestore profile at all (a crash, a network failure, or an abandoned tab between the two calls is enough). `app/login/page.tsx` self-heals the profile via a merge `setDoc` on next login, but that doesn't help a user who never logs in again. Firestore-only "ghost" profiles with no backing Auth account are structurally impossible to provision by this pipeline — they're just never enumerated, since `listUsersPage` is Auth-only. Workspace ownership is treated purely as an identity concept, not a subscription or profile-completeness concept — there is no dependency on `runsThisMonth`, plan state, or any other `users/{uid}` field anywhere in the eligibility path.
+
+### Disabled-user policy
+
+A disabled Firebase Auth user (`user.disabled === true`) is excluded from provisioning (`classifyUserEligibility()` in `lib/workspaces/provisioningEligibility.ts`). Disabled accounts cannot authenticate, so a Workspace document for one would be inert — provisioning it only adds noise to the coverage audit and a theoretical future-reactivation edge case that's better handled by re-running the bulk provisioner (idempotent, cheap) than by pre-provisioning speculatively.
+
+### Service/test/canary account exclusion
+
+There is no hardcoded exclusion list in the codebase. Exclusion is entirely operator-driven at invocation time, via repeatable `--exclude-uid=<uid>` CLI flags and/or a `--exclude-file=<path>` newline-delimited file (`#`-prefixed comment lines ignored, CRLF- and BOM-safe, matching `lib/workspaces/provisioningEligibility.ts`'s `parseExclusionList()`). This keeps the decision of "which accounts are service/test/canary accounts" a reviewable, per-run operator input rather than a silently-encoded assumption baked into shipped code.
+
+An exclusion is a safety mechanism, so a malformed or unloadable exclusion must never fail open. Every parsed entry (from `--exclude-uid` or `--exclude-file`) is validated with `validateExclusionUids()` — reusing the exact same uid-shape validator (`getPersonalWorkspaceId()`) used everywhere else a uid becomes a Firestore document id, rather than inventing separate rules that could disagree with it — and the run aborts before any enumeration if even one entry is malformed. Loading `--exclude-file` itself (`loadExclusionSet()`/`readExclusionFile()`) throws rather than silently proceeding with zero file-based exclusions if the file is missing or unreadable; the CLI script catches that throw only to print a clear message and abort, never to continue. Both checks apply in dry-run and execute alike — a dry-run report enumerated with the wrong exclusion set would be misleading, not just an execute run unsafe.
+
+### Dry-run default; execution requires `--execute`
+
+`npm run workspaces:provision-existing -- --dry-run` (or no flag at all — dry-run is the default) is **structurally** read-only: `discoverUserWorkspaceStatus()` — the function dry-run mode calls — only ever calls `getWorkspace()`, and a dedicated regression test (`lib/workspaces/__tests__/existingUserProvisioning.spec.ts`, "Structural: dry-run is incapable of writing") asserts by source inspection that its function body contains no reference to `createPersonalWorkspace(` or `ensurePersonalWorkspace(` at all — not merely that it happens not to call them today. `--execute` is the sole way to opt into mutation (`lib/workspaces/provisioningSafety.ts`'s `parseProvisioningCliArgs()` — a dedicated test proves no misspelled or malformed flag variant accidentally enables it).
+
+**Project identity, validated before any enumeration, in both modes:** `checkProjectIdentityConsistency()` resolves the Firebase project the Admin SDK was *actually* initialized with (`getInitializedFirebaseProjectId()` in `lib/firebase/admin.ts`, reading `app.options.projectId` back from the live, already-initialized app — never re-derived from a second, independently-trusted environment variable), and requires it to (a) be resolvable at all and (b) agree with `FIREBASE_PROJECT_ID` (the env-var-driven constant used elsewhere in the codebase). Disagreement between the two — a "split-brain" misconfiguration, possible when `FIREBASE_SERVICE_ACCOUNT_BASE64`/`_JSON`'s embedded `project_id` differs from `FIREBASE_PROJECT_ID` — aborts immediately with `firebase_project_configuration_mismatch`, before enumeration, in both dry-run and execute, and is never overridable by `--yes`. This closes a gap from the earlier design, where `--confirm-project` was checked only against the same env-var constant used to initialize the SDK — under a credential mismatch, an operator could have confirmed a project the SDK wasn't actually connected to. `--confirm-project` now compares against this actual, validated identity, not the env constant.
+
+Executing also requires passing `checkProvisioningGuard()` (mirrors the established `adaptiveGovernanceSeedSafety.ts` pattern), checked in this order: `--confirm-project=<id>` present and matching the actual initialized project (see above), then `ALLOW_WORKSPACE_PROVISIONING=true` (exact literal) env var, then `NODE_ENV !== "production"` and no `VERCEL_ENV` set as defense-in-depth (this repo has no separate dev/staging Firebase project, so these are secondary checks, not the primary gate — same disclosed constraint as the governance seed script). An interactive "type yes" confirmation prompt is also required unless `--yes` is passed — `--yes` skips only that prompt, never any of the checks before it.
+
+### Pagination
+
+`adminAuth.listUsers(pageSize, pageToken)` is paged via a `do…while` loop over `runExistingUserProvisioning()` (`lib/workspaces/existingUserProvisioningRun.ts`), continuing until a page returns no `pageToken`. The loop is dependency-injected (`listUsersPage: ListUsersPageFn`) specifically so it's unit-testable against fake, controlled, multi-page fixtures without mocking the Firebase Admin SDK — the real CLI script's only job is supplying the real `adminAuth.listUsers` binding.
+
+**A fatal enumeration failure (a page's `listUsersPage` call rejecting) never throws out of `runExistingUserProvisioning()`.** It's caught internally, and the function returns normally with `status: "incomplete"` plus a sanitized `fatalError: { code: "enumeration_failed", message }` — the raw exception is deliberately never persisted (it could carry internal details unsafe to write to a result artifact) — and whatever was aggregated from pages that DID succeed is preserved, not discarded. The CLI script always writes a result artifact regardless of `status`, and exits non-zero whenever it's `"incomplete"`. This closes an earlier gap where a page-2+ failure would throw, produce no artifact at all, and silently lose every already-processed page's results (recoverable only by manually copying the last `onPageComplete` console line's page token).
+
+### Bounded concurrency
+
+Each page's users are processed through a hand-rolled worker-pool (`mapWithConcurrency()` in `lib/workspaces/existingUserProvisioning.ts`, default concurrency 5, `--concurrency=<n>` to override) rather than sequentially or fully in parallel. Verified via an instrumented test tracking real-time in-flight count, asserting it never exceeds the configured limit while still proving genuine concurrency occurred (not accidental serialization) — including dedicated tests at `concurrency=1` (observed max-in-flight is exactly 1) and at the operational maximum with a population larger than it.
+
+Concurrency is bounded to an explicit operator-facing range: `MIN_PROVISIONING_CONCURRENCY = 1`, `MAX_PROVISIONING_CONCURRENCY = 20` (`lib/workspaces/provisioningSafety.ts`) — a conservative ceiling, not a Firebase/Firestore hard limit, meant to catch operator error (e.g. an extra zero) rather than let a `--concurrency` typo blow past the "5-10 concurrent" spec by orders of magnitude. `validateProvisioningConcurrency()` rejects any non-integer or out-of-range value with an explicit `invalid_concurrency` error rather than silently clamping — a bulk-mutation safety knob should fail loudly on clearly-wrong input, not quietly substitute a value the operator never asked for. Only a *missing* `--concurrency` flag falls back to the default of 5; a present-but-malformed one (non-numeric, decimal, negative, zero, or over the ceiling) is caught by this explicit validation step, run immediately after argv parsing and before any enumeration.
+
+### Failure isolation
+
+One user's failure never aborts the batch. `provisionUserWorkspace()` returns a typed `{ status: "failed" }` (or `lookup_failed`/`invalid_uid`) per-user result rather than throwing; `runExistingUserProvisioning()` aggregates these into a `failures[]` array in the final report and continues processing every remaining user and page regardless. This is a deliberately different failure class from Auth-enumeration failure (above): a per-user outcome never aborts anything; only a failure to list the population itself marks the whole run `"incomplete"`.
+
+### No automatic conflict repair
+
+`conflict` results (`wrong_owner`, `wrong_type`, `malformed`) are reported, never auto-repaired — this mirrors `ensurePersonalWorkspace()`'s own fail-closed, never-overwrite behavior from Phase 2. A conflict means a document already exists at the deterministic `personal-{uid}` id that doesn't match the expected shape/owner; resolving that is an explicit, separate, human-reviewed operation, never something the bulk provisioner decides on its own.
+
+### Resumability
+
+No Firestore checkpoint document is used. Because `ensurePersonalWorkspace()` is fully idempotent, a complete full re-run is always safe — already-provisioned users simply report `existing` again (one extra read each, no write, no mutation). For very large populations where re-scanning from the start is undesirable, the script also prints the current Auth `pageToken` after every completed page; an operator can pass that back via `--start-page-token=<token>` to resume from exactly that point. Both strategies are safe; which one to use is an operator cost/convenience choice, not a correctness requirement.
+
+### Result artifact
+
+Every run (dry-run or execute, complete or incomplete) writes a JSON result file (`workspace-provisioning-<timestamp>.json` by default, or `--output=<path>`) containing: `project` (the actual validated identity, not the env constant), `dryRun`, `status` (`"complete"` | `"incomplete"`), `startedAt`/`completedAt`, `pageSize`, `concurrency`, `totals` (scanned/eligible/excluded), `counts` (per-status breakdown), `conflicts[]`, `failures[]`, `excludedRecords[]`, `fatalError` (present only when `status: "incomplete"` — a sanitized `{code, message}`, never the raw exception) — each per-user record carries only `uid` and `status`/`reason`, deliberately excluding email, display name, or any other PII. A human-readable summary (including the `Status:` line) is also printed to stdout. If the artifact write itself fails, the script still exits non-zero and the failure is printed, rather than silently reporting success with no durable record. These artifact files are gitignored and not meant to be committed — they contain real user ids from whichever project they were run against.
+
+### Coverage audit contract
+
+Phase 3 readiness (or any future gate that treats a bulk-provisioning report as proof of coverage) must use `isCompleteWithFullCoverage()` (`lib/workspaces/existingUserProvisioningRun.ts`) as the sole sanctioned predicate: `status === "complete"` AND `counts.missing === 0` AND zero `conflicts` AND zero `failures`. An `"incomplete"` result can never satisfy this, no matter how clean its partial counts look, because a partial enumeration cannot prove `missing === 0` for users it never reached.
+
+This predicate does **not** check for "unexpected Workspace documents" — a `personal-{uid}` document existing with no corresponding eligible Auth user (e.g. from a since-deleted Auth account, or a project mismatch during an earlier, differently-configured run). That's a distinct, independent reverse-audit concern requiring a separate query against the `workspaces` collection cross-referenced against a fresh `listUsers()` enumeration; it is deliberately not built into this run's own result, since it isn't a property of any single provisioning pass. Before treating a Stage E audit (below) as final, an operator should also confirm no such orphaned documents exist.
+
+### Production rollout plan (Phase 2B) — prepared, not executed
+
+Population is checked fresh immediately before execution at every stage — the specific counts observed during development/review (see below) are a snapshot, not something to hardcode into rollout decisions, since real users can sign up between the last dry run and the actual execute.
+
+- **Stage A** — `--dry-run` against production. Confirm scanned/eligible/excluded totals match the known Auth population size, zero unexpected conflicts, zero writes (verified by re-querying the `workspaces` collection before/after), `status: "complete"`.
+- **Stage B** — `--execute` against a small (~5-user) controlled batch (`--exclude-file` covering everyone else, or a narrow test cohort). Confirm exactly the expected number of new documents, correct owner/schema on each, zero mutation to any pre-existing document.
+- **Stage C** — `--execute` against the remaining population at the default concurrency (5) — there is no operational reason to raise it just because a higher ceiling (20) is supported; the goal is safety margin, not speed, at this population size.
+- **Stage D** — coverage audit: a final `--dry-run` pass requiring `isCompleteWithFullCoverage() === true` (`status: "complete"`, `missing: 0`, `conflicts: 0`, `failures: 0`) across the entire eligible population, plus a manual check for unexpected Workspace documents (see "Coverage audit contract" above). This is the explicit **Phase 3 entry gate** — Phase 3 (workspace-aware writes for new runs) should not begin until this audit is clean, per the strategic ordering decided at the top of this section.
+
+This plan is prepared and documented only. No production bulk provisioning (`--execute` against real production data) has been run as part of this phase — every production interaction so far has been read-only `--dry-run` verification.
