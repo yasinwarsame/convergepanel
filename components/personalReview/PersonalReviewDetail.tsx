@@ -90,6 +90,29 @@ export function ReviewerIdentityLine({ displayName, relationship }: ReviewerIden
   );
 }
 
+export type AutomatedGovernanceStatusValue = "passed" | "flagged" | "blocked" | "not_evaluated" | "error";
+
+/**
+ * Pure — renders the automated-governance badge only when the run has a
+ * real, persisted automated-governance record (`governanceRecord.
+ * automatedGovernance`). This is the fix for the reported "Unknown" badge:
+ * that badge was never reviewer identity — it's `GovernanceStatusBadge`
+ * rendering its own generic fallback because the field it was fed
+ * (`GET /api/user/runs/[runId]`'s `adaptive.automatedGovernanceStatus`)
+ * is never actually populated on a read (only in the ephemeral run-panel
+ * generation response). The real field is `governanceRecord.
+ * automatedGovernance.status`, mirroring exactly what
+ * `AdaptiveReviewDetailResponseV1` (the team detail route) already
+ * exposes. "No automated-governance record at all" and "a genuine
+ * `not_evaluated` status" are two different, non-interchangeable states —
+ * the former renders no badge, the latter renders a truthful "Not
+ * Evaluated" badge via the unchanged, shared `GovernanceStatusBadge`.
+ */
+export function AutomatedGovernanceStatusIndicator({ automatedGovernance }: { automatedGovernance: { status: AutomatedGovernanceStatusValue } | null }) {
+  if (!automatedGovernance) return null;
+  return <GovernanceStatusBadge status={automatedGovernance.status} />;
+}
+
 function CollapsibleList({ title, items }: { title: string; items: string[] }) {
   const [expanded, setExpanded] = useState(true);
   if (items.length === 0) return null;
@@ -134,7 +157,21 @@ type LoadedData = {
     sourceBacked: boolean;
     humanReviewNeeded: boolean;
   };
-  automatedGovernanceStatus?: string;
+  /**
+   * The run's persisted, canonical automated-governance record
+   * (`governanceRecord.automatedGovernance`), sourced from the governance
+   * route — the SAME field `AdaptiveReviewDetailResponseV1` (the team
+   * detail route) already exposes. `null` when the run genuinely has no
+   * automated-governance record at all (never evaluated for this run) —
+   * the header renders no badge in that case, never a fabricated
+   * "Unknown". Previously this field was read from
+   * `GET /api/user/runs/[runId]`'s `adaptive.automatedGovernanceStatus`,
+   * which that route never actually populates on a read (it's only ever
+   * set in the ephemeral POST /api/run-panel response at generation time)
+   * — that was the real cause of the "Unknown" badge always appearing on
+   * this page, not a reviewer-identity problem at all.
+   */
+  automatedGovernance: { status: "passed" | "flagged" | "blocked" | "not_evaluated" | "error" } | null;
   reviewer: ReviewerIdentity;
 };
 
@@ -204,7 +241,7 @@ export default function PersonalReviewDetail({ runId }: { runId: string }) {
           schemaId: govJson.schemaId,
           answerShape: govJson.answerShape,
           decisionReceipt: govJson.decisionReceipt,
-          automatedGovernanceStatus: reportJson.adaptive?.automatedGovernanceStatus,
+          automatedGovernance: govJson.automatedGovernance ?? null,
           reviewer: deriveReviewerIdentity(govJson.governance),
         });
         setError(null);
@@ -274,7 +311,7 @@ export default function PersonalReviewDetail({ runId }: { runId: string }) {
               <span className="text-sm text-cp-muted">{answerShapeLabel(data.answerShape)}</span>
             </div>
             <div className="mt-3 flex flex-wrap items-center gap-2">
-              <GovernanceStatusBadge status={data.automatedGovernanceStatus} />
+              <AutomatedGovernanceStatusIndicator automatedGovernance={data.automatedGovernance} />
               <PersonalReviewStatusBadge status={data.humanReviewStatus} />
             </div>
             <ReviewerIdentityLine displayName={data.reviewer.displayName} relationship={data.reviewer.relationship} />

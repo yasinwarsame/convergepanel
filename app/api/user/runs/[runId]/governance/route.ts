@@ -234,6 +234,21 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
     decisionReceipt: govParse.ok ? govParse.record.decisionReceipt : undefined,
     schemaId: govParse.ok ? govParse.record.schemaId : undefined,
     answerShape: govParse.ok ? govParse.record.answerShape : undefined,
+    // Mirrors AdaptiveReviewDetailResponseV1's own automatedGovernance
+    // exposure (the team detail route, lib/governance/adaptiveReviewDetail.ts)
+    // exactly — `status`/`evaluatedAt`/`policyVersion` only, never `reasons`
+    // (policy-internal text, never exposed to any reviewer/owner surface).
+    // `undefined` when the run genuinely has no automated-governance record
+    // at all — the client must render nothing for this field then, never a
+    // fabricated "Unknown" badge.
+    automatedGovernance:
+      govParse.ok && govParse.record.automatedGovernance
+        ? {
+            status: govParse.record.automatedGovernance.status,
+            evaluatedAt: govParse.record.automatedGovernance.evaluatedAt,
+            policyVersion: govParse.record.automatedGovernance.policyVersion,
+          }
+        : undefined,
     governance,
   });
 }

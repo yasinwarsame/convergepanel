@@ -498,6 +498,69 @@ describe("GET /api/user/runs/[runId]/governance — identity resolution is batch
   });
 });
 
+describe("GET /api/user/runs/[runId]/governance — automatedGovernance exposure (corrective pass on PR #37: fixes the misleading 'Unknown' badge)", () => {
+  it("includes status/evaluatedAt/policyVersion when the run has a real automated-governance record — mirrors AdaptiveReviewDetailResponseV1's own exposure exactly", async () => {
+    mockedRunGet.mockResolvedValue({
+      exists: true,
+      data: () => ({
+        userId: UID,
+        governanceRecord: baseGovernanceRecord({
+          automatedGovernance: { status: "flagged", reasons: ["policy X", "policy Y"], evaluatedAt: "2026-08-13T09:00:00.000Z", policyVersion: 3 },
+        }),
+      }),
+    });
+    const { json } = await callRoute();
+    expect(json.automatedGovernance).toEqual({ status: "flagged", evaluatedAt: "2026-08-13T09:00:00.000Z", policyVersion: 3 });
+  });
+
+  it("never includes 'reasons' — policy-internal text, never exposed to any reviewer/owner surface (same discipline as AdaptiveReviewDetailResponseV1)", async () => {
+    mockedRunGet.mockResolvedValue({
+      exists: true,
+      data: () => ({
+        userId: UID,
+        governanceRecord: baseGovernanceRecord({
+          automatedGovernance: { status: "blocked", reasons: ["PRIVATE POLICY REASON TEXT"], evaluatedAt: "2026-08-13T09:00:00.000Z", policyVersion: 1 },
+        }),
+      }),
+    });
+    const { json } = await callRoute();
+    expect(json.automatedGovernance).not.toHaveProperty("reasons");
+    expect(JSON.stringify(json)).not.toContain("PRIVATE POLICY REASON TEXT");
+  });
+
+  it("is undefined (never a fabricated placeholder) when the run genuinely has no automated-governance record at all — the exact condition that used to render a misleading 'Unknown' badge on the client", async () => {
+    mockedRunGet.mockResolvedValue({
+      exists: true,
+      data: () => ({ userId: UID, governanceRecord: baseGovernanceRecord() }), // no automatedGovernance key
+    });
+    const { json } = await callRoute();
+    expect(json.automatedGovernance).toBeUndefined();
+  });
+
+  it("is undefined for the legacy family (no governanceRecord at all) — same as every other governanceRecord-only field on this response", async () => {
+    mockedRunGet.mockResolvedValue({
+      exists: true,
+      data: () => ({ userId: UID, governanceStatus: "approved", governanceReviewedBy: "reviewer-9" }),
+    });
+    const { json } = await callRoute();
+    expect(json.automatedGovernance).toBeUndefined();
+  });
+
+  it("a genuine 'not_evaluated' status is passed through as real data, distinct from the field being absent", async () => {
+    mockedRunGet.mockResolvedValue({
+      exists: true,
+      data: () => ({
+        userId: UID,
+        governanceRecord: baseGovernanceRecord({
+          automatedGovernance: { status: "not_evaluated", reasons: [], evaluatedAt: "2026-08-13T09:00:00.000Z", policyVersion: 1 },
+        }),
+      }),
+    });
+    const { json } = await callRoute();
+    expect(json.automatedGovernance).toEqual({ status: "not_evaluated", evaluatedAt: "2026-08-13T09:00:00.000Z", policyVersion: 1 });
+  });
+});
+
 describe("GET /api/user/runs/[runId]/governance — reviewer identity fallback (personal-review-reviewer-identity fix)", () => {
   it("passes REVIEWER_UNAVAILABLE_LABEL as the resolver's unresolved-label fallback for a personal assignment, never UNKNOWN_REVIEWER_LABEL", async () => {
     mockedRunGet.mockResolvedValue({ exists: true, data: () => ({ userId: UID, governanceRecord: baseGovernanceRecord() }) });

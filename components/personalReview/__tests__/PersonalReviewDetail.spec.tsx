@@ -19,7 +19,7 @@
 
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { deriveReviewerIdentity, ReviewerIdentityLine } from "@/components/personalReview/PersonalReviewDetail";
+import { deriveReviewerIdentity, ReviewerIdentityLine, AutomatedGovernanceStatusIndicator } from "@/components/personalReview/PersonalReviewDetail";
 import type { ReviewGovernanceViewModel } from "@/lib/adaptiveSchema/reviewGovernanceViewModel";
 
 function assignmentOnly(name: string): ReviewGovernanceViewModel {
@@ -179,5 +179,61 @@ describe("Cross-surface consistency (Step 11/12): PersonalReviewDetail's header 
     // shape — asserting the same source field here proves the two surfaces
     // cannot diverge (there is exactly one displayName in the response).
     expect(headerIdentity.displayName).toBe((detail as Extract<ReviewGovernanceViewModel, { family: "milestone2" }>).singleReviewer?.displayName);
+  });
+});
+
+describe("AutomatedGovernanceStatusIndicator — the real fix for the reported 'Unknown' badge (corrective pass on PR #37)", () => {
+  function render(automatedGovernance: Parameters<typeof AutomatedGovernanceStatusIndicator>[0]["automatedGovernance"]) {
+    return renderToStaticMarkup(createElement(AutomatedGovernanceStatusIndicator, { automatedGovernance }));
+  }
+
+  it("renders NOTHING — never a fabricated 'Unknown' badge — when the run has no automated-governance record at all (the exact reported screenshot scenario)", () => {
+    const html = render(null);
+    expect(html).toBe("");
+    expect(html).not.toContain("Unknown");
+  });
+
+  it.each(["passed", "flagged", "blocked", "error"] as const)(
+    "renders a truthful badge for a genuine, valid automated-governance status '%s'",
+    (status) => {
+      const html = render({ status });
+      expect(html).not.toBe("");
+      expect(html).not.toContain("Unknown");
+    }
+  );
+
+  it("a genuine 'not_evaluated' status (evaluation ran, concluded not applicable) renders the truthful 'Not Evaluated' label — a real, meaningful state, never confused with 'no record at all'", () => {
+    const html = render({ status: "not_evaluated" });
+    expect(html).toContain("Not Evaluated");
+    expect(html).not.toContain("Unknown");
+  });
+
+  it("distinguishes 'no automated-governance record' (renders nothing) from 'a record exists with a real status' (renders a badge) — the two states this fix is specifically about not conflating", () => {
+    const absent = render(null);
+    const present = render({ status: "passed" });
+    expect(absent).toBe("");
+    expect(present).not.toBe("");
+  });
+});
+
+describe("Full header regression — the exact reported screenshot scenario, end to end (Step 5/6/7)", () => {
+  it("Decision Support, approved, automatedGovernance absent, reviewer = Yasin Mursal Warsame: shows 'Reviewed by Yasin Mursal Warsame' and NO 'Unknown' badge — the complete, corrected fix", () => {
+    const reviewerHtml = renderToStaticMarkup(
+      createElement(ReviewerIdentityLine, deriveReviewerIdentity(decided("Yasin Mursal Warsame")))
+    );
+    const governanceBadgeHtml = renderToStaticMarkup(createElement(AutomatedGovernanceStatusIndicator, { automatedGovernance: null }));
+    const combined = reviewerHtml + governanceBadgeHtml;
+    expect(combined).toContain("Reviewed by Yasin Mursal Warsame");
+    expect(combined).not.toContain("Unknown");
+  });
+
+  it("Decision Support, pending, automatedGovernance absent, reviewer = Yasin Mursal Warsame: shows 'Assigned to Yasin Mursal Warsame' and NO 'Unknown' badge", () => {
+    const reviewerHtml = renderToStaticMarkup(
+      createElement(ReviewerIdentityLine, deriveReviewerIdentity(assignmentOnly("Yasin Mursal Warsame")))
+    );
+    const governanceBadgeHtml = renderToStaticMarkup(createElement(AutomatedGovernanceStatusIndicator, { automatedGovernance: null }));
+    const combined = reviewerHtml + governanceBadgeHtml;
+    expect(combined).toContain("Assigned to Yasin Mursal Warsame");
+    expect(combined).not.toContain("Unknown");
   });
 });
