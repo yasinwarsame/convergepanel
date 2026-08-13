@@ -61,6 +61,7 @@ import {
   CommonResponseMeta,
 } from "./types";
 import { PersistedAdaptiveSchemaId, PersistedLegacyAdaptiveSchemaId } from "./persistedOutput";
+import { AdaptiveExportGeneratedBy } from "./exportGeneratedBy";
 import { ModelId } from "../types";
 
 /**
@@ -238,6 +239,12 @@ export interface AdaptiveExportManifest {
  * Phase 4) never bumps `version`: the same `AdaptiveResearchExportV1` shape
  * simply renders through one more format-specific renderer, chosen by
  * `format`, all still operating on the exact same `reportSnapshot`.
+ *
+ * Export Generator Provenance follows the identical precedent: `generatedBy`
+ * (below) is a new, optional, additive field — not a `version` bump. Old
+ * persisted records simply don't have the key; every reader must treat its
+ * absence as "no provenance available for this historical export," never
+ * synthesize a value for it.
  */
 export interface AdaptiveResearchExportV1 {
   version: 1;
@@ -253,6 +260,22 @@ export interface AdaptiveResearchExportV1 {
 
   createdAt: string;
   createdBy: string;
+  /**
+   * Export Generator Provenance — the human-facing identity of whoever
+   * generated THIS export, frozen at creation time (see
+   * exportGeneratedBy.ts's own header comment for the full historical-
+   * invariant rationale). Additive, optional field: absent on every export
+   * created before this feature shipped, and on regeneration those old
+   * records must keep regenerating exactly as before — never fabricate
+   * this field for them. `createdBy` above remains the internal uid (kept
+   * for audit purposes, never rendered into an exported document);
+   * `generatedBy` is the presentation-safe counterpart that IS rendered.
+   * Deliberately named `generatedBy`, not `owner` — the run's owner and
+   * the export's generator are usually the same person today, but a
+   * future team/workspace member could export research they don't own
+   * (Part 12); this field must never be conflated with run ownership.
+   */
+  generatedBy?: AdaptiveExportGeneratedBy;
 
   format: AdaptiveExportFormat;
   artifactStatus: AdaptiveExportArtifactStatus;

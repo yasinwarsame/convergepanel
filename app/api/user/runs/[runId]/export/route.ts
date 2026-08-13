@@ -37,6 +37,7 @@ import { parsePersistedAdaptiveOutput, parsePersistedLegacyAdaptiveOutput } from
 import { parseGovernanceRecord } from "@/lib/adaptiveSchema/governanceRecordParser";
 import { buildExportSnapshot } from "@/lib/adaptiveSchema/exportSnapshot";
 import { resolveAdaptiveExportVerdict } from "@/lib/adaptiveSchema/exportAuthorization";
+import { resolveExportGeneratedBy } from "@/lib/adaptiveSchema/exportGeneratedBy";
 import { AdaptiveResearchExportV1, AdaptiveExportFormat, adaptiveExportContentType, adaptiveExportFileExtension } from "@/lib/adaptiveSchema/researchExport";
 import { createAdaptiveExportRecord, markAdaptiveExportReady, markAdaptiveExportFailed, supersedeOlderAdaptiveExports } from "@/lib/firestore/adaptiveExports";
 import { renderAdaptiveResearchExport } from "@/lib/pdf/renderAdaptiveResearchPdf";
@@ -162,6 +163,14 @@ export async function POST(req: NextRequest, context: { params: Promise<{ runId:
   const exportId = `exp-${randomUUID()}`;
   const nowIso = new Date().toISOString();
 
+  // Export Generator Provenance — resolved and frozen HERE, at creation
+  // time only, from the already-authenticated `uid` (never from the
+  // request body). Regeneration (GET /api/user/runs/[runId]/exports/[exportId])
+  // never calls this — it renders `generatedBy` straight off the record
+  // read back from Firestore. See exportGeneratedBy.ts's header comment
+  // for the full historical-invariant rationale.
+  const generatedBy = await resolveExportGeneratedBy(uid);
+
   const recordBase: Omit<AdaptiveResearchExportV1, "reportVersion" | "exportMetadata"> & {
     exportMetadata: Omit<AdaptiveResearchExportV1["exportMetadata"], "finalReportVersion">;
   } = {
@@ -173,6 +182,7 @@ export async function POST(req: NextRequest, context: { params: Promise<{ runId:
     schemaVersion: 1,
     createdAt: nowIso,
     createdBy: uid,
+    generatedBy,
     format: validatedFormat,
     artifactStatus: "generating",
     classification,

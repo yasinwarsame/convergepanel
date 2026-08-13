@@ -13,6 +13,14 @@
  * below is a dedicated, explicit projection — every field it emits is a
  * deliberate inclusion, not "whatever happened to be on the record."
  *
+ * Export Generator Provenance: `generatedBy` (the human-facing
+ * displayName/maskedEmail pair, when the frozen record has one) IS included
+ * below, deliberately — unlike `createdBy`, it was purpose-built to be a
+ * safe, human-facing projection with no raw uid or unmasked email in it,
+ * exactly the kind of field this file's own "every field is a deliberate
+ * inclusion" contract exists for. Absent (never fabricated) for any export
+ * created before this feature shipped.
+ *
  * Deliberately excluded from the public contract (present internally, never
  * emitted here): `createdBy` / `exportMetadata.requestingUser` (Firebase
  * UIDs — no product requirement to expose them), `artifactStatus`
@@ -46,6 +54,7 @@ import { ConsensusLevel, SourceGroundingLevel } from "./reportSummary";
 import { AdaptiveDecisionReceipt } from "./governanceRecord";
 import { AdaptiveGateResult, AdaptiveModelResult, AdaptiveSynthesisReport, AdaptiveTrustSummary, AlignedClaim } from "./types";
 import { PersistedAdaptiveSchemaId, PersistedLegacyAdaptiveSchemaId } from "./persistedOutput";
+import { AdaptiveExportGeneratedBy } from "./exportGeneratedBy";
 
 export const ADAPTIVE_RESEARCH_JSON_EXPORT_FORMAT_VERSION = "1" as const;
 
@@ -76,6 +85,8 @@ export interface AdaptiveResearchJsonExportV1 {
     reportVersion: number;
     createdAt: string;
     format: "json";
+    /** Absent for any export created before Export Generator Provenance shipped — never fabricated for those records. */
+    generatedBy?: AdaptiveExportGeneratedBy;
   };
 
   report: {
@@ -273,6 +284,7 @@ export function buildAdaptiveResearchJsonExport(record: AdaptiveResearchExportV1
       reportVersion: record.reportVersion,
       createdAt: record.createdAt,
       format: "json",
+      ...(record.generatedBy ? { generatedBy: record.generatedBy } : {}),
     },
     report: {
       runId: record.runId,

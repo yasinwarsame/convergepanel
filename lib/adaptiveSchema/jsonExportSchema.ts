@@ -76,6 +76,13 @@ export const adaptiveResearchJsonExportV1Schema = z.object({
     reportVersion: z.number(),
     createdAt: z.string(),
     format: z.literal("json"),
+    /** Export Generator Provenance — absent for any export created before this feature shipped, never fabricated for those. */
+    generatedBy: z
+      .object({
+        displayName: z.string().nullable(),
+        maskedEmail: z.string().nullable(),
+      })
+      .optional(),
   }),
   report: z.object({
     runId: z.string(),
