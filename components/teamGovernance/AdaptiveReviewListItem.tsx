@@ -59,7 +59,7 @@ function ReviewerBlock({ item }: { item: EnrichedAdaptiveTeamRunListItemV1 }) {
         </div>
         <ul className="mt-1.5 space-y-0.5">
           {visibleReviewers.map((r) => (
-            <li key={r.userId} className="flex items-center justify-between gap-2 text-cp-text">
+            <li key={r.reviewerKey} className="flex items-center justify-between gap-2 text-cp-text">
               <span className="truncate">{r.displayName}</span>
               <span className="shrink-0 text-cp-muted">{r.hasVoted ? humanReviewStatusLabel(r.voteStatus) : "Pending"}</span>
             </li>

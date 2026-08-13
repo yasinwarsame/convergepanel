@@ -58,10 +58,8 @@ describe("ReviewGovernanceBody — Part 15 status scenarios", () => {
       family: "milestone2",
       singleReviewer: null,
       assignment: {
-        reviewerUserId: "r1",
         reviewerDisplayName: "Jane Smith",
         assignedAt: "2026-08-12T10:31:00.000Z",
-        assignedByUserId: "a1",
         assignedByDisplayName: "Alex Owner",
       },
       panel: null,
@@ -82,9 +80,9 @@ describe("ReviewGovernanceBody — Part 15 status scenarios", () => {
         requiredReviewerCount: 3,
         quorum: 2,
         reviewers: [
-          { userId: "r1", displayName: "Jane Smith", hasVoted: false },
-          { userId: "r2", displayName: "Mohamed Ali", hasVoted: false },
-          { userId: "r3", displayName: "Sarah Chen", hasVoted: false },
+          { reviewerKey: "r1", displayName: "Jane Smith", hasVoted: false },
+          { reviewerKey: "r2", displayName: "Mohamed Ali", hasVoted: false },
+          { reviewerKey: "r3", displayName: "Sarah Chen", hasVoted: false },
         ],
         submittedCount: 0,
         approvalCount: 0,
@@ -102,7 +100,7 @@ describe("ReviewGovernanceBody — Part 15 status scenarios", () => {
   it("5. reviewer approved: reviewer visible, completion timestamp visible", () => {
     const detail: ReviewGovernanceViewModel = {
       family: "milestone2",
-      singleReviewer: { userId: "r1", displayName: "Jane Smith", reviewedAt: "2026-08-12T10:44:00.000Z" },
+      singleReviewer: { displayName: "Jane Smith", reviewedAt: "2026-08-12T10:44:00.000Z" },
       assignment: null,
       panel: null,
     };
@@ -115,7 +113,7 @@ describe("ReviewGovernanceBody — Part 15 status scenarios", () => {
   it("6. changes requested: reviewer visible, completion timestamp visible", () => {
     const detail: ReviewGovernanceViewModel = {
       family: "milestone2",
-      singleReviewer: { userId: "r1", displayName: "Jane Smith", reviewedAt: "2026-08-12T10:48:00.000Z" },
+      singleReviewer: { displayName: "Jane Smith", reviewedAt: "2026-08-12T10:48:00.000Z" },
       assignment: null,
       panel: null,
     };
@@ -134,9 +132,9 @@ describe("ReviewGovernanceBody — Part 15 status scenarios", () => {
         requiredReviewerCount: 3,
         quorum: 2,
         reviewers: [
-          { userId: "r1", displayName: "Jane Smith", hasVoted: true, voteStatus: "approved", submittedAt: "2026-08-12T10:44:00.000Z" },
-          { userId: "r2", displayName: "Mohamed Ali", hasVoted: true, voteStatus: "approved", submittedAt: "2026-08-12T10:45:00.000Z" },
-          { userId: "r3", displayName: "Sarah Chen", hasVoted: false },
+          { reviewerKey: "r1", displayName: "Jane Smith", hasVoted: true, voteStatus: "approved", submittedAt: "2026-08-12T10:44:00.000Z" },
+          { reviewerKey: "r2", displayName: "Mohamed Ali", hasVoted: true, voteStatus: "approved", submittedAt: "2026-08-12T10:45:00.000Z" },
+          { reviewerKey: "r3", displayName: "Sarah Chen", hasVoted: false },
         ],
         submittedCount: 2,
         approvalCount: 2,
@@ -160,9 +158,9 @@ describe("ReviewGovernanceBody — Part 15 status scenarios", () => {
         requiredReviewerCount: 3,
         quorum: 2,
         reviewers: [
-          { userId: "r1", displayName: "Jane Smith", hasVoted: true, voteStatus: "approved", submittedAt: "2026-08-12T10:44:00.000Z" },
-          { userId: "r2", displayName: "Mohamed Ali", hasVoted: true, voteStatus: "approved", submittedAt: "2026-08-12T10:45:00.000Z" },
-          { userId: "r3", displayName: "Sarah Chen", hasVoted: false },
+          { reviewerKey: "r1", displayName: "Jane Smith", hasVoted: true, voteStatus: "approved", submittedAt: "2026-08-12T10:44:00.000Z" },
+          { reviewerKey: "r2", displayName: "Mohamed Ali", hasVoted: true, voteStatus: "approved", submittedAt: "2026-08-12T10:45:00.000Z" },
+          { reviewerKey: "r3", displayName: "Sarah Chen", hasVoted: false },
         ],
         submittedCount: 2,
         approvalCount: 2,
@@ -195,7 +193,7 @@ describe("ReviewGovernanceBody — Part 15 status scenarios", () => {
         finalStatus: "rejected",
         finalizedAt: "2026-08-12T10:55:00.000Z",
         finalizedVia: "owner_override",
-        overrideBy: { userId: "admin-1", displayName: "Alex Owner" },
+        overrideBy: { displayName: "Alex Owner" },
       },
     };
     const html = renderBody({ humanReview: { status: "rejected", decidedVia: "multi_reviewer_owner_override" }, detail });
@@ -256,7 +254,7 @@ describe("ReviewGovernanceBody — collapsed summary line", () => {
   it("matches the task's exact 'Approved · Jane Smith' example", () => {
     const detail: ReviewGovernanceViewModel = {
       family: "milestone2",
-      singleReviewer: { userId: "r1", displayName: "Jane Smith", reviewedAt: "2026-08-12T10:44:00.000Z" },
+      singleReviewer: { displayName: "Jane Smith", reviewedAt: "2026-08-12T10:44:00.000Z" },
       assignment: null,
       panel: null,
     };
@@ -269,10 +267,8 @@ describe("ReviewGovernanceBody — collapsed summary line", () => {
       family: "milestone2",
       singleReviewer: null,
       assignment: {
-        reviewerUserId: "r1",
         reviewerDisplayName: "Jane Smith",
         assignedAt: "2026-08-12T10:31:00.000Z",
-        assignedByUserId: "a1",
         assignedByDisplayName: "Alex Owner",
       },
       panel: null,
@@ -384,7 +380,7 @@ describe("ReviewGovernanceSection — privacy and read-only guarantees (source-l
     () => {
       const detail: ReviewGovernanceViewModel = {
         family: "milestone2",
-        singleReviewer: { userId: "r1", displayName: "Jane Smith", reviewedAt: "2026-08-12T10:44:00.000Z" },
+        singleReviewer: { displayName: "Jane Smith", reviewedAt: "2026-08-12T10:44:00.000Z" },
         assignment: null,
         panel: null,
       };

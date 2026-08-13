@@ -294,19 +294,32 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
     ? { status: "valid" as const, output: parsedLegacyAdaptive.output }
     : { status: parsedLegacyAdaptive.reason, output: null };
 
+  // Governance Follow-Up Hardening — a personal reviewer needs each
+  // model's answer text to make a review decision, but not per-model
+  // token/latency counts (operational metadata, not review content; found
+  // during the PR #33 production canary). Owner behavior is completely
+  // unchanged. Field-by-field removal, not a schema change: `results`
+  // stays the same shape and length either way, just missing these two
+  // keys for a personal_reviewer response.
+  const resultsForResponse =
+    viewerRole === "personal_reviewer"
+      ? results.map(({ tokenUsage: _tokenUsage, latencyMs: _latencyMs, ...rest }) => rest)
+      : results;
+
   return NextResponse.json({
     ok: true,
     runId,
     // Personal Reviewer Inbox + Action Flow — lets the client distinguish
     // "this is my own report" from "I am reviewing someone else's report"
     // so it can hide owner-only controls (export, rerun) and show the
-    // review decision UI instead. Never a signal of anything beyond that
-    // — the rest of the response is identical either way.
+    // review decision UI instead. The rest of the response is otherwise
+    // identical, except `results[].tokenUsage`/`latencyMs` are omitted for
+    // personal_reviewer (see resultsForResponse above).
     viewerRole,
     question,
     selectedModels,
     status,
-    results,
+    results: resultsForResponse,
     synthesisCache,
     governance,
     governanceStatus: orgGovernanceStatus,

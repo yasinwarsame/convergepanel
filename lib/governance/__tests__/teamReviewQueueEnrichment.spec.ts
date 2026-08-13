@@ -137,14 +137,15 @@ describe("enrichAdaptiveTeamRunListItem", () => {
       { governanceRecord: makeGovernanceRecord(), assignment, panel: null, votes: [] },
       resolveDisplayName
     );
-    expect(result.assignment).toMatchObject({ reviewerUserId: "reviewer-1", reviewerDisplayName: "Jane Smith" });
+    expect(result.assignment).toMatchObject({ reviewerDisplayName: "Jane Smith" });
+    expect(JSON.stringify(result.assignment)).not.toContain("reviewer-1");
   });
 
   it("surfaces a resolved single-reviewer terminal decision", async () => {
     const item = baseAdaptiveItem({ humanReviewStatus: "approved", reviewable: false });
     const governanceRecord = makeGovernanceRecord({ status: "approved", reviewerId: "reviewer-1", reviewedAt: "2026-08-12T10:44:00.000Z", decidedVia: "single_reviewer" });
     const result = await enrichAdaptiveTeamRunListItem(item, { governanceRecord, assignment: null, panel: null, votes: [] }, resolveDisplayName);
-    expect(result.singleReviewer).toEqual({ userId: "reviewer-1", displayName: "Jane Smith", reviewedAt: "2026-08-12T10:44:00.000Z" });
+    expect(result.singleReviewer).toEqual({ displayName: "Jane Smith", reviewedAt: "2026-08-12T10:44:00.000Z" });
   });
 
   it("surfaces peer-review panel progress with resolved reviewer names", async () => {
@@ -182,8 +183,8 @@ describe("enrichAdaptiveTeamRunListItem", () => {
     const result = await enrichAdaptiveTeamRunListItem(item, { governanceRecord: makeGovernanceRecord(), assignment: null, panel, votes }, resolveDisplayName);
     expect(result.panel).toMatchObject({ status: "open", submittedCount: 1, requiredReviewerCount: 2, quorum: 2 });
     expect(result.panel?.reviewers).toEqual([
-      { userId: "reviewer-1", displayName: "Jane Smith", hasVoted: true, voteStatus: "approved", submittedAt: "2026-08-12T10:44:00.000Z" },
-      { userId: "reviewer-2", displayName: "Mohamed Ali", hasVoted: false },
+      { reviewerKey: "panelist-0", displayName: "Jane Smith", hasVoted: true, voteStatus: "approved", submittedAt: "2026-08-12T10:44:00.000Z" },
+      { reviewerKey: "panelist-1", displayName: "Mohamed Ali", hasVoted: false },
     ]);
   });
 

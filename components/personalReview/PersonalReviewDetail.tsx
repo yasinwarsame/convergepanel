@@ -19,6 +19,7 @@ import type { AdaptiveReviewSubmissionResult as SubmissionResult } from "@/lib/c
 import GovernanceStatusBadge from "@/components/teamGovernance/GovernanceStatusBadge";
 import ReviewErrorState from "@/components/teamGovernance/ReviewErrorState";
 import AdaptiveReviewDecisionForm from "@/components/teamGovernance/AdaptiveReviewDecisionForm";
+import { ReviewHistory } from "@/components/adaptive/ReviewGovernanceSection";
 import PersonalReviewStatusBadge from "./PersonalReviewStatusBadge";
 import type { PersonalReviewInboxStatus } from "@/lib/governance/personalReviewInbox";
 import { personalReviewInboxStatus } from "@/lib/governance/personalReviewInbox";
@@ -255,6 +256,17 @@ export default function PersonalReviewDetail({ runId }: { runId: string }) {
               />
             </section>
           ) : null}
+
+          {/* Governance Follow-Up Hardening — the assigned reviewer sees the
+              same safe history the owner sees for this exact run, reusing
+              the shared ReviewHistory component (scope="personal") rather
+              than a second history UI. Central access resolver (via
+              GET /api/user/runs/[runId]/review-history) already confirmed
+              this reviewer is allowed on this specific run — nothing
+              owner-only is exposed. */}
+          <section className="rounded-xl border border-cp-border bg-cp-surface p-5 shadow-sm">
+            <ReviewHistory runId={runId} canonicalTerminal={!data.reviewable} scope="personal" />
+          </section>
         </div>
       ) : null}
     </div>

@@ -285,7 +285,7 @@ describe("GET /api/user/runs/[runId]/governance — family classification", () =
     const { res, json } = await callRoute();
     expect(res.status).toBe(200);
     expect(json.governance.family).toBe("milestone2");
-    expect(json.governance.assignment).toMatchObject({ reviewerUserId: "reviewer-1", reviewerDisplayName: "Name-reviewer-1" });
+    expect(json.governance.assignment).toMatchObject({ reviewerDisplayName: "Name-reviewer-1" });
     expect(json.governance.panel).toMatchObject({
       status: "open",
       requiredReviewerCount: 2,
@@ -294,14 +294,25 @@ describe("GET /api/user/runs/[runId]/governance — family classification", () =
       approvalCount: 1,
     });
     expect(json.governance.panel.reviewers).toEqual([
-      { userId: "reviewer-1", displayName: "Name-reviewer-1", hasVoted: true, voteStatus: "approved", submittedAt: "2026-08-12T10:44:00.000Z" },
-      { userId: "reviewer-2", displayName: "Name-reviewer-2", hasVoted: false },
+      { reviewerKey: "panelist-0", displayName: "Name-reviewer-1", hasVoted: true, voteStatus: "approved", submittedAt: "2026-08-12T10:44:00.000Z" },
+      { reviewerKey: "panelist-1", displayName: "Name-reviewer-2", hasVoted: false },
     ]);
 
     // Comment/justification text must never leak into the response, even
     // though both the canonical humanReview and the vote have it populated.
     const raw = JSON.stringify(json);
     expect(raw).not.toContain("internal note that must never leak");
+    // Governance Follow-Up Hardening — raw reviewer/owner uid FIELDS must
+    // never appear in the response, only resolved display names. A
+    // substring scan for the raw uid itself is unreliable here (this
+    // file's mock resolver returns "Name-<uid>", so the uid IS a
+    // substring of the safe, expected display name) — assert field
+    // absence instead, which is exact.
+    expect(json.governance.assignment).not.toHaveProperty("reviewerUserId");
+    expect(json.governance.assignment).not.toHaveProperty("assignedByUserId");
+    for (const reviewer of json.governance.panel.reviewers) {
+      expect(reviewer).not.toHaveProperty("userId");
+    }
     expect(raw).not.toContain("a private vote comment that must never leak");
     expect(raw).not.toContain('"comment"');
     expect(raw).not.toContain("overrideJustification");
@@ -498,7 +509,7 @@ describe("GET /api/user/runs/[runId]/governance — canonical governance precede
     });
     const { json } = await callRoute();
     expect(collectionCalls).not.toContain("teamRuns");
-    expect(json.governance.singleReviewer).toMatchObject({ userId: "reviewer-1" });
+    expect(json.governance.singleReviewer).toMatchObject({ displayName: "Name-reviewer-1" });
   });
 
   it("canonical humanReview=approved wins even though a stale teamRuns projection (wired into the mock) claims unreviewed", async () => {
@@ -515,7 +526,7 @@ describe("GET /api/user/runs/[runId]/governance — canonical governance precede
     });
     const { json } = await callRoute();
     expect(json.governance.family).toBe("milestone2");
-    expect(json.governance.singleReviewer).toEqual({ userId: "reviewer-1", displayName: "Name-reviewer-1", reviewedAt: "2026-08-12T10:44:00.000Z" });
+    expect(json.governance.singleReviewer).toEqual({ displayName: "Name-reviewer-1", reviewedAt: "2026-08-12T10:44:00.000Z" });
     // The stale projection's "unreviewed" claim must not surface anywhere.
     expect(JSON.stringify(json)).not.toMatch(/"status":"unreviewed"/);
   });
@@ -563,7 +574,9 @@ describe("GET /api/user/runs/[runId]/governance — personal reviewer access", (
     expect(res.status).toBe(200);
     expect(json.viewerRole).toBe("personal_reviewer");
     expect(json.governance.family).toBe("milestone2");
-    expect(json.governance.assignment).toMatchObject({ reviewerUserId: REVIEWER_UID });
+    expect(json.governance.assignment).toBeDefined();
+    expect(json.governance.assignment).not.toHaveProperty("reviewerUserId");
+    expect(json.governance.assignment).not.toHaveProperty("assignedByUserId");
   });
 
   it("an unrelated user (not owner, no assignment) is denied and leaks nothing", async () => {
@@ -640,6 +653,7 @@ describe("GET /api/user/runs/[runId]/governance — personal reviewer access", (
 
     const { res, json } = await callRoute();
     expect(res.status).toBe(200);
-    expect(json.governance.singleReviewer).toMatchObject({ userId: REVIEWER_UID });
+    expect(json.governance.singleReviewer).toBeDefined();
+    expect(json.governance.singleReviewer).not.toHaveProperty("userId");
   });
 });

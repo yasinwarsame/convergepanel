@@ -223,7 +223,7 @@ function ReviewerList({ reviewers }: { reviewers: ReviewGovernanceReviewerView[]
       <SectionLabel>Reviewers</SectionLabel>
       <ul className="space-y-2" aria-label="Reviewers">
         {reviewers.map((r) => (
-          <ReviewerRow key={r.userId} reviewer={r} />
+          <ReviewerRow key={r.reviewerKey} reviewer={r} />
         ))}
       </ul>
     </div>
@@ -268,9 +268,21 @@ function CancellationBanner() {
   );
 }
 
-function ReviewHistory({ runId, canonicalTerminal }: { runId: string; canonicalTerminal: boolean }) {
+export type ReviewHistoryScope = "team" | "personal";
+
+/** Items from either history endpoint; `reviewerDisplayName` is only ever present on the personal-scope response (`/api/user/runs/[runId]/review-history`) — the team endpoint's contract deliberately excludes reviewer identity, so this stays optional and simply doesn't render for team items. */
+type ReviewHistoryItem = AdaptiveReviewHistoryResponseV1["items"][number] & { reviewerDisplayName?: string };
+
+/** Governance Follow-Up Hardening — the single place either history URL is constructed, mirroring the established `decisionRouteUrl()` pattern (lib/client/adaptiveReviewSubmission.ts) for the same team/personal split. */
+function historyRouteUrl(scope: ReviewHistoryScope, runId: string): string {
+  return scope === "personal"
+    ? `/api/user/runs/${encodeURIComponent(runId)}/review-history`
+    : `/api/teams/adaptive-runs/${encodeURIComponent(runId)}/history`;
+}
+
+export function ReviewHistory({ runId, canonicalTerminal, scope = "team" }: { runId: string; canonicalTerminal: boolean; scope?: ReviewHistoryScope }) {
   const { user, authReady } = useAuth();
-  const [items, setItems] = useState<AdaptiveReviewHistoryResponseV1["items"] | null>(null);
+  const [items, setItems] = useState<ReviewHistoryItem[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [unavailable, setUnavailable] = useState(false);
 
@@ -283,7 +295,7 @@ function ReviewHistory({ runId, canonicalTerminal }: { runId: string; canonicalT
       setUnavailable(false);
       try {
         const { authedFetch } = await import("@/lib/client/authedFetch");
-        const res = await authedFetch(`/api/teams/adaptive-runs/${encodeURIComponent(runId)}/history`, {
+        const res = await authedFetch(historyRouteUrl(scope, runId), {
           user,
           authReady,
           method: "GET",
@@ -297,7 +309,7 @@ function ReviewHistory({ runId, canonicalTerminal }: { runId: string; canonicalT
         }
         const json = (await res.json()) as AdaptiveReviewHistoryResponseV1;
         if (json.ok && json.version === 1) {
-          setItems(json.items);
+          setItems(json.items as ReviewHistoryItem[]);
         } else {
           setUnavailable(true);
         }
@@ -314,7 +326,7 @@ function ReviewHistory({ runId, canonicalTerminal }: { runId: string; canonicalT
     return () => {
       cancelled = true;
     };
-  }, [user, authReady, runId]);
+  }, [user, authReady, runId, scope]);
 
   return (
     <div>
@@ -335,7 +347,10 @@ function ReviewHistory({ runId, canonicalTerminal }: { runId: string; canonicalT
                 <span className="font-medium text-slate-900">{humanReviewStatusLabel(item.newStatus)}</span>
                 <span className="text-xs text-slate-500">Immutable decision record</span>
               </div>
-              <p className="mt-0.5 text-xs text-slate-500">Decided {formatDatetime(item.reviewedAt)}</p>
+              <p className="mt-0.5 text-xs text-slate-500">
+                Decided {formatDatetime(item.reviewedAt)}
+                {item.reviewerDisplayName ? ` by ${item.reviewerDisplayName}` : ""}
+              </p>
               <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
                 <span>{item.commentPresent ? "Comment provided" : "No comment provided"}</span>
                 <span aria-hidden>&middot;</span>
@@ -421,6 +436,8 @@ interface ReviewGovernanceBodyProps extends ReviewGovernanceSectionProps {
   loading: boolean;
   unavailable: boolean;
   detail: ReviewGovernanceViewModel | null;
+  /** From the same governance fetch's `historyScope` field — routes ReviewHistory to the correct endpoint. Absent/"unknown" defaults to "team" (existing behavior, zero regression for every current call site). */
+  historyScope?: "team" | "personal" | "unknown";
 }
 
 /** Pure presentational body — no fetch, no hooks. Exported so every status scenario can be tested directly with a hand-built `detail` fixture (see the test suite's own doc comment on why this split exists). */
@@ -439,6 +456,7 @@ export function ReviewGovernanceBody({
   loading,
   unavailable,
   detail,
+  historyScope,
 }: ReviewGovernanceBodyProps) {
   const status = deriveReportStatus({ humanReview, reviewRouting, persistenceStatus });
   const canonicalTerminal = TERMINAL_STATUS_KINDS.has(status.kind);
@@ -487,7 +505,9 @@ export function ReviewGovernanceBody({
         {/* GovernanceRecordV1 only exists for Milestone-2 schemas — skip the
             history fetch entirely (not just degrade it) when there's no
             governance record for this run to have a history for. */}
-        {humanReview && runId && <ReviewHistory runId={runId} canonicalTerminal={canonicalTerminal} />}
+        {humanReview && runId && (
+          <ReviewHistory runId={runId} canonicalTerminal={canonicalTerminal} scope={historyScope === "personal" ? "personal" : "team"} />
+        )}
 
         {gate && synthesisReport && modelsUsed && question && (
           <details className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
@@ -530,6 +550,10 @@ function useGovernanceDetail(runId: string | undefined | null) {
   // — there is nothing to fetch, so it must never claim "loading".
   const [loading, setLoading] = useState<boolean>(!!runId);
   const [unavailable, setUnavailable] = useState(false);
+  // Governance Follow-Up Hardening — captured from the SAME governance
+  // fetch below (zero extra request), so ReviewHistory can route to the
+  // correct endpoint without a fetch of its own to determine scope.
+  const [historyScope, setHistoryScope] = useState<"team" | "personal" | "unknown">("unknown");
 
   useEffect(() => {
     if (!runId) {
@@ -559,6 +583,7 @@ function useGovernanceDetail(runId: string | undefined | null) {
         const json = await res.json();
         if (json.ok) {
           setDetail(json.governance as ReviewGovernanceViewModel);
+          setHistoryScope(json.historyScope === "personal" || json.historyScope === "team" ? json.historyScope : "unknown");
         } else {
           setUnavailable(true);
           setDetail(null);
@@ -578,10 +603,10 @@ function useGovernanceDetail(runId: string | undefined | null) {
     };
   }, [runId, user, authReady]);
 
-  return { detail, loading, unavailable };
+  return { detail, loading, unavailable, historyScope };
 }
 
 export default function ReviewGovernanceSection(props: ReviewGovernanceSectionProps) {
-  const { detail, loading, unavailable } = useGovernanceDetail(props.runId);
-  return <ReviewGovernanceBody {...props} loading={loading} unavailable={unavailable} detail={detail} />;
+  const { detail, loading, unavailable, historyScope } = useGovernanceDetail(props.runId);
+  return <ReviewGovernanceBody {...props} loading={loading} unavailable={unavailable} detail={detail} historyScope={historyScope} />;
 }
