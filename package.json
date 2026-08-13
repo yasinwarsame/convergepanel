@@ -25,7 +25,8 @@
     "verify:video": "node scripts/dev-verify-video-processing.mjs",
     "seo:indexnow": "node scripts/submit-indexnow.mjs",
     "governance:seed": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/seed-adaptive-multi-reviewer-e2e.ts",
-    "governance:seed:cleanup": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/cleanup-adaptive-multi-reviewer-e2e.ts"
+    "governance:seed:cleanup": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/cleanup-adaptive-multi-reviewer-e2e.ts",
+    "workspaces:provision-existing": "node --conditions=react-server -r ./scripts/workspaces/register-path-alias.js node_modules/.bin/ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/workspaces/provision-existing-personal-workspaces.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.20.0",
