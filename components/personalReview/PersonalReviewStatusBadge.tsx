@@ -21,8 +21,8 @@ const LABELS: Record<PersonalReviewInboxStatus, string> = {
 
 const TONE: Record<PersonalReviewInboxStatus, string> = {
   assigned: "bg-cp-raised text-cp-muted ring-1 ring-cp-border",
-  approved: "bg-emerald-900/30 text-emerald-400 ring-1 ring-emerald-700/40",
-  approved_with_conditions: "bg-emerald-900/30 text-emerald-400 ring-1 ring-emerald-700/40",
+  approved: "bg-green-100 text-green-800 ring-1 ring-green-300",
+  approved_with_conditions: "bg-green-100 text-green-800 ring-1 ring-green-300",
   changes_requested: "bg-amber-900/30 text-amber-400 ring-1 ring-amber-700/40",
   rejected: "bg-red-900/30 text-red-400 ring-1 ring-red-700/40",
 };

@@ -15,7 +15,7 @@ function toneClasses(status: string | undefined | null): string {
     case "blocked":
       return "bg-red-900/30 text-red-400 ring-1 ring-red-700/40";
     case "passed":
-      return "bg-emerald-900/30 text-emerald-400 ring-1 ring-emerald-700/40";
+      return "bg-green-100 text-green-800 ring-1 ring-green-300";
     case "error":
       return "bg-red-900/30 text-red-400 ring-1 ring-red-700/40";
     case "not_evaluated":
