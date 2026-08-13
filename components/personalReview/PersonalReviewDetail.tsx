@@ -11,8 +11,6 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
 import { useAuth } from "@/components/AuthProvider";
 import { answerShapeLabel, schemaLabel } from "@/lib/governance/teamReviewLabels";
 import type { AdaptiveReviewSubmissionResult as SubmissionResult } from "@/lib/client/adaptiveReviewSubmission";
@@ -21,14 +19,97 @@ import ReviewErrorState from "@/components/teamGovernance/ReviewErrorState";
 import AdaptiveReviewDecisionForm from "@/components/teamGovernance/AdaptiveReviewDecisionForm";
 import { ReviewHistory } from "@/components/adaptive/ReviewGovernanceSection";
 import PersonalReviewStatusBadge from "./PersonalReviewStatusBadge";
+import ReviewerNavigation from "./ReviewerNavigation";
 import type { PersonalReviewInboxStatus } from "@/lib/governance/personalReviewInbox";
 import { personalReviewInboxStatus } from "@/lib/governance/personalReviewInbox";
+import type { ReviewGovernanceViewModel } from "@/lib/adaptiveSchema/reviewGovernanceViewModel";
 
 function formatDatetime(iso: string | undefined): string {
   if (!iso) return "—";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+}
+
+export interface ReviewerIdentity {
+  displayName: string | null;
+  /** "reviewed" once a decision exists, "assigned" while only the assignment (no decision yet) exists. */
+  relationship: "assigned" | "reviewed" | null;
+}
+
+/**
+ * Pure — derives this run's reviewer identity from the SAME governance
+ * detail response (`GET /api/user/runs/[runId]/governance`'s `governance`
+ * field) that `ReviewGovernanceSection`/`ReviewHistory` already consume, so
+ * this page's header, the Review & Governance section, and Review History
+ * can never disagree on who reviewed/is assigned to a run — one canonical
+ * resolution (`buildReviewGovernanceViewModel` + `reviewerIdentity.ts`'s
+ * safe fallback chain), never a second lookup implementation.
+ *
+ * Schema-agnostic by construction: reads only `family`/`singleReviewer`/
+ * `assignment`, never `schemaId` — the identical derivation applies to
+ * Decision Support, Deep Research, Ranked List, or any other Milestone-2
+ * schema, since they all share this one component and this one response
+ * shape. Legacy-family schemas never reach this page at all (gated
+ * upstream by the `decisionReceipt` check in `load()` below, which only
+ * Milestone-2's `governanceRecord` ever populates).
+ *
+ * Precedence mirrors `SingleReviewerIdentityCard` exactly: a completed
+ * decision (`singleReviewer`) takes priority over the still-open
+ * `assignment`, since a decided run's assignment record still exists but
+ * its identity is more precisely shown via the decision itself.
+ */
+export function deriveReviewerIdentity(governance: ReviewGovernanceViewModel | null | undefined): ReviewerIdentity {
+  if (governance?.family !== "milestone2") return { displayName: null, relationship: null };
+  if (governance.singleReviewer?.displayName) {
+    return { displayName: governance.singleReviewer.displayName, relationship: "reviewed" };
+  }
+  if (governance.assignment?.reviewerDisplayName) {
+    return { displayName: governance.assignment.reviewerDisplayName, relationship: "assigned" };
+  }
+  return { displayName: null, relationship: null };
+}
+
+/**
+ * Pure presentational — status-aware "Assigned to <name>" / "Reviewed by
+ * <name>" text. Renders nothing when no canonical identity is available
+ * (never fabricates a placeholder here; `reviewerDisplayName` itself is
+ * already guaranteed non-blank by the shared resolver's own fallback chain
+ * whenever a canonical assignment/decision exists — name, else masked
+ * email, else "Reviewer unavailable", never "Unknown"). Actual text, not
+ * color-only, so it reads correctly to a screen reader on its own.
+ */
+export function ReviewerIdentityLine({ displayName, relationship }: ReviewerIdentity) {
+  if (!displayName) return null;
+  return (
+    <p className="mt-2 text-sm font-medium text-cp-text">
+      {relationship === "reviewed" ? "Reviewed by " : "Assigned to "}
+      {displayName}
+    </p>
+  );
+}
+
+export type AutomatedGovernanceStatusValue = "passed" | "flagged" | "blocked" | "not_evaluated" | "error";
+
+/**
+ * Pure — renders the automated-governance badge only when the run has a
+ * real, persisted automated-governance record (`governanceRecord.
+ * automatedGovernance`). This is the fix for the reported "Unknown" badge:
+ * that badge was never reviewer identity — it's `GovernanceStatusBadge`
+ * rendering its own generic fallback because the field it was fed
+ * (`GET /api/user/runs/[runId]`'s `adaptive.automatedGovernanceStatus`)
+ * is never actually populated on a read (only in the ephemeral run-panel
+ * generation response). The real field is `governanceRecord.
+ * automatedGovernance.status`, mirroring exactly what
+ * `AdaptiveReviewDetailResponseV1` (the team detail route) already
+ * exposes. "No automated-governance record at all" and "a genuine
+ * `not_evaluated` status" are two different, non-interchangeable states —
+ * the former renders no badge, the latter renders a truthful "Not
+ * Evaluated" badge via the unchanged, shared `GovernanceStatusBadge`.
+ */
+export function AutomatedGovernanceStatusIndicator({ automatedGovernance }: { automatedGovernance: { status: AutomatedGovernanceStatusValue } | null }) {
+  if (!automatedGovernance) return null;
+  return <GovernanceStatusBadge status={automatedGovernance.status} />;
 }
 
 function CollapsibleList({ title, items }: { title: string; items: string[] }) {
@@ -75,7 +156,22 @@ type LoadedData = {
     sourceBacked: boolean;
     humanReviewNeeded: boolean;
   };
-  automatedGovernanceStatus?: string;
+  /**
+   * The run's persisted, canonical automated-governance record
+   * (`governanceRecord.automatedGovernance`), sourced from the governance
+   * route — the SAME field `AdaptiveReviewDetailResponseV1` (the team
+   * detail route) already exposes. `null` when the run genuinely has no
+   * automated-governance record at all (never evaluated for this run) —
+   * the header renders no badge in that case, never a fabricated
+   * "Unknown". Previously this field was read from
+   * `GET /api/user/runs/[runId]`'s `adaptive.automatedGovernanceStatus`,
+   * which that route never actually populates on a read (it's only ever
+   * set in the ephemeral POST /api/run-panel response at generation time)
+   * — that was the real cause of the "Unknown" badge always appearing on
+   * this page, not a reviewer-identity problem at all.
+   */
+  automatedGovernance: { status: "passed" | "flagged" | "blocked" | "not_evaluated" | "error" } | null;
+  reviewer: ReviewerIdentity;
 };
 
 export default function PersonalReviewDetail({ runId }: { runId: string }) {
@@ -144,7 +240,8 @@ export default function PersonalReviewDetail({ runId }: { runId: string }) {
           schemaId: govJson.schemaId,
           answerShape: govJson.answerShape,
           decisionReceipt: govJson.decisionReceipt,
-          automatedGovernanceStatus: reportJson.adaptive?.automatedGovernanceStatus,
+          automatedGovernance: govJson.automatedGovernance ?? null,
+          reviewer: deriveReviewerIdentity(govJson.governance),
         });
         setError(null);
       } catch {
@@ -190,13 +287,7 @@ export default function PersonalReviewDetail({ runId }: { runId: string }) {
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-8 pb-20">
-      <Link
-        href="/reviews"
-        className="mb-6 inline-flex items-center gap-2 text-sm font-medium text-cp-text transition-colors hover:text-cp-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent focus-visible:ring-offset-2 rounded"
-      >
-        <ArrowLeft className="h-4 w-4 shrink-0" aria-hidden />
-        Back to my reviews
-      </Link>
+      <ReviewerNavigation showBackToReviews={true} />
 
       {authLoading || !authReady || loading ? (
         <div className="py-12 text-center text-cp-muted" aria-live="polite">
@@ -213,9 +304,10 @@ export default function PersonalReviewDetail({ runId }: { runId: string }) {
               <span className="text-sm text-cp-muted">{answerShapeLabel(data.answerShape)}</span>
             </div>
             <div className="mt-3 flex flex-wrap items-center gap-2">
-              <GovernanceStatusBadge status={data.automatedGovernanceStatus} />
+              <AutomatedGovernanceStatusIndicator automatedGovernance={data.automatedGovernance} />
               <PersonalReviewStatusBadge status={data.humanReviewStatus} />
             </div>
+            <ReviewerIdentityLine displayName={data.reviewer.displayName} relationship={data.reviewer.relationship} />
             {refreshNotice ? <p className="mt-2 text-xs text-amber-400">{refreshNotice}</p> : null}
           </header>
 

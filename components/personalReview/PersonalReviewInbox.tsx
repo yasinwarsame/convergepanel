@@ -12,6 +12,7 @@ import { useAuth } from "@/components/AuthProvider";
 import { schemaLabel } from "@/lib/governance/teamReviewLabels";
 import type { PersonalReviewInboxItemV1, PersonalReviewInboxFilter } from "@/lib/governance/personalReviewInbox";
 import PersonalReviewStatusBadge from "./PersonalReviewStatusBadge";
+import ReviewerNavigation from "./ReviewerNavigation";
 
 function formatDatetime(iso: string | undefined): string {
   if (!iso) return "—";
@@ -71,6 +72,8 @@ export default function PersonalReviewInbox() {
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-8 pb-20">
+      <ReviewerNavigation showBackToReviews={false} />
+
       <header className="mb-6">
         <h1 className="text-xl font-bold text-cp-text">My Reviews</h1>
         <p className="mt-1 text-sm text-cp-muted">Reports someone has personally assigned to you for review.</p>
