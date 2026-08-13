@@ -207,6 +207,26 @@ export default function LoginPage() {
         }
       }
 
+      // Workspace-Aware Writes for New Personal Adaptive Runs, Phase 3 —
+      // new-user provisioning gap resolution: self-heal a missing Personal
+      // Workspace on every login, mirroring the profile self-heal setDoc
+      // above exactly (best-effort, fire-and-forget, never blocks login or
+      // the redirect below). POST /api/user/workspace is Phase 2's existing
+      // self-provisioning endpoint — it already no-ops safely (503
+      // provisioning_disabled) whenever PERSONAL_WORKSPACE_PROVISIONING_ENABLED
+      // is off, which it currently is in production; this call is dark
+      // until that separate, still-unauthorized flag is turned on.
+      setTimeout(async () => {
+        try {
+          const { authedFetch } = await import("@/lib/client/authedFetch");
+          await authedFetch("/api/user/workspace", { user, authReady: true, method: "POST" });
+        } catch (err: any) {
+          if (process.env.NODE_ENV !== "production") {
+            console.warn("[login] Personal Workspace self-heal request failed (non-blocking):", err?.message);
+          }
+        }
+      }, 100);
+
       posthog.identify(user.uid, { email: user.email ?? undefined });
       posthog.capture("user_logged_in", { method: "email" });
 

@@ -53,4 +53,25 @@ describe("Login page — source-level wiring guarantees", () => {
     expect(source).toMatch(/syncState === "session_error"/);
     expect(source).toMatch(/setLoading\(false\)/);
   });
+
+  describe("Phase 3 — Personal Workspace self-heal on login", () => {
+    it("calls POST /api/user/workspace via authedFetch", () => {
+      expect(source).toMatch(/authedFetch\(\s*["']\/api\/user\/workspace["']/);
+    });
+
+    it("is wrapped in its own try/catch, isolated from the rest of the login flow", () => {
+      const workspaceCallIndex = source.indexOf('authedFetch("/api/user/workspace"');
+      expect(workspaceCallIndex).toBeGreaterThan(-1);
+      const surroundingBlock = source.slice(Math.max(0, workspaceCallIndex - 400), workspaceCallIndex + 200);
+      expect(surroundingBlock).toMatch(/try\s*{/);
+      expect(surroundingBlock).toMatch(/catch/);
+    });
+
+    it("never appears inside handleSubmit's synchronous success path before the redirect-arming call — it's deferred via setTimeout, matching the existing subscription-validation pattern", () => {
+      const workspaceCallIndex = source.indexOf('authedFetch("/api/user/workspace"');
+      const precedingSetTimeout = source.lastIndexOf("setTimeout(async () => {", workspaceCallIndex);
+      expect(precedingSetTimeout).toBeGreaterThan(-1);
+      expect(precedingSetTimeout).toBeLessThan(workspaceCallIndex);
+    });
+  });
 });

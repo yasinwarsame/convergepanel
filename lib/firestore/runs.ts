@@ -77,6 +77,19 @@ import { logger } from "@/lib/logger";
 
 export interface PanelRun {
   userId: string;
+  /**
+   * Workspace-Aware Writes for New Personal Adaptive Runs, Phase 3 — the
+   * deterministic `personal-{uid}` id of the owning user's Personal
+   * Workspace, present ONLY when `PERSONAL_RUN_WORKSPACE_WRITES_ENABLED`
+   * was on and workspace resolution succeeded at creation time. Optional
+   * and never backfilled: a run created before Phase 3 (or created while
+   * the user has a team, or while the flag is off) simply never has this
+   * field — `userId` above remains the sole, always-present ownership
+   * field and is never superseded by this one. See
+   * docs/workspaces/architecture.md's Phase 3 section for the full
+   * compatibility rationale.
+   */
+  workspaceId?: string;
   question: string;
   selectedModels: string[];
   status: "running" | "complete" | "error";
@@ -99,18 +112,27 @@ export interface PanelRun {
 
 /**
  * Create a new run document in Firestore
- * 
+ *
  * @param runId - Unique run identifier
  * @param userId - User ID who initiated the run
  * @param question - The question asked
  * @param selectedModels - Array of model IDs selected for this run
+ * @param workspaceId - Phase 3, optional: the resolved Personal Workspace id
+ *   to bind this run to at creation time. Included in this SAME initial
+ *   `.set()` call deliberately — never patched on afterward — so a run is
+ *   either workspace-bound from the moment it exists or not at all; there
+ *   is no intermediate, ambiguous-ownership state. `undefined` is written
+ *   as an absent field (adminDb has `ignoreUndefinedProperties: true`
+ *   configured — see lib/firebase/admin.ts), matching every other optional
+ *   field on this document.
  * @returns Promise<void>
  */
 export async function createRun(
   runId: string,
   userId: string,
   question: string,
-  selectedModels: string[]
+  selectedModels: string[],
+  workspaceId?: string
 ): Promise<void> {
   if (!adminDb) {
     throw new Error("Firestore is not available");
@@ -118,6 +140,7 @@ export async function createRun(
 
   const runData: Partial<PanelRun> = {
     userId,
+    workspaceId,
     question,
     selectedModels,
     status: "running",

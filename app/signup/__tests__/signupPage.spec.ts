@@ -42,4 +42,27 @@ describe("Signup page — source-level wiring guarantees", () => {
     expect(source).toMatch(/setTimeout\(/);
     expect(source).toMatch(/10000/);
   });
+
+  describe("Phase 3 — Personal Workspace provisioning trigger on signup", () => {
+    it("calls POST /api/user/workspace via authedFetch", () => {
+      expect(source).toMatch(/authedFetch\(\s*["']\/api\/user\/workspace["']/);
+    });
+
+    it("is wrapped in its own try/catch, isolated from the rest of the signup flow", () => {
+      const workspaceCallIndex = source.indexOf('authedFetch("/api/user/workspace"');
+      expect(workspaceCallIndex).toBeGreaterThan(-1);
+      const surroundingBlock = source.slice(Math.max(0, workspaceCallIndex - 400), workspaceCallIndex + 200);
+      expect(surroundingBlock).toMatch(/try\s*{/);
+      expect(surroundingBlock).toMatch(/catch/);
+    });
+
+    it("fires after the profile setDoc, deferred via setTimeout rather than blocking the onboarding redirect", () => {
+      const setDocIndex = source.indexOf('setDoc(doc(db, "users", user.uid)');
+      const workspaceCallIndex = source.indexOf('authedFetch("/api/user/workspace"');
+      expect(setDocIndex).toBeGreaterThan(-1);
+      expect(workspaceCallIndex).toBeGreaterThan(setDocIndex);
+      const precedingSetTimeout = source.lastIndexOf("setTimeout(async () => {", workspaceCallIndex);
+      expect(precedingSetTimeout).toBeGreaterThan(setDocIndex);
+    });
+  });
 });

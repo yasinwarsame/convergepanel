@@ -48,7 +48,8 @@ import { sanitizeModelText, truncateForSynthesis, MAX_CHARS_SYNTHESIS_PER_MODEL 
 import { PanelResultPublic } from "@/lib/panel/schemas";
 import { normalizeModelResultPublic, assertPublicStatus } from "@/lib/panel/normalize";
 import { logger } from "@/lib/logger";
-import { ADAPTIVE_SCHEMAS_ENABLED } from "@/lib/env";
+import { ADAPTIVE_SCHEMAS_ENABLED, PERSONAL_RUN_WORKSPACE_WRITES_ENABLED, WORKSPACES_ENABLED } from "@/lib/env";
+import { resolvePersonalRunWorkspaceBinding } from "@/lib/workspaces/personalRunWorkspaceBinding";
 import { planAdaptiveRun, finalizeAdaptiveRun, AdaptivePromptPlan, buildNonExecutionPayload } from "@/lib/adaptiveSchema/orchestrate";
 import { trackQueryClassified, trackRoutingOutcome, trackPanelExecutionStarted, trackPanelExecutionCompleted, trackPanelExecutionFailed, trackRankedListShortfall, trackComparisonMatrixGap, trackDefinitionAmbiguity, trackCausalExplanationGap, trackChecklistTaxonomyGap, trackDeepResearchGap, trackEvidenceReviewGap, trackBiasAuditNoAttribution, trackBiasAuditPanelGapFound, trackBiasAuditHomogeneityFlagged, trackDecisionSupportContested, trackDecisionSupportHighSensitivity, trackDecisionSupportMissingCriteria } from "@/lib/adaptiveSchema/analytics";
 
@@ -339,7 +340,52 @@ export async function POST(req: NextRequest) {
     
     // Create run document in Firestore (status: "running")
     try {
-      await createRun(runId, uid, trimmedQuestion, selectedModels);
+      // Workspace-Aware Writes for New Personal Adaptive Runs, Phase 3 —
+      // resolved BEFORE the single createRun() write below (never a
+      // patch-after-create) and BEFORE runPanel()'s expensive model
+      // execution further down. Never calls ensurePersonalWorkspace() —
+      // a missing Workspace is a resolution failure, not a trigger to
+      // create one (see personalRunWorkspaceBinding.ts's own doc comment).
+      let workspaceIdForRun: string | undefined;
+      if (PERSONAL_RUN_WORKSPACE_WRITES_ENABLED) {
+        const teamCtx = await loadUserAndTeam(uid);
+        const binding = await resolvePersonalRunWorkspaceBinding({
+          uid,
+          writesEnabled: PERSONAL_RUN_WORKSPACE_WRITES_ENABLED,
+          workspacesEnabled: WORKSPACES_ENABLED,
+          hasTeam: !!teamCtx?.team,
+        });
+        switch (binding.outcome) {
+          case "bound":
+            workspaceIdForRun = binding.workspaceId;
+            logger.info("[run-panel] personal_run_workspace_bound", { runId });
+            break;
+          case "resolution_failed":
+            // Fail clearly — never silently fall back to creating a
+            // legacy (non-workspace-bound) run once write rollout is
+            // enabled, since that would create mixed ownership based on
+            // failures with no visible signal. Throwing here skips the
+            // createRun() call entirely, landing in the same catch below
+            // that already treats "run record could not be created" as
+            // non-fatal to the request (research still proceeds) — this
+            // reuses that existing, already-established degradation
+            // path rather than inventing a new one.
+            logger.error("[run-panel] personal_run_workspace_resolution_failed", { runId, reason: binding.reason });
+            throw new Error(`personal_run_workspace_resolution_failed:${binding.reason}`);
+          case "invalid_configuration":
+            // Fail closed on invalid configuration: this run is created
+            // exactly as if the write flag were off (no workspaceId) —
+            // never as an unsafe Workspace-bound write under a
+            // configuration where the resolver itself would deny access.
+            logger.error("[run-panel] personal_run_workspace_configuration_invalid", { runId, reason: binding.reason });
+            break;
+          case "team_user":
+          case "flag_off":
+            // Not applicable — proceeds exactly as legacy, not a failure.
+            break;
+        }
+      }
+      await createRun(runId, uid, trimmedQuestion, selectedModels, workspaceIdForRun);
     } catch (runError: any) {
       // Log but don't fail - run creation is for tracking, not critical for execution
       logger.error("[run-panel] Failed to create run record", { error: runError });

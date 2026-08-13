@@ -289,6 +289,27 @@ export default function SignupPage() {
       posthog.identify(user.uid, { email: user.email ?? undefined, name: name.trim() || undefined });
       posthog.capture("user_signed_up", { method: "email" });
 
+      // Workspace-Aware Writes for New Personal Adaptive Runs, Phase 3 —
+      // new-user provisioning gap resolution: this is the very first
+      // opportunity to provision a brand-new user's Personal Workspace,
+      // mirroring the profile setDoc above (best-effort, fire-and-forget,
+      // never blocks signup or the onboarding redirect below). Also
+      // triggered again on every future login (app/login/page.tsx) so a
+      // failed attempt here isn't the only chance. POST /api/user/workspace
+      // is Phase 2's existing self-provisioning endpoint — it no-ops
+      // safely (503 provisioning_disabled) while
+      // PERSONAL_WORKSPACE_PROVISIONING_ENABLED remains off in production.
+      setTimeout(async () => {
+        try {
+          const { authedFetch } = await import("@/lib/client/authedFetch");
+          await authedFetch("/api/user/workspace", { user, authReady: true, method: "POST" });
+        } catch (err: any) {
+          if (process.env.NODE_ENV !== "production") {
+            console.warn("[signup] Personal Workspace provisioning request failed (non-blocking):", err?.message);
+          }
+        }
+      }, 100);
+
       // Redirect to onboarding page instead of main app
       // Preserve any redirect param so the user lands on their intended page after onboarding
       const rawRedirect = searchParams.get("redirect") || searchParams.get("next");
