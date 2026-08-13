@@ -78,6 +78,7 @@ describe("runExistingUserProvisioning — pagination", () => {
     });
 
     expect(seenTokens).toEqual([undefined, "page-2", "page-3"]);
+    expect(result.status).toBe("complete");
     expect(result.pageCount).toBe(3);
     expect(result.totals.scanned).toBe(5);
     expect(result.totals.eligible).toBe(5);
@@ -99,6 +100,67 @@ describe("runExistingUserProvisioning — pagination", () => {
     expect(onPageComplete).toHaveBeenCalledTimes(2);
     expect(onPageComplete).toHaveBeenNthCalledWith(1, { scanned: 1, eligible: 1, excluded: 0, nextPageToken: "tok-2" });
     expect(onPageComplete).toHaveBeenNthCalledWith(2, { scanned: 2, eligible: 2, excluded: 0, nextPageToken: undefined });
+  });
+});
+
+describe("runExistingUserProvisioning — fatal enumeration failure produces an incomplete result, never a thrown exception", () => {
+  it("page 1 succeeds, page 2's Auth listing fails: previous page's results are preserved, status is incomplete, no false coverage claim", async () => {
+    const { runExistingUserProvisioning } = await loadModule();
+
+    const listUsersPage = jest
+      .fn()
+      .mockResolvedValueOnce({ users: [{ uid: "u1", disabled: false }, { uid: "u2", disabled: false }], pageToken: "page-2" })
+      .mockRejectedValueOnce(new Error("simulated Firebase Auth listUsers() transient failure"));
+
+    const result = await runExistingUserProvisioning({ dryRun: true, concurrency: 2, excludedUids: new Set(), listUsersPage });
+
+    // Does not throw — resolves to a result object instead.
+    expect(result.status).toBe("incomplete");
+    expect(result.fatalError).toEqual(expect.objectContaining({ code: "enumeration_failed" }));
+    // Page 1's results are preserved, not discarded.
+    expect(result.pageCount).toBe(1);
+    expect(result.totals.scanned).toBe(2);
+    expect(result.totals.eligible).toBe(2);
+    expect(result.counts.missing).toBe(2);
+    // The raw exception is never persisted into the result.
+    expect(JSON.stringify(result)).not.toContain("simulated Firebase Auth listUsers() transient failure");
+  });
+
+  it("a fatal failure on the very first page still returns a well-formed (if empty) incomplete result", async () => {
+    const { runExistingUserProvisioning } = await loadModule();
+    const listUsersPage = jest.fn().mockRejectedValueOnce(new Error("boom"));
+
+    const result = await runExistingUserProvisioning({ dryRun: false, concurrency: 2, excludedUids: new Set(), listUsersPage });
+
+    expect(result.status).toBe("incomplete");
+    expect(result.pageCount).toBe(0);
+    expect(result.totals).toEqual({ scanned: 0, eligible: 0, excluded: 0 });
+  });
+});
+
+describe("isCompleteWithFullCoverage — the sole Phase-3-readiness predicate", () => {
+  it("returns true only for a complete run with zero missing, zero conflicts, zero failures", async () => {
+    const { runExistingUserProvisioning, isCompleteWithFullCoverage } = await loadModule();
+    const listUsersPage = jest.fn().mockResolvedValueOnce({ users: [{ uid: "u1", disabled: false }], pageToken: undefined });
+    // u1 will report "missing" in a fresh mock DB — not full coverage yet.
+    const result = await runExistingUserProvisioning({ dryRun: true, concurrency: 1, excludedUids: new Set(), listUsersPage });
+    expect(isCompleteWithFullCoverage(result)).toBe(false); // missing=1
+  });
+
+  it("returns false for an incomplete run even if its partial counts look clean", async () => {
+    const { runExistingUserProvisioning, isCompleteWithFullCoverage } = await loadModule();
+    const listUsersPage = jest.fn().mockRejectedValueOnce(new Error("boom"));
+    const result = await runExistingUserProvisioning({ dryRun: true, concurrency: 1, excludedUids: new Set(), listUsersPage });
+    expect(result.status).toBe("incomplete");
+    expect(isCompleteWithFullCoverage(result)).toBe(false);
+  });
+
+  it("returns true for a complete run with zero missing/conflicts/failures", async () => {
+    const { runExistingUserProvisioning, isCompleteWithFullCoverage } = await loadModule();
+    const listUsersPage = jest.fn().mockResolvedValueOnce({ users: [], pageToken: undefined });
+    const result = await runExistingUserProvisioning({ dryRun: true, concurrency: 1, excludedUids: new Set(), listUsersPage });
+    expect(result.status).toBe("complete");
+    expect(isCompleteWithFullCoverage(result)).toBe(true);
   });
 });
 

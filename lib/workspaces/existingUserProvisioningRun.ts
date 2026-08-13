@@ -31,7 +31,24 @@ export interface RunProvisioningOptions {
   onPageComplete?: (info: { scanned: number; eligible: number; excluded: number; nextPageToken: string | undefined }) => void;
 }
 
+export interface RunFatalError {
+  /** A short, stable classification — never the raw thrown error/exception, which could carry internal details (stack traces, credential-adjacent text) unsafe to persist in a result artifact. */
+  code: "enumeration_failed";
+  message: string;
+}
+
 export interface RunProvisioningResult {
+  /**
+   * "complete" only if every page was enumerated and processed —
+   * `pageToken` was exhausted (`undefined`), not merely that the loop
+   * stopped. "incomplete" means a fatal error interrupted enumeration
+   * partway through; whatever was aggregated up to that point is still
+   * returned (never discarded), but this result must never be treated as
+   * proof of full coverage — see `isCompleteWithFullCoverage()` below,
+   * which is the only sanctioned way to check a Phase-3-readiness gate
+   * against this result.
+   */
+  status: "complete" | "incomplete";
   totals: { scanned: number; eligible: number; excluded: number };
   counts: Record<string, number>;
   conflicts: PerUserRecord[];
@@ -39,6 +56,7 @@ export interface RunProvisioningResult {
   excludedRecords: PerUserRecord[];
   lastPageToken: string | null;
   pageCount: number;
+  fatalError?: RunFatalError;
 }
 
 /**
@@ -47,6 +65,18 @@ export interface RunProvisioningResult {
  * (read-only) instead of `provisionUserWorkspace` (the only function that
  * can write) based purely on this flag, checked once per user via a plain
  * ternary — there is no other conditional write path anywhere in this loop.
+ *
+ * Never throws for an Auth-enumeration failure (`options.listUsersPage`
+ * rejecting) — that's an expected-to-happen-eventually operational fault
+ * (network blip, transient Auth API error), not a bug, and a thrown
+ * exception here would make the CLI script lose every already-aggregated
+ * per-user result for the pages that DID succeed. Instead, the failure is
+ * caught, `status: "incomplete"` plus a sanitized `fatalError` are
+ * attached, and whatever was aggregated so far is returned normally so
+ * the caller can still persist a result artifact. A genuinely unexpected
+ * bug elsewhere (not in `listUsersPage`) is deliberately left to propagate
+ * — this function only absorbs the one failure mode it knows how to
+ * describe safely.
  */
 export async function runExistingUserProvisioning(options: RunProvisioningOptions): Promise<RunProvisioningResult> {
   const counts: Record<string, number> = {};
@@ -61,7 +91,25 @@ export async function runExistingUserProvisioning(options: RunProvisioningOption
 
   let pageToken: string | undefined = options.startPageToken;
   do {
-    const page = await options.listUsersPage(pageToken);
+    let page;
+    try {
+      page = await options.listUsersPage(pageToken);
+    } catch {
+      return {
+        status: "incomplete",
+        totals: { scanned, eligible, excluded },
+        counts,
+        conflicts,
+        failures,
+        excludedRecords,
+        lastPageToken,
+        pageCount,
+        fatalError: {
+          code: "enumeration_failed",
+          message: `Failed to list Firebase Auth users after ${pageCount} page(s) successfully processed. See script logs around this run for detail; the underlying exception is deliberately not persisted in this artifact.`,
+        },
+      };
+    }
     pageCount += 1;
     scanned += page.users.length;
 
@@ -95,5 +143,23 @@ export async function runExistingUserProvisioning(options: RunProvisioningOption
     options.onPageComplete?.({ scanned, eligible, excluded, nextPageToken: pageToken });
   } while (pageToken);
 
-  return { totals: { scanned, eligible, excluded }, counts, conflicts, failures, excludedRecords, lastPageToken, pageCount };
+  return { status: "complete", totals: { scanned, eligible, excluded }, counts, conflicts, failures, excludedRecords, lastPageToken, pageCount };
+}
+
+/**
+ * The single sanctioned Phase-3-readiness predicate — see
+ * docs/workspaces/architecture.md's "Coverage audit contract." An
+ * `"incomplete"` result can never satisfy this, regardless of how clean
+ * its partial counts look, because a partial enumeration cannot prove
+ * `missing === 0` for users it never reached. This checks only what's
+ * computable from a single provisioning run's own artifact (status,
+ * conflicts, failures, and — for a dry run — `counts.missing`); it does
+ * NOT check for "unexpected Workspace docs" (a Personal Workspace document
+ * with no corresponding eligible Auth user), which requires a separate,
+ * independent reverse audit query against the `workspaces` collection —
+ * deliberately not built here, since that's a different, standalone
+ * verification concern, not a property of this run's own result.
+ */
+export function isCompleteWithFullCoverage(result: RunProvisioningResult): boolean {
+  return result.status === "complete" && (result.counts.missing ?? 0) === 0 && result.conflicts.length === 0 && result.failures.length === 0;
 }

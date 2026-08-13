@@ -1,17 +1,18 @@
 /**
  * Existing-User Personal Workspace Provisioning, Phase 2B —
- * checkProvisioningGuard() / parseProvisioningCliArgs() tests.
+ * checkProjectIdentityConsistency() / checkProvisioningGuard() /
+ * validateProvisioningConcurrency() / parseProvisioningCliArgs() tests.
  */
 
-import { checkProvisioningGuard, isProvisioningExplicitlyAllowed, parseProvisioningCliArgs } from "@/lib/workspaces/provisioningSafety";
-
-const VALID_ARGS = {
-  allowFlagValue: "true",
-  resolvedProjectId: "convergepanel",
-  confirmedProjectId: "convergepanel",
-  nodeEnv: "development",
-  vercelEnv: undefined,
-};
+import {
+  checkProjectIdentityConsistency,
+  checkProvisioningGuard,
+  isProvisioningExplicitlyAllowed,
+  MAX_PROVISIONING_CONCURRENCY,
+  MIN_PROVISIONING_CONCURRENCY,
+  parseProvisioningCliArgs,
+  validateProvisioningConcurrency,
+} from "@/lib/workspaces/provisioningSafety";
 
 describe("isProvisioningExplicitlyAllowed", () => {
   it.each(["true", "TRUE", "1", "yes", undefined, ""])("only the exact literal \"true\" allows — rejects: %s", (value) => {
@@ -19,45 +20,114 @@ describe("isProvisioningExplicitlyAllowed", () => {
   });
 });
 
-describe("checkProvisioningGuard", () => {
-  it("passes with all conditions satisfied", () => {
-    expect(checkProvisioningGuard(VALID_ARGS)).toEqual({ ok: true });
+describe("checkProjectIdentityConsistency", () => {
+  it("passes when the env constant and the actual initialized project agree", () => {
+    const result = checkProjectIdentityConsistency({ envProjectId: "convergepanel", actualProjectId: "convergepanel" });
+    expect(result).toEqual({ ok: true, projectId: "convergepanel" });
   });
 
-  it("fails when the allow flag is missing", () => {
-    const result = checkProvisioningGuard({ ...VALID_ARGS, allowFlagValue: undefined });
-    expect(result).toEqual(expect.objectContaining({ ok: false, reason: "allow_flag_missing" }));
+  it("fails closed when the actual initialized project cannot be resolved at all", () => {
+    const result = checkProjectIdentityConsistency({ envProjectId: "convergepanel", actualProjectId: undefined });
+    expect(result).toEqual(expect.objectContaining({ ok: false, reason: "actual_project_unresolved" }));
+  });
+
+  it("detects split-brain: env constant says one project, the initialized Admin SDK is actually on another", () => {
+    const result = checkProjectIdentityConsistency({ envProjectId: "convergepanel", actualProjectId: "some-other-project" });
+    expect(result).toEqual(expect.objectContaining({ ok: false, reason: "firebase_project_configuration_mismatch" }));
+  });
+
+  it("split-brain is detected even when --confirm-project would separately match the (wrong) env value — this is the regression that matters", () => {
+    // env project = A, initialized app project = B. An operator who passes
+    // --confirm-project=A (matching the env constant they can see) must
+    // still be blocked, because A is not what the SDK actually connected to.
+    const result = checkProjectIdentityConsistency({ envProjectId: "A", actualProjectId: "B" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("firebase_project_configuration_mismatch");
+  });
+});
+
+describe("validateProvisioningConcurrency", () => {
+  it.each([1, 5, MAX_PROVISIONING_CONCURRENCY])("accepts %d (in range)", (value) => {
+    expect(validateProvisioningConcurrency(value)).toEqual({ ok: true, concurrency: value });
+  });
+
+  it.each([MAX_PROVISIONING_CONCURRENCY + 1, 0, -1, -100])("rejects %d (out of range) with invalid_concurrency", (value) => {
+    const result = validateProvisioningConcurrency(value);
+    expect(result).toEqual(expect.objectContaining({ ok: false, reason: "invalid_concurrency" }));
+  });
+
+  it("rejects NaN", () => {
+    expect(validateProvisioningConcurrency(NaN)).toEqual(expect.objectContaining({ ok: false, reason: "invalid_concurrency" }));
+  });
+
+  it("rejects a decimal value — integer concurrency only", () => {
+    expect(validateProvisioningConcurrency(2.5)).toEqual(expect.objectContaining({ ok: false, reason: "invalid_concurrency" }));
+  });
+
+  it("MIN/MAX constants are exported and consistent with the default (5) being in range", () => {
+    expect(MIN_PROVISIONING_CONCURRENCY).toBe(1);
+    expect(MAX_PROVISIONING_CONCURRENCY).toBeGreaterThanOrEqual(5);
+  });
+});
+
+const VALID_GUARD_ARGS = {
+  allowFlagValue: "true",
+  actualProjectId: "convergepanel",
+  confirmedProjectId: "convergepanel",
+  nodeEnv: "development",
+  vercelEnv: undefined,
+};
+
+describe("checkProvisioningGuard", () => {
+  it("passes with all conditions satisfied", () => {
+    expect(checkProvisioningGuard(VALID_GUARD_ARGS)).toEqual({ ok: true });
   });
 
   it("fails when --confirm-project is missing", () => {
-    const result = checkProvisioningGuard({ ...VALID_ARGS, confirmedProjectId: undefined });
+    const result = checkProvisioningGuard({ ...VALID_GUARD_ARGS, confirmedProjectId: undefined });
     expect(result).toEqual(expect.objectContaining({ ok: false, reason: "project_confirmation_missing" }));
   });
 
-  it("fails when --confirm-project does not match the resolved project", () => {
-    const result = checkProvisioningGuard({ ...VALID_ARGS, confirmedProjectId: "some-other-project" });
+  it("fails when --confirm-project does not match the actual initialized project", () => {
+    const result = checkProvisioningGuard({ ...VALID_GUARD_ARGS, confirmedProjectId: "some-other-project" });
     expect(result).toEqual(expect.objectContaining({ ok: false, reason: "project_confirmation_mismatch" }));
   });
 
+  it("fails when the allow flag is missing", () => {
+    const result = checkProvisioningGuard({ ...VALID_GUARD_ARGS, allowFlagValue: undefined });
+    expect(result).toEqual(expect.objectContaining({ ok: false, reason: "allow_flag_missing" }));
+  });
+
   it("fails when NODE_ENV=production", () => {
-    const result = checkProvisioningGuard({ ...VALID_ARGS, nodeEnv: "production" });
+    const result = checkProvisioningGuard({ ...VALID_GUARD_ARGS, nodeEnv: "production" });
     expect(result).toEqual(expect.objectContaining({ ok: false, reason: "node_env_production" }));
   });
 
   it("fails when VERCEL_ENV is present", () => {
-    const result = checkProvisioningGuard({ ...VALID_ARGS, vercelEnv: "production" });
+    const result = checkProvisioningGuard({ ...VALID_GUARD_ARGS, vercelEnv: "production" });
     expect(result).toEqual(expect.objectContaining({ ok: false, reason: "vercel_env_present" }));
   });
 
-  it("the allow-flag check always wins first, even if other conditions also fail", () => {
+  it("project-confirmation checks win first, even if other conditions also fail — project identity is validated before the mutation-allow gate", () => {
     const result = checkProvisioningGuard({
       allowFlagValue: undefined,
-      resolvedProjectId: "convergepanel",
+      actualProjectId: "convergepanel",
       confirmedProjectId: undefined,
       nodeEnv: "production",
       vercelEnv: "production",
     });
-    expect(result).toEqual(expect.objectContaining({ reason: "allow_flag_missing" }));
+    expect(result).toEqual(expect.objectContaining({ reason: "project_confirmation_missing" }));
+  });
+
+  it("a confirmed project mismatch wins over a missing allow flag", () => {
+    const result = checkProvisioningGuard({
+      allowFlagValue: undefined,
+      actualProjectId: "convergepanel",
+      confirmedProjectId: "wrong-project",
+      nodeEnv: "development",
+      vercelEnv: undefined,
+    });
+    expect(result).toEqual(expect.objectContaining({ reason: "project_confirmation_mismatch" }));
   });
 });
 
@@ -78,13 +148,30 @@ describe("parseProvisioningCliArgs", () => {
     expect(parseProvisioningCliArgs(["--confirm-project=convergepanel"]).confirmProjectId).toBe("convergepanel");
   });
 
-  it("parses --page-size and --concurrency as numbers, with sane defaults otherwise", () => {
-    const args = parseProvisioningCliArgs(["--page-size=100", "--concurrency=8"]);
+  it("parses --page-size, with a sane default otherwise", () => {
+    const args = parseProvisioningCliArgs(["--page-size=100"]);
     expect(args.pageSize).toBe(100);
-    expect(args.concurrency).toBe(8);
     const defaults = parseProvisioningCliArgs([]);
     expect(defaults.pageSize).toBeGreaterThan(0);
-    expect(defaults.concurrency).toBeGreaterThan(0);
+  });
+
+  it("defaults concurrency to 5 when --concurrency is absent entirely", () => {
+    expect(parseProvisioningCliArgs([]).concurrency).toBe(5);
+  });
+
+  it("parses a well-formed --concurrency", () => {
+    expect(parseProvisioningCliArgs(["--concurrency=8"]).concurrency).toBe(8);
+  });
+
+  it("does NOT silently substitute the default for a malformed --concurrency — preserves NaN for validateProvisioningConcurrency to reject", () => {
+    expect(parseProvisioningCliArgs(["--concurrency=notanumber"]).concurrency).toBeNaN();
+  });
+
+  it("preserves an explicit out-of-range --concurrency value as-is (validation happens separately)", () => {
+    expect(parseProvisioningCliArgs(["--concurrency=1000"]).concurrency).toBe(1000);
+    expect(parseProvisioningCliArgs(["--concurrency=0"]).concurrency).toBe(0);
+    expect(parseProvisioningCliArgs(["--concurrency=-5"]).concurrency).toBe(-5);
+    expect(parseProvisioningCliArgs(["--concurrency=2.5"]).concurrency).toBe(2.5);
   });
 
   it("collects multiple --exclude-uid flags", () => {

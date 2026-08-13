@@ -141,6 +141,22 @@ try {
   adminDb = undefined;
 }
 
+/**
+ * Returns the Firebase project id the Admin SDK app was ACTUALLY
+ * initialized with — read back from the live `App` instance's own
+ * `options.projectId`, not re-derived from an environment variable.
+ * `initFirebaseAdmin()` above always passes an explicit `projectId` to
+ * `initializeApp()` on every credential-loading branch (base64 JSON, raw
+ * JSON, or separate env vars), so this is guaranteed populated whenever
+ * `app` itself is defined. Returns `undefined` only if Admin init failed
+ * entirely (`app` is `undefined`) — callers that need a hard identity
+ * guarantee (e.g. the Phase 2B bulk provisioner) must treat `undefined`
+ * as "unknown project, fail closed," never substitute another source.
+ */
+export function getInitializedFirebaseProjectId(): string | undefined {
+  return app?.options.projectId;
+}
+
 export { admin, adminAuth, adminDb };
 export const firebaseAdmin = admin;
 export default app;
