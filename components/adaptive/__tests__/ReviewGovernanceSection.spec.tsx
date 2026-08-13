@@ -250,6 +250,56 @@ describe("ReviewGovernanceBody — Part 15 status scenarios", () => {
   });
 });
 
+describe("ReviewGovernanceBody — status-aware reviewer identity wording (personal-review-reviewer-identity fix)", () => {
+  it("pending personal assignment renders the literal 'Assigned to <name>' text, matching the task's exact example", () => {
+    const detail: ReviewGovernanceViewModel = {
+      family: "milestone2",
+      singleReviewer: null,
+      assignment: { reviewerDisplayName: "Yasin Mursal Warsame", assignedAt: "2026-08-12T10:31:00.000Z", assignedByDisplayName: "Alex Owner" },
+      panel: null,
+    };
+    const html = renderBody({ humanReview: { status: "unreviewed" }, reviewRouting: "in_queue", detail });
+    expect(html).toContain("Assigned to Yasin Mursal Warsame");
+  });
+
+  it("completed (approved) personal review renders the literal 'Reviewed by <name>' text, matching the task's exact example", () => {
+    const detail: ReviewGovernanceViewModel = {
+      family: "milestone2",
+      singleReviewer: { displayName: "Yasin Mursal Warsame", reviewedAt: "2026-08-12T10:44:00.000Z" },
+      assignment: null,
+      panel: null,
+    };
+    const html = renderBody({ humanReview: { status: "approved", decidedVia: "single_reviewer" }, detail });
+    expect(html).toContain("Reviewed by Yasin Mursal Warsame");
+  });
+
+  it.each(["approved_with_conditions", "changes_requested", "rejected"] as const)(
+    "terminal status '%s' still renders 'Reviewed by <name>' — reviewer identity never disappears once a canonical decision exists",
+    (status) => {
+      const detail: ReviewGovernanceViewModel = {
+        family: "milestone2",
+        singleReviewer: { displayName: "Yasin Mursal Warsame", reviewedAt: "2026-08-12T10:44:00.000Z" },
+        assignment: null,
+        panel: null,
+      };
+      const html = renderBody({ humanReview: { status, decidedVia: "single_reviewer" }, detail });
+      expect(html).toContain("Reviewed by Yasin Mursal Warsame");
+    }
+  );
+
+  it("never renders the bare 'Unknown reviewer' label when a canonical assignment or decision identity is present", () => {
+    const detail: ReviewGovernanceViewModel = {
+      family: "milestone2",
+      singleReviewer: { displayName: "Reviewer unavailable", reviewedAt: "2026-08-12T10:44:00.000Z" },
+      assignment: null,
+      panel: null,
+    };
+    const html = renderBody({ humanReview: { status: "approved", decidedVia: "single_reviewer" }, detail });
+    expect(html).toContain("Reviewed by Reviewer unavailable");
+    expect(html).not.toMatch(/Unknown reviewer/);
+  });
+});
+
 describe("ReviewGovernanceBody — collapsed summary line", () => {
   it("matches the task's exact 'Approved · Jane Smith' example", () => {
     const detail: ReviewGovernanceViewModel = {

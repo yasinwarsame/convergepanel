@@ -24,27 +24,61 @@ import { maskEmail } from "@/lib/utils/maskEmail";
 export const UNKNOWN_REVIEWER_LABEL = "Unknown reviewer";
 
 /**
+ * A known, canonical assignment/decision points at a real uid — a failed
+ * NAME lookup for that uid is a resolution gap, not evidence the reviewer
+ * is unidentified. Callers resolving an already-known reviewer/assignee
+ * uid (assignment, single-reviewer decision, panel seat, override actor,
+ * legacy reviewedBy) should prefer this over `UNKNOWN_REVIEWER_LABEL` for
+ * their terminal fallback — reserving "Unknown reviewer" for genuinely
+ * unresolved-identity contexts (e.g. this module's own reuse for
+ * OWNER name resolution in `GET /api/user/reviews`, where the "reviewer"
+ * framing doesn't apply at all).
+ */
+export const REVIEWER_UNAVAILABLE_LABEL = "Reviewer unavailable";
+
+/**
  * Resolves one uid to a safe display name. Never throws — a Firestore
  * read failure degrades to the email-based fallback, and a fully absent
- * name/email degrades to `UNKNOWN_REVIEWER_LABEL` rather than an empty
- * string.
+ * name/email degrades to `unresolvedLabel` (default `UNKNOWN_REVIEWER_LABEL`)
+ * rather than an empty string.
+ *
+ * Email fallback has two independent sources, tried in order: (1) the
+ * SAME `users/{uid}` doc's own `email` field — always available for any
+ * uid that has ever signed up/logged in (set at `app/signup/page.tsx` and
+ * re-synced at every `app/login/page.tsx`), regardless of whether the
+ * caller shares a team with that uid; (2) `fallbackEmail`, the caller-
+ * supplied roster/context email (e.g. a team roster entry). Source (1) is
+ * what fixes personal (non-team) reviewer identity — a personal reviewer
+ * is, by construction, never on the run owner's team roster, so relying
+ * on `fallbackEmail` alone left every such reviewer permanently
+ * unresolvable down to their masked email whenever they hadn't set a
+ * Firestore `name`. Revealing this uid's OWN email (masked) is safe here
+ * specifically because every caller of this resolver already supplies a
+ * uid drawn from a canonical governance record for THIS run (an
+ * assignment, decision, panel seat, or history row) — never an arbitrary
+ * uid — so the caller already has a legitimate, run-scoped reason to see
+ * who that uid is.
  */
 export async function resolveReviewerDisplayName(
   uid: string,
   fallbackEmail: string | undefined | null,
-  callerEmail: string | undefined | null
+  callerEmail: string | undefined | null,
+  unresolvedLabel: string = UNKNOWN_REVIEWER_LABEL
 ): Promise<string> {
+  let ownEmail = "";
   if (adminDb) {
     try {
       const snap = await adminDb.collection("users").doc(uid).get();
-      const name = typeof snap.data()?.name === "string" ? (snap.data()!.name as string).trim() : "";
+      const data = snap.data();
+      const name = typeof data?.name === "string" ? (data.name as string).trim() : "";
       if (name) return name;
+      ownEmail = typeof data?.email === "string" ? (data.email as string).trim() : "";
     } catch {
       // Fall through to the email-based fallback.
     }
   }
-  const masked = maskEmail(fallbackEmail ?? "", callerEmail ?? undefined);
-  return masked || UNKNOWN_REVIEWER_LABEL;
+  const masked = maskEmail(ownEmail || fallbackEmail || "", callerEmail ?? undefined);
+  return masked || unresolvedLabel;
 }
 
 /**
@@ -69,7 +103,8 @@ export async function resolveReviewerDisplayName(
 export async function resolveReviewerDisplayNames(
   uids: readonly string[],
   emailByUid: ReadonlyMap<string, string>,
-  callerEmail: string | undefined | null
+  callerEmail: string | undefined | null,
+  unresolvedLabel: string = UNKNOWN_REVIEWER_LABEL
 ): Promise<Map<string, string>> {
   const uniqueUids = Array.from(new Set(uids));
   const result = new Map<string, string>();
@@ -77,7 +112,7 @@ export async function resolveReviewerDisplayNames(
   if (!adminDb || uniqueUids.length === 0) {
     for (const uid of uniqueUids) {
       const masked = maskEmail(emailByUid.get(uid) ?? "", callerEmail ?? undefined);
-      result.set(uid, masked || UNKNOWN_REVIEWER_LABEL);
+      result.set(uid, masked || unresolvedLabel);
     }
     return result;
   }
@@ -90,12 +125,18 @@ export async function resolveReviewerDisplayNames(
       const snaps = await db.getAll(...chunk.map((uid) => db.collection("users").doc(uid)));
       for (let j = 0; j < chunk.length; j++) {
         const uid = chunk[j];
-        const name = typeof snaps[j]?.data()?.name === "string" ? (snaps[j]!.data()!.name as string).trim() : "";
+        const data = snaps[j]?.data();
+        const name = typeof data?.name === "string" ? (data.name as string).trim() : "";
         if (name) {
           result.set(uid, name);
         } else {
-          const masked = maskEmail(emailByUid.get(uid) ?? "", callerEmail ?? undefined);
-          result.set(uid, masked || UNKNOWN_REVIEWER_LABEL);
+          // See resolveReviewerDisplayName's doc comment — the uid's OWN
+          // email (source 1) takes precedence over the caller-supplied
+          // roster email (source 2), since it's always authoritative and
+          // never scoped to team membership.
+          const ownEmail = typeof data?.email === "string" ? (data.email as string).trim() : "";
+          const masked = maskEmail(ownEmail || emailByUid.get(uid) || "", callerEmail ?? undefined);
+          result.set(uid, masked || unresolvedLabel);
         }
       }
     } catch {
@@ -104,7 +145,7 @@ export async function resolveReviewerDisplayNames(
       // resolver's own degrade-on-read-failure behavior.
       for (const uid of chunk) {
         const masked = maskEmail(emailByUid.get(uid) ?? "", callerEmail ?? undefined);
-        result.set(uid, masked || UNKNOWN_REVIEWER_LABEL);
+        result.set(uid, masked || unresolvedLabel);
       }
     }
   }

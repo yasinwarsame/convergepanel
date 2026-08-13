@@ -74,6 +74,7 @@ const mockedResolveReviewerDisplayNames = jest.fn();
 jest.mock("@/lib/governance/reviewerIdentity", () => ({
   resolveReviewerDisplayNames: (...args: any[]) => mockedResolveReviewerDisplayNames(...args),
   UNKNOWN_REVIEWER_LABEL: "Unknown reviewer",
+  REVIEWER_UNAVAILABLE_LABEL: "Reviewer unavailable",
 }));
 
 const mockLoggerWarn = jest.fn();
@@ -494,6 +495,77 @@ describe("GET /api/user/runs/[runId]/governance — identity resolution is batch
 
     const [calledUids] = mockedResolveReviewerDisplayNames.mock.calls[0];
     expect(calledUids).toEqual(["reviewer-1"]);
+  });
+});
+
+describe("GET /api/user/runs/[runId]/governance — reviewer identity fallback (personal-review-reviewer-identity fix)", () => {
+  it("passes REVIEWER_UNAVAILABLE_LABEL as the resolver's unresolved-label fallback for a personal assignment, never UNKNOWN_REVIEWER_LABEL", async () => {
+    mockedRunGet.mockResolvedValue({ exists: true, data: () => ({ userId: UID, governanceRecord: baseGovernanceRecord() }) });
+    mockedGetAssignment.mockResolvedValue({
+      status: "found",
+      assignment: {
+        schemaVersion: 1,
+        teamId: null,
+        runId: RUN_ID,
+        assignedReviewerUserId: "reviewer-1",
+        assignedAt: "2026-08-12T10:31:00.000Z",
+        assignedByUserId: UID,
+        updatedAt: "2026-08-12T10:31:00.000Z",
+        updatedByUserId: UID,
+        revision: 1,
+      },
+    });
+    await callRoute();
+    const call = mockedResolveReviewerDisplayNames.mock.calls[0];
+    expect(call[3]).toBe("Reviewer unavailable");
+  });
+
+  it("a personal assignment whose reviewer identity genuinely fails to resolve shows 'Reviewer unavailable', never 'Unknown reviewer' — the exact defect this fix addresses", async () => {
+    mockedRunGet.mockResolvedValue({ exists: true, data: () => ({ userId: UID, governanceRecord: baseGovernanceRecord() }) });
+    mockedGetAssignment.mockResolvedValue({
+      status: "found",
+      assignment: {
+        schemaVersion: 1,
+        teamId: null,
+        runId: RUN_ID,
+        assignedReviewerUserId: "reviewer-1",
+        assignedAt: "2026-08-12T10:31:00.000Z",
+        assignedByUserId: UID,
+        updatedAt: "2026-08-12T10:31:00.000Z",
+        updatedByUserId: UID,
+        revision: 1,
+      },
+    });
+    // Simulates the real resolver's own behavior of filling every requested
+    // uid with the caller-supplied unresolvedLabel (see
+    // reviewerIdentity.spec.ts) rather than ever omitting an entry.
+    mockedResolveReviewerDisplayNames.mockImplementation(async (uids: string[], _emailByUid: unknown, _callerEmail: unknown, unresolvedLabel: string) => new Map(uids.map((uid) => [uid, unresolvedLabel])));
+    const { json } = await callRoute();
+    expect(json.governance.assignment.reviewerDisplayName).toBe("Reviewer unavailable");
+    expect(json.governance.assignment.reviewerDisplayName).not.toBe("Unknown reviewer");
+  });
+
+  it("cross-surface consistency: the SAME reviewer uid resolves to the SAME display name whether it's an in-progress assignment or a completed singleReviewer decision", async () => {
+    mockedResolveReviewerDisplayNames.mockImplementation(async (uids: string[]) => new Map(uids.map((uid) => [uid, `Resolved-${uid}`])));
+
+    // Pending: assignment only.
+    mockedRunGet.mockResolvedValue({ exists: true, data: () => ({ userId: UID, governanceRecord: baseGovernanceRecord() }) });
+    mockedGetAssignment.mockResolvedValue({
+      status: "found",
+      assignment: { schemaVersion: 1, teamId: null, runId: RUN_ID, assignedReviewerUserId: "reviewer-1", assignedAt: "2026-08-12T10:31:00.000Z", assignedByUserId: UID, updatedAt: "2026-08-12T10:31:00.000Z", updatedByUserId: UID, revision: 1 },
+    });
+    const pending = await callRoute();
+    expect(pending.json.governance.assignment.reviewerDisplayName).toBe("Resolved-reviewer-1");
+
+    // Same reviewer, now a completed decision — identity source shifts from
+    // assignment to singleReviewer, but must resolve to the identical name.
+    mockedRunGet.mockResolvedValue({
+      exists: true,
+      data: () => ({ userId: UID, governanceRecord: baseGovernanceRecord({ humanReview: { status: "approved", reviewerId: "reviewer-1", decidedVia: "single_reviewer" } }) }),
+    });
+    const completed = await callRoute();
+    expect(completed.json.governance.singleReviewer.displayName).toBe("Resolved-reviewer-1");
+    expect(completed.json.governance.singleReviewer.displayName).toBe(pending.json.governance.assignment.reviewerDisplayName);
   });
 });
 

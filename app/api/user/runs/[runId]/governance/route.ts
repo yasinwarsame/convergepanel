@@ -35,7 +35,7 @@ import { getAdaptiveHumanReviewAssignment, getAdaptiveHumanReviewPanel, getAdapt
 import type { AdaptiveHumanReviewAssignmentV1 } from "@/lib/governance/adaptiveHumanReviewAssignment";
 import type { AdaptiveHumanReviewPanelV1 } from "@/lib/governance/adaptiveHumanReviewPanel";
 import type { AdaptiveHumanReviewVoteV1 } from "@/lib/governance/adaptiveHumanReviewVote";
-import { resolveReviewerDisplayNames, UNKNOWN_REVIEWER_LABEL } from "@/lib/governance/reviewerIdentity";
+import { resolveReviewerDisplayNames, REVIEWER_UNAVAILABLE_LABEL } from "@/lib/governance/reviewerIdentity";
 import { resolveAdaptiveRunAccess } from "@/lib/governance/adaptiveRunAccess";
 import { loadUserAndTeam } from "@/lib/teams/teamApiAuth";
 import { logger } from "@/lib/logger";
@@ -183,8 +183,8 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
     if (panel.overrideByUserId) candidateUids.add(panel.overrideByUserId);
   }
 
-  const resolvedNames = await resolveReviewerDisplayNames(Array.from(candidateUids), emailByUid, callerEmail);
-  const resolveDisplayName = async (reviewerUid: string) => resolvedNames.get(reviewerUid) ?? UNKNOWN_REVIEWER_LABEL;
+  const resolvedNames = await resolveReviewerDisplayNames(Array.from(candidateUids), emailByUid, callerEmail, REVIEWER_UNAVAILABLE_LABEL);
+  const resolveDisplayName = async (reviewerUid: string) => resolvedNames.get(reviewerUid) ?? REVIEWER_UNAVAILABLE_LABEL;
 
   const governance = await buildReviewGovernanceViewModel({
     governanceRecord: govParse.ok ? govParse.record : null,

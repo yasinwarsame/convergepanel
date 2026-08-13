@@ -35,7 +35,7 @@ import { parseGovernanceRecord } from "@/lib/adaptiveSchema/governanceRecordPars
 import { getAdaptiveHumanReviewAssignment } from "@/lib/firestore/runs";
 import { resolveAdaptiveRunAccess } from "@/lib/governance/adaptiveRunAccess";
 import { classifyAdaptiveHumanReviewHistoryRow, AdaptiveReviewHistoryListItemV1 } from "@/lib/governance/adaptiveHumanReviewHistory";
-import { resolveReviewerDisplayNames, UNKNOWN_REVIEWER_LABEL } from "@/lib/governance/reviewerIdentity";
+import { resolveReviewerDisplayNames, REVIEWER_UNAVAILABLE_LABEL } from "@/lib/governance/reviewerIdentity";
 import { loadUserAndTeam } from "@/lib/teams/teamApiAuth";
 import { logger } from "@/lib/logger";
 
@@ -134,11 +134,11 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
   const emailByUid = new Map((teamCtx?.team?.members ?? []).map((m) => [m.uid, m.email] as const));
 
   const candidateUids = Array.from(new Set(rows.map((r) => r.reviewerId).filter((v): v is string => v !== null)));
-  const resolvedNames = await resolveReviewerDisplayNames(candidateUids, emailByUid, callerEmail);
+  const resolvedNames = await resolveReviewerDisplayNames(candidateUids, emailByUid, callerEmail, REVIEWER_UNAVAILABLE_LABEL);
 
   const items: PersonalReviewHistoryItemV1[] = rows.map((r) => ({
     ...r.item,
-    reviewerDisplayName: r.reviewerId ? resolvedNames.get(r.reviewerId) ?? UNKNOWN_REVIEWER_LABEL : UNKNOWN_REVIEWER_LABEL,
+    reviewerDisplayName: r.reviewerId ? resolvedNames.get(r.reviewerId) ?? REVIEWER_UNAVAILABLE_LABEL : REVIEWER_UNAVAILABLE_LABEL,
   }));
 
   return NextResponse.json({ ok: true, version: 1, runId, items });
