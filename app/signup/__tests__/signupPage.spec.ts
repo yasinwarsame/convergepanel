@@ -56,13 +56,34 @@ describe("Signup page — source-level wiring guarantees", () => {
       expect(surroundingBlock).toMatch(/catch/);
     });
 
-    it("fires after the profile setDoc, deferred via setTimeout rather than blocking the onboarding redirect", () => {
+    it("fires after the profile setDoc, and is AWAITED (not fire-and-forget) — hardened per independent review", () => {
       const setDocIndex = source.indexOf('setDoc(doc(db, "users", user.uid)');
       const workspaceCallIndex = source.indexOf('authedFetch("/api/user/workspace"');
       expect(setDocIndex).toBeGreaterThan(-1);
       expect(workspaceCallIndex).toBeGreaterThan(setDocIndex);
-      const precedingSetTimeout = source.lastIndexOf("setTimeout(async () => {", workspaceCallIndex);
-      expect(precedingSetTimeout).toBeGreaterThan(setDocIndex);
+      expect(source).toMatch(/await authedFetch\(\s*["']\/api\/user\/workspace["']/);
+      // No longer fire-and-forget: this call must NOT be wrapped in a
+      // setTimeout closure — a setTimeout callback's own promise is never
+      // awaited by the surrounding handleSubmit, which is exactly the
+      // race the hardening closes.
+      const surroundingBlock = source.slice(Math.max(0, workspaceCallIndex - 600), workspaceCallIndex);
+      expect(surroundingBlock).not.toMatch(/setTimeout\(async \(\) => \{[\s\S]*$/);
+    });
+
+    it("a genuine provisioning failure (not provisioning_disabled) blocks the redirect and surfaces a retryable error, rather than continuing into onboarding", () => {
+      expect(source).toMatch(/errorCode === ["']provisioning_disabled["']/);
+      const workspaceCallIndex = source.indexOf('authedFetch("/api/user/workspace"');
+      const afterCall = source.slice(workspaceCallIndex, workspaceCallIndex + 1200);
+      expect(afterCall).toMatch(/if \(!personalWorkspaceReady\)/);
+      expect(afterCall).toMatch(/setError\(/);
+      expect(afterCall).toMatch(/return;/);
+    });
+
+    it("does not delete or otherwise touch the just-created Firebase Auth account on provisioning failure", () => {
+      const workspaceCallIndex = source.indexOf('authedFetch("/api/user/workspace"');
+      const afterCall = source.slice(workspaceCallIndex, workspaceCallIndex + 1200);
+      expect(afterCall).not.toMatch(/deleteUser/);
+      expect(afterCall).not.toMatch(/signOut/);
     });
   });
 });

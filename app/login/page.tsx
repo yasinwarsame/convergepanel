@@ -208,24 +208,45 @@ export default function LoginPage() {
       }
 
       // Workspace-Aware Writes for New Personal Adaptive Runs, Phase 3 —
-      // new-user provisioning gap resolution: self-heal a missing Personal
-      // Workspace on every login, mirroring the profile self-heal setDoc
-      // above exactly (best-effort, fire-and-forget, never blocks login or
-      // the redirect below). POST /api/user/workspace is Phase 2's existing
-      // self-provisioning endpoint — it already no-ops safely (503
-      // provisioning_disabled) whenever PERSONAL_WORKSPACE_PROVISIONING_ENABLED
-      // is off, which it currently is in production; this call is dark
-      // until that separate, still-unauthorized flag is turned on.
-      setTimeout(async () => {
-        try {
-          const { authedFetch } = await import("@/lib/client/authedFetch");
-          await authedFetch("/api/user/workspace", { user, authReady: true, method: "POST" });
-        } catch (err: any) {
-          if (process.env.NODE_ENV !== "production") {
-            console.warn("[login] Personal Workspace self-heal request failed (non-blocking):", err?.message);
-          }
+      // new-user provisioning gap resolution, hardened per independent
+      // review: AWAITED (not fire-and-forget), self-heals a missing
+      // Personal Workspace on every login, mirroring the profile self-heal
+      // setDoc above. POST /api/user/workspace is Phase 2's existing
+      // self-provisioning endpoint. Two outcomes proceed to redirect
+      // exactly as before this hardening: a real success ("created"/
+      // "existing"), and "provisioning_disabled" (503) — which is what
+      // this endpoint always returns today, since
+      // PERSONAL_WORKSPACE_PROVISIONING_ENABLED is off in production, so
+      // flags-off login behavior is unchanged (just one extra fast round
+      // trip). Any OTHER outcome (a genuine failure while the flag IS on)
+      // blocks the redirect and surfaces a retryable error instead of
+      // silently sending the user into an app where their first
+      // Workspace-aware research request is already guaranteed to fail —
+      // this is the client-side half of that guarantee; /api/run-panel
+      // independently enforces the same prerequisite server-side
+      // regardless of what the client does (the real safety boundary; see
+      // docs/workspaces/architecture.md). The Firebase Auth session itself
+      // is never touched on failure — retrying is just resubmitting this
+      // form, which re-attempts provisioning as an idempotent self-heal.
+      let personalWorkspaceReady = true;
+      try {
+        const { authedFetch } = await import("@/lib/client/authedFetch");
+        const workspaceRes = await authedFetch("/api/user/workspace", { user, authReady: true, method: "POST" });
+        if (!workspaceRes.ok) {
+          const workspaceBody = await workspaceRes.json().catch(() => ({}) as any);
+          personalWorkspaceReady = workspaceBody?.errorCode === "provisioning_disabled";
         }
-      }, 100);
+      } catch (err: any) {
+        personalWorkspaceReady = false;
+        if (process.env.NODE_ENV !== "production") {
+          console.warn("[login] Personal Workspace self-heal request failed:", err?.message);
+        }
+      }
+      if (!personalWorkspaceReady) {
+        setError("We couldn't finish setting up your account. Please try signing in again.");
+        setLoading(false);
+        return;
+      }
 
       posthog.identify(user.uid, { email: user.email ?? undefined });
       posthog.capture("user_logged_in", { method: "email" });

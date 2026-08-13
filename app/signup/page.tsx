@@ -290,25 +290,40 @@ export default function SignupPage() {
       posthog.capture("user_signed_up", { method: "email" });
 
       // Workspace-Aware Writes for New Personal Adaptive Runs, Phase 3 —
-      // new-user provisioning gap resolution: this is the very first
-      // opportunity to provision a brand-new user's Personal Workspace,
-      // mirroring the profile setDoc above (best-effort, fire-and-forget,
-      // never blocks signup or the onboarding redirect below). Also
-      // triggered again on every future login (app/login/page.tsx) so a
-      // failed attempt here isn't the only chance. POST /api/user/workspace
-      // is Phase 2's existing self-provisioning endpoint — it no-ops
-      // safely (503 provisioning_disabled) while
-      // PERSONAL_WORKSPACE_PROVISIONING_ENABLED remains off in production.
-      setTimeout(async () => {
-        try {
-          const { authedFetch } = await import("@/lib/client/authedFetch");
-          await authedFetch("/api/user/workspace", { user, authReady: true, method: "POST" });
-        } catch (err: any) {
-          if (process.env.NODE_ENV !== "production") {
-            console.warn("[signup] Personal Workspace provisioning request failed (non-blocking):", err?.message);
-          }
+      // new-user provisioning gap resolution, hardened per independent
+      // review: AWAITED (not fire-and-forget) — this is the very first
+      // opportunity to provision a brand-new user's Personal Workspace.
+      // POST /api/user/workspace is Phase 2's existing self-provisioning
+      // endpoint. Two outcomes proceed to onboarding exactly as before
+      // this hardening: a real success ("created"/"existing"), and
+      // "provisioning_disabled" (503) — what this endpoint always returns
+      // today, since PERSONAL_WORKSPACE_PROVISIONING_ENABLED is off in
+      // production, so flags-off signup behavior is unchanged (just one
+      // extra fast round trip). Any OTHER outcome (a genuine failure while
+      // the flag IS on) does NOT delete the just-created Auth account or
+      // profile — provisioning is idempotent, so the correct recovery is
+      // "try again," not "start over." The error directs the user to sign
+      // in, which re-attempts provisioning as app/login/page.tsx's own
+      // hardened self-heal — no separate retry UI needed.
+      let personalWorkspaceReady = true;
+      try {
+        const { authedFetch } = await import("@/lib/client/authedFetch");
+        const workspaceRes = await authedFetch("/api/user/workspace", { user, authReady: true, method: "POST" });
+        if (!workspaceRes.ok) {
+          const workspaceBody = await workspaceRes.json().catch(() => ({}) as any);
+          personalWorkspaceReady = workspaceBody?.errorCode === "provisioning_disabled";
         }
-      }, 100);
+      } catch (err: any) {
+        personalWorkspaceReady = false;
+        if (process.env.NODE_ENV !== "production") {
+          console.warn("[signup] Personal Workspace provisioning request failed:", err?.message);
+        }
+      }
+      if (!personalWorkspaceReady) {
+        setError("Your account was created, but we couldn't finish setting it up. Please try signing in.");
+        setLoading(false);
+        return;
+      }
 
       // Redirect to onboarding page instead of main app
       // Preserve any redirect param so the user lands on their intended page after onboarding

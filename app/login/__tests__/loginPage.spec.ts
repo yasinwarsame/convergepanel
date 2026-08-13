@@ -67,11 +67,37 @@ describe("Login page — source-level wiring guarantees", () => {
       expect(surroundingBlock).toMatch(/catch/);
     });
 
-    it("never appears inside handleSubmit's synchronous success path before the redirect-arming call — it's deferred via setTimeout, matching the existing subscription-validation pattern", () => {
+    it("is AWAITED before the redirect-arming call (setPendingLoginUid), not fire-and-forget — hardened per independent review", () => {
       const workspaceCallIndex = source.indexOf('authedFetch("/api/user/workspace"');
-      const precedingSetTimeout = source.lastIndexOf("setTimeout(async () => {", workspaceCallIndex);
-      expect(precedingSetTimeout).toBeGreaterThan(-1);
-      expect(precedingSetTimeout).toBeLessThan(workspaceCallIndex);
+      expect(source).toMatch(/await authedFetch\(\s*["']\/api\/user\/workspace["']/);
+      const pendingLoginArmIndex = source.indexOf("setPendingLoginUid(user.uid)");
+      expect(pendingLoginArmIndex).toBeGreaterThan(workspaceCallIndex);
+      // Must not be wrapped in a setTimeout closure — a setTimeout
+      // callback's own promise is never awaited by the surrounding
+      // handleSubmit, which is exactly the race the hardening closes.
+      const surroundingBlock = source.slice(Math.max(0, workspaceCallIndex - 600), workspaceCallIndex);
+      expect(surroundingBlock).not.toMatch(/setTimeout\(async \(\) => \{[\s\S]*$/);
+    });
+
+    it("a genuine provisioning failure (not provisioning_disabled) blocks the redirect and surfaces a retryable error, rather than continuing to sign the user in", () => {
+      expect(source).toMatch(/errorCode === ["']provisioning_disabled["']/);
+      const workspaceCallIndex = source.indexOf('authedFetch("/api/user/workspace"');
+      const afterCall = source.slice(workspaceCallIndex, workspaceCallIndex + 1200);
+      expect(afterCall).toMatch(/if \(!personalWorkspaceReady\)/);
+      expect(afterCall).toMatch(/setError\(/);
+      expect(afterCall).toMatch(/return;/);
+      // The failure branch must precede arming the redirect.
+      const failureBranchIndex = source.indexOf("if (!personalWorkspaceReady)");
+      const pendingLoginArmIndex = source.indexOf("setPendingLoginUid(user.uid)");
+      expect(failureBranchIndex).toBeGreaterThan(-1);
+      expect(pendingLoginArmIndex).toBeGreaterThan(failureBranchIndex);
+    });
+
+    it("does not sign the user out or clear the session on provisioning failure — the Firebase Auth session remains valid for a retry", () => {
+      const workspaceCallIndex = source.indexOf('authedFetch("/api/user/workspace"');
+      const afterCall = source.slice(workspaceCallIndex, workspaceCallIndex + 1200);
+      expect(afterCall).not.toMatch(/clearServerSession\(\)/);
+      expect(afterCall).not.toMatch(/signOut\(auth\)/);
     });
   });
 });
