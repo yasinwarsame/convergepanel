@@ -8,6 +8,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { ArrowLeft } from "lucide-react";
 import { useAuth } from "@/components/AuthProvider";
 import { schemaLabel } from "@/lib/governance/teamReviewLabels";
 import type { PersonalReviewInboxItemV1, PersonalReviewInboxFilter } from "@/lib/governance/personalReviewInbox";
@@ -71,6 +72,14 @@ export default function PersonalReviewInbox() {
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-8 pb-20">
+      <Link
+        href="/"
+        className="mb-6 inline-flex items-center gap-2 text-sm font-medium text-cp-text transition-colors hover:text-cp-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent focus-visible:ring-offset-2 rounded"
+      >
+        <ArrowLeft className="h-4 w-4 shrink-0" aria-hidden />
+        Back to ConvergePanel
+      </Link>
+
       <header className="mb-6">
         <h1 className="text-xl font-bold text-cp-text">My Reviews</h1>
         <p className="mt-1 text-sm text-cp-muted">Reports someone has personally assigned to you for review.</p>
