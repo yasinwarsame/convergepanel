@@ -11,8 +11,6 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
 import { useAuth } from "@/components/AuthProvider";
 import { answerShapeLabel, schemaLabel } from "@/lib/governance/teamReviewLabels";
 import type { AdaptiveReviewSubmissionResult as SubmissionResult } from "@/lib/client/adaptiveReviewSubmission";
@@ -21,6 +19,7 @@ import ReviewErrorState from "@/components/teamGovernance/ReviewErrorState";
 import AdaptiveReviewDecisionForm from "@/components/teamGovernance/AdaptiveReviewDecisionForm";
 import { ReviewHistory } from "@/components/adaptive/ReviewGovernanceSection";
 import PersonalReviewStatusBadge from "./PersonalReviewStatusBadge";
+import ReviewerNavigation from "./ReviewerNavigation";
 import type { PersonalReviewInboxStatus } from "@/lib/governance/personalReviewInbox";
 import { personalReviewInboxStatus } from "@/lib/governance/personalReviewInbox";
 import type { ReviewGovernanceViewModel } from "@/lib/adaptiveSchema/reviewGovernanceViewModel";
@@ -288,13 +287,7 @@ export default function PersonalReviewDetail({ runId }: { runId: string }) {
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-8 pb-20">
-      <Link
-        href="/reviews"
-        className="mb-6 inline-flex items-center gap-2 text-sm font-medium text-cp-text transition-colors hover:text-cp-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent focus-visible:ring-offset-2 rounded"
-      >
-        <ArrowLeft className="h-4 w-4 shrink-0" aria-hidden />
-        Back to my reviews
-      </Link>
+      <ReviewerNavigation showBackToReviews={true} />
 
       {authLoading || !authReady || loading ? (
         <div className="py-12 text-center text-cp-muted" aria-live="polite">
