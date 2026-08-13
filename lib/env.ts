@@ -173,6 +173,26 @@ export const ADAPTIVE_RESEARCH_JSON_EXPORT_ENABLED = process.env.ADAPTIVE_RESEAR
 export const WORKSPACES_ENABLED = process.env.WORKSPACES_ENABLED === "true";
 
 /**
+ * Personal Workspace Provisioning, Phase 2 (docs/workspaces/architecture.md)
+ * — a SEPARATE server-side-only kill switch from `WORKSPACES_ENABLED`
+ * above, default OFF, same fail-closed convention. Deliberately not
+ * reusing `WORKSPACES_ENABLED`: that flag is an authorization/security-
+ * boundary concern (does the resolver honor a persisted `workspaceId`?);
+ * this one is a rollout concern (is the system currently allowed to
+ * CREATE new Personal Workspace documents?). They must be able to move
+ * independently — most importantly, disabling this flag must NEVER alter
+ * how the Phase-1 resolver treats an already-existing workspace document;
+ * it only stops NEW ones from being created. See
+ * `lib/workspaces/ensurePersonalWorkspace.ts`.
+ *
+ * Gates workspace creation only. `POST /api/user/workspace` checks it;
+ * nothing else does yet — this flag has no effect on any existing route,
+ * and is not wired into login, signup, session refresh, or any other
+ * automatic flow. Provisioning remains explicitly-callable-only in Phase 2.
+ */
+export const PERSONAL_WORKSPACE_PROVISIONING_ENABLED = process.env.PERSONAL_WORKSPACE_PROVISIONING_ENABLED === "true";
+
+/**
  * Search engine site-verification tokens.
  *
  * Optional — when unset, the corresponding verification meta tag is simply
