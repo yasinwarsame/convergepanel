@@ -23,12 +23,71 @@ import { ReviewHistory } from "@/components/adaptive/ReviewGovernanceSection";
 import PersonalReviewStatusBadge from "./PersonalReviewStatusBadge";
 import type { PersonalReviewInboxStatus } from "@/lib/governance/personalReviewInbox";
 import { personalReviewInboxStatus } from "@/lib/governance/personalReviewInbox";
+import type { ReviewGovernanceViewModel } from "@/lib/adaptiveSchema/reviewGovernanceViewModel";
 
 function formatDatetime(iso: string | undefined): string {
   if (!iso) return "—";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+}
+
+export interface ReviewerIdentity {
+  displayName: string | null;
+  /** "reviewed" once a decision exists, "assigned" while only the assignment (no decision yet) exists. */
+  relationship: "assigned" | "reviewed" | null;
+}
+
+/**
+ * Pure — derives this run's reviewer identity from the SAME governance
+ * detail response (`GET /api/user/runs/[runId]/governance`'s `governance`
+ * field) that `ReviewGovernanceSection`/`ReviewHistory` already consume, so
+ * this page's header, the Review & Governance section, and Review History
+ * can never disagree on who reviewed/is assigned to a run — one canonical
+ * resolution (`buildReviewGovernanceViewModel` + `reviewerIdentity.ts`'s
+ * safe fallback chain), never a second lookup implementation.
+ *
+ * Schema-agnostic by construction: reads only `family`/`singleReviewer`/
+ * `assignment`, never `schemaId` — the identical derivation applies to
+ * Decision Support, Deep Research, Ranked List, or any other Milestone-2
+ * schema, since they all share this one component and this one response
+ * shape. Legacy-family schemas never reach this page at all (gated
+ * upstream by the `decisionReceipt` check in `load()` below, which only
+ * Milestone-2's `governanceRecord` ever populates).
+ *
+ * Precedence mirrors `SingleReviewerIdentityCard` exactly: a completed
+ * decision (`singleReviewer`) takes priority over the still-open
+ * `assignment`, since a decided run's assignment record still exists but
+ * its identity is more precisely shown via the decision itself.
+ */
+export function deriveReviewerIdentity(governance: ReviewGovernanceViewModel | null | undefined): ReviewerIdentity {
+  if (governance?.family !== "milestone2") return { displayName: null, relationship: null };
+  if (governance.singleReviewer?.displayName) {
+    return { displayName: governance.singleReviewer.displayName, relationship: "reviewed" };
+  }
+  if (governance.assignment?.reviewerDisplayName) {
+    return { displayName: governance.assignment.reviewerDisplayName, relationship: "assigned" };
+  }
+  return { displayName: null, relationship: null };
+}
+
+/**
+ * Pure presentational — status-aware "Assigned to <name>" / "Reviewed by
+ * <name>" text. Renders nothing when no canonical identity is available
+ * (never fabricates a placeholder here; `reviewerDisplayName` itself is
+ * already guaranteed non-blank by the shared resolver's own fallback chain
+ * whenever a canonical assignment/decision exists — name, else masked
+ * email, else "Reviewer unavailable", never "Unknown"). Actual text, not
+ * color-only, so it reads correctly to a screen reader on its own.
+ */
+export function ReviewerIdentityLine({ displayName, relationship }: ReviewerIdentity) {
+  if (!displayName) return null;
+  return (
+    <p className="mt-2 text-sm font-medium text-cp-text">
+      {relationship === "reviewed" ? "Reviewed by " : "Assigned to "}
+      {displayName}
+    </p>
+  );
 }
 
 function CollapsibleList({ title, items }: { title: string; items: string[] }) {
@@ -76,6 +135,7 @@ type LoadedData = {
     humanReviewNeeded: boolean;
   };
   automatedGovernanceStatus?: string;
+  reviewer: ReviewerIdentity;
 };
 
 export default function PersonalReviewDetail({ runId }: { runId: string }) {
@@ -145,6 +205,7 @@ export default function PersonalReviewDetail({ runId }: { runId: string }) {
           answerShape: govJson.answerShape,
           decisionReceipt: govJson.decisionReceipt,
           automatedGovernanceStatus: reportJson.adaptive?.automatedGovernanceStatus,
+          reviewer: deriveReviewerIdentity(govJson.governance),
         });
         setError(null);
       } catch {
@@ -216,6 +277,7 @@ export default function PersonalReviewDetail({ runId }: { runId: string }) {
               <GovernanceStatusBadge status={data.automatedGovernanceStatus} />
               <PersonalReviewStatusBadge status={data.humanReviewStatus} />
             </div>
+            <ReviewerIdentityLine displayName={data.reviewer.displayName} relationship={data.reviewer.relationship} />
             {refreshNotice ? <p className="mt-2 text-xs text-amber-400">{refreshNotice}</p> : null}
           </header>
 
