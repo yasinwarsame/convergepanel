@@ -39,6 +39,16 @@ export async function getWorkspace(workspaceId: string): Promise<GetWorkspaceRes
       logger.warn("[firestore/workspaces] Malformed workspace document", { workspaceId });
       return { status: "malformed" };
     }
+    if (data.id !== workspaceId) {
+      // The document's own `id` field (redundant-by-design, mirroring
+      // TeamDocument's `id` convention for self-describing documents) must
+      // match the Firestore document id it was actually fetched at. This
+      // invariant is enforced HERE, at the point of read — not left for
+      // every future caller to re-derive — so a mismatch can never be
+      // silently accepted as "found" by any caller, present or future.
+      logger.warn("[firestore/workspaces] Workspace document id mismatch", { workspaceId, documentBodyId: data.id });
+      return { status: "malformed" };
+    }
     return { status: "found", workspace: data };
   } catch {
     logger.warn("[firestore/workspaces] Failed to read workspace", { workspaceId });

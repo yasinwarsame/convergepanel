@@ -29,8 +29,16 @@ export interface ResolveWorkspaceContextInput {
    * async wrapper below supplies the real value from `WORKSPACES_ENABLED`.
    */
   workspacesEnabled: boolean;
-  /** The resource's own optional `workspaceId` field. `null`, `undefined`, and `""` are all treated identically as "absent". */
-  workspaceId: string | null | undefined;
+  /**
+   * The resource's own optional `workspaceId` field. Only `undefined` (the
+   * key was never written to the document at all) counts as "absent" and
+   * triggers legacy compatibility. `null`, `""`, whitespace-only strings,
+   * and non-string values are all treated as a workspace reference that IS
+   * present but unusable — they resolve to `workspaces_disabled` or
+   * `malformed`, never `legacy`. See `resolveWorkspaceContext()`'s own doc
+   * comment for why this distinction matters.
+   */
+  workspaceId: unknown;
   /** The resource's existing legacy owner field (`userId`/`ownerUid`) — every resource has one today; this is never optional. */
   legacyOwnerUserId: string;
   /**
@@ -46,29 +54,55 @@ export interface ResolveWorkspaceContextInput {
 /**
  * Pure. Every input combination maps to a real, named outcome — never a
  * silent "unknown, treat as legacy" branch. Critical invariant (see
- * `WorkspaceContextResolution`'s own doc comment): once a non-empty
- * `workspaceId` is present AND the flag is enabled, resolution can ONLY
- * return `resolved` or an explicit failure kind — it can never return to
- * `legacy`. A present-but-invalid workspace reference must fail closed,
- * not silently regain the record's legacy ownership semantics.
+ * `WorkspaceContextResolution`'s own doc comment): once `workspaceId` is
+ * anything other than `undefined`, resolution can ONLY return `resolved` or
+ * an explicit failure kind (`not_found` / `malformed` /
+ * `unsupported_workspace_type` / `lookup_failed` / `workspaces_disabled`) —
+ * it can NEVER return to `legacy`. A present-but-invalid workspace
+ * reference must fail closed, not silently regain the record's legacy
+ * ownership semantics. This includes `null` and `""`: a document that
+ * explicitly holds `workspaceId: ""` is NOT the same as one that never had
+ * the field written at all, and must not be treated as if it were.
+ *
+ * This is also why presence is checked BEFORE the feature flag, not after:
+ * `WORKSPACES_ENABLED` may disable the Workspace subsystem, but it must
+ * never cause a resource that has ALREADY committed to workspace-scoped
+ * authorization to silently fall back to a different, potentially
+ * inconsistent authorization model. The flag can only ever narrow access
+ * for such a resource (`workspaces_disabled`, a deny), never widen or
+ * redirect it. See docs/workspaces/architecture.md's Feature Flag Safety
+ * section — this is the resolver's single most important invariant.
  */
 export function resolveWorkspaceContext(input: ResolveWorkspaceContextInput): WorkspaceContextResolution {
-  if (!input.workspacesEnabled) {
-    // Global kill switch: not a per-record fallback decision. See
-    // WORKSPACES_ENABLED's doc comment in lib/env.ts.
+  const workspaceId = input.workspaceId;
+
+  if (workspaceId === undefined) {
+    // Truly absent — the field was never written to this document. This is
+    // the ONLY condition under which legacy compatibility applies,
+    // regardless of flag state (there is nothing for the flag to
+    // downgrade).
     return { kind: "legacy", context: { mode: "legacy", ownerUserId: input.legacyOwnerUserId } };
   }
 
-  const workspaceId = input.workspaceId;
-  if (workspaceId === null || workspaceId === undefined || workspaceId === "") {
-    return { kind: "legacy", context: { mode: "legacy", ownerUserId: input.legacyOwnerUserId } };
+  // From here, workspaceId is present in some form (null, "", whitespace,
+  // a wrong type, or a real string) — a workspace reference was written,
+  // and this can never fold back into "absent"/legacy.
+  if (!input.workspacesEnabled) {
+    return { kind: "workspaces_disabled" };
+  }
+
+  if (typeof workspaceId !== "string" || workspaceId.trim().length === 0) {
+    // null, "", whitespace-only, or a non-string value — a present but
+    // structurally unusable reference. Never trimmed-and-used; rejected
+    // outright.
+    return { kind: "malformed" };
   }
 
   const lookup = input.workspaceLookup;
   if (!lookup) {
-    // Caller had a non-empty workspaceId but didn't supply a lookup result.
-    // Never interpret missing information as permission to fall back to
-    // legacy — fail closed and let the caller fix its call site.
+    // Caller had a workspaceId but didn't supply a lookup result. Never
+    // interpret missing information as permission to fall back to legacy —
+    // fail closed and let the caller fix its call site.
     return { kind: "malformed" };
   }
 
@@ -101,18 +135,19 @@ export function resolveWorkspaceContext(input: ResolveWorkspaceContextInput): Wo
 
 /**
  * The only I/O-performing entry point. Reads `workspaces/{workspaceId}`
- * exactly when one is needed (flag enabled AND a non-empty workspaceId was
- * supplied), then delegates to the pure resolver above. Not called by any
- * route in Phase 1.
+ * exactly when a lookup could actually change the outcome (flag enabled AND
+ * a structurally usable, non-empty string workspaceId was supplied) — every
+ * other combination is resolvable locally by the pure function without a
+ * Firestore round-trip. Not called by any route in Phase 1.
  */
 export async function resolveWorkspaceContextForResource(args: {
-  workspaceId: string | null | undefined;
+  workspaceId: unknown;
   legacyOwnerUserId: string;
 }): Promise<WorkspaceContextResolution> {
   const workspacesEnabled = WORKSPACES_ENABLED;
-  const hasWorkspaceId = typeof args.workspaceId === "string" && args.workspaceId.length > 0;
+  const isUsableWorkspaceId = typeof args.workspaceId === "string" && args.workspaceId.trim().length > 0;
 
-  const workspaceLookup = workspacesEnabled && hasWorkspaceId ? await getWorkspace(args.workspaceId as string) : undefined;
+  const workspaceLookup = workspacesEnabled && isUsableWorkspaceId ? await getWorkspace(args.workspaceId as string) : undefined;
 
   return resolveWorkspaceContext({
     workspacesEnabled,

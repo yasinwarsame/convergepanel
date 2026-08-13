@@ -35,6 +35,35 @@ describe("checkWorkspaceAccess — pure", () => {
       expect(checkWorkspaceAccess(OTHER_UID, context)).toEqual({ granted: false, reason: "not_owner" });
     });
   });
+
+  describe("uid comparison is exact equality only — no prefix/substring/case behavior", () => {
+    const context: WorkspaceContext = { mode: "workspace", workspaceId: "ws-1", workspaceType: "personal", ownerUserId: "owner-1" };
+
+    it("denies an empty-string uid", () => {
+      expect(checkWorkspaceAccess("", context)).toEqual({ granted: false, reason: "not_owner" });
+    });
+
+    it("denies a uid that is a case-different match", () => {
+      expect(checkWorkspaceAccess("Owner-1", context)).toEqual({ granted: false, reason: "not_owner" });
+    });
+
+    it("denies a uid that is a substring of the real owner uid", () => {
+      expect(checkWorkspaceAccess("owner", context)).toEqual({ granted: false, reason: "not_owner" });
+    });
+
+    it("denies a uid that has the real owner uid as a substring (superstring/prefix-extension)", () => {
+      expect(checkWorkspaceAccess("owner-10", context)).toEqual({ granted: false, reason: "not_owner" });
+    });
+
+    it("denies a uid with incidental leading/trailing whitespace", () => {
+      expect(checkWorkspaceAccess(" owner-1", context)).toEqual({ granted: false, reason: "not_owner" });
+      expect(checkWorkspaceAccess("owner-1 ", context)).toEqual({ granted: false, reason: "not_owner" });
+    });
+
+    it("grants only the exact match", () => {
+      expect(checkWorkspaceAccess("owner-1", context)).toEqual({ granted: true });
+    });
+  });
 });
 
 describe("authorizeWorkspaceResourceAccess — async wrapper, security threat model", () => {
@@ -146,6 +175,23 @@ describe("authorizeWorkspaceResourceAccess — async wrapper, security threat mo
       seedWorkspace("team-ws", OWNER_UID, { type: "team" });
       const result = await authorize({ uid: OWNER_UID, workspaceId: "team-ws", legacyOwnerUserId: OWNER_UID });
       expect(result).toEqual({ granted: false, reason: "unsupported_workspace_type" });
+    });
+  });
+
+  describe("Threat: flag-safety downgrade — WORKSPACES_ENABLED=false must never re-grant access via legacy ownership for an already workspace-bound resource", () => {
+    it("denies with workspaces_disabled even when uid === legacyOwnerUserId AND uid is the real workspace owner", async () => {
+      const authorize = await loadWrapperWithFlag(false);
+      seedWorkspace("ws-1", OWNER_UID);
+      const result = await authorize({ uid: OWNER_UID, workspaceId: "ws-1", legacyOwnerUserId: OWNER_UID });
+      expect(result).toEqual({ granted: false, reason: "workspaces_disabled" });
+      // The critical assertion: this must NEVER equal a granted legacy outcome.
+      expect(result.granted).toBe(false);
+    });
+
+    it("denies with workspaces_disabled for a present-but-invalid workspaceId too (empty string), not legacy", async () => {
+      const authorize = await loadWrapperWithFlag(false);
+      const result = await authorize({ uid: OWNER_UID, workspaceId: "", legacyOwnerUserId: OWNER_UID });
+      expect(result).toEqual({ granted: false, reason: "workspaces_disabled" });
     });
   });
 

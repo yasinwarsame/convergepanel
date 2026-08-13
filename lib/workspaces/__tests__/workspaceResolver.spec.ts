@@ -1,9 +1,17 @@
 /**
  * Workspace Compatibility Foundation, Phase 1 — resolveWorkspaceContext()
  * (pure) and resolveWorkspaceContextForResource() (async wrapper) tests.
- * Covers the program's required unit test matrix and the "legacy downgrade"
- * security invariant: an invalid workspaceId must never fall back to
- * legacy ownership.
+ * Covers the program's required unit test matrix and two distinct security
+ * invariants:
+ *
+ * 1. "Legacy downgrade": an invalid/malformed/missing/unsupported workspace
+ *    reference must never fall back to legacy ownership.
+ * 2. "Flag-safety downgrade": once a workspaceId is present in ANY form
+ *    (including null/""/whitespace/wrong-type — anything other than
+ *    `undefined`), disabling WORKSPACES_ENABLED must deny
+ *    (`workspaces_disabled`), never fall back to legacy ownership either.
+ *    This is the invariant a disabled flag could otherwise silently
+ *    violate for an already workspace-bound resource in a future phase.
  */
 
 import { resolveWorkspaceContext } from "@/lib/workspaces/workspaceResolver";
@@ -28,41 +36,57 @@ function foundLookup(overrides: Partial<GetWorkspaceResult & { status: "found" }
 }
 
 describe("resolveWorkspaceContext — pure", () => {
-  describe("feature flag disabled", () => {
-    it("always resolves legacy, even when a workspaceId is present and would otherwise resolve", () => {
-      const result = resolveWorkspaceContext({
-        workspacesEnabled: false,
-        workspaceId: "ws-1",
-        legacyOwnerUserId: OWNER_UID,
-        workspaceLookup: foundLookup(),
-      });
-      expect(result).toEqual({ kind: "legacy", context: { mode: "legacy", ownerUserId: OWNER_UID } });
-    });
-
-    it("resolves legacy when workspaceId is absent, as expected", () => {
-      const result = resolveWorkspaceContext({
-        workspacesEnabled: false,
-        workspaceId: undefined,
-        legacyOwnerUserId: OWNER_UID,
-      });
-      expect(result).toEqual({ kind: "legacy", context: { mode: "legacy", ownerUserId: OWNER_UID } });
-    });
-  });
-
-  describe("feature flag enabled — workspaceId absent", () => {
-    it("resolves legacy for undefined workspaceId", () => {
+  describe("workspaceId truly absent (undefined) — the ONLY condition that resolves legacy", () => {
+    it("resolves legacy when the flag is enabled", () => {
       const result = resolveWorkspaceContext({ workspacesEnabled: true, workspaceId: undefined, legacyOwnerUserId: OWNER_UID });
       expect(result).toEqual({ kind: "legacy", context: { mode: "legacy", ownerUserId: OWNER_UID } });
     });
 
-    it("resolves legacy for null workspaceId", () => {
-      const result = resolveWorkspaceContext({ workspacesEnabled: true, workspaceId: null, legacyOwnerUserId: OWNER_UID });
+    it("resolves legacy when the flag is disabled", () => {
+      const result = resolveWorkspaceContext({ workspacesEnabled: false, workspaceId: undefined, legacyOwnerUserId: OWNER_UID });
       expect(result).toEqual({ kind: "legacy", context: { mode: "legacy", ownerUserId: OWNER_UID } });
     });
+  });
 
-    it("resolves legacy for an empty-string workspaceId", () => {
-      const result = resolveWorkspaceContext({ workspacesEnabled: true, workspaceId: "", legacyOwnerUserId: OWNER_UID });
-      expect(result).toEqual({ kind: "legacy", context: { mode: "legacy", ownerUserId: OWNER_UID } });
+  describe("Threat: flag-safety downgrade — workspaceId present + flag disabled must NEVER resolve legacy", () => {
+    it.each([
+      ["a real workspaceId", "ws-1"],
+      ["null", null],
+      ["an empty string", ""],
+      ["a whitespace-only string", "   "],
+      ["a number", 12345],
+      ["an object", { id: "ws-1" }],
+      ["an array", ["ws-1"]],
+    ])("workspaceId = %s: resolves workspaces_disabled, not legacy", (_label, workspaceId) => {
+      const result = resolveWorkspaceContext({
+        workspacesEnabled: false,
+        workspaceId,
+        legacyOwnerUserId: OWNER_UID,
+        // Even if a caller mistakenly supplied a "found" lookup anyway, the
+        // flag-disabled branch must be reached before the lookup is ever
+        // consulted — proving the deny doesn't depend on the lookup shape.
+        workspaceLookup: foundLookup(),
+      });
+      expect(result).toEqual({ kind: "workspaces_disabled" });
+      expect(result).not.toHaveProperty("context");
+    });
+  });
+
+  describe("workspaceId present but structurally invalid (flag enabled) — never falls back to legacy", () => {
+    it.each([
+      ["null", null],
+      ["an empty string", ""],
+      ["a whitespace-only string", "   "],
+      ["a number", 12345],
+      ["an object", { id: "ws-1" }],
+      ["an array", ["ws-1"]],
+    ])("workspaceId = %s: resolves malformed, not legacy", (_label, workspaceId) => {
+      const result = resolveWorkspaceContext({
+        workspacesEnabled: true,
+        workspaceId,
+        legacyOwnerUserId: OWNER_UID,
+      });
+      expect(result).toEqual({ kind: "malformed" });
     });
   });
 
@@ -163,11 +187,9 @@ describe("resolveWorkspaceContext — pure", () => {
 
 describe("resolveWorkspaceContextForResource — async wrapper", () => {
   const workspaceDocs = new Map<string, Record<string, unknown>>();
-  const flagValue = { value: false };
 
   beforeEach(() => {
     workspaceDocs.clear();
-    flagValue.value = false;
     jest.resetModules();
   });
 
@@ -204,12 +226,13 @@ describe("resolveWorkspaceContextForResource — async wrapper", () => {
     expect(getWorkspace).not.toHaveBeenCalled();
   });
 
-  it("does not read Firestore at all when the flag is disabled, even with a workspaceId present", async () => {
+  it("regression guard: workspaceId present + flag disabled resolves workspaces_disabled, NEVER legacy, and never reads Firestore", async () => {
     const resolveFn = await loadWrapperWithFlag(false);
     const { getWorkspace } = await import("@/lib/firestore/workspaces");
     seedWorkspace("ws-1");
     const result = await resolveFn({ workspaceId: "ws-1", legacyOwnerUserId: OWNER_UID });
-    expect(result).toEqual({ kind: "legacy", context: { mode: "legacy", ownerUserId: OWNER_UID } });
+    expect(result).toEqual({ kind: "workspaces_disabled" });
+    expect(result).not.toEqual(expect.objectContaining({ kind: "legacy" }));
     expect(getWorkspace).not.toHaveBeenCalled();
   });
 
@@ -227,5 +250,13 @@ describe("resolveWorkspaceContextForResource — async wrapper", () => {
     const resolveFn = await loadWrapperWithFlag(true);
     const result = await resolveFn({ workspaceId: "ws-missing", legacyOwnerUserId: OWNER_UID });
     expect(result).toEqual({ kind: "not_found" });
+  });
+
+  it("does not read Firestore for a structurally invalid workspaceId even with the flag enabled (resolvable locally)", async () => {
+    const resolveFn = await loadWrapperWithFlag(true);
+    const { getWorkspace } = await import("@/lib/firestore/workspaces");
+    const result = await resolveFn({ workspaceId: "", legacyOwnerUserId: OWNER_UID });
+    expect(result).toEqual({ kind: "malformed" });
+    expect(getWorkspace).not.toHaveBeenCalled();
   });
 });

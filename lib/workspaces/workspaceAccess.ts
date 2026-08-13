@@ -33,13 +33,17 @@ export function checkWorkspaceAccess(uid: string, context: WorkspaceContext): Wo
  * the resource's workspace context (performing the one Firestore read that
  * requires), then checks access, and collapses both into one verdict. A
  * resolution failure (`not_found` / `malformed` / `unsupported_workspace_type`
- * / `lookup_failed`) is always a denial here — it is never reinterpreted as
- * "fall back to legacy and check owner equality anyway." That reinterpretation
- * is exactly the downgrade attack this module exists to prevent.
+ * / `lookup_failed` / `workspaces_disabled`) is always a denial here — it is
+ * never reinterpreted as "fall back to legacy and check owner equality
+ * anyway." That reinterpretation is exactly the downgrade attack this
+ * module exists to prevent — including the case where an operator disables
+ * `WORKSPACES_ENABLED` for a resource that already carries a real
+ * `workspaceId`: that denies (`workspaces_disabled`), it never re-grants
+ * access via the legacy owner field.
  */
 export async function authorizeWorkspaceResourceAccess(args: {
   uid: string;
-  workspaceId: string | null | undefined;
+  workspaceId: unknown;
   legacyOwnerUserId: string;
 }): Promise<WorkspaceResourceAccessOutcome> {
   const resolution = await resolveWorkspaceContextForResource({
@@ -64,5 +68,7 @@ export async function authorizeWorkspaceResourceAccess(args: {
       return { granted: false, reason: "unsupported_workspace_type" };
     case "lookup_failed":
       return { granted: false, reason: "lookup_failed" };
+    case "workspaces_disabled":
+      return { granted: false, reason: "workspaces_disabled" };
   }
 }

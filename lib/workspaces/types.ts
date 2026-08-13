@@ -40,7 +40,35 @@ export interface WorkspaceV1 {
   updatedAt: Timestamp | string;
 }
 
-/** Structural guard for data read back from Firestore — never a blind cast, since resolution security depends on this. Deliberately does NOT check `type === "personal"`; a `"team"` workspace is well-formed data, just not yet resolvable (see `unsupported_workspace_type`). */
+/**
+ * Structural guard for data read back from Firestore — never a blind cast,
+ * since resolution security depends on this. Deliberately does NOT check
+ * `type === "personal"`; a `"team"` workspace is well-formed data, just not
+ * yet resolvable (see `unsupported_workspace_type`).
+ *
+ * Deliberate runtime-validation compatibility policy (Phase 1):
+ * - Strictly validated because they are authorization-relevant:
+ *   `schemaVersion` (must be the literal `1`), `id` (non-empty string —
+ *   its match against the actual Firestore document id is enforced
+ *   separately, in `lib/firestore/workspaces.ts`, at the point of read),
+ *   `type` (must be a recognized `WorkspaceType` value), `ownerUserId`
+ *   (non-empty string — this is the entire Phase 1 access model).
+ * - Validated for type only, not further constrained: `name` (must be a
+ *   string; emptiness is a display-quality concern, not a security one).
+ * - NOT validated at all, deliberately: `createdAt`/`updatedAt`. Neither
+ *   field is ever read by the resolver or the access check — only
+ *   `id`/`type`/`ownerUserId` participate in any authorization decision —
+ *   so a malformed timestamp cannot produce an authorization bug, and
+ *   rejecting a document over a cosmetic field would be over-validation
+ *   for a security boundary. If a future phase starts making decisions
+ *   based on these fields (e.g. expiry), they must be added here THEN.
+ * - Unknown/unexpected additional fields on the document are ACCEPTED, not
+ *   rejected — an open/forward-compatible schema, matching this
+ *   codebase's own convention (`TeamDocument`'s additive-optional-block
+ *   pattern) of adding new optional fields without breaking old readers.
+ *   This guard only requires that the fields it DOES check are present and
+ *   well-typed; it never fails a document merely for having extra keys.
+ */
 export function isWellFormedWorkspaceV1(data: unknown): data is WorkspaceV1 {
   if (typeof data !== "object" || data === null) return false;
   const d = data as Record<string, unknown>;
@@ -74,11 +102,13 @@ export type WorkspaceContext =
  * (never a single generic "failed") so callers — and tests — must handle
  * each case by name. Critical invariant this type exists to enforce:
  * `not_found` / `malformed` / `unsupported_workspace_type` / `lookup_failed`
- * are ALL distinct from `legacy` — none of them may ever be treated as
- * "fall back to legacy," because that would let an attacker who forges or
- * corrupts a `workspaceId` reference silently regain legacy-style access to
- * someone else's resource. See docs/workspaces/architecture.md's Error
- * Semantics section.
+ * / `workspaces_disabled` are ALL distinct from `legacy` — none of them may
+ * ever be treated as "fall back to legacy," because that would let an
+ * attacker who forges or corrupts a `workspaceId` reference (or an operator
+ * who flips a kill switch) silently regain legacy-style access to a
+ * resource that has already committed to workspace-scoped authorization.
+ * See docs/workspaces/architecture.md's Error Semantics and Feature Flag
+ * Safety sections.
  */
 export type WorkspaceContextResolution =
   | { kind: "legacy"; context: Extract<WorkspaceContext, { mode: "legacy" }> }
@@ -86,7 +116,8 @@ export type WorkspaceContextResolution =
   | { kind: "not_found" }
   | { kind: "malformed" }
   | { kind: "unsupported_workspace_type" }
-  | { kind: "lookup_failed" };
+  | { kind: "lookup_failed" }
+  | { kind: "workspaces_disabled" };
 
 /** Access verdict for an already-resolved `WorkspaceContext`. Phase 1 has exactly one access rule for both modes: owner-equality. No membership model exists yet for either legacy or personal-workspace resources. */
 export type WorkspaceAccessVerdict = { granted: true } | { granted: false; reason: "not_owner" };
@@ -98,4 +129,7 @@ export type WorkspaceAccessVerdict = { granted: true } | { granted: false; reaso
  */
 export type WorkspaceResourceAccessOutcome =
   | { granted: true; context: WorkspaceContext }
-  | { granted: false; reason: "not_owner" | "workspace_not_found" | "workspace_malformed" | "unsupported_workspace_type" | "lookup_failed" };
+  | {
+      granted: false;
+      reason: "not_owner" | "workspace_not_found" | "workspace_malformed" | "unsupported_workspace_type" | "lookup_failed" | "workspaces_disabled";
+    };

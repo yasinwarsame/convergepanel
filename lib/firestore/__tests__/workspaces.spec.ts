@@ -92,6 +92,27 @@ describe("getWorkspace", () => {
     expect(result).toEqual({ status: "malformed" });
   });
 
+  it("returns malformed when the document's own id field does not match the Firestore document id it was fetched at (never accepted as found)", async () => {
+    // Simulates a corrupted/tampered document: fetched at workspaces/ws-real,
+    // but its own body claims to be a different workspace entirely.
+    seedWorkspace("ws-real", { id: "ws-impostor" });
+    const result = await getWorkspace("ws-real");
+    expect(result).toEqual({ status: "malformed" });
+  });
+
+  it("returns malformed when the id key is entirely absent from the document (not just non-string)", async () => {
+    workspaceDocs.set("workspaces/no-id-key", {
+      schemaVersion: 1,
+      type: "personal",
+      name: "Personal Workspace",
+      ownerUserId: "owner-1",
+      createdAt: "2026-08-14T00:00:00.000Z",
+      updatedAt: "2026-08-14T00:00:00.000Z",
+    });
+    const result = await getWorkspace("no-id-key");
+    expect(result).toEqual({ status: "malformed" });
+  });
+
   it("returns firestore_unavailable when adminDb is null", async () => {
     firestoreUnavailableFlag.value = true;
     const result = await getWorkspace("ws-1");

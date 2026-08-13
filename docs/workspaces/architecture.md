@@ -88,34 +88,51 @@ type WorkspaceContextResolution =
 ## Error semantics — the critical invariant
 
 ```
-workspaceId absent                → legacy compatibility
-workspaceId present but invalid   → explicit failure, never legacy
+workspaceId truly absent (undefined)   → legacy compatibility
+workspaceId present in ANY other form  → explicit failure, never legacy
 ```
 
-Once a non-empty `workspaceId` is present (and the feature flag is on), resolution can only return `resolved` or a named failure kind. It can **never** return to `legacy`. This is enforced structurally, not just by convention: `resolveWorkspaceContext()`'s workspaceId-present branch has no code path back to a `legacy` result. Five distinct outcomes are always kept separate and never conflated:
+**"Present in any other form" is deliberately broad.** Only `undefined` — the key was never written to the document at all — counts as absent. `null`, `""`, a whitespace-only string, and a wrong-typed value (number/object/array, defensively, in case a caller bug ever produces one) are all treated as "a workspace reference was written, and it's unusable" — never folded back into "absent." A document holding `workspaceId: ""` is not the same as one that never had the field at all, and must not be treated as if it were.
+
+Once `workspaceId` is anything other than `undefined`, resolution can only return `resolved` or a named failure kind. It can **never** return to `legacy`. This is enforced structurally, not just by convention: `resolveWorkspaceContext()`'s workspaceId-present branch has no code path back to a `legacy` result. Six distinct outcomes are always kept separate and never conflated:
 
 | Outcome | Meaning |
 |---|---|
-| `legacy` | No workspaceId — today's existing behavior, unchanged |
+| `legacy` | `workspaceId === undefined` — today's existing behavior, unchanged |
 | `resolved` | workspaceId present, workspace found, well-formed, `type: "personal"` |
 | `not_found` | workspaceId present, no such workspace document exists |
-| `malformed` | workspace document exists but fails shape validation, or its own `id` doesn't match the requested id |
+| `malformed` | workspace document exists but fails shape validation, its own `id` doesn't match the requested id, or the supplied `workspaceId` itself is structurally unusable (`null`/`""`/whitespace/wrong type) |
 | `unsupported_workspace_type` | workspace is well-formed but `type: "team"` — real future data, not yet authorizable |
 | `lookup_failed` | internal Firestore read failure (distinct from "not found") |
+| `workspaces_disabled` | workspaceId present, but `WORKSPACES_ENABLED` is off — see Feature Flag Safety below |
 
-`authorizeWorkspaceResourceAccess()` denies on every one of `not_found` / `malformed` / `unsupported_workspace_type` / `lookup_failed` — **it never falls back to checking the legacy owner field once a workspaceId was present.** This is proven by the "legacy downgrade" test suite in `lib/workspaces/__tests__/workspaceAccess.spec.ts`: even when the calling `uid` genuinely equals the resource's `legacyOwnerUserId`, an invalid workspace reference still denies.
+`authorizeWorkspaceResourceAccess()` denies on every one of `not_found` / `malformed` / `unsupported_workspace_type` / `lookup_failed` / `workspaces_disabled` — **it never falls back to checking the legacy owner field once a workspaceId was present.** This is proven by the "legacy downgrade" and "flag-safety downgrade" test suites in `lib/workspaces/__tests__/workspaceAccess.spec.ts` and `workspaceResolver.spec.ts`: even when the calling `uid` genuinely equals the resource's `legacyOwnerUserId` (and is even the resource's real workspace owner), an invalid or flag-disabled workspace reference still denies.
 
 ## Authorization principles
 
 - Workspace access is always server-derived, from the persisted `workspaces/{id}` document's own `ownerUserId` field — never from a client-supplied `workspaceId`, a UI-selected workspace, or a claimed membership.
-- Phase 1's entire access model, for both `legacy` and `workspace` (personal) modes, is exact `uid === ownerUserId` equality. No membership, roles, or delegation exist for either mode yet.
+- Phase 1's entire access model, for both `legacy` and `workspace` (personal) modes, is exact `uid === ownerUserId` string equality — no case-insensitivity, no prefix/substring matching, no whitespace trimming. Tested explicitly (`lib/workspaces/__tests__/workspaceAccess.spec.ts`).
 - Workspace does not weaken existing authorization: for legacy records, current authorization behavior remains fully authoritative, unchanged, because no route calls any Phase 1 code yet.
 
 ## Feature flag
 
 `WORKSPACES_ENABLED` (`lib/env.ts`), server-side only, `process.env.WORKSPACES_ENABLED === "true"` — same fail-closed convention as every other flag in this file (`ADAPTIVE_SCHEMAS_ENABLED`, `MULTI_REVIEWER_GOVERNANCE_ENABLED`, etc.). Default **off**.
 
-The flag is checked *inside the resolver itself*, not only at a hypothetical future route boundary: when `false`, `resolveWorkspaceContext()` always returns `legacy`, regardless of whether a `workspaceId` is present or what it resolves to. This is a global kill switch, not a per-record fallback decision — categorically different from the forbidden "malformed → pretend legacy" downgrade above, the same way `ADAPTIVE_SCHEMAS_ENABLED=false` makes an entire feature not exist rather than degrading it per-record.
+### Feature flag safety — the resolver's single most important invariant
+
+Earlier drafts of this design checked the flag *first*, before checking whether `workspaceId` was even present, and returned `legacy` unconditionally when the flag was off. **This was a latent security defect, caught and fixed during independent review before merge, and never shipped.** The failure mode it would have created: once a future phase writes a real `workspaceId` onto a resource (making it genuinely workspace-bound), disabling `WORKSPACES_ENABLED` — e.g. as an incident-response kill switch — would have silently re-derived access from the resource's `legacyOwnerUserId` field instead. If that field ever diverges from the workspace's true current authorization state (ownership transfer, team membership changes, a member removed from a workspace — none of which exist yet, but all of which are plausible by Phase 8), flipping the flag off would have been able to **grant** access inconsistent with the resource's real, current-state intent — the opposite of what a safety kill switch should ever do.
+
+The corrected, shipped invariant:
+
+```
+workspaceId === undefined                          → flag is irrelevant; always legacy
+workspaceId present (any form) + flag disabled      → workspaces_disabled (deny)
+workspaceId present (any form) + flag enabled       → resolve for real (resolved/not_found/malformed/unsupported_workspace_type/lookup_failed)
+```
+
+`resolveWorkspaceContext()` checks `workspaceId` presence **before** the flag, not after. The flag can only ever **narrow** access for an already workspace-bound resource (deny via `workspaces_disabled`) — it can never widen it or redirect it back to a different authorization model. This mirrors an existing, established precedent already in this codebase: `MULTI_REVIEWER_GOVERNANCE_ENABLED`'s own doc comment (`lib/env.ts`) states its kill switch is checked "ONLY at panel creation/reconfiguration... NEVER checked by vote submission, finalization, owner override, or panel cancellation — an already-open panel must always remain completable or cancellable regardless of this flag's value, so no panel can ever become stranded." The same shape applies here: a flag may gate whether the system *begins* new workspace-aware behavior; it must never gate whether the system *honors* a binding that already exists.
+
+Practical consequence for Phase 1 specifically: harmless either way today, since no production record has ever had `workspaceId` written to it. The fix matters entirely for phases 3+, and is deliberately settled now, before any real workspace-bound record can exist, per the explicit design principle: fixing a security-boundary decision is cheap before millions of records depend on it, and expensive after.
 
 No public/client flag exists or is needed — Phase 1 has no client-facing behavior.
 
@@ -144,6 +161,36 @@ Validated against the actual codebase (`docs/team-workspaces-architecture-audit.
 **A** = should eventually own `workspaceId` directly. **B** = should inherit workspace through its parent resource (never denormalize `workspaceId` onto child docs without a proven query/authorization need — none exists yet for any B-classified resource). **C** = must remain outside Workspace. **D** = protected system; deferred to a dedicated future audit, not "architecturally unclear."
 
 No resource's `userId`/`ownerUid` field is removed, renamed, or reinterpreted by Phase 1. No `userId → workspaceId` migration exists or is permitted in this phase.
+
+### Export inheritance — resolved decision, not an open question
+
+Exports must **freeze `workspaceId` at export creation time**, exactly like `AdaptiveResearchExportV1` already freezes `governanceStatusAtExport` and generator/provenance identity. This isn't a new design question — it's a direct application of the export system's own existing, already-established philosophy: an export is a point-in-time, immutable snapshot, and it must never re-derive authorization-relevant facts dynamically from the live parent run at render/regeneration time (the entire reason `governanceStatusAtExport` exists is to prevent exactly that class of drift). Dynamically inheriting workspace authorization from the live run would let a workspace transfer *after* export creation silently change who could access an already-generated document — inconsistent with every other frozen field the export already carries. **Decided now; not implemented — exports are untouched in Phase 1 and remain so until whichever future phase adds export/workspace integration.**
+
+### History inheritance — no new design question
+
+`humanReviewHistory` is a genuine Firestore subcollection of its run (`runs/{runId}/humanReviewHistory/*`), always queried in the context of an already-known, already-authorized `runId` — never queried standalone across all users by `workspaceId`. Inheriting authorization from the parent run costs nothing extra (one resolution already happened to reach the run). The one place an aggregate, cross-run history view exists (`app/api/user/panel-history/route.ts`, querying `runs`/`verifications`/`videoVerifications` by `userId`) is already covered by those resources' own **A** classification: if a future phase needs `.where("workspaceId","==", ...)` instead of `.where("userId","==", ...)`, that's the same direct-`workspaceId`-on-the-parent-resource need already documented above, not a new inheritance problem for history specifically.
+
+### Governance inheritance — mostly resolved, one flagged open question
+
+`governanceRecord`, `humanReviewAssignment/current`, `humanReviewPanel`, and `humanReviewVotes` are all reached only after the parent run's own access has already been resolved (a user views governance for one specific run they're already authorized to view) — inheriting through the run is safe and costs no extra query.
+
+**One genuine open question, not resolved here:** `firestore.indexes.json` already has a `collectionGroup: "humanReviewAssignment"` index keyed on `(assignedReviewerUserId, teamId, assignedAt)` — the query behind the personal-reviewer inbox ("show me everything assigned to me across all runs"). If a future phase wants to scope that to "show me everything assigned to me *within workspace X*," the assignment subcollection docs would need their own denormalized `workspaceId` — an explicit, narrow exception to the general "inherit from run, never denormalize" rule for **B**-classified resources, needed only because this one query already crosses run boundaries by design. **Flagged as an explicit Phase-4 design question. Not decided, not implemented, here.**
+
+## Personal Workspace identity strategy — decision required before Phase 2
+
+Phase 1 states each user may eventually have one Personal Workspace, but a naive `workspaces/{randomId}` + `ownerUserId` shape does not, by itself, enforce "exactly one." This is a load-bearing decision for Phase 2's provisioning design, made now — while it's cheap — rather than after real records exist:
+
+**Decision: deterministic Personal Workspace document IDs, of the form `personal-{uid}`.**
+
+Provisioning (Phase 2, not implemented here) creates via `.collection("workspaces").doc(\`personal-${uid}\`).create({...})` — Firestore's `.create()` (used elsewhere in this codebase, e.g. `createAdaptiveHumanReviewHistory`) fails with `ALREADY_EXISTS` on a second attempt at the same doc id, which gives idempotent, race-safe, exactly-once provisioning **for free**, with no transaction, no pre-check query, and no separate uniqueness index needed. A concurrent double-provisioning attempt (e.g. two simultaneous requests during signup) resolves itself: exactly one `.create()` succeeds, the other observes `ALREADY_EXISTS` and simply reads the existing doc instead.
+
+This also means **no `users/{uid}.personalWorkspaceId` mapping field is needed** — a user's Personal Workspace id is always mechanically derivable from their uid alone (`personal-${uid}`), never a second, separately-maintained pointer that could drift from the truth. This is a deliberate rejection of exactly the failure pattern `docs/team-workspaces-architecture-audit.md` already identified as this codebase's own recurring smell: `teams/{teamId}` + `users/{uid}.teamId` and `governanceReviewerUid`/`governanceReviewerFor` are both two-sided relationships that can (and, per that audit, already do) drift out of sync with each other. A deterministic id sidesteps that entire class of bug for Personal Workspaces specifically.
+
+Considered and rejected: random workspace IDs + a `.where("ownerUserId","==",uid).where("type","==","personal")` existence query before creation. Rejected because that query is not race-safe against concurrent provisioning without wrapping it in a transaction, and even transactionally, it is strictly more complex than `.create()`'s built-in exactly-once guarantee for no benefit — Personal Workspaces have no legitimate reason to ever be enumerated by anything other than direct uid-derived lookup.
+
+Enumeration/privacy: not a practical concern given the existing Firestore rules posture (see Firestore Rules below) — `workspaces/*` is already unreadable by any client SDK regardless of whether ids are predictable, and the id never appears in any URL (see Domain model / No user-visible change).
+
+**This decision governs Phase 2's implementation; Phase 1 implements no provisioning. `WorkspaceV1`'s shape and `getWorkspace()`'s behavior are already id-scheme-agnostic and require no change for this decision to take effect later.**
 
 ## Future Project relationship
 
@@ -184,13 +231,26 @@ Phase 1's only Firestore operation is a direct `workspaces/{id}` document `.get(
 
 Phase 1 introduces no migration and has no route depending on it. **Code rollback is sufficient; no data rollback is required.** Reverting the deployment removes `lib/workspaces/*`, `lib/firestore/workspaces.ts`, and the `WORKSPACES_ENABLED` flag from the running build; since nothing ever wrote a `workspaces/{id}` document or a `workspaceId` field in production, there is nothing in the database that depends on this code existing. The only artifact left behind by a rollback would be an empty `workspaces` collection that was never populated — inert, not a compatibility concern.
 
+## Runtime validation policy
+
+TypeScript types describe intent; they do not validate what Firestore actually returns. `isWellFormedWorkspaceV1()` (`lib/workspaces/types.ts`) is the runtime guard `getWorkspace()` calls on every document before it can ever be treated as "found" — a raw `data() as WorkspaceV1` cast never happens anywhere in this codebase's Workspace code. Its policy, deliberately decided rather than left implicit:
+
+- **Strictly validated** (authorization-relevant): `schemaVersion` (must be the literal `1`), `id` (non-empty string, and — enforced separately, in `getWorkspace()` itself, at the point of read — must equal the actual Firestore document id it was fetched at, never left for callers to re-check), `type` (must be a recognized value), `ownerUserId` (non-empty string — this field alone is Phase 1's entire access model).
+- **Type-checked only, not further constrained**: `name` (a display field; emptiness is not a security concern).
+- **Not validated at all**: `createdAt`/`updatedAt`. Neither is ever read by the resolver or the access check, so a malformed timestamp cannot produce an authorization bug.
+- **Unknown/extra fields are accepted**, not rejected — an open, forward-compatible schema matching this codebase's own `TeamDocument` additive-optional-field convention.
+
+All of the above is asserted directly by tests, not merely described here (`lib/workspaces/__tests__/types.spec.ts`, `lib/firestore/__tests__/workspaces.spec.ts`).
+
 ## Security invariants — summary
 
 1. **Workspace IDOR** (User A supplies User B's real workspace id) — denied. Tested.
 2. **Cross-workspace access** (genuine owner of Workspace A requests a resource bound to Workspace B) — denied. Tested.
 3. **Legacy downgrade** (invalid/missing/malformed workspace reference) — never falls back to legacy owner check, even when the calling uid genuinely equals the legacy owner field. Tested for `not_found`, `malformed`, `lookup_failed`, and `unsupported_workspace_type`.
-4. **Forged/claimed ownership** — access is computed purely from the server-resolved `WorkspaceContext.ownerUserId`, never from any client-supplied claim. Tested.
-5. **No implicit creation** — no function in `lib/firestore/workspaces.ts` or `lib/workspaces/*` writes anything. Verified structurally by test (module export enumeration), not just by inspection.
+4. **Flag-safety downgrade** (workspaceId present + `WORKSPACES_ENABLED` disabled) — denies (`workspaces_disabled`), never falls back to legacy owner check, even when the calling uid is genuinely both the legacy owner AND the real workspace owner. See Feature Flag Safety above. Tested.
+5. **Forged/claimed ownership** — access is computed purely from the server-resolved `WorkspaceContext.ownerUserId`, never from any client-supplied claim. Tested.
+6. **Uid comparison is exact** — no case-insensitivity, prefix, substring, or whitespace-tolerant matching. Tested.
+7. **No implicit creation** — no function in `lib/firestore/workspaces.ts` or `lib/workspaces/*` writes anything. Verified both structurally by test (module export enumeration) and by direct source inspection (no `.set(`/`.create(`/`.update(`/`.delete(`/`.add(`/`batch.`/`transaction.` calls anywhere in the new source files).
 
 ## Rollout phases (for context; not part of Phase 1's scope)
 
