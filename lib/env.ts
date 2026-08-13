@@ -156,6 +156,23 @@ export const ADAPTIVE_RESEARCH_DOCX_EXPORT_ENABLED = process.env.ADAPTIVE_RESEAR
 export const ADAPTIVE_RESEARCH_JSON_EXPORT_ENABLED = process.env.ADAPTIVE_RESEARCH_JSON_EXPORT_ENABLED === "true";
 
 /**
+ * Workspace Compatibility Foundation, Phase 1 (docs/workspaces/architecture.md)
+ * — a server-side-only kill switch, default OFF (same fail-closed
+ * convention as every flag above). Phase 1 introduces the `lib/workspaces/`
+ * resolver/access-check modules and a `workspaces` Firestore collection but
+ * wires NEITHER into any route yet — this flag currently has no caller in
+ * production code at all. It exists now so `resolveWorkspaceContext()`
+ * itself is flag-aware from day one: when false, resolution ALWAYS
+ * collapses to legacy ownership regardless of any `workspaceId` a resource
+ * might (hypothetically — nothing writes one yet) carry, giving a single,
+ * global, pre-route-level way to fully disable workspace-mode resolution
+ * once later phases do start calling it. Never a public/client flag —
+ * workspace membership must always be server-derived (see
+ * `lib/workspaces/workspaceAccess.ts`).
+ */
+export const WORKSPACES_ENABLED = process.env.WORKSPACES_ENABLED === "true";
+
+/**
  * Search engine site-verification tokens.
  *
  * Optional — when unset, the corresponding verification meta tag is simply
