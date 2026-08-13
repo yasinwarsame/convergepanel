@@ -146,7 +146,7 @@ describe("GET /api/user/runs/[runId] — personal reviewer access", () => {
     expect(json.viewerRole).toBe("owner");
   });
 
-  it("the currently-assigned personal reviewer is granted access, viewerRole: personal_reviewer, identical response shape", async () => {
+  it("the currently-assigned personal reviewer is granted access, viewerRole: personal_reviewer, same response shape (except results[].tokenUsage/latencyMs — see the Governance Follow-Up Hardening test below)", async () => {
     mockedRunGet.mockResolvedValue(runDoc());
     mockedGetPersonalAssignment.mockResolvedValue({ status: "found", assignment: assignment() });
     const { res, json } = await callRouteAs(REVIEWER_UID);
@@ -154,6 +154,23 @@ describe("GET /api/user/runs/[runId] — personal reviewer access", () => {
     expect(json.viewerRole).toBe("personal_reviewer");
     expect(json.ok).toBe(true);
     expect(json.adaptive.output).toBeDefined();
+  });
+
+  it("Governance Follow-Up Hardening: a personal reviewer's results omit tokenUsage/latencyMs (operational metadata, not review content); the owner still gets both, unchanged", async () => {
+    mockedRunDocumentToPublicResults.mockReturnValue([
+      { modelId: "chatgpt", rawTextFull: "answer text", tokenUsage: { promptTokens: 10, completionTokens: 20, totalTokens: 30 }, latencyMs: 1234 },
+    ]);
+    mockedRunGet.mockResolvedValue(runDoc());
+    mockedGetPersonalAssignment.mockResolvedValue({ status: "found", assignment: assignment() });
+
+    const { json: reviewerJson } = await callRouteAs(REVIEWER_UID);
+    expect(reviewerJson.results[0]).not.toHaveProperty("tokenUsage");
+    expect(reviewerJson.results[0]).not.toHaveProperty("latencyMs");
+    expect(reviewerJson.results[0].rawTextFull).toBe("answer text"); // review content itself is untouched
+
+    const { json: ownerJson } = await callRouteAs(OWNER_UID);
+    expect(ownerJson.results[0].tokenUsage).toEqual({ promptTokens: 10, completionTokens: 20, totalTokens: 30 });
+    expect(ownerJson.results[0].latencyMs).toBe(1234);
   });
 
   it("an unrelated user with no assignment at all is denied", async () => {

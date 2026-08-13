@@ -34,9 +34,30 @@ export interface AdaptiveRunAccessCapabilities {
   canViewGovernance: boolean;
   /** Submit an approve/changes-requested/reject/approve-with-conditions decision right now. */
   canSubmitReview: boolean;
-  /** Export the report (PDF/DOCX/JSON). Reviewers do not get this in v1 — least privilege, nothing in this feature's scope asks for it. */
+  /**
+   * Export the report (PDF/DOCX/JSON). Reviewers do not get this in v1 —
+   * least privilege, nothing in this feature's scope asks for it.
+   *
+   * NOT CURRENTLY ENFORCED ANYWHERE — documented intent only. Export
+   * denial is real and tested (confirmed by the PR #33 production canary:
+   * a personal reviewer gets 403 on both `POST .../export` and
+   * `GET .../exports`), but it comes from those routes' own pre-existing,
+   * untouched `owner !== uid → 403` check, not from this field. No caller
+   * currently reads `capabilities.canExport`. Left as documented,
+   * unwired intent rather than removed (Governance Follow-Up Hardening,
+   * Part 15) — wiring it into the export routes was judged out of scope
+   * for that small hardening PR; fold into the Workspace-era central
+   * capability model instead of re-deciding this per role added later.
+   */
   canExport: boolean;
-  /** Delete/edit/rerun the run, change reviewer configuration, billing, ownership. Owner only, always false for a reviewer. */
+  /**
+   * Delete/edit/rerun the run, change reviewer configuration, billing,
+   * ownership. Owner only, always false for a reviewer.
+   *
+   * Same status as `canExport` above: documented intent, not currently
+   * read by any caller. Owner-only mutation routes already enforce this
+   * independently via their own `owner !== uid` checks.
+   */
   canMutateRun: boolean;
 }
 

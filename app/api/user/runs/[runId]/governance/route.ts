@@ -152,11 +152,17 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
     }
   }
 
-  // The run owner (this endpoint's only caller) has no team-admin context
-  // by default — sourced here purely to give the identity resolver a
-  // roster of member emails for its masked-email fallback, never to gate
-  // authorization (the owner check above already did that) and never to
-  // change family classification.
+  // Governance Follow-Up Hardening — this comment previously said "the run
+  // owner (this endpoint's only caller)", which stopped being true once
+  // Personal Reviewer Inbox + Action Flow (PR #33) extended this route to
+  // an assigned personal reviewer too. Neither caller has team-admin
+  // context by default; this is sourced purely to give the identity
+  // resolver a roster of member emails for its masked-email fallback,
+  // never to gate authorization (the resolveAdaptiveRunAccess check above
+  // already did that) and never to change family classification. Worst
+  // case on a miss is a less-precise display-name fallback for the
+  // CALLER's own already-visible team roster — never a cross-boundary
+  // leak, since emailByUid only ever contains the caller's own team.
   const teamCtx = await loadUserAndTeam(uid).catch(() => null);
   const callerEmail = teamCtx?.user?.email;
   const emailByUid = new Map((teamCtx?.team?.members ?? []).map((m) => [m.uid, m.email] as const));
@@ -189,9 +195,20 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
     resolveDisplayName,
   });
 
+  // Governance Follow-Up Hardening — a coarse routing signal (never a raw
+  // teamId) so the client knows which review-history endpoint to call:
+  // the team-only `/api/teams/adaptive-runs/[runId]/history` or the new
+  // `/api/user/runs/[runId]/review-history`. A panel is team-only by
+  // construction (personal runs never have one), so its presence alone is
+  // decisive; otherwise derived from the single-reviewer assignment's own
+  // teamId. "unknown" only when nothing is configured yet — there is no
+  // history to fetch either way in that case.
+  const historyScope: "team" | "personal" | "unknown" = panel ? "team" : assignment ? (assignment.teamId === null ? "personal" : "team") : "unknown";
+
   return NextResponse.json({
     ok: true,
     viewerRole,
+    historyScope,
     // Personal Reviewer Inbox + Action Flow — the same optimistic-
     // concurrency token the team decision form already sends as
     // `expectedUpdatedAt` (submitAdaptiveHumanReview matches it against

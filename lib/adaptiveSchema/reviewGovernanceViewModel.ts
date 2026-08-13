@@ -25,7 +25,15 @@
  * builder below never reads those fields off any input into the output.
  * Identity IS included (a deliberate, disclosed relaxation of the
  * component's prior "never reviewer identity" stance — see
- * ReviewGovernanceSection.tsx's own doc comment).
+ * ReviewGovernanceSection.tsx's own doc comment) — but only ever as a
+ * resolved DISPLAY NAME, never a raw Firebase/Firestore uid. Governance
+ * Follow-Up Hardening (docs/personal-reviewer-inbox, Part 1-3 audit) found
+ * every consumer of this view model reads identity fields for display
+ * only, plus exactly one React list `key` — no client operation sends any
+ * uid from this response back to a mutation. Raw uids are therefore
+ * dropped from every identity field; `ReviewGovernanceReviewerView` uses a
+ * safe, response-stable `reviewerKey` (derived from the panel's own fixed
+ * `reviewerUserIds` order) in place of the reviewer's real uid.
  */
 
 import type { GovernanceRecordV1 } from "./governanceRecord";
@@ -36,7 +44,8 @@ import type { AdaptiveReviewDecisionStatus } from "../governance/adaptiveHumanRe
 import { aggregateAdaptiveReviewVotes } from "../governance/adaptiveReviewAggregation";
 
 export interface ReviewGovernanceReviewerView {
-  userId: string;
+  /** Safe, response-stable list key (e.g. `"panelist-0"`) — NOT the reviewer's real uid. Panel reviewer order is fixed at panel-creation time, so this stays stable across re-fetches of the same panel revision. */
+  reviewerKey: string;
   displayName: string;
   hasVoted: boolean;
   voteStatus?: AdaptiveReviewDecisionStatus;
@@ -57,8 +66,8 @@ export interface ReviewGovernancePanelView {
   finalStatus?: AdaptiveReviewFinalStatus;
   finalizedAt?: string;
   finalizedVia?: "aggregation" | "owner_override";
-  /** Present only when `finalizedVia === "owner_override"`. */
-  overrideBy?: { userId: string; displayName: string };
+  /** Present only when `finalizedVia === "owner_override"`. No raw uid — see module doc comment. */
+  overrideBy?: { displayName: string };
 }
 
 export type ReviewGovernanceViewModel =
@@ -80,13 +89,11 @@ export type ReviewGovernanceViewModel =
        * through `panel.reviewers`/`panel.overrideBy` below, so a run never
        * shows the same decision under two different identity shapes.
        */
-      singleReviewer: { userId: string; displayName: string; reviewedAt: string | null } | null;
-      /** Present only when `runs/{runId}/humanReviewAssignment/current` exists with a live assignee. */
+      singleReviewer: { displayName: string; reviewedAt: string | null } | null;
+      /** Present only when `runs/{runId}/humanReviewAssignment/current` exists with a live assignee. No raw uid — see module doc comment. */
       assignment: {
-        reviewerUserId: string;
         reviewerDisplayName: string;
         assignedAt: string | null;
-        assignedByUserId: string | null;
         assignedByDisplayName: string | null;
       } | null;
       /** Present only when `runs/{runId}/humanReviewPanel/current` exists — peer review is/was configured. */
@@ -133,11 +140,11 @@ async function buildPanelView(
   const voteByReviewer = new Map(votes.map((v) => [v.reviewerUserId, v] as const));
 
   const reviewers: ReviewGovernanceReviewerView[] = await Promise.all(
-    panel.reviewerUserIds.map(async (userId) => {
+    panel.reviewerUserIds.map(async (userId, index) => {
       const displayName = await resolveDisplayName(userId);
       const vote = voteByReviewer.get(userId);
       return {
-        userId,
+        reviewerKey: `panelist-${index}`,
         displayName,
         hasVoted: vote !== undefined,
         ...(vote ? { voteStatus: vote.status, submittedAt: vote.submittedAt } : {}),
@@ -167,9 +174,9 @@ async function buildPanelView(
     blockingCount = votes.filter((v) => v.status === "changes_requested" || v.status === "rejected").length;
   }
 
-  let overrideBy: { userId: string; displayName: string } | undefined;
+  let overrideBy: { displayName: string } | undefined;
   if (panel.finalizedVia === "owner_override" && panel.overrideByUserId) {
-    overrideBy = { userId: panel.overrideByUserId, displayName: await resolveDisplayName(panel.overrideByUserId) };
+    overrideBy = { displayName: await resolveDisplayName(panel.overrideByUserId) };
   }
 
   return {
@@ -200,10 +207,9 @@ export async function buildReviewGovernanceViewModel(input: BuildReviewGovernanc
   if (governanceRecord) {
     const hr = governanceRecord.humanReview;
 
-    let singleReviewer: { userId: string; displayName: string; reviewedAt: string | null } | null = null;
+    let singleReviewer: { displayName: string; reviewedAt: string | null } | null = null;
     if (hr.reviewerId && (hr.decidedVia === undefined || hr.decidedVia === "single_reviewer")) {
       singleReviewer = {
-        userId: hr.reviewerId,
         displayName: await resolveDisplayName(hr.reviewerId),
         reviewedAt: hr.reviewedAt ?? null,
       };
@@ -216,10 +222,8 @@ export async function buildReviewGovernanceViewModel(input: BuildReviewGovernanc
         assignment.assignedByUserId ? resolveDisplayName(assignment.assignedByUserId) : Promise.resolve(null),
       ]);
       assignmentView = {
-        reviewerUserId: assignment.assignedReviewerUserId,
         reviewerDisplayName,
         assignedAt: assignment.assignedAt,
-        assignedByUserId: assignment.assignedByUserId,
         assignedByDisplayName,
       };
     }

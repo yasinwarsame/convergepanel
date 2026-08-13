@@ -113,10 +113,8 @@ describe("AdaptiveReviewListItem — single reviewer (Step 5, Step 19)", () => {
   it("shows the assigned reviewer and assignment timestamp", () => {
     const item = adaptiveItem({
       assignment: {
-        reviewerUserId: "r1",
         reviewerDisplayName: "Jane Smith",
         assignedAt: "2026-08-12T10:31:00.000Z",
-        assignedByUserId: "a1",
         assignedByDisplayName: "Alex Owner",
       },
     });
@@ -131,7 +129,7 @@ describe("AdaptiveReviewListItem — single reviewer (Step 5, Step 19)", () => {
     (status) => {
       const item = adaptiveItem({
         humanReviewStatus: status,
-        singleReviewer: { userId: "r1", displayName: "Jane Smith", reviewedAt: "2026-08-12T10:44:00.000Z" },
+        singleReviewer: { displayName: "Jane Smith", reviewedAt: "2026-08-12T10:44:00.000Z" },
       });
       const html = renderToStaticMarkup(createElement(AdaptiveReviewListItem, { item }));
       expect(html).toContain("Jane Smith");
@@ -142,7 +140,7 @@ describe("AdaptiveReviewListItem — single reviewer (Step 5, Step 19)", () => {
   it("never reduces an available decision to a generic 'Reviewed' label", () => {
     const item = adaptiveItem({
       humanReviewStatus: "changes_requested",
-      singleReviewer: { userId: "r1", displayName: "Jane Smith", reviewedAt: "2026-08-12T10:44:00.000Z" },
+      singleReviewer: { displayName: "Jane Smith", reviewedAt: "2026-08-12T10:44:00.000Z" },
     });
     const html = renderToStaticMarkup(createElement(AdaptiveReviewListItem, { item }));
     expect(html).toMatch(/changes requested/i);
@@ -157,9 +155,9 @@ describe("AdaptiveReviewListItem — peer review (Step 6, Step 19)", () => {
       requiredReviewerCount: 3,
       quorum: 2,
       reviewers: [
-        { userId: "r1", displayName: "Jane Smith", hasVoted: true, voteStatus: "approved" as const, submittedAt: "2026-08-12T10:44:00.000Z" },
-        { userId: "r2", displayName: "Mohamed Ali", hasVoted: true, voteStatus: "changes_requested" as const, submittedAt: "2026-08-12T10:45:00.000Z" },
-        { userId: "r3", displayName: "Sarah Chen", hasVoted: false },
+        { reviewerKey: "panelist-0", displayName: "Jane Smith", hasVoted: true, voteStatus: "approved" as const, submittedAt: "2026-08-12T10:44:00.000Z" },
+        { reviewerKey: "panelist-1", displayName: "Mohamed Ali", hasVoted: true, voteStatus: "changes_requested" as const, submittedAt: "2026-08-12T10:45:00.000Z" },
+        { reviewerKey: "panelist-2", displayName: "Sarah Chen", hasVoted: false },
       ],
       submittedCount: 2,
       approvalCount: 1,
@@ -189,11 +187,11 @@ describe("AdaptiveReviewListItem — peer review (Step 6, Step 19)", () => {
       panel: panel({
         requiredReviewerCount: 5,
         reviewers: [
-          { userId: "r1", displayName: "Jane Smith", hasVoted: true, voteStatus: "approved", submittedAt: "2026-08-12T10:44:00.000Z" },
-          { userId: "r2", displayName: "Mohamed Ali", hasVoted: true, voteStatus: "approved", submittedAt: "2026-08-12T10:45:00.000Z" },
-          { userId: "r3", displayName: "Sarah Chen", hasVoted: false },
-          { userId: "r4", displayName: "Extra One", hasVoted: false },
-          { userId: "r5", displayName: "Extra Two", hasVoted: false },
+          { reviewerKey: "panelist-0", displayName: "Jane Smith", hasVoted: true, voteStatus: "approved", submittedAt: "2026-08-12T10:44:00.000Z" },
+          { reviewerKey: "panelist-1", displayName: "Mohamed Ali", hasVoted: true, voteStatus: "approved", submittedAt: "2026-08-12T10:45:00.000Z" },
+          { reviewerKey: "panelist-2", displayName: "Sarah Chen", hasVoted: false },
+          { reviewerKey: "panelist-3", displayName: "Extra One", hasVoted: false },
+          { reviewerKey: "panelist-4", displayName: "Extra Two", hasVoted: false },
         ],
       }),
     });
@@ -223,7 +221,7 @@ describe("AdaptiveReviewListItem — peer review (Step 6, Step 19)", () => {
         finalStatus: "rejected",
         finalizedAt: "2026-08-12T10:55:00.000Z",
         finalizedVia: "owner_override",
-        overrideBy: { userId: "admin-1", displayName: "Alex Owner" },
+        overrideBy: { displayName: "Alex Owner" },
       }),
     });
     const html = renderToStaticMarkup(createElement(AdaptiveReviewListItem, { item }));
@@ -254,19 +252,37 @@ describe("AdaptiveReviewListItem — enrichment failure vs genuine absence (Step
   });
 });
 
-describe("AdaptiveReviewListItem — privacy (Step 10)", () => {
-  it("never renders a raw reviewer uid as visible text, only inside a resolved display name pairing", () => {
+describe("AdaptiveReviewListItem — privacy (Step 10, strengthened by Governance Follow-Up Hardening)", () => {
+  it("renders the resolved display name and never a raw reviewer uid (the DTO no longer even carries one — see reviewGovernanceViewModel.ts)", () => {
     const item = adaptiveItem({
       assignment: {
-        reviewerUserId: "reviewer-raw-uid-123",
         reviewerDisplayName: "Jane Smith",
         assignedAt: "2026-08-12T10:31:00.000Z",
-        assignedByUserId: "a1",
         assignedByDisplayName: "Alex Owner",
       },
     });
     const html = renderToStaticMarkup(createElement(AdaptiveReviewListItem, { item }));
-    expect(html).not.toContain("reviewer-raw-uid-123");
+    expect(html).toContain("Jane Smith");
+    // No `reviewerUserId`/`assignedByUserId` field exists on the type at
+    // all anymore, so there is nothing a future change could accidentally
+    // start rendering — this is a redundant, defense-in-depth check.
+  });
+
+  it("panel reviewer rows key off a safe reviewerKey, never a raw uid", () => {
+    const item = adaptiveItem({
+      panel: {
+        status: "open",
+        requiredReviewerCount: 1,
+        quorum: 1,
+        reviewers: [{ reviewerKey: "panelist-0", displayName: "Jane Smith", hasVoted: false }],
+        submittedCount: 0,
+        approvalCount: 0,
+        blockingCount: 0,
+      },
+    });
+    const html = renderToStaticMarkup(createElement(AdaptiveReviewListItem, { item }));
+    expect(html).toContain("Jane Smith");
+    expect(html).not.toContain("panelist-0");
   });
 });
 

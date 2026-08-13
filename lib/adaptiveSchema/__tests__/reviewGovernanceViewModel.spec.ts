@@ -168,13 +168,14 @@ describe("buildReviewGovernanceViewModel — milestone2, unreviewed / assignment
       family: "milestone2",
       singleReviewer: null,
       assignment: {
-        reviewerUserId: "reviewer-1",
         reviewerDisplayName: "Jane Smith",
         assignedAt: "2026-08-12T10:31:00.000Z",
-        assignedByUserId: "admin-1",
         assignedByDisplayName: "Alex Owner",
       },
     });
+    // No raw uid anywhere in the assignment view — see Governance Follow-Up Hardening.
+    expect(JSON.stringify(result)).not.toContain("reviewer-1");
+    expect(JSON.stringify(result)).not.toContain("admin-1");
   });
 
   it("omits assignment when the assignment document exists but is currently unassigned", async () => {
@@ -201,8 +202,9 @@ describe("buildReviewGovernanceViewModel — milestone2, single-reviewer termina
       );
       expect(result).toMatchObject({
         family: "milestone2",
-        singleReviewer: { userId: "reviewer-1", displayName: "Jane Smith", reviewedAt: "2026-08-12T10:44:00.000Z" },
+        singleReviewer: { displayName: "Jane Smith", reviewedAt: "2026-08-12T10:44:00.000Z" },
       });
+      expect(JSON.stringify(result)).not.toContain("reviewer-1");
     }
   );
 
@@ -210,7 +212,7 @@ describe("buildReviewGovernanceViewModel — milestone2, single-reviewer termina
     const result = await buildReviewGovernanceViewModel(
       baseInput({ governanceRecord: makeGovernanceRecord({ status: "approved", reviewerId: "reviewer-1" }) })
     );
-    expect(result).toMatchObject({ singleReviewer: { userId: "reviewer-1" } });
+    expect(result).toMatchObject({ singleReviewer: { displayName: "Jane Smith" } });
   });
 
   it("does NOT populate singleReviewer for a multi-reviewer decision, even though reviewerId is set to the overriding owner", async () => {
@@ -246,10 +248,14 @@ describe("buildReviewGovernanceViewModel — milestone2, peer-review panel", () 
     });
     const panelResult = (result as any).panel;
     expect(panelResult.reviewers).toEqual([
-      { userId: "reviewer-1", displayName: "Jane Smith", hasVoted: true, voteStatus: "approved", submittedAt: "2026-08-12T10:44:00.000Z" },
-      { userId: "reviewer-2", displayName: "Mohamed Ali", hasVoted: false },
-      { userId: "reviewer-3", displayName: "Sarah Chen", hasVoted: false },
+      { reviewerKey: "panelist-0", displayName: "Jane Smith", hasVoted: true, voteStatus: "approved", submittedAt: "2026-08-12T10:44:00.000Z" },
+      { reviewerKey: "panelist-1", displayName: "Mohamed Ali", hasVoted: false },
+      { reviewerKey: "panelist-2", displayName: "Sarah Chen", hasVoted: false },
     ]);
+    // No raw reviewer uid anywhere in the panel view — see Governance Follow-Up Hardening.
+    expect(JSON.stringify(result)).not.toContain("reviewer-1");
+    expect(JSON.stringify(result)).not.toContain("reviewer-2");
+    expect(JSON.stringify(result)).not.toContain("reviewer-3");
   });
 
   it("reflects an open panel that has reached quorum and is ready to finalize", async () => {
@@ -301,9 +307,11 @@ describe("buildReviewGovernanceViewModel — milestone2, peer-review panel", () 
         status: "finalized",
         finalStatus: "rejected",
         finalizedVia: "owner_override",
-        overrideBy: { userId: "admin-1", displayName: "Alex Owner" },
+        overrideBy: { displayName: "Alex Owner" },
       },
     });
+    // The override actor's raw uid must never appear, only their resolved name.
+    expect(JSON.stringify(result)).not.toContain("admin-1");
   });
 
   it("reflects a cancelled panel without crashing when no votes are supplied", async () => {
@@ -313,6 +321,60 @@ describe("buildReviewGovernanceViewModel — milestone2, peer-review panel", () 
       panel: { status: "cancelled", submittedCount: 0, approvalCount: 0, blockingCount: 0 },
     });
     expect((result as any).panel.aggregationState).toBeUndefined();
+  });
+});
+
+describe("buildReviewGovernanceViewModel — Governance Follow-Up Hardening: no raw uid ever appears (Part 4)", () => {
+  it("a fully-populated milestone2 fixture (assignment + owner-override panel + votes + single-reviewer-shaped record) never leaks any raw uid, only resolved display names", async () => {
+    // Every uid used anywhere in this fixture — assignment, panel roster,
+    // override actor, humanReview.reviewerId — is asserted absent from the
+    // serialized output below. Real uids are deliberately distinctive
+    // (not substrings of any display name) so a false-positive match is
+    // implausible.
+    const record = makeGovernanceRecord({
+      status: "rejected",
+      reviewerId: "admin-1",
+      decidedVia: "multi_reviewer_owner_override",
+    });
+    const assignment = makeAssignment({ assignedReviewerUserId: "reviewer-1", assignedByUserId: "admin-1" });
+    const panel = makePanel({
+      reviewerUserIds: ["reviewer-1", "reviewer-2", "reviewer-3"],
+      status: "finalized",
+      finalStatus: "rejected",
+      finalizedAt: "2026-08-12T10:55:00.000Z",
+      finalizedByUserId: "admin-1",
+      finalDecisionId: "decision-3",
+      aggregationPolicyVersion: 1,
+      finalizedVia: "owner_override",
+      overrideJustificationPresent: true,
+      overrideByUserId: "admin-1",
+    });
+    const votes = [
+      makeVote({ reviewerUserId: "reviewer-1", status: "changes_requested" }),
+      makeVote({ reviewerUserId: "reviewer-2", status: "rejected" }),
+    ];
+    const result = await buildReviewGovernanceViewModel(baseInput({ governanceRecord: record, legacy: null, assignment, panel, votes }));
+
+    const raw = JSON.stringify(result);
+    const rawUids = ["reviewer-1", "reviewer-2", "reviewer-3", "admin-1"];
+    for (const uid of rawUids) {
+      expect(raw).not.toContain(uid);
+    }
+    // The resolved display names ARE expected to be present — this proves
+    // the absence above is real redaction, not merely an empty response.
+    expect(raw).toContain("Jane Smith");
+    expect(raw).toContain("Mohamed Ali");
+    expect(raw).toContain("Sarah Chen");
+    expect(raw).toContain("Alex Owner");
+  });
+
+  it("legacy family: reviewedByUid never appears, only the resolved display name", async () => {
+    const result = await buildReviewGovernanceViewModel(
+      baseInput({ legacy: { status: "blocked", reasons: ["policy"], reviewedByUid: "reviewer-2", reviewedAt: "2026-08-12T09:00:00.000Z" } })
+    );
+    const raw = JSON.stringify(result);
+    expect(raw).not.toContain("reviewer-2");
+    expect(raw).toContain("Mohamed Ali");
   });
 });
 

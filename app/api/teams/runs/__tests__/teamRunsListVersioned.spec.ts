@@ -506,7 +506,7 @@ describe("GET /api/teams/runs?version=1 — reviewer display (final task)", () =
     setAssignment("run-assigned");
     const body = await (await GET(buildRequest(""))).json();
     const item = body.items.find((i: any) => i.runId === "run-assigned");
-    expect(item.assignment).toMatchObject({ reviewerUserId: "reviewer-1", reviewerDisplayName: "Name-reviewer-1" });
+    expect(item.assignment).toMatchObject({ reviewerDisplayName: "Name-reviewer-1" });
     expect(item.singleReviewer).toBeNull();
   });
 
@@ -515,7 +515,7 @@ describe("GET /api/teams/runs?version=1 — reviewer display (final task)", () =
     setGovernanceRecord("run-done", { status: "approved", reviewerId: "reviewer-1", reviewedAt: "2026-08-12T10:44:00.000Z", decidedVia: "single_reviewer" });
     const body = await (await GET(buildRequest(""))).json();
     const item = body.items.find((i: any) => i.runId === "run-done");
-    expect(item.singleReviewer).toEqual({ userId: "reviewer-1", displayName: "Name-reviewer-1", reviewedAt: "2026-08-12T10:44:00.000Z" });
+    expect(item.singleReviewer).toEqual({ displayName: "Name-reviewer-1", reviewedAt: "2026-08-12T10:44:00.000Z" });
   });
 
   it("shows peer-review panel progress with individual reviewer results", async () => {
@@ -527,8 +527,8 @@ describe("GET /api/teams/runs?version=1 — reviewer display (final task)", () =
     const item = body.items.find((i: any) => i.runId === "run-panel");
     expect(item.panel).toMatchObject({ status: "open", requiredReviewerCount: 2, quorum: 2, submittedCount: 1, approvalCount: 1 });
     expect(item.panel.reviewers).toEqual([
-      { userId: "reviewer-1", displayName: "Name-reviewer-1", hasVoted: true, voteStatus: "approved", submittedAt: "2026-08-12T10:44:00.000Z" },
-      { userId: "reviewer-2", displayName: "Name-reviewer-2", hasVoted: false },
+      { reviewerKey: "panelist-0", displayName: "Name-reviewer-1", hasVoted: true, voteStatus: "approved", submittedAt: "2026-08-12T10:44:00.000Z" },
+      { reviewerKey: "panelist-1", displayName: "Name-reviewer-2", hasVoted: false },
     ]);
   });
 
@@ -549,7 +549,7 @@ describe("GET /api/teams/runs?version=1 — reviewer display (final task)", () =
     });
     const body = await (await GET(buildRequest(""))).json();
     const item = body.items.find((i: any) => i.runId === "run-override");
-    expect(item.panel).toMatchObject({ finalizedVia: "owner_override", overrideBy: { userId: "admin-1", displayName: "Name-admin-1" } });
+    expect(item.panel).toMatchObject({ finalizedVia: "owner_override", overrideBy: { displayName: "Name-admin-1" } });
     expect(item.singleReviewer).toBeNull(); // override identity surfaces via panel.overrideBy, never duplicated
   });
 
@@ -632,7 +632,7 @@ describe("GET /api/teams/runs?version=1 — canonical precedence over the adapti
     const body = await (await GET(buildRequest(""))).json();
     const item = body.items.find((i: any) => i.runId === "run-mismatch");
     // The enriched, canonical-derived detail fields show the real, approved state...
-    expect(item.singleReviewer).toEqual({ userId: "reviewer-1", displayName: "Name-reviewer-1", reviewedAt: "2026-08-12T10:44:00.000Z" });
+    expect(item.singleReviewer).toEqual({ displayName: "Name-reviewer-1", reviewedAt: "2026-08-12T10:44:00.000Z" });
     // ...and the top-level status badge/reviewable flag are corrected to
     // match rather than left at the stale discovery-projection value. This
     // mirrors the established precedent in
@@ -706,15 +706,21 @@ describe("GET /api/teams/runs?version=1 — privacy on enriched fields (Step 10)
     }
   });
 
-  it("never renders a raw reviewer uid anywhere except inside an already-resolved reviewer object's own userId field (never as free text)", async () => {
+  it("never renders a raw reviewer uid anywhere — Governance Follow-Up Hardening removed raw uids from the shared ReviewGovernanceViewModel this list item reuses; only resolved display names remain", async () => {
     teamRunDocs.set("a1", adaptiveDoc({ runId: "run-uid-check" }));
     setGovernanceRecord("run-uid-check", { status: "unreviewed" });
     setAssignment("run-uid-check", { assignedReviewerUserId: "reviewer-1", assignedByUserId: "admin-1" });
     const body = await (await GET(buildRequest(""))).json();
     const item = body.items.find((i: any) => i.runId === "run-uid-check");
-    // The uid is only ever present alongside its own resolved displayName.
-    expect(item.assignment.reviewerUserId).toBe("reviewer-1");
     expect(item.assignment.reviewerDisplayName).toBe("Name-reviewer-1");
+    // Field-presence check, not a substring scan — this mock's resolved
+    // display names are literally "Name-<uid>", so the raw uid IS a
+    // substring of the safe, expected output; asserting the *field* is
+    // gone is the real guarantee (a substring check here would be a
+    // false-positive-prone assertion, same pitfall documented in
+    // reviewGovernanceViewModel.spec.ts).
+    expect(item.assignment).not.toHaveProperty("reviewerUserId");
+    expect(item.assignment).not.toHaveProperty("assignedByUserId");
   });
 });
 
