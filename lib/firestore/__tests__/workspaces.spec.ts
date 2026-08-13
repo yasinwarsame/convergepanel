@@ -70,6 +70,7 @@ jest.mock("@/lib/logger", () => ({
 }));
 
 import { getWorkspace, createPersonalWorkspace } from "@/lib/firestore/workspaces";
+import { isWellFormedWorkspaceV1 } from "@/lib/workspaces/types";
 
 function seedWorkspace(id: string, overrides: Record<string, unknown> = {}) {
   workspaceDocs.set(`workspaces/${id}`, {
@@ -198,6 +199,19 @@ describe("createPersonalWorkspace", () => {
       expect(result.workspace.updatedAt).toBeDefined();
     }
     expect(workspaceDocs.has("workspaces/personal-owner-1")).toBe(true);
+  });
+
+  it("the created document passes isWellFormedWorkspaceV1() with no special bypass — creation and reading share the exact same schema", async () => {
+    const result = await createPersonalWorkspace("owner-1");
+    expect(result.status).toBe("created");
+    if (result.status === "created") {
+      expect(isWellFormedWorkspaceV1(result.workspace)).toBe(true);
+    }
+    // And round-tripping through getWorkspace() (the real read path)
+    // confirms the same: no divergence between what create writes and
+    // what read is willing to accept as "found".
+    const readBack = await getWorkspace("personal-owner-1");
+    expect(readBack.status).toBe("found");
   });
 
   it("returns already_exists (never overwrites) when the deterministic id is already taken", async () => {
