@@ -30,6 +30,7 @@ lib/
   video/                 ← Video verification pipeline
   synthesis/             ← Synthesis schemas + input builder
   governance/            ← Policy engine, audit log, team types
+  workspaces/            ← Personal Workspace provisioning + Workspace-aware run binding
   firestore/             ← All Firestore read/write helpers
   billing/               ← Plan config helpers
   panel.ts               ← Panel orchestration (runPanel)
@@ -865,6 +866,29 @@ Summary: three formats — PDF (Phase 1), DOCX (Phase 3), JSON (Phase 4) — eac
 
 ---
 
+## Workspaces (Personal) — LIVE IN PRODUCTION as of 2026-08-14
+
+Full architecture, phase-by-phase design rationale, flag matrices, and rollout evidence: **[`docs/workspaces/architecture.md`](./workspaces/architecture.md)**.
+
+Every user gets exactly one deterministic Personal Workspace (`workspaces/personal-{uid}`, `lib/workspaces/personalWorkspaceId.ts`) — id construction is never reimplemented inline anywhere in the codebase. Provisioning is idempotent (Firestore `.create()` only, no transaction needed) via the single canonical `ensurePersonalWorkspace()` (`lib/workspaces/ensurePersonalWorkspace.ts`), reused verbatim by every call site:
+
+- **Self-service** (`POST /api/user/workspace`, `app/api/user/workspace/route.ts`) — called from both `/login` and `/signup` client code, **awaited before the app redirect proceeds**. This is what makes provisioning "steady-state": a user can never enter the app without a Workspace, and a Workspace that goes missing for an existing user self-heals on their next login. Gated by `PERSONAL_WORKSPACE_PROVISIONING_ENABLED` (`lib/env.ts`), independent of the two flags below.
+- **Bulk backfill** (one-time, historical) — `scripts/workspaces/provision-existing-personal-workspaces.ts`, used once to provision the pre-existing user population before Workspace-aware writes went live. Not part of any runtime code path.
+
+**Workspace-aware writes** — newly created Personal (non-team) **adaptive** research runs are persisted with an optional `workspaceId` pointing at the owner's Workspace (`lib/workspaces/personalRunWorkspaceBinding.ts`, wired into `POST /api/run-panel`). Deep Research (non-adaptive), Claim Verification, Video Verification, and all team runs are entirely unaffected — `workspaceId` is simply absent on those documents; no historical run has ever been mutated, and none will be until a separate, later backfill phase. A missing/invalid Workspace fails the request closed (`workspace_prerequisite_failed` / `workspace_configuration_invalid`) **before** any model call, usage increment, or run creation — the binding check never provisions a Workspace as a side effect.
+
+Two independent flags gate this, both required, checked in this order in `resolvePersonalRunWorkspaceBinding()` (team exclusion is checked before the flag-configuration invariant — this ordering was itself a fixed defect, see architecture doc):
+
+| Flag | Purpose |
+|------|---------|
+| `WORKSPACES_ENABLED` | Authorization/read prerequisite — do reads honor a persisted `workspaceId` at all |
+| `PERSONAL_RUN_WORKSPACE_WRITES_ENABLED` | Write rollout switch — global, currently `true` in production |
+| `PERSONAL_RUN_WORKSPACE_WRITE_CANARY_UIDS` | Optional comma-separated account-scoped allowlist that can enable writes for specific uids independent of the global flag (used for staged canaries; absent once a rollout goes global) |
+
+**Production status:** Personal Workspace provisioning and Workspace-aware writes are fully live and global (`PERSONAL_WORKSPACE_PROVISIONING_ENABLED=true`, `WORKSPACES_ENABLED=true`, `PERSONAL_RUN_WORKSPACE_WRITES_ENABLED=true`, no canary allowlist). This was reached through four staged production releases — a single-account write canary, a lifecycle-provisioning release (new-signup + login-self-heal), a small multi-account write canary, and finally the global write enablement — each with its own read-only population reconciliation and rollback rehearsal, with zero rollbacks needed at any stage. **Not yet started:** backfilling `workspaceId` onto pre-existing runs, making any read path treat `workspaceId` as security-relevant, Workspace UI, or Projects — all deliberately separate future phases.
+
+---
+
 ## Firestore Data Model
 
 Primary database. Firebase Admin SDK is server-only — import with `"server-only"`.
@@ -872,7 +896,8 @@ Primary database. Firebase Admin SDK is server-only — import with `"server-onl
 | Collection | Purpose |
 |-----------|---------|
 | `users/{uid}` | User profile, plan, `runsThisMonth`, `usageMonth`, video quota, Stripe subscription state, governance fields |
-| `runs/{runId}` | Panel run: `userId`, `question`, `selectedModels`, `status`, `results`, `resultsCompact`, `totalTokens`, `tokensByProvider`, `synthesizedReportV2`, `synthesizedStructuredReport` |
+| `runs/{runId}` | Panel run: `userId`, `question`, `selectedModels`, `status`, `results`, `resultsCompact`, `totalTokens`, `tokensByProvider`, `synthesizedReportV2`, `synthesizedStructuredReport`, optional `workspaceId` (Personal adaptive runs only — see Workspaces section) |
+| `workspaces/{workspaceId}` | Personal Workspace: `id`, `schemaVersion`, `type` (`"personal"`), `ownerUserId`, `name`, `createdAt`, `updatedAt`. Deterministic id `personal-{uid}`, one per user, never mutated after creation except by re-provisioning an equivalent record |
 | `videoVerifications/{id}` | Video verification result with frames metadata, vision model outputs, verdict, consensus score |
 | `admin_audit_logs/{id}` | Append-only governance audit events |
 | `teams/{teamId}` | Team document with members, policyRules, settings, `adaptiveMultiReviewerSettings.enabled` (team opt-in) |
@@ -905,6 +930,7 @@ At runtime, `lib/env.ts` is the single source of truth for all server-side envir
 | `/api/teams/adaptive-runs/[runId]/votes` | POST | Submit a reviewer's vote |
 | `/api/admin/*` | Various | Admin management (requires `admin: true` custom claim) |
 | `/api/user/*` | Various | User profile read/update |
+| `/api/user/workspace` | POST | Ensure the authenticated user's Personal Workspace exists (idempotent); called by `/login` and `/signup`, awaited before redirect |
 
 ---
 
@@ -955,6 +981,15 @@ Firebase Admin tries credentials in the order listed above.
 | Variable | Used for |
 |----------|---------|
 | `ADMIN_EMAILS` | Comma-separated emails that can be granted `admin: true` custom claim |
+
+**Workspaces** (see Workspaces section above; production values as of 2026-08-14 noted):
+
+| Variable | Used for | Production |
+|----------|---------|-----------|
+| `WORKSPACES_ENABLED` | Read/authorization prerequisite — do reads honor a persisted `workspaceId` | `true` |
+| `PERSONAL_WORKSPACE_PROVISIONING_ENABLED` | Self-service provisioning on login/signup | `true` |
+| `PERSONAL_RUN_WORKSPACE_WRITES_ENABLED` | Global switch for writing `workspaceId` onto new Personal adaptive runs | `true` |
+| `PERSONAL_RUN_WORKSPACE_WRITE_CANARY_UIDS` | Optional account-scoped allowlist for staged write canaries, independent of the global flag | absent (not in use) |
 
 ---
 
