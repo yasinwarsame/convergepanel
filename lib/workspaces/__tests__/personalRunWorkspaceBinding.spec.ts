@@ -47,7 +47,7 @@ describe("resolvePersonalRunWorkspaceBinding", () => {
     expect(result).toEqual({ outcome: "flag_off" });
   });
 
-  it("invalid_configuration when RW=true but W=false — never proceeds to team/workspace resolution", async () => {
+  it("invalid_configuration when RW=true but W=false, for a NON-team user — never proceeds to workspace resolution", async () => {
     const { resolvePersonalRunWorkspaceBinding } = await loadModule();
     const result = await resolvePersonalRunWorkspaceBinding({ uid: "uid-1", writesEnabled: true, workspacesEnabled: false, hasTeam: false });
     expect(result).toEqual({ outcome: "invalid_configuration", reason: "workspaces_disabled_but_writes_enabled" });
@@ -57,6 +57,14 @@ describe("resolvePersonalRunWorkspaceBinding", () => {
     const { resolvePersonalRunWorkspaceBinding } = await loadModule();
     const result = await resolvePersonalRunWorkspaceBinding({ uid: "uid-1", writesEnabled: true, workspacesEnabled: true, hasTeam: true });
     expect(result).toEqual({ outcome: "team_user" });
+    expect(workspaceDocs.size).toBe(0); // never even attempted a workspace lookup
+  });
+
+  it("REGRESSION (Phase 3A independent review): a TEAM user with writesEnabled=true and workspacesEnabled=false gets team_user, NEVER invalid_configuration — the Personal-only configuration invariant must never hard-reject a request Phase 3 was never going to bind in the first place. Team scope-exclusion is checked before the Personal-only config check, not after", async () => {
+    const { resolvePersonalRunWorkspaceBinding } = await loadModule();
+    const result = await resolvePersonalRunWorkspaceBinding({ uid: "team-uid", writesEnabled: true, workspacesEnabled: false, hasTeam: true });
+    expect(result).toEqual({ outcome: "team_user" });
+    expect(result).not.toEqual(expect.objectContaining({ outcome: "invalid_configuration" }));
     expect(workspaceDocs.size).toBe(0); // never even attempted a workspace lookup
   });
 

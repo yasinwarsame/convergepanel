@@ -42,19 +42,34 @@ export async function resolvePersonalRunWorkspaceBinding(args: {
     return { outcome: "flag_off" };
   }
 
+  // Team scope-exclusion checked BEFORE the Personal-only configuration
+  // invariant below — found by a Phase 3A independent review testing
+  // canary-targeted team users specifically. The Personal Workspace
+  // `writesEnabled && !workspacesEnabled` invariant exists to protect a
+  // PERSONAL Workspace-bound write from being created under a
+  // configuration where the resolver can't authorize it; it has nothing
+  // to do with a team run at all, since Phase 3/3A never bind a team run
+  // to a Personal Workspace regardless of W. Checking configuration
+  // first (the original, pre-Phase-3A order) meant a team user who
+  // happened to have `writesEnabled: true` (via global RW or a canary
+  // match) — a request Phase 3 was never going to touch — was
+  // incorrectly HARD-REJECTED with `workspace_configuration_invalid`
+  // whenever W was off, purely because of a Personal-only invariant that
+  // doesn't apply to them. Team runs never get a Personal Workspace
+  // binding — team Workspace mapping is explicitly out of scope for
+  // Phase 3 (see architecture doc). This is not a failure; it's simply
+  // not applicable, and must be established before any Personal-only
+  // check runs.
+  if (args.hasTeam) {
+    return { outcome: "team_user" };
+  }
+
   const configCheck = checkPersonalRunWorkspaceWriteConfiguration({
     workspacesEnabled: args.workspacesEnabled,
     writesEnabled: args.writesEnabled,
   });
   if (!configCheck.ok) {
     return { outcome: "invalid_configuration", reason: configCheck.reason };
-  }
-
-  // Team runs never get a Personal Workspace binding — team Workspace
-  // mapping is explicitly out of scope for Phase 3 (see architecture doc).
-  // This is not a failure; it's simply not applicable.
-  if (args.hasTeam) {
-    return { outcome: "team_user" };
   }
 
   const idResult = getPersonalWorkspaceId(args.uid);

@@ -214,6 +214,27 @@ export const PERSONAL_WORKSPACE_PROVISIONING_ENABLED = process.env.PERSONAL_WORK
 export const PERSONAL_RUN_WORKSPACE_WRITES_ENABLED = process.env.PERSONAL_RUN_WORKSPACE_WRITES_ENABLED === "true";
 
 /**
+ * Account-Scoped Workspace Write Canary, Phase 3A
+ * (docs/workspaces/architecture.md) — an optional, server-only comma-
+ * separated Firebase uid allowlist letting the ALREADY-BUILT Phase 3
+ * write path (see `PERSONAL_RUN_WORKSPACE_WRITES_ENABLED` above) be
+ * activated for a small number of explicitly named accounts while the
+ * global flag stays `false`. Deliberately a raw, unparsed string here —
+ * `lib/workspaces/personalRunWorkspaceWriteCanary.ts` owns all parsing/
+ * validation/matching logic, so this module stays a pure passthrough
+ * like every other env binding in this file.
+ *
+ * Never prefixed `NEXT_PUBLIC_` — this must never reach a client bundle;
+ * canary membership is a server-only decision, resolved once per request
+ * against the authenticated uid, never exposed to any response body or
+ * client-readable config (see that module's own doc comment for why: an
+ * allowlist is a legitimate uid list, sensitive enough to keep entirely
+ * server-side even though it doesn't gate anything security-critical by
+ * itself).
+ */
+export const PERSONAL_RUN_WORKSPACE_WRITE_CANARY_UIDS = process.env.PERSONAL_RUN_WORKSPACE_WRITE_CANARY_UIDS;
+
+/**
  * Search engine site-verification tokens.
  *
  * Optional — when unset, the corresponding verification meta tag is simply
