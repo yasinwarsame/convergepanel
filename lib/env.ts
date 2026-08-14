@@ -193,6 +193,27 @@ export const WORKSPACES_ENABLED = process.env.WORKSPACES_ENABLED === "true";
 export const PERSONAL_WORKSPACE_PROVISIONING_ENABLED = process.env.PERSONAL_WORKSPACE_PROVISIONING_ENABLED === "true";
 
 /**
+ * Workspace-Aware Writes for New Personal Adaptive Runs, Phase 3
+ * (docs/workspaces/architecture.md) — a THIRD independent server-side-only
+ * kill switch, default OFF, same fail-closed convention as the two flags
+ * above. `WORKSPACES_ENABLED` answers "does the resolver honor a persisted
+ * workspaceId" (authorization); `PERSONAL_WORKSPACE_PROVISIONING_ENABLED`
+ * answers "can new Workspace documents be created" (Phase 2 provisioning
+ * rollout); this one answers "should a newly created Personal adaptive run
+ * be persisted WITH a workspaceId at all" (Phase 3 write rollout). All
+ * three must be able to move independently.
+ *
+ * Enabling this while `WORKSPACES_ENABLED` is false is an invalid
+ * configuration — see `checkPersonalRunWorkspaceWriteConfiguration()` in
+ * `lib/workspaces/personalRunWorkspaceWriteConfig.ts`, the single place
+ * that invariant is enforced. A newly bound run would otherwise be
+ * immediately inaccessible to its own owner, since the resolver denies
+ * (never falls back to legacy) whenever a `workspaceId` is present but
+ * `WORKSPACES_ENABLED` is off.
+ */
+export const PERSONAL_RUN_WORKSPACE_WRITES_ENABLED = process.env.PERSONAL_RUN_WORKSPACE_WRITES_ENABLED === "true";
+
+/**
  * Search engine site-verification tokens.
  *
  * Optional — when unset, the corresponding verification meta tag is simply

@@ -48,7 +48,8 @@ import { sanitizeModelText, truncateForSynthesis, MAX_CHARS_SYNTHESIS_PER_MODEL 
 import { PanelResultPublic } from "@/lib/panel/schemas";
 import { normalizeModelResultPublic, assertPublicStatus } from "@/lib/panel/normalize";
 import { logger } from "@/lib/logger";
-import { ADAPTIVE_SCHEMAS_ENABLED } from "@/lib/env";
+import { ADAPTIVE_SCHEMAS_ENABLED, PERSONAL_RUN_WORKSPACE_WRITES_ENABLED, WORKSPACES_ENABLED } from "@/lib/env";
+import { resolvePersonalRunWorkspaceBinding } from "@/lib/workspaces/personalRunWorkspaceBinding";
 import { planAdaptiveRun, finalizeAdaptiveRun, AdaptivePromptPlan, buildNonExecutionPayload } from "@/lib/adaptiveSchema/orchestrate";
 import { trackQueryClassified, trackRoutingOutcome, trackPanelExecutionStarted, trackPanelExecutionCompleted, trackPanelExecutionFailed, trackRankedListShortfall, trackComparisonMatrixGap, trackDefinitionAmbiguity, trackCausalExplanationGap, trackChecklistTaxonomyGap, trackDeepResearchGap, trackEvidenceReviewGap, trackBiasAuditNoAttribution, trackBiasAuditPanelGapFound, trackBiasAuditHomogeneityFlagged, trackDecisionSupportContested, trackDecisionSupportHighSensitivity, trackDecisionSupportMissingCriteria } from "@/lib/adaptiveSchema/analytics";
 
@@ -261,6 +262,93 @@ export async function POST(req: NextRequest) {
     }
 
     // ============================================
+    // WORKSPACE-AWARE WRITES FOR NEW PERSONAL ADAPTIVE RUNS, PHASE 3 —
+    // PREREQUISITE CHECK
+    // ============================================
+    // Resolved here — BEFORE subscription validation, BEFORE plan-quota/
+    // usage increment (checkAndIncrementUsageForRun below), BEFORE any
+    // model execution (runPanel further down) — specifically so a
+    // request that is already known to be unable to satisfy the Phase 3
+    // write contract never spends model tokens or consumes usage quota
+    // for research it cannot persist. This is a distinct failure class
+    // from an ordinary createRun() failure after successful research
+    // (handled separately, in its own established best-effort way, at
+    // the CREATE RUN RECORD section below).
+    //
+    // Scoped to adaptive runs only: by this point, the routing guard
+    // above has already guaranteed `adaptivePlan` is either null (adaptive
+    // disabled or classification failed — a legacy/Deep-Research request)
+    // or has `routing.kind === "active"` (a genuine adaptive request) — a
+    // non-active routing already returned early. So `adaptivePlan !== null`
+    // here IS "this is a genuine adaptive request," with no separate
+    // `.routing.kind` check needed. For a null adaptivePlan (Deep
+    // Research), this entire block — including `loadUserAndTeam`,
+    // `getPersonalWorkspaceId`, and `getWorkspace` — is skipped entirely;
+    // Phase 3 does not cover Deep Research, so no Workspace lookup of any
+    // kind is ever attempted for it.
+    const runId = `run-${randomUUID()}`;
+    let workspaceIdForRun: string | undefined;
+    if (PERSONAL_RUN_WORKSPACE_WRITES_ENABLED && adaptivePlan !== null) {
+      const teamCtx = await loadUserAndTeam(uid);
+      const binding = await resolvePersonalRunWorkspaceBinding({
+        uid,
+        writesEnabled: PERSONAL_RUN_WORKSPACE_WRITES_ENABLED,
+        workspacesEnabled: WORKSPACES_ENABLED,
+        hasTeam: !!teamCtx?.team,
+      });
+      switch (binding.outcome) {
+        case "bound":
+          workspaceIdForRun = binding.workspaceId;
+          logger.info("[run-panel] personal_run_workspace_bound", { runId });
+          break;
+        case "resolution_failed": {
+          // Fail BEFORE model execution — never silently fall back to
+          // creating a legacy (non-workspace-bound) run once write
+          // rollout is enabled, and never spend model tokens on a
+          // request already known to be unable to persist. Sanitized:
+          // never leaks the owner uid, a Firestore path, or a raw
+          // Firebase error — only a stable, generic reason code.
+          logger.error("[run-panel] personal_run_workspace_resolution_failed", { runId, reason: binding.reason });
+          const sanitizedReason: "workspace_missing" | "workspace_unavailable" | "workspace_invalid" =
+            binding.reason === "not_found"
+              ? "workspace_missing"
+              : binding.reason === "lookup_failed"
+                ? "workspace_unavailable"
+                : "workspace_invalid"; // malformed | wrong_owner | wrong_type | invalid_uid
+          const status = sanitizedReason === "workspace_unavailable" ? 503 : 409;
+          const message =
+            sanitizedReason === "workspace_missing"
+              ? "Your account isn't fully set up yet. Please try signing in again."
+              : sanitizedReason === "workspace_unavailable"
+                ? "We couldn't verify your account right now. Please try again in a moment."
+                : "There's a problem with your account setup. Please contact support.";
+          const response: RunPanelApiResponse = { ok: false, errorCode: "workspace_prerequisite_failed", message };
+          return NextResponse.json(response, { status });
+        }
+        case "invalid_configuration": {
+          // Rollout-integrity hardening: RW=true with W=false must never
+          // silently downgrade to a legacy write — an operator who
+          // enabled RW expects Workspace-associated runs, and a silent
+          // legacy fallback would let production quietly keep generating
+          // unbound records with no visible signal. Rejected before any
+          // model execution or usage consumption, same as a resolution
+          // failure above.
+          logger.error("[run-panel] personal_run_workspace_configuration_invalid", { runId, reason: binding.reason });
+          const response: RunPanelApiResponse = {
+            ok: false,
+            errorCode: "workspace_configuration_invalid",
+            message: "This feature is temporarily unavailable. Please try again later.",
+          };
+          return NextResponse.json(response, { status: 500 });
+        }
+        case "team_user":
+        case "flag_off":
+          // Not applicable — proceeds exactly as legacy, not a failure.
+          break;
+      }
+    }
+
+    // ============================================
     // SUBSCRIPTION VALIDATION (for paid plans)
     // ============================================
     
@@ -333,13 +421,17 @@ export async function POST(req: NextRequest) {
     // ============================================
     // CREATE RUN RECORD
     // ============================================
-    
-    // Generate unique run ID
-    const runId = `run-${randomUUID()}`;
-    
-    // Create run document in Firestore (status: "running")
+    // `workspaceIdForRun` was already resolved (or determined not
+    // applicable) further up, before any model execution — see the
+    // WORKSPACE PREREQUISITE CHECK block above. This section only
+    // performs the actual best-effort persistence write. A failure HERE
+    // (e.g. a transient Firestore write error) is a different failure
+    // class from a Workspace PREREQUISITE failure: research has not run
+    // yet at this point either way, and this mirrors the pre-existing,
+    // established "run creation is for tracking, not critical for
+    // execution" degradation for any other createRun() failure.
     try {
-      await createRun(runId, uid, trimmedQuestion, selectedModels);
+      await createRun(runId, uid, trimmedQuestion, selectedModels, workspaceIdForRun);
     } catch (runError: any) {
       // Log but don't fail - run creation is for tracking, not critical for execution
       logger.error("[run-panel] Failed to create run record", { error: runError });

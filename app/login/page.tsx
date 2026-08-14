@@ -207,6 +207,54 @@ export default function LoginPage() {
         }
       }
 
+      // Workspace-Aware Writes for New Personal Adaptive Runs, Phase 3 —
+      // new-user provisioning gap resolution, hardened per independent
+      // review: AWAITED (not fire-and-forget), self-heals a missing
+      // Personal Workspace on every login, mirroring the profile self-heal
+      // setDoc above. POST /api/user/workspace is Phase 2's existing
+      // self-provisioning endpoint.
+      //
+      // Only a WELL-FORMED, non-"provisioning_disabled" error response
+      // blocks the redirect — never a network-level failure (fetch
+      // throwing: connectivity loss, DNS, CORS, timeout, or authedFetch's
+      // own token-retrieval errors). A thrown error carries NO information
+      // about whether PERSONAL_WORKSPACE_PROVISIONING_ENABLED is even on
+      // server-side, so treating it as a hard block would give login a NEW
+      // failure dependency on this one endpoint even while Phase 3 is
+      // entirely dark — exactly the flags-off regression a second
+      // independent review caught in the first version of this hardening
+      // (that version's catch block unconditionally set
+      // personalWorkspaceReady = false, which is wrong: it made a
+      // transient network blip on THIS ONE endpoint capable of blocking
+      // login/signup for every user regardless of rollout state). Logged
+      // for observability either way — if this is ever masking a real
+      // problem during an active RW=true rollout, it is visible in logs,
+      // and the small residual gap is fully contained server-side: an
+      // affected user's first research request still fails safely and
+      // clearly (no run created, no tokens spent — see
+      // docs/workspaces/architecture.md's Workspace prerequisite section)
+      // rather than silently producing a broken or ambiguous run.
+      let personalWorkspaceReady = true;
+      try {
+        const { authedFetch } = await import("@/lib/client/authedFetch");
+        const workspaceRes = await authedFetch("/api/user/workspace", { user, authReady: true, method: "POST" });
+        if (!workspaceRes.ok) {
+          const workspaceBody = await workspaceRes.json().catch(() => ({}) as any);
+          personalWorkspaceReady = workspaceBody?.errorCode === "provisioning_disabled";
+        }
+      } catch (err: any) {
+        // Network-level failure — never block login on this alone (see
+        // comment above). Only surfaced in logs.
+        if (process.env.NODE_ENV !== "production") {
+          console.warn("[login] Personal Workspace self-heal request failed (non-blocking network error):", err?.message);
+        }
+      }
+      if (!personalWorkspaceReady) {
+        setError("We couldn't finish setting up your account. Please try signing in again.");
+        setLoading(false);
+        return;
+      }
+
       posthog.identify(user.uid, { email: user.email ?? undefined });
       posthog.capture("user_logged_in", { method: "email" });
 

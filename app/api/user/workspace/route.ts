@@ -7,9 +7,15 @@
  * never read for any provisioning input; every canonical value is derived
  * server-side.
  *
- * Not called by login, signup, session refresh, middleware, the homepage,
- * or any research/history route — provisioning remains explicitly-
- * callable-only in Phase 2 (docs/workspaces/architecture.md).
+ * As of Phase 3 (Workspace-Aware Writes for New Personal Adaptive Runs —
+ * the new-user provisioning gap resolution), this IS called by
+ * app/login/page.tsx and app/signup/page.tsx, fire-and-forget, best-effort,
+ * mirroring the existing profile self-heal pattern in both files. This
+ * endpoint's own behavior is unchanged: it still no-ops safely (503
+ * `provisioning_disabled`) whenever `PERSONAL_WORKSPACE_PROVISIONING_ENABLED`
+ * is off, which it currently is in production — so this remains dark until
+ * that separate, still-unauthorized flag is turned on. Not called by
+ * session refresh, middleware, the homepage, or any research/history route.
  */
 
 import { NextRequest, NextResponse } from "next/server";

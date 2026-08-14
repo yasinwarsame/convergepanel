@@ -289,6 +289,48 @@ export default function SignupPage() {
       posthog.identify(user.uid, { email: user.email ?? undefined, name: name.trim() || undefined });
       posthog.capture("user_signed_up", { method: "email" });
 
+      // Workspace-Aware Writes for New Personal Adaptive Runs, Phase 3 —
+      // new-user provisioning gap resolution, hardened per independent
+      // review: AWAITED (not fire-and-forget) — this is the very first
+      // opportunity to provision a brand-new user's Personal Workspace.
+      // POST /api/user/workspace is Phase 2's existing self-provisioning
+      // endpoint.
+      //
+      // Only a WELL-FORMED, non-"provisioning_disabled" error response
+      // blocks onboarding — never a network-level failure (fetch
+      // throwing). See app/login/page.tsx's identical block for the full
+      // reasoning: a thrown error carries no information about whether
+      // PERSONAL_WORKSPACE_PROVISIONING_ENABLED is even on server-side, so
+      // treating it as a hard block would give signup a new failure
+      // dependency on this one endpoint even while Phase 3 is entirely
+      // dark. Logged for observability; the residual gap is fully
+      // contained server-side (a first research request without a
+      // Workspace still fails safely and clearly — no run, no tokens
+      // spent). Provisioning is idempotent, so the correct recovery for a
+      // genuine failure is "try again" (directed to sign in, which
+      // re-attempts via login's own hardened self-heal), never "start
+      // over" — the just-created Auth account/profile is never deleted.
+      let personalWorkspaceReady = true;
+      try {
+        const { authedFetch } = await import("@/lib/client/authedFetch");
+        const workspaceRes = await authedFetch("/api/user/workspace", { user, authReady: true, method: "POST" });
+        if (!workspaceRes.ok) {
+          const workspaceBody = await workspaceRes.json().catch(() => ({}) as any);
+          personalWorkspaceReady = workspaceBody?.errorCode === "provisioning_disabled";
+        }
+      } catch (err: any) {
+        // Network-level failure — never block signup on this alone (see
+        // comment above). Only surfaced in logs.
+        if (process.env.NODE_ENV !== "production") {
+          console.warn("[signup] Personal Workspace provisioning request failed (non-blocking network error):", err?.message);
+        }
+      }
+      if (!personalWorkspaceReady) {
+        setError("Your account was created, but we couldn't finish setting it up. Please try signing in.");
+        setLoading(false);
+        return;
+      }
+
       // Redirect to onboarding page instead of main app
       // Preserve any redirect param so the user lands on their intended page after onboarding
       const rawRedirect = searchParams.get("redirect") || searchParams.get("next");

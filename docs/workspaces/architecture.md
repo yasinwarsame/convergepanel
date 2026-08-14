@@ -375,11 +375,138 @@ All of the above is asserted directly by tests, not merely described here (`lib/
 
 ## Rollout phases
 
-Phase 1 (COMPLETE, in production) → Phase 2 (COMPLETE, in production — provisions Personal Workspaces one-at-a-time on self-service demand only) → **Phase 2B (this document's latest section) bulk-provisions Personal Workspaces for the existing user population — explicitly NOT run backfill** → Phase 3 makes writes workspace-aware for new runs → Phase 4 makes reads/history workspace-aware and backfills historical runs → Phase 5 ships Workspace UI → Phase 6 introduces Projects → Phase 7 ships Projects UI → Phase 8 adds shared/collaborative workspaces.
+Phase 1 (COMPLETE, in production) → Phase 2 (COMPLETE, in production — provisions Personal Workspaces one-at-a-time on self-service demand only) → Phase 2B (COMPLETE, in production — bulk-provisioned Personal Workspaces for the full existing user population; explicitly NOT run backfill) → **Phase 3 (this document's latest section) makes writes workspace-aware for newly created Personal adaptive runs only — explicitly NOT historical backfill, NOT broad reads** → Phase 4 makes reads/history workspace-aware and backfills historical runs → Phase 5 ships Workspace UI → Phase 6 introduces Projects → Phase 7 ships Projects UI → Phase 8 adds shared/collaborative workspaces.
 
-The Phase 2B → Phase 3 ordering is a deliberate strategic choice: existing users are made Workspace-ready (provisioned) before any run gains workspace-aware writes. This keeps Phase 3 simple — new-run creation never needs to provision a Workspace and create a run in the same hot-path operation, because by the time Phase 3 starts, provisioning coverage should already be at or near 100%.
+The Phase 2B → Phase 3 ordering was a deliberate strategic choice: existing users were made Workspace-ready (provisioned) before any run gained workspace-aware writes. This kept Phase 3 simple — new-run creation never needs to provision a Workspace and create a run in the same hot-path operation, because by the time Phase 3 starts, provisioning coverage is already at 100% for the population that existed at the Phase 2B sweep (88/88 users, `missing: 0`, `conflicts: 0`, verified immediately before Phase 3 began).
 
-Phase 1, Phase 2, and Phase 2B are each independently releasable and reversible without any dependency on a later phase ever shipping.
+Phase 1, Phase 2, Phase 2B, and Phase 3 are each independently releasable and reversible without any dependency on a later phase ever shipping.
+
+## Phase 3 — Workspace-Aware Writes for New Personal Adaptive Runs
+
+Phase 3 adds exactly one capability: newly created Personal (non-team) **adaptive** research runs are persisted with an optional `workspaceId` field pointing at the owner's already-existing Personal Workspace. Nothing about existing runs, team runs, Deep Research (non-adaptive) runs, Claim Verification, Video Verification, the Verification Gate, export contracts, or governance canonical semantics changes. No historical run is ever mutated. No Workspace UI or Project concept is introduced.
+
+This section was hardened once after an independent review found three defects in the first implementation (model execution still proceeding after a Workspace prerequisite failure, a fire-and-forget new-user provisioning race, and Workspace binding leaking onto non-adaptive Deep Research runs) plus a fourth requested hardening (an invalid `W`/`RW` configuration silently downgrading to a legacy write instead of rejecting). All four are described as **resolved** below; the surrounding narrative reflects the current, hardened state — see PR history for the pre-hardening design if needed for context.
+
+### Write-site audit
+
+There is exactly **one** route capable of creating a `runs/{runId}` document — `POST /api/run-panel` (`app/api/run-panel/route.ts`), shared by both the Deep Research (multi-LLM) flow and the schema-classified adaptive flow. No retry/recovery/restore/import endpoint creates a run. The run document's ownership field is `userId` only — there is no `ownerUserId` field on `runs/{runId}`, and no personal-vs-team field on the document itself; "team run" is decided per-request, downstream, purely by whether `loadUserAndTeam(uid)` finds a team, via a separate `teamRuns/{...}` projection document, never a different shape of the run doc itself.
+
+`createRun()` (`lib/firestore/runs.ts`) performs a single, non-transactional `.set()` — `governanceRecord` (a field, not a subcollection) and `humanReviewAssignment` (a real subcollection) are both written by separate, later calls, further downstream. `uid` is resolved (`resolveRequestIdentity()`) at the very top of the route.
+
+### Actual request ordering (hardened)
+
+1. Authenticate (`resolveRequestIdentity`)
+2. Rate limiting, request body parsing/validation
+3. Adaptive classification (`planAdaptiveRun`, flag-gated by `ADAPTIVE_SCHEMAS_ENABLED`, never blocks — a classification failure degrades `adaptivePlan` to `null`, handled identically to adaptive being disabled)
+4. Query-routing guard — a non-`"active"` routing outcome returns early, before any run doc and before the Workspace prerequisite check
+5. **Workspace prerequisite check** (new position, moved up during hardening — see below)
+6. Subscription validation (best-effort, unaffected by Phase 3)
+7. Plan-quota/run-count usage increment (unaffected by Phase 3 either way — this is pre-existing ordering, out of this phase's scope, and happens regardless of Workspace outcome)
+8. `createRun()` — the single initial write, using the `workspaceId` already resolved at step 5
+9. `runPanel()` — real model execution
+10. (Adaptive-only, further downstream) adaptive output persistence, governance initialization, automated governance evaluation, a second, independent `loadUserAndTeam(uid)` call for team/personal review routing (team projection vs. personal reviewer assignment — pre-existing, unrelated to Workspace binding)
+
+### Workspace binding logic
+
+`lib/workspaces/personalRunWorkspaceBinding.ts`'s `resolvePersonalRunWorkspaceBinding()` is the single resolution function, reusing `getPersonalWorkspaceId()` (Phase 2) and `getWorkspace()` (Phase 1) verbatim — no reimplemented id-construction, schema validation, or conflict logic. **It never calls `ensurePersonalWorkspace()`** — a missing Workspace is a `resolution_failed` outcome, never a trigger to create one; enforced structurally (a dedicated test asserts the module never imports it). Team status (`hasTeam`) is supplied by the caller via the same canonical `loadUserAndTeam(uid)` already used elsewhere in this route for team-vs-personal routing.
+
+Outcomes: `flag_off` (writes disabled) / `invalid_configuration` (see Flag matrix below) / `team_user` (not applicable, not a failure) / `bound` (validated: `type === "personal"`, `ownerUserId === uid`, deterministic id matches) / `resolution_failed` with reason `invalid_uid | not_found | malformed | wrong_owner | wrong_type | lookup_failed`. The client-supplied request body is never consulted for any of this — `POST /api/run-panel` only ever destructures `{question, selectedModels}` from the body; a malicious `workspaceId`/`userId`/`ownerUserId` in the request is structurally never read, let alone trusted (tested explicitly).
+
+### Adaptive-only scope (hardened)
+
+The independent review found the first implementation attempted Workspace binding for **every** Personal run through this route, including plain Deep Research — because the check originally sat right next to `createRun()`, a call site shared unconditionally by both request types. Fixed by gating the entire prerequisite-check block (team lookup, Workspace resolution, everything) on `adaptivePlan !== null`, evaluated at its new position (step 5 above) — the exact signal the routing guard (step 4) has already confirmed means "a genuine, actively-routed adaptive request." For a non-adaptive Deep Research request, `resolvePersonalRunWorkspaceBinding()` — and therefore `loadUserAndTeam()`, `getPersonalWorkspaceId()`, and `getWorkspace()` — is never called at all (tested explicitly: zero calls, model execution still proceeds normally under existing Deep Research semantics, `workspaceId` is absent on the created run).
+
+### No patch-after-create; ownership consistency
+
+`createRun()`'s signature gained one optional trailing parameter, `workspaceId`, included in the SAME initial `.set()` call — never a later `.update()`. A run is either workspace-bound from the moment it exists, or not at all; there is no intermediate, ambiguous-ownership state. `userId` is always set to the authenticated `uid`, and `workspaceId` (when bound) is always the deterministic id whose `ownerUserId` was independently validated to equal that same `uid` — so `run.userId === workspace.ownerUserId === authenticated uid` holds by construction.
+
+### Workspace prerequisite failure: fails before model execution and before usage consumption (hardened)
+
+The independent review found the first implementation's `resolution_failed` handling reused the pre-existing "run creation is for tracking, not critical for execution" degradation path — which let `runPanel()` (real model execution) and downstream token-usage accounting proceed anyway, spending resources on a request already known to be unable to satisfy the Phase 3 write contract. This is a genuinely different failure class from "research succeeded but the tracking record failed to save," and is now handled distinctly:
+
+The Workspace prerequisite check (step 5) now runs **before** subscription validation, **before** `checkAndIncrementUsageForRun` (plan-quota/run-count), and **before** `runPanel()`. On `resolution_failed` or `invalid_configuration`, the route returns an HTTP error response **immediately** — no `createRun()`, no model/provider calls, no token-usage increment, no governance/review-assignment/team-projection creation. This is tested explicitly for every one of the six `resolution_failed` reasons plus `invalid_configuration`, asserting zero calls to `runPanel`, `createRun`, and `incrementUserTokenUsage` in each case.
+
+Response contract, sanitized (never leaks an owner uid, a Firestore path, or a raw Firebase error):
+
+| Outcome | `errorCode` | Sanitized reason | HTTP status |
+|---|---|---|---|
+| `resolution_failed: not_found` | `workspace_prerequisite_failed` | `workspace_missing` | 409 |
+| `resolution_failed: malformed / wrong_owner / wrong_type / invalid_uid` | `workspace_prerequisite_failed` | `workspace_invalid` | 409 |
+| `resolution_failed: lookup_failed` | `workspace_prerequisite_failed` | `workspace_unavailable` (transient — retry-appropriate) | 503 |
+| `invalid_configuration` | `workspace_configuration_invalid` | — | 500 |
+
+Plan-quota/run-count consumption (`checkAndIncrementUsageForRun`) is a separate, pre-existing mechanism this phase does not otherwise touch; it happens after the Workspace check in the hardened ordering, so it is correctly never charged for a rejected request either.
+
+### Configuration invariant: `RW=true` requires `W=true` — now rejects, never downgrades (hardened)
+
+`lib/workspaces/personalRunWorkspaceWriteConfig.ts`'s `checkPersonalRunWorkspaceWriteConfiguration()` is the single place this is enforced. Rationale: `resolveWorkspaceContext()` (Phase 1) treats a present `workspaceId` with `WORKSPACES_ENABLED=false` as `workspaces_disabled` — a deny, never a legacy fallback. If writes were enabled while the resolver itself is disabled, a freshly created Workspace-bound run would be immediately inaccessible to its own owner.
+
+The independent review found the first implementation's response to this invalid combination — silently creating a legacy (unbound) run — was safe from an *access* perspective but unsafe from a *rollout-integrity* perspective: an operator who enabled `RW=true` would have no visible signal that production was quietly still generating legacy records. Hardened: for an eligible (adaptive, personal) request, `RW=true` with `W=false` now **rejects the request** (`workspace_configuration_invalid`, HTTP 500) before any model execution or usage consumption — no run is created at all, bound or legacy — logged as `personal_run_workspace_configuration_invalid`.
+
+Full flag matrix (`W` = `WORKSPACES_ENABLED`, `RW` = `PERSONAL_RUN_WORKSPACE_WRITES_ENABLED`), all four combinations test-covered:
+
+| W | RW | Result |
+|---|----|--------|
+| false | false | ok — writes off, no binding attempted (today's production default) |
+| false | true | **rejected** for an eligible adaptive request — `workspace_configuration_invalid`, no run created, no legacy fallback |
+| true | false | ok — writes off regardless of W |
+| true | true | ok — the only combination that safely binds new runs |
+
+### New-user provisioning: mechanical, not fire-and-forget (hardened)
+
+The most important operational risk in this phase: the Phase 2B sweep provisioned the population that existed at that moment (88/88 users). Every user who signs up *afterward* would have no Personal Workspace, and `resolvePersonalRunWorkspaceBinding()` deliberately never auto-provisions one.
+
+**Auth-entry-path audit**: this codebase has exactly two entry points that establish a new session — email/password signup and email/password login (`app/signup/page.tsx`, `app/login/page.tsx`); there is no OAuth/social/magic-link/SSO path, and no server-side/admin account-creation route. A third case — an already-authenticated session reaching the app via direct navigation, bypassing both pages entirely — is real and is **not** addressable client-side at all; it is covered exclusively by `/api/run-panel`'s own server-side prerequisite check (above), which is why that check is described as the final safety boundary regardless of what the client does.
+
+The independent review found the first implementation's client-side trigger (`POST /api/user/workspace`, Phase 2's existing self-provisioning endpoint) was fire-and-forget (`setTimeout`, never awaited) — meaning "provisioning was attempted" and "provisioning is guaranteed complete before the user's first research request" were conflated; a user could reach the app and submit research before the background call finished. Hardened: both signup and login now **await** this call before proceeding (redirect / onboarding). Two outcomes proceed normally, unchanged from pre-hardening behavior: a real success (`created`/`existing`), and `provisioning_disabled` (503) — what this endpoint always returns today, since `PERSONAL_WORKSPACE_PROVISIONING_ENABLED` is off in production, so **flags-off signup/login behavior is unchanged** (one extra fast round trip; no Firestore write, no expensive lookup on the disabled path). Any other outcome (a genuine failure while the flag is on) blocks the redirect and surfaces a retryable error via the pages' existing `error` state — no new UI was added. The just-created Firebase Auth account/profile is never deleted or signed out on a provisioning failure (provisioning is idempotent — retry, don't restart); a signup failure's error message directs the user to sign in, which re-attempts provisioning via login's own hardened self-heal, reusing that path as the retry mechanism rather than building a separate one.
+
+No new flag was introduced for this trigger — the endpoint it calls is already gated by `PERSONAL_WORKSPACE_PROVISIONING_ENABLED`. Turning that flag on in production remains a separate, not-yet-authorized rollout decision (see Stage B below), not something this phase enables by itself.
+
+**`loadUserAndTeam(uid)` called twice, evaluated, left separate**: the route now calls this function once for the Phase 3 prerequisite check (step 5) and again, independently, at its original pre-existing location deep in adaptive-only review routing (step 10). Both reads reflect the same static, per-account property (`users/{uid}.teamId`), and nothing in this route writes to it — so redundancy carries no correctness risk. Consolidating into a single call was evaluated and deliberately **not** done: it isn't required for correctness, and touching more of this already highly complex route than the hardening strictly needs was judged the wrong tradeoff for this pass.
+
+### Minimum read integration: **none required**
+
+This is a deliberate, audited scope decision, not an oversight. Phase 3's own mandated design — retaining `userId` unchanged alongside the new optional `workspaceId` — is exactly what makes this safe: every existing read/access/export/reviewer/history route (`app/api/user/runs/[runId]/route.ts` and its siblings) authorizes purely via `data.userId === uid`, and none of them currently reads `data.workspaceId` at all. Adding the field is therefore entirely inert to every existing route — a workspace-bound run's true owner continues to be granted access through the same, completely unmodified code path as any legacy run (verified empirically: a dedicated test asserts byte-identical `viewerRole`/`ok`/`adaptive.output` for the same owner whether or not `workspaceId` is present).
+
+Phase 1's `authorizeWorkspaceResourceAccess()` / `resolveWorkspaceContext()` remain fully built, fully tested, and **still unwired to any route** — reserved for a future phase that actually needs Workspace-*scoped* (not merely owner-equality) reasoning, such as shared/team Workspaces or Workspace-scoped listing (Phase 4+). Wiring them in now would be premature: there is no route today whose authorization behavior would differ from what the untouched `userId` check already provides.
+
+The corollary "never security-downgrade a workspace-bound run" invariant (a Workspace lookup failure must never fall back to a legacy `userId` check) therefore has no live risk surface yet in Phase 3 either — no route reads `workspaceId` for authorization, so there is nothing to downgrade from. This invariant becomes load-bearing the moment a future phase starts consulting `workspaceId` for access decisions; it is documented here so that phase inherits the constraint rather than rediscovering it.
+
+### Personal reviewer flow — unaffected
+
+`resolveAdaptiveRunAccess()` / `lib/governance/adaptiveRunAccess.ts` is untouched (zero diff). Reviewer access is granted purely via the canonical per-run `humanReviewAssignment` document matching the requester's uid — it has no concept of `workspaceId` and needs none. Since no read route was modified, this composition question (documented during design as "owner-via-workspace OR reviewer-via-assignment, never letting a workspace-lookup failure re-open the legacy-owner branch as a bypass") did not need to be built in Phase 3 — it remains a documented design for whichever future phase first wires Workspace-based authorization into a read route.
+
+### Team runs — unaffected
+
+A team run's document is created via the exact same `createRun()` call as a personal run (there is no separate team creation path), but `resolvePersonalRunWorkspaceBinding()` returns `team_user` (not `bound`) whenever `loadUserAndTeam(uid)` finds a team — no `workspaceId` is ever attached, tested explicitly. Team access continues through its own, fully separate route tree and authorization function (`app/api/teams/adaptive-runs/[runId]/**`, `loadUserAndTeam` + `isTeamAdmin` + team-run projection) which was not touched and does not read `workspaceId` at all.
+
+### Data isolation
+
+No historical run is ever mutated — the only write site is `createRun()`, called exactly once per NEW run at a freshly generated `runId`; there is no code path in Phase 3 by which an existing `runs/{runId}` document could be touched. No `governanceRecord`/`humanReviewAssignment`/`humanReviewHistory`/panel/vote document gains a `workspaceId` — these continue to inherit Workspace context from their parent run only if a future phase's read/query needs require it, not speculatively now. No export contract (`AdaptiveResearchExportV1`, PDF/DOCX/JSON, frozen-snapshot semantics) changes. No `projectId` is introduced — a Workspace-bound run has no persisted Project association; conceptually "Workspace → Unfiled." Billing remains entirely user-based — no Workspace billing concept exists.
+
+### Rollback: write kill-switch vs. read security are different levers
+
+Before any Workspace-bound run exists, rollback is trivial: with both new flags off, this phase's code paths are entirely inert (zero behavior change), and no `--execute`-equivalent action has occurred. **Once real Workspace-bound production runs exist, `WORKSPACES_ENABLED` can no longer be casually disabled** — per Phase 1's own invariant, doing so would make every such run's `workspaceId` resolve to `workspaces_disabled` (a deny)... except Phase 3 wires zero read routes to check it (see above), so today, disabling `WORKSPACES_ENABLED` after Phase 3 runs exist has **no live effect on read access at all** (owner access still flows through the untouched `userId` check). This safe property is temporary — it holds only as long as no route reads `workspaceId` for authorization. The moment a future phase wires that in, this document's guidance changes to: disabling `WORKSPACES_ENABLED` after bound runs exist would make them inaccessible, so the correct kill switch at that point is `PERSONAL_RUN_WORKSPACE_WRITES_ENABLED` alone (stops creating *new* bound runs; does not touch authorization of *existing* ones) — never a single flag that conflates write-rollback with access-security.
+
+### Safe global-rollout predicate
+
+Global `RW=true` enablement is safe only when **all** of the following hold — the Phase 2B 88/88 baseline alone is not sufficient by itself, since signup remains open and the population drifts the moment user 89 registers:
+
+1. `W=true` (required by the configuration invariant above).
+2. `P` (`PERSONAL_WORKSPACE_PROVISIONING_ENABLED`) `=true`, and has been for long enough that new signups are reliably covered.
+3. The new-user provisioning lifecycle is mechanical (awaited, not fire-and-forget) — true as of this hardening pass.
+4. `/api/run-panel` fails fast (before model execution, before usage consumption) on a missing/invalid Workspace — true as of this hardening pass.
+5. Existing eligible population coverage remains complete (re-run the Phase 2B dry-run/coverage-audit tooling immediately before any global enablement to reconfirm, not assumed from a stale snapshot).
+
+### Production rollout plan (Phase 3) — prepared, not executed
+
+- **Stage A** — deploy with `P=false`, `W=false`, `RW=false` (default). Verify zero behavior change.
+- **Stage B** — enable `P` only. Prove: existing login self-heal works for the 88/88 population (all resolve `existing`); a brand-new production signup receives a Workspace; the awaited provisioning call genuinely blocks app entry until it resolves (no race); a provisioning failure leaves the account in a retryable state rather than a broken one.
+- **Stage C** — enable `W` while `RW` remains `false`. Prove no existing behavior changes (Phase 3 still creates zero Workspace-bound runs; this only makes the — still entirely unwired — Phase 1 resolver capable of honoring a `workspaceId` if one existed, which none do yet).
+- **Stage D** — narrow canary: `RW=true` for one internal/test account only (mirroring Phase 2's own canary technique). Create one new adaptive Personal run; verify `workspaceId` persisted in the initial write, owner can immediately render/restore it (already true by construction — see "Minimum read integration" above), old legacy runs still work, reviewer behavior intact, export behavior intact if exercised, and a deliberately-broken-Workspace test account is correctly rejected before model execution.
+- **Stage E** — broader `RW` rollout only after Stage D's controlled proof, and only once the safe global-rollout predicate above is fully satisfied.
+
+This plan is prepared and documented only. No production Workspace-bound run has been created as part of this phase — every verification so far has been code review, unit/integration tests, and static analysis; all three flags (`P`, `W`, `RW`) remain `false`/absent in production.
 
 ## Phase 2 production rollout plan — prepared, not executed
 
