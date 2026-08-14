@@ -28,6 +28,8 @@ import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelem
 import { adminDb } from "@/lib/firebase/admin";
 import { ADAPTIVE_RESEARCH_EXPORT_ENABLED } from "@/lib/env";
 import { listAdaptiveExportRecords } from "@/lib/firestore/adaptiveExports";
+import { validateRunWorkspaceAssociation } from "@/lib/workspaces/runWorkspaceIntegrity";
+import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -107,6 +109,15 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
   }
   const data = snap.data() as Record<string, unknown>;
   const owner = String(data.userId ?? "");
+
+  // Phase 4B — Mandatory Workspace Integrity, requester-independent, before
+  // the owner check and before listing any export metadata.
+  const integrity = await validateRunWorkspaceAssociation(owner, data);
+  if (integrity.classification === "invalid") {
+    logger.warn("[user/runs/exports] workspace_run_integrity_failed", { runId, reason: integrity.reason });
+    return errorResponse(404, "not_found", "Run not found.");
+  }
+
   if (owner !== uid) {
     return errorResponse(403, "forbidden", "You do not have access to this run.");
   }

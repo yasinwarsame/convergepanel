@@ -22,6 +22,7 @@ import {
   PersonalReviewInboxFilter,
   PersonalReviewInboxItemV1,
 } from "@/lib/governance/personalReviewInbox";
+import { createRunWorkspaceIntegrityBatch } from "@/lib/workspaces/runWorkspaceIntegrityBatch";
 import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
@@ -128,12 +129,36 @@ export async function GET(req: NextRequest) {
   // raw uid or an unmasked email pulled from nowhere.
   const resolvedOwnerNames = await resolveReviewerDisplayNames(ownerUids, new Map(), undefined);
 
+  // ---- Step 3.5 (Phase 4B): Workspace integrity, requester-independent,
+  // before any row is built. A valid reviewer assignment (already proven by
+  // Step 1's query) is never sufficient on its own — the run it points to
+  // must independently pass Layer A. Rows come from potentially many
+  // different owners, so the batch validator's per-(owner, workspaceId)
+  // memoization caps the actual Firestore read count at the number of
+  // DISTINCT owners represented on this page, not the number of
+  // assignments, while still validating every row individually. ----
+  const validateWorkspace = createRunWorkspaceIntegrityBatch();
+  const integrityByRunId = new Map<string, Awaited<ReturnType<typeof validateWorkspace>>>();
+  await Promise.all(
+    candidates.map(async (c) => {
+      const runData = runDataByRunId.get(c.runId);
+      if (!runData) return; // already handled as "run no longer exists" below
+      const result = await validateWorkspace(String(runData.userId ?? ""), runData);
+      integrityByRunId.set(c.runId, result);
+    })
+  );
+
   // ---- Step 4: build safe DTOs, skip malformed rows (never fabricate) ----
   const items: PersonalReviewInboxItemV1[] = [];
   for (const c of candidates) {
     const runData = runDataByRunId.get(c.runId);
     if (!runData) {
       logger.warn("[user/reviews] Assignment references a run that no longer exists or could not be read", { runId: c.runId });
+      continue;
+    }
+    const integrity = integrityByRunId.get(c.runId);
+    if (integrity?.classification === "invalid") {
+      logger.warn("[user/reviews] workspace_run_integrity_failed", { runId: c.runId, reason: integrity.reason });
       continue;
     }
     const ownerUid = ownerUidByRunId.get(c.runId);

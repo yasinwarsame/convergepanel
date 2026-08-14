@@ -6,6 +6,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { resolveRequestIdentity } from "@/lib/auth/resolveRequestIdentity";
 import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelemetry";
 import { adminDb } from "@/lib/firebase/admin";
+import { validateRunWorkspaceAssociation } from "@/lib/workspaces/runWorkspaceIntegrity";
 import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
@@ -83,6 +84,22 @@ export async function GET(req: NextRequest) {
         { ok: false, errorCode: "forbidden", message: "Access denied." },
         { status: 403 }
       );
+    }
+
+    // Phase 4B — Mandatory Workspace Integrity. This route also serves
+    // `verifications`/`videoVerifications`, which are entirely outside the
+    // Workspace program (never carry a `workspaceId`) — scoped to the
+    // `runs` collection only, requester-independent, before any governance
+    // field is returned.
+    if (collection === "runs") {
+      const integrity = await validateRunWorkspaceAssociation(owner, data);
+      if (integrity.classification === "invalid") {
+        logger.warn("[user/run-governance] workspace_run_integrity_failed", { runId, reason: integrity.reason });
+        return NextResponse.json(
+          { ok: false, errorCode: "not_found", message: "Document not found." },
+          { status: 404 }
+        );
+      }
     }
 
     const reviewedBy =

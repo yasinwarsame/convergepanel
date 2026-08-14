@@ -1,12 +1,19 @@
 /**
- * Workspace-Aware Writes for New Personal Adaptive Runs, Phase 3 —
- * confirms the deliberate "zero read-route changes" design decision
- * (docs/workspaces/architecture.md's Phase 3 section) actually holds:
- * a run document carrying the new optional `workspaceId` field is
- * entirely inert to GET /api/user/runs/[runId]'s existing, UNTOUCHED
- * owner/reviewer access logic — `userId` remains the sole, authoritative
- * ownership field this route reads, exactly as before Phase 3. Mirrors
- * personalReviewerAccess.spec.ts's scaffolding.
+ * Phase 4B — Mandatory Workspace Integrity for Workspace-Bound Run Reads.
+ *
+ * Formerly `phase3WorkspaceIdInert.spec.ts`. Phase 3 deliberately made
+ * `workspaceId` inert on every read route ("zero read-route changes"),
+ * and this file proved exactly that premise. Phase 4B's entire purpose is
+ * to end that inertness for `workspaceId`-bearing runs: presence is now
+ * mandatorily validated, and only a genuinely VALID association behaves
+ * identically to a legacy run — an INVALID one must deny even the run's
+ * own owner. This file is rewritten (not just patched) to test the new,
+ * correct invariant rather than the old, now-intentionally-false one.
+ *
+ * The acceptance test this program cares about most: a valid reviewer
+ * assignment on a CORRUPTED Workspace-bound run must still be denied
+ * (covered in personalReviewerAccess.spec.ts's own Phase 4B additions);
+ * this file covers the owner/unrelated-user side of that same invariant.
  */
 
 const mockedResolveRequestIdentity = jest.fn();
@@ -67,12 +74,39 @@ jest.mock("@/lib/logger", () => ({
   logger: { warn: jest.fn(), info: jest.fn(), error: jest.fn(), debug: jest.fn() },
 }));
 
+// Phase 4B — the Layer-A dependency. Mocked as its own module (never
+// routed through the generic `mockAdminDb` above, which is shared with
+// the run-doc lookup and would otherwise return run data when Layer A
+// asks for a Workspace document).
+const mockedGetWorkspace = jest.fn();
+jest.mock("@/lib/firestore/workspaces", () => ({
+  getWorkspace: (...args: any[]) => mockedGetWorkspace(...args),
+}));
+jest.mock("@/lib/env", () => ({ WORKSPACES_ENABLED: true }));
+
 import { NextRequest } from "next/server";
 import { GET } from "@/app/api/user/runs/[runId]/route";
 
 const OWNER_UID = "owner-1";
 const OTHER_UID = "other-1";
 const RUN_ID = "run-1";
+const BOUND_WORKSPACE_ID = "personal-owner-1";
+
+function validWorkspace(overrides: Record<string, unknown> = {}) {
+  return {
+    status: "found",
+    workspace: {
+      schemaVersion: 1,
+      id: BOUND_WORKSPACE_ID,
+      type: "personal",
+      name: "Personal Workspace",
+      ownerUserId: OWNER_UID,
+      createdAt: "2026-08-14T00:00:00.000Z",
+      updatedAt: "2026-08-14T00:00:00.000Z",
+      ...overrides,
+    },
+  };
+}
 
 function runDoc(overrides: Record<string, unknown> = {}) {
   return {
@@ -113,33 +147,86 @@ beforeEach(() => {
   mockedLoadUserAndTeam.mockResolvedValue({ user: {}, team: null });
 });
 
-describe("GET /api/user/runs/[runId] — workspaceId field is inert (Phase 3 zero-read-route-change proof)", () => {
-  it("a run with workspaceId present still grants its true owner full access, viewerRole: owner — no different from a legacy run", async () => {
-    mockedRunGet.mockResolvedValue(runDoc({ workspaceId: "personal-owner-1" }));
+describe("GET /api/user/runs/[runId] — legacy runs remain byte-for-byte unchanged (zero Workspace lookup)", () => {
+  it("a run with workspaceId truly absent never calls getWorkspace at all", async () => {
+    mockedRunGet.mockResolvedValue(runDoc()); // no workspaceId key
+    const { res, json } = await callRouteAs(OWNER_UID);
+    expect(res.status).toBe(200);
+    expect(json.viewerRole).toBe("owner");
+    expect(mockedGetWorkspace).not.toHaveBeenCalled();
+  });
+});
+
+describe("GET /api/user/runs/[runId] — a genuinely VALID bound run behaves identically to a legacy run", () => {
+  it("grants its true owner full access, viewerRole: owner — same as a legacy run", async () => {
+    mockedGetWorkspace.mockResolvedValue(validWorkspace());
+    mockedRunGet.mockResolvedValue(runDoc({ workspaceId: BOUND_WORKSPACE_ID }));
     const { res, json } = await callRouteAs(OWNER_UID);
     expect(res.status).toBe(200);
     expect(json.viewerRole).toBe("owner");
     expect(json.ok).toBe(true);
   });
 
-  it("a run with workspaceId present still denies a non-owner, non-reviewer exactly as before — the extra field grants nothing extra", async () => {
-    mockedRunGet.mockResolvedValue(runDoc({ workspaceId: "personal-owner-1" }));
+  it("still denies a non-owner, non-reviewer exactly as before — Workspace validity grants nothing extra", async () => {
+    mockedGetWorkspace.mockResolvedValue(validWorkspace());
+    mockedRunGet.mockResolvedValue(runDoc({ workspaceId: BOUND_WORKSPACE_ID }));
     const { res, json } = await callRouteAs(OTHER_UID);
     expect(res.status).toBe(403);
     expect(json.errorCode).toBe("forbidden");
   });
 
-  it("response shape (viewerRole, ok, adaptive.output) is byte-identical whether workspaceId is present or absent, for the same owner", async () => {
+  it("response shape (viewerRole, ok, adaptive.output) is byte-identical whether workspaceId is present-and-valid or absent, for the same owner", async () => {
     mockedRunGet.mockResolvedValue(runDoc()); // no workspaceId
     const legacyResult = await callRouteAs(OWNER_UID);
+
     jest.clearAllMocks();
     mockedGetPersonalAssignment.mockResolvedValue({ status: "unassigned" });
     mockedLoadUserAndTeam.mockResolvedValue({ user: {}, team: null });
-    mockedRunGet.mockResolvedValue(runDoc({ workspaceId: "personal-owner-1" })); // workspace-bound
+    mockedGetWorkspace.mockResolvedValue(validWorkspace());
+    mockedRunGet.mockResolvedValue(runDoc({ workspaceId: BOUND_WORKSPACE_ID })); // workspace-bound, valid
     const boundResult = await callRouteAs(OWNER_UID);
 
     expect(boundResult.json.viewerRole).toBe(legacyResult.json.viewerRole);
     expect(boundResult.json.ok).toBe(legacyResult.json.ok);
     expect(boundResult.json.adaptive.output).toEqual(legacyResult.json.adaptive.output);
+  });
+});
+
+describe("GET /api/user/runs/[runId] — Phase 4B: an INVALID bound run denies even the true owner (the core acceptance test)", () => {
+  it("Workspace document missing -> 404, denies the owner, never falls back to legacy access", async () => {
+    mockedGetWorkspace.mockResolvedValue({ status: "not_found" });
+    mockedRunGet.mockResolvedValue(runDoc({ workspaceId: BOUND_WORKSPACE_ID }));
+    const { res, json } = await callRouteAs(OWNER_UID);
+    expect(res.status).toBe(404);
+    expect(json.ok).toBe(false);
+    expect(json.errorCode).toBe("not_found");
+  });
+
+  it("Workspace.ownerUserId mutated to a different uid -> denies the owner, never falls back to legacy access", async () => {
+    mockedGetWorkspace.mockResolvedValue(validWorkspace({ ownerUserId: "attacker-or-corruption-uid" }));
+    mockedRunGet.mockResolvedValue(runDoc({ workspaceId: BOUND_WORKSPACE_ID }));
+    const { res } = await callRouteAs(OWNER_UID);
+    expect(res.status).toBe(404);
+  });
+
+  it("Workspace.type is 'team' (unsupported) -> denies the owner", async () => {
+    mockedGetWorkspace.mockResolvedValue(validWorkspace({ type: "team" }));
+    mockedRunGet.mockResolvedValue(runDoc({ workspaceId: BOUND_WORKSPACE_ID }));
+    const { res } = await callRouteAs(OWNER_UID);
+    expect(res.status).toBe(404);
+  });
+
+  it("run.workspaceId does not match the deterministic id for its own owner -> denies the owner, no Firestore Workspace lookup even attempted", async () => {
+    mockedRunGet.mockResolvedValue(runDoc({ workspaceId: "personal-someone-else" }));
+    const { res } = await callRouteAs(OWNER_UID);
+    expect(res.status).toBe(404);
+    expect(mockedGetWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("Workspace lookup throws -> denies the owner (fail closed on transient failure too)", async () => {
+    mockedGetWorkspace.mockResolvedValue({ status: "read_failed" });
+    mockedRunGet.mockResolvedValue(runDoc({ workspaceId: BOUND_WORKSPACE_ID }));
+    const { res } = await callRouteAs(OWNER_UID);
+    expect(res.status).toBe(404);
   });
 });

@@ -8,6 +8,8 @@ import { requireAdminApiAccess } from "@/lib/firebase/auth-helpers";
 import { adminDb } from "@/lib/firebase/admin";
 import { writeAuditEvent } from "@/lib/governance/auditLog";
 import { sanitizeForFirestore } from "@/lib/firestore/sanitizeForFirestore";
+import { validateRunWorkspaceAssociation } from "@/lib/workspaces/runWorkspaceIntegrity";
+import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -66,7 +68,25 @@ export async function GET(
     return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
   }
 
-  return NextResponse.json({ ok: true, data: doc.data(), collection, runId });
+  const docData = doc.data() as Record<string, unknown>;
+
+  // Phase 4B — Mandatory Workspace Integrity. The existing admin bypass
+  // grants broad READ access with no ownership scoping at all, but that is
+  // an existing Layer-B grant, not an exemption from Layer A: an admin
+  // route is not a documented forensic/corruption-inspection capability
+  // (no such capability exists in this codebase today), so it gets the
+  // same integrity gate as every other canonical-run disclosure route.
+  // Scoped to "runs" only — verifications/videoVerifications never carry
+  // a workspaceId.
+  if (collection === "runs") {
+    const integrity = await validateRunWorkspaceAssociation(String(docData.userId ?? ""), docData);
+    if (integrity.classification === "invalid") {
+      logger.warn("[admin/runs/[runId]] workspace_run_integrity_failed", { runId, reason: integrity.reason });
+      return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
+    }
+  }
+
+  return NextResponse.json({ ok: true, data: docData, collection, runId });
 }
 
 export async function PATCH(
