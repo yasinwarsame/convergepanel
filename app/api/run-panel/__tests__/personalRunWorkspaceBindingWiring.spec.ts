@@ -16,7 +16,7 @@
  *   - never lets a client-supplied workspaceId influence anything.
  */
 
-const mockEnvFlags = { RW: false, W: false, ADAPTIVE: true };
+const mockEnvFlags = { RW: false, W: false, ADAPTIVE: true, CANARY_UIDS: undefined as string | undefined };
 
 jest.mock("@/lib/env", () => ({
   OPENAI_API_KEY: "test",
@@ -29,6 +29,9 @@ jest.mock("@/lib/env", () => ({
   },
   get PERSONAL_RUN_WORKSPACE_WRITES_ENABLED() {
     return mockEnvFlags.RW;
+  },
+  get PERSONAL_RUN_WORKSPACE_WRITE_CANARY_UIDS() {
+    return mockEnvFlags.CANARY_UIDS;
   },
   get WORKSPACES_ENABLED() {
     return mockEnvFlags.W;
@@ -190,6 +193,7 @@ describe("POST /api/run-panel — Personal Run Workspace Binding wiring (hardene
     mockEnvFlags.RW = false;
     mockEnvFlags.W = false;
     mockEnvFlags.ADAPTIVE = true;
+    mockEnvFlags.CANARY_UIDS = undefined;
   });
 
   afterEach(() => {
@@ -361,6 +365,197 @@ describe("POST /api/run-panel — Personal Run Workspace Binding wiring (hardene
       const [, ownerArg, , , workspaceIdArg] = mockedCreateRun.mock.calls[0];
       expect(ownerArg).toBe("test-uid"); // authenticated uid, never the spoofed body field
       expect(workspaceIdArg).toBe("personal-test-uid"); // server-resolved, never the spoofed body field
+    });
+
+    it("a client-supplied 'canary: true' field or spoofed uid in the request body has zero effect — canary eligibility derives exclusively from the authenticated uid", async () => {
+      mockEnvFlags.RW = false;
+      mockEnvFlags.W = true;
+      mockEnvFlags.CANARY_UIDS = "some-other-uid"; // NOT "test-uid" — the authenticated identity
+
+      const { response, body } = await runAdaptiveRequest({ canary: true, uid: "some-other-uid" });
+
+      expect(response.status).toBe(200);
+      expect(body.ok).toBe(true);
+      expect(mockedResolveBinding).not.toHaveBeenCalled(); // never activated for the real authenticated uid
+      const [, , , , workspaceIdArg] = mockedCreateRun.mock.calls[0];
+      expect(workspaceIdArg).toBeUndefined();
+    });
+  });
+
+  describe("Account-Scoped Workspace Write Canary, Phase 3A — uses the REAL resolvePersonalRunWorkspaceWriteMode() (not mocked); resolvePersonalRunWorkspaceBinding remains mocked, proving canary reuses that exact same call unmodified", () => {
+    it("global RW=false, authenticated uid IS in a valid canary list, W=true, adaptive personal: Phase-3 binding activates via source=canary, workspaceId persisted", async () => {
+      mockEnvFlags.RW = false;
+      mockEnvFlags.W = true;
+      mockEnvFlags.CANARY_UIDS = "test-uid,someone-else";
+      mockedLoadUserAndTeam.mockResolvedValueOnce({ user: { teamId: undefined }, team: null });
+      mockedResolveBinding.mockResolvedValueOnce({ outcome: "bound", workspaceId: "personal-test-uid" });
+
+      const { response, body } = await runAdaptiveRequest();
+
+      expect(response.status).toBe(200);
+      expect(body.ok).toBe(true);
+      expect(mockedResolveBinding).toHaveBeenCalledWith(expect.objectContaining({ uid: "test-uid", writesEnabled: true }));
+      const [, , , , workspaceIdArg] = mockedCreateRun.mock.calls[0];
+      expect(workspaceIdArg).toBe("personal-test-uid");
+    });
+
+    it("global RW=false, authenticated uid NOT in the canary list: fully unaffected, identical to today's dark production behavior — zero Workspace lookups, zero new failure dependency", async () => {
+      mockEnvFlags.RW = false;
+      mockEnvFlags.W = true; // W=true alone must never matter for a non-canary, non-global user
+      mockEnvFlags.CANARY_UIDS = "someone-else,another-uid";
+
+      const { response, body } = await runAdaptiveRequest();
+
+      expect(response.status).toBe(200);
+      expect(body.ok).toBe(true);
+      expect(mockedResolveBinding).not.toHaveBeenCalled();
+      expect(mockedLoadUserAndTeam).not.toHaveBeenCalled();
+      expect(mockedRunPanel).toHaveBeenCalledTimes(1); // research proceeds exactly as legacy
+      const [, , , , workspaceIdArg] = mockedCreateRun.mock.calls[0];
+      expect(workspaceIdArg).toBeUndefined();
+    });
+
+    it("canary UID, non-adaptive Deep Research request: zero Workspace lookups even though the uid is allowlisted — canary only selects write mode, never broadens Phase 3's adaptive-only scope", async () => {
+      mockEnvFlags.RW = false;
+      mockEnvFlags.W = true;
+      mockEnvFlags.ADAPTIVE = false;
+      mockEnvFlags.CANARY_UIDS = "test-uid";
+
+      const { response, body } = await runNonAdaptiveRequest();
+
+      expect(response.status).toBe(200);
+      expect(body.ok).toBe(true);
+      expect(mockedResolveBinding).not.toHaveBeenCalled();
+      expect(mockedRunPanel).toHaveBeenCalledTimes(1);
+      const [, , , , workspaceIdArg] = mockedCreateRun.mock.calls[0];
+      expect(workspaceIdArg).toBeUndefined();
+    });
+
+    it("canary UID, adaptive TEAM request: no Personal workspaceId — being canary-listed never overrides team isolation", async () => {
+      mockEnvFlags.RW = false;
+      mockEnvFlags.W = true;
+      mockEnvFlags.CANARY_UIDS = "test-uid";
+      mockedLoadUserAndTeam.mockResolvedValueOnce({
+        user: { teamId: "team_abc" },
+        team: { id: "team_abc", name: "T", createdBy: "x", createdAt: "2026-01-01", members: [], policyRules: [], settings: {} },
+      });
+      mockedResolveBinding.mockResolvedValueOnce({ outcome: "team_user" });
+
+      const { response, body } = await runAdaptiveRequest();
+
+      expect(mockedResolveBinding).toHaveBeenCalledWith(expect.objectContaining({ hasTeam: true }));
+      expect(response.status).toBe(200);
+      expect(body.ok).toBe(true);
+      const [, , , , workspaceIdArg] = mockedCreateRun.mock.calls[0];
+      expect(workspaceIdArg).toBeUndefined();
+    });
+
+    it("canary UID targeted, W=false: rejected before model execution — no legacy fallback, identical to global RW's own invalid-configuration handling", async () => {
+      mockEnvFlags.RW = false;
+      mockEnvFlags.W = false;
+      mockEnvFlags.CANARY_UIDS = "test-uid";
+      mockedLoadUserAndTeam.mockResolvedValueOnce({ user: { teamId: undefined }, team: null });
+      mockedResolveBinding.mockResolvedValueOnce({ outcome: "invalid_configuration", reason: "workspaces_disabled_but_writes_enabled" });
+
+      const { response, body } = await runAdaptiveRequest();
+
+      expect(response.status).toBe(500);
+      expect(body.ok).toBe(false);
+      expect(body.errorCode).toBe("workspace_configuration_invalid");
+      expect(mockedRunPanel).not.toHaveBeenCalled();
+      expect(mockedCreateRun).not.toHaveBeenCalled();
+      expect(mockedIncrementUserTokenUsage).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["not_found", 409],
+      ["malformed", 409],
+      ["wrong_owner", 409],
+      ["wrong_type", 409],
+      ["lookup_failed", 503],
+      ["invalid_uid", 409],
+    ])("canary UID targeted, resolution_failed:%s: zero model/usage/run calls, identical to global RW's failure-before-spend", async (reason, expectedStatus) => {
+      mockEnvFlags.RW = false;
+      mockEnvFlags.W = true;
+      mockEnvFlags.CANARY_UIDS = "test-uid";
+      mockedLoadUserAndTeam.mockResolvedValueOnce({ user: { teamId: undefined }, team: null });
+      mockedResolveBinding.mockResolvedValueOnce({ outcome: "resolution_failed", reason });
+
+      const { response, body } = await runAdaptiveRequest();
+
+      expect(response.status).toBe(expectedStatus);
+      expect(body.ok).toBe(false);
+      expect(body.errorCode).toBe("workspace_prerequisite_failed");
+      expect(mockedRunPanel).not.toHaveBeenCalled();
+      expect(mockedCreateRun).not.toHaveBeenCalled();
+      expect(mockedIncrementUserTokenUsage).not.toHaveBeenCalled();
+    });
+
+    it("global RW=true takes precedence over an ABSENT canary list — unaffected, matches pre-Phase-3A behavior exactly", async () => {
+      mockEnvFlags.RW = true;
+      mockEnvFlags.W = true;
+      mockEnvFlags.CANARY_UIDS = undefined;
+      mockedLoadUserAndTeam.mockResolvedValueOnce({ user: { teamId: undefined }, team: null });
+      mockedResolveBinding.mockResolvedValueOnce({ outcome: "bound", workspaceId: "personal-test-uid" });
+
+      const { response, body } = await runAdaptiveRequest();
+
+      expect(response.status).toBe(200);
+      expect(body.ok).toBe(true);
+      const [, , , , workspaceIdArg] = mockedCreateRun.mock.calls[0];
+      expect(workspaceIdArg).toBe("personal-test-uid");
+    });
+
+    it("global RW=true takes precedence over a MALFORMED canary list — the request still succeeds via global mode, the malformed list never blocks it", async () => {
+      mockEnvFlags.RW = true;
+      mockEnvFlags.W = true;
+      mockEnvFlags.CANARY_UIDS = "not/a/valid/uid";
+      mockedLoadUserAndTeam.mockResolvedValueOnce({ user: { teamId: undefined }, team: null });
+      mockedResolveBinding.mockResolvedValueOnce({ outcome: "bound", workspaceId: "personal-test-uid" });
+
+      const { response, body } = await runAdaptiveRequest();
+
+      expect(response.status).toBe(200);
+      expect(body.ok).toBe(true);
+      expect(mockedResolveBinding).toHaveBeenCalledWith(expect.objectContaining({ writesEnabled: true }));
+      const [, , , , workspaceIdArg] = mockedCreateRun.mock.calls[0];
+      expect(workspaceIdArg).toBe("personal-test-uid");
+    });
+
+    it("global RW=false, MALFORMED canary list: fails closed to off for every uid — the authenticated uid is never activated, even if it would have otherwise matched a well-formed entry in the same string", async () => {
+      mockEnvFlags.RW = false;
+      mockEnvFlags.W = true;
+      mockEnvFlags.CANARY_UIDS = "test-uid,not/valid"; // "test-uid" itself is well-formed, but the WHOLE list is invalidated by the other entry
+
+      const { response, body } = await runAdaptiveRequest();
+
+      expect(response.status).toBe(200);
+      expect(body.ok).toBe(true);
+      expect(mockedResolveBinding).not.toHaveBeenCalled(); // never activated despite "test-uid" being present in the raw string
+      const [, , , , workspaceIdArg] = mockedCreateRun.mock.calls[0];
+      expect(workspaceIdArg).toBeUndefined();
+    });
+  });
+
+  describe("structural: global and canary converge on the exact same code path", () => {
+    it("route.ts calls resolvePersonalRunWorkspaceBinding() from exactly one call site — there is no separate, parallel implementation for canary vs. global", () => {
+      const fs = require("fs");
+      const path = require("path");
+      const source = fs.readFileSync(path.join(process.cwd(), "app/api/run-panel/route.ts"), "utf8");
+      const callSites = (source.match(/resolvePersonalRunWorkspaceBinding\(\{/g) ?? []).length;
+      expect(callSites).toBe(1);
+    });
+
+    it("the canary allowlist is never returned in any NextResponse.json body in this route, and no NEXT_PUBLIC_-prefixed variant of it exists anywhere in the repo", () => {
+      const fs = require("fs");
+      const path = require("path");
+      const source = fs.readFileSync(path.join(process.cwd(), "app/api/run-panel/route.ts"), "utf8");
+      // Every response object literal in this file — none may reference
+      // the canary env constant or its raw value.
+      const responseLiterals = source.match(/NextResponse\.json\(\s*\{[\s\S]*?\}/g) ?? [];
+      for (const literal of responseLiterals) {
+        expect(literal).not.toMatch(/CANARY/);
+      }
     });
   });
 });

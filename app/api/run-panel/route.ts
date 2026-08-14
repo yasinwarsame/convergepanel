@@ -48,8 +48,9 @@ import { sanitizeModelText, truncateForSynthesis, MAX_CHARS_SYNTHESIS_PER_MODEL 
 import { PanelResultPublic } from "@/lib/panel/schemas";
 import { normalizeModelResultPublic, assertPublicStatus } from "@/lib/panel/normalize";
 import { logger } from "@/lib/logger";
-import { ADAPTIVE_SCHEMAS_ENABLED, PERSONAL_RUN_WORKSPACE_WRITES_ENABLED, WORKSPACES_ENABLED } from "@/lib/env";
+import { ADAPTIVE_SCHEMAS_ENABLED, PERSONAL_RUN_WORKSPACE_WRITES_ENABLED, PERSONAL_RUN_WORKSPACE_WRITE_CANARY_UIDS, WORKSPACES_ENABLED } from "@/lib/env";
 import { resolvePersonalRunWorkspaceBinding } from "@/lib/workspaces/personalRunWorkspaceBinding";
+import { resolvePersonalRunWorkspaceWriteMode } from "@/lib/workspaces/personalRunWorkspaceWriteCanary";
 import { planAdaptiveRun, finalizeAdaptiveRun, AdaptivePromptPlan, buildNonExecutionPayload } from "@/lib/adaptiveSchema/orchestrate";
 import { trackQueryClassified, trackRoutingOutcome, trackPanelExecutionStarted, trackPanelExecutionCompleted, trackPanelExecutionFailed, trackRankedListShortfall, trackComparisonMatrixGap, trackDefinitionAmbiguity, trackCausalExplanationGap, trackChecklistTaxonomyGap, trackDeepResearchGap, trackEvidenceReviewGap, trackBiasAuditNoAttribution, trackBiasAuditPanelGapFound, trackBiasAuditHomogeneityFlagged, trackDecisionSupportContested, trackDecisionSupportHighSensitivity, trackDecisionSupportMissingCriteria } from "@/lib/adaptiveSchema/analytics";
 
@@ -282,69 +283,96 @@ export async function POST(req: NextRequest) {
     // non-active routing already returned early. So `adaptivePlan !== null`
     // here IS "this is a genuine adaptive request," with no separate
     // `.routing.kind` check needed. For a null adaptivePlan (Deep
-    // Research), this entire block — including `loadUserAndTeam`,
-    // `getPersonalWorkspaceId`, and `getWorkspace` — is skipped entirely;
-    // Phase 3 does not cover Deep Research, so no Workspace lookup of any
-    // kind is ever attempted for it.
+    // Research), this entire block — including write-mode resolution,
+    // `loadUserAndTeam`, `getPersonalWorkspaceId`, and `getWorkspace` — is
+    // skipped entirely; Phase 3 does not cover Deep Research, so no
+    // Workspace lookup of any kind is ever attempted for it.
     const runId = `run-${randomUUID()}`;
     let workspaceIdForRun: string | undefined;
-    if (PERSONAL_RUN_WORKSPACE_WRITES_ENABLED && adaptivePlan !== null) {
-      const teamCtx = await loadUserAndTeam(uid);
-      const binding = await resolvePersonalRunWorkspaceBinding({
+    if (adaptivePlan !== null) {
+      // Account-Scoped Workspace Write Canary, Phase 3A — the ONLY thing
+      // this adds is which uids get `writesEnabled: true` below. A
+      // malformed canary allowlist is always logged (regardless of
+      // whether it even mattered — see `canaryConfigInvalid`'s own doc
+      // comment), but NEVER changes eligibility beyond what
+      // `resolvePersonalRunWorkspaceWriteMode()` itself already decided
+      // (global precedence, fail-closed-to-off for a bad list when
+      // global is off) — no separate, competing "what if config is bad"
+      // branch exists here.
+      const writeMode = resolvePersonalRunWorkspaceWriteMode({
         uid,
-        writesEnabled: PERSONAL_RUN_WORKSPACE_WRITES_ENABLED,
-        workspacesEnabled: WORKSPACES_ENABLED,
-        hasTeam: !!teamCtx?.team,
+        globalWritesEnabled: PERSONAL_RUN_WORKSPACE_WRITES_ENABLED,
+        canaryUidsRaw: PERSONAL_RUN_WORKSPACE_WRITE_CANARY_UIDS,
       });
-      switch (binding.outcome) {
-        case "bound":
-          workspaceIdForRun = binding.workspaceId;
-          logger.info("[run-panel] personal_run_workspace_bound", { runId });
-          break;
-        case "resolution_failed": {
-          // Fail BEFORE model execution — never silently fall back to
-          // creating a legacy (non-workspace-bound) run once write
-          // rollout is enabled, and never spend model tokens on a
-          // request already known to be unable to persist. Sanitized:
-          // never leaks the owner uid, a Firestore path, or a raw
-          // Firebase error — only a stable, generic reason code.
-          logger.error("[run-panel] personal_run_workspace_resolution_failed", { runId, reason: binding.reason });
-          const sanitizedReason: "workspace_missing" | "workspace_unavailable" | "workspace_invalid" =
-            binding.reason === "not_found"
-              ? "workspace_missing"
-              : binding.reason === "lookup_failed"
-                ? "workspace_unavailable"
-                : "workspace_invalid"; // malformed | wrong_owner | wrong_type | invalid_uid
-          const status = sanitizedReason === "workspace_unavailable" ? 503 : 409;
-          const message =
-            sanitizedReason === "workspace_missing"
-              ? "Your account isn't fully set up yet. Please try signing in again."
-              : sanitizedReason === "workspace_unavailable"
-                ? "We couldn't verify your account right now. Please try again in a moment."
-                : "There's a problem with your account setup. Please contact support.";
-          const response: RunPanelApiResponse = { ok: false, errorCode: "workspace_prerequisite_failed", message };
-          return NextResponse.json(response, { status });
+      if (writeMode.canaryConfigInvalid) {
+        logger.error("[run-panel] personal_run_workspace_write_canary_configuration_invalid", { runId });
+      }
+      if (writeMode.enabled) {
+        logger.info("[run-panel] personal_run_workspace_write_mode", { runId, source: writeMode.source });
+        const teamCtx = await loadUserAndTeam(uid);
+        const binding = await resolvePersonalRunWorkspaceBinding({
+          uid,
+          writesEnabled: writeMode.enabled,
+          workspacesEnabled: WORKSPACES_ENABLED,
+          hasTeam: !!teamCtx?.team,
+        });
+        switch (binding.outcome) {
+          case "bound":
+            workspaceIdForRun = binding.workspaceId;
+            logger.info("[run-panel] personal_run_workspace_bound", { runId });
+            break;
+          case "resolution_failed": {
+            // Fail BEFORE model execution — never silently fall back to
+            // creating a legacy (non-workspace-bound) run once write
+            // rollout is enabled, and never spend model tokens on a
+            // request already known to be unable to persist. Sanitized:
+            // never leaks the owner uid, a Firestore path, or a raw
+            // Firebase error — only a stable, generic reason code.
+            logger.error("[run-panel] personal_run_workspace_resolution_failed", { runId, reason: binding.reason });
+            const sanitizedReason: "workspace_missing" | "workspace_unavailable" | "workspace_invalid" =
+              binding.reason === "not_found"
+                ? "workspace_missing"
+                : binding.reason === "lookup_failed"
+                  ? "workspace_unavailable"
+                  : "workspace_invalid"; // malformed | wrong_owner | wrong_type | invalid_uid
+            const status = sanitizedReason === "workspace_unavailable" ? 503 : 409;
+            const message =
+              sanitizedReason === "workspace_missing"
+                ? "Your account isn't fully set up yet. Please try signing in again."
+                : sanitizedReason === "workspace_unavailable"
+                  ? "We couldn't verify your account right now. Please try again in a moment."
+                  : "There's a problem with your account setup. Please contact support.";
+            const response: RunPanelApiResponse = { ok: false, errorCode: "workspace_prerequisite_failed", message };
+            return NextResponse.json(response, { status });
+          }
+          case "invalid_configuration": {
+            // Rollout-integrity hardening: writeMode.enabled=true (from
+            // EITHER global RW or a canary match) with W=false must never
+            // silently downgrade to a legacy write — whoever activated
+            // write mode for this uid expects a Workspace-associated run,
+            // and a silent legacy fallback would let production quietly
+            // keep generating unbound records with no visible signal.
+            // Rejected before any model execution or usage consumption,
+            // same as a resolution failure above. Reused verbatim from
+            // Phase 3's own global-RW handling — this branch has no
+            // canary-specific logic at all.
+            logger.error("[run-panel] personal_run_workspace_configuration_invalid", { runId, reason: binding.reason });
+            const response: RunPanelApiResponse = {
+              ok: false,
+              errorCode: "workspace_configuration_invalid",
+              message: "This feature is temporarily unavailable. Please try again later.",
+            };
+            return NextResponse.json(response, { status: 500 });
+          }
+          case "team_user":
+          case "flag_off":
+            // Not applicable — proceeds exactly as legacy, not a failure.
+            // "flag_off" is structurally unreachable from this call site
+            // (writeMode.enabled is already true here), kept only because
+            // resolvePersonalRunWorkspaceBinding()'s own return type
+            // still includes it for its other, direct callers/tests.
+            break;
         }
-        case "invalid_configuration": {
-          // Rollout-integrity hardening: RW=true with W=false must never
-          // silently downgrade to a legacy write — an operator who
-          // enabled RW expects Workspace-associated runs, and a silent
-          // legacy fallback would let production quietly keep generating
-          // unbound records with no visible signal. Rejected before any
-          // model execution or usage consumption, same as a resolution
-          // failure above.
-          logger.error("[run-panel] personal_run_workspace_configuration_invalid", { runId, reason: binding.reason });
-          const response: RunPanelApiResponse = {
-            ok: false,
-            errorCode: "workspace_configuration_invalid",
-            message: "This feature is temporarily unavailable. Please try again later.",
-          };
-          return NextResponse.json(response, { status: 500 });
-        }
-        case "team_user":
-        case "flag_off":
-          // Not applicable — proceeds exactly as legacy, not a failure.
-          break;
       }
     }
 

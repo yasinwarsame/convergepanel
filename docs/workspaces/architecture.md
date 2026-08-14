@@ -375,7 +375,7 @@ All of the above is asserted directly by tests, not merely described here (`lib/
 
 ## Rollout phases
 
-Phase 1 (COMPLETE, in production) → Phase 2 (COMPLETE, in production — provisions Personal Workspaces one-at-a-time on self-service demand only) → Phase 2B (COMPLETE, in production — bulk-provisioned Personal Workspaces for the full existing user population; explicitly NOT run backfill) → **Phase 3 (this document's latest section) makes writes workspace-aware for newly created Personal adaptive runs only — explicitly NOT historical backfill, NOT broad reads** → Phase 4 makes reads/history workspace-aware and backfills historical runs → Phase 5 ships Workspace UI → Phase 6 introduces Projects → Phase 7 ships Projects UI → Phase 8 adds shared/collaborative workspaces.
+Phase 1 (COMPLETE, in production) → Phase 2 (COMPLETE, in production — provisions Personal Workspaces one-at-a-time on self-service demand only) → Phase 2B (COMPLETE, in production — bulk-provisioned Personal Workspaces for the full existing user population; explicitly NOT run backfill) → Phase 3 (COMPLETE, deployed dark in production — makes writes workspace-aware for newly created Personal adaptive runs only, all three flags off) → **Phase 3A (this document's latest section) adds a server-only, account-scoped canary allowlist so Phase 3 can be exercised for one real production account without a global rollout — infrastructure only, no production canary executed yet** → Phase 4 makes reads/history workspace-aware and backfills historical runs → Phase 5 ships Workspace UI → Phase 6 introduces Projects → Phase 7 ships Projects UI → Phase 8 adds shared/collaborative workspaces.
 
 The Phase 2B → Phase 3 ordering was a deliberate strategic choice: existing users were made Workspace-ready (provisioned) before any run gained workspace-aware writes. This kept Phase 3 simple — new-run creation never needs to provision a Workspace and create a run in the same hot-path operation, because by the time Phase 3 starts, provisioning coverage is already at 100% for the population that existed at the Phase 2B sweep (88/88 users, `missing: 0`, `conflicts: 0`, verified immediately before Phase 3 began).
 
@@ -503,10 +503,64 @@ Global `RW=true` enablement is safe only when **all** of the following hold — 
 - **Stage A** — deploy with `P=false`, `W=false`, `RW=false` (default). Verify zero behavior change.
 - **Stage B** — enable `P` only. Prove: existing login self-heal works for the 88/88 population (all resolve `existing`); a brand-new production signup receives a Workspace; the awaited provisioning call genuinely blocks app entry until it resolves (no race); a provisioning failure leaves the account in a retryable state rather than a broken one.
 - **Stage C** — enable `W` while `RW` remains `false`. Prove no existing behavior changes (Phase 3 still creates zero Workspace-bound runs; this only makes the — still entirely unwired — Phase 1 resolver capable of honoring a `workspaceId` if one existed, which none do yet).
-- **Stage D** — narrow canary: `RW=true` for one internal/test account only (mirroring Phase 2's own canary technique). Create one new adaptive Personal run; verify `workspaceId` persisted in the initial write, owner can immediately render/restore it (already true by construction — see "Minimum read integration" above), old legacy runs still work, reviewer behavior intact, export behavior intact if exercised, and a deliberately-broken-Workspace test account is correctly rejected before model execution.
+- **Stage D** — narrow canary: `W=true`, global `RW` stays `false`, one internal/test account's uid added to `PERSONAL_RUN_WORKSPACE_WRITE_CANARY_UIDS` (Phase 3A — see below; this is the mechanism a first independent review found absent, then Phase 3A built). Create one new adaptive Personal run for that account; verify `workspaceId` persisted in the initial write, owner can immediately render/restore it (already true by construction — see "Minimum read integration" above), old legacy runs still work, reviewer behavior intact, export behavior intact if exercised, a deliberately-broken-Workspace canary account is correctly rejected before model execution, and — critically — every OTHER (non-canary) account remains completely unaffected throughout.
 - **Stage E** — broader `RW` rollout only after Stage D's controlled proof, and only once the safe global-rollout predicate above is fully satisfied.
 
 This plan is prepared and documented only. No production Workspace-bound run has been created as part of this phase — every verification so far has been code review, unit/integration tests, and static analysis; all three flags (`P`, `W`, `RW`) remain `false`/absent in production.
+
+## Phase 3A — Account-Scoped Workspace Write Canary
+
+Phase 3A adds exactly one capability: a server-only Firebase uid allowlist (`PERSONAL_RUN_WORKSPACE_WRITE_CANARY_UIDS`) that lets the already-built, already-reviewed Phase 3 write path be activated for a small number of explicitly named accounts while the global `PERSONAL_RUN_WORKSPACE_WRITES_ENABLED` flag stays `false`. This closes the gap the Phase 3 independent re-review identified: that flag is a plain global boolean with no account scoping, so there was previously no way to canary Phase 3 against one real user without exposing every eligible user simultaneously.
+
+**The defining design constraint, and the reason this phase is safe to trust without re-reviewing Phase 3 itself: the canary mechanism is a selector, not a reimplementation.** It decides *which* authenticated uid gets `writesEnabled: true` fed into `resolvePersonalRunWorkspaceBinding()` — the exact same function, called from the exact same single call site in `app/api/run-panel/route.ts`, with the exact same failure-before-spend, adaptive-only-scope, team-isolation, and initial-write semantics Phase 3 already has. A structural test asserts there is only one call site to that function in the whole route — there is no parallel "canary path" that could drift from the reviewed one.
+
+### Canary configuration
+
+`lib/workspaces/personalRunWorkspaceWriteCanary.ts`'s `parseCanaryUidAllowlist()` parses `PERSONAL_RUN_WORKSPACE_WRITE_CANARY_UIDS` — a comma-separated list, trimmed and deduplicated per entry, capped at `MAX_PERSONAL_RUN_WORKSPACE_CANARY_UIDS = 10` (a narrow-canary safety ceiling, not the global rollout mechanism — global rollout uses `PERSONAL_RUN_WORKSPACE_WRITES_ENABLED=true` instead of an ever-growing list). Every entry is validated with `getPersonalWorkspaceId()` — the same canonical uid-shape validator Phase 2/3 already use everywhere else a uid becomes a Firestore document id — never a separate, weaker, competing validator. Absent/empty/whitespace-only input parses to a valid, empty allowlist (canary mode simply has nothing to match). **A single malformed entry invalidates the whole list, never just that entry** — partially accepting the valid entries while silently dropping the invalid ones would leave an operator with no clear signal about which accounts actually ended up activated.
+
+The env var is deliberately never `NEXT_PUBLIC_`-prefixed and is read only in `lib/env.ts` → `app/api/run-panel/route.ts` → the canary module — never included in any `NextResponse.json()` body in that route (tested explicitly by scanning every response literal in the file for the string `CANARY`), never persisted to Firestore, and matching is always exact-uid-equality against `resolveRequestIdentity()`'s authenticated uid — never email, never a request-body field, never a wildcard (a literal `"*"` entry parses successfully, since `getPersonalWorkspaceId()` only forbids structurally dangerous Firestore-id characters, but it can never match a real Firebase-issued uid and the matching logic itself has no pattern semantics at all — proven by dedicated prefix/substring-mismatch tests).
+
+### Write-mode precedence
+
+`resolvePersonalRunWorkspaceWriteMode({uid, globalWritesEnabled, canaryUidsRaw})` is the single decision point, returning `{enabled, source: "off" | "canary" | "global", canaryConfigInvalid}`:
+
+| `RW` (global) | Canary list | Result |
+|---|---|---|
+| `false` | absent/empty | `off` |
+| `false` | uid present, valid | `canary` |
+| `false` | uid absent, valid | `off` |
+| `false` | malformed (any uid) | `off` — fails closed, never a partial match |
+| `true` | anything (valid, invalid, absent) | `global` — always wins |
+
+**Global `RW=true` always takes precedence, regardless of whether the canary list is even valid.** A deliberately-enabled global rollout must never be silently disabled by an unrelated allowlist typo. `canaryConfigInvalid` is a separate, always-computed field precisely so a malformed list is still visible in logs (`personal_run_workspace_write_canary_configuration_invalid`) even on a request where it had zero effect on eligibility.
+
+Full flag/canary matrix (`W` = `WORKSPACES_ENABLED`, `RW` = global write flag, `C` = authenticated uid in a *valid* canary list), all seven rows test-covered:
+
+| W | RW | C | Result |
+|---|----|---|--------|
+| false | false | false | legacy |
+| true | false | false | legacy |
+| false | false | true | `workspace_configuration_invalid` — rejected before models, same as Phase 3's existing global invalid-config handling |
+| true | false | true | canary Phase-3 association |
+| false | true | false | existing global invalid-config rejection (unchanged from Phase 3) |
+| true | true | false | global Phase-3 association |
+| true | true | true | global Phase-3 association (global takes precedence; canary is redundant but harmless here) |
+
+### Isolation guarantees
+
+- **Non-canary users are completely unaffected.** With global `RW=false` and a canary list containing a different uid, a non-canary user's request never calls `resolvePersonalRunWorkspaceBinding()`, `loadUserAndTeam()` (for this purpose), `getPersonalWorkspaceId()`, or `getWorkspace()` — tested explicitly, including with `W=true` (W alone must never matter for a non-targeted user).
+- **Adaptive-only scope is preserved for canary users too.** A canary-listed uid making a non-adaptive Deep Research request still triggers zero Workspace lookups — canary only selects *whether* Phase 3 may run, never *which requests* Phase 3 covers.
+- **Team isolation is preserved for canary users too.** A canary-listed uid with a team still gets `team_user` (never a Personal `workspaceId`) — being allowlisted never overrides the team check.
+- **A targeted canary request with `W=false` rejects, exactly like Phase 3's existing global invalid-configuration handling** — no canary-specific "downgrade to legacy" path exists.
+- **Spoof resistance**: a client-supplied `{canary: true, uid: "<canary-uid>"}` (or any other body field) has zero effect — eligibility derives exclusively from the server-resolved authenticated uid, never anything in the request body (tested explicitly).
+
+### Production canary plan (Phase 3A) — prepared, not executed
+
+Intended canary state once Phase 3A merges and is deliberately activated: `P=false` (no lifecycle change needed — the intended canary account is already in the Phase 2B-provisioned 88), `W=true` (the Phase 3 configuration prerequisite), global `RW=false` (ordinary users remain legacy), `PERSONAL_RUN_WORKSPACE_WRITE_CANARY_UIDS` containing exactly one existing, already-provisioned internal account's uid — never hardcoded in source, environment configuration only. Before activating, verify that account's Firebase Auth user exists, its Personal Workspace exists with the correct deterministic id and owner, and has no conflict — read-only verification via the existing Phase 2B tooling, never a new mechanism.
+
+**Rollback**: remove the uid from (or empty) `PERSONAL_RUN_WORKSPACE_WRITE_CANARY_UIDS` to stop new canary associations. Any already-created Workspace-associated run remains intact and usable — Phase 3's reads still use legacy `userId`/reviewer semantics (see "Minimum read integration" above), so an existing canary-associated run stays fully accessible to its owner even after the canary is turned off. Never strip a `workspaceId` as a rollback step. `W` should stay on throughout a Phase 3A canary unless there's a specific rollback reason — the same "W is not yet a generic kill switch" distinction Phase 3's own rollback section already documents applies here unchanged.
+
+No production canary has been executed as part of this phase — every flag (`P`, `W`, `RW`) and the canary list remain `false`/absent in production; this PR is infrastructure only.
 
 ## Phase 2 production rollout plan — prepared, not executed
 
