@@ -71,7 +71,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
   // denies the run's own owner exactly as it denies anyone else. A truly
   // legacy run (workspaceId property absent) short-circuits with zero
   // Firestore lookup and falls through to the unchanged existing logic.
-  const integrity = await validateRunWorkspaceAssociation(owner, data);
+  const integrity = await validateRunWorkspaceAssociation(data);
   if (integrity.classification === "invalid") {
     logger.warn("[user/runs/[runId]] workspace_run_integrity_failed", { runId, reason: integrity.reason });
     return NextResponse.json(

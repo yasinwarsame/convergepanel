@@ -108,7 +108,7 @@ export async function POST(req: NextRequest, context: { params: Promise<{ runId:
 
   // Phase 4B — Mandatory Workspace Integrity, requester-independent, before
   // the owner check and before any export generation.
-  const integrity = await validateRunWorkspaceAssociation(owner, data);
+  const integrity = await validateRunWorkspaceAssociation(data);
   if (integrity.classification === "invalid") {
     logger.warn("[user/runs/export] workspace_run_integrity_failed", { runId, reason: integrity.reason });
     return errorResponse(404, "not_found", "Run not found.");

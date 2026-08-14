@@ -9,12 +9,14 @@
  *    `invalid`, never `legacy`, regardless of what the underlying resolver
  *    or Firestore lookup returns.
  *
- * The `(userId, runData)` signature (never a reconstructed
- * `{userId, workspaceId}` object) is itself load-bearing: an object
- * literal with a `workspaceId:` key always creates an own property even
- * when the value is `undefined`, which would silently defeat true-absence
- * detection at every call site. These tests construct `runData` the same
- * way real Firestore data arrives — via property assignment or
+ * As of the Phase 4B security re-review, the function takes exactly ONE
+ * argument — the run's own canonical data. It derives the owning uid from
+ * `runData.userId` internally and never accepts a caller-supplied identity
+ * — a caller-supplied owner parameter was found to be a real misuse risk
+ * (a real call site in this codebase passed the authenticated requester's
+ * uid instead of the row's own owner, safe only by coincidence of that
+ * route's query). These tests construct `runData` the same way real
+ * Firestore data arrives — via property assignment or
  * `Object.defineProperty`, never a literal with an always-present key.
  */
 
@@ -22,10 +24,23 @@ import type { WorkspaceContextResolution } from "@/lib/workspaces/types";
 
 const OWNER_UID = "owner-1";
 
-describe("validateRunWorkspaceAssociation — requester-independence", () => {
-  it("the exported function's parameters carry no requester/reviewer/admin identity beyond the run's own owner", async () => {
+describe("validateRunWorkspaceAssociation — no caller-supplied identity", () => {
+  it("the exported function takes exactly one parameter — the run's own data, nothing else", async () => {
     const { validateRunWorkspaceAssociation } = await import("@/lib/workspaces/runWorkspaceIntegrity");
-    expect(validateRunWorkspaceAssociation.length).toBe(2); // userId, runData — nothing else
+    expect(validateRunWorkspaceAssociation.length).toBe(1);
+  });
+
+  it("THREAT — a run whose OWN userId differs from any external context still validates purely from its own data (no way to inject a different owner)", async () => {
+    jest.resetModules();
+    const getWorkspaceMock = jest.fn(async () => ({ status: "not_found" }));
+    jest.doMock("@/lib/firestore/workspaces", () => ({ getWorkspace: getWorkspaceMock }));
+    jest.doMock("@/lib/env", () => ({ WORKSPACES_ENABLED: true }));
+    const mod = await import("@/lib/workspaces/runWorkspaceIntegrity");
+    // Regardless of any uid an outer caller might have in scope, only
+    // runData.userId can ever participate — there is no parameter through
+    // which a different value could reach this function.
+    const result = await mod.validateRunWorkspaceAssociation({ userId: OWNER_UID, workspaceId: `personal-${OWNER_UID}` });
+    expect(result).toEqual({ classification: "invalid", reason: "workspace_not_found" });
   });
 });
 
@@ -38,8 +53,8 @@ describe("validateRunWorkspaceAssociation — legacy detection (true absence onl
 
   it("workspaceId property truly absent on runData -> legacy", async () => {
     const validate = await load();
-    const runData: Record<string, unknown> = { question: "x" }; // no workspaceId key at all
-    const result = await validate(OWNER_UID, runData);
+    const runData: Record<string, unknown> = { userId: OWNER_UID, question: "x" }; // no workspaceId key at all
+    const result = await validate(runData);
     expect(result).toEqual({ classification: "legacy" });
   });
 
@@ -53,11 +68,11 @@ describe("validateRunWorkspaceAssociation — legacy detection (true absence onl
     ["undefined as an OWNED property (not truly absent)", undefined],
   ])("workspaceId present as %s -> invalid, never legacy", async (_label, value) => {
     const validate = await load();
-    const runData: Record<string, unknown> = {};
+    const runData: Record<string, unknown> = { userId: OWNER_UID };
     Object.defineProperty(runData, "workspaceId", { value, enumerable: true, configurable: true });
     expect(Object.prototype.hasOwnProperty.call(runData, "workspaceId")).toBe(true);
 
-    const result = await validate(OWNER_UID, runData);
+    const result = await validate(runData);
     expect(result.classification).toBe("invalid");
     expect(result).not.toEqual({ classification: "legacy" });
   });
@@ -70,9 +85,15 @@ describe("validateRunWorkspaceAssociation — run_owner_invalid", () => {
     return mod.validateRunWorkspaceAssociation;
   }
 
-  it("an unparseable owner uid (e.g. containing '/') fails closed before any Firestore read", async () => {
+  it("an unparseable owner uid on the run itself (e.g. containing '/') fails closed before any Firestore read", async () => {
     const validate = await load();
-    const result = await validate("bad/uid", { workspaceId: "personal-bad/uid" });
+    const result = await validate({ userId: "bad/uid", workspaceId: "personal-bad/uid" });
+    expect(result).toEqual({ classification: "invalid", reason: "run_owner_invalid" });
+  });
+
+  it("a run with no userId field at all, but a present workspaceId, fails closed as run_owner_invalid", async () => {
+    const validate = await load();
+    const result = await validate({ workspaceId: "personal-someone" });
     expect(result).toEqual({ classification: "invalid", reason: "run_owner_invalid" });
   });
 });
@@ -85,7 +106,7 @@ describe("validateRunWorkspaceAssociation — deterministic_id_mismatch", () => 
     jest.doMock("@/lib/env", () => ({ WORKSPACES_ENABLED: true }));
     const mod = await import("@/lib/workspaces/runWorkspaceIntegrity");
 
-    const result = await mod.validateRunWorkspaceAssociation(OWNER_UID, { workspaceId: "personal-someone-else" });
+    const result = await mod.validateRunWorkspaceAssociation({ userId: OWNER_UID, workspaceId: "personal-someone-else" });
     expect(result).toEqual({ classification: "invalid", reason: "deterministic_id_mismatch" });
     expect(getWorkspaceMock).not.toHaveBeenCalled();
   });
@@ -109,42 +130,42 @@ describe("validateRunWorkspaceAssociation — resolver outcomes mapped correctly
   it("resolver: workspaces_disabled -> invalid/workspaces_disabled", async () => {
     mockResolver({ kind: "workspaces_disabled" });
     const validate = await load();
-    const result = await validate(OWNER_UID, { workspaceId: expectedWorkspaceId });
+    const result = await validate({ userId: OWNER_UID, workspaceId: expectedWorkspaceId });
     expect(result).toEqual({ classification: "invalid", reason: "workspaces_disabled" });
   });
 
   it("resolver: not_found -> invalid/workspace_not_found", async () => {
     mockResolver({ kind: "not_found" });
     const validate = await load();
-    const result = await validate(OWNER_UID, { workspaceId: expectedWorkspaceId });
+    const result = await validate({ userId: OWNER_UID, workspaceId: expectedWorkspaceId });
     expect(result).toEqual({ classification: "invalid", reason: "workspace_not_found" });
   });
 
   it("resolver: lookup_failed -> invalid/workspace_lookup_failed", async () => {
     mockResolver({ kind: "lookup_failed" });
     const validate = await load();
-    const result = await validate(OWNER_UID, { workspaceId: expectedWorkspaceId });
+    const result = await validate({ userId: OWNER_UID, workspaceId: expectedWorkspaceId });
     expect(result).toEqual({ classification: "invalid", reason: "workspace_lookup_failed" });
   });
 
   it("resolver: malformed -> invalid/workspace_malformed", async () => {
     mockResolver({ kind: "malformed" });
     const validate = await load();
-    const result = await validate(OWNER_UID, { workspaceId: expectedWorkspaceId });
+    const result = await validate({ userId: OWNER_UID, workspaceId: expectedWorkspaceId });
     expect(result).toEqual({ classification: "invalid", reason: "workspace_malformed" });
   });
 
   it("resolver: unsupported_workspace_type -> invalid/workspace_wrong_type", async () => {
     mockResolver({ kind: "unsupported_workspace_type" });
     const validate = await load();
-    const result = await validate(OWNER_UID, { workspaceId: expectedWorkspaceId });
+    const result = await validate({ userId: OWNER_UID, workspaceId: expectedWorkspaceId });
     expect(result).toEqual({ classification: "invalid", reason: "workspace_wrong_type" });
   });
 
   it("resolver: legacy (structurally unreachable in practice) -> invalid/malformed_workspace_id, never legacy", async () => {
     mockResolver({ kind: "legacy", context: { mode: "legacy", ownerUserId: OWNER_UID } });
     const validate = await load();
-    const result = await validate(OWNER_UID, { workspaceId: expectedWorkspaceId });
+    const result = await validate({ userId: OWNER_UID, workspaceId: expectedWorkspaceId });
     expect(result).toEqual({ classification: "invalid", reason: "malformed_workspace_id" });
     expect(result).not.toEqual({ classification: "legacy" });
   });
@@ -155,7 +176,7 @@ describe("validateRunWorkspaceAssociation — resolver outcomes mapped correctly
       context: { mode: "workspace", workspaceId: expectedWorkspaceId, workspaceType: "personal", ownerUserId: OWNER_UID },
     });
     const validate = await load();
-    const result = await validate(OWNER_UID, { workspaceId: expectedWorkspaceId });
+    const result = await validate({ userId: OWNER_UID, workspaceId: expectedWorkspaceId });
     expect(result).toEqual({ classification: "valid", workspaceId: expectedWorkspaceId });
   });
 
@@ -165,7 +186,7 @@ describe("validateRunWorkspaceAssociation — resolver outcomes mapped correctly
       context: { mode: "workspace", workspaceId: expectedWorkspaceId, workspaceType: "personal", ownerUserId: "someone-else" },
     });
     const validate = await load();
-    const result = await validate(OWNER_UID, { workspaceId: expectedWorkspaceId });
+    const result = await validate({ userId: OWNER_UID, workspaceId: expectedWorkspaceId });
     expect(result).toEqual({ classification: "invalid", reason: "workspace_owner_mismatch" });
     expect(result.classification).not.toBe("valid");
   });
@@ -216,7 +237,7 @@ describe("validateRunWorkspaceAssociation — end-to-end through the real Phase 
     const validate = await loadWithFlag(true);
     const expectedWorkspaceId = `personal-${OWNER_UID}`;
     seedWorkspace(expectedWorkspaceId);
-    const result = await validate(OWNER_UID, { workspaceId: expectedWorkspaceId });
+    const result = await validate({ userId: OWNER_UID, workspaceId: expectedWorkspaceId });
     expect(result).toEqual({ classification: "valid", workspaceId: expectedWorkspaceId });
   });
 
@@ -224,14 +245,14 @@ describe("validateRunWorkspaceAssociation — end-to-end through the real Phase 
     const validate = await loadWithFlag(false);
     const expectedWorkspaceId = `personal-${OWNER_UID}`;
     seedWorkspace(expectedWorkspaceId);
-    const result = await validate(OWNER_UID, { workspaceId: expectedWorkspaceId });
+    const result = await validate({ userId: OWNER_UID, workspaceId: expectedWorkspaceId });
     expect(result).toEqual({ classification: "invalid", reason: "workspaces_disabled" });
   });
 
   it("W=false + legacy run (property truly absent on runData) -> legacy unaffected, zero Firestore read", async () => {
     const validate = await loadWithFlag(false);
     const { getWorkspace } = await import("@/lib/firestore/workspaces");
-    const result = await validate(OWNER_UID, { question: "x" });
+    const result = await validate({ userId: OWNER_UID, question: "x" });
     expect(result).toEqual({ classification: "legacy" });
     expect(getWorkspace).not.toHaveBeenCalled();
   });
@@ -240,7 +261,7 @@ describe("validateRunWorkspaceAssociation — end-to-end through the real Phase 
     const validate = await loadWithFlag(true);
     const expectedWorkspaceId = `personal-${OWNER_UID}`;
     seedWorkspace(expectedWorkspaceId, { ownerUserId: "attacker-or-corruption-uid" });
-    const result = await validate(OWNER_UID, { workspaceId: expectedWorkspaceId });
+    const result = await validate({ userId: OWNER_UID, workspaceId: expectedWorkspaceId });
     expect(result).toEqual({ classification: "invalid", reason: "workspace_owner_mismatch" });
   });
 
@@ -250,7 +271,7 @@ describe("validateRunWorkspaceAssociation — end-to-end through the real Phase 
     // from a document that was written without ever setting workspaceId.
     const baseRunFields = { userId: OWNER_UID, question: "capital of France", status: "complete" };
     const runData: Record<string, unknown> = { ...baseRunFields };
-    const result = await validate(OWNER_UID, runData);
+    const result = await validate(runData);
     expect(result).toEqual({ classification: "legacy" });
   });
 });

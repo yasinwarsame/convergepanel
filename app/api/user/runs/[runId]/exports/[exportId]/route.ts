@@ -88,7 +88,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
   // creation — Layer A follows the same live-recheck discipline). A frozen
   // export snapshot being valid historically is never sufficient on its
   // own if the canonical run's Workspace association is invalid now.
-  const integrity = await validateRunWorkspaceAssociation(owner, runData);
+  const integrity = await validateRunWorkspaceAssociation(runData);
   if (integrity.classification === "invalid") {
     logger.warn("[user/runs/exports/exportId] workspace_run_integrity_failed", { runId, reason: integrity.reason });
     return errorResponse(404, "not_found", "Not found.");

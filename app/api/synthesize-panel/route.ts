@@ -77,6 +77,7 @@ import type { UserProfile } from "@/lib/types";
 import { evaluateAndStoreGovernance } from "@/lib/governance/evaluateAndStore";
 import { governanceInputFromResearchRun } from "@/lib/governance/governanceInputFromDocs";
 import { parsePersistedAdaptiveOutput } from "@/lib/adaptiveSchema/persistedOutput";
+import { validateRunWorkspaceAssociation } from "@/lib/workspaces/runWorkspaceIntegrity";
 import {
   applyTeamGovernancePipeline,
   mergeGovernanceIntoBody,
@@ -307,7 +308,7 @@ export async function GET(req: NextRequest) {
     try {
       const runDoc = await adminDb.collection("runs").doc(runId).get();
       if (runDoc.exists) {
-        const runData = runDoc.data();
+        const runData = runDoc.data() as Record<string, unknown>;
         const runUserId = runData?.userId;
         if (runUserId !== undefined && runUserId !== uid) {
           return NextResponse.json(
@@ -316,6 +317,19 @@ export async function GET(req: NextRequest) {
               "You don't have access to this run.",
               requestId
             ),
+            { status: 403 }
+          );
+        }
+
+        // Phase 4B — Mandatory Workspace Integrity, requester-independent,
+        // before any cached content is disclosed below. A run with no
+        // workspaceId is unaffected (zero lookup); a bound-invalid run
+        // denies unconditionally, even for its own owner.
+        const integrity = await validateRunWorkspaceAssociation(runData);
+        if (integrity.classification === "invalid") {
+          logger.warn(`[${requestId}] [synthesize-panel GET] workspace_run_integrity_failed`, { requestId, runId, reason: integrity.reason });
+          return NextResponse.json(
+            createErrorResponse(ERROR_CODES.FORBIDDEN, "You don't have access to this run.", requestId),
             { status: 403 }
           );
         }
@@ -520,7 +534,38 @@ export async function POST(req: NextRequest) {
         if (adminDb) {
           const runDoc = await adminDb.collection("runs").doc(runId).get();
           if (runDoc.exists) {
-            const data = runDoc.data();
+            const data = runDoc.data() as Record<string, unknown>;
+
+            // Security fix (authorized as part of Phase 4B — this branch
+            // previously returned cached synthesis content with NO
+            // ownership check at all, unlike every other read path in this
+            // file. An authenticated but unrelated user could receive
+            // another owner's cached report merely by requesting the same
+            // runId while a request for it happened to already be
+            // in-flight. Mirrors the same lenient-on-missing-userId pattern
+            // already used elsewhere in this file — not a new, divergent
+            // authorization rule.
+            const cachedRunUserId = data?.userId;
+            if (cachedRunUserId !== undefined && cachedRunUserId !== uid) {
+              logger.warn(`[${requestId}] [synthesize-panel] In-flight cache ownership check failed`, { requestId, runId });
+              return NextResponse.json(
+                createErrorResponse(ERROR_CODES.FORBIDDEN, "You don't have access to this run.", requestId),
+                { status: 403 }
+              );
+            }
+
+            // Phase 4B — Mandatory Workspace Integrity, same as every other
+            // disclosure point in this file. A bound-invalid run denies
+            // here too, before any cached content is returned.
+            const inFlightIntegrity = await validateRunWorkspaceAssociation(data);
+            if (inFlightIntegrity.classification === "invalid") {
+              logger.warn(`[${requestId}] [synthesize-panel] In-flight cache workspace_run_integrity_failed`, { requestId, runId, reason: inFlightIntegrity.reason });
+              return NextResponse.json(
+                createErrorResponse(ERROR_CODES.FORBIDDEN, "You don't have access to this run.", requestId),
+                { status: 403 }
+              );
+            }
+
             if (data?.synthesizedStructuredReport && data?.schemaVersion === 1) {
               logger.info(`[${requestId}] [synthesize-panel] Cache hit (while waiting for in-flight)`, {
                 requestId,
@@ -682,6 +727,21 @@ export async function POST(req: NextRequest) {
           if (!runUserId) {
             // Log missing userId for monitoring (old runs)
             logger.debug(`[${requestId}] [synthesize-panel] Run has no userId field (old run), allowing access`, { requestId, runId });
+          }
+
+          // Phase 4B — Mandatory Workspace Integrity, requester-independent,
+          // before synthesis generation/disclosure proceeds. Only Legacy-
+          // family adaptive runs (and plain Deep Research runs) can reach
+          // this point — Milestone-2 adaptive runs are rejected below — but
+          // Legacy-family runs ARE eligible for Workspace binding under
+          // Phase 3, so this check is not hypothetical.
+          const integrity = await validateRunWorkspaceAssociation(runData as Record<string, unknown>);
+          if (integrity.classification === "invalid") {
+            logger.warn(`[${requestId}] [synthesize-panel] workspace_run_integrity_failed`, { requestId, runId, reason: integrity.reason });
+            return NextResponse.json(
+              createErrorResponse(ERROR_CODES.FORBIDDEN, "You don't have access to this run.", requestId),
+              { status: 403 }
+            );
           }
         } else {
           // Run doesn't exist — a real, successful lookup that found

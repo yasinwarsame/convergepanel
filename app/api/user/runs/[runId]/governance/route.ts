@@ -82,7 +82,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
   // before every other check in this route (including the governance-
   // record-corruption check below) — an invalid association must deny
   // regardless of who is asking or what else about the run looks fine.
-  const integrity = await validateRunWorkspaceAssociation(owner, data);
+  const integrity = await validateRunWorkspaceAssociation(data);
   if (integrity.classification === "invalid") {
     logger.warn("[user/runs/governance] workspace_run_integrity_failed", { runId, reason: integrity.reason });
     return NextResponse.json({ ok: false, errorCode: "not_found", message: "Run not found." }, { status: 404 });

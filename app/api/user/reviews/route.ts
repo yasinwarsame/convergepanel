@@ -143,7 +143,7 @@ export async function GET(req: NextRequest) {
     candidates.map(async (c) => {
       const runData = runDataByRunId.get(c.runId);
       if (!runData) return; // already handled as "run no longer exists" below
-      const result = await validateWorkspace(String(runData.userId ?? ""), runData);
+      const result = await validateWorkspace(runData);
       integrityByRunId.set(c.runId, result);
     })
   );

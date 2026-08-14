@@ -77,7 +77,7 @@ export async function POST(req: NextRequest, { params }: { params: { runId: stri
 
   // Phase 4B — Mandatory Workspace Integrity, requester-independent, before
   // the reviewer-assignment authorization below and before any mutation.
-  const integrity = await validateRunWorkspaceAssociation(owner, runData ?? {});
+  const integrity = await validateRunWorkspaceAssociation(runData ?? {});
   if (integrity.classification === "invalid") {
     logger.warn("[user/runs/decision] workspace_run_integrity_failed", { runId, reason: integrity.reason });
     return errorResponse(404, "not_found", "Run not found.");

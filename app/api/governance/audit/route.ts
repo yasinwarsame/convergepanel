@@ -10,6 +10,8 @@ import {
   runOwnerVisibleInGovernance,
 } from "@/lib/governance/governanceVisibleUserIds";
 import { resolveGovernanceRequestUser } from "@/lib/governance/authCheck";
+import { validateRunWorkspaceAssociation } from "@/lib/workspaces/runWorkspaceIntegrity";
+import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -359,6 +361,22 @@ export async function GET(request: NextRequest) {
           },
           { status: 403 }
         );
+      }
+
+      // Phase 4B — Mandatory Workspace Integrity, requester-independent.
+      // This route's own visibility model (governance reviewer assignment)
+      // is an existing Layer-B grant, not an exemption from Layer A.
+      // Scoped to "runs" only — verifications/videoVerifications never
+      // carry a workspaceId.
+      if (collection === "runs") {
+        const integrity = await validateRunWorkspaceAssociation(parentData);
+        if (integrity.classification === "invalid") {
+          logger.warn("[governance/audit] workspace_run_integrity_failed", { runId, reason: integrity.reason });
+          return NextResponse.json(
+            { ok: false, error: { code: "not_found", message: "Run not found." } },
+            { status: 404 }
+          );
+        }
       }
 
       try {

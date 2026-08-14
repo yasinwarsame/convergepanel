@@ -2,14 +2,19 @@
  * Phase 4B — Mandatory Workspace Integrity for Workspace-Bound Run Reads.
  *
  * The single, requester-independent Layer-A primitive: "is this persisted
- * run's Workspace association internally valid?" It takes no requester uid,
- * reviewer uid, or admin role — it cannot be handed a requester identity
- * even by accident, which is what makes it safe to call identically from
- * every route (owner, reviewer, admin, list) without risk of Layer A and
- * Layer B (existing owner/reviewer/admin authorization, entirely unchanged)
- * ever being conflated at a call site. See docs/workspaces/architecture.md's
- * Phase 4B section and docs/workspaces/phase4a-read-authorization-audit.md
- * for the full design rationale and threat model this implements.
+ * run's Workspace association internally valid?" Takes the run's own
+ * canonical data ONLY — no requester uid, reviewer uid, or admin role, and
+ * (as of the Phase 4B security re-review) no caller-supplied owner uid
+ * either. The owning uid is derived exclusively from `runData.userId`,
+ * never accepted as a separate parameter. An earlier revision took
+ * `(userId, runData)`, and one real call site (the owner-history list)
+ * passed the AUTHENTICATED REQUESTER's uid rather than the row's own
+ * `userId` — safe only because that route's query happens to guarantee
+ * the two are equal, with nothing in the function itself enforcing it. A
+ * future call site copying that pattern into a context where they differ
+ * would have silently validated the wrong owner. Deriving the owner
+ * internally makes that class of misuse structurally impossible: there is
+ * no parameter a caller could get wrong.
  *
  * Built on Phase 1's `resolveWorkspaceContextForResource()` verbatim — no
  * duplicated presence/shape/schema parsing. It adds exactly the two checks
@@ -24,6 +29,10 @@
  * Both checks are independently necessary: (1) catches a corrupted
  * `run.workspaceId`; (2) catches a corrupted Workspace document — a
  * violation of one does not imply the other.
+ *
+ * See docs/workspaces/architecture.md's Phase 4B section and
+ * docs/workspaces/phase4a-read-authorization-audit.md for the full design
+ * rationale and threat model this implements.
  */
 
 import "server-only";
@@ -57,18 +66,16 @@ export type RunWorkspaceIntegrityResult =
   | { classification: "invalid"; reason: RunWorkspaceIntegrityReason };
 
 /**
- * Deliberately NOT `{ userId, workspaceId }` — a caller reconstructing that
- * shape from Firestore data (e.g. `{ userId: owner, workspaceId: data.workspaceId }`)
- * would silently defeat the whole point of this primitive: in JavaScript,
- * an object literal with a `workspaceId:` key ALWAYS creates an own
- * property on the new object, even when the value is `undefined` because
- * the source never had the key at all — `hasOwnProperty` would then report
- * `true` for every run, and a truly legacy run would misclassify as
- * present-but-invalid. Taking the raw Firestore data object directly and
- * checking presence on THAT object (never a reconstructed one) makes this
- * bug structurally impossible at any call site.
+ * `runData` is the run's own already-fetched Firestore data — never a
+ * reconstructed `{ userId, workspaceId }` object literal. In JavaScript, an
+ * object literal with a `workspaceId:` key ALWAYS creates an own property
+ * on the new object, even when the value is `undefined` because the source
+ * never had the key at all — `hasOwnProperty` would then report `true` for
+ * every run, and a truly legacy run would misclassify as present-but-
+ * invalid. Checking presence directly on the run's own fetched document
+ * (never a copy) makes that bug structurally impossible at any call site.
  */
-export async function validateRunWorkspaceAssociation(userId: string, runData: Record<string, unknown>): Promise<RunWorkspaceIntegrityResult> {
+export async function validateRunWorkspaceAssociation(runData: Record<string, unknown>): Promise<RunWorkspaceIntegrityResult> {
   const hasWorkspaceIdProperty = Object.prototype.hasOwnProperty.call(runData, "workspaceId");
   if (!hasWorkspaceIdProperty) {
     // Truly absent — the ONLY legacy trigger. No resolver call, no Firestore read.
@@ -90,7 +97,12 @@ export async function validateRunWorkspaceAssociation(userId: string, runData: R
     return { classification: "invalid", reason: "malformed_workspace_id" };
   }
 
-  const expected = getPersonalWorkspaceId(userId);
+  // The owning uid is derived exclusively from the run's own canonical
+  // field — never a caller-supplied parameter. A run whose own `userId`
+  // isn't a valid, well-formed uid can never have a legitimately bound
+  // Workspace, regardless of what workspaceId it claims.
+  const ownerUserId = typeof runData.userId === "string" ? runData.userId : "";
+  const expected = getPersonalWorkspaceId(ownerUserId);
   if (!expected.ok) {
     return { classification: "invalid", reason: "run_owner_invalid" };
   }
@@ -109,7 +121,7 @@ export async function validateRunWorkspaceAssociation(userId: string, runData: R
 
   const resolution = await resolveWorkspaceContextForResource({
     workspaceId: rawWorkspaceId,
-    legacyOwnerUserId: userId,
+    legacyOwnerUserId: ownerUserId,
   });
 
   switch (resolution.kind) {
@@ -131,7 +143,7 @@ export async function validateRunWorkspaceAssociation(userId: string, runData: R
     case "unsupported_workspace_type":
       return { classification: "invalid", reason: "workspace_wrong_type" };
     case "resolved":
-      if (resolution.context.ownerUserId !== userId) {
+      if (resolution.context.ownerUserId !== ownerUserId) {
         return { classification: "invalid", reason: "workspace_owner_mismatch" };
       }
       return { classification: "valid", workspaceId: resolution.context.workspaceId };

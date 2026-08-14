@@ -78,7 +78,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
 
   // Phase 4B — Mandatory Workspace Integrity, requester-independent, before
   // the owner/reviewer access resolution below.
-  const integrity = await validateRunWorkspaceAssociation(owner, data);
+  const integrity = await validateRunWorkspaceAssociation(data);
   if (integrity.classification === "invalid") {
     logger.warn("[user/runs/review-history] workspace_run_integrity_failed", { runId, reason: integrity.reason });
     return errorResponse(404, "not_found", "Run not found.");

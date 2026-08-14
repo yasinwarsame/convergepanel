@@ -106,7 +106,7 @@ export async function GET(req: NextRequest) {
     const validateWorkspace = createRunWorkspaceIntegrityBatch();
     const ownedRunDocs = runsSnap.docs.filter((d) => String(d.data().userId ?? "") === uid);
     const integrityResults = await Promise.all(
-      ownedRunDocs.map((d) => validateWorkspace(uid, d.data()))
+      ownedRunDocs.map((d) => validateWorkspace(d.data()))
     );
 
     for (let i = 0; i < ownedRunDocs.length; i++) {

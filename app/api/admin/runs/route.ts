@@ -6,6 +6,8 @@ import { NextRequest, NextResponse } from "next/server";
 import type { QuerySnapshot } from "firebase-admin/firestore";
 import { requireAdminApiAccess } from "@/lib/firebase/auth-helpers";
 import { adminDb } from "@/lib/firebase/admin";
+import { createRunWorkspaceIntegrityBatch } from "@/lib/workspaces/runWorkspaceIntegrityBatch";
+import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,6 +24,11 @@ const RUN_FIELDS = [
   "governanceReviewedBy",
   "governanceReviewedAt",
   "governanceReviewComment",
+  // Phase 4B — required so Layer-A integrity validation can see whether
+  // this row actually carries a Workspace association at all; omitting it
+  // from the projection would make every row look "legacy" regardless of
+  // its real, persisted state.
+  "workspaceId",
 ] as const;
 
 const VER_FIELDS = [
@@ -209,6 +216,10 @@ export async function GET(request: NextRequest) {
     ]);
 
     if (runsSnap) {
+      // First pass: apply the existing filters exactly as before (search,
+      // userId, governance status) — Phase 4B does not broaden or narrow
+      // these. Only rows surviving them are candidates for the list.
+      const candidates: Array<{ docId: string; data: Record<string, unknown>; userId: string; q: string; gs: string | null }> = [];
       for (const doc of runsSnap.docs) {
         const data = doc.data() as Record<string, unknown>;
         const userId = String(data.userId ?? "");
@@ -217,20 +228,39 @@ export async function GET(request: NextRequest) {
         if (search && !q.toLowerCase().includes(search)) continue;
         const gs = data.governanceStatus != null ? String(data.governanceStatus) : null;
         if (!matchesGovernanceStatusFilter(statusFilter, gs)) continue;
-        const ms = firestoreMillis(data.createdAt);
+        candidates.push({ docId: doc.id, data, userId, q, gs });
+      }
+
+      // Phase 4B — Mandatory Workspace Integrity. The admin bypass is an
+      // existing Layer-B grant (no ownership scoping), not an exemption
+      // from Layer A — a corrupted Workspace-bound run must not be
+      // disclosed here merely because the requester is an admin. Batched
+      // per distinct owner (see runWorkspaceIntegrityBatch.ts), never one
+      // lookup per row.
+      const validateWorkspace = createRunWorkspaceIntegrityBatch();
+      const integrityResults = await Promise.all(candidates.map((c) => validateWorkspace(c.data)));
+
+      for (let i = 0; i < candidates.length; i++) {
+        const c = candidates[i];
+        const integrity = integrityResults[i];
+        if (integrity.classification === "invalid") {
+          logger.warn("[admin/runs] workspace_run_integrity_failed", { runId: c.docId, reason: integrity.reason });
+          continue;
+        }
+        const ms = firestoreMillis(c.data.createdAt);
         merged.push({
           sortMs: ms || 0,
-          runId: doc.id,
+          runId: c.docId,
           collection: "runs",
           runType: "research",
-          question: q.slice(0, 5000),
-          userEmail: typeof data.userEmail === "string" ? data.userEmail : "",
-          userId,
-          consensusScore: consensusFromData(data),
+          question: c.q.slice(0, 5000),
+          userEmail: typeof c.data.userEmail === "string" ? c.data.userEmail : "",
+          userId: c.userId,
+          consensusScore: consensusFromData(c.data),
           verdict: null,
-          governanceStatus: gs,
+          governanceStatus: c.gs,
           governanceReviewedBy:
-            typeof data.governanceReviewedBy === "string" ? data.governanceReviewedBy : null,
+            typeof c.data.governanceReviewedBy === "string" ? c.data.governanceReviewedBy : null,
           createdAt: ms ? new Date(ms).toISOString() : new Date().toISOString(),
         });
       }

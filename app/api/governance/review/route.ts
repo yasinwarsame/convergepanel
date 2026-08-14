@@ -13,6 +13,8 @@ import {
 } from "@/lib/governance/governanceVisibleUserIds";
 import { writeAuditEvent } from "@/lib/governance/auditLog";
 import { resolveGovernanceRequestUser } from "@/lib/governance/authCheck";
+import { validateRunWorkspaceAssociation } from "@/lib/workspaces/runWorkspaceIntegrity";
+import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -137,6 +139,21 @@ export async function POST(request: NextRequest) {
       },
       { status: 403 }
     );
+  }
+
+  // Phase 4B — Mandatory Workspace Integrity, requester-independent, before
+  // this decision mutates governance state or its response discloses any
+  // run content. Scoped to "runs" only — verifications/videoVerifications
+  // never carry a workspaceId.
+  if (collection === "runs") {
+    const integrity = await validateRunWorkspaceAssociation(data);
+    if (integrity.classification === "invalid") {
+      logger.warn("[governance/review] workspace_run_integrity_failed", { runId: docId, reason: integrity.reason });
+      return NextResponse.json(
+        { ok: false, error: { code: "not_found", message: "Run not found" } },
+        { status: 404 }
+      );
+    }
   }
 
   const prevStatus =

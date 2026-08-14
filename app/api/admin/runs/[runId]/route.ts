@@ -79,7 +79,7 @@ export async function GET(
   // Scoped to "runs" only — verifications/videoVerifications never carry
   // a workspaceId.
   if (collection === "runs") {
-    const integrity = await validateRunWorkspaceAssociation(String(docData.userId ?? ""), docData);
+    const integrity = await validateRunWorkspaceAssociation(docData);
     if (integrity.classification === "invalid") {
       logger.warn("[admin/runs/[runId]] workspace_run_integrity_failed", { runId, reason: integrity.reason });
       return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });

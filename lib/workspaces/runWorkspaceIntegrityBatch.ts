@@ -21,40 +21,41 @@
  * one read per distinct owner represented on the page, not one per row.
  *
  * Deliberately built on the unmodified `validateRunWorkspaceAssociation()`
- * — this is a caching wrapper around it, not a reimplementation. No change
- * to Phase 1's `getWorkspace()`/`resolveWorkspaceContextForResource()` was
- * needed to achieve this. Takes the same `(userId, runData)` shape as the
- * underlying primitive — never a reconstructed `{workspaceId: ...}` object
- * literal — for the exact reason documented on that primitive: reassembling
- * that shape from a source object silently defeats true-absence detection.
+ * — this is a caching wrapper around it, not a reimplementation. Takes the
+ * same single `runData` shape as the underlying primitive — never a
+ * caller-supplied owner uid — for the exact reason documented on that
+ * primitive: a caller-supplied identity parameter is a structural misuse
+ * risk (a real call site in this codebase passed the requester's uid
+ * rather than the row's own owner before this was caught).
  */
 
 import "server-only";
 import { validateRunWorkspaceAssociation, type RunWorkspaceIntegrityResult } from "./runWorkspaceIntegrity";
 
 export interface RunWorkspaceIntegrityBatchValidator {
-  (userId: string, runData: Record<string, unknown>): Promise<RunWorkspaceIntegrityResult>;
+  (runData: Record<string, unknown>): Promise<RunWorkspaceIntegrityResult>;
   /** Diagnostic only — the number of distinct (owner, workspaceId) pairs actually resolved so far, never row count. */
   readonly distinctLookupCount: number;
 }
 
-function cacheKeyFor(userId: string, runData: Record<string, unknown>): string {
+function cacheKeyFor(runData: Record<string, unknown>): string {
+  const ownerUserId = typeof runData.userId === "string" ? runData.userId : "__invalid_owner__";
   const hasField = Object.prototype.hasOwnProperty.call(runData, "workspaceId");
-  if (!hasField) return `${userId}::__absent__`;
+  if (!hasField) return `${ownerUserId}::__absent__`;
   const raw = runData.workspaceId;
   const shape = typeof raw === "string" ? raw : `__nonstring__:${JSON.stringify(raw)}`;
-  return `${userId}::${shape}`;
+  return `${ownerUserId}::${shape}`;
 }
 
 /** Create one batch validator per request/list-response — never share across requests, since the cache has no eviction and no isolation between different callers' data. */
 export function createRunWorkspaceIntegrityBatch(): RunWorkspaceIntegrityBatchValidator {
   const cache = new Map<string, Promise<RunWorkspaceIntegrityResult>>();
 
-  const validate = (async (userId: string, runData: Record<string, unknown>) => {
-    const key = cacheKeyFor(userId, runData);
+  const validate = (async (runData: Record<string, unknown>) => {
+    const key = cacheKeyFor(runData);
     let pending = cache.get(key);
     if (!pending) {
-      pending = validateRunWorkspaceAssociation(userId, runData);
+      pending = validateRunWorkspaceAssociation(runData);
       cache.set(key, pending);
     }
     return pending;

@@ -92,7 +92,7 @@ export async function GET(req: NextRequest) {
     // `runs` collection only, requester-independent, before any governance
     // field is returned.
     if (collection === "runs") {
-      const integrity = await validateRunWorkspaceAssociation(owner, data);
+      const integrity = await validateRunWorkspaceAssociation(data);
       if (integrity.classification === "invalid") {
         logger.warn("[user/run-governance] workspace_run_integrity_failed", { runId, reason: integrity.reason });
         return NextResponse.json(
