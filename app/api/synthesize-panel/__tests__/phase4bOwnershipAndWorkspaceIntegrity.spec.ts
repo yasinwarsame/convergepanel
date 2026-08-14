@@ -20,11 +20,23 @@
  * this route's full LLM/timeout/AbortController machinery to exercise at
  * runtime — attempting that proved too fragile/slow to be a reliable CI
  * test (the route's real timeout/abort-signal plumbing does not resolve
- * quickly under fake concurrency). That branch is instead covered by a
- * source-level regression assertion below, the same technique this exact
- * directory already uses in clientAdaptiveGuardRegression.spec.ts for a
- * comparable hard-to-execute-at-runtime scenario: it fails if a future
- * edit removes the ownership/integrity check from that specific branch.
+ * quickly under fake concurrency).
+ *
+ * An earlier version of this file covered that branch with a source-level
+ * regex assertion instead (matching this directory's own
+ * clientAdaptiveGuardRegression.spec.ts convention). A later independent
+ * security review proved by mutation testing that this specific guard was
+ * worthless: four different broken mutants of the branch (check disabled,
+ * check comparing a value to itself, check commented out, unconditional
+ * early disclosure) all still passed every assertion, because the
+ * assertions only matched byte offsets of string literals in the raw
+ * source text and never executed the code. The fix was to extract the
+ * branch's entire decision into an exported, directly callable function —
+ * `resolveInFlightDisclosureGate(runId, uid)` (in
+ * lib/synthesis/inFlightDisclosureGate.ts, imported directly by the route
+ * handler — Next.js's App Router route-export typing forbids exporting it
+ * from route.ts itself) — and test that function's real return values
+ * below instead of the surrounding source text.
  */
 
 jest.mock("@/lib/env", () => ({
@@ -89,10 +101,9 @@ jest.mock("@/lib/governance/evaluateAndStore", () => ({
 jest.mock("openai", () => jest.fn().mockImplementation(() => ({ chat: { completions: { create: jest.fn() } } })));
 jest.mock("@anthropic-ai/sdk", () => jest.fn().mockImplementation(() => ({ messages: { create: jest.fn() } })));
 
-import { readFileSync } from "fs";
-import { join } from "path";
 import { NextRequest } from "next/server";
 import { GET, POST } from "@/app/api/synthesize-panel/route";
+import { resolveInFlightDisclosureGate } from "@/lib/synthesis/inFlightDisclosureGate";
 
 const MINIMAL_VALID_SYNTHESIS = {
   executiveSummary: "Synthesis of the panel's responses.",
@@ -229,41 +240,99 @@ describe("POST /api/synthesize-panel — main ownership path (first request for 
   });
 });
 
-describe("POST /api/synthesize-panel — in-flight-cache branch (source-level regression guard)", () => {
-  // See the file-level doc comment for why this is source-level rather
-  // than a live concurrency test — same technique already used in this
-  // exact directory's clientAdaptiveGuardRegression.spec.ts.
-  const ROUTE_SOURCE = readFileSync(join(__dirname, "..", "route.ts"), "utf-8");
+describe("resolveInFlightDisclosureGate — direct executable coverage of the in-flight branch (Phase 4B security re-review)", () => {
+  // A second independent review found the original source-text-regex
+  // coverage of this branch worthless: it verified by mutation testing
+  // that all its assertions still passed against four different broken
+  // mutants (check disabled, check comparing a value to itself, check
+  // commented out, unconditional early disclosure). The fix extracted the
+  // branch's entire decision into `resolveInFlightDisclosureGate()`
+  // (lib/synthesis/inFlightDisclosureGate.ts) specifically so it can be
+  // called directly here and asserted against real return values — not
+  // string-matched.
+  const OWNER_UID = "owner-uid";
+  const RUN_ID = "run-in-flight";
 
-  it("the in-flight branch's cache-hit block is preceded by an ownership check before the runDoc data is ever returned", () => {
-    const inFlightBlockStart = ROUTE_SOURCE.indexOf("Request already in progress for runId");
-    expect(inFlightBlockStart).toBeGreaterThan(-1);
-    const cacheHitReturn = ROUTE_SOURCE.indexOf("Cache hit (while waiting for in-flight)", inFlightBlockStart);
-    expect(cacheHitReturn).toBeGreaterThan(inFlightBlockStart);
+  function seedRun(overrides: Record<string, unknown> = {}) {
+    runDocs.set(RUN_ID, { userId: OWNER_UID, synthesizedStructuredReport: MINIMAL_VALID_SYNTHESIS, schemaVersion: 1, ...overrides });
+  }
 
-    const blockBetween = ROUTE_SOURCE.slice(inFlightBlockStart, cacheHitReturn);
-    expect(blockBetween).toMatch(/cachedRunUserId\s*!==\s*undefined\s*&&\s*cachedRunUserId\s*!==\s*uid/);
-    expect(blockBetween).toMatch(/ERROR_CODES\.FORBIDDEN/);
+  it("Firestore read throws -> denied, 503, fails closed rather than falling through to disclose anything", async () => {
+    seedRun();
+    const originalCollection = mockAdminDb.collection;
+    (mockAdminDb as any).collection = (name: string) =>
+      name === "runs"
+        ? { doc: () => ({ get: async () => { throw new Error("simulated read failure"); } }) }
+        : originalCollection(name);
+    try {
+      const result = await resolveInFlightDisclosureGate(RUN_ID, OWNER_UID);
+      expect(result.outcome).toBe("denied");
+      if (result.outcome === "denied") {
+        expect(result.status).toBe(503);
+        expect(result.reason).toBe("run_lookup_threw");
+      }
+    } finally {
+      (mockAdminDb as any).collection = originalCollection;
+    }
   });
 
-  it("the in-flight branch also calls validateRunWorkspaceAssociation before the cache-hit disclosure", () => {
-    const inFlightBlockStart = ROUTE_SOURCE.indexOf("Request already in progress for runId");
-    const cacheHitReturn = ROUTE_SOURCE.indexOf("Cache hit (while waiting for in-flight)", inFlightBlockStart);
-    const blockBetween = ROUTE_SOURCE.slice(inFlightBlockStart, cacheHitReturn);
-    expect(blockBetween).toMatch(/validateRunWorkspaceAssociation\(data\)/);
-    expect(blockBetween).toMatch(/inFlightIntegrity\.classification\s*===\s*"invalid"/);
+  it("run document does not (yet) exist -> denied, 503, fails closed rather than falling through unchecked", async () => {
+    // Deliberately NOT seeding runDocs for RUN_ID.
+    const result = await resolveInFlightDisclosureGate(RUN_ID, OWNER_UID);
+    expect(result.outcome).toBe("denied");
+    if (result.outcome === "denied") {
+      expect(result.status).toBe(503);
+      expect(result.reason).toBe("run_not_found");
+    }
   });
 
-  it("both new checks appear BEFORE the `report:` field is ever placed in a response within this block", () => {
-    const inFlightBlockStart = ROUTE_SOURCE.indexOf("Request already in progress for runId");
-    const cacheHitReturn = ROUTE_SOURCE.indexOf("Cache hit (while waiting for in-flight)", inFlightBlockStart);
-    const ownershipCheckIdx = ROUTE_SOURCE.indexOf("cachedRunUserId !== undefined", inFlightBlockStart);
-    const integrityCheckIdx = ROUTE_SOURCE.indexOf("validateRunWorkspaceAssociation(data)", inFlightBlockStart);
-    const reportFieldIdx = ROUTE_SOURCE.indexOf("report: data.synthesizedStructuredReport", inFlightBlockStart);
+  it("SECURITY: unrelated authenticated user (different uid than run.userId) -> denied, 403, never cache_hit or verified_no_cache", async () => {
+    seedRun();
+    const result = await resolveInFlightDisclosureGate(RUN_ID, "attacker-uid");
+    expect(result.outcome).toBe("denied");
+    if (result.outcome === "denied") {
+      expect(result.status).toBe(403);
+      expect(result.reason).toBe("owner_mismatch");
+    }
+  });
 
-    expect(ownershipCheckIdx).toBeGreaterThan(inFlightBlockStart);
-    expect(integrityCheckIdx).toBeGreaterThan(ownershipCheckIdx);
-    expect(reportFieldIdx).toBeGreaterThan(cacheHitReturn); // the disclosure itself, after the cache-hit log line
-    expect(integrityCheckIdx).toBeLessThan(reportFieldIdx);
+  it("Workspace integrity check throws -> denied, 503, fails closed", async () => {
+    seedRun({ workspaceId: `personal-${OWNER_UID}` });
+    mockedGetWorkspace.mockImplementationOnce(async () => { throw new Error("simulated workspace lookup failure"); });
+    const result = await resolveInFlightDisclosureGate(RUN_ID, OWNER_UID);
+    expect(result.outcome).toBe("denied");
+    if (result.outcome === "denied") expect(result.reason).toBe("workspace_integrity_check_threw");
+  });
+
+  it("SECURITY: Workspace-bound-invalid run -> denied, 403, even for the true owner", async () => {
+    seedRun({ workspaceId: `personal-${OWNER_UID}` });
+    // No workspace seeded -> not_found -> invalid.
+    const result = await resolveInFlightDisclosureGate(RUN_ID, OWNER_UID);
+    expect(result.outcome).toBe("denied");
+    if (result.outcome === "denied") {
+      expect(result.status).toBe(403);
+      expect(result.reason).toContain("workspace_run_integrity_failed");
+    }
+  });
+
+  it("true owner, cached report already present -> cache_hit, with the real report body", async () => {
+    seedRun();
+    const result = await resolveInFlightDisclosureGate(RUN_ID, OWNER_UID);
+    expect(result.outcome).toBe("cache_hit");
+    if (result.outcome === "cache_hit") expect(result.body.report).toEqual(MINIMAL_VALID_SYNTHESIS);
+  });
+
+  it("true owner, no cached report yet -> verified_no_cache (safe to await the in-flight promise)", async () => {
+    seedRun({ synthesizedStructuredReport: undefined, schemaVersion: undefined });
+    const result = await resolveInFlightDisclosureGate(RUN_ID, OWNER_UID);
+    expect(result.outcome).toBe("verified_no_cache");
+  });
+
+  it("legacy run (workspaceId absent) with true owner -> verified_no_cache, no Workspace lookup attempted", async () => {
+    seedRun();
+    mockedGetWorkspace.mockClear();
+    const result = await resolveInFlightDisclosureGate(RUN_ID, OWNER_UID);
+    expect(result.outcome).toBe("cache_hit"); // seedRun() includes a cached report by default
+    expect(mockedGetWorkspace).not.toHaveBeenCalled();
   });
 });

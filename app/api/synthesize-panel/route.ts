@@ -78,6 +78,7 @@ import { evaluateAndStoreGovernance } from "@/lib/governance/evaluateAndStore";
 import { governanceInputFromResearchRun } from "@/lib/governance/governanceInputFromDocs";
 import { parsePersistedAdaptiveOutput } from "@/lib/adaptiveSchema/persistedOutput";
 import { validateRunWorkspaceAssociation } from "@/lib/workspaces/runWorkspaceIntegrity";
+import { resolveInFlightDisclosureGate } from "@/lib/synthesis/inFlightDisclosureGate";
 import {
   applyTeamGovernancePipeline,
   mergeGovernanceIntoBody,
@@ -529,84 +530,54 @@ export async function POST(req: NextRequest) {
     const existing = inFlightSynthesis.get(runId);
     if (existing) {
       logger.debug(`[${requestId}] [synthesize-panel] Request already in progress for runId: ${runId}, checking cache then awaiting existing promise`, { requestId, runId });
-      // Check cache first before waiting on in-flight request
-      try {
-        if (adminDb) {
-          const runDoc = await adminDb.collection("runs").doc(runId).get();
-          if (runDoc.exists) {
-            const data = runDoc.data() as Record<string, unknown>;
 
-            // Security fix (authorized as part of Phase 4B — this branch
-            // previously returned cached synthesis content with NO
-            // ownership check at all, unlike every other read path in this
-            // file. An authenticated but unrelated user could receive
-            // another owner's cached report merely by requesting the same
-            // runId while a request for it happened to already be
-            // in-flight. Mirrors the same lenient-on-missing-userId pattern
-            // already used elsewhere in this file — not a new, divergent
-            // authorization rule.
-            const cachedRunUserId = data?.userId;
-            if (cachedRunUserId !== undefined && cachedRunUserId !== uid) {
-              logger.warn(`[${requestId}] [synthesize-panel] In-flight cache ownership check failed`, { requestId, runId });
-              return NextResponse.json(
-                createErrorResponse(ERROR_CODES.FORBIDDEN, "You don't have access to this run.", requestId),
-                { status: 403 }
-              );
-            }
-
-            // Phase 4B — Mandatory Workspace Integrity, same as every other
-            // disclosure point in this file. A bound-invalid run denies
-            // here too, before any cached content is returned.
-            const inFlightIntegrity = await validateRunWorkspaceAssociation(data);
-            if (inFlightIntegrity.classification === "invalid") {
-              logger.warn(`[${requestId}] [synthesize-panel] In-flight cache workspace_run_integrity_failed`, { requestId, runId, reason: inFlightIntegrity.reason });
-              return NextResponse.json(
-                createErrorResponse(ERROR_CODES.FORBIDDEN, "You don't have access to this run.", requestId),
-                { status: 403 }
-              );
-            }
-
-            if (data?.synthesizedStructuredReport && data?.schemaVersion === 1) {
-              logger.info(`[${requestId}] [synthesize-panel] Cache hit (while waiting for in-flight)`, {
-                requestId,
-                runId,
-              });
-              const gov = governanceFromRunDoc(data);
-              return NextResponse.json(
-                mergeGovernanceIntoBody(
-                  {
-                    ok: true,
-                    report: data.synthesizedStructuredReport,
-                    schemaVersion: 1,
-                    synthesizedBy: data.synthesizedBy || "gpt-5.1",
-                    cached: true,
-                  },
-                  gov
-                )
-              );
-            }
-          }
-        }
-      } catch (cacheError: any) {
-        // Continue to wait on in-flight request if cache check fails
-        logger.warn(`[${requestId}] [synthesize-panel] Cache check failed, waiting on in-flight request`, {
-          requestId,
-          error: cacheError?.message,
-        });
+      // Security fix (Phase 4B security re-review — a second independent
+      // review found the FIRST fix incomplete): every path through this
+      // branch must independently verify THIS requester's ownership before
+      // ever touching `existing` (another request's in-flight promise),
+      // never only the cache-hit sub-case. The original fix added checks
+      // inside a `try` whose `catch` fell through to `await existing`
+      // unchecked on ANY read failure, and whose `if (runDoc.exists)`
+      // guard skipped the checks entirely (also falling through unchecked)
+      // when the run doc wasn't yet readable — both are real disclosure
+      // paths, not edge cases: `await existing` resolves to whatever the
+      // FIRST requester's response was, and an unrelated authenticated
+      // user could receive it merely by racing the same runId. Every other
+      // read path in this file fails closed on a lookup failure (see the
+      // main path's `RUN_LOOKUP_UNAVAILABLE` handling below); this branch
+      // now does too, via `resolveInFlightDisclosureGate` — extracted into
+      // its own function specifically so it can be unit-tested directly
+      // against every input combination, not just asserted about via a
+      // source-text regex.
+      const gate = await resolveInFlightDisclosureGate(runId, uid);
+      if (gate.outcome === "denied") {
+        logger.warn(`[${requestId}] [synthesize-panel] In-flight disclosure gate denied`, { requestId, runId, reason: gate.reason });
+        return NextResponse.json(createErrorResponse(gate.errorCode, gate.message, requestId), { status: gate.status });
       }
+      if (gate.outcome === "cache_hit") {
+        logger.info(`[${requestId}] [synthesize-panel] Cache hit (while waiting for in-flight)`, { requestId, runId });
+        return NextResponse.json(gate.body);
+      }
+      // gate.outcome === "verified_no_cache" — ownership and Workspace
+      // integrity were just confirmed, moments ago, for THIS uid against
+      // the SAME runId the in-flight promise is generating. Since a run
+      // has exactly one `userId` and the in-flight request resolved its
+      // own ownership check against that same field, both agree by
+      // construction — safe to await and return its result.
+
       // CRITICAL FIX: Await the existing promise and clone the response BEFORE reading
       // This prevents "ReadableStream is locked" errors when multiple requests share the same promise
       // Each request needs its own NextResponse instance with its own stream
       try {
         const existingResponse = await existing;
-        
+
         // Clone the response BEFORE reading to avoid stream lock
         // This creates a new ReadableStream that can be consumed independently
         const clonedResponse = existingResponse.clone();
-        
+
         // Read the JSON data from the cloned response
         const responseData = await clonedResponse.json();
-        
+
         // Create a NEW NextResponse with the same data for this request
         // This ensures each concurrent request gets its own response stream
         return NextResponse.json(responseData, {
