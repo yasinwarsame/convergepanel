@@ -256,6 +256,25 @@ describe("POST /api/run-panel — Personal Run Workspace Binding wiring (hardene
       expect(workspaceIdArg).toBeUndefined();
     });
 
+    it("REGRESSION (Phase 3A independent review): global RW=true, adaptive TEAM request, W=false — same team_user pass-through must hold under global source too, not just canary", async () => {
+      mockEnvFlags.RW = true;
+      mockEnvFlags.W = false;
+      mockedLoadUserAndTeam.mockResolvedValueOnce({
+        user: { teamId: "team_abc" },
+        team: { id: "team_abc", name: "T", createdBy: "x", createdAt: "2026-01-01", members: [], policyRules: [], settings: {} },
+      });
+      mockedResolveBinding.mockResolvedValueOnce({ outcome: "team_user" });
+
+      const { response, body } = await runAdaptiveRequest();
+
+      expect(mockedResolveBinding).toHaveBeenCalledWith(expect.objectContaining({ hasTeam: true, writesEnabled: true, workspacesEnabled: false }));
+      expect(response.status).toBe(200);
+      expect(body.ok).toBe(true);
+      expect(mockedRunPanel).toHaveBeenCalledTimes(1);
+      const [, , , , workspaceIdArg] = mockedCreateRun.mock.calls[0];
+      expect(workspaceIdArg).toBeUndefined();
+    });
+
     it("flag off (RW=false, W=false), adaptive request: resolvePersonalRunWorkspaceBinding is never called", async () => {
       mockEnvFlags.RW = false;
       mockEnvFlags.W = false;
@@ -444,6 +463,25 @@ describe("POST /api/run-panel — Personal Run Workspace Binding wiring (hardene
       const { response, body } = await runAdaptiveRequest();
 
       expect(mockedResolveBinding).toHaveBeenCalledWith(expect.objectContaining({ hasTeam: true }));
+      expect(response.status).toBe(200);
+      expect(body.ok).toBe(true);
+      const [, , , , workspaceIdArg] = mockedCreateRun.mock.calls[0];
+      expect(workspaceIdArg).toBeUndefined();
+    });
+
+    it("REGRESSION (Phase 3A independent review): canary UID, adaptive TEAM request with W=false too — the route must pass hasTeam=true/writesEnabled=true/workspacesEnabled=false through to resolvePersonalRunWorkspaceBinding() unmodified. The internal ordering fix itself (team_user, never invalid_configuration, for exactly this input) is proven directly against the REAL function in personalRunWorkspaceBinding.spec.ts; this test proves the route's own wiring passes the right arguments so that fix actually applies in production", async () => {
+      mockEnvFlags.RW = false;
+      mockEnvFlags.W = false;
+      mockEnvFlags.CANARY_UIDS = "test-uid";
+      mockedLoadUserAndTeam.mockResolvedValueOnce({
+        user: { teamId: "team_abc" },
+        team: { id: "team_abc", name: "T", createdBy: "x", createdAt: "2026-01-01", members: [], policyRules: [], settings: {} },
+      });
+      mockedResolveBinding.mockResolvedValueOnce({ outcome: "team_user" });
+
+      const { response, body } = await runAdaptiveRequest();
+
+      expect(mockedResolveBinding).toHaveBeenCalledWith(expect.objectContaining({ hasTeam: true, writesEnabled: true, workspacesEnabled: false }));
       expect(response.status).toBe(200);
       expect(body.ok).toBe(true);
       const [, , , , workspaceIdArg] = mockedCreateRun.mock.calls[0];
