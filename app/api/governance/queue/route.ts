@@ -23,6 +23,8 @@ import {
   resolveGovernanceVisibleUserIdsCached,
 } from "@/lib/governance/governanceVisibleUserIds";
 import { resolveGovernanceRequestUser } from "@/lib/governance/authCheck";
+import { createRunWorkspaceIntegrityBatch } from "@/lib/workspaces/runWorkspaceIntegrityBatch";
+import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -55,6 +57,9 @@ const RUN_QUEUE_FIELDS = [
   "synthesizedReportV2",
   "structuredSynthesis",
   "synthesis",
+  // Phase 4B — required so Layer-A integrity validation can see whether a
+  // staged row actually carries a Workspace association at all.
+  "workspaceId",
 ] as const;
 
 const VER_QUEUE_FIELDS = [
@@ -1324,7 +1329,7 @@ export async function GET(request: NextRequest) {
     let videoSnapSize = 0;
 
     const tFs0 = Date.now();
-    const staged: StagedQueueRow[] = [];
+    let staged: StagedQueueRow[] = [];
 
     try {
       if (visibleUserIds === null) {
@@ -1425,6 +1430,30 @@ export async function GET(request: NextRequest) {
       );
     }
     console.log(`[governance/queue] Firestore: ${Date.now() - tFs0}ms`);
+
+    // Phase 4B — Mandatory Workspace Integrity. This route's own visibility
+    // model (support-admin global, or per-owner `resolveGovernanceVisibleUserIds`)
+    // is an existing Layer-B grant, not an exemption from Layer A — a
+    // corrupted Workspace-bound run must not disclose its (truncated)
+    // question/content here merely because the requester can see it under
+    // that model. Only "research" rows come from the `runs` collection and
+    // can carry a `workspaceId`; verification/video rows are unaffected.
+    // Batched per distinct owner, never one lookup per row.
+    {
+      const validateWorkspace = createRunWorkspaceIntegrityBatch();
+      const researchRows = staged.filter((s) => s.kind === "research");
+      const integrityResults = await Promise.all(researchRows.map((s) => validateWorkspace(s.data)));
+      const invalidDocIds = new Set<string>();
+      for (let i = 0; i < researchRows.length; i++) {
+        if (integrityResults[i].classification === "invalid") {
+          invalidDocIds.add(researchRows[i].docId);
+          logger.warn("[governance/queue] workspace_run_integrity_failed", { runId: researchRows[i].docId, reason: (integrityResults[i] as { reason: string }).reason });
+        }
+      }
+      if (invalidDocIds.size > 0) {
+        staged = staged.filter((s) => !(s.kind === "research" && invalidDocIds.has(s.docId)));
+      }
+    }
 
     const tProc0 = Date.now();
     await prefetchOwnerProfilesForQueue(

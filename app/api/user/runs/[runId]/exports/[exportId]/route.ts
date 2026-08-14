@@ -39,6 +39,7 @@ import { adaptiveExportContentType, adaptiveExportFileExtension } from "@/lib/ad
 import { resolveAdaptiveExportVerdict } from "@/lib/adaptiveSchema/exportAuthorization";
 import { renderAdaptiveResearchExport } from "@/lib/pdf/renderAdaptiveResearchPdf";
 import { writeAdaptiveExportAdminAuditEvent } from "@/lib/governance/auditLog";
+import { validateRunWorkspaceAssociation } from "@/lib/workspaces/runWorkspaceIntegrity";
 import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
@@ -79,6 +80,20 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
   }
   const runData = runSnap.data() as Record<string, unknown>;
   const owner = String(runData.userId ?? "");
+
+  // Phase 4B — Mandatory Workspace Integrity, requester-independent. The
+  // canonical run is reloaded and revalidated on every regeneration
+  // request (this route already re-checks CURRENT ownership/entitlement on
+  // every call rather than trusting a permanent grant frozen at export
+  // creation — Layer A follows the same live-recheck discipline). A frozen
+  // export snapshot being valid historically is never sufficient on its
+  // own if the canonical run's Workspace association is invalid now.
+  const integrity = await validateRunWorkspaceAssociation(runData);
+  if (integrity.classification === "invalid") {
+    logger.warn("[user/runs/exports/exportId] workspace_run_integrity_failed", { runId, reason: integrity.reason });
+    return errorResponse(404, "not_found", "Not found.");
+  }
+
   if (owner !== uid) {
     // Same generic "not_found" as a genuinely missing export — never reveal
     // whether a foreign run/export combination exists (Part 5/23).

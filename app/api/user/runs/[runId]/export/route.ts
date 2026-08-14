@@ -42,6 +42,7 @@ import { AdaptiveResearchExportV1, AdaptiveExportFormat, adaptiveExportContentTy
 import { createAdaptiveExportRecord, markAdaptiveExportReady, markAdaptiveExportFailed, supersedeOlderAdaptiveExports } from "@/lib/firestore/adaptiveExports";
 import { renderAdaptiveResearchExport } from "@/lib/pdf/renderAdaptiveResearchPdf";
 import { writeAdaptiveExportAdminAuditEvent } from "@/lib/governance/auditLog";
+import { validateRunWorkspaceAssociation } from "@/lib/workspaces/runWorkspaceIntegrity";
 import { logger } from "@/lib/logger";
 import type { ModelId } from "@/lib/types";
 
@@ -104,6 +105,15 @@ export async function POST(req: NextRequest, context: { params: Promise<{ runId:
   }
   const data = snap.data() as Record<string, unknown>;
   const owner = String(data.userId ?? "");
+
+  // Phase 4B — Mandatory Workspace Integrity, requester-independent, before
+  // the owner check and before any export generation.
+  const integrity = await validateRunWorkspaceAssociation(data);
+  if (integrity.classification === "invalid") {
+    logger.warn("[user/runs/export] workspace_run_integrity_failed", { runId, reason: integrity.reason });
+    return errorResponse(404, "not_found", "Run not found.");
+  }
+
   if (owner !== uid) {
     return errorResponse(403, "forbidden", "You do not have access to this run.");
   }

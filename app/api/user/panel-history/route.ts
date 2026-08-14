@@ -10,6 +10,7 @@ import { logger } from "@/lib/logger";
 import type { ClaimVerificationFirestoreDoc } from "@/lib/firestore/verifications";
 import type { PanelHistoryItem, PanelHistoryResearchItem } from "@/lib/user/panelHistory";
 import type { ModelId } from "@/lib/types";
+import { createRunWorkspaceIntegrityBatch } from "@/lib/workspaces/runWorkspaceIntegrityBatch";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -96,9 +97,26 @@ export async function GET(req: NextRequest) {
 
     const merged: Array<{ sortKey: number; item: PanelHistoryItem }> = [];
 
-    for (const d of runsSnap.docs) {
+    // Phase 4B — Mandatory Workspace Integrity for the owner-scoped `runs`
+    // rows in this list. Every surviving row here has `userId === uid` (the
+    // authenticated caller), so every bound row shares the SAME
+    // deterministic Workspace — the batch validator collapses this to
+    // exactly one Firestore read for the entire page, not one per row.
+    // Legacy rows (workspaceId truly absent) never trigger a read at all.
+    const validateWorkspace = createRunWorkspaceIntegrityBatch();
+    const ownedRunDocs = runsSnap.docs.filter((d) => String(d.data().userId ?? "") === uid);
+    const integrityResults = await Promise.all(
+      ownedRunDocs.map((d) => validateWorkspace(d.data()))
+    );
+
+    for (let i = 0; i < ownedRunDocs.length; i++) {
+      const d = ownedRunDocs[i];
+      const integrity = integrityResults[i];
+      if (integrity.classification === "invalid") {
+        logger.warn("[user/panel-history] workspace_run_integrity_failed", { runId: d.id, reason: integrity.reason });
+        continue;
+      }
       const data = d.data();
-      if (String(data.userId ?? "") !== uid) continue;
       const sortKey = firestoreMillis(data.createdAt);
       const perModel =
         data.runDocument?.perModel ??

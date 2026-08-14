@@ -38,6 +38,7 @@ import type { AdaptiveHumanReviewVoteV1 } from "@/lib/governance/adaptiveHumanRe
 import { resolveReviewerDisplayNames, REVIEWER_UNAVAILABLE_LABEL } from "@/lib/governance/reviewerIdentity";
 import { resolveAdaptiveRunAccess } from "@/lib/governance/adaptiveRunAccess";
 import { loadUserAndTeam } from "@/lib/teams/teamApiAuth";
+import { validateRunWorkspaceAssociation } from "@/lib/workspaces/runWorkspaceIntegrity";
 import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
@@ -76,6 +77,16 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
 
   const data = snap.data() as Record<string, unknown>;
   const owner = String(data.userId ?? "");
+
+  // Phase 4B — Mandatory Workspace Integrity, requester-independent, runs
+  // before every other check in this route (including the governance-
+  // record-corruption check below) — an invalid association must deny
+  // regardless of who is asking or what else about the run looks fine.
+  const integrity = await validateRunWorkspaceAssociation(data);
+  if (integrity.classification === "invalid") {
+    logger.warn("[user/runs/governance] workspace_run_integrity_failed", { runId, reason: integrity.reason });
+    return NextResponse.json({ ok: false, errorCode: "not_found", message: "Run not found." }, { status: 404 });
+  }
 
   const govParse = parseGovernanceRecord(data.governanceRecord);
   if (!govParse.ok && govParse.reason !== "absent") {

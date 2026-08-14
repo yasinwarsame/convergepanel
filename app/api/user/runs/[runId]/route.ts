@@ -17,6 +17,7 @@ import { loadUserAndTeam } from "@/lib/teams/teamApiAuth";
 import { getAdaptiveTeamRunProjection } from "@/lib/firestore/teamRuns";
 import { getAdaptiveHumanReviewAssignment } from "@/lib/firestore/runs";
 import { resolveAdaptiveRunAccess } from "@/lib/governance/adaptiveRunAccess";
+import { validateRunWorkspaceAssociation } from "@/lib/workspaces/runWorkspaceIntegrity";
 import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
@@ -64,6 +65,20 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
 
   const data = snap.data() as Record<string, unknown>;
   const owner = String(data.userId ?? "");
+
+  // Phase 4B — Mandatory Workspace Integrity. Requester-independent: runs
+  // BEFORE the owner/reviewer branch below, so an invalid association
+  // denies the run's own owner exactly as it denies anyone else. A truly
+  // legacy run (workspaceId property absent) short-circuits with zero
+  // Firestore lookup and falls through to the unchanged existing logic.
+  const integrity = await validateRunWorkspaceAssociation(data);
+  if (integrity.classification === "invalid") {
+    logger.warn("[user/runs/[runId]] workspace_run_integrity_failed", { runId, reason: integrity.reason });
+    return NextResponse.json(
+      { ok: false, errorCode: "not_found", message: "Run not found." },
+      { status: 404 }
+    );
+  }
 
   // Personal Reviewer Inbox + Action Flow — a non-owner is granted access
   // ONLY when the canonical per-run assignment currently names them

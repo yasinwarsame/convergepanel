@@ -37,6 +37,7 @@ import { resolveAdaptiveRunAccess } from "@/lib/governance/adaptiveRunAccess";
 import { classifyAdaptiveHumanReviewHistoryRow, AdaptiveReviewHistoryListItemV1 } from "@/lib/governance/adaptiveHumanReviewHistory";
 import { resolveReviewerDisplayNames, REVIEWER_UNAVAILABLE_LABEL } from "@/lib/governance/reviewerIdentity";
 import { loadUserAndTeam } from "@/lib/teams/teamApiAuth";
+import { validateRunWorkspaceAssociation } from "@/lib/workspaces/runWorkspaceIntegrity";
 import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
@@ -74,6 +75,14 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
   }
   const data = snap.data() as Record<string, unknown>;
   const owner = String(data.userId ?? "");
+
+  // Phase 4B — Mandatory Workspace Integrity, requester-independent, before
+  // the owner/reviewer access resolution below.
+  const integrity = await validateRunWorkspaceAssociation(data);
+  if (integrity.classification === "invalid") {
+    logger.warn("[user/runs/review-history] workspace_run_integrity_failed", { runId, reason: integrity.reason });
+    return errorResponse(404, "not_found", "Run not found.");
+  }
 
   const [assignmentResult, govParse] = await Promise.all([
     getAdaptiveHumanReviewAssignment(runId),

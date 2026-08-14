@@ -33,6 +33,7 @@ import {
 } from "@/lib/governance/adaptiveHumanReviewHistory";
 import { resolveAdaptiveRunAccess } from "@/lib/governance/adaptiveRunAccess";
 import { PersistedAdaptiveSchemaId } from "@/lib/adaptiveSchema/persistedOutput";
+import { validateRunWorkspaceAssociation } from "@/lib/workspaces/runWorkspaceIntegrity";
 import { logger } from "@/lib/logger";
 
 export const runtime = "nodejs";
@@ -73,6 +74,14 @@ export async function POST(req: NextRequest, { params }: { params: { runId: stri
   }
   const runData = runSnap.data();
   const owner = typeof runData?.userId === "string" ? runData.userId : "";
+
+  // Phase 4B — Mandatory Workspace Integrity, requester-independent, before
+  // the reviewer-assignment authorization below and before any mutation.
+  const integrity = await validateRunWorkspaceAssociation(runData ?? {});
+  if (integrity.classification === "invalid") {
+    logger.warn("[user/runs/decision] workspace_run_integrity_failed", { runId, reason: integrity.reason });
+    return errorResponse(404, "not_found", "Run not found.");
+  }
 
   const preParse = parseGovernanceRecord(runData?.governanceRecord);
   const assignmentResult = await getAdaptiveHumanReviewAssignment(runId);
