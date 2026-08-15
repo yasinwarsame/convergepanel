@@ -93,16 +93,6 @@ export async function verifyAdminToken(
 }
 
 /**
- * Verify Firebase session cookie from request
- * 
- * This function verifies the session cookie (set by Firebase Auth client SDK).
- * It's used for protecting routes that require any authenticated user (not just admin).
- * 
- * @param request - Next.js request object
- * @returns User ID and admin status, or null if invalid/missing
- * @throws Error if adminAuth is not initialized or if verification fails with a non-recoverable error
- */
-/**
  * The actual verification core — takes the raw cookie VALUE, never a
  * request object. Extracted (Phase 5C) so a Server Component context,
  * which has no `NextRequest` to read `.cookies.get()` from, can reuse
@@ -110,6 +100,10 @@ export async function verifyAdminToken(
  * second, independently-written one. `verifySessionCookie(request)`
  * below is now a thin wrapper: identical behavior, unchanged signature,
  * unchanged callers.
+ *
+ * @param sessionCookie - the raw `__session` cookie value, or undefined if absent
+ * @returns User ID and admin status, or null if the cookie is absent
+ * @throws Error if adminAuth is not initialized or if verification fails with a non-recoverable error
  */
 export async function verifySessionCookieValue(
   sessionCookie: string | undefined
@@ -144,6 +138,19 @@ export async function verifySessionCookieValue(
   }
 }
 
+/**
+ * Verify Firebase session cookie from request
+ *
+ * Extracts the raw cookie value from the request and delegates to
+ * `verifySessionCookieValue()` above for the actual verification — this
+ * function's own job is only the `NextRequest`-specific extraction step.
+ * Used for protecting routes that require any authenticated user (not
+ * just admin).
+ *
+ * @param request - Next.js request object
+ * @returns User ID and admin status, or null if invalid/missing
+ * @throws Error if adminAuth is not initialized or if verification fails with a non-recoverable error
+ */
 export async function verifySessionCookie(
   request: NextRequest
 ): Promise<{ uid: string; isAdmin: boolean } | null> {
