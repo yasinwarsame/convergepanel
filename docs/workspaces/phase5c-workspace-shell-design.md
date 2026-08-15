@@ -177,3 +177,23 @@ Canary membership is never revealed by response shape — every ineligible case 
 ## 53. Process control (reconfirmed)
 
 Any future Phase 5C PR requires fresh, PR-specific, exact-head merge authorization — no prior PR's authorization (including this session's PR #45/46/47) carries forward.
+
+## Phase 5C.1 correction (post-deployment production verification)
+
+§50 step 3 above predicted `GET /workspace` → literal `404` for every ineligible
+account. Live production verification after PR #48's merge found this to be
+imprecise: the response **content** is the genuine Next.js not-found result
+(`digest: NEXT_NOT_FOUND`, correct 404 copy, zero Workspace-specific content or
+configuration disclosed, confirmed for both authenticated-ineligible and
+unauthenticated requests) but the raw **HTTP status code is `200`**, due to a
+pre-existing, app-root-level `app/loading.tsx` Suspense boundary that causes
+Next.js to commit the response status before the page's `notFound()` call
+resolves. This is a structural characteristic of the app's existing streaming
+shell, not a Phase 5C code defect, and investigating a safe fix (Phase 5C.1)
+concluded no route-local correction exists that doesn't require either a global
+loading-behavior redesign, a parallel/weaker Edge-compatible auth implementation
+in middleware, or a full App Router root-layout restructure — all explicitly out
+of scope. See `docs/workspaces/phase5c1-dark-route-http-status-investigation.md`
+for the full investigation, evidence, and the three rejected candidate fixes.
+Every other §50 verification point (nav unchanged, no Workspace shell flash, no
+content disclosure, Phase 5B APIs unaffected) was reconfirmed accurate as written.
