@@ -10,6 +10,29 @@ Baseline this design is built against: `main` at `c7961985f41f3bd9bd27a719496b55
 commit. Everything below is derived from reading the actual current source, not
 from prior design documents' predictions.
 
+**Revision 1 correction (this revision).** Two issues in the original PR #50
+submission are corrected below, in place — sections read as the corrected design,
+not the original followed by a patch, so an implementer reading top-to-bottom sees
+only the final intended architecture. The corrected sections are marked
+**[Revision 1]**. Both corrections narrow scope; neither adds it:
+
+1. **Withdrawn**: the proposed "has legacy History" existence signal on
+   `GET /api/user/workspace`. Adding three-collection existence reads to a
+   currently-clean, canonical Workspace-metadata endpoint — solely to pick
+   empty-state copy — would change that endpoint's semantics, add reads to every
+   Workspace page load, and couple Workspace metadata availability to unrelated
+   History collections. Replaced with a single empty-state message that is
+   truthful for both a new user and a legacy-only user, requiring no existence
+   check at all. See "Empty-state architecture [Revision 1]" below.
+2. **Corrected**: the definitive-empty-state condition. The original draft used
+   `items.length === 0` as suf*f*icient to show the final empty state. That is
+   wrong given Phase 4B's fail-closed row omission: `GET /api/user/workspace/runs`
+   can legitimately return `{items: [], hasMore: true, nextCursor: "..."}` when a
+   page's rows are all omitted for failing integrity while valid rows still exist
+   further down the cursor. The correct condition is `items.length === 0 AND
+   hasMore === false` (after a successful request) — see "Pagination
+   forward-progress [Revision 1]" below.
+
 ## 1–2. Existing Workspace shell (re-audited from source)
 
 - **Page** (`app/workspace/page.tsx`): Server Component, `dynamic = "force-dynamic"`. Calls `resolveServerComponentIdentity()` → `notFound()` if absent; calls `resolvePersonalWorkspaceUiMode()` → `notFound()` if disabled. Renders `<WorkspaceShell />` only on the eligible path.
@@ -72,7 +95,7 @@ The entire History tab lives inline inside `app/page.tsx`'s single 2872-line `Ho
 
 **Decision: do not extract the History row into a shared component.** Pulling that JSX out (it branches on 3 item types — research/verification/video — and reads 8+ pieces of `Home`'s local state) would touch code this session has no reason to change and creates real regression risk in already-working, unrelated (verification/video) history rendering, for a feature (Workspace) that only ever needs the `research`-type subset of that logic. This matches the explicit instruction not to perform a large History refactor for architectural purity.
 
-**One narrow, genuinely low-risk exception: `HistoryGovernanceChip`.** It's a small (~12 line), pure, prop-driven component (`status → JSX`, no hooks, no closure over `Home`'s state) defined at module scope in `app/page.tsx` but not exported. Recommend extracting it verbatim to `components/shared/GovernanceChip.tsx` and updating `app/page.tsx`'s one usage to import from there — a mechanical, behavior-preserving move (not a redesign), avoiding a third independent copy of the same approved/needs_review/blocked → color/label mapping. This is the one History-adjacent file this phase would touch, and only by extraction, not modification of History's own render logic.
+**One narrow, genuinely low-risk exception: `HistoryGovernanceChip`.** Re-verified directly at `app/page.tsx:262-278` for this revision: it's a 17-line function taking exactly one prop (`status`), no `useState`/`useEffect`/`useContext`/ref, no reference to any variable from `Home`'s closure — genuinely pure and presentation-only, confirming the original assessment rather than just repeating it. Recommend extracting it verbatim to `components/shared/GovernanceChip.tsx` and updating `app/page.tsx`'s one usage to import from there — a mechanical, behavior-preserving move (not a redesign), avoiding a third independent copy of the same approved/needs_review/blocked → color/label mapping. This is the one History-adjacent file this phase would touch, and only by extraction, not modification of History's own render logic. **If implementation finds this extraction would require touching anything in `Home`'s own render logic or state** (it shouldn't, per the direct re-verification above, but if some coupling is discovered that wasn't visible at design time), the fallback is a small Workspace-local presentational duplicate instead — the extraction is not worth doing at the cost of touching unrelated History behavior.
 
 **New component: `components/workspace/WorkspaceRunCard.tsx`.** A new, Workspace-scoped, `research`-type-only card that visually mirrors the existing History row (`app/page.tsx:2160-2261`) — same badge/icon-less layout (Workspace only has one item type, so the type badge and icon-switch present in History are unnecessary; keep this card simpler than History's, not more decorated), same date formatting (`new Date(item.at).toLocaleString()`), same title truncation approach (`line-clamp-2`), same status-line composition pattern (`{modelsOk}/{modelsTotal} model responses` / error / fallback, `· Synthesis {score}/100` suffix), same `HistoryGovernanceChip` reuse, same full-row-as-button click target, same `cp-*` token classnames. This is intentional visual parity without a shared component — the smaller, single-type nature of this card makes duplication of ~40 lines of JSX proportionate, not a maintenance burden.
 
@@ -111,25 +134,62 @@ No total-count, consensus-average, model-usage-chart, or activity-graph widgets 
 
 No code path introduced by Phase 5D touches `app/page.tsx`'s History tab, its query (`GET /api/user/panel-history`), or its state. The only touch to that file is the one-line `HistoryGovernanceChip` export move in §6 — a pure relocation, zero behavior change, verified by keeping the import working identically.
 
-## 13–16. Legacy-only vs. genuinely-new user (the correctness-critical case)
+## 13–17. Empty-state architecture [Revision 1]
 
-Three real states to distinguish, from `WorkspaceRunSummary[]` alone plus one signal:
+The original draft tried to distinguish three states (has-bound-runs / legacy-only /
+genuinely-new) using a new existence signal. **That signal is withdrawn.** The
+correction is not a cheaper way to compute the same three-way distinction — it's
+recognizing the distinction itself isn't needed, and that computing it at all
+implies knowledge Phase 5D doesn't canonically have.
 
-1. **Has bound runs** → render the list (trivial — `items.length > 0`).
-2. **Zero bound runs, but has prior (legacy) History** → "earlier research is in History" message, never "no research yet."
-3. **Zero bound runs, zero prior History at all** → genuine first-time-user empty state.
+**Why withdrawn, precisely:** `0 Workspace-bound rows` does not imply `0
+historical research` — a legacy-only user has real research, just not
+Workspace-bound. But Phase 5D also has no reliable, cheap way to *prove* the
+opposite (that a user has *zero* research anywhere) without querying History's
+collections — and per the investigation that produced the original (now-withdrawn)
+recommendation, even a `limit=1` call to the existing `GET /api/user/panel-history`
+still costs up to 360 document reads internally (`app/api/user/panel-history/route.ts:76-94`,
+`FETCH_CAP=120` × 3 collections, ignoring the requested `limit`). A purpose-built,
+genuinely cheap (worst-case 3-document) existence-only addition was proposed to fix
+the cost, but the deeper problem remains even at zero cost: it would change
+`GET /api/user/workspace`'s semantics from "Workspace metadata" to "Workspace
+metadata + a probe of unrelated History collections," coupling that endpoint's
+availability to History's, for every single Workspace page load, solely to choose
+a string of copy. That coupling is the thing being rejected, not just its dollar
+cost.
 
-**Distinguishing 2 from 3 requires an existence signal Workspace's own API cannot provide** — `GET /api/user/workspace/runs` only ever sees Workspace-*bound* rows by its query's own `workspaceId==` filter; it structurally cannot see legacy rows, by design (§13's constraint: never let this signal leak into reassigning legacy runs to the Workspace — it must be read-only, presentation-only).
+**Corrected design: one empty-state message, correct for both cases.** When the
+Workspace-runs endpoint definitively establishes zero bound rows (see "Pagination
+forward-progress" below for what "definitively" means), render:
 
-**Investigated and rejected: reusing `GET /api/user/panel-history` with `limit=1`.** This looked like the obvious "reuse an existing, already-proven endpoint" answer, but re-reading its actual source (`app/api/user/panel-history/route.ts:76-94`) shows it **always** runs 3 parallel collection scans (`runs`/`verifications`/`videoVerifications`) each `.limit(FETCH_CAP)` where `FETCH_CAP = 120`, **regardless of the request's own `limit` parameter** — the requested `limit` only affects the post-merge slice, not the underlying reads. Calling it with `limit=1` still costs up to 360 document reads server-side. That is not the "smallest reliable signal" the mission asks for, and triggering it on *every* `/workspace` page load (including for canary users who never open the History tab) would add a real, avoidable read cost purely to pick empty-state copy.
+```
+New research will appear here.
+You can find all of your research in History.
 
-**Recommended smallest signal: a new, minimal, existence-only check.** Three independent `.where("userId","==",uid).limit(1).get()` queries (`runs`, `verifications`, `videoVerifications`, run in parallel via `Promise.all`) — worst case 3 document reads, best case fewer once any collection returns non-empty (can short-circuit). This is a small, proportionate backend addition (a few lines, reusing the exact same three collections/field names `panel-history` already queries), not the "new expensive API" the mission warns against — it is in fact *cheaper* than the existing endpoint, not an expansion of it. Exposed either as a new tiny field on the existing `GET /api/user/workspace` metadata response (e.g. `hasLegacyHistory: boolean`, resolved server-side alongside the Workspace lookup, since that request already fires on every Workspace page load) or as a new minimal endpoint — the metadata-response route is preferred, since it avoids a third network round-trip on page load (see §19) and the metadata endpoint already runs once per Workspace visit regardless.
+[New research]   [View History]
+```
 
-**Never** use a raw `runsThisMonth`/global-run-count as this signal (§15) — that's calendar-scoped and plan-usage-scoped, not "has this user ever produced any run," and using it would risk exactly the false-empty/false-legacy misclassification the mission is guarding against.
+(Wording to be refined against ConvergePanel's established tone at implementation
+time — the constraint is semantic, not this exact phrasing.) This says nothing
+about whether History currently contains anything — it's equally true, and equally
+non-misleading, whether the account is brand new or has years of legacy research.
+The "View History" link is **purely navigational** — clicking it goes to the
+existing History tab; it carries no claim that History records belong to, or will
+ever be moved into, the Workspace. `Workspace → canonically bound records only` and
+`History → compatibility-complete authorized history` remain exactly as separate as
+every prior phase in this program established.
 
-## 17. New-user empty state
+**Explicitly rejected copy** (each requires knowledge this design does not
+canonically possess, and was in the original draft or an earlier iteration of this
+document):
+- *"No research yet"* / *"You have no research"* — asserts something Phase 5D can't verify (a legacy-only user has research).
+- *"Start your first research run"* — asserts this is the user's first-ever run, which may be false.
+- *"Your earlier research is in History"* — asserts legacy History definitely exists, which may be false for a genuinely new user.
 
-Zero bound runs, `hasLegacyHistory: false`: *"Start your first research run."* + the existing "New research" CTA (no second CTA needed — the top-of-page one already serves this).
+**No new History existence endpoint of any kind** — not the withdrawn
+`hasLegacyHistory` metadata field, not `panel-history?limit=1`, not a dedicated
+`/api/user/history-exists`. The UX does not require knowing whether old History
+exists, so nothing is added to determine it.
 
 ## 18. No "Unfiled" anywhere
 
@@ -137,7 +197,7 @@ Confirmed: zero occurrences of "Unfiled" anywhere in Phase 5D's scope. Reserved 
 
 ## 19. Loading strategy
 
-`useWorkspaceMetadata()` (existing) and a new `useWorkspaceRuns()` hook are independent reads with no data dependency on each other (the runs endpoint does its own independent `resolvePersonalWorkspaceForOwner()` call — it does not consume the metadata endpoint's result). **Fire both in parallel** on mount, not sequentially — a waterfall here would be pure, avoidable latency. If `hasLegacyHistory` is folded into the metadata response as recommended in §16, this stays exactly 2 parallel requests, not 3.
+`useWorkspaceMetadata()` (existing, **unmodified** per Revision 1 — no new field) and a new `useWorkspaceRuns()` hook are independent reads with no data dependency on each other (the runs endpoint does its own independent `resolvePersonalWorkspaceForOwner()` call — it does not consume the metadata endpoint's result). **Fire both in parallel** on mount, not sequentially — a waterfall here would be pure, avoidable latency. Exactly 2 parallel requests, page load to page load — no third request for an existence signal, since none is added.
 
 ## 20–21. Error taxonomy — metadata vs. runs kept distinct
 
@@ -170,6 +230,59 @@ The client treats `nextCursor` as a fully opaque string — stored, replayed via
 
 **Deduplication**: append-time dedupe by `id` (a `Set` check before pushing into `items`) as a defensive measure only — if a duplicate is ever observed, `logger`-equivalent client telemetry (or simply a dev-console warn, matching this repo's client-side conventions) rather than silently treating it as expected, per the mission's explicit instruction not to mask a server contract violation.
 
+## Pagination forward-progress and the definitive-empty condition [Revision 1]
+
+**Root cause this section closes**: Phase 4B's read-time integrity check
+(`createRunWorkspaceIntegrityBatch()`, reused unmodified inside the runs route —
+see `app/api/user/workspace/runs/route.ts:217-230`) can omit individual rows from
+a page while `hasMore` still legitimately advances the cursor past them. A whole
+page can therefore come back with **zero returned items but `hasMore: true`** —
+this is not a malformed or edge-case response, it is the documented, intended
+Phase 4B/5B behavior for a page whose bound rows all happen to fail integrity while
+further, valid rows exist deeper in the cursor sequence. The original draft's
+`items.length === 0` empty-state check would have misrendered this exact response
+as "Workspace is empty," silently discarding Phase 4B's fail-closed omission
+guarantee into a false product claim. This is corrected below.
+
+**Definitive-empty condition (the only condition allowed to render the final empty state):**
+
+```
+initial request succeeded
+AND accumulated items.length === 0
+AND hasMore === false
+```
+
+`items.length === 0` **alone is never sufficient.** A response with `items: []` and
+`hasMore: true` must never render the empty state.
+
+**Cursor-state invariant**: on every successful response — regardless of whether
+`items.length > 0` — the client unconditionally adopts that response's `items`
+(appended), `hasMore`, and `nextCursor` as its new state. Cursor advancement is
+never conditional on how many valid items a page contained; it is conditional only
+on the request having succeeded. A failed request never advances any of the three.
+
+**Required handling, explicitly, for every shape the server contract can produce:**
+
+| Server response | Required client behavior |
+|---|---|
+| First page: `items:[]`, `hasMore:false` | Render the definitive empty state (§13–17) |
+| First page: `items:[]`, `hasMore:true`, `nextCursor` present | **Never** render the empty state. Append zero items, adopt the new cursor/`hasMore`, render a usable `Load more` control (empty list, but a working continuation affordance) |
+| Continuation page: `items:[]`, `hasMore:true` | Append zero items, adopt the new cursor, keep `Load more` visible, no state regression |
+| Continuation page: `items:[]`, `hasMore:false`, after earlier pages had valid rows | Preserve all previously-loaded rows, hide `Load more`, do **not** show the empty state (there are visible rows) |
+| Continuation page: valid item(s), `hasMore:false` | Append item(s), hide `Load more` |
+| Multiple consecutive empty continuation pages (A→B→C, each `hasMore:true`, until a page with a valid item and `hasMore:false`) | Cursor advances A→B→C on each successful response; no repeated request for the same cursor; no infinite loop (bounded by the server's own pagination, since each response supplies a strictly new cursor or `hasMore:false`); the eventual valid item is appended once its page arrives |
+| `Load more` request fails | Preserve already-loaded rows **and** the cursor that was in flight (the one that failed) — do not advance to a new cursor on failure. Retry re-sends the exact same, still-current cursor. Only a *successful* response ever advances state. |
+| `400 invalid_cursor` | Never surface "cursor" terminology to the user. Do not automatically discard visible rows. Offer an explicit, user-triggered "reload" action that resets to page 1 — never an automatic silent reset behind the user's back. |
+
+**No automatic/hidden continuation.** The default is explicit, user-controlled
+`Load more` even for an empty-but-`hasMore:true` page — the UI shows a working
+`Load more` control rather than any content, and the user decides to advance. A
+small bounded auto-continuation (e.g., automatically fetching the next page once,
+purely to avoid ever showing an empty-looking screen when a `Load more` click would
+immediately reveal real content) could be considered only if implementation finds
+a concrete UX case that clearly benefits — not adopted as the default here, to
+avoid introducing any hidden pagination loop.
+
 ## 28–29. Refresh and back-button behavior
 
 **Refresh reloads page 1** — no cursor persisted to the URL or `sessionStorage`; this matches History's own behavior (a plain page reload also restarts History at page 1) and there's no stated product need to preserve deep pagination position across a hard refresh. **Back-button from an opened report**: since opening a report is `/?openResearchRun=` navigation (§7), the browser's own history stack naturally returns to `/workspace` on Back — Next.js's App Router preserves client component state (including whatever page of Workspace runs was loaded) across a same-tab back navigation by default (no special restoration code needed), the same as it already does for History today. No new scroll/pagination-restoration engineering required for the first release.
@@ -177,6 +290,7 @@ The client treats `nextCursor` as a fully opaque string — stored, replayed via
 ## 30–36. Card content and interaction
 
 - **Status display**: reuse History's exact composition logic verbatim (§6's `WorkspaceRunCard`) — `{modelsOk}/{modelsTotal} model responses` (+ non-"complete" status suffix), "Run ended with an error" when `status === "error"` with no counts, "Research panel" fallback otherwise, `· Synthesis {score}/100` suffix when present. No new status vocabulary invented.
+- **Consensus score reconfirmed [Revision 1]**: `synthesisConsensusScore` is already presented in History today, verbatim at `app/page.tsx:2216-2217` (`item.synthesisConsensusScore != null && <span> · Synthesis {item.synthesisConsensusScore}/100</span>`). Since it's already established, established presentation is reused exactly as-is — same label ("Synthesis"), same `/100` format, same inline placement as a trailing status-line suffix, never its own badge/callout/larger typography. No increase in visual prominence, and no restatement that a consensus score is a correctness proof — it is presented with identical weight to how History already presents it, nothing more.
 - **`adaptiveSchemaId`**: never rendered (§4) — no human-readable mapping exists anywhere in the codebase today, and inventing one is out of this phase's scope.
 - **`governanceStatus`**: reuse the exact same badge (`HistoryGovernanceChip`, relocated per §6) with identical color/label semantics — no new governance prominence.
 - **`selectedModels`**: not rendered as a chip row — History doesn't surface it as chips either (it folds model info into the `modelsOk/modelsTotal` count line instead); no reason for Workspace to be visually heavier here.
@@ -202,9 +316,9 @@ No export actions, no reviewer/governance mutation controls, and no client-side 
 ## 46–50. Error-state details
 
 - **No client caching** exists anywhere in this design, so a plain error state is sufficient for an initial-load failure (§46) — nothing to reconcile against stale cached rows.
-- **`Load more` failure** (§47): preserve the already-loaded `items`, show a bounded inline `Retry` near the pagination control — never blank the whole section.
-- **`invalid_cursor`** (§48): should not occur in normal UI flow (the browser only ever replays a server-issued cursor), but if it does, treat as an abnormal continuation failure — offer a plain "reload" action that discards client pagination state and refetches page 1, rather than surfacing "cursor" terminology to the user.
-- **`workspace_unavailable` during `Load more`** (§49): keep existing rows, offer retry — never reinterpret as "Workspace is empty."
+- **`Load more` failure** (§47): preserve the already-loaded `items` **and the cursor that failed** (see "Pagination forward-progress" above — cursor never advances on failure), show a bounded inline `Retry` near the pagination control — never blank the whole section. Retry re-sends the same, unadvanced cursor.
+- **`invalid_cursor`** (§48): should not occur in normal UI flow (the browser only ever replays a server-issued cursor), but if it does, treat as an abnormal continuation failure — never surface "cursor" terminology, never automatically discard visible rows; offer an explicit, user-triggered "reload" action that resets to page 1.
+- **`workspace_unavailable` during `Load more`** (§49): keep existing rows, offer retry — never reinterpret as "Workspace is empty," and never conflate with the definitive-empty condition above (an error response is not a successful `hasMore:false` response).
 - **Workspace becomes missing/invalid after initial load** (§50): escalate to the page-level (not list-level) error state, matching §21's reasoning — this is a prerequisite failure, not a list failure, and must never silently fall back to showing History content or attempt to reprovision.
 
 ## 51–53. Accessibility and responsiveness
@@ -228,7 +342,7 @@ Phase 5D makes zero changes to `app/loading.tsx`, `middleware.ts`, or the `/work
 
 ## 62–66. Rollout, verification, and fixture strategy
 
-Same sequence as Phase 5C: implement → independent review → merge → deploy dark → verify both flags still absent → verify existing UI (nav, History, root, `/api/user/usage`) byte-for-byte unchanged → Phase 5D code remains unreachable to any real user. During implementation, local-only `process.env` overrides (never persisted to Vercel) can exercise the positive path (list loads, pagination works, both empty states render) — matching the exact technique already used and documented for Phase 5C. Given this session's controlled test accounts (`Td2BOHteYSUIafLh7qL8s0V2CCt2` / `pBoH05Ssj8WgOZWdtI4Ry82dSR22`) may not naturally have both a "has bound runs" state and a "legacy-only, zero bound runs" state simultaneously, those specific empty-state permutations may remain test-backed (component/hook-level) rather than fixture-verified live, consistent with this program's established "do not manufacture production-like data merely to satisfy a UI check" discipline — to be confirmed against actual controlled-account state at implementation time rather than assumed now.
+Same sequence as Phase 5C: implement → independent review → merge → deploy dark → verify both flags still absent → verify existing UI (nav, History, root, `/api/user/usage`) byte-for-byte unchanged → Phase 5D code remains unreachable to any real user. During implementation, local-only `process.env` overrides (never persisted to Vercel) can exercise the positive path (list loads, pagination works, the single empty state renders, `Load more` continuation works including an empty-but-`hasMore:true` page if a controlled account/fixture can produce one) — matching the exact technique already used and documented for Phase 5C. Given this session's controlled test accounts (`Td2BOHteYSUIafLh7qL8s0V2CCt2` / `pBoH05Ssj8WgOZWdtI4Ry82dSR22`) may not naturally exhibit every pagination edge case (in particular, an empty-continuation page requires a Phase 4B integrity failure to occur naturally, which is not something to manufacture in production data), those specific permutations may remain test-backed (component/hook-level) rather than fixture-verified live, consistent with this program's established "do not manufacture production-like data merely to satisfy a UI check" discipline — to be confirmed against actual controlled-account state at implementation time rather than assumed now.
 
 ## 67–69. Analytics, performance, prefetch
 
@@ -237,11 +351,12 @@ No new analytics in this phase (no existing lightweight, privacy-safe analytics 
 ## 70–73. Test architecture
 
 Mirroring this program's established layers (Phase 5B/5C precedent):
-- **Pure-logic unit tests**: the runs-response-parsing function (mirroring `parseWorkspaceMetadataResponse`), the empty-state classification logic (bound-runs / legacy-only / new-user), cursor-append/dedupe logic — all as pure functions, no React/mocking required.
+- **Pure-logic unit tests**: the runs-response-parsing function (mirroring `parseWorkspaceMetadataResponse`), the definitive-empty-condition check (`items.length===0 AND hasMore===false`, never `items.length===0` alone), cursor-append/dedupe logic — all as pure functions, no React/mocking required.
 - **Hook tests**: `useWorkspaceRuns()` — cancellation, account-switch reset, `Load more` sequencing, error-state transitions — same fake-fetch-injection style already used for `useWorkspaceMetadata`.
 - **Component tests**: `WorkspaceRunCard` and the list section, via `renderToStaticMarkup` (no jsdom, matching this repo's established convention) across every state — populated, both empty variants, both error variants, loading.
 - **Route-gate/page integration**: extend `app/workspace/__tests__/page.spec.tsx`'s existing matrix only if the page-level wiring changes; the list itself doesn't need new route-gate tests, since it's gated by the exact same, already-tested resolver.
-- **Full pagination matrix** (§71) and **full empty-state matrix** (§72), including a dedicated test proving the "has legacy History" signal can never cause a legacy run to appear inside the Workspace list itself (a type-level and runtime assertion that the empty-state classifier's input type carries no run-level data at all, only the boolean signal — mirroring the type-level regression guard already used elsewhere in this program to prove a stale signal can't leak into rendered content).
+- **Full pagination matrix, explicitly including the empty-continuation cases [Revision 1]**: first page `items:[]`/`hasMore:false` (definitive empty state) · first page `items:[]`/`hasMore:true` (no empty state, working `Load more`) · continuation `items:[]`/`hasMore:true` (append zero, cursor advances, `Load more` stays) · continuation `items:[]`/`hasMore:false` after prior valid rows (hide `Load more`, preserve rows, no empty state) · multiple consecutive empty continuation pages (cursor strictly advances page-to-page, no repeated request, no infinite loop, eventual valid item is appended) · a page with valid rows following one or more empty continuation pages · cursor advances on every successful response regardless of item count · cursor does **not** advance on a failed response · `Load more` failure retries with the identical, unadvanced cursor · the empty state never renders while `hasMore === true`, under any combination of the above.
+- **Empty-state matrix (revised, single-message design)**: zero bound rows with `hasMore:false` → the one definitive empty-state message (§13–17) — no branching on legacy-vs-new, since that branch no longer exists. A dedicated test proves the empty-state renderer's input type carries no History-derived data at all (no `hasLegacyHistory` field exists anywhere in the type — a compile-time guarantee, not just a runtime one, that no such signal can be reintroduced by accident).
 - **Report-open regression**: a test proving a Workspace card link/click leads to the exact same `/?openResearchRun={id}` URL construction already covered by existing `app/page.tsx` deep-link tests, not a new parser.
 - **History regression** (§74): a test (source-level, matching this repo's established regex-assertion convention for `app/page.tsx`, since it has no jsdom harness either) proving no Phase 5D file is imported by or mutates `app/page.tsx`'s History-tab code path, beyond the single `HistoryGovernanceChip` import-source change.
 
@@ -249,13 +364,25 @@ Mirroring this program's established layers (Phase 5B/5C precedent):
 
 Zero changes anywhere under `lib/verification/`, `app/api/verify-claim/`, `lib/video/`, `app/api/verify-video/`, `lib/verificationGate/`, or any reviewer/governance/export logic — none of Phase 5D's scope touches any of these.
 
-## 76–77. Implementation PR scope and activation semantics
+## 76–77. Implementation PR scope and activation semantics [Revision 1: no backend change]
 
-**Expected to fit one PR**: `useWorkspaceRuns()` hook + its parser, `WorkspaceRunCard`, the list/pagination section wired into `WorkspaceShellView`, the new legacy-vs-new-user empty-state signal (small addition to `GET /api/user/workspace`'s response + `resolvePersonalWorkspaceForOwner`-adjacent read), the `HistoryGovernanceChip` extraction, tests, and this document's implementation-outcome update. Small enough, and every piece depends on the others being present to be independently reviewable — matching Phase 5C's own "one PR" precedent and reasoning.
+**Expected to fit one PR**: `useWorkspaceRuns()` hook + its parser (including the pagination forward-progress logic above), `WorkspaceRunCard`, the list/pagination section wired into `WorkspaceShellView`, the single revised empty-state message, the `HistoryGovernanceChip` extraction, tests, and this document's implementation-outcome update.
+
+**No backend changes.** Per Revision 1, Phase 5D touches **zero** server-side code:
+
+| Surface | Touched? |
+|---|---|
+| `GET /api/user/workspace` (metadata) | **No** — unmodified, no new field |
+| `GET /api/user/workspace/runs` | **No** — consumed exactly as it exists today |
+| `GET /api/user/panel-history` | **No** — not called by Phase 5D at all |
+| Firestore queries / composite indexes | **No** |
+| `resolvePersonalWorkspaceForOwner()` or any Phase 4B/5B primitive | **No** |
+
+Phase 5D is client/UI-only: new hook, new components, one extraction of an already-pure component, tests, docs. If implementation discovers a genuine defect in an existing API requiring a fix, that is separately scoped and separately reviewed — not folded into this PR.
 
 **Activation semantics, stated precisely**: merging and deploying Phase 5D while both UI flags remain absent is **merge + dark production deployment**, not user-facing activation — identical framing to Phase 5C's. The Phase 5E boundary (§78) — first canary uid, positive-path live verification, eventual global enablement — is not blurred by this phase reaching production in dark form.
 
 ## Open items for implementation time (not resolved by design alone)
 
-- Exact placement/response-field name for the "has legacy History" signal (`hasLegacyHistory` on `GET /api/user/workspace`, vs. a dedicated field elsewhere) — recommended above, final call belongs to implementation, since it depends on confirming `resolvePersonalWorkspaceForOwner()`'s call site can cheaply carry one more parallel existence check without restructuring that shared helper.
 - Whether the `HistoryGovernanceChip` extraction should also add a lightweight test file of its own, or rely on Workspace's + History's existing coverage after the move — a judgment call once the actual diff exists.
+- Exact copy wording for the single empty-state message (§13–17) — the semantic constraint (say nothing about whether legacy History exists) is fixed; the precise phrasing is a copy-polish decision at implementation time.
