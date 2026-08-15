@@ -22,18 +22,62 @@ import { NextRequest, NextResponse } from "next/server";
 import { resolveRequestIdentity } from "@/lib/auth/resolveRequestIdentity";
 import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelemetry";
 import { ensurePersonalWorkspace } from "@/lib/workspaces/ensurePersonalWorkspace";
+import { resolvePersonalWorkspaceForOwner } from "@/lib/workspaces/resolvePersonalWorkspaceForOwner";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-async function getUid(req: NextRequest): Promise<string | NextResponse> {
+async function getUid(req: NextRequest, method: "GET" | "POST"): Promise<string | NextResponse> {
   const identity = await resolveRequestIdentity(req);
   if (identity.status === "authenticated") return identity.uid;
-  logIdentityResolutionFailure({ route: "POST /api/user/workspace", method: "POST", failureCategory: identity.reason });
+  logIdentityResolutionFailure({ route: `${method} /api/user/workspace`, method, failureCategory: identity.reason });
   if (identity.reason === "missing_credentials") {
     return NextResponse.json({ ok: false, errorCode: "unauthorized", message: "Please sign in." }, { status: 401 });
   }
   return NextResponse.json({ ok: false, errorCode: "auth_error", message: "Authentication failed." }, { status: 401 });
+}
+
+/**
+ * Phase 5B — GET /api/user/workspace, read-only retrieval, distinct from
+ * the POST provisioning endpoint below. Never calls
+ * `ensurePersonalWorkspace()` or any other write path — a missing or
+ * malformed Personal Workspace is reported as a sanitized failure, never
+ * silently repaired. `uid` comes exclusively from the authenticated
+ * session; no `workspaceId`/`userId`/`ownerUserId` is ever accepted from
+ * the request. Response DTO is deliberately minimal (`{name, type}`) —
+ * unlike POST's response (which returns the full provisioned document,
+ * unchanged, existing behavior), GET never exposes `id`, `ownerUserId`,
+ * `schemaVersion`, or timestamps: every route that needs the Workspace
+ * server-side resolves it itself from the session, so the browser has no
+ * use for the raw identifier.
+ */
+export async function GET(req: NextRequest) {
+  const uidOrRes = await getUid(req, "GET");
+  if (uidOrRes instanceof NextResponse) return uidOrRes;
+  const uid = uidOrRes;
+
+  const result = await resolvePersonalWorkspaceForOwner(uid);
+
+  switch (result.status) {
+    case "found":
+      return NextResponse.json({ ok: true, workspace: { name: result.workspace.name, type: "personal" as const } });
+    case "workspaces_disabled":
+      return NextResponse.json({ ok: false, errorCode: "workspace_unavailable", message: "Workspaces are not available right now." }, { status: 503 });
+    case "invalid_uid":
+      return NextResponse.json({ ok: false, errorCode: "workspace_invalid", message: "Unable to load your Workspace." }, { status: 400 });
+    case "not_found":
+      return NextResponse.json({ ok: false, errorCode: "workspace_missing", message: "Your Workspace hasn't been set up yet." }, { status: 404 });
+    case "malformed":
+    case "wrong_owner":
+    case "wrong_type":
+      // All three are the same client-facing outcome — a Workspace
+      // document exists at the deterministic id but can't be trusted as
+      // this caller's valid Personal Workspace. Never disclose which of
+      // the three underlying integrity checks failed.
+      return NextResponse.json({ ok: false, errorCode: "workspace_invalid", message: "There's a problem with your Workspace. Please contact support." }, { status: 409 });
+    case "lookup_failed":
+      return NextResponse.json({ ok: false, errorCode: "workspace_unavailable", message: "Couldn't load your Workspace right now. Please try again." }, { status: 503 });
+  }
 }
 
 /**
@@ -44,7 +88,7 @@ async function getUid(req: NextRequest): Promise<string | NextResponse> {
  * only by `errorCode` for programmatic handling.
  */
 export async function POST(req: NextRequest) {
-  const uidOrRes = await getUid(req);
+  const uidOrRes = await getUid(req, "POST");
   if (uidOrRes instanceof NextResponse) return uidOrRes;
   const uid = uidOrRes;
 

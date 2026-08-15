@@ -17,8 +17,13 @@ jest.mock("@/lib/workspaces/ensurePersonalWorkspace", () => ({
   ensurePersonalWorkspace: (...args: any[]) => mockedEnsurePersonalWorkspace(...args),
 }));
 
+const mockedResolvePersonalWorkspaceForOwner = jest.fn();
+jest.mock("@/lib/workspaces/resolvePersonalWorkspaceForOwner", () => ({
+  resolvePersonalWorkspaceForOwner: (...args: any[]) => mockedResolvePersonalWorkspaceForOwner(...args),
+}));
+
 import { NextRequest } from "next/server";
-import { POST } from "@/app/api/user/workspace/route";
+import { GET, POST } from "@/app/api/user/workspace/route";
 
 const UID = "owner-1";
 
@@ -29,8 +34,18 @@ function buildRequest(body?: unknown): NextRequest {
   });
 }
 
+function buildGetRequest(): NextRequest {
+  return new NextRequest("http://localhost/api/user/workspace");
+}
+
 async function callRoute(body?: unknown) {
   const res = await POST(buildRequest(body));
+  const json = await res.json();
+  return { res, json };
+}
+
+async function callGet() {
+  const res = await GET(buildGetRequest());
   const json = await res.json();
   return { res, json };
 }
@@ -158,6 +173,90 @@ describe("POST /api/user/workspace — result mapping", () => {
     mockedEnsurePersonalWorkspace.mockResolvedValue({ status: "create_failed" });
     const { res, json } = await callRoute();
     expect(res.status).toBe(500);
+    expect(JSON.stringify(json)).not.toMatch(/firestore|firebase|stack|at Object/i);
+  });
+});
+
+/**
+ * Phase 5B — GET /api/user/workspace, read-only retrieval. Distinct
+ * `resolvePersonalWorkspaceForOwner()` dependency (not `ensurePersonalWorkspace`)
+ * — asserting `ensurePersonalWorkspace` is never called anywhere below is
+ * how these tests prove GET never provisions.
+ */
+describe("GET /api/user/workspace — auth", () => {
+  it("401s when unauthenticated", async () => {
+    mockedResolveRequestIdentity.mockResolvedValue({ status: "unauthenticated", reason: "missing_credentials" });
+    const { res, json } = await callGet();
+    expect(res.status).toBe(401);
+    expect(json.ok).toBe(false);
+    expect(mockedResolvePersonalWorkspaceForOwner).not.toHaveBeenCalled();
+  });
+});
+
+describe("GET /api/user/workspace — never provisions", () => {
+  it("calling GET never calls ensurePersonalWorkspace, regardless of outcome", async () => {
+    for (const status of ["found", "workspaces_disabled", "not_found", "malformed", "wrong_owner", "wrong_type", "lookup_failed"]) {
+      mockedResolvePersonalWorkspaceForOwner.mockResolvedValue(
+        status === "found"
+          ? { status, workspace: { name: "Personal Workspace" } }
+          : { status }
+      );
+      await callGet();
+    }
+    expect(mockedEnsurePersonalWorkspace).not.toHaveBeenCalled();
+  });
+});
+
+describe("GET /api/user/workspace — result mapping", () => {
+  it("found: 200, minimal DTO only — never id/ownerUserId/schemaVersion/timestamps", async () => {
+    mockedResolvePersonalWorkspaceForOwner.mockResolvedValue({
+      status: "found",
+      workspace: { schemaVersion: 1, id: "personal-owner-1", type: "personal", name: "Personal Workspace", ownerUserId: UID, createdAt: "x", updatedAt: "x" },
+    });
+    const { res, json } = await callGet();
+    expect(res.status).toBe(200);
+    expect(json).toEqual({ ok: true, workspace: { name: "Personal Workspace", type: "personal" } });
+    const body = JSON.stringify(json);
+    expect(body).not.toContain("personal-owner-1");
+    expect(body).not.toContain("ownerUserId");
+    expect(body).not.toContain("schemaVersion");
+  });
+
+  it("workspaces_disabled: 503", async () => {
+    mockedResolvePersonalWorkspaceForOwner.mockResolvedValue({ status: "workspaces_disabled" });
+    const { res, json } = await callGet();
+    expect(res.status).toBe(503);
+    expect(json.ok).toBe(false);
+    expect(json.errorCode).toBe("workspace_unavailable");
+  });
+
+  it("invalid_uid: 400", async () => {
+    mockedResolvePersonalWorkspaceForOwner.mockResolvedValue({ status: "invalid_uid" });
+    const { res, json } = await callGet();
+    expect(res.status).toBe(400);
+    expect(json.ok).toBe(false);
+  });
+
+  it("not_found: 404, workspace_missing", async () => {
+    mockedResolvePersonalWorkspaceForOwner.mockResolvedValue({ status: "not_found" });
+    const { res, json } = await callGet();
+    expect(res.status).toBe(404);
+    expect(json.errorCode).toBe("workspace_missing");
+  });
+
+  it.each(["malformed", "wrong_owner", "wrong_type"])("%s: 409, generic workspace_invalid, never discloses which integrity check failed", async (status) => {
+    mockedResolvePersonalWorkspaceForOwner.mockResolvedValue({ status });
+    const { res, json } = await callGet();
+    expect(res.status).toBe(409);
+    expect(json.errorCode).toBe("workspace_invalid");
+    const body = JSON.stringify(json);
+    expect(body).not.toContain(status);
+  });
+
+  it("lookup_failed: 503, retryable, no raw Firebase error leaked", async () => {
+    mockedResolvePersonalWorkspaceForOwner.mockResolvedValue({ status: "lookup_failed" });
+    const { res, json } = await callGet();
+    expect(res.status).toBe(503);
     expect(JSON.stringify(json)).not.toMatch(/firestore|firebase|stack|at Object/i);
   });
 });
