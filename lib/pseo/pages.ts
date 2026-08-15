@@ -1817,7 +1817,7 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "how-to-verify-a-viral-claim-before-sharing-it",
-    publishedAt: "2026-06-28",
+    publishedAt: "2026-08-16",
     title: "How to Verify a Viral Claim Before You Share It",
     h1: "Verify a Viral Claim Before You Share It",
     audience: "Anyone who shares information online",
@@ -1872,7 +1872,8 @@ export const PAGES: PSEOPage[] = [
           "Quote — verify exact wording against a specific, checkable recording or transcript",
           "Image or video context — screenshots and clips are frequently stripped or altered",
           "Source support — check that a cited source actually states the claim, not just the general topic",
-          "Model disagreement — where AI models split, the claim is contested and needs more verification before sharing",
+          "Compare independent interpretations — run the claim through multiple AI models and see where they agree or split",
+          "Escalate material uncertainty — for high-stakes claims, route contested or unresolved cases to a person before sharing, not just another AI check",
         ],
       },
       {
@@ -4805,9 +4806,9 @@ export const PAGES: PSEOPage[] = [
 
   {
     slug: "how-to-fact-check-chatgpt-responses",
-    publishedAt: "2026-06-28",
+    publishedAt: "2026-08-16",
     title: "How to Fact-Check ChatGPT Responses Before You Trust Them",
-    h1: "How to Fact-Check ChatGPT Responses",
+    h1: "Fact-Check a ChatGPT Response Before You Act on It",
     audience: "Researchers, students, professionals, creators, analysts",
     audienceDetail: "Anyone who uses ChatGPT for research, writing, or decisions and wants to check accuracy before acting on the response",
     problem:
@@ -4815,14 +4816,14 @@ export const PAGES: PSEOPage[] = [
     solution:
       "Multi-model comparison gives you a fast triage layer for ChatGPT responses. By running the same question through Claude, Gemini, Grok, and Perplexity, you can identify which claims have broad AI consensus (lower risk) and which produce model disagreement (higher priority for manual fact-checking). ConvergePanel surfaces this comparison automatically with a consensus score, per-model evidence, and flagged discrepancies — so you know where to focus before you trust the response.",
     workflow: [
-      "Identify the claim or conclusion inside the ChatGPT response",
-      "Separate facts from interpretation — statistics and citations need source verification; framing needs comparison",
-      "Check whether sources are real and relevant: search directly for any citations before trusting them",
-      "Submit the question to ConvergePanel to run it across Claude, Gemini, Grok, and Perplexity",
-      "Compare agreement and disagreement — where models split, you have a verification signal",
-      "Flag unsupported claims: anything one model asserts and others challenge or can't corroborate",
-      "Review missing context and blind spots — what did ChatGPT leave out that other models raised?",
-      "Create a synthesis or document a decision receipt if the answer informs something consequential",
+      "Extract every factual claim inside the ChatGPT response — separate facts from interpretation and recommendation",
+      "Inspect any citations or sources: search for each directly before trusting it exists or says what's claimed",
+      "Verify names, dates, and numbers against a primary source — small specifics are where confident-sounding errors hide",
+      "Check whether the cited evidence actually supports the exact claim made, not just the general topic",
+      "Identify omitted caveats — what qualification or counterargument did ChatGPT leave out?",
+      "Submit the question to ConvergePanel to compare the response across Claude, Gemini, Grok, and Perplexity",
+      "Inspect disagreement — where models split, you have a concrete signal for where to focus manual verification",
+      "Determine whether the claim's stakes call for expert or editorial review before you act on it",
     ],
     useCases: [
       "Checking a ChatGPT-generated essay or report before submitting it for academic or professional purposes",
@@ -11731,7 +11732,7 @@ export const PAGES: PSEOPage[] = [
   // ─── Cluster H: Finance Operations & FP&A ────────────────────────────────
   {
     slug: "verify-financial-assumptions-with-ai",
-    publishedAt: "2026-06-08",
+    publishedAt: "2026-08-16",
     title: "Verify Financial Assumptions with AI",
     h1: "Verify Financial Model Assumptions Using Multiple AI Models",
     metaDescription: "Compare how multiple AI models characterize your financial assumptions — market size, growth rates, benchmarks, and comparables. Surface gaps before presenting to stakeholders.",
@@ -11785,6 +11786,7 @@ export const PAGES: PSEOPage[] = [
       { href: "/use-cases/what-is-a-consensus-score", label: "What Is a Consensus Score?" },
       { href: "/use-cases/ai-thesis-fragility", label: "Stress-test the investment thesis" },
       { href: "/use-cases/ai-valuation-assumption-check", label: "Review the valuation assumptions" },
+      { href: "/solutions/cre-due-diligence", label: "Verify AI-Assisted CRE Due Diligence" },
     ],
   },
 
@@ -15894,7 +15896,7 @@ export const PAGES: PSEOPage[] = [
   },
   {
     slug: "finance-memo-review-with-ai-consensus",
-    publishedAt: "2026-06-16",
+    publishedAt: "2026-08-16",
     title: "Finance Memo Review with AI Consensus",
     h1: "Finance Memo Review with AI Consensus Before Circulation",
     metaDescription: "Review finance memo assumptions, narrative claims, source context, risk signals, and model disagreement before sharing internally.",
@@ -16014,6 +16016,7 @@ export const PAGES: PSEOPage[] = [
       { href: "/use-cases/ai-disagreement-analysis-tool", label: "AI Disagreement Analysis Tool" },
       { href: "/use-cases/how-to-create-an-ai-audit-trail", label: "How to Create an AI Audit Trail" },
       { href: "/use-cases/what-is-a-decision-receipt", label: "What Is a Decision Receipt?" },
+      { href: "/solutions/cre-due-diligence", label: "Verify an AI-Assisted CRE Investment Memo" },
     ],
   },
 
