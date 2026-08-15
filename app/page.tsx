@@ -53,6 +53,7 @@ import FileAttachButton from "@/components/FileAttachButton";
 import type { ClaimVerificationClientPayload } from "@/lib/verification/claimVerificationClientPayload";
 import type { VideoVerificationClientPayload } from "@/lib/verification/videoVerificationClientPayload";
 import type { PanelHistoryGovernanceStatus, PanelHistoryItem } from "@/lib/user/panelHistory";
+import { GovernanceChip } from "@/components/shared/GovernanceChip";
 import type { TeamGovernanceBannerProps, AdaptivePanelPayload } from "@/components/ResultsDisplay";
 import type { PersistedAdaptiveOutput, PersistedLegacyAdaptiveOutputV1 } from "@/lib/adaptiveSchema/persistedOutput";
 import type { ReportStatusInput } from "@/lib/adaptiveSchema/reportStatus";
@@ -258,25 +259,6 @@ type HistoryItem =
       consensusScore?: number;
       governanceStatus?: PanelHistoryGovernanceStatus;
     };
-
-function HistoryGovernanceChip({ status }: { status?: PanelHistoryGovernanceStatus }) {
-  if (!status) return null;
-  const cfg =
-    status === "approved"
-      ? { dot: "bg-emerald-500", text: "Approved", textCls: "text-emerald-800" }
-      : status === "blocked"
-        ? { dot: "bg-red-500", text: "Blocked", textCls: "text-red-800" }
-        : { dot: "bg-amber-500", text: "Review", textCls: "text-amber-900" };
-  return (
-    <span
-      className={`inline-flex shrink-0 items-center gap-1.5 self-center rounded-full border border-cp-border bg-cp-surface px-2 py-0.5 text-[10px] font-semibold ${cfg.textCls}`}
-      aria-label={`Governance: ${cfg.text}`}
-    >
-      <span className={`h-2 w-2 rounded-full ${cfg.dot}`} aria-hidden />
-      {cfg.text}
-    </span>
-  );
-}
 
 export default function Home() {
   // Performance: Mark app start
@@ -2255,7 +2237,7 @@ export default function Home() {
                             )}
                           </span>
                         </span>
-                        <HistoryGovernanceChip status={item.governanceStatus} />
+                        <GovernanceChip status={item.governanceStatus} />
                       </button>
                     </li>
                   ))}
