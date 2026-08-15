@@ -1,18 +1,46 @@
 /**
- * Phase 5C — WorkspaceShellView. Renders the real component
+ * Phase 5C/5D — WorkspaceShellView. Renders the real component
  * (`react-dom/server`, no jsdom) against every `UseWorkspaceMetadataResult`
- * state directly as props — matching this repo's established
- * no-jsdom/@testing-library component-testing convention (see
- * `components/adaptive/__tests__/MetricsGridView.spec.tsx`).
+ * × `UseWorkspaceRunsResult` combination directly as props — matching this
+ * repo's established no-jsdom/@testing-library component-testing
+ * convention (see `components/adaptive/__tests__/MetricsGridView.spec.tsx`).
  */
 
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { WorkspaceShellView, errorCopy } from "@/components/workspace/WorkspaceShell";
 import type { UseWorkspaceMetadataResult, WorkspaceMetadataErrorCode } from "@/hooks/useWorkspaceMetadata";
+import type { UseWorkspaceRunsResult, WorkspaceRunSummary } from "@/hooks/useWorkspaceRuns";
 
-function render(metadata: UseWorkspaceMetadataResult): string {
-  return renderToStaticMarkup(createElement(WorkspaceShellView, { metadata })).replace(/&#x27;/g, "'");
+function fakeRuns(overrides: Partial<UseWorkspaceRunsResult> = {}): UseWorkspaceRunsResult {
+  return {
+    items: [],
+    hasMore: false,
+    status: "ready",
+    initialErrorCode: null,
+    loadingMore: false,
+    loadMoreErrorCode: null,
+    loadMore: jest.fn(),
+    retryInitial: jest.fn(),
+    resetAndReloadFromStart: jest.fn(),
+    ...overrides,
+  };
+}
+
+const SAMPLE_ITEM: WorkspaceRunSummary = {
+  id: "run-1",
+  at: "2026-08-15T00:00:00.000Z",
+  question: "What are the main causes of inflation?",
+  selectedModels: ["chatgpt", "claude"],
+  status: "complete",
+  modelsOk: 2,
+  modelsTotal: 2,
+  synthesisConsensusScore: 84,
+  governanceStatus: "approved",
+};
+
+function render(metadata: UseWorkspaceMetadataResult, runs: UseWorkspaceRunsResult = fakeRuns()): string {
+  return renderToStaticMarkup(createElement(WorkspaceShellView, { metadata, runs })).replace(/&#x27;/g, "'");
 }
 
 describe("WorkspaceShellView — loading state", () => {
@@ -23,7 +51,7 @@ describe("WorkspaceShellView — loading state", () => {
   });
 });
 
-describe("WorkspaceShellView — success state", () => {
+describe("WorkspaceShellView — success state (metadata success, runs ready)", () => {
   it("shows the Workspace heading, the real metadata name (not a client-reconstructed one), and a New research CTA reusing the existing entry point", () => {
     const html = render({ status: "success", workspace: { name: "Personal Workspace", type: "personal" } });
     expect(html).toContain("Workspace");
@@ -32,19 +60,69 @@ describe("WorkspaceShellView — success state", () => {
     expect(html).toContain('href="/"');
   });
 
-  it("never renders a run list, Workspace selector, settings, or Projects/Unfiled language", () => {
+  it("never renders a Workspace selector, settings, or Projects/Unfiled/team language", () => {
     const html = render({ status: "success", workspace: { name: "Personal Workspace", type: "personal" } });
-    expect(html.toLowerCase()).not.toMatch(/unfiled|project|workspacerunsummary|switch workspace|rename/);
-    expect(html).not.toMatch(/\/api\/user\/workspace\/runs/);
+    expect(html.toLowerCase()).not.toMatch(/unfiled|project|switch workspace|rename|invite|member/);
   });
 
-  it("never displays 'you have no research' even though a real user might have zero bound runs — no list is rendered at all in Phase 5C, so there's nothing to be misleading about", () => {
-    const html = render({ status: "success", workspace: { name: "Personal Workspace", type: "personal" } });
-    expect(html.toLowerCase()).not.toMatch(/no research|nothing here/);
+  it("renders the Recent research section and populated list when runs has items", () => {
+    const html = render({ status: "success", workspace: { name: "Personal Workspace", type: "personal" } }, fakeRuns({ items: [SAMPLE_ITEM] }));
+    expect(html).toContain("Recent research");
+    expect(html).toContain("What are the main causes of inflation?");
+    expect(html).toContain('href="/?openResearchRun=run-1"');
+  });
+
+  it("definitive empty state (items=[], hasMore=false) shows the single provenance-safe message, never 'no research yet' style copy", () => {
+    const html = render({ status: "success", workspace: { name: "Personal Workspace", type: "personal" } }, fakeRuns({ items: [], hasMore: false }));
+    expect(html).toContain("New research will appear here.");
+    expect(html).toContain("You can find all of your research in History.");
+    expect(html.toLowerCase()).not.toMatch(/no research yet|you have no research|start your first|earlier research is in history/);
+  });
+
+  it("empty page with hasMore=true does NOT show the empty state and shows a working Load more control instead", () => {
+    const html = render({ status: "success", workspace: { name: "Personal Workspace", type: "personal" } }, fakeRuns({ items: [], hasMore: true }));
+    expect(html).not.toContain("New research will appear here.");
+    expect(html).toContain("Load more");
   });
 });
 
-describe("WorkspaceShellView — error states, one distinct UI per Phase 5B error code", () => {
+describe("WorkspaceShellView — runs-list-only failures stay section-local", () => {
+  it("a runs-specific error (not one of the shared Workspace-prerequisite codes) keeps the heading/CTA/Workspace name visible and shows only a section-local error", () => {
+    const html = render(
+      { status: "success", workspace: { name: "Personal Workspace", type: "personal" } },
+      fakeRuns({ status: "error", initialErrorCode: "internal_error" })
+    );
+    expect(html).toContain("Personal Workspace");
+    expect(html).toContain("New research");
+    expect(html).toContain("Couldn't load your research right now");
+  });
+});
+
+describe("WorkspaceShellView — runs prerequisite errors escalate to the page-level error", () => {
+  const escalatingCodes: Array<"workspace_missing" | "workspace_invalid" | "workspace_unavailable"> = [
+    "workspace_missing",
+    "workspace_invalid",
+    "workspace_unavailable",
+  ];
+
+  it.each(escalatingCodes)(
+    "runs error %s (a race with a metadata success) replaces the entire success view with the SAME page-level error metadata failures use, never showing a half-broken success view",
+    (code) => {
+      const html = render(
+        { status: "success", workspace: { name: "Personal Workspace", type: "personal" } },
+        fakeRuns({ status: "error", initialErrorCode: code })
+      );
+      const copy = errorCopy(code);
+      expect(html).toContain(copy.title);
+      expect(html).toContain(copy.body);
+      expect(html).not.toContain("New research");
+      expect(html).not.toContain("Personal Workspace");
+      expect(html).not.toContain("Recent research");
+    }
+  );
+});
+
+describe("WorkspaceShellView — error states, one distinct UI per Phase 5B metadata error code", () => {
   const cases: Array<{ code: WorkspaceMetadataErrorCode; expectRetry: boolean }> = [
     { code: "unauthorized", expectRetry: false },
     { code: "auth_error", expectRetry: false },
@@ -71,20 +149,9 @@ describe("WorkspaceShellView — error states, one distinct UI per Phase 5B erro
 
   it("all six defined error codes produce genuinely distinct copy from one another (no accidental collapse to one generic message)", () => {
     const outputs = cases.map(({ code }) => `${errorCopy(code).title}|${errorCopy(code).body}`);
-    const distinctByPair = new Set(outputs.map((_, i) => `${cases[i].code}:${outputs[i]}`));
+    const uniqueTexts = new Set(outputs);
     // Two pairs are intentionally identical (unauthorized/auth_error, workspace_unavailable/network_error) —
     // confirm exactly those two collapses, not any unintended additional one.
-    const uniqueTexts = new Set(outputs);
     expect(uniqueTexts.size).toBe(4);
-  });
-});
-
-describe("WorkspaceShellView — never calls the Phase 5D runs endpoint", () => {
-  it("component source contains no reference to /api/user/workspace/runs or WorkspaceRunSummary", () => {
-    const { readFileSync } = require("fs");
-    const { join } = require("path");
-    const source = readFileSync(join(__dirname, "..", "WorkspaceShell.tsx"), "utf8");
-    expect(source).not.toMatch(/\/api\/user\/workspace\/runs/);
-    expect(source).not.toMatch(/WorkspaceRunSummary/);
   });
 });
