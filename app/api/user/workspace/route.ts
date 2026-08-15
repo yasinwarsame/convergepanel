@@ -23,6 +23,7 @@ import { resolveRequestIdentity } from "@/lib/auth/resolveRequestIdentity";
 import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelemetry";
 import { ensurePersonalWorkspace } from "@/lib/workspaces/ensurePersonalWorkspace";
 import { resolvePersonalWorkspaceForOwner } from "@/lib/workspaces/resolvePersonalWorkspaceForOwner";
+import { personalWorkspaceErrorResponse } from "@/lib/workspaces/personalWorkspaceErrorResponse";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -58,26 +59,11 @@ export async function GET(req: NextRequest) {
 
   const result = await resolvePersonalWorkspaceForOwner(uid);
 
-  switch (result.status) {
-    case "found":
-      return NextResponse.json({ ok: true, workspace: { name: result.workspace.name, type: "personal" as const } });
-    case "workspaces_disabled":
-      return NextResponse.json({ ok: false, errorCode: "workspace_unavailable", message: "Workspaces are not available right now." }, { status: 503 });
-    case "invalid_uid":
-      return NextResponse.json({ ok: false, errorCode: "workspace_invalid", message: "Unable to load your Workspace." }, { status: 400 });
-    case "not_found":
-      return NextResponse.json({ ok: false, errorCode: "workspace_missing", message: "Your Workspace hasn't been set up yet." }, { status: 404 });
-    case "malformed":
-    case "wrong_owner":
-    case "wrong_type":
-      // All three are the same client-facing outcome — a Workspace
-      // document exists at the deterministic id but can't be trusted as
-      // this caller's valid Personal Workspace. Never disclose which of
-      // the three underlying integrity checks failed.
-      return NextResponse.json({ ok: false, errorCode: "workspace_invalid", message: "There's a problem with your Workspace. Please contact support." }, { status: 409 });
-    case "lookup_failed":
-      return NextResponse.json({ ok: false, errorCode: "workspace_unavailable", message: "Couldn't load your Workspace right now. Please try again." }, { status: 503 });
+  if (result.status === "found") {
+    return NextResponse.json({ ok: true, workspace: { name: result.workspace.name, type: "personal" as const } });
   }
+  const { status, body } = personalWorkspaceErrorResponse(result.status);
+  return NextResponse.json(body, { status });
 }
 
 /**

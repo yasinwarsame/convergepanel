@@ -17,6 +17,17 @@
  * the query's own `workspaceId==` equality filter — Firestore's `==`
  * never matches a document where the filtered field doesn't exist at all.
  * No post-query filtering decides Workspace membership.
+ *
+ * Independent-review correction: the caller's Personal Workspace is now
+ * validated via `resolvePersonalWorkspaceForOwner()` — the SAME
+ * prerequisite helper `GET /api/user/workspace` uses — BEFORE the runs
+ * query ever executes. The runs query itself only ever inspects the
+ * `runs` collection's own field values, so a missing/malformed Workspace
+ * that also happens to have zero bound runs would otherwise be
+ * indistinguishable from a genuinely empty, healthy Workspace — the
+ * query alone cannot tell those two cases apart. Failure is now detected
+ * by an explicit reason from the prerequisite check, never inferred from
+ * how many rows passed integrity.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -26,6 +37,8 @@ import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelem
 import { logger } from "@/lib/logger";
 import { adminDb } from "@/lib/firebase/admin";
 import { getPersonalWorkspaceId } from "@/lib/workspaces/personalWorkspaceId";
+import { resolvePersonalWorkspaceForOwner } from "@/lib/workspaces/resolvePersonalWorkspaceForOwner";
+import { personalWorkspaceErrorResponse } from "@/lib/workspaces/personalWorkspaceErrorResponse";
 import { createRunWorkspaceIntegrityBatch } from "@/lib/workspaces/runWorkspaceIntegrityBatch";
 import { decodeWorkspaceRunsCursor, encodeWorkspaceRunsCursor } from "@/lib/workspaces/workspaceRunsCursor";
 import type { ModelId } from "@/lib/types";
@@ -56,7 +69,18 @@ function normalizeGovernanceStatus(v: unknown): "approved" | "needs_review" | "b
   return undefined;
 }
 
-function firestoreMillis(value: unknown): number {
+/** Raw seconds/nanoseconds off a Firestore Timestamp — never `.toMillis()`, which truncates below millisecond precision. See workspaceRunsCursor.ts. */
+function firestoreSecondsNanos(value: unknown): { seconds: number; nanoseconds: number } {
+  if (value && typeof value === "object" && "seconds" in value && "nanoseconds" in value) {
+    const v = value as { seconds: unknown; nanoseconds: unknown };
+    if (typeof v.seconds === "number" && typeof v.nanoseconds === "number") {
+      return { seconds: v.seconds, nanoseconds: v.nanoseconds };
+    }
+  }
+  return { seconds: 0, nanoseconds: 0 };
+}
+
+function firestoreMillisForDisplay(value: unknown): number {
   if (value && typeof value === "object" && "toMillis" in value && typeof (value as { toMillis: () => number }).toMillis === "function") {
     return (value as { toMillis: () => number }).toMillis();
   }
@@ -64,7 +88,7 @@ function firestoreMillis(value: unknown): number {
 }
 
 function toSummary(id: string, data: Record<string, unknown>): WorkspaceRunSummary {
-  const sortKey = firestoreMillis(data.createdAt);
+  const sortKey = firestoreMillisForDisplay(data.createdAt);
   const perModel =
     (data.runDocument as { perModel?: unknown[] } | undefined)?.perModel ??
     (data.resultsCompact as { perModel?: unknown[] } | undefined)?.perModel;
@@ -112,6 +136,19 @@ export async function GET(req: NextRequest) {
   if (uidOrRes instanceof NextResponse) return uidOrRes;
   const uid = uidOrRes;
 
+  // Prerequisite: validate the caller's own Personal Workspace BEFORE
+  // querying runs at all — the same helper GET /api/user/workspace uses,
+  // and the same sanitized error mapping, so both endpoints report a
+  // missing/malformed/wrong-owner/wrong-type/lookup-failed/disabled
+  // Workspace identically. This is what makes "valid Workspace, zero
+  // bound runs" distinguishable from "broken Workspace, zero bound
+  // runs" — the runs query below cannot tell those apart on its own.
+  const workspaceResult = await resolvePersonalWorkspaceForOwner(uid);
+  if (workspaceResult.status !== "found") {
+    const { status, body } = personalWorkspaceErrorResponse(workspaceResult.status);
+    return NextResponse.json(body, { status });
+  }
+
   if (!adminDb) {
     return NextResponse.json({ ok: false, errorCode: "internal_error", message: "Database unavailable." }, { status: 500 });
   }
@@ -126,7 +163,7 @@ export async function GET(req: NextRequest) {
   const limit = Math.min(MAX_LIMIT, Math.max(1, parseInt(searchParams.get("limit") || String(DEFAULT_LIMIT), 10) || DEFAULT_LIMIT));
 
   const rawCursor = searchParams.get("cursor");
-  let startAfter: { createdAtMillis: number; lastDocId: string } | undefined;
+  let startAfter: { createdAtSeconds: number; createdAtNanoseconds: number; lastDocId: string } | undefined;
   if (rawCursor != null) {
     const decoded = decodeWorkspaceRunsCursor(rawCursor);
     if (!decoded.ok) {
@@ -147,7 +184,7 @@ export async function GET(req: NextRequest) {
       .orderBy(FieldPath.documentId(), "desc");
 
     if (startAfter) {
-      query = query.startAfter(Timestamp.fromMillis(startAfter.createdAtMillis), startAfter.lastDocId);
+      query = query.startAfter(new Timestamp(startAfter.createdAtSeconds, startAfter.createdAtNanoseconds), startAfter.lastDocId);
     }
 
     // Peek one extra document (`limit + 1`) purely to determine `hasMore`
@@ -160,16 +197,23 @@ export async function GET(req: NextRequest) {
     const pageDocs = allDocs.slice(0, limit);
 
     if (pageDocs.length === 0) {
-      // Genuinely no rows in scope — either a brand-new Workspace or one
-      // with zero bound runs. Not a failure.
+      // The Workspace prerequisite above already confirmed this is a
+      // valid, healthy Personal Workspace — so zero matching runs here
+      // is genuinely an empty Workspace, not an unresolvable one.
       return NextResponse.json({ ok: true, items: [], hasMore: false });
     }
 
-    // Phase 4B Layer A, batched — every row here shares the identical
-    // (userId, workspaceId) pair by construction of the query above, so
-    // this collapses to exactly one underlying Workspace lookup for the
-    // entire page, and (provably, not just typically) every row either
-    // ALL pass or ALL fail together, since they share one cache key.
+    // Phase 4B Layer A, batched, kept as defense in depth even though the
+    // prerequisite check above already confirmed the shared Workspace is
+    // valid — this does not convert "Workspace is valid" into "every run
+    // row is automatically valid": each row's own userId/workspaceId
+    // relation is still independently checked. Every row here shares the
+    // identical (userId, workspaceId) pair by construction of the query,
+    // so this collapses to at most one additional Workspace lookup for
+    // the whole page (a second lookup relative to the prerequisite check
+    // above, since the batch validator has no way to reuse that earlier
+    // result — accepted as the cost of not modifying the shared,
+    // unmodified Phase 4B primitive).
     const validateWorkspace = createRunWorkspaceIntegrityBatch();
     const integrityResults = await Promise.all(pageDocs.map((d) => validateWorkspace(d.data())));
 
@@ -186,14 +230,14 @@ export async function GET(req: NextRequest) {
     }
 
     if (invalidCount === pageDocs.length) {
-      // Every row in the page window failed together — per the shared
-      // single-Workspace-lookup invariant above, this means the caller's
-      // Personal Workspace itself is currently unresolvable, not that
-      // these specific runs are individually corrupt. Returning
-      // items:[] here would misleadingly read as "this Workspace is
-      // empty" when it isn't — fail the whole request instead so the
-      // client can distinguish "empty" from "temporarily broken."
-      logger.warn("[user/workspace/runs] shared_workspace_lookup_failed", { pageSize: pageDocs.length });
+      // Should be unreachable in normal operation now that the
+      // prerequisite check above already confirmed the Workspace is
+      // valid — kept as a fail-closed safety net for a race where the
+      // Workspace becomes invalid between the prerequisite check and
+      // this query. items:[] here would misleadingly read as "this
+      // Workspace is empty" when it isn't, so the whole request fails
+      // retryable instead.
+      logger.warn("[user/workspace/runs] shared_workspace_lookup_failed_after_prerequisite_passed", { pageSize: pageDocs.length });
       return NextResponse.json(
         { ok: false, errorCode: "workspace_unavailable", message: "Couldn't load your Workspace right now. Please try again." },
         { status: 503 }
@@ -207,8 +251,9 @@ export async function GET(req: NextRequest) {
     // omitted-invalid row sitting at the page boundary be re-scanned on
     // every subsequent page request, forever.
     const lastScanned = pageDocs[pageDocs.length - 1];
+    const lastScannedTs = firestoreSecondsNanos(lastScanned.data().createdAt);
     const nextCursor = hasMore
-      ? encodeWorkspaceRunsCursor({ createdAtMillis: firestoreMillis(lastScanned.data().createdAt), lastDocId: lastScanned.id })
+      ? encodeWorkspaceRunsCursor({ createdAtSeconds: lastScannedTs.seconds, createdAtNanoseconds: lastScannedTs.nanoseconds, lastDocId: lastScanned.id })
       : undefined;
 
     return NextResponse.json({

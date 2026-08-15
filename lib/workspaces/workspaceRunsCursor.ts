@@ -2,24 +2,38 @@
  * Phase 5B — opaque pagination cursor for `GET /api/user/workspace/runs`.
  *
  * Deliberately carries ONLY the ordering position needed to resume a
- * `createdAt DESC, documentId DESC` scan (`createdAt` millis + the last
- * SCANNED document's id — never the last VALID item returned; see the
- * route for why that distinction matters for bound-invalid rows at a page
- * boundary). Never carries `userId` or `workspaceId` — those are
- * re-derived from the authenticated session on every request, so a
- * cursor can only ever move pagination position, never change scope, even
- * if copied verbatim between two different accounts.
+ * `createdAt DESC, documentId DESC` scan — never `userId`/`workspaceId`;
+ * see the route for why that distinction matters for scope isolation.
+ *
+ * Corrected during independent review (v1 stored `createdAtMillis`,
+ * derived from `Timestamp.toMillis()`): Firestore's `Timestamp` is
+ * seconds + nanoseconds resolution (`@google-cloud/firestore`'s own
+ * `Timestamp` class, `get seconds()`/`get nanoseconds()`, constructor
+ * `(seconds, nanoseconds)`) — `.toMillis()` truncates anything below
+ * millisecond precision. `createRun()`'s own writer (`Timestamp.now()`)
+ * happens to always produce millisecond-aligned values today (`.now()`
+ * is documented as "millisecond precision"), but the cursor contract
+ * must not depend on that being true of every writer forever — a lossy
+ * cursor could reconstruct a `startAfter` value that doesn't exactly
+ * match the last scanned document's true ordering key, causing a
+ * duplicate or skipped row for any timestamp with a genuine
+ * sub-millisecond component. The cursor now stores the raw
+ * `seconds`/`nanoseconds` pair and reconstructs the exact `Timestamp`
+ * via its `(seconds, nanoseconds)` constructor — never `fromMillis()`,
+ * which is itself lossy in the same way.
  */
 
 const CURSOR_VERSION = 1;
+const MAX_NANOSECONDS = 999_999_999;
 
 export interface WorkspaceRunsCursor {
-  createdAtMillis: number;
+  createdAtSeconds: number;
+  createdAtNanoseconds: number;
   lastDocId: string;
 }
 
 export function encodeWorkspaceRunsCursor(cursor: WorkspaceRunsCursor): string {
-  const payload = { v: CURSOR_VERSION, c: cursor.createdAtMillis, i: cursor.lastDocId };
+  const payload = { v: CURSOR_VERSION, s: cursor.createdAtSeconds, n: cursor.createdAtNanoseconds, i: cursor.lastDocId };
   return Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
 }
 
@@ -59,12 +73,15 @@ export function decodeWorkspaceRunsCursor(raw: string | null | undefined): Decod
   if (p.v !== CURSOR_VERSION) {
     return { ok: false, reason: "unsupported_version" };
   }
-  if (typeof p.c !== "number" || !Number.isFinite(p.c) || p.c < 0) {
+  if (typeof p.s !== "number" || !Number.isFinite(p.s) || !Number.isInteger(p.s) || p.s < 0) {
+    return { ok: false, reason: "invalid_fields" };
+  }
+  if (typeof p.n !== "number" || !Number.isFinite(p.n) || !Number.isInteger(p.n) || p.n < 0 || p.n > MAX_NANOSECONDS) {
     return { ok: false, reason: "invalid_fields" };
   }
   if (typeof p.i !== "string" || p.i.length === 0 || p.i.length > 1500) {
     return { ok: false, reason: "invalid_fields" };
   }
 
-  return { ok: true, cursor: { createdAtMillis: p.c, lastDocId: p.i } };
+  return { ok: true, cursor: { createdAtSeconds: p.s, createdAtNanoseconds: p.n, lastDocId: p.i } };
 }
