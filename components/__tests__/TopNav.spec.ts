@@ -176,3 +176,68 @@ describe("TopNav — tablet-width header overflow fix", () => {
     expect(desktopNavBlock).not.toMatch(/mobileMenuOpen/);
   });
 });
+
+/**
+ * Phase 5C — Workspace nav-item integration. Source-level regex, matching
+ * this file's own established, explicitly-documented convention for this
+ * exact component (no jsdom/@testing-library/react in this repo). Every
+ * assertion here was verified with a targeted mutation self-check
+ * (temporarily gutting the gating condition and confirming the affected
+ * assertion fails, then reverting) before being accepted — the disproven
+ * synthesize-panel source-regex test earlier this session is the reason
+ * that verification step is mandatory, not optional, for a test like this.
+ */
+describe("TopNav — Phase 5C Workspace nav-item integration", () => {
+  function extractBetween(startMarker: string, endMarker: string): string {
+    const startIndex = source.indexOf(startMarker);
+    expect(startIndex).toBeGreaterThan(-1);
+    const endIndex = source.indexOf(endMarker, startIndex + startMarker.length);
+    expect(endIndex).toBeGreaterThan(startIndex);
+    return source.slice(startIndex, endIndex);
+  }
+  const desktopNavBlock = extractBetween(
+    '<div className="hidden items-center gap-1 lg:flex">',
+    "{/* Mobile/tablet toggle"
+  );
+  const mobileMenuBlock = extractBetween('{mobileMenuOpen && (', "</header>");
+
+  it("destructures workspaceUiEnabled from useUserPlan(), the same server-computed capability source as governanceDashboardEligible/teamRole", () => {
+    expect(source).toMatch(/const \{ governanceDashboardEligible, plan: userPlan, loading: planLoading, teamRole, workspaceUiEnabled \} = useUserPlan\(\);/);
+  });
+
+  it("gates the desktop Workspace link on !loading && user && !planLoading && workspaceUiEnabled — same shape as the Governance/Team Reviews gates, never optimistically shown", () => {
+    expect(desktopNavBlock).toMatch(/\{!loading && user && !planLoading && workspaceUiEnabled && \(\s*\n\s*<Link\s*\n\s*href="\/workspace"/);
+  });
+
+  it("gates the mobile Workspace link identically to the desktop one", () => {
+    expect(mobileMenuBlock).toMatch(/\{!loading && user && !planLoading && workspaceUiEnabled && \(\s*\n\s*<Link\s*\n\s*href="\/workspace"/);
+  });
+
+  it("Workspace appears in both blocks, positioned immediately before My Reviews (desktop) / immediately after Team Reviews (mobile, where My Reviews doesn't exist today)", () => {
+    const workspaceIdx = desktopNavBlock.indexOf('href="/workspace"');
+    const myReviewsIdx = desktopNavBlock.indexOf('href="/reviews"');
+    expect(workspaceIdx).toBeGreaterThan(-1);
+    expect(myReviewsIdx).toBeGreaterThan(-1);
+    expect(workspaceIdx).toBeLessThan(myReviewsIdx);
+  });
+
+  it("carries visible 'Workspace' text — never icon-only navigation", () => {
+    expect(desktopNavBlock).toMatch(/href="\/workspace"[\s\S]{0,300}>\s*Workspace\s*</);
+    expect(mobileMenuBlock).toMatch(/href="\/workspace"[\s\S]{0,300}>\s*Workspace\s*</);
+  });
+
+  it("wires aria-current=\"page\" for /workspace based on real pathname state, in both blocks", () => {
+    expect(desktopNavBlock).toMatch(/aria-current=\{pathname === "\/workspace" \? "page" : undefined\}/);
+    expect(mobileMenuBlock).toMatch(/aria-current=\{pathname === "\/workspace" \? "page" : undefined\}/);
+  });
+
+  it("does not introduce a client-visible rollout flag — no NEXT_PUBLIC_PERSONAL_WORKSPACE_UI reference anywhere in this file", () => {
+    expect(source).not.toMatch(/NEXT_PUBLIC_PERSONAL_WORKSPACE_UI/);
+  });
+
+  it("never relocates or removes History/My Reviews/Team Reviews/Governance — exactly the pre-existing four conditional/static nav concepts plus the one new Workspace addition", () => {
+    for (const href of ['href="/governance"', 'href="/team/reviews"', 'href="/reviews"']) {
+      expect(desktopNavBlock).toContain(href);
+    }
+  });
+});

@@ -16,7 +16,7 @@ export default function TopNav() {
   const pathname = usePathname();
   const router = useRouter();
   const { user, loading, isAdmin, beginLogout } = useAuth();
-  const { governanceDashboardEligible, plan: userPlan, loading: planLoading, teamRole } = useUserPlan();
+  const { governanceDashboardEligible, plan: userPlan, loading: planLoading, teamRole, workspaceUiEnabled } = useUserPlan();
   const isGovernanceUser = governanceDashboardEligible || userPlan === "full";
   /**
    * Query-Routing Redesign, Phase 2A, Step 7, Part E1 — `teamRole` is
@@ -184,6 +184,16 @@ export default function TopNav() {
               className="rounded-md px-3 py-1.5 text-[15px] font-medium text-cp-muted transition-colors hover:bg-cp-raised hover:text-cp-text"
             >
               Team Reviews
+            </Link>
+          )}
+
+          {!loading && user && !planLoading && workspaceUiEnabled && (
+            <Link
+              href="/workspace"
+              aria-current={pathname === "/workspace" ? "page" : undefined}
+              className="rounded-md px-3 py-1.5 text-[15px] font-medium text-cp-muted transition-colors hover:bg-cp-raised hover:text-cp-text"
+            >
+              Workspace
             </Link>
           )}
 
@@ -358,6 +368,16 @@ export default function TopNav() {
                 className="rounded-md px-3 py-2 text-sm text-cp-text transition-colors hover:bg-cp-raised hover:text-cp-text"
               >
                 Team Reviews
+              </Link>
+            )}
+            {!loading && user && !planLoading && workspaceUiEnabled && (
+              <Link
+                href="/workspace"
+                aria-current={pathname === "/workspace" ? "page" : undefined}
+                onClick={() => setMobileMenuOpen(false)}
+                className="rounded-md px-3 py-2 text-sm text-cp-text transition-colors hover:bg-cp-raised hover:text-cp-text"
+              >
+                Workspace
               </Link>
             )}
             <div className="my-2 border-t border-cp-border" />

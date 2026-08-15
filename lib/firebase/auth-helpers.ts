@@ -102,12 +102,18 @@ export async function verifyAdminToken(
  * @returns User ID and admin status, or null if invalid/missing
  * @throws Error if adminAuth is not initialized or if verification fails with a non-recoverable error
  */
-export async function verifySessionCookie(
-  request: NextRequest
+/**
+ * The actual verification core — takes the raw cookie VALUE, never a
+ * request object. Extracted (Phase 5C) so a Server Component context,
+ * which has no `NextRequest` to read `.cookies.get()` from, can reuse
+ * this exact same Firebase Admin SDK verification call rather than a
+ * second, independently-written one. `verifySessionCookie(request)`
+ * below is now a thin wrapper: identical behavior, unchanged signature,
+ * unchanged callers.
+ */
+export async function verifySessionCookieValue(
+  sessionCookie: string | undefined
 ): Promise<{ uid: string; isAdmin: boolean } | null> {
-  // Get session cookie
-  const sessionCookie = request.cookies.get("__session")?.value;
-
   if (!sessionCookie) {
     return null;
   }
@@ -122,7 +128,7 @@ export async function verifySessionCookie(
     // Verify the session cookie using Firebase Admin SDK
     // This will throw if the cookie is invalid, expired, or from a different project
     const decodedClaims = await adminAuth.verifySessionCookie(sessionCookie, true);
-    
+
     return {
       uid: decodedClaims.uid,
       isAdmin: !!decodedClaims.admin,
@@ -136,6 +142,13 @@ export async function verifySessionCookie(
     });
     throw error;
   }
+}
+
+export async function verifySessionCookie(
+  request: NextRequest
+): Promise<{ uid: string; isAdmin: boolean } | null> {
+  const sessionCookie = request.cookies.get("__session")?.value;
+  return verifySessionCookieValue(sessionCookie);
 }
 
 /**
