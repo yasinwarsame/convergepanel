@@ -65,6 +65,14 @@ interface UserUsageData {
   governanceReviewerFor?: string[];
   governanceReviewerEnabled?: boolean;
   governanceAssignedReviewerEmail?: string | null;
+  /**
+   * Phase 5C — server-computed via `resolvePersonalWorkspaceUiMode()` in
+   * `GET /api/user/usage`. Drives TopNav's Workspace link visibility only
+   * — never an authorization decision; Phase 5B's Workspace read APIs are
+   * independent of this flag. Absent/falsy must mean hidden, same as
+   * every other capability flag here.
+   */
+  workspaceUiEnabled?: boolean;
 }
 
 interface UseUserPlanReturn {
@@ -84,6 +92,8 @@ interface UseUserPlanReturn {
   governanceReviewerFor: string[];
   governanceReviewerEnabled: boolean;
   governanceAssignedReviewerEmail: string | null;
+  /** Phase 5C — see `UserUsageData.workspaceUiEnabled`. Always `false` while `loading`, on error, or when signed out — never optimistically `true`. */
+  workspaceUiEnabled: boolean;
   loading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
@@ -110,6 +120,7 @@ const DEFAULT_USAGE: UserUsageData = {
   governanceReviewerFor: [],
   governanceReviewerEnabled: false,
   governanceAssignedReviewerEmail: null,
+  workspaceUiEnabled: false,
 };
 
 // Never throws — returns DEFAULT_USAGE on any error to prevent infinite loading states.
@@ -208,6 +219,7 @@ async function fetchUsage(user: any): Promise<UserUsageData> {
         data.governanceAssignedReviewerEmail.trim()
           ? data.governanceAssignedReviewerEmail.trim()
           : null,
+      workspaceUiEnabled: data.workspaceUiEnabled === true,
     };
   } catch (err) {
     // Any network or unexpected error leads to default usage, no throwing.
@@ -356,6 +368,10 @@ export function useUserPlan(): UseUserPlanReturn {
       usageData.governanceAssignedReviewerEmail.trim()
         ? usageData.governanceAssignedReviewerEmail.trim()
         : null,
+    // Fails closed on the exact same terms as every other capability
+    // flag above: default object, loading state, and error/catch paths
+    // all resolve through DEFAULT_USAGE (workspaceUiEnabled: false).
+    workspaceUiEnabled: usageData.workspaceUiEnabled === true,
     loading: authLoading || loading,
     error,
     refresh,

@@ -18,6 +18,23 @@ import { planHasTeamGovernance } from "@/lib/plans";
 import { isAdminEmail } from "@/lib/admin/config";
 import { parseGovernanceReviewerFor } from "@/lib/governance/reviewerFields";
 import { getVideoLimit } from "@/lib/billing/planConfig";
+import { resolvePersonalWorkspaceUiMode } from "@/lib/workspaces/workspaceUiRollout";
+import { PERSONAL_WORKSPACE_UI_ENABLED, PERSONAL_WORKSPACE_UI_CANARY_UIDS } from "@/lib/env";
+
+/**
+ * Phase 5C — the single call site computing `workspaceUiEnabled` for this
+ * endpoint's two success responses. Never trusts a client-supplied uid —
+ * always the server-resolved `identity.uid` from `resolveRequestIdentity()`
+ * above. `resolvePersonalWorkspaceUiMode()` owns all precedence/parsing
+ * logic; this is never re-derived inline.
+ */
+function workspaceUiEnabledFor(uid: string): boolean {
+  return resolvePersonalWorkspaceUiMode({
+    uid,
+    globalEnabled: PERSONAL_WORKSPACE_UI_ENABLED,
+    canaryUidsRaw: PERSONAL_WORKSPACE_UI_CANARY_UIDS,
+  }).enabled;
+}
 
 function clientGovernanceRole(
   userData: Partial<UserProfile> | undefined,
@@ -142,6 +159,7 @@ export async function GET(req: NextRequest) {
           governanceReviewerFor: [] as string[],
           governanceReviewerEnabled: false,
           governanceAssignedReviewerEmail: null as string | null,
+          workspaceUiEnabled: workspaceUiEnabledFor(uid),
         },
         { status: 200 }
       );
@@ -247,6 +265,7 @@ export async function GET(req: NextRequest) {
         governanceReviewerFor,
         governanceReviewerEnabled,
         governanceAssignedReviewerEmail: assignedEmail,
+        workspaceUiEnabled: workspaceUiEnabledFor(uid),
       },
       { status: 200 }
     );
@@ -275,6 +294,11 @@ export async function GET(req: NextRequest) {
         governanceReviewerFor: [] as string[],
         governanceReviewerEnabled: false,
         governanceAssignedReviewerEmail: null as string | null,
+        // Fails closed, matching every other flag in this degraded-safe-default
+        // response — uid is out of scope here (identity resolution may not have
+        // completed if the error happened before it), so this can never be
+        // computed for a real identity; false is the only safe value.
+        workspaceUiEnabled: false,
       },
       { status: 200 }
     );

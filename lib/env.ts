@@ -235,6 +235,41 @@ export const PERSONAL_RUN_WORKSPACE_WRITES_ENABLED = process.env.PERSONAL_RUN_WO
 export const PERSONAL_RUN_WORKSPACE_WRITE_CANARY_UIDS = process.env.PERSONAL_RUN_WORKSPACE_WRITE_CANARY_UIDS;
 
 /**
+ * Personal Workspace UI Shell, Phase 5C — a PRESENTATION-only rollout
+ * flag, unrelated to and with no effect on `WORKSPACES_ENABLED` /
+ * `PERSONAL_WORKSPACE_PROVISIONING_ENABLED` /
+ * `PERSONAL_RUN_WORKSPACE_WRITES_ENABLED` above. Those three gate whether
+ * Workspace association/provisioning/writes are authorized at all; this
+ * one only decides whether the `/workspace` UI route and its `TopNav`
+ * entry are visible. Phase 5B's read APIs (`GET /api/user/workspace`,
+ * `GET /api/user/workspace/runs`) never check this flag and remain
+ * reachable to any authenticated user regardless of its value — a flag
+ * this narrow must never become a second authorization boundary.
+ *
+ * Default OFF (absent), same fail-closed convention as every flag above
+ * — this is the required dark-deployment state: shipping this phase's
+ * code must never require setting this variable to remain safe.
+ */
+export const PERSONAL_WORKSPACE_UI_ENABLED = process.env.PERSONAL_WORKSPACE_UI_ENABLED === "true";
+
+/**
+ * Account-Scoped Workspace UI Canary, Phase 5C — structural sibling of
+ * `PERSONAL_RUN_WORKSPACE_WRITE_CANARY_UIDS` above: an optional, server-
+ * only comma-separated Firebase uid allowlist letting the Workspace UI be
+ * activated for a small number of explicitly named accounts while
+ * `PERSONAL_WORKSPACE_UI_ENABLED` stays `false`. Raw, unparsed string —
+ * `lib/workspaces/workspaceUiRollout.ts` owns all parsing/validation/
+ * matching/precedence logic.
+ *
+ * Never prefixed `NEXT_PUBLIC_` — canary membership is a server-only
+ * decision, resolved once per request against the authenticated uid via
+ * `GET /api/user/usage`, never exposed to any response body or client-
+ * readable config. The browser only ever receives the final boolean
+ * (`workspaceUiEnabled`) that decision produces.
+ */
+export const PERSONAL_WORKSPACE_UI_CANARY_UIDS = process.env.PERSONAL_WORKSPACE_UI_CANARY_UIDS;
+
+/**
  * Search engine site-verification tokens.
  *
  * Optional — when unset, the corresponding verification meta tag is simply
