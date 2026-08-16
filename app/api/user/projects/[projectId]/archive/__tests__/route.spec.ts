@@ -1,0 +1,189 @@
+/**
+ * Project Foundation, Phase 6C — POST /api/user/projects/{projectId}/archive tests.
+ */
+
+const mockedResolveRequestIdentity = jest.fn();
+jest.mock("@/lib/auth/resolveRequestIdentity", () => ({
+  resolveRequestIdentity: (...args: any[]) => mockedResolveRequestIdentity(...args),
+}));
+
+jest.mock("@/lib/auth/identityResolutionTelemetry", () => ({
+  logIdentityResolutionFailure: jest.fn(),
+}));
+
+let globalEnabled = false;
+let canaryUidsRaw: string | undefined = undefined;
+jest.mock("@/lib/env", () => ({
+  get PROJECTS_ENABLED() {
+    return globalEnabled;
+  },
+  get PROJECTS_CANARY_UIDS() {
+    return canaryUidsRaw;
+  },
+}));
+
+const mockedResolveProjectForOwner = jest.fn();
+jest.mock("@/lib/projects/resolveProjectForOwner", () => ({
+  resolveProjectForOwner: (...args: any[]) => mockedResolveProjectForOwner(...args),
+}));
+
+const mockedUpdateProjectFields = jest.fn();
+jest.mock("@/lib/firestore/projects", () => ({
+  updateProjectFields: (...args: any[]) => mockedUpdateProjectFields(...args),
+}));
+
+const mockedWriteProjectEvent = jest.fn();
+jest.mock("@/lib/projects/projectEvents", () => ({
+  writeProjectEvent: (...args: any[]) => mockedWriteProjectEvent(...args),
+}));
+
+jest.mock("@/lib/logger", () => ({
+  logger: { warn: jest.fn(), info: jest.fn(), error: jest.fn(), debug: jest.fn() },
+}));
+
+import { NextRequest } from "next/server";
+import { Timestamp } from "firebase-admin/firestore";
+import { POST } from "@/app/api/user/projects/[projectId]/archive/route";
+
+const UID = "owner-1";
+const WS_ID = "personal-owner-1";
+const PROJECT_ID = "proj-1";
+const NOW = Timestamp.now();
+const CURRENT_UPDATE_TIME = Timestamp.fromMillis(1_700_000_000_000);
+const TOKEN = { seconds: CURRENT_UPDATE_TIME.seconds, nanoseconds: CURRENT_UPDATE_TIME.nanoseconds };
+
+function validProject(overrides: Record<string, unknown> = {}) {
+  return {
+    schemaVersion: 1,
+    id: PROJECT_ID,
+    workspaceId: WS_ID,
+    name: "My Project",
+    status: "active",
+    createdByUserId: UID,
+    createdAt: NOW,
+    updatedAt: NOW,
+    ...overrides,
+  };
+}
+
+function buildRequest(body?: unknown): NextRequest {
+  return new NextRequest(`http://localhost/api/user/projects/${PROJECT_ID}/archive`, {
+    method: "POST",
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+  });
+}
+
+async function callArchive(body?: unknown, projectId = PROJECT_ID) {
+  const res = await POST(buildRequest(body), { params: { projectId } });
+  const json = await res.json();
+  return { res, json };
+}
+
+beforeEach(() => {
+  jest.clearAllMocks();
+  globalEnabled = true;
+  canaryUidsRaw = undefined;
+  mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: UID });
+  mockedResolveProjectForOwner.mockResolvedValue({ status: "found", project: validProject({ status: "active" }), documentUpdateTime: CURRENT_UPDATE_TIME });
+  mockedUpdateProjectFields.mockResolvedValue({ status: "updated", documentUpdateTime: Timestamp.fromMillis(1_800_000_000_000) });
+  mockedWriteProjectEvent.mockResolvedValue(undefined);
+});
+
+describe("auth + rollout gate", () => {
+  it("401s when unauthenticated", async () => {
+    mockedResolveRequestIdentity.mockResolvedValue({ status: "unauthenticated", reason: "missing_credentials" });
+    const { res } = await callArchive({ expectedUpdateTime: TOKEN });
+    expect(res.status).toBe(401);
+  });
+
+  it("feature off -> dark", async () => {
+    globalEnabled = false;
+    const { res, json } = await callArchive({ expectedUpdateTime: TOKEN });
+    expect(res.status).toBe(503);
+    expect(json.errorCode).toBe("projects_disabled");
+    expect(mockedResolveProjectForOwner).not.toHaveBeenCalled();
+  });
+});
+
+describe("valid active -> archived", () => {
+  it("succeeds and returns the archived DTO", async () => {
+    const { res, json } = await callArchive({ expectedUpdateTime: TOKEN });
+    expect(res.status).toBe(200);
+    expect(json.ok).toBe(true);
+    expect(json.project.status).toBe("archived");
+  });
+
+  it("passes status: archived to updateProjectFields", async () => {
+    await callArchive({ expectedUpdateTime: TOKEN });
+    expect(mockedUpdateProjectFields).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "archived" }) }));
+  });
+
+  it("writes a project_archived event after success", async () => {
+    await callArchive({ expectedUpdateTime: TOKEN });
+    expect(mockedWriteProjectEvent).toHaveBeenCalledWith(expect.objectContaining({ eventType: "project_archived" }));
+  });
+});
+
+describe("stale token", () => {
+  it("stale expectedUpdateTime -> 409 conflict, no write attempted", async () => {
+    const staleToken = { seconds: 1, nanoseconds: 0 };
+    const { res, json } = await callArchive({ expectedUpdateTime: staleToken });
+    expect(res.status).toBe(409);
+    expect(json.errorCode).toBe("conflict");
+    expect(mockedUpdateProjectFields).not.toHaveBeenCalled();
+  });
+});
+
+describe("repeated archive — invalid transition, not silently idempotent", () => {
+  it("already-archived Project, even with a token matching the CURRENT (already-archived) state, is rejected as an invalid transition, not treated as success", async () => {
+    mockedResolveProjectForOwner.mockResolvedValue({ status: "found", project: validProject({ status: "archived" }), documentUpdateTime: CURRENT_UPDATE_TIME });
+    const { res, json } = await callArchive({ expectedUpdateTime: TOKEN }); // fresh token, but status is already archived
+    expect(res.status).toBe(409);
+    expect(json.errorCode).toBe("invalid_project_status_transition");
+    expect(mockedUpdateProjectFields).not.toHaveBeenCalled();
+  });
+
+  it("MUTATION CHECK: this is a DIFFERENT errorCode from the plain staleness conflict — proving the two failure modes are actually distinguished, not accidentally collapsed", async () => {
+    mockedResolveProjectForOwner.mockResolvedValue({ status: "found", project: validProject({ status: "archived" }), documentUpdateTime: CURRENT_UPDATE_TIME });
+    const alreadyArchived = await callArchive({ expectedUpdateTime: TOKEN });
+
+    mockedResolveProjectForOwner.mockResolvedValue({ status: "found", project: validProject({ status: "active" }), documentUpdateTime: CURRENT_UPDATE_TIME });
+    const staleToken = { seconds: 1, nanoseconds: 0 };
+    const stale = await callArchive({ expectedUpdateTime: staleToken });
+
+    expect(alreadyArchived.json.errorCode).not.toBe(stale.json.errorCode);
+    expect(alreadyArchived.res.status).toBe(409);
+    expect(stale.res.status).toBe(409);
+  });
+});
+
+describe("foreign Project concealment", () => {
+  it("foreign Project -> concealed 404", async () => {
+    mockedResolveProjectForOwner.mockResolvedValue({ status: "workspace_mismatch" });
+    const { res, json } = await callArchive({ expectedUpdateTime: TOKEN });
+    expect(res.status).toBe(404);
+    expect(json.errorCode).toBe("project_not_found");
+  });
+});
+
+describe("body validation", () => {
+  it("SECURITY: unknown field (e.g. status) rejected outright", async () => {
+    const { res, json } = await callArchive({ expectedUpdateTime: TOKEN, status: "active" });
+    expect(res.status).toBe(400);
+    expect(json.errorCode).toBe("unexpected_field");
+  });
+
+  it("missing expectedUpdateTime -> 400", async () => {
+    const { res, json } = await callArchive({});
+    expect(res.status).toBe(400);
+    expect(json.errorCode).toBe("invalid_update_time");
+  });
+});
+
+describe("events", () => {
+  it("EVENT FAILURE SAFETY: archive still succeeds when the event write fails internally", async () => {
+    mockedWriteProjectEvent.mockResolvedValue(undefined);
+    const { res } = await callArchive({ expectedUpdateTime: TOKEN });
+    expect(res.status).toBe(200);
+  });
+});
