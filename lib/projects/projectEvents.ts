@@ -12,15 +12,21 @@
  * existing reader's `isGovernanceAuditDoc()` filter would simply ignore
  * them) or incorrectly implying Project events ARE governance-relevant.
  *
- * Secondary, best-effort, never blocking (frozen by Phase 6A.2, reversing
- * an earlier draft that briefly coupled event writes to the same
- * transaction as the canonical mutation): every call site in the Phase 6C
- * routes calls this ONLY after the canonical Project mutation has already
- * committed successfully, and NEVER awaits it in a way that could turn a
- * write failure into a failed response — a failed event write is logged
- * and swallowed, mirroring `writeAuditEvent()`'s own established
- * best-effort shape (`lib/governance/auditLog.ts`) exactly. No automatic
- * retry.
+ * Secondary, best-effort, never blocking in the sense that matters (frozen
+ * by Phase 6A.2, reversing an earlier draft that briefly coupled event
+ * writes to the same transaction as the canonical mutation; corrected again
+ * in Phase 6C.1): every call site in the Phase 6C routes calls this ONLY
+ * after the canonical Project mutation has already committed successfully.
+ * Callers DO `await` this call — the guarantee is not "the response returns
+ * before the event attempt finishes," it is "an event failure can never
+ * turn a successful canonical mutation into a failed response." Those are
+ * different properties: on Vercel/serverless, an unawaited async Firestore
+ * write can be frozen or aborted once the response has been sent, which
+ * would silently degrade "best-effort" into "rarely attempted to
+ * completion." This function's own internal try/catch is what makes
+ * awaiting it safe — it always resolves, mirroring `writeAuditEvent()`'s
+ * established best-effort shape (`lib/governance/auditLog.ts`). No
+ * automatic retry.
  *
  * Append-only random-ID writes (`.add()`), not the deterministic-ID
  * `.create()`-idempotent style governance events use — deliberately: a
@@ -57,7 +63,7 @@ export interface ProjectRunAssociationEventExtra {
 
 export type WriteProjectEventArgs = ProjectEventBase & Partial<ProjectRunAssociationEventExtra>;
 
-/** Always resolves — never throws, never rejects. Callers should not `await` this in any way that could delay or fail the response it follows. */
+/** Always resolves — never throws, never rejects. Callers MUST `await` this before returning their success response, so the request lifetime covers the best-effort attempt; a failure here is logged internally and never propagates. */
 export async function writeProjectEvent(args: WriteProjectEventArgs): Promise<void> {
   if (!adminDb) {
     logger.warn("[projects/events] Skipped project event write — Firestore unavailable", { eventType: args.eventType });

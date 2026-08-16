@@ -49,8 +49,9 @@ jest.mock("@/lib/security/rateLimit", () => ({
   checkRateLimit: (...args: any[]) => mockedCheckRateLimit(...args),
 }));
 
+const mockedLoggerWarn = jest.fn();
 jest.mock("@/lib/logger", () => ({
-  logger: { warn: jest.fn(), info: jest.fn(), error: jest.fn(), debug: jest.fn() },
+  logger: { warn: (...args: any[]) => mockedLoggerWarn(...args), info: jest.fn(), error: jest.fn(), debug: jest.fn() },
 }));
 
 import { NextRequest } from "next/server";
@@ -331,12 +332,52 @@ describe("POST /api/user/projects — creation", () => {
     expect(res.status).toBe(201);
   });
 
+  it("OBSERVABILITY: a count-guard infrastructure failure emits a structured warning log before creation continues", async () => {
+    mockedCountProjectsInWorkspace.mockResolvedValue({ status: "count_failed" });
+    await callPost({ name: "X" });
+    expect(mockedLoggerWarn).toHaveBeenCalledWith(expect.stringContaining("count guard"), expect.objectContaining({ workspaceId: WS_ID }));
+  });
+
+  it("OBSERVABILITY: a healthy count-guard check does NOT emit the failure warning", async () => {
+    mockedCountProjectsInWorkspace.mockResolvedValue({ status: "ok", count: 5 });
+    await callPost({ name: "X" });
+    expect(mockedLoggerWarn).not.toHaveBeenCalled();
+  });
+
   it("EVENT FAILURE SAFETY: creation still succeeds (201) even when the projectEvents write fails internally — writeProjectEvent's own real contract is to never reject (proven in projectEvents.spec.ts), so this simulates that same contract: the mock resolves (representing an internally-caught failure), and the route must not treat that resolution as a reason to fail the response", async () => {
     mockedWriteProjectEvent.mockResolvedValue(undefined);
     const { res, json } = await callPost({ name: "X" });
     expect(res.status).toBe(201);
     expect(json.ok).toBe(true);
     expect(mockedWriteProjectEvent).toHaveBeenCalled();
+  });
+
+  it("PROPERTY B: the route awaits the event write before returning — the response does not settle until the event attempt's own promise settles", async () => {
+    let resolveEvent!: () => void;
+    const deferred = new Promise<void>((resolve) => {
+      resolveEvent = resolve;
+    });
+    mockedWriteProjectEvent.mockReturnValue(deferred);
+
+    let settled = false;
+    const postPromise = callPost({ name: "X" }).then((result) => {
+      settled = true;
+      return result;
+    });
+
+    // Flush every pending microtask (all the real, already-resolved mock
+    // promises ahead of the event write) without ever resolving the
+    // deferred event promise — a macrotask boundary is required here,
+    // not a fixed number of microtask ticks, or this assertion would
+    // pass even for a fire-and-forget (`void writeProjectEvent(...)`)
+    // regression purely by coincidental timing.
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(settled).toBe(false); // the route must still be awaiting the event attempt here
+
+    resolveEvent();
+    const { res } = await postPromise;
+    expect(settled).toBe(true);
+    expect(res.status).toBe(201);
   });
 
   it("a canonical creation failure never attempts to write a success event with fabricated data — writeProjectEvent is only called after createProject succeeds", async () => {

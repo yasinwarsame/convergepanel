@@ -168,4 +168,34 @@ describe("events", () => {
     const { res } = await callRestore({ expectedUpdateTime: TOKEN });
     expect(res.status).toBe(200);
   });
+
+  it("a canonical restore failure never attempts to write a success event", async () => {
+    mockedUpdateProjectFields.mockResolvedValue({ status: "update_failed" });
+    await callRestore({ expectedUpdateTime: TOKEN });
+    expect(mockedWriteProjectEvent).not.toHaveBeenCalled();
+  });
+
+  it("PROPERTY B: the route awaits the event write before returning — the response does not settle until the event attempt's own promise settles", async () => {
+    let resolveEvent!: () => void;
+    const deferred = new Promise<void>((resolve) => {
+      resolveEvent = resolve;
+    });
+    mockedWriteProjectEvent.mockReturnValue(deferred);
+
+    let settled = false;
+    const restorePromise = callRestore({ expectedUpdateTime: TOKEN }).then((result) => {
+      settled = true;
+      return result;
+    });
+
+    // Macrotask flush, not a fixed microtask-tick count — see the
+    // create-route test's identical comment for why this matters.
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(settled).toBe(false); // the route must still be awaiting the event attempt here
+
+    resolveEvent();
+    const { res } = await restorePromise;
+    expect(settled).toBe(true);
+    expect(res.status).toBe(200);
+  });
 });

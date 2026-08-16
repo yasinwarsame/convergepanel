@@ -96,7 +96,10 @@ export async function POST(req: NextRequest, { params }: { params: { projectId: 
 
   switch (updateResult.status) {
     case "updated":
-      void writeProjectEvent({ eventType: "project_restored", actorUid: uid, workspaceId: project.workspaceId, projectId: project.id });
+      // Secondary, best-effort — awaited so the request lifetime covers
+      // the attempt; writeProjectEvent catches/logs its own failure and
+      // never turns this into a failed response.
+      await writeProjectEvent({ eventType: "project_restored", actorUid: uid, workspaceId: project.workspaceId, projectId: project.id });
       return NextResponse.json({
         ok: true,
         project: toProjectSummaryDto({ ...project, status: "active" }, updateResult.documentUpdateTime),

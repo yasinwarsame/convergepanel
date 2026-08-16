@@ -160,9 +160,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(body, { status });
   }
 
-  // Secondary, best-effort, never blocking — the response below is
-  // already a success regardless of whether this write succeeds.
-  void writeProjectEvent({
+  // Secondary, best-effort — the response below is a success regardless
+  // of whether this write succeeds (writeProjectEvent catches/logs its own
+  // failure internally). Awaited so the request lifetime covers the
+  // attempt rather than leaving it to finish after the response is sent.
+  await writeProjectEvent({
     eventType: "project_created",
     actorUid: uid,
     workspaceId,
