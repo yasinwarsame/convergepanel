@@ -36,9 +36,17 @@
  * decides an HTTP status; the public-concealment mapping (existence/
  * authorization failures -> 404 `project_not_found`; `lookup_failed` ->
  * 503) is Phase 6C's job.
+ *
+ * Phase 6C addition: the `found` outcome now also carries
+ * `documentUpdateTime` (Firestore's native document `updateTime`,
+ * unmodified pass-through from `getProject()`) — additive only, read
+ * order and every other outcome are unchanged from Phase 6B. This is what
+ * lets the rename/archive/restore routes use `expectedUpdateTime` OCC
+ * without a second Firestore read.
  */
 
 import "server-only";
+import type { Timestamp } from "firebase-admin/firestore";
 import { getProject } from "@/lib/firestore/projects";
 import { getPersonalWorkspaceId } from "@/lib/workspaces/personalWorkspaceId";
 import { resolvePersonalWorkspaceForOwner } from "@/lib/workspaces/resolvePersonalWorkspaceForOwner";
@@ -46,7 +54,12 @@ import { validateProjectIdSyntax } from "./projectId";
 import type { ProjectV1 } from "./types";
 
 export type ResolveProjectForOwnerResult =
-  | { status: "found"; project: ProjectV1 }
+  // `documentUpdateTime` is additive (Phase 6C) — Firestore's native
+  // document `updateTime` at the point of read, passed through
+  // unmodified from `getProject()`. Never derived from `project.updatedAt`;
+  // see `lib/projects/updateTimeToken.ts`. Existing Phase 6B callers that
+  // only destructure `{status, project}` are unaffected.
+  | { status: "found"; project: ProjectV1; documentUpdateTime: Timestamp }
   | { status: "invalid_project_id" }
   | { status: "not_found" }
   | { status: "malformed" }
@@ -76,6 +89,7 @@ export async function resolveProjectForOwner(uid: string, projectId: string): Pr
       break;
   }
   const project = lookup.project;
+  const documentUpdateTime = lookup.documentUpdateTime;
 
   // Step 4-5: compare against the caller's own deterministic Personal
   // Workspace id BEFORE ever reading any Workspace document. A mismatch
@@ -100,7 +114,7 @@ export async function resolveProjectForOwner(uid: string, projectId: string): Pr
   const workspaceResult = await resolvePersonalWorkspaceForOwner(uid);
   switch (workspaceResult.status) {
     case "found":
-      return { status: "found", project };
+      return { status: "found", project, documentUpdateTime };
     case "workspaces_disabled":
       return { status: "workspaces_disabled" };
     case "not_found":
