@@ -270,6 +270,44 @@ export const PERSONAL_WORKSPACE_UI_ENABLED = process.env.PERSONAL_WORKSPACE_UI_E
 export const PERSONAL_WORKSPACE_UI_CANARY_UIDS = process.env.PERSONAL_WORKSPACE_UI_CANARY_UIDS;
 
 /**
+ * Projects Foundation, Phase 6B — backend Project-capability rollout flag
+ * (CRUD availability + `projectId` authorization together). Unrelated to
+ * and with no effect on any Workspace flag above — Projects is an
+ * additive organizational layer on top of an already-provisioned Personal
+ * Workspace, never a replacement for Workspace's own gating.
+ *
+ * Deliberately does NOT also gate `PROJECT_RUN_ASSOCIATION_WRITES_ENABLED`
+ * or `PROJECTS_UI_ENABLED` — those are Phase 6D's and Phase 7's own,
+ * separate flags (not yet implemented; see
+ * docs/workspaces/architecture.md), kept independent so backend rollout,
+ * run-association writes, and UI exposure can each move on their own
+ * schedule, exactly mirroring how `WORKSPACES_ENABLED` /
+ * `PERSONAL_RUN_WORKSPACE_WRITES_ENABLED` / `PERSONAL_WORKSPACE_UI_ENABLED`
+ * are already kept independent.
+ *
+ * No route reads this yet (Phase 6C). Default OFF (absent) — the required
+ * dark-deployment state; shipping Phase 6B must never require setting
+ * this variable to remain safe, since Phase 6B has no route that could
+ * even read it.
+ */
+export const PROJECTS_ENABLED = process.env.PROJECTS_ENABLED === "true";
+
+/**
+ * Account-Scoped Projects Backend Canary, Phase 6B — structural sibling
+ * of `PERSONAL_WORKSPACE_UI_CANARY_UIDS` above: an optional, server-only
+ * comma-separated Firebase uid allowlist letting Project backend
+ * capability be activated for a small number of explicitly named accounts
+ * while `PROJECTS_ENABLED` stays `false`. Raw, unparsed string —
+ * `lib/projects/projectsRollout.ts` owns all parsing/validation/matching/
+ * precedence logic.
+ *
+ * Never prefixed `NEXT_PUBLIC_`, for the same reason as every other
+ * canary allowlist in this file — server-only decision, never exposed to
+ * any response body or client-readable config.
+ */
+export const PROJECTS_CANARY_UIDS = process.env.PROJECTS_CANARY_UIDS;
+
+/**
  * Search engine site-verification tokens.
  *
  * Optional — when unset, the corresponding verification meta tag is simply
