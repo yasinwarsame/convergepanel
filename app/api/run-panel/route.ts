@@ -48,7 +48,15 @@ import { sanitizeModelText, truncateForSynthesis, MAX_CHARS_SYNTHESIS_PER_MODEL 
 import { PanelResultPublic } from "@/lib/panel/schemas";
 import { normalizeModelResultPublic, assertPublicStatus } from "@/lib/panel/normalize";
 import { logger } from "@/lib/logger";
-import { ADAPTIVE_SCHEMAS_ENABLED, PERSONAL_RUN_WORKSPACE_WRITES_ENABLED, PERSONAL_RUN_WORKSPACE_WRITE_CANARY_UIDS, WORKSPACES_ENABLED } from "@/lib/env";
+import {
+  ADAPTIVE_SCHEMAS_ENABLED,
+  PERSONAL_RUN_WORKSPACE_WRITES_ENABLED,
+  PERSONAL_RUN_WORKSPACE_WRITE_CANARY_UIDS,
+  WORKSPACES_ENABLED,
+  PROJECT_RUN_ASSOCIATION_WRITES_ENABLED,
+  PROJECT_RUN_ASSOCIATION_WRITE_CANARY_UIDS,
+} from "@/lib/env";
+import { resolveProjectRunAssociationWriteMode } from "@/lib/projects/projectRunAssociationWriteCanary";
 import { resolvePersonalRunWorkspaceBinding } from "@/lib/workspaces/personalRunWorkspaceBinding";
 import { resolvePersonalRunWorkspaceWriteMode } from "@/lib/workspaces/personalRunWorkspaceWriteCanary";
 import { planAdaptiveRun, finalizeAdaptiveRun, AdaptivePromptPlan, buildNonExecutionPayload } from "@/lib/adaptiveSchema/orchestrate";
@@ -289,6 +297,12 @@ export async function POST(req: NextRequest) {
     // Workspace lookup of any kind is ever attempted for it.
     const runId = `run-${randomUUID()}`;
     let workspaceIdForRun: string | undefined;
+    // Going-Forward Run/Project Association Writer, Phase 6D.2 — only ever
+    // computed inside the SAME "bound" branch that sets workspaceIdForRun
+    // above, so projectIdForRun can structurally never be set without a
+    // real, resolved Personal workspaceId alongside it (the invariant is
+    // enforced by control flow, not by a separate runtime check).
+    let projectIdForRun: null | undefined;
     if (adaptivePlan !== null) {
       // Account-Scoped Workspace Write Canary, Phase 3A — the ONLY thing
       // this adds is which uids get `writesEnabled: true` below. A
@@ -317,10 +331,30 @@ export async function POST(req: NextRequest) {
           hasTeam: !!teamCtx?.team,
         });
         switch (binding.outcome) {
-          case "bound":
+          case "bound": {
             workspaceIdForRun = binding.workspaceId;
             logger.info("[run-panel] personal_run_workspace_bound", { runId });
+
+            // Piggybacks exclusively on the binding this branch just
+            // established — never independently resolves or manufactures
+            // a Workspace association. Mirrors the Personal Workspace
+            // write canary's own precedence exactly (Phase 3A): the
+            // canary is an independent activation path, not subordinate
+            // to the global flag.
+            const projectWriteMode = resolveProjectRunAssociationWriteMode({
+              uid,
+              globalWritesEnabled: PROJECT_RUN_ASSOCIATION_WRITES_ENABLED,
+              canaryUidsRaw: PROJECT_RUN_ASSOCIATION_WRITE_CANARY_UIDS,
+            });
+            if (projectWriteMode.canaryConfigInvalid) {
+              logger.error("[run-panel] project_run_association_write_canary_configuration_invalid", { runId });
+            }
+            if (projectWriteMode.enabled) {
+              projectIdForRun = null;
+              logger.info("[run-panel] project_run_association_write_mode", { runId, source: projectWriteMode.source });
+            }
             break;
+          }
           case "resolution_failed": {
             // Fail BEFORE model execution — never silently fall back to
             // creating a legacy (non-workspace-bound) run once write
@@ -459,7 +493,7 @@ export async function POST(req: NextRequest) {
     // established "run creation is for tracking, not critical for
     // execution" degradation for any other createRun() failure.
     try {
-      await createRun(runId, uid, trimmedQuestion, selectedModels, workspaceIdForRun);
+      await createRun(runId, uid, trimmedQuestion, selectedModels, workspaceIdForRun, projectIdForRun);
     } catch (runError: any) {
       // Log but don't fail - run creation is for tracking, not critical for execution
       logger.error("[run-panel] Failed to create run record", { error: runError });
