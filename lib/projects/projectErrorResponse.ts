@@ -73,3 +73,35 @@ export function invalidProjectStatusTransitionResponse(): { status: number; body
 export function internalErrorResponse(): { status: number; body: ProjectErrorBody } {
   return { status: 500, body: { ok: false, errorCode: "internal_error", message: "Something went wrong. Please try again." } };
 }
+
+/**
+ * Run/Project Association, Phase 6D.4A — a run that doesn't exist,
+ * doesn't belong to the caller, belongs to a different Workspace, or is a
+ * legacy/unbound run (never Project-assignable) are all reported
+ * identically: no distinguishing status, no distinguishing message. Same
+ * concealment rationale as `projectNotFoundConcealedResponse()` above,
+ * applied to run ids instead of Project ids.
+ */
+export function runNotFoundConcealedResponse(): { status: number; body: ProjectErrorBody } {
+  return { status: 404, body: { ok: false, errorCode: "run_not_found", message: "This run could not be found." } };
+}
+
+/** A target Project that doesn't exist, isn't structurally valid, or belongs to a different Workspace — concealed identically to a foreign Project lookup elsewhere in this file. Never reveals which of those three actually happened. */
+export function runProjectAssociationTargetNotFoundResponse(): { status: number; body: ProjectErrorBody } {
+  return { status: 404, body: { ok: false, errorCode: "project_not_found", message: "This Project could not be found." } };
+}
+
+/** A target Project that IS the caller's own (ownership already established) but is archived — safe to reveal, distinct from the concealed 404 above. */
+export function projectArchivedTargetResponse(): { status: number; body: ProjectErrorBody } {
+  return { status: 409, body: { ok: false, errorCode: "project_archived", message: "This Project is archived and cannot accept new run assignments." } };
+}
+
+/** The caller's `expectedProjectId` did not match the run's actual current association. Never echoes the actual current value — that would let a stale guess be used to probe organizational state. */
+export function runProjectAssociationConflictResponse(): { status: number; body: ProjectErrorBody } {
+  return { status: 409, body: { ok: false, errorCode: "project_association_conflict", message: "This run's Project association changed since you last loaded it. Please refresh and try again." } };
+}
+
+/** The requested target is already the run's current association (post expected-state check) — never silently treated as success, never written, never emits an event. */
+export function runProjectAssociationUnchangedResponse(): { status: number; body: ProjectErrorBody } {
+  return { status: 409, body: { ok: false, errorCode: "project_association_unchanged", message: "This run is already associated with the requested Project." } };
+}
