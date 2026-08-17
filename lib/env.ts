@@ -308,6 +308,49 @@ export const PROJECTS_ENABLED = process.env.PROJECTS_ENABLED === "true";
 export const PROJECTS_CANARY_UIDS = process.env.PROJECTS_CANARY_UIDS;
 
 /**
+ * Going-Forward Run/Project Association Writer, Phase 6D.2 — a FOURTH
+ * independent server-side-only kill switch, default OFF, deliberately
+ * separate from `PROJECTS_ENABLED`/`PROJECTS_CANARY_UIDS` above.
+ * `PROJECTS_ENABLED` answers "can this uid use Project CRUD"; this one
+ * answers "should a newly created Personal Workspace-bound run be
+ * persisted with `projectId: null` at all." These must be able to move
+ * independently — once this flag is globalized, EVERY newly-created
+ * Personal Workspace-bound run gets `projectId: null` regardless of
+ * whether that uid has Project CRUD/UI eligibility, so the missing-field
+ * cohort stops growing for everyone, not just the Project CRUD canary
+ * population. See `lib/projects/projectRunAssociationWriteCanary.ts` for
+ * the rollout-mode resolver this gates — precedence mirrors
+ * `PERSONAL_RUN_WORKSPACE_WRITES_ENABLED`/`resolvePersonalRunWorkspaceWriteMode()`
+ * exactly (Phase 3A), not a new interpretation: the canary below is an
+ * independent activation path, not subordinate to this flag.
+ *
+ * This flag governs ONLY whether the initial `projectId: null` field is
+ * written — it never independently produces a `workspaceId`. The
+ * existing, unmodified Personal Workspace run-write path
+ * (`PERSONAL_RUN_WORKSPACE_WRITES_ENABLED`) remains the sole source of
+ * `workspaceId`; this writer only piggybacks on that already-resolved
+ * binding when one exists.
+ */
+export const PROJECT_RUN_ASSOCIATION_WRITES_ENABLED = process.env.PROJECT_RUN_ASSOCIATION_WRITES_ENABLED === "true";
+
+/**
+ * Account-Scoped Run/Project Association Write Canary, Phase 6D.2 —
+ * structural sibling of `PERSONAL_RUN_WORKSPACE_WRITE_CANARY_UIDS`: an
+ * optional, server-only comma-separated Firebase uid allowlist letting
+ * the `projectId: null` writer be activated for a small number of
+ * explicitly named accounts while `PROJECT_RUN_ASSOCIATION_WRITES_ENABLED`
+ * stays `false` — an INDEPENDENT activation path, exactly mirroring
+ * `resolvePersonalRunWorkspaceWriteMode()`'s proven precedence, not a
+ * value that only narrows an already-`true` global flag. Raw, unparsed
+ * string — `lib/projects/projectRunAssociationWriteCanary.ts` owns all
+ * parsing/validation/matching/precedence logic.
+ *
+ * Never prefixed `NEXT_PUBLIC_`, for the same reason as every other
+ * canary allowlist in this file.
+ */
+export const PROJECT_RUN_ASSOCIATION_WRITE_CANARY_UIDS = process.env.PROJECT_RUN_ASSOCIATION_WRITE_CANARY_UIDS;
+
+/**
  * Search engine site-verification tokens.
  *
  * Optional — when unset, the corresponding verification meta tag is simply

@@ -90,6 +90,20 @@ export interface PanelRun {
    * compatibility rationale.
    */
   workspaceId?: string;
+  /**
+   * Going-Forward Run/Project Association Writer, Phase 6D.2 — mirrors
+   * `workspaceId` above exactly: present ONLY when the same initial
+   * `.set()` call also included a valid `workspaceId` AND
+   * `PROJECT_RUN_ASSOCIATION_WRITES_ENABLED`/its canary was enabled for
+   * this uid at creation time. `createRun()` can only ever initialize
+   * this to `null` ("Unfiled") — never a real Project id — see that
+   * function's own `projectId?: null` parameter type. A real Project id
+   * is only ever written later, by the (not yet implemented) Phase 6D.4
+   * assignment API. Absent means either created before Phase 6D.2, or
+   * created without a Personal Workspace binding, or created while this
+   * writer was off for this uid — never backfilled by this writer.
+   */
+  projectId?: string | null;
   question: string;
   selectedModels: string[];
   status: "running" | "complete" | "error";
@@ -125,6 +139,17 @@ export interface PanelRun {
  *   as an absent field (adminDb has `ignoreUndefinedProperties: true`
  *   configured — see lib/firebase/admin.ts), matching every other optional
  *   field on this document.
+ * @param projectId - Phase 6D.2, optional: pass exactly `null` to initialize
+ *   this run as "Unfiled" in the SAME initial `.set()` call as `workspaceId`
+ *   above — never a follow-up `.update()`. Deliberately typed `null` only
+ *   (never `string`): this function can never be used to assign a run to a
+ *   real Project — that is exclusively the future Phase 6D.4 assignment
+ *   API's job, operating on an already-existing run. The caller
+ *   (`app/api/run-panel/route.ts`) is responsible for only ever passing
+ *   `null` here when `workspaceId` above is ALSO being passed a real,
+ *   resolved value — this function does not itself enforce that pairing,
+ *   trusting its single caller, exactly like `workspaceId` itself trusts
+ *   its caller to have already resolved a genuine binding.
  * @returns Promise<void>
  */
 export async function createRun(
@@ -132,7 +157,8 @@ export async function createRun(
   userId: string,
   question: string,
   selectedModels: string[],
-  workspaceId?: string
+  workspaceId?: string,
+  projectId?: null
 ): Promise<void> {
   if (!adminDb) {
     throw new Error("Firestore is not available");
@@ -141,6 +167,7 @@ export async function createRun(
   const runData: Partial<PanelRun> = {
     userId,
     workspaceId,
+    projectId,
     question,
     selectedModels,
     status: "running",
