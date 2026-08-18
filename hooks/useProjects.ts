@@ -59,10 +59,43 @@ export interface ProjectsListPage {
 
 export type ParseProjectsListPageResult = { ok: true; page: ProjectsListPage } | { ok: false; errorCode: ProjectsListErrorCode };
 
-/** Pure: mirrors `parseWorkspaceRunsPageResponse()` — a malformed/absent `items`/`hasMore` on a nominally-`ok` response is `internal_error`, never a synthesized page shape. */
-export function parseProjectsListPageResponse(outcome: { ok: boolean; body: unknown }): ParseProjectsListPageResult {
+/**
+ * Phase 7C.1 — minimal structural + status-scope validation for a single
+ * returned item. Not a general runtime-schema check: only the fields this
+ * UI actually renders/relies on (`id`, `name`, `status`) are validated.
+ * `status === expectedStatus` is the load-bearing check this correction
+ * exists for — an Active-scoped request that comes back with an archived
+ * row (or vice versa) is a read-contract integrity violation, not
+ * something to silently filter and continue past.
+ */
+function isValidProjectSummaryItem(item: unknown, expectedStatus: "active" | "archived"): item is ProjectSummary {
+  if (typeof item !== "object" || item === null) return false;
+  const candidate = item as Record<string, unknown>;
+  return typeof candidate.id === "string" && candidate.id.length > 0 && typeof candidate.name === "string" && candidate.status === expectedStatus;
+}
+
+/**
+ * Pure: mirrors `parseWorkspaceRunsPageResponse()` — a malformed/absent
+ * `items`/`hasMore` on a nominally-`ok` response is `internal_error`,
+ * never a synthesized page shape. Phase 7C.1 addition: every item in an
+ * otherwise-well-formed page must also satisfy `isValidProjectSummaryItem()`
+ * against `expectedStatus` — a SINGLE contradictory row (e.g. an archived
+ * Project in an active-scoped response) fails the WHOLE page closed as
+ * `internal_error`, never silently filtered-and-continued. This mirrors the
+ * server's own fail-whole-page-closed policy (`listProjectsForOwner.ts`)
+ * rather than `GET /api/user/workspace/runs`'s omit-and-continue policy —
+ * deliberately, since a status-scope contradiction here is itself the
+ * structural problem worth surfacing loudly, not an isolated bad row.
+ */
+export function parseProjectsListPageResponse(outcome: { ok: boolean; body: unknown; expectedStatus: "active" | "archived" }): ParseProjectsListPageResult {
   const body = outcome.body as { ok?: unknown; items?: unknown; hasMore?: unknown; nextCursor?: unknown; errorCode?: unknown } | null;
-  if (outcome.ok && body?.ok === true && Array.isArray(body.items) && typeof body.hasMore === "boolean") {
+  if (
+    outcome.ok &&
+    body?.ok === true &&
+    Array.isArray(body.items) &&
+    typeof body.hasMore === "boolean" &&
+    body.items.every((item) => isValidProjectSummaryItem(item, outcome.expectedStatus))
+  ) {
     return {
       ok: true,
       page: {
@@ -137,7 +170,7 @@ export function useProjects(args: { status: "active" | "archived" }): UseProject
         const body = await res.json().catch(() => null);
         if (seq !== seqRef.current) return; // superseded — never apply a stale response
 
-        const result = parseProjectsListPageResponse({ ok: res.ok, body });
+        const result = parseProjectsListPageResponse({ ok: res.ok, body, expectedStatus: listStatus });
         if (!result.ok) {
           if (opts.isLoadMore) {
             setLoadingMore(false);

@@ -37,44 +37,95 @@ jest.mock("@/lib/client/authedFetch", () => ({
 
 import { useProjects, parseProjectsListPageResponse, isDefinitiveEmptyProjectsState } from "@/hooks/useProjects";
 import type { UseProjectsResult, ProjectSummary } from "@/hooks/useProjects";
+import { ActiveProjectsSection } from "@/components/projects/ActiveProjectsSection";
 
 const SAMPLE_PROJECT: ProjectSummary = { id: "proj-1", name: "Project One", status: "active", createdAt: "2026-08-01T00:00:00.000Z", updatedAt: "2026-08-01T00:00:00.000Z" };
+const SAMPLE_ARCHIVED_PROJECT: ProjectSummary = { id: "proj-9", name: "Archived One", status: "archived", createdAt: "2026-08-01T00:00:00.000Z", updatedAt: "2026-08-01T00:00:00.000Z" };
 
 describe("parseProjectsListPageResponse (pure)", () => {
   it("real production success envelope -> success page", () => {
-    const result = parseProjectsListPageResponse({ ok: true, body: { ok: true, items: [SAMPLE_PROJECT], hasMore: true, nextCursor: "abc" } });
+    const result = parseProjectsListPageResponse({ ok: true, body: { ok: true, items: [SAMPLE_PROJECT], hasMore: true, nextCursor: "abc" }, expectedStatus: "active" });
     expect(result).toEqual({ ok: true, page: { items: [SAMPLE_PROJECT], hasMore: true, nextCursor: "abc" } });
   });
 
   it("empty envelope (items:[], hasMore:false, no nextCursor key) -> success page with nextCursor undefined", () => {
-    const result = parseProjectsListPageResponse({ ok: true, body: { ok: true, items: [], hasMore: false } });
+    const result = parseProjectsListPageResponse({ ok: true, body: { ok: true, items: [], hasMore: false }, expectedStatus: "active" });
     expect(result).toEqual({ ok: true, page: { items: [], hasMore: false, nextCursor: undefined } });
   });
 
   it("items:[] with hasMore:true and a nextCursor is a valid success page, not an error", () => {
-    const result = parseProjectsListPageResponse({ ok: true, body: { ok: true, items: [], hasMore: true, nextCursor: "next" } });
+    const result = parseProjectsListPageResponse({ ok: true, body: { ok: true, items: [], hasMore: true, nextCursor: "next" }, expectedStatus: "active" });
     expect(result).toEqual({ ok: true, page: { items: [], hasMore: true, nextCursor: "next" } });
   });
 
   it.each(["unauthorized", "auth_error", "projects_disabled", "invalid_status", "workspace_unavailable", "workspace_invalid", "workspace_missing", "invalid_cursor", "internal_error"])(
     "known error code %s passes through unchanged",
     (errorCode) => {
-      const result = parseProjectsListPageResponse({ ok: false, body: { ok: false, errorCode, message: "x" } });
+      const result = parseProjectsListPageResponse({ ok: false, body: { ok: false, errorCode, message: "x" }, expectedStatus: "active" });
       expect(result).toEqual({ ok: false, errorCode });
     }
   );
 
   it("unrecognized errorCode -> falls back to internal_error", () => {
-    const result = parseProjectsListPageResponse({ ok: false, body: { ok: false, errorCode: "some_new_future_code" } });
+    const result = parseProjectsListPageResponse({ ok: false, body: { ok: false, errorCode: "some_new_future_code" }, expectedStatus: "active" });
     expect(result).toEqual({ ok: false, errorCode: "internal_error" });
   });
 
   it("malformed body (ok:true HTTP but body.items missing) -> error, never a guessed page", () => {
-    expect(parseProjectsListPageResponse({ ok: true, body: { ok: true } }).ok).toBe(false);
+    expect(parseProjectsListPageResponse({ ok: true, body: { ok: true }, expectedStatus: "active" }).ok).toBe(false);
   });
 
   it("null body never throws", () => {
-    expect(() => parseProjectsListPageResponse({ ok: true, body: null })).not.toThrow();
+    expect(() => parseProjectsListPageResponse({ ok: true, body: null, expectedStatus: "active" })).not.toThrow();
+  });
+});
+
+describe("parseProjectsListPageResponse — MUTATION-TARGETED: status-scope integrity (Phase 7C.1, spec items 2/6/7)", () => {
+  it("active request + all-active rows -> success", () => {
+    const result = parseProjectsListPageResponse({ ok: true, body: { ok: true, items: [SAMPLE_PROJECT], hasMore: false }, expectedStatus: "active" });
+    expect(result).toEqual({ ok: true, page: { items: [SAMPLE_PROJECT], hasMore: false, nextCursor: undefined } });
+  });
+
+  it("archived request + all-archived rows -> success", () => {
+    const result = parseProjectsListPageResponse({ ok: true, body: { ok: true, items: [SAMPLE_ARCHIVED_PROJECT], hasMore: false }, expectedStatus: "archived" });
+    expect(result).toEqual({ ok: true, page: { items: [SAMPLE_ARCHIVED_PROJECT], hasMore: false, nextCursor: undefined } });
+  });
+
+  it("SECURITY: active request + an archived row -> internal_error, the archived row is never rendered", () => {
+    const result = parseProjectsListPageResponse({ ok: true, body: { ok: true, items: [SAMPLE_ARCHIVED_PROJECT], hasMore: false }, expectedStatus: "active" });
+    expect(result).toEqual({ ok: false, errorCode: "internal_error" });
+  });
+
+  it("SECURITY: archived request + an active row -> internal_error, the active row is never rendered", () => {
+    const result = parseProjectsListPageResponse({ ok: true, body: { ok: true, items: [SAMPLE_PROJECT], hasMore: false }, expectedStatus: "archived" });
+    expect(result).toEqual({ ok: false, errorCode: "internal_error" });
+  });
+
+  it("SECURITY: a mixed-status page (active P1, archived P2, active P3) rejects the WHOLE page — P2 is never silently omitted while P1/P3 render", () => {
+    const p1 = { ...SAMPLE_PROJECT, id: "p1" };
+    const p2 = { ...SAMPLE_ARCHIVED_PROJECT, id: "p2" };
+    const p3 = { ...SAMPLE_PROJECT, id: "p3" };
+    const result = parseProjectsListPageResponse({ ok: true, body: { ok: true, items: [p1, p2, p3], hasMore: false }, expectedStatus: "active" });
+    expect(result).toEqual({ ok: false, errorCode: "internal_error" });
+  });
+
+  it("SECURITY: same mixed-status contradiction rejected for an archived-scoped request", () => {
+    const p1 = { ...SAMPLE_ARCHIVED_PROJECT, id: "p1" };
+    const p2 = { ...SAMPLE_PROJECT, id: "p2" };
+    const result = parseProjectsListPageResponse({ ok: true, body: { ok: true, items: [p1, p2], hasMore: false }, expectedStatus: "archived" });
+    expect(result).toEqual({ ok: false, errorCode: "internal_error" });
+  });
+
+  it("a structurally malformed item (missing id, missing name, non-string status) is rejected the same way as a status mismatch", () => {
+    expect(parseProjectsListPageResponse({ ok: true, body: { ok: true, items: [{ name: "no id", status: "active" }], hasMore: false }, expectedStatus: "active" }).ok).toBe(false);
+    expect(parseProjectsListPageResponse({ ok: true, body: { ok: true, items: [{ id: "x", status: "active" }], hasMore: false }, expectedStatus: "active" }).ok).toBe(false);
+    expect(parseProjectsListPageResponse({ ok: true, body: { ok: true, items: [{ id: "x", name: "n", status: 123 }], hasMore: false }, expectedStatus: "active" }).ok).toBe(false);
+    expect(parseProjectsListPageResponse({ ok: true, body: { ok: true, items: [{ id: "", name: "n", status: "active" }], hasMore: false }, expectedStatus: "active" }).ok).toBe(false); // empty-string id rejected
+  });
+
+  it("an empty items array is vacuously valid regardless of expectedStatus (nothing to contradict)", () => {
+    expect(parseProjectsListPageResponse({ ok: true, body: { ok: true, items: [], hasMore: false }, expectedStatus: "active" }).ok).toBe(true);
+    expect(parseProjectsListPageResponse({ ok: true, body: { ok: true, items: [], hasMore: false }, expectedStatus: "archived" }).ok).toBe(true);
   });
 });
 
@@ -277,6 +328,58 @@ describe("useProjects — pagination", () => {
   });
 });
 
+describe("useProjects — MUTATION-TARGETED, full hook: status-scope integrity end-to-end (Phase 7C.1, spec items 3/7/8)", () => {
+  it("initial page containing a status-mismatched row -> status error, internal_error, zero rows adopted, no empty-state fabrication", async () => {
+    let latest!: UseProjectsResult;
+    queueResponse(ACTIVE_URL, { ok: true, body: { ok: true, items: [SAMPLE_ARCHIVED_PROJECT], hasMore: false } });
+    let renderer!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      renderer = TestRenderer.create(createElement(HookHost, { status: "active", onResult: (r) => (latest = r) }));
+    });
+    await flush();
+    expect(latest.status).toBe("error");
+    expect(latest.initialErrorCode).toBe("internal_error");
+    expect(latest.items).toEqual([]);
+    expect(isDefinitiveEmptyProjectsState(latest)).toBe(false); // never fabricates "No active projects yet."
+    renderer.unmount();
+  });
+
+  it("Load-more integrity: page 1 valid active P1 (hasMore:true), page 2 returns an archived row -> P1 stays rendered, P2 never adopted, loadMoreErrorCode=internal_error, cursor from page 1 remains authoritative, retry re-sends the same cursor", async () => {
+    let latest!: UseProjectsResult;
+    queueResponse(ACTIVE_URL, { ok: true, body: { ok: true, items: [SAMPLE_PROJECT], hasMore: true, nextCursor: "page1-cursor" } });
+    let renderer!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      renderer = TestRenderer.create(createElement(HookHost, { status: "active", onResult: (r) => (latest = r) }));
+    });
+    await flush();
+    expect(latest.items).toEqual([SAMPLE_PROJECT]);
+
+    // Page 2 is well-formed (ok:true, items array, hasMore boolean) but
+    // contains an archived row inside an active-scoped request.
+    queueResponse(cursorUrl(ACTIVE_URL, "page1-cursor"), { ok: true, body: { ok: true, items: [SAMPLE_ARCHIVED_PROJECT], hasMore: true, nextCursor: "should-never-be-adopted" } });
+    await act(async () => {
+      latest.loadMore();
+    });
+    await flush();
+    expect(latest.loadMoreErrorCode).toBe("internal_error");
+    expect(latest.items).toEqual([SAMPLE_PROJECT]); // P1 preserved; the archived row never adopted
+    expect(latest.hasMore).toBe(true); // untouched from page 1's own value
+
+    // Retry must re-request page 1's own cursor, never the malformed
+    // page's "should-never-be-adopted" cursor.
+    queueResponse(cursorUrl(ACTIVE_URL, "page1-cursor"), { ok: true, body: { ok: true, items: [{ ...SAMPLE_PROJECT, id: "proj-2" }], hasMore: false } });
+    await act(async () => {
+      latest.loadMore();
+    });
+    await flush();
+    expect(callLog.filter((u) => u === cursorUrl(ACTIVE_URL, "page1-cursor")).length).toBe(2); // failed attempt + retry, same cursor both times
+    expect(callLog).not.toContain(cursorUrl(ACTIVE_URL, "should-never-be-adopted"));
+    expect(latest.items.map((i) => i.id)).toEqual(["proj-1", "proj-2"]);
+    expect(latest.loadMoreErrorCode).toBeNull();
+    renderer.unmount();
+  });
+});
+
 describe("useProjects — deduplication", () => {
   it("a duplicate id across pages is dropped defensively, with a dev warning", async () => {
     const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
@@ -391,6 +494,38 @@ describe("useProjects — MUTATION-TARGETED: two simultaneous instances (Active 
     expect(latestArchived.items.map((i) => i.id)).toEqual(["archived-1"]);
     expect(latestArchived.hasMore).toBe(true);
     expect(latestArchived.loadingMore).toBe(false);
+    renderer.unmount();
+  });
+});
+
+describe("ActiveProjectsSection through the REAL useProjects()/parseProjectsListPageResponse() path (Phase 7C.1 spec item 9) — no independent filtering added to the component itself; the parser boundary is what protects it", () => {
+  function ActiveSectionHost() {
+    const result = useProjects({ status: "active" });
+    return createElement(ActiveProjectsSection, { result });
+  }
+
+  it("a response containing an archived Project never renders that Project's name, even though the component performs no status filtering of its own", async () => {
+    queueResponse(ACTIVE_URL, { ok: true, body: { ok: true, items: [SAMPLE_ARCHIVED_PROJECT], hasMore: false } });
+    let renderer!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      renderer = TestRenderer.create(createElement(ActiveSectionHost));
+    });
+    await flush();
+    const html = JSON.stringify(renderer.toJSON());
+    expect(html).not.toContain(SAMPLE_ARCHIVED_PROJECT.name);
+    expect(html).toContain("Try again"); // section-local error, not a fabricated empty state
+    renderer.unmount();
+  });
+
+  it("a genuinely all-active response renders normally through the same real path", async () => {
+    queueResponse(ACTIVE_URL, { ok: true, body: { ok: true, items: [SAMPLE_PROJECT], hasMore: false } });
+    let renderer!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      renderer = TestRenderer.create(createElement(ActiveSectionHost));
+    });
+    await flush();
+    const html = JSON.stringify(renderer.toJSON());
+    expect(html).toContain(SAMPLE_PROJECT.name);
     renderer.unmount();
   });
 });
