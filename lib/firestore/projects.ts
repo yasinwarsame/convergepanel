@@ -133,11 +133,20 @@ export type ListActiveProjectsRawResult =
  * codebase's established convention: a list query's validation policy
  * (fail the whole page vs. omit-and-continue) is a caller-specific
  * product decision, not a generic Firestore-read concern.
+ *
+ * Project Read Foundation, Phase 7A — `status` is now an optional param
+ * (defaulting to `"active"`, its original hardcoded behavior) so
+ * `GET /api/user/projects?status=archived` can reuse this exact query
+ * shape/index rather than a second, parallel raw-list function. The
+ * function name is kept unchanged (not renamed to something status-
+ * generic) to keep this an additive, minimal-diff change — every existing
+ * caller that omits `status` gets byte-identical behavior to before.
  */
 export async function listActiveProjectsRaw(args: {
   workspaceId: string;
   limit: number;
   startAfter?: { createdAtSeconds: number; createdAtNanoseconds: number; lastDocId: string };
+  status?: "active" | "archived";
 }): Promise<ListActiveProjectsRawResult> {
   if (!adminDb) {
     return { status: "firestore_unavailable" };
@@ -146,7 +155,7 @@ export async function listActiveProjectsRaw(args: {
     let query = adminDb
       .collection("projects")
       .where("workspaceId", "==", args.workspaceId)
-      .where("status", "==", "active")
+      .where("status", "==", args.status ?? "active")
       .orderBy("createdAt", "desc")
       .orderBy(FieldPath.documentId(), "desc");
 

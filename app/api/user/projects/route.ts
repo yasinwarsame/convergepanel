@@ -69,8 +69,14 @@ export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
   const limit = Math.min(MAX_LIMIT, Math.max(1, parseInt(searchParams.get("limit") || String(DEFAULT_LIMIT), 10) || DEFAULT_LIMIT));
   const cursorRaw = searchParams.get("cursor");
+  // Project Read Foundation, Phase 7A — additive, defaults to "active"
+  // (byte-identical to pre-7A behavior). Only "archived" is recognized;
+  // any other value (including "all", deliberately not supported) falls
+  // back to the default rather than erroring, matching this route's
+  // existing lenient `limit` parsing style.
+  const status = searchParams.get("status") === "archived" ? "archived" : "active";
 
-  const result = await listProjectsForOwner({ uid, limit, cursorRaw });
+  const result = await listProjectsForOwner({ uid, limit, cursorRaw, status });
 
   switch (result.status) {
     case "ok":

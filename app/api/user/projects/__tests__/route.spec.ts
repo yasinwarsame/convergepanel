@@ -208,6 +208,27 @@ describe("GET /api/user/projects — listing", () => {
     expect(json.errorCode).toBe("invalid_cursor");
   });
 
+  describe("Project Read Foundation, Phase 7A — additive ?status=archived", () => {
+    it("status omitted -> defaults to active (byte-identical to pre-7A behavior)", async () => {
+      mockedListProjectsForOwner.mockResolvedValue({ status: "ok", items: [], hasMore: false });
+      await callGet();
+      expect(mockedListProjectsForOwner).toHaveBeenCalledWith(expect.objectContaining({ status: "active" }));
+    });
+
+    it("status=archived is passed through", async () => {
+      mockedListProjectsForOwner.mockResolvedValue({ status: "ok", items: [], hasMore: false });
+      await callGet("?status=archived");
+      expect(mockedListProjectsForOwner).toHaveBeenCalledWith(expect.objectContaining({ status: "archived" }));
+    });
+
+    it("an unsupported status value (e.g. 'all') falls back to the default 'active', never errors, never passes the raw value through", async () => {
+      mockedListProjectsForOwner.mockResolvedValue({ status: "ok", items: [], hasMore: false });
+      const { res } = await callGet("?status=all");
+      expect(res.status).toBe(200);
+      expect(mockedListProjectsForOwner).toHaveBeenCalledWith(expect.objectContaining({ status: "active" }));
+    });
+  });
+
   it("SECURITY: an integrity violation (malformed/mismatched Project in the result) fails closed, never partially discloses items", async () => {
     mockedListProjectsForOwner.mockResolvedValue({ status: "integrity_violation" });
     const { res, json } = await callGet();
