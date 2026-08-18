@@ -202,7 +202,7 @@ describe("TopNav — Phase 5C Workspace nav-item integration", () => {
   const mobileMenuBlock = extractBetween('{mobileMenuOpen && (', "</header>");
 
   it("destructures workspaceUiEnabled from useUserPlan(), the same server-computed capability source as governanceDashboardEligible/teamRole", () => {
-    expect(source).toMatch(/const \{ governanceDashboardEligible, plan: userPlan, loading: planLoading, teamRole, workspaceUiEnabled \} = useUserPlan\(\);/);
+    expect(source).toMatch(/const \{ governanceDashboardEligible, plan: userPlan, loading: planLoading, teamRole, workspaceUiEnabled, projectsUiEnabled \} = useUserPlan\(\);/);
   });
 
   it("gates the desktop Workspace link on !loading && user && !planLoading && workspaceUiEnabled — same shape as the Governance/Team Reviews gates, never optimistically shown", () => {
@@ -237,6 +237,79 @@ describe("TopNav — Phase 5C Workspace nav-item integration", () => {
 
   it("never relocates or removes History/My Reviews/Team Reviews/Governance — exactly the pre-existing four conditional/static nav concepts plus the one new Workspace addition", () => {
     for (const href of ['href="/governance"', 'href="/team/reviews"', 'href="/reviews"']) {
+      expect(desktopNavBlock).toContain(href);
+    }
+  });
+});
+
+/**
+ * Phase 7B — Projects nav-item integration. Same source-level regex
+ * methodology as the Workspace nav-item block above, including the
+ * mandatory targeted mutation self-check before acceptance.
+ */
+describe("TopNav — Phase 7B Projects nav-item integration", () => {
+  function extractBetween(startMarker: string, endMarker: string): string {
+    const startIndex = source.indexOf(startMarker);
+    expect(startIndex).toBeGreaterThan(-1);
+    const endIndex = source.indexOf(endMarker, startIndex + startMarker.length);
+    expect(endIndex).toBeGreaterThan(startIndex);
+    return source.slice(startIndex, endIndex);
+  }
+  const desktopNavBlock = extractBetween(
+    '<div className="hidden items-center gap-1 lg:flex">',
+    "{/* Mobile/tablet toggle"
+  );
+  const mobileMenuBlock = extractBetween('{mobileMenuOpen && (', "</header>");
+
+  it("destructures projectsUiEnabled from useUserPlan(), alongside workspaceUiEnabled — the same server-computed capability source", () => {
+    expect(source).toMatch(/const \{ governanceDashboardEligible, plan: userPlan, loading: planLoading, teamRole, workspaceUiEnabled, projectsUiEnabled \} = useUserPlan\(\);/);
+  });
+
+  it("gates the desktop Projects link on !loading && user && !planLoading && projectsUiEnabled — same shape as the Workspace gate, never optimistically shown", () => {
+    expect(desktopNavBlock).toMatch(/\{!loading && user && !planLoading && projectsUiEnabled && \(\s*\n\s*<Link\s*\n\s*href="\/workspace\/projects"/);
+  });
+
+  it("gates the mobile Projects link identically to the desktop one", () => {
+    expect(mobileMenuBlock).toMatch(/\{!loading && user && !planLoading && projectsUiEnabled && \(\s*\n\s*<Link\s*\n\s*href="\/workspace\/projects"/);
+  });
+
+  it("Projects appears in both blocks, positioned immediately after Workspace and before My Reviews (desktop) / immediately after Workspace (mobile)", () => {
+    const workspaceIdx = desktopNavBlock.indexOf('href="/workspace"');
+    const projectsIdx = desktopNavBlock.indexOf('href="/workspace/projects"');
+    const myReviewsIdx = desktopNavBlock.indexOf('href="/reviews"');
+    expect(workspaceIdx).toBeGreaterThan(-1);
+    expect(projectsIdx).toBeGreaterThan(-1);
+    expect(myReviewsIdx).toBeGreaterThan(-1);
+    expect(workspaceIdx).toBeLessThan(projectsIdx);
+    expect(projectsIdx).toBeLessThan(myReviewsIdx);
+
+    const mobileWorkspaceIdx = mobileMenuBlock.indexOf('href="/workspace"');
+    const mobileProjectsIdx = mobileMenuBlock.indexOf('href="/workspace/projects"');
+    expect(mobileWorkspaceIdx).toBeGreaterThan(-1);
+    expect(mobileProjectsIdx).toBeGreaterThan(-1);
+    expect(mobileWorkspaceIdx).toBeLessThan(mobileProjectsIdx);
+  });
+
+  it("carries visible 'Projects' text — never icon-only navigation", () => {
+    expect(desktopNavBlock).toMatch(/href="\/workspace\/projects"[\s\S]{0,300}>\s*Projects\s*</);
+    expect(mobileMenuBlock).toMatch(/href="\/workspace\/projects"[\s\S]{0,300}>\s*Projects\s*</);
+  });
+
+  it("wires aria-current=\"page\" for /workspace/projects based on real pathname state, in both blocks, distinct from the /workspace check", () => {
+    expect(desktopNavBlock).toMatch(/aria-current=\{pathname === "\/workspace\/projects" \? "page" : undefined\}/);
+    expect(mobileMenuBlock).toMatch(/aria-current=\{pathname === "\/workspace\/projects" \? "page" : undefined\}/);
+  });
+
+  it("does not introduce a client-visible rollout flag — no NEXT_PUBLIC_PROJECTS_UI reference anywhere in this file", () => {
+    expect(source).not.toMatch(/NEXT_PUBLIC_PROJECTS_UI/);
+  });
+
+  it("does not call a Project read API merely to decide nav visibility", () => {
+    expect(source).not.toMatch(/fetch\([^)]*\/api\/user\/project/);
+  });
+
+  it("never relocates or removes Workspace/History/My Reviews/Team Reviews/Governance — exactly the pre-existing nav concepts plus the one new Projects addition", () => {
+    for (const href of ['href="/workspace"', 'href="/governance"', 'href="/team/reviews"', 'href="/reviews"']) {
       expect(desktopNavBlock).toContain(href);
     }
   });

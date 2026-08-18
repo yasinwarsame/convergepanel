@@ -19,7 +19,15 @@ import { isAdminEmail } from "@/lib/admin/config";
 import { parseGovernanceReviewerFor } from "@/lib/governance/reviewerFields";
 import { getVideoLimit } from "@/lib/billing/planConfig";
 import { resolvePersonalWorkspaceUiMode } from "@/lib/workspaces/workspaceUiRollout";
-import { PERSONAL_WORKSPACE_UI_ENABLED, PERSONAL_WORKSPACE_UI_CANARY_UIDS } from "@/lib/env";
+import { resolveProjectsUiEligibility } from "@/lib/projects/projectsUiEligibility";
+import {
+  PERSONAL_WORKSPACE_UI_ENABLED,
+  PERSONAL_WORKSPACE_UI_CANARY_UIDS,
+  PROJECTS_UI_ENABLED,
+  PROJECTS_UI_CANARY_UIDS,
+  PROJECTS_ENABLED,
+  PROJECTS_CANARY_UIDS,
+} from "@/lib/env";
 
 /**
  * Phase 5C — the single call site computing `workspaceUiEnabled` for this
@@ -34,6 +42,23 @@ function workspaceUiEnabledFor(uid: string): boolean {
     globalEnabled: PERSONAL_WORKSPACE_UI_ENABLED,
     canaryUidsRaw: PERSONAL_WORKSPACE_UI_CANARY_UIDS,
   }).enabled;
+}
+
+/**
+ * Phase 7B — the single call site computing `projectsUiEnabled` for this
+ * endpoint's two success responses. Mirrors `workspaceUiEnabledFor()`
+ * exactly, except the underlying decision is the combined (UI AND
+ * backend) one from `resolveProjectsUiEligibility()`, never the UI
+ * resolver alone.
+ */
+function projectsUiEnabledFor(uid: string): boolean {
+  return resolveProjectsUiEligibility({
+    uid,
+    uiGlobalEnabled: PROJECTS_UI_ENABLED,
+    uiCanaryUidsRaw: PROJECTS_UI_CANARY_UIDS,
+    backendGlobalEnabled: PROJECTS_ENABLED,
+    backendCanaryUidsRaw: PROJECTS_CANARY_UIDS,
+  });
 }
 
 function clientGovernanceRole(
@@ -160,6 +185,7 @@ export async function GET(req: NextRequest) {
           governanceReviewerEnabled: false,
           governanceAssignedReviewerEmail: null as string | null,
           workspaceUiEnabled: workspaceUiEnabledFor(uid),
+          projectsUiEnabled: projectsUiEnabledFor(uid),
         },
         { status: 200 }
       );
@@ -266,6 +292,7 @@ export async function GET(req: NextRequest) {
         governanceReviewerEnabled,
         governanceAssignedReviewerEmail: assignedEmail,
         workspaceUiEnabled: workspaceUiEnabledFor(uid),
+        projectsUiEnabled: projectsUiEnabledFor(uid),
       },
       { status: 200 }
     );
@@ -299,6 +326,7 @@ export async function GET(req: NextRequest) {
         // completed if the error happened before it), so this can never be
         // computed for a real identity; false is the only safe value.
         workspaceUiEnabled: false,
+        projectsUiEnabled: false,
       },
       { status: 200 }
     );

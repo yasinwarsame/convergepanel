@@ -73,6 +73,15 @@ interface UserUsageData {
    * every other capability flag here.
    */
   workspaceUiEnabled?: boolean;
+  /**
+   * Phase 7B — server-computed via `resolveProjectsUiEligibility()`
+   * (combined UI-rollout AND backend-eligibility) in `GET /api/user/usage`.
+   * Drives TopNav's Projects link visibility only — never an
+   * authorization decision; Project APIs are independent of this flag.
+   * Absent/falsy must mean hidden, same as every other capability flag
+   * here.
+   */
+  projectsUiEnabled?: boolean;
 }
 
 interface UseUserPlanReturn {
@@ -94,6 +103,8 @@ interface UseUserPlanReturn {
   governanceAssignedReviewerEmail: string | null;
   /** Phase 5C — see `UserUsageData.workspaceUiEnabled`. Always `false` while `loading`, on error, or when signed out — never optimistically `true`. */
   workspaceUiEnabled: boolean;
+  /** Phase 7B — see `UserUsageData.projectsUiEnabled`. Always `false` while `loading`, on error, or when signed out — never optimistically `true`. */
+  projectsUiEnabled: boolean;
   loading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
@@ -121,6 +132,7 @@ const DEFAULT_USAGE: UserUsageData = {
   governanceReviewerEnabled: false,
   governanceAssignedReviewerEmail: null,
   workspaceUiEnabled: false,
+  projectsUiEnabled: false,
 };
 
 // Never throws — returns DEFAULT_USAGE on any error to prevent infinite loading states.
@@ -220,6 +232,7 @@ async function fetchUsage(user: any): Promise<UserUsageData> {
           ? data.governanceAssignedReviewerEmail.trim()
           : null,
       workspaceUiEnabled: data.workspaceUiEnabled === true,
+      projectsUiEnabled: data.projectsUiEnabled === true,
     };
   } catch (err) {
     // Any network or unexpected error leads to default usage, no throwing.
@@ -372,6 +385,7 @@ export function useUserPlan(): UseUserPlanReturn {
     // flag above: default object, loading state, and error/catch paths
     // all resolve through DEFAULT_USAGE (workspaceUiEnabled: false).
     workspaceUiEnabled: usageData.workspaceUiEnabled === true,
+    projectsUiEnabled: usageData.projectsUiEnabled === true,
     loading: authLoading || loading,
     error,
     refresh,

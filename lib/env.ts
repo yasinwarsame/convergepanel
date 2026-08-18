@@ -308,6 +308,47 @@ export const PROJECTS_ENABLED = process.env.PROJECTS_ENABLED === "true";
 export const PROJECTS_CANARY_UIDS = process.env.PROJECTS_CANARY_UIDS;
 
 /**
+ * Projects UI Shell, Phase 7B — a PRESENTATION-only rollout flag,
+ * structural sibling of `PERSONAL_WORKSPACE_UI_ENABLED` above. Unrelated
+ * to and with no effect on `PROJECTS_ENABLED`/`PROJECTS_CANARY_UIDS`
+ * above (backend Project capability) or
+ * `PROJECT_RUN_ASSOCIATION_WRITES_ENABLED` below (the going-forward
+ * `projectId:null` writer) — this one only decides whether the
+ * `/workspace/projects` UI route and its `TopNav` entry are visible.
+ * Phase 6C/7A's read/write/association APIs never check this flag and
+ * remain reachable to any backend-eligible authenticated user regardless
+ * of its value — a flag this narrow must never become a second
+ * authorization boundary.
+ *
+ * UI eligibility additionally requires backend eligibility
+ * (`PROJECTS_ENABLED`/`PROJECTS_CANARY_UIDS`) — see
+ * `lib/projects/projectsUiEligibility.ts`, the single place that AND is
+ * computed. This flag alone is necessary but never sufficient.
+ *
+ * Default OFF (absent), same fail-closed convention as every flag above
+ * — this is the required dark-deployment state: shipping this phase's
+ * code must never require setting this variable to remain safe.
+ */
+export const PROJECTS_UI_ENABLED = process.env.PROJECTS_UI_ENABLED === "true";
+
+/**
+ * Account-Scoped Projects UI Canary, Phase 7B — structural sibling of
+ * `PERSONAL_WORKSPACE_UI_CANARY_UIDS` above: an optional, server-only
+ * comma-separated Firebase uid allowlist letting the Projects UI be
+ * activated for a small number of explicitly named accounts while
+ * `PROJECTS_UI_ENABLED` stays `false`. Raw, unparsed string —
+ * `lib/projects/projectsUiRollout.ts` owns all parsing/validation/
+ * matching/precedence logic.
+ *
+ * Never prefixed `NEXT_PUBLIC_` — canary membership is a server-only
+ * decision, resolved once per request against the authenticated uid via
+ * `GET /api/user/usage`, never exposed to any response body or client-
+ * readable config. The browser only ever receives the final combined
+ * boolean (`projectsUiEnabled`) that decision produces.
+ */
+export const PROJECTS_UI_CANARY_UIDS = process.env.PROJECTS_UI_CANARY_UIDS;
+
+/**
  * Going-Forward Run/Project Association Writer, Phase 6D.2 — a FOURTH
  * independent server-side-only kill switch, default OFF, deliberately
  * separate from `PROJECTS_ENABLED`/`PROJECTS_CANARY_UIDS` above.
