@@ -18,6 +18,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import { authedFetch } from "@/lib/client/authedFetch";
+import { isValidUpdateTimeTokenShape, type UpdateTimeToken } from "@/lib/projects/updateTimeTokenClient";
 
 export interface ProjectSummary {
   id: string;
@@ -25,6 +26,8 @@ export interface ProjectSummary {
   status: "active" | "archived";
   createdAt: string;
   updatedAt: string;
+  /** Opaque OCC token — Phase 7D echoes this back verbatim as a lifecycle mutation's `expectedUpdateTime`. Never regenerated/reconstructed client-side. */
+  updateTime: UpdateTimeToken;
 }
 
 export type ProjectsListErrorCode =
@@ -67,11 +70,24 @@ export type ParseProjectsListPageResult = { ok: true; page: ProjectsListPage } |
  * exists for — an Active-scoped request that comes back with an archived
  * row (or vice versa) is a read-contract integrity violation, not
  * something to silently filter and continue past.
+ *
+ * Phase 7D addition: every row now also exposes lifecycle mutation
+ * controls (Rename/Archive/Restore), each of which requires a structurally
+ * valid `updateTime` OCC token to send as `expectedUpdateTime`. A row with
+ * a missing/malformed token must never render an enabled mutation control
+ * backed by an invented token — it fails the whole page closed here,
+ * exactly like a status-scope mismatch.
  */
 function isValidProjectSummaryItem(item: unknown, expectedStatus: "active" | "archived"): item is ProjectSummary {
   if (typeof item !== "object" || item === null) return false;
   const candidate = item as Record<string, unknown>;
-  return typeof candidate.id === "string" && candidate.id.length > 0 && typeof candidate.name === "string" && candidate.status === expectedStatus;
+  return (
+    typeof candidate.id === "string" &&
+    candidate.id.length > 0 &&
+    typeof candidate.name === "string" &&
+    candidate.status === expectedStatus &&
+    isValidUpdateTimeTokenShape(candidate.updateTime)
+  );
 }
 
 /**
@@ -127,6 +143,8 @@ export interface UseProjectsResult {
   retryInitial: () => void;
   /** Discards all client pagination state and re-fetches from page 1 — the ONLY path that ever resets an in-progress cursor, and only ever on explicit caller invocation. */
   resetAndReloadFromStart: () => void;
+  /** Phase 7D — local, non-networked reconciliation for a successful rename: replaces the one matching item in place (by id) with the canonical DTO returned by the mutation. A no-op if this section doesn't currently hold that id (e.g. calling it on the Archived list after renaming an Active Project) — safe to call unconditionally on every section. Never used for status transitions (archive/restore use `resetAndReloadFromStart` on both sections instead, since the Project moves between them). */
+  replaceItem: (updated: ProjectSummary) => void;
 }
 
 const PROJECTS_ENDPOINT = "/api/user/projects";
@@ -267,5 +285,9 @@ export function useProjects(args: { status: "active" | "archived" }): UseProject
     void fetchPage({ cursor: undefined, isLoadMore: false, currentUser: user });
   }, [user, fetchPage]);
 
-  return { items, hasMore, status, initialErrorCode, loadingMore, loadMoreErrorCode, loadMore, retryInitial, resetAndReloadFromStart };
+  const replaceItem = useCallback((updated: ProjectSummary) => {
+    setItems((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+  }, []);
+
+  return { items, hasMore, status, initialErrorCode, loadingMore, loadMoreErrorCode, loadMore, retryInitial, resetAndReloadFromStart, replaceItem };
 }

@@ -5,6 +5,9 @@
  * unlike Workspace, which has no separate metadata call here to escalate
  * against — see the shell's own doc comment) and that all three sections
  * are independently wired and ordered Active -> Unfiled -> Archived.
+ *
+ * Phase 7D adds the lifecycle hook + reconciliation handlers as required
+ * props.
  */
 
 import { createElement } from "react";
@@ -12,6 +15,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { ProjectsShellView } from "@/components/projects/ProjectsShell";
 import type { UseProjectsResult, ProjectSummary } from "@/hooks/useProjects";
 import type { UseUnfiledRunsResult, ProjectRunSummary } from "@/hooks/useUnfiledRuns";
+import type { UseProjectLifecycleResult } from "@/hooks/useProjectLifecycle";
 
 function fakeProjects(overrides: Partial<UseProjectsResult> = {}): UseProjectsResult {
   return {
@@ -24,6 +28,7 @@ function fakeProjects(overrides: Partial<UseProjectsResult> = {}): UseProjectsRe
     loadMore: jest.fn(),
     retryInitial: jest.fn(),
     resetAndReloadFromStart: jest.fn(),
+    replaceItem: jest.fn(),
     ...overrides,
   };
 }
@@ -43,12 +48,35 @@ function fakeUnfiled(overrides: Partial<UseUnfiledRunsResult> = {}): UseUnfiledR
   };
 }
 
-const ACTIVE_PROJECT: ProjectSummary = { id: "p1", name: "My Active Project", status: "active", createdAt: "2026-08-01T00:00:00.000Z", updatedAt: "2026-08-01T00:00:00.000Z" };
-const ARCHIVED_PROJECT: ProjectSummary = { id: "p2", name: "My Archived Project", status: "archived", createdAt: "2026-08-01T00:00:00.000Z", updatedAt: "2026-08-01T00:00:00.000Z" };
+function fakeLifecycle(overrides: Partial<UseProjectLifecycleResult> = {}): UseProjectLifecycleResult {
+  return {
+    isProjectBusy: () => false,
+    isCreating: false,
+    createProject: jest.fn(),
+    renameProject: jest.fn(),
+    archiveProject: jest.fn(),
+    restoreProject: jest.fn(),
+    ...overrides,
+  };
+}
+
+const UPDATE_TIME = { seconds: 1723600000, nanoseconds: 0 };
+const ACTIVE_PROJECT: ProjectSummary = { id: "p1", name: "My Active Project", status: "active", createdAt: "2026-08-01T00:00:00.000Z", updatedAt: "2026-08-01T00:00:00.000Z", updateTime: UPDATE_TIME };
+const ARCHIVED_PROJECT: ProjectSummary = { id: "p2", name: "My Archived Project", status: "archived", createdAt: "2026-08-01T00:00:00.000Z", updatedAt: "2026-08-01T00:00:00.000Z", updateTime: UPDATE_TIME };
 const UNFILED_RUN: ProjectRunSummary = { id: "r1", at: "2026-08-01T00:00:00.000Z", question: "My Unfiled Question", selectedModels: ["chatgpt"], projectId: null };
 
 function render(active: UseProjectsResult, unfiled: UseUnfiledRunsResult, archived: UseProjectsResult): string {
-  return renderToStaticMarkup(createElement(ProjectsShellView, { active, unfiled, archived }));
+  return renderToStaticMarkup(
+    createElement(ProjectsShellView, {
+      active,
+      unfiled,
+      archived,
+      lifecycle: fakeLifecycle(),
+      onCreated: jest.fn(),
+      onRenamed: jest.fn(),
+      refreshSections: jest.fn(),
+    })
+  );
 }
 
 describe("ProjectsShellView — heading renders unconditionally", () => {
@@ -103,5 +131,12 @@ describe("ProjectsShellView — no data rendered until each section's own hook r
     expect(html).not.toContain("My Active Project");
     expect(html).not.toContain("My Unfiled Question");
     expect(html).not.toContain("My Archived Project");
+  });
+});
+
+describe("ProjectsShellView — Phase 7D: New Project trigger present, reachable from the shell", () => {
+  it("'New Project' renders as part of the Active section", () => {
+    const html = render(fakeProjects(), fakeUnfiled(), fakeProjects());
+    expect(html).toContain("New Project");
   });
 });
