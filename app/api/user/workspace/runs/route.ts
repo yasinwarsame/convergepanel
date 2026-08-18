@@ -41,8 +41,7 @@ import { resolvePersonalWorkspaceForOwner } from "@/lib/workspaces/resolvePerson
 import { personalWorkspaceErrorResponse } from "@/lib/workspaces/personalWorkspaceErrorResponse";
 import { createRunWorkspaceIntegrityBatch } from "@/lib/workspaces/runWorkspaceIntegrityBatch";
 import { decodeWorkspaceRunsCursor, encodeWorkspaceRunsCursor } from "@/lib/workspaces/workspaceRunsCursor";
-import type { ModelId } from "@/lib/types";
-import type { QueryType } from "@/lib/adaptiveSchema/types";
+import { firestoreSecondsNanos, toRunSummaryBase, type RunSummaryBase } from "@/lib/runs/runSummary";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -50,76 +49,10 @@ export const dynamic = "force-dynamic";
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 50;
 
-export type WorkspaceRunSummary = {
-  id: string;
-  at: string;
-  question: string;
-  selectedModels: ModelId[];
-  status?: string;
-  modelsOk?: number;
-  modelsTotal?: number;
-  synthesisConsensusScore?: number;
-  governanceStatus?: "approved" | "needs_review" | "blocked";
-  hasAdaptiveOutput?: boolean;
-  adaptiveSchemaId?: QueryType;
-};
+/** Phase 7C: now a type alias for the shared `RunSummaryBase` (see `lib/runs/runSummary.ts`) — field shape and every consumer's import path (`@/app/api/user/workspace/runs/route`) are unchanged. */
+export type WorkspaceRunSummary = RunSummaryBase;
 
-function normalizeGovernanceStatus(v: unknown): "approved" | "needs_review" | "blocked" | undefined {
-  if (v === "approved" || v === "needs_review" || v === "blocked") return v;
-  return undefined;
-}
-
-/** Raw seconds/nanoseconds off a Firestore Timestamp — never `.toMillis()`, which truncates below millisecond precision. See workspaceRunsCursor.ts. */
-function firestoreSecondsNanos(value: unknown): { seconds: number; nanoseconds: number } {
-  if (value && typeof value === "object" && "seconds" in value && "nanoseconds" in value) {
-    const v = value as { seconds: unknown; nanoseconds: unknown };
-    if (typeof v.seconds === "number" && typeof v.nanoseconds === "number") {
-      return { seconds: v.seconds, nanoseconds: v.nanoseconds };
-    }
-  }
-  return { seconds: 0, nanoseconds: 0 };
-}
-
-function firestoreMillisForDisplay(value: unknown): number {
-  if (value && typeof value === "object" && "toMillis" in value && typeof (value as { toMillis: () => number }).toMillis === "function") {
-    return (value as { toMillis: () => number }).toMillis();
-  }
-  return 0;
-}
-
-function toSummary(id: string, data: Record<string, unknown>): WorkspaceRunSummary {
-  const sortKey = firestoreMillisForDisplay(data.createdAt);
-  const perModel =
-    (data.runDocument as { perModel?: unknown[] } | undefined)?.perModel ??
-    (data.resultsCompact as { perModel?: unknown[] } | undefined)?.perModel;
-  const modelsTotal = Array.isArray(perModel)
-    ? perModel.length
-    : Array.isArray(data.selectedModels)
-      ? (data.selectedModels as unknown[]).length
-      : 0;
-  const modelsOk = Array.isArray(perModel)
-    ? (perModel as { status?: string }[]).filter((p) => p.status === "ok").length
-    : undefined;
-
-  const synSum = data.synthesisConsensusSummary as { overallConsensusScore?: number } | undefined;
-  const synthesisConsensusScore = typeof synSum?.overallConsensusScore === "number" ? synSum.overallConsensusScore : undefined;
-
-  const adaptiveOutput = data.adaptiveOutput as { schemaId?: unknown } | undefined;
-  const hasAdaptiveOutput = !!adaptiveOutput && typeof adaptiveOutput.schemaId === "string";
-
-  return {
-    id,
-    at: new Date(sortKey || Date.now()).toISOString(),
-    question: String(data.question ?? ""),
-    selectedModels: (Array.isArray(data.selectedModels) ? data.selectedModels : []) as ModelId[],
-    status: typeof data.status === "string" ? data.status : undefined,
-    modelsOk,
-    modelsTotal: modelsTotal || undefined,
-    synthesisConsensusScore,
-    governanceStatus: normalizeGovernanceStatus(data.governanceStatus),
-    ...(hasAdaptiveOutput ? { hasAdaptiveOutput, adaptiveSchemaId: adaptiveOutput!.schemaId as QueryType } : {}),
-  };
-}
+const toSummary = toRunSummaryBase;
 
 async function getUid(req: NextRequest): Promise<string | NextResponse> {
   const identity = await resolveRequestIdentity(req);
