@@ -524,6 +524,31 @@ describe("listActiveProjectsRaw", () => {
     const result = await listActiveProjectsRaw({ workspaceId: "personal-owner-1", limit: 10 });
     expect(result).toEqual({ status: "read_failed" });
   });
+
+  describe("Project Read Foundation, Phase 7A — additive status param", () => {
+    it("defaults to active when status is omitted (byte-identical to pre-7A behavior)", async () => {
+      seedAt("proj-1", 100, 0, { status: "active" });
+      seedAt("proj-2", 200, 0, { status: "archived" });
+      const result = await listActiveProjectsRaw({ workspaceId: "personal-owner-1", limit: 10 });
+      expect(result.status).toBe("ok");
+      if (result.status === "ok") expect(result.items.map((i) => i.id)).toEqual(["proj-1"]);
+    });
+
+    it("status: 'archived' returns only archived Projects", async () => {
+      seedAt("proj-1", 100, 0, { status: "active" });
+      seedAt("proj-2", 200, 0, { status: "archived" });
+      const result = await listActiveProjectsRaw({ workspaceId: "personal-owner-1", limit: 10, status: "archived" });
+      expect(result.status).toBe("ok");
+      if (result.status === "ok") expect(result.items.map((i) => i.id)).toEqual(["proj-2"]);
+    });
+
+    it("status: 'active' explicitly is identical to omitting it", async () => {
+      seedAt("proj-1", 100, 0, { status: "active" });
+      const withDefault = await listActiveProjectsRaw({ workspaceId: "personal-owner-1", limit: 10 });
+      const withExplicit = await listActiveProjectsRaw({ workspaceId: "personal-owner-1", limit: 10, status: "active" });
+      expect(withDefault).toEqual(withExplicit);
+    });
+  });
 });
 
 describe("updateProjectFields", () => {

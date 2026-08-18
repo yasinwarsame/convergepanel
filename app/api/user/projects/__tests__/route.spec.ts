@@ -208,6 +208,63 @@ describe("GET /api/user/projects — listing", () => {
     expect(json.errorCode).toBe("invalid_cursor");
   });
 
+  describe("Project Read Foundation, Phase 7A.1 — strict ?status= parsing", () => {
+    it("status omitted -> defaults to active (byte-identical to pre-7A behavior)", async () => {
+      mockedListProjectsForOwner.mockResolvedValue({ status: "ok", items: [], hasMore: false });
+      await callGet();
+      expect(mockedListProjectsForOwner).toHaveBeenCalledWith(expect.objectContaining({ status: "active" }));
+    });
+
+    it("status=active is passed through explicitly", async () => {
+      mockedListProjectsForOwner.mockResolvedValue({ status: "ok", items: [], hasMore: false });
+      await callGet("?status=active");
+      expect(mockedListProjectsForOwner).toHaveBeenCalledWith(expect.objectContaining({ status: "active" }));
+    });
+
+    it("status=archived is passed through", async () => {
+      mockedListProjectsForOwner.mockResolvedValue({ status: "ok", items: [], hasMore: false });
+      await callGet("?status=archived");
+      expect(mockedListProjectsForOwner).toHaveBeenCalledWith(expect.objectContaining({ status: "archived" }));
+    });
+
+    it("SECURITY FIX: an unsupported status value (e.g. 'all') is REJECTED with 400, never silently coerced to 'active' — the Phase 7A defect this correction fixes", async () => {
+      const { res, json } = await callGet("?status=all");
+      expect(res.status).toBe(400);
+      expect(json.errorCode).toBe("invalid_status");
+      expect(mockedListProjectsForOwner).not.toHaveBeenCalled();
+    });
+
+    it("status=garbage -> 400", async () => {
+      const { res, json } = await callGet("?status=garbage");
+      expect(res.status).toBe(400);
+      expect(json.errorCode).toBe("invalid_status");
+    });
+
+    it("status=deleted -> 400", async () => {
+      const { res, json } = await callGet("?status=deleted");
+      expect(res.status).toBe(400);
+      expect(json.errorCode).toBe("invalid_status");
+    });
+
+    it("status= (present, empty) -> 400, distinguishable from omission", async () => {
+      const { res, json } = await callGet("?status=");
+      expect(res.status).toBe(400);
+      expect(json.errorCode).toBe("invalid_status");
+    });
+
+    it("duplicate status query parameters -> 400, never first-or-last-wins", async () => {
+      const { res, json } = await callGet("?status=active&status=archived");
+      expect(res.status).toBe(400);
+      expect(json.errorCode).toBe("invalid_status");
+      expect(mockedListProjectsForOwner).not.toHaveBeenCalled();
+    });
+
+    it("an invalid status never reaches the Project query", async () => {
+      await callGet("?status=all");
+      expect(mockedListProjectsForOwner).not.toHaveBeenCalled();
+    });
+  });
+
   it("SECURITY: an integrity violation (malformed/mismatched Project in the result) fails closed, never partially discloses items", async () => {
     mockedListProjectsForOwner.mockResolvedValue({ status: "integrity_violation" });
     const { res, json } = await callGet();

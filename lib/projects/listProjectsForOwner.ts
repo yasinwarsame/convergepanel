@@ -17,6 +17,15 @@
  * integrity corruption and would distort the cursor (a caller could
  * never tell whether "fewer items than expected" meant "that's genuinely
  * all of them" or "one was silently hidden").
+ *
+ * Project Read Foundation, Phase 7A — `status` is now an optional param
+ * (defaulting to `"active"`) threaded straight through to
+ * `listActiveProjectsRaw()`, so `GET /api/user/projects?status=archived`
+ * reuses this exact orchestration. The integrity check below now compares
+ * against the REQUESTED status, not a hardcoded `"active"` literal — an
+ * archived-scoped query returning an active Project (or vice versa) is
+ * exactly the same kind of scope violation the unmodified checks below
+ * already treat as corruption.
  */
 
 import "server-only";
@@ -48,7 +57,8 @@ export type ListProjectsForOwnerResult =
   | { status: "wrong_type" }
   | { status: "lookup_failed" };
 
-export async function listProjectsForOwner(args: { uid: string; limit: number; cursorRaw?: string | null }): Promise<ListProjectsForOwnerResult> {
+export async function listProjectsForOwner(args: { uid: string; limit: number; cursorRaw?: string | null; status?: "active" | "archived" }): Promise<ListProjectsForOwnerResult> {
+  const status = args.status ?? "active";
   const workspaceResult = await resolvePersonalWorkspaceForOwner(args.uid);
   if (workspaceResult.status !== "found") {
     return workspaceResult;
@@ -64,7 +74,7 @@ export async function listProjectsForOwner(args: { uid: string; limit: number; c
     startAfter = decoded.cursor;
   }
 
-  const rawResult = await listActiveProjectsRaw({ workspaceId, limit: args.limit, startAfter });
+  const rawResult = await listActiveProjectsRaw({ workspaceId, limit: args.limit, startAfter, status });
   if (rawResult.status !== "ok") {
     return { status: "lookup_failed" };
   }
@@ -83,8 +93,8 @@ export async function listProjectsForOwner(args: { uid: string; limit: number; c
       logger.warn("[projects/list] Integrity violation — workspaceId mismatch on a document returned by caller-scoped query", { workspaceId, docId: doc.id });
       return { status: "integrity_violation" };
     }
-    if (doc.data.status !== "active") {
-      logger.warn("[projects/list] Integrity violation — non-active status on a document returned by the active-only query", { workspaceId, docId: doc.id, status: doc.data.status });
+    if (doc.data.status !== status) {
+      logger.warn("[projects/list] Integrity violation — unexpected status on a document returned by the status-scoped query", { workspaceId, docId: doc.id, requestedStatus: status, actualStatus: doc.data.status });
       return { status: "integrity_violation" };
     }
     items.push({ project: doc.data, documentUpdateTime: doc.updateTime });

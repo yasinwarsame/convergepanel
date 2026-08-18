@@ -105,3 +105,8 @@ export function runProjectAssociationConflictResponse(): { status: number; body:
 export function runProjectAssociationUnchangedResponse(): { status: number; body: ProjectErrorBody } {
   return { status: 409, body: { ok: false, errorCode: "project_association_unchanged", message: "This run is already associated with the requested Project." } };
 }
+
+/** Project Read Foundation, Phase 7A.1 — an explicitly-supplied `?status=` value on `GET /api/user/projects` that isn't `"active"` or `"archived"`, or a duplicate `status` parameter. Never silently coerced to `"active"` — see `parseProjectListStatusQuery()`'s own doc comment for why that would be unsafe. */
+export function invalidProjectListStatusResponse(): { status: number; body: ProjectErrorBody } {
+  return { status: 400, body: { ok: false, errorCode: "invalid_status", message: "status must be 'active' or 'archived'." } };
+}

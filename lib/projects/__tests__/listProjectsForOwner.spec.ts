@@ -190,3 +190,37 @@ describe("listProjectsForOwner — infrastructure failure", () => {
     expect(result).toEqual({ status: "lookup_failed" });
   });
 });
+
+describe("Project Read Foundation, Phase 7A — additive status param", () => {
+  it("defaults to 'active' when status is omitted (byte-identical to pre-7A behavior)", async () => {
+    mockedListActiveProjectsRaw.mockResolvedValue({ status: "ok", items: [], hasMore: false });
+    await listProjectsForOwner({ uid: UID, limit: 20 });
+    expect(mockedListActiveProjectsRaw).toHaveBeenCalledWith(expect.objectContaining({ status: "active" }));
+  });
+
+  it("'archived' is passed through to the raw query", async () => {
+    mockedListActiveProjectsRaw.mockResolvedValue({ status: "ok", items: [], hasMore: false });
+    await listProjectsForOwner({ uid: UID, limit: 20, status: "archived" });
+    expect(mockedListActiveProjectsRaw).toHaveBeenCalledWith(expect.objectContaining({ status: "archived" }));
+  });
+
+  it("an archived Project returned by an archived-scoped query passes the (now status-aware) integrity check", async () => {
+    mockedListActiveProjectsRaw.mockResolvedValue({
+      status: "ok",
+      items: [{ data: validProjectDoc({ status: "archived" }), id: "proj-1", updateTime: UPDATE_TIME }],
+      hasMore: false,
+    });
+    const result = await listProjectsForOwner({ uid: UID, limit: 20, status: "archived" });
+    expect(result.status).toBe("ok");
+  });
+
+  it("SECURITY: an active Project returned by an archived-scoped query still fails the whole page closed — the integrity check compares against the REQUESTED status, not a hardcoded literal in either direction", async () => {
+    mockedListActiveProjectsRaw.mockResolvedValue({
+      status: "ok",
+      items: [{ data: validProjectDoc({ status: "active" }), id: "proj-1", updateTime: UPDATE_TIME }],
+      hasMore: false,
+    });
+    const result = await listProjectsForOwner({ uid: UID, limit: 20, status: "archived" });
+    expect(result).toEqual({ status: "integrity_violation" });
+  });
+});
