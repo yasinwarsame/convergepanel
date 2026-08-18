@@ -21,11 +21,13 @@ import { createProject, countProjectsInWorkspace } from "@/lib/firestore/project
 import { toProjectSummaryDto } from "@/lib/projects/projectDto";
 import { writeProjectEvent } from "@/lib/projects/projectEvents";
 import { listProjectsForOwner } from "@/lib/projects/listProjectsForOwner";
+import { parseProjectListStatusQuery } from "@/lib/projects/projectListStatusQuery";
 import {
   projectsDisabledResponse,
   invalidRequestBodyResponse,
   unexpectedFieldResponse,
   invalidProjectNameResponse,
+  invalidProjectListStatusResponse,
   tooManyProjectsResponse,
   internalErrorResponse,
 } from "@/lib/projects/projectErrorResponse";
@@ -69,12 +71,18 @@ export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
   const limit = Math.min(MAX_LIMIT, Math.max(1, parseInt(searchParams.get("limit") || String(DEFAULT_LIMIT), 10) || DEFAULT_LIMIT));
   const cursorRaw = searchParams.get("cursor");
-  // Project Read Foundation, Phase 7A — additive, defaults to "active"
-  // (byte-identical to pre-7A behavior). Only "archived" is recognized;
-  // any other value (including "all", deliberately not supported) falls
-  // back to the default rather than erroring, matching this route's
-  // existing lenient `limit` parsing style.
-  const status = searchParams.get("status") === "archived" ? "archived" : "active";
+  // Project Read Foundation, Phase 7A.1 — additive, defaults to "active"
+  // when the parameter is absent (byte-identical to pre-7A behavior). An
+  // explicitly-supplied unsupported value (including "all", deliberately
+  // not supported, and a duplicate parameter) is rejected outright, never
+  // silently coerced to "active" — see parseProjectListStatusQuery()'s own
+  // doc comment for why that distinction matters.
+  const statusResult = parseProjectListStatusQuery(searchParams);
+  if (!statusResult.ok) {
+    const { status: httpStatus, body } = invalidProjectListStatusResponse();
+    return NextResponse.json(body, { status: httpStatus });
+  }
+  const status = statusResult.status;
 
   const result = await listProjectsForOwner({ uid, limit, cursorRaw, status });
 
