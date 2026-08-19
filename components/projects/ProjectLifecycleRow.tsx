@@ -9,6 +9,7 @@
  */
 
 import { useRef, useState } from "react";
+import Link from "next/link";
 import { RenameProjectDialog } from "@/components/projects/RenameProjectDialog";
 import { ArchiveProjectDialog } from "@/components/projects/ArchiveProjectDialog";
 import { projectMutationErrorCopy, isStaleProjectMutationError } from "@/components/projects/projectMutationErrorCopy";
@@ -62,7 +63,15 @@ export function ProjectLifecycleRow({
   return (
     <li className="rounded-xl border-2 border-cp-border bg-cp-raised px-3 py-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="min-w-0 flex-1 break-words text-sm font-medium text-cp-text">{project.name}</span>
+        {/* Phase 7E-B — name is the only clickable part of the row; lifecycle
+            actions remain separate sibling buttons, never nested inside this
+            link (avoids nested/ambiguous interactive elements). */}
+        <Link
+          href={`/workspace/projects/${encodeURIComponent(project.id)}`}
+          className="min-w-0 flex-1 break-words text-sm font-medium text-cp-text hover:underline"
+        >
+          {project.name}
+        </Link>
         <div className="flex shrink-0 flex-wrap gap-2">
           <button ref={renameTriggerRef} type="button" disabled={busy} onClick={() => setOpenDialog("rename")} className={buttonClass}>
             Rename

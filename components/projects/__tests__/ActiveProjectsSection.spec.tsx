@@ -113,13 +113,16 @@ describe("ActiveProjectsSection — definitive empty state", () => {
 });
 
 describe("ActiveProjectsSection — populated list", () => {
-  it("renders every Project name, in order, never as a clickable link (spec item 29: no Project detail route yet)", () => {
+  it("renders every Project name, in order, each as its own link to /workspace/projects/{id} (Phase 7E-B: deliberate, disclosed addition of Project-name navigation)", () => {
     const html = render(fakeResult({ items: [PROJECT_A, PROJECT_B] }));
     const posA = html.indexOf("Project A");
     const posB = html.indexOf("Project B");
     expect(posA).toBeGreaterThan(-1);
     expect(posB).toBeGreaterThan(posA);
-    expect(html).not.toContain("<a ");
+    expect(html).toContain(`href="/workspace/projects/${PROJECT_A.id}"`);
+    expect(html).toContain(`href="/workspace/projects/${PROJECT_B.id}"`);
+    // Exactly one link per row (the name) — lifecycle actions remain separate buttons, never nested inside it.
+    expect((html.match(/<a /g) || []).length).toBe(2);
   });
 
   it("never exposes workspaceId/createdByUserId even if present on the summary object", () => {

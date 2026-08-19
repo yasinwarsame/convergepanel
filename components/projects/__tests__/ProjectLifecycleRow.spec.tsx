@@ -7,6 +7,24 @@
 
 import { createElement } from "react";
 import TestRenderer, { act } from "react-test-renderer";
+
+// Phase 7E-B — `next/link`'s real implementation sets up prefetch-on-
+// visibility effects that touch browser-only globals (`self`,
+// `IntersectionObserver`), which this repo's `react-test-renderer`-based
+// interactive tests cannot provide (no jsdom — see this file's own
+// established convention). Every other `next/link` consumer in this repo
+// is only ever tested via `renderToStaticMarkup` (SSR, no effects run) —
+// `ProjectLifecycleRow` is the first to need BOTH a real navigable link
+// AND interactive button testing, so the standard, well-established fix
+// applies: mock `next/link` down to a plain anchor for this test file
+// only. The real component and its real `next/link` import are
+// completely unaffected outside this test file.
+jest.mock("next/link", () => {
+  const MockLink = ({ href, children, className }: { href: string; children: React.ReactNode; className?: string }) =>
+    require("react").createElement("a", { href, className }, children);
+  return { __esModule: true, default: MockLink };
+});
+
 import { ProjectLifecycleRow } from "@/components/projects/ProjectLifecycleRow";
 import type { UseProjectLifecycleResult, ProjectMutationResult } from "@/hooks/useProjectLifecycle";
 import type { ProjectSummary } from "@/hooks/useProjects";
