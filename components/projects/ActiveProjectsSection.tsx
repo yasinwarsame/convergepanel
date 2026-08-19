@@ -2,13 +2,18 @@
 
 /**
  * Phase 7C — "Active Projects" section: `GET /api/user/projects` (default
- * `status=active`). Read-only summary rows only — no rename/archive
- * controls, no links to a Project-detail route (none exists yet), no
- * counts (no API supplies an authoritative one).
+ * `status=active`). Phase 7D adds lifecycle controls: a "New Project"
+ * trigger near the heading, and Rename/Archive on every row (via the
+ * shared `ProjectLifecycleRow`). Still no links to a Project-detail route
+ * (none exists yet), no counts (no API supplies an authoritative one).
  */
 
-import { isDefinitiveEmptyProjectsState, type ProjectsListErrorCode, type UseProjectsResult } from "@/hooks/useProjects";
+import { useRef, useState } from "react";
+import { isDefinitiveEmptyProjectsState, type ProjectsListErrorCode, type ProjectSummary, type UseProjectsResult } from "@/hooks/useProjects";
+import type { UseProjectLifecycleResult } from "@/hooks/useProjectLifecycle";
 import { SectionEmptyBox, SectionInitialErrorBox, SectionLoadingRow, SectionPagination } from "@/components/projects/SectionState";
+import { ProjectLifecycleRow } from "@/components/projects/ProjectLifecycleRow";
+import { NewProjectDialog } from "@/components/projects/NewProjectDialog";
 
 function initialErrorCopy(code: ProjectsListErrorCode): { message: string; retry: boolean } {
   switch (code) {
@@ -27,20 +32,45 @@ function loadMoreErrorCopy(code: ProjectsListErrorCode): { message: string; acti
   return { message: "Couldn't load more Projects. Please try again.", action: "retry" };
 }
 
-function ProjectRow({ name }: { name: string }) {
-  return (
-    <li className="rounded-xl border-2 border-cp-border bg-cp-raised px-3 py-3">
-      <span className="block text-sm font-medium text-cp-text">{name}</span>
-    </li>
-  );
-}
-
-export function ActiveProjectsSection({ result }: { result: UseProjectsResult }) {
+export function ActiveProjectsSection({
+  result,
+  lifecycle,
+  onRenamed,
+  refreshSections,
+  onCreated,
+}: {
+  result: UseProjectsResult;
+  lifecycle: UseProjectLifecycleResult;
+  onRenamed: (updated: ProjectSummary) => void;
+  refreshSections: () => void;
+  onCreated: () => void;
+}) {
   const { items, hasMore, status, initialErrorCode, loadingMore, loadMoreErrorCode, loadMore, retryInitial, resetAndReloadFromStart } = result;
+  const [newProjectOpen, setNewProjectOpen] = useState(false);
+  const newProjectTriggerRef = useRef<HTMLButtonElement>(null);
 
   return (
     <section className="mt-10">
-      <h2 className="text-lg font-semibold text-cp-text">Active Projects</h2>
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-lg font-semibold text-cp-text">Active Projects</h2>
+        <button
+          ref={newProjectTriggerRef}
+          type="button"
+          onClick={() => setNewProjectOpen(true)}
+          className="rounded-lg border-2 border-cp-border bg-cp-surface px-3 py-1.5 text-xs font-semibold text-cp-text transition-colors hover:border-cp-accent hover:bg-cp-primary-soft"
+        >
+          New Project
+        </button>
+      </div>
+
+      {newProjectOpen && (
+        <NewProjectDialog
+          triggerRef={newProjectTriggerRef}
+          onClose={() => setNewProjectOpen(false)}
+          lifecycle={lifecycle}
+          onCreated={onCreated}
+        />
+      )}
 
       {status === "loading" && <SectionLoadingRow label="Loading your Projects…" />}
 
@@ -56,7 +86,7 @@ export function ActiveProjectsSection({ result }: { result: UseProjectsResult })
       {status === "ready" && items.length > 0 && (
         <ul className="mt-4 space-y-2">
           {items.map((item) => (
-            <ProjectRow key={item.id} name={item.name} />
+            <ProjectLifecycleRow key={item.id} project={item} variant="active" lifecycle={lifecycle} onRenamed={onRenamed} refreshSections={refreshSections} />
           ))}
         </ul>
       )}

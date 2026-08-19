@@ -2,12 +2,14 @@
 
 /**
  * Phase 7C — "Archived Projects" section: `GET /api/user/projects?status=archived`.
- * Read-only summary rows only — explicitly no "Restore" control in this
- * phase (that's mutation UI, out of scope).
+ * Phase 7D adds Rename + Restore (via the shared `ProjectLifecycleRow`) —
+ * explicitly no Archive control here and no "New Project" trigger.
  */
 
-import { isDefinitiveEmptyProjectsState, type ProjectsListErrorCode, type UseProjectsResult } from "@/hooks/useProjects";
+import { isDefinitiveEmptyProjectsState, type ProjectsListErrorCode, type ProjectSummary, type UseProjectsResult } from "@/hooks/useProjects";
+import type { UseProjectLifecycleResult } from "@/hooks/useProjectLifecycle";
 import { SectionEmptyBox, SectionInitialErrorBox, SectionLoadingRow, SectionPagination } from "@/components/projects/SectionState";
+import { ProjectLifecycleRow } from "@/components/projects/ProjectLifecycleRow";
 
 function initialErrorCopy(code: ProjectsListErrorCode): { message: string; retry: boolean } {
   switch (code) {
@@ -26,15 +28,17 @@ function loadMoreErrorCopy(code: ProjectsListErrorCode): { message: string; acti
   return { message: "Couldn't load more Projects. Please try again.", action: "retry" };
 }
 
-function ProjectRow({ name }: { name: string }) {
-  return (
-    <li className="rounded-xl border-2 border-cp-border bg-cp-raised px-3 py-3">
-      <span className="block text-sm font-medium text-cp-text">{name}</span>
-    </li>
-  );
-}
-
-export function ArchivedProjectsSection({ result }: { result: UseProjectsResult }) {
+export function ArchivedProjectsSection({
+  result,
+  lifecycle,
+  onRenamed,
+  refreshSections,
+}: {
+  result: UseProjectsResult;
+  lifecycle: UseProjectLifecycleResult;
+  onRenamed: (updated: ProjectSummary) => void;
+  refreshSections: () => void;
+}) {
   const { items, hasMore, status, initialErrorCode, loadingMore, loadMoreErrorCode, loadMore, retryInitial, resetAndReloadFromStart } = result;
 
   return (
@@ -55,7 +59,7 @@ export function ArchivedProjectsSection({ result }: { result: UseProjectsResult 
       {status === "ready" && items.length > 0 && (
         <ul className="mt-4 space-y-2">
           {items.map((item) => (
-            <ProjectRow key={item.id} name={item.name} />
+            <ProjectLifecycleRow key={item.id} project={item} variant="archived" lifecycle={lifecycle} onRenamed={onRenamed} refreshSections={refreshSections} />
           ))}
         </ul>
       )}

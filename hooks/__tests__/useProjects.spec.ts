@@ -39,8 +39,9 @@ import { useProjects, parseProjectsListPageResponse, isDefinitiveEmptyProjectsSt
 import type { UseProjectsResult, ProjectSummary } from "@/hooks/useProjects";
 import { ActiveProjectsSection } from "@/components/projects/ActiveProjectsSection";
 
-const SAMPLE_PROJECT: ProjectSummary = { id: "proj-1", name: "Project One", status: "active", createdAt: "2026-08-01T00:00:00.000Z", updatedAt: "2026-08-01T00:00:00.000Z" };
-const SAMPLE_ARCHIVED_PROJECT: ProjectSummary = { id: "proj-9", name: "Archived One", status: "archived", createdAt: "2026-08-01T00:00:00.000Z", updatedAt: "2026-08-01T00:00:00.000Z" };
+const UPDATE_TIME = { seconds: 1723600000, nanoseconds: 0 };
+const SAMPLE_PROJECT: ProjectSummary = { id: "proj-1", name: "Project One", status: "active", createdAt: "2026-08-01T00:00:00.000Z", updatedAt: "2026-08-01T00:00:00.000Z", updateTime: UPDATE_TIME };
+const SAMPLE_ARCHIVED_PROJECT: ProjectSummary = { id: "proj-9", name: "Archived One", status: "archived", createdAt: "2026-08-01T00:00:00.000Z", updatedAt: "2026-08-01T00:00:00.000Z", updateTime: UPDATE_TIME };
 
 describe("parseProjectsListPageResponse (pure)", () => {
   it("real production success envelope -> success page", () => {
@@ -501,7 +502,13 @@ describe("useProjects — MUTATION-TARGETED: two simultaneous instances (Active 
 describe("ActiveProjectsSection through the REAL useProjects()/parseProjectsListPageResponse() path (Phase 7C.1 spec item 9) — no independent filtering added to the component itself; the parser boundary is what protects it", () => {
   function ActiveSectionHost() {
     const result = useProjects({ status: "active" });
-    return createElement(ActiveProjectsSection, { result });
+    return createElement(ActiveProjectsSection, {
+      result,
+      lifecycle: { isProjectBusy: () => false, isCreating: false, createProject: jest.fn(), renameProject: jest.fn(), archiveProject: jest.fn(), restoreProject: jest.fn() },
+      onRenamed: jest.fn(),
+      refreshSections: jest.fn(),
+      onCreated: jest.fn(),
+    });
   }
 
   it("a response containing an archived Project never renders that Project's name, even though the component performs no status filtering of its own", async () => {
