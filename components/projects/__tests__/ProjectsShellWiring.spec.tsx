@@ -71,6 +71,7 @@ jest.mock("@/hooks/useUnfiledRuns", () => {
 jest.mock("@/hooks/useProjectLifecycle", () => ({
   useProjectLifecycle: () => ({
     isProjectBusy: () => false,
+    getBusyOperation: () => null,
     isCreating: false,
     createProject: jest.fn(),
     renameProject: jest.fn(),

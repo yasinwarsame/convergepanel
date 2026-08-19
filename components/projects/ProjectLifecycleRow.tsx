@@ -34,6 +34,14 @@ export function ProjectLifecycleRow({
   const [openDialog, setOpenDialog] = useState<"none" | "rename" | "archive">("none");
   const [rowError, setRowError] = useState<string | null>(null);
   const busy = lifecycle.isProjectBusy(project.id);
+  // Phase 7D.3B — `busy` alone doesn't say WHICH operation is running (it's
+  // shared across Rename/Archive/Restore for this Project), so it must
+  // never drive progress-text choice on its own — only which operation
+  // actually holds the lock may claim to be "in progress." Restore is the
+  // only control here with its own busy-conditional label (Rename/Archive
+  // dispatch through their own dialogs, whose "Saving…"/"Archiving…" text
+  // is already scoped to their own submit action).
+  const restoreInFlight = lifecycle.getBusyOperation(project.id) === "restore";
   const renameTriggerRef = useRef<HTMLButtonElement>(null);
   const archiveTriggerRef = useRef<HTMLButtonElement>(null);
 
@@ -66,7 +74,7 @@ export function ProjectLifecycleRow({
           )}
           {variant === "archived" && (
             <button type="button" disabled={busy} onClick={handleRestore} className={buttonClass}>
-              {busy ? "Restoring…" : "Restore"}
+              {restoreInFlight ? "Restoring…" : "Restore"}
             </button>
           )}
         </div>

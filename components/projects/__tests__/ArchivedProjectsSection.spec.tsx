@@ -30,6 +30,7 @@ function fakeResult(overrides: Partial<UseProjectsResult> = {}): UseProjectsResu
 function fakeLifecycle(overrides: Partial<UseProjectLifecycleResult> = {}): UseProjectLifecycleResult {
   return {
     isProjectBusy: () => false,
+    getBusyOperation: () => null,
     isCreating: false,
     createProject: jest.fn(),
     renameProject: jest.fn(),
