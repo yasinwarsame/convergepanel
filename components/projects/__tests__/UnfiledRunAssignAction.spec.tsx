@@ -42,7 +42,10 @@ function fakeProjectsResult(overrides: Partial<UseProjectsResult> = {}): UseProj
 function fakeAssociation(overrides: Partial<UseRunProjectAssociationResult> = {}): UseRunProjectAssociationResult {
   return {
     isRunBusy: () => false,
+    getBusyOperation: () => null,
     assign: jest.fn(),
+    move: jest.fn(),
+    remove: jest.fn(),
     ...overrides,
   };
 }

@@ -70,7 +70,10 @@ const UNFILED_RUN: ProjectRunSummary = { id: "r1", at: "2026-08-01T00:00:00.000Z
 function fakeAssociation(overrides: Partial<UseRunProjectAssociationResult> = {}): UseRunProjectAssociationResult {
   return {
     isRunBusy: () => false,
+    getBusyOperation: () => null,
     assign: jest.fn(),
+    move: jest.fn(),
+    remove: jest.fn(),
     ...overrides,
   };
 }

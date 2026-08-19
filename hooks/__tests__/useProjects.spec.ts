@@ -35,6 +35,17 @@ jest.mock("@/lib/client/authedFetch", () => ({
   authedFetch: (...args: [string, unknown]) => authedFetchMock(...args),
 }));
 
+// Phase 7E-B — `ActiveProjectsSection` renders `ProjectLifecycleRow`, which
+// now uses a real `next/link` for Project-name navigation; its prefetch-
+// on-visibility effect touches browser-only globals this repo's jsdom-free
+// `react-test-renderer` harness can't provide. Same standard mock as
+// `ProjectLifecycleRow.spec.tsx` itself.
+jest.mock("next/link", () => {
+  const MockLink = ({ href, children, className }: { href: string; children: React.ReactNode; className?: string }) =>
+    require("react").createElement("a", { href, className }, children);
+  return { __esModule: true, default: MockLink };
+});
+
 import { useProjects, parseProjectsListPageResponse, isDefinitiveEmptyProjectsState } from "@/hooks/useProjects";
 import type { UseProjectsResult, ProjectSummary } from "@/hooks/useProjects";
 import { ActiveProjectsSection } from "@/components/projects/ActiveProjectsSection";

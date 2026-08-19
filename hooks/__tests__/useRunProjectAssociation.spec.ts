@@ -246,3 +246,133 @@ describe("useRunProjectAssociation — MUTATION-TARGETED: per-run locking", () =
     expect(resultForRun2).toEqual({ status: "ok", runId: "run-2", projectId: "proj-1" });
   });
 });
+
+describe("useRunProjectAssociation — Phase 7E-B: move() request shape", () => {
+  it("PATCH with body { projectId: P2, expectedProjectId: P1 } exactly", async () => {
+    const { latest } = await mount();
+    queueResponse("/api/user/runs/run-1/project", { ok: true, body: { ok: true, runId: "run-1", projectId: "proj-2" } });
+    let result!: RunProjectAssociationResult;
+    await act(async () => {
+      result = await latest().move("run-1", "proj-2", "proj-1");
+    });
+    expect(callLog).toHaveLength(1);
+    expect(callLog[0].url).toBe("/api/user/runs/run-1/project");
+    expect(callLog[0].options.method).toBe("PATCH");
+    const body = JSON.parse(callLog[0].options.body);
+    expect(body).toEqual({ projectId: "proj-2", expectedProjectId: "proj-1" });
+    expect(Object.keys(body).sort()).toEqual(["expectedProjectId", "projectId"]);
+    expect(result).toEqual({ status: "ok", runId: "run-1", projectId: "proj-2" });
+  });
+
+  it("NEVER sends Project updateTime/expectedUpdateTime or uid/workspaceId", async () => {
+    const { latest } = await mount();
+    queueResponse("/api/user/runs/run-1/project", { ok: true, body: { ok: true, runId: "run-1", projectId: "proj-2" } });
+    await act(async () => {
+      await latest().move("run-1", "proj-2", "proj-1");
+    });
+    const body = JSON.parse(callLog[0].options.body);
+    expect(body.updateTime).toBeUndefined();
+    expect(body.expectedUpdateTime).toBeUndefined();
+    expect(body.uid).toBeUndefined();
+    expect(body.workspaceId).toBeUndefined();
+  });
+});
+
+describe("useRunProjectAssociation — Phase 7E-B: remove() request shape", () => {
+  it("PATCH with body { projectId: null, expectedProjectId: P1 } exactly", async () => {
+    const { latest } = await mount();
+    queueResponse("/api/user/runs/run-1/project", { ok: true, body: { ok: true, runId: "run-1", projectId: null } });
+    let result!: RunProjectAssociationResult;
+    await act(async () => {
+      result = await latest().remove("run-1", "proj-1");
+    });
+    expect(callLog).toHaveLength(1);
+    const body = JSON.parse(callLog[0].options.body);
+    expect(body).toEqual({ projectId: null, expectedProjectId: "proj-1" });
+    expect(result).toEqual({ status: "ok", runId: "run-1", projectId: null });
+  });
+
+  it("NEVER sends Project updateTime/expectedUpdateTime or uid/workspaceId", async () => {
+    const { latest } = await mount();
+    queueResponse("/api/user/runs/run-1/project", { ok: true, body: { ok: true, runId: "run-1", projectId: null } });
+    await act(async () => {
+      await latest().remove("run-1", "proj-1");
+    });
+    const body = JSON.parse(callLog[0].options.body);
+    expect(body.updateTime).toBeUndefined();
+    expect(body.expectedUpdateTime).toBeUndefined();
+    expect(body.uid).toBeUndefined();
+    expect(body.workspaceId).toBeUndefined();
+  });
+});
+
+describe("useRunProjectAssociation — Phase 7E-B: assign() unchanged (regression proof)", () => {
+  it("assign() still sends exactly the same body shape it did in Phase 7E-A", async () => {
+    const { latest } = await mount();
+    queueResponse("/api/user/runs/run-1/project", { ok: true, body: { ok: true, runId: "run-1", projectId: "proj-1" } });
+    await act(async () => {
+      await latest().assign("run-1", "proj-1", null);
+    });
+    const body = JSON.parse(callLog[0].options.body);
+    expect(body).toEqual({ projectId: "proj-1", expectedProjectId: null });
+  });
+});
+
+describe("useRunProjectAssociation — Phase 7E-B: MUTATION-TARGETED: operation-specific busy label (spec item 31/55)", () => {
+  it("getBusyOperation reflects 'move' while a move is in flight, and null once it resolves", async () => {
+    const { latest } = await mount();
+    const deferred = queuePendingResponse("/api/user/runs/run-1/project");
+    expect(latest().getBusyOperation("run-1")).toBeNull();
+
+    let pending!: Promise<RunProjectAssociationResult>;
+    act(() => {
+      pending = latest().move("run-1", "proj-2", "proj-1");
+    });
+    expect(latest().getBusyOperation("run-1")).toBe("move");
+    expect(latest().isRunBusy("run-1")).toBe(true);
+
+    await act(async () => {
+      deferred.resolve({ ok: true, json: async () => ({ ok: true, runId: "run-1", projectId: "proj-2" }) });
+      await pending;
+    });
+    expect(latest().getBusyOperation("run-1")).toBeNull();
+  });
+
+  it("getBusyOperation reflects 'remove' while a remove is in flight — never 'move' for the same run", async () => {
+    const { latest } = await mount();
+    const deferred = queuePendingResponse("/api/user/runs/run-1/project");
+
+    let pending!: Promise<RunProjectAssociationResult>;
+    act(() => {
+      pending = latest().remove("run-1", "proj-1");
+    });
+    expect(latest().getBusyOperation("run-1")).toBe("remove");
+    expect(latest().getBusyOperation("run-1")).not.toBe("move");
+
+    await act(async () => {
+      deferred.resolve({ ok: true, json: async () => ({ ok: true, runId: "run-1", projectId: null }) });
+      await pending;
+    });
+  });
+
+  it("a Move and a Remove for the SAME run cannot dispatch simultaneously — the second is rejected before reaching authedFetch", async () => {
+    const { latest } = await mount();
+    const deferred = queuePendingResponse("/api/user/runs/run-1/project");
+
+    let first!: Promise<RunProjectAssociationResult>;
+    let second!: RunProjectAssociationResult;
+    act(() => {
+      first = latest().move("run-1", "proj-2", "proj-1");
+    });
+    await act(async () => {
+      second = await latest().remove("run-1", "proj-1");
+    });
+    expect(second).toEqual({ status: "error", errorCode: "internal_error" });
+    expect(callLog).toHaveLength(1); // remove never reached authedFetch
+
+    await act(async () => {
+      deferred.resolve({ ok: true, json: async () => ({ ok: true, runId: "run-1", projectId: "proj-2" }) });
+      await first;
+    });
+  });
+});

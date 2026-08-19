@@ -89,10 +89,10 @@ describe("ArchivedProjectsSection — definitive empty state", () => {
 });
 
 describe("ArchivedProjectsSection — populated list", () => {
-  it("renders archived Project names, never as a clickable link (no Project detail route yet)", () => {
+  it("renders archived Project names as a link to /workspace/projects/{id} (Phase 7E-B: archived Projects are readable detail pages too)", () => {
     const html = render(fakeResult({ items: [PROJECT_A] }));
     expect(html).toContain("Archived Project A");
-    expect(html).not.toContain("<a ");
+    expect(html).toContain(`href="/workspace/projects/${PROJECT_A.id}"`);
   });
 });
 
