@@ -46,8 +46,14 @@ describe("ProjectDialogFrame — mounted behavior (no `document` dependency)", (
   it("renders role=dialog, aria-modal, aria-labelledby pointing at the title", () => {
     let renderer!: TestRenderer.ReactTestRenderer;
     act(() => {
+      // `children` here is ProjectDialogFrame's typed render-prop function,
+      // not literal ReactNode — it must be passed inside the props object.
+      // createElement's positional-children overload always types rest args
+      // as ReactNode, which does not satisfy this component's `children:
+      // (args) => ReactNode` prop type.
       renderer = TestRenderer.create(
-        createElement(ProjectDialogFrame, { title: "Test dialog", triggerRef: fakeTrigger(), onClose: jest.fn() }, () => createElement("p", null, "body"))
+        // eslint-disable-next-line react/no-children-prop
+        createElement(ProjectDialogFrame, { title: "Test dialog", triggerRef: fakeTrigger(), onClose: jest.fn(), children: () => createElement("p", null, "body") })
       );
     });
     const dialog = renderer.root.findByProps({ role: "dialog" });
@@ -61,7 +67,8 @@ describe("ProjectDialogFrame — mounted behavior (no `document` dependency)", (
     const onClose = jest.fn();
     let renderer!: TestRenderer.ReactTestRenderer;
     act(() => {
-      renderer = TestRenderer.create(createElement(ProjectDialogFrame, { title: "T", triggerRef: fakeTrigger(), onClose }, () => createElement("p", null, "body")));
+      // eslint-disable-next-line react/no-children-prop -- see comment above
+      renderer = TestRenderer.create(createElement(ProjectDialogFrame, { title: "T", triggerRef: fakeTrigger(), onClose, children: () => createElement("p", null, "body") }));
     });
     const backdrop = renderer.root.findByProps({ role: "dialog" });
     const fakeEvent = { target: "backdrop-node", currentTarget: "backdrop-node" };
@@ -75,7 +82,8 @@ describe("ProjectDialogFrame — mounted behavior (no `document` dependency)", (
     const onClose = jest.fn();
     let renderer!: TestRenderer.ReactTestRenderer;
     act(() => {
-      renderer = TestRenderer.create(createElement(ProjectDialogFrame, { title: "T", triggerRef: fakeTrigger(), onClose }, () => createElement("p", null, "body")));
+      // eslint-disable-next-line react/no-children-prop -- see comment above
+      renderer = TestRenderer.create(createElement(ProjectDialogFrame, { title: "T", triggerRef: fakeTrigger(), onClose, children: () => createElement("p", null, "body") }));
     });
     const backdrop = renderer.root.findByProps({ role: "dialog" });
     act(() => {
@@ -89,9 +97,15 @@ describe("ProjectDialogFrame — mounted behavior (no `document` dependency)", (
     let capturedRequestClose: (() => void) | null = null;
     act(() => {
       TestRenderer.create(
-        createElement(ProjectDialogFrame, { title: "T", triggerRef: fakeTrigger(), onClose }, ({ requestClose }: { requestClose: () => void; titleId: string }) => {
-          capturedRequestClose = requestClose;
-          return createElement("p", null, "body");
+        // eslint-disable-next-line react/no-children-prop -- see comment above
+        createElement(ProjectDialogFrame, {
+          title: "T",
+          triggerRef: fakeTrigger(),
+          onClose,
+          children: ({ requestClose }: { requestClose: () => void; titleId: string }) => {
+            capturedRequestClose = requestClose;
+            return createElement("p", null, "body");
+          },
         })
       );
     });
