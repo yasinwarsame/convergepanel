@@ -46,29 +46,35 @@
 import { useProjects } from "@/hooks/useProjects";
 import { useUnfiledRuns } from "@/hooks/useUnfiledRuns";
 import { useProjectLifecycle } from "@/hooks/useProjectLifecycle";
+import { useRunProjectAssociation } from "@/hooks/useRunProjectAssociation";
 import { ActiveProjectsSection } from "@/components/projects/ActiveProjectsSection";
 import { UnfiledResearchSection } from "@/components/projects/UnfiledResearchSection";
 import { ArchivedProjectsSection } from "@/components/projects/ArchivedProjectsSection";
 import type { UseProjectsResult, ProjectSummary } from "@/hooks/useProjects";
 import type { UseUnfiledRunsResult } from "@/hooks/useUnfiledRuns";
 import type { UseProjectLifecycleResult } from "@/hooks/useProjectLifecycle";
+import type { UseRunProjectAssociationResult } from "@/hooks/useRunProjectAssociation";
 
 export function ProjectsShellView({
   active,
   unfiled,
   archived,
   lifecycle,
+  association,
   onCreated,
   onRenamed,
   refreshSections,
+  onRunAssigned,
 }: {
   active: UseProjectsResult;
   unfiled: UseUnfiledRunsResult;
   archived: UseProjectsResult;
   lifecycle: UseProjectLifecycleResult;
+  association: UseRunProjectAssociationResult;
   onCreated: () => void;
   onRenamed: (updated: ProjectSummary) => void;
   refreshSections: () => void;
+  onRunAssigned: () => void;
 }) {
   return (
     <main className="mx-auto max-w-4xl px-4 py-10 sm:py-14">
@@ -76,7 +82,7 @@ export function ProjectsShellView({
       <p className="mt-2 text-sm text-cp-muted">Organize your Workspace research into projects.</p>
 
       <ActiveProjectsSection result={active} lifecycle={lifecycle} onRenamed={onRenamed} refreshSections={refreshSections} onCreated={onCreated} />
-      <UnfiledResearchSection result={unfiled} />
+      <UnfiledResearchSection result={unfiled} association={association} onAssigned={onRunAssigned} />
       <ArchivedProjectsSection result={archived} lifecycle={lifecycle} onRenamed={onRenamed} refreshSections={refreshSections} />
     </main>
   );
@@ -87,6 +93,7 @@ export default function ProjectsShell() {
   const unfiled = useUnfiledRuns();
   const archived = useProjects({ status: "archived" });
   const lifecycle = useProjectLifecycle();
+  const association = useRunProjectAssociation();
 
   const handleCreated = () => {
     active.resetAndReloadFromStart();
@@ -102,15 +109,24 @@ export default function ProjectsShell() {
     archived.resetAndReloadFromStart();
   };
 
+  // Phase 7E-A — a run assignment changes ONLY Unfiled membership; Project
+  // lifecycle state (Active/Archived lists) never changes as a side effect
+  // of assigning a run, so neither list is reset here (spec item 20).
+  const handleRunAssigned = () => {
+    unfiled.resetAndReloadFromStart();
+  };
+
   return (
     <ProjectsShellView
       active={active}
       unfiled={unfiled}
       archived={archived}
       lifecycle={lifecycle}
+      association={association}
       onCreated={handleCreated}
       onRenamed={handleRenamed}
       refreshSections={refreshSections}
+      onRunAssigned={handleRunAssigned}
     />
   );
 }

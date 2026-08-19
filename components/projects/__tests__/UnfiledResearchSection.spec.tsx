@@ -8,6 +8,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { UnfiledResearchSection } from "@/components/projects/UnfiledResearchSection";
 import type { UseUnfiledRunsResult, ProjectRunSummary } from "@/hooks/useUnfiledRuns";
+import type { UseRunProjectAssociationResult } from "@/hooks/useRunProjectAssociation";
 
 function fakeResult(overrides: Partial<UseUnfiledRunsResult> = {}): UseUnfiledRunsResult {
   return {
@@ -24,11 +25,19 @@ function fakeResult(overrides: Partial<UseUnfiledRunsResult> = {}): UseUnfiledRu
   };
 }
 
+function fakeAssociation(overrides: Partial<UseRunProjectAssociationResult> = {}): UseRunProjectAssociationResult {
+  return {
+    isRunBusy: () => false,
+    assign: jest.fn(),
+    ...overrides,
+  };
+}
+
 const RUN_A: ProjectRunSummary = { id: "run-a", at: "2026-08-01T00:00:00.000Z", question: "Question A", selectedModels: ["chatgpt"], projectId: null };
 const RUN_B: ProjectRunSummary = { id: "run-b", at: "2026-08-02T00:00:00.000Z", question: "Question B", selectedModels: ["chatgpt"], projectId: null, governanceStatus: "approved" };
 
-function render(result: UseUnfiledRunsResult): string {
-  return renderToStaticMarkup(createElement(UnfiledResearchSection, { result }));
+function render(result: UseUnfiledRunsResult, association: UseRunProjectAssociationResult = fakeAssociation(), onAssigned = jest.fn()): string {
+  return renderToStaticMarkup(createElement(UnfiledResearchSection, { result, association, onAssigned }));
 }
 
 describe("UnfiledResearchSection — heading", () => {
@@ -83,8 +92,17 @@ describe("UnfiledResearchSection — reuses WorkspaceRunCard verbatim", () => {
   });
 });
 
-describe("UnfiledResearchSection — no mutation controls (spec item 13/30)", () => {
-  it.each(["Move to Project", "Assign", "New Project"])("never renders a %s control", (label) => {
+describe("UnfiledResearchSection — Phase 7E-A: deliberate, disclosed addition of exactly one mutation control", () => {
+  // Before Phase 7E-A this section rendered NO mutation controls at all — that
+  // invariant is intentionally relaxed here to add "Add to project" (spec
+  // item 7). Move/Unassign/New Project remain absent by design; only the
+  // Unfiled-specific assign affordance is in scope for this increment.
+  it("renders exactly one 'Add to project' control per Unfiled row", () => {
+    const html = render(fakeResult({ items: [RUN_A, RUN_B] }));
+    expect((html.match(/Add to project/g) || []).length).toBe(2);
+  });
+
+  it.each(["Move to Project", "Assign", "Unassign", "New Project"])("never renders a %s control", (label) => {
     expect(render(fakeResult({ items: [RUN_A] }))).not.toContain(label);
   });
 });
@@ -95,9 +113,13 @@ describe("UnfiledResearchSection — pagination", () => {
     expect(render(fakeResult({ items: [RUN_A], hasMore: false }))).not.toContain("Load more");
   });
 
-  it("loadMoreErrorCode invalid_cursor -> 'Reload', never the word 'cursor'", () => {
+  it("loadMoreErrorCode invalid_cursor -> 'Reload', never the word 'cursor' in visible text", () => {
     const html = render(fakeResult({ items: [RUN_A], hasMore: true, loadMoreErrorCode: "invalid_cursor" }));
     expect(html).toContain("Reload");
-    expect(html.toLowerCase()).not.toMatch(/cursor/);
+    // Strip tags/attributes first — Tailwind's `disabled:cursor-not-allowed`
+    // class (added by Phase 7E-A's "Add to project" button) legitimately
+    // contains "cursor" as a substring; only visible text must never say it.
+    const visibleText = html.replace(/<[^>]*>/g, " ");
+    expect(visibleText.toLowerCase()).not.toMatch(/cursor/);
   });
 });
