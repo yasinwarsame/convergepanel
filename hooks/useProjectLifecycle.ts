@@ -33,9 +33,20 @@ const PROJECTS_ENDPOINT = "/api/user/projects";
 
 export type ProjectMutationResult = { status: "ok"; project: ProjectSummary } | { status: "error"; errorCode: ProjectMutationErrorCode };
 
+/** Phase 7D.3B — presentation-only label for which operation currently holds a Project's lock. Never affects locking/dispatch. */
+export type ProjectLifecycleOperation = "create" | "rename" | "archive" | "restore";
+
 export interface UseProjectLifecycleResult {
   /** True while a lifecycle mutation for this exact Project id is in flight through this hook. */
   isProjectBusy: (projectId: string) => boolean;
+  /**
+   * Phase 7D.3B — which operation is actually holding the lock for this
+   * Project, or `null` if idle. Presentation-only: a control must still
+   * disable off `isProjectBusy()` (any in-flight operation blocks any
+   * other), this is only for choosing correct progress text so a
+   * non-executing control never claims to be the one running.
+   */
+  getBusyOperation: (projectId: string) => ProjectLifecycleOperation | null;
   /** True while a create request is in flight. */
   isCreating: boolean;
   createProject: (name: string) => Promise<ProjectMutationResult>;
@@ -54,36 +65,45 @@ async function parseMutationResponse(res: Response): Promise<{ ok: true; project
 
 export function useProjectLifecycle(): UseProjectLifecycleResult {
   const { user } = useAuth();
-  const [busyIds, setBusyIds] = useState<ReadonlySet<string>>(new Set());
+  // Phase 7D.3B — was `Set<string>`; now a `Map` recording which
+  // operation holds each lock key, purely so a control can show correct
+  // progress text. The lock semantics are unchanged: `.has(lockKey)` is
+  // still exactly "is a mutation in flight for this key" — see
+  // `isProjectBusy`/`withLock` below, both still keyed the same way.
+  const [busyOperations, setBusyOperations] = useState<ReadonlyMap<string, ProjectLifecycleOperation>>(new Map());
   // Synchronous source of truth for the lock check itself — React state
   // updates are batched/async, so a rapid double-call could otherwise both
-  // observe the pre-update `busyIds` and both proceed. The ref is mutated
-  // synchronously before any await; `busyIds` state exists only to let
-  // components re-render when lock membership changes.
-  const busyIdsRef = useRef<Set<string>>(new Set());
+  // observe the pre-update map and both proceed. The ref is mutated
+  // synchronously before any await; `busyOperations` state exists only to
+  // let components re-render when lock membership changes.
+  const busyOperationsRef = useRef<Map<string, ProjectLifecycleOperation>>(new Map());
 
-  const isProjectBusy = useCallback((projectId: string) => busyIds.has(projectId), [busyIds]);
+  const isProjectBusy = useCallback((projectId: string) => busyOperations.has(projectId), [busyOperations]);
+  const getBusyOperation = useCallback((projectId: string) => busyOperations.get(projectId) ?? null, [busyOperations]);
 
-  const withLock = useCallback(async (lockKey: string, fn: () => Promise<ProjectMutationResult>): Promise<ProjectMutationResult> => {
-    if (busyIdsRef.current.has(lockKey)) {
-      // Defense in depth — the UI is expected to have already disabled the
-      // control that would produce this call. Never dispatches a second
-      // request for the same lock key.
-      return { status: "error", errorCode: "internal_error" };
-    }
-    busyIdsRef.current.add(lockKey);
-    setBusyIds(new Set(busyIdsRef.current));
-    try {
-      return await fn();
-    } finally {
-      busyIdsRef.current.delete(lockKey);
-      setBusyIds(new Set(busyIdsRef.current));
-    }
-  }, []);
+  const withLock = useCallback(
+    async (lockKey: string, operation: ProjectLifecycleOperation, fn: () => Promise<ProjectMutationResult>): Promise<ProjectMutationResult> => {
+      if (busyOperationsRef.current.has(lockKey)) {
+        // Defense in depth — the UI is expected to have already disabled the
+        // control that would produce this call. Never dispatches a second
+        // request for the same lock key.
+        return { status: "error", errorCode: "internal_error" };
+      }
+      busyOperationsRef.current.set(lockKey, operation);
+      setBusyOperations(new Map(busyOperationsRef.current));
+      try {
+        return await fn();
+      } finally {
+        busyOperationsRef.current.delete(lockKey);
+        setBusyOperations(new Map(busyOperationsRef.current));
+      }
+    },
+    []
+  );
 
   const createProject = useCallback(
     (name: string): Promise<ProjectMutationResult> =>
-      withLock(CREATE_LOCK_KEY, async () => {
+      withLock(CREATE_LOCK_KEY, "create", async () => {
         try {
           const res = await authedFetch(PROJECTS_ENDPOINT, { user, authReady: true, method: "POST", body: JSON.stringify({ name }) });
           const parsed = await parseMutationResponse(res);
@@ -100,7 +120,7 @@ export function useProjectLifecycle(): UseProjectLifecycleResult {
 
   const renameProject = useCallback(
     (project: ProjectSummary, name: string): Promise<ProjectMutationResult> =>
-      withLock(project.id, async () => {
+      withLock(project.id, "rename", async () => {
         try {
           const res = await authedFetch(`${PROJECTS_ENDPOINT}/${encodeURIComponent(project.id)}`, {
             user,
@@ -122,7 +142,7 @@ export function useProjectLifecycle(): UseProjectLifecycleResult {
 
   const archiveProject = useCallback(
     (project: ProjectSummary): Promise<ProjectMutationResult> =>
-      withLock(project.id, async () => {
+      withLock(project.id, "archive", async () => {
         try {
           const res = await authedFetch(`${PROJECTS_ENDPOINT}/${encodeURIComponent(project.id)}/archive`, {
             user,
@@ -144,7 +164,7 @@ export function useProjectLifecycle(): UseProjectLifecycleResult {
 
   const restoreProject = useCallback(
     (project: ProjectSummary): Promise<ProjectMutationResult> =>
-      withLock(project.id, async () => {
+      withLock(project.id, "restore", async () => {
         try {
           const res = await authedFetch(`${PROJECTS_ENDPOINT}/${encodeURIComponent(project.id)}/restore`, {
             user,
@@ -166,7 +186,8 @@ export function useProjectLifecycle(): UseProjectLifecycleResult {
 
   return {
     isProjectBusy,
-    isCreating: busyIds.has(CREATE_LOCK_KEY),
+    getBusyOperation,
+    isCreating: busyOperations.has(CREATE_LOCK_KEY),
     createProject,
     renameProject,
     archiveProject,

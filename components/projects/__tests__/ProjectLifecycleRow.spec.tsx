@@ -14,6 +14,7 @@ import type { ProjectSummary } from "@/hooks/useProjects";
 function fakeLifecycle(overrides: Partial<UseProjectLifecycleResult> = {}): UseProjectLifecycleResult {
   return {
     isProjectBusy: () => false,
+    getBusyOperation: () => null,
     isCreating: false,
     createProject: jest.fn(),
     renameProject: jest.fn(),
@@ -103,8 +104,34 @@ describe("ProjectLifecycleRow — Restore has no confirmation dialog, dispatches
     expect(refreshSections).not.toHaveBeenCalled();
   });
 
-  it("Restore button is disabled while this Project is busy, and shows a busy label", () => {
-    const lifecycle = fakeLifecycle({ isProjectBusy: (id) => id === ARCHIVED_PROJECT.id });
+  it("archived Project idle: Restore button is enabled and reads exactly \"Restore\"", () => {
+    const lifecycle = fakeLifecycle();
+    const { renderer } = setup(ARCHIVED_PROJECT, "archived", lifecycle);
+    const restoreButton = renderer.root.findAllByType("button").find((b) => typeof b.props.children === "string" && b.props.children.includes("Restor"))!;
+    expect(restoreButton.props.disabled).toBe(false);
+    expect(restoreButton.props.children).toBe("Restore");
+  });
+
+  it("Phase 7D.3B regression — archived Project rename in flight: Restore is disabled but its label must stay \"Restore\", never \"Restoring…\"", () => {
+    // The shared per-Project lock is held (isProjectBusy true) by a Rename,
+    // not a Restore — getBusyOperation must be consulted for the label, not
+    // isProjectBusy alone, or the Restore button falsely claims to be the
+    // operation that's actually running.
+    const lifecycle = fakeLifecycle({
+      isProjectBusy: (id) => id === ARCHIVED_PROJECT.id,
+      getBusyOperation: (id) => (id === ARCHIVED_PROJECT.id ? "rename" : null),
+    });
+    const { renderer } = setup(ARCHIVED_PROJECT, "archived", lifecycle);
+    const restoreButton = renderer.root.findAllByType("button").find((b) => typeof b.props.children === "string" && b.props.children.includes("Restor"))!;
+    expect(restoreButton.props.disabled).toBe(true);
+    expect(restoreButton.props.children).toBe("Restore");
+  });
+
+  it("archived Project restore in flight: Restore is disabled and its label is \"Restoring…\"", () => {
+    const lifecycle = fakeLifecycle({
+      isProjectBusy: (id) => id === ARCHIVED_PROJECT.id,
+      getBusyOperation: (id) => (id === ARCHIVED_PROJECT.id ? "restore" : null),
+    });
     const { renderer } = setup(ARCHIVED_PROJECT, "archived", lifecycle);
     const restoreButton = renderer.root.findAllByType("button").find((b) => typeof b.props.children === "string" && b.props.children.includes("Restor"))!;
     expect(restoreButton.props.disabled).toBe(true);
@@ -120,5 +147,18 @@ describe("ProjectLifecycleRow — Restore has no confirmation dialog, dispatches
       await restoreButton.props.onClick();
     });
     expect(restoreProject).not.toHaveBeenCalled();
+  });
+});
+
+describe("ProjectLifecycleRow — Phase 7D.3B: active-side equivalent has no analogous defect (protective regression)", () => {
+  it("active Project rename in flight: Archive trigger is disabled but its label stays exactly \"Archive\", never a false archiving-progress claim", () => {
+    const lifecycle = fakeLifecycle({
+      isProjectBusy: (id) => id === ACTIVE_PROJECT.id,
+      getBusyOperation: (id) => (id === ACTIVE_PROJECT.id ? "rename" : null),
+    });
+    const { renderer } = setup(ACTIVE_PROJECT, "active", lifecycle);
+    const archiveButton = renderer.root.findAllByType("button").find((b) => b.props.children === "Archive")!;
+    expect(archiveButton.props.disabled).toBe(true);
+    expect(archiveButton.props.children).toBe("Archive");
   });
 });

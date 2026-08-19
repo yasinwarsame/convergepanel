@@ -504,7 +504,7 @@ describe("ActiveProjectsSection through the REAL useProjects()/parseProjectsList
     const result = useProjects({ status: "active" });
     return createElement(ActiveProjectsSection, {
       result,
-      lifecycle: { isProjectBusy: () => false, isCreating: false, createProject: jest.fn(), renameProject: jest.fn(), archiveProject: jest.fn(), restoreProject: jest.fn() },
+      lifecycle: { isProjectBusy: () => false, getBusyOperation: () => null, isCreating: false, createProject: jest.fn(), renameProject: jest.fn(), archiveProject: jest.fn(), restoreProject: jest.fn() },
       onRenamed: jest.fn(),
       refreshSections: jest.fn(),
       onCreated: jest.fn(),

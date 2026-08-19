@@ -51,6 +51,7 @@ function fakeUnfiled(overrides: Partial<UseUnfiledRunsResult> = {}): UseUnfiledR
 function fakeLifecycle(overrides: Partial<UseProjectLifecycleResult> = {}): UseProjectLifecycleResult {
   return {
     isProjectBusy: () => false,
+    getBusyOperation: () => null,
     isCreating: false,
     createProject: jest.fn(),
     renameProject: jest.fn(),
