@@ -100,3 +100,34 @@ describe("WorkspaceRunCard", () => {
     expect(html.toLowerCase()).not.toMatch(/workspaceid|ownerid|userid/);
   });
 });
+
+describe("WorkspaceRunCard — Phase 7E-A: optional `actions` slot (default path stays byte-identical)", () => {
+  it("actions omitted: still exactly one <a>, zero <button> — no existing caller is affected", () => {
+    // Duplicates the invariant above deliberately: this is the specific
+    // regression this slot could introduce if `actions` leaked a default.
+    const html = render(BASE_ITEM);
+    expect((html.match(/<a /g) || []).length).toBe(1);
+    expect((html.match(/<button/g) || []).length).toBe(0);
+  });
+
+  it("actions provided: renders as a SIBLING of the report link, never nested inside the <a> — still exactly one <a>", () => {
+    const html = renderToStaticMarkup(
+      createElement("ul", null, createElement(WorkspaceRunCard, { item: BASE_ITEM, actions: createElement("button", { type: "button" }, "Add to project") }))
+    );
+    expect((html.match(/<a /g) || []).length).toBe(1);
+    expect((html.match(/<button/g) || []).length).toBe(1);
+    // The button must appear AFTER the anchor closes, not inside it.
+    const anchorClose = html.indexOf("</a>");
+    const buttonOpen = html.indexOf("<button");
+    expect(anchorClose).toBeGreaterThan(-1);
+    expect(buttonOpen).toBeGreaterThan(anchorClose);
+  });
+
+  it("actions provided: report link href/question text are unaffected", () => {
+    const html = renderToStaticMarkup(
+      createElement("ul", null, createElement(WorkspaceRunCard, { item: BASE_ITEM, actions: createElement("button", { type: "button" }, "Add to project") }))
+    );
+    expect(html).toContain(`href="/?openResearchRun=${encodeURIComponent(BASE_ITEM.id)}"`);
+    expect(html).toContain(BASE_ITEM.question);
+  });
+});

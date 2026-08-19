@@ -80,6 +80,13 @@ jest.mock("@/hooks/useProjectLifecycle", () => ({
   }),
 }));
 
+jest.mock("@/hooks/useRunProjectAssociation", () => ({
+  useRunProjectAssociation: () => ({
+    isRunBusy: () => false,
+    assign: jest.fn(),
+  }),
+}));
+
 import ProjectsShell, { ProjectsShellView } from "@/components/projects/ProjectsShell";
 import type { ProjectSummary } from "@/hooks/useProjects";
 
@@ -140,5 +147,17 @@ describe("ProjectsShell wiring — archive/restore (spec item 13/15/23: BOTH sec
     expect(mockActive.resetAndReloadFromStart).toHaveBeenCalledTimes(1);
     expect(mockArchived.resetAndReloadFromStart).toHaveBeenCalledTimes(1);
     expect(mockUnfiled.resetAndReloadFromStart).not.toHaveBeenCalled();
+  });
+});
+
+describe("ProjectsShell wiring — Phase 7E-A: run assignment resets Unfiled only (spec item 20)", () => {
+  it("onRunAssigned resets Unfiled but never touches Active or Archived", () => {
+    const { view } = mountShell();
+    act(() => {
+      (view.props as any).onRunAssigned();
+    });
+    expect(mockUnfiled.resetAndReloadFromStart).toHaveBeenCalledTimes(1);
+    expect(mockActive.resetAndReloadFromStart).not.toHaveBeenCalled();
+    expect(mockArchived.resetAndReloadFromStart).not.toHaveBeenCalled();
   });
 });

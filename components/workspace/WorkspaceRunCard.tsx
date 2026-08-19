@@ -11,6 +11,7 @@
  */
 
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { GovernanceChip } from "@/components/shared/GovernanceChip";
 import type { WorkspaceRunSummary } from "@/hooks/useWorkspaceRuns";
 
@@ -40,13 +41,21 @@ export function workspaceRunStatusLine(item: Pick<WorkspaceRunSummary, "status" 
   return base;
 }
 
-export function WorkspaceRunCard({ item }: { item: WorkspaceRunSummary }) {
+/**
+ * Phase 7E-A — `actions` is an optional slot for Projects-context-only
+ * controls (e.g. "Add to project"). Deliberately rendered as a SIBLING of
+ * `Link`, never nested inside it — the whole row's report navigation is a
+ * single `<a>`, and an interactive control nested inside an `<a>` would be
+ * both invalid HTML and unreliable to click. When `actions` is omitted
+ * (every existing caller: `/workspace`, Active/Archived-adjacent contexts),
+ * rendering is byte-identical to before this prop existed — see this
+ * component's own tests for the enforced "exactly one `<a>`, zero
+ * `<button>`" invariant on that default path.
+ */
+export function WorkspaceRunCard({ item, actions }: { item: WorkspaceRunSummary; actions?: ReactNode }) {
   return (
-    <li>
-      <Link
-        href={`/?openResearchRun=${encodeURIComponent(item.id)}`}
-        className="flex w-full items-start gap-3 rounded-xl border-2 border-cp-border bg-cp-raised px-3 py-3 text-left transition-colors hover:border-cp-accent hover:bg-cp-primary-soft"
-      >
+    <li className="rounded-xl border-2 border-cp-border bg-cp-raised transition-colors hover:border-cp-accent hover:bg-cp-primary-soft">
+      <Link href={`/?openResearchRun=${encodeURIComponent(item.id)}`} className="flex w-full items-start gap-3 px-3 py-3 text-left">
         <span className="min-w-0 flex-1">
           <span className="flex flex-wrap items-center gap-2">
             <span className="text-xs font-medium text-cp-faint">{new Date(item.at).toLocaleString()}</span>
@@ -56,6 +65,7 @@ export function WorkspaceRunCard({ item }: { item: WorkspaceRunSummary }) {
         </span>
         <GovernanceChip status={item.governanceStatus} />
       </Link>
+      {actions && <div className="flex justify-end gap-2 border-t border-cp-border-soft px-3 py-2">{actions}</div>}
     </li>
   );
 }

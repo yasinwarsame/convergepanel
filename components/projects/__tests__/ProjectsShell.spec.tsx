@@ -16,6 +16,7 @@ import { ProjectsShellView } from "@/components/projects/ProjectsShell";
 import type { UseProjectsResult, ProjectSummary } from "@/hooks/useProjects";
 import type { UseUnfiledRunsResult, ProjectRunSummary } from "@/hooks/useUnfiledRuns";
 import type { UseProjectLifecycleResult } from "@/hooks/useProjectLifecycle";
+import type { UseRunProjectAssociationResult } from "@/hooks/useRunProjectAssociation";
 
 function fakeProjects(overrides: Partial<UseProjectsResult> = {}): UseProjectsResult {
   return {
@@ -66,6 +67,14 @@ const ACTIVE_PROJECT: ProjectSummary = { id: "p1", name: "My Active Project", st
 const ARCHIVED_PROJECT: ProjectSummary = { id: "p2", name: "My Archived Project", status: "archived", createdAt: "2026-08-01T00:00:00.000Z", updatedAt: "2026-08-01T00:00:00.000Z", updateTime: UPDATE_TIME };
 const UNFILED_RUN: ProjectRunSummary = { id: "r1", at: "2026-08-01T00:00:00.000Z", question: "My Unfiled Question", selectedModels: ["chatgpt"], projectId: null };
 
+function fakeAssociation(overrides: Partial<UseRunProjectAssociationResult> = {}): UseRunProjectAssociationResult {
+  return {
+    isRunBusy: () => false,
+    assign: jest.fn(),
+    ...overrides,
+  };
+}
+
 function render(active: UseProjectsResult, unfiled: UseUnfiledRunsResult, archived: UseProjectsResult): string {
   return renderToStaticMarkup(
     createElement(ProjectsShellView, {
@@ -73,9 +82,11 @@ function render(active: UseProjectsResult, unfiled: UseUnfiledRunsResult, archiv
       unfiled,
       archived,
       lifecycle: fakeLifecycle(),
+      association: fakeAssociation(),
       onCreated: jest.fn(),
       onRenamed: jest.fn(),
       refreshSections: jest.fn(),
+      onRunAssigned: jest.fn(),
     })
   );
 }
