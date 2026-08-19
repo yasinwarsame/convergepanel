@@ -100,6 +100,136 @@ describe("parseProjectRunsPageResponse (pure)", () => {
     });
   });
 
+  describe("MUTATION-TARGETED: scope.project must pass the full canonical ProjectSummaryDto shape check (Phase 7E-B.1A)", () => {
+    it("scope.project missing entirely (scope.type is 'project' but no project field) -> whole page rejected", () => {
+      const result = parseProjectRunsPageResponse({
+        ok: true,
+        body: { ok: true, items: [SAMPLE_ITEM], hasMore: false, scope: { type: "project" } },
+        expectedProjectId: PROJECT_ID,
+      });
+      expect(result).toEqual({ ok: false, errorCode: "internal_error" });
+    });
+
+    it("scope.project is a non-object (e.g. a string) -> whole page rejected", () => {
+      const result = parseProjectRunsPageResponse({
+        ok: true,
+        body: { ok: true, items: [SAMPLE_ITEM], hasMore: false, scope: { type: "project", project: PROJECT_ID } },
+        expectedProjectId: PROJECT_ID,
+      });
+      expect(result).toEqual({ ok: false, errorCode: "internal_error" });
+    });
+
+    it("scope.project.id missing -> whole page rejected", () => {
+      const { id: _id, ...rest } = VALID_SCOPE.project;
+      const result = parseProjectRunsPageResponse({
+        ok: true,
+        body: { ok: true, items: [SAMPLE_ITEM], hasMore: false, scope: { type: "project", project: rest } },
+        expectedProjectId: PROJECT_ID,
+      });
+      expect(result).toEqual({ ok: false, errorCode: "internal_error" });
+    });
+
+    it("scope.project.id empty string -> whole page rejected", () => {
+      const result = parseProjectRunsPageResponse({
+        ok: true,
+        body: { ok: true, items: [SAMPLE_ITEM], hasMore: false, scope: { ...VALID_SCOPE, project: { ...VALID_SCOPE.project, id: "" } } },
+        expectedProjectId: PROJECT_ID,
+      });
+      expect(result).toEqual({ ok: false, errorCode: "internal_error" });
+    });
+
+    it("scope.project.id wrong type (number) -> whole page rejected", () => {
+      const result = parseProjectRunsPageResponse({
+        ok: true,
+        body: { ok: true, items: [SAMPLE_ITEM], hasMore: false, scope: { ...VALID_SCOPE, project: { ...VALID_SCOPE.project, id: 1 } } },
+        expectedProjectId: PROJECT_ID,
+      });
+      expect(result).toEqual({ ok: false, errorCode: "internal_error" });
+    });
+
+    it("scope.project.name wrong type (number) -> whole page rejected", () => {
+      const result = parseProjectRunsPageResponse({
+        ok: true,
+        body: { ok: true, items: [SAMPLE_ITEM], hasMore: false, scope: { ...VALID_SCOPE, project: { ...VALID_SCOPE.project, name: 42 } } },
+        expectedProjectId: PROJECT_ID,
+      });
+      expect(result).toEqual({ ok: false, errorCode: "internal_error" });
+    });
+
+    it("scope.project.status invalid enum value -> whole page rejected", () => {
+      const result = parseProjectRunsPageResponse({
+        ok: true,
+        body: { ok: true, items: [SAMPLE_ITEM], hasMore: false, scope: { ...VALID_SCOPE, project: { ...VALID_SCOPE.project, status: "deleted" } } },
+        expectedProjectId: PROJECT_ID,
+      });
+      expect(result).toEqual({ ok: false, errorCode: "internal_error" });
+    });
+
+    it("scope.project.updateTime missing -> whole page rejected (INITIAL-PAGE PROOF: otherwise-valid rows are never adopted)", () => {
+      const { updateTime: _updateTime, ...rest } = VALID_SCOPE.project;
+      const result = parseProjectRunsPageResponse({
+        ok: true,
+        body: { ok: true, items: [SAMPLE_ITEM], hasMore: false, scope: { type: "project", project: rest } },
+        expectedProjectId: PROJECT_ID,
+      });
+      expect(result).toEqual({ ok: false, errorCode: "internal_error" });
+    });
+
+    it("scope.project.updateTime non-object -> whole page rejected", () => {
+      const result = parseProjectRunsPageResponse({
+        ok: true,
+        body: { ok: true, items: [SAMPLE_ITEM], hasMore: false, scope: { ...VALID_SCOPE, project: { ...VALID_SCOPE.project, updateTime: "not-a-token" } } },
+        expectedProjectId: PROJECT_ID,
+      });
+      expect(result).toEqual({ ok: false, errorCode: "internal_error" });
+    });
+
+    it("scope.project.updateTime.seconds malformed (negative) -> whole page rejected", () => {
+      const result = parseProjectRunsPageResponse({
+        ok: true,
+        body: { ok: true, items: [SAMPLE_ITEM], hasMore: false, scope: { ...VALID_SCOPE, project: { ...VALID_SCOPE.project, updateTime: { seconds: -1, nanoseconds: 0 } } } },
+        expectedProjectId: PROJECT_ID,
+      });
+      expect(result).toEqual({ ok: false, errorCode: "internal_error" });
+    });
+
+    it("scope.project.updateTime.seconds malformed (non-integer) -> whole page rejected", () => {
+      const result = parseProjectRunsPageResponse({
+        ok: true,
+        body: { ok: true, items: [SAMPLE_ITEM], hasMore: false, scope: { ...VALID_SCOPE, project: { ...VALID_SCOPE.project, updateTime: { seconds: 1.5, nanoseconds: 0 } } } },
+        expectedProjectId: PROJECT_ID,
+      });
+      expect(result).toEqual({ ok: false, errorCode: "internal_error" });
+    });
+
+    it("scope.project.updateTime.nanoseconds malformed (exceeds max) -> whole page rejected", () => {
+      const result = parseProjectRunsPageResponse({
+        ok: true,
+        body: { ok: true, items: [SAMPLE_ITEM], hasMore: false, scope: { ...VALID_SCOPE, project: { ...VALID_SCOPE.project, updateTime: { seconds: 1, nanoseconds: 1_000_000_000 } } } },
+        expectedProjectId: PROJECT_ID,
+      });
+      expect(result).toEqual({ ok: false, errorCode: "internal_error" });
+    });
+
+    it("scope.project.updateTime.nanoseconds malformed (negative) -> whole page rejected", () => {
+      const result = parseProjectRunsPageResponse({
+        ok: true,
+        body: { ok: true, items: [SAMPLE_ITEM], hasMore: false, scope: { ...VALID_SCOPE, project: { ...VALID_SCOPE.project, updateTime: { seconds: 1, nanoseconds: -1 } } } },
+        expectedProjectId: PROJECT_ID,
+      });
+      expect(result).toEqual({ ok: false, errorCode: "internal_error" });
+    });
+
+    it("fully valid scope.project (exact canonical shape) -> accepted", () => {
+      const result = parseProjectRunsPageResponse({
+        ok: true,
+        body: { ok: true, items: [SAMPLE_ITEM], hasMore: false, scope: VALID_SCOPE },
+        expectedProjectId: PROJECT_ID,
+      });
+      expect(result).toEqual({ ok: true, page: { items: [SAMPLE_ITEM], hasMore: false, nextCursor: undefined } });
+    });
+  });
+
   describe("MUTATION-TARGETED: per-item projectId invariant, whole page rejected (spec items 9/12/13)", () => {
     it("missing projectId field on one item -> whole page rejected, zero rows adopted", () => {
       const badItem = { id: "run-bad", at: SAMPLE_ITEM.at, question: "Q", selectedModels: [] } as unknown as ProjectRunSummary;
@@ -256,6 +386,41 @@ describe("useProjectRuns — MUTATION-TARGETED: load-more contradiction preserve
     expect(latest.hasMore).toBe(true); // not silently flipped to false
 
     // Retry the SAME cursor, this time valid.
+    queueResponse(cursorUrl("c1"), { ok: true, body: { ok: true, items: [{ ...SAMPLE_ITEM, id: "run-2" }], hasMore: false, scope: VALID_SCOPE } });
+    await act(async () => {
+      latest.loadMore();
+    });
+    await flush();
+    expect(latest.items.map((i) => i.id)).toEqual(["run-1", "run-2"]);
+    expect(callLog.filter((u) => u === cursorUrl("c1")).length).toBe(2);
+    renderer.unmount();
+  });
+
+  it("a load-more page with a structurally malformed scope.project (missing updateTime) contributes zero rows; prior valid rows and cursor are preserved; same cursor is retried (Phase 7E-B.1A)", async () => {
+    let latest!: UseProjectRunsResult;
+    queueResponse(PROJECT_URL, { ok: true, body: { ok: true, items: [SAMPLE_ITEM], hasMore: true, nextCursor: "c1", scope: VALID_SCOPE } });
+    let renderer!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      renderer = TestRenderer.create(createElement(HookHost, { projectId: PROJECT_ID, onResult: (r) => (latest = r) }));
+    });
+    await flush();
+    expect(latest.items).toEqual([SAMPLE_ITEM]);
+
+    // Load-more page 2 has valid rows but a scope.project missing its updateTime token.
+    const { updateTime: _updateTime, ...projectWithoutUpdateTime } = VALID_SCOPE.project;
+    queueResponse(cursorUrl("c1"), {
+      ok: true,
+      body: { ok: true, items: [{ ...SAMPLE_ITEM, id: "run-2" }], hasMore: true, nextCursor: "c2", scope: { type: "project", project: projectWithoutUpdateTime } },
+    });
+    await act(async () => {
+      latest.loadMore();
+    });
+    await flush();
+    expect(latest.loadMoreErrorCode).toBe("internal_error");
+    expect(latest.items).toEqual([SAMPLE_ITEM]); // prior valid page untouched, malformed page contributed zero rows
+    expect(latest.hasMore).toBe(true); // not silently flipped to false
+
+    // Retry the SAME cursor, this time with a fully valid scope.project.
     queueResponse(cursorUrl("c1"), { ok: true, body: { ok: true, items: [{ ...SAMPLE_ITEM, id: "run-2" }], hasMore: false, scope: VALID_SCOPE } });
     await act(async () => {
       latest.loadMore();

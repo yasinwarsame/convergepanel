@@ -16,8 +16,14 @@
  *
  * Two independent things are validated, both fail-closed:
  *  1. the response's own `scope` envelope — `scope.type === "project"` and
- *     `scope.project.id === projectId` (the server's own confirmation of
- *     what it thinks it just served).
+ *     `scope.project` structurally valid as the exact same
+ *     `ProjectSummaryDto` shape `GET /api/user/projects` serves (the route
+ *     literally calls the same `toProjectSummaryDto()`), reusing
+ *     `isValidUpdateTimeTokenShape()` from `updateTimeTokenClient.ts` — the
+ *     identical validator `useProjects.ts`'s `isValidProjectSummaryItem()`
+ *     already uses for `updateTime` — rather than a second competing
+ *     schema. `scope.project.id === projectId` exactly (the server's own
+ *     confirmation of what it thinks it just served).
  *  2. every returned run's own `projectId` field — `=== projectId` exactly
  *     (mirrors the server's own `listProjectRunsForOwner.ts` integrity
  *     check; this is defense-in-depth on top of an already-enforced
@@ -32,6 +38,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import { authedFetch } from "@/lib/client/authedFetch";
 import type { ProjectRunSummary } from "@/lib/projects/projectRunSummary";
+import { isValidUpdateTimeTokenShape } from "@/lib/projects/updateTimeTokenClient";
 export type { ProjectRunSummary };
 
 export type ProjectRunsErrorCode =
@@ -68,7 +75,15 @@ export interface ProjectRunsPage {
 
 export type ParseProjectRunsPageResult = { ok: true; page: ProjectRunsPage } | { ok: false; errorCode: ProjectRunsErrorCode };
 
-/** Pure: the response's own confirmation of what it served must agree with what was requested — never trusted merely because the HTTP call as a whole succeeded. */
+/**
+ * Pure: the response's own confirmation of what it served must agree with
+ * what was requested — never trusted merely because the HTTP call as a
+ * whole succeeded. `scope.project` must pass the same structural checks as
+ * `useProjects.ts`'s `isValidProjectSummaryItem()` (id/name/status/
+ * updateTime shape) — it is the exact same DTO, just wrapped in a `scope`
+ * envelope instead of a list item. `id === expectedProjectId` is checked
+ * exactly, with no normalization/coercion/substitution.
+ */
 function isValidProjectScopeEnvelope(scope: unknown, expectedProjectId: string): boolean {
   if (typeof scope !== "object" || scope === null) return false;
   const c = scope as Record<string, unknown>;
@@ -76,7 +91,14 @@ function isValidProjectScopeEnvelope(scope: unknown, expectedProjectId: string):
   const project = c.project;
   if (typeof project !== "object" || project === null) return false;
   const p = project as Record<string, unknown>;
-  return typeof p.id === "string" && p.id === expectedProjectId && typeof p.name === "string" && (p.status === "active" || p.status === "archived");
+  return (
+    typeof p.id === "string" &&
+    p.id.length > 0 &&
+    p.id === expectedProjectId &&
+    typeof p.name === "string" &&
+    (p.status === "active" || p.status === "archived") &&
+    isValidUpdateTimeTokenShape(p.updateTime)
+  );
 }
 
 /** Pure: minimal structural + exact-scope validation for a single returned run item — mirrors `isValidProjectSummaryItem()` in `hooks/useProjects.ts`. */
