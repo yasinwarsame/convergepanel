@@ -15,25 +15,26 @@ import type { Timestamp } from "firebase-admin/firestore";
 
 /**
  * Both values are part of the domain vocabulary from Phase 1 onward so the
- * `Workspace` document shape never needs a breaking change later, but only
- * "personal" is ever resolvable by this phase's logic (see
- * `WorkspaceContext` below, which pins `workspaceType` to the literal
- * `"personal"`). A `type: "team"` workspace is real future-compatible data
- * shape, not implemented authorization — see `resolveWorkspaceContext()`'s
- * `unsupported_workspace_type` outcome.
+ * `Workspace` document shape never needs a breaking change later. Phase 1
+ * through Phase 7's resolvers only ever authorize `"personal"` (see
+ * `WorkspaceContext`, still pinned to `"personal"` — Phase 8B's new
+ * membership-based resolver, `resolveWorkspaceAccess()`, is the first code
+ * to actually authorize `"team"`; see `resolveWorkspaceAccess.ts`).
  */
 export type WorkspaceType = "personal" | "team";
 
 /**
- * The Workspace document itself, at `workspaces/{id}`. Phase 1 defines this
- * shape and reads it (when a `workspaceId` happens to be present on a
- * resource — which never happens yet, since nothing writes one) but never
- * creates, updates, or deletes it. Provisioning is Phase 2.
+ * The Personal Workspace variant — byte-identical shape to every Personal
+ * Workspace document written by Phase 1 through Phase 7 (no migration, no
+ * new required field). `createdByUserId` deliberately does not exist on
+ * this variant: a Personal Workspace has exactly one person associated
+ * with it, already fully captured by `ownerUserId`, so a second
+ * "who created it" field would be redundant, never additive.
  */
-export interface WorkspaceV1 {
+export interface PersonalWorkspaceV1 {
   schemaVersion: 1;
   id: string;
-  type: WorkspaceType;
+  type: "personal";
   name: string;
   ownerUserId: string;
   createdAt: Timestamp | string;
@@ -41,27 +42,64 @@ export interface WorkspaceV1 {
 }
 
 /**
+ * The Team Workspace variant, introduced in Phase 8B. `ownerUserId` is
+ * CURRENT administrative ownership — it moves on a successful ownership
+ * transfer (see `transferTeamWorkspaceOwnership()`). `createdByUserId` is
+ * immutable historical provenance, set once at creation and never mutated
+ * by any Phase 8B write path (transfer included) — see
+ * `docs/workspaces/phase8-team-workspace-foundation.md`'s "createdByUserId
+ * immutability" section for the full invariant and where it's enforced/
+ * tested. Both are non-empty uids; `createdByUserId` is required (never
+ * optional) specifically for `"team"` — unlike `"personal"`, where the
+ * concept doesn't apply.
+ */
+export interface TeamWorkspaceV1 {
+  schemaVersion: 1;
+  id: string;
+  type: "team";
+  name: string;
+  ownerUserId: string;
+  createdByUserId: string;
+  createdAt: Timestamp | string;
+  updatedAt: Timestamp | string;
+}
+
+/**
+ * The Workspace document itself, at `workspaces/{id}`. A discriminated
+ * union on `type` — additive over the pre-Phase-8B flat shape: every
+ * existing Personal Workspace document in production already satisfies
+ * `PersonalWorkspaceV1` byte-for-byte (same required fields, same
+ * optional-absent `createdByUserId`), so no migration/backfill is
+ * triggered by this change. `type: "team"` is the first variant to
+ * require `createdByUserId`.
+ */
+export type WorkspaceV1 = PersonalWorkspaceV1 | TeamWorkspaceV1;
+
+/**
  * Structural guard for data read back from Firestore — never a blind cast,
- * since resolution security depends on this. Deliberately does NOT check
- * `type === "personal"`; a `"team"` workspace is well-formed data, just not
- * yet resolvable (see `unsupported_workspace_type`).
+ * since resolution security depends on this. Additive over the pre-Phase-8B
+ * version: every check that previously applied still applies identically to
+ * a Personal document; a Team document additionally requires a non-empty
+ * `createdByUserId`.
  *
- * Deliberate runtime-validation compatibility policy (Phase 1):
+ * Deliberate runtime-validation compatibility policy:
  * - Strictly validated because they are authorization-relevant:
  *   `schemaVersion` (must be the literal `1`), `id` (non-empty string —
  *   its match against the actual Firestore document id is enforced
  *   separately, in `lib/firestore/workspaces.ts`, at the point of read),
  *   `type` (must be a recognized `WorkspaceType` value), `ownerUserId`
- *   (non-empty string — this is the entire Phase 1 access model).
+ *   (non-empty string — this is the entire Personal-mode access model, and
+ *   the necessary-but-not-sufficient half of the Team Owner invariant — see
+ *   `resolveWorkspaceAccess.ts`). For `type: "team"`, `createdByUserId` is
+ *   additionally required (non-empty string).
  * - Validated for type only, not further constrained: `name` (must be a
  *   string; emptiness is a display-quality concern, not a security one).
  * - NOT validated at all, deliberately: `createdAt`/`updatedAt`. Neither
  *   field is ever read by the resolver or the access check — only
- *   `id`/`type`/`ownerUserId` participate in any authorization decision —
- *   so a malformed timestamp cannot produce an authorization bug, and
- *   rejecting a document over a cosmetic field would be over-validation
- *   for a security boundary. If a future phase starts making decisions
- *   based on these fields (e.g. expiry), they must be added here THEN.
+ *   `id`/`type`/`ownerUserId`/(`createdByUserId` for Team) participate in
+ *   any authorization decision — so a malformed timestamp cannot produce an
+ *   authorization bug, and rejecting a document over a cosmetic field would
+ *   be over-validation for a security boundary.
  * - Unknown/unexpected additional fields on the document are ACCEPTED, not
  *   rejected — an open/forward-compatible schema, matching this
  *   codebase's own convention (`TeamDocument`'s additive-optional-block
@@ -72,15 +110,23 @@ export interface WorkspaceV1 {
 export function isWellFormedWorkspaceV1(data: unknown): data is WorkspaceV1 {
   if (typeof data !== "object" || data === null) return false;
   const d = data as Record<string, unknown>;
-  return (
+  const baseValid =
     d.schemaVersion === 1 &&
     typeof d.id === "string" &&
     d.id.length > 0 &&
     (d.type === "personal" || d.type === "team") &&
     typeof d.name === "string" &&
     typeof d.ownerUserId === "string" &&
-    d.ownerUserId.length > 0
-  );
+    d.ownerUserId.length > 0;
+  if (!baseValid) return false;
+
+  if (d.type === "team") {
+    return typeof d.createdByUserId === "string" && d.createdByUserId.length > 0;
+  }
+  // type === "personal" — createdByUserId is not part of this variant's
+  // shape; its presence/absence is never checked either way (forward-
+  // compatible with the open-extra-fields policy above).
+  return true;
 }
 
 /**

@@ -227,7 +227,7 @@ describe("ensurePersonalWorkspace — ALREADY_EXISTS conflict handling (fail clo
 
   it("ALREADY_EXISTS + wrong type (team): conflict, existing document untouched", async () => {
     const ensure = await loadWithFlag(true);
-    seed("owner-1", { type: "team" });
+    seed("owner-1", { type: "team", createdByUserId: "owner-1" }); // Phase 8B: well-formed team shape now requires createdByUserId
     const before = workspaceDocs.get("workspaces/personal-owner-1");
     const result = await ensure("owner-1");
     expect(result).toEqual({ status: "conflict", reason: "wrong_type" });

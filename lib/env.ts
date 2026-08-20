@@ -308,6 +308,28 @@ export const PROJECTS_ENABLED = process.env.PROJECTS_ENABLED === "true";
 export const PROJECTS_CANARY_UIDS = process.env.PROJECTS_CANARY_UIDS;
 
 /**
+ * Team Workspace Core Foundation, Phase 8B
+ * (docs/workspaces/phase8-team-workspace-foundation.md) — a server-side-
+ * only kill switch, default OFF, same fail-closed convention as every
+ * flag above. Gates the entire Team Workspace backend surface introduced
+ * in Phase 8B: Team Workspace creation, ownership transfer, and
+ * membership-based Team access resolution (`resolveWorkspaceAccess()`'s
+ * Team path). Unrelated to and with no effect on `WORKSPACES_ENABLED` —
+ * that flag governs the pre-existing resource-to-workspace binding
+ * resolver (`resolveWorkspaceContextForResource()`), a different axis
+ * entirely from "does a uid have access within a given Workspace," which
+ * is what Phase 8B's resolver answers.
+ *
+ * Personal Workspace behavior is completely unaffected by this flag —
+ * `resolveWorkspaceAccess()`'s Personal path never reads it, mirroring
+ * how `PERSONAL_WORKSPACE_PROVISIONING_ENABLED` never affects Phase 1's
+ * resolver. Default OFF is the required dark-deployment state: shipping
+ * Phase 8B must never require setting this variable to remain safe, and
+ * no Team Workspace may be created in production while this stays off.
+ */
+export const TEAM_WORKSPACES_ENABLED = process.env.TEAM_WORKSPACES_ENABLED === "true";
+
+/**
  * Projects UI Shell, Phase 7B — a PRESENTATION-only rollout flag,
  * structural sibling of `PERSONAL_WORKSPACE_UI_ENABLED` above. Unrelated
  * to and with no effect on `PROJECTS_ENABLED`/`PROJECTS_CANARY_UIDS`

@@ -98,7 +98,7 @@ describe("discoverUserWorkspaceStatus — dry-run, read-only", () => {
 
   it("returns conflict wrong_type for a team-type existing workspace", async () => {
     const { discoverUserWorkspaceStatus } = await loadModules();
-    seed("uid-1", { type: "team" });
+    seed("uid-1", { type: "team", createdByUserId: "uid-1" }); // Phase 8B: well-formed team shape now requires createdByUserId
     const result = await discoverUserWorkspaceStatus({ uid: "uid-1", disabled: false }, new Set());
     expect(result).toEqual({ status: "conflict", reason: "wrong_type" });
   });
