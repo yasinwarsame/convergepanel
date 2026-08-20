@@ -166,8 +166,8 @@ describe("getWorkspace", () => {
     expect(result).toEqual({ status: "read_failed" });
   });
 
-  it("accepts type: \"team\" as well-formed data (Phase 1 defers authorization, not shape validity)", async () => {
-    seedWorkspace("team-ws", { type: "team" });
+  it("accepts a well-formed type: \"team\" document (Phase 8B added the createdByUserId requirement for this variant; Phase 1's own resolvers still defer authorization for it, not shape validity)", async () => {
+    seedWorkspace("team-ws", { type: "team", createdByUserId: "founder-1" });
     const result = await getWorkspace("team-ws");
     expect(result.status).toBe("found");
     if (result.status === "found") {

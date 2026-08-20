@@ -1,6 +1,11 @@
 /**
- * Workspace Compatibility Foundation, Phase 1 — isWellFormedWorkspaceV1()
- * structural guard tests.
+ * Workspace Compatibility Foundation (Phase 1) + Team Workspace Core
+ * Foundation (Phase 8B) — isWellFormedWorkspaceV1() structural guard
+ * tests. Phase 8B converted `WorkspaceV1` from a flat shape into a
+ * `type`-discriminated union; every pre-existing Personal-shape test below
+ * is preserved unchanged (Personal validity never required
+ * `createdByUserId`) and new tests cover the Team variant's additional
+ * requirement.
  */
 
 import { isWellFormedWorkspaceV1 } from "@/lib/workspaces/types";
@@ -15,13 +20,42 @@ const VALID: unknown = {
   updatedAt: "2026-08-14T00:00:00.000Z",
 };
 
+const VALID_TEAM: unknown = {
+  ...(VALID as Record<string, unknown>),
+  type: "team",
+  createdByUserId: "founder-1",
+};
+
 describe("isWellFormedWorkspaceV1", () => {
   it("accepts a well-formed personal workspace", () => {
     expect(isWellFormedWorkspaceV1(VALID)).toBe(true);
   });
 
-  it("accepts a well-formed team workspace (shape validity, not authorization support)", () => {
-    expect(isWellFormedWorkspaceV1({ ...VALID, type: "team" })).toBe(true);
+  it("accepts a legacy-shaped personal workspace with no createdByUserId field at all — pre-Phase-8B production documents remain valid without migration", () => {
+    expect(isWellFormedWorkspaceV1(VALID)).toBe(true);
+    expect((VALID as Record<string, unknown>).createdByUserId).toBeUndefined();
+  });
+
+  it("accepts a well-formed team workspace with createdByUserId", () => {
+    expect(isWellFormedWorkspaceV1(VALID_TEAM)).toBe(true);
+  });
+
+  it("rejects a team workspace missing createdByUserId entirely", () => {
+    const { createdByUserId, ...rest } = VALID_TEAM as Record<string, unknown>;
+    expect(isWellFormedWorkspaceV1(rest)).toBe(false);
+  });
+
+  it("rejects a team workspace with an empty createdByUserId", () => {
+    expect(isWellFormedWorkspaceV1({ ...(VALID_TEAM as Record<string, unknown>), createdByUserId: "" })).toBe(false);
+  });
+
+  it("rejects a team workspace with a non-string createdByUserId", () => {
+    expect(isWellFormedWorkspaceV1({ ...(VALID_TEAM as Record<string, unknown>), createdByUserId: 42 })).toBe(false);
+    expect(isWellFormedWorkspaceV1({ ...(VALID_TEAM as Record<string, unknown>), createdByUserId: null })).toBe(false);
+  });
+
+  it("continues rejecting unsupported workspace types", () => {
+    expect(isWellFormedWorkspaceV1({ ...(VALID as Record<string, unknown>), type: "enterprise" })).toBe(false);
   });
 
   it.each([

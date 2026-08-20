@@ -98,7 +98,12 @@ describe("resolvePersonalRunWorkspaceBinding", () => {
 
   it("resolution_failed:wrong_type when the document is a non-personal Workspace", async () => {
     const { resolvePersonalRunWorkspaceBinding } = await loadModule();
-    seed("uid-1", { type: "team" });
+    // Phase 8B: a well-formed team-shaped document now requires
+    // createdByUserId; this test's intent is a structurally VALID
+    // non-personal-type Workspace, not a malformed one, so the seed must
+    // include it to keep exercising the "wrong_type" downstream check
+    // rather than shape validation itself.
+    seed("uid-1", { type: "team", createdByUserId: "uid-1" });
     const result = await resolvePersonalRunWorkspaceBinding({ uid: "uid-1", writesEnabled: true, workspacesEnabled: true, hasTeam: false });
     expect(result).toEqual({ outcome: "resolution_failed", reason: "wrong_type" });
   });

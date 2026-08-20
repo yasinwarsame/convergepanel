@@ -308,6 +308,45 @@ export const PROJECTS_ENABLED = process.env.PROJECTS_ENABLED === "true";
 export const PROJECTS_CANARY_UIDS = process.env.PROJECTS_CANARY_UIDS;
 
 /**
+ * Team Workspace Core Foundation, Phase 8B (rollout flag reinstated with a
+ * canary allowlist in Phase 8B.2) — a server-side-only backend-capability
+ * gate, default OFF, same fail-closed convention as every flag above.
+ * Structural mirror of `PROJECTS_ENABLED`/`PROJECTS_CANARY_UIDS` (Phase
+ * 6B) — see `lib/workspaces/teamWorkspacesRollout.ts`, the single place
+ * that owns parsing/validation/matching/precedence for both this flag and
+ * `TEAM_WORKSPACES_CANARY_UIDS` below.
+ *
+ * Gates the entire Team Workspace backend surface: Team Workspace
+ * creation, ownership transfer, and membership-based Team access
+ * resolution (`resolveWorkspaceAccess()`'s Team path). Unrelated to and
+ * with no effect on `WORKSPACES_ENABLED` — that flag governs the
+ * pre-existing resource-to-workspace binding resolver
+ * (`resolveWorkspaceContextForResource()`), a different axis entirely
+ * from "does a uid have access within a given Workspace," which is what
+ * Phase 8B's resolver answers.
+ *
+ * Personal Workspace behavior is completely unaffected by this flag —
+ * `resolveWorkspaceAccess()`'s Personal path never reads it, mirroring
+ * how `PERSONAL_WORKSPACE_PROVISIONING_ENABLED` never affects Phase 1's
+ * resolver. Default OFF is the required dark-deployment state.
+ */
+export const TEAM_WORKSPACES_ENABLED = process.env.TEAM_WORKSPACES_ENABLED === "true";
+
+/**
+ * Account-Scoped Team Workspaces Backend Canary, Phase 8B.2 — structural
+ * sibling of `PROJECTS_CANARY_UIDS` above: an optional, server-only
+ * comma-separated Firebase uid allowlist letting Team Workspace backend
+ * capability be activated for a small number of explicitly named accounts
+ * while `TEAM_WORKSPACES_ENABLED` stays `false`. Raw, unparsed string —
+ * `lib/workspaces/teamWorkspacesRollout.ts` owns all parsing/validation/
+ * matching/precedence logic.
+ *
+ * Never prefixed `NEXT_PUBLIC_` — server-only decision, never exposed to
+ * any response body or client-readable config.
+ */
+export const TEAM_WORKSPACES_CANARY_UIDS = process.env.TEAM_WORKSPACES_CANARY_UIDS;
+
+/**
  * Projects UI Shell, Phase 7B — a PRESENTATION-only rollout flag,
  * structural sibling of `PERSONAL_WORKSPACE_UI_ENABLED` above. Unrelated
  * to and with no effect on `PROJECTS_ENABLED`/`PROJECTS_CANARY_UIDS`
