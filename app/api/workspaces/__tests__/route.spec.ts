@@ -92,3 +92,10 @@ it("500s on firestore_unavailable", async () => {
   const { res } = await callRoute({ name: "Acme" });
   expect(res.status).toBe(500);
 });
+
+it("503s when team_workspaces_disabled (rollout gate off)", async () => {
+  mockedCreateTeamWorkspace.mockResolvedValue({ status: "team_workspaces_disabled" });
+  const { res, json } = await callRoute({ name: "Acme" });
+  expect(res.status).toBe(503);
+  expect(json.errorCode).toBe("team_workspaces_disabled");
+});

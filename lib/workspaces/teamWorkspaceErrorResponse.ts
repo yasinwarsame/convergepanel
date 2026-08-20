@@ -1,19 +1,19 @@
 /**
  * Team Workspace Core Foundation, Phase 8B (route namespace corrected in
- * Phase 8B.1) — shared sanitized error mappings for `POST /api/workspaces`
- * and `POST /api/workspaces/[workspaceId]/transfer-ownership`. Structural
+ * Phase 8B.1; canary rollout gate reinstated in Phase 8B.2) — shared
+ * sanitized error mappings for `POST /api/workspaces` and
+ * `POST /api/workspaces/[workspaceId]/transfer-ownership`. Structural
  * mirror of `lib/projects/projectErrorResponse.ts`. Never forwards a raw
  * Firestore error, and never distinguishes, in a single response, which
  * of several internal checks specifically failed when doing so could
  * help an attacker enumerate another workspace's/membership's state.
- *
- * No "disabled" response exists here — Phase 8B introduces no feature
- * flag for the Team Workspace backend (see Phase 8B.1's removal of
- * `TEAM_WORKSPACES_ENABLED`); this branch's non-merged, non-deployed
- * status is the only thing gating production exposure during review.
  */
 
 export type TeamWorkspaceErrorBody = { ok: false; errorCode: string; message: string };
+
+export function teamWorkspacesDisabledResponse(): { status: number; body: TeamWorkspaceErrorBody } {
+  return { status: 503, body: { ok: false, errorCode: "team_workspaces_disabled", message: "Team Workspaces are not available right now." } };
+}
 
 export function invalidRequestBodyResponse(): { status: number; body: TeamWorkspaceErrorBody } {
   return { status: 400, body: { ok: false, errorCode: "invalid_request_body", message: "The request body is invalid." } };

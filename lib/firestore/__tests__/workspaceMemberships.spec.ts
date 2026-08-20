@@ -61,6 +61,23 @@ const mockAdminDb: any = {
     doc: (docId?: string) => makeDocRef(name, docId ?? `auto-${++autoIdCounter}`),
   }),
   runTransaction: jest.fn().mockImplementation(async (fn: (txn: any) => Promise<any>) => {
+    // Real Firestore transactions buffer every write and apply them
+    // atomically only once the callback resolves without throwing — a
+    // write is never visible (to this store, or to any later call within
+    // the SAME callback) until commit. `pendingWrites` reproduces that:
+    // `create`/`update` validate immediately (ALREADY_EXISTS / precondition
+    // checks read the CURRENT committed store, matching real Firestore's
+    // read-your-own-writes-within-a-transaction-are-still-only-applied-
+    // at-commit semantics closely enough for this suite's purposes) but
+    // only QUEUE the actual mutation; nothing in `stores` changes until
+    // every queued write is applied after the callback returns. If the
+    // callback throws at any point — including on a LATER write in the
+    // same transaction — every earlier-queued write in this attempt is
+    // discarded, never applied. Without this buffering, a two-`tx.create()`
+    // transaction where the second `create` throws would leave the first
+    // write's effect visible in the mock, which would NOT prove atomicity
+    // the way a real Firestore transaction does.
+    const pendingWrites: Array<() => void> = [];
     const txn = {
       get: async (ref: { __collection: string; __id: string }) => {
         const store = stores[ref.__collection];
@@ -74,7 +91,7 @@ const mockAdminDb: any = {
         if (store.has(ref.__id)) {
           throw new FirestoreError("6", "ALREADY_EXISTS");
         }
-        store.set(ref.__id, { data, updateTime: nextUpdateTime() });
+        pendingWrites.push(() => store.set(ref.__id, { data, updateTime: nextUpdateTime() }));
       },
       update: (ref: { __collection: string; __id: string }, data: Record<string, unknown>, precondition?: { lastUpdateTime?: Timestamp }) => {
         const store = stores[ref.__collection];
@@ -88,10 +105,12 @@ const mockAdminDb: any = {
             throw new FirestoreError("9", "FAILED_PRECONDITION: the document has changed");
           }
         }
-        store.set(ref.__id, { data: { ...entry.data, ...data }, updateTime: nextUpdateTime() });
+        pendingWrites.push(() => store.set(ref.__id, { data: { ...entry.data, ...data }, updateTime: nextUpdateTime() }));
       },
     };
-    return fn(txn);
+    const result = await fn(txn);
+    for (const applyWrite of pendingWrites) applyWrite();
+    return result;
   }),
 };
 
@@ -102,6 +121,17 @@ jest.mock("@/lib/firebase/admin", () => ({
 }));
 
 const firestoreUnavailableFlag = { value: false };
+
+let teamWorkspacesEnabled = true;
+let teamWorkspacesCanaryUids: string | undefined = undefined;
+jest.mock("@/lib/env", () => ({
+  get TEAM_WORKSPACES_ENABLED() {
+    return teamWorkspacesEnabled;
+  },
+  get TEAM_WORKSPACES_CANARY_UIDS() {
+    return teamWorkspacesCanaryUids;
+  },
+}));
 
 jest.mock("@/lib/logger", () => ({
   logger: { warn: jest.fn(), info: jest.fn(), error: jest.fn(), debug: jest.fn() },
@@ -158,6 +188,8 @@ beforeEach(() => {
   stores.workspaceMemberships.clear();
   concurrentMutationHook = null;
   firestoreUnavailableFlag.value = false;
+  teamWorkspacesEnabled = true;
+  teamWorkspacesCanaryUids = undefined;
 });
 
 describe("getWorkspaceMembershipForBinding", () => {
@@ -249,6 +281,71 @@ describe("createTeamWorkspace", () => {
     expect(result.status).toBe("create_failed");
     expect(stores.workspaces.size).toBe(0);
     expect(stores.workspaceMemberships.size).toBe(0);
+  });
+
+  it("is genuinely atomic: if the SECOND write (founder membership) fails inside the transaction, the FIRST write (Workspace) never commits either — proves this is one transaction, not two independent writes", async () => {
+    // Predict the next auto-generated workspace id (the mock's doc()
+    // counter is deterministic) and pre-seed a colliding document at the
+    // membership id that workspace would produce for OWNER_UID, forcing
+    // tx.create(membershipRef, ...) to throw ALREADY_EXISTS mid-transaction.
+    const predictedWorkspaceId = `auto-${autoIdCounter + 1}`;
+    const collidingMembershipId = computeMembershipId(predictedWorkspaceId, OWNER_UID);
+    stores.workspaceMemberships.set(collidingMembershipId, {
+      data: { schemaVersion: 1, id: collidingMembershipId, workspaceId: "some-other-ws", uid: "someone-else", role: "member", status: "active", createdAt: Timestamp.now(), updatedAt: Timestamp.now(), invitedByUserId: null, removedAt: null, removedByUserId: null },
+      updateTime: nextUpdateTime(),
+    });
+
+    const result = await createTeamWorkspace({ uid: OWNER_UID, name: "Acme" });
+
+    expect(result.status).toBe("create_failed");
+    // The Workspace document must NOT exist — a non-atomic (two-transaction)
+    // implementation would have already committed it before the second
+    // transaction (membership) failed.
+    expect(stores.workspaces.get(predictedWorkspaceId)).toBeUndefined();
+    expect(stores.workspaces.size).toBe(0);
+  });
+
+  it("never falsifies founder invitedByUserId to the owner's own uid merely to avoid null — the founder was not invited", async () => {
+    const result = await createTeamWorkspace({ uid: OWNER_UID, name: "Acme" });
+    expect(result.status).toBe("created");
+    if (result.status !== "created") return;
+    expect(result.membership.invitedByUserId).toBeNull();
+    expect(result.membership.invitedByUserId).not.toBe(OWNER_UID);
+  });
+
+  it("never persists a second updateTime field on the membership document — OCC is the native DocumentSnapshot.updateTime, not a stored domain field", async () => {
+    const result = await createTeamWorkspace({ uid: OWNER_UID, name: "Acme" });
+    expect(result.status).toBe("created");
+    if (result.status !== "created") return;
+    expect(Object.prototype.hasOwnProperty.call(result.membership, "updateTime")).toBe(false);
+    const persisted = stores.workspaceMemberships.get(result.membership.id)!.data;
+    expect(Object.prototype.hasOwnProperty.call(persisted, "updateTime")).toBe(false);
+    expect(Object.keys(persisted).sort()).toEqual(
+      ["schemaVersion", "id", "workspaceId", "uid", "role", "status", "createdAt", "updatedAt", "invitedByUserId", "removedAt", "removedByUserId"].sort()
+    );
+  });
+
+  describe("rollout gate", () => {
+    it("reports team_workspaces_disabled and performs no Firestore access when globally off and uid is not in the canary", async () => {
+      teamWorkspacesEnabled = false;
+      const result = await createTeamWorkspace({ uid: OWNER_UID, name: "Acme" });
+      expect(result.status).toBe("team_workspaces_disabled");
+      expect(mockAdminDb.runTransaction).not.toHaveBeenCalled();
+    });
+
+    it("succeeds for a uid in a valid canary list even when the global flag is off", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryUids = OWNER_UID;
+      const result = await createTeamWorkspace({ uid: OWNER_UID, name: "Acme" });
+      expect(result.status).toBe("created");
+    });
+
+    it("fails closed to disabled for a uid NOT in the canary list, even though the list is otherwise valid", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryUids = "some-other-uid";
+      const result = await createTeamWorkspace({ uid: OWNER_UID, name: "Acme" });
+      expect(result.status).toBe("team_workspaces_disabled");
+    });
   });
 });
 
@@ -501,6 +598,37 @@ describe("transferTeamWorkspaceOwnership", () => {
       expect(validateUpdateTimeToken({ seconds: "not-a-number", nanoseconds: 0 }).ok).toBe(false);
       expect(validateUpdateTimeToken(null).ok).toBe(false);
       expect(validateUpdateTimeToken({ seconds: 1 }).ok).toBe(false);
+    });
+  });
+
+  describe("rollout gate", () => {
+    it("reports team_workspaces_disabled and performs no Firestore access when globally off and callerUid is not in the canary", async () => {
+      teamWorkspacesEnabled = false;
+      const result = await transferTeamWorkspaceOwnership({
+        workspaceId: WS_ID,
+        callerUid: OWNER_UID,
+        newOwnerUid: OTHER_UID,
+        expectedWorkspaceUpdateTime: Timestamp.now(),
+        expectedOldOwnerMembershipUpdateTime: Timestamp.now(),
+        expectedNewOwnerMembershipUpdateTime: Timestamp.now(),
+      });
+      expect(result.status).toBe("team_workspaces_disabled");
+      expect(mockAdminDb.runTransaction).not.toHaveBeenCalled();
+    });
+
+    it("succeeds for a callerUid in a valid canary list even when the global flag is off", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryUids = OWNER_UID;
+      const tokens = seedHappyPath();
+      const result = await transferTeamWorkspaceOwnership({
+        workspaceId: WS_ID,
+        callerUid: OWNER_UID,
+        newOwnerUid: OTHER_UID,
+        expectedWorkspaceUpdateTime: tokens.workspaceUpdateTime,
+        expectedOldOwnerMembershipUpdateTime: tokens.oldOwnerUpdateTime,
+        expectedNewOwnerMembershipUpdateTime: tokens.newOwnerUpdateTime,
+      });
+      expect(result.status).toBe("transferred");
     });
   });
 });

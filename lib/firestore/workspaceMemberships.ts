@@ -12,6 +12,8 @@ import { Status } from "google-gax";
 import { Timestamp } from "firebase-admin/firestore";
 import { adminDb } from "@/lib/firebase/admin";
 import { logger } from "@/lib/logger";
+import { TEAM_WORKSPACES_ENABLED, TEAM_WORKSPACES_CANARY_UIDS } from "@/lib/env";
+import { resolveTeamWorkspacesMode } from "@/lib/workspaces/teamWorkspacesRollout";
 import { computeMembershipId } from "@/lib/workspaces/membershipId";
 import { validateMembershipBinding } from "@/lib/workspaces/membershipBinding";
 import { isCanonicalTeamOwnerMembership } from "@/lib/workspaces/ownerInvariant";
@@ -56,22 +58,34 @@ export async function getWorkspaceMembershipForBinding(args: { workspaceId: stri
 
 export type CreateTeamWorkspaceResult =
   | { status: "created"; workspace: TeamWorkspaceV1; membership: WorkspaceMembershipV1 }
+  | { status: "team_workspaces_disabled" }
   | { status: "firestore_unavailable" }
   | { status: "create_failed" };
 
 /**
- * Team Workspace creation, Phase 8B — the Workspace document and its
- * founder membership are created in ONE transaction via `tx.create()` on
- * both refs, so a Team Workspace is never observable without its Owner
- * membership (no partial state on failure — either both documents commit
- * or neither does).
+ * Team Workspace creation, Phase 8B (rollout-gated in Phase 8B.2) — the
+ * Workspace document and its founder membership are created in ONE
+ * transaction via `tx.create()` on both refs, so a Team Workspace is
+ * never observable without its Owner membership (no partial state on
+ * failure — either both documents commit or neither does).
  *
  * Every identity-derived field (`ownerUserId`, `createdByUserId`, the
  * founder's `uid`/`role`) comes from `uid` alone, the caller's own
  * authenticated identity — never from a request body. `invitedByUserId`
- * is always `null` for the founder membership, never a fabricated inviter.
+ * is always `null` for the founder membership — the founder was never
+ * invited, so this is never falsified to a non-null value merely to
+ * avoid `null`; a later invitation-created membership carries the real
+ * inviter's uid instead.
+ *
+ * Requires rollout eligibility (`resolveTeamWorkspacesMode()`) BEFORE any
+ * Firestore access — a uid outside the global/canary rollout gets
+ * `team_workspaces_disabled` and zero reads or writes occur.
  */
 export async function createTeamWorkspace(args: { uid: string; name: string }): Promise<CreateTeamWorkspaceResult> {
+  const rollout = resolveTeamWorkspacesMode({ uid: args.uid, globalEnabled: TEAM_WORKSPACES_ENABLED, canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS });
+  if (!rollout.enabled) {
+    return { status: "team_workspaces_disabled" };
+  }
   if (!adminDb) {
     return { status: "firestore_unavailable" };
   }
@@ -119,6 +133,7 @@ export async function createTeamWorkspace(args: { uid: string; name: string }): 
 
 export type TransferTeamWorkspaceOwnershipResult =
   | { status: "transferred"; workspace: TeamWorkspaceV1; oldOwnerMembership: WorkspaceMembershipV1; newOwnerMembership: WorkspaceMembershipV1 }
+  | { status: "team_workspaces_disabled" }
   | { status: "firestore_unavailable" }
   | { status: "workspace_not_found" }
   | { status: "workspace_stale" }
@@ -206,6 +221,10 @@ export async function transferTeamWorkspaceOwnership(args: {
   expectedOldOwnerMembershipUpdateTime: Timestamp;
   expectedNewOwnerMembershipUpdateTime: Timestamp;
 }): Promise<TransferTeamWorkspaceOwnershipResult> {
+  const rollout = resolveTeamWorkspacesMode({ uid: args.callerUid, globalEnabled: TEAM_WORKSPACES_ENABLED, canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS });
+  if (!rollout.enabled) {
+    return { status: "team_workspaces_disabled" };
+  }
   if (!adminDb) {
     return { status: "firestore_unavailable" };
   }

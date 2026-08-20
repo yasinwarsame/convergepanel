@@ -1,18 +1,44 @@
 /**
- * Team Workspace Core Foundation, Phase 8B — the one centralized
- * role/capability model. No new API route in this phase (or any future
- * phase) should compare `membership.role === "admin"` directly; every
- * authorization decision should go through `roleHasCapability()` (or
- * `resolveWorkspaceAccess()`, which already returns a resolved capability
- * set) so a future role/capability change never has to be re-derived at
- * every call site — the same anti-scattering rationale already documented
- * for `resolveWorkspaceContext()`/`checkWorkspaceAccess()`.
+ * Team Workspace Core Foundation, Phase 8B (review matrix corrected in
+ * Phase 8B.2) — the one centralized role/capability model. No new API
+ * route in this phase (or any future phase) should compare
+ * `membership.role === "admin"` directly; every authorization decision
+ * should go through `roleHasCapability()` (or `resolveWorkspaceAccess()`,
+ * which already returns a resolved capability set) so a future
+ * role/capability change never has to be re-derived at every call site —
+ * the same anti-scattering rationale already documented for
+ * `resolveWorkspaceContext()`/`checkWorkspaceAccess()`.
  *
  * This module defines the FOUNDATION only — no route in Phase 8B actually
- * calls `research.create`, `reviews.submit`, etc. Per-run reviewer
- * assignment remains an independent, later Phase 8F requirement; a
- * capability existing here does not imply its enforcement point exists
- * yet.
+ * calls `research.create`, `reviews.submit`, etc. A capability existing
+ * here does not imply its enforcement point exists yet.
+ *
+ * **`reviews.submit` is a single-role model, not a second membership
+ * role.** The membership document carries exactly ONE `role` — there is
+ * no simultaneous "Member AND Reviewer" state. If ordinary collaboration
+ * capability (`projects.create`, `research.organize`, etc.) and review
+ * eligibility were mutually exclusive per role, an enterprise analyst
+ * could never create/organize research AND later be assigned as a peer
+ * reviewer without losing their collaboration capabilities by switching
+ * roles. Phase 8B.2 corrects this: `reviews.submit` is granted to every
+ * role except Viewer (Owner, Admin, Member, Reviewer all `YES`) —
+ * `reviews.submit` alone is ELIGIBILITY, never standalone vote
+ * authorization. Casting an actual vote requires BOTH:
+ *
+ *   this capability (`reviews.submit`)
+ *   AND
+ *   the existing canonical per-run/panel reviewer assignment for that run
+ *   (the pre-existing `reviewer_not_assigned` gate in
+ *   `app/api/teams/adaptive-runs/[runId]/votes/route.ts` — Phase 8F wires
+ *   this codebase's own already-stated design principle, unchanged, to
+ *   Workspace-derived authorization instead of legacy Team roles)
+ *
+ * A Member having `reviews.submit` does NOT mean a Member may review
+ * every Workspace run — it means a Member remains eligible to be
+ * assigned as a reviewer without a Workspace role change. Per-run
+ * reviewer assignment remains an independent, later Phase 8F
+ * requirement; this capability existing here does not implement that
+ * enforcement point.
  */
 
 import "server-only";
@@ -57,7 +83,7 @@ const OWNER_CAPABILITIES: readonly WorkspaceCapability[] = [
   "exports.create",
   "ownership.transfer",
   "admins.manage",
-];
+]; // Owner: reviews.read/submit/manage/override all YES (Phase 8B.2 §14).
 
 const ADMIN_CAPABILITIES: readonly WorkspaceCapability[] = [
   "workspace.read",
@@ -71,6 +97,8 @@ const ADMIN_CAPABILITIES: readonly WorkspaceCapability[] = [
   "research.read",
   "research.create",
   "research.organize",
+  "reviews.read",
+  "reviews.submit",
   "reviews.manage",
   "exports.create",
   // Deliberately absent: reviews.override, ownership.transfer, admins.manage.
@@ -85,23 +113,27 @@ const MEMBER_CAPABILITIES: readonly WorkspaceCapability[] = [
   "research.read",
   "research.create",
   "research.organize",
+  "reviews.read",
+  "reviews.submit", // Phase 8B.2 correction — see module doc comment's "Member reviews.submit" note. Eligibility only; actual vote-casting additionally requires canonical per-run reviewer assignment.
   "exports.create",
-  // Deliberately absent: reviews.submit (no reviews.submit by default for Member).
+  // Deliberately absent: reviews.manage, reviews.override.
 ];
 
 const REVIEWER_CAPABILITIES: readonly WorkspaceCapability[] = [
   "workspace.read",
+  "projects.read",
   "research.read",
   "reviews.read",
   "reviews.submit",
-  // Deliberately absent: reviews.manage, reviews.override, exports.create.
+  // Deliberately absent: reviews.manage, reviews.override, exports.create, projects.create, projects.manage, research.organize.
 ];
 
 const VIEWER_CAPABILITIES: readonly WorkspaceCapability[] = [
   "workspace.read",
+  "projects.read",
   "research.read",
   "reviews.read",
-  // Deliberately absent: exports.create, reviews.submit.
+  // Deliberately absent: exports.create, reviews.submit, projects.create, projects.manage, research.create, research.organize.
 ];
 
 /**

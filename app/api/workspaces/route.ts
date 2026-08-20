@@ -12,9 +12,10 @@
  * parsed ONLY for `name`; no `ownerUserId`, `createdByUserId`, `type`, or
  * `schemaVersion` field is ever accepted from a client.
  *
- * No feature flag gates this route — Phase 8B is prohibited from changing
- * the environment contract. Production exposure is controlled entirely by
- * this branch not being merged or deployed.
+ * Gated by `TEAM_WORKSPACES_ENABLED`/`TEAM_WORKSPACES_CANARY_UIDS`
+ * (`lib/workspaces/teamWorkspacesRollout.ts`) — checked inside
+ * `createTeamWorkspace()` itself before any Firestore access, mirroring
+ * `PROJECTS_ENABLED`/`PROJECTS_CANARY_UIDS`'s existing precedent.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -23,7 +24,7 @@ import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelem
 import { parseCreateTeamWorkspaceBody } from "@/lib/workspaces/teamWorkspaceMutationBody";
 import { validateTeamWorkspaceName } from "@/lib/workspaces/teamWorkspaceName";
 import { createTeamWorkspace } from "@/lib/firestore/workspaceMemberships";
-import { invalidRequestBodyResponse, unexpectedFieldResponse, invalidTeamWorkspaceNameResponse, internalErrorResponse } from "@/lib/workspaces/teamWorkspaceErrorResponse";
+import { teamWorkspacesDisabledResponse, invalidRequestBodyResponse, unexpectedFieldResponse, invalidTeamWorkspaceNameResponse, internalErrorResponse } from "@/lib/workspaces/teamWorkspaceErrorResponse";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -64,6 +65,10 @@ export async function POST(req: NextRequest) {
   switch (result.status) {
     case "created":
       return NextResponse.json({ ok: true, workspace: result.workspace, membership: result.membership }, { status: 201 });
+    case "team_workspaces_disabled": {
+      const { status, body } = teamWorkspacesDisabledResponse();
+      return NextResponse.json(body, { status });
+    }
     case "firestore_unavailable":
     case "create_failed": {
       const { status, body } = internalErrorResponse();

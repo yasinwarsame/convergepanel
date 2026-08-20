@@ -1,6 +1,6 @@
 # Phase 8 — Enterprise Team Workspaces: Frozen Architecture (8A–8A.2) & Core Foundation (8B)
 
-**Status: Phase 8A / 8A.1 / 8A.2 architecture reviewed and frozen (2026-08-20). Phase 8B implemented the foundation — creation, ownership transfer, membership storage, capability model, access resolution, and account-lifecycle protection — and underwent senior review; Phase 8B.1 is the corrective pass addressing that review (fail-closed account-lifecycle guard, no environment-contract change, corrected `/api/workspaces` namespace). Invitations, member-management UI, Team Projects, Team research-run creation, Team report sharing, Team review integration, Team Workspace UI, and the four planned composite indexes are all explicitly deferred to later Phase 8 subphases. No Team Workspace has been created in production. Phase 8B introduces no environment variable — the Team Workspace backend is scoped to production exposure entirely by this branch not being merged or deployed.**
+**Status: Phase 8A / 8A.1 / 8A.2 architecture reviewed and frozen (2026-08-20). Phase 8B implemented the foundation — creation, ownership transfer, membership storage, capability model, access resolution, and account-lifecycle protection. Phase 8B.1 corrected three review findings (fail-closed account-lifecycle guard, no environment-contract change, corrected `/api/workspaces` namespace). Phase 8B.2 is a further reconciliation pass on the SAME branch (not a restart) correcting two architecture-drift findings — the review capability matrix and the membership-id domain separator — and reinstating a canary rollout gate (`TEAM_WORKSPACES_ENABLED`/`TEAM_WORKSPACES_CANARY_UIDS`, mirroring the existing Projects backend-canary precedent) now that the architecture explicitly calls for one. Invitations, member-management UI, Team Projects, Team research-run creation, Team report sharing, Team review integration, Team Workspace UI, and the four planned composite indexes are all explicitly deferred to later Phase 8 subphases. No Team Workspace has been created in production; the rollout flag defaults off.**
 
 This is an architectural record of what was decided and why — not a claim about what has shipped where. See `docs/workspaces/architecture.md` for Phases 1–3D (Personal Workspace foundation, provisioning, and workspace-aware writes) and `docs/team-workspaces-architecture-audit.md` for the original pre-Phase-8 data-model audit this design builds on.
 
@@ -14,7 +14,8 @@ Phase 8 itself is internally staged:
 - **8A.1** — revision addressing initial review feedback.
 - **8A.2** — final revision; reviewed and accepted with one correction (see "OCC requirements" below) — **frozen as of 2026-08-20**.
 - **8B** — Team Workspace Core Foundation, Ownership & Access Control. Implements the frozen architecture's foundation only.
-- **8B.1** (this document's latest revision) — corrective pass following senior review of 8B: the account-lifecycle guard now fails closed on an ownership-lookup failure, the `TEAM_WORKSPACES_ENABLED` environment variable Phase 8B had introduced (in violation of the "no environment change" requirement) was removed, and the Team API namespace was corrected from `/api/user/team-workspaces` to the frozen `/api/workspaces` root. No other Phase 8B behavior was altered.
+- **8B.1** — corrective pass following senior review of 8B: the account-lifecycle guard now fails closed on an ownership-lookup failure, the `TEAM_WORKSPACES_ENABLED` environment variable Phase 8B had introduced (in violation of the "no environment change" requirement) was removed, and the Team API namespace was corrected from `/api/user/team-workspaces` to the frozen `/api/workspaces` root.
+- **8B.2** (this document's latest revision) — a further hardening/reconciliation pass on the same implementation, not a restart: (1) the review-capability matrix corrected so `reviews.submit` is single-role eligibility granted to every role except Viewer, never requiring a Workspace role change to become reviewer-eligible; (2) the membership-id algorithm now hashes a fixed domain separator (`convergepanel.workspace-membership.v1`) as part of its input, not merely as a display prefix on the output; (3) a canary rollout gate (`TEAM_WORKSPACES_ENABLED`/`TEAM_WORKSPACES_CANARY_UIDS`) was reinstated, mirroring the existing `PROJECTS_ENABLED`/`PROJECTS_CANARY_UIDS` precedent, since the architecture now explicitly calls for one (superseding 8B.1's "no environment flag" stance, which was correct for that review cycle's stated constraint but not for this one).
 - 8C+ (not started) — member management, invitations (8D), Team Projects, Team research runs, Team review integration, Team Workspace UI.
 
 ## Personal versus Team Workspace schema
@@ -85,13 +86,20 @@ Defined in `lib/workspaces/membershipTypes.ts`. Removal is a soft-delete (`statu
 
 ```
 canonicalBytes =
-    u32be(byteLength(utf8(workspaceId))) || utf8(workspaceId)
+    utf8(DOMAIN_SEPARATOR)
+  || u32be(byteLength(utf8(workspaceId))) || utf8(workspaceId)
   || u32be(byteLength(utf8(uid)))         || utf8(uid)
 
 membershipId = "wm_" + lowercaseHex(SHA256(canonicalBytes))
 ```
 
-Length prefixes are UTF-8 **byte** lengths (`Buffer.byteLength(str, "utf8")`), never JS `string.length` (which counts UTF-16 code units and diverges for any multibyte character) — using `string.length` would make the serialization non-injective for multibyte input. The length-prefixed serialization is injective: no delimiter-looking byte sequence inside either value can be misread as a segment boundary, so two distinct `(workspaceId, uid)` tuples can never produce the same `canonicalBytes`. SHA-256 is then applied only for fixed-length, practically collision-resistant output — the injective serialization, not the hash function, is what guarantees different inputs are never hashed from the same bytes. (SHA-256 itself is practically collision-resistant, never described as "mathematically collision-free.") Output is always `wm_` + 64 lowercase hex characters = 67 characters total. Uses Node's built-in `crypto` module — no new dependency.
+where `DOMAIN_SEPARATOR = "convergepanel.workspace-membership.v1"`.
+
+**The domain separator is hashed as the first bytes of the digest input (Phase 8B.2) — it is not merely the `wm_` display prefix on the output.** The `wm_` string prepended to the hex digest is a readability convention only; it plays no role in the hash computation and provides no domain separation by itself — two different hash-input domains that happened to compute over the identical `(workspaceId, uid)`-shaped bytes would still collide at the digest level even if their displayed ids used different string prefixes. Hashing `DOMAIN_SEPARATOR` as the first segment of `canonicalBytes` is what makes this id space cryptographically distinct from any other hash this application (or a future one) might compute over a similarly-shaped tuple. Proven with fixed, hardcoded test vectors (`__tests__/membershipId.spec.ts`) — a property-based/relative test suite alone (determinism, tuple-distinctness) cannot catch a regression that silently drops or changes the separator, since those properties would still hold either way.
+
+Length prefixes are UTF-8 **byte** lengths (`Buffer.byteLength(str, "utf8")`), never JS `string.length` (which counts UTF-16 code units and diverges for any multibyte character) — using `string.length` would make the serialization non-injective for multibyte input. This is also proven with a fixed vector, not just a relative one: a naive `string.length`-based implementation and the correct `Buffer.byteLength`-based one produce the SAME digest for pure-ASCII inputs (byte length and UTF-16 length coincide there) — only a multibyte fixed vector (`"ws-😀"`, byte length 7 vs. `string.length` 5) can actually distinguish the two, and only a hardcoded expected digest for that exact input can prove which one the implementation actually uses.
+
+The length-prefixed serialization is injective: no delimiter-looking byte sequence inside either value can be misread as a segment boundary, so two distinct `(workspaceId, uid)` tuples can never produce the same `canonicalBytes`. SHA-256 is then applied only for fixed-length, practically collision-resistant output — the injective serialization, not the hash function, is what guarantees different inputs are never hashed from the same bytes. (SHA-256 itself is practically collision-resistant, never described as "mathematically collision-free.") Output is always `wm_` + 64 lowercase hex characters = 67 characters total. Uses Node's built-in `crypto` module — no new dependency.
 
 ## Membership validation requirements
 
@@ -102,9 +110,11 @@ Two layers, matching the split already established for `WorkspaceV1`/`getWorkspa
 
 `getWorkspaceMembershipForBinding()` (`lib/firestore/workspaceMemberships.ts`) is the one canonical (workspaceId, uid) → membership load path: a direct `.get()` at `workspaceMemberships/{computeMembershipId(workspaceId, uid)}`, no query, delegating to `validateMembershipBinding()`. Any mismatch fails closed (`malformed`) — never silently repaired.
 
-## Role / capability matrix
+## Role / capability matrix — review model corrected in Phase 8B.2
 
 Centralized in `lib/workspaces/capabilities.ts` (`ROLE_CAPABILITIES`, frozen at module load via `Object.freeze`). Foundation only in Phase 8B — no route yet enforces most of these capabilities (e.g. `research.create`); per-run reviewer assignment remains an independent Phase 8F requirement.
+
+**Phase 8B.2 correction — `reviews.submit` is single-role eligibility, not a second membership role.** A `workspaceMemberships` document carries exactly ONE `role`. Phase 8B's original matrix denied `reviews.submit` to Member, which would have forced an enterprise analyst to give up their `projects.create`/`research.organize` collaboration capabilities merely to become review-eligible (there is no "Member AND Reviewer" simultaneous state). The corrected model grants `reviews.submit` to every role except Viewer — Owner, Admin, Member, and Reviewer can all be assigned as a reviewer without a Workspace role change. `reviews.submit` alone is never sufficient to cast an actual vote: Phase 8F must additionally require the existing, unchanged canonical per-run/panel reviewer assignment (the `reviewer_not_assigned` gate already present in `app/api/teams/adaptive-runs/[runId]/votes/route.ts`, whose own doc comment already states this exact two-dimensional principle — "voting authorization is panel membership + current eligibility, NOT a standalone admin gate"). Workspace capability answers "is this uid ALLOWED to be a reviewer"; per-run assignment answers "IS this uid the reviewer for THIS run" — both must hold.
 
 | Capability | Owner | Admin | Member | Reviewer | Viewer |
 |---|---|---|---|---|---|
@@ -113,16 +123,19 @@ Centralized in `lib/workspaces/capabilities.ts` (`ROLE_CAPABILITIES`, frozen at 
 | `members.invite` | ✓ | ✓ | | | |
 | `members.manage` (Member/Reviewer/Viewer only, not Admin/Owner grant/revoke) | ✓ | ✓ | | | |
 | `audit.read` | ✓ | ✓ | | | |
-| `projects.read` / `.create` / `.manage` | ✓ | ✓ | ✓ | | |
+| `projects.read` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `projects.create` / `.manage` | ✓ | ✓ | ✓ | | |
 | `research.read` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `research.create` / `.organize` | ✓ | ✓ | ✓ | | |
-| `reviews.read` | ✓ | | | ✓ | ✓ |
-| `reviews.submit` | ✓ | | | ✓ | |
+| `reviews.read` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `reviews.submit` | ✓ | ✓ | ✓ | ✓ | |
 | `reviews.manage` | ✓ | ✓ | | | |
 | `reviews.override` | ✓ | | | | |
-| `exports.create` | ✓ | ✓ | ✓ | | |
+| `exports.create` (Reviewer/Viewer conservative-V1 exclusion — export is an exfiltration-adjacent capability, not just another read) | ✓ | ✓ | ✓ | | |
 | `ownership.transfer` | ✓ | | | | |
 | `admins.manage` | ✓ | | | | |
+
+Reviewer additionally has NO `projects.create`, `projects.manage`, or `research.organize` — read-only on Projects, matching Viewer's read-only posture on the same axis.
 
 `ORDINARY_SETTABLE_ROLES` (`["admin", "member", "reviewer", "viewer"]`) structurally excludes `"owner"` — the one set any future generic role-mutation endpoint must intersect against, so ownership can never be granted or demoted through an ordinary role change.
 
@@ -140,9 +153,17 @@ workspace.ownerUserId === membership.uid
 
 A membership row with `role: "owner"` while `workspace.ownerUserId` disagrees is an **integrity violation**, not a lower-privilege grant: `resolveWorkspaceAccess()` denies the ENTIRE authorization result for that membership (never reinterpreted as Admin, never granted any lower capability set) and logs a structured integrity event via `logger.error()`. No standing "exactly one Owner" query exists or is needed — the invariant is checked from the two documents (`workspace`, `membership`) already read for any normal access resolution; no N+1 pattern.
 
+## Backend rollout — canary gate (Phase 8B.2)
+
+`TEAM_WORKSPACES_ENABLED` (boolean, default off) + `TEAM_WORKSPACES_CANARY_UIDS` (comma-separated uid allowlist, max 10 entries) — structural mirror of the existing `PROJECTS_ENABLED`/`PROJECTS_CANARY_UIDS` precedent (Phase 6B), resolved by `resolveTeamWorkspacesMode()` (`lib/workspaces/teamWorkspacesRollout.ts`). Same precedence as every other canary in this codebase: global `true` always wins (even over a malformed canary list — a deliberate global rollout must never be silently disabled by an unrelated allowlist typo); otherwise an exact uid match against a VALID canary list; otherwise off. A malformed or oversized (>10) canary list fails closed to off for everyone when global is false — never "enable everyone," never "guess which entries were valid."
+
+Gates the entire Team Workspace backend surface — checked, against the acting uid, before any Firestore access in `createTeamWorkspace()`, `transferTeamWorkspaceOwnership()` (both by `callerUid`), and `resolveWorkspaceAccess()`'s Team path (by the resolving uid). Unrelated to and with no effect on `WORKSPACES_ENABLED` (the pre-existing resource-to-workspace binding resolver, a different axis) or on Personal Workspace behavior, which never reads this flag at all.
+
+Superseded 8B.1's "no environment flag" position: that correction was right for the constraint stated at the time (Phase 8B, as originally scoped, explicitly prohibited any environment-contract change, and nothing was deployed to protect against anyway). This checkpoint's frozen architecture explicitly calls for a canary gate as the intended rollout mechanism for the *next* phase of work, so reinstating it — using the codebase's own established two-variable canary pattern rather than inventing a new one — is implementing the (now-updated) architecture, not re-violating the prior instruction.
+
 ## Team Workspace creation transaction
 
-`createTeamWorkspace()` (`lib/firestore/workspaceMemberships.ts`) — one `adminDb.runTransaction()`, `tx.create()` on both the Workspace and founder-membership refs. A Team Workspace is never observable without its Owner membership: either both documents commit or neither does. Every identity-derived field (`ownerUserId`, `createdByUserId`, founder `uid`/`role`) is derived server-side from the authenticated caller alone; the request body is parsed only for `name` (`POST /api/workspaces`). Founder `invitedByUserId` is always `null` — never a fabricated inviter uid.
+`createTeamWorkspace()` (`lib/firestore/workspaceMemberships.ts`) — one `adminDb.runTransaction()`, `tx.create()` on both the Workspace and founder-membership refs. A Team Workspace is never observable without its Owner membership: either both documents commit or neither does. Every identity-derived field (`ownerUserId`, `createdByUserId`, founder `uid`/`role`) is derived server-side from the authenticated caller alone; the request body is parsed only for `name` (`POST /api/workspaces`). Founder `invitedByUserId` is always `null` — the founder was not invited by anyone, and this is never falsified to the owner's own uid (or any other value) merely to avoid a `null`; a later invitation-created membership carries the real inviter's uid instead. Tested explicitly, including a negative assertion that `invitedByUserId !== ownerUid`.
 
 ## Ownership-transfer transaction
 

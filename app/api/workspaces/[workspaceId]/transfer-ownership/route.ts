@@ -19,9 +19,10 @@
  * comment for the full authoritative-precondition contract.
  * =================================================================
  *
- * No feature flag gates this route — Phase 8B is prohibited from
- * changing the environment contract. Production exposure is controlled
- * entirely by this branch not being merged or deployed.
+ * Gated by `TEAM_WORKSPACES_ENABLED`/`TEAM_WORKSPACES_CANARY_UIDS`
+ * (`lib/workspaces/teamWorkspacesRollout.ts`) — checked inside
+ * `transferTeamWorkspaceOwnership()` itself, against the caller's uid,
+ * before any Firestore access.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -31,6 +32,7 @@ import { parseTransferOwnershipBody } from "@/lib/workspaces/teamWorkspaceMutati
 import { validateUpdateTimeToken } from "@/lib/projects/updateTimeToken";
 import { transferTeamWorkspaceOwnership } from "@/lib/firestore/workspaceMemberships";
 import {
+  teamWorkspacesDisabledResponse,
   invalidRequestBodyResponse,
   unexpectedFieldResponse,
   invalidUpdateTimeResponse,
@@ -106,6 +108,10 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
         oldOwnerMembership: result.oldOwnerMembership,
         newOwnerMembership: result.newOwnerMembership,
       });
+    case "team_workspaces_disabled": {
+      const { status, body } = teamWorkspacesDisabledResponse();
+      return NextResponse.json(body, { status });
+    }
     case "workspace_not_found":
     case "caller_not_owner": {
       // Collapsed identically: a caller who isn't the canonical Owner

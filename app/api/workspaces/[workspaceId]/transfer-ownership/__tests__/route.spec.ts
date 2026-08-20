@@ -136,6 +136,7 @@ it.each([
   ["old_owner_membership_stale", 409],
   ["new_owner_membership_stale", 409],
   ["stale_precondition", 409],
+  ["team_workspaces_disabled", 503],
   ["firestore_unavailable", 500],
   ["transaction_failed", 500],
 ])("maps service status %s -> HTTP %d", async (status, expectedHttp) => {

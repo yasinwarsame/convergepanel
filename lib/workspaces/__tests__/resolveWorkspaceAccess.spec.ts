@@ -6,6 +6,17 @@
  * invariant check over their results.
  */
 
+let teamWorkspacesEnabled = true;
+let teamWorkspacesCanaryUids: string | undefined = undefined;
+jest.mock("@/lib/env", () => ({
+  get TEAM_WORKSPACES_ENABLED() {
+    return teamWorkspacesEnabled;
+  },
+  get TEAM_WORKSPACES_CANARY_UIDS() {
+    return teamWorkspacesCanaryUids;
+  },
+}));
+
 const mockGetWorkspace = jest.fn();
 jest.mock("@/lib/firestore/workspaces", () => ({
   getWorkspace: (...args: unknown[]) => mockGetWorkspace(...args),
@@ -55,6 +66,8 @@ function membership(role: WorkspaceMembershipRole, overrides: Partial<WorkspaceM
 
 beforeEach(() => {
   jest.clearAllMocks();
+  teamWorkspacesEnabled = true;
+  teamWorkspacesCanaryUids = undefined;
 });
 
 describe("Personal Workspace path", () => {
@@ -91,6 +104,32 @@ describe("workspace lookup failures", () => {
 describe("Team Workspace path", () => {
   beforeEach(() => {
     mockGetWorkspace.mockResolvedValue({ status: "found", workspace: teamWorkspace() });
+  });
+
+  describe("rollout gate", () => {
+    it("denies outright when globally off and uid is not in the canary, even for a legitimate active membership", async () => {
+      teamWorkspacesEnabled = false;
+      mockGetWorkspaceMembershipForBinding.mockResolvedValue({ status: "found", membership: membership("owner") });
+      const result = await resolveWorkspaceAccess({ uid: UID, workspaceId: WS_ID });
+      expect(result).toEqual({ granted: false, reason: "team_workspaces_disabled" });
+      expect(mockGetWorkspaceMembershipForBinding).not.toHaveBeenCalled();
+    });
+
+    it("grants access for a uid in a valid canary list even when the global flag is off", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryUids = UID;
+      mockGetWorkspaceMembershipForBinding.mockResolvedValue({ status: "found", membership: membership("member") });
+      const result = await resolveWorkspaceAccess({ uid: UID, workspaceId: WS_ID });
+      expect(result.granted).toBe(true);
+    });
+
+    it("fails closed to disabled when the canary list is malformed, even though global is off (never enables everyone)", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryUids = "not/a/uid";
+      mockGetWorkspaceMembershipForBinding.mockResolvedValue({ status: "found", membership: membership("owner") });
+      const result = await resolveWorkspaceAccess({ uid: UID, workspaceId: WS_ID });
+      expect(result).toEqual({ granted: false, reason: "team_workspaces_disabled" });
+    });
   });
 
   it.each<WorkspaceMembershipRole>(["admin", "member", "reviewer", "viewer"])("resolves a valid active %s membership with its role's capability set", async (role) => {
