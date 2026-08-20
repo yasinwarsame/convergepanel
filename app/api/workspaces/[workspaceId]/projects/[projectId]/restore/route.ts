@@ -14,7 +14,7 @@ import { parseStatusTransitionBody } from "@/lib/projects/projectMutationBody";
 import { validateUpdateTimeToken } from "@/lib/projects/updateTimeToken";
 import { updateTeamProjectFields } from "@/lib/firestore/teamProjects";
 import { toTeamProjectSummaryDto } from "@/lib/projects/teamProjectDto";
-import { writeProjectEvent } from "@/lib/projects/projectEvents";
+import { writeTeamProjectEventSafely as writeSafely } from "@/lib/projects/writeTeamProjectEventSafely";
 import { teamWorkspacesDisabledResponse, invalidRequestBodyResponse, unexpectedFieldResponse, invalidUpdateTimeResponse, internalErrorResponse } from "@/lib/workspaces/teamWorkspaceErrorResponse";
 import { staleUpdateTimeConflictResponse } from "@/lib/projects/projectErrorResponse";
 import { teamProjectAuthorizationDeniedResponse, teamProjectNotFoundConcealedResponse, teamProjectInvalidStatusTransitionResponse } from "@/lib/projects/teamProjectErrorResponse";
@@ -68,8 +68,17 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
 
   switch (updateResult.status) {
     case "updated":
-      await writeProjectEvent({ eventType: "project_restored", actorUid: uid, workspaceId, projectId });
+      await writeSafely({ eventType: "project_restored", actorUid: uid, workspaceId, projectId });
       return NextResponse.json({ ok: true, project: toTeamProjectSummaryDto(updateResult.project, updateResult.documentUpdateTime) });
+    case "updated_projection_unavailable": {
+      await writeSafely({ eventType: "project_restored", actorUid: uid, workspaceId, projectId });
+      return NextResponse.json({
+        ok: true,
+        project: toTeamProjectSummaryDto(updateResult.project, null),
+        projectionUnavailable: true,
+        message: "The restore was applied, but we couldn't confirm the latest state. Refresh to load the current version before making further changes.",
+      });
+    }
     case "team_workspaces_disabled": {
       const { status, body } = teamWorkspacesDisabledResponse();
       return NextResponse.json(body, { status });

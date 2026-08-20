@@ -1,6 +1,7 @@
 /**
- * Team Project Backend, Phase 8C-A — Firestore write primitives for Team
- * Projects. Deliberately NOT a reuse or modification of `createProject()`/
+ * Team Project Backend, Phase 8C-A (post-commit-read semantics corrected
+ * in Phase 8C-A.1) — Firestore write primitives for Team Projects.
+ * Deliberately NOT a reuse or modification of `createProject()`/
  * `updateProjectFields()` in `lib/firestore/projects.ts`: those perform
  * their writes via plain `DocumentReference.create()/.update()` outside
  * any transaction, so their function bodies cannot be invoked from inside
@@ -16,7 +17,42 @@
  * the write — see that module's doc comment for the revocation-race
  * rationale. Firestore internal transaction retries are the ONLY retry
  * mechanism in play; neither function wraps `runTransaction()` in any
- * application-level retry loop.
+ * application-level retry loop, and this module never imports
+ * `writeProjectEvent` — event writing belongs exclusively to the route
+ * layer, strictly after this module's exported functions have already
+ * returned (see `docs/workspaces/phase8-team-workspace-foundation.md`'s
+ * Phase 8C-A.1 event-ordering note).
+ *
+ * ================= POST-COMMIT READ FAILURE CONTRACT =================
+ * `tx.create()`/`tx.update()` have no `WriteResult` of their own (unlike
+ * their non-transactional counterparts), so the authoritative native
+ * `updateTime` for the response DTO can only come from a POST-COMMIT read
+ * — issued strictly AFTER `runTransaction()` has already resolved
+ * successfully. That read is deliberately wrapped in its OWN try/catch,
+ * separate from the transaction's try/catch (a Phase 8C-A.1 correction —
+ * the original Phase 8C-A implementation shared one try/catch across
+ * both, which meant a transient failure of this SECOND, non-canonical
+ * read was indistinguishable from the transaction itself failing,
+ * silently implying to the caller that nothing had committed when the
+ * Project had, in fact, already been created/updated).
+ *
+ * If the post-commit read fails, the function returns a status carrying
+ * the word `projection_unavailable` (`created_projection_unavailable` /
+ * `updated_projection_unavailable`) — NEVER the generic `create_failed`/
+ * `update_failed`/`precondition_failed` statuses a genuine transaction
+ * failure produces. The caller still receives the already-known `project`
+ * object (the exact document just written, held in memory from the
+ * transaction callback's own return value) but no `documentUpdateTime` —
+ * there is no authoritative native `updateTime` to report, and this
+ * module NEVER fabricates one (never `Timestamp.now()`, never
+ * `project.updatedAt`, never the caller's own stale `expectedUpdateTime`
+ * echoed back as if it were fresh). A caller that needs a fresh OCC token
+ * after a `projection_unavailable` response must obtain one through an
+ * ordinary, unrelated canonical read (e.g. the list route) — never by
+ * retrying this same mutation, which would either duplicate the create
+ * (a fresh opaque Project id) or redundantly re-apply the same lifecycle
+ * transition.
+ * =======================================================================
  */
 
 import "server-only";
@@ -31,6 +67,9 @@ import { isWellFormedProjectV1, type ProjectV1 } from "@/lib/projects/types";
 
 export type CreateTeamProjectResult =
   | { status: "created"; project: ProjectV1; documentUpdateTime: Timestamp }
+  // Transaction committed; the post-commit projection read failed. The
+  // canonical mutation is NOT invalidated — see module doc comment.
+  | { status: "created_projection_unavailable"; project: ProjectV1 }
   | { status: "team_workspaces_disabled" }
   | { status: "firestore_unavailable" }
   | { status: "unauthorized"; reason: TeamMutationAuthorizationDenialReason }
@@ -46,7 +85,10 @@ export type CreateTeamProjectResult =
  * about (and potentially already partially observed) by the caller. The
  * id, once allocated, is passed into every retry of the callback
  * unchanged, exactly like `createProject()`'s own frozen Phase 6A.1
- * creation invariant.
+ * creation invariant. It is also allocated exactly once per CALL to this
+ * function — there is no application-level retry loop around
+ * `runTransaction()` itself, so a genuine transaction failure never
+ * silently re-attempts under a second id within the same invocation.
  */
 export async function createTeamProject(args: { uid: string; workspaceId: string; name: string }): Promise<CreateTeamProjectResult> {
   const rollout = resolveTeamWorkspacesMode({ uid: args.uid, globalEnabled: TEAM_WORKSPACES_ENABLED, canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS });
@@ -62,8 +104,9 @@ export async function createTeamProject(args: { uid: string; workspaceId: string
 
   type TxResult = { kind: "created"; project: ProjectV1 } | { kind: "unauthorized"; reason: TeamMutationAuthorizationDenialReason };
 
+  let txResult: TxResult;
   try {
-    const txResult = await adminDb.runTransaction<TxResult>(async (tx) => {
+    txResult = await adminDb.runTransaction<TxResult>(async (tx) => {
       const auth = await authorizeTeamWorkspaceMutationInTransaction(tx, { uid: args.uid, workspaceId: args.workspaceId, requiredCapability: "projects.create" });
       if (!auth.ok) {
         return { kind: "unauthorized", reason: auth.reason };
@@ -88,21 +131,30 @@ export async function createTeamProject(args: { uid: string; workspaceId: string
       tx.create(projectRef, project);
       return { kind: "created", project };
     });
+  } catch (err) {
+    // The TRANSACTION ITSELF failed — genuinely nothing committed.
+    logger.warn("[firestore/teamProjects] Team Project creation transaction failed — no Project was created", { workspaceId: args.workspaceId, error: err instanceof Error ? err.message : String(err) });
+    return { status: "create_failed" };
+  }
 
-    if (txResult.kind === "unauthorized") {
-      return { status: "unauthorized", reason: txResult.reason };
-    }
+  if (txResult.kind === "unauthorized") {
+    return { status: "unauthorized", reason: txResult.reason };
+  }
 
-    // Post-commit read — NOT a mutation retry. `tx.create()` has no
-    // `WriteResult` of its own (unlike a non-transactional `.create()`),
-    // so the authoritative native `updateTime` for the response DTO can
-    // only come from re-reading the document after the transaction has
-    // already committed successfully.
+  // The transaction has ALREADY committed successfully at this point —
+  // the Project genuinely exists. Everything below is best-effort
+  // projection, deliberately isolated in its own try/catch so a failure
+  // here can NEVER be reported as though the mutation itself failed.
+  try {
     const postCommitSnap = await projectRef.get();
     return { status: "created", project: txResult.project, documentUpdateTime: postCommitSnap.updateTime as Timestamp };
   } catch (err) {
-    logger.warn("[firestore/teamProjects] Team Project creation transaction failed", { workspaceId: args.workspaceId, error: err instanceof Error ? err.message : String(err) });
-    return { status: "create_failed" };
+    logger.warn("[firestore/teamProjects] Team Project created successfully but the post-commit projection read failed — canonical mutation is NOT invalidated", {
+      workspaceId: args.workspaceId,
+      projectId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return { status: "created_projection_unavailable", project: txResult.project };
   }
 }
 
@@ -110,6 +162,9 @@ export type TeamProjectMutation = { kind: "rename"; name: string } | { kind: "ar
 
 export type UpdateTeamProjectFieldsResult =
   | { status: "updated"; project: ProjectV1; documentUpdateTime: Timestamp }
+  // Transaction committed; the post-commit projection read failed. The
+  // canonical mutation is NOT invalidated — see module doc comment.
+  | { status: "updated_projection_unavailable"; project: ProjectV1 }
   | { status: "team_workspaces_disabled" }
   | { status: "firestore_unavailable" }
   | { status: "unauthorized"; reason: TeamMutationAuthorizationDenialReason }
@@ -142,6 +197,10 @@ export type UpdateTeamProjectFieldsResult =
  *      fails on every Firestore-internal retry of this callback, exactly
  *      mirroring `transferTeamWorkspaceOwnership()`'s documented dual
  *      fast-path/authoritative precondition contract.
+ *
+ * The post-commit projection read (for `documentUpdateTime`) is issued
+ * strictly AFTER step 6 has already committed, in its own try/catch — see
+ * this module's header comment for the full contract.
  */
 export async function updateTeamProjectFields(args: {
   uid: string;
@@ -209,18 +268,13 @@ export async function updateTeamProjectFields(args: {
       return { kind: "updated", project: { ...project, ...data } };
     });
   } catch (err: unknown) {
+    // The TRANSACTION ITSELF failed — genuinely nothing committed.
     const code = (err as { code?: unknown } | null)?.code;
     const message = err instanceof Error ? err.message : String(err);
     if (code === Status.FAILED_PRECONDITION || message.includes("FAILED_PRECONDITION")) {
-      // The native Firestore precondition fired — a stale token slipped
-      // past the fast-path check above (e.g. a concurrent write landed
-      // between this transaction's read and its commit, including across
-      // an internal Firestore retry) but was still caught here,
-      // authoritatively. Never distinguished from the fast-path "stale"
-      // outcome at the public response layer.
       return { status: "precondition_failed" };
     }
-    logger.warn("[firestore/teamProjects] Team Project update transaction failed", { workspaceId: args.workspaceId, projectId: args.projectId, error: message });
+    logger.warn("[firestore/teamProjects] Team Project update transaction failed — no change was committed", { workspaceId: args.workspaceId, projectId: args.projectId, error: message });
     return { status: "update_failed" };
   }
 
@@ -234,13 +288,23 @@ export async function updateTeamProjectFields(args: {
     case "stale":
       return { status: "precondition_failed" };
     case "updated": {
-      // Post-commit read — NOT a mutation retry. `tx.update()` has no
-      // `WriteResult` of its own; the authoritative native `updateTime`
-      // for the response DTO can only come from re-reading the document
-      // after the transaction has already committed successfully.
+      // The transaction has ALREADY committed successfully at this point
+      // — the mutation genuinely applied. Everything below is
+      // best-effort projection, isolated in its own try/catch so a
+      // failure here can NEVER be reported as though the mutation itself
+      // failed, and never masqueraded as a stale-token conflict either.
       const projectRef = adminDb.collection("projects").doc(args.projectId);
-      const postCommitSnap = await projectRef.get();
-      return { status: "updated", project: txResult.project, documentUpdateTime: postCommitSnap.updateTime as Timestamp };
+      try {
+        const postCommitSnap = await projectRef.get();
+        return { status: "updated", project: txResult.project, documentUpdateTime: postCommitSnap.updateTime as Timestamp };
+      } catch (err) {
+        logger.warn("[firestore/teamProjects] Team Project updated successfully but the post-commit projection read failed — canonical mutation is NOT invalidated", {
+          workspaceId: args.workspaceId,
+          projectId: args.projectId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return { status: "updated_projection_unavailable", project: txResult.project };
+      }
     }
   }
 }

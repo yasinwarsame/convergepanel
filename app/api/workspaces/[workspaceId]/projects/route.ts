@@ -26,7 +26,7 @@ import { listTeamProjects } from "@/lib/projects/listTeamProjects";
 import { toTeamProjectSummaryDto } from "@/lib/projects/teamProjectDto";
 import { createTeamProject } from "@/lib/firestore/teamProjects";
 import { countProjectsInWorkspace } from "@/lib/firestore/projects";
-import { writeProjectEvent } from "@/lib/projects/projectEvents";
+import { writeTeamProjectEventSafely as writeSafely } from "@/lib/projects/writeTeamProjectEventSafely";
 import { checkRateLimit } from "@/lib/security/rateLimit";
 import { logger } from "@/lib/logger";
 
@@ -146,8 +146,34 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
   const createResult = await createTeamProject({ uid, workspaceId, name: nameResult.name });
   switch (createResult.status) {
     case "created": {
-      await writeProjectEvent({ eventType: "project_created", actorUid: uid, workspaceId, projectId: createResult.project.id });
+      // Best-effort — see writeSafely()'s own comment. An event-write
+      // failure must never turn this already-successful response into a
+      // failure (Section 9/Mutation P).
+      await writeSafely({ eventType: "project_created", actorUid: uid, workspaceId, projectId: createResult.project.id });
       return NextResponse.json({ ok: true, project: toTeamProjectSummaryDto(createResult.project, createResult.documentUpdateTime) }, { status: 201 });
+    }
+    case "created_projection_unavailable": {
+      // The canonical Firestore transaction ALREADY committed — the
+      // Project genuinely exists. Only the best-effort post-commit
+      // projection read failed. This must never be reported as an
+      // ordinary failure a client might safely retry (Section 5/7):
+      // retrying `createTeamProject()` would allocate a NEW opaque
+      // Project id and create a genuine duplicate. Still 201 (the
+      // mutation succeeded); `updateTime: null` signals no fresh OCC
+      // token is available from this response — the client must obtain
+      // one via an ordinary canonical read (e.g. GET this same route)
+      // before its NEXT mutation on this Project, never by repeating
+      // this create.
+      await writeSafely({ eventType: "project_created", actorUid: uid, workspaceId, projectId: createResult.project.id });
+      return NextResponse.json(
+        {
+          ok: true,
+          project: toTeamProjectSummaryDto(createResult.project, null),
+          projectionUnavailable: true,
+          message: "The Project was created, but we couldn't confirm its latest state. Refresh to load the current version before making further changes.",
+        },
+        { status: 201 }
+      );
     }
     case "team_workspaces_disabled": {
       const { status, body } = teamWorkspacesDisabledResponse();

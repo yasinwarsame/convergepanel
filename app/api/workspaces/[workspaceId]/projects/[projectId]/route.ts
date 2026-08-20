@@ -13,7 +13,7 @@ import { validateProjectName } from "@/lib/projects/projectName";
 import { validateUpdateTimeToken } from "@/lib/projects/updateTimeToken";
 import { updateTeamProjectFields } from "@/lib/firestore/teamProjects";
 import { toTeamProjectSummaryDto } from "@/lib/projects/teamProjectDto";
-import { writeProjectEvent } from "@/lib/projects/projectEvents";
+import { writeTeamProjectEventSafely as writeSafely } from "@/lib/projects/writeTeamProjectEventSafely";
 import { teamWorkspacesDisabledResponse, invalidRequestBodyResponse, unexpectedFieldResponse, invalidUpdateTimeResponse, internalErrorResponse } from "@/lib/workspaces/teamWorkspaceErrorResponse";
 import { invalidProjectNameResponse, staleUpdateTimeConflictResponse } from "@/lib/projects/projectErrorResponse";
 import { teamProjectAuthorizationDeniedResponse, teamProjectNotFoundConcealedResponse, teamProjectInvalidStatusTransitionResponse } from "@/lib/projects/teamProjectErrorResponse";
@@ -73,8 +73,22 @@ export async function PATCH(req: NextRequest, { params }: { params: { workspaceI
 
   switch (updateResult.status) {
     case "updated":
-      await writeProjectEvent({ eventType: "project_renamed", actorUid: uid, workspaceId, projectId });
+      await writeSafely({ eventType: "project_renamed", actorUid: uid, workspaceId, projectId });
       return NextResponse.json({ ok: true, project: toTeamProjectSummaryDto(updateResult.project, updateResult.documentUpdateTime) });
+    case "updated_projection_unavailable": {
+      // Canonical transaction ALREADY committed — the rename genuinely
+      // applied. Only the best-effort post-commit projection read
+      // failed. 200 (the mutation succeeded), never implying retry is
+      // needed or safe; `updateTime: null` signals the client must fetch
+      // a fresh token elsewhere before its next mutation.
+      await writeSafely({ eventType: "project_renamed", actorUid: uid, workspaceId, projectId });
+      return NextResponse.json({
+        ok: true,
+        project: toTeamProjectSummaryDto(updateResult.project, null),
+        projectionUnavailable: true,
+        message: "The rename was applied, but we couldn't confirm the latest state. Refresh to load the current version before making further changes.",
+      });
+    }
     case "team_workspaces_disabled": {
       const { status, body } = teamWorkspacesDisabledResponse();
       return NextResponse.json(body, { status });

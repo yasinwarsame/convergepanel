@@ -8,6 +8,17 @@
  * shared Workspace is exactly what "shared" means. `createdByUserId` is
  * immutable, non-authoritative attribution only (Section 19) — no route
  * ever branches on it for access control.
+ *
+ * `updateTime` is nullable — a Phase 8C-A.1 correction. A canonical
+ * mutation can commit successfully while the SEPARATE, best-effort
+ * post-commit projection read that would normally supply this value
+ * fails (see `lib/firestore/teamProjects.ts`'s post-commit-read-failure
+ * contract). `null` here means exactly "the mutation committed, but no
+ * fresh OCC token is available from this response" — it is NEVER
+ * fabricated from `project.updatedAt`, `Timestamp.now()`, or a caller's
+ * own stale token. A client that receives `null` must obtain a fresh
+ * token via an ordinary canonical read (e.g. the list route) before its
+ * next mutation, never by retrying the mutation that returned `null`.
  */
 
 import "server-only";
@@ -23,11 +34,11 @@ export interface TeamProjectSummaryDto {
   createdByUserId: string;
   createdAt: string;
   updatedAt: string;
-  updateTime: UpdateTimeToken;
+  updateTime: UpdateTimeToken | null;
 }
 
-/** `documentUpdateTime` is the Firestore document's own native `updateTime` at the point of read — supplied by the caller, never derived from `project.updatedAt`. */
-export function toTeamProjectSummaryDto(project: ProjectV1, documentUpdateTime: Timestamp): TeamProjectSummaryDto {
+/** `documentUpdateTime` is the Firestore document's own native `updateTime` at the point of read — supplied by the caller, never derived from `project.updatedAt`. Pass `null` only when no authoritative native `updateTime` is available (post-commit projection read failure) — never a fabricated stand-in. */
+export function toTeamProjectSummaryDto(project: ProjectV1, documentUpdateTime: Timestamp | null): TeamProjectSummaryDto {
   return {
     id: project.id,
     workspaceId: project.workspaceId,
@@ -36,6 +47,6 @@ export function toTeamProjectSummaryDto(project: ProjectV1, documentUpdateTime: 
     createdByUserId: project.createdByUserId,
     createdAt: project.createdAt.toDate().toISOString(),
     updatedAt: project.updatedAt.toDate().toISOString(),
-    updateTime: serializeUpdateTimeToken(documentUpdateTime),
+    updateTime: documentUpdateTime ? serializeUpdateTimeToken(documentUpdateTime) : null,
   };
 }

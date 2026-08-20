@@ -123,6 +123,29 @@ it("404s (concealed) on project_not_found", async () => {
   expect(json.errorCode).toBe("project_not_found");
 });
 
+it("updated_projection_unavailable -> still 200 (archive genuinely committed), updateTime: null", async () => {
+  mockedUpdateTeamProjectFields.mockResolvedValue({
+    status: "updated_projection_unavailable",
+    project: { id: PROJECT_ID, workspaceId: WS_ID, name: "P", status: "archived", createdByUserId: UID, createdAt: Timestamp.now(), updatedAt: Timestamp.now() },
+  });
+  const { res, json } = await callRoute(VALID_BODY);
+  expect(res.status).toBe(200);
+  expect(json.project.status).toBe("archived");
+  expect(json.project.updateTime).toBeNull();
+  expect(json.projectionUnavailable).toBe(true);
+});
+
+it("Mutation P proof: even if the event writer rejects, the route still returns the canonical 200 success", async () => {
+  mockedWriteProjectEvent.mockRejectedValueOnce(new Error("simulated projectEvents failure"));
+  mockedUpdateTeamProjectFields.mockResolvedValue({
+    status: "updated",
+    project: { id: PROJECT_ID, workspaceId: WS_ID, name: "P", status: "archived", createdByUserId: UID, createdAt: Timestamp.now(), updatedAt: Timestamp.now() },
+    documentUpdateTime: Timestamp.now(),
+  });
+  const { res } = await callRoute(VALID_BODY);
+  expect(res.status).toBe(200);
+});
+
 it("503s when team_workspaces_disabled", async () => {
   mockedUpdateTeamProjectFields.mockResolvedValue({ status: "team_workspaces_disabled" });
   const { res } = await callRoute(VALID_BODY);

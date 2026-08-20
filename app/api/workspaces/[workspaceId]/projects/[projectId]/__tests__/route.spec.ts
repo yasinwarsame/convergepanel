@@ -110,6 +110,31 @@ it("maps unauthorized: insufficient_capability -> 403, everything else -> 404 co
   expect((await callRoute(VALID_BODY)).res.status).toBe(404);
 });
 
+it("updated_projection_unavailable -> still 200 (rename genuinely committed), updateTime: null, never implies retry", async () => {
+  mockedUpdateTeamProjectFields.mockResolvedValue({
+    status: "updated_projection_unavailable",
+    project: { id: PROJECT_ID, workspaceId: WS_ID, name: "Renamed", status: "active", createdByUserId: UID, createdAt: Timestamp.now(), updatedAt: Timestamp.now() },
+  });
+  const { res, json } = await callRoute(VALID_BODY);
+  expect(res.status).toBe(200);
+  expect(json.ok).toBe(true);
+  expect(json.project.name).toBe("Renamed");
+  expect(json.project.updateTime).toBeNull();
+  expect(json.projectionUnavailable).toBe(true);
+});
+
+it("Mutation P proof: even if the event writer rejects, the route still returns the canonical 200 success", async () => {
+  mockedWriteProjectEvent.mockRejectedValueOnce(new Error("simulated projectEvents failure"));
+  mockedUpdateTeamProjectFields.mockResolvedValue({
+    status: "updated",
+    project: { id: PROJECT_ID, workspaceId: WS_ID, name: "Renamed", status: "active", createdByUserId: UID, createdAt: Timestamp.now(), updatedAt: Timestamp.now() },
+    documentUpdateTime: Timestamp.now(),
+  });
+  const { res, json } = await callRoute(VALID_BODY);
+  expect(res.status).toBe(200);
+  expect(json.ok).toBe(true);
+});
+
 it("404s (concealed) on project_not_found — same code as a genuinely missing Project", async () => {
   mockedUpdateTeamProjectFields.mockResolvedValue({ status: "project_not_found" });
   const { res, json } = await callRoute(VALID_BODY);

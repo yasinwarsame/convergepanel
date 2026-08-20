@@ -37,12 +37,19 @@ function resetStores() {
   stores.projects.clear();
 }
 
+/** When true, the NEXT non-transactional `.get()` call (i.e. the post-commit projection read — `projectRef.get()`, never `tx.get()`) throws instead of resolving, then resets itself. Simulates a transient Firestore read failure that happens strictly AFTER a transaction has already committed. */
+let failNextPostCommitGet = false;
+
 function makeDocRef(collectionName: string, docId: string) {
   return {
     __collection: collectionName,
     __id: docId,
     id: docId,
     get: async () => {
+      if (failNextPostCommitGet) {
+        failNextPostCommitGet = false;
+        throw new FirestoreError("14", "UNAVAILABLE: simulated post-commit read failure");
+      }
       const store = stores[collectionName];
       const entry = store.get(docId);
       return { exists: entry !== undefined, data: () => entry?.data, updateTime: entry?.updateTime };
@@ -221,6 +228,7 @@ beforeEach(() => {
   concurrentMutationHook = null;
   retriesBeforeSuccess = 0;
   projectsAutoIdCallCount = 0;
+  failNextPostCommitGet = false;
   teamWorkspacesEnabled = true;
   teamWorkspacesCanaryUids = undefined;
   mockAdminDb.runTransaction.mockClear();
@@ -526,5 +534,170 @@ describe("transaction discipline (Section 30)", () => {
     const result = await createTeamProject({ uid: MEMBER_UID, workspaceId: WS_ID, name: "P" });
     expect(result).toEqual({ status: "unauthorized", reason: "owner_integrity_violation" });
     expect(stores.projects.size).toBe(0);
+  });
+
+  it("no application-level retry: a genuine transaction failure calls runTransaction() exactly once and reports create_failed, never re-attempting under a fresh id (Mutation R baseline)", async () => {
+    seedWorkspace();
+    seedMembership(OWNER_UID, "owner");
+    mockAdminDb.runTransaction.mockImplementationOnce(async () => {
+      throw new Error("simulated persistent Firestore failure");
+    });
+    const result = await createTeamProject({ uid: OWNER_UID, workspaceId: WS_ID, name: "P" });
+    expect(result).toEqual({ status: "create_failed" });
+    expect(mockAdminDb.runTransaction).toHaveBeenCalledTimes(1);
+    expect(stores.projects.size).toBe(0);
+  });
+});
+
+describe("Phase 8C-A.1 — direct creator-without-membership proof (Section 2)", () => {
+  it("A creates Project P (createdByUserId = A); A's membership is then removed; A's subsequent mutation attempt is denied purely on current membership state — createdByUserId never grants access", async () => {
+    const A = "creator-a";
+    seedWorkspace({ ownerUserId: OWNER_UID, createdByUserId: OWNER_UID });
+    seedMembership(OWNER_UID, "owner");
+    seedMembership(A, "member");
+
+    const created = await createTeamProject({ uid: A, workspaceId: WS_ID, name: "A's Project" });
+    expect(created.status).toBe("created");
+    if (created.status !== "created") return;
+    expect(created.project.createdByUserId).toBe(A);
+    const projectId = created.project.id;
+
+    // Remove A's membership entirely (not merely downgrade).
+    const aMembershipId = computeMembershipId(WS_ID, A);
+    stores.workspaceMemberships.delete(aMembershipId);
+
+    const preUpdateTime = stores.projects.get(projectId)!.updateTime;
+    const deniedResult = await updateTeamProjectFields({ uid: A, workspaceId: WS_ID, projectId, mutation: { kind: "rename", name: "A tries to rename own Project" }, expectedUpdateTime: preUpdateTime });
+    expect(deniedResult).toEqual({ status: "unauthorized", reason: "membership_not_found" });
+    expect(stores.projects.get(projectId)!.data.name).toBe("A's Project"); // untouched
+
+    // Also prove creation-time capability check has the same property: A
+    // (now with no membership at all) cannot create a SECOND Project either.
+    const secondCreateAttempt = await createTeamProject({ uid: A, workspaceId: WS_ID, name: "A tries again" });
+    expect(secondCreateAttempt).toEqual({ status: "unauthorized", reason: "membership_not_found" });
+  });
+
+  it("A creates Project P; A is REMOVED (status: removed, not merely missing); B (a current authorized Admin) can rename P; P.createdByUserId remains A throughout", async () => {
+    const A = "creator-a";
+    const B = "admin-b";
+    seedWorkspace({ ownerUserId: OWNER_UID, createdByUserId: OWNER_UID });
+    seedMembership(OWNER_UID, "owner");
+    seedMembership(A, "member");
+    seedMembership(B, "admin");
+
+    const created = await createTeamProject({ uid: A, workspaceId: WS_ID, name: "A's Project" });
+    expect(created.status).toBe("created");
+    if (created.status !== "created") return;
+    const projectId = created.project.id;
+
+    const aMembershipId = computeMembershipId(WS_ID, A);
+    const aEntry = stores.workspaceMemberships.get(aMembershipId)!;
+    stores.workspaceMemberships.set(aMembershipId, { data: { ...aEntry.data, status: "removed", removedAt: ts(9999), removedByUserId: OWNER_UID }, updateTime: nextUpdateTime() });
+
+    // A, now removed, is denied.
+    const preUpdateTimeForA = stores.projects.get(projectId)!.updateTime;
+    const aAttempt = await updateTeamProjectFields({ uid: A, workspaceId: WS_ID, projectId, mutation: { kind: "rename", name: "A tries" }, expectedUpdateTime: preUpdateTimeForA });
+    expect(aAttempt).toEqual({ status: "unauthorized", reason: "membership_removed" });
+
+    // B, a current authorized non-creator Admin, CAN manage P per capability.
+    const preUpdateTimeForB = stores.projects.get(projectId)!.updateTime;
+    const bResult = await updateTeamProjectFields({ uid: B, workspaceId: WS_ID, projectId, mutation: { kind: "rename", name: "Renamed by B" }, expectedUpdateTime: preUpdateTimeForB });
+    expect(bResult.status).toBe("updated");
+    if (bResult.status !== "updated") return;
+    expect(bResult.project.name).toBe("Renamed by B");
+    expect(bResult.project.createdByUserId).toBe(A); // provenance preserved, never rewritten
+  });
+});
+
+describe("Phase 8C-A.1 — post-commit projection read failure (Sections 4-9)", () => {
+  it("createTeamProject: transaction commits, post-commit get() fails -> created_projection_unavailable, exactly ONE Project write, no second id generated, no automatic retry", async () => {
+    seedWorkspace();
+    seedMembership(OWNER_UID, "owner");
+    failNextPostCommitGet = true;
+
+    const result = await createTeamProject({ uid: OWNER_UID, workspaceId: WS_ID, name: "P" });
+    expect(result.status).toBe("created_projection_unavailable");
+    if (result.status !== "created_projection_unavailable") return;
+    expect(result.project.name).toBe("P");
+    expect((result as any).documentUpdateTime).toBeUndefined();
+
+    // Exactly one Project document exists — the canonical write committed,
+    // and no application-level retry generated a duplicate under a second id.
+    expect(stores.projects.size).toBe(1);
+    expect(projectsAutoIdCallCount).toBe(1);
+    expect(mockAdminDb.runTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("createTeamProject: a client that naively re-calls createTeamProject after created_projection_unavailable creates a SECOND, genuinely distinct Project — proving the server itself never does this automatically, only an external re-invocation would (and this phase intentionally builds no idempotency-key protection against that)", async () => {
+    seedWorkspace();
+    seedMembership(OWNER_UID, "owner");
+    failNextPostCommitGet = true;
+    const first = await createTeamProject({ uid: OWNER_UID, workspaceId: WS_ID, name: "P" });
+    expect(first.status).toBe("created_projection_unavailable");
+
+    // The server made NO second attempt on its own — confirmed above
+    // (runTransaction called once). A second explicit call, as an
+    // uninformed client might issue, is a NEW request the server has no
+    // way to distinguish from a genuine second create — this is the
+    // documented, accepted duplicate-risk surface this phase does not
+    // attempt to close (no idempotency-key infra exists in this repo).
+    const second = await createTeamProject({ uid: OWNER_UID, workspaceId: WS_ID, name: "P" });
+    expect(second.status).toBe("created");
+    expect(stores.projects.size).toBe(2);
+  });
+
+  it("updateTeamProjectFields (rename): transaction commits, post-commit get() fails -> updated_projection_unavailable; the rename is NOT rolled back, no fabricated updateTime, no automatic retry", async () => {
+    seedWorkspace();
+    seedMembership(OWNER_UID, "owner");
+    seedProject("proj-1");
+    const preUpdateTime = stores.projects.get("proj-1")!.updateTime;
+    failNextPostCommitGet = true;
+
+    const result = await updateTeamProjectFields({ uid: OWNER_UID, workspaceId: WS_ID, projectId: "proj-1", mutation: { kind: "rename", name: "Renamed" }, expectedUpdateTime: preUpdateTime });
+    expect(result.status).toBe("updated_projection_unavailable");
+    if (result.status !== "updated_projection_unavailable") return;
+    expect(result.project.name).toBe("Renamed");
+    expect((result as any).documentUpdateTime).toBeUndefined();
+
+    // The store shows the rename genuinely committed — not rolled back.
+    expect(stores.projects.get("proj-1")!.data.name).toBe("Renamed");
+    expect(mockAdminDb.runTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("updateTeamProjectFields (archive): transaction commits, post-commit get() fails -> updated_projection_unavailable; archive is NOT rolled back", async () => {
+    seedWorkspace();
+    seedMembership(OWNER_UID, "owner");
+    seedProject("proj-1", { status: "active" });
+    const preUpdateTime = stores.projects.get("proj-1")!.updateTime;
+    failNextPostCommitGet = true;
+
+    const result = await updateTeamProjectFields({ uid: OWNER_UID, workspaceId: WS_ID, projectId: "proj-1", mutation: { kind: "archive" }, expectedUpdateTime: preUpdateTime });
+    expect(result.status).toBe("updated_projection_unavailable");
+    expect(stores.projects.get("proj-1")!.data.status).toBe("archived");
+  });
+
+  it("updateTeamProjectFields (restore): transaction commits, post-commit get() fails -> updated_projection_unavailable; restore is NOT rolled back", async () => {
+    seedWorkspace();
+    seedMembership(OWNER_UID, "owner");
+    seedProject("proj-1", { status: "archived" });
+    const preUpdateTime = stores.projects.get("proj-1")!.updateTime;
+    failNextPostCommitGet = true;
+
+    const result = await updateTeamProjectFields({ uid: OWNER_UID, workspaceId: WS_ID, projectId: "proj-1", mutation: { kind: "restore" }, expectedUpdateTime: preUpdateTime });
+    expect(result.status).toBe("updated_projection_unavailable");
+    expect(stores.projects.get("proj-1")!.data.status).toBe("active");
+  });
+
+  it("a genuine PRE-commit transaction failure (not a post-commit read failure) still reports the ordinary *_failed status, never projection_unavailable — the two are never conflated", async () => {
+    seedWorkspace();
+    seedMembership(OWNER_UID, "owner");
+    seedProject("proj-1");
+    const preUpdateTime = stores.projects.get("proj-1")!.updateTime;
+    mockAdminDb.runTransaction.mockImplementationOnce(async () => {
+      throw new Error("simulated pre-commit transaction failure");
+    });
+    const result = await updateTeamProjectFields({ uid: OWNER_UID, workspaceId: WS_ID, projectId: "proj-1", mutation: { kind: "rename", name: "X" }, expectedUpdateTime: preUpdateTime });
+    expect(result).toEqual({ status: "update_failed" });
+    expect(stores.projects.get("proj-1")!.data.name).toBe("Existing Project"); // never applied
   });
 });

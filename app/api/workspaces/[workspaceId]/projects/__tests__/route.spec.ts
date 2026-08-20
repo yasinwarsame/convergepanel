@@ -200,6 +200,32 @@ describe("POST (create)", () => {
     expect(concealedRes.res.status).toBe(404);
   });
 
+  it("created_projection_unavailable -> still 201 (mutation genuinely committed), updateTime: null, never implies the client should retry the create", async () => {
+    mockedCreateTeamProject.mockResolvedValue({
+      status: "created_projection_unavailable",
+      project: { id: "p1", workspaceId: WS_ID, name: "P", status: "active", createdByUserId: UID, createdAt: Timestamp.now(), updatedAt: Timestamp.now() },
+    });
+    const { res, json } = await callPost({ name: "P" });
+    expect(res.status).toBe(201);
+    expect(json.ok).toBe(true);
+    expect(json.project.id).toBe("p1");
+    expect(json.project.updateTime).toBeNull();
+    expect(json.projectionUnavailable).toBe(true);
+    expect(mockedWriteProjectEvent).toHaveBeenCalledWith({ eventType: "project_created", actorUid: UID, workspaceId: WS_ID, projectId: "p1" });
+  });
+
+  it("Mutation P proof: even if the event writer rejects, the route still returns the canonical 201 success — an event failure never invalidates an already-committed mutation", async () => {
+    mockedWriteProjectEvent.mockRejectedValueOnce(new Error("simulated projectEvents failure"));
+    mockedCreateTeamProject.mockResolvedValue({
+      status: "created",
+      project: { id: "p1", workspaceId: WS_ID, name: "P", status: "active", createdByUserId: UID, createdAt: Timestamp.now(), updatedAt: Timestamp.now() },
+      documentUpdateTime: Timestamp.now(),
+    });
+    const { res, json } = await callPost({ name: "P" });
+    expect(res.status).toBe(201);
+    expect(json.ok).toBe(true);
+  });
+
   it("503s when team_workspaces_disabled", async () => {
     mockedCreateTeamProject.mockResolvedValue({ status: "team_workspaces_disabled" });
     const { res, json } = await callPost({ name: "P" });
