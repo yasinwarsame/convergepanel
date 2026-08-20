@@ -19,7 +19,6 @@
  */
 
 import "server-only";
-import { TEAM_WORKSPACES_ENABLED } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import { getWorkspace } from "@/lib/firestore/workspaces";
 import { getWorkspaceMembershipForBinding } from "@/lib/firestore/workspaceMemberships";
@@ -38,7 +37,6 @@ export type ResolveWorkspaceAccessResult =
         | "workspace_malformed"
         | "lookup_failed"
         | "not_owner" // Personal mode only.
-        | "team_workspaces_disabled"
         | "membership_not_found"
         | "membership_removed"
         | "membership_malformed"
@@ -82,17 +80,10 @@ export async function resolveWorkspaceAccess(args: { uid: string; workspaceId: s
     return { granted: true, workspaceType: "personal", workspace };
   }
 
-  // workspace.type === "team"
-  if (!TEAM_WORKSPACES_ENABLED) {
-    // Mirrors WORKSPACES_ENABLED's flag-safety invariant (see
-    // docs/workspaces/architecture.md's "Feature flag safety" section):
-    // the flag can only ever narrow access, never widen it or redirect it
-    // to a different authorization model. A disabled flag denies outright
-    // — it never falls back to treating the Team Workspace as if it were
-    // Personal, and never grants access via any other path.
-    return { granted: false, reason: "team_workspaces_disabled" };
-  }
-
+  // workspace.type === "team" — no feature flag gates this path. Phase
+  // 8B introduces no environment-contract change; the Team Workspace
+  // backend surface is scoped to production exposure entirely by this
+  // branch not being merged or deployed, not by a runtime kill switch.
   const membershipLookup = await getWorkspaceMembershipForBinding({ workspaceId: workspace.id, uid: args.uid });
   switch (membershipLookup.status) {
     case "not_found":

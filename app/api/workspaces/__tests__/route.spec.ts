@@ -1,7 +1,9 @@
 /**
- * Team Workspace Core Foundation, Phase 8B — POST /api/user/team-workspaces
- * tests. Mocks `createTeamWorkspace()` (already independently tested) —
- * this suite covers request parsing, auth, and status-code mapping only.
+ * Team Workspace Core Foundation, Phase 8B, route namespace corrected in
+ * Phase 8B.1 — POST /api/workspaces tests. Mocks `createTeamWorkspace()`
+ * (already independently tested) — this suite covers request parsing,
+ * auth, and status-code mapping only. No feature-flag/disabled scenario
+ * exists here — Phase 8B.1 removed `TEAM_WORKSPACES_ENABLED` entirely.
  */
 
 const mockedResolveRequestIdentity = jest.fn();
@@ -19,12 +21,12 @@ jest.mock("@/lib/firestore/workspaceMemberships", () => ({
 }));
 
 import { NextRequest } from "next/server";
-import { POST } from "@/app/api/user/team-workspaces/route";
+import { POST } from "@/app/api/workspaces/route";
 
 const UID = "uid-1";
 
 function buildRequest(body?: unknown): NextRequest {
-  return new NextRequest("http://localhost/api/user/team-workspaces", { method: "POST", ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
+  return new NextRequest("http://localhost/api/workspaces", { method: "POST", ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
 }
 
 async function callRoute(body?: unknown) {
@@ -46,7 +48,7 @@ it("401s when unauthenticated", async () => {
 });
 
 it("400s on an invalid JSON body", async () => {
-  const req = new NextRequest("http://localhost/api/user/team-workspaces", { method: "POST", body: "not json" });
+  const req = new NextRequest("http://localhost/api/workspaces", { method: "POST", body: "not json" });
   const res = await POST(req);
   expect(res.status).toBe(400);
 });
@@ -79,15 +81,14 @@ it("passes only the authenticated uid — never a client-supplied uid", async ()
   expect(mockedCreateTeamWorkspace.mock.calls[0][0]).toEqual({ uid: UID, name: "Acme" });
 });
 
-it("503s when Team Workspaces are disabled", async () => {
-  mockedCreateTeamWorkspace.mockResolvedValue({ status: "team_workspaces_disabled" });
-  const { res, json } = await callRoute({ name: "Acme" });
-  expect(res.status).toBe(503);
-  expect(json.errorCode).toBe("team_workspaces_disabled");
-});
-
 it("500s on create_failed", async () => {
   mockedCreateTeamWorkspace.mockResolvedValue({ status: "create_failed" });
+  const { res } = await callRoute({ name: "Acme" });
+  expect(res.status).toBe(500);
+});
+
+it("500s on firestore_unavailable", async () => {
+  mockedCreateTeamWorkspace.mockResolvedValue({ status: "firestore_unavailable" });
   const { res } = await callRoute({ name: "Acme" });
   expect(res.status).toBe(500);
 });

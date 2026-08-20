@@ -1,7 +1,8 @@
 /**
- * Team Workspace Core Foundation, Phase 8B — the account-lifecycle guard
- * `DELETE`/`PATCH /api/admin/users/[uid]` consult before permanently
- * deleting or disabling a user who currently owns a Team Workspace.
+ * Team Workspace Core Foundation, Phase 8B (corrected in Phase 8B.1) — the
+ * account-lifecycle guard `DELETE`/`PATCH /api/admin/users/[uid]` consult
+ * before permanently deleting or disabling a user who currently owns a
+ * Team Workspace.
  *
  * Deliberately a single-field-equality query (`.where("ownerUserId","==",uid)`
  * on `workspaces`, already covered by Firestore's automatic single-field
@@ -14,6 +15,18 @@
  * nothing that matters — see docs/workspaces/phase8-team-workspace-foundation.md's
  * "Indexes" section for the full reasoning against adding one solely for
  * this guard.
+ *
+ * Phase 8B.1 correction: the result is now a three-way discriminated
+ * union, never a boolean — "the lookup failed" and "the uid owns no Team
+ * Workspace" are DIFFERENT facts and must never be conflated. An account-
+ * management action that cannot positively confirm a uid owns no Team
+ * Workspace must never proceed as if it had confirmed exactly that: a
+ * failed lookup means ownership status is UNKNOWN, and UNKNOWN must fail
+ * closed, or a transient Firestore failure could delete/disable the sole
+ * Owner of a Team Workspace and leave it administratively ownerless —
+ * exactly the condition this guard exists to prevent. The caller
+ * (`app/api/admin/users/[uid]/route.ts`) is required to treat `"lookup_failed"`
+ * as a hard stop, never as "proceed."
  */
 
 import "server-only";
@@ -21,11 +34,14 @@ import { adminDb } from "@/lib/firebase/admin";
 import { logger } from "@/lib/logger";
 import { isWellFormedWorkspaceV1 } from "@/lib/workspaces/types";
 
-export type GetTeamWorkspaceOwnershipResult = { status: "ok"; ownsTeamWorkspace: boolean; workspaceIds: string[] } | { status: "firestore_unavailable" } | { status: "lookup_failed" };
+export type TeamOwnershipCheckResult = { kind: "clear" } | { kind: "owns_team_workspace"; workspaceIds: string[] } | { kind: "lookup_failed" };
 
-export async function getTeamWorkspaceOwnershipForUid(uid: string): Promise<GetTeamWorkspaceOwnershipResult> {
+export async function checkTeamWorkspaceOwnershipForUid(uid: string): Promise<TeamOwnershipCheckResult> {
   if (!adminDb) {
-    return { status: "firestore_unavailable" };
+    // Firestore itself unavailable — ownership status is UNKNOWN, not
+    // "clear." Same fail-closed treatment as a query throwing below.
+    logger.error("[workspaces/teamOwnerGuard] Firestore unavailable while checking Team Workspace ownership — failing closed", { uid });
+    return { kind: "lookup_failed" };
   }
   try {
     const snap = await adminDb.collection("workspaces").where("ownerUserId", "==", uid).get();
@@ -36,9 +52,9 @@ export async function getTeamWorkspaceOwnershipForUid(uid: string): Promise<GetT
         workspaceIds.push(doc.id);
       }
     }
-    return { status: "ok", ownsTeamWorkspace: workspaceIds.length > 0, workspaceIds };
+    return workspaceIds.length > 0 ? { kind: "owns_team_workspace", workspaceIds } : { kind: "clear" };
   } catch (err) {
-    logger.warn("[workspaces/teamOwnerGuard] Failed to look up Team Workspace ownership", { uid, error: err instanceof Error ? err.message : String(err) });
-    return { status: "lookup_failed" };
+    logger.error("[workspaces/teamOwnerGuard] Failed to look up Team Workspace ownership — failing closed", { uid, error: err instanceof Error ? err.message : String(err) });
+    return { kind: "lookup_failed" };
   }
 }

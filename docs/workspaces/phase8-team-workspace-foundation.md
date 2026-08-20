@@ -1,6 +1,6 @@
 # Phase 8 — Enterprise Team Workspaces: Frozen Architecture (8A–8A.2) & Core Foundation (8B)
 
-**Status: Phase 8A / 8A.1 / 8A.2 architecture reviewed and frozen (2026-08-20). Phase 8B (this document's implementation companion) implements the foundation only — creation, ownership transfer, membership storage, capability model, access resolution, and account-lifecycle protection. Invitations, member-management UI, Team Projects, Team research-run creation, Team report sharing, Team review integration, Team Workspace UI, and the four planned composite indexes are all explicitly deferred to later Phase 8 subphases. No Team Workspace has been created in production. `TEAM_WORKSPACES_ENABLED` is off in production.**
+**Status: Phase 8A / 8A.1 / 8A.2 architecture reviewed and frozen (2026-08-20). Phase 8B implemented the foundation — creation, ownership transfer, membership storage, capability model, access resolution, and account-lifecycle protection — and underwent senior review; Phase 8B.1 is the corrective pass addressing that review (fail-closed account-lifecycle guard, no environment-contract change, corrected `/api/workspaces` namespace). Invitations, member-management UI, Team Projects, Team research-run creation, Team report sharing, Team review integration, Team Workspace UI, and the four planned composite indexes are all explicitly deferred to later Phase 8 subphases. No Team Workspace has been created in production. Phase 8B introduces no environment variable — the Team Workspace backend is scoped to production exposure entirely by this branch not being merged or deployed.**
 
 This is an architectural record of what was decided and why — not a claim about what has shipped where. See `docs/workspaces/architecture.md` for Phases 1–3D (Personal Workspace foundation, provisioning, and workspace-aware writes) and `docs/team-workspaces-architecture-audit.md` for the original pre-Phase-8 data-model audit this design builds on.
 
@@ -13,7 +13,8 @@ Phase 8 itself is internally staged:
 - **8A** — initial Team Workspace architecture proposal (schema, membership, roles).
 - **8A.1** — revision addressing initial review feedback.
 - **8A.2** — final revision; reviewed and accepted with one correction (see "OCC requirements" below) — **frozen as of 2026-08-20**.
-- **8B** (this phase) — Team Workspace Core Foundation, Ownership & Access Control. Implements the frozen architecture's foundation only.
+- **8B** — Team Workspace Core Foundation, Ownership & Access Control. Implements the frozen architecture's foundation only.
+- **8B.1** (this document's latest revision) — corrective pass following senior review of 8B: the account-lifecycle guard now fails closed on an ownership-lookup failure, the `TEAM_WORKSPACES_ENABLED` environment variable Phase 8B had introduced (in violation of the "no environment change" requirement) was removed, and the Team API namespace was corrected from `/api/user/team-workspaces` to the frozen `/api/workspaces` root. No other Phase 8B behavior was altered.
 - 8C+ (not started) — member management, invitations (8D), Team Projects, Team research runs, Team review integration, Team Workspace UI.
 
 ## Personal versus Team Workspace schema
@@ -141,11 +142,11 @@ A membership row with `role: "owner"` while `workspace.ownerUserId` disagrees is
 
 ## Team Workspace creation transaction
 
-`createTeamWorkspace()` (`lib/firestore/workspaceMemberships.ts`) — one `adminDb.runTransaction()`, `tx.create()` on both the Workspace and founder-membership refs. A Team Workspace is never observable without its Owner membership: either both documents commit or neither does. Every identity-derived field (`ownerUserId`, `createdByUserId`, founder `uid`/`role`) is derived server-side from the authenticated caller alone; the request body is parsed only for `name` (`POST /api/user/team-workspaces`). Founder `invitedByUserId` is always `null` — never a fabricated inviter uid.
+`createTeamWorkspace()` (`lib/firestore/workspaceMemberships.ts`) — one `adminDb.runTransaction()`, `tx.create()` on both the Workspace and founder-membership refs. A Team Workspace is never observable without its Owner membership: either both documents commit or neither does. Every identity-derived field (`ownerUserId`, `createdByUserId`, founder `uid`/`role`) is derived server-side from the authenticated caller alone; the request body is parsed only for `name` (`POST /api/workspaces`). Founder `invitedByUserId` is always `null` — never a fabricated inviter uid.
 
 ## Ownership-transfer transaction
 
-`transferTeamWorkspaceOwnership()` (`lib/firestore/workspaceMemberships.ts`), exposed via `POST /api/user/team-workspaces/[workspaceId]/transfer-ownership`. One transaction, three documents read together (`tx.get()` via `Promise.all`): the Workspace, the caller's own membership (at `computeMembershipId(workspaceId, callerUid)`), and the proposed new Owner's membership (at `computeMembershipId(workspaceId, newOwnerUid)`).
+`transferTeamWorkspaceOwnership()` (`lib/firestore/workspaceMemberships.ts`), exposed via `POST /api/workspaces/[workspaceId]/transfer-ownership`. One transaction, three documents read together (`tx.get()` via `Promise.all`): the Workspace, the caller's own membership (at `computeMembershipId(workspaceId, callerUid)`), and the proposed new Owner's membership (at `computeMembershipId(workspaceId, newOwnerUid)`).
 
 Validation order inside the transaction: Workspace well-formed + `type === "team"` → caller passes `isCanonicalTeamOwnerMembership()` → reject self-transfer → new Owner's membership exists, is bound to this exact workspace/uid, `status === "active"`, `role !== "owner"` → OCC token comparison (see below) → three writes, each with its own precondition:
 
@@ -161,7 +162,7 @@ Never exposed as a generic role-mutation path — this is the ONLY way `ownerUse
 
 **This is the one substantive correction to the Phase 8A.2 report, made during review, and it is the actual implemented behavior — not merely a stated intention.**
 
-The route (`POST /api/user/team-workspaces/[workspaceId]/transfer-ownership`) requires three caller-supplied tokens: `expectedWorkspaceUpdateTime`, `expectedOldOwnerMembershipUpdateTime`, `expectedNewOwnerMembershipUpdateTime`. Parsed via the EXISTING shared `validateUpdateTimeToken()` (`lib/projects/updateTimeToken.ts`) — never a reimplemented parser.
+The route (`POST /api/workspaces/[workspaceId]/transfer-ownership`) requires three caller-supplied tokens: `expectedWorkspaceUpdateTime`, `expectedOldOwnerMembershipUpdateTime`, `expectedNewOwnerMembershipUpdateTime`. Parsed via the EXISTING shared `validateUpdateTimeToken()` (`lib/projects/updateTimeToken.ts`) — never a reimplemented parser.
 
 **What would have been wrong, and is NOT what this implementation does:** reading each document's current `snapshot.updateTime` inside the transaction and feeding that freshly-read value back as the `lastUpdateTime` precondition. That only protects the transaction's own read version against a write landing between its read and its commit (a guarantee Firestore's read-set conflict detection already provides for free) — it does **not** enforce that the CALLER's belief about the document, from whenever they last fetched it, was itself still current.
 
@@ -174,17 +175,23 @@ Verified by an explicit adversarial test (`lib/firestore/__tests__/workspaceMemb
 
 ## Account lifecycle protections
 
-`getTeamWorkspaceOwnershipForUid()` (`lib/workspaces/teamOwnerGuard.ts`) — a single-field-equality query (`workspaces.where("ownerUserId","==",uid)`, covered by Firestore's automatic index) followed by an in-memory `type === "team"` filter, deliberately avoiding a new composite index for a low-frequency admin operation.
+`checkTeamWorkspaceOwnershipForUid()` (`lib/workspaces/teamOwnerGuard.ts`) — a single-field-equality query (`workspaces.where("ownerUserId","==",uid)`, covered by Firestore's automatic index) followed by an in-memory `type === "team"` filter, deliberately avoiding a new composite index for a low-frequency admin operation. Returns a three-way discriminated result — `{kind: "clear"}`, `{kind: "owns_team_workspace"; workspaceIds}`, or `{kind: "lookup_failed"}` — never a boolean, because "the lookup failed" and "the uid owns nothing" are different facts that must never collapse into the same outcome.
 
-`DELETE`/`PATCH /api/admin/users/[uid]` (existing pre-Phase-8 routes) now consult this guard: permanently deleting, or disabling (`isDisabled: true`), a uid that owns any Team Workspace returns `409 team_workspace_owner` with zero mutation. Re-enabling (`isDisabled: false`) is never blocked. A lookup failure (Firestore unreachable) deliberately does NOT block the request — the guard only ever ADDS a block on positively-confirmed Team ownership; it never introduces a new way for a previously-succeeding admin operation to start failing merely because ownership couldn't be determined at that instant. Ownership is never auto-transferred, no replacement Owner is ever chosen, and no Team resource is ever cascaded — the guard only blocks the destructive/disabling action outright, deferring to a human running the dedicated transfer operation first.
+`DELETE`/`PATCH /api/admin/users/[uid]` (existing pre-Phase-8 routes) now consult this guard: permanently deleting, or disabling (`isDisabled: true`), a uid that owns any Team Workspace returns `409 team_workspace_owner` with zero mutation. Re-enabling (`isDisabled: false`) is never blocked — the guard is never even called in that direction.
+
+**FAILS CLOSED on a lookup failure (Phase 8B.1 correction).** A failed Firestore ownership lookup means ownership status is UNKNOWN, and UNKNOWN must never be treated as "clear." Phase 8B's original implementation proceeded with the destructive/disabling action when the lookup failed — a transient Firestore failure could then delete or disable a Team Workspace's sole Owner and leave it administratively ownerless, the exact condition this guard exists to prevent. Phase 8B.1 corrects this: `{kind: "lookup_failed"}` returns `503 team_workspace_ownership_check_failed` and performs zero mutation — neither `adminAuth.deleteUser()`/`adminAuth.updateUser(...disabled:true)` nor the corresponding `users/{uid}` Firestore write is ever reached. The infrastructure failure is logged via `logger.error()`, never exposed to the client as a raw Firestore error.
+
+Ownership is never auto-transferred, no replacement Owner is ever chosen, and no Team resource is ever cascaded — the guard only blocks the destructive/disabling action outright, deferring to a human running the dedicated transfer operation first.
 
 ## Invitation architecture — deferred to Phase 8D
 
 `workspaceInvitations`, `workspaceInvitationKeys`, invite creation/revocation/resend/token rotation, acceptance, verified-email enforcement, transactional email integration, and member-invitation UI are all explicitly Phase 8D's scope, not Phase 8B's. No such collection, email provider selection, or email environment variable exists as of Phase 8B. `invitedByUserId` on `WorkspaceMembershipV1` already anticipates this (non-null once real invitations exist) without requiring a schema change later.
 
-## Team API namespace decision
+## Team API namespace — corrected in Phase 8B.1
 
-`/api/user/team-workspaces` (plural, distinct from the existing singular `/api/user/workspace` — Personal-only) for creation, and `/api/user/team-workspaces/[workspaceId]/transfer-ownership` for the dedicated transfer operation. No `GET`/list endpoint exists yet (deferred — Phase 8B has no UI to serve). Chosen to keep Team Workspace's own API surface visually and structurally distinct from the pre-existing Personal-Workspace-only `/api/user/workspace` namespace, avoiding any ambiguity about which resource a route operates on as more Team endpoints are added in later subphases.
+**Canonical, frozen (Phase 8A):** `/api/workspaces/{workspaceId}/...` — the Team-Workspace-qualified API root. `POST /api/workspaces` (at the collection root) creates a Team Workspace; `POST /api/workspaces/[workspaceId]/transfer-ownership` performs the dedicated ownership transfer. No `GET`/list endpoint exists yet (deferred — Phase 8B has no UI to serve).
+
+Phase 8B's initial implementation placed these routes under `/api/user/team-workspaces` instead — architecture drift from the frozen namespace, caught in senior review. Because neither route had been deployed, Phase 8B.1 corrected the paths directly rather than preserving an alias, redirect, or compatibility wrapper: the old route tree was deleted outright, with no remaining reference to it anywhere in the codebase. The underlying service/domain logic (`createTeamWorkspace()`, `transferTeamWorkspaceOwnership()`) was unchanged by this correction — only the route file locations and their own path literals moved.
 
 ## Review-system integration decision
 

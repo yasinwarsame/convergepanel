@@ -1,3 +1,11 @@
+/**
+ * Phase 8B.1 — `checkTeamWorkspaceOwnershipForUid()` tests. Renamed from
+ * `getTeamWorkspaceOwnershipForUid()` and now returns a three-way
+ * discriminated result (`"clear" | "owns_team_workspace" | "lookup_failed"`)
+ * instead of a boolean — "lookup failed" and "owns nothing" must never
+ * collapse into the same outcome (see the module's own doc comment).
+ */
+
 const firestoreUnavailableFlag = { value: false };
 const queryShouldThrow = { value: false };
 let queryDocs: Array<{ id: string; data: Record<string, unknown> }> = [];
@@ -27,7 +35,8 @@ jest.mock("@/lib/logger", () => ({
 }));
 
 import { Timestamp } from "firebase-admin/firestore";
-import { getTeamWorkspaceOwnershipForUid } from "@/lib/workspaces/teamOwnerGuard";
+import { checkTeamWorkspaceOwnershipForUid } from "@/lib/workspaces/teamOwnerGuard";
+import { logger } from "@/lib/logger";
 
 const UID = "uid-1";
 const NOW = Timestamp.now();
@@ -47,57 +56,58 @@ beforeEach(() => {
   queryShouldThrow.value = false;
 });
 
-describe("getTeamWorkspaceOwnershipForUid", () => {
-  it("reports no ownership when the uid owns nothing", async () => {
-    const result = await getTeamWorkspaceOwnershipForUid(UID);
-    expect(result).toEqual({ status: "ok", ownsTeamWorkspace: false, workspaceIds: [] });
+describe("checkTeamWorkspaceOwnershipForUid", () => {
+  it("reports clear when the uid owns nothing", async () => {
+    const result = await checkTeamWorkspaceOwnershipForUid(UID);
+    expect(result).toEqual({ kind: "clear" });
   });
 
-  it("reports ownership when the uid owns a Team Workspace", async () => {
+  it("reports owns_team_workspace when the uid owns a Team Workspace", async () => {
     queryDocs = [teamDoc("ws-team-1")];
-    const result = await getTeamWorkspaceOwnershipForUid(UID);
-    expect(result).toEqual({ status: "ok", ownsTeamWorkspace: true, workspaceIds: ["ws-team-1"] });
+    const result = await checkTeamWorkspaceOwnershipForUid(UID);
+    expect(result).toEqual({ kind: "owns_team_workspace", workspaceIds: ["ws-team-1"] });
   });
 
-  it("does NOT report ownership from owning only a Personal Workspace", async () => {
+  it("reports clear from owning only a Personal Workspace", async () => {
     queryDocs = [personalDoc("personal-uid-1")];
-    const result = await getTeamWorkspaceOwnershipForUid(UID);
-    expect(result).toEqual({ status: "ok", ownsTeamWorkspace: false, workspaceIds: [] });
+    const result = await checkTeamWorkspaceOwnershipForUid(UID);
+    expect(result).toEqual({ kind: "clear" });
   });
 
   it("filters out a malformed document rather than trusting it", async () => {
     queryDocs = [{ id: "ws-bad", data: { ownerUserId: UID, type: "team" } }]; // missing required fields
-    const result = await getTeamWorkspaceOwnershipForUid(UID);
-    expect(result).toEqual({ status: "ok", ownsTeamWorkspace: false, workspaceIds: [] });
+    const result = await checkTeamWorkspaceOwnershipForUid(UID);
+    expect(result).toEqual({ kind: "clear" });
   });
 
   it("filters out a document whose embedded id disagrees with its Firestore doc id", async () => {
     const doc = teamDoc("ws-real-id");
     (doc.data as any).id = "ws-mismatched-id";
     queryDocs = [doc];
-    const result = await getTeamWorkspaceOwnershipForUid(UID);
-    expect(result).toEqual({ status: "ok", ownsTeamWorkspace: false, workspaceIds: [] });
+    const result = await checkTeamWorkspaceOwnershipForUid(UID);
+    expect(result).toEqual({ kind: "clear" });
   });
 
   it("reports both Team Workspaces when the uid owns more than one", async () => {
     queryDocs = [teamDoc("ws-team-1"), teamDoc("ws-team-2"), personalDoc("personal-uid-1")];
-    const result = await getTeamWorkspaceOwnershipForUid(UID);
-    expect(result.status).toBe("ok");
-    if (result.status === "ok") {
-      expect(result.ownsTeamWorkspace).toBe(true);
+    const result = await checkTeamWorkspaceOwnershipForUid(UID);
+    expect(result.kind).toBe("owns_team_workspace");
+    if (result.kind === "owns_team_workspace") {
       expect(result.workspaceIds.sort()).toEqual(["ws-team-1", "ws-team-2"]);
     }
   });
 
-  it("reports firestore_unavailable when adminDb is null", async () => {
+  it("fails closed (lookup_failed, never clear) when adminDb is null", async () => {
     firestoreUnavailableFlag.value = true;
-    const result = await getTeamWorkspaceOwnershipForUid(UID);
-    expect(result).toEqual({ status: "firestore_unavailable" });
+    const result = await checkTeamWorkspaceOwnershipForUid(UID);
+    expect(result).toEqual({ kind: "lookup_failed" });
+    expect(logger.error).toHaveBeenCalled();
   });
 
-  it("reports lookup_failed when the query throws", async () => {
+  it("fails closed (lookup_failed, never clear) when the query throws", async () => {
     queryShouldThrow.value = true;
-    const result = await getTeamWorkspaceOwnershipForUid(UID);
-    expect(result).toEqual({ status: "lookup_failed" });
+    const result = await checkTeamWorkspaceOwnershipForUid(UID);
+    expect(result).toEqual({ kind: "lookup_failed" });
+    expect(logger.error).toHaveBeenCalled();
   });
 });

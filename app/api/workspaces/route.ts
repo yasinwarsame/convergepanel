@@ -1,14 +1,20 @@
 /**
- * Team Workspace Core Foundation, Phase 8B — `POST /api/user/team-workspaces`,
- * the minimal API surface needed to exercise `createTeamWorkspace()`. No
+ * Team Workspace Core Foundation, Phase 8B — `POST /api/workspaces`, the
+ * minimal API surface needed to exercise `createTeamWorkspace()`, at the
+ * frozen Phase 8A Team API namespace root (`/api/workspaces/{workspaceId}/...`
+ * — this route creates the `{workspaceId}` those later paths address). No
  * GET/list endpoint, no member-management, no invitations — those are
  * later Phase 8 subphases (see docs/workspaces/phase8-team-workspace-foundation.md).
  *
  * Every identity-derived field is server-derived from the authenticated
  * uid alone (`resolveRequestIdentity()`, the same hardened resolver every
- * other `/api/user/**` route uses) — the request body is parsed ONLY for
- * `name`; no `ownerUserId`, `createdByUserId`, `type`, or `schemaVersion`
- * field is ever accepted from a client.
+ * other authenticated route in this codebase uses) — the request body is
+ * parsed ONLY for `name`; no `ownerUserId`, `createdByUserId`, `type`, or
+ * `schemaVersion` field is ever accepted from a client.
+ *
+ * No feature flag gates this route — Phase 8B is prohibited from changing
+ * the environment contract. Production exposure is controlled entirely by
+ * this branch not being merged or deployed.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -17,7 +23,7 @@ import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelem
 import { parseCreateTeamWorkspaceBody } from "@/lib/workspaces/teamWorkspaceMutationBody";
 import { validateTeamWorkspaceName } from "@/lib/workspaces/teamWorkspaceName";
 import { createTeamWorkspace } from "@/lib/firestore/workspaceMemberships";
-import { teamWorkspacesDisabledResponse, invalidRequestBodyResponse, unexpectedFieldResponse, invalidTeamWorkspaceNameResponse, internalErrorResponse } from "@/lib/workspaces/teamWorkspaceErrorResponse";
+import { invalidRequestBodyResponse, unexpectedFieldResponse, invalidTeamWorkspaceNameResponse, internalErrorResponse } from "@/lib/workspaces/teamWorkspaceErrorResponse";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,7 +31,7 @@ export const dynamic = "force-dynamic";
 export async function POST(req: NextRequest) {
   const identity = await resolveRequestIdentity(req);
   if (identity.status !== "authenticated") {
-    logIdentityResolutionFailure({ route: "POST /api/user/team-workspaces", method: "POST", failureCategory: identity.reason });
+    logIdentityResolutionFailure({ route: "POST /api/workspaces", method: "POST", failureCategory: identity.reason });
     if (identity.reason === "missing_credentials") {
       return NextResponse.json({ ok: false, errorCode: "unauthorized", message: "Please sign in." }, { status: 401 });
     }
@@ -58,10 +64,6 @@ export async function POST(req: NextRequest) {
   switch (result.status) {
     case "created":
       return NextResponse.json({ ok: true, workspace: result.workspace, membership: result.membership }, { status: 201 });
-    case "team_workspaces_disabled": {
-      const { status, body } = teamWorkspacesDisabledResponse();
-      return NextResponse.json(body, { status });
-    }
     case "firestore_unavailable":
     case "create_failed": {
       const { status, body } = internalErrorResponse();

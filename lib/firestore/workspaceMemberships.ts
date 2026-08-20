@@ -12,7 +12,6 @@ import { Status } from "google-gax";
 import { Timestamp } from "firebase-admin/firestore";
 import { adminDb } from "@/lib/firebase/admin";
 import { logger } from "@/lib/logger";
-import { TEAM_WORKSPACES_ENABLED } from "@/lib/env";
 import { computeMembershipId } from "@/lib/workspaces/membershipId";
 import { validateMembershipBinding } from "@/lib/workspaces/membershipBinding";
 import { isCanonicalTeamOwnerMembership } from "@/lib/workspaces/ownerInvariant";
@@ -57,7 +56,6 @@ export async function getWorkspaceMembershipForBinding(args: { workspaceId: stri
 
 export type CreateTeamWorkspaceResult =
   | { status: "created"; workspace: TeamWorkspaceV1; membership: WorkspaceMembershipV1 }
-  | { status: "team_workspaces_disabled" }
   | { status: "firestore_unavailable" }
   | { status: "create_failed" };
 
@@ -74,9 +72,6 @@ export type CreateTeamWorkspaceResult =
  * is always `null` for the founder membership, never a fabricated inviter.
  */
 export async function createTeamWorkspace(args: { uid: string; name: string }): Promise<CreateTeamWorkspaceResult> {
-  if (!TEAM_WORKSPACES_ENABLED) {
-    return { status: "team_workspaces_disabled" };
-  }
   if (!adminDb) {
     return { status: "firestore_unavailable" };
   }
@@ -124,7 +119,6 @@ export async function createTeamWorkspace(args: { uid: string; name: string }): 
 
 export type TransferTeamWorkspaceOwnershipResult =
   | { status: "transferred"; workspace: TeamWorkspaceV1; oldOwnerMembership: WorkspaceMembershipV1; newOwnerMembership: WorkspaceMembershipV1 }
-  | { status: "team_workspaces_disabled" }
   | { status: "firestore_unavailable" }
   | { status: "workspace_not_found" }
   | { status: "workspace_stale" }
@@ -212,9 +206,6 @@ export async function transferTeamWorkspaceOwnership(args: {
   expectedOldOwnerMembershipUpdateTime: Timestamp;
   expectedNewOwnerMembershipUpdateTime: Timestamp;
 }): Promise<TransferTeamWorkspaceOwnershipResult> {
-  if (!TEAM_WORKSPACES_ENABLED) {
-    return { status: "team_workspaces_disabled" };
-  }
   if (!adminDb) {
     return { status: "firestore_unavailable" };
   }

@@ -6,13 +6,6 @@
  * invariant check over their results.
  */
 
-let teamWorkspacesEnabled = true;
-jest.mock("@/lib/env", () => ({
-  get TEAM_WORKSPACES_ENABLED() {
-    return teamWorkspacesEnabled;
-  },
-}));
-
 const mockGetWorkspace = jest.fn();
 jest.mock("@/lib/firestore/workspaces", () => ({
   getWorkspace: (...args: unknown[]) => mockGetWorkspace(...args),
@@ -62,7 +55,6 @@ function membership(role: WorkspaceMembershipRole, overrides: Partial<WorkspaceM
 
 beforeEach(() => {
   jest.clearAllMocks();
-  teamWorkspacesEnabled = true;
 });
 
 describe("Personal Workspace path", () => {
@@ -99,14 +91,6 @@ describe("workspace lookup failures", () => {
 describe("Team Workspace path", () => {
   beforeEach(() => {
     mockGetWorkspace.mockResolvedValue({ status: "found", workspace: teamWorkspace() });
-  });
-
-  it("denies outright when TEAM_WORKSPACES_ENABLED is off, even for a legitimate active membership", async () => {
-    teamWorkspacesEnabled = false;
-    mockGetWorkspaceMembershipForBinding.mockResolvedValue({ status: "found", membership: membership("owner") });
-    const result = await resolveWorkspaceAccess({ uid: UID, workspaceId: WS_ID });
-    expect(result).toEqual({ granted: false, reason: "team_workspaces_disabled" });
-    expect(mockGetWorkspaceMembershipForBinding).not.toHaveBeenCalled();
   });
 
   it.each<WorkspaceMembershipRole>(["admin", "member", "reviewer", "viewer"])("resolves a valid active %s membership with its role's capability set", async (role) => {

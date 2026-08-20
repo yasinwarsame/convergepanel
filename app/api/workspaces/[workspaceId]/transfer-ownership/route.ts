@@ -1,7 +1,8 @@
 /**
  * Team Workspace Core Foundation, Phase 8B —
- * `POST /api/user/team-workspaces/[workspaceId]/transfer-ownership`, the
- * only route that calls `transferTeamWorkspaceOwnership()`. The
+ * `POST /api/workspaces/[workspaceId]/transfer-ownership`, the only route
+ * that calls `transferTeamWorkspaceOwnership()`, at the frozen Phase 8A
+ * Team API namespace (`/api/workspaces/{workspaceId}/...`). The
  * authenticated caller is always the `callerUid` the service function
  * validates as the canonical current Owner — never a body-supplied value.
  *
@@ -17,6 +18,10 @@
  * `updateTime` for what the client supplied. See that function's own doc
  * comment for the full authoritative-precondition contract.
  * =================================================================
+ *
+ * No feature flag gates this route — Phase 8B is prohibited from
+ * changing the environment contract. Production exposure is controlled
+ * entirely by this branch not being merged or deployed.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -26,7 +31,6 @@ import { parseTransferOwnershipBody } from "@/lib/workspaces/teamWorkspaceMutati
 import { validateUpdateTimeToken } from "@/lib/projects/updateTimeToken";
 import { transferTeamWorkspaceOwnership } from "@/lib/firestore/workspaceMemberships";
 import {
-  teamWorkspacesDisabledResponse,
   invalidRequestBodyResponse,
   unexpectedFieldResponse,
   invalidUpdateTimeResponse,
@@ -44,7 +48,7 @@ export const dynamic = "force-dynamic";
 export async function POST(req: NextRequest, { params }: { params: { workspaceId: string } }) {
   const identity = await resolveRequestIdentity(req);
   if (identity.status !== "authenticated") {
-    logIdentityResolutionFailure({ route: "POST /api/user/team-workspaces/[workspaceId]/transfer-ownership", method: "POST", failureCategory: identity.reason });
+    logIdentityResolutionFailure({ route: "POST /api/workspaces/[workspaceId]/transfer-ownership", method: "POST", failureCategory: identity.reason });
     if (identity.reason === "missing_credentials") {
       return NextResponse.json({ ok: false, errorCode: "unauthorized", message: "Please sign in." }, { status: 401 });
     }
@@ -102,10 +106,6 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
         oldOwnerMembership: result.oldOwnerMembership,
         newOwnerMembership: result.newOwnerMembership,
       });
-    case "team_workspaces_disabled": {
-      const { status, body } = teamWorkspacesDisabledResponse();
-      return NextResponse.json(body, { status });
-    }
     case "workspace_not_found":
     case "caller_not_owner": {
       // Collapsed identically: a caller who isn't the canonical Owner

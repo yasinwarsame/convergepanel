@@ -103,13 +103,6 @@ jest.mock("@/lib/firebase/admin", () => ({
 
 const firestoreUnavailableFlag = { value: false };
 
-let teamWorkspacesEnabled = true;
-jest.mock("@/lib/env", () => ({
-  get TEAM_WORKSPACES_ENABLED() {
-    return teamWorkspacesEnabled;
-  },
-}));
-
 jest.mock("@/lib/logger", () => ({
   logger: { warn: jest.fn(), info: jest.fn(), error: jest.fn(), debug: jest.fn() },
 }));
@@ -165,7 +158,6 @@ beforeEach(() => {
   stores.workspaceMemberships.clear();
   concurrentMutationHook = null;
   firestoreUnavailableFlag.value = false;
-  teamWorkspacesEnabled = true;
 });
 
 describe("getWorkspaceMembershipForBinding", () => {
@@ -247,13 +239,6 @@ describe("createTeamWorkspace", () => {
     if (result.status !== "created") return;
     expect(result.workspace.ownerUserId).toBe(OWNER_UID);
     expect(result.workspace.createdByUserId).toBe(OWNER_UID);
-  });
-
-  it("reports team_workspaces_disabled and performs no Firestore access when the flag is off", async () => {
-    teamWorkspacesEnabled = false;
-    const result = await createTeamWorkspace({ uid: OWNER_UID, name: "Acme" });
-    expect(result.status).toBe("team_workspaces_disabled");
-    expect(mockAdminDb.runTransaction).not.toHaveBeenCalled();
   });
 
   it("leaves no partial state when the transaction throws", async () => {
@@ -517,19 +502,5 @@ describe("transferTeamWorkspaceOwnership", () => {
       expect(validateUpdateTimeToken(null).ok).toBe(false);
       expect(validateUpdateTimeToken({ seconds: 1 }).ok).toBe(false);
     });
-  });
-
-  it("reports team_workspaces_disabled and performs no Firestore access when the flag is off", async () => {
-    teamWorkspacesEnabled = false;
-    const result = await transferTeamWorkspaceOwnership({
-      workspaceId: WS_ID,
-      callerUid: OWNER_UID,
-      newOwnerUid: OTHER_UID,
-      expectedWorkspaceUpdateTime: Timestamp.now(),
-      expectedOldOwnerMembershipUpdateTime: Timestamp.now(),
-      expectedNewOwnerMembershipUpdateTime: Timestamp.now(),
-    });
-    expect(result.status).toBe("team_workspaces_disabled");
-    expect(mockAdminDb.runTransaction).not.toHaveBeenCalled();
   });
 });

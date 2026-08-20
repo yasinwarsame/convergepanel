@@ -1,13 +1,14 @@
 /**
- * Team Workspace Core Foundation, Phase 8B —
- * POST /api/user/team-workspaces/[workspaceId]/transfer-ownership tests.
- * Mocks `transferTeamWorkspaceOwnership()` (already independently, and
- * far more thoroughly, tested in
+ * Team Workspace Core Foundation, Phase 8B, route namespace corrected in
+ * Phase 8B.1 — POST /api/workspaces/[workspaceId]/transfer-ownership
+ * tests. Mocks `transferTeamWorkspaceOwnership()` (already independently,
+ * and far more thoroughly, tested in
  * lib/firestore/__tests__/workspaceMemberships.spec.ts) — this suite
  * proves the route layer parses/validates the three OCC tokens correctly
  * and passes the CALLER-SUPPLIED tokens straight through, never
  * substituting anything it read itself (this route never reads any
- * document).
+ * document). No feature-flag/disabled scenario exists here — Phase 8B.1
+ * removed `TEAM_WORKSPACES_ENABLED` entirely.
  */
 
 const mockedResolveRequestIdentity = jest.fn();
@@ -26,14 +27,14 @@ jest.mock("@/lib/firestore/workspaceMemberships", () => ({
 
 import { NextRequest } from "next/server";
 import { Timestamp } from "firebase-admin/firestore";
-import { POST } from "@/app/api/user/team-workspaces/[workspaceId]/transfer-ownership/route";
+import { POST } from "@/app/api/workspaces/[workspaceId]/transfer-ownership/route";
 
 const UID = "owner-1";
 const WS_ID = "ws-team-1";
 const VALID_TOKEN = { seconds: 1_700_000_000, nanoseconds: 0 };
 
 function buildRequest(body?: unknown): NextRequest {
-  return new NextRequest(`http://localhost/api/user/team-workspaces/${WS_ID}/transfer-ownership`, {
+  return new NextRequest(`http://localhost/api/workspaces/${WS_ID}/transfer-ownership`, {
     method: "POST",
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   });
@@ -135,7 +136,6 @@ it.each([
   ["old_owner_membership_stale", 409],
   ["new_owner_membership_stale", 409],
   ["stale_precondition", 409],
-  ["team_workspaces_disabled", 503],
   ["firestore_unavailable", 500],
   ["transaction_failed", 500],
 ])("maps service status %s -> HTTP %d", async (status, expectedHttp) => {
