@@ -82,7 +82,14 @@ const mockedGetWorkspace = jest.fn();
 jest.mock("@/lib/firestore/workspaces", () => ({
   getWorkspace: (...args: any[]) => mockedGetWorkspace(...args),
 }));
-jest.mock("@/lib/env", () => ({ WORKSPACES_ENABLED: true }));
+// Team Shared Run Detail, Phase 8C-B3.1 — Team rollout stays explicitly
+// OFF in this file. Every scenario here uses `BOUND_WORKSPACE_ID`
+// (`personal-owner-1`, deterministic-Personal-shaped) or a mismatched
+// Personal-shaped id — never a genuine Team Workspace auto-id — so this
+// file's own scope remains Personal/legacy exactly as before. Genuine
+// Team candidate coverage (real `resolveWorkspaceAccess` wiring, rollout
+// enabled) lives in `teamSharedReadAccess.spec.ts`.
+jest.mock("@/lib/env", () => ({ WORKSPACES_ENABLED: true, TEAM_WORKSPACES_ENABLED: false, TEAM_WORKSPACES_CANARY_UIDS: undefined }));
 
 import { NextRequest } from "next/server";
 import { GET } from "@/app/api/user/runs/[runId]/route";
@@ -209,14 +216,40 @@ describe("GET /api/user/runs/[runId] — Phase 4B: an INVALID bound run denies e
     expect(res.status).toBe(404);
   });
 
-  it("Workspace.type is 'team' (unsupported) -> denies the owner", async () => {
+  // Team Shared Run Detail, Phase 8C-B3.1 — re-verified, NOT superseded:
+  // `BOUND_WORKSPACE_ID` ("personal-owner-1") IS the deterministic
+  // Personal Workspace id for OWNER_UID ("owner-1") — so
+  // `classifyRunWorkspaceBindingShape()` classifies this run as
+  // `"personal"`, not `"non_personal_bound"`, and it still routes through
+  // the unchanged `validateRunWorkspaceAssociation()` path below, exactly
+  // as before B3. This scenario is genuinely a CORRUPTED Personal
+  // Workspace document (the document at the owner's own deterministic
+  // slot has somehow been mutated to claim `type: "team"` — structurally
+  // impossible in practice per the Phase 8C-B2 audit's own Personal/Team
+  // id-namespace collision-impossibility proof, but still correctly
+  // fails closed as defense in depth), NOT a genuine Team-bound run. A
+  // genuine Team-bound run (a real, distinct Team Workspace auto-id) is
+  // covered separately in `teamSharedReadAccess.spec.ts`, which proves
+  // the NEW Team branch grants access for that case when authorized.
+  it("Workspace.type is 'team' (unsupported) -> denies the owner (Personal-shaped id, corrupted document — not a genuine Team-bound run)", async () => {
     mockedGetWorkspace.mockResolvedValue(validWorkspace({ type: "team" }));
     mockedRunGet.mockResolvedValue(runDoc({ workspaceId: BOUND_WORKSPACE_ID }));
     const { res } = await callRouteAs(OWNER_UID);
     expect(res.status).toBe(404);
   });
 
-  it("run.workspaceId does not match the deterministic id for its own owner -> denies the owner, no Firestore Workspace lookup even attempted", async () => {
+  // Team Shared Run Detail, Phase 8C-B3.1 — this assertion is no longer
+  // universally true (it depended implicitly on Team rollout being off).
+  // Split into the precise cases: "personal-someone-else" is classified
+  // `non_personal_bound` (a well-formed string that is not OWNER_UID's
+  // own deterministic Personal id) — with Team rollout OFF (this file's
+  // explicit env mock), `resolveTeamRunWorkspaceAccess()` denies at the
+  // rollout gate with ZERO Firestore Workspace lookup, exactly as
+  // asserted below. When Team rollout is ON, the SAME classification MAY
+  // legitimately reach a real Workspace lookup — proven separately in
+  // `teamSharedReadAccess.spec.ts`'s "valid Team Workspace id -> reaches
+  // the Team branch" test.
+  it("run.workspaceId does not match the deterministic id for its own owner, Team rollout OFF -> denies the owner, zero Firestore Workspace lookup (rollout-gated, not classifier-gated)", async () => {
     mockedRunGet.mockResolvedValue(runDoc({ workspaceId: "personal-someone-else" }));
     const { res } = await callRouteAs(OWNER_UID);
     expect(res.status).toBe(404);

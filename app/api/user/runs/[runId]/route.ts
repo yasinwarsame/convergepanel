@@ -12,13 +12,53 @@ import type { ModelId } from "@/lib/types";
 import { runDocumentToPublicResults } from "@/lib/user/runDocumentToPublicResults";
 import { publicizePanelResults } from "@/lib/panel/publicize";
 import { parsePersistedAdaptiveOutput, parsePersistedLegacyAdaptiveOutput } from "@/lib/adaptiveSchema/persistedOutput";
-import { parseGovernanceRecord } from "@/lib/adaptiveSchema/governanceRecordParser";
+import { parseGovernanceRecord, isHumanReviewStatusReviewable } from "@/lib/adaptiveSchema/governanceRecordParser";
 import { loadUserAndTeam } from "@/lib/teams/teamApiAuth";
 import { getAdaptiveTeamRunProjection } from "@/lib/firestore/teamRuns";
 import { getAdaptiveHumanReviewAssignment } from "@/lib/firestore/runs";
 import { resolveAdaptiveRunAccess } from "@/lib/governance/adaptiveRunAccess";
 import { validateRunWorkspaceAssociation } from "@/lib/workspaces/runWorkspaceIntegrity";
+import { classifyRunWorkspaceBindingShape } from "@/lib/workspaces/classifyRunWorkspaceBindingShape";
+import { resolveTeamRunWorkspaceAccess, type ResolveTeamRunWorkspaceAccessResult } from "@/lib/workspaces/resolveTeamRunWorkspaceAccess";
+import { classifyProjectIdFieldState } from "@/lib/projects/runProjectNormalizationEligibility";
 import { logger } from "@/lib/logger";
+
+type TeamAccessDenied = Extract<ResolveTeamRunWorkspaceAccessResult, { granted: false }>;
+
+/**
+ * Team Shared Run Detail, Phase 8C-B3.1 — public status mapping for a
+ * `non_personal_bound` run's Team authorization outcome. Deliberately a
+ * LOCAL, route-specific mapping, not a reuse of B2's
+ * `teamRunAccessResponse` (`lib/workspaces/teamRunAccessResponse.ts`):
+ * this route's own established precedent already distinguishes
+ * "run/association integrity broken" (concealed 404, matching every
+ * existing `validateRunWorkspaceAssociation` "invalid" outcome) from
+ * "run is fine, this specific requester just isn't authorized for it"
+ * (403 `forbidden`, matching the existing `personal_reviewer` denial
+ * branch) — a materially different concealment posture than B2's list
+ * routes, which protect Workspace-existence enumeration via a
+ * client-supplied `{workspaceId}` URL param rather than an
+ * already-effectively-unguessable `runId`. `membership_malformed` is
+ * grouped with the integrity-failure bucket (404), not the
+ * valid-requester-lacks-access bucket (403): a malformed membership
+ * document is the AUTHORIZATION RECORD itself failing integrity
+ * validation, not an otherwise-valid requester simply lacking a grant.
+ */
+function mapTeamAccessDenialToResponse(reason: TeamAccessDenied["reason"]): NextResponse {
+  switch (reason) {
+    case "team_workspaces_disabled":
+    case "workspace_not_found":
+    case "workspace_malformed":
+    case "wrong_workspace_type":
+    case "owner_integrity_violation":
+    case "lookup_failed":
+    case "membership_malformed":
+      return NextResponse.json({ ok: false, errorCode: "not_found", message: "Run not found." }, { status: 404 });
+    case "membership_not_found":
+    case "membership_removed":
+      return NextResponse.json({ ok: false, errorCode: "forbidden", message: "You do not have access to this run." }, { status: 403 });
+  }
+}
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -66,48 +106,147 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
   const data = snap.data() as Record<string, unknown>;
   const owner = String(data.userId ?? "");
 
-  // Phase 4B — Mandatory Workspace Integrity. Requester-independent: runs
-  // BEFORE the owner/reviewer branch below, so an invalid association
-  // denies the run's own owner exactly as it denies anyone else. A truly
-  // legacy run (workspaceId property absent) short-circuits with zero
-  // Firestore lookup and falls through to the unchanged existing logic.
-  const integrity = await validateRunWorkspaceAssociation(data);
-  if (integrity.classification === "invalid") {
-    logger.warn("[user/runs/[runId]] workspace_run_integrity_failed", { runId, reason: integrity.reason });
+  // Team Shared Run Detail, Phase 8C-B3.1 — pure, zero-I/O structural
+  // classification of the run's OWN raw workspaceId/userId fields, BEFORE
+  // any authorization decision. Takes `data` directly (never a
+  // reconstructed `{userId, workspaceId}` literal) so field-PRESENCE is
+  // preserved exactly as persisted — see
+  // `classifyRunWorkspaceBindingShape`'s own doc comment. This is NOT
+  // authorization: it only decides which of the two entirely separate
+  // authorization branches below applies. `legacy`/`personal` fall
+  // through to the ORIGINAL, byte-unchanged Personal/legacy path;
+  // `non_personal_bound` is diverted to the new Team branch BEFORE it can
+  // ever reach the `owner === uid` shortcut — this ordering is what
+  // closes the prospective "Team-bound run's own creator bypasses Team
+  // membership" risk identified in the Phase 8C-B3.0 audit.
+  const classified = classifyRunWorkspaceBindingShape({
+    hasWorkspaceIdField: Object.prototype.hasOwnProperty.call(data, "workspaceId"),
+    workspaceIdValue: data.workspaceId,
+    userId: data.userId,
+  });
+
+  if (classified.kind === "invalid") {
+    logger.warn("[user/runs/[runId]] workspace_run_binding_invalid", { runId, reason: classified.reason });
     return NextResponse.json(
       { ok: false, errorCode: "not_found", message: "Run not found." },
       { status: 404 }
     );
   }
 
-  // Personal Reviewer Inbox + Action Flow — a non-owner is granted access
-  // ONLY when the canonical per-run assignment currently names them
-  // (resolveAdaptiveRunAccess never consults users/{owner}.governanceReviewerUid
-  // directly — see that module's own doc comment for why). The response
-  // shape below is identical for both roles (no owner-only fields exist in
-  // it — results/synthesis/adaptive output/governance status are exactly
-  // the content a reviewer needs to review); `viewerRole` lets the client
-  // know which one it got so it can hide owner-only controls (export,
-  // rerun) and show the review decision UI instead.
-  let viewerRole: "owner" | "personal_reviewer" = "owner";
-  if (owner !== uid) {
-    const [assignmentResult, preAccessGovernance] = await Promise.all([
-      getAdaptiveHumanReviewAssignment(runId),
-      Promise.resolve(parseGovernanceRecord(data.governanceRecord)),
-    ]);
-    const access = resolveAdaptiveRunAccess({
-      uid,
-      runOwnerUid: owner,
-      assignment: assignmentResult.status === "found" ? assignmentResult.assignment : null,
-      humanReviewStatus: preAccessGovernance.ok ? preAccessGovernance.record.humanReview.status : null,
-    });
-    if (access.role !== "personal_reviewer") {
+  let viewerRole: "owner" | "personal_reviewer" | "team_member" | "team_reviewer";
+
+  if (classified.kind === "non_personal_bound") {
+    // Team candidate path — entirely separate from the Personal/legacy
+    // branch below. Never reaches the `owner === uid` shortcut: run
+    // creator identity is attribution only for a Team-bound run, never an
+    // authorization grant. Reuses `resolveTeamRunWorkspaceAccess()`
+    // unchanged (Phase 8C-B2) — rollout-before-I/O, one
+    // `resolveWorkspaceAccess()` path, `workspaceType==="team"` enforced,
+    // Personal-Workspace-collision closed — no duplicate Team
+    // authorization logic exists here.
+    const access = await resolveTeamRunWorkspaceAccess({ uid, workspaceId: classified.workspaceId });
+    if (!access.granted) {
+      logger.warn("[user/runs/[runId]] team_run_access_denied", { runId, reason: access.reason });
+      return mapTeamAccessDenialToResponse(access.reason);
+    }
+    if (!access.capabilities.includes("research.read")) {
+      logger.warn("[user/runs/[runId]] team_run_access_denied", { runId, reason: "insufficient_capability" });
       return NextResponse.json(
         { ok: false, errorCode: "forbidden", message: "You do not have access to this run." },
         { status: 403 }
       );
     }
-    viewerRole = "personal_reviewer";
+
+    // Team run integrity, Phase 8C-B2 parity — a Team-bound run's
+    // `projectId` must be explicitly `null` (canonical Unfiled) or a
+    // structurally assigned string (filed); absent or malformed is an
+    // integrity failure, fails closed, never reinterpreted as Unfiled.
+    // Field presence/shape only — no Project document is read here; B3
+    // does not expose or depend on Project metadata (that remains a B2
+    // list-level or future detail-schema concern).
+    const projectIdState = classifyProjectIdFieldState({
+      hasProjectIdField: Object.prototype.hasOwnProperty.call(data, "projectId"),
+      projectIdValue: data.projectId,
+    });
+    if (projectIdState === "absent" || projectIdState === "malformed") {
+      logger.warn("[user/runs/[runId]] team_run_projectId_integrity_failed", { runId, projectIdState });
+      return NextResponse.json(
+        { ok: false, errorCode: "not_found", message: "Run not found." },
+        { status: 404 }
+      );
+    }
+
+    // Team reviewer eligibility — a SEPARATE, additional gate on top of
+    // the base `research.read` grant above, never a substitute for it and
+    // never itself sufficient alone. Mirrors (never modifies)
+    // `resolveAdaptiveRunAccess()`'s own reviewable-state predicate
+    // (`isHumanReviewStatusReviewable`) rather than duplicating its
+    // logic. ALL of the following must hold for `team_reviewer`:
+    // `research.read` (already established above), the Workspace
+    // `reviews.submit` capability, a canonical per-run assignment naming
+    // this uid, and a currently-reviewable human-review status. A Team
+    // Workspace membership role literally named "reviewer" grants
+    // nothing here on its own — only the capability + assignment +
+    // review-state combination does. Any one condition missing yields
+    // `team_member`, never a partial/intermediate role.
+    const [assignmentResult, preAccessGovernance] = await Promise.all([
+      getAdaptiveHumanReviewAssignment(runId),
+      Promise.resolve(parseGovernanceRecord(data.governanceRecord)),
+    ]);
+    const isAssignedReviewer = assignmentResult.status === "found" && assignmentResult.assignment.assignedReviewerUserId === uid;
+    const hasReviewsSubmit = access.capabilities.includes("reviews.submit");
+    const humanReviewStatus = preAccessGovernance.ok ? preAccessGovernance.record.humanReview.status : null;
+    const isReviewableState = humanReviewStatus !== null && isHumanReviewStatusReviewable(humanReviewStatus);
+
+    viewerRole = isAssignedReviewer && hasReviewsSubmit && isReviewableState ? "team_reviewer" : "team_member";
+  } else {
+    // classified.kind === "legacy" | "personal" — the ORIGINAL,
+    // byte-unchanged Personal/legacy path. `validateRunWorkspaceAssociation()`
+    // is still called exactly as before (never bypassed merely because the
+    // new classifier already produced a category) — Phase 4B — Mandatory
+    // Workspace Integrity. Requester-independent: runs BEFORE the
+    // owner/reviewer branch below, so an invalid association denies the
+    // run's own owner exactly as it denies anyone else. A truly legacy run
+    // (workspaceId property absent) short-circuits with zero Firestore
+    // lookup and falls through to the unchanged existing logic.
+    const integrity = await validateRunWorkspaceAssociation(data);
+    if (integrity.classification === "invalid") {
+      logger.warn("[user/runs/[runId]] workspace_run_integrity_failed", { runId, reason: integrity.reason });
+      return NextResponse.json(
+        { ok: false, errorCode: "not_found", message: "Run not found." },
+        { status: 404 }
+      );
+    }
+
+    // Personal Reviewer Inbox + Action Flow — a non-owner is granted access
+    // ONLY when the canonical per-run assignment currently names them
+    // (resolveAdaptiveRunAccess never consults users/{owner}.governanceReviewerUid
+    // directly — see that module's own doc comment for why). The response
+    // shape below is identical for both roles (no owner-only fields exist in
+    // it — results/synthesis/adaptive output/governance status are exactly
+    // the content a reviewer needs to review); `viewerRole` lets the client
+    // know which one it got so it can hide owner-only controls (export,
+    // rerun) and show the review decision UI instead.
+    viewerRole = "owner";
+    if (owner !== uid) {
+      const [assignmentResult, preAccessGovernance] = await Promise.all([
+        getAdaptiveHumanReviewAssignment(runId),
+        Promise.resolve(parseGovernanceRecord(data.governanceRecord)),
+      ]);
+      const access = resolveAdaptiveRunAccess({
+        uid,
+        runOwnerUid: owner,
+        assignment: assignmentResult.status === "found" ? assignmentResult.assignment : null,
+        humanReviewStatus: preAccessGovernance.ok ? preAccessGovernance.record.humanReview.status : null,
+      });
+      if (access.role !== "personal_reviewer") {
+        return NextResponse.json(
+          { ok: false, errorCode: "forbidden", message: "You do not have access to this run." },
+          { status: 403 }
+        );
+      }
+      viewerRole = "personal_reviewer";
+    }
   }
 
   const runDocument = data.runDocument as RunDocument | undefined;
@@ -315,9 +454,14 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
   // during the PR #33 production canary). Owner behavior is completely
   // unchanged. Field-by-field removal, not a schema change: `results`
   // stays the same shape and length either way, just missing these two
-  // keys for a personal_reviewer response.
+  // keys for a personal_reviewer response. Team Shared Run Detail, Phase
+  // 8C-B3.1 — `team_reviewer` gets the identical redaction, for the
+  // identical reason (review-integrity, not general privacy); a plain
+  // `team_member` gets the full, owner-equivalent shape, matching
+  // `research.read`'s intent of genuine shared visibility into the
+  // team's own research.
   const resultsForResponse =
-    viewerRole === "personal_reviewer"
+    viewerRole === "personal_reviewer" || viewerRole === "team_reviewer"
       ? results.map(({ tokenUsage: _tokenUsage, latencyMs: _latencyMs, ...rest }) => rest)
       : results;
 
@@ -329,7 +473,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
     // so it can hide owner-only controls (export, rerun) and show the
     // review decision UI instead. The rest of the response is otherwise
     // identical, except `results[].tokenUsage`/`latencyMs` are omitted for
-    // personal_reviewer (see resultsForResponse above).
+    // personal_reviewer/team_reviewer (see resultsForResponse above).
     viewerRole,
     question,
     selectedModels,
