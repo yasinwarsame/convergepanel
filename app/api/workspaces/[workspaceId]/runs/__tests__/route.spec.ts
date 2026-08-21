@@ -9,7 +9,10 @@ const mockedResolveRequestIdentity = jest.fn();
 jest.mock("@/lib/auth/resolveRequestIdentity", () => ({
   resolveRequestIdentity: (...args: unknown[]) => mockedResolveRequestIdentity(...args),
 }));
-jest.mock("@/lib/auth/identityResolutionTelemetry", () => ({ logIdentityResolutionFailure: jest.fn() }));
+const mockedLogIdentityResolutionFailure = jest.fn();
+jest.mock("@/lib/auth/identityResolutionTelemetry", () => ({
+  logIdentityResolutionFailure: (...args: unknown[]) => mockedLogIdentityResolutionFailure(...args),
+}));
 
 const mockedResolveTeamRunWorkspaceAccess = jest.fn();
 jest.mock("@/lib/workspaces/resolveTeamRunWorkspaceAccess", () => ({
@@ -137,6 +140,47 @@ describe("GET /api/workspaces/[workspaceId]/runs — auth", () => {
     const res = await GET(buildRequest(), { params: { workspaceId: WS_ID } });
     expect(res.status).toBe(401);
     expect(mockedResolveTeamRunWorkspaceAccess).not.toHaveBeenCalled();
+  });
+
+  it("missing credentials -> logIdentityResolutionFailure receives GET route + GET method (Phase 8C-D.1.1)", async () => {
+    mockedResolveRequestIdentity.mockResolvedValueOnce({ status: "unauthenticated", reason: "missing_credentials" });
+    await GET(buildRequest(), { params: { workspaceId: WS_ID } });
+    expect(mockedLogIdentityResolutionFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ route: "GET /api/workspaces/[workspaceId]/runs", method: "GET", failureCategory: "missing_credentials" })
+    );
+  });
+});
+
+describe("POST /api/workspaces/[workspaceId]/runs — identity telemetry (Phase 8C-D.1.1 correction)", () => {
+  it("missing credentials -> logIdentityResolutionFailure receives POST route + POST method, never GET's", async () => {
+    mockedResolveRequestIdentity.mockResolvedValueOnce({ status: "unauthenticated", reason: "missing_credentials" });
+    const res = await POST(buildPostRequest(buildPostBody()), { params: { workspaceId: WS_ID } });
+    expect(res.status).toBe(401);
+    expect(mockedLogIdentityResolutionFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ route: "POST /api/workspaces/[workspaceId]/runs", method: "POST", failureCategory: "missing_credentials" })
+    );
+    expect(mockedLogIdentityResolutionFailure).not.toHaveBeenCalledWith(expect.objectContaining({ method: "GET" }));
+  });
+
+  it("non-missing auth-resolution failure -> logIdentityResolutionFailure receives POST route + POST method", async () => {
+    mockedResolveRequestIdentity.mockResolvedValueOnce({ status: "unauthenticated", reason: "invalid_token" });
+    const res = await POST(buildPostRequest(buildPostBody()), { params: { workspaceId: WS_ID } });
+    expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body.errorCode).toBe("auth_error");
+    expect(mockedLogIdentityResolutionFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ route: "POST /api/workspaces/[workspaceId]/runs", method: "POST", failureCategory: "invalid_token" })
+    );
+  });
+
+  it("auth failure short-circuits before rate limit, body parsing, rollout, adaptive planning, quota, Team creation, and execution", async () => {
+    mockedResolveRequestIdentity.mockResolvedValueOnce({ status: "unauthenticated", reason: "missing_credentials" });
+    await POST(buildPostRequest(buildPostBody()), { params: { workspaceId: WS_ID } });
+    expect(mockedCheckRateLimit).not.toHaveBeenCalled();
+    expect(mockedPlanAdaptiveRun).not.toHaveBeenCalled();
+    expect(mockedCheckAndIncrementUsage).not.toHaveBeenCalled();
+    expect(mockedCreateTeamWorkspaceRun).not.toHaveBeenCalled();
+    expect(mockedExecuteOrdinaryRun).not.toHaveBeenCalled();
   });
 });
 

@@ -59,10 +59,18 @@ const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 50;
 const MIN_MODELS = 2; // Mirrors app/api/run-panel/route.ts's own local constant.
 
-async function getUid(req: NextRequest): Promise<string | NextResponse> {
+/**
+ * Phase 8C-D.1.1 — `route`/`method` are caller-supplied telemetry
+ * metadata, not re-derived from `req` itself: this route now has two
+ * HTTP methods (GET, POST) sharing this one identity helper, and each
+ * caller passes its own accurate values so `logIdentityResolutionFailure()`
+ * never attributes a POST failure to GET (or vice versa). Identity
+ * resolution/response behavior is otherwise unchanged.
+ */
+async function getUid(req: NextRequest, telemetry: { route: string; method: string }): Promise<string | NextResponse> {
   const identity = await resolveRequestIdentity(req);
   if (identity.status === "authenticated") return identity.uid;
-  logIdentityResolutionFailure({ route: "GET /api/workspaces/[workspaceId]/runs", method: "GET", failureCategory: identity.reason });
+  logIdentityResolutionFailure({ route: telemetry.route, method: telemetry.method, failureCategory: identity.reason });
   if (identity.reason === "missing_credentials") {
     return NextResponse.json({ ok: false, errorCode: "unauthorized", message: "Please sign in." }, { status: 401 });
   }
@@ -77,7 +85,7 @@ function parseScope(searchParams: URLSearchParams): { ok: true; scope: TeamWorks
 }
 
 export async function GET(req: NextRequest, { params }: { params: { workspaceId: string } }) {
-  const uidOrRes = await getUid(req);
+  const uidOrRes = await getUid(req, { route: "GET /api/workspaces/[workspaceId]/runs", method: "GET" });
   if (uidOrRes instanceof NextResponse) return uidOrRes;
   const uid = uidOrRes;
   const workspaceId = params.workspaceId;
@@ -132,7 +140,7 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
     // ============================================
     // AUTHENTICATION
     // ============================================
-    const uidOrRes = await getUid(req);
+    const uidOrRes = await getUid(req, { route: "POST /api/workspaces/[workspaceId]/runs", method: "POST" });
     if (uidOrRes instanceof NextResponse) return uidOrRes;
     const uid = uidOrRes;
     const workspaceId = params.workspaceId;
