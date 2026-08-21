@@ -228,6 +228,32 @@ describe("listTeamProjectRuns — Part 17 matrix", () => {
   });
 });
 
+describe("listTeamProjectRuns — peek-row (limit+1) integrity, Phase 8C-B2.2 correction", () => {
+  it("STEP 7: corrupt peek row (limit=2, 3rd fetched doc has an empty/malformed userId) -> integrity_violation, never ok/hasMore/nextCursor/partial items", async () => {
+    runsDocs = [
+      runDoc("a", { createdAt: FakeTimestamp.fromMillis(3000) }),
+      runDoc("b", { createdAt: FakeTimestamp.fromMillis(2000) }),
+      runDoc("c-peek-corrupt", { createdAt: FakeTimestamp.fromMillis(1000), userId: "" }), // createdAt stays sortable; userId is what's malformed
+    ];
+    const result = await listTeamProjectRuns({ workspaceId: W, projectId: P, limit: 2 });
+    expect(result).toEqual({ status: "integrity_violation" });
+    expect((result as any).items).toBeUndefined();
+    expect((result as any).hasMore).toBeUndefined();
+    expect((result as any).nextCursor).toBeUndefined();
+  });
+
+  it("STEP 8: VALID peek row -> normal pagination, peek row itself never emitted", async () => {
+    runsDocs = [runDoc("a", { createdAt: FakeTimestamp.fromMillis(3000) }), runDoc("b", { createdAt: FakeTimestamp.fromMillis(2000) }), runDoc("c-peek-valid", { createdAt: FakeTimestamp.fromMillis(1000) })];
+    const result = await listTeamProjectRuns({ workspaceId: W, projectId: P, limit: 2 });
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.items.map((i) => i.id)).toEqual(["a", "b"]);
+    expect(result.items.map((i) => i.id)).not.toContain("c-peek-valid");
+    expect(result.hasMore).toBe(true);
+    expect(result.nextCursor).toBeDefined();
+  });
+});
+
 describe("listTeamProjectRuns — infra", () => {
   it("firestore unavailable -> query_failed", async () => {
     firestoreUnavailable = true;

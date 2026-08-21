@@ -7,18 +7,26 @@
  * authorization model; the whole point is that member B can read a run
  * created by member A.
  *
- * Fail-whole-page integrity policy (deliberately NOT the Personal
- * historical omit-and-continue pattern — see `docs/workspaces/architecture.md`
- * and the Phase 8C-B.0/8C-B.0.1 audit): any malformed or cross-boundary
- * row aborts the ENTIRE page with `integrity_violation`, never a partial
- * DTO page and never a silently-shrunk result set.
+ * Fail-WHOLE-FETCHED-WINDOW integrity policy (deliberately NOT the
+ * Personal historical omit-and-continue pattern — see
+ * `docs/workspaces/architecture.md` and the Phase 8C-B.0/8C-B.0.1 audit):
+ * any malformed or cross-boundary row anywhere in the fetched
+ * `limit + 1` query window — including the peeked, never-emitted row
+ * used only to compute `hasMore` — aborts the ENTIRE request with
+ * `integrity_violation`, never a partial DTO page and never a
+ * `hasMore`/pagination signal derived from an unvalidated document
+ * (Phase 8C-B2.1/8C-B2.2 correction: the original implementation
+ * validated only the emitted `pageDocs` slice, letting a corrupt peek
+ * row silently influence `hasMore` for one page cycle without ever
+ * surfacing as a violation).
  *
  * "all" mode additionally batch-validates every unique non-null
- * `projectId` referenced by the page in exactly ONE `adminDb.getAll(...)`
- * call — never a per-row Project lookup. Zero non-null `projectId`s in
- * the page means zero Project reads. `?scope=unfiled` never reads a
- * Project at all (its rows have no Project reference by construction of
- * the query and the row validator).
+ * `projectId` referenced ANYWHERE in the fetched window — including the
+ * peek row — in exactly ONE `adminDb.getAll(...)` call — never a per-row
+ * Project lookup. Zero non-null `projectId`s in the window means zero
+ * Project reads. `?scope=unfiled` never reads a Project at all (its rows
+ * have no Project reference by construction of the query and the row
+ * validator).
  */
 
 import "server-only";
@@ -68,18 +76,20 @@ export async function listTeamWorkspaceRuns(args: { workspaceId: string; scope: 
 
     const snap = await query.limit(args.limit + 1).get();
     const allDocs = snap.docs;
-    const hasMore = allDocs.length > args.limit;
-    const pageDocs = allDocs.slice(0, args.limit);
 
-    if (pageDocs.length === 0) {
+    if (allDocs.length === 0) {
       return { status: "ok", items: [], hasMore: false };
     }
 
-    const validated = pageDocs.map((doc) => ({ doc, result: validateTeamRunRowShape(doc.data(), args.workspaceId) }));
+    // Validate EVERY fetched document — including the peek row at index
+    // `args.limit`, which is never emitted but IS used to compute
+    // `hasMore` below. No pagination signal may ever be derived from an
+    // unvalidated document (Phase 8C-B2.2 correction).
+    const validated = allDocs.map((doc) => ({ doc, result: validateTeamRunRowShape(doc.data(), args.workspaceId) }));
 
     for (const v of validated) {
       if (!v.result.ok) {
-        logger.warn("[workspaces/listTeamWorkspaceRuns] integrity_violation — malformed run row, failing whole page", { workspaceId: args.workspaceId, scope: args.scope, docId: v.doc.id });
+        logger.warn("[workspaces/listTeamWorkspaceRuns] integrity_violation — malformed run row in the fetched window (peek row included), failing whole request", { workspaceId: args.workspaceId, scope: args.scope, docId: v.doc.id });
         return { status: "integrity_violation" };
       }
       // Defense in depth for scope=unfiled: the query's own `projectId==null`
@@ -91,6 +101,10 @@ export async function listTeamWorkspaceRuns(args: { workspaceId: string; scope: 
     }
 
     if (args.scope === "all") {
+      // Collected from the ENTIRE fetched window, including the peek
+      // row's own Project reference — a peek row's foreign/missing/
+      // malformed Project is just as much a trust-boundary violation as
+      // an emitted row's would be.
       const uniqueProjectIds = Array.from(
         new Set(
           validated
@@ -112,14 +126,23 @@ export async function listTeamWorkspaceRuns(args: { workspaceId: string; scope: 
         }
         for (const pid of uniqueProjectIds) {
           if (!validatedProjectIds.has(pid)) {
-            logger.warn("[workspaces/listTeamWorkspaceRuns] integrity_violation — referenced Project missing/malformed/cross-Workspace", { workspaceId: args.workspaceId, projectId: pid });
+            logger.warn("[workspaces/listTeamWorkspaceRuns] integrity_violation — referenced Project missing/malformed/cross-Workspace (fetched window, peek row included)", { workspaceId: args.workspaceId, projectId: pid });
             return { status: "integrity_violation" };
           }
         }
       }
     }
 
-    const items: TeamRunSummaryDto[] = validated.map((v) => {
+    // Only now — after the ENTIRE fetched window has passed integrity and
+    // Project-reference validation — may pagination metadata, DTOs, and
+    // the cursor be derived. `hasMore`/`pageDocs` below are the first
+    // point in this function that treats the peek row as anything other
+    // than "must also be valid."
+    const hasMore = allDocs.length > args.limit;
+    const pageDocs = allDocs.slice(0, args.limit);
+    const pageValidated = validated.slice(0, args.limit);
+
+    const items: TeamRunSummaryDto[] = pageValidated.map((v) => {
       const r = v.result as Extract<typeof v.result, { ok: true }>;
       return toTeamRunSummary(v.doc.id, v.doc.data(), r.userId, r.workspaceId, r.projectId);
     });

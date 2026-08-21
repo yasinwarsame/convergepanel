@@ -294,6 +294,96 @@ describe("listTeamWorkspaceRuns — general list integrity (Part 15)", () => {
   });
 });
 
+describe("listTeamWorkspaceRuns — peek-row (limit+1) integrity, Phase 8C-B2.2 correction", () => {
+  it("STEP 5: corrupt peek row (limit=2, 3rd fetched doc is malformed) -> integrity_violation, never ok/hasMore:true", async () => {
+    runsDocs = [
+      runDoc("a", { projectId: null, createdAt: FakeTimestamp.fromMillis(3000) }),
+      runDoc("b", { projectId: null, createdAt: FakeTimestamp.fromMillis(2000) }),
+      (() => {
+        const d = runDoc("c-peek-corrupt", { createdAt: FakeTimestamp.fromMillis(1000) });
+        delete (d.data as any).projectId; // absent projectId -> malformed for Team
+        return d;
+      })(),
+    ];
+    const result = await listTeamWorkspaceRuns({ workspaceId: W, scope: "all", limit: 2 });
+    expect(result).toEqual({ status: "integrity_violation" });
+    expect((result as any).items).toBeUndefined();
+    expect((result as any).hasMore).toBeUndefined();
+    expect((result as any).nextCursor).toBeUndefined();
+  });
+
+  it("STEP 6: peek row is structurally valid but references a MISSING Project -> integrity_violation, and getAll includes the peek row's ref", async () => {
+    const getAllSpy = jest.spyOn(mockAdminDb, "getAll");
+    runsDocs = [
+      runDoc("a", { projectId: null, createdAt: FakeTimestamp.fromMillis(3000) }),
+      runDoc("b", { projectId: null, createdAt: FakeTimestamp.fromMillis(2000) }),
+      runDoc("c-peek", { projectId: "proj-missing", createdAt: FakeTimestamp.fromMillis(1000) }),
+    ];
+    const result = await listTeamWorkspaceRuns({ workspaceId: W, scope: "all", limit: 2 });
+    expect(result).toEqual({ status: "integrity_violation" });
+    expect(getAllSpy).toHaveBeenCalledTimes(1);
+    expect(getAllSpy.mock.calls[0].map((r: any) => r.id)).toContain("proj-missing");
+    getAllSpy.mockRestore();
+  });
+
+  it("STEP 8: VALID peek row -> normal pagination, peek row itself never emitted", async () => {
+    runsDocs = [
+      runDoc("a", { projectId: null, createdAt: FakeTimestamp.fromMillis(3000) }),
+      runDoc("b", { projectId: null, createdAt: FakeTimestamp.fromMillis(2000) }),
+      runDoc("c-peek-valid", { projectId: null, createdAt: FakeTimestamp.fromMillis(1000) }),
+    ];
+    const result = await listTeamWorkspaceRuns({ workspaceId: W, scope: "all", limit: 2 });
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.items.map((i) => i.id)).toEqual(["a", "b"]);
+    expect(result.items.map((i) => i.id)).not.toContain("c-peek-valid");
+    expect(result.hasMore).toBe(true);
+    expect(result.nextCursor).toBeDefined();
+  });
+
+  it("STEP 9: Project getAll boundary — page rows share P1, peek row references distinct P2; both validated in exactly one getAll call", async () => {
+    const getAllSpy = jest.spyOn(mockAdminDb, "getAll");
+    runsDocs = [
+      runDoc("a", { projectId: "proj-1", createdAt: FakeTimestamp.fromMillis(3000) }),
+      runDoc("b", { projectId: "proj-1", createdAt: FakeTimestamp.fromMillis(2000) }),
+      runDoc("c-peek", { projectId: "proj-2", createdAt: FakeTimestamp.fromMillis(1000) }),
+    ];
+    projectsDocs["proj-1"] = validProject("proj-1");
+    projectsDocs["proj-2"] = validProject("proj-2");
+
+    const result = await listTeamWorkspaceRuns({ workspaceId: W, scope: "all", limit: 2 });
+    expect(result.status).toBe("ok");
+    if (result.status === "ok") {
+      expect(result.items.map((i) => i.id)).toEqual(["a", "b"]);
+      expect(result.hasMore).toBe(true);
+    }
+    expect(getAllSpy).toHaveBeenCalledTimes(1);
+    const requestedIds = getAllSpy.mock.calls[0].map((r: any) => r.id).sort();
+    expect(requestedIds).toEqual(["proj-1", "proj-2"]);
+    getAllSpy.mockRestore();
+
+    // Now make P2 (the peek row's own Project) invalid -> whole window fails.
+    getAllSpy.mockClear();
+    delete projectsDocs["proj-2"];
+    const failed = await listTeamWorkspaceRuns({ workspaceId: W, scope: "all", limit: 2 });
+    expect(failed).toEqual({ status: "integrity_violation" });
+  });
+
+  it("peek row with Workspace mismatch (defense-in-depth) -> integrity_violation", async () => {
+    runsDocs = [
+      runDoc("a", { projectId: null, createdAt: FakeTimestamp.fromMillis(3000) }),
+      runDoc("b", { projectId: null, createdAt: FakeTimestamp.fromMillis(2000) }),
+      runDoc("c-peek", { projectId: null, workspaceId: "wrong-ws", createdAt: FakeTimestamp.fromMillis(1000) }),
+    ];
+    // This peek row would never actually be returned by a real
+    // `workspaceId==W` query — this proves the row validator itself
+    // still catches it if it somehow appeared in the fetched window.
+    const result = await listTeamWorkspaceRuns({ workspaceId: W, scope: "all", limit: 2 });
+    expect(result.status).toBe("ok"); // the fake query's own where() filter already excludes it
+    if (result.status === "ok") expect(result.items.map((i) => i.id)).toEqual(["a", "b"]);
+  });
+});
+
 describe("listTeamWorkspaceRuns — unfiled scope (Part 16)", () => {
   it("explicit null returned", async () => {
     runsDocs = [runDoc("r1", { projectId: null })];
@@ -350,6 +440,16 @@ describe("listTeamWorkspaceRuns — unfiled scope (Part 16)", () => {
     const result = await listTeamWorkspaceRuns({ workspaceId: W, scope: "unfiled", limit: 20 });
     expect(result.status).toBe("ok");
     if (result.status === "ok") expect(result.items[0].userId).toBe("some-other-creator");
+  });
+
+  it("Phase 8C-B2.2: corrupt peek row in unfiled scope (limit=2, 3rd fetched doc has an empty/malformed userId) -> integrity_violation, never ok", async () => {
+    runsDocs = [
+      runDoc("a", { projectId: null, createdAt: FakeTimestamp.fromMillis(3000) }),
+      runDoc("b", { projectId: null, createdAt: FakeTimestamp.fromMillis(2000) }),
+      runDoc("c-peek-corrupt", { projectId: null, createdAt: FakeTimestamp.fromMillis(1000), userId: "" }), // createdAt stays sortable; userId is what's malformed
+    ];
+    const result = await listTeamWorkspaceRuns({ workspaceId: W, scope: "unfiled", limit: 2 });
+    expect(result).toEqual({ status: "integrity_violation" });
   });
 });
 

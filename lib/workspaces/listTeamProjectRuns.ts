@@ -1,10 +1,17 @@
 /**
- * Team Run Lists, Phase 8C-B2 — the raw query + fail-whole-page integrity
- * orchestration for `GET /api/workspaces/{W}/projects/{P}/runs`. The
- * target Project `P` is validated exactly ONCE by the route BEFORE this
- * function is ever called (existence, `ProjectV1` well-formedness,
+ * Team Run Lists, Phase 8C-B2 — the raw query + fail-WHOLE-FETCHED-WINDOW
+ * integrity orchestration for `GET /api/workspaces/{W}/projects/{P}/runs`.
+ * The target Project `P` is validated exactly ONCE by the route BEFORE
+ * this function is ever called (existence, `ProjectV1` well-formedness,
  * embedded id match, `project.workspaceId === W`) — this module never
  * re-reads the Project document per row, or at all.
+ *
+ * Every document in the fetched `limit + 1` query window — including the
+ * peeked, never-emitted row used only to compute `hasMore` — is validated
+ * before any pagination metadata, DTO, or cursor is derived (Phase
+ * 8C-B2.1/8C-B2.2 correction: the original implementation validated only
+ * the emitted page slice, letting a corrupt peek row silently influence
+ * `hasMore` without ever surfacing as `integrity_violation`).
  *
  * No `userId`/creator predicate — identical authorization posture to
  * `listTeamWorkspaceRuns()`.
@@ -53,29 +60,40 @@ export async function listTeamProjectRuns(args: { workspaceId: string; projectId
 
     const snap = await query.limit(args.limit + 1).get();
     const allDocs = snap.docs;
-    const hasMore = allDocs.length > args.limit;
-    const pageDocs = allDocs.slice(0, args.limit);
 
-    if (pageDocs.length === 0) {
+    if (allDocs.length === 0) {
       return { status: "ok", items: [], hasMore: false };
     }
 
-    const items: TeamRunSummaryDto[] = [];
-    for (const doc of pageDocs) {
-      const result = validateTeamRunRowShape(doc.data(), args.workspaceId);
-      if (!result.ok) {
-        logger.warn("[workspaces/listTeamProjectRuns] integrity_violation — malformed run row, failing whole page", { workspaceId: args.workspaceId, projectId: args.projectId, docId: doc.id });
+    // Validate EVERY fetched document — including the peek row at index
+    // `args.limit`, which is never emitted but IS used to compute
+    // `hasMore` below (Phase 8C-B2.2 correction).
+    const validated = allDocs.map((doc) => ({ doc, result: validateTeamRunRowShape(doc.data(), args.workspaceId) }));
+
+    for (const v of validated) {
+      if (!v.result.ok) {
+        logger.warn("[workspaces/listTeamProjectRuns] integrity_violation — malformed run row in the fetched window (peek row included), failing whole request", { workspaceId: args.workspaceId, projectId: args.projectId, docId: v.doc.id });
         return { status: "integrity_violation" };
       }
       // The target Project was already validated once by the caller —
       // per-row work here is a cheap in-memory equality check only, never
       // a second Project read.
-      if (result.projectId !== args.projectId) {
-        logger.warn("[workspaces/listTeamProjectRuns] integrity_violation — projectId does not exactly match the requested Project on a row returned by the Project-scoped query", { workspaceId: args.workspaceId, projectId: args.projectId, docId: doc.id });
+      if (v.result.projectId !== args.projectId) {
+        logger.warn("[workspaces/listTeamProjectRuns] integrity_violation — projectId does not exactly match the requested Project on a row in the fetched window (peek row included)", { workspaceId: args.workspaceId, projectId: args.projectId, docId: v.doc.id });
         return { status: "integrity_violation" };
       }
-      items.push(toTeamRunSummary(doc.id, doc.data(), result.userId, result.workspaceId, result.projectId));
     }
+
+    // Only now — after the ENTIRE fetched window has passed validation —
+    // may pagination metadata, DTOs, and the cursor be derived.
+    const hasMore = allDocs.length > args.limit;
+    const pageDocs = allDocs.slice(0, args.limit);
+    const pageValidated = validated.slice(0, args.limit);
+
+    const items: TeamRunSummaryDto[] = pageValidated.map((v) => {
+      const r = v.result as Extract<typeof v.result, { ok: true }>;
+      return toTeamRunSummary(v.doc.id, v.doc.data(), r.userId, r.workspaceId, r.projectId);
+    });
 
     const lastScanned = pageDocs[pageDocs.length - 1];
     const lastScannedTs = firestoreSecondsNanos(lastScanned.data().createdAt);
