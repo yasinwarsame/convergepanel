@@ -53,10 +53,7 @@ import {
   PERSONAL_RUN_WORKSPACE_WRITES_ENABLED,
   PERSONAL_RUN_WORKSPACE_WRITE_CANARY_UIDS,
   WORKSPACES_ENABLED,
-  PROJECT_RUN_ASSOCIATION_WRITES_ENABLED,
-  PROJECT_RUN_ASSOCIATION_WRITE_CANARY_UIDS,
 } from "@/lib/env";
-import { resolveProjectRunAssociationWriteMode } from "@/lib/projects/projectRunAssociationWriteCanary";
 import { resolvePersonalRunWorkspaceBinding } from "@/lib/workspaces/personalRunWorkspaceBinding";
 import { resolvePersonalRunWorkspaceWriteMode } from "@/lib/workspaces/personalRunWorkspaceWriteCanary";
 import { planAdaptiveRun, finalizeAdaptiveRun, AdaptivePromptPlan, buildNonExecutionPayload } from "@/lib/adaptiveSchema/orchestrate";
@@ -297,11 +294,18 @@ export async function POST(req: NextRequest) {
     // Workspace lookup of any kind is ever attempted for it.
     const runId = `run-${randomUUID()}`;
     let workspaceIdForRun: string | undefined;
-    // Going-Forward Run/Project Association Writer, Phase 6D.2 — only ever
-    // computed inside the SAME "bound" branch that sets workspaceIdForRun
+    // Personal Run/Project Schema Canonicalization, Phase 8C-B1.3B — only
+    // ever set inside the SAME "bound" branch that sets workspaceIdForRun
     // above, so projectIdForRun can structurally never be set without a
     // real, resolved Personal workspaceId alongside it (the invariant is
-    // enforced by control flow, not by a separate runtime check).
+    // enforced by control flow, not by a separate runtime check). No
+    // longer gated by PROJECT_RUN_ASSOCIATION_WRITES_ENABLED/its canary —
+    // that flag's role in suppressing this neutral `null` write was the
+    // source of a rollout-transition gap (workspaceId present, projectId
+    // absent) that Phase 8C-B1.3A/8C-B1.3A.1 audited and closed here. The
+    // flag and its resolver remain in use elsewhere (e.g. the assign/
+    // move/unassign endpoint's own eligibility gate) — only this specific
+    // neutral-shape write is now unconditional.
     let projectIdForRun: null | undefined;
     if (adaptivePlan !== null) {
       // Account-Scoped Workspace Write Canary, Phase 3A — the ONLY thing
@@ -335,24 +339,16 @@ export async function POST(req: NextRequest) {
             workspaceIdForRun = binding.workspaceId;
             logger.info("[run-panel] personal_run_workspace_bound", { runId });
 
+            // Schema canonicalization, Phase 8C-B1.3B — a Personal
+            // Workspace-bound run always gets an explicit `projectId: null`
+            // at creation. This is neutral shape only: it creates no
+            // Project, assigns no Project, and changes no Project CRUD/UI
+            // eligibility (those remain gated separately by
+            // PROJECTS_ENABLED/PROJECTS_UI_ENABLED/their own canaries).
             // Piggybacks exclusively on the binding this branch just
             // established — never independently resolves or manufactures
-            // a Workspace association. Mirrors the Personal Workspace
-            // write canary's own precedence exactly (Phase 3A): the
-            // canary is an independent activation path, not subordinate
-            // to the global flag.
-            const projectWriteMode = resolveProjectRunAssociationWriteMode({
-              uid,
-              globalWritesEnabled: PROJECT_RUN_ASSOCIATION_WRITES_ENABLED,
-              canaryUidsRaw: PROJECT_RUN_ASSOCIATION_WRITE_CANARY_UIDS,
-            });
-            if (projectWriteMode.canaryConfigInvalid) {
-              logger.error("[run-panel] project_run_association_write_canary_configuration_invalid", { runId });
-            }
-            if (projectWriteMode.enabled) {
-              projectIdForRun = null;
-              logger.info("[run-panel] project_run_association_write_mode", { runId, source: projectWriteMode.source });
-            }
+            // a Workspace association.
+            projectIdForRun = null;
             break;
           }
           case "resolution_failed": {

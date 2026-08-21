@@ -1,12 +1,20 @@
 /**
- * Going-Forward Run/Project Association Writer, Phase 6D.2 — route wiring
- * tests for POST /api/run-panel's `projectId: null` initialization.
+ * Personal Run/Project Schema Canonicalization, Phase 8C-B1.3B — route
+ * wiring tests for POST /api/run-panel's `projectId: null` initialization.
  * Mirrors personalRunWorkspaceBindingWiring.spec.ts's structure exactly.
- * `resolvePersonalRunWorkspaceBinding()` is mocked (always resolves
- * "bound" here — its own outcome logic is covered elsewhere);
- * `resolveProjectRunAssociationWriteMode()` is the REAL function, not
- * mocked — it's pure, already unit-tested, and cheap to exercise for
- * real, proving the route's wiring, not a re-test of its own logic.
+ * `resolvePersonalRunWorkspaceBinding()` is mocked (its own outcome logic
+ * is covered elsewhere) — every outcome this route branches on is
+ * exercised here.
+ *
+ * `resolveProjectRunAssociationWriteMode()`/`PROJECT_RUN_ASSOCIATION_WRITES_ENABLED`/
+ * its canary are deliberately NOT referenced anywhere in this file —
+ * route.ts no longer imports or calls them (see the STRUCTURAL test
+ * below). The neutral `projectId: null` write for a Personal
+ * Workspace-bound run is now unconditional, closing the rollout-
+ * transition gap (workspaceId present, projectId absent) that Phase
+ * 8C-B1.3A/8C-B1.3A.1 audited. That flag/resolver remain in use
+ * elsewhere (the assign/move/unassign endpoint's own eligibility gate) —
+ * unrelated to this route.
  */
 
 const mockEnvFlags = {
@@ -14,8 +22,6 @@ const mockEnvFlags = {
   W: true,
   ADAPTIVE: true,
   CANARY_UIDS: undefined as string | undefined,
-  PROJECT_RW: false,
-  PROJECT_CANARY_UIDS: undefined as string | undefined,
 };
 
 jest.mock("@/lib/env", () => ({
@@ -35,12 +41,6 @@ jest.mock("@/lib/env", () => ({
   },
   get WORKSPACES_ENABLED() {
     return mockEnvFlags.W;
-  },
-  get PROJECT_RUN_ASSOCIATION_WRITES_ENABLED() {
-    return mockEnvFlags.PROJECT_RW;
-  },
-  get PROJECT_RUN_ASSOCIATION_WRITE_CANARY_UIDS() {
-    return mockEnvFlags.PROJECT_CANARY_UIDS;
   },
 }));
 
@@ -193,14 +193,12 @@ function createRunArgs() {
   return mockedCreateRun.mock.calls[0];
 }
 
-describe("POST /api/run-panel — Going-Forward Run/Project Association Writer wiring (Phase 6D.2)", () => {
+describe("POST /api/run-panel — Personal Run/Project Schema Canonicalization wiring (Phase 8C-B1.3B)", () => {
   beforeEach(() => {
     mockEnvFlags.RW = true;
     mockEnvFlags.W = true;
     mockEnvFlags.ADAPTIVE = true;
     mockEnvFlags.CANARY_UIDS = undefined;
-    mockEnvFlags.PROJECT_RW = false;
-    mockEnvFlags.PROJECT_CANARY_UIDS = undefined;
     mockedLoadUserAndTeam.mockResolvedValue({ user: { teamId: undefined }, team: null });
     mockedResolveBinding.mockResolvedValue({ outcome: "bound", workspaceId: "personal-test-uid" });
   });
@@ -211,57 +209,39 @@ describe("POST /api/run-panel — Going-Forward Run/Project Association Writer w
     mockedFinalizeAdaptiveRun.mockReset();
   });
 
-  it("Personal-bound + PROJECT_RW=false + no canary: workspaceId present, projectId arg is undefined (the expected temporary state during canary rollout)", async () => {
+  it("Personal-bound (global workspace writes): workspaceId present, projectId arg is exactly null — the canonical invariant", async () => {
     const { response, body } = await runAdaptiveRequest();
     expect(response.status).toBe(200);
     expect(body.ok).toBe(true);
     const [, , , , workspaceIdArg, projectIdArg] = createRunArgs();
     expect(workspaceIdArg).toBe("personal-test-uid");
+    expect(projectIdArg).toBeNull();
+  });
+
+  it("Personal-bound via the workspace-write canary (global RW off): projectId arg is still exactly null", async () => {
+    mockEnvFlags.RW = false;
+    mockEnvFlags.CANARY_UIDS = "test-uid,someone-else";
+    const { response, body } = await runAdaptiveRequest();
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    const [, , , , workspaceIdArg, projectIdArg] = createRunArgs();
+    expect(workspaceIdArg).toBe("personal-test-uid");
+    expect(projectIdArg).toBeNull();
+  });
+
+  it("workspace-write mode disabled (global off, uid not canaried): legacy shape — workspaceId absent, projectId absent, exactly as before this phase", async () => {
+    mockEnvFlags.RW = false;
+    mockEnvFlags.CANARY_UIDS = "someone-else,another-uid";
+    const { response, body } = await runAdaptiveRequest();
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(mockedResolveBinding).not.toHaveBeenCalled();
+    const [, , , , workspaceIdArg, projectIdArg] = createRunArgs();
+    expect(workspaceIdArg).toBeUndefined();
     expect(projectIdArg).toBeUndefined();
   });
 
-  it("Personal-bound + authenticated uid IS in a valid canary list (PROJECT_RW=false): projectId arg is exactly null", async () => {
-    mockEnvFlags.PROJECT_CANARY_UIDS = "test-uid,someone-else";
-    const { response, body } = await runAdaptiveRequest();
-    expect(response.status).toBe(200);
-    expect(body.ok).toBe(true);
-    const [, , , , workspaceIdArg, projectIdArg] = createRunArgs();
-    expect(workspaceIdArg).toBe("personal-test-uid");
-    expect(projectIdArg).toBeNull();
-  });
-
-  it("Personal-bound + authenticated uid NOT in the canary list: projectId arg is undefined", async () => {
-    mockEnvFlags.PROJECT_CANARY_UIDS = "someone-else,another-uid";
-    const { response, body } = await runAdaptiveRequest();
-    expect(response.status).toBe(200);
-    expect(body.ok).toBe(true);
-    const [, , , , workspaceIdArg, projectIdArg] = createRunArgs();
-    expect(workspaceIdArg).toBe("personal-test-uid");
-    expect(projectIdArg).toBeUndefined();
-  });
-
-  it("Personal-bound + PROJECT_RW=true (global): projectId arg is exactly null regardless of canary contents", async () => {
-    mockEnvFlags.PROJECT_RW = true;
-    const { response, body } = await runAdaptiveRequest();
-    expect(response.status).toBe(200);
-    expect(body.ok).toBe(true);
-    const [, , , , workspaceIdArg, projectIdArg] = createRunArgs();
-    expect(workspaceIdArg).toBe("personal-test-uid");
-    expect(projectIdArg).toBeNull();
-  });
-
-  it("Personal-bound + PROJECT_RW=true + MALFORMED canary: global still wins, projectId arg is exactly null", async () => {
-    mockEnvFlags.PROJECT_RW = true;
-    mockEnvFlags.PROJECT_CANARY_UIDS = "not/valid";
-    const { response, body } = await runAdaptiveRequest();
-    expect(response.status).toBe(200);
-    expect(body.ok).toBe(true);
-    const [, , , , , projectIdArg] = createRunArgs();
-    expect(projectIdArg).toBeNull();
-  });
-
-  it("SECURITY/INVARIANT: Team adaptive request — projectId arg is ALWAYS undefined regardless of Project-write-mode flags, since workspaceIdForRun is never set for a team user", async () => {
-    mockEnvFlags.PROJECT_RW = true; // global on — must still have zero effect for a team user
+  it("SECURITY/INVARIANT: Team adaptive request — projectId arg is ALWAYS undefined, since workspaceIdForRun is never set for a team user", async () => {
     mockedLoadUserAndTeam.mockResolvedValueOnce({
       user: { teamId: "team_abc" },
       team: { id: "team_abc", name: "T", createdBy: "x", createdAt: "2026-01-01", members: [], policyRules: [], settings: {} },
@@ -276,8 +256,7 @@ describe("POST /api/run-panel — Going-Forward Run/Project Association Writer w
     expect(projectIdArg).toBeUndefined();
   });
 
-  it("SECURITY/INVARIANT: nonadaptive Deep Research request — projectId arg is ALWAYS undefined even with PROJECT_RW=true globally, since the whole binding block is skipped for a null adaptivePlan", async () => {
-    mockEnvFlags.PROJECT_RW = true;
+  it("SECURITY/INVARIANT: nonadaptive Deep Research request — projectId arg is ALWAYS undefined, since the whole binding block is skipped for a null adaptivePlan", async () => {
     mockEnvFlags.ADAPTIVE = false;
 
     const response = await POST(buildRequest());
@@ -293,7 +272,6 @@ describe("POST /api/run-panel — Going-Forward Run/Project Association Writer w
   it("SECURITY/INVARIANT: Personal Workspace binding resolution_failed — createRun is never called at all, so no projectId can be written", async () => {
     mockedResolveBinding.mockReset();
     mockedResolveBinding.mockResolvedValueOnce({ outcome: "resolution_failed", reason: "not_found" });
-    mockEnvFlags.PROJECT_RW = true;
 
     const { response, body } = await runAdaptiveRequest();
     expect(response.status).toBe(409);
@@ -301,20 +279,33 @@ describe("POST /api/run-panel — Going-Forward Run/Project Association Writer w
     expect(mockedCreateRun).not.toHaveBeenCalled();
   });
 
-  it("REQUEST SPOOFING: a client-supplied projectId in the request body has zero effect on the persisted value", async () => {
-    mockEnvFlags.PROJECT_RW = false;
-    mockEnvFlags.PROJECT_CANARY_UIDS = undefined;
-    await runAdaptiveRequest({ projectId: "attacker-supplied-project-id" });
-    const [, , , , , projectIdArg] = createRunArgs();
-    expect(projectIdArg).toBeUndefined(); // never "attacker-supplied-project-id", and never coerced to null by the client's presence alone
+  it("SECURITY/INVARIANT: Personal Workspace binding invalid_configuration — rejected before model execution, createRun is never called", async () => {
+    mockedResolveBinding.mockReset();
+    mockedResolveBinding.mockResolvedValueOnce({ outcome: "invalid_configuration", reason: "workspaces_disabled_but_writes_enabled" });
+
+    const { response, body } = await runAdaptiveRequest();
+    expect(response.status).toBe(500);
+    expect(body.ok).toBe(false);
+    expect(body.errorCode).toBe("workspace_configuration_invalid");
+    expect(mockedCreateRun).not.toHaveBeenCalled();
   });
 
-  it("STRUCTURAL: route.ts calls resolveProjectRunAssociationWriteMode() from exactly one call site", () => {
+  it("REQUEST SPOOFING: a client-supplied projectId in the request body has zero effect on the persisted value", async () => {
+    await runAdaptiveRequest({ projectId: "attacker-supplied-project-id" });
+    const [, , , , , projectIdArg] = createRunArgs();
+    expect(projectIdArg).toBeNull(); // never "attacker-supplied-project-id" — always the canonical null for a bound run, never client-influenced
+  });
+
+  it("STRUCTURAL: route.ts no longer imports or calls resolveProjectRunAssociationWriteMode() — the neutral projectId:null write is unconditional", () => {
     const fs = require("fs");
     const path = require("path");
     const source = fs.readFileSync(path.join(process.cwd(), "app/api/run-panel/route.ts"), "utf8");
-    const callSites = (source.match(/resolveProjectRunAssociationWriteMode\(\{/g) ?? []).length;
-    expect(callSites).toBe(1);
+    // Checks the executable surface only — an explanatory code comment is
+    // allowed to name the retired flag; an import or a call site is not.
+    expect(source).not.toMatch(/resolveProjectRunAssociationWriteMode\(/);
+    expect(source).not.toMatch(/^import .*resolveProjectRunAssociationWriteMode.*$/m);
+    expect(source).not.toMatch(/^import \{[^}]*PROJECT_RUN_ASSOCIATION_WRITES_ENABLED[^}]*\} from "@\/lib\/env";$/m);
+    expect(source).not.toMatch(/^import \{[^}]*PROJECT_RUN_ASSOCIATION_WRITE_CANARY_UIDS[^}]*\} from "@\/lib\/env";$/m);
   });
 
   it("STRUCTURAL: the projectIdForRun computation appears only inside the same case block that assigns workspaceIdForRun — proven by requiring exactly one occurrence of the assignment pattern between 'case \"bound\"' and the next 'case'", () => {

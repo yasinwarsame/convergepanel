@@ -12,10 +12,25 @@
  * omit-and-continue choice: a query that's supposed to be scoped to
  * exactly this Project (or exactly Unfiled) returning something that
  * violates that scope is itself the structural problem worth surfacing
- * loudly. The completed Phase 6D normalization means "Unfiled" is now a
- * simple, enforced invariant (`projectId === null`, never merely
- * "missing") — this module treats any row that doesn't exactly match that
- * invariant as corruption, never silently reinterprets it as compatible.
+ * loudly.
+ *
+ * "Unfiled" is a simple, enforced invariant (`projectId === null`, never
+ * merely "missing") for every Personal Workspace-bound run going
+ * forward — not because a historical migration reached every row in the
+ * database (it didn't; see below), but because the writer itself
+ * (`app/api/run-panel/route.ts`, Phase 8C-B1.3B) now always writes
+ * `projectId: null` at creation whenever a run is Workspace-bound, with
+ * no rollout flag able to suppress that write anymore. A one-time
+ * historical backfill (Phase 6D.3A, 2026-08-17) separately normalized the
+ * narrow set of pre-8C-B1.3B rows that had a valid `workspaceId` but a
+ * merely-absent `projectId` — that set was 9 rows, not "every historical
+ * run." Runs with `workspaceId` itself absent (pre-Workspace legacy data)
+ * were never in scope for either the writer fix or the backfill, and
+ * remain outside every Workspace-scoped query entirely, unrelated to
+ * `projectId`. This module treats any Workspace-bound row that doesn't
+ * exactly match the `null`/assigned invariant as corruption, never
+ * silently reinterprets it as compatible — deliberately strict, not a
+ * dual-reader, per the Phase 8C-B1.3A/8C-B1.3A.1/8C-B1.3B audit chain.
  */
 
 import "server-only";
