@@ -11,6 +11,7 @@ import type { ClaimVerificationFirestoreDoc } from "@/lib/firestore/verification
 import { mapStoredVerificationToClientPayload } from "@/lib/user/mapStoredVerificationToClientPayload";
 import { mapStoredVideoVerificationToClientPayload } from "@/lib/user/mapStoredVideoVerificationToClientPayload";
 import { validateTeamClaimVerificationRowShape } from "@/lib/workspaces/teamClaimVerificationRowValidation";
+import { validateTeamVideoVerificationRowShape } from "@/lib/workspaces/teamVideoVerificationRowValidation";
 import { resolveTeamRunWorkspaceAccess } from "@/lib/workspaces/resolveTeamRunWorkspaceAccess";
 
 export const runtime = "nodejs";
@@ -143,6 +144,70 @@ export async function GET(
       return NextResponse.json({ ok: true, payload });
     } catch (e: unknown) {
       logger.error("[user/verifications/id] Team Claim map failed", { error: (e as Error)?.message });
+      return NextResponse.json(
+        { ok: false, errorCode: "internal_error", message: "Could not load verification." },
+        { status: 500 }
+      );
+    }
+  }
+
+  // ============================================
+  // Phase 8C-E.3.3.1 — Team Video read classification. Applies ONLY to
+  // collection === "videoVerifications"; deliberately a SEPARATE block
+  // from the Claim branch above (never merged/refactored together) so
+  // this addition cannot alter Claim's already-Production-safe semantics.
+  // A workspaceId field on a videoVerifications row may NEVER fall back
+  // to the Personal owner-ownership path below.
+  // ============================================
+  const hasVideoWorkspaceIdField = collection === "videoVerifications" && Object.prototype.hasOwnProperty.call(raw, "workspaceId");
+
+  if (hasVideoWorkspaceIdField) {
+    if (typeof raw.workspaceId !== "string" || raw.workspaceId.length === 0) {
+      // Malformed workspaceId value on an otherwise-claimed-Team row —
+      // concealed, never a distinguishable error, never a Personal
+      // fallback.
+      return NextResponse.json(
+        { ok: false, errorCode: "not_found", message: "Video verification not found." },
+        { status: 404 }
+      );
+    }
+
+    const workspaceId = raw.workspaceId;
+    const validated = validateTeamVideoVerificationRowShape(raw, workspaceId);
+    if (!validated.ok) {
+      return NextResponse.json(
+        { ok: false, errorCode: "not_found", message: "Video verification not found." },
+        { status: 404 }
+      );
+    }
+
+    const access = await resolveTeamRunWorkspaceAccess({ uid, workspaceId });
+    if (!access.granted) {
+      if (access.reason === "team_workspaces_disabled" || access.reason === "lookup_failed") {
+        return NextResponse.json(
+          { ok: false, errorCode: "team_workspaces_disabled", message: "Team Workspaces are not available right now." },
+          { status: 503 }
+        );
+      }
+      // Every other denial reason collapses to the same concealed 404 —
+      // a non-member must never learn which of those is actually true.
+      return NextResponse.json(
+        { ok: false, errorCode: "not_found", message: "Video verification not found." },
+        { status: 404 }
+      );
+    }
+    if (!access.capabilities.includes("research.read")) {
+      return NextResponse.json(
+        { ok: false, errorCode: "insufficient_capability", message: "You do not have permission to view this Video verification." },
+        { status: 403 }
+      );
+    }
+
+    try {
+      const payload = mapStoredVideoVerificationToClientPayload(verificationId, raw);
+      return NextResponse.json({ ok: true, payload });
+    } catch (e: unknown) {
+      logger.error("[user/verifications/id] Team Video map failed", { error: (e as Error)?.message });
       return NextResponse.json(
         { ok: false, errorCode: "internal_error", message: "Could not load verification." },
         { status: 500 }
