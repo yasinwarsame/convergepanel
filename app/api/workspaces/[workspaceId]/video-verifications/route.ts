@@ -5,7 +5,7 @@
  * §27 precedent). Detail-read support lives in the existing shared
  * `GET /api/user/verifications/[verificationId]?collection=videoVerifications`.
  *
- * Frozen architecture (Phase 8C-E.3.3.0 + its .1/.2/.3 corrections):
+ * Frozen architecture (Phase 8C-E.3.3.0 + its .1/.2/.3/.3.2.1 corrections):
  *
  * identity -> rate limit (team-video-verification:${uid}, BEFORE body
  * parsing) -> body read/validation (Personal Video semantics verbatim +
@@ -13,22 +13,46 @@
  * rollout (zero Team Workspace/membership/Project/dedup Firestore reads
  * before this point — the UID rate limiter may use its own persistence
  * backend, intentionally outside this invariant) -> GATE 1
- * (`authorizeTeamVideoVerificationAdmission()`, no write) -> requester
+ * (`authorizeTeamVideoVerificationAdmission()`, no write — authorizes
+ * research.create BEFORE any dedup lookup or provider spend) -> requester
  * entitlement -> ONE requester users/{uid} read (supplies userEmail AND
  * videoRunsThisMonth/usageMonth, Personal-identical normalization,
  * Phase 8C-E.3.3.0.1) -> free-plan block -> video monthly limit -> Team
- * -scoped dedup (userId+fileName+workspaceId+projectId, preserving
- * Personal's own newest-candidate-only quirk; a dedup-hit read-auth
- * failure falls through to normal creation rather than erroring, since
- * Gate 2 is always the authoritative final check either way) -> generic
- * atomic pre-charge (`checkAndIncrementUsageForRun(uid,2)`, Claim-style,
- * BEFORE provider execution, Phase 8C-E.3.3.0 §20 Option A) ->
- * `analyzeMetadata()` -> `executeVideoVerification()` (same shared
- * service Personal uses, unmodified) -> GATE 2
- * (`saveTeamVideoVerification()`, fresh reauthorization + writer-owned id
- * + `tx.create()`, Phase 8C-E.3.3.0.3) -> unconditional best-effort token
- * accounting (BEFORE branching on Gate-2's result) -> (only on Gate-2
- * success) governance + video counter -> response.
+ * -scoped dedup lookup (userId+fileName+workspaceId+projectId binding,
+ * preserving Personal's own newest-candidate-only quirk).
+ *
+ * DEDUP SECURITY CONTRACT (Phase 8C-E.3.3.1.1 — read this before touching
+ * the dedup block below): a TRUE MISS (no matching document, or the
+ * newest candidate fails the window/fileSize/duration criteria) may
+ * proceed to fresh creation below. But once a candidate DOES satisfy
+ * those match criteria, the request has identified an EXISTING Team
+ * artifact, not a miss — its row is validated
+ * (`validateTeamVideoVerificationRowShape()`) and access is freshly
+ * reauthorized for `research.read` (`resolveTeamRunWorkspaceAccess()`,
+ * independent of Gate 1's `research.create` decision). From that point
+ * every outcome is terminal and FAILS CLOSED — a matched candidate's
+ * authorization failure is NEVER reinterpreted as a miss and retried as
+ * fresh creation:
+ *   - malformed matched row                    -> concealed 404
+ *   - research.read capability missing         -> 403
+ *   - concealed Workspace/membership/integrity  -> concealed 404
+ *   - rollout disabled / infra lookup failure   -> 503
+ *   - valid row + research.read granted         -> existing artifact, 200
+ * None of those five outcomes ever reaches `checkAndIncrementUsageForRun()`
+ * or `executeVideoVerification()` below. Gate 2 remains the sole
+ * authority for authorizing a FRESH creation after a genuine miss — it is
+ * not a fallback that "double-checks" a failed read authorization on an
+ * already-identified existing artifact.
+ *
+ * Only past a true miss does the route continue: generic atomic
+ * pre-charge (`checkAndIncrementUsageForRun(uid,2)`, Claim-style, BEFORE
+ * provider execution, Phase 8C-E.3.3.0 §20 Option A) -> `analyzeMetadata()`
+ * -> `executeVideoVerification()` (same shared service Personal uses,
+ * unmodified) -> GATE 2 (`saveTeamVideoVerification()`, fresh
+ * reauthorization + writer-owned id + `tx.create()`, Phase 8C-E.3.3.0.3)
+ * -> unconditional best-effort token accounting (BEFORE branching on
+ * Gate-2's result) -> (only on Gate-2 success) governance + video counter
+ * -> response.
  *
  * The entire handler is wrapped in a Team-only top-level safe catch
  * (Phase 8C-E.3.3.0 §33 Option A) — Personal Video itself has no such
