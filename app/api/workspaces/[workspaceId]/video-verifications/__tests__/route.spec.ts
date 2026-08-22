@@ -403,23 +403,131 @@ describe("POST /api/workspaces/[workspaceId]/video-verifications — dedup", () 
     expect(mockRunTransaction).not.toHaveBeenCalled();
   });
 
-  it("hit + malformed row (fails validator) -> falls through to normal creation, no error surfaced", async () => {
+  it("MATCHED candidate + malformed row (fails validator) -> FAIL CLOSED, concealed 404, zero downstream work of any kind", async () => {
     mockedFindDedupCandidate.mockResolvedValueOnce({ id: "vid-bad", data: { userId: "x", workspaceId: WS_ID, type: "video_verification" /* missing projectId/timestamp */ } });
     const res = await POST(buildPostRequest(buildBody()), { params: { workspaceId: WS_ID } });
-    expect(res.status).toBe(200);
-    expect(mockedExecuteVideoVerification).toHaveBeenCalledTimes(1);
-    expect(mockedSaveGate2).toHaveBeenCalledTimes(1);
+    const body = await res.json();
+    expect(res.status).toBe(404);
+    expect(body.errorCode).toBe("not_found");
+    expect(mockedResolveTeamRunWorkspaceAccess).not.toHaveBeenCalled();
+    expect(mockedCheckAndIncrementUsage).not.toHaveBeenCalled();
+    expect(mockedExecuteVideoVerification).not.toHaveBeenCalled();
+    expect(mockedSaveGate2).not.toHaveBeenCalled();
+    expect(mockedIncrementUserTokenUsage).not.toHaveBeenCalled();
+    expect(mockedEvaluateAndStoreGovernance).not.toHaveBeenCalled();
+    expect(mockRunTransaction).not.toHaveBeenCalled();
   });
 
-  it("hit + valid row + research.read DENIED -> falls through to normal creation (Gate 2 remains authoritative), no error", async () => {
+  it("MATCHED candidate + valid row + research.read MISSING (granted but lacking capability) -> 403 insufficient_capability, zero downstream work", async () => {
+    mockedFindDedupCandidate.mockResolvedValueOnce({
+      id: "vid-existing-1",
+      data: { userId: "creator-uid", workspaceId: WS_ID, projectId: null, type: "video_verification", timestamp: Timestamp.now() },
+    });
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValueOnce({ granted: true, workspace: {}, membership: {}, capabilities: ["projects.read"] });
+    const res = await POST(buildPostRequest(buildBody()), { params: { workspaceId: WS_ID } });
+    const body = await res.json();
+    expect(res.status).toBe(403);
+    expect(body.errorCode).toBe("insufficient_capability");
+    expect(mockedCheckAndIncrementUsage).not.toHaveBeenCalled();
+    expect(mockedExecuteVideoVerification).not.toHaveBeenCalled();
+    expect(mockedSaveGate2).not.toHaveBeenCalled();
+    expect(mockedIncrementUserTokenUsage).not.toHaveBeenCalled();
+    expect(mockedEvaluateAndStoreGovernance).not.toHaveBeenCalled();
+    expect(mockRunTransaction).not.toHaveBeenCalled();
+  });
+
+  it("MATCHED candidate + membership removed before fresh read -> FAIL CLOSED, concealed 404, zero downstream work — request never spends provider quota waiting for Gate 2 to rediscover the revocation", async () => {
     mockedFindDedupCandidate.mockResolvedValueOnce({
       id: "vid-existing-1",
       data: { userId: "creator-uid", workspaceId: WS_ID, projectId: null, type: "video_verification", timestamp: Timestamp.now() },
     });
     mockedResolveTeamRunWorkspaceAccess.mockResolvedValueOnce({ granted: false, reason: "membership_removed" });
     const res = await POST(buildPostRequest(buildBody()), { params: { workspaceId: WS_ID } });
-    expect(res.status).toBe(200);
-    expect(mockedExecuteVideoVerification).toHaveBeenCalledTimes(1);
+    const body = await res.json();
+    expect(res.status).toBe(404);
+    expect(body.errorCode).toBe("not_found");
+    expect(mockedCheckAndIncrementUsage).not.toHaveBeenCalled();
+    expect(mockedExecuteVideoVerification).not.toHaveBeenCalled();
+    expect(mockedSaveGate2).not.toHaveBeenCalled();
+    expect(mockedIncrementUserTokenUsage).not.toHaveBeenCalled();
+    expect(mockedEvaluateAndStoreGovernance).not.toHaveBeenCalled();
+    expect(mockRunTransaction).not.toHaveBeenCalled();
+  });
+
+  it("MATCHED candidate + wrong Workspace type on fresh read -> concealed 404, zero downstream work", async () => {
+    mockedFindDedupCandidate.mockResolvedValueOnce({
+      id: "vid-existing-1",
+      data: { userId: "creator-uid", workspaceId: WS_ID, projectId: null, type: "video_verification", timestamp: Timestamp.now() },
+    });
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValueOnce({ granted: false, reason: "wrong_workspace_type" });
+    const res = await POST(buildPostRequest(buildBody()), { params: { workspaceId: WS_ID } });
+    expect(res.status).toBe(404);
+    expect(mockedExecuteVideoVerification).not.toHaveBeenCalled();
+  });
+
+  it("MATCHED candidate + owner-integrity violation on fresh read -> concealed 404, zero downstream work", async () => {
+    mockedFindDedupCandidate.mockResolvedValueOnce({
+      id: "vid-existing-1",
+      data: { userId: "creator-uid", workspaceId: WS_ID, projectId: null, type: "video_verification", timestamp: Timestamp.now() },
+    });
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValueOnce({ granted: false, reason: "owner_integrity_violation" });
+    const res = await POST(buildPostRequest(buildBody()), { params: { workspaceId: WS_ID } });
+    expect(res.status).toBe(404);
+    expect(mockedExecuteVideoVerification).not.toHaveBeenCalled();
+  });
+
+  it("MATCHED candidate + fresh-read rollout disabled -> 503 team_workspaces_disabled, zero downstream work", async () => {
+    mockedFindDedupCandidate.mockResolvedValueOnce({
+      id: "vid-existing-1",
+      data: { userId: "creator-uid", workspaceId: WS_ID, projectId: null, type: "video_verification", timestamp: Timestamp.now() },
+    });
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValueOnce({ granted: false, reason: "team_workspaces_disabled" });
+    const res = await POST(buildPostRequest(buildBody()), { params: { workspaceId: WS_ID } });
+    const body = await res.json();
+    expect(res.status).toBe(503);
+    expect(body.errorCode).toBe("team_workspaces_disabled");
+    expect(mockedExecuteVideoVerification).not.toHaveBeenCalled();
+  });
+
+  it("MATCHED candidate + fresh-read infrastructure lookup failure -> 503 mapping, zero downstream work", async () => {
+    mockedFindDedupCandidate.mockResolvedValueOnce({
+      id: "vid-existing-1",
+      data: { userId: "creator-uid", workspaceId: WS_ID, projectId: null, type: "video_verification", timestamp: Timestamp.now() },
+    });
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValueOnce({ granted: false, reason: "lookup_failed" });
+    const res = await POST(buildPostRequest(buildBody()), { params: { workspaceId: WS_ID } });
+    const body = await res.json();
+    expect(res.status).toBe(503);
+    expect(body.errorCode).toBe("team_workspaces_disabled");
+    expect(mockedExecuteVideoVerification).not.toHaveBeenCalled();
+  });
+
+  it("KEY ACCEPTANCE INVARIANT: a true dedup HIT can never reach creation unless research.read succeeds — proven across malformed/denied/concealed/infra cases, all producing zero calls to executeVideoVerification/saveTeamVideoVerification", async () => {
+    const scenarios: Array<() => void> = [
+      () => mockedFindDedupCandidate.mockResolvedValueOnce({ id: "vid-1", data: { userId: "x", type: "video_verification" } }), // malformed
+      () => {
+        mockedFindDedupCandidate.mockResolvedValueOnce({ id: "vid-2", data: { userId: "x", workspaceId: WS_ID, projectId: null, type: "video_verification", timestamp: Timestamp.now() } });
+        mockedResolveTeamRunWorkspaceAccess.mockResolvedValueOnce({ granted: false, reason: "membership_removed" });
+      },
+      () => {
+        mockedFindDedupCandidate.mockResolvedValueOnce({ id: "vid-3", data: { userId: "x", workspaceId: WS_ID, projectId: null, type: "video_verification", timestamp: Timestamp.now() } });
+        mockedResolveTeamRunWorkspaceAccess.mockResolvedValueOnce({ granted: true, workspace: {}, membership: {}, capabilities: [] });
+      },
+    ];
+    for (const arrange of scenarios) {
+      jest.clearAllMocks();
+      mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: UID });
+      mockedCheckRateLimit.mockResolvedValue({ allowed: true, remaining: 9, resetAt: new Date() });
+      mockedResolveTeamWorkspacesMode.mockReturnValue({ enabled: true, source: "global" });
+      mockedAuthorizeGate1.mockResolvedValue({ status: "authorized", workspaceId: WS_ID, projectId: null });
+      mockedGetEffectiveEntitlements.mockResolvedValue({ planId: "full", source: "stripe", monthlyLimit: 150, maxModelsPerRun: 5 });
+      mockUsersDocGet.mockResolvedValue({ exists: true, data: () => ({ email: "member@example.com", usageMonth: nowMonthLabel(), videoRunsThisMonth: 0 }) });
+      arrange();
+      const res = await POST(buildPostRequest(buildBody()), { params: { workspaceId: WS_ID } });
+      expect([403, 404]).toContain(res.status);
+      expect(mockedExecuteVideoVerification).not.toHaveBeenCalled();
+      expect(mockedSaveGate2).not.toHaveBeenCalled();
+    }
   });
 
   it("dedup query THROW -> 500 internal_error via outer catch, zero generic/execution/Gate2/tokens/counter/governance", async () => {

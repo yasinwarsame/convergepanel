@@ -341,6 +341,19 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
     // TEAM-SCOPED DEDUP — a Firestore query failure is NOT caught here;
     // it propagates to this route's own outer catch (fail-closed, Phase
     // 8C-E.3.3.0.2 §10), deliberately unlike Personal's best-effort catch.
+    //
+    // Phase 8C-E.3.3.1.1 — once the query returns a document that passes
+    // the actual dedup-match criteria (newest, window, fileSize,
+    // duration), the request has identified an EXISTING Team artifact,
+    // not merely "no candidate." From that point on, a row-validation or
+    // read-authorization failure MUST fail closed (concealed 404 / 403) —
+    // it must never be reinterpreted as a miss and silently retried as a
+    // fresh, expensive, provider-spending creation. Only the four true-
+    // miss conditions inside findTeamVideoVerificationDedupCandidate()
+    // itself (no docs / outside window / size mismatch / duration
+    // mismatch) may fall through to normal creation. Mapping reused
+    // verbatim from the shared Team Video detail-read branch in
+    // app/api/user/verifications/[verificationId]/route.ts.
     // ============================================
     const dedupCandidate = await findTeamVideoVerificationDedupCandidate({
       uid, workspaceId, projectId: targetProjectId, fileName, fileSize, duration, windowMs: DEDUP_WINDOW_MS,
@@ -348,37 +361,62 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
 
     if (dedupCandidate) {
       const rowValidation = validateTeamVideoVerificationRowShape(dedupCandidate.data, workspaceId);
-      if (rowValidation.ok) {
-        const readAccess = await resolveTeamRunWorkspaceAccess({ uid, workspaceId: rowValidation.workspaceId });
-        if (readAccess.granted && readAccess.capabilities.includes("research.read")) {
-          const existing = mapStoredVideoVerificationToClientPayload(dedupCandidate.id, dedupCandidate.data);
-          return NextResponse.json({
-            ok: true,
-            verificationId: existing.verificationId,
-            verdict: existing.verdict,
-            contentType: existing.contentType,
-            consensusScore: existing.consensusScore,
-            confidenceLabel: existing.confidenceLabel,
-            evidenceQuality: existing.evidenceQuality,
-            supportRatio: existing.supportRatio,
-            metadata: existing.metadata,
-            metadataAnalysis: existing.metadataAnalysis,
-            modelEvidence: existing.modelEvidence,
-            agreementPoints: existing.agreementPoints,
-            disagreementPoints: existing.disagreementPoints,
-            frameCount: existing.frameCount,
-            warnings: existing.warnings,
-            disclaimer: VIDEO_VERIFICATION_DISCLAIMER,
-            _deduplicated: true,
-            workspaceId: rowValidation.workspaceId,
-            projectId: rowValidation.projectId,
-          });
-        }
+      if (!rowValidation.ok) {
+        // Matched-but-malformed Team-bound candidate — fail closed,
+        // concealed. Never falls through to creation.
+        return NextResponse.json(
+          { ok: false, errorCode: "not_found", message: "Video verification not found." },
+          { status: 404 }
+        );
       }
-      // Malformed candidate or a stale/failed read-authorization race falls
-      // through to normal creation — Gate 2 is always the authoritative,
-      // final authorization decision either way; no separate error path
-      // is invented for this specific edge case.
+
+      const readAccess = await resolveTeamRunWorkspaceAccess({ uid, workspaceId: rowValidation.workspaceId });
+      if (!readAccess.granted) {
+        if (readAccess.reason === "team_workspaces_disabled" || readAccess.reason === "lookup_failed") {
+          return NextResponse.json(
+            { ok: false, errorCode: "team_workspaces_disabled", message: "Team Workspaces are not available right now." },
+            { status: 503 }
+          );
+        }
+        // Every other denial reason (workspace absent/malformed/wrong
+        // type, membership absent/removed/malformed, owner-integrity
+        // violation) collapses to the same concealed 404 — never falls
+        // through to creation, and never spends provider quota waiting
+        // for Gate 2 to rediscover a revocation this check already saw.
+        return NextResponse.json(
+          { ok: false, errorCode: "not_found", message: "Video verification not found." },
+          { status: 404 }
+        );
+      }
+      if (!readAccess.capabilities.includes("research.read")) {
+        return NextResponse.json(
+          { ok: false, errorCode: "insufficient_capability", message: "You do not have permission to view this Video verification." },
+          { status: 403 }
+        );
+      }
+
+      const existing = mapStoredVideoVerificationToClientPayload(dedupCandidate.id, dedupCandidate.data);
+      return NextResponse.json({
+        ok: true,
+        verificationId: existing.verificationId,
+        verdict: existing.verdict,
+        contentType: existing.contentType,
+        consensusScore: existing.consensusScore,
+        confidenceLabel: existing.confidenceLabel,
+        evidenceQuality: existing.evidenceQuality,
+        supportRatio: existing.supportRatio,
+        metadata: existing.metadata,
+        metadataAnalysis: existing.metadataAnalysis,
+        modelEvidence: existing.modelEvidence,
+        agreementPoints: existing.agreementPoints,
+        disagreementPoints: existing.disagreementPoints,
+        frameCount: existing.frameCount,
+        warnings: existing.warnings,
+        disclaimer: VIDEO_VERIFICATION_DISCLAIMER,
+        _deduplicated: true,
+        workspaceId: rowValidation.workspaceId,
+        projectId: rowValidation.projectId,
+      });
     }
 
     // ============================================
