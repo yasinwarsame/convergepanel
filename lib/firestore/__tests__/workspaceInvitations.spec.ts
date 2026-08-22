@@ -795,6 +795,93 @@ describe("revokeWorkspaceInvitation", () => {
 });
 
 // ==================================================================
+// REVOKE / CREATE RACE — dedicated permanent test, Phase 8D.1.0.1
+// ==================================================================
+
+describe("revokeWorkspaceInvitation vs createWorkspaceInvitation — guard-repoint race", () => {
+  it("a stale revoke of A, racing a concurrent create that legitimately supersedes A with B, re-reads the guard fresh and fails as stale_superseded — B is never touched, the guard stays pointed at B", async () => {
+    // Invitation A: pending, current, but logically EXPIRED — the exact
+    // "pending but expired" state the frozen CREATE guard matrix already
+    // treats as legitimately supersedable (Section 3 of Phase 8D.0.0.3's
+    // guard-state matrix), and which revoke's own status check (pending
+    // vs. accepted/revoked only — never expiry-aware) would otherwise
+    // still consider revocable in isolation.
+    seedInvitation("inv-A", { status: "pending", expiresAt: ts(1), deliveryVersion: 3 });
+    seedGuard(WS_ID, INVITEE_EMAIL, "inv-A");
+
+    // Same real-transaction-retry-simulation methodology already used for
+    // the create/create and resend/resend races above: the FIRST
+    // (discarded) callback invocation of the revoke transaction reads A's
+    // stale-but-still-guard-current state — but before that attempt's
+    // writes are kept, a concurrent CREATE commits directly into the
+    // shared store: a new invitation B, and the guard repointed to B.
+    // Because CREATE never rewrites a superseded invitation's own
+    // `status` field, A's document is left exactly as seeded
+    // (`status: "pending"`) — only the GUARD moves. The KEPT (second)
+    // invocation of revoke's transaction re-reads the guard fresh and
+    // must observe it now points at B, not A.
+    retriesBeforeSuccess = 1;
+    let fired = false;
+    const winningInvitationId = "inv-B";
+    concurrentMutationHook = () => {
+      if (fired) return;
+      fired = true;
+      stores.workspaceInvitations.set(winningInvitationId, {
+        data: {
+          schemaVersion: 1,
+          id: winningInvitationId,
+          workspaceId: WS_ID,
+          normalizedEmail: INVITEE_EMAIL,
+          role: "member",
+          status: "pending",
+          tokenHash: hashWorkspaceInvitationToken("concurrent-create-winner-token"),
+          expiresAt: ts(9_000_000_000),
+          createdAt: ts(2000),
+          updatedAt: ts(2000),
+          invitedByUserId: OWNER_UID,
+          acceptedAt: null,
+          acceptedByUserId: null,
+          revokedAt: null,
+          revokedByUserId: null,
+          deliveryVersion: 1,
+          lastDeliveryAttemptAt: null,
+          lastDeliveryStatus: null,
+          lastDeliveryVersion: null,
+          providerMessageId: null,
+        },
+        updateTime: nextUpdateTime(),
+      });
+      const key = computeWorkspaceInvitationKey(WS_ID, INVITEE_EMAIL);
+      stores.workspaceInvitationKeys.set(key, { data: { workspaceId: WS_ID, normalizedEmail: INVITEE_EMAIL, currentInvitationId: winningInvitationId, updatedAt: ts(2000) }, updateTime: nextUpdateTime() });
+    };
+
+    const result = await revokeWorkspaceInvitation({ uid: OWNER_UID, workspaceId: WS_ID, invitationId: "inv-A", expectedDeliveryVersion: 3 });
+
+    // Required outcome: the stale revoke of A fails as stale_superseded —
+    // never a successful revoke of the now-inactive A, and never (by
+    // construction, since it never even reaches a write) any mutation of
+    // the currently-active B.
+    expect(result).toEqual({ status: "stale_superseded" });
+
+    // B was never touched by the stale revoke attempt.
+    expect(stores.workspaceInvitations.get(winningInvitationId)!.data.status).toBe("pending");
+    expect(stores.workspaceInvitations.get(winningInvitationId)!.data.revokedAt).toBeNull();
+    expect(stores.workspaceInvitations.get(winningInvitationId)!.data.revokedByUserId).toBeNull();
+
+    // A's own document is untouched too — still exactly the pending,
+    // expired, never-revoked row it was seeded as (CREATE never rewrote
+    // it, and the stale revoke never reached its own write).
+    expect(stores.workspaceInvitations.get("inv-A")!.data.status).toBe("pending");
+    expect(stores.workspaceInvitations.get("inv-A")!.data.revokedAt).toBeNull();
+
+    // The guard is still pointing at B — the stale revoke never repointed
+    // it (revoke never writes the guard at all, in any outcome).
+    const key = computeWorkspaceInvitationKey(WS_ID, INVITEE_EMAIL);
+    expect(stores.workspaceInvitationKeys.get(key)!.data.currentInvitationId).toBe(winningInvitationId);
+  });
+});
+
+// ==================================================================
 // ACCEPT
 // ==================================================================
 
