@@ -508,3 +508,24 @@ export const STRIPE_5_MODELS_ANNUAL = process.env.STRIPE_5_MODELS_ANNUAL || proc
   }
 })();
 
+/**
+ * Team Workspace Invitations, Phase 8D.2 — transactional email
+ * configuration for `lib/email/workspaceInvitations.ts`. Deliberately NOT
+ * validated at import time (unlike the Stripe IIFE above) — absence must
+ * never fail a build, test run, or Preview deployment; the adapter itself
+ * checks completeness only when actually invoked and returns a typed
+ * `configuration_missing` result, never a fabricated success. See that
+ * module's doc comment for the full rationale.
+ */
+export const RESEND_API_KEY = process.env.RESEND_API_KEY;
+export const TRANSACTIONAL_EMAIL_FROM = process.env.TRANSACTIONAL_EMAIL_FROM;
+
+/**
+ * Canonical public origin used to build invitation acceptance links. Never
+ * derived from a request's `Host`/`X-Forwarded-Host` header — always this
+ * explicit, server-configured value. No existing app-base-URL convention
+ * existed anywhere in this repository before Phase 8D (confirmed during
+ * the Phase 8D.0 audit).
+ */
+export const APP_BASE_URL = process.env.APP_BASE_URL;
+
