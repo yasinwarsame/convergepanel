@@ -302,17 +302,26 @@ describe("GET — list", () => {
     expect(res.status).toBe(403);
   });
 
-  it("lookup_failed -> 500 internal_error", async () => {
+  it("lookup_failed -> 503, stable non-secret service-unavailable body, no Firestore/exception detail", async () => {
     mockedListWorkspaceInvitations.mockResolvedValue({ status: "lookup_failed" });
+    const { res, json } = await callGet();
+    expect(res.status).toBe(503);
+    expect(json).toEqual({ ok: false, errorCode: "team_workspaces_disabled", message: "Team Workspaces are not available right now." });
+    expect(JSON.stringify(json)).not.toMatch(/lookup_failed|Firestore|exception/i);
+  });
+
+  it("firestore_unavailable -> 503, same infrastructure-unavailable treatment as lookup_failed", async () => {
+    mockedListWorkspaceInvitations.mockResolvedValue({ status: "firestore_unavailable" });
+    const { res, json } = await callGet();
+    expect(res.status).toBe(503);
+    expect(json.errorCode).toBe("team_workspaces_disabled");
+  });
+
+  it("state_corruption -> 500 internal_error (distinct from the 503 infrastructure class)", async () => {
+    mockedListWorkspaceInvitations.mockResolvedValue({ status: "state_corruption" });
     const { res, json } = await callGet();
     expect(res.status).toBe(500);
     expect(json.errorCode).toBe("internal_error");
-  });
-
-  it("state_corruption -> 500", async () => {
-    mockedListWorkspaceInvitations.mockResolvedValue({ status: "state_corruption" });
-    const { res } = await callGet();
-    expect(res.status).toBe(500);
   });
 
   it("empty list -> 200, invitations: []", async () => {

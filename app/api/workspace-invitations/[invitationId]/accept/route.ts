@@ -50,8 +50,16 @@ function mapAcceptDenial(result: Exclude<AcceptWorkspaceInvitationResult, { stat
       return { status: 403, body: { ok: false, errorCode: "invitation_email_mismatch", message: "This invitation is for a different email address than your account." } };
     case "invitation_invalid_or_expired":
       return { status: 404, body: { ok: false, errorCode: "invitation_invalid_or_expired", message: "This invitation is invalid, expired, or no longer available." } };
-    case "firestore_unavailable":
     case "auth_lookup_failed":
+      // The core already distinguishes this from a deterministic account
+      // state (missing/unverified email is its own
+      // `email_verification_required` status) — this is specifically a
+      // failure to obtain authoritative Firebase Auth state (the account
+      // record itself, or a transient Admin SDK failure), i.e.
+      // infrastructure, not a fact about the caller's account. Mapped to a
+      // generic, safe 503 — never the Firebase error code/message/stack.
+      return { status: 503, body: { ok: false, errorCode: "service_unavailable", message: "Something went wrong. Please try again." } };
+    case "firestore_unavailable":
     case "state_corruption":
     case "accept_failed":
       return internalErrorResponse();

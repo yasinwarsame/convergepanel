@@ -279,3 +279,129 @@ describe("sendWorkspaceInvitationEmail — secret logging", () => {
     expect(allLoggedArgs).not.toContain("workspace-invitations/accept#");
   });
 });
+
+/**
+ * Provider timeout — every HTTP attempt already carries a bounded
+ * `AbortController`-based timeout (fresh per attempt, cleared via
+ * `clearTimeout` on settle). These tests exercise that mechanism directly
+ * by mocking `fetch` to hang until its supplied `signal` aborts, then
+ * advancing Jest's fake timers past the fixed timeout — never waiting a
+ * real 10s per test.
+ */
+describe("sendWorkspaceInvitationEmail — provider timeout", () => {
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  function abortableHangingFetch(onCall: (signal: AbortSignal) => void, finalResponse: () => Promise<Response>) {
+    let call = 0;
+    return jest.fn((_url: string, init: { signal: AbortSignal }) => {
+      call += 1;
+      onCall(init.signal);
+      if (call === 1) {
+        return new Promise((_resolve, reject) => {
+          init.signal.addEventListener("abort", () => {
+            const err = new Error("The operation was aborted.");
+            (err as Error & { name: string }).name = "AbortError";
+            reject(err);
+          });
+        });
+      }
+      return finalResponse();
+    });
+  }
+
+  it("A/B: first attempt times out, second attempt succeeds -> sent after exactly 2 fetch calls", async () => {
+    jest.useFakeTimers();
+    const capturedSignals: AbortSignal[] = [];
+    global.fetch = abortableHangingFetch(
+      (signal) => capturedSignals.push(signal),
+      async () => jsonResponse(200, { id: "msg-after-timeout" })
+    ) as unknown as typeof fetch;
+
+    const resultPromise = sendWorkspaceInvitationEmail(BASE_ARGS);
+    await jest.advanceTimersByTimeAsync(10_000);
+    const result = await resultPromise;
+
+    expect(result).toEqual({ status: "sent", providerMessageId: "msg-after-timeout" });
+    expect(getFetchMock()).toHaveBeenCalledTimes(2);
+    // E: each attempt received a distinct, fresh AbortSignal.
+    expect(capturedSignals).toHaveLength(2);
+    expect(capturedSignals[0]).not.toBe(capturedSignals[1]);
+    expect(capturedSignals[0].aborted).toBe(true);
+  });
+
+  it("C: both attempts time out -> provider_unavailable after exactly 2 calls, no third attempt", async () => {
+    jest.useFakeTimers();
+    let call = 0;
+    global.fetch = jest.fn((_url: string, init: { signal: AbortSignal }) => {
+      call += 1;
+      return new Promise((_resolve, reject) => {
+        init.signal.addEventListener("abort", () => {
+          const err = new Error("The operation was aborted.");
+          (err as Error & { name: string }).name = "AbortError";
+          reject(err);
+        });
+      });
+    }) as unknown as typeof fetch;
+
+    const resultPromise = sendWorkspaceInvitationEmail(BASE_ARGS);
+    await jest.advanceTimersByTimeAsync(10_000); // attempt 1 times out
+    await jest.advanceTimersByTimeAsync(10_000); // attempt 2 times out
+    const result = await resultPromise;
+
+    expect(result).toEqual({ status: "provider_unavailable" });
+    expect(call).toBe(2);
+    expect(getFetchMock()).toHaveBeenCalledTimes(2);
+  });
+
+  it("D: the retried attempt after a timeout reuses the identical URL, serialized body, and Idempotency-Key", async () => {
+    jest.useFakeTimers();
+    const calls: Array<{ url: string; init: { headers: Record<string, string>; body: string; signal: AbortSignal } }> = [];
+    global.fetch = jest.fn((url: string, init: any) => {
+      calls.push({ url, init });
+      if (calls.length === 1) {
+        return new Promise((_resolve, reject) => {
+          init.signal.addEventListener("abort", () => {
+            const err = new Error("aborted");
+            (err as Error & { name: string }).name = "AbortError";
+            reject(err);
+          });
+        });
+      }
+      return Promise.resolve(jsonResponse(200, { id: "msg-1" }));
+    }) as unknown as typeof fetch;
+
+    const resultPromise = sendWorkspaceInvitationEmail(BASE_ARGS);
+    await jest.advanceTimersByTimeAsync(10_000);
+    await resultPromise;
+
+    expect(calls).toHaveLength(2);
+    expect(calls[0].url).toBe(calls[1].url);
+    expect(calls[0].init.body).toBe(calls[1].init.body);
+    expect(calls[0].init.headers["Idempotency-Key"]).toBe(calls[1].init.headers["Idempotency-Key"]);
+  });
+
+  it("F: no raw token, recipient email, or request body appears in logs after a timeout-driven retry", async () => {
+    jest.useFakeTimers();
+    const { logger } = jest.requireMock("@/lib/logger") as { logger: { warn: jest.Mock } };
+    global.fetch = jest.fn((_url: string, init: { signal: AbortSignal }) => {
+      return new Promise((_resolve, reject) => {
+        init.signal.addEventListener("abort", () => {
+          const err = new Error("aborted");
+          (err as Error & { name: string }).name = "AbortError";
+          reject(err);
+        });
+      });
+    }) as unknown as typeof fetch;
+
+    const resultPromise = sendWorkspaceInvitationEmail(BASE_ARGS);
+    await jest.advanceTimersByTimeAsync(10_000);
+    await jest.advanceTimersByTimeAsync(10_000);
+    await resultPromise;
+
+    const logged = JSON.stringify(logger.warn.mock.calls);
+    expect(logged).not.toContain(BASE_ARGS.rawToken);
+    expect(logged).not.toContain(BASE_ARGS.to);
+  });
+});

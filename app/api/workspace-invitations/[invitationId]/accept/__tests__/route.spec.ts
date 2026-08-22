@@ -107,11 +107,28 @@ it("email mismatch -> 403", async () => {
   expect(res.status).toBe(403);
 });
 
-it("auth lookup failure -> safe infra response (500 internal_error), no raw detail", async () => {
+it("auth lookup failure -> safe infra response (503 service_unavailable), no Firebase detail", async () => {
+  // A distinct infrastructure class from a deterministic account-state
+  // failure (email_verification_required/invitation_email_mismatch) —
+  // the core already separates "we couldn't obtain authoritative Firebase
+  // Auth state" from "we obtained it and it says X."
   mockedAcceptWorkspaceInvitation.mockResolvedValue({ status: "auth_lookup_failed" });
   const { res, json } = await callRoute(VALID_BODY);
-  expect(res.status).toBe(500);
-  expect(json.errorCode).toBe("internal_error");
+  expect(res.status).toBe(503);
+  expect(json.errorCode).toBe("service_unavailable");
+});
+
+it("auth lookup failure never leaks a Firebase-style error marker into the response body", async () => {
+  const FIREBASE_SECRET_MARKER = "auth/internal-error: FIREBASE_SECRET_DETAIL_MARKER";
+  // Simulate the core having encountered (and safely swallowed) a Firebase
+  // Admin SDK error internally — the mocked core result itself never
+  // carries this detail (matching the real `acceptWorkspaceInvitation()`
+  // contract, which returns a bare `{status:"auth_lookup_failed"}` with no
+  // payload), so this asserts the route doesn't invent a channel to leak
+  // one even if a future core change accidentally attached extra data.
+  mockedAcceptWorkspaceInvitation.mockResolvedValue({ status: "auth_lookup_failed", _hypotheticalFutureDetail: FIREBASE_SECRET_MARKER } as any);
+  const { json } = await callRoute(VALID_BODY);
+  expect(JSON.stringify(json)).not.toContain(FIREBASE_SECRET_MARKER);
 });
 
 it("state corruption -> 500", async () => {

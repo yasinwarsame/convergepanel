@@ -187,7 +187,21 @@ export async function GET(req: NextRequest, { params }: { params: { workspaceId:
       return NextResponse.json(body, { status });
     }
     case "firestore_unavailable":
-    case "lookup_failed":
+    case "lookup_failed": {
+      // Both represent transient infrastructure unavailability at the
+      // resolveWorkspaceAccess()-family read boundary — the SAME class the
+      // established Team-route precedent (e.g. the Team Video dedup-hit
+      // block's `readAccess.reason === "team_workspaces_disabled" ||
+      // readAccess.reason === "lookup_failed"` branch) already groups with
+      // rollout-disabled, reusing the identical concealed response rather
+      // than a distinct 500. `firestore_unavailable` here is the same
+      // underlying "adminDb is null" condition resolveWorkspaceAccess()
+      // itself collapses into its own `lookup_failed` reason one layer
+      // deeper — never a data-corruption class, so it never shares
+      // state_corruption's 500 mapping.
+      const { status, body } = teamWorkspacesDisabledResponse();
+      return NextResponse.json(body, { status });
+    }
     case "state_corruption": {
       const { status, body } = internalErrorResponse();
       return NextResponse.json(body, { status });
