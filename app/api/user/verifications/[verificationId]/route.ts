@@ -10,6 +10,8 @@ import { logger } from "@/lib/logger";
 import type { ClaimVerificationFirestoreDoc } from "@/lib/firestore/verifications";
 import { mapStoredVerificationToClientPayload } from "@/lib/user/mapStoredVerificationToClientPayload";
 import { mapStoredVideoVerificationToClientPayload } from "@/lib/user/mapStoredVideoVerificationToClientPayload";
+import { validateTeamClaimVerificationRowShape } from "@/lib/workspaces/teamClaimVerificationRowValidation";
+import { resolveTeamRunWorkspaceAccess } from "@/lib/workspaces/resolveTeamRunWorkspaceAccess";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -77,6 +79,80 @@ export async function GET(
   }
 
   const raw = snap.data() as Record<string, unknown>;
+
+  // ============================================
+  // Phase 8C-E.1 — Team Claim read classification. Applies ONLY to
+  // collection === "verifications"; Video's own Team classification is
+  // out of scope here (deferred to E3) and always falls through to the
+  // unchanged Personal owner-check path below, exactly as it does today.
+  // ============================================
+  const hasWorkspaceIdField = collection === "verifications" && Object.prototype.hasOwnProperty.call(raw, "workspaceId");
+
+  if (hasWorkspaceIdField) {
+    // A workspaceId field is present at all -> this row is claiming to be
+    // Team-bound. It may NEVER fall back to the Personal owner-ownership
+    // path below, regardless of what happens next: an absent/malformed
+    // value already failed closed above conceptually, and a present-but-
+    // invalid value fails closed via the row validator next.
+    if (typeof raw.workspaceId !== "string" || raw.workspaceId.length === 0) {
+      // Malformed workspaceId value on an otherwise-claimed-Team row —
+      // concealed, never a distinguishable error, never a Personal
+      // fallback.
+      return NextResponse.json(
+        { ok: false, errorCode: "not_found", message: "Claim not found." },
+        { status: 404 }
+      );
+    }
+
+    const workspaceId = raw.workspaceId;
+    const validated = validateTeamClaimVerificationRowShape(raw, workspaceId);
+    if (!validated.ok) {
+      return NextResponse.json(
+        { ok: false, errorCode: "not_found", message: "Claim not found." },
+        { status: 404 }
+      );
+    }
+
+    const access = await resolveTeamRunWorkspaceAccess({ uid, workspaceId });
+    if (!access.granted) {
+      if (access.reason === "team_workspaces_disabled" || access.reason === "lookup_failed") {
+        return NextResponse.json(
+          { ok: false, errorCode: "team_workspaces_disabled", message: "Team Workspaces are not available right now." },
+          { status: 503 }
+        );
+      }
+      // Every other denial reason (workspace absent/malformed/wrong
+      // type, membership absent/removed/malformed, owner-integrity
+      // violation) collapses to the same concealed 404 — a non-member
+      // must never learn which of those is actually true.
+      return NextResponse.json(
+        { ok: false, errorCode: "not_found", message: "Claim not found." },
+        { status: 404 }
+      );
+    }
+    if (!access.capabilities.includes("research.read")) {
+      return NextResponse.json(
+        { ok: false, errorCode: "insufficient_capability", message: "You do not have permission to view this Claim verification." },
+        { status: 403 }
+      );
+    }
+
+    try {
+      const data = raw as ClaimVerificationFirestoreDoc;
+      const payload = mapStoredVerificationToClientPayload(data, verificationId);
+      return NextResponse.json({ ok: true, payload });
+    } catch (e: unknown) {
+      logger.error("[user/verifications/id] Team Claim map failed", { error: (e as Error)?.message });
+      return NextResponse.json(
+        { ok: false, errorCode: "internal_error", message: "Could not load verification." },
+        { status: 500 }
+      );
+    }
+  }
+
+  // ============================================
+  // Existing Personal/legacy owner path — unchanged.
+  // ============================================
   const owner =
     (typeof raw.userId === "string" && raw.userId.trim()) ||
     (typeof raw.uid === "string" && raw.uid.trim()) ||

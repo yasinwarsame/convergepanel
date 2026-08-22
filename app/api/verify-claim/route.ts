@@ -11,14 +11,13 @@ import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelem
 import { checkAndIncrementUsageForRun } from "@/lib/stripe/usageCheck";
 import { validateUserSubscription } from "@/lib/stripe/subscriptionValidation";
 import { runClaimVerificationPanel } from "@/lib/verification/runClaimVerificationPanel";
-import { parsedModelVerificationFromObject } from "@/lib/verification/parseVerificationJson";
-import { cleanJsonResponse, repairTruncatedJson } from "@/lib/verification/cleanJsonResponse";
 import type { ModelVerdict } from "@/lib/verification/parseVerificationJson";
 import { computeClaimVerdict } from "@/lib/verification/claimVerdict";
 import { computeConsensusScoring } from "@/lib/verification/consensusScoring";
 import { buildAgreementDisagreementDigest } from "@/lib/verification/agreementDigest";
 import { buildClaimVerificationAuditBundle } from "@/lib/verification/auditBundle";
-import { saveClaimVerification, type ClaimVerificationFirestoreDoc } from "@/lib/firestore/verifications";
+import { buildClaimModelEvidence } from "@/lib/verification/buildClaimModelEvidence";
+import { saveClaimVerification, type ClaimVerificationFirestoreDoc, type StoredVerificationModelSummary } from "@/lib/firestore/verifications";
 import { sanitizeForFirestore } from "@/lib/firestore/sanitizeForFirestore";
 import { incrementUserTokenUsage } from "@/lib/firestore/userTokens";
 import { logger } from "@/lib/logger";
@@ -43,10 +42,6 @@ const ALL_MODELS: Set<ModelId> = new Set([
   "perplexity",
   "gemini",
 ]);
-
-function isConnectorSuccess(r: ModelResult): boolean {
-  return r.status === "ok" || r.status === "substituted";
-}
 
 function totalTokensFromResult(result: ModelResult): number {
   if (result.tokenUsage?.totalTokens !== undefined && typeof result.tokenUsage.totalTokens === "number") {
@@ -185,80 +180,7 @@ export async function POST(req: NextRequest) {
 
     const modelResults = await runClaimVerificationPanel(claimRaw, selectedModels, apiKeys);
 
-    type EvRow = {
-      modelId: string;
-      status: "ok" | "parse_error" | "failed";
-      verdict: string;
-      confidence: string;
-      summary: string;
-      correctParts: string[];
-      incorrectParts: string[];
-      unverifiableParts: string[];
-    };
-
-    const modelEvidence: EvRow[] = modelResults.map((r) => {
-      if (!isConnectorSuccess(r)) {
-        return {
-          modelId: r.modelId,
-          status: "failed" as const,
-          verdict: "failed",
-          confidence: "low",
-          summary: r.errorMessage || "Model request failed.",
-          correctParts: [] as string[],
-          incorrectParts: [] as string[],
-          unverifiableParts: [] as string[],
-        };
-      }
-      const modelId = r.modelId;
-      const rawText = r.rawText ?? "";
-      logger.debug(`[verify-claim] Raw response from ${modelId}`, { length: rawText.length });
-
-      const cleaned = cleanJsonResponse(rawText);
-      const trimmedRaw = rawText.trim();
-      if (cleaned !== trimmedRaw) {
-        logger.debug(
-          `[verify-claim] Cleaned JSON response for ${modelId}`,
-          { removedChars: rawText.length - cleaned.length }
-        );
-      }
-      let d: ReturnType<typeof parsedModelVerificationFromObject>;
-      try {
-        const obj = JSON.parse(cleaned) as Record<string, unknown>;
-        d = parsedModelVerificationFromObject(obj);
-      } catch {
-        try {
-          const repaired = repairTruncatedJson(cleaned);
-          const obj = JSON.parse(repaired) as Record<string, unknown>;
-          d = parsedModelVerificationFromObject(obj);
-          logger.debug(`[verify-claim] Repaired truncated JSON for ${modelId}`);
-        } catch {
-          logger.error(
-            `[verify-claim] JSON parse failed even after repair for ${modelId}`,
-            { cleanedPreview: cleaned.substring(0, 100) }
-          );
-          return {
-            modelId,
-            status: "parse_error" as const,
-            verdict: "parse_error",
-            confidence: "low",
-            summary: "Model returned invalid JSON; could not parse verification result.",
-            correctParts: [],
-            incorrectParts: [],
-            unverifiableParts: ["Non-JSON or malformed response"],
-          };
-        }
-      }
-      return {
-        modelId,
-        status: "ok" as const,
-        verdict: d.verdict,
-        confidence: d.confidence,
-        summary: d.summary,
-        correctParts: d.correctParts,
-        incorrectParts: d.incorrectParts,
-        unverifiableParts: d.unverifiableParts,
-      };
-    });
+    const modelEvidence: StoredVerificationModelSummary[] = buildClaimModelEvidence(modelResults);
 
     const verdict = computeClaimVerdict(
       modelEvidence.map((m) => ({
