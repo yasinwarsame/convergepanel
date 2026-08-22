@@ -111,6 +111,10 @@ jest.mock("@/lib/logger", () => ({
 
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/verify-claim/route";
+// Deliberately the REAL, unmocked implementations — used only to prove the
+// fixture below genuinely exercises the repair path (Phase 8C-E.1.2),
+// never to mock buildClaimModelEvidence() or anything it calls.
+import { cleanJsonResponse, repairTruncatedJson } from "@/lib/verification/cleanJsonResponse";
 
 function buildRequest(body: Record<string, unknown>): NextRequest {
   return new NextRequest("http://localhost/api/verify-claim", {
@@ -160,6 +164,76 @@ describe("POST /api/verify-claim — full pipeline characterization (Phase 8C-E.
     expect(claudeRow.status).toBe("parse_error");
     const chatgptRow = body.modelEvidence.find((r: any) => r.modelId === "chatgpt");
     expect(chatgptRow.status).toBe("ok");
+  });
+
+  it("repairable truncated model JSON -> repairTruncatedJson() fixes it, that row becomes status:\"ok\" (not parse_error), sibling row unaffected and correctly ordered, repaired evidence reaches persistence (Phase 8C-E.1.2)", async () => {
+    // A realistic max-output-tokens cutoff: the model's response is cut off
+    // mid-string, inside the "summary" field's value, before the closing
+    // quote or the object's closing brace. cleanJsonResponse() does not
+    // alter this (no markdown fence, already starts with "{"), so it is
+    // exactly what buildClaimModelEvidence() would hand to the first
+    // JSON.parse() attempt.
+    const truncatedRawText =
+      '{"verdict": "accurate", "confidence": "high", "summary": "The claim is well-supported by evidence and widely confirmed by independent sources includ';
+
+    // Prove, using the REAL functions (not mocked), that this fixture
+    // genuinely requires the repair fallback rather than already being
+    // valid JSON — satisfying Phase 8C-E.1.2's explicit "do not just
+    // provide already-valid JSON" requirement.
+    const cleaned = cleanJsonResponse(truncatedRawText);
+    expect(() => JSON.parse(cleaned)).toThrow();
+    const repaired = repairTruncatedJson(cleaned);
+    const repairedParsed = JSON.parse(repaired); // must not throw
+    expect(repairedParsed).toEqual({
+      verdict: "accurate",
+      confidence: "high",
+      summary: "The claim is well-supported by evidence and widely confirmed by independent sources includ",
+    });
+
+    mockedRunClaimVerificationPanel.mockResolvedValueOnce([
+      { modelId: "claude", status: "ok", rawText: truncatedRawText, latencyMs: 5, tokenUsage: { totalTokens: 8, promptTokens: 4, completionTokens: 4 } },
+      modelResult("chatgpt", "inaccurate"),
+    ]);
+
+    const res = await POST(buildRequest({ claim: "Test claim.", models: ["claude", "chatgpt"] }));
+    const body = await res.json();
+    expect(res.status).toBe(200);
+
+    // Exact row contents, not just HTTP 200 — and exact array order
+    // matching the provider result order (claude first, chatgpt second),
+    // proving the repair of one model's row did not reorder or corrupt
+    // its sibling.
+    expect(body.modelEvidence).toHaveLength(2);
+    expect(body.modelEvidence[0]).toEqual({
+      modelId: "claude",
+      status: "ok",
+      verdict: "accurate",
+      confidence: "high",
+      summary: "The claim is well-supported by evidence and widely confirmed by independent sources includ",
+      correctParts: [],
+      incorrectParts: [],
+      unverifiableParts: [],
+    });
+    expect(body.modelEvidence[1]).toEqual(
+      expect.objectContaining({ modelId: "chatgpt", status: "ok", verdict: "inaccurate" })
+    );
+
+    // The repaired evidence must reach the canonical Personal Claim
+    // persistence input unchanged — proving it survives past response
+    // construction into saveClaimVerification()'s own payload.
+    expect(mockedSaveClaimVerification).toHaveBeenCalledTimes(1);
+    const [, persistedDoc] = mockedSaveClaimVerification.mock.calls[0];
+    const persistedClaudeRow = persistedDoc.modelResults.find((r: any) => r.modelId === "claude");
+    expect(persistedClaudeRow).toEqual({
+      modelId: "claude",
+      status: "ok",
+      verdict: "accurate",
+      confidence: "high",
+      summary: "The claim is well-supported by evidence and widely confirmed by independent sources includ",
+      correctParts: [],
+      incorrectParts: [],
+      unverifiableParts: [],
+    });
   });
 
   it("model subset via body.models is honored, still >= MIN_MODELS", async () => {
