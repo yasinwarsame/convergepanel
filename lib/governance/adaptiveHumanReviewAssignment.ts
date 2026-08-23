@@ -57,8 +57,57 @@ export interface AdaptiveHumanReviewAssignmentWorkspaceMetadata {
   workspaceId: string;
   /** `null` = canonical Unfiled, mirroring `runs/{runId}.projectId`'s own convention. */
   projectId: string | null;
-  /** `null` = no deadline set/cleared. Manager-controlled only — no reviewer self-extension exists at this layer or above it. */
+  /** `null` = no deadline set/cleared. Manager-controlled only — no reviewer self-extension exists at this layer or above it. Non-null values MUST be canonical — see `isCanonicalDueAt()`; both builders below enforce this before ever constructing a document. */
   dueAt: string | null;
+}
+
+/**
+ * Phase 9B.2-R2C — strict canonical-UTC-ISO-8601 check for `dueAt`,
+ * deliberately NOT reusing `isValidTimestamp()`
+ * (`lib/adaptiveSchema/governanceRecordParser.ts`) — that helper only
+ * requires `Date.parse()`-ability, which accepts date-only strings
+ * (`"2026-08-23"`) and timezone-offset forms (`"...+03:00""`) that would
+ * sort incorrectly against canonical UTC strings in a future Firestore
+ * lexicographic range query (`where("dueAt", "<", nowIso).orderBy("dueAt")`).
+ * `new Date(value).toISOString() === value` accepts ONLY the exact
+ * fixed-width `YYYY-MM-DDTHH:mm:ss.sssZ` form `Date.prototype.toISOString()`
+ * itself produces — every other syntactically-valid-but-noncanonical
+ * variant (offset, no milliseconds, date-only, lowercase `t`/`z`, etc.) is
+ * rejected by construction, not by an enumerated blocklist.
+ *
+ * Typed `unknown => value is string`, matching `isValidTimestamp()`'s own
+ * convention, rather than assuming a `string` input — a future persisted-
+ * document parser (there is none yet for this document; see this module's
+ * own header comment) will want to call this directly against raw,
+ * unvalidated Firestore data.
+ */
+export function isCanonicalDueAt(value: unknown): value is string {
+  if (typeof value !== "string" || value.length === 0) return false;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return false;
+  return parsed.toISOString() === value;
+}
+
+/**
+ * Domain invariant, enforced identically by both
+ * `buildNextAdaptiveHumanReviewAssignment` and
+ * `buildAdaptiveHumanReviewAssignmentMetadataUpdate` — the only two
+ * functions in this codebase that can ever produce an
+ * `AdaptiveHumanReviewAssignmentV1` carrying `dueAt`. A noncanonical
+ * `dueAt` must never reach a constructed document (and therefore never
+ * reach a Firestore write), regardless of whether any caller yet exists —
+ * this is a storage-layer invariant, not something deferred to a future
+ * HTTP route's request validation. Throws (this codebase's established
+ * convention for a pure builder's own input-contract violation — see e.g.
+ * `buildAdaptivePanelOverrideDecisionId`), never a result union: an
+ * invalid `dueAt` reaching this point is a programmer/caller contract
+ * violation, not a recoverable business outcome for this pure function to
+ * report.
+ */
+function assertCanonicalDueAt(fnName: string, dueAt: string | null): void {
+  if (dueAt !== null && !isCanonicalDueAt(dueAt)) {
+    throw new Error(`${fnName}: dueAt must be a canonical UTC ISO-8601 timestamp (e.g. "2026-08-23T19:30:00.000Z") or null, got: ${JSON.stringify(dueAt)}`);
+  }
 }
 
 export type AdaptiveHumanReviewAssignmentV1 = {
@@ -143,6 +192,7 @@ export function buildNextAdaptiveHumanReviewAssignment(args: {
     revision: args.currentRevision + 1,
   };
   if (!args.workspaceMetadata) return base;
+  assertCanonicalDueAt("buildNextAdaptiveHumanReviewAssignment", args.workspaceMetadata.dueAt);
   return {
     ...base,
     workspaceId: args.workspaceMetadata.workspaceId,
@@ -173,6 +223,7 @@ export function buildAdaptiveHumanReviewAssignmentMetadataUpdate(args: {
   now: string;
   workspaceMetadata: AdaptiveHumanReviewAssignmentWorkspaceMetadata;
 }): AdaptiveHumanReviewAssignmentV1 {
+  assertCanonicalDueAt("buildAdaptiveHumanReviewAssignmentMetadataUpdate", args.workspaceMetadata.dueAt);
   return {
     ...args.current,
     updatedAt: args.now,
@@ -245,6 +296,7 @@ export function buildAdaptiveHumanReviewAssignmentHistoryEntry(args: {
     changedByUserId: args.changedByUserId,
   };
   if (!args.workspaceMetadata) return base;
+  assertCanonicalDueAt("buildAdaptiveHumanReviewAssignmentHistoryEntry", args.workspaceMetadata.dueAt);
   return {
     ...base,
     workspaceId: args.workspaceMetadata.workspaceId,
@@ -273,6 +325,7 @@ export function buildAdaptiveHumanReviewAssignmentMetadataHistoryEntry(args: {
   changedByUserId: string;
   workspaceMetadata: AdaptiveHumanReviewAssignmentWorkspaceMetadata;
 }): AdaptiveHumanReviewAssignmentHistoryV1 {
+  assertCanonicalDueAt("buildAdaptiveHumanReviewAssignmentMetadataHistoryEntry", args.workspaceMetadata.dueAt);
   return {
     schemaVersion: 1,
     eventId: String(args.assignmentRevision),
