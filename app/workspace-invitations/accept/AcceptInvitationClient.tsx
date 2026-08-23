@@ -17,9 +17,16 @@
  *   minute TTL) before redirecting to `/login`, so the post-login return
  *   trip can restore it with no fragment involved.
  * - `inFlightRef` is a hard single-flight guard: at most one POST is ever
- *   in the air for a given credential. Only an explicit user-initiated
- *   retry resets it — this flow never auto-polls or auto-loops
- *   accept → login → accept.
+ *   in the air for a given credential. Only `attemptAcceptance` itself
+ *   acquires/releases it — checked and set synchronously, with no async
+ *   gap, before `fetch` is ever called. `handleRetry` never force-resets
+ *   it; a rapid double-click on Retry (a real Production defect found via
+ *   canary testing, Phase 8D.3.4-R1) must see the guard still held by the
+ *   first in-flight attempt and no-op. This flow never auto-polls or
+ *   auto-loops accept → login → accept.
+ * - `successLatchRef` is a second, independent guard: once a successful
+ *   acceptance response has been observed, no later response — however it
+ *   might arrive — is ever allowed to regress the UI away from success.
  */
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -70,10 +77,12 @@ export default function AcceptInvitationClient() {
   const [alreadyMemberRole, setAlreadyMemberRole] = useState<string | null>(null);
   const [verificationSendState, setVerificationSendState] = useState<"idle" | "pending" | "sent" | "failed">("idle");
   const [accountSwitchError, setAccountSwitchError] = useState(false);
+  const [isAccepting, setIsAccepting] = useState(false);
 
   const credentialRef = useRef<InvitationAcceptanceCredential | null>(null);
   const captureDoneRef = useRef(false);
   const inFlightRef = useRef(false);
+  const successLatchRef = useRef(false);
 
   // Fragment capture + scrub — runs exactly once, before paint.
   useLayoutEffect(() => {
@@ -136,8 +145,13 @@ export default function AcceptInvitationClient() {
   };
 
   const attemptAcceptance = useCallback(async (credential: InvitationAcceptanceCredential) => {
+    // Synchronous acquire — no async gap between the check and the set, so
+    // a second invocation (rapid double-click, a re-firing effect, an
+    // overlapping explicit retry) that lands before this one completes
+    // always no-ops here, never issuing a second `fetch`.
     if (inFlightRef.current) return;
     inFlightRef.current = true;
+    setIsAccepting(true);
     setViewState("accepting");
 
     let res: Response;
@@ -151,6 +165,8 @@ export default function AcceptInvitationClient() {
       });
     } catch {
       inFlightRef.current = false;
+      setIsAccepting(false);
+      if (successLatchRef.current) return;
       setViewState("temporarily_unavailable");
       return;
     }
@@ -164,12 +180,23 @@ export default function AcceptInvitationClient() {
 
     const next = classifyAcceptanceResponse(res.status, body);
 
+    // A success has already been latched — this response is stale/redundant
+    // (e.g. a request that was in flight before a prior one committed).
+    // Release the lock, but never let it regress the UI away from success.
+    if (successLatchRef.current && next !== "success" && next !== "already_member_success") {
+      inFlightRef.current = false;
+      setIsAccepting(false);
+      return;
+    }
+
     switch (next) {
       case "success":
       case "already_member_success":
+        successLatchRef.current = true;
         clearInvitationAcceptance(window.sessionStorage);
         credentialRef.current = null;
         inFlightRef.current = false;
+        setIsAccepting(false);
         if (next === "already_member_success" && typeof body?.effectiveRole === "string") {
           setAlreadyMemberRole(body.effectiveRole);
         }
@@ -179,6 +206,7 @@ export default function AcceptInvitationClient() {
         clearInvitationAcceptance(window.sessionStorage);
         credentialRef.current = null;
         inFlightRef.current = false;
+        setIsAccepting(false);
         setViewState("invalid_or_expired");
         return;
       case "needs_verification":
@@ -187,16 +215,19 @@ export default function AcceptInvitationClient() {
         // reload, or navigation, so this is an approved sessionStorage use.
         storeInvitationAcceptance(window.sessionStorage, credential, Date.now());
         inFlightRef.current = false;
+        setIsAccepting(false);
         setViewState(next);
         return;
       case "wrong_account":
       case "temporarily_unavailable":
       case "internal_error":
         inFlightRef.current = false;
+        setIsAccepting(false);
         setViewState(next);
         return;
       default:
         inFlightRef.current = false;
+        setIsAccepting(false);
         setViewState("internal_error");
         return;
     }
@@ -231,7 +262,11 @@ export default function AcceptInvitationClient() {
   const handleRetry = useCallback(() => {
     const credential = credentialRef.current;
     if (!credential) return;
-    inFlightRef.current = false;
+    // Never force-reset inFlightRef here — attemptAcceptance is the sole
+    // owner of that lock's lifecycle. If a request is already in flight,
+    // this call synchronously no-ops inside attemptAcceptance; if the
+    // previous attempt already completed, the lock was already released
+    // there, and this is a legitimate new attempt.
     void attemptAcceptance(credential);
   }, [attemptAcceptance]);
 
@@ -360,7 +395,7 @@ export default function AcceptInvitationClient() {
         <div role="alert">
           <h1>Temporarily unavailable</h1>
           <p>We&apos;re having trouble reaching our servers. Please try again.</p>
-          <button type="button" onClick={handleRetry}>
+          <button type="button" onClick={handleRetry} disabled={isAccepting}>
             Retry
           </button>
         </div>
@@ -371,7 +406,7 @@ export default function AcceptInvitationClient() {
         <div role="alert">
           <h1>Something went wrong</h1>
           <p>Something went wrong. Please try again.</p>
-          <button type="button" onClick={handleRetry}>
+          <button type="button" onClick={handleRetry} disabled={isAccepting}>
             Retry
           </button>
         </div>
