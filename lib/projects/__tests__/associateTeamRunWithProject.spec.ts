@@ -89,14 +89,27 @@ const mockAdminDb: any = {
       throw new Error("simulated transaction failure");
     }
     const pendingWrites: Array<() => void> = [];
+    // Phase 9B.2-R1 — mirrors the real Firestore Admin SDK's hard
+    // requirement that every transaction `get()` execute before any
+    // `set()`/`update()`/`delete()`; the SDK throws the instant a read is
+    // attempted after a write has been queued, regardless of which
+    // document either touches. The original 9B.2 projection-sync bug (a
+    // `tx.get()` issued after `tx.update(runRef, ...)`) passed silently
+    // against a fake without this guard — this flag exists specifically so
+    // that class of bug fails here too, not only against production.
+    let hasWritten = false;
     const txn = {
       get: async (ref: { __collection: string; __id: string }) => {
+        if (hasWritten) {
+          throw new Error("Firestore transactions require all reads to be executed before all writes.");
+        }
         if (concurrentMutationHook) concurrentMutationHook(ref);
         const store = stores[ref.__collection];
         const data = store.get(ref.__id);
         return { exists: data !== undefined, data: () => data, id: ref.__id };
       },
       update: (ref: { __collection: string; __id: string }, data: Record<string, unknown>) => {
+        hasWritten = true;
         pendingWrites.push(() => {
           const store = stores[ref.__collection];
           const existing = store.get(ref.__id) ?? {};

@@ -77,23 +77,26 @@
  *      read either, regardless of operation — moving out of, or between,
  *      an archived Project is explicitly allowed; only writing INTO an
  *      archived Project is rejected.
- *   8. the write touches exactly one field: `projectId`. No `updatedAt`,
- *      no `workspaceId`, no other run field, ever. No Project-side
- *      projection of any kind is written — association truth remains
- *      solely `run.projectId`.
- *   9. (Phase 9B.2) active Workspace-review projection sync: if
- *      `runs/{runId}/humanReviewAssignment/current` and/or
- *      `.../humanReviewPanel/current` exist AND already carry a Workspace
- *      metadata mirror (their own `workspaceId` field, matching this
- *      Workspace), their `projectId` mirror moves too, in this SAME
- *      transaction — otherwise a future Project-filtered review queue would
- *      go stale immediately. This is projection maintenance, NOT a
- *      reviewer-assignment/panel mutation: exactly one field
- *      (`projectId`) is touched on each, `revision` is never incremented,
- *      `updatedAt` is never touched, and no append-only history entry is
- *      written for either. A legacy assignment/panel with no `workspaceId`
- *      mirror is left completely untouched — it is never treated as a
- *      Workspace projection it isn't.
+ *   8. (Phase 9B.2) active Workspace-review projection reads:
+ *      `runs/{runId}/humanReviewAssignment/current` and
+ *      `.../humanReviewPanel/current`, both read here — BEFORE any write
+ *      in this transaction — because the Admin SDK requires every read to
+ *      happen before any write, and throws otherwise. Each is a candidate
+ *      for `projectId`-mirror sync only if it exists AND already carries a
+ *      Workspace metadata mirror (its own `workspaceId` field, matching
+ *      this Workspace) — a legacy assignment/panel with no `workspaceId`
+ *      mirror is left completely untouched, never treated as a Workspace
+ *      projection it isn't.
+ *   9. every write in this transaction, together, only after every read
+ *      above (steps 1-8): the run write touches exactly one field,
+ *      `projectId` — no `updatedAt`, no `workspaceId`, no other run field,
+ *      ever. If step 8 found a Workspace-bound assignment and/or panel,
+ *      each gets the identical one-field `projectId` write — `revision` is
+ *      never incremented on either, `updatedAt` is never touched, and no
+ *      append-only history entry is written for either: this is projection
+ *      maintenance, NOT a reviewer-assignment/panel mutation. No other
+ *      Project-side projection of any kind is written — association truth
+ *      remains solely `run.projectId`.
  *
  * Transaction-callback purity: the callback contains ONLY Firestore
  * reads/writes and pure comparisons — no event emission, no logging of
@@ -215,42 +218,26 @@ export async function associateTeamRunWithProject(args: {
         }
       }
 
-      // Step 8 — exactly one field, nothing else.
-      tx.update(runRef, { projectId: args.targetProjectId });
-
-      // Step 9 (Phase 9B.2) — active Workspace-review projection sync.
-      // `humanReviewAssignment/current`/`humanReviewPanel/current` may mirror
-      // this run's `projectId` for future queue filtering (§19/§20 of the
-      // Phase 9B.2 spec) — if either exists AND already carries a Workspace
-      // metadata mirror (i.e. has its own `workspaceId`), that mirror must
-      // move in the SAME transaction or a Project-filtered queue would go
-      // stale immediately. This is projection maintenance, NOT a reviewer-
-      // assignment/panel mutation: exactly one field is touched
-      // (`projectId`), `revision` is never bumped, `updatedAt` is never
-      // touched, and no history entry is written — mirroring Step 8's own
-      // single-field-only discipline for the run write above. A legacy
-      // assignment/panel with no `workspaceId` field is never touched here
-      // at all — it is not a Workspace projection and must not be treated
-      // as one. `workspaceId` is defensively re-checked against `args.workspaceId`
-      // (this function never mutates a run's `workspaceId`, so it should
-      // always already match; failing closed rather than assuming is this
-      // codebase's established convention — see `resolveWorkspaceReviewTarget.ts`).
+      // Step 8 (Phase 9B.2) — active Workspace-review projection reads; see
+      // the header doc comment (step 8) for the full rationale and the
+      // read-before-write ordering requirement.
       const assignmentRef = runRef.collection("humanReviewAssignment").doc("current");
-      const assignmentSnap = await tx.get(assignmentRef);
-      if (assignmentSnap.exists) {
-        const assignmentData = assignmentSnap.data() as Record<string, unknown> | undefined;
-        if (isNonEmptyString(assignmentData?.workspaceId) && assignmentData!.workspaceId === args.workspaceId) {
-          tx.update(assignmentRef, { projectId: args.targetProjectId });
-        }
-      }
-
       const panelRef = runRef.collection("humanReviewPanel").doc("current");
-      const panelSnap = await tx.get(panelRef);
-      if (panelSnap.exists) {
-        const panelData = panelSnap.data() as Record<string, unknown> | undefined;
-        if (isNonEmptyString(panelData?.workspaceId) && panelData!.workspaceId === args.workspaceId) {
-          tx.update(panelRef, { projectId: args.targetProjectId });
-        }
+      const [assignmentSnap, panelSnap] = await Promise.all([tx.get(assignmentRef), tx.get(panelRef)]);
+
+      const assignmentData = assignmentSnap.exists ? (assignmentSnap.data() as Record<string, unknown> | undefined) : undefined;
+      const syncAssignmentMirror = isNonEmptyString(assignmentData?.workspaceId) && assignmentData!.workspaceId === args.workspaceId;
+
+      const panelData = panelSnap.exists ? (panelSnap.data() as Record<string, unknown> | undefined) : undefined;
+      const syncPanelMirror = isNonEmptyString(panelData?.workspaceId) && panelData!.workspaceId === args.workspaceId;
+
+      // Step 9 — every write, together, only after every read above.
+      tx.update(runRef, { projectId: args.targetProjectId });
+      if (syncAssignmentMirror) {
+        tx.update(assignmentRef, { projectId: args.targetProjectId });
+      }
+      if (syncPanelMirror) {
+        tx.update(panelRef, { projectId: args.targetProjectId });
       }
 
       return {
