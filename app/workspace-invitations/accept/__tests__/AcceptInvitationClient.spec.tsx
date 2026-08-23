@@ -240,6 +240,108 @@ describe("EXPLICIT RETRY", () => {
   });
 });
 
+/**
+ * Phase 8D.3.4-R1 — regression coverage for a real Production defect found
+ * via live canary testing: a rapid double-activation of Retry could defeat
+ * the single-flight guard (`handleRetry` used to unconditionally reset
+ * `inFlightRef` before starting another attempt) and let a second, stale
+ * `invitation_invalid_or_expired` response overwrite an already-successful
+ * acceptance in the UI. The backend itself was never at risk — Firestore
+ * correctly rejected the redundant accept — this is purely a frontend
+ * concurrency defect.
+ */
+describe("RAPID DOUBLE RETRY (Phase 8D.3.4-R1 regression)", () => {
+  it("a second immediate Retry activation while the first retry request is unresolved issues no second fetch", async () => {
+    setWindow({ hash: `#invitationId=${INVITATION_ID}&token=${SENTINEL}` });
+    mockFetchOnce(503, { ok: false, errorCode: "service_unavailable" });
+    const renderer = await mount(authState({ user: AUTHENTICATED_USER, authReady: true, syncState: "authenticated", canMutate: true }));
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(renderer.root.findByType("h1").props.children).toBe("Temporarily unavailable");
+
+    const retryButton = findButton(renderer, "Retry")!;
+    const onRetryClick = retryButton.props.onClick as () => void;
+
+    let resolveRetryFetch!: (value: unknown) => void;
+    (global.fetch as jest.Mock).mockReturnValueOnce(new Promise((resolve) => { resolveRetryFetch = resolve; }));
+
+    await act(async () => {
+      // Two activations of the SAME captured handler reference, both
+      // firing before React has a chance to re-render — reproducing the
+      // exact race window a real rapid double-click exploited in
+      // Production (the button itself unmounts once accepting begins, so
+      // this is the faithful way to model "two clicks landed before the
+      // re-render that would have removed the control").
+      onRetryClick();
+      onRetryClick();
+    });
+
+    // One fetch for the initial mount's 503, one for the retry — NOT two
+    // retries, despite two activations of the handler.
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      resolveRetryFetch({ status: 200, json: async () => ({ ok: true, alreadyMember: false }) });
+    });
+
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(renderer.root.findByType("h1").props.children).toBe("You've joined the workspace");
+  });
+});
+
+describe("RETRY CONTROL NON-ACTIONABLE WHILE IN FLIGHT", () => {
+  it("the Retry control is disabled/absent for the duration of an active retry request", async () => {
+    setWindow({ hash: `#invitationId=${INVITATION_ID}&token=${SENTINEL}` });
+    mockFetchOnce(503, { ok: false, errorCode: "service_unavailable" });
+    const renderer = await mount(authState({ user: AUTHENTICATED_USER, authReady: true, syncState: "authenticated", canMutate: true }));
+
+    const retryButton = findButton(renderer, "Retry")!;
+    expect(retryButton.props.disabled).toBeFalsy();
+
+    let resolveRetryFetch!: (value: unknown) => void;
+    (global.fetch as jest.Mock).mockReturnValueOnce(new Promise((resolve) => { resolveRetryFetch = resolve; }));
+    await act(async () => {
+      retryButton.props.onClick();
+    });
+
+    // The correctness guarantee is the synchronous inFlightRef check, not
+    // this UI state — but the control itself must also be non-actionable
+    // while a request is active. In this component's architecture the
+    // whole "temporarily_unavailable" view (including the Retry button)
+    // unmounts in favor of the "accepting" view the instant a request
+    // starts, which is a stronger form of non-actionable than merely
+    // `disabled`.
+    expect(findButton(renderer, "Retry")).toBeUndefined();
+
+    await act(async () => {
+      resolveRetryFetch({ status: 200, json: async () => ({ ok: true, alreadyMember: false }) });
+    });
+    expect(renderer.root.findByType("h1").props.children).toBe("You've joined the workspace");
+  });
+});
+
+describe("SUCCESS CANNOT BE OVERWRITTEN (Phase 8D.3.4-R1 regression)", () => {
+  it("success is a stable terminal state: no retry control exists afterward, no further fetch fires, and success survives further re-renders", async () => {
+    setWindow({ hash: `#invitationId=${INVITATION_ID}&token=${SENTINEL}` });
+    mockFetchOnce(200, { ok: true, alreadyMember: false });
+    const renderer = await mount(authState({ user: AUTHENTICATED_USER, authReady: true, syncState: "authenticated", canMutate: true }));
+
+    expect(renderer.root.findByType("h1").props.children).toBe("You've joined the workspace");
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+
+    // Simulate further churn (e.g. auth state re-emitting) after success —
+    // this must never regress the UI or issue another request. With the
+    // single-flight fix, two truly concurrent acceptance fetches are
+    // structurally impossible, so this is the closest meaningful boundary:
+    // the credential is cleared on success and no control remains that
+    // could re-trigger acceptance.
+    await update(renderer, authState({ user: AUTHENTICATED_USER, authReady: true, syncState: "authenticated", canMutate: true }));
+
+    expect(renderer.root.findByType("h1").props.children).toBe("You've joined the workspace");
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(findButton(renderer, "Retry")).toBeUndefined();
+  });
+});
+
 describe("EXACT ACCEPT BODY", () => {
   it("POSTs to the exact endpoint with a body of exactly {token}", async () => {
     setWindow({ hash: `#invitationId=${INVITATION_ID}&token=${SENTINEL}` });
