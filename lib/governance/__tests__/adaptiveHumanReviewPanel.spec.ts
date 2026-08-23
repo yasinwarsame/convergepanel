@@ -118,6 +118,53 @@ describe("buildNextAdaptiveHumanReviewPanel", () => {
     const next = buildNextAdaptiveHumanReviewPanel({ ...BASE, reviewerUserIds: ["a", "b"], current: null });
     expect(next.mode).toBe("majority_quorum");
   });
+
+  describe("Phase 9B.2 — workspaceMetadata", () => {
+    it("omitted -> the resulting panel carries neither workspaceId nor projectId (legacy Team behavior, unchanged)", () => {
+      const next = buildNextAdaptiveHumanReviewPanel({ ...BASE, reviewerUserIds: ["a", "b"], current: null }) as Record<string, unknown>;
+      expect(next).not.toHaveProperty("workspaceId");
+      expect(next).not.toHaveProperty("projectId");
+    });
+
+    it("supplied on creation -> workspaceId/projectId are set exactly as given", () => {
+      const next = buildNextAdaptiveHumanReviewPanel({
+        ...BASE,
+        reviewerUserIds: ["a", "b"],
+        current: null,
+        workspaceMetadata: { workspaceId: "ws-1", projectId: "proj-1" },
+      });
+      expect(next.workspaceId).toBe("ws-1");
+      expect(next.projectId).toBe("proj-1");
+    });
+
+    it("projectId: null means canonical Unfiled, distinct from omitted", () => {
+      const next = buildNextAdaptiveHumanReviewPanel({
+        ...BASE,
+        reviewerUserIds: ["a", "b"],
+        current: null,
+        workspaceMetadata: { workspaceId: "ws-1", projectId: null },
+      });
+      expect(next).toHaveProperty("projectId", null);
+    });
+
+    it("reconfiguration without re-supplying workspaceMetadata drops the mirror rather than silently preserving it — every field here is freshly derived from args, never spread from current", () => {
+      const current = validPanel({ workspaceId: "ws-1", projectId: "proj-1" } as Partial<AdaptiveHumanReviewPanelV1>);
+      const next = buildNextAdaptiveHumanReviewPanel({ ...BASE, reviewerUserIds: ["x", "y"], current }) as Record<string, unknown>;
+      expect(next).not.toHaveProperty("workspaceId");
+      expect(next).not.toHaveProperty("projectId");
+    });
+
+    it("reconfiguration WITH re-supplied workspaceMetadata carries the fresh (possibly changed) mirror forward", () => {
+      const current = validPanel({ workspaceId: "ws-1", projectId: "proj-1" } as Partial<AdaptiveHumanReviewPanelV1>);
+      const next = buildNextAdaptiveHumanReviewPanel({
+        ...BASE,
+        reviewerUserIds: ["x", "y"],
+        current,
+        workspaceMetadata: { workspaceId: "ws-1", projectId: "proj-2" },
+      });
+      expect(next.projectId).toBe("proj-2");
+    });
+  });
 });
 
 describe("buildCancelledAdaptiveHumanReviewPanel", () => {
@@ -265,5 +312,43 @@ describe("parseAdaptiveHumanReviewPanel", () => {
     const result = parseAdaptiveHumanReviewPanel(malformed);
     expect(result).toEqual({ status: "malformed" });
     expect(result).not.toHaveProperty("panel");
+  });
+
+  describe("Phase 9B.2 — workspaceId/projectId discovery-metadata mirror", () => {
+    it("a legacy panel with neither field is still valid — no backfill required", () => {
+      const result = parseAdaptiveHumanReviewPanel(validPanel());
+      expect(result.status).toBe("valid");
+      if (result.status === "valid") {
+        expect(result.panel).not.toHaveProperty("workspaceId");
+        expect(result.panel).not.toHaveProperty("projectId");
+      }
+    });
+
+    it("a Workspace-bound panel with a string workspaceId and string projectId parses valid and round-trips both", () => {
+      const result = parseAdaptiveHumanReviewPanel(validPanel({ workspaceId: "ws-1", projectId: "proj-1" } as Partial<AdaptiveHumanReviewPanelV1>));
+      expect(result.status).toBe("valid");
+      if (result.status === "valid") {
+        expect(result.panel.workspaceId).toBe("ws-1");
+        expect(result.panel.projectId).toBe("proj-1");
+      }
+    });
+
+    it("projectId: null (Unfiled) is valid and distinct from absent", () => {
+      const result = parseAdaptiveHumanReviewPanel(validPanel({ workspaceId: "ws-1", projectId: null } as Partial<AdaptiveHumanReviewPanelV1>));
+      expect(result.status).toBe("valid");
+      if (result.status === "valid") {
+        expect(result.panel).toHaveProperty("projectId", null);
+      }
+    });
+
+    it("an empty-string workspaceId is malformed, never silently accepted", () => {
+      const result = parseAdaptiveHumanReviewPanel(validPanel({ workspaceId: "" } as unknown as Partial<AdaptiveHumanReviewPanelV1>));
+      expect(result).toEqual({ status: "malformed" });
+    });
+
+    it("a non-string, non-null projectId is malformed", () => {
+      const result = parseAdaptiveHumanReviewPanel(validPanel({ workspaceId: "ws-1", projectId: 123 } as unknown as Partial<AdaptiveHumanReviewPanelV1>));
+      expect(result).toEqual({ status: "malformed" });
+    });
   });
 });

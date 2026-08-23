@@ -39,6 +39,28 @@ export function hasAdaptiveReviewSubmissionOverride(role: string | null): boolea
 // Canonical assignment document
 // ============================================
 
+/**
+ * Phase 9B.2 — Workspace/Project DISCOVERY metadata for a Workspace-bound
+ * Team run's assignment, and the reviewer's due date. `workspaceId`/
+ * `projectId` are NEVER authority — the caller (inside the same
+ * transaction) must always freshly re-derive them from the canonical
+ * `runs/{runId}.workspaceId`/`runs/{runId}.projectId` before constructing
+ * this bundle; this module never infers, guesses, or preserves them on its
+ * own. `dueAt` is bundled together with them (rather than accepted as an
+ * independent optional field) specifically so a reassignment can never
+ * omit a due-date decision by accident — every call site that supplies
+ * `workspaceMetadata` is forced by the type system to explicitly choose
+ * `dueAt: null` (clear) or a value, never silently inherit whatever the
+ * previous reviewer's deadline happened to be.
+ */
+export interface AdaptiveHumanReviewAssignmentWorkspaceMetadata {
+  workspaceId: string;
+  /** `null` = canonical Unfiled, mirroring `runs/{runId}.projectId`'s own convention. */
+  projectId: string | null;
+  /** `null` = no deadline set/cleared. Manager-controlled only — no reviewer self-extension exists at this layer or above it. */
+  dueAt: string | null;
+}
+
 export type AdaptiveHumanReviewAssignmentV1 = {
   schemaVersion: 1;
   /** `null` for a personal (non-team) run's assignment — see personalReviewerAssignment.ts. Never used for authorization anywhere (that's always the separate teamRuns projection's own teamId) — purely descriptive/audit metadata. */
@@ -54,10 +76,24 @@ export type AdaptiveHumanReviewAssignmentV1 = {
   updatedByUserId: string;
 
   revision: number;
+
+  /**
+   * Phase 9B.2 — present if and only if this assignment belongs to a
+   * WORKSPACE_BOUND_TEAM run (see `lib/workspaces/resolveWorkspaceReviewTarget.ts`).
+   * Absent entirely for every legacy Team assignment and every Personal
+   * assignment — no backfill, no migration; an existing Production
+   * document with none of these three fields remains fully valid forever.
+   * Discovery/projection only, never ownership authority — see this
+   * module's own header comment and `AdaptiveHumanReviewAssignmentWorkspaceMetadata`'s
+   * doc comment above.
+   */
+  workspaceId?: string;
+  projectId?: string | null;
+  dueAt?: string | null;
 };
 
 /** The event that actually occurred, derived from the before/after assignee — never trusted from the client. */
-export type AdaptiveHumanReviewAssignmentEventType = "assigned" | "reassigned" | "unassigned";
+export type AdaptiveHumanReviewAssignmentEventType = "assigned" | "reassigned" | "unassigned" | "metadata_updated";
 
 export function classifyAssignmentEventType(
   previousReviewerUserId: string | null,
@@ -83,9 +119,19 @@ export function buildNextAdaptiveHumanReviewAssignment(args: {
   /** Preserved from the current document unless this mutation itself sets a new assignee. */
   currentAssignedAt: string | null;
   currentAssignedByUserId: string | null;
+  /**
+   * Phase 9B.2 — supplied only for a Workspace-bound assignment mutation
+   * (create/reassign/unassign). Omit entirely for every legacy Team call
+   * site — the resulting document then carries none of the three fields,
+   * identical to today's behavior. When supplied, `dueAt` is ALWAYS the
+   * caller's fresh, explicit decision for the new assignee — reassignment
+   * never inherits the previous reviewer's deadline, because there is no
+   * code path here that reads a "current dueAt" at all.
+   */
+  workspaceMetadata?: AdaptiveHumanReviewAssignmentWorkspaceMetadata;
 }): AdaptiveHumanReviewAssignmentV1 {
   const isAssigning = args.newReviewerUserId !== null;
-  return {
+  const base: AdaptiveHumanReviewAssignmentV1 = {
     schemaVersion: 1,
     teamId: args.teamId,
     runId: args.runId,
@@ -95,6 +141,46 @@ export function buildNextAdaptiveHumanReviewAssignment(args: {
     updatedAt: args.now,
     updatedByUserId: args.actorUserId,
     revision: args.currentRevision + 1,
+  };
+  if (!args.workspaceMetadata) return base;
+  return {
+    ...base,
+    workspaceId: args.workspaceMetadata.workspaceId,
+    projectId: args.workspaceMetadata.projectId,
+    dueAt: args.workspaceMetadata.dueAt,
+  };
+}
+
+/**
+ * Phase 9B.2 — pure builder for a SAME-REVIEWER assignment metadata/due-date
+ * mutation: change or clear `dueAt`, or resync `workspaceId`/`projectId`,
+ * WITHOUT touching who is assigned. Preserves `assignedReviewerUserId` /
+ * `assignedAt` / `assignedByUserId` from the current document EXACTLY — a
+ * due-date change is never an assignment event, and must never overwrite
+ * the record of when this person was actually assigned. Only `updatedAt` /
+ * `updatedByUserId` / `revision` advance, alongside the freshly supplied
+ * metadata itself (`updatedAt` already exists precisely to distinguish
+ * "record last touched" from "reviewer assigned" — this function is the
+ * first caller to actually need that distinction).
+ *
+ * Requires an EXISTING assignment with a non-null `assignedReviewerUserId`
+ * — there is no reviewer identity to preserve otherwise. Callers must use
+ * `buildNextAdaptiveHumanReviewAssignment` for create/reassign/unassign.
+ */
+export function buildAdaptiveHumanReviewAssignmentMetadataUpdate(args: {
+  current: AdaptiveHumanReviewAssignmentV1 & { assignedReviewerUserId: string };
+  actorUserId: string;
+  now: string;
+  workspaceMetadata: AdaptiveHumanReviewAssignmentWorkspaceMetadata;
+}): AdaptiveHumanReviewAssignmentV1 {
+  return {
+    ...args.current,
+    updatedAt: args.now,
+    updatedByUserId: args.actorUserId,
+    revision: args.current.revision + 1,
+    workspaceId: args.workspaceMetadata.workspaceId,
+    projectId: args.workspaceMetadata.projectId,
+    dueAt: args.workspaceMetadata.dueAt,
   };
 }
 
@@ -120,6 +206,19 @@ export type AdaptiveHumanReviewAssignmentHistoryV1 = {
   assignmentRevision: number;
   changedAt: string;
   changedByUserId: string;
+
+  /**
+   * Phase 9B.2 — historical Workspace/Project discovery-metadata AND due-date
+   * snapshot AT THE TIME of this mutation. Immutable once written — never
+   * rewritten if the run later moves Projects (see
+   * `associateTeamRunWithProject.ts`'s own projection-sync, which updates
+   * ONLY the live `humanReviewAssignment/current` mirror, never this
+   * history). Present only for Workspace-bound assignment mutations; absent
+   * for legacy Team mutations, exactly like the assignment document itself.
+   */
+  workspaceId?: string;
+  projectId?: string | null;
+  dueAt?: string | null;
 };
 
 export function buildAdaptiveHumanReviewAssignmentHistoryEntry(args: {
@@ -130,8 +229,10 @@ export function buildAdaptiveHumanReviewAssignmentHistoryEntry(args: {
   assignmentRevision: number;
   changedAt: string;
   changedByUserId: string;
+  /** Phase 9B.2 — supplied only for a Workspace-bound assignment mutation, mirroring `buildNextAdaptiveHumanReviewAssignment`'s own optional parameter exactly. */
+  workspaceMetadata?: AdaptiveHumanReviewAssignmentWorkspaceMetadata;
 }): AdaptiveHumanReviewAssignmentHistoryV1 {
-  return {
+  const base: AdaptiveHumanReviewAssignmentHistoryV1 = {
     schemaVersion: 1,
     eventId: String(args.assignmentRevision),
     teamId: args.teamId,
@@ -142,5 +243,49 @@ export function buildAdaptiveHumanReviewAssignmentHistoryEntry(args: {
     assignmentRevision: args.assignmentRevision,
     changedAt: args.changedAt,
     changedByUserId: args.changedByUserId,
+  };
+  if (!args.workspaceMetadata) return base;
+  return {
+    ...base,
+    workspaceId: args.workspaceMetadata.workspaceId,
+    projectId: args.workspaceMetadata.projectId,
+    dueAt: args.workspaceMetadata.dueAt,
+  };
+}
+
+/**
+ * Phase 9B.2 — the append-only history counterpart to
+ * `buildAdaptiveHumanReviewAssignmentMetadataUpdate()`. `eventType` is
+ * always `"metadata_updated"`, never derived via `classifyAssignmentEventType()`
+ * (which would incorrectly read a same-reviewer metadata change as
+ * `"reassigned"`, since it only compares before/after reviewer identity —
+ * this is a genuinely distinct event class, checked/constructed
+ * independently). `previousReviewerUserId`/`newReviewerUserId` are both set
+ * to the unchanged `reviewerUserId`, honestly reflecting that no reviewer
+ * transition occurred.
+ */
+export function buildAdaptiveHumanReviewAssignmentMetadataHistoryEntry(args: {
+  teamId: string | null;
+  runId: string;
+  reviewerUserId: string;
+  assignmentRevision: number;
+  changedAt: string;
+  changedByUserId: string;
+  workspaceMetadata: AdaptiveHumanReviewAssignmentWorkspaceMetadata;
+}): AdaptiveHumanReviewAssignmentHistoryV1 {
+  return {
+    schemaVersion: 1,
+    eventId: String(args.assignmentRevision),
+    teamId: args.teamId,
+    runId: args.runId,
+    eventType: "metadata_updated",
+    previousReviewerUserId: args.reviewerUserId,
+    newReviewerUserId: args.reviewerUserId,
+    assignmentRevision: args.assignmentRevision,
+    changedAt: args.changedAt,
+    changedByUserId: args.changedByUserId,
+    workspaceId: args.workspaceMetadata.workspaceId,
+    projectId: args.workspaceMetadata.projectId,
+    dueAt: args.workspaceMetadata.dueAt,
   };
 }

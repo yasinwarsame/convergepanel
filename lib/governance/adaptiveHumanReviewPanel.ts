@@ -124,7 +124,32 @@ export type AdaptiveHumanReviewPanelV1 = {
   finalizedVia?: "aggregation" | "owner_override";
   overrideJustificationPresent?: boolean;
   overrideByUserId?: string;
+
+  /**
+   * Phase 9B.2 — Workspace/Project DISCOVERY metadata mirror, present if and
+   * only if this panel belongs to a WORKSPACE_BOUND_TEAM run (see
+   * `lib/workspaces/resolveWorkspaceReviewTarget.ts`). Absent entirely for
+   * every legacy Team panel — no backfill, no migration. Discovery/
+   * projection only, never ownership authority, exactly mirroring
+   * `AdaptiveHumanReviewAssignmentV1`'s own `workspaceId`/`projectId` pair
+   * in `adaptiveHumanReviewAssignment.ts`. No panel-level `dueAt` — Phase 9
+   * due dates are scoped to the single-assignment responsibility model
+   * only, not the multi-reviewer panel.
+   */
+  workspaceId?: string;
+  /** `null` = canonical Unfiled, mirroring `runs/{runId}.projectId`'s own convention. */
+  projectId?: string | null;
 };
+
+/**
+ * Phase 9B.2 — companion to `AdaptiveHumanReviewAssignmentWorkspaceMetadata`
+ * (`adaptiveHumanReviewAssignment.ts`), minus `dueAt` — panels have no
+ * due-date concept in this phase.
+ */
+export interface AdaptiveHumanReviewPanelWorkspaceMetadata {
+  workspaceId: string;
+  projectId: string | null;
+}
 
 /**
  * Pure. Builds the next panel document for BOTH creation (no current
@@ -141,10 +166,24 @@ export function buildNextAdaptiveHumanReviewPanel(args: {
   actorUserId: string;
   now: string;
   current: AdaptiveHumanReviewPanelV1 | null;
+  /**
+   * Phase 9B.2 — supplied only for a Workspace-bound panel create/
+   * reconfigure. Omit entirely for every legacy Team call site — the
+   * resulting document then carries neither field, identical to today's
+   * behavior. Every field on this document (not just workspace metadata)
+   * is already freshly recomputed from `args` on every call rather than
+   * preserved from `current` by spread, so — consistent with that existing
+   * pattern, and with §18's "always re-derive from the canonical run
+   * inside the same transaction" — a future Workspace reconfigure route
+   * must re-supply the canonical metadata on every call to keep it
+   * populated; omitting it on a reconfigure of an already-metadata-bearing
+   * panel drops the mirror, it does not preserve it.
+   */
+  workspaceMetadata?: AdaptiveHumanReviewPanelWorkspaceMetadata;
 }): AdaptiveHumanReviewPanelV1 {
   const reviewerUserIds = normalizeAdaptivePanelReviewerUserIds(args.reviewerUserIds);
   const requiredReviewerCount = reviewerUserIds.length;
-  return {
+  const base: AdaptiveHumanReviewPanelV1 = {
     schemaVersion: 1,
     kind: "adaptive_review_panel",
     teamId: args.teamId,
@@ -159,6 +198,12 @@ export function buildNextAdaptiveHumanReviewPanel(args: {
     createdByUserId: args.current?.createdByUserId ?? args.actorUserId,
     updatedAt: args.now,
     updatedByUserId: args.actorUserId,
+  };
+  if (!args.workspaceMetadata) return base;
+  return {
+    ...base,
+    workspaceId: args.workspaceMetadata.workspaceId,
+    projectId: args.workspaceMetadata.projectId,
   };
 }
 
@@ -377,6 +422,12 @@ export function parseAdaptiveHumanReviewPanel(
     return { status: "malformed" };
   }
 
+  // Phase 9B.2 — Workspace/Project discovery-metadata mirror. Both
+  // OPTIONAL, exactly like `AdaptiveHumanReviewAssignmentV1`'s own pair —
+  // absent on every legacy Team panel, never coerced, never required.
+  if (raw.workspaceId !== undefined && !isNonEmptyString(raw.workspaceId)) return { status: "malformed" };
+  if (raw.projectId !== undefined && raw.projectId !== null && !isNonEmptyString(raw.projectId)) return { status: "malformed" };
+
   return {
     status: "valid",
     panel: {
@@ -410,6 +461,8 @@ export function parseAdaptiveHumanReviewPanel(
             overrideByUserId: raw.overrideByUserId as string,
           }
         : {}),
+      ...(raw.workspaceId !== undefined ? { workspaceId: raw.workspaceId as string } : {}),
+      ...(raw.projectId !== undefined ? { projectId: raw.projectId as string | null } : {}),
     },
   };
 }

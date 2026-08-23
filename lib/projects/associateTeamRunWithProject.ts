@@ -81,6 +81,19 @@
  *      no `workspaceId`, no other run field, ever. No Project-side
  *      projection of any kind is written — association truth remains
  *      solely `run.projectId`.
+ *   9. (Phase 9B.2) active Workspace-review projection sync: if
+ *      `runs/{runId}/humanReviewAssignment/current` and/or
+ *      `.../humanReviewPanel/current` exist AND already carry a Workspace
+ *      metadata mirror (their own `workspaceId` field, matching this
+ *      Workspace), their `projectId` mirror moves too, in this SAME
+ *      transaction — otherwise a future Project-filtered review queue would
+ *      go stale immediately. This is projection maintenance, NOT a
+ *      reviewer-assignment/panel mutation: exactly one field
+ *      (`projectId`) is touched on each, `revision` is never incremented,
+ *      `updatedAt` is never touched, and no append-only history entry is
+ *      written for either. A legacy assignment/panel with no `workspaceId`
+ *      mirror is left completely untouched — it is never treated as a
+ *      Workspace projection it isn't.
  *
  * Transaction-callback purity: the callback contains ONLY Firestore
  * reads/writes and pure comparisons — no event emission, no logging of
@@ -106,6 +119,11 @@ import { resolveTeamWorkspacesMode } from "@/lib/workspaces/teamWorkspacesRollou
 import { authorizeTeamWorkspaceMutationInTransaction, type TeamMutationAuthorizationDenialReason } from "@/lib/workspaces/authorizeTeamWorkspaceMutationInTransaction";
 import { validateTeamRunRowShape } from "@/lib/workspaces/teamRunRowValidation";
 import { isWellFormedProjectV1 } from "./types";
+
+/** Phase 9B.2 — narrow presence check for a Workspace-metadata mirror field; not a full parse, deliberately, since Step 9 only ever needs to know whether a mirror exists at all. */
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
 
 export type AssociateTeamRunWithProjectResult =
   | { status: "associated"; runId: string; workspaceId: string; fromProjectId: string | null; toProjectId: string | null }
@@ -199,6 +217,41 @@ export async function associateTeamRunWithProject(args: {
 
       // Step 8 — exactly one field, nothing else.
       tx.update(runRef, { projectId: args.targetProjectId });
+
+      // Step 9 (Phase 9B.2) — active Workspace-review projection sync.
+      // `humanReviewAssignment/current`/`humanReviewPanel/current` may mirror
+      // this run's `projectId` for future queue filtering (§19/§20 of the
+      // Phase 9B.2 spec) — if either exists AND already carries a Workspace
+      // metadata mirror (i.e. has its own `workspaceId`), that mirror must
+      // move in the SAME transaction or a Project-filtered queue would go
+      // stale immediately. This is projection maintenance, NOT a reviewer-
+      // assignment/panel mutation: exactly one field is touched
+      // (`projectId`), `revision` is never bumped, `updatedAt` is never
+      // touched, and no history entry is written — mirroring Step 8's own
+      // single-field-only discipline for the run write above. A legacy
+      // assignment/panel with no `workspaceId` field is never touched here
+      // at all — it is not a Workspace projection and must not be treated
+      // as one. `workspaceId` is defensively re-checked against `args.workspaceId`
+      // (this function never mutates a run's `workspaceId`, so it should
+      // always already match; failing closed rather than assuming is this
+      // codebase's established convention — see `resolveWorkspaceReviewTarget.ts`).
+      const assignmentRef = runRef.collection("humanReviewAssignment").doc("current");
+      const assignmentSnap = await tx.get(assignmentRef);
+      if (assignmentSnap.exists) {
+        const assignmentData = assignmentSnap.data() as Record<string, unknown> | undefined;
+        if (isNonEmptyString(assignmentData?.workspaceId) && assignmentData!.workspaceId === args.workspaceId) {
+          tx.update(assignmentRef, { projectId: args.targetProjectId });
+        }
+      }
+
+      const panelRef = runRef.collection("humanReviewPanel").doc("current");
+      const panelSnap = await tx.get(panelRef);
+      if (panelSnap.exists) {
+        const panelData = panelSnap.data() as Record<string, unknown> | undefined;
+        if (isNonEmptyString(panelData?.workspaceId) && panelData!.workspaceId === args.workspaceId) {
+          tx.update(panelRef, { projectId: args.targetProjectId });
+        }
+      }
 
       return {
         status: "associated",
