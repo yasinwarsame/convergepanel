@@ -77,9 +77,22 @@ function makeDocRef(collectionName: string, docId: string) {
   };
 }
 
+/**
+ * Fires on every `tx.get()`, AFTER this attempt's own read snapshot for that doc has
+ * already been captured (see `runTransaction` below) — so a hook that mutates a store
+ * models a genuinely concurrent, separate transaction committing a change this
+ * attempt's reads cannot observe, exactly like real Firestore. Used (Phase
+ * 9B.5.1-R1C) to prove an assignment mutation cannot commit around a panel that
+ * opens between this transaction's panel read and its commit: `runTransaction`
+ * below detects the resulting conflict and retries the whole callback, so the
+ * retried attempt observes the panel as open and the business logic itself denies
+ * the mutation — never a race window.
+ */
 let concurrentMutationHook: ((ref: { __collection: string; __id: string }) => void) | null = null;
 const firestoreUnavailableFlag = { value: false };
 const transactionShouldThrow = { value: false };
+const transactionAttemptCount = { value: 0 };
+const MAX_TRANSACTION_ATTEMPTS = 5;
 
 const mockAdminDb: any = {
   collection: (name: string) => ({
@@ -87,32 +100,47 @@ const mockAdminDb: any = {
   }),
   runTransaction: jest.fn().mockImplementation(async (fn: (txn: any) => Promise<any>) => {
     if (transactionShouldThrow.value) throw new Error("simulated transaction failure");
-    const pendingWrites: Array<() => void> = [];
-    let hasWritten = false;
-    const txn = {
-      get: async (ref: { __collection: string; __id: string }) => {
-        if (hasWritten) throw new Error("Firestore transactions require all reads to be executed before all writes.");
-        if (concurrentMutationHook) concurrentMutationHook(ref);
-        const store = stores[ref.__collection];
-        const data = store.get(ref.__id);
-        return { exists: data !== undefined, data: () => data, id: ref.__id };
-      },
-      update: (ref: { __collection: string; __id: string }, data: Record<string, unknown>) => {
-        hasWritten = true;
-        pendingWrites.push(() => {
+    for (let attempt = 0; attempt < MAX_TRANSACTION_ATTEMPTS; attempt++) {
+      transactionAttemptCount.value++;
+      const pendingWrites: Array<() => void> = [];
+      const readSnapshots = new Map<string, unknown>();
+      let hasWritten = false;
+      const txn = {
+        get: async (ref: { __collection: string; __id: string }) => {
+          if (hasWritten) throw new Error("Firestore transactions require all reads to be executed before all writes.");
           const store = stores[ref.__collection];
-          const existing = store.get(ref.__id) ?? {};
-          store.set(ref.__id, applyDottedFieldUpdate(existing, data));
-        });
-      },
-      set: (ref: { __collection: string; __id: string }, data: Record<string, unknown>) => {
-        hasWritten = true;
-        pendingWrites.push(() => stores[ref.__collection].set(ref.__id, data));
-      },
-    };
-    const result = await fn(txn);
-    for (const applyWrite of pendingWrites) applyWrite();
-    return result;
+          const data = store.get(ref.__id);
+          readSnapshots.set(`${ref.__collection}/${ref.__id}`, data);
+          if (concurrentMutationHook) concurrentMutationHook(ref);
+          return { exists: data !== undefined, data: () => data, id: ref.__id };
+        },
+        update: (ref: { __collection: string; __id: string }, data: Record<string, unknown>) => {
+          hasWritten = true;
+          pendingWrites.push(() => {
+            const store = stores[ref.__collection];
+            const existing = store.get(ref.__id) ?? {};
+            store.set(ref.__id, applyDottedFieldUpdate(existing, data));
+          });
+        },
+        set: (ref: { __collection: string; __id: string }, data: Record<string, unknown>) => {
+          hasWritten = true;
+          pendingWrites.push(() => stores[ref.__collection].set(ref.__id, data));
+        },
+      };
+      const result = await fn(txn);
+      // Firestore-style OCC: if any doc this attempt read has since changed (a
+      // concurrent transaction committed underneath it), discard this attempt's
+      // writes entirely and retry the whole callback from scratch — never apply a
+      // write derived from a stale read.
+      const conflicted = [...readSnapshots.entries()].some(([key, snapshot]) => {
+        const [collection, id] = key.split("/");
+        return stores[collection].get(id) !== snapshot;
+      });
+      if (conflicted) continue;
+      for (const applyWrite of pendingWrites) applyWrite();
+      return result;
+    }
+    throw new Error("simulated transaction retry exhaustion");
   }),
   // Only used by getWorkspaceReviewAssignment's plain, non-transactional read.
   get: undefined,
@@ -151,8 +179,21 @@ jest.mock("@/lib/governance/auditLog", () => ({
   writeAdaptiveAdminAuditEvent: (...args: unknown[]) => mockedWriteAdaptiveAdminAuditEvent(...args),
 }));
 
+// Phase 9B.5.1-R1C — wraps the REAL capabilities module (every test relies on the
+// genuine role -> capability matrix by default) but lets specific tests install a
+// synthetic override, so the "assignment management requires reviews.manage AND
+// research.read, independently" invariant can be locked in even though no current
+// role can otherwise represent "has reviews.manage but not research.read."
+const mockedRoleHasCapability = jest.fn();
+jest.mock("@/lib/workspaces/capabilities", () => {
+  const actual = jest.requireActual("@/lib/workspaces/capabilities");
+  return { ...actual, roleHasCapability: (...args: unknown[]) => mockedRoleHasCapability(...args) };
+});
+
 import { computeMembershipId } from "@/lib/workspaces/membershipId";
 import { getWorkspaceReviewAssignment, putWorkspaceReviewAssignment, deleteWorkspaceReviewAssignment, submitWorkspaceReviewDecision } from "@/lib/workspaces/workspaceReviewMutations";
+
+const actualCapabilities = jest.requireActual("@/lib/workspaces/capabilities");
 
 const WS_ID = "ws-1";
 const OTHER_WS_ID = "ws-2";
@@ -263,11 +304,13 @@ beforeEach(() => {
   mockedCreateAdaptiveHumanReviewHistory.mockResolvedValue({ status: "recorded" });
   mockedWriteAdaptiveHumanReviewEvent.mockResolvedValue({ written: true });
   mockedWriteAdaptiveAdminAuditEvent.mockResolvedValue({ status: "recorded" });
+  mockedRoleHasCapability.mockImplementation(actualCapabilities.roleHasCapability); // default: genuine role -> capability matrix; individual tests may override.
   resetStores();
   teamWorkspacesEnabled = true;
   teamWorkspacesCanaryUids = undefined;
   firestoreUnavailableFlag.value = false;
   transactionShouldThrow.value = false;
+  transactionAttemptCount.value = 0;
   concurrentMutationHook = null;
   seedWorkspace();
   seedMembership(OWNER_UID, "owner");
@@ -350,6 +393,24 @@ describe("putWorkspaceReviewAssignment — authorization", () => {
   it("outsider (no membership): denied", async () => {
     const result = await putCall({ uid: OUTSIDER_UID, dueAt: null });
     expect(result).toEqual({ ok: false, reason: "membership_not_found" });
+  });
+});
+
+describe("putWorkspaceReviewAssignment — explicit dual-capability requirement (Phase 9B.5.1-R1C)", () => {
+  it("reviews.manage AND research.read both present (Admin): proceeds to normal mutation logic", async () => {
+    const result = await putCall({ uid: ADMIN_UID, dueAt: null });
+    expect(result.ok).toBe(true);
+  });
+
+  it("reviews.manage true but research.read false — a synthetic capability split the current role table cannot otherwise represent — denies, independent of reviews.manage: zero write, zero history", async () => {
+    mockedRoleHasCapability.mockImplementation((role: string, capability: string) => {
+      if (role === "admin" && capability === "research.read") return false; // synthetic: locks the invariant against a future role-table change, not today's coincidental overlap.
+      return actualCapabilities.roleHasCapability(role, capability);
+    });
+    const result = await putCall({ uid: ADMIN_UID, dueAt: null });
+    expect(result).toEqual({ ok: false, reason: "insufficient_capability" });
+    expect(mockedCreateAdaptiveHumanReviewAssignmentHistory).not.toHaveBeenCalled();
+    expect(stores.humanReviewAssignment.get(RUN_ID)).toBeUndefined();
   });
 });
 
@@ -505,6 +566,23 @@ describe("putWorkspaceReviewAssignment — active panel", () => {
     stores.humanReviewPanel.set(RUN_ID, { schemaVersion: 1 } as any);
     expect(await putCall({ dueAt: null })).toEqual({ ok: false, reason: "panel_unreadable" });
   });
+
+  it("panel opens concurrently, after this transaction's own panel read but before commit (Phase 9B.5.1-R1C): the mutation cannot commit around it — Firestore-style conflict forces a retry, and the retried attempt observes the panel as open", async () => {
+    let hookFired = false;
+    concurrentMutationHook = (ref) => {
+      if (!hookFired && ref.__collection === "humanReviewPanel" && ref.__id === RUN_ID) {
+        hookFired = true; // a separate, concurrent transaction committing exactly once — not this attempt's own re-reads on retry.
+        seedPanel({ status: "open" });
+      }
+    };
+    const result = await putCall({ dueAt: null });
+    expect(result).toEqual({ ok: false, reason: "active_panel" });
+    // Proves this was a genuine retry, not a lucky first read: the callback ran twice.
+    expect(transactionAttemptCount.value).toBe(2);
+    expect(mockedCreateAdaptiveHumanReviewAssignmentHistory).not.toHaveBeenCalled();
+    expect(stores.humanReviewAssignment.get(RUN_ID)).toBeUndefined();
+    expect(stores.humanReviewPanel.get(RUN_ID)?.status).toBe("open");
+  });
 });
 
 describe("putWorkspaceReviewAssignment — history + read/write ordering", () => {
@@ -560,6 +638,19 @@ describe("deleteWorkspaceReviewAssignment", () => {
   it("Viewer: DENY", async () => {
     seedAssignment();
     expect(await deleteCall({ uid: VIEWER_UID })).toEqual({ ok: false, reason: "insufficient_capability" });
+  });
+
+  it("reviews.manage true but research.read false — synthetic capability split (Phase 9B.5.1-R1C): denies, assignment and history unchanged", async () => {
+    seedAssignment();
+    const before = stores.humanReviewAssignment.get(RUN_ID);
+    mockedRoleHasCapability.mockImplementation((role: string, capability: string) => {
+      if (role === "admin" && capability === "research.read") return false;
+      return actualCapabilities.roleHasCapability(role, capability);
+    });
+    const result = await deleteCall({ uid: ADMIN_UID });
+    expect(result).toEqual({ ok: false, reason: "insufficient_capability" });
+    expect(mockedCreateAdaptiveHumanReviewAssignmentHistory).not.toHaveBeenCalled();
+    expect(stores.humanReviewAssignment.get(RUN_ID)).toBe(before);
   });
 
   it("stale revision: 409-equivalent", async () => {

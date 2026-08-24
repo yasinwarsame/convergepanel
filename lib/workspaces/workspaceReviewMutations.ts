@@ -49,6 +49,7 @@ import { logger } from "@/lib/logger";
 import { TEAM_WORKSPACES_ENABLED, TEAM_WORKSPACES_CANARY_UIDS } from "@/lib/env";
 import { resolveTeamWorkspacesMode } from "./teamWorkspacesRollout";
 import { authorizeTeamWorkspaceMutationInTransaction, type TeamMutationAuthorizationDenialReason } from "./authorizeTeamWorkspaceMutationInTransaction";
+import { roleHasCapability } from "./capabilities";
 import { resolveWorkspaceReviewTarget } from "./resolveWorkspaceReviewTarget";
 import { isValidAssignmentTarget, isOrdinaryReviewerAuthorized, type WorkspaceReviewCandidate, type AssignmentTargetIneligibilityReason, type OrdinaryReviewerAuthorizationDenialReason } from "./workspaceReviewEligibility";
 import { computeMembershipId } from "./membershipId";
@@ -194,6 +195,12 @@ export async function putWorkspaceReviewAssignment(args: {
     transactionResult = await adminDb.runTransaction(async (tx) => {
       const auth = await authorizeTeamWorkspaceMutationInTransaction(tx, { uid: args.uid, workspaceId: args.workspaceId, requiredCapability: "reviews.manage" });
       if (!auth.ok) return { ok: false, reason: auth.reason };
+      // Assignment management explicitly requires BOTH `reviews.manage` (checked above) AND
+      // `research.read` (checked here) — never inferred from `reviews.manage` alone, even
+      // though every role holding `reviews.manage` today (owner/admin) also holds
+      // `research.read`. Evaluated against the SAME `auth.membership` snapshot the capability
+      // check above already used — no second membership lookup, no new authorization window.
+      if (!roleHasCapability(auth.membership.role, "research.read")) return { ok: false, reason: "insufficient_capability" as const };
 
       const runRef = adminDb!.collection("runs").doc(args.runId);
       const runSnap = await tx.get(runRef);
@@ -357,6 +364,9 @@ export async function deleteWorkspaceReviewAssignment(args: { uid: string; works
     transactionResult = await adminDb.runTransaction(async (tx) => {
       const auth = await authorizeTeamWorkspaceMutationInTransaction(tx, { uid: args.uid, workspaceId: args.workspaceId, requiredCapability: "reviews.manage" });
       if (!auth.ok) return { ok: false, reason: auth.reason };
+      // Same explicit dual-capability requirement as putWorkspaceReviewAssignment — see the
+      // comment there. Same `auth.membership` snapshot, no second lookup.
+      if (!roleHasCapability(auth.membership.role, "research.read")) return { ok: false, reason: "insufficient_capability" as const };
 
       const runRef = adminDb!.collection("runs").doc(args.runId);
       const runSnap = await tx.get(runRef);
