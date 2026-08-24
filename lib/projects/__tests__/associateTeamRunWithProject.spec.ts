@@ -23,6 +23,12 @@ const stores: Record<string, Map<string, StoredDoc>> = {
   workspaceMemberships: new Map(),
   runs: new Map(),
   projects: new Map(),
+  // Phase 9B.2 — the two run-scoped subcollections `associateTeamRunWithProject`'s
+  // Step 9 projection sync reads/writes. Both are single-fixed-ID
+  // (`current`) per run, so — exactly like `makeSubDocRef` below — they are
+  // keyed directly by `runId`, never by a composite `runId/current` path.
+  humanReviewAssignment: new Map(),
+  humanReviewPanel: new Map(),
 };
 
 function resetStores() {
@@ -30,6 +36,16 @@ function resetStores() {
   stores.workspaceMemberships.clear();
   stores.runs.clear();
   stores.projects.clear();
+  stores.humanReviewAssignment.clear();
+  stores.humanReviewPanel.clear();
+}
+
+function seedHumanReviewAssignment(overrides: StoredDoc = {}, runId: string = RUN_ID) {
+  stores.humanReviewAssignment.set(runId, asPersisted(overrides));
+}
+
+function seedHumanReviewPanel(overrides: StoredDoc = {}, runId: string = RUN_ID) {
+  stores.humanReviewPanel.set(runId, asPersisted(overrides));
 }
 
 // Mirrors adminDb's real `ignoreUndefinedProperties: true` behavior — an
@@ -45,7 +61,19 @@ function asPersisted(data: Record<string, unknown>): Record<string, unknown> {
 }
 
 function makeDocRef(collectionName: string, docId: string) {
-  return { __collection: collectionName, __id: docId };
+  return {
+    __collection: collectionName,
+    __id: docId,
+    // Phase 9B.2 — subcollection chaining, needed only for
+    // `runs/{runId}/humanReviewAssignment|humanReviewPanel/current`. Both
+    // are single-fixed-ID ("current") subcollections, so the sub-doc ref is
+    // keyed directly by the PARENT doc's own id (the runId) in a top-level
+    // fake store named after the subcollection — `subDocId` is accepted for
+    // API-shape fidelity but never itself part of the key.
+    collection: (subCollectionName: string) => ({
+      doc: (_subDocId: string) => ({ __collection: subCollectionName, __id: docId }),
+    }),
+  };
 }
 
 let concurrentMutationHook: ((ref: { __collection: string; __id: string }) => void) | null = null;
@@ -61,14 +89,27 @@ const mockAdminDb: any = {
       throw new Error("simulated transaction failure");
     }
     const pendingWrites: Array<() => void> = [];
+    // Phase 9B.2-R1 — mirrors the real Firestore Admin SDK's hard
+    // requirement that every transaction `get()` execute before any
+    // `set()`/`update()`/`delete()`; the SDK throws the instant a read is
+    // attempted after a write has been queued, regardless of which
+    // document either touches. The original 9B.2 projection-sync bug (a
+    // `tx.get()` issued after `tx.update(runRef, ...)`) passed silently
+    // against a fake without this guard — this flag exists specifically so
+    // that class of bug fails here too, not only against production.
+    let hasWritten = false;
     const txn = {
       get: async (ref: { __collection: string; __id: string }) => {
+        if (hasWritten) {
+          throw new Error("Firestore transactions require all reads to be executed before all writes.");
+        }
         if (concurrentMutationHook) concurrentMutationHook(ref);
         const store = stores[ref.__collection];
         const data = store.get(ref.__id);
         return { exists: data !== undefined, data: () => data, id: ref.__id };
       },
       update: (ref: { __collection: string; __id: string }, data: Record<string, unknown>) => {
+        hasWritten = true;
         pendingWrites.push(() => {
           const store = stores[ref.__collection];
           const existing = store.get(ref.__id) ?? {};
@@ -651,5 +692,193 @@ describe("transaction races — the callback revalidates from fresh reads, never
     const resultB = await call({ targetProjectId: "proj-3", expectedProjectId: PROJECT_ID });
     expect(resultB.status).toBe("conflict");
     expect(stores.runs.get(RUN_ID)?.projectId).toBe(PROJECT_ID_2); // A's write stands, never silently overwritten
+  });
+});
+
+describe("Phase 9B.2 — active Workspace-review projection sync (Step 9)", () => {
+  it("A/B/C — Workspace-bound assignment: project A -> B moves the mirror, preserves dueAt and the assigned reviewer", async () => {
+    seedRun({ projectId: PROJECT_ID });
+    seedProject(PROJECT_ID_2);
+    seedHumanReviewAssignment({
+      schemaVersion: 1,
+      teamId: WS_ID,
+      runId: RUN_ID,
+      assignedReviewerUserId: REVIEWER_UID,
+      assignedAt: "2026-08-01T00:00:00.000Z",
+      assignedByUserId: OWNER_UID,
+      updatedAt: "2026-08-01T00:00:00.000Z",
+      updatedByUserId: OWNER_UID,
+      revision: 3,
+      workspaceId: WS_ID,
+      projectId: PROJECT_ID,
+      dueAt: "2026-09-01T00:00:00.000Z",
+    });
+
+    const result = await call({ targetProjectId: PROJECT_ID_2, expectedProjectId: PROJECT_ID });
+
+    expect(result.status).toBe("associated");
+    expect(stores.runs.get(RUN_ID)?.projectId).toBe(PROJECT_ID_2); // canonical run moved
+    const assignment = stores.humanReviewAssignment.get(RUN_ID)!;
+    expect(assignment.projectId).toBe(PROJECT_ID_2); // A: mirror moved
+    expect(assignment.dueAt).toBe("2026-09-01T00:00:00.000Z"); // B: dueAt preserved
+    expect(assignment.assignedReviewerUserId).toBe(REVIEWER_UID); // C: reviewer preserved
+  });
+
+  it("D/E — project move leaves assignment revision unchanged and appends no history entry", async () => {
+    seedRun({ projectId: PROJECT_ID });
+    seedProject(PROJECT_ID_2);
+    seedHumanReviewAssignment({
+      schemaVersion: 1,
+      teamId: WS_ID,
+      runId: RUN_ID,
+      assignedReviewerUserId: REVIEWER_UID,
+      assignedAt: "2026-08-01T00:00:00.000Z",
+      assignedByUserId: OWNER_UID,
+      updatedAt: "2026-08-01T00:00:00.000Z",
+      updatedByUserId: OWNER_UID,
+      revision: 5,
+      workspaceId: WS_ID,
+      projectId: PROJECT_ID,
+      dueAt: null,
+    });
+
+    await call({ targetProjectId: PROJECT_ID_2, expectedProjectId: PROJECT_ID });
+
+    const assignment = stores.humanReviewAssignment.get(RUN_ID)!;
+    expect(assignment.revision).toBe(5); // D: unchanged
+    expect(assignment.updatedAt).toBe("2026-08-01T00:00:00.000Z"); // never touched either
+    // E: no separate history subcollection is ever written by this
+    // function — it imports no assignment-history writer at all — so the
+    // absence of any such call is structural, not just an empty store.
+  });
+
+  it("F — Workspace-bound panel: projectId mirror updates alongside the assignment mirror", async () => {
+    seedRun({ projectId: PROJECT_ID });
+    seedProject(PROJECT_ID_2);
+    seedHumanReviewPanel({
+      schemaVersion: 1,
+      kind: "adaptive_review_panel",
+      teamId: WS_ID,
+      runId: RUN_ID,
+      mode: "majority_quorum",
+      reviewerUserIds: [OWNER_UID, ADMIN_UID],
+      requiredReviewerCount: 2,
+      quorum: 2,
+      status: "open",
+      revision: 1,
+      createdAt: "2026-08-01T00:00:00.000Z",
+      createdByUserId: OWNER_UID,
+      updatedAt: "2026-08-01T00:00:00.000Z",
+      updatedByUserId: OWNER_UID,
+      workspaceId: WS_ID,
+      projectId: PROJECT_ID,
+    });
+
+    await call({ targetProjectId: PROJECT_ID_2, expectedProjectId: PROJECT_ID });
+
+    const panel = stores.humanReviewPanel.get(RUN_ID)!;
+    expect(panel.projectId).toBe(PROJECT_ID_2);
+    expect(panel.revision).toBe(1); // unchanged, same discipline as the assignment mirror
+  });
+
+  it("G — no assignment/panel document at all: project move still succeeds normally", async () => {
+    seedRun({ projectId: PROJECT_ID });
+    seedProject(PROJECT_ID_2);
+    const result = await call({ targetProjectId: PROJECT_ID_2, expectedProjectId: PROJECT_ID });
+    expect(result.status).toBe("associated");
+    expect(stores.humanReviewAssignment.has(RUN_ID)).toBe(false);
+    expect(stores.humanReviewPanel.has(RUN_ID)).toBe(false);
+  });
+
+  it("H — legacy assignment/panel without a workspaceId mirror is never mutated as if it were a Workspace projection", async () => {
+    seedRun({ projectId: PROJECT_ID });
+    seedProject(PROJECT_ID_2);
+    seedHumanReviewAssignment({
+      schemaVersion: 1,
+      teamId: "legacy-team-id",
+      runId: RUN_ID,
+      assignedReviewerUserId: REVIEWER_UID,
+      assignedAt: "2026-08-01T00:00:00.000Z",
+      assignedByUserId: OWNER_UID,
+      updatedAt: "2026-08-01T00:00:00.000Z",
+      updatedByUserId: OWNER_UID,
+      revision: 2,
+      // no workspaceId / projectId / dueAt — legacy Team assignment
+    });
+    seedHumanReviewPanel({
+      schemaVersion: 1,
+      kind: "adaptive_review_panel",
+      teamId: "legacy-team-id",
+      runId: RUN_ID,
+      mode: "majority_quorum",
+      reviewerUserIds: [OWNER_UID, ADMIN_UID],
+      requiredReviewerCount: 2,
+      quorum: 2,
+      status: "open",
+      revision: 1,
+      createdAt: "2026-08-01T00:00:00.000Z",
+      createdByUserId: OWNER_UID,
+      updatedAt: "2026-08-01T00:00:00.000Z",
+      updatedByUserId: OWNER_UID,
+      // no workspaceId / projectId — legacy Team panel
+    });
+
+    await call({ targetProjectId: PROJECT_ID_2, expectedProjectId: PROJECT_ID });
+
+    const assignment = stores.humanReviewAssignment.get(RUN_ID)!;
+    const panel = stores.humanReviewPanel.get(RUN_ID)!;
+    expect(assignment.projectId).toBeUndefined();
+    expect(assignment.workspaceId).toBeUndefined();
+    expect(assignment.revision).toBe(2);
+    expect(panel.projectId).toBeUndefined();
+    expect(panel.workspaceId).toBeUndefined();
+    expect(panel.revision).toBe(1);
+  });
+
+  it("I — moving to Unfiled (null) syncs the mirror to null too", async () => {
+    seedRun({ projectId: PROJECT_ID });
+    seedHumanReviewAssignment({
+      schemaVersion: 1,
+      teamId: WS_ID,
+      runId: RUN_ID,
+      assignedReviewerUserId: REVIEWER_UID,
+      assignedAt: "2026-08-01T00:00:00.000Z",
+      assignedByUserId: OWNER_UID,
+      updatedAt: "2026-08-01T00:00:00.000Z",
+      updatedByUserId: OWNER_UID,
+      revision: 1,
+      workspaceId: WS_ID,
+      projectId: PROJECT_ID,
+      dueAt: null,
+    });
+
+    const result = await call({ targetProjectId: null, expectedProjectId: PROJECT_ID });
+
+    expect(result.status).toBe("associated");
+    expect(stores.runs.get(RUN_ID)?.projectId).toBeNull();
+    expect(stores.humanReviewAssignment.get(RUN_ID)?.projectId).toBeNull();
+  });
+
+  it("a mirror belonging to a different Workspace's assignment document is never touched (defensive workspaceId re-check)", async () => {
+    seedRun({ projectId: PROJECT_ID });
+    seedProject(PROJECT_ID_2);
+    seedHumanReviewAssignment({
+      schemaVersion: 1,
+      teamId: OTHER_WS_ID,
+      runId: RUN_ID,
+      assignedReviewerUserId: REVIEWER_UID,
+      assignedAt: "2026-08-01T00:00:00.000Z",
+      assignedByUserId: OWNER_UID,
+      updatedAt: "2026-08-01T00:00:00.000Z",
+      updatedByUserId: OWNER_UID,
+      revision: 1,
+      workspaceId: OTHER_WS_ID, // foreign Workspace — should never happen for a run truly in WS_ID, but defended anyway
+      projectId: PROJECT_ID,
+      dueAt: null,
+    });
+
+    await call({ targetProjectId: PROJECT_ID_2, expectedProjectId: PROJECT_ID });
+
+    expect(stores.humanReviewAssignment.get(RUN_ID)?.projectId).toBe(PROJECT_ID); // untouched
   });
 });
