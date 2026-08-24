@@ -1,9 +1,15 @@
 /**
- * Approval Workflow, Phase 9C.1 — GET /workspace/reviews route gate.
- * Mirrors `app/workspace/__tests__/page.spec.tsx`'s own established
- * pattern: calls the Server Component function directly and asserts real
- * `next/navigation` `notFound()` behavior (digest `"NEXT_NOT_FOUND"`)
- * rather than mocking `notFound` itself.
+ * Approval Workflow, Phase 9C.1 (corrected 9C.1-R1C) — GET /workspace/reviews
+ * route gate. Mirrors `app/workspace/__tests__/page.spec.tsx`'s own
+ * established pattern: calls the Server Component function directly and
+ * asserts real `next/navigation` `notFound()` behavior (digest
+ * `"NEXT_NOT_FOUND"`) rather than mocking `notFound` itself.
+ *
+ * Phase 9C.1-R1C adds the multi-Workspace matrix: `resolveViewerTeamWorkspaceId`
+ * (which silently picked one Workspace) is replaced by
+ * `resolveViewerTeamWorkspaceSelection`, a discriminated
+ * `"none"/"single"/"multiple"` result the page must never collapse into a
+ * silent choice.
  */
 
 const mockedResolveServerComponentIdentity = jest.fn();
@@ -22,9 +28,9 @@ jest.mock("@/lib/env", () => ({
   },
 }));
 
-const mockedResolveViewerTeamWorkspaceId = jest.fn();
-jest.mock("@/lib/workspaces/resolveViewerTeamWorkspaceId", () => ({
-  resolveViewerTeamWorkspaceId: (...args: any[]) => mockedResolveViewerTeamWorkspaceId(...args),
+const mockedResolveViewerTeamWorkspaceSelection = jest.fn();
+jest.mock("@/lib/workspaces/resolveViewerTeamWorkspaceSelection", () => ({
+  resolveViewerTeamWorkspaceSelection: (...args: any[]) => mockedResolveViewerTeamWorkspaceSelection(...args),
 }));
 
 const mockedResolveTeamRunWorkspaceAccess = jest.fn();
@@ -34,10 +40,21 @@ jest.mock("@/lib/workspaces/resolveTeamRunWorkspaceAccess", () => ({
 
 jest.mock("@/components/workspace/WorkspaceReviewQueueShell", () => ({
   __esModule: true,
-  default: () => "WORKSPACE_REVIEW_QUEUE_SHELL_RENDERED_MARKER",
+  default: () => null,
+}));
+
+jest.mock("@/components/workspace/WorkspaceReviewsChooser", () => ({
+  __esModule: true,
+  default: () => null,
 }));
 
 import WorkspaceReviewsPage from "@/app/workspace/reviews/page";
+import WorkspaceReviewQueueShell from "@/components/workspace/WorkspaceReviewQueueShell";
+import WorkspaceReviewsChooser from "@/components/workspace/WorkspaceReviewsChooser";
+
+function callPage(searchParams: Record<string, string | string[] | undefined> = {}) {
+  return WorkspaceReviewsPage({ searchParams });
+}
 
 async function expectRealNotFound(promise: Promise<unknown>): Promise<void> {
   let caught: unknown;
@@ -52,7 +69,7 @@ async function expectRealNotFound(promise: Promise<unknown>): Promise<void> {
   expect((caught as any)?.digest).toBe("NEXT_NOT_FOUND");
 }
 
-const GRANTED_ACCESS = { granted: true, capabilities: ["research.read", "reviews.read", "reviews.manage"] };
+const GRANTED_ACCESS = { granted: true, capabilities: ["research.read", "reviews.read", "reviews.manage"], workspace: { name: "Acme Research" } };
 
 beforeEach(() => {
   approvalGlobal = false;
@@ -64,91 +81,159 @@ describe("GET /workspace/reviews — route gate matrix", () => {
   it("unauthenticated -> real notFound(), regardless of every other flag", async () => {
     mockedResolveServerComponentIdentity.mockResolvedValue(null);
     approvalGlobal = true;
-    await expectRealNotFound(WorkspaceReviewsPage());
-    expect(mockedResolveViewerTeamWorkspaceId).not.toHaveBeenCalled();
+    await expectRealNotFound(callPage());
+    expect(mockedResolveViewerTeamWorkspaceSelection).not.toHaveBeenCalled();
   });
 
   it("authenticated, Approval Workflow not admitted -> real notFound(), never reaches Team Workspace discovery (cheapest gate first)", async () => {
     mockedResolveServerComponentIdentity.mockResolvedValue({ uid: "u1" });
-    await expectRealNotFound(WorkspaceReviewsPage());
-    expect(mockedResolveViewerTeamWorkspaceId).not.toHaveBeenCalled();
+    await expectRealNotFound(callPage());
+    expect(mockedResolveViewerTeamWorkspaceSelection).not.toHaveBeenCalled();
   });
 
   it("SECURITY: Approval Workflow admitted, canary present but uid does not match -> real notFound()", async () => {
     mockedResolveServerComponentIdentity.mockResolvedValue({ uid: "u2" });
     approvalCanary = "u1";
-    await expectRealNotFound(WorkspaceReviewsPage());
+    await expectRealNotFound(callPage());
   });
 
   it("admitted, no discoverable Team Workspace -> real notFound()", async () => {
     mockedResolveServerComponentIdentity.mockResolvedValue({ uid: "u1" });
     approvalGlobal = true;
-    mockedResolveViewerTeamWorkspaceId.mockResolvedValue({ status: "not_found" });
-    await expectRealNotFound(WorkspaceReviewsPage());
+    mockedResolveViewerTeamWorkspaceSelection.mockResolvedValue({ kind: "none" });
+    await expectRealNotFound(callPage());
     expect(mockedResolveTeamRunWorkspaceAccess).not.toHaveBeenCalled();
   });
 
   it("admitted, Team Workspace discovery lookup_failed -> real notFound(), fails closed (never fabricates a workspace)", async () => {
     mockedResolveServerComponentIdentity.mockResolvedValue({ uid: "u1" });
     approvalGlobal = true;
-    mockedResolveViewerTeamWorkspaceId.mockResolvedValue({ status: "lookup_failed" });
-    await expectRealNotFound(WorkspaceReviewsPage());
+    mockedResolveViewerTeamWorkspaceSelection.mockResolvedValue({ kind: "lookup_failed" });
+    await expectRealNotFound(callPage());
   });
 
-  it("admitted, Team Workspace found but access denied -> real notFound()", async () => {
+  it("admitted, single Team Workspace but access denied -> real notFound()", async () => {
     mockedResolveServerComponentIdentity.mockResolvedValue({ uid: "u1" });
     approvalGlobal = true;
-    mockedResolveViewerTeamWorkspaceId.mockResolvedValue({ status: "found", workspaceId: "ws-1" });
+    mockedResolveViewerTeamWorkspaceSelection.mockResolvedValue({ kind: "single", workspaceId: "ws-1" });
     mockedResolveTeamRunWorkspaceAccess.mockResolvedValue({ granted: false, reason: "membership_removed" });
-    await expectRealNotFound(WorkspaceReviewsPage());
+    await expectRealNotFound(callPage());
   });
 
   it("admitted, access granted but missing reviews.read capability -> real notFound()", async () => {
     mockedResolveServerComponentIdentity.mockResolvedValue({ uid: "u1" });
     approvalGlobal = true;
-    mockedResolveViewerTeamWorkspaceId.mockResolvedValue({ status: "found", workspaceId: "ws-1" });
-    mockedResolveTeamRunWorkspaceAccess.mockResolvedValue({ granted: true, capabilities: ["research.read"] });
-    await expectRealNotFound(WorkspaceReviewsPage());
+    mockedResolveViewerTeamWorkspaceSelection.mockResolvedValue({ kind: "single", workspaceId: "ws-1" });
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValue({ granted: true, capabilities: ["research.read"], workspace: { name: "Acme" } });
+    await expectRealNotFound(callPage());
   });
 
   it("admitted, access granted but missing research.read capability -> real notFound()", async () => {
     mockedResolveServerComponentIdentity.mockResolvedValue({ uid: "u1" });
     approvalGlobal = true;
-    mockedResolveViewerTeamWorkspaceId.mockResolvedValue({ status: "found", workspaceId: "ws-1" });
-    mockedResolveTeamRunWorkspaceAccess.mockResolvedValue({ granted: true, capabilities: ["reviews.read"] });
-    await expectRealNotFound(WorkspaceReviewsPage());
+    mockedResolveViewerTeamWorkspaceSelection.mockResolvedValue({ kind: "single", workspaceId: "ws-1" });
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValue({ granted: true, capabilities: ["reviews.read"], workspace: { name: "Acme" } });
+    await expectRealNotFound(callPage());
   });
 
-  it("fully eligible -> renders the queue shell, no notFound() thrown", async () => {
+  it("fully eligible, single Workspace -> renders the queue shell, no notFound() thrown", async () => {
     mockedResolveServerComponentIdentity.mockResolvedValue({ uid: "u1" });
     approvalGlobal = true;
-    mockedResolveViewerTeamWorkspaceId.mockResolvedValue({ status: "found", workspaceId: "ws-1" });
+    mockedResolveViewerTeamWorkspaceSelection.mockResolvedValue({ kind: "single", workspaceId: "ws-1" });
     mockedResolveTeamRunWorkspaceAccess.mockResolvedValue(GRANTED_ACCESS);
-    const result = await WorkspaceReviewsPage();
+    const result = await callPage();
     expect(result).toBeTruthy();
   });
 
   it("eligible via canary (not global) -> renders the queue shell", async () => {
     mockedResolveServerComponentIdentity.mockResolvedValue({ uid: "canary-uid" });
     approvalCanary = "canary-uid";
-    mockedResolveViewerTeamWorkspaceId.mockResolvedValue({ status: "found", workspaceId: "ws-1" });
+    mockedResolveViewerTeamWorkspaceSelection.mockResolvedValue({ kind: "single", workspaceId: "ws-1" });
     mockedResolveTeamRunWorkspaceAccess.mockResolvedValue(GRANTED_ACCESS);
-    const result = await WorkspaceReviewsPage();
+    const result = await callPage();
     expect(result).toBeTruthy();
   });
 
   it("SECURITY: malformed canary config while global is off -> real notFound(), never falls open", async () => {
     mockedResolveServerComponentIdentity.mockResolvedValue({ uid: "u1" });
     approvalCanary = "not/a/valid/uid";
-    await expectRealNotFound(WorkspaceReviewsPage());
+    await expectRealNotFound(callPage());
   });
 
   it("passes the discovered workspaceId (never a hardcoded/route-param value) to resolveTeamRunWorkspaceAccess and the rendered shell", async () => {
     mockedResolveServerComponentIdentity.mockResolvedValue({ uid: "u1" });
     approvalGlobal = true;
-    mockedResolveViewerTeamWorkspaceId.mockResolvedValue({ status: "found", workspaceId: "ws-discovered-42" });
+    mockedResolveViewerTeamWorkspaceSelection.mockResolvedValue({ kind: "single", workspaceId: "ws-discovered-42" });
     mockedResolveTeamRunWorkspaceAccess.mockResolvedValue(GRANTED_ACCESS);
-    await WorkspaceReviewsPage();
+    await callPage();
     expect(mockedResolveTeamRunWorkspaceAccess).toHaveBeenCalledWith({ uid: "u1", workspaceId: "ws-discovered-42" });
+  });
+});
+
+describe("GET /workspace/reviews — Phase 9C.1-R1C: multi-Workspace selection", () => {
+  it("multiple active Workspaces, NO ?workspace= param -> renders the CHOOSER, never silently picks one", async () => {
+    mockedResolveServerComponentIdentity.mockResolvedValue({ uid: "u1" });
+    approvalGlobal = true;
+    mockedResolveViewerTeamWorkspaceSelection.mockResolvedValue({ kind: "multiple" });
+    const result: any = await callPage();
+    expect(result.type).toBe(WorkspaceReviewsChooser);
+    expect(mockedResolveTeamRunWorkspaceAccess).not.toHaveBeenCalled();
+  });
+
+  it("multiple active Workspaces, ?workspace=A -> revalidates and renders Workspace A's queue directly (no chooser)", async () => {
+    mockedResolveServerComponentIdentity.mockResolvedValue({ uid: "u1" });
+    approvalGlobal = true;
+    mockedResolveViewerTeamWorkspaceSelection.mockResolvedValue({ kind: "multiple" });
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValue(GRANTED_ACCESS);
+    const result: any = await callPage({ workspace: "A" });
+    expect(mockedResolveTeamRunWorkspaceAccess).toHaveBeenCalledWith({ uid: "u1", workspaceId: "A" });
+    expect(result.type).toBe(WorkspaceReviewQueueShell);
+    expect(result.props.workspaceId).toBe("A");
+    expect(result.props.hasMultipleWorkspaces).toBe(true);
+  });
+
+  it("multiple active Workspaces, ?workspace=B -> revalidates and renders Workspace B's queue, never falls back to A", async () => {
+    mockedResolveServerComponentIdentity.mockResolvedValue({ uid: "u1" });
+    approvalGlobal = true;
+    mockedResolveViewerTeamWorkspaceSelection.mockResolvedValue({ kind: "multiple" });
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValue(GRANTED_ACCESS);
+    await callPage({ workspace: "B" });
+    expect(mockedResolveTeamRunWorkspaceAccess).toHaveBeenCalledWith({ uid: "u1", workspaceId: "B" });
+  });
+
+  it("SECURITY: user belongs to A/B, requests ?workspace=C (unauthorized) -> real notFound(), never falls back to A/B", async () => {
+    mockedResolveServerComponentIdentity.mockResolvedValue({ uid: "u1" });
+    approvalGlobal = true;
+    mockedResolveViewerTeamWorkspaceSelection.mockResolvedValue({ kind: "multiple" });
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValue({ granted: false, reason: "membership_not_found" });
+    await expectRealNotFound(callPage({ workspace: "C" }));
+    expect(mockedResolveTeamRunWorkspaceAccess).toHaveBeenCalledWith({ uid: "u1", workspaceId: "C" });
+  });
+
+  it("single active Workspace, explicit ?workspace= for a DIFFERENT/unauthorized id -> real notFound(), never silently substitutes the single discovered Workspace", async () => {
+    mockedResolveServerComponentIdentity.mockResolvedValue({ uid: "u1" });
+    approvalGlobal = true;
+    mockedResolveViewerTeamWorkspaceSelection.mockResolvedValue({ kind: "single", workspaceId: "ws-1" });
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValue({ granted: false, reason: "membership_not_found" });
+    await expectRealNotFound(callPage({ workspace: "ws-other" }));
+    expect(mockedResolveTeamRunWorkspaceAccess).toHaveBeenCalledWith({ uid: "u1", workspaceId: "ws-other" });
+  });
+
+  it("passes hasMultipleWorkspaces=false to the shell for a single-Workspace uid", async () => {
+    mockedResolveServerComponentIdentity.mockResolvedValue({ uid: "u1" });
+    approvalGlobal = true;
+    mockedResolveViewerTeamWorkspaceSelection.mockResolvedValue({ kind: "single", workspaceId: "ws-1" });
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValue(GRANTED_ACCESS);
+    const result: any = await callPage();
+    expect(result.props.hasMultipleWorkspaces).toBe(false);
+  });
+
+  it("passes the resolved workspace name to the shell, never a raw id as the display value", async () => {
+    mockedResolveServerComponentIdentity.mockResolvedValue({ uid: "u1" });
+    approvalGlobal = true;
+    mockedResolveViewerTeamWorkspaceSelection.mockResolvedValue({ kind: "single", workspaceId: "ws-1" });
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValue({ granted: true, capabilities: ["research.read", "reviews.read"], workspace: { name: "Real Workspace Name" } });
+    const result: any = await callPage();
+    expect(result.props.workspaceName).toBe("Real Workspace Name");
   });
 });

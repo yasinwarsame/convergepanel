@@ -21,8 +21,8 @@ import { getVideoLimit } from "@/lib/billing/planConfig";
 import { resolvePersonalWorkspaceUiMode } from "@/lib/workspaces/workspaceUiRollout";
 import { resolveProjectsUiEligibility } from "@/lib/projects/projectsUiEligibility";
 import { resolveApprovalWorkflowAdmission } from "@/lib/workspaces/approvalWorkflowRollout";
-import { resolveViewerTeamWorkspaceId } from "@/lib/workspaces/resolveViewerTeamWorkspaceId";
-import { resolveTeamRunWorkspaceAccess } from "@/lib/workspaces/resolveTeamRunWorkspaceAccess";
+import { resolveTeamWorkspacesMode } from "@/lib/workspaces/teamWorkspacesRollout";
+import { resolveViewerTeamWorkspaceSelection } from "@/lib/workspaces/resolveViewerTeamWorkspaceSelection";
 import {
   PERSONAL_WORKSPACE_UI_ENABLED,
   PERSONAL_WORKSPACE_UI_CANARY_UIDS,
@@ -32,6 +32,8 @@ import {
   PROJECTS_CANARY_UIDS,
   APPROVAL_WORKFLOW_ENABLED,
   APPROVAL_WORKFLOW_CANARY_UIDS,
+  TEAM_WORKSPACES_ENABLED,
+  TEAM_WORKSPACES_CANARY_UIDS,
 } from "@/lib/env";
 
 /**
@@ -71,24 +73,31 @@ function projectsUiEnabledFor(uid: string): boolean {
  * Mirrors `workspaceUiEnabledFor()`/`projectsUiEnabledFor()`'s own
  * established pattern (a nav-visibility signal derived from the SAME
  * rollout/admission machinery every Phase 9 route already uses, never a
- * new client-side authorization system), but unlike those two — which are
- * pure and synchronous — this one requires the same bounded reads
- * `/workspace/reviews/page.tsx` itself performs (Team Workspace
- * discovery + access/capability check), since Approval Workflow
- * admission alone doesn't say whether this uid can actually reach a Team
- * Workspace review surface. `resolveApprovalWorkflowAdmission()` is
- * checked FIRST and is pure/zero-I/O, so the non-canary majority of
- * requests never reach the Firestore reads below — mirroring the
+ * new client-side authorization system).
+ *
+ * Phase 9C.1-R1C: this is now purely an EXISTENCE signal — "does this uid
+ * have Approval Workflow admission, Team Workspace admission, and at
+ * least one active Team Workspace membership" — never a per-Workspace
+ * capability check, and never a Workspace selection. The removed
+ * predecessor called `resolveTeamRunWorkspaceAccess()` here to check
+ * `research.read`/`reviews.read` for ONE discovered Workspace; that no
+ * longer makes sense once a uid may have several active memberships with
+ * potentially different roles/capabilities in each — this boolean cannot
+ * encode "for which one." `/workspace/reviews/page.tsx` remains the sole
+ * authority for whether a given Workspace is actually reachable; this
+ * flag only decides whether the nav link is worth showing at all.
+ * `resolveApprovalWorkflowAdmission()` and `resolveTeamWorkspacesMode()`
+ * are both pure/zero-I/O and checked first, so the non-canary majority of
+ * requests never reach the bounded Firestore scan below — mirroring the
  * "cheapest gate first" convention used by every other Phase 9 route.
  */
 async function workspaceReviewsUiEnabledFor(uid: string): Promise<boolean> {
   const admission = resolveApprovalWorkflowAdmission({ uid, globalEnabled: APPROVAL_WORKFLOW_ENABLED, canaryUidsRaw: APPROVAL_WORKFLOW_CANARY_UIDS });
   if (!admission.admitted) return false;
-  const workspaceResult = await resolveViewerTeamWorkspaceId(uid);
-  if (workspaceResult.status !== "found") return false;
-  const access = await resolveTeamRunWorkspaceAccess({ uid, workspaceId: workspaceResult.workspaceId });
-  if (!access.granted) return false;
-  return access.capabilities.includes("research.read") && access.capabilities.includes("reviews.read");
+  const teamRollout = resolveTeamWorkspacesMode({ uid, globalEnabled: TEAM_WORKSPACES_ENABLED, canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS });
+  if (!teamRollout.enabled) return false;
+  const selection = await resolveViewerTeamWorkspaceSelection(uid);
+  return selection.kind === "single" || selection.kind === "multiple";
 }
 
 function clientGovernanceRole(

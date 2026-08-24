@@ -76,28 +76,33 @@ describe("parseQueueSearchParams", () => {
 });
 
 describe("buildQueueHref", () => {
-  it("always sets both view and project explicitly — never a partial URL", () => {
-    const href = buildQueueHref("/workspace/reviews", "needs_review", "proj-1");
-    expect(href).toBe("/workspace/reviews?view=needs_review&project=proj-1");
+  it("always sets view, project, AND workspace explicitly — never a partial URL", () => {
+    const href = buildQueueHref("/workspace/reviews", "ws-1", "needs_review", "proj-1");
+    expect(href).toBe("/workspace/reviews?workspace=ws-1&view=needs_review&project=proj-1");
   });
 
   it("Unfiled filter serializes to project=unfiled", () => {
-    const href = buildQueueHref("/workspace/reviews", "assigned_to_me", null);
+    const href = buildQueueHref("/workspace/reviews", "ws-1", "assigned_to_me", null);
     expect(href).toContain("project=unfiled");
   });
 
   it("all-Projects filter serializes to project=all, never an absent param a stale cursor could misinterpret", () => {
-    const href = buildQueueHref("/workspace/reviews", "assigned_to_me", undefined);
+    const href = buildQueueHref("/workspace/reviews", "ws-1", "assigned_to_me", undefined);
     expect(href).toContain("project=all");
   });
 
   it("round-trips through parseQueueSearchParams exactly for every view", () => {
     for (const view of ["assigned_to_me", "needs_review", "changes_requested", "overdue", "recently_approved"] as const) {
-      const href = buildQueueHref("/workspace/reviews", view, "proj-x");
+      const href = buildQueueHref("/workspace/reviews", "ws-1", view, "proj-x");
       const qs = href.split("?")[1];
       const parsed = parseQueueSearchParams(new URLSearchParams(qs));
       expect(parsed).toEqual({ view, projectFilter: "proj-x" });
     }
+  });
+
+  it("Phase 9C.1-R1C: always preserves the current Workspace, so a filter change can never silently drop a multi-Workspace uid back into ambiguous/chooser territory", () => {
+    const href = buildQueueHref("/workspace/reviews", "ws-specific-42", "overdue", "all");
+    expect(href).toContain("workspace=ws-specific-42");
   });
 });
 
@@ -157,25 +162,28 @@ beforeEach(() => {
   mockedUseSearchParams.mockReturnValue(new URLSearchParams(""));
 });
 
+const SINGLE_WS_PROPS = { workspaceId: "ws-1", workspaceName: "Acme Research", hasMultipleWorkspaces: false };
+const MULTI_WS_PROPS = { workspaceId: "ws-1", workspaceName: "Acme Research", hasMultipleWorkspaces: true };
+
 describe("WorkspaceReviewQueueShell — initial render", () => {
   it("renders the Reviews heading", () => {
-    const html = renderToStaticMarkup(createElement(WorkspaceReviewQueueShell, { workspaceId: "ws-1" }));
+    const html = renderToStaticMarkup(createElement(WorkspaceReviewQueueShell, SINGLE_WS_PROPS));
     expect(html).toContain("Reviews");
   });
 
   it("shows a loading indicator before the fetch resolves, never 'No reviews' prematurely", () => {
-    const html = renderToStaticMarkup(createElement(WorkspaceReviewQueueShell, { workspaceId: "ws-1" }));
+    const html = renderToStaticMarkup(createElement(WorkspaceReviewQueueShell, SINGLE_WS_PROPS));
     expect(html).toContain("Loading reviews");
     expect(html).not.toContain("Nothing assigned to you");
   });
 
   it("defaults to the 'Assigned to me' view label when no URL param is present", () => {
-    const html = renderToStaticMarkup(createElement(WorkspaceReviewQueueShell, { workspaceId: "ws-1" }));
+    const html = renderToStaticMarkup(createElement(WorkspaceReviewQueueShell, SINGLE_WS_PROPS));
     expect(html).toContain("Assigned to me");
   });
 
   it("renders all five view options, with accessible pressed-state semantics (aria-pressed), never color-only", () => {
-    const html = renderToStaticMarkup(createElement(WorkspaceReviewQueueShell, { workspaceId: "ws-1" }));
+    const html = renderToStaticMarkup(createElement(WorkspaceReviewQueueShell, SINGLE_WS_PROPS));
     for (const label of ["Assigned to me", "Needs review", "Changes requested", "Overdue", "Recently approved"]) {
       expect(html).toContain(label);
     }
@@ -183,15 +191,33 @@ describe("WorkspaceReviewQueueShell — initial render", () => {
   });
 
   it("Project filter is a labeled <select>, not a bare placeholder-only control", () => {
-    const html = renderToStaticMarkup(createElement(WorkspaceReviewQueueShell, { workspaceId: "ws-1" }));
+    const html = renderToStaticMarkup(createElement(WorkspaceReviewQueueShell, SINGLE_WS_PROPS));
     expect(html).toMatch(/<label[^>]*>[\s\S]*Project[\s\S]*<select/);
     expect(html).toContain("All projects");
     expect(html).toContain("Unfiled");
   });
 
   it("no Load more button appears before any page has loaded", () => {
-    const html = renderToStaticMarkup(createElement(WorkspaceReviewQueueShell, { workspaceId: "ws-1" }));
+    const html = renderToStaticMarkup(createElement(WorkspaceReviewQueueShell, SINGLE_WS_PROPS));
     expect(html).not.toContain("Load more");
+  });
+});
+
+describe("WorkspaceReviewQueueShell — Phase 9C.1-R1C: current-Workspace indicator", () => {
+  it("always displays the current Workspace's name near the heading", () => {
+    const html = renderToStaticMarkup(createElement(WorkspaceReviewQueueShell, SINGLE_WS_PROPS));
+    expect(html).toContain("Acme Research");
+  });
+
+  it("single Workspace -> no 'Switch Workspace' link (nothing to switch to)", () => {
+    const html = renderToStaticMarkup(createElement(WorkspaceReviewQueueShell, SINGLE_WS_PROPS));
+    expect(html).not.toContain("Switch Workspace");
+  });
+
+  it("multiple Workspaces -> shows a 'Switch Workspace' link back to the bare chooser route", () => {
+    const html = renderToStaticMarkup(createElement(WorkspaceReviewQueueShell, MULTI_WS_PROPS));
+    expect(html).toContain("Switch Workspace");
+    expect(html).toMatch(/href="\/workspace\/reviews"/);
   });
 });
 

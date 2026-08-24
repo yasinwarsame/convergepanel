@@ -40,10 +40,16 @@ describe("ReviewQueueRow — run label and navigation", () => {
     expect(html).not.toMatch(/>run-secret-id</);
   });
 
-  it("navigates to /reviews/{runId} via a real link, with a generic 'View' action label", () => {
+  it("Phase 9C.1-R1C: navigates to the Workspace-native /workspace/reviews/{runId} route, via a real link, with a generic 'View' action label", () => {
     const html = renderRow(makeRow({ runId: "run-42" }));
-    expect(html).toMatch(/href="\/reviews\/run-42"/);
+    expect(html).toMatch(/href="\/workspace\/reviews\/run-42"/);
     expect(html).toContain(">View<");
+  });
+
+  it("Phase 9C.1-R1C: never navigates to the Personal review surface (/reviews/{runId}) or the legacy Team surface (/team/reviews/{runId}) — both reject/misrepresent Workspace-bound runs (R1-confirmed)", () => {
+    const html = renderRow(makeRow({ runId: "run-42" }));
+    expect(html).not.toMatch(/href="\/reviews\/run-42"/);
+    expect(html).not.toMatch(/href="\/team\/reviews\/run-42"/);
   });
 
   it("a long runLabel renders without crashing (truncation handled visually, not by hard string-slicing)", () => {

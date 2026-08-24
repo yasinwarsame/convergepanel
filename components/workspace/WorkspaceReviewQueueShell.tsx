@@ -12,13 +12,16 @@
  * `workspaceId` is a prop supplied by the server-gated page
  * (`app/workspace/reviews/page.tsx`) — never re-derived, hardcoded, or
  * read from a Project/assignment/queue row on the client (Phase 9C.1
- * §14). URL search params (`view`, `project`) are the single source of
- * truth for filter state — never held only in component memory — so
- * back/forward/refresh/share-link all reproduce the exact same query.
+ * §14). URL search params (`view`, `project`, and — Phase 9C.1-R1C —
+ * `workspace`) are the single source of truth for filter state — never
+ * held only in component memory — so back/forward/refresh/share-link all
+ * reproduce the exact same query, including which Workspace, for a uid
+ * with more than one active Team Workspace membership.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { useAuth } from "@/components/AuthProvider";
 import {
   fetchWorkspaceReviewQueue,
@@ -45,9 +48,17 @@ export function parseQueueSearchParams(searchParams: URLSearchParams): { view: R
   };
 }
 
-/** Pure — the URL a filter-change navigates to. Always sets both `view` and `project` explicitly (never partial), so a changed filter can never accidentally inherit a stale value from a param it didn't touch. */
-export function buildQueueHref(pathname: string, view: ReviewQueueView, projectFilter: ReviewQueueProjectFilter): string {
+/**
+ * Pure — the URL a filter-change navigates to. Always sets `view`,
+ * `project`, AND `workspace` explicitly (never partial), so a changed
+ * filter can never accidentally inherit a stale value from a param it
+ * didn't touch — and, critically (Phase 9C.1-R1C), a view/Project change
+ * for a multi-Workspace uid can never accidentally drop the currently
+ * selected Workspace back into ambiguous/ chooser territory.
+ */
+export function buildQueueHref(pathname: string, workspaceId: string, view: ReviewQueueView, projectFilter: ReviewQueueProjectFilter): string {
   const params = new URLSearchParams();
+  params.set("workspace", workspaceId);
   params.set("view", view);
   params.set("project", projectFilterToParamValue(projectFilter));
   return `${pathname}?${params.toString()}`;
@@ -66,7 +77,7 @@ export function mergeUniqueQueueRows(existing: WorkspaceReviewQueueRow[], incomi
   return merged;
 }
 
-export default function WorkspaceReviewQueueShell({ workspaceId }: { workspaceId: string }) {
+export default function WorkspaceReviewQueueShell({ workspaceId, workspaceName, hasMultipleWorkspaces }: { workspaceId: string; workspaceName: string; hasMultipleWorkspaces: boolean }) {
   const { user, authReady } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
@@ -154,11 +165,11 @@ export default function WorkspaceReviewQueueShell({ workspaceId }: { workspaceId
   }, [cursor, loadingMore, workspaceId, user, authReady, view, projectFilter]);
 
   const handleViewChange = (nextView: ReviewQueueView) => {
-    router.push(buildQueueHref(pathname, nextView, projectFilter));
+    router.push(buildQueueHref(pathname, workspaceId, nextView, projectFilter));
   };
 
   const handleProjectChange = (nextProjectParam: string) => {
-    router.push(buildQueueHref(pathname, view, parseProjectFilterParam(nextProjectParam)));
+    router.push(buildQueueHref(pathname, workspaceId, view, parseProjectFilterParam(nextProjectParam)));
   };
 
   const emptyCopy = getReviewQueueEmptyStateCopy(view);
@@ -168,6 +179,14 @@ export default function WorkspaceReviewQueueShell({ workspaceId }: { workspaceId
       <div className="mb-6">
         <h1 className="text-2xl font-semibold text-cp-text">Reviews</h1>
         <p className="mt-1 text-sm text-cp-muted">Review work assigned to you and track Workspace review status.</p>
+        <div className="mt-2 flex items-center gap-2 text-sm">
+          <span className="font-medium text-cp-text">{workspaceName}</span>
+          {hasMultipleWorkspaces && (
+            <Link href="/workspace/reviews" className="text-cp-accent underline-offset-2 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent">
+              Switch Workspace
+            </Link>
+          )}
+        </div>
       </div>
 
       <div className="mb-4 flex flex-wrap items-center gap-3">

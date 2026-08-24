@@ -4,6 +4,10 @@
  * (already independently tested) — this suite covers request parsing,
  * auth, and status-code mapping only. No feature-flag/disabled scenario
  * exists here — Phase 8B.1 removed `TEAM_WORKSPACES_ENABLED` entirely.
+ *
+ * Phase 9C.1-R1C adds `GET /api/workspaces` — the bounded, paginated
+ * "Team Workspaces I actively belong to" discovery/selection list backing
+ * the Reviews multi-Workspace chooser.
  */
 
 const mockedResolveRequestIdentity = jest.fn();
@@ -20,13 +24,29 @@ jest.mock("@/lib/firestore/workspaceMemberships", () => ({
   createTeamWorkspace: (...args: unknown[]) => mockedCreateTeamWorkspace(...args),
 }));
 
+let teamRolloutEnabled = true;
+const mockedResolveTeamWorkspacesMode = jest.fn(() => ({ enabled: teamRolloutEnabled, source: teamRolloutEnabled ? "global" : "off", canaryConfigInvalid: false }));
+jest.mock("@/lib/workspaces/teamWorkspacesRollout", () => ({
+  resolveTeamWorkspacesMode: (...args: unknown[]) => mockedResolveTeamWorkspacesMode(...args),
+}));
+
+const mockedListViewerTeamWorkspaces = jest.fn();
+jest.mock("@/lib/workspaces/listViewerTeamWorkspaces", () => ({
+  ...jest.requireActual("@/lib/workspaces/listViewerTeamWorkspaces"),
+  listViewerTeamWorkspaces: (...args: unknown[]) => mockedListViewerTeamWorkspaces(...args),
+}));
+
 import { NextRequest } from "next/server";
-import { POST } from "@/app/api/workspaces/route";
+import { GET, POST } from "@/app/api/workspaces/route";
 
 const UID = "uid-1";
 
 function buildRequest(body?: unknown): NextRequest {
   return new NextRequest("http://localhost/api/workspaces", { method: "POST", ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
+}
+
+function buildGetRequest(query = ""): NextRequest {
+  return new NextRequest(`http://localhost/api/workspaces${query}`, { method: "GET" });
 }
 
 async function callRoute(body?: unknown) {
@@ -35,8 +55,15 @@ async function callRoute(body?: unknown) {
   return { res, json };
 }
 
+async function callGet(query = "") {
+  const res = await GET(buildGetRequest(query));
+  const json = await res.json();
+  return { res, json };
+}
+
 beforeEach(() => {
   jest.clearAllMocks();
+  teamRolloutEnabled = true;
   mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: UID, source: "session_cookie" });
 });
 
@@ -98,4 +125,68 @@ it("503s when team_workspaces_disabled (rollout gate off)", async () => {
   const { res, json } = await callRoute({ name: "Acme" });
   expect(res.status).toBe(503);
   expect(json.errorCode).toBe("team_workspaces_disabled");
+});
+
+describe("GET /api/workspaces — Phase 9C.1-R1C list endpoint", () => {
+  it("401s when unauthenticated", async () => {
+    mockedResolveRequestIdentity.mockResolvedValue({ status: "unauthenticated", reason: "missing_credentials" });
+    const { res } = await callGet();
+    expect(res.status).toBe(401);
+    expect(mockedListViewerTeamWorkspaces).not.toHaveBeenCalled();
+  });
+
+  it("503s when Team Workspaces rollout is off — never reaches Firestore", async () => {
+    teamRolloutEnabled = false;
+    const { res, json } = await callGet();
+    expect(res.status).toBe(503);
+    expect(json.errorCode).toBe("team_workspaces_disabled");
+    expect(mockedListViewerTeamWorkspaces).not.toHaveBeenCalled();
+  });
+
+  it("200s and returns items/hasMore/nextCursor on success", async () => {
+    mockedListViewerTeamWorkspaces.mockResolvedValue({ status: "ok", items: [{ workspaceId: "ws-1", name: "Acme" }], hasMore: false, nextCursor: null });
+    const { res, json } = await callGet();
+    expect(res.status).toBe(200);
+    expect(json.ok).toBe(true);
+    expect(json.items).toEqual([{ workspaceId: "ws-1", name: "Acme" }]);
+    expect(json.hasMore).toBe(false);
+    expect(json.nextCursor).toBeNull();
+  });
+
+  it("passes only the authenticated uid — never a client-supplied uid — to listViewerTeamWorkspaces", async () => {
+    mockedListViewerTeamWorkspaces.mockResolvedValue({ status: "ok", items: [], hasMore: false, nextCursor: null });
+    await callGet();
+    expect(mockedListViewerTeamWorkspaces.mock.calls[0][0]).toMatchObject({ uid: UID });
+  });
+
+  it("forwards a supplied cursor verbatim", async () => {
+    mockedListViewerTeamWorkspaces.mockResolvedValue({ status: "ok", items: [], hasMore: false, nextCursor: null });
+    await callGet("?cursor=wm_abc123");
+    expect(mockedListViewerTeamWorkspaces.mock.calls[0][0]).toMatchObject({ cursor: "wm_abc123" });
+  });
+
+  it("clamps an oversized limit to the max page size", async () => {
+    mockedListViewerTeamWorkspaces.mockResolvedValue({ status: "ok", items: [], hasMore: false, nextCursor: null });
+    await callGet("?limit=99999");
+    expect(mockedListViewerTeamWorkspaces.mock.calls[0][0].limit).toBeLessThanOrEqual(50);
+  });
+
+  it("500s when the list lookup fails", async () => {
+    mockedListViewerTeamWorkspaces.mockResolvedValue({ status: "lookup_failed" });
+    const { res } = await callGet();
+    expect(res.status).toBe(500);
+  });
+
+  it("response never exposes role, capability arrays, owner uid, or member lists — only workspaceId/name", async () => {
+    mockedListViewerTeamWorkspaces.mockResolvedValue({
+      status: "ok",
+      items: [{ workspaceId: "ws-1", name: "Acme" } as any],
+      hasMore: false,
+      nextCursor: null,
+    });
+    const { json } = await callGet();
+    for (const item of json.items) {
+      expect(Object.keys(item).sort()).toEqual(["name", "workspaceId"]);
+    }
+  });
 });

@@ -30,7 +30,14 @@ export default function ReviewQueueRow({ row, projectNameById, canManageReviews 
   const projectLabel = getProjectLabel(row.projectId, projectNameById);
   const dueLabel = formatDueDate(row.assignment.dueAt);
   const updatedLabel = formatAbsoluteDate(row.reviewedAt) ?? formatAbsoluteDate(row.createdAt);
-  const detailHref = `/reviews/${encodeURIComponent(row.runId)}`;
+  // Phase 9C.1-R1C — corrected destination. `/reviews/{runId}` is the
+  // Personal review surface and rejects every Workspace viewer role
+  // (confirmed by independent review); `/team/reviews/{runId}` is the
+  // separate legacy Team namespace. `/workspace/reviews/{runId}` is the
+  // new, permanent, Workspace-native canonical detail route — it sources
+  // its own Workspace authority from `runs/{runId}.workspaceId`, so no
+  // `?workspace=` param is needed here even for a multi-Workspace uid.
+  const detailHref = `/workspace/reviews/${encodeURIComponent(row.runId)}`;
 
   const assignmentToneClass = assignmentPresentation.tone === "warning" ? "text-cp-orange" : assignmentPresentation.tone === "positive" ? "text-cp-text" : "text-cp-muted";
 
