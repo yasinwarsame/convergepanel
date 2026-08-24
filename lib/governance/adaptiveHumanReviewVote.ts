@@ -54,7 +54,8 @@ export type AdaptiveHumanReviewVoteV1 = {
   schemaVersion: 1;
   kind: "adaptive_human_review_vote";
 
-  teamId: string;
+  /** Phase 9B.5.2 — `null` for a Workspace-bound panel's vote, mirroring `AdaptiveHumanReviewPanelV1.teamId`'s own `string | null` widening. */
+  teamId: string | null;
   runId: string;
 
   panelRevision: number;
@@ -80,7 +81,7 @@ export type AdaptiveHumanReviewVoteV1 = {
  * anything.
  */
 export function buildAdaptiveHumanReviewVote(args: {
-  teamId: string;
+  teamId: string | null;
   runId: string;
   panelRevision: number;
   reviewerUserId: string;
@@ -233,7 +234,7 @@ export function parseAdaptiveHumanReviewVote(
     return raw.schemaVersion === undefined ? { status: "malformed" } : { status: "unsupported_version" };
   }
   if (raw.kind !== "adaptive_human_review_vote") return { status: "malformed" };
-  if (!isNonEmptyString(raw.teamId)) return { status: "malformed" };
+  if (raw.teamId !== null && !isNonEmptyString(raw.teamId)) return { status: "malformed" };
   if (!isNonEmptyString(raw.runId)) return { status: "malformed" };
   if (context?.expectedTeamId && raw.teamId !== context.expectedTeamId) return { status: "malformed" };
   if (context?.expectedRunId && raw.runId !== context.expectedRunId) return { status: "malformed" };

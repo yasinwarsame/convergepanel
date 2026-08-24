@@ -204,6 +204,14 @@ describe("buildAdaptiveHumanReviewVote", () => {
     expect(vote.conditionsCount).toBe(3);
     expect(vote.commentPresent).toBe(false);
   });
+
+  it("Phase 9B.5.2 — teamId: null (Workspace-bound panel vote) produces a vote document with teamId: null, not coerced/omitted, and round-trips through the parser unchanged", () => {
+    const vote = buildAdaptiveHumanReviewVote({ teamId: null, runId: "run-1", panelRevision: 1, reviewerUserId: "reviewer-a", status: "approved", now: VALID_TIMESTAMP });
+    expect(vote.teamId).toBeNull();
+    const parsed = parseAdaptiveHumanReviewVote(vote);
+    expect(parsed.status).toBe("valid");
+    if (parsed.status === "valid") expect(parsed.vote.teamId).toBeNull();
+  });
 });
 
 describe("isSemanticallyEquivalentAdaptiveHumanReviewVote", () => {
@@ -271,6 +279,16 @@ describe("parseAdaptiveHumanReviewVote", () => {
 
   it("empty/missing teamId is malformed", () => {
     expect(parseAdaptiveHumanReviewVote(validVote({ teamId: "" }))).toEqual({ status: "malformed" });
+  });
+
+  it("Phase 9B.5.2 — teamId: null (Workspace-bound panel vote) parses as valid, distinct from empty/undefined; every existing legacy Team vote (non-null string teamId) continues to parse exactly as before", () => {
+    const nullResult = parseAdaptiveHumanReviewVote(validVote({ teamId: null }));
+    expect(nullResult.status).toBe("valid");
+    if (nullResult.status === "valid") expect(nullResult.vote.teamId).toBeNull();
+
+    const legacyResult = parseAdaptiveHumanReviewVote(validVote({ teamId: "team-1" }));
+    expect(legacyResult.status).toBe("valid");
+    if (legacyResult.status === "valid") expect(legacyResult.vote.teamId).toBe("team-1");
   });
 
   it("empty/missing runId is malformed", () => {

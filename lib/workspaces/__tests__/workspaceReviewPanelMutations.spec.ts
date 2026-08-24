@@ -1,0 +1,914 @@
+/**
+ * Approval Workflow, Phase 9B.5.2 — workspaceReviewPanelMutations.ts tests.
+ * In-memory Firestore transaction fake mirroring workspaceReviewMutations.spec.ts's
+ * own hardened, read-after-write-guarded, retry-capable fake exactly (Phase
+ * 9B.5.1-R1C's concurrency-hook precedent), extended with humanReviewVotes.
+ * The panel-specific best-effort post-commit writers (finalization/override
+ * history, governance events, admin audit) are MOCKED here — this suite
+ * verifies they are CALLED correctly, not that their own internals work.
+ */
+
+import { Timestamp } from "firebase-admin/firestore";
+
+type StoredDoc = Record<string, unknown>;
+const stores: Record<string, Map<string, StoredDoc>> = {
+  workspaces: new Map(),
+  workspaceMemberships: new Map(),
+  runs: new Map(),
+  humanReviewAssignment: new Map(),
+  humanReviewPanel: new Map(),
+  humanReviewVotes: new Map(), // keyed by `${runId}::${voteId}` since votes are per-run-per-revision-per-reviewer
+};
+
+function resetStores() {
+  for (const store of Object.values(stores)) store.clear();
+}
+
+function asPersisted(data: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(data)) {
+    if (value !== undefined) result[key] = value;
+  }
+  return result;
+}
+
+function applyDottedFieldUpdate(existing: Record<string, unknown>, data: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = { ...existing };
+  for (const [path, value] of Object.entries(data)) {
+    const segments = path.split(".");
+    let cursor: Record<string, unknown> = result;
+    for (let i = 0; i < segments.length - 1; i++) {
+      const seg = segments[i];
+      const current = cursor[seg];
+      cursor[seg] = current && typeof current === "object" && !Array.isArray(current) ? { ...(current as Record<string, unknown>) } : {};
+      cursor = cursor[seg] as Record<string, unknown>;
+    }
+    cursor[segments[segments.length - 1]] = value;
+  }
+  return result;
+}
+
+// `humanReviewVotes` is keyed globally by parentDocId (runId) + subdoc id — mirror via composite key.
+function subKey(collection: string, parentId: string, subId: string): string {
+  return collection === "humanReviewVotes" || collection === "humanReviewAssignment" || collection === "humanReviewPanel" ? `${parentId}::${subId}` : subId;
+}
+
+function makeSubDocRef(subCollectionName: string, parentDocId: string, subDocId: string) {
+  const key = subKey(subCollectionName, parentDocId, subDocId);
+  return {
+    __collection: subCollectionName,
+    __id: key,
+    get: async () => {
+      const data = stores[subCollectionName].get(key);
+      return { exists: data !== undefined, data: () => data, id: subDocId };
+    },
+  };
+}
+
+function makeDocRef(collectionName: string, docId: string) {
+  return {
+    __collection: collectionName,
+    __id: docId,
+    collection: (subCollectionName: string) => ({
+      doc: (subDocId: string) => makeSubDocRef(subCollectionName, docId, subDocId),
+    }),
+    get: async () => {
+      const data = stores[collectionName].get(docId);
+      return { exists: data !== undefined, data: () => data, id: docId };
+    },
+  };
+}
+
+let concurrentMutationHook: ((ref: { __collection: string; __id: string }) => void) | null = null;
+const firestoreUnavailableFlag = { value: false };
+const transactionShouldThrow = { value: false };
+const transactionAttemptCount = { value: 0 };
+const MAX_TRANSACTION_ATTEMPTS = 5;
+
+const mockAdminDb: any = {
+  collection: (name: string) => ({
+    doc: (docId: string) => makeDocRef(name, docId),
+  }),
+  runTransaction: jest.fn().mockImplementation(async (fn: (txn: any) => Promise<any>) => {
+    if (transactionShouldThrow.value) throw new Error("simulated transaction failure");
+    for (let attempt = 0; attempt < MAX_TRANSACTION_ATTEMPTS; attempt++) {
+      transactionAttemptCount.value++;
+      const pendingWrites: Array<() => void> = [];
+      const readSnapshots = new Map<string, unknown>();
+      let hasWritten = false;
+      const txn = {
+        get: async (ref: { __collection: string; __id: string }) => {
+          if (hasWritten) throw new Error("Firestore transactions require all reads to be executed before all writes.");
+          const store = stores[ref.__collection];
+          const data = store.get(ref.__id);
+          readSnapshots.set(`${ref.__collection}/${ref.__id}`, data);
+          if (concurrentMutationHook) concurrentMutationHook(ref);
+          return { exists: data !== undefined, data: () => data, id: ref.__id };
+        },
+        update: (ref: { __collection: string; __id: string }, data: Record<string, unknown>) => {
+          hasWritten = true;
+          pendingWrites.push(() => {
+            const store = stores[ref.__collection];
+            const existing = store.get(ref.__id) ?? {};
+            store.set(ref.__id, applyDottedFieldUpdate(existing, data));
+          });
+        },
+        set: (ref: { __collection: string; __id: string }, data: Record<string, unknown>) => {
+          hasWritten = true;
+          pendingWrites.push(() => stores[ref.__collection].set(ref.__id, data));
+        },
+      };
+      const result = await fn(txn);
+      const conflicted = [...readSnapshots.entries()].some(([key, snapshot]) => {
+        const [collection, id] = key.split("/");
+        return stores[collection].get(id) !== snapshot;
+      });
+      if (conflicted) continue;
+      for (const applyWrite of pendingWrites) applyWrite();
+      return result;
+    }
+    throw new Error("simulated transaction retry exhaustion");
+  }),
+  get: undefined,
+};
+
+jest.mock("@/lib/firebase/admin", () => ({
+  get adminDb() {
+    return firestoreUnavailableFlag.value ? null : mockAdminDb;
+  },
+}));
+
+let teamWorkspacesEnabled = true;
+let teamWorkspacesCanaryUids: string | undefined = undefined;
+jest.mock("@/lib/env", () => ({
+  get TEAM_WORKSPACES_ENABLED() {
+    return teamWorkspacesEnabled;
+  },
+  get TEAM_WORKSPACES_CANARY_UIDS() {
+    return teamWorkspacesCanaryUids;
+  },
+}));
+
+jest.mock("@/lib/logger", () => ({ logger: { warn: jest.fn(), info: jest.fn(), error: jest.fn(), debug: jest.fn() } }));
+
+const mockedCreateAdaptiveHumanReviewHistory = jest.fn().mockResolvedValue({ status: "recorded" });
+const mockedCreateAdaptivePanelFinalizationHistory = jest.fn().mockResolvedValue({ status: "recorded" });
+const mockedCreateAdaptivePanelOverrideHistory = jest.fn().mockResolvedValue({ status: "recorded" });
+const mockedWriteAdaptivePanelFinalizationGovernanceEvent = jest.fn().mockResolvedValue({ status: "recorded" });
+const mockedWriteAdaptivePanelOverrideGovernanceEvent = jest.fn().mockResolvedValue({ status: "recorded" });
+// The cross-service mutual-exclusion tests below also call
+// `putWorkspaceReviewAssignment` (Phase 9B.5.1) directly, which imports its
+// OWN best-effort writers from this same module — mocked here as harmless
+// no-ops purely so that import resolves; their own behavior is already
+// exhaustively covered by workspaceReviewMutations.spec.ts.
+const mockedCreateAdaptiveHumanReviewAssignmentHistory = jest.fn().mockResolvedValue({ status: "recorded" });
+const mockedWriteAdaptiveHumanReviewEvent = jest.fn().mockResolvedValue({ written: true });
+jest.mock("@/lib/firestore/runs", () => ({
+  createAdaptiveHumanReviewHistory: (...args: unknown[]) => mockedCreateAdaptiveHumanReviewHistory(...args),
+  createAdaptivePanelFinalizationHistory: (...args: unknown[]) => mockedCreateAdaptivePanelFinalizationHistory(...args),
+  createAdaptivePanelOverrideHistory: (...args: unknown[]) => mockedCreateAdaptivePanelOverrideHistory(...args),
+  writeAdaptivePanelFinalizationGovernanceEvent: (...args: unknown[]) => mockedWriteAdaptivePanelFinalizationGovernanceEvent(...args),
+  writeAdaptivePanelOverrideGovernanceEvent: (...args: unknown[]) => mockedWriteAdaptivePanelOverrideGovernanceEvent(...args),
+  createAdaptiveHumanReviewAssignmentHistory: (...args: unknown[]) => mockedCreateAdaptiveHumanReviewAssignmentHistory(...args),
+  writeAdaptiveHumanReviewEvent: (...args: unknown[]) => mockedWriteAdaptiveHumanReviewEvent(...args),
+}));
+
+const mockedWriteAdaptivePanelFinalizationAdminAuditEvent = jest.fn().mockResolvedValue({ status: "recorded" });
+const mockedWriteAdaptivePanelOverrideAdminAuditEvent = jest.fn().mockResolvedValue({ status: "recorded" });
+const mockedWriteAdaptiveAdminAuditEvent = jest.fn().mockResolvedValue({ status: "recorded" });
+jest.mock("@/lib/governance/auditLog", () => ({
+  writeAdaptivePanelFinalizationAdminAuditEvent: (...args: unknown[]) => mockedWriteAdaptivePanelFinalizationAdminAuditEvent(...args),
+  writeAdaptivePanelOverrideAdminAuditEvent: (...args: unknown[]) => mockedWriteAdaptivePanelOverrideAdminAuditEvent(...args),
+  writeAdaptiveAdminAuditEvent: (...args: unknown[]) => mockedWriteAdaptiveAdminAuditEvent(...args),
+}));
+
+// Phase 9B.5.2 — wraps the REAL capabilities module, letting specific tests
+// install a synthetic override (mirrors the 9B.5.1-R1C precedent) so the
+// "reviews.manage/reviews.override alone is NOT sufficient — research.read
+// is independently required" invariant can be locked in.
+const mockedRoleHasCapability = jest.fn();
+jest.mock("@/lib/workspaces/capabilities", () => {
+  const actual = jest.requireActual("@/lib/workspaces/capabilities");
+  return { ...actual, roleHasCapability: (...args: unknown[]) => mockedRoleHasCapability(...args) };
+});
+
+import { computeMembershipId } from "@/lib/workspaces/membershipId";
+import { buildAdaptiveHumanReviewVoteId } from "@/lib/governance/adaptiveHumanReviewVote";
+import {
+  getWorkspaceReviewPanel,
+  putWorkspaceReviewPanel,
+  deleteWorkspaceReviewPanel,
+  submitWorkspaceReviewPanelVote,
+  finalizeWorkspaceReviewPanel,
+  overrideWorkspaceReviewPanel,
+} from "@/lib/workspaces/workspaceReviewPanelMutations";
+import { putWorkspaceReviewAssignment } from "@/lib/workspaces/workspaceReviewMutations";
+
+const actualCapabilities = jest.requireActual("@/lib/workspaces/capabilities");
+
+const WS_ID = "ws-1";
+const OWNER_UID = "owner-1";
+const ADMIN_UID = "admin-1";
+const MEMBER_UID = "member-1";
+const REVIEWER_UID = "reviewer-1";
+const REVIEWER2_UID = "reviewer-2";
+const REVIEWER3_UID = "reviewer-3";
+const VIEWER_UID = "viewer-1";
+const CREATOR_UID = "creator-1";
+const RUN_ID = "run-1";
+const NOW = Timestamp.now();
+const GOVERNANCE_UPDATED_AT = "2026-08-01T00:00:00.000Z";
+const MUTATE_NOW = "2026-08-10T00:00:00.000Z";
+
+function seedWorkspace(overrides: Record<string, unknown> = {}) {
+  stores.workspaces.set(WS_ID, asPersisted({ schemaVersion: 1, id: WS_ID, type: "team", name: "Acme", ownerUserId: OWNER_UID, createdByUserId: OWNER_UID, createdAt: NOW, updatedAt: NOW, ...overrides }));
+}
+
+function seedMembership(uid: string, role: string, workspaceId: string = WS_ID, overrides: Record<string, unknown> = {}) {
+  const id = computeMembershipId(workspaceId, uid);
+  const status = (overrides.status as string | undefined) ?? "active";
+  stores.workspaceMemberships.set(
+    id,
+    asPersisted({ schemaVersion: 1, id, workspaceId, uid, role, status: "active", createdAt: NOW, updatedAt: NOW, invitedByUserId: null, removedAt: status === "removed" ? NOW : null, removedByUserId: status === "removed" ? OWNER_UID : null, ...overrides })
+  );
+}
+
+function validGovernanceRecord(overrides: Record<string, unknown> = {}) {
+  return asPersisted({
+    version: 1,
+    schemaId: "decision_support",
+    answerShape: "decision_support_view",
+    adaptiveOutputVersion: 1,
+    humanReview: { status: "unreviewed" },
+    decisionReceipt: { conclusion: "x", basis: [], assumptions: [], uncertainties: [], limitations: [], sources: [], sourceBacked: true, humanReviewNeeded: false },
+    createdAt: GOVERNANCE_UPDATED_AT,
+    updatedAt: GOVERNANCE_UPDATED_AT,
+    ...overrides,
+  });
+}
+
+function seedRun(overrides: Record<string, unknown> = {}) {
+  stores.runs.set(RUN_ID, asPersisted({ userId: CREATOR_UID, workspaceId: WS_ID, projectId: null, createdAt: NOW, governanceRecord: validGovernanceRecord(), ...overrides }));
+}
+
+function seedAssignment(overrides: Record<string, unknown> = {}) {
+  const key = `${RUN_ID}::current`;
+  stores.humanReviewAssignment.set(
+    key,
+    asPersisted({ schemaVersion: 1, teamId: null, runId: RUN_ID, assignedReviewerUserId: REVIEWER_UID, assignedAt: "2026-07-01T00:00:00.000Z", assignedByUserId: OWNER_UID, updatedAt: "2026-07-01T00:00:00.000Z", updatedByUserId: OWNER_UID, revision: 1, workspaceId: WS_ID, projectId: null, dueAt: null, ...overrides })
+  );
+}
+
+/** `requiredReviewerCount`/`quorum` are ALWAYS re-derived from the (possibly overridden) `reviewerUserIds`, never independently hardcoded — a test overriding `reviewerUserIds` without also updating these would otherwise produce an internally-inconsistent, parser-rejected panel document. */
+function seedPanel(overrides: Record<string, unknown> = {}) {
+  const key = `${RUN_ID}::current`;
+  const reviewerUserIds = (overrides.reviewerUserIds as string[] | undefined) ?? [OWNER_UID, ADMIN_UID, REVIEWER_UID].sort();
+  const requiredReviewerCount = (overrides.requiredReviewerCount as number | undefined) ?? reviewerUserIds.length;
+  const quorum = (overrides.quorum as number | undefined) ?? Math.floor(requiredReviewerCount / 2) + 1;
+  const { reviewerUserIds: _r, requiredReviewerCount: _rc, quorum: _q, ...restOverrides } = overrides;
+  stores.humanReviewPanel.set(
+    key,
+    asPersisted({
+      schemaVersion: 1,
+      kind: "adaptive_review_panel",
+      teamId: null,
+      runId: RUN_ID,
+      mode: "majority_quorum",
+      reviewerUserIds,
+      requiredReviewerCount,
+      quorum,
+      status: "open",
+      revision: 1,
+      createdAt: "2026-08-01T00:00:00.000Z",
+      createdByUserId: OWNER_UID,
+      updatedAt: "2026-08-01T00:00:00.000Z",
+      updatedByUserId: OWNER_UID,
+      workspaceId: WS_ID,
+      projectId: null,
+      ...restOverrides,
+    })
+  );
+}
+
+/** `commentPresent`/`conditionsCount` are ALWAYS re-derived from the (possibly overridden) `comment`/`conditions`, and a default comment is supplied for `changes_requested`/`rejected` (which the shared validator requires one for) unless explicitly overridden — same "never let a derived field drift from its source field" discipline as `seedPanel` above. */
+function seedVote(reviewerUserId: string, revision: number, overrides: Record<string, unknown> = {}) {
+  const voteId = buildAdaptiveHumanReviewVoteId(revision, reviewerUserId);
+  const key = `${RUN_ID}::${voteId}`;
+  const status = (overrides.status as string | undefined) ?? "approved";
+  const needsComment = status === "changes_requested" || status === "rejected";
+  const comment = Object.prototype.hasOwnProperty.call(overrides, "comment") ? (overrides.comment as string | undefined) : needsComment ? "See notes." : undefined;
+  const conditions = overrides.conditions as string[] | undefined;
+  const commentPresent = Boolean(comment && comment.trim().length > 0);
+  const conditionsCount = conditions?.length ?? 0;
+  const { commentPresent: _cp, conditionsCount: _cc, comment: _c, ...restOverrides } = overrides;
+  stores.humanReviewVotes.set(
+    key,
+    asPersisted({ schemaVersion: 1, kind: "adaptive_human_review_vote", teamId: null, runId: RUN_ID, panelRevision: revision, reviewerUserId, status, comment, commentPresent, conditionsCount, submittedAt: "2026-08-02T00:00:00.000Z", ...restOverrides })
+  );
+}
+
+beforeEach(() => {
+  jest.clearAllMocks();
+  mockedCreateAdaptiveHumanReviewHistory.mockResolvedValue({ status: "recorded" });
+  mockedCreateAdaptivePanelFinalizationHistory.mockResolvedValue({ status: "recorded" });
+  mockedCreateAdaptivePanelOverrideHistory.mockResolvedValue({ status: "recorded" });
+  mockedWriteAdaptivePanelFinalizationGovernanceEvent.mockResolvedValue({ status: "recorded" });
+  mockedWriteAdaptivePanelOverrideGovernanceEvent.mockResolvedValue({ status: "recorded" });
+  mockedWriteAdaptivePanelFinalizationAdminAuditEvent.mockResolvedValue({ status: "recorded" });
+  mockedWriteAdaptivePanelOverrideAdminAuditEvent.mockResolvedValue({ status: "recorded" });
+  mockedCreateAdaptiveHumanReviewAssignmentHistory.mockResolvedValue({ status: "recorded" });
+  mockedWriteAdaptiveHumanReviewEvent.mockResolvedValue({ written: true });
+  mockedWriteAdaptiveAdminAuditEvent.mockResolvedValue({ status: "recorded" });
+  mockedRoleHasCapability.mockImplementation(actualCapabilities.roleHasCapability);
+  resetStores();
+  teamWorkspacesEnabled = true;
+  teamWorkspacesCanaryUids = undefined;
+  firestoreUnavailableFlag.value = false;
+  transactionShouldThrow.value = false;
+  transactionAttemptCount.value = 0;
+  concurrentMutationHook = null;
+  seedWorkspace();
+  seedMembership(OWNER_UID, "owner");
+  seedMembership(ADMIN_UID, "admin");
+  seedMembership(MEMBER_UID, "member");
+  seedMembership(REVIEWER_UID, "reviewer");
+  seedMembership(REVIEWER2_UID, "reviewer");
+  seedMembership(REVIEWER3_UID, "reviewer");
+  seedMembership(VIEWER_UID, "viewer");
+  seedMembership(CREATOR_UID, "member");
+  seedRun();
+});
+
+// ============================================
+// GET
+// ============================================
+
+describe("getWorkspaceReviewPanel", () => {
+  it("admitted, no panel: ok, null", async () => {
+    const result = await getWorkspaceReviewPanel({ workspaceId: WS_ID, runId: RUN_ID, approvalAdmitted: true });
+    expect(result).toEqual({ status: "ok", panel: null });
+  });
+
+  it("not admitted, no panel: not_admitted (concealed at route)", async () => {
+    const result = await getWorkspaceReviewPanel({ workspaceId: WS_ID, runId: RUN_ID, approvalAdmitted: false });
+    expect(result).toEqual({ status: "not_admitted" });
+  });
+
+  it("not admitted, existing open panel: drain-read allowed", async () => {
+    seedPanel({ status: "open" });
+    const result = await getWorkspaceReviewPanel({ workspaceId: WS_ID, runId: RUN_ID, approvalAdmitted: false });
+    expect(result.status).toBe("ok");
+    if (result.status === "ok") expect(result.panel?.status).toBe("open");
+  });
+
+  it("not admitted, existing finalized panel: drain-read allowed", async () => {
+    seedPanel({ status: "finalized", finalizedAt: "2026-08-05T00:00:00.000Z", updatedAt: "2026-08-05T00:00:00.000Z", finalizedByUserId: OWNER_UID, finalStatus: "approved", finalDecisionId: "panel_workspace_dec_abc", aggregationPolicyVersion: 1 });
+    const result = await getWorkspaceReviewPanel({ workspaceId: WS_ID, runId: RUN_ID, approvalAdmitted: false });
+    expect(result.status).toBe("ok");
+  });
+
+  it("open panel: voteSummary reflects submitted votes", async () => {
+    seedPanel({ status: "open", revision: 1 });
+    seedVote(OWNER_UID, 1, { status: "approved" });
+    seedVote(ADMIN_UID, 1, { status: "approved" });
+    const result = await getWorkspaceReviewPanel({ workspaceId: WS_ID, runId: RUN_ID, approvalAdmitted: true });
+    expect(result.status).toBe("ok");
+    if (result.status === "ok") {
+      expect(result.panel?.voteSummary).toEqual({ submittedCount: 2, aggregationState: "ready" });
+    }
+  });
+
+  it("wrong workspace -> run_not_found (concealed)", async () => {
+    const result = await getWorkspaceReviewPanel({ workspaceId: "other-ws", runId: RUN_ID, approvalAdmitted: true });
+    expect(result).toEqual({ status: "run_not_found" });
+  });
+});
+
+// ============================================
+// PUT (create / reconfigure)
+// ============================================
+
+function putCall(overrides: Partial<Parameters<typeof putWorkspaceReviewPanel>[0]> = {}) {
+  return putWorkspaceReviewPanel({ uid: OWNER_UID, workspaceId: WS_ID, runId: RUN_ID, reviewerUserIds: [OWNER_UID, ADMIN_UID], expectedRevision: 0, now: MUTATE_NOW, ...overrides });
+}
+
+describe("putWorkspaceReviewPanel — infra/rollout", () => {
+  it("Team Workspaces disabled -> denied, zero Firestore access", async () => {
+    teamWorkspacesEnabled = false;
+    const result = await putCall();
+    expect(result).toEqual({ ok: false, reason: "team_workspaces_disabled" });
+    expect(mockAdminDb.runTransaction).not.toHaveBeenCalled();
+  });
+});
+
+describe("putWorkspaceReviewPanel — authorization", () => {
+  it("Owner (reviews.manage + research.read): allowed", async () => {
+    const result = await putCall();
+    expect(result.ok).toBe(true);
+  });
+
+  it("Admin: allowed", async () => {
+    const result = await putCall({ uid: ADMIN_UID });
+    expect(result.ok).toBe(true);
+  });
+
+  it("Member (no reviews.manage): denied", async () => {
+    const result = await putCall({ uid: MEMBER_UID });
+    expect(result).toEqual({ ok: false, reason: "insufficient_capability" });
+  });
+
+  it("reviews.manage true but research.read false (synthetic capability split, Phase 9B.5.1-R1C pattern applied proactively): denied, zero write", async () => {
+    mockedRoleHasCapability.mockImplementation((role: string, capability: string) => {
+      if (role === "admin" && capability === "research.read") return false;
+      return actualCapabilities.roleHasCapability(role, capability);
+    });
+    const result = await putCall({ uid: ADMIN_UID });
+    expect(result).toEqual({ ok: false, reason: "insufficient_capability" });
+    expect(stores.humanReviewPanel.get(`${RUN_ID}::current`)).toBeUndefined();
+  });
+});
+
+describe("putWorkspaceReviewPanel — reviewer eligibility", () => {
+  it("all eligible (Owner/Admin/Member/Reviewer, not creator): PASS", async () => {
+    const result = await putCall({ reviewerUserIds: [OWNER_UID, ADMIN_UID, MEMBER_UID, REVIEWER_UID].sort() });
+    expect(result.ok).toBe(true);
+  });
+
+  it("Viewer target: denied", async () => {
+    const result = await putCall({ reviewerUserIds: [OWNER_UID, VIEWER_UID] });
+    expect(result).toEqual({ ok: false, reason: { kind: "target_not_eligible", reviewerUserId: VIEWER_UID, reason: "insufficient_capability" } });
+  });
+
+  it("removed member target: denied", async () => {
+    seedMembership(REVIEWER2_UID, "reviewer", WS_ID, { status: "removed" });
+    const result = await putCall({ reviewerUserIds: [OWNER_UID, REVIEWER2_UID] });
+    expect(result).toEqual({ ok: false, reason: { kind: "target_not_eligible", reviewerUserId: REVIEWER2_UID, reason: "removed" } });
+  });
+
+  it("creator target (self-review): denied", async () => {
+    const result = await putCall({ reviewerUserIds: [OWNER_UID, CREATOR_UID] });
+    expect(result).toEqual({ ok: false, reason: { kind: "target_not_eligible", reviewerUserId: CREATOR_UID, reason: "self_review" } });
+  });
+
+  it("cross-Workspace member target: denied", async () => {
+    stores.workspaceMemberships.delete(computeMembershipId(WS_ID, REVIEWER2_UID));
+    seedMembership(REVIEWER2_UID, "reviewer", "other-ws");
+    const result = await putCall({ reviewerUserIds: [OWNER_UID, REVIEWER2_UID] });
+    expect(result).toEqual({ ok: false, reason: { kind: "target_not_eligible", reviewerUserId: REVIEWER2_UID, reason: "not_found" } });
+  });
+});
+
+describe("putWorkspaceReviewPanel — OCC", () => {
+  it("stale revision -> stale_revision, no write", async () => {
+    seedPanel({ revision: 3, reviewerUserIds: [OWNER_UID, ADMIN_UID] });
+    const result = await putCall({ expectedRevision: 1 });
+    expect(result).toEqual({ ok: false, reason: "stale_revision" });
+    expect((stores.humanReviewPanel.get(`${RUN_ID}::current`) as any).revision).toBe(3);
+  });
+
+  it("reconfigure with correct revision: PASS, revision increments", async () => {
+    seedPanel({ revision: 1, reviewerUserIds: [OWNER_UID, ADMIN_UID] });
+    const result = await putCall({ expectedRevision: 1, reviewerUserIds: [OWNER_UID, ADMIN_UID, REVIEWER_UID].sort() });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.panel.revision).toBe(2);
+  });
+});
+
+describe("putWorkspaceReviewPanel — finalized/cancelled", () => {
+  it("finalized panel: DENY, never reopened", async () => {
+    seedPanel({ status: "finalized", revision: 2, finalizedAt: "2026-08-05T00:00:00.000Z", updatedAt: "2026-08-05T00:00:00.000Z", finalizedByUserId: OWNER_UID, finalStatus: "approved", finalDecisionId: "panel_workspace_dec_x", aggregationPolicyVersion: 1 });
+    const result = await putCall({ expectedRevision: 2 });
+    expect(result).toEqual({ ok: false, reason: "panel_finalized" });
+  });
+
+  it("cancelled panel: DENY, never reopened", async () => {
+    seedPanel({ status: "cancelled", revision: 2 });
+    const result = await putCall({ expectedRevision: 2 });
+    expect(result).toEqual({ ok: false, reason: "panel_finalized" });
+  });
+});
+
+describe("putWorkspaceReviewPanel — mutual exclusion with single-review assignment", () => {
+  it("active assignment exists: DENY panel creation", async () => {
+    seedAssignment({ assignedReviewerUserId: REVIEWER_UID });
+    const result = await putCall();
+    expect(result).toEqual({ ok: false, reason: "single_review_active" });
+    expect(stores.humanReviewPanel.get(`${RUN_ID}::current`)).toBeUndefined();
+  });
+
+  it("unassigned-but-existing assignment document (assignedReviewerUserId: null): does NOT block", async () => {
+    seedAssignment({ assignedReviewerUserId: null });
+    const result = await putCall();
+    expect(result.ok).toBe(true);
+  });
+
+  it("no assignment document at all: does NOT block", async () => {
+    const result = await putCall();
+    expect(result.ok).toBe(true);
+  });
+});
+
+describe("putWorkspaceReviewPanel — not_pending", () => {
+  it("terminal review status: DENY", async () => {
+    seedRun({ governanceRecord: validGovernanceRecord({ humanReview: { status: "approved", reviewedAt: GOVERNANCE_UPDATED_AT } }) });
+    const result = await putCall();
+    expect(result).toEqual({ ok: false, reason: "not_pending" });
+  });
+});
+
+describe("putWorkspaceReviewPanel — concurrency (real retry model, Phase 9B.5.1-R1C pattern)", () => {
+  it("an assignment becomes actively assigned after this transaction's own read but before commit: panel creation cannot commit around it", async () => {
+    let hookFired = false;
+    concurrentMutationHook = (ref) => {
+      if (!hookFired && ref.__collection === "humanReviewAssignment" && ref.__id === `${RUN_ID}::current`) {
+        hookFired = true;
+        seedAssignment({ assignedReviewerUserId: REVIEWER2_UID, revision: 1 });
+      }
+    };
+    const result = await putCall();
+    expect(result).toEqual({ ok: false, reason: "single_review_active" });
+    expect(transactionAttemptCount.value).toBe(2);
+    expect(stores.humanReviewPanel.get(`${RUN_ID}::current`)).toBeUndefined();
+  });
+});
+
+// ============================================
+// DELETE (cancel)
+// ============================================
+
+function deleteCall(overrides: Partial<Parameters<typeof deleteWorkspaceReviewPanel>[0]> = {}) {
+  return deleteWorkspaceReviewPanel({ uid: OWNER_UID, workspaceId: WS_ID, runId: RUN_ID, expectedRevision: 1, now: MUTATE_NOW, ...overrides });
+}
+
+describe("deleteWorkspaceReviewPanel", () => {
+  it("valid manager + correct revision: PASS, status cancelled, reviewer list preserved", async () => {
+    seedPanel({ revision: 1 });
+    const result = await deleteCall();
+    expect(result).toEqual({ ok: true });
+    const stored = stores.humanReviewPanel.get(`${RUN_ID}::current`) as any;
+    expect(stored.status).toBe("cancelled");
+    expect(stored.reviewerUserIds).toEqual([OWNER_UID, ADMIN_UID, REVIEWER_UID].sort());
+  });
+
+  it("Member without reviews.manage: DENY", async () => {
+    seedPanel({ revision: 1 });
+    expect(await deleteCall({ uid: MEMBER_UID })).toEqual({ ok: false, reason: "insufficient_capability" });
+  });
+
+  it("panel absent: DENY", async () => {
+    expect(await deleteCall()).toEqual({ ok: false, reason: "panel_absent" });
+  });
+
+  it("stale revision: DENY", async () => {
+    seedPanel({ revision: 5 });
+    expect(await deleteCall({ expectedRevision: 1 })).toEqual({ ok: false, reason: "stale_revision" });
+  });
+
+  it("finalized panel: DENY (never cancellable post-finalization)", async () => {
+    seedPanel({ status: "finalized", revision: 2, finalizedAt: "2026-08-05T00:00:00.000Z", updatedAt: "2026-08-05T00:00:00.000Z", finalizedByUserId: OWNER_UID, finalStatus: "approved", finalDecisionId: "panel_workspace_dec_x", aggregationPolicyVersion: 1 });
+    expect(await deleteCall({ expectedRevision: 2 })).toEqual({ ok: false, reason: "panel_finalized" });
+  });
+
+  it("already cancelled: DENY (panel_already_cancelled, not a silent no-op)", async () => {
+    seedPanel({ status: "cancelled", revision: 2 });
+    expect(await deleteCall({ expectedRevision: 2 })).toEqual({ ok: false, reason: "panel_already_cancelled" });
+  });
+});
+
+// ============================================
+// POST vote
+// ============================================
+
+function voteCall(overrides: Partial<Parameters<typeof submitWorkspaceReviewPanelVote>[0]> = {}) {
+  return submitWorkspaceReviewPanelVote({ uid: OWNER_UID, workspaceId: WS_ID, runId: RUN_ID, panelRevision: 1, status: "approved", now: MUTATE_NOW, ...overrides });
+}
+
+describe("submitWorkspaceReviewPanelVote", () => {
+  it("current panel reviewer with capabilities: PASS", async () => {
+    seedPanel({ revision: 1 });
+    const result = await voteCall();
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.submissionStatus).toBe("submitted");
+  });
+
+  it("idempotent identical retry: already_submitted, no duplicate write attempt semantics change", async () => {
+    seedPanel({ revision: 1 });
+    const first = await voteCall();
+    expect(first.ok).toBe(true);
+    const second = await voteCall();
+    expect(second.ok).toBe(true);
+    if (second.ok) expect(second.submissionStatus).toBe("already_submitted");
+  });
+
+  it("conflicting retry (different status): vote_conflict, never overwritten", async () => {
+    seedPanel({ revision: 1 });
+    await voteCall({ status: "approved" });
+    const second = await voteCall({ status: "rejected" });
+    expect(second).toEqual({ ok: false, reason: "vote_conflict" });
+  });
+
+  it("not a panel reviewer: DENY (not_reviewer)", async () => {
+    seedPanel({ revision: 1, reviewerUserIds: [OWNER_UID, ADMIN_UID].sort() });
+    const result = await voteCall({ uid: REVIEWER_UID });
+    expect(result).toEqual({ ok: false, reason: "not_reviewer" });
+  });
+
+  it("removed panel reviewer: DENY (stored panel list cannot resurrect permission — denied even earlier, by the same-transaction membership authorization itself)", async () => {
+    seedPanel({ revision: 1, reviewerUserIds: [OWNER_UID, REVIEWER2_UID].sort() });
+    seedMembership(REVIEWER2_UID, "reviewer", WS_ID, { status: "removed" });
+    const result = await voteCall({ uid: REVIEWER2_UID });
+    expect(result).toEqual({ ok: false, reason: "membership_removed" });
+  });
+
+  it("Viewer-downgraded panel reviewer: DENY (no reviews.submit capability — denied by the same-transaction membership authorization itself)", async () => {
+    seedPanel({ revision: 1, reviewerUserIds: [OWNER_UID, REVIEWER2_UID].sort() });
+    seedMembership(REVIEWER2_UID, "viewer");
+    const result = await voteCall({ uid: REVIEWER2_UID });
+    expect(result).toEqual({ ok: false, reason: "insufficient_capability" });
+  });
+
+  it("creator in corrupted reviewer list: DENY (self_review, independent of stored list)", async () => {
+    seedPanel({ revision: 1, reviewerUserIds: [OWNER_UID, CREATOR_UID].sort() });
+    const result = await voteCall({ uid: CREATOR_UID });
+    expect(result).toEqual({ ok: false, reason: "self_review" });
+  });
+
+  it("wrong revision (stale): DENY", async () => {
+    seedPanel({ revision: 2 });
+    const result = await voteCall({ panelRevision: 1 });
+    expect(result).toEqual({ ok: false, reason: "panel_stale" });
+  });
+
+  it("finalized panel: DENY (panel_not_open)", async () => {
+    seedPanel({ status: "finalized", revision: 2, finalizedAt: "2026-08-05T00:00:00.000Z", updatedAt: "2026-08-05T00:00:00.000Z", finalizedByUserId: OWNER_UID, finalStatus: "approved", finalDecisionId: "panel_workspace_dec_x", aggregationPolicyVersion: 1 });
+    const result = await voteCall({ panelRevision: 2 });
+    expect(result).toEqual({ ok: false, reason: "panel_not_open" });
+  });
+
+  it("cancelled panel: DENY (panel_not_open)", async () => {
+    seedPanel({ status: "cancelled", revision: 2 });
+    const result = await voteCall({ panelRevision: 2 });
+    expect(result).toEqual({ ok: false, reason: "panel_not_open" });
+  });
+
+  it("panel absent: DENY", async () => {
+    const result = await voteCall();
+    expect(result).toEqual({ ok: false, reason: "panel_absent" });
+  });
+
+  it("old-revision votes never satisfy a new revision after reconfiguration — distinct vote document identity", async () => {
+    seedPanel({ revision: 1 });
+    await voteCall({ panelRevision: 1, status: "approved" });
+    // Reconfigure to revision 2.
+    seedPanel({ revision: 2, reviewerUserIds: [OWNER_UID, ADMIN_UID].sort() });
+    const voteAtOldRevision = stores.humanReviewVotes.get(`${RUN_ID}::${buildAdaptiveHumanReviewVoteId(1, OWNER_UID)}`);
+    const voteAtNewRevision = stores.humanReviewVotes.get(`${RUN_ID}::${buildAdaptiveHumanReviewVoteId(2, OWNER_UID)}`);
+    expect(voteAtOldRevision).toBeDefined();
+    expect(voteAtNewRevision).toBeUndefined();
+  });
+});
+
+// ============================================
+// POST finalize
+// ============================================
+
+function finalizeCall(overrides: Partial<Parameters<typeof finalizeWorkspaceReviewPanel>[0]> = {}) {
+  return finalizeWorkspaceReviewPanel({ uid: OWNER_UID, workspaceId: WS_ID, runId: RUN_ID, expectedPanelRevision: 1, expectedGovernanceUpdatedAt: GOVERNANCE_UPDATED_AT, now: MUTATE_NOW, ...overrides });
+}
+
+describe("finalizeWorkspaceReviewPanel", () => {
+  it("quorum met, strict majority: PASS, writes history/event/audit", async () => {
+    seedPanel({ revision: 1 });
+    seedVote(OWNER_UID, 1, { status: "approved" });
+    seedVote(ADMIN_UID, 1, { status: "approved" });
+    const result = await finalizeCall();
+    expect(result).toEqual({ ok: true, status: "approved", finalizedAt: MUTATE_NOW });
+    expect(mockedCreateAdaptiveHumanReviewHistory).toHaveBeenCalledTimes(1);
+    expect(mockedCreateAdaptivePanelFinalizationHistory).toHaveBeenCalledTimes(1);
+    expect(mockedWriteAdaptivePanelFinalizationGovernanceEvent).toHaveBeenCalledTimes(1);
+    expect(mockedWriteAdaptivePanelFinalizationAdminAuditEvent).toHaveBeenCalledTimes(1);
+    const stored = stores.runs.get(RUN_ID) as any;
+    expect(stored.governanceRecord.humanReview.status).toBe("approved");
+  });
+
+  it("quorum not met: DENY", async () => {
+    seedPanel({ revision: 1 });
+    seedVote(OWNER_UID, 1, { status: "approved" });
+    const result = await finalizeCall();
+    expect(result).toEqual({ ok: false, reason: "quorum_not_met" });
+  });
+
+  it("deadlocked (no strict majority): DENY", async () => {
+    seedPanel({ revision: 1 });
+    seedVote(OWNER_UID, 1, { status: "approved" });
+    seedVote(ADMIN_UID, 1, { status: "rejected" });
+    const result = await finalizeCall();
+    expect(result).toEqual({ ok: false, reason: "panel_deadlocked" });
+  });
+
+  it("reviews.manage but no research.read synthetic: DENY", async () => {
+    seedPanel({ revision: 1 });
+    seedVote(OWNER_UID, 1, { status: "approved" });
+    seedVote(ADMIN_UID, 1, { status: "approved" });
+    mockedRoleHasCapability.mockImplementation((role: string, capability: string) => {
+      if (role === "admin" && capability === "research.read") return false;
+      return actualCapabilities.roleHasCapability(role, capability);
+    });
+    const result = await finalizeCall({ uid: ADMIN_UID });
+    expect(result).toEqual({ ok: false, reason: "insufficient_capability" });
+  });
+
+  it("wrong panel revision: DENY (panel_stale)", async () => {
+    seedPanel({ revision: 2 });
+    const result = await finalizeCall({ expectedPanelRevision: 1 });
+    expect(result).toEqual({ ok: false, reason: "panel_stale" });
+  });
+
+  it("stale governance updatedAt: DENY (governance_stale)", async () => {
+    seedPanel({ revision: 1 });
+    seedVote(OWNER_UID, 1, { status: "approved" });
+    seedVote(ADMIN_UID, 1, { status: "approved" });
+    const result = await finalizeCall({ expectedGovernanceUpdatedAt: "2020-01-01T00:00:00.000Z" });
+    expect(result).toEqual({ ok: false, reason: "governance_stale" });
+  });
+
+  it("cancelled panel: DENY", async () => {
+    seedPanel({ status: "cancelled", revision: 2 });
+    const result = await finalizeCall({ expectedPanelRevision: 2 });
+    expect(result).toEqual({ ok: false, reason: "panel_cancelled" });
+  });
+
+  it("panel absent: DENY", async () => {
+    const result = await finalizeCall();
+    expect(result).toEqual({ ok: false, reason: "panel_absent" });
+  });
+
+  it("already finalized (idempotent retry): PASS, no duplicate history/audit writes", async () => {
+    seedPanel({ revision: 1 });
+    seedVote(OWNER_UID, 1, { status: "approved" });
+    seedVote(ADMIN_UID, 1, { status: "approved" });
+    const first = await finalizeCall();
+    expect(first.ok).toBe(true);
+    expect(mockedCreateAdaptiveHumanReviewHistory).toHaveBeenCalledTimes(1);
+
+    const retry = await finalizeCall();
+    expect(retry).toEqual({ ok: true, status: "approved", finalizedAt: MUTATE_NOW });
+    // Post-commit writers ARE attempted again on the idempotent retry
+    // (best-effort, create-only, `already_exists` is a safe outcome) — but
+    // never produce a SECOND distinct canonical decision.
+    expect(mockedCreateAdaptiveHumanReviewHistory).toHaveBeenCalledTimes(2);
+    const secondCallArgs = mockedCreateAdaptiveHumanReviewHistory.mock.calls[1];
+    const firstCallArgs = mockedCreateAdaptiveHumanReviewHistory.mock.calls[0];
+    expect(secondCallArgs[1].decisionId).toBe(firstCallArgs[1].decisionId); // same deterministic decisionId both times
+  });
+
+  it("STALE-VOTE POLICY (frozen, §36): a reviewer removed AFTER voting still has their already-cast vote counted at finalization", async () => {
+    seedPanel({ revision: 1 });
+    seedVote(OWNER_UID, 1, { status: "approved" });
+    seedVote(ADMIN_UID, 1, { status: "approved" });
+    // ADMIN_UID is removed from the Workspace AFTER voting, before finalization.
+    seedMembership(ADMIN_UID, "admin", WS_ID, { status: "removed" });
+    const result = await finalizeCall();
+    expect(result.ok).toBe(true); // quorum (2) still met using the already-cast vote; finalization does not re-check voter membership.
+    if (result.ok) expect(result.status).toBe("approved");
+  });
+
+  it("changes_requested resubmit changes_requested sequence: each finalization decision gets a distinct, collision-safe decisionId (via distinct panel revisions)", async () => {
+    seedPanel({ revision: 1 });
+    seedVote(OWNER_UID, 1, { status: "changes_requested", comment: "needs work" });
+    seedVote(ADMIN_UID, 1, { status: "changes_requested", comment: "needs work" });
+    const first = await finalizeCall();
+    expect(first.ok).toBe(true);
+    const firstDecisionId = mockedCreateAdaptiveHumanReviewHistory.mock.calls[0][1].decisionId;
+
+    // A NEW panel round (a fresh call would be blocked by "finalized" in
+    // production — this directly seeds revision 3 to model the state after
+    // a hypothetical future round, isolating the ID-collision property only).
+    seedPanel({ revision: 3, status: "open" });
+    seedVote(OWNER_UID, 3, { status: "approved" });
+    seedVote(ADMIN_UID, 3, { status: "approved" });
+    seedRun({ governanceRecord: validGovernanceRecord({ humanReview: { status: "unreviewed" }, updatedAt: GOVERNANCE_UPDATED_AT }) });
+    const second = await finalizeCall({ expectedPanelRevision: 3 });
+    expect(second.ok).toBe(true);
+    const secondDecisionId = mockedCreateAdaptiveHumanReviewHistory.mock.calls[1][1].decisionId;
+
+    expect(firstDecisionId).not.toBe(secondDecisionId);
+  });
+});
+
+// ============================================
+// POST override
+// ============================================
+
+function overrideCall(overrides: Partial<Parameters<typeof overrideWorkspaceReviewPanel>[0]> = {}) {
+  return overrideWorkspaceReviewPanel({ uid: OWNER_UID, workspaceId: WS_ID, runId: RUN_ID, expectedPanelRevision: 1, expectedGovernanceUpdatedAt: GOVERNANCE_UPDATED_AT, status: "approved", justification: "Deadline requires resolution.", now: MUTATE_NOW, ...overrides });
+}
+
+describe("overrideWorkspaceReviewPanel", () => {
+  it("Owner with reviews.override + research.read: PASS", async () => {
+    seedPanel({ revision: 1 });
+    const result = await overrideCall();
+    expect(result).toEqual({ ok: true, status: "approved", finalizedAt: MUTATE_NOW });
+    expect(mockedCreateAdaptivePanelOverrideHistory).toHaveBeenCalledTimes(1);
+    expect(mockedWriteAdaptivePanelOverrideAdminAuditEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it("Admin (no reviews.override capability): DENY", async () => {
+    seedPanel({ revision: 1 });
+    const result = await overrideCall({ uid: ADMIN_UID });
+    expect(result).toEqual({ ok: false, reason: "insufficient_capability" });
+  });
+
+  it("Member: DENY", async () => {
+    seedPanel({ revision: 1 });
+    expect(await overrideCall({ uid: MEMBER_UID })).toEqual({ ok: false, reason: "insufficient_capability" });
+  });
+
+  it("Owner overriding own artifact (self-artifact): ALLOWED only through this explicit path", async () => {
+    seedRun({ userId: OWNER_UID, workspaceId: WS_ID, projectId: null, governanceRecord: validGovernanceRecord() });
+    seedPanel({ revision: 1 });
+    const result = await overrideCall({ uid: OWNER_UID });
+    expect(result.ok).toBe(true);
+  });
+
+  it("empty justification: rejected upstream by the pure request parser (route-level 400, not reachable here) — service itself still requires a non-empty string", async () => {
+    seedPanel({ revision: 1 });
+    const result = await overrideCall({ justification: "" });
+    // buildAdaptivePanelOverrideDecisionId / buildWorkspacePanelOverrideDecisionId throws on empty justification.
+    expect(result.ok).toBe(false);
+  });
+
+  it("stale panel revision: DENY (panel_stale)", async () => {
+    seedPanel({ revision: 2 });
+    const result = await overrideCall({ expectedPanelRevision: 1 });
+    expect(result).toEqual({ ok: false, reason: "panel_stale" });
+  });
+
+  it("cancelled panel: DENY", async () => {
+    seedPanel({ status: "cancelled", revision: 2 });
+    const result = await overrideCall({ expectedPanelRevision: 2 });
+    expect(result).toEqual({ ok: false, reason: "panel_cancelled" });
+  });
+
+  it("panel absent: DENY (naturally self-limiting — no hidden bypass for an unrelated run)", async () => {
+    const result = await overrideCall();
+    expect(result).toEqual({ ok: false, reason: "panel_absent" });
+  });
+
+  it("does not read or require any votes at all — overrides a panel with zero votes cast", async () => {
+    seedPanel({ revision: 1 });
+    const result = await overrideCall();
+    expect(result.ok).toBe(true);
+  });
+
+  it("idempotent identical retry: PASS, no duplicate canonical mutation", async () => {
+    seedPanel({ revision: 1 });
+    const first = await overrideCall();
+    expect(first.ok).toBe(true);
+    const retry = await overrideCall();
+    expect(retry).toEqual({ ok: true, status: "approved", finalizedAt: MUTATE_NOW });
+  });
+
+  it("a DIFFERENT override request against an already-overridden panel: DENY (panel_already_finalized), never silently overwritten", async () => {
+    seedPanel({ revision: 1 });
+    const first = await overrideCall({ status: "approved" });
+    expect(first.ok).toBe(true);
+    const second = await overrideCall({ status: "rejected", justification: "different reasoning" });
+    expect(second).toEqual({ ok: false, reason: "panel_already_finalized" });
+  });
+});
+
+// ============================================
+// Mutual exclusion — concurrent single-review assignment vs panel create
+// ============================================
+
+describe("cross-service mutual exclusion — assignment vs panel (§50)", () => {
+  it("racing putWorkspaceReviewAssignment and putWorkspaceReviewPanel from a clean state: never both commit (panel loses when assignment already committed)", async () => {
+    // Sequential simulation of the race's resolution (both functions share
+    // the SAME hardened transaction fake and its read-before-write/conflict
+    // detection — the real concurrency mechanics are already proven by the
+    // dedicated hook-based tests above and in workspaceReviewMutations.spec.ts;
+    // this test proves the CROSS-SERVICE invariant holds once one committed first).
+    const assignmentResult = await putWorkspaceReviewAssignment({ uid: OWNER_UID, workspaceId: WS_ID, runId: RUN_ID, assignedReviewerUserId: REVIEWER_UID, expectedRevision: 0, dueAt: null, now: MUTATE_NOW });
+    expect(assignmentResult.ok).toBe(true);
+
+    const panelResult = await putCall();
+    expect(panelResult).toEqual({ ok: false, reason: "single_review_active" });
+
+    const finalAssignment = stores.humanReviewAssignment.get(`${RUN_ID}::current`);
+    const finalPanel = stores.humanReviewPanel.get(`${RUN_ID}::current`);
+    expect(finalAssignment).toBeDefined();
+    expect(finalPanel).toBeUndefined();
+  });
+
+  it("panel created first: a subsequent assignment attempt is blocked by the (already 9B.5.1-proven) open-panel gate", async () => {
+    const panelResult = await putCall();
+    expect(panelResult.ok).toBe(true);
+
+    const assignmentResult = await putWorkspaceReviewAssignment({ uid: OWNER_UID, workspaceId: WS_ID, runId: RUN_ID, assignedReviewerUserId: REVIEWER_UID, expectedRevision: 0, dueAt: null, now: MUTATE_NOW });
+    expect(assignmentResult).toEqual({ ok: false, reason: "active_panel" });
+
+    const finalAssignment = stores.humanReviewAssignment.get(`${RUN_ID}::current`);
+    expect(finalAssignment).toBeUndefined();
+  });
+});

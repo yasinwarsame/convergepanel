@@ -119,6 +119,20 @@ describe("buildNextAdaptiveHumanReviewPanel", () => {
     expect(next.mode).toBe("majority_quorum");
   });
 
+  describe("Phase 9B.5.2 — teamId: null (Workspace-bound panel, no legacy team)", () => {
+    it("creation with teamId: null produces a panel document with teamId: null, not coerced/omitted", () => {
+      const next = buildNextAdaptiveHumanReviewPanel({ ...BASE, teamId: null, reviewerUserIds: ["a", "b"], current: null });
+      expect(next.teamId).toBeNull();
+    });
+
+    it("a null-teamId panel round-trips through the parser unchanged", () => {
+      const built = buildNextAdaptiveHumanReviewPanel({ ...BASE, teamId: null, reviewerUserIds: ["a", "b"], current: null, workspaceMetadata: { workspaceId: "ws-1", projectId: null } });
+      const parsed = parseAdaptiveHumanReviewPanel(built);
+      expect(parsed.status).toBe("valid");
+      if (parsed.status === "valid") expect(parsed.panel.teamId).toBeNull();
+    });
+  });
+
   describe("Phase 9B.2 — workspaceMetadata", () => {
     it("omitted -> the resulting panel carries neither workspaceId nor projectId (legacy Team behavior, unchanged)", () => {
       const next = buildNextAdaptiveHumanReviewPanel({ ...BASE, reviewerUserIds: ["a", "b"], current: null }) as Record<string, unknown>;
@@ -225,6 +239,18 @@ describe("parseAdaptiveHumanReviewPanel", () => {
   it("empty/missing teamId is malformed", () => {
     expect(parseAdaptiveHumanReviewPanel(validPanel({ teamId: "" }))).toEqual({ status: "malformed" });
     expect(parseAdaptiveHumanReviewPanel(validPanel({ teamId: undefined as any }))).toEqual({ status: "malformed" });
+  });
+
+  it("Phase 9B.5.2 — teamId: null (Workspace-bound panel) parses as valid, distinct from empty/undefined", () => {
+    const result = parseAdaptiveHumanReviewPanel(validPanel({ teamId: null }));
+    expect(result.status).toBe("valid");
+    if (result.status === "valid") expect(result.panel.teamId).toBeNull();
+  });
+
+  it("every existing legacy Team panel document (non-null string teamId) continues to parse exactly as before", () => {
+    const result = parseAdaptiveHumanReviewPanel(validPanel({ teamId: "team-1" }));
+    expect(result.status).toBe("valid");
+    if (result.status === "valid") expect(result.panel.teamId).toBe("team-1");
   });
 
   it("empty/missing runId is malformed", () => {

@@ -75,7 +75,18 @@ export type AdaptiveHumanReviewPanelV1 = {
   schemaVersion: 1;
   kind: "adaptive_review_panel";
 
-  teamId: string;
+  /**
+   * Phase 9B.5.2 — `null` for a Workspace-bound panel (there is no legacy
+   * team), mirroring `AdaptiveHumanReviewAssignmentV1.teamId`'s own
+   * established `string | null` precedent exactly. Every existing legacy
+   * Team panel document has a non-empty string here and continues to parse
+   * unchanged — this widening is additive only, never a redefinition of an
+   * existing document's meaning. Purely descriptive/audit metadata, like
+   * the assignment field — never used for authorization anywhere (Workspace
+   * authorization is `runs/{runId}.workspaceId` + Workspace membership, not
+   * this field).
+   */
+  teamId: string | null;
   runId: string;
 
   mode: AdaptiveMultiReviewerPanelMode;
@@ -160,7 +171,7 @@ export interface AdaptiveHumanReviewPanelWorkspaceMetadata {
  * here (deduplicated + sorted) so callers never need to pre-normalize.
  */
 export function buildNextAdaptiveHumanReviewPanel(args: {
-  teamId: string;
+  teamId: string | null;
   runId: string;
   reviewerUserIds: readonly string[];
   actorUserId: string;
@@ -344,7 +355,7 @@ export function parseAdaptiveHumanReviewPanel(
     return raw.schemaVersion === undefined ? { status: "malformed" } : { status: "unsupported_version" };
   }
   if (raw.kind !== "adaptive_review_panel") return { status: "malformed" };
-  if (!isNonEmptyString(raw.teamId)) return { status: "malformed" };
+  if (raw.teamId !== null && !isNonEmptyString(raw.teamId)) return { status: "malformed" };
   if (!isNonEmptyString(raw.runId)) return { status: "malformed" };
   if (context?.expectedTeamId && raw.teamId !== context.expectedTeamId) return { status: "malformed" };
   if (context?.expectedRunId && raw.runId !== context.expectedRunId) return { status: "malformed" };

@@ -7,6 +7,7 @@
 
 import {
   buildAdaptivePanelFinalDecisionId,
+  buildWorkspacePanelFinalDecisionId,
   buildFinalConditionsUnion,
   buildFinalSystemComment,
   buildFinalizedMultiReviewerHumanReview,
@@ -55,6 +56,41 @@ describe("buildAdaptivePanelFinalDecisionId", () => {
     expect(() => buildAdaptivePanelFinalDecisionId("team-1", "", 3, "approved", 1)).toThrow();
     expect(() => buildAdaptivePanelFinalDecisionId("team-1", "run-1", 0, "approved", 1)).toThrow();
     expect(() => buildAdaptivePanelFinalDecisionId("team-1", "run-1", 3, "", 1)).toThrow();
+  });
+});
+
+describe("buildWorkspacePanelFinalDecisionId (Phase 9B.5.2)", () => {
+  it("is deterministic", () => {
+    const a = buildWorkspacePanelFinalDecisionId("ws-1", "run-1", 3, "approved", 1);
+    const b = buildWorkspacePanelFinalDecisionId("ws-1", "run-1", 3, "approved", 1);
+    expect(a).toBe(b);
+  });
+
+  it("produces a distinct ID when workspaceId, runId, panelRevision, or finalStatus differs", () => {
+    const base = buildWorkspacePanelFinalDecisionId("ws-1", "run-1", 3, "approved", 1);
+    expect(buildWorkspacePanelFinalDecisionId("ws-2", "run-1", 3, "approved", 1)).not.toBe(base);
+    expect(buildWorkspacePanelFinalDecisionId("ws-1", "run-2", 3, "approved", 1)).not.toBe(base);
+    expect(buildWorkspacePanelFinalDecisionId("ws-1", "run-1", 4, "approved", 1)).not.toBe(base);
+    expect(buildWorkspacePanelFinalDecisionId("ws-1", "run-1", 3, "rejected", 1)).not.toBe(base);
+  });
+
+  it("never collides with the legacy Team decision-ID namespace for the same runId/panelRevision/finalStatus/aggregationPolicyVersion", () => {
+    const workspaceId = buildWorkspacePanelFinalDecisionId("ws-1", "run-1", 3, "approved", 1);
+    const team = buildAdaptivePanelFinalDecisionId("ws-1", "run-1", 3, "approved", 1);
+    expect(workspaceId).not.toBe(team);
+  });
+
+  it("is a safe Firestore document ID with a distinct prefix from the legacy Team builder", () => {
+    const id = buildWorkspacePanelFinalDecisionId("ws-1", "run-1", 3, "approved", 1);
+    expect(id).not.toContain("/");
+    expect(id).toMatch(/^panel_workspace_dec_[0-9a-f]{32}$/);
+  });
+
+  it("throws on empty required components", () => {
+    expect(() => buildWorkspacePanelFinalDecisionId("", "run-1", 3, "approved", 1)).toThrow();
+    expect(() => buildWorkspacePanelFinalDecisionId("ws-1", "", 3, "approved", 1)).toThrow();
+    expect(() => buildWorkspacePanelFinalDecisionId("ws-1", "run-1", 0, "approved", 1)).toThrow();
+    expect(() => buildWorkspacePanelFinalDecisionId("ws-1", "run-1", 3, "", 1)).toThrow();
   });
 });
 
@@ -228,6 +264,24 @@ describe("buildAdaptivePanelFinalizationHistoryEntry", () => {
     expect(entry.eventId).toBe("4:panel_finalized");
     expect(entry.eventType).toBe("panel_finalized");
     expect(entry.finalDecisionId).toBe("panel_dec_x");
+  });
+
+  it("Phase 9B.5.2 — teamId: null (Workspace-bound panel finalization) is accepted, not coerced/omitted", () => {
+    const entry = buildAdaptivePanelFinalizationHistoryEntry({
+      teamId: null,
+      runId: "run-1",
+      preFinalizationPanelRevision: 1,
+      finalizedPanelRevision: 2,
+      finalStatus: "approved",
+      finalDecisionId: "panel_workspace_dec_x",
+      aggregationPolicyVersion: 1,
+      reviewerCount: 2,
+      submittedCount: 2,
+      supportingReviewerCount: 2,
+      actorUserId: "owner-uid",
+      finalizedAt: "2020-06-01T00:00:00.000Z",
+    });
+    expect(entry.teamId).toBeNull();
   });
 
   it("never includes vote comments, conditions, or reviewer names/emails", () => {
