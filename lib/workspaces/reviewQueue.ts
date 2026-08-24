@@ -36,7 +36,7 @@ import { computeMembershipId } from "./membershipId";
 import { validateMembershipBinding } from "./membershipBinding";
 import { isHumanReviewStatusReviewable, parseGovernanceRecord } from "@/lib/adaptiveSchema/governanceRecordParser";
 import { isCanonicalDueAt, type AdaptiveHumanReviewAssignmentV1 } from "@/lib/governance/adaptiveHumanReviewAssignment";
-import { resolveReviewerDisplayNames, REVIEWER_UNAVAILABLE_LABEL } from "@/lib/governance/reviewerIdentity";
+import { resolveWorkspaceReviewerDisplayNames, REVIEWER_UNAVAILABLE_LABEL } from "./workspaceReviewerIdentity";
 import type { GovernanceRecordV1 } from "@/lib/adaptiveSchema/governanceRecord";
 import { encodeReviewQueueCursor, type ReviewQueueView, type ReviewQueueCursor } from "./reviewQueueCursor";
 
@@ -510,26 +510,27 @@ function encodeCursorFor(workspaceId: string, view: ReviewQueueView, projectFilt
 // ============================================
 
 /**
- * Phase 9B.6 — one additional batched identity-resolution pass over the
- * PAGE's already-returned rows (never per-row, never a new query) so the
- * UI never has to render a raw UID for an assignee. Uses the same
- * established `resolveReviewerDisplayNames()` batching primitive
- * (`lib/governance/reviewerIdentity.ts`) the legacy review-detail
- * endpoints already rely on — deduplicated by uid, chunked at 10 via
- * `db.getAll()`. `REVIEWER_UNAVAILABLE_LABEL` (not `UNKNOWN_REVIEWER_LABEL`)
- * is the correct fallback here per that module's own guidance: every uid
- * enriched here is already a known, canonical `assignedReviewerUserId` —
- * a failed name lookup is a resolution gap, not an unidentified reviewer.
- * A resolution failure/gap NEVER changes `assignment.state` — a stale
- * assignment naming a removed reviewer still safely enriches to
- * "Reviewer unavailable," never a fabricated name, and never becomes
- * actionable merely because identity resolution succeeded or failed.
+ * Phase 9B.6, membership-gated per Phase 9B.6-R1C — one additional
+ * batched identity-resolution pass over the PAGE's already-returned rows
+ * (never per-row, never a new query) so the UI never has to render a raw
+ * UID for an assignee. Uses `resolveWorkspaceReviewerDisplayNames()`
+ * (`workspaceReviewerIdentity.ts`), NOT the raw global
+ * `resolveReviewerDisplayNames()` directly — an `assignedReviewerUserId`
+ * is governance metadata, not proof of Workspace membership, and this
+ * gate is what prevents a corrupted/foreign UID from becoming a
+ * cross-user identity oracle (see that module's own doc comment for the
+ * full rationale). A resolution failure/gap/non-membership NEVER changes
+ * `assignment.state` — a stale assignment naming a removed-but-evidenced
+ * reviewer still safely enriches to a real name; a non-member or foreign
+ * UID enriches to `REVIEWER_UNAVAILABLE_LABEL`, never a fabricated name,
+ * and never becomes actionable merely because identity resolution
+ * succeeded or failed.
  */
-async function enrichWithReviewerDisplayNames(result: ReviewQueueResult): Promise<ReviewQueueResult> {
+async function enrichWithReviewerDisplayNames(result: ReviewQueueResult, workspaceId: string): Promise<ReviewQueueResult> {
   if (result.status !== "ok" || result.items.length === 0) return result;
   const uids = result.items.map((row) => row.assignment.assignedReviewerUserId).filter((uid): uid is string => typeof uid === "string" && uid.length > 0);
   if (uids.length === 0) return result;
-  const nameByUid = await resolveReviewerDisplayNames(uids, new Map(), undefined, REVIEWER_UNAVAILABLE_LABEL);
+  const nameByUid = await resolveWorkspaceReviewerDisplayNames(workspaceId, uids);
   return {
     ...result,
     items: result.items.map((row) =>
@@ -563,5 +564,5 @@ export async function getReviewQueue(args: {
       result = await scanOverdue({ workspaceId: args.workspaceId, uid: args.uid, projectFilter: args.projectFilter, limit: args.limit, cursor: args.cursor });
       break;
   }
-  return enrichWithReviewerDisplayNames(result);
+  return enrichWithReviewerDisplayNames(result, args.workspaceId);
 }

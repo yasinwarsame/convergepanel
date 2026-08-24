@@ -55,7 +55,7 @@ import { isCanonicalDueAt, type AdaptiveHumanReviewAssignmentV1 } from "@/lib/go
 import { parseAdaptiveHumanReviewPanel, type AdaptiveHumanReviewPanelV1 } from "@/lib/governance/adaptiveHumanReviewPanel";
 import { aggregateAdaptiveReviewVotes } from "@/lib/governance/adaptiveReviewAggregation";
 import { buildAdaptiveHumanReviewVoteId, parseAdaptiveHumanReviewVote } from "@/lib/governance/adaptiveHumanReviewVote";
-import { resolveReviewerDisplayNames, REVIEWER_UNAVAILABLE_LABEL } from "@/lib/governance/reviewerIdentity";
+import { resolveWorkspaceReviewerDisplayNames, REVIEWER_UNAVAILABLE_LABEL } from "./workspaceReviewerIdentity";
 import type { GovernanceRecordV1 } from "@/lib/adaptiveSchema/governanceRecord";
 
 // ============================================
@@ -75,6 +75,19 @@ export interface ReviewContextReviewInfo {
   comment?: string;
   conditions?: string[];
   decidedVia?: "single_reviewer" | "multi_reviewer_panel" | "multi_reviewer_owner_override";
+  /**
+   * Phase 9B.6-R1C — the canonical `governanceRecord.updatedAt` OCC token,
+   * verbatim, unsynthesized. Required by `submitWorkspaceReviewDecision`
+   * (`expectedUpdatedAt`), `resubmitWorkspaceReview` (`expectedUpdatedAt`),
+   * `finalizeWorkspaceReviewPanel` (`expectedGovernanceUpdatedAt`), and
+   * `overrideWorkspaceReviewPanel` (`expectedGovernanceUpdatedAt`) — an
+   * opaque concurrency token the UI stores and echoes back verbatim,
+   * never displays, never recomputes. Always present: every governed
+   * adaptive run has a `governanceRecord.updatedAt` (non-optional on
+   * `GovernanceRecordV1`) the moment `parseGovernanceRecord()` succeeds,
+   * which is a precondition for this DTO existing at all.
+   */
+  governanceUpdatedAt: string;
 }
 
 export interface ReviewContextAssignmentInfo {
@@ -198,11 +211,14 @@ export async function getReviewContext(args: { workspaceId: string; runId: strin
     const rawAssignment = assignmentSnap.exists ? (assignmentSnap.data() as AdaptiveHumanReviewAssignmentV1) : null;
     const hasActiveAssignment = !!rawAssignment && typeof rawAssignment.assignedReviewerUserId === "string" && rawAssignment.assignedReviewerUserId.length > 0;
 
-    // ---- Batch-resolve every identity this response needs, in one pass. ----
+    // ---- Batch-resolve every identity this response needs, in one pass.
+    // Membership-gated (Phase 9B.6-R1C) — an assignment/panel UID is
+    // governance metadata, not membership proof; see
+    // workspaceReviewerIdentity.ts for the full rationale. ----
     const identityUids: string[] = [];
     if (hasActiveAssignment) identityUids.push(rawAssignment!.assignedReviewerUserId as string);
     if (panel) identityUids.push(...panel.reviewerUserIds);
-    const nameByUid = identityUids.length > 0 ? await resolveReviewerDisplayNames(identityUids, new Map(), undefined, REVIEWER_UNAVAILABLE_LABEL) : new Map<string, string>();
+    const nameByUid = identityUids.length > 0 ? await resolveWorkspaceReviewerDisplayNames(args.workspaceId, identityUids) : new Map<string, string>();
 
     // ---- Assignment presentation + eligibility ----
     let assignmentInfo: ReviewContextAssignmentInfo | null = null;
@@ -312,6 +328,7 @@ export async function getReviewContext(args: { workspaceId: string; runId: strin
         ...(record.humanReview.comment !== undefined ? { comment: record.humanReview.comment } : {}),
         ...(record.humanReview.conditions !== undefined ? { conditions: record.humanReview.conditions } : {}),
         ...(record.humanReview.decidedVia !== undefined ? { decidedVia: record.humanReview.decidedVia } : {}),
+        governanceUpdatedAt: record.updatedAt,
       },
       assignment: assignmentInfo,
       panel: panelInfo,

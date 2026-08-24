@@ -470,6 +470,40 @@ describe("Phase 9B.6 — assignedReviewerDisplayName", () => {
     expect(result.items[0].assignment.assignedReviewerDisplayName).toBe("Former Person");
   });
 
+  it("Phase 9B.6-R1C CRITICAL: corrupted assignment naming an arbitrary foreign UID never discloses that user's real global identity", async () => {
+    const foreignUid = "foreign-app-user-with-no-workspace-relationship";
+    seedRun("run-1");
+    seedAssignment("run-1", { assignedReviewerUserId: foreignUid });
+    // Deliberately NO seedMembership() for foreignUid in WS_ID — this uid
+    // has no relationship to this Workspace at all — but it DOES have a
+    // real, resolvable global profile, exactly like any other real app user.
+    seedUser(foreignUid, { name: "Private Other User", email: "private@example.com" });
+    const result = await getReviewQueue({ view: "needs_review", workspaceId: WS_ID, uid: OWNER_UID, callerCandidate: callerCandidate(OWNER_UID, "owner"), projectFilter: undefined, limit: 25, cursor: null });
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    const displayName = result.items[0].assignment.assignedReviewerDisplayName;
+    expect(displayName).toBe("Reviewer unavailable");
+    expect(displayName).not.toBe("Private Other User");
+    expect(displayName).not.toContain("private");
+    expect(displayName).not.toBe(foreignUid);
+    // The stable machine identifier is still present for any future mutation payload.
+    expect(result.items[0].assignment.assignedReviewerUserId).toBe(foreignUid);
+    // Assignment classification is unaffected by identity resolution outcome.
+    expect(result.items[0].assignment.state).toBe("stale");
+  });
+
+  it("Phase 9B.6-R1C: a uid with active membership in a DIFFERENT Workspace does not get its identity disclosed in THIS Workspace's queue", async () => {
+    const otherWorkspaceUid = "other-workspace-member-uid";
+    seedRun("run-1");
+    seedAssignment("run-1", { assignedReviewerUserId: otherWorkspaceUid });
+    seedMembership(otherWorkspaceUid, "reviewer", OTHER_WS_ID); // active membership, but in OTHER_WS_ID, not WS_ID
+    seedUser(otherWorkspaceUid, { name: "Someone Else's Teammate" });
+    const result = await getReviewQueue({ view: "needs_review", workspaceId: WS_ID, uid: OWNER_UID, callerCandidate: callerCandidate(OWNER_UID, "owner"), projectFilter: undefined, limit: 25, cursor: null });
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.items[0].assignment.assignedReviewerDisplayName).toBe("Reviewer unavailable");
+  });
+
   it("unassigned row: assignedReviewerDisplayName is null, not a fallback string", async () => {
     seedRun("run-1");
     const result = await getReviewQueue({ view: "needs_review", workspaceId: WS_ID, uid: OWNER_UID, callerCandidate: callerCandidate(OWNER_UID, "owner"), projectFilter: undefined, limit: 25, cursor: null });

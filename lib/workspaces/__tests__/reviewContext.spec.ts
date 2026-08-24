@@ -246,6 +246,66 @@ describe("getReviewContext — current review detail (§58)", () => {
   });
 });
 
+describe("getReviewContext — Phase 9B.6-R1C: governanceUpdatedAt OCC token", () => {
+  it("exposes the exact canonical governanceRecord.updatedAt value, unsynthesized", async () => {
+    seedRun({ governanceRecord: validGovernanceRecord({ updatedAt: "2026-08-09T12:00:00.000Z" }) });
+    const result = await call(OWNER_UID, "owner", true);
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.context.review.governanceUpdatedAt).toBe("2026-08-09T12:00:00.000Z");
+  });
+
+  it("decision-UI sufficiency: an assigned reviewer's context carries governanceUpdatedAt usable as review-decision's expectedUpdatedAt, with no additional read", async () => {
+    seedAssignment({ assignedReviewerUserId: REVIEWER_UID });
+    const result = await call(REVIEWER_UID, "reviewer", true);
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.context.viewer.canSubmitDecision).toBe(true);
+    expect(result.context.review.governanceUpdatedAt).toBe(GOVERNANCE_UPDATED_AT);
+  });
+
+  it("resubmit-UI sufficiency: a changes_requested context carries governanceUpdatedAt usable as review-resubmit's expectedUpdatedAt", async () => {
+    seedRun({ governanceRecord: validGovernanceRecord({ humanReview: { status: "changes_requested", reviewedAt: GOVERNANCE_UPDATED_AT, comment: "fix" } }) });
+    const result = await call(CREATOR_UID, "member", true);
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.context.viewer.canResubmit).toBe(true);
+    expect(result.context.review.governanceUpdatedAt).toBe(GOVERNANCE_UPDATED_AT);
+  });
+
+  it("finalize-UI sufficiency: an open, quorum-ready panel context carries governanceUpdatedAt (expectedGovernanceUpdatedAt) AND panel.revision together", async () => {
+    seedPanel({ status: "open", revision: 1, reviewerUserIds: [OWNER_UID, ADMIN_UID].sort() });
+    seedVote(OWNER_UID, 1, { status: "approved" });
+    seedVote(ADMIN_UID, 1, { status: "approved" });
+    const result = await call(OWNER_UID, "owner", true);
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.context.viewer.canFinalize).toBe(true);
+    expect(result.context.review.governanceUpdatedAt).toBe(GOVERNANCE_UPDATED_AT);
+    expect(result.context.panel?.revision).toBe(1);
+  });
+
+  it("override-UI sufficiency: an override-eligible context carries governanceUpdatedAt (expectedGovernanceUpdatedAt) AND panel.revision together", async () => {
+    seedPanel({ status: "open", revision: 1 });
+    const result = await call(OWNER_UID, "owner", true);
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.context.viewer.canOverride).toBe(true);
+    expect(result.context.review.governanceUpdatedAt).toBe(GOVERNANCE_UPDATED_AT);
+    expect(result.context.panel?.revision).toBe(1);
+  });
+
+  it("never synthesized from an unrelated timestamp (assignment.updatedAt/panel.updatedAt/reviewedAt all differ from the true source)", async () => {
+    seedRun({ governanceRecord: validGovernanceRecord({ updatedAt: "2026-08-09T12:00:00.000Z", humanReview: { status: "unreviewed" } }) });
+    seedAssignment({ updatedAt: "2020-01-01T00:00:00.000Z" });
+    seedPanel({ status: "cancelled", updatedAt: "2021-01-01T00:00:00.000Z" });
+    const result = await call(OWNER_UID, "owner", true);
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.context.review.governanceUpdatedAt).toBe("2026-08-09T12:00:00.000Z");
+  });
+});
+
 describe("getReviewContext — §59 assigned reviewer canSubmitDecision", () => {
   it("unreviewed + actionable assignment to caller + eligible + no panel: canSubmitDecision = true", async () => {
     seedAssignment({ assignedReviewerUserId: REVIEWER_UID });
@@ -394,6 +454,27 @@ describe("getReviewContext — panel reviewer identity", () => {
     expect(names).toEqual(["Andy Admin", "Olivia Owner"]);
   });
 
+  it("Phase 9B.6-R1C CRITICAL: a corrupted panel reviewer list naming an arbitrary foreign UID never discloses that user's real global identity", async () => {
+    const foreignUid = "foreign-app-user-with-no-workspace-relationship";
+    seedPanel({ status: "open", reviewerUserIds: [OWNER_UID, foreignUid].sort() });
+    seedUser(OWNER_UID, { name: "Olivia Owner" });
+    // Deliberately NO seedMembership() for foreignUid — but it DOES have a
+    // real, resolvable global profile.
+    seedUser(foreignUid, { name: "Private Other User" });
+    const result = await call(OWNER_UID, "owner", true);
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    const foreignReviewer = result.context.panel!.reviewers.find((r) => r.uid === foreignUid);
+    expect(foreignReviewer).toBeDefined();
+    expect(foreignReviewer!.displayName).toBe("Reviewer unavailable");
+    expect(foreignReviewer!.displayName).not.toBe("Private Other User");
+    // Stable machine uid is still present (needed for reconfiguration/candidate preselection).
+    expect(foreignReviewer!.uid).toBe(foreignUid);
+    // The legitimate member's own identity is unaffected.
+    const ownerReviewer = result.context.panel!.reviewers.find((r) => r.uid === OWNER_UID);
+    expect(ownerReviewer!.displayName).toBe("Olivia Owner");
+  });
+
   it("hasVoted reflects only the CURRENT panel revision, never an old-revision vote", async () => {
     seedPanel({ status: "open", revision: 2, reviewerUserIds: [OWNER_UID, ADMIN_UID].sort() });
     seedVote(OWNER_UID, 1, { status: "approved" }); // old revision — must not count
@@ -423,6 +504,22 @@ describe("getReviewContext — assignment identity + staleness", () => {
     if (result.status !== "ok") return;
     expect(result.context.assignment?.state).toBe("stale");
     expect(result.context.assignment?.assignedReviewerDisplayName).toBe("Reviewer unavailable");
+  });
+
+  it("Phase 9B.6-R1C CRITICAL: corrupted assignment naming an arbitrary foreign UID never discloses that user's real global identity", async () => {
+    const foreignUid = "foreign-app-user-with-no-workspace-relationship";
+    seedAssignment({ assignedReviewerUserId: foreignUid });
+    // Deliberately NO seedMembership() for foreignUid — but it DOES have a
+    // real, resolvable global profile.
+    seedUser(foreignUid, { name: "Private Other User" });
+    const result = await call(OWNER_UID, "owner", true);
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.context.assignment?.state).toBe("stale");
+    expect(result.context.assignment?.assignedReviewerDisplayName).toBe("Reviewer unavailable");
+    expect(result.context.assignment?.assignedReviewerDisplayName).not.toBe("Private Other User");
+    // Stable machine uid is still present.
+    expect(result.context.assignment?.assignedReviewerUserId).toBe(foreignUid);
   });
 });
 
