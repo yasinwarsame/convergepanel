@@ -36,10 +36,19 @@ import { computeMembershipId } from "./membershipId";
 import { validateMembershipBinding } from "./membershipBinding";
 import { isHumanReviewStatusReviewable, parseGovernanceRecord } from "@/lib/adaptiveSchema/governanceRecordParser";
 import { isCanonicalDueAt, type AdaptiveHumanReviewAssignmentV1 } from "@/lib/governance/adaptiveHumanReviewAssignment";
+import { resolveWorkspaceReviewerDisplayNames, REVIEWER_UNAVAILABLE_LABEL } from "./workspaceReviewerIdentity";
 import type { GovernanceRecordV1 } from "@/lib/adaptiveSchema/governanceRecord";
 import { encodeReviewQueueCursor, type ReviewQueueView, type ReviewQueueCursor } from "./reviewQueueCursor";
 
 const MAX_SCAN_ROUNDS = 3;
+
+/** Phase 9B.6 — mirrors `personalReviewInbox.ts`'s own established `question` → safe-preview truncation exactly (same 200-char bound), reused here rather than a new convention. Never the full research prompt. */
+const MAX_RUN_LABEL_LENGTH = 200;
+
+function truncateRunLabel(s: string): string {
+  const t = s.trim();
+  return t.length <= MAX_RUN_LABEL_LENGTH ? t : `${t.slice(0, MAX_RUN_LABEL_LENGTH)}…`;
+}
 
 export type ReviewQueueAssignmentState = "unassigned" | "actionable" | "stale";
 
@@ -47,10 +56,18 @@ export interface ReviewQueueRow {
   runId: string;
   workspaceId: string;
   projectId: string | null;
+  /** Phase 9B.6 — a safe, truncated preview of the run's own `question`, never the full research prompt/context. */
+  runLabel: string;
   reviewStatus: GovernanceRecordV1["humanReview"]["status"];
   createdAt: string;
   reviewedAt: string | null;
-  assignment: { assignedReviewerUserId: string | null; dueAt: string | null; state: ReviewQueueAssignmentState };
+  assignment: {
+    assignedReviewerUserId: string | null;
+    /** Phase 9B.6 — server-resolved, safe display label (never a raw UID). `null` only when `assignedReviewerUserId` is `null`. */
+    assignedReviewerDisplayName: string | null;
+    dueAt: string | null;
+    state: ReviewQueueAssignmentState;
+  };
   isAssignedToMe: boolean;
   isOverdue: boolean;
 }
@@ -66,6 +83,7 @@ interface RunRevalidation {
   creatorUid: string;
   humanReview: GovernanceRecordV1["humanReview"];
   createdAt: string;
+  runLabel: string;
 }
 
 // ============================================
@@ -106,6 +124,7 @@ function revalidateRun(runId: string, workspaceId: string, runData: Record<strin
     creatorUid: target.creatorUid,
     humanReview: parsed.record.humanReview,
     createdAt: createdAtToIso(runData.createdAt),
+    runLabel: truncateRunLabel(typeof runData.question === "string" ? runData.question : ""),
   };
 }
 
@@ -269,10 +288,11 @@ async function scanStatusView(args: {
               runId: revalidated.runId,
               workspaceId: revalidated.workspaceId,
               projectId: revalidated.projectId,
+              runLabel: revalidated.runLabel,
               reviewStatus: revalidated.humanReview.status,
               createdAt: revalidated.createdAt,
               reviewedAt: revalidated.humanReview.reviewedAt ?? null,
-              assignment: assignmentSummary,
+              assignment: { ...assignmentSummary, assignedReviewerDisplayName: null },
               isAssignedToMe: assignmentSummary.assignedReviewerUserId === args.uid && assignmentSummary.state === "actionable",
               isOverdue,
             });
@@ -365,10 +385,11 @@ async function scanAssignedToMe(args: {
             runId: revalidated.runId,
             workspaceId: revalidated.workspaceId,
             projectId: revalidated.projectId,
+            runLabel: revalidated.runLabel,
             reviewStatus: revalidated.humanReview.status,
             createdAt: revalidated.createdAt,
             reviewedAt: revalidated.humanReview.reviewedAt ?? null,
-            assignment: { assignedReviewerUserId: args.uid, dueAt, state: "actionable" },
+            assignment: { assignedReviewerUserId: args.uid, assignedReviewerDisplayName: null, dueAt, state: "actionable" },
             isAssignedToMe: true,
             isOverdue: dueAt !== null && Date.parse(dueAt) < Date.now(),
           });
@@ -454,10 +475,11 @@ async function scanOverdue(args: {
             runId: revalidated.runId,
             workspaceId: revalidated.workspaceId,
             projectId: revalidated.projectId,
+            runLabel: revalidated.runLabel,
             reviewStatus: revalidated.humanReview.status,
             createdAt: revalidated.createdAt,
             reviewedAt: revalidated.humanReview.reviewedAt ?? null,
-            assignment: { assignedReviewerUserId: assignment.assignedReviewerUserId, dueAt: assignment.dueAt, state: "actionable" },
+            assignment: { assignedReviewerUserId: assignment.assignedReviewerUserId, assignedReviewerDisplayName: null, dueAt: assignment.dueAt, state: "actionable" },
             isAssignedToMe: assignment.assignedReviewerUserId === args.uid,
             isOverdue: true,
           });
@@ -487,6 +509,38 @@ function encodeCursorFor(workspaceId: string, view: ReviewQueueView, projectFilt
 // Public entry point
 // ============================================
 
+/**
+ * Phase 9B.6, membership-gated per Phase 9B.6-R1C — one additional
+ * batched identity-resolution pass over the PAGE's already-returned rows
+ * (never per-row, never a new query) so the UI never has to render a raw
+ * UID for an assignee. Uses `resolveWorkspaceReviewerDisplayNames()`
+ * (`workspaceReviewerIdentity.ts`), NOT the raw global
+ * `resolveReviewerDisplayNames()` directly — an `assignedReviewerUserId`
+ * is governance metadata, not proof of Workspace membership, and this
+ * gate is what prevents a corrupted/foreign UID from becoming a
+ * cross-user identity oracle (see that module's own doc comment for the
+ * full rationale). A resolution failure/gap/non-membership NEVER changes
+ * `assignment.state` — a stale assignment naming a removed-but-evidenced
+ * reviewer still safely enriches to a real name; a non-member or foreign
+ * UID enriches to `REVIEWER_UNAVAILABLE_LABEL`, never a fabricated name,
+ * and never becomes actionable merely because identity resolution
+ * succeeded or failed.
+ */
+async function enrichWithReviewerDisplayNames(result: ReviewQueueResult, workspaceId: string): Promise<ReviewQueueResult> {
+  if (result.status !== "ok" || result.items.length === 0) return result;
+  const uids = result.items.map((row) => row.assignment.assignedReviewerUserId).filter((uid): uid is string => typeof uid === "string" && uid.length > 0);
+  if (uids.length === 0) return result;
+  const nameByUid = await resolveWorkspaceReviewerDisplayNames(workspaceId, uids);
+  return {
+    ...result,
+    items: result.items.map((row) =>
+      row.assignment.assignedReviewerUserId
+        ? { ...row, assignment: { ...row.assignment, assignedReviewerDisplayName: nameByUid.get(row.assignment.assignedReviewerUserId) ?? REVIEWER_UNAVAILABLE_LABEL } }
+        : row
+    ),
+  };
+}
+
 export async function getReviewQueue(args: {
   view: ReviewQueueView;
   workspaceId: string;
@@ -496,14 +550,19 @@ export async function getReviewQueue(args: {
   limit: number;
   cursor: ReviewQueueCursor | null;
 }): Promise<ReviewQueueResult> {
+  let result: ReviewQueueResult;
   switch (args.view) {
     case "needs_review":
     case "changes_requested":
     case "recently_approved":
-      return scanStatusView({ view: args.view, workspaceId: args.workspaceId, uid: args.uid, projectFilter: args.projectFilter, limit: args.limit, cursor: args.cursor });
+      result = await scanStatusView({ view: args.view, workspaceId: args.workspaceId, uid: args.uid, projectFilter: args.projectFilter, limit: args.limit, cursor: args.cursor });
+      break;
     case "assigned_to_me":
-      return scanAssignedToMe({ workspaceId: args.workspaceId, uid: args.uid, callerCandidate: args.callerCandidate, projectFilter: args.projectFilter, limit: args.limit, cursor: args.cursor });
+      result = await scanAssignedToMe({ workspaceId: args.workspaceId, uid: args.uid, callerCandidate: args.callerCandidate, projectFilter: args.projectFilter, limit: args.limit, cursor: args.cursor });
+      break;
     case "overdue":
-      return scanOverdue({ workspaceId: args.workspaceId, uid: args.uid, projectFilter: args.projectFilter, limit: args.limit, cursor: args.cursor });
+      result = await scanOverdue({ workspaceId: args.workspaceId, uid: args.uid, projectFilter: args.projectFilter, limit: args.limit, cursor: args.cursor });
+      break;
   }
+  return enrichWithReviewerDisplayNames(result, args.workspaceId);
 }

@@ -150,7 +150,18 @@ export async function GET(req: NextRequest, { params }: { params: { workspaceId:
   const result = await getReviewQueue({ view, workspaceId, uid, callerCandidate, projectFilter, limit, cursor });
   switch (result.status) {
     case "ok":
-      return NextResponse.json({ ok: true, items: result.items, hasMore: result.hasMore, ...(result.nextCursor ? { nextCursor: result.nextCursor } : {}) });
+      // Phase 9B.6 — a server-derived UX hint only, computed once per
+      // request from the SAME capability check already performed above
+      // (no extra read, no role-name inference). Never authoritative —
+      // every mutation route reauthorizes independently regardless of
+      // what this flag says.
+      return NextResponse.json({
+        ok: true,
+        items: result.items,
+        hasMore: result.hasMore,
+        ...(result.nextCursor ? { nextCursor: result.nextCursor } : {}),
+        viewerActions: { canManageReviews: access.capabilities.includes("reviews.manage") },
+      });
     case "query_failed": {
       const { status, body } = internalErrorResponse();
       return NextResponse.json(body, { status });
