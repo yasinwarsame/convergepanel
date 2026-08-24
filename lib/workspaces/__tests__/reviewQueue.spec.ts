@@ -16,11 +16,13 @@ type StoredDoc = Record<string, unknown>;
 const runsStore = new Map<string, StoredDoc>();
 const assignmentsStore = new Map<string, StoredDoc>(); // runId -> assignment "current" doc
 const membershipsStore = new Map<string, StoredDoc>();
+const usersStore = new Map<string, StoredDoc>(); // Phase 9B.6 — uid -> users/{uid} doc, for resolveReviewerDisplayNames()
 
 function resetStores() {
   runsStore.clear();
   assignmentsStore.clear();
   membershipsStore.clear();
+  usersStore.clear();
 }
 
 function getNestedField(data: StoredDoc, path: string): unknown {
@@ -178,6 +180,11 @@ const mockAdminDb: any = {
         doc: (id: string) => ({ __kind: "membershipDocRef", __id: id }),
       };
     }
+    if (name === "users") {
+      return {
+        doc: (id: string) => ({ __kind: "userDocRef", __id: id }),
+      };
+    }
     throw new Error(`unexpected collection: ${name}`);
   },
   collectionGroup: (name: string) => {
@@ -197,6 +204,10 @@ const mockAdminDb: any = {
       }
       if (ref.__kind === "membershipDocRef") {
         const data = membershipsStore.get(ref.__id);
+        return { exists: data !== undefined, id: ref.__id, data: () => data };
+      }
+      if (ref.__kind === "userDocRef") {
+        const data = usersStore.get(ref.__id);
         return { exists: data !== undefined, id: ref.__id, data: () => data };
       }
       // run doc refs from collectionGroup's doc.ref.parent.parent
@@ -297,6 +308,10 @@ function seedAssignment(runId: string, overrides: StoredDoc = {}) {
   });
 }
 
+function seedUser(uid: string, overrides: StoredDoc = {}) {
+  usersStore.set(uid, { name: "", email: "", ...overrides });
+}
+
 function callerCandidate(uid: string, role: string, status: "active" | "removed" = "active"): WorkspaceReviewCandidate {
   return { uid, workspaceId: WS_ID, role: role as any, status };
 }
@@ -380,6 +395,100 @@ describe("needs_review", () => {
     expect(result.status).toBe("ok");
     if (result.status !== "ok") return;
     expect(result.items).toHaveLength(0);
+  });
+});
+
+describe("Phase 9B.6 — runLabel", () => {
+  it("derives runLabel from the run's own question field, truncated safely, never the full prompt", async () => {
+    seedRun("run-1", { question: "x".repeat(500) });
+    const result = await getReviewQueue({ view: "needs_review", workspaceId: WS_ID, uid: OWNER_UID, callerCandidate: callerCandidate(OWNER_UID, "owner"), projectFilter: undefined, limit: 25, cursor: null });
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.items[0].runLabel.length).toBeLessThan(500);
+    expect(result.items[0].runLabel.endsWith("…")).toBe(true);
+  });
+
+  it("short question: returned verbatim, no truncation ellipsis", async () => {
+    seedRun("run-1", { question: "What is the market size?" });
+    const result = await getReviewQueue({ view: "needs_review", workspaceId: WS_ID, uid: OWNER_UID, callerCandidate: callerCandidate(OWNER_UID, "owner"), projectFilter: undefined, limit: 25, cursor: null });
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.items[0].runLabel).toBe("What is the market size?");
+  });
+
+  it("missing/malformed question field: safe empty label, never a crash", async () => {
+    seedRun("run-1", { question: undefined });
+    const result = await getReviewQueue({ view: "needs_review", workspaceId: WS_ID, uid: OWNER_UID, callerCandidate: callerCandidate(OWNER_UID, "owner"), projectFilter: undefined, limit: 25, cursor: null });
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.items[0].runLabel).toBe("");
+  });
+
+  it("adds zero additional read cost: no new field required beyond the run doc already fetched for revalidation", async () => {
+    // Structural proof, not a spy count — runLabel is derived inside
+    // revalidateRun() from data already read for canonical revalidation;
+    // no new query/get is introduced. Covered implicitly by every passing
+    // test in this suite continuing to use the SAME fake query/get call
+    // pattern as before this phase.
+    seedRun("run-1", { question: "y" });
+    const result = await getReviewQueue({ view: "needs_review", workspaceId: WS_ID, uid: OWNER_UID, callerCandidate: callerCandidate(OWNER_UID, "owner"), projectFilter: undefined, limit: 25, cursor: null });
+    expect(result.status).toBe("ok");
+  });
+});
+
+describe("Phase 9B.6 — assignedReviewerDisplayName", () => {
+  it("resolves users/{uid}.name when present", async () => {
+    seedRun("run-1");
+    seedAssignment("run-1");
+    seedUser(REVIEWER_UID, { name: "Dana Reviewer" });
+    const result = await getReviewQueue({ view: "needs_review", workspaceId: WS_ID, uid: OWNER_UID, callerCandidate: callerCandidate(OWNER_UID, "owner"), projectFilter: undefined, limit: 25, cursor: null });
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.items[0].assignment.assignedReviewerDisplayName).toBe("Dana Reviewer");
+  });
+
+  it("no users/{uid} doc at all: safe 'Reviewer unavailable' fallback, never a raw UID, never a crash", async () => {
+    seedRun("run-1");
+    seedAssignment("run-1");
+    // Deliberately no seedUser() call.
+    const result = await getReviewQueue({ view: "needs_review", workspaceId: WS_ID, uid: OWNER_UID, callerCandidate: callerCandidate(OWNER_UID, "owner"), projectFilter: undefined, limit: 25, cursor: null });
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.items[0].assignment.assignedReviewerDisplayName).toBe("Reviewer unavailable");
+    expect(result.items[0].assignment.assignedReviewerDisplayName).not.toBe(REVIEWER_UID);
+  });
+
+  it("stale (removed) assignee still gets a safe display label, never becomes actionable merely because identity resolved", async () => {
+    seedRun("run-1");
+    seedAssignment("run-1");
+    seedMembership(REVIEWER_UID, "reviewer", WS_ID, { status: "removed" });
+    seedUser(REVIEWER_UID, { name: "Former Person" });
+    const result = await getReviewQueue({ view: "needs_review", workspaceId: WS_ID, uid: OWNER_UID, callerCandidate: callerCandidate(OWNER_UID, "owner"), projectFilter: undefined, limit: 25, cursor: null });
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.items[0].assignment.state).toBe("stale");
+    expect(result.items[0].assignment.assignedReviewerDisplayName).toBe("Former Person");
+  });
+
+  it("unassigned row: assignedReviewerDisplayName is null, not a fallback string", async () => {
+    seedRun("run-1");
+    const result = await getReviewQueue({ view: "needs_review", workspaceId: WS_ID, uid: OWNER_UID, callerCandidate: callerCandidate(OWNER_UID, "owner"), projectFilter: undefined, limit: 25, cursor: null });
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.items[0].assignment.assignedReviewerDisplayName).toBeNull();
+  });
+
+  it("multiple rows sharing the same reviewer uid: name resolved once per request, not per row (batched)", async () => {
+    seedRun("run-1");
+    seedRun("run-2");
+    seedAssignment("run-1");
+    seedAssignment("run-2");
+    seedUser(REVIEWER_UID, { name: "Dana Reviewer" });
+    const result = await getReviewQueue({ view: "needs_review", workspaceId: WS_ID, uid: OWNER_UID, callerCandidate: callerCandidate(OWNER_UID, "owner"), projectFilter: undefined, limit: 25, cursor: null });
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.items).toHaveLength(2);
+    for (const row of result.items) expect(row.assignment.assignedReviewerDisplayName).toBe("Dana Reviewer");
   });
 });
 

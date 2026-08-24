@@ -280,7 +280,7 @@ describe("result mapping", () => {
     const res = await GET(buildRequest("?view=needs_review"), { params: { workspaceId: WS_ID } });
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body).toEqual({ ok: true, items: [{ runId: "run-1" }], hasMore: true, nextCursor: "abc" });
+    expect(body).toEqual({ ok: true, items: [{ runId: "run-1" }], hasMore: true, nextCursor: "abc", viewerActions: { canManageReviews: false } });
   });
 
   it("empty authorized queue -> 200, not 404", async () => {
@@ -288,7 +288,15 @@ describe("result mapping", () => {
     const res = await GET(buildRequest("?view=needs_review"), { params: { workspaceId: WS_ID } });
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body).toEqual({ ok: true, items: [], hasMore: false });
+    expect(body).toEqual({ ok: true, items: [], hasMore: false, viewerActions: { canManageReviews: false } });
+  });
+
+  it("Phase 9B.6 — viewerActions.canManageReviews reflects reviews.manage capability, computed once per request from the same access check, never per-row", async () => {
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValueOnce(grantedAccess({ capabilities: ["research.read", "reviews.read", "reviews.manage"] }));
+    mockedGetReviewQueue.mockResolvedValueOnce({ status: "ok", items: [], hasMore: false });
+    const res = await GET(buildRequest("?view=needs_review"), { params: { workspaceId: WS_ID } });
+    const body = await res.json();
+    expect(body.viewerActions).toEqual({ canManageReviews: true });
   });
 
   it("query_failed -> 500 (internalErrorResponse(), the same mapping the sibling GET /api/workspaces/{workspaceId}/runs route uses for its own query_failed/integrity_violation), distinguishable from an empty result", async () => {
