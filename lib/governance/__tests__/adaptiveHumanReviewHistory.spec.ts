@@ -5,6 +5,7 @@
 
 import {
   buildAdaptiveReviewDecisionId,
+  buildWorkspaceReviewDecisionId,
   buildAdaptiveHumanReviewHistoryEntry,
   isAdaptiveReviewTerminalStatus,
   isAdaptiveReviewNonTerminalStatus,
@@ -54,6 +55,48 @@ describe("buildAdaptiveReviewDecisionId", () => {
     expect(() => buildAdaptiveReviewDecisionId("team-1", "", "2026-07-30T00:00:00.000Z", "approved")).toThrow();
     expect(() => buildAdaptiveReviewDecisionId("team-1", "run-1", "", "approved")).toThrow();
     expect(() => buildAdaptiveReviewDecisionId("team-1", "run-1", "2026-07-30T00:00:00.000Z", "")).toThrow();
+  });
+});
+
+describe("buildWorkspaceReviewDecisionId (Phase 9B.5.1)", () => {
+  it("is deterministic — identical input produces identical output", () => {
+    const a = buildWorkspaceReviewDecisionId("ws-1", "run-1", "2026-07-30T00:00:00.000Z", "approved");
+    const b = buildWorkspaceReviewDecisionId("ws-1", "run-1", "2026-07-30T00:00:00.000Z", "approved");
+    expect(a).toBe(b);
+  });
+
+  it("produces a distinct ID when workspaceId differs", () => {
+    const a = buildWorkspaceReviewDecisionId("ws-1", "run-1", "2026-07-30T00:00:00.000Z", "approved");
+    const b = buildWorkspaceReviewDecisionId("ws-2", "run-1", "2026-07-30T00:00:00.000Z", "approved");
+    expect(a).not.toBe(b);
+  });
+
+  it("produces a distinct ID when runId, reviewedAt, or newStatus differs", () => {
+    const base = buildWorkspaceReviewDecisionId("ws-1", "run-1", "2026-07-30T00:00:00.000Z", "approved");
+    expect(buildWorkspaceReviewDecisionId("ws-1", "run-2", "2026-07-30T00:00:00.000Z", "approved")).not.toBe(base);
+    expect(buildWorkspaceReviewDecisionId("ws-1", "run-1", "2026-07-30T00:00:01.000Z", "approved")).not.toBe(base);
+    expect(buildWorkspaceReviewDecisionId("ws-1", "run-1", "2026-07-30T00:00:00.000Z", "rejected")).not.toBe(base);
+  });
+
+  it("never collides with the legacy Team or Personal decision-ID namespaces for the same runId/reviewedAt/newStatus", () => {
+    const workspaceId = buildWorkspaceReviewDecisionId("ws-1", "run-1", "2026-07-30T00:00:00.000Z", "approved");
+    const team = buildAdaptiveReviewDecisionId("ws-1", "run-1", "2026-07-30T00:00:00.000Z", "approved");
+    expect(workspaceId).not.toBe(team);
+  });
+
+  it("produces a safe Firestore document ID: no slash, no raw workspace/run values recoverable", () => {
+    const id = buildWorkspaceReviewDecisionId("ws-1", "run-1", "2026-07-30T00:00:00.000Z", "approved");
+    expect(id).not.toContain("/");
+    expect(id).not.toContain("ws-1");
+    expect(id).not.toContain("run-1");
+    expect(id).toMatch(/^dec_[0-9a-f]{32}$/);
+  });
+
+  it("rejects empty components", () => {
+    expect(() => buildWorkspaceReviewDecisionId("", "run-1", "2026-07-30T00:00:00.000Z", "approved")).toThrow();
+    expect(() => buildWorkspaceReviewDecisionId("ws-1", "", "2026-07-30T00:00:00.000Z", "approved")).toThrow();
+    expect(() => buildWorkspaceReviewDecisionId("ws-1", "run-1", "", "approved")).toThrow();
+    expect(() => buildWorkspaceReviewDecisionId("ws-1", "run-1", "2026-07-30T00:00:00.000Z", "")).toThrow();
   });
 });
 

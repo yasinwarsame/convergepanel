@@ -72,6 +72,30 @@ export function buildPersonalReviewDecisionId(runId: string, reviewedAt: string,
   return `dec_${digest}`;
 }
 
+/**
+ * Phase 9B.5.1 — the Workspace-bound-Team equivalent of the two decision-ID
+ * builders above. Deliberately a THIRD, separate function rather than
+ * reusing `buildAdaptiveReviewDecisionId(workspaceId, ...)` (that function's
+ * `teamId` parameter, and its own `throw` guard, is specifically about the
+ * LEGACY Team system — passing a Workspace id through it would compile but
+ * mislabel the namespace to a future reader) or `buildPersonalReviewDecisionId`
+ * (semantically wrong — a Workspace-bound Team run is not a personal one).
+ * `runId` alone is already globally unique, so — exactly like the personal
+ * variant's own reasoning — this loses no collision-resistance; the
+ * `workspace:` prefix exists only to keep the namespace honest, not for
+ * uniqueness.
+ */
+export function buildWorkspaceReviewDecisionId(workspaceId: string, runId: string, reviewedAt: string, newStatus: string): string {
+  if (!workspaceId || !workspaceId.trim()) throw new Error("buildWorkspaceReviewDecisionId: workspaceId must not be empty");
+  if (!runId || !runId.trim()) throw new Error("buildWorkspaceReviewDecisionId: runId must not be empty");
+  if (!reviewedAt || !reviewedAt.trim()) throw new Error("buildWorkspaceReviewDecisionId: reviewedAt must not be empty");
+  if (!newStatus || !newStatus.trim()) throw new Error("buildWorkspaceReviewDecisionId: newStatus must not be empty");
+
+  const material = `workspace:${workspaceId}:${runId}:${reviewedAt}:${newStatus}`;
+  const digest = createHash("sha256").update(material).digest("hex").slice(0, 32);
+  return `dec_${digest}`;
+}
+
 // ============================================
 // Immutable history record contract
 // ============================================
