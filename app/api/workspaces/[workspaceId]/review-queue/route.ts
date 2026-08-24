@@ -129,10 +129,17 @@ export async function GET(req: NextRequest, { params }: { params: { workspaceId:
     if (!decoded.ok) {
       return NextResponse.json({ ok: false, errorCode: "invalid_cursor", message: "This page link is no longer valid." }, { status: 400 });
     }
-    // A cursor issued for a different view, or a different Project
-    // filter, is never silently honored — reject outright rather than
-    // reinterpreting it against a different query shape (§26).
-    if (decoded.cursor.view !== view || decoded.cursor.projectFilter !== projectFilter) {
+    // A cursor issued for a different Workspace, a different view, or a
+    // different Project filter, is never silently honored — reject
+    // outright rather than reinterpreting it against a different query
+    // shape (§26; Workspace binding added per 9B.4-R1 — the underlying
+    // Firestore queries already scope every candidate to THIS Workspace
+    // regardless of cursor contents, so a cross-Workspace cursor replay
+    // could never leak another Workspace's rows, but accepting an
+    // unvalidated cross-context `startAfter()` position is still the
+    // wrong contract: it could silently skip a prefix of, or falsely
+    // exhaust, the requesting Workspace's own correctly-scoped results).
+    if (decoded.cursor.workspaceId !== workspaceId || decoded.cursor.view !== view || decoded.cursor.projectFilter !== projectFilter) {
       return NextResponse.json({ ok: false, errorCode: "invalid_cursor", message: "This page link is no longer valid." }, { status: 400 });
     }
     cursor = decoded.cursor;

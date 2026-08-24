@@ -6,6 +6,7 @@ import { encodeReviewQueueCursor, decodeReviewQueueCursor, type ReviewQueueCurso
 
 function isoCursor(overrides: Partial<ReviewQueueCursor> = {}): ReviewQueueCursor {
   return {
+    workspaceId: "ws-1",
     view: "needs_review",
     projectFilter: undefined,
     sort: { kind: "iso", value: "2026-08-20T00:00:00.000Z" },
@@ -86,37 +87,56 @@ describe("malformed input rejection", () => {
   });
 
   it("wrong version -> unsupported_version", () => {
-    const payload = Buffer.from(JSON.stringify({ v: 999, view: "needs_review", i: "run-1", sk: "s", sv: "2026-01-01T00:00:00.000Z" }), "utf8").toString("base64url");
+    const payload = Buffer.from(JSON.stringify({ v: 999, w: "ws-1", view: "needs_review", i: "run-1", sk: "s", sv: "2026-01-01T00:00:00.000Z" }), "utf8").toString("base64url");
     expect(decodeReviewQueueCursor(payload)).toEqual({ ok: false, reason: "unsupported_version" });
   });
 
   it("invalid view -> invalid_fields", () => {
-    const payload = Buffer.from(JSON.stringify({ v: 1, view: "all", i: "run-1", sk: "s", sv: "2026-01-01T00:00:00.000Z" }), "utf8").toString("base64url");
+    const payload = Buffer.from(JSON.stringify({ v: 1, w: "ws-1", view: "all", i: "run-1", sk: "s", sv: "2026-01-01T00:00:00.000Z" }), "utf8").toString("base64url");
     expect(decodeReviewQueueCursor(payload)).toEqual({ ok: false, reason: "invalid_fields" });
   });
 
   it("missing doc path -> invalid_fields", () => {
-    const payload = Buffer.from(JSON.stringify({ v: 1, view: "needs_review", sk: "s", sv: "2026-01-01T00:00:00.000Z" }), "utf8").toString("base64url");
+    const payload = Buffer.from(JSON.stringify({ v: 1, w: "ws-1", view: "needs_review", sk: "s", sv: "2026-01-01T00:00:00.000Z" }), "utf8").toString("base64url");
     expect(decodeReviewQueueCursor(payload)).toEqual({ ok: false, reason: "invalid_fields" });
   });
 
   it("unknown sort kind -> invalid_fields", () => {
-    const payload = Buffer.from(JSON.stringify({ v: 1, view: "needs_review", i: "run-1", sk: "x" }), "utf8").toString("base64url");
+    const payload = Buffer.from(JSON.stringify({ v: 1, w: "ws-1", view: "needs_review", i: "run-1", sk: "x" }), "utf8").toString("base64url");
     expect(decodeReviewQueueCursor(payload)).toEqual({ ok: false, reason: "invalid_fields" });
   });
 
   it("timestamp sort missing seconds/nanoseconds -> invalid_fields", () => {
-    const payload = Buffer.from(JSON.stringify({ v: 1, view: "needs_review", i: "run-1", sk: "t" }), "utf8").toString("base64url");
+    const payload = Buffer.from(JSON.stringify({ v: 1, w: "ws-1", view: "needs_review", i: "run-1", sk: "t" }), "utf8").toString("base64url");
     expect(decodeReviewQueueCursor(payload)).toEqual({ ok: false, reason: "invalid_fields" });
   });
 
   it("negative nanoseconds -> invalid_fields", () => {
-    const payload = Buffer.from(JSON.stringify({ v: 1, view: "needs_review", i: "run-1", sk: "t", ss: 100, sn: -1 }), "utf8").toString("base64url");
+    const payload = Buffer.from(JSON.stringify({ v: 1, w: "ws-1", view: "needs_review", i: "run-1", sk: "t", ss: 100, sn: -1 }), "utf8").toString("base64url");
     expect(decodeReviewQueueCursor(payload)).toEqual({ ok: false, reason: "invalid_fields" });
   });
 
   it("malformed projectFilter (empty string, not null) -> invalid_fields", () => {
-    const payload = Buffer.from(JSON.stringify({ v: 1, view: "needs_review", i: "run-1", p: "", sk: "s", sv: "2026-01-01T00:00:00.000Z" }), "utf8").toString("base64url");
+    const payload = Buffer.from(JSON.stringify({ v: 1, w: "ws-1", view: "needs_review", i: "run-1", p: "", sk: "s", sv: "2026-01-01T00:00:00.000Z" }), "utf8").toString("base64url");
     expect(decodeReviewQueueCursor(payload)).toEqual({ ok: false, reason: "invalid_fields" });
+  });
+
+  it("9B.4-R1 — missing workspaceId -> invalid_fields (never silently treated as unscoped)", () => {
+    const payload = Buffer.from(JSON.stringify({ v: 1, view: "needs_review", i: "run-1", sk: "s", sv: "2026-01-01T00:00:00.000Z" }), "utf8").toString("base64url");
+    expect(decodeReviewQueueCursor(payload)).toEqual({ ok: false, reason: "invalid_fields" });
+  });
+
+  it("9B.4-R1 — empty-string workspaceId -> invalid_fields", () => {
+    const payload = Buffer.from(JSON.stringify({ v: 1, w: "", view: "needs_review", i: "run-1", sk: "s", sv: "2026-01-01T00:00:00.000Z" }), "utf8").toString("base64url");
+    expect(decodeReviewQueueCursor(payload)).toEqual({ ok: false, reason: "invalid_fields" });
+  });
+
+  it("9B.4-R1 — workspaceId round-trips exactly, distinct workspaces produce distinct cursors", () => {
+    const cursorA = isoCursor({ workspaceId: "ws-A" });
+    const cursorB = isoCursor({ workspaceId: "ws-B" });
+    expect(encodeReviewQueueCursor(cursorA)).not.toBe(encodeReviewQueueCursor(cursorB));
+    const decodedA = decodeReviewQueueCursor(encodeReviewQueueCursor(cursorA));
+    expect(decodedA).toEqual({ ok: true, cursor: cursorA });
+    if (decodedA.ok) expect(decodedA.cursor.workspaceId).toBe("ws-A");
   });
 });

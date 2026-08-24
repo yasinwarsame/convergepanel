@@ -283,7 +283,7 @@ async function scanStatusView(args: {
     }
 
     const hasMore = !exhausted && lastScanned !== null;
-    const nextCursor = hasMore && lastScanned ? encodeCursorFor(args.view, args.projectFilter, lastScanned.sort, lastScanned.docPath) : undefined;
+    const nextCursor = hasMore && lastScanned ? encodeCursorFor(args.workspaceId, args.view, args.projectFilter, lastScanned.sort, lastScanned.docPath) : undefined;
     return { status: "ok", items: validRows, hasMore, ...(nextCursor ? { nextCursor } : {}) };
   } catch (err) {
     logger.warn("[workspaces/reviewQueue] status-view query failed", { view: args.view, workspaceId: args.workspaceId, error: err instanceof Error ? err.message : String(err) });
@@ -378,7 +378,7 @@ async function scanAssignedToMe(args: {
     }
 
     const hasMore = !exhausted && lastScanned !== null;
-    const nextCursor = hasMore && lastScanned ? encodeCursorFor("assigned_to_me", args.projectFilter, { kind: "iso", value: lastScanned.value }, lastScanned.docPath) : undefined;
+    const nextCursor = hasMore && lastScanned ? encodeCursorFor(args.workspaceId, "assigned_to_me", args.projectFilter, { kind: "iso", value: lastScanned.value }, lastScanned.docPath) : undefined;
     return { status: "ok", items: validRows, hasMore, ...(nextCursor ? { nextCursor } : {}) };
   } catch (err) {
     logger.warn("[workspaces/reviewQueue] assigned_to_me query failed", { workspaceId: args.workspaceId, error: err instanceof Error ? err.message : String(err) });
@@ -467,7 +467,7 @@ async function scanOverdue(args: {
     }
 
     const hasMore = !exhausted && lastScanned !== null;
-    const nextCursor = hasMore && lastScanned ? encodeCursorFor("overdue", args.projectFilter, { kind: "iso", value: lastScanned.value }, lastScanned.docPath) : undefined;
+    const nextCursor = hasMore && lastScanned ? encodeCursorFor(args.workspaceId, "overdue", args.projectFilter, { kind: "iso", value: lastScanned.value }, lastScanned.docPath) : undefined;
     return { status: "ok", items: validRows, hasMore, ...(nextCursor ? { nextCursor } : {}) };
   } catch (err) {
     logger.warn("[workspaces/reviewQueue] overdue query failed", { workspaceId: args.workspaceId, error: err instanceof Error ? err.message : String(err) });
@@ -479,8 +479,8 @@ function cursorIso(sort: ReviewQueueCursor["sort"]): string {
   return sort.kind === "iso" ? sort.value : new Date(0).toISOString();
 }
 
-function encodeCursorFor(view: ReviewQueueView, projectFilter: string | null | undefined, sort: ReviewQueueCursor["sort"], docPath: string): string {
-  return encodeReviewQueueCursor({ view, projectFilter, sort, docPath });
+function encodeCursorFor(workspaceId: string, view: ReviewQueueView, projectFilter: string | null | undefined, sort: ReviewQueueCursor["sort"], docPath: string): string {
+  return encodeReviewQueueCursor({ workspaceId, view, projectFilter, sort, docPath });
 }
 
 // ============================================

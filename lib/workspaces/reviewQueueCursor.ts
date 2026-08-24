@@ -24,6 +24,19 @@
  *   - a view binding — a cursor issued for one view must never be
  *     accepted by another, even if their sort-value shape happens to
  *     coincide.
+ *   - a WORKSPACE binding (9B.4-R1 correction) — a cursor issued while
+ *     querying Workspace A must never be silently accepted for Workspace
+ *     B. `reviewQueue.ts`'s own Firestore queries already scope every
+ *     candidate by `workspaceId == <the URL path's workspace>`
+ *     unconditionally, so a cross-workspace-replayed cursor could never
+ *     actually leak Workspace A's documents into a Workspace B response —
+ *     but accepting cursor state that was never validated against the
+ *     CURRENT request's workspace is still the wrong contract: the
+ *     mismatched `startAfter()` position it carries is meaningless
+ *     relative to Workspace B's own ordering, and could silently skip an
+ *     arbitrary prefix of B's real results or produce a false
+ *     "exhausted" empty page. Binding `workspaceId` here, exactly like
+ *     `view`/`projectFilter` already are, closes that gap the same way.
  *
  * `docPath` is deliberately the caller's own concern for what it means
  * (this module never interprets it) — the `runs`-collection views pass
@@ -40,6 +53,7 @@ export type ReviewQueueView = "assigned_to_me" | "needs_review" | "changes_reque
 export type ReviewQueueSortValue = { kind: "timestamp"; seconds: number; nanoseconds: number } | { kind: "iso"; value: string };
 
 export interface ReviewQueueCursor {
+  workspaceId: string;
   view: ReviewQueueView;
   /** `undefined` = no Project filter was in effect when this cursor was issued. `null` = Unfiled. */
   projectFilter: string | null | undefined;
@@ -52,12 +66,14 @@ const MAX_CURSOR_BYTES = 768;
 const MAX_NANOSECONDS = 999_999_999;
 const MAX_DOC_PATH_LENGTH = 1500;
 const MAX_ISO_LENGTH = 64;
+const MAX_WORKSPACE_ID_LENGTH = 200;
 
 const VALID_VIEWS: ReadonlySet<string> = new Set<ReviewQueueView>(["assigned_to_me", "needs_review", "changes_requested", "overdue", "recently_approved"]);
 
 export function encodeReviewQueueCursor(cursor: ReviewQueueCursor): string {
   const payload: Record<string, unknown> = {
     v: CURSOR_VERSION,
+    w: cursor.workspaceId,
     view: cursor.view,
     i: cursor.docPath,
   };
@@ -112,6 +128,9 @@ export function decodeReviewQueueCursor(raw: string | null | undefined): DecodeR
   if (p.v !== CURSOR_VERSION) {
     return { ok: false, reason: "unsupported_version" };
   }
+  if (typeof p.w !== "string" || p.w.length === 0 || p.w.length > MAX_WORKSPACE_ID_LENGTH) {
+    return { ok: false, reason: "invalid_fields" };
+  }
   if (typeof p.view !== "string" || !VALID_VIEWS.has(p.view)) {
     return { ok: false, reason: "invalid_fields" };
   }
@@ -147,5 +166,5 @@ export function decodeReviewQueueCursor(raw: string | null | undefined): DecodeR
     return { ok: false, reason: "invalid_fields" };
   }
 
-  return { ok: true, cursor: { view: p.view as ReviewQueueView, projectFilter, sort, docPath: p.i } };
+  return { ok: true, cursor: { workspaceId: p.w, view: p.view as ReviewQueueView, projectFilter, sort, docPath: p.i } };
 }

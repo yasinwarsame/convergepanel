@@ -245,23 +245,32 @@ describe("cursor", () => {
   });
 
   it("a cursor issued for a different view is rejected, never silently reinterpreted", async () => {
-    const cursor = encodeReviewQueueCursor({ view: "overdue", projectFilter: undefined, sort: { kind: "iso", value: "2026-08-01T00:00:00.000Z" }, docPath: "runs/run-1/humanReviewAssignment/current" });
+    const cursor = encodeReviewQueueCursor({ workspaceId: WS_ID, view: "overdue", projectFilter: undefined, sort: { kind: "iso", value: "2026-08-01T00:00:00.000Z" }, docPath: "runs/run-1/humanReviewAssignment/current" });
     const res = await GET(buildRequest(`?view=needs_review&cursor=${cursor}`), { params: { workspaceId: WS_ID } });
     expect(res.status).toBe(400);
     expect(mockedGetReviewQueue).not.toHaveBeenCalled();
   });
 
   it("a cursor issued for a different Project filter is rejected", async () => {
-    const cursor = encodeReviewQueueCursor({ view: "needs_review", projectFilter: "proj-A", sort: { kind: "timestamp", seconds: 1, nanoseconds: 0 }, docPath: "run-1" });
+    const cursor = encodeReviewQueueCursor({ workspaceId: WS_ID, view: "needs_review", projectFilter: "proj-A", sort: { kind: "timestamp", seconds: 1, nanoseconds: 0 }, docPath: "run-1" });
     const res = await GET(buildRequest(`?view=needs_review&cursor=${cursor}&projectId=proj-B`), { params: { workspaceId: WS_ID } });
     expect(res.status).toBe(400);
   });
 
-  it("a valid cursor for the SAME view/project is honored and passed through", async () => {
-    const cursor = encodeReviewQueueCursor({ view: "needs_review", projectFilter: undefined, sort: { kind: "timestamp", seconds: 1, nanoseconds: 0 }, docPath: "run-1" });
+  it("9B.4-R1 — a cursor issued for a DIFFERENT Workspace is rejected, even with an identical view/Project filter", async () => {
+    const cursor = encodeReviewQueueCursor({ workspaceId: "ws-other-team", view: "needs_review", projectFilter: undefined, sort: { kind: "timestamp", seconds: 1, nanoseconds: 0 }, docPath: "run-1" });
+    const res = await GET(buildRequest(`?view=needs_review&cursor=${cursor}`), { params: { workspaceId: WS_ID } });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.errorCode).toBe("invalid_cursor");
+    expect(mockedGetReviewQueue).not.toHaveBeenCalled();
+  });
+
+  it("a valid cursor for the SAME Workspace/view/project is honored and passed through", async () => {
+    const cursor = encodeReviewQueueCursor({ workspaceId: WS_ID, view: "needs_review", projectFilter: undefined, sort: { kind: "timestamp", seconds: 1, nanoseconds: 0 }, docPath: "run-1" });
     const res = await GET(buildRequest(`?view=needs_review&cursor=${cursor}`), { params: { workspaceId: WS_ID } });
     expect(res.status).toBe(200);
-    expect(mockedGetReviewQueue).toHaveBeenCalledWith(expect.objectContaining({ cursor: expect.objectContaining({ view: "needs_review" }) }));
+    expect(mockedGetReviewQueue).toHaveBeenCalledWith(expect.objectContaining({ cursor: expect.objectContaining({ view: "needs_review", workspaceId: WS_ID }) }));
   });
 });
 
