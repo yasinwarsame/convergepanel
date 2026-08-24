@@ -63,6 +63,36 @@ export function buildAdaptivePanelFinalDecisionId(
   return `panel_dec_${digest}`;
 }
 
+/**
+ * Phase 9B.5.2 — Workspace-scoped sibling of `buildAdaptivePanelFinalDecisionId`,
+ * exactly mirroring `buildWorkspaceReviewDecisionId`'s own precedent from
+ * Phase 9B.5.1 (`adaptiveHumanReviewHistory.ts`): a purely additive new
+ * function keyed on `workspaceId` rather than `teamId`, distinct prefix
+ * (`panel_workspace_dec_`), zero changes to `buildAdaptivePanelFinalDecisionId`
+ * itself or any of its existing legacy Team callers. `workspaceId` is
+ * required non-empty (never `null`) — a Workspace-bound panel always has
+ * one once it exists, so there is no analogous nullable-teamId case to
+ * handle here the way the PANEL DOCUMENT's own `teamId` field does.
+ */
+export function buildWorkspacePanelFinalDecisionId(
+  workspaceId: string,
+  runId: string,
+  panelRevision: number,
+  finalStatus: string,
+  aggregationPolicyVersion: number
+): string {
+  if (!workspaceId || !workspaceId.trim()) throw new Error("buildWorkspacePanelFinalDecisionId: workspaceId must not be empty");
+  if (!runId || !runId.trim()) throw new Error("buildWorkspacePanelFinalDecisionId: runId must not be empty");
+  if (!Number.isInteger(panelRevision) || panelRevision < 1) {
+    throw new Error("buildWorkspacePanelFinalDecisionId: panelRevision must be a positive integer");
+  }
+  if (!finalStatus || !finalStatus.trim()) throw new Error("buildWorkspacePanelFinalDecisionId: finalStatus must not be empty");
+
+  const material = `workspace:${workspaceId}:${runId}:${panelRevision}:${finalStatus}:${aggregationPolicyVersion}`;
+  const digest = createHash("sha256").update(material).digest("hex").slice(0, 32);
+  return `panel_workspace_dec_${digest}`;
+}
+
 // ============================================
 // Canonical condition union (§E8/§E22, Option A)
 // ============================================
@@ -187,7 +217,8 @@ export type AdaptivePanelFinalizationHistoryV1 = {
   schemaVersion: 1;
   eventId: string;
   eventType: "panel_finalized";
-  teamId: string;
+  /** Phase 9B.5.2 — `null` for a Workspace-bound panel's finalization, mirroring `AdaptiveHumanReviewPanelV1.teamId`'s own widening. */
+  teamId: string | null;
   runId: string;
   preFinalizationPanelRevision: number;
   finalizedPanelRevision: number;
@@ -202,7 +233,7 @@ export type AdaptivePanelFinalizationHistoryV1 = {
 };
 
 export function buildAdaptivePanelFinalizationHistoryEntry(args: {
-  teamId: string;
+  teamId: string | null;
   runId: string;
   preFinalizationPanelRevision: number;
   finalizedPanelRevision: number;

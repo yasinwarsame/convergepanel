@@ -171,6 +171,40 @@ export function buildAdaptivePanelOverrideDecisionId(args: {
   return `panel_override_dec_${digest}`;
 }
 
+/**
+ * Phase 9B.5.2 — Workspace-scoped sibling of `buildAdaptivePanelOverrideDecisionId`,
+ * exactly mirroring `buildWorkspaceReviewDecisionId`'s (Phase 9B.5.1) and
+ * `buildWorkspacePanelFinalDecisionId`'s (this phase) own precedent: purely
+ * additive, keyed on `workspaceId` (required non-empty — a Workspace-bound
+ * panel always has one once it exists), distinct prefix
+ * (`panel_workspace_override_dec_`), zero changes to
+ * `buildAdaptivePanelOverrideDecisionId` itself or any existing legacy Team
+ * caller.
+ */
+export function buildWorkspacePanelOverrideDecisionId(args: {
+  workspaceId: string;
+  runId: string;
+  panelRevision: number;
+  status: string;
+  justification: string;
+  conditions?: string[];
+}): string {
+  if (!args.workspaceId || !args.workspaceId.trim()) throw new Error("buildWorkspacePanelOverrideDecisionId: workspaceId must not be empty");
+  if (!args.runId || !args.runId.trim()) throw new Error("buildWorkspacePanelOverrideDecisionId: runId must not be empty");
+  if (!Number.isInteger(args.panelRevision) || args.panelRevision < 1) {
+    throw new Error("buildWorkspacePanelOverrideDecisionId: panelRevision must be a positive integer");
+  }
+  if (!args.status || !args.status.trim()) throw new Error("buildWorkspacePanelOverrideDecisionId: status must not be empty");
+  if (!args.justification || !args.justification.trim()) {
+    throw new Error("buildWorkspacePanelOverrideDecisionId: justification must not be empty");
+  }
+
+  const conditionsPart = args.conditions && args.conditions.length > 0 ? args.conditions.join("␟") : "";
+  const material = `owner_override:workspace:${args.workspaceId}:${args.runId}:${args.panelRevision}:${args.status}:${args.justification}:${conditionsPart}`;
+  const digest = createHash("sha256").update(material).digest("hex").slice(0, 32);
+  return `panel_workspace_override_dec_${digest}`;
+}
+
 // ============================================
 // Canonical humanReview provenance (§F6)
 // ============================================
@@ -243,7 +277,8 @@ export type AdaptivePanelOverrideHistoryV1 = {
   schemaVersion: 1;
   eventId: string;
   eventType: "panel_owner_overridden";
-  teamId: string;
+  /** Phase 9B.5.2 — `null` for a Workspace-bound panel's override, mirroring `AdaptiveHumanReviewPanelV1.teamId`'s own widening. */
+  teamId: string | null;
   runId: string;
   preOverridePanelRevision: number;
   overriddenPanelRevision: number;
@@ -256,7 +291,7 @@ export type AdaptivePanelOverrideHistoryV1 = {
 };
 
 export function buildAdaptivePanelOverrideHistoryEntry(args: {
-  teamId: string;
+  teamId: string | null;
   runId: string;
   preOverridePanelRevision: number;
   overriddenPanelRevision: number;

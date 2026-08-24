@@ -187,7 +187,8 @@ export async function writeAdaptiveAssignmentAdminAuditEvent(args: {
  */
 export async function writeAdaptivePanelFinalizationAdminAuditEvent(args: {
   actorUid: string;
-  teamId: string;
+  /** Phase 9B.5.2 — `null` for a Workspace-bound panel finalization. */
+  teamId: string | null;
   runId: string;
   priorHumanReviewStatus: string;
   finalStatus: string;
@@ -245,7 +246,8 @@ export async function writeAdaptivePanelFinalizationAdminAuditEvent(args: {
  */
 export async function writeAdaptivePanelOverrideAdminAuditEvent(args: {
   actorUid: string;
-  teamId: string;
+  /** Phase 9B.5.2 — `null` for a Workspace-bound panel override. */
+  teamId: string | null;
   runId: string;
   priorHumanReviewStatus: string;
   finalStatus: string;

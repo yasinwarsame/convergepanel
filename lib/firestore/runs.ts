@@ -2005,7 +2005,8 @@ export type AdaptivePanelFinalizationGovernanceEventWriteResult = { status: "rec
  */
 export async function writeAdaptivePanelFinalizationGovernanceEvent(args: {
   runId: string;
-  teamId: string;
+  /** Phase 9B.5.2 — `null` for a Workspace-bound panel finalization. */
+  teamId: string | null;
   schemaId: GovernanceRecordV1["schemaId"];
   answerShape: GovernanceRecordV1["answerShape"];
   finalStatus: string;
@@ -2317,7 +2318,8 @@ export type AdaptivePanelOverrideGovernanceEventWriteResult = { status: "recorde
  */
 export async function writeAdaptivePanelOverrideGovernanceEvent(args: {
   runId: string;
-  teamId: string;
+  /** Phase 9B.5.2 — `null` for a Workspace-bound panel override. */
+  teamId: string | null;
   schemaId: GovernanceRecordV1["schemaId"];
   answerShape: GovernanceRecordV1["answerShape"];
   finalStatus: string;

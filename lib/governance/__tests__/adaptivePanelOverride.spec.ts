@@ -7,8 +7,10 @@
 import {
   parseSubmitAdaptiveReviewOverrideRequest,
   buildAdaptivePanelOverrideDecisionId,
+  buildWorkspacePanelOverrideDecisionId,
   buildOverrideSystemComment,
   buildOverriddenMultiReviewerHumanReview,
+  buildAdaptivePanelOverrideHistoryEntry,
 } from "@/lib/governance/adaptivePanelOverride";
 
 describe("parseSubmitAdaptiveReviewOverrideRequest", () => {
@@ -211,6 +213,61 @@ describe("buildAdaptivePanelOverrideDecisionId", () => {
     expect(() => buildAdaptivePanelOverrideDecisionId({ ...base, panelRevision: 0 })).toThrow();
     expect(() => buildAdaptivePanelOverrideDecisionId({ ...base, status: "" })).toThrow();
     expect(() => buildAdaptivePanelOverrideDecisionId({ ...base, justification: "" })).toThrow();
+  });
+});
+
+describe("buildWorkspacePanelOverrideDecisionId (Phase 9B.5.2)", () => {
+  const base = { workspaceId: "ws-1", runId: "run-1", panelRevision: 3, status: "approved", justification: "same justification" };
+
+  it("is deterministic — the exact same request always produces the same ID (exact-retry idempotency)", () => {
+    const a = buildWorkspacePanelOverrideDecisionId(base);
+    const b = buildWorkspacePanelOverrideDecisionId(base);
+    expect(a).toBe(b);
+  });
+
+  it("a different justification, status, panelRevision, or workspaceId produces a different ID", () => {
+    const a = buildWorkspacePanelOverrideDecisionId(base);
+    expect(buildWorkspacePanelOverrideDecisionId({ ...base, justification: "a different justification" })).not.toBe(a);
+    expect(buildWorkspacePanelOverrideDecisionId({ ...base, status: "rejected" })).not.toBe(a);
+    expect(buildWorkspacePanelOverrideDecisionId({ ...base, panelRevision: 4 })).not.toBe(a);
+    expect(buildWorkspacePanelOverrideDecisionId({ ...base, workspaceId: "ws-2" })).not.toBe(a);
+  });
+
+  it("never collides with the legacy Team override decision-ID namespace for the same runId/panelRevision/status/justification", () => {
+    const workspaceId = buildWorkspacePanelOverrideDecisionId(base);
+    const team = buildAdaptivePanelOverrideDecisionId({ teamId: "ws-1", runId: "run-1", panelRevision: 3, status: "approved", justification: "same justification" });
+    expect(workspaceId).not.toBe(team);
+  });
+
+  it("is a safe Firestore document ID with a distinct prefix", () => {
+    const id = buildWorkspacePanelOverrideDecisionId(base);
+    expect(id).toMatch(/^panel_workspace_override_dec_[0-9a-f]{32}$/);
+  });
+
+  it("throws on empty required components", () => {
+    expect(() => buildWorkspacePanelOverrideDecisionId({ ...base, workspaceId: "" })).toThrow();
+    expect(() => buildWorkspacePanelOverrideDecisionId({ ...base, runId: "" })).toThrow();
+    expect(() => buildWorkspacePanelOverrideDecisionId({ ...base, panelRevision: 0 })).toThrow();
+    expect(() => buildWorkspacePanelOverrideDecisionId({ ...base, status: "" })).toThrow();
+    expect(() => buildWorkspacePanelOverrideDecisionId({ ...base, justification: "" })).toThrow();
+  });
+});
+
+describe("buildAdaptivePanelOverrideHistoryEntry — Phase 9B.5.2 teamId: null", () => {
+  it("teamId: null (Workspace-bound panel override) is accepted, not coerced/omitted", () => {
+    const entry = buildAdaptivePanelOverrideHistoryEntry({
+      teamId: null,
+      runId: "run-1",
+      preOverridePanelRevision: 1,
+      overriddenPanelRevision: 2,
+      finalStatus: "approved",
+      finalDecisionId: "panel_workspace_override_dec_x",
+      overrideByUserId: "owner-uid",
+      conditionsCount: 0,
+      finalizedAt: "2020-06-01T00:00:00.000Z",
+    });
+    expect(entry.teamId).toBeNull();
+    expect(entry.eventId).toBe("2:panel_owner_overridden");
   });
 });
 
