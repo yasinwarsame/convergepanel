@@ -51,6 +51,8 @@ jest.mock("@/lib/billing/planConfig", () => ({ getVideoLimit: () => 0 }));
 
 let uiGlobal = false;
 let uiCanary: string | undefined = undefined;
+let approvalGlobal = false;
+let approvalCanary: string | undefined = undefined;
 jest.mock("@/lib/env", () => ({
   get PERSONAL_WORKSPACE_UI_ENABLED() {
     return uiGlobal;
@@ -58,6 +60,22 @@ jest.mock("@/lib/env", () => ({
   get PERSONAL_WORKSPACE_UI_CANARY_UIDS() {
     return uiCanary;
   },
+  get APPROVAL_WORKFLOW_ENABLED() {
+    return approvalGlobal;
+  },
+  get APPROVAL_WORKFLOW_CANARY_UIDS() {
+    return approvalCanary;
+  },
+}));
+
+const mockedResolveViewerTeamWorkspaceId = jest.fn();
+jest.mock("@/lib/workspaces/resolveViewerTeamWorkspaceId", () => ({
+  resolveViewerTeamWorkspaceId: (...args: any[]) => mockedResolveViewerTeamWorkspaceId(...args),
+}));
+
+const mockedResolveTeamRunWorkspaceAccess = jest.fn();
+jest.mock("@/lib/workspaces/resolveTeamRunWorkspaceAccess", () => ({
+  resolveTeamRunWorkspaceAccess: (...args: any[]) => mockedResolveTeamRunWorkspaceAccess(...args),
 }));
 
 import { NextRequest } from "next/server";
@@ -94,9 +112,13 @@ beforeEach(() => {
   userDocs.clear();
   uiGlobal = false;
   uiCanary = undefined;
+  approvalGlobal = false;
+  approvalCanary = undefined;
   jest.clearAllMocks();
   mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: UID });
   mockedGetUser.mockResolvedValue({ email: "user@example.com" });
+  mockedResolveViewerTeamWorkspaceId.mockResolvedValue({ status: "not_found" });
+  mockedResolveTeamRunWorkspaceAccess.mockResolvedValue({ granted: false, reason: "team_workspaces_disabled" });
 });
 
 describe("GET /api/user/usage — auth", () => {
@@ -186,5 +208,120 @@ describe("GET /api/user/usage — catch-all safe-default fallback", () => {
     const json = await res.json();
     expect(res.status).toBe(200); // this route's own established convention: degrade, don't fail the request
     expect(json.workspaceUiEnabled).toBe(false);
+  });
+
+  it("fails closed: workspaceReviewsUiEnabled=false even if an unexpected error occurs mid-request, regardless of rollout config", async () => {
+    approvalGlobal = true;
+    userDocs.set(UID, { plan: "free" });
+    const entitlements = require("@/lib/admin/entitlements");
+    entitlements.getEffectiveEntitlements.mockRejectedValueOnce(new Error("boom"));
+    const res = await GET(buildRequest());
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json.workspaceReviewsUiEnabled).toBe(false);
+  });
+});
+
+/**
+ * Approval Workflow, Phase 9C.1 — workspaceReviewsUiEnabled. Mirrors
+ * workspaceUiEnabled/projectsUiEnabled's own established test shape, plus
+ * coverage for the two additional async gates (Team Workspace discovery
+ * and access/capability check) this flag alone requires.
+ */
+describe("GET /api/user/usage — workspaceReviewsUiEnabled", () => {
+  const GRANTED = { granted: true, capabilities: ["research.read", "reviews.read"] };
+
+  it("includes workspaceReviewsUiEnabled alongside every other field, defaulting to false", async () => {
+    const res = await GET(buildRequest());
+    const json = await res.json();
+    expect(json).toHaveProperty("workspaceReviewsUiEnabled");
+    expect(json.workspaceReviewsUiEnabled).toBe(false);
+  });
+
+  it("false when Approval Workflow is not admitted — never even calls Team Workspace discovery (cheapest gate first)", async () => {
+    const res = await GET(buildRequest());
+    await res.json();
+    expect(mockedResolveViewerTeamWorkspaceId).not.toHaveBeenCalled();
+  });
+
+  it("true when Approval Workflow is globally enabled, a Team Workspace is discovered, and access + both capabilities are granted", async () => {
+    approvalGlobal = true;
+    mockedResolveViewerTeamWorkspaceId.mockResolvedValue({ status: "found", workspaceId: "ws-1" });
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValue(GRANTED);
+    const res = await GET(buildRequest());
+    const json = await res.json();
+    expect(json.workspaceReviewsUiEnabled).toBe(true);
+  });
+
+  it("true via canary admission (not global)", async () => {
+    approvalCanary = UID;
+    mockedResolveViewerTeamWorkspaceId.mockResolvedValue({ status: "found", workspaceId: "ws-1" });
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValue(GRANTED);
+    const res = await GET(buildRequest());
+    const json = await res.json();
+    expect(json.workspaceReviewsUiEnabled).toBe(true);
+  });
+
+  it("false when admitted but no Team Workspace is discoverable", async () => {
+    approvalGlobal = true;
+    mockedResolveViewerTeamWorkspaceId.mockResolvedValue({ status: "not_found" });
+    const res = await GET(buildRequest());
+    const json = await res.json();
+    expect(json.workspaceReviewsUiEnabled).toBe(false);
+    expect(mockedResolveTeamRunWorkspaceAccess).not.toHaveBeenCalled();
+  });
+
+  it("false when the discovery lookup fails — never falls open", async () => {
+    approvalGlobal = true;
+    mockedResolveViewerTeamWorkspaceId.mockResolvedValue({ status: "lookup_failed" });
+    const res = await GET(buildRequest());
+    const json = await res.json();
+    expect(json.workspaceReviewsUiEnabled).toBe(false);
+  });
+
+  it("false when a Team Workspace is discovered but access is denied", async () => {
+    approvalGlobal = true;
+    mockedResolveViewerTeamWorkspaceId.mockResolvedValue({ status: "found", workspaceId: "ws-1" });
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValue({ granted: false, reason: "membership_removed" });
+    const res = await GET(buildRequest());
+    const json = await res.json();
+    expect(json.workspaceReviewsUiEnabled).toBe(false);
+  });
+
+  it("false when access is granted but research.read is missing", async () => {
+    approvalGlobal = true;
+    mockedResolveViewerTeamWorkspaceId.mockResolvedValue({ status: "found", workspaceId: "ws-1" });
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValue({ granted: true, capabilities: ["reviews.read"] });
+    const res = await GET(buildRequest());
+    const json = await res.json();
+    expect(json.workspaceReviewsUiEnabled).toBe(false);
+  });
+
+  it("false when access is granted but reviews.read is missing", async () => {
+    approvalGlobal = true;
+    mockedResolveViewerTeamWorkspaceId.mockResolvedValue({ status: "found", workspaceId: "ws-1" });
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValue({ granted: true, capabilities: ["research.read"] });
+    const res = await GET(buildRequest());
+    const json = await res.json();
+    expect(json.workspaceReviewsUiEnabled).toBe(false);
+  });
+
+  it("uses the server-resolved uid, never a client-supplied one", async () => {
+    approvalCanary = "attacker-supplied-uid";
+    mockedResolveViewerTeamWorkspaceId.mockResolvedValue({ status: "found", workspaceId: "ws-1" });
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValue(GRANTED);
+    const res = await GET(buildRequest());
+    const json = await res.json();
+    expect(json.workspaceReviewsUiEnabled).toBe(false); // UID is "owner-1", not the canary entry
+  });
+
+  it("reflects the same admission for an existing user too", async () => {
+    userDocs.set(UID, { plan: "free", runsThisMonth: 2, usageMonth: new Date().toISOString().slice(0, 7) });
+    approvalGlobal = true;
+    mockedResolveViewerTeamWorkspaceId.mockResolvedValue({ status: "found", workspaceId: "ws-1" });
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValue(GRANTED);
+    const res = await GET(buildRequest());
+    const json = await res.json();
+    expect(json.workspaceReviewsUiEnabled).toBe(true);
   });
 });

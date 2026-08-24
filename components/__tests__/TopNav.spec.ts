@@ -202,7 +202,7 @@ describe("TopNav — Phase 5C Workspace nav-item integration", () => {
   const mobileMenuBlock = extractBetween('{mobileMenuOpen && (', "</header>");
 
   it("destructures workspaceUiEnabled from useUserPlan(), the same server-computed capability source as governanceDashboardEligible/teamRole", () => {
-    expect(source).toMatch(/const \{ governanceDashboardEligible, plan: userPlan, loading: planLoading, teamRole, workspaceUiEnabled, projectsUiEnabled \} = useUserPlan\(\);/);
+    expect(source).toMatch(/const \{ governanceDashboardEligible, plan: userPlan, loading: planLoading, teamRole, workspaceUiEnabled, projectsUiEnabled, workspaceReviewsUiEnabled \} = useUserPlan\(\);/);
   });
 
   it("gates the desktop Workspace link on !loading && user && !planLoading && workspaceUiEnabled — same shape as the Governance/Team Reviews gates, never optimistically shown", () => {
@@ -262,7 +262,7 @@ describe("TopNav — Phase 7B Projects nav-item integration", () => {
   const mobileMenuBlock = extractBetween('{mobileMenuOpen && (', "</header>");
 
   it("destructures projectsUiEnabled from useUserPlan(), alongside workspaceUiEnabled — the same server-computed capability source", () => {
-    expect(source).toMatch(/const \{ governanceDashboardEligible, plan: userPlan, loading: planLoading, teamRole, workspaceUiEnabled, projectsUiEnabled \} = useUserPlan\(\);/);
+    expect(source).toMatch(/const \{ governanceDashboardEligible, plan: userPlan, loading: planLoading, teamRole, workspaceUiEnabled, projectsUiEnabled, workspaceReviewsUiEnabled \} = useUserPlan\(\);/);
   });
 
   it("gates the desktop Projects link on !loading && user && !planLoading && projectsUiEnabled — same shape as the Workspace gate, never optimistically shown", () => {
@@ -312,5 +312,86 @@ describe("TopNav — Phase 7B Projects nav-item integration", () => {
     for (const href of ['href="/workspace"', 'href="/governance"', 'href="/team/reviews"', 'href="/reviews"']) {
       expect(desktopNavBlock).toContain(href);
     }
+  });
+});
+
+/**
+ * Approval Workflow, Phase 9C.1 — TopNav's new "Reviews" (Team Workspace)
+ * entry. Mirrors the Projects block's own established source-regex
+ * pattern exactly. The nav boolean (`workspaceReviewsUiEnabled`) is a
+ * server-computed capability signal from `useUserPlan()` — the SAME
+ * mechanism `workspaceUiEnabled`/`projectsUiEnabled` already use, never a
+ * new client-side authorization system, never a role-name check.
+ */
+describe("TopNav — Reviews (Team Workspace) nav entry", () => {
+  function extractBetween(startMarker: string, endMarker: string): string {
+    const startIndex = source.indexOf(startMarker);
+    expect(startIndex).toBeGreaterThan(-1);
+    const endIndex = source.indexOf(endMarker, startIndex + startMarker.length);
+    expect(endIndex).toBeGreaterThan(startIndex);
+    return source.slice(startIndex, endIndex);
+  }
+  const desktopNavBlock = extractBetween(
+    '<div className="hidden items-center gap-1 lg:flex">',
+    "{/* Mobile/tablet toggle"
+  );
+  const mobileMenuBlock = extractBetween('{mobileMenuOpen && (', "</header>");
+
+  it("gates the desktop Reviews link on !loading && user && !planLoading && workspaceReviewsUiEnabled — same shape as every other capability-flag gate, never optimistically shown", () => {
+    expect(desktopNavBlock).toMatch(/\{!loading && user && !planLoading && workspaceReviewsUiEnabled && \(\s*\n\s*<Link\s*\n\s*href="\/workspace\/reviews"/);
+  });
+
+  it("gates the mobile Reviews link identically to the desktop one", () => {
+    expect(mobileMenuBlock).toMatch(/\{!loading && user && !planLoading && workspaceReviewsUiEnabled && \(\s*\n\s*<Link\s*\n\s*href="\/workspace\/reviews"/);
+  });
+
+  it("never hardcodes role === \"Owner\" or role === \"Admin\" to gate the Reviews link — the flag is the sole gate", () => {
+    const linkArea = desktopNavBlock.slice(Math.max(0, desktopNavBlock.indexOf('href="/workspace/reviews"') - 200), desktopNavBlock.indexOf('href="/workspace/reviews"') + 50);
+    expect(linkArea).not.toMatch(/role === ["']Owner["']|role === ["']Admin["']|teamRole === /);
+  });
+
+  it("Reviews is positioned adjacent to Projects (immediately after, per the frozen 9C architecture), before My Reviews", () => {
+    const projectsIdx = desktopNavBlock.indexOf('href="/workspace/projects"');
+    const reviewsIdx = desktopNavBlock.indexOf('href="/workspace/reviews"');
+    const myReviewsIdx = desktopNavBlock.indexOf('href="/reviews"');
+    expect(projectsIdx).toBeGreaterThan(-1);
+    expect(reviewsIdx).toBeGreaterThan(-1);
+    expect(myReviewsIdx).toBeGreaterThan(-1);
+    expect(projectsIdx).toBeLessThan(reviewsIdx);
+    expect(reviewsIdx).toBeLessThan(myReviewsIdx);
+  });
+
+  it("carries visible 'Reviews' text — never icon-only navigation", () => {
+    expect(desktopNavBlock).toMatch(/href="\/workspace\/reviews"[\s\S]{0,300}>\s*Reviews\s*</);
+    expect(mobileMenuBlock).toMatch(/href="\/workspace\/reviews"[\s\S]{0,300}>\s*Reviews\s*</);
+  });
+
+  it("uses a label distinguishable from the pre-existing 'Team Reviews' (legacy) and 'My Reviews' (Personal) nav entries — no duplicate-label collision", () => {
+    expect(desktopNavBlock).toContain("Team Reviews");
+    expect(desktopNavBlock).toContain("My Reviews");
+    expect(desktopNavBlock).toMatch(/>\s*Reviews\s*</);
+    // The exact string "Reviews" (with no adjacent "Team "/"My ") must
+    // exist as its own distinct link label, not merely as a substring of
+    // the other two.
+    expect(desktopNavBlock.match(/>\s*Reviews\s*</g)?.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("wires aria-current=\"page\" for /workspace/reviews based on real pathname state, in both blocks", () => {
+    expect(desktopNavBlock).toMatch(/aria-current=\{pathname === "\/workspace\/reviews" \? "page" : undefined\}/);
+    expect(mobileMenuBlock).toMatch(/aria-current=\{pathname === "\/workspace\/reviews" \? "page" : undefined\}/);
+  });
+
+  it("does not introduce a client-visible rollout flag — no NEXT_PUBLIC_APPROVAL_WORKFLOW reference anywhere in this file", () => {
+    expect(source).not.toMatch(/NEXT_PUBLIC_APPROVAL_WORKFLOW/);
+  });
+
+  it("does not call the review-queue API merely to decide nav visibility", () => {
+    expect(source).not.toMatch(/fetch\([^)]*review-queue/);
+  });
+
+  it("never removes or relocates the legacy Team Reviews link (desktop and mobile) or the My Reviews link (desktop)", () => {
+    expect(desktopNavBlock).toContain('href="/team/reviews"');
+    expect(mobileMenuBlock).toContain('href="/team/reviews"');
+    expect(desktopNavBlock).toContain('href="/reviews"');
   });
 });

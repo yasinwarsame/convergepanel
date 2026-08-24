@@ -20,6 +20,9 @@ import { parseGovernanceReviewerFor } from "@/lib/governance/reviewerFields";
 import { getVideoLimit } from "@/lib/billing/planConfig";
 import { resolvePersonalWorkspaceUiMode } from "@/lib/workspaces/workspaceUiRollout";
 import { resolveProjectsUiEligibility } from "@/lib/projects/projectsUiEligibility";
+import { resolveApprovalWorkflowAdmission } from "@/lib/workspaces/approvalWorkflowRollout";
+import { resolveViewerTeamWorkspaceId } from "@/lib/workspaces/resolveViewerTeamWorkspaceId";
+import { resolveTeamRunWorkspaceAccess } from "@/lib/workspaces/resolveTeamRunWorkspaceAccess";
 import {
   PERSONAL_WORKSPACE_UI_ENABLED,
   PERSONAL_WORKSPACE_UI_CANARY_UIDS,
@@ -27,6 +30,8 @@ import {
   PROJECTS_UI_CANARY_UIDS,
   PROJECTS_ENABLED,
   PROJECTS_CANARY_UIDS,
+  APPROVAL_WORKFLOW_ENABLED,
+  APPROVAL_WORKFLOW_CANARY_UIDS,
 } from "@/lib/env";
 
 /**
@@ -59,6 +64,31 @@ function projectsUiEnabledFor(uid: string): boolean {
     backendGlobalEnabled: PROJECTS_ENABLED,
     backendCanaryUidsRaw: PROJECTS_CANARY_UIDS,
   });
+}
+
+/**
+ * Phase 9C.1 — the single call site computing `workspaceReviewsUiEnabled`.
+ * Mirrors `workspaceUiEnabledFor()`/`projectsUiEnabledFor()`'s own
+ * established pattern (a nav-visibility signal derived from the SAME
+ * rollout/admission machinery every Phase 9 route already uses, never a
+ * new client-side authorization system), but unlike those two — which are
+ * pure and synchronous — this one requires the same bounded reads
+ * `/workspace/reviews/page.tsx` itself performs (Team Workspace
+ * discovery + access/capability check), since Approval Workflow
+ * admission alone doesn't say whether this uid can actually reach a Team
+ * Workspace review surface. `resolveApprovalWorkflowAdmission()` is
+ * checked FIRST and is pure/zero-I/O, so the non-canary majority of
+ * requests never reach the Firestore reads below — mirroring the
+ * "cheapest gate first" convention used by every other Phase 9 route.
+ */
+async function workspaceReviewsUiEnabledFor(uid: string): Promise<boolean> {
+  const admission = resolveApprovalWorkflowAdmission({ uid, globalEnabled: APPROVAL_WORKFLOW_ENABLED, canaryUidsRaw: APPROVAL_WORKFLOW_CANARY_UIDS });
+  if (!admission.admitted) return false;
+  const workspaceResult = await resolveViewerTeamWorkspaceId(uid);
+  if (workspaceResult.status !== "found") return false;
+  const access = await resolveTeamRunWorkspaceAccess({ uid, workspaceId: workspaceResult.workspaceId });
+  if (!access.granted) return false;
+  return access.capabilities.includes("research.read") && access.capabilities.includes("reviews.read");
 }
 
 function clientGovernanceRole(
@@ -186,6 +216,7 @@ export async function GET(req: NextRequest) {
           governanceAssignedReviewerEmail: null as string | null,
           workspaceUiEnabled: workspaceUiEnabledFor(uid),
           projectsUiEnabled: projectsUiEnabledFor(uid),
+          workspaceReviewsUiEnabled: await workspaceReviewsUiEnabledFor(uid),
         },
         { status: 200 }
       );
@@ -293,6 +324,7 @@ export async function GET(req: NextRequest) {
         governanceAssignedReviewerEmail: assignedEmail,
         workspaceUiEnabled: workspaceUiEnabledFor(uid),
         projectsUiEnabled: projectsUiEnabledFor(uid),
+        workspaceReviewsUiEnabled: await workspaceReviewsUiEnabledFor(uid),
       },
       { status: 200 }
     );
@@ -327,6 +359,7 @@ export async function GET(req: NextRequest) {
         // computed for a real identity; false is the only safe value.
         workspaceUiEnabled: false,
         projectsUiEnabled: false,
+        workspaceReviewsUiEnabled: false,
       },
       { status: 200 }
     );
