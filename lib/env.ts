@@ -347,6 +347,36 @@ export const TEAM_WORKSPACES_ENABLED = process.env.TEAM_WORKSPACES_ENABLED === "
 export const TEAM_WORKSPACES_CANARY_UIDS = process.env.TEAM_WORKSPACES_CANARY_UIDS;
 
 /**
+ * Approval Workflow (Phase 9B.4) — dark backend admission gate for the
+ * first PUBLIC Phase 9 route (`GET /api/workspaces/{workspaceId}/review-queue`).
+ * Structural mirror of `TEAM_WORKSPACES_ENABLED`/`TEAM_WORKSPACES_CANARY_UIDS`
+ * — see `lib/workspaces/approvalWorkflowRollout.ts`, the single place that
+ * owns parsing/validation/matching/precedence for both this flag and
+ * `APPROVAL_WORKFLOW_CANARY_UIDS` below.
+ *
+ * Deliberately a SEPARATE, independent rollout axis from
+ * `TEAM_WORKSPACES_ENABLED`/`TEAM_WORKSPACES_CANARY_UIDS` — the two are
+ * operationally independent (a caller must pass BOTH gates; this flag can
+ * never widen Team Workspace access, and Team Workspace admission can
+ * never substitute for this flag). Default OFF is the required
+ * dark-deployment state; absent env parses identically to `"false"`.
+ */
+export const APPROVAL_WORKFLOW_ENABLED = process.env.APPROVAL_WORKFLOW_ENABLED === "true";
+
+/**
+ * Approval Workflow account-scoped canary (Phase 9B.4) — structural
+ * sibling of `TEAM_WORKSPACES_CANARY_UIDS`: an optional, server-only
+ * comma-separated Firebase uid allowlist letting the review-queue route be
+ * activated for a small number of explicitly named accounts while
+ * `APPROVAL_WORKFLOW_ENABLED` stays `false`. Raw, unparsed string —
+ * `lib/workspaces/approvalWorkflowRollout.ts` owns all parsing.
+ *
+ * Never prefixed `NEXT_PUBLIC_` — server-only decision, never exposed to
+ * any response body or client-readable config.
+ */
+export const APPROVAL_WORKFLOW_CANARY_UIDS = process.env.APPROVAL_WORKFLOW_CANARY_UIDS;
+
+/**
  * Projects UI Shell, Phase 7B — a PRESENTATION-only rollout flag,
  * structural sibling of `PERSONAL_WORKSPACE_UI_ENABLED` above. Unrelated
  * to and with no effect on `PROJECTS_ENABLED`/`PROJECTS_CANARY_UIDS`
