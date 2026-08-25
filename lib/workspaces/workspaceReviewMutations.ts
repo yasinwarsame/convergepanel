@@ -122,12 +122,24 @@ function toDto(assignment: AdaptiveHumanReviewAssignmentV1): WorkspaceReviewAssi
 // ============================================
 
 export type GetWorkspaceReviewAssignmentResult =
-  | { status: "ok"; assignment: WorkspaceReviewAssignmentDto | null }
+  | { status: "ok"; assignment: WorkspaceReviewAssignmentDto | null; assignmentRevision: number }
   | { status: "run_not_found" }
   | { status: "firestore_unavailable" }
   | { status: "read_failed" };
 
-/** Plain, non-transactional read — no write follows, so no OCC/transaction is needed. Workspace/capability authorization is the CALLER's (route's) responsibility, exactly like the Phase 9B.4 queue route's own division of labor. */
+/**
+ * Plain, non-transactional read — no write follows, so no OCC/transaction is needed. Workspace/capability authorization is the CALLER's (route's) responsibility, exactly like the Phase 9B.4 queue route's own division of labor.
+ *
+ * Phase 9B.7 — `assignmentRevision` is the persisted assignment resource's
+ * OCC version, independent of `assignment` itself: clearing an assignment
+ * preserves the document (writes a new revision with
+ * `assignedReviewerUserId: null`) rather than deleting it, so `assignment`
+ * can be `null` while `assignmentRevision` is still nonzero. This is the
+ * exact value `putWorkspaceReviewAssignment`/`deleteWorkspaceReviewAssignment`
+ * check against `expectedRevision` — see `reviewContext.ts`'s identical
+ * field for the full rationale. `0` means no assignment document has ever
+ * been written.
+ */
 export async function getWorkspaceReviewAssignment(args: { workspaceId: string; runId: string }): Promise<GetWorkspaceReviewAssignmentResult> {
   if (!adminDb) return { status: "firestore_unavailable" };
   try {
@@ -145,8 +157,10 @@ export async function getWorkspaceReviewAssignment(args: { workspaceId: string; 
     if (target.kind !== "valid_workspace_review_target") return { status: "run_not_found" };
 
     const assignmentSnap = await adminDb.collection("runs").doc(args.runId).collection("humanReviewAssignment").doc("current").get();
-    if (!assignmentSnap.exists) return { status: "ok", assignment: null };
-    return { status: "ok", assignment: toDto(assignmentSnap.data() as AdaptiveHumanReviewAssignmentV1) };
+    if (!assignmentSnap.exists) return { status: "ok", assignment: null, assignmentRevision: 0 };
+    const rawAssignment = assignmentSnap.data() as AdaptiveHumanReviewAssignmentV1;
+    if (typeof rawAssignment.revision !== "number" || !Number.isInteger(rawAssignment.revision) || rawAssignment.revision < 0) return { status: "read_failed" };
+    return { status: "ok", assignment: toDto(rawAssignment), assignmentRevision: rawAssignment.revision };
   } catch (err) {
     logger.warn("[workspaces/workspaceReviewMutations] getWorkspaceReviewAssignment failed", { workspaceId: args.workspaceId, runId: args.runId, error: err instanceof Error ? err.message : String(err) });
     return { status: "read_failed" };

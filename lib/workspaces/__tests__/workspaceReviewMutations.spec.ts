@@ -328,18 +328,31 @@ beforeEach(() => {
 // ============================================
 
 describe("getWorkspaceReviewAssignment", () => {
-  it("no assignment: ok, null", async () => {
+  it("no assignment: ok, null, assignmentRevision 0", async () => {
     const result = await getWorkspaceReviewAssignment({ workspaceId: WS_ID, runId: RUN_ID });
-    expect(result).toEqual({ status: "ok", assignment: null });
+    expect(result).toEqual({ status: "ok", assignment: null, assignmentRevision: 0 });
   });
 
-  it("existing assignment: ok, safe DTO", async () => {
+  it("existing assignment: ok, safe DTO, assignmentRevision matches", async () => {
     seedAssignment({ dueAt: "2026-09-01T00:00:00.000Z" });
     const result = await getWorkspaceReviewAssignment({ workspaceId: WS_ID, runId: RUN_ID });
     expect(result).toEqual({
       status: "ok",
       assignment: { assignedReviewerUserId: REVIEWER_UID, revision: 1, assignedAt: "2026-07-01T00:00:00.000Z", assignedByUserId: OWNER_UID, updatedAt: "2026-07-01T00:00:00.000Z", dueAt: "2026-09-01T00:00:00.000Z" },
+      assignmentRevision: 1,
     });
+  });
+
+  it("Phase 9B.7 CORE FIX: cleared assignment -> assignment null, but assignmentRevision exposes the persisted document's true nonzero revision", async () => {
+    seedAssignment({ assignedReviewerUserId: null, revision: 2 });
+    const result = await getWorkspaceReviewAssignment({ workspaceId: WS_ID, runId: RUN_ID });
+    expect(result).toEqual({ status: "ok", assignment: null, assignmentRevision: 2 });
+  });
+
+  it("persisted assignment document with malformed revision -> read_failed, never guesses 0", async () => {
+    seedAssignment({ revision: "not-a-number" as unknown as number });
+    const result = await getWorkspaceReviewAssignment({ workspaceId: WS_ID, runId: RUN_ID });
+    expect(result).toEqual({ status: "read_failed" });
   });
 
   it("run not found -> run_not_found", async () => {
@@ -675,6 +688,83 @@ describe("deleteWorkspaceReviewAssignment", () => {
     seedAssignment();
     seedPanel({ status: "finalized", finalizedAt: "2026-08-05T00:00:00.000Z", updatedAt: "2026-08-05T00:00:00.000Z", finalizedByUserId: OWNER_UID, finalStatus: "changes_requested", finalDecisionId: "dec_abc", aggregationPolicyVersion: 1 });
     expect((await deleteCall()).ok).toBe(true);
+  });
+});
+
+// ============================================
+// Phase 9B.7 — cleared-assignment OCC read-model correction.
+// The real domain workflow this phase fixes: assign -> clear -> read ->
+// reassign. Before this phase, step 3's read model collapsed the cleared
+// assignment to `assignment: null` with no way to recover the document's
+// true (now-nonzero) revision, so step 4 could only ever guess
+// expectedRevision: 0 and would deterministically fail with
+// stale_revision forever. No mocks for the mutation/read chain itself —
+// exercises the real in-memory transactional Firestore fake end-to-end.
+// ============================================
+
+describe("Phase 9B.7 — clear then reassign (the exact regression this phase fixes)", () => {
+  it("assign -> clear -> read -> reassign using the returned assignmentRevision: SUCCESS", async () => {
+    // 1. no assignment exists yet.
+    expect(await getWorkspaceReviewAssignment({ workspaceId: WS_ID, runId: RUN_ID })).toEqual({ status: "ok", assignment: null, assignmentRevision: 0 });
+
+    // 2. assign reviewer A with expectedRevision=0.
+    const assignResult = await putCall({ uid: OWNER_UID, assignedReviewerUserId: REVIEWER_UID, expectedRevision: 0, dueAt: null });
+    expect(assignResult.ok).toBe(true);
+    if (!assignResult.ok) throw new Error("unreachable");
+    expect(assignResult.assignment.revision).toBe(1);
+
+    // 3. clear reviewer A using the current revision.
+    const clearResult = await deleteCall({ expectedRevision: 1 });
+    expect(clearResult).toEqual({ ok: true });
+    // persisted assignment document remains, reviewer null, revision advanced.
+    const persisted = stores.humanReviewAssignment.get(RUN_ID);
+    expect(persisted?.assignedReviewerUserId).toBeNull();
+    expect(persisted?.revision).toBe(2);
+
+    // 4. read review model — THE CORE FIX: assignment is null, but
+    // assignmentRevision exposes the true persisted revision.
+    const readAfterClear = await getWorkspaceReviewAssignment({ workspaceId: WS_ID, runId: RUN_ID });
+    expect(readAfterClear).toEqual({ status: "ok", assignment: null, assignmentRevision: 2 });
+    if (readAfterClear.status !== "ok") throw new Error("unreachable");
+
+    // 5. assign reviewer B using exactly the revision the read model returned.
+    const reassignResult = await putCall({ uid: OWNER_UID, assignedReviewerUserId: REVIEWER2_UID, expectedRevision: readAfterClear.assignmentRevision, dueAt: null });
+    expect(reassignResult.ok).toBe(true);
+    if (!reassignResult.ok) throw new Error("unreachable");
+    expect(reassignResult.assignment.assignedReviewerUserId).toBe(REVIEWER2_UID);
+    expect(reassignResult.assignment.revision).toBe(3);
+  });
+
+  it("reassigning after a clear with a guessed expectedRevision: 0 still deterministically fails with stale_revision — proves mutation OCC enforcement is unchanged", async () => {
+    await putCall({ uid: OWNER_UID, assignedReviewerUserId: REVIEWER_UID, expectedRevision: 0, dueAt: null });
+    await deleteCall({ expectedRevision: 1 });
+    const guessedZero = await putCall({ uid: OWNER_UID, assignedReviewerUserId: REVIEWER2_UID, expectedRevision: 0, dueAt: null });
+    expect(guessedZero).toEqual({ ok: false, reason: "stale_revision" });
+  });
+
+  it("repeated assign/clear cycles: revision monotonically advances and the read model always exposes the exact current value", async () => {
+    async function readRevision(): Promise<number> {
+      const result = await getWorkspaceReviewAssignment({ workspaceId: WS_ID, runId: RUN_ID });
+      if (result.status !== "ok") throw new Error("unreachable");
+      return result.assignmentRevision;
+    }
+
+    // assign A (rev 0 -> 1)
+    await putCall({ uid: OWNER_UID, assignedReviewerUserId: REVIEWER_UID, expectedRevision: await readRevision(), dueAt: null });
+    expect(await readRevision()).toBe(1);
+
+    // clear (rev 1 -> 2)
+    await deleteCall({ expectedRevision: await readRevision() });
+    expect(await readRevision()).toBe(2);
+
+    // assign B (rev 2 -> 3)
+    await putCall({ uid: OWNER_UID, assignedReviewerUserId: REVIEWER2_UID, expectedRevision: await readRevision(), dueAt: null });
+    expect(await readRevision()).toBe(3);
+
+    // clear again (rev 3 -> 4)
+    await deleteCall({ expectedRevision: await readRevision() });
+    const final = await getWorkspaceReviewAssignment({ workspaceId: WS_ID, runId: RUN_ID });
+    expect(final).toEqual({ status: "ok", assignment: null, assignmentRevision: 4 });
   });
 });
 

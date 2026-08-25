@@ -125,7 +125,7 @@ export async function GET(req: NextRequest, { params }: { params: { workspaceId:
   const result = await getWorkspaceReviewAssignment({ workspaceId, runId });
   switch (result.status) {
     case "ok":
-      return NextResponse.json({ ok: true, assignment: result.assignment });
+      return NextResponse.json({ ok: true, assignment: result.assignment, assignmentRevision: result.assignmentRevision });
     case "run_not_found": {
       const { status, body } = teamRunWorkspaceNotFoundConcealedResponse();
       return NextResponse.json(body, { status });
