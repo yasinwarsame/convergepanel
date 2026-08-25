@@ -148,6 +148,22 @@ export interface ReviewContextDto {
   run: ReviewContextRunInfo;
   review: ReviewContextReviewInfo;
   assignment: ReviewContextAssignmentInfo | null;
+  /**
+   * Phase 9B.7 — "no active reviewer" and "the assignment resource has
+   * never been mutated" are NOT the same state. Clearing an assignment
+   * (`deleteWorkspaceReviewAssignment`) does not delete the underlying
+   * `humanReviewAssignment/current` document — it writes a new revision
+   * with `assignedReviewerUserId: null`, so the document's true revision
+   * keeps advancing even while `assignment` above is `null`. This field
+   * is the persisted assignment resource's OCC version — the exact value
+   * `putWorkspaceReviewAssignment`/`deleteWorkspaceReviewAssignment`
+   * check against `expectedRevision` — independent of whether a reviewer
+   * is currently assigned. `0` means no assignment document has ever
+   * been written for this run (the only case where guessing `0` as
+   * `expectedRevision` is safe). Never conflate this with `assignment`'s
+   * own `revision` field, which exists only when `assignment !== null`.
+   */
+  assignmentRevision: number;
   panel: ReviewContextPanelInfo | null;
   viewer: ReviewContextViewerInfo;
 }
@@ -210,6 +226,20 @@ export async function getReviewContext(args: { workspaceId: string; runId: strin
 
     const rawAssignment = assignmentSnap.exists ? (assignmentSnap.data() as AdaptiveHumanReviewAssignmentV1) : null;
     const hasActiveAssignment = !!rawAssignment && typeof rawAssignment.assignedReviewerUserId === "string" && rawAssignment.assignedReviewerUserId.length > 0;
+
+    // ---- Phase 9B.7: assignment OCC revision, independent of active-assignee
+    // presentation (see ReviewContextDto.assignmentRevision doc comment).
+    // Fail closed rather than guess 0 for a persisted-but-malformed document —
+    // guessing 0 here would recreate the exact unsafe-guess defect this phase
+    // fixes. ----
+    let assignmentRevision: number;
+    if (rawAssignment === null) {
+      assignmentRevision = 0;
+    } else if (typeof rawAssignment.revision === "number" && Number.isInteger(rawAssignment.revision) && rawAssignment.revision >= 0) {
+      assignmentRevision = rawAssignment.revision;
+    } else {
+      return { status: "read_failed" };
+    }
 
     // ---- Batch-resolve every identity this response needs, in one pass.
     // Membership-gated (Phase 9B.6-R1C) — an assignment/panel UID is
@@ -331,6 +361,7 @@ export async function getReviewContext(args: { workspaceId: string; runId: strin
         governanceUpdatedAt: record.updatedAt,
       },
       assignment: assignmentInfo,
+      assignmentRevision,
       panel: panelInfo,
       viewer: {
         mode,

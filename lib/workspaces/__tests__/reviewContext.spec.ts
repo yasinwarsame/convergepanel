@@ -523,6 +523,50 @@ describe("getReviewContext — assignment identity + staleness", () => {
   });
 });
 
+describe("getReviewContext — Phase 9B.7: assignmentRevision is independent of assignment presentation", () => {
+  it("never assigned (no assignment document at all): assignment null, assignmentRevision 0", async () => {
+    const result = await call(OWNER_UID, "owner", true);
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.context.assignment).toBeNull();
+    expect(result.context.assignmentRevision).toBe(0);
+  });
+
+  it("active assignment: assignmentRevision matches the persisted document's revision", async () => {
+    seedAssignment({ revision: 1 });
+    const result = await call(OWNER_UID, "owner", true);
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.context.assignment?.assignedReviewerUserId).toBe(REVIEWER_UID);
+    expect(result.context.assignmentRevision).toBe(1);
+  });
+
+  it("Phase 9B.7 CORE FIX: cleared assignment (assignedReviewerUserId null, persisted revision nonzero) -> assignment null, but assignmentRevision exposes the true nonzero revision", async () => {
+    seedAssignment({ assignedReviewerUserId: null, revision: 2 });
+    const result = await call(OWNER_UID, "owner", true);
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.context.assignment).toBeNull();
+    expect(result.context.assignmentRevision).toBe(2);
+  });
+
+  it("stale assignment (assignee no longer eligible): assignmentRevision still matches the persisted document's revision", async () => {
+    seedAssignment({ assignedReviewerUserId: REVIEWER2_UID, revision: 3 });
+    seedMembership(REVIEWER2_UID, "reviewer", WS_ID, { status: "removed" });
+    const result = await call(OWNER_UID, "owner", true);
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.context.assignment?.state).toBe("stale");
+    expect(result.context.assignmentRevision).toBe(3);
+  });
+
+  it("persisted assignment document with a malformed revision -> read_failed, never fabricates assignmentRevision 0", async () => {
+    seedAssignment({ revision: "not-a-number" as unknown as number });
+    const result = await call(OWNER_UID, "owner", true);
+    expect(result.status).toBe("read_failed");
+  });
+});
+
 describe("getReviewContext — quorum-driven canFinalize", () => {
   it("quorum met (ready): canFinalize = true for a manager", async () => {
     seedPanel({ status: "open", revision: 1, reviewerUserIds: [OWNER_UID, ADMIN_UID].sort() });

@@ -65,7 +65,7 @@ beforeEach(() => {
   approvalWorkflowEnabled = true;
   approvalWorkflowCanaryUids = undefined;
   mockedResolveTeamRunWorkspaceAccess.mockResolvedValue(grantedAccess());
-  mockedGetWorkspaceReviewAssignment.mockResolvedValue({ status: "ok", assignment: null });
+  mockedGetWorkspaceReviewAssignment.mockResolvedValue({ status: "ok", assignment: null, assignmentRevision: 0 });
   mockedPutWorkspaceReviewAssignment.mockResolvedValue({ ok: true, assignment: { assignedReviewerUserId: "reviewer-1", revision: 1, assignedAt: "x", assignedByUserId: UID, updatedAt: "x", dueAt: null } });
   mockedDeleteWorkspaceReviewAssignment.mockResolvedValue({ ok: true });
 });
@@ -106,18 +106,30 @@ describe("GET — auth", () => {
 });
 
 describe("GET — result mapping", () => {
-  it("no assignment -> 200, null", async () => {
+  it("no assignment -> 200, null, assignmentRevision 0", async () => {
     const res = await GET(buildRequest("GET"), { params: { workspaceId: WS_ID, runId: RUN_ID } });
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body).toEqual({ ok: true, assignment: null });
+    expect(body).toEqual({ ok: true, assignment: null, assignmentRevision: 0 });
   });
 
-  it("existing assignment -> 200, DTO", async () => {
-    mockedGetWorkspaceReviewAssignment.mockResolvedValueOnce({ status: "ok", assignment: { assignedReviewerUserId: "reviewer-1", revision: 2, assignedAt: "x", assignedByUserId: "owner-1", updatedAt: "x", dueAt: null } });
+  it("existing assignment -> 200, DTO, assignmentRevision echoed", async () => {
+    mockedGetWorkspaceReviewAssignment.mockResolvedValueOnce({
+      status: "ok",
+      assignment: { assignedReviewerUserId: "reviewer-1", revision: 2, assignedAt: "x", assignedByUserId: "owner-1", updatedAt: "x", dueAt: null },
+      assignmentRevision: 2,
+    });
     const res = await GET(buildRequest("GET"), { params: { workspaceId: WS_ID, runId: RUN_ID } });
     const body = await res.json();
     expect(body.assignment.assignedReviewerUserId).toBe("reviewer-1");
+    expect(body.assignmentRevision).toBe(2);
+  });
+
+  it("Phase 9B.7: cleared assignment -> 200, assignment null but assignmentRevision nonzero", async () => {
+    mockedGetWorkspaceReviewAssignment.mockResolvedValueOnce({ status: "ok", assignment: null, assignmentRevision: 3 });
+    const res = await GET(buildRequest("GET"), { params: { workspaceId: WS_ID, runId: RUN_ID } });
+    const body = await res.json();
+    expect(body).toEqual({ ok: true, assignment: null, assignmentRevision: 3 });
   });
 
   it("run_not_found -> concealed 404", async () => {
