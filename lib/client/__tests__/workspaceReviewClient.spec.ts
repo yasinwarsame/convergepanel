@@ -24,7 +24,13 @@ import {
   buildAssignmentDeleteRequest,
   buildDecisionRequest,
   buildResubmitRequest,
+  buildPanelPutRequest,
+  buildPanelDeleteRequest,
+  buildPanelVoteRequest,
+  buildPanelFinalizeRequest,
+  currentPanelRevision,
   type WorkspaceReviewContext,
+  type ReviewContextPanelInfo,
 } from "@/lib/client/workspaceReviewClient";
 
 function makeContext(overrides: Partial<Pick<WorkspaceReviewContext, "assignment" | "assignmentRevision" | "review">> = {}): Pick<WorkspaceReviewContext, "assignment" | "assignmentRevision" | "review"> {
@@ -134,5 +140,114 @@ describe("buildDecisionRequest / buildResubmitRequest — governance OCC domain,
     const full = buildDecisionRequest(context, { status: "approved_with_conditions", comment: "note", conditions: ["cap table review"] });
     expect(full.comment).toBe("note");
     expect(full.conditions).toEqual(["cap table review"]);
+  });
+});
+
+// ============================================
+// Phase 9C.3 — panel OCC. A THIRD independent concurrency domain
+// alongside assignmentRevision and governanceUpdatedAt.
+// ============================================
+
+function makePanel(overrides: Partial<ReviewContextPanelInfo> = {}): ReviewContextPanelInfo {
+  return {
+    status: "open",
+    revision: 1,
+    reviewers: [
+      { uid: "r1", displayName: "Alice" },
+      { uid: "r2", displayName: "Bob" },
+    ],
+    voteSummary: null,
+    createdAt: "2026-08-01T00:00:00.000Z",
+    updatedAt: "2026-08-01T00:00:00.000Z",
+    finalizedAt: null,
+    ...overrides,
+  };
+}
+
+describe("currentPanelRevision — panel=null is UNAMBIGUOUS (never created), unlike the assignment case", () => {
+  it("panel=null -> 0", () => {
+    expect(currentPanelRevision({ panel: null })).toBe(0);
+  });
+  it("panel present -> panel.revision, regardless of status", () => {
+    expect(currentPanelRevision({ panel: makePanel({ revision: 5, status: "open" }) })).toBe(5);
+    expect(currentPanelRevision({ panel: makePanel({ revision: 5, status: "cancelled" }) })).toBe(5);
+    expect(currentPanelRevision({ panel: makePanel({ revision: 5, status: "finalized" }) })).toBe(5);
+  });
+});
+
+describe("buildPanelPutRequest — create (panel=null) and reconfigure (panel present) share one builder", () => {
+  it("create: no panel exists -> expectedRevision=0", () => {
+    const body = buildPanelPutRequest({ panel: null }, ["r1", "r2"]);
+    expect(body).toEqual({ reviewerUserIds: ["r1", "r2"], expectedRevision: 0 });
+  });
+  it("reconfigure: existing open panel at revision 3 -> expectedRevision=3, never 0", () => {
+    const body = buildPanelPutRequest({ panel: makePanel({ revision: 3 }) }, ["r1", "r3"]);
+    expect(body).toEqual({ reviewerUserIds: ["r1", "r3"], expectedRevision: 3 });
+    expect(body.expectedRevision).not.toBe(0);
+  });
+});
+
+describe("buildPanelDeleteRequest (cancel) — sources revision from the caller-supplied current panel", () => {
+  it("expectedRevision = panel.revision", () => {
+    expect(buildPanelDeleteRequest({ revision: 12 })).toEqual({ expectedRevision: 12 });
+  });
+});
+
+describe("buildPanelVoteRequest — panelRevision only, never assignmentRevision or governanceUpdatedAt", () => {
+  it("uses the supplied panel revision exactly", () => {
+    const body = buildPanelVoteRequest({ revision: 4 }, { status: "approved" });
+    expect(body).toEqual({ panelRevision: 4, status: "approved" });
+  });
+  it("includes comment/conditions only when provided", () => {
+    const bare = buildPanelVoteRequest({ revision: 1 }, { status: "changes_requested" });
+    expect("comment" in bare).toBe(false);
+    const full = buildPanelVoteRequest({ revision: 1 }, { status: "approved_with_conditions", comment: "note", conditions: ["x"] });
+    expect(full.comment).toBe("note");
+    expect(full.conditions).toEqual(["x"]);
+  });
+});
+
+describe("buildPanelFinalizeRequest — the TWO-domain builder: panel.revision AND governanceUpdatedAt, never assignmentRevision", () => {
+  it("PHASE 9C.3 PRIMARY ACCEPTANCE CRITERION: three deliberately divergent OCC values (assignmentRevision=111, panelRevision=7, governanceUpdatedAt=distinct token) — finalize request contains only its own two, never the assignment one", () => {
+    const panel = makePanel({ revision: 7 });
+    const review = { status: "unreviewed" as const, reviewedAt: null, governanceUpdatedAt: "distinct-governance-token" };
+    // assignmentRevision=111 exists in a full context but is never passed to this builder at all —
+    // proves the function signature itself makes cross-wiring structurally impossible, not just
+    // "happens not to" for this input.
+    const body = buildPanelFinalizeRequest(panel, review);
+    expect(body).toEqual({ expectedPanelRevision: 7, expectedGovernanceUpdatedAt: "distinct-governance-token" });
+    expect(Object.values(body)).not.toContain(111);
+  });
+});
+
+describe("Phase 9C.3 — cross-domain OCC separation across all three concurrency tokens", () => {
+  it("assignment, panel, and governance builders each use only their own domain even when all three values differ", () => {
+    const assignmentRevision = 111;
+    const panel = makePanel({ revision: 7 });
+    const review = { status: "unreviewed" as const, reviewedAt: null, governanceUpdatedAt: "gov-token-xyz" };
+
+    const assignmentBody = buildAssignmentPutRequest({ assignmentRevision }, { assignedReviewerUserId: "r1", dueAt: null });
+    expect(assignmentBody.expectedRevision).toBe(111);
+
+    const panelBody = buildPanelPutRequest({ panel }, ["r1", "r2"]);
+    expect(panelBody.expectedRevision).toBe(7);
+    expect(panelBody.expectedRevision).not.toBe(111);
+
+    const voteBody = buildPanelVoteRequest({ revision: panel.revision }, { status: "approved" });
+    expect(voteBody.panelRevision).toBe(7);
+    expect(voteBody.panelRevision).not.toBe(111);
+
+    const finalizeBody = buildPanelFinalizeRequest(panel, review);
+    expect(finalizeBody.expectedPanelRevision).toBe(7);
+    expect(finalizeBody.expectedGovernanceUpdatedAt).toBe("gov-token-xyz");
+    expect(Object.values(finalizeBody)).not.toContain(111);
+
+    const decisionBody = buildDecisionRequest({ review }, { status: "approved" });
+    expect(decisionBody.expectedUpdatedAt).toBe("gov-token-xyz");
+    expect(Object.values(decisionBody)).not.toContain(111);
+    expect(Object.values(decisionBody)).not.toContain(7);
+
+    const resubmitBody = buildResubmitRequest({ review });
+    expect(resubmitBody.expectedUpdatedAt).toBe("gov-token-xyz");
   });
 });

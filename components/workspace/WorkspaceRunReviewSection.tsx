@@ -1,22 +1,24 @@
 "use client";
 
 /**
- * Approval Workflow, Phase 9C.2 — the single-review workflow section
- * hosted on the permanent `/workspace/reviews/[runId]` detail route.
- * Fetches `review-context` (the sole presentation authority for review
- * status, assignment, `assignmentRevision`, panel state, and
- * `viewer.can*` UX hints — Phase 9C.2 §9/§10) and renders:
+ * Approval Workflow, Phase 9C.2/9C.3 — the review workflow section hosted
+ * on the permanent `/workspace/reviews/[runId]` detail route. Fetches
+ * `review-context` (the sole presentation authority for review status,
+ * assignment, `assignmentRevision`, panel state, and `viewer.can*` UX
+ * hints — Phase 9C.2 §9/§10) and renders:
  *   - a read-only current-review summary
  *   - the assignment card (manager controls gated on `canManageAssignment`)
  *   - the ordinary decision form (gated on `canSubmitDecision`)
  *   - the resubmit action (gated on `canResubmit`)
+ *   - the panel review section (Phase 9C.3 — create/reconfigure/vote/
+ *     finalize/cancel, each independently gated on its own `viewer.can*`
+ *     field; see `WorkspacePanelReviewSection.tsx`)
  *
- * SCOPE (frozen, mandatory): no panel authoring/voting/finalize/cancel
- * UI, no Owner Override UI, no history/audit UI, no panel round 2 — even
- * where `viewer.canCreatePanel`/`canVote`/`canFinalize`/`canCancelPanel`/
- * `canOverride` might be true, this section never reads or branches on
- * those fields (they are not even present on the client-safe
- * `WorkspaceReviewContext` type — see `workspaceReviewClient.ts`).
+ * SCOPE (frozen, mandatory): still no Owner Override UI, no history/audit
+ * UI, no panel round 2 — even where `viewer.canOverride` might be true,
+ * this section never reads or branches on it (not present on the
+ * client-safe `WorkspaceReviewContext` type — see
+ * `workspaceReviewClient.ts`).
  *
  * PANEL BOUNDARY (Phase 9C.0 Correction A / 9C.2 §52-§56, frozen): only
  * `panel.status === "open"` suppresses single-review controls — checked
@@ -24,7 +26,9 @@
  * authoritative `viewer.can*` flags (which the backend already computes
  * with the identical `!panelOpen` condition) — never `if (panel) ...`,
  * which would incorrectly re-block the finalized-panel single-review
- * fallback Phase 9B.5.1/9B.5.2/9C.0 established.
+ * fallback Phase 9B.5.1/9B.5.2/9C.0 established. The panel section itself
+ * is rendered unconditionally (it governs its own internal presentation
+ * for every status, including `null`).
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -34,6 +38,7 @@ import { getReviewStatusLabel, getReviewStatusBadgeClass, isApprovedWithConditio
 import ReviewAssignmentCard from "./ReviewAssignmentCard";
 import ReviewDecisionForm from "./ReviewDecisionForm";
 import ReviewResubmitAction from "./ReviewResubmitAction";
+import WorkspacePanelReviewSection from "./WorkspacePanelReviewSection";
 import ReviewErrorState from "@/components/teamGovernance/ReviewErrorState";
 
 function decidedViaCaption(decidedVia: WorkspaceReviewContext["review"]["decidedVia"]): string | null {
@@ -145,9 +150,7 @@ export default function WorkspaceRunReviewSection({ workspaceId, runId }: { work
         )}
       </div>
 
-      {panelOpen && <div className="rounded-xl border border-cp-border bg-cp-raised px-5 py-4 text-sm text-cp-muted">Panel review in progress</div>}
-      {!panelOpen && panel?.status === "finalized" && <p className="text-xs text-cp-muted">Previous panel review finalized</p>}
-      {!panelOpen && panel?.status === "cancelled" && <p className="text-xs text-cp-muted">Previous panel review cancelled</p>}
+      <WorkspacePanelReviewSection workspaceId={workspaceId} runId={runId} panel={panel} review={review} viewer={viewer} onMutated={refreshContext} />
 
       {!panelOpen && (
         <ReviewAssignmentCard workspaceId={workspaceId} runId={runId} assignment={assignment} assignmentRevision={assignmentRevision} canManageAssignment={viewer.canManageAssignment} onMutated={refreshContext} />

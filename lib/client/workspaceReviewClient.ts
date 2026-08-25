@@ -93,10 +93,17 @@ export interface ReviewContextViewerInfo {
   canManageAssignment: boolean;
   canSubmitDecision: boolean;
   canResubmit: boolean;
-  // canCreatePanel / canReconfigurePanel / canCancelPanel / canVote / hasVoted / canFinalize / canOverride
-  // are intentionally NOT mirrored here — Phase 9C.2 renders no panel or
-  // Owner Override UI, and this client module should not even carry the
-  // temptation to branch on those flags (Phase 9C.2 §57/§58/§76/§77).
+  /** Phase 9C.3 — panel presentation/mutation UX hints, backend-authoritative like every other `can*` field. */
+  canCreatePanel: boolean;
+  canReconfigurePanel: boolean;
+  canCancelPanel: boolean;
+  canVote: boolean;
+  hasVoted: boolean;
+  canFinalize: boolean;
+  // canOverride is intentionally NOT mirrored here — Owner Override UI is
+  // out of scope through Phase 9C.3 (deferred to 9C.4), and this client
+  // module should not even carry the temptation to branch on it (mirrors
+  // the same discipline Phase 9C.2 already applied to this whole block).
 }
 
 export interface WorkspaceReviewContext {
@@ -184,6 +191,89 @@ export interface ResubmitRequestBody {
 /** Sources `expectedUpdatedAt` from `context.review.governanceUpdatedAt` ONLY — never `assignmentRevision`. Same OCC domain as decision, independent of assignment OCC. */
 export function buildResubmitRequest(context: Pick<WorkspaceReviewContext, "review">): ResubmitRequestBody {
   return { expectedUpdatedAt: context.review.governanceUpdatedAt };
+}
+
+// ============================================
+// Panel OCC — Phase 9C.3. A THIRD, independent concurrency domain
+// alongside assignmentRevision and governanceUpdatedAt. Create/reconfigure/
+// vote/cancel use ONLY panel.revision; finalize uses panel.revision AND
+// governanceUpdatedAt (the backend's own `finalizeWorkspaceReviewPanel`
+// contract — see `workspaceReviewPanelMutations.ts`). NEVER
+// assignmentRevision, in any of the four builders below.
+//
+// PANEL-ABSENT SEMANTICS (deliberately NOT the same ambiguity Phase 9B.7
+// fixed for assignments): `panel === null` in `WorkspaceReviewContext`
+// unambiguously means no panel document has EVER been created for this
+// run — cancel/finalize are terminal STATUS transitions on the same
+// document (never a delete, never a "clear"; see
+// `workspaceReviewPanelMutations.ts`'s own `deleteWorkspaceReviewPanel`
+// doc comment: "Never a physical delete"), so a panel that once existed
+// can never present as `null` again. `currentPanelRevision()` is
+// therefore safe to source `0` from `panel === null` — this is NOT a
+// repeat of the assignment mistake, it is the opposite, deliberately
+// verified case.
+// ============================================
+
+export function currentPanelRevision(context: Pick<WorkspaceReviewContext, "panel">): number {
+  return context.panel === null ? 0 : context.panel.revision;
+}
+
+export interface PanelPutRequestBody {
+  reviewerUserIds: string[];
+  expectedRevision: number;
+}
+
+/** Used for BOTH panel creation (no current panel) and reconfiguration (existing open panel) — the backend shares one code path for both (`putWorkspaceReviewPanel`), keyed only by `expectedRevision`. */
+export function buildPanelPutRequest(context: Pick<WorkspaceReviewContext, "panel">, reviewerUserIds: string[]): PanelPutRequestBody {
+  return { reviewerUserIds, expectedRevision: currentPanelRevision(context) };
+}
+
+export interface PanelDeleteRequestBody {
+  expectedRevision: number;
+}
+
+/** Cancel is only ever offered for an already-non-null open panel — the caller supplies `panel.revision` directly, mirroring `buildPanelVoteRequest`/`buildPanelFinalizeRequest`'s explicit-source pattern rather than re-deriving from a possibly-null context. */
+export function buildPanelDeleteRequest(panel: { revision: number }): PanelDeleteRequestBody {
+  return { expectedRevision: panel.revision };
+}
+
+export interface PanelVoteDraft {
+  status: AdaptiveReviewDecisionStatus;
+  comment?: string;
+  conditions?: string[];
+}
+
+export interface PanelVoteRequestBody {
+  panelRevision: number;
+  status: AdaptiveReviewDecisionStatus;
+  comment?: string;
+  conditions?: string[];
+}
+
+/**
+ * `panel` here is the caller's already-non-null current panel (voting is
+ * only ever possible on an OPEN panel, which is never `null`) — the
+ * caller supplies `panel.revision` directly rather than this function
+ * re-deriving it from a context that might be stale/absent, keeping the
+ * OCC source explicit at every call site.
+ */
+export function buildPanelVoteRequest(panel: { revision: number }, draft: PanelVoteDraft): PanelVoteRequestBody {
+  return {
+    panelRevision: panel.revision,
+    status: draft.status,
+    ...(draft.comment !== undefined ? { comment: draft.comment } : {}),
+    ...(draft.conditions !== undefined ? { conditions: draft.conditions } : {}),
+  };
+}
+
+export interface PanelFinalizeRequestBody {
+  expectedPanelRevision: number;
+  expectedGovernanceUpdatedAt: string;
+}
+
+/** The one place both panel OCC and governance OCC are combined — deliberately takes two distinct, separately-sourced values so a divergent-token test can prove neither is ever substituted for the other, and NEITHER is ever `assignmentRevision`. */
+export function buildPanelFinalizeRequest(panel: { revision: number }, review: Pick<ReviewContextReviewInfo, "governanceUpdatedAt">): PanelFinalizeRequestBody {
+  return { expectedPanelRevision: panel.revision, expectedGovernanceUpdatedAt: review.governanceUpdatedAt };
 }
 
 // ============================================
@@ -325,6 +415,42 @@ export async function resubmitReview(args: { workspaceId: string; runId: string;
   });
 }
 
+export async function putPanel(args: { workspaceId: string; runId: string; user: User | null; authReady: boolean; body: PanelPutRequestBody }): Promise<MutationResult> {
+  return runMutation(`/api/workspaces/${encodeURIComponent(args.workspaceId)}/runs/${encodeURIComponent(args.runId)}/review-panel`, {
+    method: "PUT",
+    user: args.user,
+    authReady: args.authReady,
+    body: args.body,
+  });
+}
+
+export async function deletePanel(args: { workspaceId: string; runId: string; user: User | null; authReady: boolean; body: PanelDeleteRequestBody }): Promise<MutationResult> {
+  return runMutation(`/api/workspaces/${encodeURIComponent(args.workspaceId)}/runs/${encodeURIComponent(args.runId)}/review-panel`, {
+    method: "DELETE",
+    user: args.user,
+    authReady: args.authReady,
+    body: args.body,
+  });
+}
+
+export async function submitPanelVote(args: { workspaceId: string; runId: string; user: User | null; authReady: boolean; body: PanelVoteRequestBody }): Promise<MutationResult> {
+  return runMutation(`/api/workspaces/${encodeURIComponent(args.workspaceId)}/runs/${encodeURIComponent(args.runId)}/review-panel/vote`, {
+    method: "POST",
+    user: args.user,
+    authReady: args.authReady,
+    body: args.body,
+  });
+}
+
+export async function finalizePanel(args: { workspaceId: string; runId: string; user: User | null; authReady: boolean; body: PanelFinalizeRequestBody }): Promise<MutationResult> {
+  return runMutation(`/api/workspaces/${encodeURIComponent(args.workspaceId)}/runs/${encodeURIComponent(args.runId)}/review-panel/finalize`, {
+    method: "POST",
+    user: args.user,
+    authReady: args.authReady,
+    body: args.body,
+  });
+}
+
 // ============================================
 // Shared copy
 // ============================================
@@ -336,3 +462,5 @@ export const GENERIC_MUTATION_ERROR_MESSAGE = "Something went wrong. Try again."
 export const ACTION_UNAVAILABLE_MESSAGE = "This review changed and this action is no longer available.";
 export const REVIEW_UNAVAILABLE_MESSAGE = "This review is no longer available.";
 export const NO_ELIGIBLE_REVIEWERS_MESSAGE = "No eligible reviewers are available.";
+/** Phase 9C.3 — deliberately distinct wording from CONFLICT_MESSAGE so a panel conflict never reads as a single-review one. No OCC/revision/transaction jargon. */
+export const PANEL_CONFLICT_MESSAGE = "This panel changed while you were editing. We refreshed the latest version. Review your changes before submitting again.";
