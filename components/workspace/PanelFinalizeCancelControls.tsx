@@ -11,13 +11,17 @@
  * (the backend's own two-domain finalize contract); cancel uses only
  * `panel.revision`. Neither ever uses `assignmentRevision`.
  *
- * MUTATION EXCLUSION (Phase 9C.3-R1C): finalize and cancel are two
+ * MUTATION EXCLUSION (Phase 9C.3-R1C/R2C): finalize and cancel are two
  * independent triggers in this one file but must never fire concurrently
  * with EACH OTHER or with a create/reconfigure/vote elsewhere in the
  * section — `finalizeDisabled`/`cancelDisabled` reflect whether the OTHER
  * action (or a sibling component's mutation) currently holds
- * `WorkspacePanelReviewSection`'s shared lock; `onBeginMutation("finalize"
- * | "cancel")`/`onEndMutation()` guard each request identically.
+ * `WorkspacePanelReviewSection`'s shared, ref-backed lock;
+ * `onBeginMutation("finalize" | "cancel")`/`onEndMutation("finalize" |
+ * "cancel")` guard each request identically, and the lock is held through
+ * the awaited `onMutated()` canonical refresh on both success and
+ * conflict — never released merely because the HTTP request settled
+ * (R2C).
  */
 
 import { useRef, useState } from "react";
@@ -53,12 +57,13 @@ export default function PanelFinalizeCancelControls({
   review: Pick<ReviewContextReviewInfo, "governanceUpdatedAt">;
   canFinalize: boolean;
   canCancelPanel: boolean;
-  onMutated: () => void;
+  /** Phase 9C.3-R2C — MUST be genuinely awaitable; see `WorkspaceRunReviewSection.tsx`'s `refreshContext` doc comment. */
+  onMutated: () => Promise<void>;
   /** Phase 9C.3-R1C — true when a different panel mutation holds the shared lock. */
   finalizeDisabled: boolean;
   cancelDisabled: boolean;
   onBeginMutation: (kind: PanelMutationKind) => boolean;
-  onEndMutation: () => void;
+  onEndMutation: (kind: PanelMutationKind) => void;
 }) {
   const { user, authReady } = useAuth();
 
@@ -79,18 +84,28 @@ export default function PanelFinalizeCancelControls({
     setFinalizeNotice(null);
     const body = buildPanelFinalizeRequest({ revision: panelRevision }, review);
     const result = await finalizePanel({ workspaceId, runId, user, authReady, body });
-    setFinalizePending(false);
-    setFinalizeConfirmOpen(false);
-    onEndMutation();
     if (result.status === "ok") {
-      onMutated();
+      // Phase 9C.3-R2C — hold the lock through the awaited canonical
+      // refresh, not merely until the HTTP response.
+      await onMutated();
+      setFinalizePending(false);
+      setFinalizeConfirmOpen(false);
+      onEndMutation("finalize");
       return;
     }
     if (result.status === "conflict") {
       setFinalizeNotice(PANEL_CONFLICT_MESSAGE);
-      onMutated();
+      await onMutated();
+      setFinalizePending(false);
+      setFinalizeConfirmOpen(false);
+      onEndMutation("finalize");
       return;
     }
+    // Generic (non-conflict) failure — canonical state never changed
+    // server-side, so no refresh is needed before releasing.
+    setFinalizePending(false);
+    setFinalizeConfirmOpen(false);
+    onEndMutation("finalize");
     setFinalizeNotice(GENERIC_MUTATION_ERROR_MESSAGE);
   }
 
@@ -101,18 +116,28 @@ export default function PanelFinalizeCancelControls({
     setCancelNotice(null);
     const body = buildPanelDeleteRequest({ revision: panelRevision });
     const result = await deletePanel({ workspaceId, runId, user, authReady, body });
-    setCancelPending(false);
-    setCancelConfirmOpen(false);
-    onEndMutation();
     if (result.status === "ok") {
-      onMutated();
+      // Phase 9C.3-R2C — hold the lock through the awaited canonical
+      // refresh, not merely until the HTTP response.
+      await onMutated();
+      setCancelPending(false);
+      setCancelConfirmOpen(false);
+      onEndMutation("cancel");
       return;
     }
     if (result.status === "conflict") {
       setCancelNotice(PANEL_CONFLICT_MESSAGE);
-      onMutated();
+      await onMutated();
+      setCancelPending(false);
+      setCancelConfirmOpen(false);
+      onEndMutation("cancel");
       return;
     }
+    // Generic (non-conflict) failure — canonical state never changed
+    // server-side, so no refresh is needed before releasing.
+    setCancelPending(false);
+    setCancelConfirmOpen(false);
+    onEndMutation("cancel");
     setCancelNotice(GENERIC_MUTATION_ERROR_MESSAGE);
   }
 

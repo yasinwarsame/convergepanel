@@ -68,7 +68,7 @@
  * failed request can never leave panel controls permanently disabled.
  */
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import {
   getReviewerCandidates,
@@ -101,7 +101,8 @@ export default function WorkspacePanelReviewSection({
   panel: ReviewContextPanelInfo | null;
   review: Pick<ReviewContextReviewInfo, "governanceUpdatedAt">;
   viewer: PanelViewerFlags;
-  onMutated: () => void;
+  /** Phase 9C.3-R2C — MUST be genuinely awaitable; see `WorkspaceRunReviewSection.tsx`'s `refreshContext` doc comment. */
+  onMutated: () => Promise<void>;
 }) {
   const { user, authReady } = useAuth();
 
@@ -113,15 +114,35 @@ export default function WorkspacePanelReviewSection({
   const [pending, setPending] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
-  // Phase 9C.3-R1C — the single shared mutation lock for this panel's
+  // Phase 9C.3-R2C — the single shared mutation lock for this panel's
   // create/reconfigure/vote/finalize/cancel controls. See module doc.
+  //
+  // AUTHORITATIVE ACQUISITION is the REF, never React state: two handlers
+  // invoked back-to-back within the same JS tick (before React commits a
+  // `setState`) would both observe a stale `activeMutation === null`
+  // closure value if state were the guard — R2 empirically reproduced
+  // exactly this with a same-tick vote+finalize probe. `activeMutationRef`
+  // is a plain mutable ref, written and read synchronously with a normal
+  // property access — its correctness does not depend on React's render/
+  // commit scheduling at all. `activeMutation` (state) exists ONLY to
+  // drive `disabled`/pending presentation; it is never consulted by
+  // `beginMutation`.
+  //
+  // `endMutation` only clears the lock if it currently holds the SAME kind
+  // it is asked to release — a defensive compare-and-clear so a stray/
+  // reordered completion callback can never clear a different mutation's
+  // lock.
+  const activeMutationRef = useRef<PanelMutationKind | null>(null);
   const [activeMutation, setActiveMutation] = useState<PanelMutationKind | null>(null);
   function beginMutation(kind: PanelMutationKind): boolean {
-    if (activeMutation !== null) return false;
+    if (activeMutationRef.current !== null) return false;
+    activeMutationRef.current = kind;
     setActiveMutation(kind);
     return true;
   }
-  function endMutation() {
+  function endMutation(kind: PanelMutationKind) {
+    if (activeMutationRef.current !== kind) return;
+    activeMutationRef.current = null;
     setActiveMutation(null);
   }
 
@@ -160,19 +181,23 @@ export default function WorkspacePanelReviewSection({
     setSelectionInvalidated(false);
     const body = buildPanelPutRequest({ panel }, selectedUids);
     const result = await putPanel({ workspaceId, runId, user, authReady, body });
-    setPending(false);
-    endMutation();
     if (result.status === "ok") {
       setEditorOpen(false);
-      onMutated();
+      // Phase 9C.3-R2C — hold the lock through canonical reconciliation:
+      // release only after `onMutated()` has actually applied the refreshed
+      // context, never merely after the HTTP response.
+      await onMutated();
+      setPending(false);
+      endMutation(ownEditorKind);
       return;
     }
     if (result.status === "conflict") {
       setNotice(PANEL_CONFLICT_MESSAGE);
-      onMutated();
-      // Re-check every selected candidate against a FRESH list — never
-      // permit a silent resubmission of a now-ineligible reviewer
-      // (§39/§78, same discipline as 9C.2's assignment 409 handling).
+      // Phase 9C.3-R2C — await BOTH the canonical context refresh AND the
+      // candidate revalidation before releasing; a stale-candidate
+      // selection must be invalidated before the form becomes submittable
+      // again (§17/§18 of the corrective spec).
+      await onMutated();
       const refreshed = await getReviewerCandidates({ workspaceId, runId, user, authReady });
       if (refreshed.status === "ok") {
         setCandidates(refreshed.candidates);
@@ -183,8 +208,14 @@ export default function WorkspacePanelReviewSection({
           setSelectionInvalidated(true);
         }
       }
+      setPending(false);
+      endMutation(ownEditorKind);
       return;
     }
+    // Generic (non-conflict) failure — canonical state never changed
+    // server-side, so no refresh is needed before releasing.
+    setPending(false);
+    endMutation(ownEditorKind);
     setNotice(GENERIC_MUTATION_ERROR_MESSAGE);
   }
 
@@ -261,7 +292,7 @@ export default function WorkspacePanelReviewSection({
                 onMutated={onMutated}
                 disabled={activeMutation !== null && activeMutation !== "vote"}
                 onBeginMutation={() => beginMutation("vote")}
-                onEndMutation={endMutation}
+                onEndMutation={() => endMutation("vote")}
               />
             </div>
           )}

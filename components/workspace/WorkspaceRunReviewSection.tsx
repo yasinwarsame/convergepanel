@@ -56,11 +56,25 @@ export default function WorkspaceRunReviewSection({ workspaceId, runId }: { work
   // newer state produced by a mutation's own refetch (§61/§83).
   const requestIdRef = useRef(0);
 
-  const refreshContext = useCallback(() => {
-    if (!authReady) return;
+  /**
+   * Phase 9C.3-R2C — genuinely awaitable. The returned Promise settles only
+   * once the review-context request has completed AND (when this request
+   * is still the latest — a superseded request resolves immediately
+   * without touching state, which is the correct completion signal for
+   * ITS caller too) the resulting canonical state has been committed via
+   * `setContext`/`setStatus`. Callers (panel/assignment/decision/resubmit
+   * mutation handlers) `await` this before releasing their own mutation
+   * lock, so a caller can never proceed against pre-refresh stale
+   * `panel.revision`/`governanceUpdatedAt`/`can*` state. Deliberately NOT
+   * `Promise.resolve()`-wrapped around a fire-and-forget IIFE — that would
+   * satisfy the type signature while preserving the exact defect this
+   * correction exists to fix.
+   */
+  const refreshContext = useCallback((): Promise<void> => {
+    if (!authReady) return Promise.resolve();
     const requestId = ++requestIdRef.current;
     setStatus((prev) => (prev === "ready" ? prev : "loading"));
-    (async () => {
+    return (async () => {
       const result = await getReviewContext({ workspaceId, runId, user, authReady });
       if (requestIdRef.current !== requestId) return;
       if (result.status === "ok") {

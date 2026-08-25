@@ -371,6 +371,233 @@ describe("WorkspacePanelReviewSection — Phase 9C.3-R1C: shared panel mutation 
   });
 });
 
+describe("WorkspacePanelReviewSection — Phase 9C.3-R2C: atomic mutation lock (ref-backed, immune to stale React-state closures)", () => {
+  it("PERMANENT REGRESSION — reproduces R2's exact defect: vote submit and finalize confirm invoked BACK-TO-BACK inside ONE synchronous act() callback (no rerender/commit between them) still results in exactly ONE network mutation", async () => {
+    let renderer!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      ({ renderer } = setup({ panel: makePanel({ revision: 3 }), viewer: makeViewer({ canVote: true, canFinalize: true }) }));
+      await Promise.resolve();
+    });
+    const approveRadio = renderer.root.findAllByType("input").find((i) => i.props.type === "radio" && i.props.value === "approved")!;
+    await act(async () => {
+      approveRadio.props.onChange();
+    });
+    const form = renderer.root.findAllByType("form")[0];
+    // Pre-open the finalize confirm dialog — purely local UI state, unrelated
+    // to the shared mutation lock, so it's safe to do before the critical window.
+    await act(async () => {
+      findButton(renderer, "Finalize panel")!.props.onClick();
+      await Promise.resolve();
+    });
+    const confirmBtn = renderer.root.findAllByType("button").filter((b) => b.props.children === "Finalize").pop()!;
+
+    // THE CRITICAL WINDOW — both handlers invoked synchronously, back-to-back,
+    // inside ONE act() callback, with no await/rerender between them. This is
+    // R2's exact reproduction of the stale-closure defect: with a
+    // React-state-only guard, both handlers would observe `activeMutation ===
+    // null` from the same pre-commit closure. With the ref-backed guard, the
+    // first handler's synchronous write to `activeMutationRef.current` (which
+    // happens before its own first `await`) is visible to the second handler
+    // immediately — no render/commit required.
+    act(() => {
+      form.props.onSubmit({ preventDefault: () => {} });
+      confirmBtn.props.onClick();
+    });
+
+    expect(mockedSubmitPanelVote).toHaveBeenCalledTimes(1);
+    expect(mockedFinalizePanel).not.toHaveBeenCalled();
+  });
+
+  it("reverse order — finalize confirm then vote submit, back-to-back in one synchronous act() — still exactly one mutation", async () => {
+    let renderer!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      ({ renderer } = setup({ panel: makePanel({ revision: 4 }), viewer: makeViewer({ canVote: true, canFinalize: true }) }));
+      await Promise.resolve();
+    });
+    const approveRadio = renderer.root.findAllByType("input").find((i) => i.props.type === "radio" && i.props.value === "approved")!;
+    await act(async () => {
+      approveRadio.props.onChange();
+    });
+    const form = renderer.root.findAllByType("form")[0];
+    await act(async () => {
+      findButton(renderer, "Finalize panel")!.props.onClick();
+      await Promise.resolve();
+    });
+    const confirmBtn = renderer.root.findAllByType("button").filter((b) => b.props.children === "Finalize").pop()!;
+
+    act(() => {
+      confirmBtn.props.onClick();
+      form.props.onSubmit({ preventDefault: () => {} });
+    });
+
+    expect(mockedFinalizePanel).toHaveBeenCalledTimes(1);
+    expect(mockedSubmitPanelVote).not.toHaveBeenCalled();
+  });
+
+  it("manager pair — reconfigure Save and cancel confirm invoked back-to-back in one synchronous act() — still exactly one mutation", async () => {
+    let renderer!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      ({ renderer } = setup({ panel: makePanel({ revision: 2 }), viewer: makeViewer({ canReconfigurePanel: true, canCancelPanel: true }) }));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      findButton(renderer, "Change reviewers")!.props.onClick();
+      await Promise.resolve();
+    });
+    const saveBtn = renderer.root.findAllByType("button").find((b) => b.props.children === "Save reviewers" && !b.props.disabled)!;
+    await act(async () => {
+      findButton(renderer, "Cancel panel review")!.props.onClick();
+      await Promise.resolve();
+    });
+    const confirmCancelBtn = renderer.root.findAllByType("button").filter((b) => b.props.children === "Cancel panel review").pop()!;
+
+    act(() => {
+      saveBtn.props.onClick();
+      confirmCancelBtn.props.onClick();
+    });
+
+    expect(mockedPutPanel).toHaveBeenCalledTimes(1);
+    expect(mockedDeletePanel).not.toHaveBeenCalled();
+  });
+});
+
+describe("WorkspacePanelReviewSection — Phase 9C.3-R2C: lock lifetime through canonical refresh (not merely the HTTP round-trip)", () => {
+  it("success: lock remains held after the mutation HTTP call has already resolved, while the canonical review-context refresh (onMutated) is still pending — releases only once the refresh resolves", async () => {
+    let resolveMutated!: () => void;
+    const onMutated = jest.fn().mockReturnValue(new Promise<void>((resolve) => (resolveMutated = resolve)));
+    mockedSubmitPanelVote.mockResolvedValueOnce({ status: "ok" });
+    let renderer!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      ({ renderer } = setup({ panel: makePanel({ revision: 3 }), viewer: makeViewer({ canVote: true, canCancelPanel: true }), onMutated }));
+      await Promise.resolve();
+    });
+    const approveRadio = renderer.root.findAllByType("input").find((i) => i.props.type === "radio" && i.props.value === "approved")!;
+    await act(async () => {
+      approveRadio.props.onChange();
+    });
+    const form = renderer.root.findAllByType("form")[0];
+    // Fire without awaiting — the handler itself does not finish until the
+    // deferred `onMutated()` resolves, so awaiting it directly would hang.
+    act(() => {
+      form.props.onSubmit({ preventDefault: () => {} });
+    });
+    // Flush every queued microtask (submitPanelVote's resolution + the call
+    // into onMutated) WITHOUT resolving onMutated's own promise.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(onMutated).toHaveBeenCalledTimes(1);
+    let cancelBtn = findButton(renderer, "Cancel panel review")!;
+    expect(cancelBtn.props.disabled).toBe(true);
+    await act(async () => {
+      cancelBtn.props.onClick();
+      await Promise.resolve();
+    });
+    const confirmCancelBtn = renderer.root.findAllByType("button").filter((b) => b.props.children === "Cancel panel review").pop()!;
+    expect(confirmCancelBtn.props.disabled).toBe(true);
+    await act(async () => {
+      confirmCancelBtn.props.onClick();
+      await Promise.resolve();
+    });
+    expect(mockedDeletePanel).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveMutated();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    cancelBtn = findButton(renderer, "Cancel panel review")!;
+    expect(cancelBtn.props.disabled).toBe(false);
+  });
+
+  it("409: lock remains held while canonical review-context refresh is still pending after the conflict response — releases only once the refresh resolves", async () => {
+    let resolveMutated!: () => void;
+    const onMutated = jest.fn().mockReturnValue(new Promise<void>((resolve) => (resolveMutated = resolve)));
+    mockedSubmitPanelVote.mockResolvedValueOnce({ status: "conflict" });
+    let renderer!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      ({ renderer } = setup({ panel: makePanel({ revision: 5 }), viewer: makeViewer({ canVote: true, canCancelPanel: true }), onMutated }));
+      await Promise.resolve();
+    });
+    const approveRadio = renderer.root.findAllByType("input").find((i) => i.props.type === "radio" && i.props.value === "approved")!;
+    await act(async () => {
+      approveRadio.props.onChange();
+    });
+    const form = renderer.root.findAllByType("form")[0];
+    act(() => {
+      form.props.onSubmit({ preventDefault: () => {} });
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(onMutated).toHaveBeenCalledTimes(1);
+    let cancelBtn = findButton(renderer, "Cancel panel review")!;
+    expect(cancelBtn.props.disabled).toBe(true); // still locked — conflict recovery isn't done yet.
+
+    await act(async () => {
+      resolveMutated();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    cancelBtn = findButton(renderer, "Cancel panel review")!;
+    expect(cancelBtn.props.disabled).toBe(false);
+  });
+
+  it("reconfigure 409: lock remains held while candidate revalidation is still pending, even though the canonical context refresh has already resolved — the lock covers BOTH awaited reconciliation steps", async () => {
+    mockedPutPanel.mockResolvedValueOnce({ status: "conflict" });
+    let resolveCandidates!: (v: unknown) => void;
+    mockedGetReviewerCandidates
+      .mockResolvedValueOnce({ status: "ok", candidates: [{ uid: "r1", displayName: "Alice" }, { uid: "r2", displayName: "Bob" }] }) // initial open
+      .mockReturnValueOnce(new Promise((resolve) => (resolveCandidates = resolve))); // post-409 revalidation — held pending
+    let renderer!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      ({ renderer } = setup({ panel: makePanel({ revision: 6 }), viewer: makeViewer({ canReconfigurePanel: true, canCancelPanel: true }) }));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      findButton(renderer, "Change reviewers")!.props.onClick();
+      await Promise.resolve();
+    });
+    const saveBtn = renderer.root.findAllByType("button").find((b) => b.props.children === "Save reviewers" && !b.props.disabled)!;
+    act(() => {
+      saveBtn.props.onClick();
+    });
+    // Flush every queued microtask: putPanel's "conflict" resolution, the
+    // (default, immediately-resolving) onMutated() call, and the start of
+    // the getReviewerCandidates() revalidation call — WITHOUT resolving the
+    // deliberately-held-pending candidates promise.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    let cancelBtn = findButton(renderer, "Cancel panel review")!;
+    expect(cancelBtn.props.disabled).toBe(true);
+
+    await act(async () => {
+      resolveCandidates({ status: "ok", candidates: [{ uid: "r2", displayName: "Bob" }] });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    cancelBtn = findButton(renderer, "Cancel panel review")!;
+    expect(cancelBtn.props.disabled).toBe(false);
+  });
+
+  it("generic (non-conflict) mutation error: lock releases immediately — no canonical refresh is needed since server state never changed", async () => {
+    mockedFinalizePanel.mockResolvedValueOnce({ status: "error" });
+    let renderer!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      ({ renderer } = setup({ panel: makePanel({ revision: 7 }), viewer: makeViewer({ canFinalize: true, canCancelPanel: true }) }));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      findButton(renderer, "Finalize panel")!.props.onClick();
+      await Promise.resolve();
+    });
+    const confirmBtn = renderer.root.findAllByType("button").filter((b) => b.props.children === "Finalize").pop()!;
+    await act(async () => {
+      await confirmBtn.props.onClick();
+    });
+    const cancelBtn = findButton(renderer, "Cancel panel review")!;
+    expect(cancelBtn.props.disabled).toBe(false);
+  });
+});
+
 describe("WorkspacePanelReviewSection — voting (§43/§44/§119/§120)", () => {
   it("canVote=false: no vote form rendered (includes self-review case — backend-derived, no client inference)", async () => {
     let renderer!: TestRenderer.ReactTestRenderer;

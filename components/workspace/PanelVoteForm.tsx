@@ -24,11 +24,14 @@
  * current panel via `buildPanelVoteRequest` — never `assignmentRevision`,
  * never `governanceUpdatedAt`.
  *
- * MUTATION EXCLUSION (Phase 9C.3-R1C): `disabled` is true whenever a
+ * MUTATION EXCLUSION (Phase 9C.3-R1C/R2C): `disabled` is true whenever a
  * DIFFERENT panel mutation (create/reconfigure/finalize/cancel) currently
- * holds `WorkspacePanelReviewSection`'s shared lock — the submit button is
- * disabled and `onBeginMutation()`/`onEndMutation()` guard the request
- * exactly like every other panel mutation's shared-lock handling.
+ * holds `WorkspacePanelReviewSection`'s shared, ref-backed lock — the
+ * submit button is disabled and `onBeginMutation()`/`onEndMutation()`
+ * guard the request exactly like every other panel mutation. The lock is
+ * held through the awaited `onMutated()` canonical refresh on both
+ * success and conflict — never released merely because the HTTP request
+ * settled (R2C).
  */
 
 import { useState } from "react";
@@ -54,7 +57,8 @@ export default function PanelVoteForm({
   workspaceId: string;
   runId: string;
   panelRevision: number;
-  onMutated: () => void;
+  /** Phase 9C.3-R2C — MUST be genuinely awaitable; see `WorkspaceRunReviewSection.tsx`'s `refreshContext` doc comment. */
+  onMutated: () => Promise<void>;
   /** Phase 9C.3-R1C — true when a different panel mutation holds the shared lock. */
   disabled: boolean;
   /** Attempts to acquire the shared panel mutation lock; returns false if another mutation is already active. */
@@ -98,20 +102,29 @@ export default function PanelVoteForm({
       }
     );
     const result = await submitPanelVote({ workspaceId, runId, user, authReady, body });
-    setPending(false);
-    onEndMutation();
     if (result.status === "ok") {
+      // Phase 9C.3-R2C — hold the lock (and the visible "Submitting…"
+      // pending state) through the awaited canonical refresh, not merely
+      // until the HTTP response.
+      await onMutated();
       setStatus("");
       setComment("");
       setConditions("");
-      onMutated();
+      setPending(false);
+      onEndMutation();
       return;
     }
     if (result.status === "conflict") {
       setNotice(PANEL_CONFLICT_MESSAGE);
-      onMutated();
+      await onMutated();
+      setPending(false);
+      onEndMutation();
       return;
     }
+    // Generic (non-conflict) failure — canonical state never changed
+    // server-side, so no refresh is needed before releasing.
+    setPending(false);
+    onEndMutation();
     setNotice(GENERIC_MUTATION_ERROR_MESSAGE);
   }
 
