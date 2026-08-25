@@ -38,6 +38,38 @@ describe("ProjectDialogFrame — source-level: Escape + initial-focus + focus-re
   });
 });
 
+describe("ProjectDialogFrame — Phase 9C.5-R1C PERMANENT REGRESSION: source-level focus-containment wiring", () => {
+  it("scans focusable descendants live via querySelectorAll — never a hard-coded control list", () => {
+    expect(source).toMatch(/const FOCUSABLE_SELECTOR = 'a\[href\], button, input, select, textarea, \[tabindex\]';/);
+    expect(source).toMatch(/panel\.querySelectorAll<HTMLElement>\(FOCUSABLE_SELECTOR\)/);
+  });
+
+  it("excludes disabled and explicitly non-tabbable (tabIndex=-1) elements from the focus-trap target list", () => {
+    expect(source).toMatch(/\.filter\(\(el\) => !el\.hasAttribute\("disabled"\) && el\.tabIndex !== -1\)/);
+  });
+
+  it("Tab from the last focusable element (or focus outside the panel) wraps forward to the first", () => {
+    expect(source).toMatch(/active === last \|\| !panel\.contains\(active\)\) \{\s*event\.preventDefault\(\);\s*first\.focus\(\);/);
+  });
+
+  it("Shift+Tab from the first focusable element (or focus outside the panel) wraps backward to the last", () => {
+    expect(source).toMatch(/active === first \|\| !panel\.contains\(active\)\) \{\s*event\.preventDefault\(\);\s*last\.focus\(\);/);
+  });
+
+  it("a dialog with zero focusable descendants keeps focus on the panel container instead of letting Tab escape", () => {
+    expect(source).toMatch(/if \(focusable\.length === 0\) \{\s*\/\/[^\n]*\s*event\.preventDefault\(\);\s*panel\.focus\(\);/);
+  });
+
+  it("Escape handling is preserved unchanged (identical to the pre-9C.5-R1C line) — checked first, before any Tab logic short-circuits", () => {
+    expect(source).toMatch(/if \(event\.key === "Escape"\) requestClose\(\);\s*if \(event\.key !== "Tab"\) return;/);
+  });
+
+  it("the keydown listener is still registered/removed on the same document effect (no separate, leak-prone listener added)", () => {
+    expect(source).toMatch(/document\.addEventListener\("keydown", handleKeyDown\)/);
+    expect(source).toMatch(/return \(\) => document\.removeEventListener\("keydown", handleKeyDown\);/);
+  });
+});
+
 function fakeTrigger() {
   return createRef<HTMLButtonElement>();
 }
