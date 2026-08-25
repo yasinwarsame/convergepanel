@@ -93,7 +93,7 @@ function setup(props: { panel: ReviewContextPanelInfo | null; viewer: WorkspaceR
   const onMutated = props.onMutated ?? jest.fn();
   act(() => {
     renderer = TestRenderer.create(
-      createElement(WorkspacePanelReviewSection, { workspaceId: WS_ID, runId: RUN_ID, panel: props.panel, review: REVIEW, viewer: props.viewer, onMutated })
+      createElement(WorkspacePanelReviewSection, { workspaceId: WS_ID, runId: RUN_ID, mode: props.viewer.mode, panel: props.panel, review: REVIEW, viewer: props.viewer, onMutated })
     );
   });
   return { renderer, onMutated };
@@ -1042,6 +1042,74 @@ describe("WorkspacePanelReviewSection — Phase 9C.4: Override participates in t
     });
     cancelBtn = findButton(renderer, "Cancel panel review")!;
     expect(cancelBtn.props.disabled).toBe(false);
+  });
+});
+
+describe("WorkspacePanelReviewSection — Phase 9C.4-R1C PERMANENT REGRESSION: drain never admits new-work panel creation/reconfiguration, even under a forged/stale can* fixture", () => {
+  it("mode=drain, panel=null, canCreatePanel=true (forged): 'Start panel review' absent, zero candidate fetch, zero PUT", async () => {
+    let renderer!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      ({ renderer } = setup({ panel: null, viewer: makeViewer({ mode: "drain", canCreatePanel: true }) }));
+      await Promise.resolve();
+    });
+    expect(renderer.toJSON()).toBeNull();
+    expect(mockedGetReviewerCandidates).not.toHaveBeenCalled();
+    expect(mockedPutPanel).not.toHaveBeenCalled();
+  });
+
+  it("mode=drain, panel=open, canReconfigurePanel=true (forged): 'Change reviewers' absent, zero candidate fetch, zero PUT", async () => {
+    let renderer!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      ({ renderer } = setup({ panel: makePanel({ revision: 6 }), viewer: makeViewer({ mode: "drain", canReconfigurePanel: true }) }));
+      await Promise.resolve();
+    });
+    expect(extractVisibleText(renderer.toJSON())).not.toContain("Change reviewers");
+    expect(mockedGetReviewerCandidates).not.toHaveBeenCalled();
+    expect(mockedPutPanel).not.toHaveBeenCalled();
+  });
+
+  it("mode=normal (regression): canCreatePanel=true still shows 'Start panel review', canReconfigurePanel=true still shows 'Change reviewers'", async () => {
+    let renderer!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      ({ renderer } = setup({ panel: null, viewer: makeViewer({ mode: "normal", canCreatePanel: true }) }));
+      await Promise.resolve();
+    });
+    expect(extractVisibleText(renderer.toJSON())).toContain("Start panel review");
+
+    await act(async () => {
+      ({ renderer } = setup({ panel: makePanel(), viewer: makeViewer({ mode: "normal", canReconfigurePanel: true }) }));
+      await Promise.resolve();
+    });
+    expect(extractVisibleText(renderer.toJSON())).toContain("Change reviewers");
+  });
+
+  it("broad forged drain matrix: create/reconfigure/assignment-adjacent flags all true does NOT admit new-work, but completion actions and Override still render per their own contextual can*", async () => {
+    let renderer!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      ({ renderer } = setup({
+        panel: makePanel({ revision: 4 }),
+        viewer: makeViewer({
+          mode: "drain",
+          canCreatePanel: true,
+          canReconfigurePanel: true,
+          canVote: true,
+          canFinalize: true,
+          canCancelPanel: true,
+          canOverride: true,
+        }),
+      }));
+      await Promise.resolve();
+    });
+    const text = extractVisibleText(renderer.toJSON());
+    // Prohibited new-work — absent regardless of the forged flags.
+    expect(text).not.toContain("Start panel review");
+    expect(text).not.toContain("Change reviewers");
+    expect(mockedGetReviewerCandidates).not.toHaveBeenCalled();
+    // Permitted completion/exceptional actions — still governed by their own contextual can*, untouched by this correction.
+    expect(text).toContain("Submit vote");
+    expect(text).toContain("Finalize panel");
+    expect(text).toContain("Cancel panel review");
+    expect(text).toMatch(/override/i);
   });
 });
 

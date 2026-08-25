@@ -38,10 +38,15 @@
  * `ReviewDecisionForm`/`ReviewResubmitAction` are never even MOUNTED in
  * drain, not merely passed a `false` capability, so a stale/malformed
  * client fixture can never accidentally surface new-work controls.
- * `WorkspacePanelReviewSection` is rendered unconditionally in both modes —
- * it needs no local mode branching itself, because `canVote`/`canFinalize`/
- * `canCancelPanel`/`canOverride` are already correctly drain-eligible (or
- * not) straight from the backend.
+ * `WorkspacePanelReviewSection` is rendered unconditionally in both modes;
+ * `canVote`/`canFinalize`/`canCancelPanel`/`canOverride` are already
+ * correctly drain-eligible (or not) straight from the backend, needing no
+ * local mode branching there. Panel CREATE/RECONFIGURE are the exception
+ * (Phase 9C.4-R1C): drain never admits new-work panel creation or
+ * reconfiguration, so the canonical `viewer.mode` is threaded down as an
+ * explicit `mode` prop and defensively narrows those two affordances
+ * independent of `canCreatePanel`/`canReconfigurePanel` — see
+ * `WorkspacePanelReviewSection.tsx`'s own module doc comment.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -176,7 +181,7 @@ export default function WorkspaceRunReviewSection({ workspaceId, runId }: { work
         </div>
       )}
 
-      <WorkspacePanelReviewSection workspaceId={workspaceId} runId={runId} panel={panel} review={review} viewer={viewer} onMutated={refreshContext} />
+      <WorkspacePanelReviewSection workspaceId={workspaceId} runId={runId} mode={viewer.mode} panel={panel} review={review} viewer={viewer} onMutated={refreshContext} />
 
       {!isDrain && !panelOpen && (
         <ReviewAssignmentCard workspaceId={workspaceId} runId={runId} assignment={assignment} assignmentRevision={assignmentRevision} canManageAssignment={viewer.canManageAssignment} onMutated={refreshContext} />

@@ -78,6 +78,22 @@
  * `panelOpen`/`reviewable` in `viewer.canOverride` itself, mirroring how
  * `canVote`/`canFinalize`/`canCancelPanel` are already drain-eligible
  * without local mode branching).
+ *
+ * DRAIN NEW-WORK BOUNDARY (Phase 9C.4-R1C): unlike vote/finalize/cancel/
+ * override, panel CREATE and RECONFIGURE are never drain-admitted — the
+ * frozen invariant is "drain completes existing open governance work only,"
+ * never new panel creation or reconfiguration. `reviewContext.ts` already
+ * forces `canCreatePanel`/`canReconfigurePanel` to `false` in drain, but
+ * this section does NOT trust that alone (R1 finding): the explicit `mode`
+ * prop, threaded down from the same canonical `viewer.mode` the parent
+ * already uses for its own drain narrowing, independently gates both
+ * affordances so a stale/forged `canCreatePanel`/`canReconfigurePanel=true`
+ * can never mount a create/reconfigure control while `mode === "drain"` —
+ * mirroring exactly how `WorkspaceRunReviewSection` never even mounts
+ * `ReviewAssignmentCard`/`ReviewDecisionForm`/`ReviewResubmitAction` in
+ * drain. This is defense-in-depth only; the backend (`PUT /review-panel`)
+ * independently re-checks Approval admission before any Firestore write
+ * regardless of what this component renders.
  */
 
 import { useRef, useState } from "react";
@@ -104,6 +120,7 @@ type PanelViewerFlags = Pick<WorkspaceReviewContext["viewer"], "canCreatePanel" 
 export default function WorkspacePanelReviewSection({
   workspaceId,
   runId,
+  mode,
   panel,
   review,
   viewer,
@@ -111,6 +128,8 @@ export default function WorkspacePanelReviewSection({
 }: {
   workspaceId: string;
   runId: string;
+  /** Phase 9C.4-R1C — canonical `viewer.mode`; gates create/reconfigure defensively (see module doc). */
+  mode: "normal" | "drain";
   panel: ReviewContextPanelInfo | null;
   review: Pick<ReviewContextReviewInfo, "governanceUpdatedAt">;
   viewer: PanelViewerFlags;
@@ -234,7 +253,9 @@ export default function WorkspacePanelReviewSection({
 
   // No panel at all.
   if (panel === null) {
-    if (!viewer.canCreatePanel) return null;
+    // Phase 9C.4-R1C — drain never admits new panel creation, regardless of
+    // `viewer.canCreatePanel` (defensive; see module doc).
+    if (mode === "drain" || !viewer.canCreatePanel) return null;
     return (
       <div className="rounded-xl border border-cp-border bg-cp-surface p-5 shadow-sm">
         <h3 className="text-sm font-semibold text-cp-text">Panel review</h3>
@@ -312,7 +333,8 @@ export default function WorkspacePanelReviewSection({
           )}
           {viewer.canVote && viewer.hasVoted && <p className="mt-3 text-xs text-cp-muted">You already voted.</p>}
 
-          {viewer.canReconfigurePanel && (
+          {/* Phase 9C.4-R1C — drain never admits reconfiguration, regardless of `viewer.canReconfigurePanel` (defensive; see module doc). */}
+          {mode === "normal" && viewer.canReconfigurePanel && (
             <div className="mt-4 border-t border-cp-border-soft pt-4">
               {!editorOpen ? (
                 <button
