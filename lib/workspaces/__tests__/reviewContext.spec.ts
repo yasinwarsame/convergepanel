@@ -587,4 +587,21 @@ describe("getReviewContext — quorum-driven canFinalize", () => {
     if (result.status !== "ok") return;
     expect(result.context.viewer.canFinalize).toBe(false);
   });
+
+  it("Phase 9C.3-R1C PERMANENT REGRESSION: old-revision votes (which would satisfy quorum if miscounted) never contaminate current-revision progress/canFinalize", async () => {
+    // Panel is currently at revision 2, quorum 2. Two OLD-revision (1) votes
+    // exist — enough to satisfy quorum=2 on their own if miscounted — plus
+    // exactly ONE current-revision (2) vote. If the old votes ever leaked
+    // into current progress, submittedCount would read 3 (or 2, satisfying
+    // quorum) and canFinalize would incorrectly become true.
+    seedPanel({ status: "open", revision: 2, reviewerUserIds: [OWNER_UID, ADMIN_UID].sort() });
+    seedVote(OWNER_UID, 1, { status: "rejected" });
+    seedVote(ADMIN_UID, 1, { status: "rejected" });
+    seedVote(OWNER_UID, 2, { status: "approved" });
+    const result = await call(OWNER_UID, "owner", true);
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.context.panel?.voteSummary).toEqual({ submittedCount: 1, aggregationState: "waiting" });
+    expect(result.context.viewer.canFinalize).toBe(false);
+  });
 });

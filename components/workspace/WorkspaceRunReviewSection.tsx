@@ -1,22 +1,24 @@
 "use client";
 
 /**
- * Approval Workflow, Phase 9C.2 — the single-review workflow section
- * hosted on the permanent `/workspace/reviews/[runId]` detail route.
- * Fetches `review-context` (the sole presentation authority for review
- * status, assignment, `assignmentRevision`, panel state, and
- * `viewer.can*` UX hints — Phase 9C.2 §9/§10) and renders:
+ * Approval Workflow, Phase 9C.2/9C.3 — the review workflow section hosted
+ * on the permanent `/workspace/reviews/[runId]` detail route. Fetches
+ * `review-context` (the sole presentation authority for review status,
+ * assignment, `assignmentRevision`, panel state, and `viewer.can*` UX
+ * hints — Phase 9C.2 §9/§10) and renders:
  *   - a read-only current-review summary
  *   - the assignment card (manager controls gated on `canManageAssignment`)
  *   - the ordinary decision form (gated on `canSubmitDecision`)
  *   - the resubmit action (gated on `canResubmit`)
+ *   - the panel review section (Phase 9C.3 — create/reconfigure/vote/
+ *     finalize/cancel, each independently gated on its own `viewer.can*`
+ *     field; see `WorkspacePanelReviewSection.tsx`)
  *
- * SCOPE (frozen, mandatory): no panel authoring/voting/finalize/cancel
- * UI, no Owner Override UI, no history/audit UI, no panel round 2 — even
- * where `viewer.canCreatePanel`/`canVote`/`canFinalize`/`canCancelPanel`/
- * `canOverride` might be true, this section never reads or branches on
- * those fields (they are not even present on the client-safe
- * `WorkspaceReviewContext` type — see `workspaceReviewClient.ts`).
+ * SCOPE (frozen, mandatory): still no Owner Override UI, no history/audit
+ * UI, no panel round 2 — even where `viewer.canOverride` might be true,
+ * this section never reads or branches on it (not present on the
+ * client-safe `WorkspaceReviewContext` type — see
+ * `workspaceReviewClient.ts`).
  *
  * PANEL BOUNDARY (Phase 9C.0 Correction A / 9C.2 §52-§56, frozen): only
  * `panel.status === "open"` suppresses single-review controls — checked
@@ -24,7 +26,9 @@
  * authoritative `viewer.can*` flags (which the backend already computes
  * with the identical `!panelOpen` condition) — never `if (panel) ...`,
  * which would incorrectly re-block the finalized-panel single-review
- * fallback Phase 9B.5.1/9B.5.2/9C.0 established.
+ * fallback Phase 9B.5.1/9B.5.2/9C.0 established. The panel section itself
+ * is rendered unconditionally (it governs its own internal presentation
+ * for every status, including `null`).
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -34,6 +38,7 @@ import { getReviewStatusLabel, getReviewStatusBadgeClass, isApprovedWithConditio
 import ReviewAssignmentCard from "./ReviewAssignmentCard";
 import ReviewDecisionForm from "./ReviewDecisionForm";
 import ReviewResubmitAction from "./ReviewResubmitAction";
+import WorkspacePanelReviewSection from "./WorkspacePanelReviewSection";
 import ReviewErrorState from "@/components/teamGovernance/ReviewErrorState";
 
 function decidedViaCaption(decidedVia: WorkspaceReviewContext["review"]["decidedVia"]): string | null {
@@ -51,11 +56,25 @@ export default function WorkspaceRunReviewSection({ workspaceId, runId }: { work
   // newer state produced by a mutation's own refetch (§61/§83).
   const requestIdRef = useRef(0);
 
-  const refreshContext = useCallback(() => {
-    if (!authReady) return;
+  /**
+   * Phase 9C.3-R2C — genuinely awaitable. The returned Promise settles only
+   * once the review-context request has completed AND (when this request
+   * is still the latest — a superseded request resolves immediately
+   * without touching state, which is the correct completion signal for
+   * ITS caller too) the resulting canonical state has been committed via
+   * `setContext`/`setStatus`. Callers (panel/assignment/decision/resubmit
+   * mutation handlers) `await` this before releasing their own mutation
+   * lock, so a caller can never proceed against pre-refresh stale
+   * `panel.revision`/`governanceUpdatedAt`/`can*` state. Deliberately NOT
+   * `Promise.resolve()`-wrapped around a fire-and-forget IIFE — that would
+   * satisfy the type signature while preserving the exact defect this
+   * correction exists to fix.
+   */
+  const refreshContext = useCallback((): Promise<void> => {
+    if (!authReady) return Promise.resolve();
     const requestId = ++requestIdRef.current;
     setStatus((prev) => (prev === "ready" ? prev : "loading"));
-    (async () => {
+    return (async () => {
       const result = await getReviewContext({ workspaceId, runId, user, authReady });
       if (requestIdRef.current !== requestId) return;
       if (result.status === "ok") {
@@ -145,9 +164,7 @@ export default function WorkspaceRunReviewSection({ workspaceId, runId }: { work
         )}
       </div>
 
-      {panelOpen && <div className="rounded-xl border border-cp-border bg-cp-raised px-5 py-4 text-sm text-cp-muted">Panel review in progress</div>}
-      {!panelOpen && panel?.status === "finalized" && <p className="text-xs text-cp-muted">Previous panel review finalized</p>}
-      {!panelOpen && panel?.status === "cancelled" && <p className="text-xs text-cp-muted">Previous panel review cancelled</p>}
+      <WorkspacePanelReviewSection workspaceId={workspaceId} runId={runId} panel={panel} review={review} viewer={viewer} onMutated={refreshContext} />
 
       {!panelOpen && (
         <ReviewAssignmentCard workspaceId={workspaceId} runId={runId} assignment={assignment} assignmentRevision={assignmentRevision} canManageAssignment={viewer.canManageAssignment} onMutated={refreshContext} />
