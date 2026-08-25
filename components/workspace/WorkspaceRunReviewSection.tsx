@@ -10,15 +10,14 @@
  *   - the assignment card (manager controls gated on `canManageAssignment`)
  *   - the ordinary decision form (gated on `canSubmitDecision`)
  *   - the resubmit action (gated on `canResubmit`)
- *   - the panel review section (Phase 9C.3 — create/reconfigure/vote/
- *     finalize/cancel, each independently gated on its own `viewer.can*`
- *     field; see `WorkspacePanelReviewSection.tsx`)
+ *   - the panel review section (Phase 9C.3/9C.4 — create/reconfigure/vote/
+ *     finalize/cancel/override, each independently gated on its own
+ *     `viewer.can*` field; see `WorkspacePanelReviewSection.tsx`)
  *
- * SCOPE (frozen, mandatory): still no Owner Override UI, no history/audit
- * UI, no panel round 2 — even where `viewer.canOverride` might be true,
- * this section never reads or branches on it (not present on the
- * client-safe `WorkspaceReviewContext` type — see
- * `workspaceReviewClient.ts`).
+ * SCOPE (frozen, mandatory): still no history/audit UI, no panel round 2.
+ * Owner Override UI shipped in Phase 9C.4 (`viewer.canOverride`, rendered
+ * inside `WorkspacePanelReviewSection`, never here) — this section itself
+ * still never reads or branches on `canOverride` directly.
  *
  * PANEL BOUNDARY (Phase 9C.0 Correction A / 9C.2 §52-§56, frozen): only
  * `panel.status === "open"` suppresses single-review controls — checked
@@ -29,11 +28,30 @@
  * fallback Phase 9B.5.1/9B.5.2/9C.0 established. The panel section itself
  * is rendered unconditionally (it governs its own internal presentation
  * for every status, including `null`).
+ *
+ * DRAIN COMPOSITION (Phase 9C.4, replaces the old 9C.2/9C.3 fail-safe early
+ * return): drain mode is no longer a dead end. `viewer.mode === "drain"` is
+ * explicit, additional, DEFENSIVE narrowing on top of the already-correct
+ * backend `viewer.can*` flags (`reviewContext.ts` already forces
+ * `canManageAssignment`/`canSubmitDecision`/`canResubmit`/`canCreatePanel`/
+ * `canReconfigurePanel` to `false` in drain) — `ReviewAssignmentCard`/
+ * `ReviewDecisionForm`/`ReviewResubmitAction` are never even MOUNTED in
+ * drain, not merely passed a `false` capability, so a stale/malformed
+ * client fixture can never accidentally surface new-work controls.
+ * `WorkspacePanelReviewSection` is rendered unconditionally in both modes;
+ * `canVote`/`canFinalize`/`canCancelPanel`/`canOverride` are already
+ * correctly drain-eligible (or not) straight from the backend, needing no
+ * local mode branching there. Panel CREATE/RECONFIGURE are the exception
+ * (Phase 9C.4-R1C): drain never admits new-work panel creation or
+ * reconfiguration, so the canonical `viewer.mode` is threaded down as an
+ * explicit `mode` prop and defensively narrows those two affordances
+ * independent of `canCreatePanel`/`canReconfigurePanel` — see
+ * `WorkspacePanelReviewSection.tsx`'s own module doc comment.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
-import { getReviewContext, GENERIC_CONTEXT_ERROR_MESSAGE, REVIEW_UNAVAILABLE_MESSAGE, type WorkspaceReviewContext } from "@/lib/client/workspaceReviewClient";
+import { getReviewContext, GENERIC_CONTEXT_ERROR_MESSAGE, REVIEW_UNAVAILABLE_MESSAGE, COMPLETION_MODE_BANNER_MESSAGE, type WorkspaceReviewContext } from "@/lib/client/workspaceReviewClient";
 import { getReviewStatusLabel, getReviewStatusBadgeClass, isApprovedWithConditions, formatAbsoluteDate } from "@/lib/workspaces/reviewQueuePresentation";
 import ReviewAssignmentCard from "./ReviewAssignmentCard";
 import ReviewDecisionForm from "./ReviewDecisionForm";
@@ -125,18 +143,10 @@ export default function WorkspaceRunReviewSection({ workspaceId, runId }: { work
   const statusClass = getReviewStatusBadgeClass(review.status);
   const caption = decidedViaCaption(review.decidedVia);
 
-  if (viewer.mode === "drain") {
-    return (
-      <section className="mt-8 space-y-4">
-        <h2 className="text-lg font-semibold text-cp-text">Review</h2>
-        <div className="rounded-xl border border-cp-border bg-cp-raised px-5 py-4 text-sm text-cp-muted">Review actions are currently unavailable.</div>
-      </section>
-    );
-  }
-
   // Defensive narrowing only — never widens what viewer.can* already
   // grants; see module doc comment.
   const panelOpen = panel?.status === "open";
+  const isDrain = viewer.mode === "drain";
 
   return (
     <section className="mt-8 space-y-4">
@@ -164,15 +174,22 @@ export default function WorkspaceRunReviewSection({ workspaceId, runId }: { work
         )}
       </div>
 
-      <WorkspacePanelReviewSection workspaceId={workspaceId} runId={runId} panel={panel} review={review} viewer={viewer} onMutated={refreshContext} />
+      {isDrain && (
+        <div role="status" className="rounded-xl border border-cp-border bg-cp-raised px-5 py-4 text-sm">
+          <p className="font-medium text-cp-text">Completion mode</p>
+          <p className="mt-1 text-cp-muted">{COMPLETION_MODE_BANNER_MESSAGE}</p>
+        </div>
+      )}
 
-      {!panelOpen && (
+      <WorkspacePanelReviewSection workspaceId={workspaceId} runId={runId} mode={viewer.mode} panel={panel} review={review} viewer={viewer} onMutated={refreshContext} />
+
+      {!isDrain && !panelOpen && (
         <ReviewAssignmentCard workspaceId={workspaceId} runId={runId} assignment={assignment} assignmentRevision={assignmentRevision} canManageAssignment={viewer.canManageAssignment} onMutated={refreshContext} />
       )}
 
-      {!panelOpen && viewer.canSubmitDecision && <ReviewDecisionForm workspaceId={workspaceId} runId={runId} review={review} canSubmitDecision={viewer.canSubmitDecision} onMutated={refreshContext} />}
+      {!isDrain && !panelOpen && viewer.canSubmitDecision && <ReviewDecisionForm workspaceId={workspaceId} runId={runId} review={review} canSubmitDecision={viewer.canSubmitDecision} onMutated={refreshContext} />}
 
-      {!panelOpen && viewer.canResubmit && <ReviewResubmitAction workspaceId={workspaceId} runId={runId} review={review} canResubmit={viewer.canResubmit} onMutated={refreshContext} />}
+      {!isDrain && !panelOpen && viewer.canResubmit && <ReviewResubmitAction workspaceId={workspaceId} runId={runId} review={review} canResubmit={viewer.canResubmit} onMutated={refreshContext} />}
     </section>
   );
 }

@@ -28,6 +28,7 @@ import {
   buildPanelDeleteRequest,
   buildPanelVoteRequest,
   buildPanelFinalizeRequest,
+  buildOverrideRequest,
   currentPanelRevision,
   type WorkspaceReviewContext,
   type ReviewContextPanelInfo,
@@ -249,5 +250,34 @@ describe("Phase 9C.3 — cross-domain OCC separation across all three concurrenc
 
     const resubmitBody = buildResubmitRequest({ review });
     expect(resubmitBody.expectedUpdatedAt).toBe("gov-token-xyz");
+
+    const overrideBody = buildOverrideRequest(panel, review, { status: "approved", justification: "Independently verified." });
+    expect(overrideBody.expectedPanelRevision).toBe(7);
+    expect(overrideBody.expectedGovernanceUpdatedAt).toBe("gov-token-xyz");
+    expect(Object.values(overrideBody)).not.toContain(111);
+  });
+});
+
+describe("buildOverrideRequest — Phase 9C.4: the SAME two-domain shape as buildPanelFinalizeRequest, verified from the actual backend override route/service contract, never assignmentRevision", () => {
+  it("PHASE 9C.4 PRIMARY ACCEPTANCE CRITERION: three deliberately divergent OCC values (assignmentRevision=111, panelRevision=7, governanceUpdatedAt=distinct token) — override request contains only its own two, never the assignment one", () => {
+    const panel = makePanel({ revision: 7 });
+    const review = { status: "unreviewed" as const, reviewedAt: null, governanceUpdatedAt: "distinct-governance-token" };
+    const body = buildOverrideRequest(panel, review, { status: "approved", justification: "Reviewed independently." });
+    expect(body).toEqual({ expectedPanelRevision: 7, expectedGovernanceUpdatedAt: "distinct-governance-token", status: "approved", justification: "Reviewed independently." });
+    expect(Object.values(body)).not.toContain(111);
+  });
+
+  it("omits conditions when not supplied", () => {
+    const panel = makePanel({ revision: 1 });
+    const review = { status: "unreviewed" as const, reviewedAt: null, governanceUpdatedAt: "gov-1" };
+    const body = buildOverrideRequest(panel, review, { status: "rejected", justification: "Not sufficiently sourced." });
+    expect("conditions" in body).toBe(false);
+  });
+
+  it("includes conditions verbatim when supplied (approved_with_conditions)", () => {
+    const panel = makePanel({ revision: 1 });
+    const review = { status: "unreviewed" as const, reviewedAt: null, governanceUpdatedAt: "gov-1" };
+    const body = buildOverrideRequest(panel, review, { status: "approved_with_conditions", justification: "Approved with conditions.", conditions: ["Verify primary source"] });
+    expect(body.conditions).toEqual(["Verify primary source"]);
   });
 });

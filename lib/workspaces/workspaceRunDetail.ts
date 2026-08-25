@@ -42,6 +42,7 @@ import { resolveWorkspaceReviewTarget } from "./resolveWorkspaceReviewTarget";
 import { resolveTeamRunWorkspaceAccess } from "./resolveTeamRunWorkspaceAccess";
 import { getProject } from "@/lib/firestore/projects";
 import { parseGovernanceRecord, type HumanReviewStatus } from "@/lib/adaptiveSchema/governanceRecordParser";
+import { parseAdaptiveHumanReviewPanel } from "@/lib/governance/adaptiveHumanReviewPanel";
 
 const MAX_RUN_LABEL_LENGTH = 200;
 
@@ -72,20 +73,27 @@ export interface WorkspaceRunDetailInfo {
 export type GetWorkspaceRunDetailResult = { status: "ok"; detail: WorkspaceRunDetailInfo } | { status: "not_found" } | { status: "read_failed" };
 
 /**
- * `approvalAdmitted` is REQUIRED true — this route has no drain-mode
- * concept of its own (Phase 9C.1 stays read-only; a future 9C.2+ pass may
- * revisit this once real mutation controls exist here to drain). Every
- * denial path — run missing, not Team-Workspace-bound, wrong Workspace,
- * malformed, Approval Workflow not admitted, Team Workspace access
- * denied, missing `research.read` or `reviews.read` (checked
- * independently, matching the queue page's own boundary — see Phase
- * 9C.1-R2C) — returns the SAME `"not_found"`, matching every other
- * Phase 9 concealment convention (§38: never a message that reveals a
- * valid run exists).
+ * `approvalAdmitted` alone is NOT sufficient for admission (Phase 9C.4):
+ * this route now mirrors `getReviewContext()`'s own drain-admission rule
+ * exactly — Team Workspace access is established FIRST (never queried
+ * before that, matching `review-context/route.ts`'s documented ordering),
+ * and if Approval Workflow is not admitted, a run with an existing,
+ * validly-parsed panel (any status) is STILL admitted (drain-eligible),
+ * because Phase 9C.4 adds real drain-mode mutation controls to this same
+ * route via `WorkspaceRunReviewSection`. An assignment existing alone, or
+ * an unreviewed run with no panel, is never drain-admission — identical to
+ * `getReviewContext()` (Phase 9C.0 Correction A/B) — this is the exact
+ * same rule re-evaluated here, not a second authorization implementation
+ * (no new Firestore read beyond the same `humanReviewPanel/current`
+ * document `getReviewContext` itself reads). Every denial path — run
+ * missing, not Team-Workspace-bound, wrong Workspace, malformed, neither
+ * normal nor drain admitted, Team Workspace access denied, missing
+ * `research.read` or `reviews.read` — returns the SAME `"not_found"`,
+ * matching every other Phase 9 concealment convention (§38: never a
+ * message that reveals a valid run exists).
  */
 export async function getWorkspaceRunDetail(args: { runId: string; uid: string; approvalAdmitted: boolean }): Promise<GetWorkspaceRunDetailResult> {
   if (!adminDb) return { status: "read_failed" };
-  if (!args.approvalAdmitted) return { status: "not_found" };
   const db = adminDb;
 
   try {
@@ -104,9 +112,17 @@ export async function getWorkspaceRunDetail(args: { runId: string; uid: string; 
     });
     if (target.kind !== "valid_workspace_review_target") return { status: "not_found" };
 
+    // Team Workspace access FIRST — see module doc comment.
     const access = await resolveTeamRunWorkspaceAccess({ uid: args.uid, workspaceId: target.workspaceId });
     if (!access.granted) return { status: "not_found" };
     if (!access.capabilities.includes("research.read") || !access.capabilities.includes("reviews.read")) return { status: "not_found" };
+
+    if (!args.approvalAdmitted) {
+      const panelSnap = await runRef.collection("humanReviewPanel").doc("current").get();
+      const panelParse = parseAdaptiveHumanReviewPanel(panelSnap.exists ? panelSnap.data() : undefined, { expectedRunId: args.runId });
+      const drainEligible = panelParse.status === "valid";
+      if (!drainEligible) return { status: "not_found" };
+    }
 
     let projectName: string | null = null;
     if (target.projectId) {

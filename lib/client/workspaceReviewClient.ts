@@ -100,10 +100,8 @@ export interface ReviewContextViewerInfo {
   canVote: boolean;
   hasVoted: boolean;
   canFinalize: boolean;
-  // canOverride is intentionally NOT mirrored here — Owner Override UI is
-  // out of scope through Phase 9C.3 (deferred to 9C.4), and this client
-  // module should not even carry the temptation to branch on it (mirrors
-  // the same discipline Phase 9C.2 already applied to this whole block).
+  /** Phase 9C.4 — mirrors `overrideWorkspaceReviewPanel`'s exact condition: `reviews.override` (Owner-only) + `research.read`, panel OPEN, review status reviewable. NOT mode-gated at the backend (override is drain-eligible by design) — normal vs. drain availability falls out of `panelOpen`/`reviewable` alone, never checked separately here. */
+  canOverride: boolean;
 }
 
 export interface WorkspaceReviewContext {
@@ -274,6 +272,44 @@ export interface PanelFinalizeRequestBody {
 /** The one place both panel OCC and governance OCC are combined — deliberately takes two distinct, separately-sourced values so a divergent-token test can prove neither is ever substituted for the other, and NEITHER is ever `assignmentRevision`. */
 export function buildPanelFinalizeRequest(panel: { revision: number }, review: Pick<ReviewContextReviewInfo, "governanceUpdatedAt">): PanelFinalizeRequestBody {
   return { expectedPanelRevision: panel.revision, expectedGovernanceUpdatedAt: review.governanceUpdatedAt };
+}
+
+// ============================================
+// Owner Override — Phase 9C.4. Verified from
+// `app/api/workspaces/[workspaceId]/runs/[runId]/review-override/route.ts`
+// and `lib/governance/adaptivePanelOverride.ts` (parseSubmitAdaptiveReviewOverrideRequest)
+// before writing this: the request contract is `expectedPanelRevision` +
+// `expectedGovernanceUpdatedAt` — the SAME dual-OCC shape as finalize, NOT
+// `governanceUpdatedAt` alone. `status` uses the identical
+// AdaptiveReviewDecisionStatus enum as votes/decisions. `justification` is
+// required, trimmed non-empty, max 4000 chars (mirrors
+// MAX_REVIEW_COMMENT_LENGTH). `conditions` only for
+// `approved_with_conditions`, same shape as decision/vote conditions.
+// ============================================
+
+export interface OverrideDraft {
+  status: AdaptiveReviewDecisionStatus;
+  justification: string;
+  conditions?: string[];
+}
+
+export interface OverrideRequestBody {
+  expectedPanelRevision: number;
+  expectedGovernanceUpdatedAt: string;
+  status: AdaptiveReviewDecisionStatus;
+  justification: string;
+  conditions?: string[];
+}
+
+/** Dual OCC, mirroring `buildPanelFinalizeRequest` exactly — `panel.revision` AND `review.governanceUpdatedAt`, sourced separately, NEVER `assignmentRevision`. */
+export function buildOverrideRequest(panel: { revision: number }, review: Pick<ReviewContextReviewInfo, "governanceUpdatedAt">, draft: OverrideDraft): OverrideRequestBody {
+  return {
+    expectedPanelRevision: panel.revision,
+    expectedGovernanceUpdatedAt: review.governanceUpdatedAt,
+    status: draft.status,
+    justification: draft.justification,
+    ...(draft.conditions !== undefined ? { conditions: draft.conditions } : {}),
+  };
 }
 
 // ============================================
@@ -451,6 +487,15 @@ export async function finalizePanel(args: { workspaceId: string; runId: string; 
   });
 }
 
+export async function overridePanel(args: { workspaceId: string; runId: string; user: User | null; authReady: boolean; body: OverrideRequestBody }): Promise<MutationResult> {
+  return runMutation(`/api/workspaces/${encodeURIComponent(args.workspaceId)}/runs/${encodeURIComponent(args.runId)}/review-override`, {
+    method: "POST",
+    user: args.user,
+    authReady: args.authReady,
+    body: args.body,
+  });
+}
+
 // ============================================
 // Shared copy
 // ============================================
@@ -464,3 +509,7 @@ export const REVIEW_UNAVAILABLE_MESSAGE = "This review is no longer available.";
 export const NO_ELIGIBLE_REVIEWERS_MESSAGE = "No eligible reviewers are available.";
 /** Phase 9C.3 — deliberately distinct wording from CONFLICT_MESSAGE so a panel conflict never reads as a single-review one. No OCC/revision/transaction jargon. */
 export const PANEL_CONFLICT_MESSAGE = "This panel changed while you were editing. We refreshed the latest version. Review your changes before submitting again.";
+/** Phase 9C.4 — deliberately distinct wording again: an override conflict should never read as an ordinary panel edit conflict. No OCC/revision/transaction jargon. */
+export const OVERRIDE_CONFLICT_MESSAGE = "This review changed while you were preparing the override. We refreshed the latest state. Review the details before submitting again.";
+/** Phase 9C.4 — shown in place of internal drain/feature-flag terminology (never "drain mode", "canary", "Approval Workflow"). */
+export const COMPLETION_MODE_BANNER_MESSAGE = "New review work is paused. An existing panel review can still be completed where permitted.";

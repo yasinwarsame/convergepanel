@@ -55,17 +55,45 @@
  * never a local counter, never incremented after a mutation (every
  * success/conflict triggers `onMutated()`, a canonical refetch).
  *
- * MUTATION EXCLUSION (Phase 9C.3-R1C): this section is the single owner of
- * `activeMutation` — only ONE panel governance mutation (create/
- * reconfigure/vote/finalize/cancel) may be in flight at a time for this
- * run's panel UI, per the frozen 9C.3 UX concurrency contract. This is a
- * client-side coordination lock only; it never touches
+ * MUTATION EXCLUSION (Phase 9C.3-R1C, extended Phase 9C.4): this section is
+ * the single owner of `activeMutation` — only ONE panel governance mutation
+ * (create/reconfigure/vote/finalize/cancel/override) may be in flight at a
+ * time for this run's panel UI, per the frozen 9C.3 UX concurrency
+ * contract. This is a client-side coordination lock only; it never touches
  * `workspaceReviewPanelMutations.ts`, panel authorization, or OCC
  * semantics — the backend remains independently authoritative regardless
  * of what this lock permits. `beginMutation()`/`endMutation()` are passed
- * down to `PanelVoteForm`/`PanelFinalizeCancelControls`; `endMutation()` is
- * always called on every exit path (success, 409, generic error) so a
- * failed request can never leave panel controls permanently disabled.
+ * down to `PanelVoteForm`/`PanelFinalizeCancelControls`/
+ * `OwnerOverrideForm`; `endMutation()` is always called on every exit path
+ * (success, 409, generic error) so a failed request can never leave panel
+ * controls permanently disabled.
+ *
+ * OWNER OVERRIDE (Phase 9C.4): `viewer.canOverride` is verified from
+ * `reviewContext.ts` source to require `panelOpen` (same precondition as
+ * vote/finalize/cancel) and is NEVER mutually exclusive with them by
+ * construction — an Owner with `reviews.manage` can see Override alongside
+ * Finalize/Cancel, or alongside Vote if also a panel reviewer — so Override
+ * shares this SAME lock rather than a second one. Override is never
+ * mode-gated here (drain vs. normal availability already falls out of
+ * `panelOpen`/`reviewable` in `viewer.canOverride` itself, mirroring how
+ * `canVote`/`canFinalize`/`canCancelPanel` are already drain-eligible
+ * without local mode branching).
+ *
+ * DRAIN NEW-WORK BOUNDARY (Phase 9C.4-R1C): unlike vote/finalize/cancel/
+ * override, panel CREATE and RECONFIGURE are never drain-admitted — the
+ * frozen invariant is "drain completes existing open governance work only,"
+ * never new panel creation or reconfiguration. `reviewContext.ts` already
+ * forces `canCreatePanel`/`canReconfigurePanel` to `false` in drain, but
+ * this section does NOT trust that alone (R1 finding): the explicit `mode`
+ * prop, threaded down from the same canonical `viewer.mode` the parent
+ * already uses for its own drain narrowing, independently gates both
+ * affordances so a stale/forged `canCreatePanel`/`canReconfigurePanel=true`
+ * can never mount a create/reconfigure control while `mode === "drain"` —
+ * mirroring exactly how `WorkspaceRunReviewSection` never even mounts
+ * `ReviewAssignmentCard`/`ReviewDecisionForm`/`ReviewResubmitAction` in
+ * drain. This is defense-in-depth only; the backend (`PUT /review-panel`)
+ * independently re-checks Approval admission before any Firestore write
+ * regardless of what this component renders.
  */
 
 import { useRef, useState } from "react";
@@ -85,12 +113,14 @@ import { getPanelStatusLabel, getQuorumProgressText, getReviewerCountLabel, comp
 import PanelReviewerSelector from "./PanelReviewerSelector";
 import PanelVoteForm from "./PanelVoteForm";
 import PanelFinalizeCancelControls from "./PanelFinalizeCancelControls";
+import OwnerOverrideForm from "./OwnerOverrideForm";
 
-type PanelViewerFlags = Pick<WorkspaceReviewContext["viewer"], "canCreatePanel" | "canReconfigurePanel" | "canCancelPanel" | "canVote" | "hasVoted" | "canFinalize">;
+type PanelViewerFlags = Pick<WorkspaceReviewContext["viewer"], "canCreatePanel" | "canReconfigurePanel" | "canCancelPanel" | "canVote" | "hasVoted" | "canFinalize" | "canOverride">;
 
 export default function WorkspacePanelReviewSection({
   workspaceId,
   runId,
+  mode,
   panel,
   review,
   viewer,
@@ -98,6 +128,8 @@ export default function WorkspacePanelReviewSection({
 }: {
   workspaceId: string;
   runId: string;
+  /** Phase 9C.4-R1C — canonical `viewer.mode`; gates create/reconfigure defensively (see module doc). */
+  mode: "normal" | "drain";
   panel: ReviewContextPanelInfo | null;
   review: Pick<ReviewContextReviewInfo, "governanceUpdatedAt">;
   viewer: PanelViewerFlags;
@@ -221,7 +253,9 @@ export default function WorkspacePanelReviewSection({
 
   // No panel at all.
   if (panel === null) {
-    if (!viewer.canCreatePanel) return null;
+    // Phase 9C.4-R1C — drain never admits new panel creation, regardless of
+    // `viewer.canCreatePanel` (defensive; see module doc).
+    if (mode === "drain" || !viewer.canCreatePanel) return null;
     return (
       <div className="rounded-xl border border-cp-border bg-cp-surface p-5 shadow-sm">
         <h3 className="text-sm font-semibold text-cp-text">Panel review</h3>
@@ -263,6 +297,7 @@ export default function WorkspacePanelReviewSection({
   const statusLabel = getPanelStatusLabel(panel.status);
 
   return (
+    <>
     <div className="rounded-xl border border-cp-border bg-cp-surface p-5 shadow-sm">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-cp-text">Panel review</h3>
@@ -298,7 +333,8 @@ export default function WorkspacePanelReviewSection({
           )}
           {viewer.canVote && viewer.hasVoted && <p className="mt-3 text-xs text-cp-muted">You already voted.</p>}
 
-          {viewer.canReconfigurePanel && (
+          {/* Phase 9C.4-R1C — drain never admits reconfiguration, regardless of `viewer.canReconfigurePanel` (defensive; see module doc). */}
+          {mode === "normal" && viewer.canReconfigurePanel && (
             <div className="mt-4 border-t border-cp-border-soft pt-4">
               {!editorOpen ? (
                 <button
@@ -350,6 +386,28 @@ export default function WorkspacePanelReviewSection({
         </>
       )}
     </div>
+
+    {/*
+     * Phase 9C.4 — Owner Override renders as its OWN top-level card,
+     * sibling to (never nested inside) the "Panel review" card above,
+     * matching the established one-card-per-governance-concept convention
+     * ("Assignment", "Panel review") and satisfying the required visual/
+     * semantic separation from peer review. It participates in the SAME
+     * shared lock as vote/finalize/cancel (see module doc comment).
+     */}
+    {panel.status === "open" && viewer.canOverride && (
+      <OwnerOverrideForm
+        workspaceId={workspaceId}
+        runId={runId}
+        panelRevision={panel.revision}
+        review={review}
+        onMutated={onMutated}
+        disabled={activeMutation !== null && activeMutation !== "override"}
+        onBeginMutation={() => beginMutation("override")}
+        onEndMutation={() => endMutation("override")}
+      />
+    )}
+    </>
   );
 }
 

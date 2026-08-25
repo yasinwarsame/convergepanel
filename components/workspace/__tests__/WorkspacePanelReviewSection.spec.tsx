@@ -9,8 +9,15 @@
  * (deferred until the create/reconfigure form is actually opened, per
  * §76 — a DELIBERATE difference from 9C.2's eager-on-can* pattern),
  * candidate invalidation after a 409, vote/finalize/cancel eligibility +
- * OCC + 409, self-review absence, Owner Override absence, no round-2
- * language, no raw UID, double-submit protection.
+ * OCC + 409, self-review absence, no round-2 language, no raw UID,
+ * double-submit protection.
+ *
+ * Phase 9C.4 adds: Owner Override eligibility (`canOverride`-gated, never
+ * inferred from other flags), dual-OCC override request (panel.revision +
+ * governanceUpdatedAt, never assignmentRevision), justification
+ * requiredness/max-length, 409 draft preservation, and Override's
+ * participation in this section's SAME shared ref-backed mutation lock
+ * (atomicity + lifetime tests extend the existing 9C.3-R2C suites below).
  */
 
 import { createElement } from "react";
@@ -26,6 +33,7 @@ const mockedPutPanel = jest.fn();
 const mockedDeletePanel = jest.fn();
 const mockedSubmitPanelVote = jest.fn();
 const mockedFinalizePanel = jest.fn();
+const mockedOverridePanel = jest.fn();
 jest.mock("@/lib/client/workspaceReviewClient", () => {
   const actual = jest.requireActual("@/lib/client/workspaceReviewClient");
   return {
@@ -35,6 +43,7 @@ jest.mock("@/lib/client/workspaceReviewClient", () => {
     deletePanel: (...args: unknown[]) => mockedDeletePanel(...args),
     submitPanelVote: (...args: unknown[]) => mockedSubmitPanelVote(...args),
     finalizePanel: (...args: unknown[]) => mockedFinalizePanel(...args),
+    overridePanel: (...args: unknown[]) => mockedOverridePanel(...args),
   };
 });
 
@@ -58,6 +67,7 @@ function makeViewer(overrides: Partial<WorkspaceReviewContext["viewer"]> = {}): 
     canVote: false,
     hasVoted: false,
     canFinalize: false,
+    canOverride: false,
     ...overrides,
   };
 }
@@ -83,7 +93,7 @@ function setup(props: { panel: ReviewContextPanelInfo | null; viewer: WorkspaceR
   const onMutated = props.onMutated ?? jest.fn();
   act(() => {
     renderer = TestRenderer.create(
-      createElement(WorkspacePanelReviewSection, { workspaceId: WS_ID, runId: RUN_ID, panel: props.panel, review: REVIEW, viewer: props.viewer, onMutated })
+      createElement(WorkspacePanelReviewSection, { workspaceId: WS_ID, runId: RUN_ID, mode: props.viewer.mode, panel: props.panel, review: REVIEW, viewer: props.viewer, onMutated })
     );
   });
   return { renderer, onMutated };
@@ -97,6 +107,7 @@ beforeEach(() => {
   mockedDeletePanel.mockResolvedValue({ status: "ok" });
   mockedSubmitPanelVote.mockResolvedValue({ status: "ok" });
   mockedFinalizePanel.mockResolvedValue({ status: "ok" });
+  mockedOverridePanel.mockResolvedValue({ status: "ok" });
 });
 
 describe("WorkspacePanelReviewSection — no panel (§16/§110)", () => {
@@ -755,6 +766,353 @@ describe("WorkspacePanelReviewSection — cancel (§66/§67/§132/§133)", () =>
   });
 });
 
+function fillOverrideDraft(renderer: TestRenderer.ReactTestRenderer, statusValue: string, justification: string) {
+  const radio = renderer.root.findAllByType("input").find((i) => i.props.type === "radio" && i.props.name === "owner-override-status" && i.props.value === statusValue)!;
+  radio.props.onChange();
+  const textarea = renderer.root.findAllByType("textarea").find((t) => t.props.id === "owner-override-justification")!;
+  textarea.props.onChange({ target: { value: justification } });
+}
+
+describe("WorkspacePanelReviewSection — Owner Override (Phase 9C.4, §26-§45)", () => {
+  it("canOverride=true, panel open: 'Owner override' section renders as its own card, separate from 'Panel review'", async () => {
+    let renderer!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      ({ renderer } = setup({ panel: makePanel(), viewer: makeViewer({ canOverride: true }) }));
+      await Promise.resolve();
+    });
+    const text = JSON.stringify(renderer.toJSON());
+    expect(text).toContain("Owner override");
+    expect(text).toContain("Panel review");
+    expect(text).toContain("exceptional governance decision");
+  });
+
+  it("canOverride=true but panel finalized: Override does not render (backend's own canOverride never true here, but verified defensively too)", async () => {
+    let renderer!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      ({ renderer } = setup({ panel: makePanel({ status: "finalized", finalizedAt: "x" }), viewer: makeViewer({ canOverride: true }) }));
+      await Promise.resolve();
+    });
+    expect(extractVisibleText(renderer.toJSON())).not.toMatch(/owner override/i);
+  });
+
+  it("submit is blocked with no status selected, or with empty/whitespace-only justification", async () => {
+    let renderer!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      ({ renderer } = setup({ panel: makePanel(), viewer: makeViewer({ canOverride: true }) }));
+      await Promise.resolve();
+    });
+    let triggerBtn = renderer.root.findAllByType("button").find((b) => b.props.children === "Override review")!;
+    expect(triggerBtn.props.disabled).toBe(true);
+
+    await act(async () => {
+      fillOverrideDraft(renderer, "approved", "   ");
+    });
+    triggerBtn = renderer.root.findAllByType("button").find((b) => b.props.children === "Override review")!;
+    expect(triggerBtn.props.disabled).toBe(true);
+
+    await act(async () => {
+      fillOverrideDraft(renderer, "approved", "Sufficient sourcing confirmed independently.");
+    });
+    triggerBtn = renderer.root.findAllByType("button").find((b) => b.props.children === "Override review")!;
+    expect(triggerBtn.props.disabled).toBe(false);
+  });
+
+  it("justification textarea enforces maxLength=4000, mirroring the backend's MAX_REVIEW_COMMENT_LENGTH", async () => {
+    let renderer!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      ({ renderer } = setup({ panel: makePanel(), viewer: makeViewer({ canOverride: true }) }));
+      await Promise.resolve();
+    });
+    const textarea = renderer.root.findAllByType("textarea").find((t) => t.props.id === "owner-override-justification")!;
+    expect(textarea.props.maxLength).toBe(4000);
+  });
+
+  it("approved_with_conditions requires at least one condition before the trigger is enabled", async () => {
+    let renderer!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      ({ renderer } = setup({ panel: makePanel(), viewer: makeViewer({ canOverride: true }) }));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      fillOverrideDraft(renderer, "approved_with_conditions", "Conditional override justification.");
+    });
+    let triggerBtn = renderer.root.findAllByType("button").find((b) => b.props.children === "Override review")!;
+    expect(triggerBtn.props.disabled).toBe(true);
+
+    const conditionsTextarea = renderer.root.findAllByType("textarea").find((t) => t.props.id === "owner-override-conditions")!;
+    await act(async () => {
+      conditionsTextarea.props.onChange({ target: { value: "Verify primary source" } });
+    });
+    triggerBtn = renderer.root.findAllByType("button").find((b) => b.props.children === "Override review")!;
+    expect(triggerBtn.props.disabled).toBe(false);
+  });
+
+  it("override request uses expectedPanelRevision (panel.revision) AND expectedGovernanceUpdatedAt (review.governanceUpdatedAt), never assignmentRevision — deliberately divergent values", async () => {
+    let renderer!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      ({ renderer } = setup({ panel: makePanel({ revision: 7 }), viewer: makeViewer({ canOverride: true }) }));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      fillOverrideDraft(renderer, "approved", "Independently verified before override.");
+    });
+    await act(async () => {
+      renderer.root.findAllByType("button").find((b) => b.props.children === "Override review")!.props.onClick();
+    });
+    const confirmButtons = renderer.root.findAllByType("button").filter((b) => b.props.children === "Confirm override");
+    await act(async () => {
+      await confirmButtons[confirmButtons.length - 1].props.onClick();
+    });
+    expect(mockedOverridePanel).toHaveBeenCalledWith(
+      expect.objectContaining({ body: expect.objectContaining({ expectedPanelRevision: 7, expectedGovernanceUpdatedAt: "gov-token-abc", status: "approved", justification: "Independently verified before override." }) })
+    );
+    const call = mockedOverridePanel.mock.calls[0][0];
+    expect(Object.values(call.body)).not.toContain(111);
+  });
+
+  it("409: no automatic retry (call count stays 1), draft (status + justification) preserved, conflict notice shown", async () => {
+    mockedOverridePanel.mockResolvedValueOnce({ status: "conflict" });
+    let renderer!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      ({ renderer } = setup({ panel: makePanel(), viewer: makeViewer({ canOverride: true }) }));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      fillOverrideDraft(renderer, "rejected", "Justification preserved across a conflict.");
+    });
+    await act(async () => {
+      renderer.root.findAllByType("button").find((b) => b.props.children === "Override review")!.props.onClick();
+    });
+    const confirmButtons = renderer.root.findAllByType("button").filter((b) => b.props.children === "Confirm override");
+    await act(async () => {
+      await confirmButtons[confirmButtons.length - 1].props.onClick();
+    });
+    expect(mockedOverridePanel).toHaveBeenCalledTimes(1);
+    const text = JSON.stringify(renderer.toJSON());
+    expect(text).toContain("This review changed while you were preparing the override");
+    const preservedRadio = renderer.root.findAllByType("input").find((i) => i.props.type === "radio" && i.props.value === "rejected")!;
+    expect(preservedRadio.props.checked).toBe(true);
+    const preservedTextarea = renderer.root.findAllByType("textarea").find((t) => t.props.id === "owner-override-justification")!;
+    expect(preservedTextarea.props.value).toBe("Justification preserved across a conflict.");
+  });
+
+  it("success: draft clears only after the awaited canonical refresh", async () => {
+    let resolveMutated!: () => void;
+    const onMutated = jest.fn(() => new Promise<void>((resolve) => (resolveMutated = resolve)));
+    let renderer!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      ({ renderer } = setup({ panel: makePanel(), viewer: makeViewer({ canOverride: true }), onMutated }));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      fillOverrideDraft(renderer, "approved", "Success path justification text.");
+    });
+    await act(async () => {
+      renderer.root.findAllByType("button").find((b) => b.props.children === "Override review")!.props.onClick();
+    });
+    const confirmButtons = renderer.root.findAllByType("button").filter((b) => b.props.children === "Confirm override");
+    act(() => {
+      confirmButtons[confirmButtons.length - 1].props.onClick();
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    // Still pending — the deferred onMutated() has not resolved yet.
+    let confirmBtn = renderer.root.findAllByType("button").find((b) => b.props.children === "Submitting…");
+    expect(confirmBtn).toBeTruthy();
+    await act(async () => {
+      resolveMutated();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(mockedOverridePanel).toHaveBeenCalledTimes(1);
+  });
+
+  it("generic (non-conflict) mutation error: releases immediately, other panel controls become available again", async () => {
+    mockedOverridePanel.mockResolvedValueOnce({ status: "error" });
+    let renderer!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      ({ renderer } = setup({ panel: makePanel(), viewer: makeViewer({ canOverride: true, canCancelPanel: true }) }));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      fillOverrideDraft(renderer, "approved", "Generic error path justification.");
+    });
+    await act(async () => {
+      renderer.root.findAllByType("button").find((b) => b.props.children === "Override review")!.props.onClick();
+    });
+    const confirmButtons = renderer.root.findAllByType("button").filter((b) => b.props.children === "Confirm override");
+    await act(async () => {
+      await confirmButtons[confirmButtons.length - 1].props.onClick();
+    });
+    const cancelBtn = findButton(renderer, "Cancel panel review")!;
+    expect(cancelBtn.props.disabled).toBe(false);
+  });
+});
+
+describe("WorkspacePanelReviewSection — Phase 9C.4: Override participates in the SAME ref-backed atomic mutation lock as vote/finalize/cancel", () => {
+  it("same-tick vote + override: only one underlying mutation fires", async () => {
+    let renderer!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      ({ renderer } = setup({ panel: makePanel({ revision: 3 }), viewer: makeViewer({ canVote: true, canOverride: true }) }));
+      await Promise.resolve();
+    });
+    const approveRadio = renderer.root.findAllByType("input").find((i) => i.props.type === "radio" && i.props.value === "approved" && i.props.name === "panel-vote-status")!;
+    await act(async () => {
+      approveRadio.props.onChange();
+    });
+    await act(async () => {
+      fillOverrideDraft(renderer, "approved", "Same-tick atomicity probe justification.");
+    });
+    const form = renderer.root.findAllByType("form")[0];
+    // Open the override confirm dialog first (a separate user action, not part of the atomicity probe itself).
+    await act(async () => {
+      renderer.root.findAllByType("button").find((b) => b.props.children === "Override review")!.props.onClick();
+    });
+    const confirmButtons = renderer.root.findAllByType("button").filter((b) => b.props.children === "Confirm override");
+    const confirmOverrideBtn = confirmButtons[confirmButtons.length - 1];
+
+    // Both handlers invoked synchronously, back-to-back, inside ONE act() —
+    // no intervening await/rerender — mirrors the 9C.3-R2C same-tick proof.
+    act(() => {
+      form.props.onSubmit({ preventDefault: () => {} });
+      confirmOverrideBtn.props.onClick();
+    });
+
+    expect(mockedSubmitPanelVote).toHaveBeenCalledTimes(1);
+    expect(mockedOverridePanel).not.toHaveBeenCalled();
+  });
+
+  it("same-tick override + finalize (reverse order): only one underlying mutation fires", async () => {
+    let renderer!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      ({ renderer } = setup({ panel: makePanel({ revision: 3 }), viewer: makeViewer({ canFinalize: true, canOverride: true }) }));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      fillOverrideDraft(renderer, "approved", "Reverse-order atomicity probe justification.");
+    });
+    await act(async () => {
+      renderer.root.findAllByType("button").find((b) => b.props.children === "Override review")!.props.onClick();
+    });
+    const overrideConfirmButtons = renderer.root.findAllByType("button").filter((b) => b.props.children === "Confirm override");
+    const confirmOverrideBtn = overrideConfirmButtons[overrideConfirmButtons.length - 1];
+
+    await act(async () => {
+      findButton(renderer, "Finalize panel")!.props.onClick();
+    });
+    const finalizeConfirmButtons = renderer.root.findAllByType("button").filter((b) => b.props.children === "Finalize");
+    const confirmFinalizeBtn = finalizeConfirmButtons[finalizeConfirmButtons.length - 1];
+
+    act(() => {
+      confirmOverrideBtn.props.onClick();
+      confirmFinalizeBtn.props.onClick();
+    });
+
+    expect(mockedOverridePanel).toHaveBeenCalledTimes(1);
+    expect(mockedFinalizePanel).not.toHaveBeenCalled();
+  });
+
+  it("lock lifetime: override HTTP resolved, canonical refresh still pending — Cancel remains disabled", async () => {
+    let resolveMutated!: () => void;
+    const onMutated = jest.fn(() => new Promise<void>((resolve) => (resolveMutated = resolve)));
+    let renderer!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      ({ renderer } = setup({ panel: makePanel(), viewer: makeViewer({ canOverride: true, canCancelPanel: true }), onMutated }));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      fillOverrideDraft(renderer, "approved", "Lock lifetime probe justification.");
+    });
+    await act(async () => {
+      renderer.root.findAllByType("button").find((b) => b.props.children === "Override review")!.props.onClick();
+    });
+    const confirmButtons = renderer.root.findAllByType("button").filter((b) => b.props.children === "Confirm override");
+    act(() => {
+      confirmButtons[confirmButtons.length - 1].props.onClick();
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    let cancelBtn = findButton(renderer, "Cancel panel review")!;
+    expect(cancelBtn.props.disabled).toBe(true);
+
+    await act(async () => {
+      resolveMutated();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    cancelBtn = findButton(renderer, "Cancel panel review")!;
+    expect(cancelBtn.props.disabled).toBe(false);
+  });
+});
+
+describe("WorkspacePanelReviewSection — Phase 9C.4-R1C PERMANENT REGRESSION: drain never admits new-work panel creation/reconfiguration, even under a forged/stale can* fixture", () => {
+  it("mode=drain, panel=null, canCreatePanel=true (forged): 'Start panel review' absent, zero candidate fetch, zero PUT", async () => {
+    let renderer!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      ({ renderer } = setup({ panel: null, viewer: makeViewer({ mode: "drain", canCreatePanel: true }) }));
+      await Promise.resolve();
+    });
+    expect(renderer.toJSON()).toBeNull();
+    expect(mockedGetReviewerCandidates).not.toHaveBeenCalled();
+    expect(mockedPutPanel).not.toHaveBeenCalled();
+  });
+
+  it("mode=drain, panel=open, canReconfigurePanel=true (forged): 'Change reviewers' absent, zero candidate fetch, zero PUT", async () => {
+    let renderer!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      ({ renderer } = setup({ panel: makePanel({ revision: 6 }), viewer: makeViewer({ mode: "drain", canReconfigurePanel: true }) }));
+      await Promise.resolve();
+    });
+    expect(extractVisibleText(renderer.toJSON())).not.toContain("Change reviewers");
+    expect(mockedGetReviewerCandidates).not.toHaveBeenCalled();
+    expect(mockedPutPanel).not.toHaveBeenCalled();
+  });
+
+  it("mode=normal (regression): canCreatePanel=true still shows 'Start panel review', canReconfigurePanel=true still shows 'Change reviewers'", async () => {
+    let renderer!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      ({ renderer } = setup({ panel: null, viewer: makeViewer({ mode: "normal", canCreatePanel: true }) }));
+      await Promise.resolve();
+    });
+    expect(extractVisibleText(renderer.toJSON())).toContain("Start panel review");
+
+    await act(async () => {
+      ({ renderer } = setup({ panel: makePanel(), viewer: makeViewer({ mode: "normal", canReconfigurePanel: true }) }));
+      await Promise.resolve();
+    });
+    expect(extractVisibleText(renderer.toJSON())).toContain("Change reviewers");
+  });
+
+  it("broad forged drain matrix: create/reconfigure/assignment-adjacent flags all true does NOT admit new-work, but completion actions and Override still render per their own contextual can*", async () => {
+    let renderer!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      ({ renderer } = setup({
+        panel: makePanel({ revision: 4 }),
+        viewer: makeViewer({
+          mode: "drain",
+          canCreatePanel: true,
+          canReconfigurePanel: true,
+          canVote: true,
+          canFinalize: true,
+          canCancelPanel: true,
+          canOverride: true,
+        }),
+      }));
+      await Promise.resolve();
+    });
+    const text = extractVisibleText(renderer.toJSON());
+    // Prohibited new-work — absent regardless of the forged flags.
+    expect(text).not.toContain("Start panel review");
+    expect(text).not.toContain("Change reviewers");
+    expect(mockedGetReviewerCandidates).not.toHaveBeenCalled();
+    // Permitted completion/exceptional actions — still governed by their own contextual can*, untouched by this correction.
+    expect(text).toContain("Submit vote");
+    expect(text).toContain("Finalize panel");
+    expect(text).toContain("Cancel panel review");
+    expect(text).toMatch(/override/i);
+  });
+});
+
 describe("WorkspacePanelReviewSection — finalized / cancelled read-only evidence (§18/§19/§136/§137)", () => {
   it("finalized: shows 'Finalized' status, reviewer list, no vote/reconfigure/finalize/cancel controls", async () => {
     let renderer!: TestRenderer.ReactTestRenderer;
@@ -786,10 +1144,10 @@ describe("WorkspacePanelReviewSection — finalized / cancelled read-only eviden
 });
 
 describe("WorkspacePanelReviewSection — scope discipline (§91/§140/§141/§57-§58 panel action absence)", () => {
-  it("Owner Override never renders, even with every other can* flag true (canOverride is not even on the client type)", async () => {
+  it("Owner Override does not render when canOverride=false, even with every other can* flag true", async () => {
     let renderer!: TestRenderer.ReactTestRenderer;
     await act(async () => {
-      ({ renderer } = setup({ panel: makePanel(), viewer: makeViewer({ canVote: true, canReconfigurePanel: true, canFinalize: true, canCancelPanel: true }) }));
+      ({ renderer } = setup({ panel: makePanel(), viewer: makeViewer({ canVote: true, canReconfigurePanel: true, canFinalize: true, canCancelPanel: true, canOverride: false }) }));
       await Promise.resolve();
     });
     expect(extractVisibleText(renderer.toJSON())).not.toMatch(/override/i);

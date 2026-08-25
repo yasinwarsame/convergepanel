@@ -4,6 +4,14 @@
  * `app/workspace/reviews/__tests__/page.spec.tsx`: calls the Server
  * Component function directly and asserts real `next/navigation`
  * `notFound()` behavior (digest `"NEXT_NOT_FOUND"`).
+ *
+ * Phase 9C.4: the page no longer 404s merely because Approval Workflow
+ * admission failed — `getWorkspaceRunDetail()` is now ALWAYS called (with
+ * `approvalAdmitted` passed through) and makes the actual normal-vs-drain
+ * admission decision itself, mirroring `getReviewContext()`'s own drain
+ * rule. `getWorkspaceRunDetail` itself is mocked here, so its internal
+ * drain logic is exercised by `lib/workspaces/__tests__/workspaceRunDetail.spec.ts`,
+ * not here — this file only asserts the page correctly defers to it.
  */
 
 const mockedResolveServerComponentIdentity = jest.fn();
@@ -73,16 +81,27 @@ describe("GET /workspace/reviews/[runId] — route gate", () => {
     expect(mockedGetWorkspaceRunDetail).not.toHaveBeenCalled();
   });
 
-  it("Approval Workflow not admitted -> real notFound(), never calls getWorkspaceRunDetail (cheapest gate first)", async () => {
+  it("Approval Workflow not admitted, getWorkspaceRunDetail reports not_found (no drain-eligible panel): real notFound(), but getWorkspaceRunDetail IS called with approvalAdmitted:false — Phase 9C.4, admission is no longer decided at the page layer", async () => {
     mockedResolveServerComponentIdentity.mockResolvedValue({ uid: "u1" });
+    mockedGetWorkspaceRunDetail.mockResolvedValue({ status: "not_found" });
     await expectRealNotFound(callPage());
-    expect(mockedGetWorkspaceRunDetail).not.toHaveBeenCalled();
+    expect(mockedGetWorkspaceRunDetail).toHaveBeenCalledWith({ runId: "run-1", uid: "u1", approvalAdmitted: false });
   });
 
-  it("SECURITY: canary present but uid does not match -> real notFound()", async () => {
+  it("Phase 9C.4: Approval Workflow not admitted, but getWorkspaceRunDetail reports ok (drain-eligible existing panel): renders, no notFound()", async () => {
+    mockedResolveServerComponentIdentity.mockResolvedValue({ uid: "u1" });
+    mockedGetWorkspaceRunDetail.mockResolvedValue(VALID_DETAIL);
+    const result = await callPage();
+    expect(result).toBeTruthy();
+    expect(mockedGetWorkspaceRunDetail).toHaveBeenCalledWith({ runId: "run-1", uid: "u1", approvalAdmitted: false });
+  });
+
+  it("SECURITY: canary present but uid does not match, and no drain-eligible panel -> real notFound()", async () => {
     mockedResolveServerComponentIdentity.mockResolvedValue({ uid: "u2" });
     approvalCanary = "u1";
+    mockedGetWorkspaceRunDetail.mockResolvedValue({ status: "not_found" });
     await expectRealNotFound(callPage());
+    expect(mockedGetWorkspaceRunDetail).toHaveBeenCalledWith({ runId: "run-1", uid: "u2", approvalAdmitted: false });
   });
 
   it("getWorkspaceRunDetail returns not_found -> real notFound(), no message reveals a run exists", async () => {
