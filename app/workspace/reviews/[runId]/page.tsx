@@ -26,6 +26,7 @@ import { resolveApprovalWorkflowAdmission } from "@/lib/workspaces/approvalWorkf
 import { getWorkspaceRunDetail } from "@/lib/workspaces/workspaceRunDetail";
 import { APPROVAL_WORKFLOW_ENABLED, APPROVAL_WORKFLOW_CANARY_UIDS } from "@/lib/env";
 import { getReviewStatusLabel, getReviewStatusBadgeClass, isApprovedWithConditions, formatAbsoluteDate, UNFILED_PROJECT_LABEL } from "@/lib/workspaces/reviewQueuePresentation";
+import WorkspaceRunReviewSection from "@/components/workspace/WorkspaceRunReviewSection";
 
 export const dynamic = "force-dynamic";
 
@@ -74,6 +75,8 @@ export default async function WorkspaceRunDetailPage({ params }: { params: { run
           <dd className="mt-1 text-sm text-cp-text">{formatAbsoluteDate(detail.reviewedAt) ?? "—"}</dd>
         </div>
       </dl>
+
+      <WorkspaceRunReviewSection workspaceId={detail.workspaceId} runId={params.runId} />
     </main>
   );
 }
