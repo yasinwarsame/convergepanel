@@ -54,6 +54,18 @@
  * `expectedPanelRevision` are ALWAYS sourced from the live `panel` prop —
  * never a local counter, never incremented after a mutation (every
  * success/conflict triggers `onMutated()`, a canonical refetch).
+ *
+ * MUTATION EXCLUSION (Phase 9C.3-R1C): this section is the single owner of
+ * `activeMutation` — only ONE panel governance mutation (create/
+ * reconfigure/vote/finalize/cancel) may be in flight at a time for this
+ * run's panel UI, per the frozen 9C.3 UX concurrency contract. This is a
+ * client-side coordination lock only; it never touches
+ * `workspaceReviewPanelMutations.ts`, panel authorization, or OCC
+ * semantics — the backend remains independently authoritative regardless
+ * of what this lock permits. `beginMutation()`/`endMutation()` are passed
+ * down to `PanelVoteForm`/`PanelFinalizeCancelControls`; `endMutation()` is
+ * always called on every exit path (success, 409, generic error) so a
+ * failed request can never leave panel controls permanently disabled.
  */
 
 import { useState } from "react";
@@ -69,7 +81,7 @@ import {
   type ReviewerCandidate,
   type WorkspaceReviewContext,
 } from "@/lib/client/workspaceReviewClient";
-import { getPanelStatusLabel, getQuorumProgressText, getReviewerCountLabel, computeQuorum, validatePanelReviewerSelection } from "@/lib/workspaces/panelPresentation";
+import { getPanelStatusLabel, getQuorumProgressText, getReviewerCountLabel, computeQuorum, validatePanelReviewerSelection, type PanelMutationKind } from "@/lib/workspaces/panelPresentation";
 import PanelReviewerSelector from "./PanelReviewerSelector";
 import PanelVoteForm from "./PanelVoteForm";
 import PanelFinalizeCancelControls from "./PanelFinalizeCancelControls";
@@ -101,7 +113,21 @@ export default function WorkspacePanelReviewSection({
   const [pending, setPending] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
+  // Phase 9C.3-R1C — the single shared mutation lock for this panel's
+  // create/reconfigure/vote/finalize/cancel controls. See module doc.
+  const [activeMutation, setActiveMutation] = useState<PanelMutationKind | null>(null);
+  function beginMutation(kind: PanelMutationKind): boolean {
+    if (activeMutation !== null) return false;
+    setActiveMutation(kind);
+    return true;
+  }
+  function endMutation() {
+    setActiveMutation(null);
+  }
+
   const isReconfigure = panel !== null;
+  const ownEditorKind: PanelMutationKind = isReconfigure ? "reconfigure" : "create";
+  const editorLocked = activeMutation !== null && activeMutation !== ownEditorKind;
 
   async function loadCandidates() {
     setCandidatesStatus("loading");
@@ -127,13 +153,15 @@ export default function WorkspacePanelReviewSection({
 
   async function handleSave() {
     const validation = validatePanelReviewerSelection(selectedUids);
-    if (!validation.valid || pending) return;
+    if (!validation.valid || pending || editorLocked) return;
+    if (!beginMutation(ownEditorKind)) return;
     setPending(true);
     setNotice(null);
     setSelectionInvalidated(false);
     const body = buildPanelPutRequest({ panel }, selectedUids);
     const result = await putPanel({ workspaceId, runId, user, authReady, body });
     setPending(false);
+    endMutation();
     if (result.status === "ok") {
       setEditorOpen(false);
       onMutated();
@@ -170,7 +198,8 @@ export default function WorkspacePanelReviewSection({
           <button
             type="button"
             onClick={openEditor}
-            className="mt-3 rounded-lg border border-cp-border px-4 py-2 text-sm font-medium text-cp-text hover:bg-cp-raised focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent"
+            disabled={editorLocked}
+            className="mt-3 rounded-lg border border-cp-border px-4 py-2 text-sm font-medium text-cp-text hover:bg-cp-raised focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent disabled:opacity-50"
           >
             Start panel review
           </button>
@@ -184,6 +213,7 @@ export default function WorkspacePanelReviewSection({
             selectionInvalidated={selectionInvalidated}
             notice={notice}
             pending={pending}
+            disabled={editorLocked}
             onSave={handleSave}
             onCancel={() => setEditorOpen(false)}
             saveLabel="Start panel review"
@@ -224,7 +254,15 @@ export default function WorkspacePanelReviewSection({
 
           {viewer.canVote && !viewer.hasVoted && (
             <div className="mt-4">
-              <PanelVoteForm workspaceId={workspaceId} runId={runId} panelRevision={panel.revision} onMutated={onMutated} />
+              <PanelVoteForm
+                workspaceId={workspaceId}
+                runId={runId}
+                panelRevision={panel.revision}
+                onMutated={onMutated}
+                disabled={activeMutation !== null && activeMutation !== "vote"}
+                onBeginMutation={() => beginMutation("vote")}
+                onEndMutation={endMutation}
+              />
             </div>
           )}
           {viewer.canVote && viewer.hasVoted && <p className="mt-3 text-xs text-cp-muted">You already voted.</p>}
@@ -235,7 +273,8 @@ export default function WorkspacePanelReviewSection({
                 <button
                   type="button"
                   onClick={openEditor}
-                  className="rounded-lg border border-cp-border px-4 py-2 text-sm font-medium text-cp-text hover:bg-cp-raised focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent"
+                  disabled={editorLocked}
+                  className="rounded-lg border border-cp-border px-4 py-2 text-sm font-medium text-cp-text hover:bg-cp-raised focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent disabled:opacity-50"
                 >
                   Change reviewers
                 </button>
@@ -249,6 +288,7 @@ export default function WorkspacePanelReviewSection({
                   selectionInvalidated={selectionInvalidated}
                   notice={notice}
                   pending={pending}
+                  disabled={editorLocked}
                   onSave={handleSave}
                   onCancel={() => setEditorOpen(false)}
                   saveLabel="Save reviewers"
@@ -269,6 +309,10 @@ export default function WorkspacePanelReviewSection({
                 canFinalize={viewer.canFinalize}
                 canCancelPanel={viewer.canCancelPanel}
                 onMutated={onMutated}
+                finalizeDisabled={activeMutation !== null && activeMutation !== "finalize"}
+                cancelDisabled={activeMutation !== null && activeMutation !== "cancel"}
+                onBeginMutation={beginMutation}
+                onEndMutation={endMutation}
               />
             </div>
           )}
@@ -287,6 +331,7 @@ function PanelEditorForm({
   selectionInvalidated,
   notice,
   pending,
+  disabled,
   onSave,
   onCancel,
   saveLabel,
@@ -301,6 +346,8 @@ function PanelEditorForm({
   selectionInvalidated: boolean;
   notice: string | null;
   pending: boolean;
+  /** Phase 9C.3-R1C — true when a DIFFERENT panel mutation currently holds the shared lock. */
+  disabled: boolean;
   onSave: () => void;
   onCancel: () => void;
   saveLabel: string;
@@ -329,7 +376,7 @@ function PanelEditorForm({
         <button
           type="button"
           onClick={onSave}
-          disabled={!validation.valid || pending}
+          disabled={!validation.valid || pending || disabled}
           className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent disabled:opacity-50"
         >
           {pending ? "Saving…" : saveLabel}

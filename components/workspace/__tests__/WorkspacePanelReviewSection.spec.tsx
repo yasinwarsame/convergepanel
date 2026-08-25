@@ -228,6 +228,147 @@ describe("WorkspacePanelReviewSection — reconfigure OCC (§38/§116)", () => {
     expect(text).toContain("starts a new panel revision");
     expect(text).not.toMatch(/round/i);
   });
+
+  it("Phase 9C.3-R1C PERMANENT REGRESSION: RECONFIGURE 409 candidate invalidation — a reviewer already selected in the draft, dropped by candidates on refetch, cannot be silently resubmitted", async () => {
+    mockedPutPanel.mockResolvedValueOnce({ status: "conflict" });
+    // Panel currently has r1/r2; reconfigure form pre-selects both. After the
+    // conflict, candidates refetch drops r1 (no longer eligible).
+    mockedGetReviewerCandidates.mockResolvedValueOnce({ status: "ok", candidates: [{ uid: "r1", displayName: "Alice" }, { uid: "r2", displayName: "Bob" }] });
+    mockedGetReviewerCandidates.mockResolvedValueOnce({ status: "ok", candidates: [{ uid: "r2", displayName: "Bob" }] });
+
+    let renderer!: TestRenderer.ReactTestRenderer;
+    let onMutated!: jest.Mock;
+    await act(async () => {
+      ({ renderer, onMutated } = setup({ panel: makePanel({ revision: 6 }), viewer: makeViewer({ canReconfigurePanel: true }) }));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      findButton(renderer, "Change reviewers")!.props.onClick();
+      await Promise.resolve();
+    });
+    const saveBtn = renderer.root.findAllByType("button").find((b) => b.props.children === "Save reviewers" && !b.props.disabled)!;
+    await act(async () => {
+      await saveBtn.props.onClick();
+    });
+    // Exactly one PUT — no automatic replay through the conflict-recovery refetch.
+    expect(mockedPutPanel).toHaveBeenCalledTimes(1);
+    expect(mockedPutPanel).toHaveBeenCalledWith(expect.objectContaining({ body: expect.objectContaining({ expectedRevision: 6 }) }));
+    expect(onMutated).toHaveBeenCalledTimes(1);
+    expect(mockedGetReviewerCandidates).toHaveBeenCalledTimes(2);
+    const text = JSON.stringify(renderer.toJSON());
+    expect(text).toContain("no longer eligible");
+    // r1 must have been dropped from the still-checked selection — the same
+    // shared `handleSave` code path the create-409 test already proves;
+    // this test proves it specifically for RECONFIGURE (§30/§93).
+    const checkboxes = renderer.root.findAllByType("input").filter((i) => i.props.type === "checkbox");
+    expect(checkboxes.filter((c) => c.props.checked).length).toBeLessThan(2);
+  });
+});
+
+describe("WorkspacePanelReviewSection — Phase 9C.3-R1C: shared panel mutation exclusion", () => {
+  it("a vote in flight blocks finalize (visually disabled AND the underlying guard rejects a direct call, bypassing the disabled attribute)", async () => {
+    let resolveVote!: (v: unknown) => void;
+    mockedSubmitPanelVote.mockReturnValueOnce(new Promise((resolve) => (resolveVote = resolve)));
+    let renderer!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      ({ renderer } = setup({ panel: makePanel({ revision: 3 }), viewer: makeViewer({ canVote: true, canFinalize: true }) }));
+      await Promise.resolve();
+    });
+    const approveRadio = renderer.root.findAllByType("input").find((i) => i.props.type === "radio" && i.props.value === "approved")!;
+    await act(async () => {
+      approveRadio.props.onChange();
+    });
+    const form = renderer.root.findAllByType("form")[0];
+    // Start the vote submission; deliberately do not resolve it yet.
+    act(() => {
+      form.props.onSubmit({ preventDefault: () => {} });
+    });
+    expect(mockedSubmitPanelVote).toHaveBeenCalledTimes(1);
+
+    const finalizeOpenBtn = findButton(renderer, "Finalize panel")!;
+    expect(finalizeOpenBtn.props.disabled).toBe(true);
+    await act(async () => {
+      finalizeOpenBtn.props.onClick(); // opening the confirm dialog is local UI state only — allowed either way.
+      await Promise.resolve();
+    });
+    const confirmBtn = renderer.root.findAllByType("button").filter((b) => b.props.children === "Finalize").pop()!;
+    expect(confirmBtn.props.disabled).toBe(true);
+    await act(async () => {
+      confirmBtn.props.onClick(); // bypasses the disabled attribute, exactly like the existing double-submit test.
+      await Promise.resolve();
+    });
+    expect(mockedFinalizePanel).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveVote({ status: "ok" });
+      await Promise.resolve();
+    });
+  });
+
+  it("a reconfigure in flight blocks cancel; after it settles, cancel becomes available again", async () => {
+    let resolvePut!: (v: unknown) => void;
+    mockedPutPanel.mockReturnValueOnce(new Promise((resolve) => (resolvePut = resolve)));
+    let renderer!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      ({ renderer } = setup({ panel: makePanel({ revision: 2 }), viewer: makeViewer({ canReconfigurePanel: true, canCancelPanel: true }) }));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      findButton(renderer, "Change reviewers")!.props.onClick();
+      await Promise.resolve();
+    });
+    const saveBtn = renderer.root.findAllByType("button").find((b) => b.props.children === "Save reviewers" && !b.props.disabled)!;
+    act(() => {
+      saveBtn.props.onClick();
+    });
+    expect(mockedPutPanel).toHaveBeenCalledTimes(1);
+
+    const cancelOpenBtn = findButton(renderer, "Cancel panel review")!;
+    expect(cancelOpenBtn.props.disabled).toBe(true);
+    await act(async () => {
+      cancelOpenBtn.props.onClick();
+      await Promise.resolve();
+    });
+    const confirmButtons = renderer.root.findAllByType("button").filter((b) => b.props.children === "Cancel panel review");
+    const confirmCancelBtn = confirmButtons[confirmButtons.length - 1];
+    expect(confirmCancelBtn.props.disabled).toBe(true);
+    await act(async () => {
+      confirmCancelBtn.props.onClick();
+      await Promise.resolve();
+    });
+    expect(mockedDeletePanel).not.toHaveBeenCalled();
+
+    // Once the reconfigure resolves, the shared lock releases and the panel
+    // re-renders from canonical (unchanged fixture) state — cancel is no
+    // longer blocked by a stale lock.
+    await act(async () => {
+      resolvePut({ status: "ok" });
+      await Promise.resolve();
+    });
+    const cancelBtnAfter = findButton(renderer, "Cancel panel review")!;
+    expect(cancelBtnAfter.props.disabled).toBe(false);
+  });
+
+  it("shared lock releases after a 409 — a different mutation is no longer blocked", async () => {
+    mockedSubmitPanelVote.mockResolvedValueOnce({ status: "conflict" });
+    let renderer!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      ({ renderer } = setup({ panel: makePanel({ revision: 5 }), viewer: makeViewer({ canVote: true, canCancelPanel: true }) }));
+      await Promise.resolve();
+    });
+    const approveRadio = renderer.root.findAllByType("input").find((i) => i.props.type === "radio" && i.props.value === "approved")!;
+    await act(async () => {
+      approveRadio.props.onChange();
+    });
+    const form = renderer.root.findAllByType("form")[0];
+    await act(async () => {
+      await form.props.onSubmit({ preventDefault: () => {} });
+    });
+    expect(mockedSubmitPanelVote).toHaveBeenCalledTimes(1);
+    // Lock released post-conflict: cancel is now available, not stuck disabled.
+    const cancelBtn = findButton(renderer, "Cancel panel review")!;
+    expect(cancelBtn.props.disabled).toBe(false);
+  });
 });
 
 describe("WorkspacePanelReviewSection — voting (§43/§44/§119/§120)", () => {

@@ -10,6 +10,14 @@
  * OCC: finalize uses `panel.revision` AND `review.governanceUpdatedAt`
  * (the backend's own two-domain finalize contract); cancel uses only
  * `panel.revision`. Neither ever uses `assignmentRevision`.
+ *
+ * MUTATION EXCLUSION (Phase 9C.3-R1C): finalize and cancel are two
+ * independent triggers in this one file but must never fire concurrently
+ * with EACH OTHER or with a create/reconfigure/vote elsewhere in the
+ * section — `finalizeDisabled`/`cancelDisabled` reflect whether the OTHER
+ * action (or a sibling component's mutation) currently holds
+ * `WorkspacePanelReviewSection`'s shared lock; `onBeginMutation("finalize"
+ * | "cancel")`/`onEndMutation()` guard each request identically.
  */
 
 import { useRef, useState } from "react";
@@ -24,6 +32,7 @@ import {
   type ReviewContextReviewInfo,
 } from "@/lib/client/workspaceReviewClient";
 import { ProjectDialogFrame } from "@/components/projects/ProjectDialogFrame";
+import type { PanelMutationKind } from "@/lib/workspaces/panelPresentation";
 
 export default function PanelFinalizeCancelControls({
   workspaceId,
@@ -33,6 +42,10 @@ export default function PanelFinalizeCancelControls({
   canFinalize,
   canCancelPanel,
   onMutated,
+  finalizeDisabled,
+  cancelDisabled,
+  onBeginMutation,
+  onEndMutation,
 }: {
   workspaceId: string;
   runId: string;
@@ -41,6 +54,11 @@ export default function PanelFinalizeCancelControls({
   canFinalize: boolean;
   canCancelPanel: boolean;
   onMutated: () => void;
+  /** Phase 9C.3-R1C — true when a different panel mutation holds the shared lock. */
+  finalizeDisabled: boolean;
+  cancelDisabled: boolean;
+  onBeginMutation: (kind: PanelMutationKind) => boolean;
+  onEndMutation: () => void;
 }) {
   const { user, authReady } = useAuth();
 
@@ -55,13 +73,15 @@ export default function PanelFinalizeCancelControls({
   const cancelTriggerRef = useRef<HTMLButtonElement>(null);
 
   async function handleFinalize() {
-    if (finalizePending) return;
+    if (finalizePending || finalizeDisabled) return;
+    if (!onBeginMutation("finalize")) return;
     setFinalizePending(true);
     setFinalizeNotice(null);
     const body = buildPanelFinalizeRequest({ revision: panelRevision }, review);
     const result = await finalizePanel({ workspaceId, runId, user, authReady, body });
     setFinalizePending(false);
     setFinalizeConfirmOpen(false);
+    onEndMutation();
     if (result.status === "ok") {
       onMutated();
       return;
@@ -75,13 +95,15 @@ export default function PanelFinalizeCancelControls({
   }
 
   async function handleCancel() {
-    if (cancelPending) return;
+    if (cancelPending || cancelDisabled) return;
+    if (!onBeginMutation("cancel")) return;
     setCancelPending(true);
     setCancelNotice(null);
     const body = buildPanelDeleteRequest({ revision: panelRevision });
     const result = await deletePanel({ workspaceId, runId, user, authReady, body });
     setCancelPending(false);
     setCancelConfirmOpen(false);
+    onEndMutation();
     if (result.status === "ok") {
       onMutated();
       return;
@@ -109,7 +131,7 @@ export default function PanelFinalizeCancelControls({
             ref={finalizeTriggerRef}
             type="button"
             onClick={() => setFinalizeConfirmOpen(true)}
-            disabled={finalizePending}
+            disabled={finalizePending || finalizeDisabled}
             className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent disabled:opacity-50"
           >
             Finalize panel
@@ -128,7 +150,7 @@ export default function PanelFinalizeCancelControls({
             ref={cancelTriggerRef}
             type="button"
             onClick={() => setCancelConfirmOpen(true)}
-            disabled={cancelPending}
+            disabled={cancelPending || cancelDisabled}
             className="rounded-lg border border-red-300 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent disabled:opacity-50"
           >
             Cancel panel review
@@ -145,7 +167,7 @@ export default function PanelFinalizeCancelControls({
                 <button type="button" onClick={() => setFinalizeConfirmOpen(false)} className="rounded-lg border border-cp-border px-4 py-2 text-sm font-medium text-cp-text hover:bg-cp-raised focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent">
                   Cancel
                 </button>
-                <button type="button" onClick={handleFinalize} disabled={finalizePending} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent disabled:opacity-50">
+                <button type="button" onClick={handleFinalize} disabled={finalizePending || finalizeDisabled} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent disabled:opacity-50">
                   {finalizePending ? "Finalizing…" : "Finalize"}
                 </button>
               </div>
@@ -163,7 +185,7 @@ export default function PanelFinalizeCancelControls({
                 <button type="button" onClick={() => setCancelConfirmOpen(false)} className="rounded-lg border border-cp-border px-4 py-2 text-sm font-medium text-cp-text hover:bg-cp-raised focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent">
                   Keep panel
                 </button>
-                <button type="button" onClick={handleCancel} disabled={cancelPending} className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent disabled:opacity-50">
+                <button type="button" onClick={handleCancel} disabled={cancelPending || cancelDisabled} className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent disabled:opacity-50">
                   {cancelPending ? "Cancelling…" : "Cancel panel review"}
                 </button>
               </div>

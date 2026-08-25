@@ -18,6 +18,19 @@
 export const MIN_PANEL_REVIEWERS = 2;
 export const MAX_PANEL_REVIEWERS = 9;
 
+/**
+ * Phase 9C.3-R1C — the single set of panel governance mutations that may
+ * never overlap in flight for one run's panel UI (create/reconfigure share
+ * one editor and are mutually exclusive by construction; vote/finalize/
+ * cancel are independent controls that previously had no shared lock).
+ * `WorkspacePanelReviewSection` owns the single `activeMutation` state this
+ * type describes; this is UX concurrency control only — it never changes
+ * `viewer.can*` authorization presentation, and the backend remains the
+ * sole authority (each mutation still reauthorizes and OCC-checks inside
+ * its own transaction regardless of what the client permits).
+ */
+export type PanelMutationKind = "create" | "reconfigure" | "vote" | "finalize" | "cancel";
+
 /** The one authoritative quorum formula — floor(N/2)+1. Never reimplemented elsewhere. */
 export function computeQuorum(reviewerCount: number): number {
   return Math.floor(reviewerCount / 2) + 1;

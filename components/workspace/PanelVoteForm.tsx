@@ -23,6 +23,12 @@
  * OCC: `panelRevision` is sourced from the caller's already-non-null
  * current panel via `buildPanelVoteRequest` — never `assignmentRevision`,
  * never `governanceUpdatedAt`.
+ *
+ * MUTATION EXCLUSION (Phase 9C.3-R1C): `disabled` is true whenever a
+ * DIFFERENT panel mutation (create/reconfigure/finalize/cancel) currently
+ * holds `WorkspacePanelReviewSection`'s shared lock — the submit button is
+ * disabled and `onBeginMutation()`/`onEndMutation()` guard the request
+ * exactly like every other panel mutation's shared-lock handling.
  */
 
 import { useState } from "react";
@@ -41,11 +47,19 @@ export default function PanelVoteForm({
   runId,
   panelRevision,
   onMutated,
+  disabled,
+  onBeginMutation,
+  onEndMutation,
 }: {
   workspaceId: string;
   runId: string;
   panelRevision: number;
   onMutated: () => void;
+  /** Phase 9C.3-R1C — true when a different panel mutation holds the shared lock. */
+  disabled: boolean;
+  /** Attempts to acquire the shared panel mutation lock; returns false if another mutation is already active. */
+  onBeginMutation: () => boolean;
+  onEndMutation: () => void;
 }) {
   const { user, authReady } = useAuth();
   const [status, setStatus] = useState<AdaptiveReviewDecisionStatus | "">("");
@@ -68,9 +82,10 @@ export default function PanelVoteForm({
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!status || pending) return;
+    if (!status || pending || disabled) return;
     if (commentRequired && comment.trim().length === 0) return;
     if (conditionsRequired && conditionsList.length === 0) return;
+    if (!onBeginMutation()) return;
     setPending(true);
     setNotice(null);
     const trimmedComment = comment.trim();
@@ -84,6 +99,7 @@ export default function PanelVoteForm({
     );
     const result = await submitPanelVote({ workspaceId, runId, user, authReady, body });
     setPending(false);
+    onEndMutation();
     if (result.status === "ok") {
       setStatus("");
       setComment("");
@@ -151,7 +167,7 @@ export default function PanelVoteForm({
 
         <button
           type="submit"
-          disabled={!status || pending || (commentRequired && comment.trim().length === 0) || (conditionsRequired && conditionsList.length === 0)}
+          disabled={!status || pending || disabled || (commentRequired && comment.trim().length === 0) || (conditionsRequired && conditionsList.length === 0)}
           className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent disabled:opacity-50"
         >
           {pending ? "Submitting…" : "Submit vote"}
