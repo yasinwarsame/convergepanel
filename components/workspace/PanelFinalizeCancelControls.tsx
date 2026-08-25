@@ -77,36 +77,47 @@ export default function PanelFinalizeCancelControls({
   const [cancelNotice, setCancelNotice] = useState<string | null>(null);
   const cancelTriggerRef = useRef<HTMLButtonElement>(null);
 
+  // Phase 9C.5 — both handlers below wrap their mutation flow in try/finally:
+  // an unconditional lock-release backstop. `finalizePanel`/`deletePanel`/
+  // `onMutated` are non-throwing by contract (verified 9C.4-R1/R2), but the
+  // lock no longer depends on that contract holding forever — any unexpected
+  // rejection still reaches `finally`, which always releases AFTER whichever
+  // `await onMutated()` call inside `try` already executed, never before.
   async function handleFinalize() {
     if (finalizePending || finalizeDisabled) return;
     if (!onBeginMutation("finalize")) return;
     setFinalizePending(true);
     setFinalizeNotice(null);
-    const body = buildPanelFinalizeRequest({ revision: panelRevision }, review);
-    const result = await finalizePanel({ workspaceId, runId, user, authReady, body });
-    if (result.status === "ok") {
-      // Phase 9C.3-R2C — hold the lock through the awaited canonical
-      // refresh, not merely until the HTTP response.
-      await onMutated();
-      setFinalizePending(false);
+    try {
+      const body = buildPanelFinalizeRequest({ revision: panelRevision }, review);
+      const result = await finalizePanel({ workspaceId, runId, user, authReady, body });
+      if (result.status === "ok") {
+        // Phase 9C.3-R2C — hold the lock through the awaited canonical
+        // refresh, not merely until the HTTP response.
+        await onMutated();
+        setFinalizeConfirmOpen(false);
+        return;
+      }
+      if (result.status === "conflict") {
+        setFinalizeNotice(PANEL_CONFLICT_MESSAGE);
+        await onMutated();
+        setFinalizeConfirmOpen(false);
+        return;
+      }
+      // Generic (non-conflict) failure — canonical state never changed
+      // server-side, so no refresh is needed before releasing.
       setFinalizeConfirmOpen(false);
-      onEndMutation("finalize");
-      return;
-    }
-    if (result.status === "conflict") {
-      setFinalizeNotice(PANEL_CONFLICT_MESSAGE);
-      await onMutated();
-      setFinalizePending(false);
+      setFinalizeNotice(GENERIC_MUTATION_ERROR_MESSAGE);
+    } catch {
+      // Unexpected throw — canonical state is unknown; never fabricate a
+      // fake success. Surface the same generic error UX a handled failure
+      // would, and let the lock release unconditionally below.
       setFinalizeConfirmOpen(false);
+      setFinalizeNotice(GENERIC_MUTATION_ERROR_MESSAGE);
+    } finally {
+      setFinalizePending(false);
       onEndMutation("finalize");
-      return;
     }
-    // Generic (non-conflict) failure — canonical state never changed
-    // server-side, so no refresh is needed before releasing.
-    setFinalizePending(false);
-    setFinalizeConfirmOpen(false);
-    onEndMutation("finalize");
-    setFinalizeNotice(GENERIC_MUTATION_ERROR_MESSAGE);
   }
 
   async function handleCancel() {
@@ -114,31 +125,36 @@ export default function PanelFinalizeCancelControls({
     if (!onBeginMutation("cancel")) return;
     setCancelPending(true);
     setCancelNotice(null);
-    const body = buildPanelDeleteRequest({ revision: panelRevision });
-    const result = await deletePanel({ workspaceId, runId, user, authReady, body });
-    if (result.status === "ok") {
-      // Phase 9C.3-R2C — hold the lock through the awaited canonical
-      // refresh, not merely until the HTTP response.
-      await onMutated();
-      setCancelPending(false);
+    try {
+      const body = buildPanelDeleteRequest({ revision: panelRevision });
+      const result = await deletePanel({ workspaceId, runId, user, authReady, body });
+      if (result.status === "ok") {
+        // Phase 9C.3-R2C — hold the lock through the awaited canonical
+        // refresh, not merely until the HTTP response.
+        await onMutated();
+        setCancelConfirmOpen(false);
+        return;
+      }
+      if (result.status === "conflict") {
+        setCancelNotice(PANEL_CONFLICT_MESSAGE);
+        await onMutated();
+        setCancelConfirmOpen(false);
+        return;
+      }
+      // Generic (non-conflict) failure — canonical state never changed
+      // server-side, so no refresh is needed before releasing.
       setCancelConfirmOpen(false);
-      onEndMutation("cancel");
-      return;
-    }
-    if (result.status === "conflict") {
-      setCancelNotice(PANEL_CONFLICT_MESSAGE);
-      await onMutated();
-      setCancelPending(false);
+      setCancelNotice(GENERIC_MUTATION_ERROR_MESSAGE);
+    } catch {
+      // Unexpected throw — canonical state is unknown; never fabricate a
+      // fake success. Surface the same generic error UX a handled failure
+      // would, and let the lock release unconditionally below.
       setCancelConfirmOpen(false);
+      setCancelNotice(GENERIC_MUTATION_ERROR_MESSAGE);
+    } finally {
+      setCancelPending(false);
       onEndMutation("cancel");
-      return;
     }
-    // Generic (non-conflict) failure — canonical state never changed
-    // server-side, so no refresh is needed before releasing.
-    setCancelPending(false);
-    setCancelConfirmOpen(false);
-    onEndMutation("cancel");
-    setCancelNotice(GENERIC_MUTATION_ERROR_MESSAGE);
   }
 
   if (!canFinalize && !canCancelPanel) return null;

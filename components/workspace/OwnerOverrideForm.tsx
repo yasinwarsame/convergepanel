@@ -106,46 +106,61 @@ export default function OwnerOverrideForm({
     if (!onBeginMutation()) return;
     setPending(true);
     setNotice(null);
-    const body = buildOverrideRequest(
-      { revision: panelRevision },
-      review,
-      {
-        status,
-        justification: trimmedJustification,
-        ...(status === "approved_with_conditions" ? { conditions: conditionsList } : {}),
+    // Phase 9C.5 — unconditional lock-release backstop. `overridePanel`/
+    // `onMutated` are non-throwing by contract (verified 9C.4-R1/R2), but the
+    // lock no longer depends on that contract holding forever — any
+    // unexpected rejection still reaches `finally`, which always runs
+    // `onEndMutation()` AFTER whichever `await onMutated()` call inside
+    // `try` already executed, never before, never skipped.
+    try {
+      const body = buildOverrideRequest(
+        { revision: panelRevision },
+        review,
+        {
+          status,
+          justification: trimmedJustification,
+          ...(status === "approved_with_conditions" ? { conditions: conditionsList } : {}),
+        }
+      );
+      const result = await overridePanel({ workspaceId, runId, user, authReady, body });
+      if (result.status === "ok") {
+        // Phase 9C.4 — hold the lock through the awaited canonical refresh,
+        // not merely until the HTTP response. Clear the draft only on
+        // confirmed success.
+        await onMutated();
+        setStatus("");
+        setConditions("");
+        setJustification("");
+        setConfirmOpen(false);
+        return;
       }
-    );
-    const result = await overridePanel({ workspaceId, runId, user, authReady, body });
-    if (result.status === "ok") {
-      // Phase 9C.4 — hold the lock through the awaited canonical refresh,
-      // not merely until the HTTP response. Clear the draft only on
-      // confirmed success.
-      await onMutated();
-      setStatus("");
-      setConditions("");
-      setJustification("");
-      setPending(false);
+      if (result.status === "conflict") {
+        // Preserve the draft (outcome + justification) — the caller
+        // refetches canonical state; if still eligible, the user may
+        // explicitly retry with the refreshed OCC tokens. Never a
+        // blind/automatic retry.
+        setNotice(OVERRIDE_CONFLICT_MESSAGE);
+        await onMutated();
+        setConfirmOpen(false);
+        return;
+      }
+      // Generic (non-conflict) failure — canonical state never changed
+      // server-side, so no refresh is needed before releasing.
       setConfirmOpen(false);
-      onEndMutation();
-      return;
-    }
-    if (result.status === "conflict") {
-      // Preserve the draft (outcome + justification) — the caller refetches
-      // canonical state; if still eligible, the user may explicitly retry
-      // with the refreshed OCC tokens. Never a blind/automatic retry.
-      setNotice(OVERRIDE_CONFLICT_MESSAGE);
-      await onMutated();
-      setPending(false);
+      setNotice(GENERIC_MUTATION_ERROR_MESSAGE);
+    } catch {
+      // Unexpected throw — canonical state is unknown; never fabricate a
+      // fake success/result. Surface the same generic error UX a handled
+      // failure would, and let the lock release unconditionally below.
+      // Draft (outcome + justification) is intentionally preserved — the
+      // dialog closes, but form state is untouched, matching the conflict
+      // path's "safe draft preservation" precedent.
       setConfirmOpen(false);
+      setNotice(GENERIC_MUTATION_ERROR_MESSAGE);
+    } finally {
+      setPending(false);
       onEndMutation();
-      return;
     }
-    // Generic (non-conflict) failure — canonical state never changed
-    // server-side, so no refresh is needed before releasing.
-    setPending(false);
-    setConfirmOpen(false);
-    onEndMutation();
-    setNotice(GENERIC_MUTATION_ERROR_MESSAGE);
   }
 
   return (

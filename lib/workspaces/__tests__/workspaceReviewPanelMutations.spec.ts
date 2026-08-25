@@ -18,10 +18,17 @@ const stores: Record<string, Map<string, StoredDoc>> = {
   humanReviewAssignment: new Map(),
   humanReviewPanel: new Map(),
   humanReviewVotes: new Map(), // keyed by `${runId}::${voteId}` since votes are per-run-per-revision-per-reviewer
+  // Phase 9C.5 — added ONLY so the durable cross-workflow journey tests
+  // below can exercise the real `resubmitWorkspaceReview()` (which writes an
+  // auto-ID `governanceEvents` doc INSIDE its transaction, atomically with
+  // the canonical update — see that module's own doc comment). Keyed by
+  // `${runId}::${autoId}`, same convention as the other per-run subcollections.
+  governanceEvents: new Map(),
 };
 
 function resetStores() {
   for (const store of Object.values(stores)) store.clear();
+  autoIdCounter = 0;
 }
 
 function asPersisted(data: Record<string, unknown>): Record<string, unknown> {
@@ -48,10 +55,12 @@ function applyDottedFieldUpdate(existing: Record<string, unknown>, data: Record<
   return result;
 }
 
-// `humanReviewVotes` is keyed globally by parentDocId (runId) + subdoc id — mirror via composite key.
+// `humanReviewVotes`/`governanceEvents` are keyed globally by parentDocId (runId) + subdoc id — mirror via composite key.
 function subKey(collection: string, parentId: string, subId: string): string {
-  return collection === "humanReviewVotes" || collection === "humanReviewAssignment" || collection === "humanReviewPanel" ? `${parentId}::${subId}` : subId;
+  return collection === "humanReviewVotes" || collection === "humanReviewAssignment" || collection === "humanReviewPanel" || collection === "governanceEvents" ? `${parentId}::${subId}` : subId;
 }
+
+let autoIdCounter = 0;
 
 function makeSubDocRef(subCollectionName: string, parentDocId: string, subDocId: string) {
   const key = subKey(subCollectionName, parentDocId, subDocId);
@@ -70,7 +79,10 @@ function makeDocRef(collectionName: string, docId: string) {
     __collection: collectionName,
     __id: docId,
     collection: (subCollectionName: string) => ({
-      doc: (subDocId: string) => makeSubDocRef(subCollectionName, docId, subDocId),
+      // Phase 9C.5 — `.doc()` with no argument mirrors real Firestore's
+      // auto-ID generation, needed by `resubmitWorkspaceReview()`'s
+      // `runRef.collection("governanceEvents").doc()` call.
+      doc: (subDocId?: string) => makeSubDocRef(subCollectionName, docId, subDocId ?? `auto-${++autoIdCounter}`),
     }),
     get: async () => {
       const data = stores[collectionName].get(docId);
@@ -202,7 +214,11 @@ import {
   finalizeWorkspaceReviewPanel,
   overrideWorkspaceReviewPanel,
 } from "@/lib/workspaces/workspaceReviewPanelMutations";
-import { putWorkspaceReviewAssignment } from "@/lib/workspaces/workspaceReviewMutations";
+import { putWorkspaceReviewAssignment, submitWorkspaceReviewDecision } from "@/lib/workspaces/workspaceReviewMutations";
+// Phase 9C.5 — real cross-mutation journey tests below chain this alongside
+// the panel/assignment/decision functions above, all against the SAME
+// shared in-memory transaction fake (not a new test framework/harness).
+import { resubmitWorkspaceReview } from "@/lib/workspaces/resubmitWorkspaceReview";
 
 const actualCapabilities = jest.requireActual("@/lib/workspaces/capabilities");
 
@@ -724,6 +740,16 @@ describe("finalizeWorkspaceReviewPanel", () => {
     expect(result).toEqual({ ok: false, reason: "panel_stale" });
   });
 
+  it("Phase 9C.5 PERMANENT REGRESSION: a rejected (stale-revision) finalize attempt never writes a ghost history/event/audit record", async () => {
+    seedPanel({ revision: 2 });
+    const result = await finalizeCall({ expectedPanelRevision: 1 });
+    expect(result).toEqual({ ok: false, reason: "panel_stale" });
+    expect(mockedCreateAdaptiveHumanReviewHistory).not.toHaveBeenCalled();
+    expect(mockedCreateAdaptivePanelFinalizationHistory).not.toHaveBeenCalled();
+    expect(mockedWriteAdaptivePanelFinalizationGovernanceEvent).not.toHaveBeenCalled();
+    expect(mockedWriteAdaptivePanelFinalizationAdminAuditEvent).not.toHaveBeenCalled();
+  });
+
   it("stale governance updatedAt: DENY (governance_stale)", async () => {
     seedPanel({ revision: 1 });
     seedVote(OWNER_UID, 1, { status: "approved" });
@@ -844,6 +870,27 @@ describe("overrideWorkspaceReviewPanel", () => {
     expect(result).toEqual({ ok: false, reason: "panel_stale" });
   });
 
+  it("Phase 9C.5 PERMANENT REGRESSION: a rejected (stale-revision) override attempt never writes a ghost history/event/audit record", async () => {
+    seedPanel({ revision: 2 });
+    const result = await overrideCall({ expectedPanelRevision: 1 });
+    expect(result).toEqual({ ok: false, reason: "panel_stale" });
+    expect(mockedCreateAdaptiveHumanReviewHistory).not.toHaveBeenCalled();
+    expect(mockedCreateAdaptivePanelOverrideHistory).not.toHaveBeenCalled();
+    expect(mockedWriteAdaptivePanelOverrideGovernanceEvent).not.toHaveBeenCalled();
+    expect(mockedWriteAdaptivePanelOverrideAdminAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("Phase 9C.5 PERMANENT REGRESSION: the idempotent identical retry re-invokes the writers with the SAME deterministic finalDecisionId both times — the actual no-duplication guarantee lives one layer down, at the writers' own deterministic-ID + create()-fails-on-conflict contract (see lib/firestore/__tests__/adaptivePanelOverrideSecondaryArtifacts.spec.ts and lib/governance/__tests__/adaptivePanelOverrideAdminAuditEvent.spec.ts, both of which assert `already_exists` on a repeat write — not re-derived here since this file mocks those writers)", async () => {
+    seedPanel({ revision: 1 });
+    const first = await overrideCall();
+    expect(first.ok).toBe(true);
+    const firstDecisionId = mockedWriteAdaptivePanelOverrideAdminAuditEvent.mock.calls[0][0].finalDecisionId;
+    const retry = await overrideCall();
+    expect(retry.ok).toBe(true);
+    const retryDecisionId = mockedWriteAdaptivePanelOverrideAdminAuditEvent.mock.calls[1][0].finalDecisionId;
+    expect(retryDecisionId).toBe(firstDecisionId);
+  });
+
   it("cancelled panel: DENY", async () => {
     seedPanel({ status: "cancelled", revision: 2 });
     const result = await overrideCall({ expectedPanelRevision: 2 });
@@ -910,5 +957,133 @@ describe("cross-service mutual exclusion — assignment vs panel (§50)", () => 
 
     const finalAssignment = stores.humanReviewAssignment.get(`${RUN_ID}::current`);
     expect(finalAssignment).toBeUndefined();
+  });
+});
+
+// ============================================
+// Phase 9C.5 — durable cross-workflow governance journeys
+// ============================================
+//
+// Each journey below chains REAL production mutation functions (never
+// `seedPanel`/`seedVote`-style direct DTO injection) against the SAME
+// shared in-memory transaction fake this whole file already uses — genuine
+// end-to-end proof that one mutation's committed output is exactly what
+// the next mutation's own authorization/OCC logic independently re-reads
+// and accepts, not merely that each function works in isolation. No new
+// test framework: this is the existing Jest + hand-written transaction
+// fake architecture, extended (see `governanceEvents` store/auto-ID `.doc()`
+// above) only as far as `resubmitWorkspaceReview()` required.
+
+describe("Phase 9C.5 — Journey A: ordinary review (assign -> decide -> approved)", () => {
+  it("owner assigns a reviewer, the assigned reviewer approves, governance record + assignment both reflect it", async () => {
+    const assign = await putWorkspaceReviewAssignment({ uid: OWNER_UID, workspaceId: WS_ID, runId: RUN_ID, assignedReviewerUserId: REVIEWER_UID, expectedRevision: 0, dueAt: null, now: MUTATE_NOW });
+    expect(assign.ok).toBe(true);
+
+    const decision = await submitWorkspaceReviewDecision({ uid: REVIEWER_UID, workspaceId: WS_ID, runId: RUN_ID, update: { status: "approved" }, expectedUpdatedAt: GOVERNANCE_UPDATED_AT, now: MUTATE_NOW });
+    expect(decision).toEqual({ ok: true, status: "approved", reviewedAt: MUTATE_NOW });
+
+    const finalRun = stores.runs.get(RUN_ID) as any;
+    expect(finalRun.governanceRecord.humanReview.status).toBe("approved");
+    expect(finalRun.governanceRecord.updatedAt).toBe(MUTATE_NOW);
+    const finalAssignment = stores.humanReviewAssignment.get(`${RUN_ID}::current`) as any;
+    expect(finalAssignment.assignedReviewerUserId).toBe(REVIEWER_UID);
+    expect(finalAssignment.revision).toBe(1);
+  });
+});
+
+describe("Phase 9C.5 — Journey B: changes_requested -> resubmit -> ordinary review continues", () => {
+  it("reviewer requests changes, creator resubmits, review returns to unreviewed with the assignment preserved, then the SAME reviewer can decide again", async () => {
+    const assign = await putWorkspaceReviewAssignment({ uid: OWNER_UID, workspaceId: WS_ID, runId: RUN_ID, assignedReviewerUserId: REVIEWER_UID, expectedRevision: 0, dueAt: "2026-09-01T00:00:00.000Z", now: MUTATE_NOW });
+    expect(assign.ok).toBe(true);
+
+    const decision = await submitWorkspaceReviewDecision({ uid: REVIEWER_UID, workspaceId: WS_ID, runId: RUN_ID, update: { status: "changes_requested", comment: "Needs another pass." }, expectedUpdatedAt: GOVERNANCE_UPDATED_AT, now: MUTATE_NOW });
+    expect(decision).toEqual({ ok: true, status: "changes_requested", reviewedAt: MUTATE_NOW });
+
+    const resubmit = await resubmitWorkspaceReview({ uid: CREATOR_UID, workspaceId: WS_ID, runId: RUN_ID, expectedUpdatedAt: MUTATE_NOW, now: "2026-08-11T00:00:00.000Z" });
+    expect(resubmit.ok).toBe(true);
+
+    const afterResubmit = stores.runs.get(RUN_ID) as any;
+    expect(afterResubmit.governanceRecord.humanReview.status).toBe("unreviewed");
+    // Assignment and its dueAt survive resubmission untouched — resubmit
+    // never touches `humanReviewAssignment`.
+    const assignmentAfter = stores.humanReviewAssignment.get(`${RUN_ID}::current`) as any;
+    expect(assignmentAfter.assignedReviewerUserId).toBe(REVIEWER_UID);
+    expect(assignmentAfter.dueAt).toBe("2026-09-01T00:00:00.000Z");
+    // Immutable event written atomically with the resubmit transaction (no panel round 2 concept anywhere in this path).
+    const events = [...stores.governanceEvents.entries()].filter(([key]) => key.startsWith(`${RUN_ID}::`));
+    expect(events).toHaveLength(1);
+    expect((events[0][1] as any).action).toBe("review_resubmitted");
+
+    // The ordinary single-review path is fully usable again with the same reviewer.
+    const secondDecision = await submitWorkspaceReviewDecision({ uid: REVIEWER_UID, workspaceId: WS_ID, runId: RUN_ID, update: { status: "approved" }, expectedUpdatedAt: "2026-08-11T00:00:00.000Z", now: "2026-08-12T00:00:00.000Z" });
+    expect(secondDecision).toEqual({ ok: true, status: "approved", reviewedAt: "2026-08-12T00:00:00.000Z" });
+  });
+});
+
+describe("Phase 9C.5 — Journey C: panel happy path (create -> vote -> vote -> finalize)", () => {
+  it("two reviewers vote approve, quorum (2 of 2) is met, finalize commits the canonical governance status", async () => {
+    const create = await putCall({ reviewerUserIds: [OWNER_UID, ADMIN_UID], expectedRevision: 0 });
+    expect(create.ok).toBe(true);
+
+    const vote1 = await voteCall({ uid: OWNER_UID, panelRevision: 1, status: "approved" });
+    expect(vote1.ok).toBe(true);
+    const vote2 = await voteCall({ uid: ADMIN_UID, panelRevision: 1, status: "approved" });
+    expect(vote2.ok).toBe(true);
+
+    const finalize = await finalizeCall({ expectedPanelRevision: 1, expectedGovernanceUpdatedAt: GOVERNANCE_UPDATED_AT });
+    expect(finalize).toEqual({ ok: true, status: "approved", finalizedAt: MUTATE_NOW });
+
+    const finalRun = stores.runs.get(RUN_ID) as any;
+    expect(finalRun.governanceRecord.humanReview.status).toBe("approved");
+    expect(finalRun.governanceRecord.humanReview.decidedVia).toBe("multi_reviewer_panel");
+  });
+});
+
+describe("Phase 9C.5 — Journey D: panel reconfiguration isolates old-revision votes from the new quorum", () => {
+  it("a vote cast at revision 1 does not count toward revision 2's quorum after reconfiguration", async () => {
+    const create = await putCall({ reviewerUserIds: [OWNER_UID, ADMIN_UID], expectedRevision: 0 });
+    expect(create.ok).toBe(true);
+
+    const voteAtRev1 = await voteCall({ uid: OWNER_UID, panelRevision: 1, status: "approved" });
+    expect(voteAtRev1.ok).toBe(true);
+
+    // Reconfigure — same reviewer set is fine; what matters is the revision bump.
+    const reconfigure = await putCall({ reviewerUserIds: [OWNER_UID, ADMIN_UID], expectedRevision: 1 });
+    expect(reconfigure.ok).toBe(true);
+    const panelAfterReconfigure = stores.humanReviewPanel.get(`${RUN_ID}::current`) as any;
+    expect(panelAfterReconfigure.revision).toBe(2);
+
+    // The revision-1 vote is still in the store (never deleted — historical
+    // fact) but must not be readable toward revision-2 quorum.
+    expect(stores.humanReviewVotes.get(`${RUN_ID}::${buildAdaptiveHumanReviewVoteId(1, OWNER_UID)}`)).toBeDefined();
+    expect(stores.humanReviewVotes.get(`${RUN_ID}::${buildAdaptiveHumanReviewVoteId(2, OWNER_UID)}`)).toBeUndefined();
+
+    const finalizeTooEarly = await finalizeCall({ expectedPanelRevision: 2, expectedGovernanceUpdatedAt: GOVERNANCE_UPDATED_AT });
+    expect(finalizeTooEarly).toEqual({ ok: false, reason: "quorum_not_met" });
+
+    // Only a FRESH revision-2 vote from both reviewers reaches quorum.
+    expect((await voteCall({ uid: OWNER_UID, panelRevision: 2, status: "approved" })).ok).toBe(true);
+    expect((await voteCall({ uid: ADMIN_UID, panelRevision: 2, status: "approved" })).ok).toBe(true);
+    const finalizeNow = await finalizeCall({ expectedPanelRevision: 2, expectedGovernanceUpdatedAt: GOVERNANCE_UPDATED_AT });
+    expect(finalizeNow).toEqual({ ok: true, status: "approved", finalizedAt: MUTATE_NOW });
+  });
+});
+
+describe("Phase 9C.5 — Journey G: Owner Override (create panel -> override, no votes required)", () => {
+  it("an Owner overrides an open panel with zero votes cast — dual OCC, immutable history, distinct provenance", async () => {
+    const create = await putCall({ reviewerUserIds: [OWNER_UID, ADMIN_UID], expectedRevision: 0 });
+    expect(create.ok).toBe(true);
+
+    const override = await overrideCall({ expectedPanelRevision: 1, expectedGovernanceUpdatedAt: GOVERNANCE_UPDATED_AT, status: "approved", justification: "Deadline requires resolution ahead of the panel's own vote schedule." });
+    expect(override).toEqual({ ok: true, status: "approved", finalizedAt: MUTATE_NOW });
+
+    const finalRun = stores.runs.get(RUN_ID) as any;
+    expect(finalRun.governanceRecord.humanReview.status).toBe("approved");
+    expect(finalRun.governanceRecord.humanReview.decidedVia).toBe("multi_reviewer_owner_override");
+    // Self-review distinction: this is NOT a peer-review decision — the
+    // ordinary single-review path was never touched by this journey at all
+    // (no `submitWorkspaceReviewDecision` call anywhere in it), and the
+    // panel itself required no reviewer votes to reach this outcome.
+    expect(stores.humanReviewVotes.size).toBe(0);
   });
 });
