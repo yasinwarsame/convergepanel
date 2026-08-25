@@ -35,3 +35,22 @@ export function validateMembershipBinding(data: unknown, expected: { workspaceId
   if (data.uid !== expected.uid) return null;
   return data;
 }
+
+/**
+ * Phase 9C.1-R1C — the weaker binding check for DISCOVERY queries, where
+ * `workspaceId` is exactly the thing being discovered and so cannot be
+ * part of `expected` the way `validateMembershipBinding()` requires. Only
+ * checks well-formedness, self-consistency (`doc.id ===
+ * computeMembershipId(doc.workspaceId, doc.uid)`), and that the document's
+ * own `uid` matches the caller who queried for it — never a substitute
+ * for `validateMembershipBinding()` on any path that already knows the
+ * expected `workspaceId` (e.g. every read/mutation route's own capability
+ * check), only for "which Workspace(s) does this uid belong to" discovery
+ * (`resolveViewerTeamWorkspaceSelection()`, `listViewerTeamWorkspaces()`).
+ */
+export function validateSelfConsistentMembership(data: unknown, expectedUid: string): WorkspaceMembershipV1 | null {
+  if (!isWellFormedWorkspaceMembershipV1(data)) return null;
+  if (data.id !== computeMembershipId(data.workspaceId, data.uid)) return null;
+  if (data.uid !== expectedUid) return null;
+  return data;
+}

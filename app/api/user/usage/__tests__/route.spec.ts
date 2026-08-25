@@ -51,6 +51,10 @@ jest.mock("@/lib/billing/planConfig", () => ({ getVideoLimit: () => 0 }));
 
 let uiGlobal = false;
 let uiCanary: string | undefined = undefined;
+let approvalGlobal = false;
+let approvalCanary: string | undefined = undefined;
+let teamGlobal = true; // Phase 9C.1-R1C — default true so existing "eligible" scenarios need no per-test change; false-path covered by dedicated tests below.
+let teamCanary: string | undefined = undefined;
 jest.mock("@/lib/env", () => ({
   get PERSONAL_WORKSPACE_UI_ENABLED() {
     return uiGlobal;
@@ -58,6 +62,23 @@ jest.mock("@/lib/env", () => ({
   get PERSONAL_WORKSPACE_UI_CANARY_UIDS() {
     return uiCanary;
   },
+  get APPROVAL_WORKFLOW_ENABLED() {
+    return approvalGlobal;
+  },
+  get APPROVAL_WORKFLOW_CANARY_UIDS() {
+    return approvalCanary;
+  },
+  get TEAM_WORKSPACES_ENABLED() {
+    return teamGlobal;
+  },
+  get TEAM_WORKSPACES_CANARY_UIDS() {
+    return teamCanary;
+  },
+}));
+
+const mockedResolveViewerTeamWorkspaceSelection = jest.fn();
+jest.mock("@/lib/workspaces/resolveViewerTeamWorkspaceSelection", () => ({
+  resolveViewerTeamWorkspaceSelection: (...args: any[]) => mockedResolveViewerTeamWorkspaceSelection(...args),
 }));
 
 import { NextRequest } from "next/server";
@@ -94,9 +115,14 @@ beforeEach(() => {
   userDocs.clear();
   uiGlobal = false;
   uiCanary = undefined;
+  approvalGlobal = false;
+  approvalCanary = undefined;
+  teamGlobal = true;
+  teamCanary = undefined;
   jest.clearAllMocks();
   mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: UID });
   mockedGetUser.mockResolvedValue({ email: "user@example.com" });
+  mockedResolveViewerTeamWorkspaceSelection.mockResolvedValue({ kind: "none" });
 });
 
 describe("GET /api/user/usage — auth", () => {
@@ -186,5 +212,116 @@ describe("GET /api/user/usage — catch-all safe-default fallback", () => {
     const json = await res.json();
     expect(res.status).toBe(200); // this route's own established convention: degrade, don't fail the request
     expect(json.workspaceUiEnabled).toBe(false);
+  });
+
+  it("fails closed: workspaceReviewsUiEnabled=false even if an unexpected error occurs mid-request, regardless of rollout config", async () => {
+    approvalGlobal = true;
+    userDocs.set(UID, { plan: "free" });
+    const entitlements = require("@/lib/admin/entitlements");
+    entitlements.getEffectiveEntitlements.mockRejectedValueOnce(new Error("boom"));
+    const res = await GET(buildRequest());
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json.workspaceReviewsUiEnabled).toBe(false);
+  });
+});
+
+/**
+ * Approval Workflow, Phase 9C.1 (corrected 9C.1-R1C) — workspaceReviewsUiEnabled.
+ * Mirrors workspaceUiEnabled/projectsUiEnabled's own established test
+ * shape. Phase 9C.1-R1C: this is now purely an EXISTENCE signal — Approval
+ * admission + Team Workspace rollout admission + "at least one active
+ * Team Workspace membership" — never a per-Workspace capability check,
+ * since a uid may now legitimately have several active memberships with
+ * different roles in each (the removed predecessor's `resolveTeamRunWorkspaceAccess()`
+ * capability check made sense only when exactly one Workspace was ever
+ * discovered).
+ */
+describe("GET /api/user/usage — workspaceReviewsUiEnabled", () => {
+  it("includes workspaceReviewsUiEnabled alongside every other field, defaulting to false", async () => {
+    const res = await GET(buildRequest());
+    const json = await res.json();
+    expect(json).toHaveProperty("workspaceReviewsUiEnabled");
+    expect(json.workspaceReviewsUiEnabled).toBe(false);
+  });
+
+  it("false when Approval Workflow is not admitted — never even calls Team Workspace discovery (cheapest gate first)", async () => {
+    const res = await GET(buildRequest());
+    await res.json();
+    expect(mockedResolveViewerTeamWorkspaceSelection).not.toHaveBeenCalled();
+  });
+
+  it("false when Approval Workflow is admitted but Team Workspaces rollout is off — never even calls discovery (both pure gates checked first)", async () => {
+    approvalGlobal = true;
+    teamGlobal = false;
+    const res = await GET(buildRequest());
+    const json = await res.json();
+    expect(json.workspaceReviewsUiEnabled).toBe(false);
+    expect(mockedResolveViewerTeamWorkspaceSelection).not.toHaveBeenCalled();
+  });
+
+  it("true when Approval Workflow is globally enabled, Team Workspaces rollout is on, and exactly one active membership exists", async () => {
+    approvalGlobal = true;
+    mockedResolveViewerTeamWorkspaceSelection.mockResolvedValue({ kind: "single", workspaceId: "ws-1" });
+    const res = await GET(buildRequest());
+    const json = await res.json();
+    expect(json.workspaceReviewsUiEnabled).toBe(true);
+  });
+
+  it("Phase 9C.1-R1C: true when TWO OR MORE active memberships exist — the boolean is existence-only, never a single-Workspace requirement", async () => {
+    approvalGlobal = true;
+    mockedResolveViewerTeamWorkspaceSelection.mockResolvedValue({ kind: "multiple" });
+    const res = await GET(buildRequest());
+    const json = await res.json();
+    expect(json.workspaceReviewsUiEnabled).toBe(true);
+  });
+
+  it("true via canary admission (not global)", async () => {
+    approvalCanary = UID;
+    mockedResolveViewerTeamWorkspaceSelection.mockResolvedValue({ kind: "single", workspaceId: "ws-1" });
+    const res = await GET(buildRequest());
+    const json = await res.json();
+    expect(json.workspaceReviewsUiEnabled).toBe(true);
+  });
+
+  it("false when admitted but no Team Workspace is discoverable", async () => {
+    approvalGlobal = true;
+    mockedResolveViewerTeamWorkspaceSelection.mockResolvedValue({ kind: "none" });
+    const res = await GET(buildRequest());
+    const json = await res.json();
+    expect(json.workspaceReviewsUiEnabled).toBe(false);
+  });
+
+  it("false when the discovery lookup fails — never falls open", async () => {
+    approvalGlobal = true;
+    mockedResolveViewerTeamWorkspaceSelection.mockResolvedValue({ kind: "lookup_failed" });
+    const res = await GET(buildRequest());
+    const json = await res.json();
+    expect(json.workspaceReviewsUiEnabled).toBe(false);
+  });
+
+  it("uses the server-resolved uid, never a client-supplied one", async () => {
+    approvalCanary = "attacker-supplied-uid";
+    mockedResolveViewerTeamWorkspaceSelection.mockResolvedValue({ kind: "single", workspaceId: "ws-1" });
+    const res = await GET(buildRequest());
+    const json = await res.json();
+    expect(json.workspaceReviewsUiEnabled).toBe(false); // UID is "owner-1", not the canary entry
+  });
+
+  it("reflects the same admission for an existing user too", async () => {
+    userDocs.set(UID, { plan: "free", runsThisMonth: 2, usageMonth: new Date().toISOString().slice(0, 7) });
+    approvalGlobal = true;
+    mockedResolveViewerTeamWorkspaceSelection.mockResolvedValue({ kind: "single", workspaceId: "ws-1" });
+    const res = await GET(buildRequest());
+    const json = await res.json();
+    expect(json.workspaceReviewsUiEnabled).toBe(true);
+  });
+
+  it("does not expose a selected Workspace id or membership internals — response delta is the boolean only", async () => {
+    approvalGlobal = true;
+    mockedResolveViewerTeamWorkspaceSelection.mockResolvedValue({ kind: "single", workspaceId: "ws-should-not-leak" });
+    const res = await GET(buildRequest());
+    const json = await res.json();
+    expect(JSON.stringify(json)).not.toContain("ws-should-not-leak");
   });
 });
