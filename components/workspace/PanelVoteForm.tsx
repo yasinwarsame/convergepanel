@@ -92,40 +92,50 @@ export default function PanelVoteForm({
     if (!onBeginMutation()) return;
     setPending(true);
     setNotice(null);
-    const trimmedComment = comment.trim();
-    const body = buildPanelVoteRequest(
-      { revision: panelRevision },
-      {
-        status,
-        ...(trimmedComment.length > 0 ? { comment: trimmedComment } : {}),
-        ...(status === "approved_with_conditions" ? { conditions: conditionsList } : {}),
+    // Phase 9C.5 — unconditional lock-release backstop. `submitPanelVote`/
+    // `onMutated` are non-throwing by contract (verified 9C.4-R1/R2), but the
+    // lock's correctness no longer depends on that contract holding forever:
+    // any unexpected rejection here still reaches `finally`, which always
+    // runs `onEndMutation()` AFTER whichever `await onMutated()` call inside
+    // `try` already executed — never before, never skipped.
+    try {
+      const trimmedComment = comment.trim();
+      const body = buildPanelVoteRequest(
+        { revision: panelRevision },
+        {
+          status,
+          ...(trimmedComment.length > 0 ? { comment: trimmedComment } : {}),
+          ...(status === "approved_with_conditions" ? { conditions: conditionsList } : {}),
+        }
+      );
+      const result = await submitPanelVote({ workspaceId, runId, user, authReady, body });
+      if (result.status === "ok") {
+        // Phase 9C.3-R2C — hold the lock (and the visible "Submitting…"
+        // pending state) through the awaited canonical refresh, not merely
+        // until the HTTP response.
+        await onMutated();
+        setStatus("");
+        setComment("");
+        setConditions("");
+        return;
       }
-    );
-    const result = await submitPanelVote({ workspaceId, runId, user, authReady, body });
-    if (result.status === "ok") {
-      // Phase 9C.3-R2C — hold the lock (and the visible "Submitting…"
-      // pending state) through the awaited canonical refresh, not merely
-      // until the HTTP response.
-      await onMutated();
-      setStatus("");
-      setComment("");
-      setConditions("");
+      if (result.status === "conflict") {
+        setNotice(PANEL_CONFLICT_MESSAGE);
+        await onMutated();
+        return;
+      }
+      // Generic (non-conflict) failure — canonical state never changed
+      // server-side, so no refresh is needed before releasing.
+      setNotice(GENERIC_MUTATION_ERROR_MESSAGE);
+    } catch {
+      // Unexpected throw — canonical state is unknown; never fabricate a
+      // fake success. Surface the same generic error UX a handled failure
+      // would, and let the lock release unconditionally below.
+      setNotice(GENERIC_MUTATION_ERROR_MESSAGE);
+    } finally {
       setPending(false);
       onEndMutation();
-      return;
     }
-    if (result.status === "conflict") {
-      setNotice(PANEL_CONFLICT_MESSAGE);
-      await onMutated();
-      setPending(false);
-      onEndMutation();
-      return;
-    }
-    // Generic (non-conflict) failure — canonical state never changed
-    // server-side, so no refresh is needed before releasing.
-    setPending(false);
-    onEndMutation();
-    setNotice(GENERIC_MUTATION_ERROR_MESSAGE);
   }
 
   return (

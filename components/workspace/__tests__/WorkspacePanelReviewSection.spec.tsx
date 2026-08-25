@@ -1219,3 +1219,131 @@ describe("WorkspacePanelReviewSection — double-submit protection (§96/§145)"
     });
   });
 });
+
+describe("WorkspacePanelReviewSection — Phase 9C.5 PERMANENT REGRESSION: unconditional lock-release backstop (an unexpected throw/rejection never permanently strands the shared ref lock)", () => {
+  it("vote: onMutated rejects unexpectedly after a successful HTTP response — lock still releases, draft is preserved (never fabricated as cleared/success), generic error shown", async () => {
+    const onMutated = jest.fn().mockRejectedValueOnce(new Error("boom"));
+    let renderer!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      ({ renderer } = setup({ panel: makePanel({ revision: 3 }), viewer: makeViewer({ canVote: true, canCancelPanel: true }), onMutated }));
+      await Promise.resolve();
+    });
+    const approveRadio = renderer.root.findAllByType("input").find((i) => i.props.type === "radio" && i.props.value === "approved")!;
+    await act(async () => {
+      approveRadio.props.onChange();
+    });
+    const form = renderer.root.findAllByType("form")[0];
+    await act(async () => {
+      await form.props.onSubmit({ preventDefault: () => {} });
+    });
+    expect(mockedSubmitPanelVote).toHaveBeenCalledTimes(1);
+    // Draft not fabricated as cleared — the throw happened at `await onMutated()`,
+    // before the success branch's `setStatus("")` line ever runs.
+    const stillCheckedRadio = renderer.root.findAllByType("input").filter((i) => i.props.type === "radio").find((r) => r.props.checked);
+    expect(stillCheckedRadio).toBeDefined();
+    const text = JSON.stringify(renderer.toJSON());
+    expect(text).toContain("Something went wrong");
+    // Lock released — the sibling Cancel control is no longer disabled by the vote's lock.
+    const cancelBtn = findButton(renderer, "Cancel panel review")!;
+    expect(cancelBtn.props.disabled).toBe(false);
+  });
+
+  it("finalize: the mutation call itself rejects unexpectedly (not merely onMutated) — lock still releases, confirm dialog closes safely, generic error shown", async () => {
+    mockedFinalizePanel.mockRejectedValueOnce(new Error("network fail"));
+    let renderer!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      ({ renderer } = setup({ panel: makePanel({ revision: 7 }), viewer: makeViewer({ canFinalize: true, canCancelPanel: true }) }));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      findButton(renderer, "Finalize panel")!.props.onClick();
+    });
+    const confirmBtn = renderer.root.findAllByType("button").find((b) => b.props.children === "Finalize")!;
+    await act(async () => {
+      await confirmBtn.props.onClick();
+    });
+    expect(mockedFinalizePanel).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(renderer.toJSON())).toContain("Something went wrong");
+    // Lock released, and the trigger itself is clickable again (not permanently stuck pending).
+    const trigger = findButton(renderer, "Finalize panel")!;
+    expect(trigger.props.disabled).toBe(false);
+  });
+
+  it("cancel: the mutation call itself rejects unexpectedly — lock still releases, no permanent deadlock", async () => {
+    mockedDeletePanel.mockRejectedValueOnce(new Error("network fail"));
+    let renderer!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      ({ renderer } = setup({ panel: makePanel({ revision: 2 }), viewer: makeViewer({ canFinalize: true, canCancelPanel: true }) }));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      findButton(renderer, "Cancel panel review")!.props.onClick();
+    });
+    const confirmBtn = renderer.root.findAllByType("button").find((b) => b.props.children === "Cancel panel review" && b.props.className?.includes("bg-red-600"))!;
+    await act(async () => {
+      await confirmBtn.props.onClick();
+    });
+    expect(mockedDeletePanel).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(renderer.toJSON())).toContain("Something went wrong");
+    const finalizeBtn = findButton(renderer, "Finalize panel")!;
+    expect(finalizeBtn.props.disabled).toBe(false);
+  });
+
+  it("Owner Override: onMutated rejects unexpectedly after a successful HTTP response — lock releases, justification draft is preserved (never fabricated as cleared/success)", async () => {
+    const onMutated = jest.fn().mockRejectedValueOnce(new Error("boom"));
+    let renderer!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      ({ renderer } = setup({ panel: makePanel({ revision: 4 }), viewer: makeViewer({ canOverride: true, canCancelPanel: true }), onMutated }));
+      await Promise.resolve();
+    });
+    const radios = renderer.root.findAllByType("input").filter((i) => i.props.type === "radio" && i.props.name === "owner-override-status");
+    const justificationInput = renderer.root.findAllByType("textarea").find((t) => t.props.id === "owner-override-justification")!;
+    await act(async () => {
+      radios[0].props.onChange();
+      justificationInput.props.onChange({ target: { value: "Exceptional reasoning." } });
+    });
+    await act(async () => {
+      findButton(renderer, "Override review")!.props.onClick();
+    });
+    const confirmBtn = renderer.root.findAllByType("button").find((b) => b.props.children === "Confirm override")!;
+    await act(async () => {
+      await confirmBtn.props.onClick();
+    });
+    expect(mockedOverridePanel).toHaveBeenCalledTimes(1);
+    // Draft not fabricated as cleared.
+    const justificationAfter = renderer.root.findAllByType("textarea").find((t) => t.props.id === "owner-override-justification")!;
+    expect(justificationAfter.props.value).toBe("Exceptional reasoning.");
+    expect(JSON.stringify(renderer.toJSON())).toContain("Something went wrong");
+    const cancelBtn = findButton(renderer, "Cancel panel review")!;
+    expect(cancelBtn.props.disabled).toBe(false);
+  });
+
+  it("create/reconfigure: candidate revalidation throws unexpectedly mid-409-recovery — lock still releases (Save becomes retryable, not permanently stuck pending)", async () => {
+    mockedPutPanel.mockResolvedValueOnce({ status: "conflict" });
+    mockedGetReviewerCandidates.mockResolvedValueOnce({ status: "ok", candidates: [{ uid: "c1", displayName: "Carol" }, { uid: "c2", displayName: "Dave" }] });
+    mockedGetReviewerCandidates.mockRejectedValueOnce(new Error("candidate service down"));
+    let renderer!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      ({ renderer } = setup({ panel: null, viewer: makeViewer({ canCreatePanel: true }) }));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      findButton(renderer, "Start panel review")!.props.onClick();
+      await Promise.resolve();
+    });
+    const checkboxes = renderer.root.findAllByType("input").filter((i) => i.props.type === "checkbox");
+    await act(async () => {
+      checkboxes[0].props.onChange();
+      checkboxes[1].props.onChange();
+    });
+    const saveBtn = renderer.root.findAllByType("button").find((b) => b.props.children === "Start panel review" && !b.props.disabled)!;
+    await act(async () => {
+      await saveBtn.props.onClick();
+    });
+    expect(mockedPutPanel).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(renderer.toJSON())).toContain("Something went wrong");
+    // Lock released — Save is enabled again (not permanently "Saving…").
+    const retryBtn = renderer.root.findAllByType("button").find((b) => b.props.children === "Start panel review")!;
+    expect(retryBtn.props.disabled).toBe(false);
+  });
+});

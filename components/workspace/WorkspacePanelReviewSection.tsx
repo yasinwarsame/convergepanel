@@ -68,6 +68,24 @@
  * (success, 409, generic error) so a failed request can never leave panel
  * controls permanently disabled.
  *
+ * THROW-SAFE RELEASE (Phase 9C.5, resolves TECH_DEBT_9C3_MUTATION_LOCK_THROW_BACKSTOP):
+ * `handleSave` here, and every sibling mutation handler in
+ * `PanelVoteForm`/`PanelFinalizeCancelControls`/`OwnerOverrideForm`, now
+ * wraps its mutation flow in `try { ...; await onMutated(); ... } catch {
+ * ... } finally { endMutation(...) }`. This was previously safe only
+ * because `putPanel`/`submitPanelVote`/`finalizePanel`/`deletePanel`/
+ * `overridePanel`/`onMutated` were all verified non-throwing by contract
+ * (9C.4-R1/R2 source audits) — a correct but fragile invariant to depend on
+ * indefinitely. The `finally` block does not change WHEN release happens
+ * relative to canonical reconciliation: every `await onMutated()` (and, for
+ * create/reconfigure conflicts, the candidate revalidation `await`) still
+ * lives inside `try`, so `finally` still only runs after that awaited work
+ * completes on the success/conflict paths — it only ADDS coverage for an
+ * unexpected rejection, which now also reaches `finally` instead of
+ * leaving the ref lock (and local `pending`) stuck forever. No path
+ * fabricates a fake canonical result on an unexpected throw — the same
+ * generic, non-internal error notice a handled failure would show.
+ *
  * OWNER OVERRIDE (Phase 9C.4): `viewer.canOverride` is verified from
  * `reviewContext.ts` source to require `panelOpen` (same precondition as
  * vote/finalize/cancel) and is NEVER mutually exclusive with them by
@@ -211,44 +229,54 @@ export default function WorkspacePanelReviewSection({
     setPending(true);
     setNotice(null);
     setSelectionInvalidated(false);
-    const body = buildPanelPutRequest({ panel }, selectedUids);
-    const result = await putPanel({ workspaceId, runId, user, authReady, body });
-    if (result.status === "ok") {
-      setEditorOpen(false);
-      // Phase 9C.3-R2C — hold the lock through canonical reconciliation:
-      // release only after `onMutated()` has actually applied the refreshed
-      // context, never merely after the HTTP response.
-      await onMutated();
-      setPending(false);
-      endMutation(ownEditorKind);
-      return;
-    }
-    if (result.status === "conflict") {
-      setNotice(PANEL_CONFLICT_MESSAGE);
-      // Phase 9C.3-R2C — await BOTH the canonical context refresh AND the
-      // candidate revalidation before releasing; a stale-candidate
-      // selection must be invalidated before the form becomes submittable
-      // again (§17/§18 of the corrective spec).
-      await onMutated();
-      const refreshed = await getReviewerCandidates({ workspaceId, runId, user, authReady });
-      if (refreshed.status === "ok") {
-        setCandidates(refreshed.candidates);
-        const stillEligible = new Set(refreshed.candidates.map((c) => c.uid));
-        const survivors = selectedUids.filter((uid) => stillEligible.has(uid));
-        if (survivors.length !== selectedUids.length) {
-          setSelectedUids(survivors);
-          setSelectionInvalidated(true);
-        }
+    // Phase 9C.5 — unconditional lock-release backstop. `putPanel`/
+    // `getReviewerCandidates`/`onMutated` are non-throwing by contract
+    // (verified 9C.4-R1/R2), but the lock no longer depends on that contract
+    // holding forever — any unexpected rejection still reaches `finally`,
+    // which always releases AFTER whichever awaited reconciliation step
+    // inside `try` already executed, never before, never skipped.
+    try {
+      const body = buildPanelPutRequest({ panel }, selectedUids);
+      const result = await putPanel({ workspaceId, runId, user, authReady, body });
+      if (result.status === "ok") {
+        setEditorOpen(false);
+        // Phase 9C.3-R2C — hold the lock through canonical reconciliation:
+        // release only after `onMutated()` has actually applied the
+        // refreshed context, never merely after the HTTP response.
+        await onMutated();
+        return;
       }
+      if (result.status === "conflict") {
+        setNotice(PANEL_CONFLICT_MESSAGE);
+        // Phase 9C.3-R2C — await BOTH the canonical context refresh AND the
+        // candidate revalidation before releasing; a stale-candidate
+        // selection must be invalidated before the form becomes submittable
+        // again (§17/§18 of the corrective spec).
+        await onMutated();
+        const refreshed = await getReviewerCandidates({ workspaceId, runId, user, authReady });
+        if (refreshed.status === "ok") {
+          setCandidates(refreshed.candidates);
+          const stillEligible = new Set(refreshed.candidates.map((c) => c.uid));
+          const survivors = selectedUids.filter((uid) => stillEligible.has(uid));
+          if (survivors.length !== selectedUids.length) {
+            setSelectedUids(survivors);
+            setSelectionInvalidated(true);
+          }
+        }
+        return;
+      }
+      // Generic (non-conflict) failure — canonical state never changed
+      // server-side, so no refresh is needed before releasing.
+      setNotice(GENERIC_MUTATION_ERROR_MESSAGE);
+    } catch {
+      // Unexpected throw — canonical state is unknown; never fabricate a
+      // fake success. Surface the same generic error UX a handled failure
+      // would, and let the lock release unconditionally below.
+      setNotice(GENERIC_MUTATION_ERROR_MESSAGE);
+    } finally {
       setPending(false);
       endMutation(ownEditorKind);
-      return;
     }
-    // Generic (non-conflict) failure — canonical state never changed
-    // server-side, so no refresh is needed before releasing.
-    setPending(false);
-    endMutation(ownEditorKind);
-    setNotice(GENERIC_MUTATION_ERROR_MESSAGE);
   }
 
   // No panel at all.
