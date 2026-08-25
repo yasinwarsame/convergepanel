@@ -77,9 +77,11 @@ export type GetWorkspaceRunDetailResult = { status: "ok"; detail: WorkspaceRunDe
  * revisit this once real mutation controls exist here to drain). Every
  * denial path — run missing, not Team-Workspace-bound, wrong Workspace,
  * malformed, Approval Workflow not admitted, Team Workspace access
- * denied, missing `research.read` — returns the SAME `"not_found"`,
- * matching every other Phase 9 concealment convention (§38: never a
- * message that reveals a valid run exists).
+ * denied, missing `research.read` or `reviews.read` (checked
+ * independently, matching the queue page's own boundary — see Phase
+ * 9C.1-R2C) — returns the SAME `"not_found"`, matching every other
+ * Phase 9 concealment convention (§38: never a message that reveals a
+ * valid run exists).
  */
 export async function getWorkspaceRunDetail(args: { runId: string; uid: string; approvalAdmitted: boolean }): Promise<GetWorkspaceRunDetailResult> {
   if (!adminDb) return { status: "read_failed" };
@@ -104,7 +106,7 @@ export async function getWorkspaceRunDetail(args: { runId: string; uid: string; 
 
     const access = await resolveTeamRunWorkspaceAccess({ uid: args.uid, workspaceId: target.workspaceId });
     if (!access.granted) return { status: "not_found" };
-    if (!access.capabilities.includes("research.read")) return { status: "not_found" };
+    if (!access.capabilities.includes("research.read") || !access.capabilities.includes("reviews.read")) return { status: "not_found" };
 
     let projectName: string | null = null;
     if (target.projectId) {

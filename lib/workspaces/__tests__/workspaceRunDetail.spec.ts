@@ -124,7 +124,14 @@ describe("getWorkspaceRunDetail — canonical Workspace source is the run's OWN 
     expect(result).toEqual({ status: "not_found" });
   });
 
-  it("Phase 9C.1-R1C CORE FIX: valid Workspace-bound run, access granted with research.read -> ok, this is the exact scenario R1 proved broken via /reviews/{runId}", async () => {
+  it("Phase 9C.1-R2C: valid Workspace-bound run, access granted but missing reviews.read (research.read present) -> not_found — this is the exact gap R2 confirmed: research.read alone must not be sufficient", async () => {
+    seedRun();
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValue({ granted: true, capabilities: ["research.read"], workspace: { name: "Acme" } });
+    const result = await getWorkspaceRunDetail({ runId: RUN_ID, uid: UID, approvalAdmitted: true });
+    expect(result).toEqual({ status: "not_found" });
+  });
+
+  it("Phase 9C.1-R1C CORE FIX: valid Workspace-bound run, access granted with research.read AND reviews.read -> ok, this is the exact scenario R1 proved broken via /reviews/{runId}", async () => {
     seedRun();
     mockedResolveTeamRunWorkspaceAccess.mockResolvedValue(GRANTED);
     const result = await getWorkspaceRunDetail({ runId: RUN_ID, uid: UID, approvalAdmitted: true });
