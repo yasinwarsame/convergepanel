@@ -28,8 +28,16 @@ export const MAX_PANEL_REVIEWERS = 9;
  * `viewer.can*` authorization presentation, and the backend remains the
  * sole authority (each mutation still reauthorizes and OCC-checks inside
  * its own transaction regardless of what the client permits).
+ *
+ * Phase 9C.4 — `"override"` added. Verified from `reviewContext.ts` source
+ * that `canOverride` requires `panelOpen` (same precondition as vote/
+ * finalize/cancel) and, unlike assignment/decision/resubmit, is never
+ * mutually exclusive with them by construction — an Owner with
+ * `reviews.manage` can simultaneously see Override alongside Finalize/
+ * Cancel, or alongside Vote if also a panel reviewer. Override therefore
+ * participates in this SAME shared lock rather than a second one.
  */
-export type PanelMutationKind = "create" | "reconfigure" | "vote" | "finalize" | "cancel";
+export type PanelMutationKind = "create" | "reconfigure" | "vote" | "finalize" | "cancel" | "override";
 
 /** The one authoritative quorum formula — floor(N/2)+1. Never reimplemented elsewhere. */
 export function computeQuorum(reviewerCount: number): number {

@@ -13,10 +13,15 @@
  * route rather than migrating users to a new URL later.
  *
  * Server-gated exactly like `/workspace/reviews` itself: identity ->
- * Approval Workflow admission (pure) -> `getWorkspaceRunDetail()`, which
- * independently resolves the run's OWN canonical `workspaceId` (never a
- * route/query param) and revalidates Team Workspace access +
- * `research.read` from scratch. Every denial path returns the identical
+ * Approval Workflow admission (pure, passed through) -> `getWorkspaceRunDetail()`,
+ * which independently resolves the run's OWN canonical `workspaceId` (never
+ * a route/query param), revalidates Team Workspace access + `research.read`
+ * from scratch, and — Phase 9C.4 — makes the actual normal-vs-drain
+ * admission decision itself (mirroring `getReviewContext()`'s drain rule:
+ * not-admitted is still admitted when an existing panel makes the run
+ * drain-eligible). This page therefore does NOT 404 merely because Approval
+ * Workflow admission failed — see `getWorkspaceRunDetail()`'s own doc
+ * comment for the full rationale. Every denial path returns the identical
  * `notFound()` — no message ever reveals whether a run exists.
  */
 
@@ -37,11 +42,8 @@ export default async function WorkspaceRunDetailPage({ params }: { params: { run
   }
 
   const admission = resolveApprovalWorkflowAdmission({ uid: identity.uid, globalEnabled: APPROVAL_WORKFLOW_ENABLED, canaryUidsRaw: APPROVAL_WORKFLOW_CANARY_UIDS });
-  if (!admission.admitted) {
-    notFound();
-  }
 
-  const result = await getWorkspaceRunDetail({ runId: params.runId, uid: identity.uid, approvalAdmitted: true });
+  const result = await getWorkspaceRunDetail({ runId: params.runId, uid: identity.uid, approvalAdmitted: admission.admitted });
   if (result.status !== "ok") {
     notFound();
   }

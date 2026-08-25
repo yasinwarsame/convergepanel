@@ -6,13 +6,21 @@
  * role. `resolveTeamRunWorkspaceAccess()` and `getProject()` are mocked;
  * `resolveWorkspaceReviewTarget()` and `parseGovernanceRecord()` are
  * real/pure — only the run document itself is faked here.
+ *
+ * Phase 9C.4 adds the drain-admission suite: `approvalAdmitted=false` is no
+ * longer an unconditional gate — it mirrors `getReviewContext()`'s own
+ * rule (Team Workspace access first, THEN admitted if either
+ * `approvalAdmitted` OR a validly-parsed panel exists) — so this fake now
+ * also serves a `humanReviewPanel/current` subcollection document.
  */
 
 type StoredDoc = Record<string, unknown>;
 const runsStore = new Map<string, StoredDoc>();
+const panelStore = new Map<string, StoredDoc>();
 
 function resetStore() {
   runsStore.clear();
+  panelStore.clear();
 }
 
 let simulateGetFailure = false;
@@ -28,10 +36,47 @@ const mockAdminDb: any = {
           const data = runsStore.get(runId);
           return { exists: data !== undefined, data: () => data };
         },
+        collection: (subName: string) => {
+          if (subName !== "humanReviewPanel") throw new Error(`unexpected subcollection: ${subName}`);
+          return {
+            doc: (subId: string) => ({
+              get: async () => {
+                const key = `${runId}::${subId}`;
+                const data = panelStore.get(key);
+                return { exists: data !== undefined, data: () => data };
+              },
+            }),
+          };
+        },
       }),
     };
   },
 };
+
+function seedPanel(overrides: Record<string, unknown> = {}) {
+  panelStore.set(
+    `${RUN_ID}::current`,
+    {
+      schemaVersion: 1,
+      kind: "adaptive_review_panel",
+      teamId: null,
+      runId: RUN_ID,
+      mode: "majority_quorum",
+      reviewerUserIds: ["reviewer-a", "reviewer-b"],
+      requiredReviewerCount: 2,
+      quorum: 2,
+      status: "open",
+      revision: 1,
+      createdAt: "2026-08-01T00:00:00.000Z",
+      createdByUserId: "owner-1",
+      updatedAt: "2026-08-01T00:00:00.000Z",
+      updatedByUserId: "owner-1",
+      workspaceId: WS_ID,
+      projectId: null,
+      ...overrides,
+    }
+  );
+}
 
 jest.mock("@/lib/firebase/admin", () => ({
   get adminDb() {
@@ -76,12 +121,60 @@ beforeEach(() => {
   mockedGetProject.mockResolvedValue({ status: "not_found" });
 });
 
-describe("getWorkspaceRunDetail — approval gate", () => {
-  it("not_found when approvalAdmitted is false, before any Firestore read", async () => {
+describe("getWorkspaceRunDetail — Phase 9C.4 drain admission (mirrors getReviewContext()'s own rule)", () => {
+  it("approvalAdmitted=false, no panel: not_found — Team Workspace access is still resolved FIRST (never skipped), then admission fails", async () => {
     seedRun();
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValue(GRANTED);
     const result = await getWorkspaceRunDetail({ runId: RUN_ID, uid: UID, approvalAdmitted: false });
     expect(result).toEqual({ status: "not_found" });
-    expect(mockedResolveTeamRunWorkspaceAccess).not.toHaveBeenCalled();
+    expect(mockedResolveTeamRunWorkspaceAccess).toHaveBeenCalledWith({ uid: UID, workspaceId: WS_ID });
+  });
+
+  it("approvalAdmitted=false, valid existing open panel: drain-admitted -> ok — the exact 9C.4 fix, mirrors getReviewContext()'s drain rule", async () => {
+    seedRun();
+    seedPanel();
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValue(GRANTED);
+    const result = await getWorkspaceRunDetail({ runId: RUN_ID, uid: UID, approvalAdmitted: false });
+    expect(result.status).toBe("ok");
+  });
+
+  it("approvalAdmitted=false, valid existing FINALIZED panel: drain-admitted -> ok — every panel status admits, not just open", async () => {
+    seedRun();
+    seedPanel({ status: "finalized", finalizedAt: "2026-08-01T00:00:00.000Z", finalizedByUserId: "owner-1", finalStatus: "approved", finalDecisionId: "panel_dec_1", aggregationPolicyVersion: 1 });
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValue(GRANTED);
+    const result = await getWorkspaceRunDetail({ runId: RUN_ID, uid: UID, approvalAdmitted: false });
+    expect(result.status).toBe("ok");
+  });
+
+  it("approvalAdmitted=false, malformed/unparseable panel document: not_found — a broken panel is never treated as drain-eligible", async () => {
+    seedRun();
+    seedPanel({ status: "not_a_real_status" });
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValue(GRANTED);
+    const result = await getWorkspaceRunDetail({ runId: RUN_ID, uid: UID, approvalAdmitted: false });
+    expect(result).toEqual({ status: "not_found" });
+  });
+
+  it("approvalAdmitted=false, Team Workspace access denied even with a valid panel present: not_found — the Team gate is never bypassed by drain eligibility", async () => {
+    seedRun();
+    seedPanel();
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValue({ granted: false, reason: "membership_removed" });
+    const result = await getWorkspaceRunDetail({ runId: RUN_ID, uid: UID, approvalAdmitted: false });
+    expect(result).toEqual({ status: "not_found" });
+  });
+
+  it("approvalAdmitted=false, valid panel present but reviews.read missing: not_found — capability check is never bypassed by drain eligibility", async () => {
+    seedRun();
+    seedPanel();
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValue({ granted: true, capabilities: ["research.read"], workspace: { name: "Acme" } });
+    const result = await getWorkspaceRunDetail({ runId: RUN_ID, uid: UID, approvalAdmitted: false });
+    expect(result).toEqual({ status: "not_found" });
+  });
+
+  it("approvalAdmitted=true: still ok regardless of panel existence (unchanged normal-mode behavior)", async () => {
+    seedRun();
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValue(GRANTED);
+    const result = await getWorkspaceRunDetail({ runId: RUN_ID, uid: UID, approvalAdmitted: true });
+    expect(result.status).toBe("ok");
   });
 });
 

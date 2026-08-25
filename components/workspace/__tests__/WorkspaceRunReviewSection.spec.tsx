@@ -50,7 +50,7 @@ function baseContext(overrides: Partial<WorkspaceReviewContext> = {}): Workspace
     assignment: null,
     assignmentRevision: 0,
     panel: null,
-    viewer: { mode: "normal", isCreator: false, canManageAssignment: false, canSubmitDecision: false, canResubmit: false, canCreatePanel: false, canReconfigurePanel: false, canCancelPanel: false, canVote: false, hasVoted: false, canFinalize: false },
+    viewer: { mode: "normal", isCreator: false, canManageAssignment: false, canSubmitDecision: false, canResubmit: false, canCreatePanel: false, canReconfigurePanel: false, canCancelPanel: false, canVote: false, hasVoted: false, canFinalize: false, canOverride: false },
     ...overrides,
   };
 }
@@ -111,11 +111,50 @@ describe("WorkspaceRunReviewSection — current review detail (§12-16)", () => 
   });
 });
 
-describe("WorkspaceRunReviewSection — drain mode (§11/§139)", () => {
-  it("drain mode: no assignment/decision/resubmit controls, read-only unavailable message", async () => {
-    const renderer = await render(baseContext({ viewer: { mode: "drain", isCreator: false, canManageAssignment: true, canSubmitDecision: true, canResubmit: true, canCreatePanel: false, canReconfigurePanel: false, canCancelPanel: false, canVote: false, hasVoted: false, canFinalize: false } }));
+describe("WorkspaceRunReviewSection — drain mode (Phase 9C.4 — replaces the old 9C.2/9C.3 dead-end)", () => {
+  it("drain, no panel: completion-mode banner + review summary render, no assignment/decision/resubmit controls even with can*-shaped true-like flags (defensive, not merely trusting backend)", async () => {
+    const renderer = await render(baseContext({ viewer: { mode: "drain", isCreator: false, canManageAssignment: true, canSubmitDecision: true, canResubmit: true, canCreatePanel: false, canReconfigurePanel: false, canCancelPanel: false, canVote: false, hasVoted: false, canFinalize: false, canOverride: false } }));
     const text = JSON.stringify(renderer.toJSON());
-    expect(text).toContain("Review actions are currently unavailable.");
+    expect(text).toContain("Completion mode");
+    expect(text).toContain("New review work is paused");
+    expect(text).not.toContain("mock-assignment-card");
+    expect(text).not.toContain("mock-decision-form");
+    expect(text).not.toContain("mock-resubmit-action");
+    expect(text).not.toContain("Start panel review");
+  });
+
+  it("drain, existing open panel, canVote=true: panel evidence + vote control render (real WorkspacePanelReviewSection, not mocked), no single-review controls", async () => {
+    const renderer = await render(
+      baseContext({
+        panel: { status: "open", revision: 1, reviewers: [{ uid: "u1", displayName: "Me" }, { uid: "u2", displayName: "Other" }], voteSummary: { submittedCount: 0, aggregationState: "waiting" }, createdAt: "x", updatedAt: "x", finalizedAt: null },
+        viewer: { mode: "drain", isCreator: false, canManageAssignment: false, canSubmitDecision: false, canResubmit: false, canCreatePanel: false, canReconfigurePanel: false, canCancelPanel: false, canVote: true, hasVoted: false, canFinalize: false, canOverride: false },
+      })
+    );
+    const text = JSON.stringify(renderer.toJSON());
+    expect(text).toContain("Completion mode");
+    expect(text).toContain("Panel review");
+    expect(text).toContain("Submit vote");
+    expect(text).not.toContain("mock-assignment-card");
+    expect(text).not.toContain("mock-decision-form");
+    expect(text).not.toContain("mock-resubmit-action");
+    expect(text).not.toContain("Change reviewers");
+    expect(text).not.toContain("Start panel review");
+  });
+
+  it("drain, finalized panel: read-only evidence only, no completion actions, no single-review controls", async () => {
+    const renderer = await render(
+      baseContext({
+        panel: { status: "finalized", revision: 2, reviewers: [{ uid: "u1", displayName: "Me" }], voteSummary: null, createdAt: "x", updatedAt: "x", finalizedAt: "x" },
+        viewer: { mode: "drain", isCreator: false, canManageAssignment: false, canSubmitDecision: false, canResubmit: false, canCreatePanel: false, canReconfigurePanel: false, canCancelPanel: false, canVote: false, hasVoted: false, canFinalize: false, canOverride: false },
+      })
+    );
+    const text = JSON.stringify(renderer.toJSON());
+    expect(text).toContain("Panel review");
+    expect(text).toContain("Finalized");
+    expect(text).not.toContain("Submit vote");
+    expect(text).not.toContain("Finalize panel");
+    expect(text).not.toContain("Cancel panel review");
+    expect(text).not.toContain("Owner override");
     expect(text).not.toContain("mock-assignment-card");
     expect(text).not.toContain("mock-decision-form");
     expect(text).not.toContain("mock-resubmit-action");
@@ -127,7 +166,7 @@ describe("WorkspaceRunReviewSection — open panel (§52/§133)", () => {
     const renderer = await render(
       baseContext({
         panel: { status: "open", revision: 1, reviewers: [], voteSummary: null, createdAt: "x", updatedAt: "x", finalizedAt: null },
-        viewer: { mode: "normal", isCreator: false, canManageAssignment: true, canSubmitDecision: true, canResubmit: true, canCreatePanel: false, canReconfigurePanel: false, canCancelPanel: false, canVote: false, hasVoted: false, canFinalize: false },
+        viewer: { mode: "normal", isCreator: false, canManageAssignment: true, canSubmitDecision: true, canResubmit: true, canCreatePanel: false, canReconfigurePanel: false, canCancelPanel: false, canVote: false, hasVoted: false, canFinalize: false, canOverride: false },
       })
     );
     const text = JSON.stringify(renderer.toJSON());
@@ -147,7 +186,7 @@ describe("WorkspaceRunReviewSection — CRITICAL: finalized panel does not block
         panel: { status: "finalized", revision: 1, reviewers: [], voteSummary: null, createdAt: "x", updatedAt: "x", finalizedAt: "x" },
         assignment: { assignedReviewerUserId: "u1", assignedReviewerDisplayName: "Me", revision: 1, assignedAt: null, updatedAt: "x", dueAt: null, state: "actionable" },
         assignmentRevision: 1,
-        viewer: { mode: "normal", isCreator: false, canManageAssignment: false, canSubmitDecision: true, canResubmit: false, canCreatePanel: false, canReconfigurePanel: false, canCancelPanel: false, canVote: false, hasVoted: false, canFinalize: false },
+        viewer: { mode: "normal", isCreator: false, canManageAssignment: false, canSubmitDecision: true, canResubmit: false, canCreatePanel: false, canReconfigurePanel: false, canCancelPanel: false, canVote: false, hasVoted: false, canFinalize: false, canOverride: false },
       })
     );
     const decisionForm = renderer.root.findAllByProps({ canSubmitDecision: true });
@@ -161,7 +200,7 @@ describe("WorkspaceRunReviewSection — CRITICAL: finalized panel does not block
         panel: { status: "finalized", revision: 1, reviewers: [], voteSummary: null, createdAt: "x", updatedAt: "x", finalizedAt: "x" },
         assignment: null,
         assignmentRevision: 6,
-        viewer: { mode: "normal", isCreator: false, canManageAssignment: true, canSubmitDecision: false, canResubmit: false, canCreatePanel: false, canReconfigurePanel: false, canCancelPanel: false, canVote: false, hasVoted: false, canFinalize: false },
+        viewer: { mode: "normal", isCreator: false, canManageAssignment: true, canSubmitDecision: false, canResubmit: false, canCreatePanel: false, canReconfigurePanel: false, canCancelPanel: false, canVote: false, hasVoted: false, canFinalize: false, canOverride: false },
       })
     );
     const assignmentCards = renderer.root.findAllByProps({ canManageAssignment: true });
@@ -174,7 +213,7 @@ describe("WorkspaceRunReviewSection — CRITICAL: finalized panel does not block
     const renderer = await render(
       baseContext({
         panel: { status: "cancelled", revision: 1, reviewers: [], voteSummary: null, createdAt: "x", updatedAt: "x", finalizedAt: null },
-        viewer: { mode: "normal", isCreator: false, canManageAssignment: true, canSubmitDecision: false, canResubmit: false, canCreatePanel: false, canReconfigurePanel: false, canCancelPanel: false, canVote: false, hasVoted: false, canFinalize: false },
+        viewer: { mode: "normal", isCreator: false, canManageAssignment: true, canSubmitDecision: false, canResubmit: false, canCreatePanel: false, canReconfigurePanel: false, canCancelPanel: false, canVote: false, hasVoted: false, canFinalize: false, canOverride: false },
       })
     );
     const text = JSON.stringify(renderer.toJSON());
@@ -183,14 +222,19 @@ describe("WorkspaceRunReviewSection — CRITICAL: finalized panel does not block
   });
 });
 
-describe("WorkspaceRunReviewSection — panel action / Owner Override absence (§57/§58)", () => {
-  it("even with canOverride-shaped true-like flags absent from the type, no Owner Override text renders", async () => {
+describe("WorkspaceRunReviewSection — Owner Override provenance caption (Phase 9C.4)", () => {
+  it("decidedVia=multi_reviewer_owner_override renders the caption; with canOverride=false (default) no interactive Override control exists", async () => {
     const renderer = await render(baseContext({ review: { status: "approved", reviewedAt: "x", decidedVia: "multi_reviewer_owner_override", governanceUpdatedAt: "gov-5" } }));
     const text = JSON.stringify(renderer.toJSON());
     expect(text).toContain("Decided via owner override");
-    // The informational caption is fine; no interactive Override control may exist.
+    // The informational caption is fine; no interactive Override control exists when canOverride is false (default fixture) and there is no open panel.
     expect(renderer.root.findAllByType("button").some((b) => String(b.props.children).includes("Override"))).toBe(false);
   });
+
+  // Owner Override presence/interaction (form rendering, OCC, confirmation,
+  // lock sharing) is tested directly in WorkspacePanelReviewSection.spec.tsx,
+  // where WorkspacePanelReviewSection is the real (unmocked) component under
+  // test. This file keeps only the orchestration-level absence check above.
 });
 
 describe("WorkspaceRunReviewSection — stale response protection (§61/§144)", () => {
