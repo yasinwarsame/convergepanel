@@ -74,6 +74,24 @@ export const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
 export const ADAPTIVE_SCHEMAS_ENABLED = process.env.ADAPTIVE_SCHEMAS_ENABLED === "true";
 
 /**
+ * Adaptive Result Schema System account-scoped canary, Phase 9D.0-A —
+ * structural sibling of `TEAM_WORKSPACES_CANARY_UIDS`/
+ * `APPROVAL_WORKFLOW_CANARY_UIDS`: an optional, server-only
+ * comma-separated Firebase uid allowlist letting the adaptive planner be
+ * entered for a small number of explicitly named accounts while
+ * `ADAPTIVE_SCHEMAS_ENABLED` stays `false`. Raw, unparsed string —
+ * `lib/adaptiveSchema/adaptiveSchemasRollout.ts` owns all parsing/
+ * validation/matching/precedence logic. Independent of the Team Workspace
+ * and Approval Workflow canary axes above — it only ever decides whether
+ * `planAdaptiveRun()` may be invoked, never Workspace or Approval
+ * admission.
+ *
+ * Never prefixed `NEXT_PUBLIC_` — server-only decision, never exposed to
+ * any response body or client-readable config.
+ */
+export const ADAPTIVE_SCHEMAS_CANARY_UIDS = process.env.ADAPTIVE_SCHEMAS_CANARY_UIDS;
+
+/**
  * Adaptive Verification Engine feature flag (defaults off, requires
  * ADAPTIVE_SCHEMAS_ENABLED to have any effect).
  *

@@ -24,10 +24,12 @@ import { loadUserAndTeam } from "@/lib/teams/teamApiAuth";
 import { logger } from "@/lib/logger";
 import {
   ADAPTIVE_SCHEMAS_ENABLED,
+  ADAPTIVE_SCHEMAS_CANARY_UIDS,
   PERSONAL_RUN_WORKSPACE_WRITES_ENABLED,
   PERSONAL_RUN_WORKSPACE_WRITE_CANARY_UIDS,
   WORKSPACES_ENABLED,
 } from "@/lib/env";
+import { resolveAdaptiveSchemasAdmission } from "@/lib/adaptiveSchema/adaptiveSchemasRollout";
 import { resolvePersonalRunWorkspaceBinding } from "@/lib/workspaces/personalRunWorkspaceBinding";
 import { resolvePersonalRunWorkspaceWriteMode } from "@/lib/workspaces/personalRunWorkspaceWriteCanary";
 import { planAdaptiveRun, AdaptivePromptPlan, buildNonExecutionPayload } from "@/lib/adaptiveSchema/orchestrate";
@@ -214,7 +216,8 @@ export async function POST(req: NextRequest) {
     // ADAPTIVE RESULT SCHEMA — CLASSIFICATION (flag-gated, never blocks the run)
     // ============================================
     let adaptivePlan: AdaptivePromptPlan | null = null;
-    if (ADAPTIVE_SCHEMAS_ENABLED) {
+    const adaptiveSchemasAdmission = resolveAdaptiveSchemasAdmission({ uid, globalEnabled: ADAPTIVE_SCHEMAS_ENABLED, canaryUidsRaw: ADAPTIVE_SCHEMAS_CANARY_UIDS });
+    if (adaptiveSchemasAdmission.admitted) {
       try {
         adaptivePlan = await planAdaptiveRun(trimmedQuestion, selectedModels as ModelId[], context);
       } catch (adaptiveError: any) {
