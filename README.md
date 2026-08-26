@@ -527,5 +527,6 @@ MIT
 For issues or questions, please open an issue on the repository.
 
 <!-- Phase 9D.0-FX deploy trigger: no functional change, this comment exists solely to produce a new Production deployment so a Vercel environment-variable update takes effect. -->
+<!-- Phase 9D.0-AC deploy trigger: no functional change, this comment exists solely to produce a new Production deployment so the ADAPTIVE_SCHEMAS_CANARY_UIDS Vercel environment-variable addition takes effect. -->
 
 
