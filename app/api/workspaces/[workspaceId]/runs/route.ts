@@ -39,8 +39,9 @@ import { internalErrorResponse, teamWorkspacesDisabledResponse, invalidRequestBo
 import { listTeamWorkspaceRuns, type TeamWorkspaceRunsScope } from "@/lib/workspaces/listTeamWorkspaceRuns";
 import { ModelId, RunPanelApiResponse } from "@/lib/types";
 import { splitQuestionAndContext } from "@/lib/questionContext";
-import { ADAPTIVE_SCHEMAS_ENABLED, TEAM_WORKSPACES_ENABLED, TEAM_WORKSPACES_CANARY_UIDS } from "@/lib/env";
+import { ADAPTIVE_SCHEMAS_ENABLED, ADAPTIVE_SCHEMAS_CANARY_UIDS, TEAM_WORKSPACES_ENABLED, TEAM_WORKSPACES_CANARY_UIDS } from "@/lib/env";
 import { resolveTeamWorkspacesMode } from "@/lib/workspaces/teamWorkspacesRollout";
+import { resolveAdaptiveSchemasAdmission } from "@/lib/adaptiveSchema/adaptiveSchemasRollout";
 import { planAdaptiveRun, AdaptivePromptPlan, buildNonExecutionPayload } from "@/lib/adaptiveSchema/orchestrate";
 import { trackQueryClassified, trackRoutingOutcome } from "@/lib/adaptiveSchema/analytics";
 import { validateUserSubscription } from "@/lib/stripe/subscriptionValidation";
@@ -276,7 +277,8 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
     // ADAPTIVE RESULT SCHEMA — CLASSIFICATION (flag-gated, never blocks the run)
     // ============================================
     let adaptivePlan: AdaptivePromptPlan | null = null;
-    if (ADAPTIVE_SCHEMAS_ENABLED) {
+    const adaptiveSchemasAdmission = resolveAdaptiveSchemasAdmission({ uid, globalEnabled: ADAPTIVE_SCHEMAS_ENABLED, canaryUidsRaw: ADAPTIVE_SCHEMAS_CANARY_UIDS });
+    if (adaptiveSchemasAdmission.admitted) {
       try {
         adaptivePlan = await planAdaptiveRun(trimmedQuestion, selectedModels as ModelId[], context);
       } catch (adaptiveError: any) {

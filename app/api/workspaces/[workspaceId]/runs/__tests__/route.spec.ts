@@ -42,11 +42,15 @@ jest.mock("@/lib/security/requestValidation", () => ({
 }));
 
 let adaptiveSchemasEnabled = false;
+let adaptiveSchemasCanaryUids: string | undefined = undefined;
 let teamWorkspacesEnabled = true;
 let teamWorkspacesCanaryUids: string | undefined = undefined;
 jest.mock("@/lib/env", () => ({
   get ADAPTIVE_SCHEMAS_ENABLED() {
     return adaptiveSchemasEnabled;
+  },
+  get ADAPTIVE_SCHEMAS_CANARY_UIDS() {
+    return adaptiveSchemasCanaryUids;
   },
   get TEAM_WORKSPACES_ENABLED() {
     return teamWorkspacesEnabled;
@@ -123,6 +127,7 @@ beforeEach(() => {
   mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: UID });
   mockedCheckRateLimit.mockResolvedValue({ allowed: true, remaining: 29, resetAt: new Date() });
   adaptiveSchemasEnabled = false;
+  adaptiveSchemasCanaryUids = undefined;
   teamWorkspacesEnabled = true;
   teamWorkspacesCanaryUids = undefined;
   mockedCheckAndIncrementUsage.mockResolvedValue({
@@ -401,6 +406,110 @@ describe("POST /api/workspaces/[workspaceId]/runs — rollout (Correction 2/17/2
     expect(mockedCheckAndIncrementUsage).not.toHaveBeenCalled();
     expect(mockedCreateTeamWorkspaceRun).not.toHaveBeenCalled();
     expect(mockedExecuteOrdinaryRun).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/workspaces/[workspaceId]/runs — Phase 9D.0-A adaptive schemas canary admission", () => {
+  it("global=false, no canary, non-canary uid -> planAdaptiveRun NOT called; legacy pipeline executes exactly as today (byte-identical non-canary behavior)", async () => {
+    // adaptiveSchemasEnabled/adaptiveSchemasCanaryUids already default false/undefined via beforeEach.
+    mockedCreateTeamWorkspaceRun.mockResolvedValueOnce({ status: "created", runId: "run-legacy", workspaceId: WS_ID, projectId: null });
+    mockedExecuteOrdinaryRun.mockResolvedValueOnce({ status: 200, body: { ok: true, results: [], runId: "run-legacy" } });
+    const res = await POST(buildPostRequest(buildPostBody()), { params: { workspaceId: WS_ID } });
+    expect(res.status).toBe(200);
+    expect(mockedPlanAdaptiveRun).not.toHaveBeenCalled();
+    expect(mockedCheckAndIncrementUsage).toHaveBeenCalledTimes(1);
+    expect(mockedCreateTeamWorkspaceRun).toHaveBeenCalledTimes(1);
+    expect(mockedExecuteOrdinaryRun).toHaveBeenCalledTimes(1);
+  });
+
+  it("global=false, authenticated uid present in ADAPTIVE_SCHEMAS_CANARY_UIDS -> planAdaptiveRun IS called exactly once, with active routing the adaptive path executes", async () => {
+    adaptiveSchemasCanaryUids = `other-uid,${UID}`;
+    mockedPlanAdaptiveRun.mockResolvedValueOnce({
+      classification: { queryType: "factual_lookup" },
+      schema: { id: "factual_lookup" },
+      promptOverrides: {},
+      routing: { kind: "active", queryType: "factual_lookup", schema: { id: "factual_lookup" } },
+    });
+    mockedCreateTeamWorkspaceRun.mockResolvedValueOnce({ status: "created", runId: "run-canary-adaptive", workspaceId: WS_ID, projectId: null });
+    mockedExecuteOrdinaryRun.mockResolvedValueOnce({ status: 200, body: { ok: true, results: [], runId: "run-canary-adaptive" } });
+    const res = await POST(buildPostRequest(buildPostBody()), { params: { workspaceId: WS_ID } });
+    expect(res.status).toBe(200);
+    expect(mockedPlanAdaptiveRun).toHaveBeenCalledTimes(1);
+    expect(mockedCheckAndIncrementUsage).toHaveBeenCalledTimes(1);
+    expect(mockedCreateTeamWorkspaceRun).toHaveBeenCalledTimes(1);
+    expect(mockedExecuteOrdinaryRun).toHaveBeenCalledTimes(1);
+  });
+
+  it("global=false, uid NOT in canary list (list non-empty but caller absent) -> planAdaptiveRun NOT called, legacy pipeline executes", async () => {
+    adaptiveSchemasCanaryUids = "uid-a,uid-b,uid-c"; // deliberately excludes UID
+    mockedCreateTeamWorkspaceRun.mockResolvedValueOnce({ status: "created", runId: "run-legacy-2", workspaceId: WS_ID, projectId: null });
+    mockedExecuteOrdinaryRun.mockResolvedValueOnce({ status: 200, body: { ok: true, results: [], runId: "run-legacy-2" } });
+    const res = await POST(buildPostRequest(buildPostBody()), { params: { workspaceId: WS_ID } });
+    expect(res.status).toBe(200);
+    expect(mockedPlanAdaptiveRun).not.toHaveBeenCalled();
+    expect(mockedExecuteOrdinaryRun).toHaveBeenCalledTimes(1);
+  });
+
+  it("SECURITY: adaptive-schema canary admission does NOT bypass Team Workspace authorization — canary uid + Team Workspaces globally disabled -> still 503 team_workspaces_disabled, planAdaptiveRun never called, identical to non-canary denial", async () => {
+    adaptiveSchemasCanaryUids = UID;
+    teamWorkspacesEnabled = false;
+    const res = await POST(buildPostRequest(buildPostBody()), { params: { workspaceId: WS_ID } });
+    expect(res.status).toBe(503);
+    const body = await res.json();
+    expect(body.errorCode).toBe("team_workspaces_disabled");
+    expect(mockedPlanAdaptiveRun).not.toHaveBeenCalled();
+    expect(mockedCheckAndIncrementUsage).not.toHaveBeenCalled();
+    expect(mockedCreateTeamWorkspaceRun).not.toHaveBeenCalled();
+    expect(mockedExecuteOrdinaryRun).not.toHaveBeenCalled();
+  });
+
+  it("global=true (existing broad-rollout switch) still admits every uid regardless of canary list — backward-compatible regression proof", async () => {
+    adaptiveSchemasEnabled = true;
+    adaptiveSchemasCanaryUids = undefined; // canary list irrelevant once global is true
+    mockedPlanAdaptiveRun.mockResolvedValueOnce({
+      classification: { queryType: "factual_lookup" },
+      schema: { id: "factual_lookup" },
+      promptOverrides: {},
+      routing: { kind: "active", queryType: "factual_lookup", schema: { id: "factual_lookup" } },
+    });
+    mockedCreateTeamWorkspaceRun.mockResolvedValueOnce({ status: "created", runId: "run-global-on", workspaceId: WS_ID, projectId: null });
+    mockedExecuteOrdinaryRun.mockResolvedValueOnce({ status: 200, body: { ok: true, results: [], runId: "run-global-on" } });
+    const res = await POST(buildPostRequest(buildPostBody()), { params: { workspaceId: WS_ID } });
+    expect(res.status).toBe(200);
+    expect(mockedPlanAdaptiveRun).toHaveBeenCalledTimes(1);
+  });
+
+  it("canary-admitted uid, usage denied (RUN_LIMIT) -> quota check still runs and still blocks the run; canary admission never bypasses usage accounting", async () => {
+    adaptiveSchemasCanaryUids = UID;
+    mockedPlanAdaptiveRun.mockResolvedValueOnce({
+      classification: { queryType: "factual_lookup" },
+      schema: { id: "factual_lookup" },
+      promptOverrides: {},
+      routing: { kind: "active", queryType: "factual_lookup", schema: { id: "factual_lookup" } },
+    });
+    mockedCheckAndIncrementUsage.mockResolvedValueOnce({
+      allowed: false,
+      reason: "RUN_LIMIT",
+      runsThisMonth: 8,
+      maxRunsPerMonth: 8,
+      maxModelsPerRun: 2,
+      plan: "free",
+      resetsAt: new Date("2026-09-01T00:00:00Z"),
+    });
+    const res = await POST(buildPostRequest(buildPostBody()), { params: { workspaceId: WS_ID } });
+    expect(res.status).toBe(429);
+    expect(mockedPlanAdaptiveRun).toHaveBeenCalledTimes(1); // classification still happens (unchanged semantics)...
+    expect(mockedCreateTeamWorkspaceRun).not.toHaveBeenCalled(); // ...but usage denial still blocks run creation exactly as before
+    expect(mockedExecuteOrdinaryRun).not.toHaveBeenCalled();
+  });
+
+  it("canary-admitted uid, rate limit exceeded -> still 429 before any adaptive planning or run creation; canary admission never bypasses rate limiting", async () => {
+    adaptiveSchemasCanaryUids = UID;
+    mockedCheckRateLimit.mockResolvedValueOnce({ allowed: false, remaining: 0, resetAt: new Date() });
+    const res = await POST(buildPostRequest(buildPostBody()), { params: { workspaceId: WS_ID } });
+    expect(res.status).toBe(429);
+    expect(mockedPlanAdaptiveRun).not.toHaveBeenCalled();
+    expect(mockedCreateTeamWorkspaceRun).not.toHaveBeenCalled();
   });
 });
 

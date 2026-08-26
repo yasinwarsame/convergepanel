@@ -32,7 +32,7 @@ Rolling back Team Workspace access (`TEAM_WORKSPACES_ENABLED=false` or removing 
 2. All 8 Phase 9B.4 review-queue Firestore indexes deployed (see §4) and confirmed `READY` in the Firebase console — not merely `firestore.indexes.json` containing the definitions.
 3. Vercel Production deployment source SHA independently verified to equal the Phase 9C.5 merge SHA (see §5) — not assumed from a successful `git push`.
 4. A designated canary identity (`<CANARY_UID>`) added to `TEAM_WORKSPACES_CANARY_UIDS` and `APPROVAL_WORKFLOW_CANARY_UIDS` — the SAME uid on both lists, since both gates are independently required.
-5. A known test `<WORKSPACE_ID>` / `<PROJECT_ID>` / `<RUN_ID>` prepared, owned by or accessible to `<CANARY_UID>`, with a real adaptive Deep Research run in a reviewable governance state.
+5. A known test `<WORKSPACE_ID>` / `<PROJECT_ID>` / `<RUN_ID>` prepared, owned by or accessible to `<CANARY_UID>`, with a real adaptive Deep Research run in a reviewable governance state. Producing that run requires a THIRD, independent gate (Phase 9D.0-A): the run's creator must be admitted through `ADAPTIVE_SCHEMAS_CANARY_UIDS` (or the global `ADAPTIVE_SCHEMAS_ENABLED`, which remains `false` for this canary) — without it, `/api/workspaces/{workspaceId}/runs` silently falls back to the legacy, non-adaptive pipeline and the resulting run is never governance-eligible.
 6. A rollback operator identified and reachable for the duration of the canary window.
 7. No broader Team Workspaces or Approval Workflow rollout — canary remains a single explicit uid (or a small, deliberate, explicitly-enumerated set, capped at `MAX_APPROVAL_WORKFLOW_CANARY_UIDS`/`MAX_TEAM_WORKSPACES_CANARY_UIDS` = 10 each).
 
