@@ -46,8 +46,8 @@ import "server-only";
 import { Timestamp } from "firebase-admin/firestore";
 import { adminDb } from "@/lib/firebase/admin";
 import { logger } from "@/lib/logger";
-import { TEAM_WORKSPACES_ENABLED, TEAM_WORKSPACES_CANARY_UIDS } from "@/lib/env";
-import { resolveTeamWorkspacesMode } from "./teamWorkspacesRollout";
+import { TEAM_WORKSPACES_ENABLED, TEAM_WORKSPACES_CANARY_UIDS, TEAM_WORKSPACES_CANARY_WORKSPACE_IDS } from "@/lib/env";
+import { resolveTeamWorkspaceTargetAdmission } from "./teamWorkspaceTargetAdmission";
 import { authorizeTeamWorkspaceMutationInTransaction, type TeamMutationAuthorizationDenialReason } from "./authorizeTeamWorkspaceMutationInTransaction";
 import { roleHasCapability } from "./capabilities";
 import { resolveWorkspaceReviewTarget } from "./resolveWorkspaceReviewTarget";
@@ -198,8 +198,14 @@ export async function putWorkspaceReviewAssignment(args: {
   dueAt: string | null | undefined;
   now?: string;
 }): Promise<PutWorkspaceReviewAssignmentResult> {
-  const rollout = resolveTeamWorkspacesMode({ uid: args.uid, globalEnabled: TEAM_WORKSPACES_ENABLED, canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS });
-  if (!rollout.enabled) return { ok: false, reason: "team_workspaces_disabled" };
+  const admission = resolveTeamWorkspaceTargetAdmission({
+    uid: args.uid,
+    workspaceId: args.workspaceId,
+    globalEnabled: TEAM_WORKSPACES_ENABLED,
+    canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS,
+    canaryWorkspaceIdsRaw: TEAM_WORKSPACES_CANARY_WORKSPACE_IDS,
+  });
+  if (!admission.enabled) return { ok: false, reason: "team_workspaces_disabled" };
   if (!adminDb) return { ok: false, reason: "firestore_unavailable" };
 
   const now = args.now ?? new Date().toISOString();
@@ -367,8 +373,14 @@ export type DeleteWorkspaceReviewAssignmentFailureReason =
 export type DeleteWorkspaceReviewAssignmentResult = { ok: true } | { ok: false; reason: DeleteWorkspaceReviewAssignmentFailureReason };
 
 export async function deleteWorkspaceReviewAssignment(args: { uid: string; workspaceId: string; runId: string; expectedRevision: number; now?: string }): Promise<DeleteWorkspaceReviewAssignmentResult> {
-  const rollout = resolveTeamWorkspacesMode({ uid: args.uid, globalEnabled: TEAM_WORKSPACES_ENABLED, canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS });
-  if (!rollout.enabled) return { ok: false, reason: "team_workspaces_disabled" };
+  const admission = resolveTeamWorkspaceTargetAdmission({
+    uid: args.uid,
+    workspaceId: args.workspaceId,
+    globalEnabled: TEAM_WORKSPACES_ENABLED,
+    canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS,
+    canaryWorkspaceIdsRaw: TEAM_WORKSPACES_CANARY_WORKSPACE_IDS,
+  });
+  if (!admission.enabled) return { ok: false, reason: "team_workspaces_disabled" };
   if (!adminDb) return { ok: false, reason: "firestore_unavailable" };
 
   const now = args.now ?? new Date().toISOString();
@@ -481,8 +493,14 @@ export async function submitWorkspaceReviewDecision(args: {
   expectedUpdatedAt: string;
   now?: string;
 }): Promise<SubmitWorkspaceReviewDecisionResult> {
-  const rollout = resolveTeamWorkspacesMode({ uid: args.uid, globalEnabled: TEAM_WORKSPACES_ENABLED, canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS });
-  if (!rollout.enabled) return { ok: false, reason: "team_workspaces_disabled" };
+  const admission = resolveTeamWorkspaceTargetAdmission({
+    uid: args.uid,
+    workspaceId: args.workspaceId,
+    globalEnabled: TEAM_WORKSPACES_ENABLED,
+    canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS,
+    canaryWorkspaceIdsRaw: TEAM_WORKSPACES_CANARY_WORKSPACE_IDS,
+  });
+  if (!admission.enabled) return { ok: false, reason: "team_workspaces_disabled" };
   if (!adminDb) return { ok: false, reason: "firestore_unavailable" };
 
   const now = args.now ?? new Date().toISOString();

@@ -67,8 +67,8 @@
 import "server-only";
 import { adminDb } from "@/lib/firebase/admin";
 import { logger } from "@/lib/logger";
-import { TEAM_WORKSPACES_ENABLED, TEAM_WORKSPACES_CANARY_UIDS } from "@/lib/env";
-import { resolveTeamWorkspacesMode } from "./teamWorkspacesRollout";
+import { TEAM_WORKSPACES_ENABLED, TEAM_WORKSPACES_CANARY_UIDS, TEAM_WORKSPACES_CANARY_WORKSPACE_IDS } from "@/lib/env";
+import { resolveTeamWorkspaceTargetAdmission } from "./teamWorkspaceTargetAdmission";
 import { authorizeTeamWorkspaceMutationInTransaction, type TeamMutationAuthorizationDenialReason } from "./authorizeTeamWorkspaceMutationInTransaction";
 import { resolveWorkspaceReviewTarget } from "./resolveWorkspaceReviewTarget";
 import { isValidAssignmentTarget, type WorkspaceReviewCandidate } from "./workspaceReviewEligibility";
@@ -118,8 +118,14 @@ export async function resubmitWorkspaceReview(args: {
   expectedUpdatedAt: string;
   now?: string;
 }): Promise<ResubmitWorkspaceReviewResult> {
-  const rollout = resolveTeamWorkspacesMode({ uid: args.uid, globalEnabled: TEAM_WORKSPACES_ENABLED, canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS });
-  if (!rollout.enabled) {
+  const admission = resolveTeamWorkspaceTargetAdmission({
+    uid: args.uid,
+    workspaceId: args.workspaceId,
+    globalEnabled: TEAM_WORKSPACES_ENABLED,
+    canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS,
+    canaryWorkspaceIdsRaw: TEAM_WORKSPACES_CANARY_WORKSPACE_IDS,
+  });
+  if (!admission.enabled) {
     return { ok: false, reason: "team_workspaces_disabled" };
   }
   if (!adminDb) {
