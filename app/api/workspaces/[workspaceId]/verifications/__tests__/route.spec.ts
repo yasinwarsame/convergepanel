@@ -22,6 +22,7 @@ jest.mock("@/lib/security/rateLimit", () => ({
 }));
 
 let teamWorkspacesEnabled = true;
+let teamWorkspacesCanaryWorkspaceIds: string | undefined = undefined;
 jest.mock("@/lib/env", () => ({
   OPENAI_API_KEY: "test",
   ANTHROPIC_API_KEY: "test",
@@ -31,6 +32,9 @@ jest.mock("@/lib/env", () => ({
   TEAM_WORKSPACES_ENABLED: true,
   get TEAM_WORKSPACES_CANARY_UIDS() {
     return undefined;
+  },
+  get TEAM_WORKSPACES_CANARY_WORKSPACE_IDS() {
+    return teamWorkspacesCanaryWorkspaceIds;
   },
 }));
 
@@ -122,6 +126,7 @@ function buildBody(overrides: Record<string, unknown> = {}): string {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  teamWorkspacesCanaryWorkspaceIds = undefined;
   mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: UID });
   mockedCheckRateLimit.mockResolvedValue({ allowed: true, remaining: 29, resetAt: new Date() });
   mockedResolveTeamWorkspacesMode.mockReturnValue({ enabled: true, source: "global" });
@@ -231,6 +236,33 @@ describe("POST /api/workspaces/[workspaceId]/verifications — rollout", () => {
     expect(mockedAuthorizeGate1).not.toHaveBeenCalled();
     expect(mockedCheckAndIncrementUsage).not.toHaveBeenCalled();
     expect(mockedRunClaimVerificationPanel).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/workspaces/[workspaceId]/verifications — Workspace-canary target admission (Phase 10B.3.2A)", () => {
+  it("global/uid off, target Workspace canary-admitted (URL-bound workspaceId) -> proceeds past admission to Gate 1", async () => {
+    mockedResolveTeamWorkspacesMode.mockReturnValue({ enabled: false, source: "off" });
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    const res = await POST(buildPostRequest(buildBody()), { params: { workspaceId: WS_ID } });
+    expect(res.status).toBe(200);
+    expect(mockedAuthorizeGate1).toHaveBeenCalledTimes(1);
+  });
+
+  it("global/uid off, a DIFFERENT Workspace id is canary-admitted, not the URL's -> 503, proves workspaceId is bound to the URL param, not reused from an unrelated admitted Workspace", async () => {
+    mockedResolveTeamWorkspacesMode.mockReturnValue({ enabled: false, source: "off" });
+    teamWorkspacesCanaryWorkspaceIds = "ws-team-other";
+    const res = await POST(buildPostRequest(buildBody()), { params: { workspaceId: WS_ID } });
+    expect(res.status).toBe(503);
+    expect((await res.json()).errorCode).toBe("team_workspaces_disabled");
+    expect(mockedAuthorizeGate1).not.toHaveBeenCalled();
+  });
+
+  it("global/uid off, malformed Workspace-canary list -> 503, fails closed", async () => {
+    mockedResolveTeamWorkspacesMode.mockReturnValue({ enabled: false, source: "off" });
+    teamWorkspacesCanaryWorkspaceIds = "*";
+    const res = await POST(buildPostRequest(buildBody()), { params: { workspaceId: WS_ID } });
+    expect(res.status).toBe(503);
+    expect(mockedAuthorizeGate1).not.toHaveBeenCalled();
   });
 });
 

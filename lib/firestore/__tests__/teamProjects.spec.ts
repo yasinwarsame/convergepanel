@@ -145,12 +145,16 @@ const firestoreUnavailableFlag = { value: false };
 
 let teamWorkspacesEnabled = true;
 let teamWorkspacesCanaryUids: string | undefined = undefined;
+let teamWorkspacesCanaryWorkspaceIds: string | undefined = undefined;
 jest.mock("@/lib/env", () => ({
   get TEAM_WORKSPACES_ENABLED() {
     return teamWorkspacesEnabled;
   },
   get TEAM_WORKSPACES_CANARY_UIDS() {
     return teamWorkspacesCanaryUids;
+  },
+  get TEAM_WORKSPACES_CANARY_WORKSPACE_IDS() {
+    return teamWorkspacesCanaryWorkspaceIds;
   },
 }));
 
@@ -231,6 +235,7 @@ beforeEach(() => {
   failNextPostCommitGet = false;
   teamWorkspacesEnabled = true;
   teamWorkspacesCanaryUids = undefined;
+  teamWorkspacesCanaryWorkspaceIds = undefined;
   mockAdminDb.runTransaction.mockClear();
 });
 
@@ -699,5 +704,235 @@ describe("Phase 8C-A.1 — post-commit projection read failure (Sections 4-9)", 
     const result = await updateTeamProjectFields({ uid: OWNER_UID, workspaceId: WS_ID, projectId: "proj-1", mutation: { kind: "rename", name: "X" }, expectedUpdateTime: preUpdateTime });
     expect(result).toEqual({ status: "update_failed" });
     expect(stores.projects.get("proj-1")!.data.name).toBe("Existing Project"); // never applied
+  });
+});
+
+describe("Phase 10B.3.2A — Workspace-canary target admission", () => {
+  const WS_ID_2 = "ws-team-2";
+
+  function seedSecondWorkspace(overrides: Record<string, unknown> = {}) {
+    const data = {
+      schemaVersion: 1,
+      id: WS_ID_2,
+      type: "team",
+      name: "Second Team",
+      ownerUserId: OWNER_UID,
+      createdByUserId: OWNER_UID,
+      createdAt: ts(1000),
+      updatedAt: ts(1000),
+      ...overrides,
+    };
+    stores.workspaces.set(WS_ID_2, { data, updateTime: nextUpdateTime() });
+    return data;
+  }
+
+  function seedMembershipIn(workspaceId: string, uid: string, role: string, overrides: Record<string, unknown> = {}) {
+    const id = computeMembershipId(workspaceId, uid);
+    const data = {
+      schemaVersion: 1,
+      id,
+      workspaceId,
+      uid,
+      role,
+      status: "active",
+      createdAt: ts(1000),
+      updatedAt: ts(1000),
+      invitedByUserId: null,
+      removedAt: null,
+      removedByUserId: null,
+      ...overrides,
+    };
+    stores.workspaceMemberships.set(id, { data, updateTime: nextUpdateTime() });
+    return data;
+  }
+
+  describe("createTeamProject", () => {
+    it("global disabled, uid-canary admits caller -> created (source: uid_canary)", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryUids = OWNER_UID;
+      seedWorkspace();
+      seedMembership(OWNER_UID, "owner");
+      const result = await createTeamProject({ uid: OWNER_UID, workspaceId: WS_ID, name: "P" });
+      expect(result.status).toBe("created");
+    });
+
+    it("global disabled, uid-canary unset, target Workspace admitted via Workspace-canary, caller has active membership with projects.create -> created", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryWorkspaceIds = WS_ID;
+      seedWorkspace();
+      seedMembership(OWNER_UID, "owner");
+      const result = await createTeamProject({ uid: OWNER_UID, workspaceId: WS_ID, name: "P" });
+      expect(result.status).toBe("created");
+    });
+
+    it("Workspace-canary-only: caller has membership but lacks projects.create (Reviewer) -> denied at the CAPABILITY check, not admission", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryWorkspaceIds = WS_ID;
+      seedWorkspace();
+      seedMembership(OWNER_UID, "owner");
+      seedMembership(REVIEWER_UID, "reviewer");
+      const result = await createTeamProject({ uid: REVIEWER_UID, workspaceId: WS_ID, name: "P" });
+      expect(result).toEqual({ status: "unauthorized", reason: "insufficient_capability" });
+    });
+
+    it("Workspace-canary-only: target Workspace admitted but caller has no membership at all -> denied membership_not_found, zero Project writes", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryWorkspaceIds = WS_ID;
+      seedWorkspace();
+      seedMembership(OWNER_UID, "owner");
+      const result = await createTeamProject({ uid: OUTSIDER_UID, workspaceId: WS_ID, name: "P" });
+      expect(result).toEqual({ status: "unauthorized", reason: "membership_not_found" });
+      expect(stores.projects.size).toBe(0);
+    });
+
+    it("Workspace-canary-only: caller's membership is removed -> denied membership_removed", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryWorkspaceIds = WS_ID;
+      seedWorkspace();
+      seedMembership(OWNER_UID, "owner");
+      seedMembership(MEMBER_UID, "member", { status: "removed", removedAt: ts(2000), removedByUserId: OWNER_UID });
+      const result = await createTeamProject({ uid: MEMBER_UID, workspaceId: WS_ID, name: "P" });
+      expect(result).toEqual({ status: "unauthorized", reason: "membership_removed" });
+      expect(stores.projects.size).toBe(0);
+    });
+
+    it("caller has an active membership in the target Workspace, but that Workspace is NOT in the canary list and global/uid are off -> team_workspaces_disabled, zero Firestore access", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryWorkspaceIds = WS_ID_2; // admits a DIFFERENT workspace only
+      seedWorkspace();
+      seedMembership(OWNER_UID, "owner");
+      const result = await createTeamProject({ uid: OWNER_UID, workspaceId: WS_ID, name: "P" });
+      expect(result).toEqual({ status: "team_workspaces_disabled" });
+      expect(mockAdminDb.runTransaction).not.toHaveBeenCalled();
+      expect(stores.projects.size).toBe(0);
+    });
+
+    it("malformed TEAM_WORKSPACES_CANARY_WORKSPACE_IDS fails that axis closed WITHOUT poisoning a valid uid-canary admission", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryUids = OWNER_UID;
+      teamWorkspacesCanaryWorkspaceIds = "*"; // malformed
+      seedWorkspace();
+      seedMembership(OWNER_UID, "owner");
+      const result = await createTeamProject({ uid: OWNER_UID, workspaceId: WS_ID, name: "P" });
+      expect(result.status).toBe("created");
+    });
+
+    it("malformed TEAM_WORKSPACES_CANARY_WORKSPACE_IDS fails that axis closed WITHOUT poisoning global admission", async () => {
+      teamWorkspacesEnabled = true;
+      teamWorkspacesCanaryWorkspaceIds = "*"; // malformed
+      seedWorkspace();
+      seedMembership(OWNER_UID, "owner");
+      const result = await createTeamProject({ uid: OWNER_UID, workspaceId: WS_ID, name: "P" });
+      expect(result.status).toBe("created");
+    });
+  });
+
+  describe("updateTeamProjectFields", () => {
+    it("global disabled, uid-canary admits caller -> updated (source: uid_canary)", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryUids = OWNER_UID;
+      seedWorkspace();
+      seedMembership(OWNER_UID, "owner");
+      seedProject("proj-1");
+      const preUpdateTime = stores.projects.get("proj-1")!.updateTime;
+      const result = await updateTeamProjectFields({ uid: OWNER_UID, workspaceId: WS_ID, projectId: "proj-1", mutation: { kind: "rename", name: "Renamed" }, expectedUpdateTime: preUpdateTime });
+      expect(result.status).toBe("updated");
+    });
+
+    it("global disabled, uid-canary unset, target Workspace admitted via Workspace-canary, caller has projects.manage -> updated", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryWorkspaceIds = WS_ID;
+      seedWorkspace();
+      seedMembership(OWNER_UID, "owner");
+      seedProject("proj-1");
+      const preUpdateTime = stores.projects.get("proj-1")!.updateTime;
+      const result = await updateTeamProjectFields({ uid: OWNER_UID, workspaceId: WS_ID, projectId: "proj-1", mutation: { kind: "rename", name: "Renamed" }, expectedUpdateTime: preUpdateTime });
+      expect(result.status).toBe("updated");
+    });
+
+    it("Workspace-canary-only: caller has membership but lacks projects.manage (Reviewer) -> denied at the CAPABILITY check, not admission", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryWorkspaceIds = WS_ID;
+      seedWorkspace();
+      seedMembership(OWNER_UID, "owner");
+      seedMembership(REVIEWER_UID, "reviewer");
+      seedProject("proj-1");
+      const preUpdateTime = stores.projects.get("proj-1")!.updateTime;
+      const result = await updateTeamProjectFields({ uid: REVIEWER_UID, workspaceId: WS_ID, projectId: "proj-1", mutation: { kind: "rename", name: "X" }, expectedUpdateTime: preUpdateTime });
+      expect(result).toEqual({ status: "unauthorized", reason: "insufficient_capability" });
+    });
+
+    it("Workspace-canary-only: target Workspace admitted but caller has no membership -> denied membership_not_found", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryWorkspaceIds = WS_ID;
+      seedWorkspace();
+      seedMembership(OWNER_UID, "owner");
+      seedProject("proj-1");
+      const preUpdateTime = stores.projects.get("proj-1")!.updateTime;
+      const result = await updateTeamProjectFields({ uid: OUTSIDER_UID, workspaceId: WS_ID, projectId: "proj-1", mutation: { kind: "rename", name: "X" }, expectedUpdateTime: preUpdateTime });
+      expect(result).toEqual({ status: "unauthorized", reason: "membership_not_found" });
+      expect(stores.projects.get("proj-1")!.data.name).toBe("Existing Project");
+    });
+
+    it("Workspace-canary-only: caller's membership is removed -> denied membership_removed", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryWorkspaceIds = WS_ID;
+      seedWorkspace();
+      seedMembership(OWNER_UID, "owner");
+      seedMembership(MEMBER_UID, "member", { status: "removed", removedAt: ts(2000), removedByUserId: OWNER_UID });
+      seedProject("proj-1");
+      const preUpdateTime = stores.projects.get("proj-1")!.updateTime;
+      const result = await updateTeamProjectFields({ uid: MEMBER_UID, workspaceId: WS_ID, projectId: "proj-1", mutation: { kind: "rename", name: "X" }, expectedUpdateTime: preUpdateTime });
+      expect(result).toEqual({ status: "unauthorized", reason: "membership_removed" });
+    });
+
+    it("caller has an active membership in the target Workspace, but that Workspace is NOT in the canary list and global/uid are off -> team_workspaces_disabled, zero Firestore access", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryWorkspaceIds = WS_ID_2;
+      seedWorkspace();
+      seedMembership(OWNER_UID, "owner");
+      seedProject("proj-1");
+      const preUpdateTime = stores.projects.get("proj-1")!.updateTime;
+      const result = await updateTeamProjectFields({ uid: OWNER_UID, workspaceId: WS_ID, projectId: "proj-1", mutation: { kind: "rename", name: "X" }, expectedUpdateTime: preUpdateTime });
+      expect(result).toEqual({ status: "team_workspaces_disabled" });
+      expect(mockAdminDb.runTransaction).not.toHaveBeenCalled();
+      expect(stores.projects.get("proj-1")!.data.name).toBe("Existing Project");
+    });
+
+    it("MANDATORY cross-Workspace test: caller is Workspace-canary-admitted for W1 with a valid active W1 membership carrying projects.manage; the targeted Project actually belongs to W2 -> denied project_not_found, never renamed. Admission to W1 must never let the function trust a caller-supplied workspaceId over the Project's own canonical field.", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryWorkspaceIds = WS_ID; // admits W1 (WS_ID) ONLY, not W2 (WS_ID_2)
+      seedWorkspace(); // W1
+      seedSecondWorkspace(); // W2
+      seedMembership(OWNER_UID, "owner"); // active W1 membership, owner has projects.manage
+      seedProject("proj-1", { workspaceId: WS_ID_2 }); // Project actually lives in W2
+      const preUpdateTime = stores.projects.get("proj-1")!.updateTime;
+      const result = await updateTeamProjectFields({ uid: OWNER_UID, workspaceId: WS_ID, projectId: "proj-1", mutation: { kind: "rename", name: "Hijacked" }, expectedUpdateTime: preUpdateTime });
+      expect(result).toEqual({ status: "project_not_found" });
+      expect(stores.projects.get("proj-1")!.data.name).toBe("Existing Project"); // never mutated
+    });
+
+    it("malformed TEAM_WORKSPACES_CANARY_WORKSPACE_IDS fails that axis closed WITHOUT poisoning a valid uid-canary admission", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryUids = OWNER_UID;
+      teamWorkspacesCanaryWorkspaceIds = "*"; // malformed
+      seedWorkspace();
+      seedMembership(OWNER_UID, "owner");
+      seedProject("proj-1");
+      const preUpdateTime = stores.projects.get("proj-1")!.updateTime;
+      const result = await updateTeamProjectFields({ uid: OWNER_UID, workspaceId: WS_ID, projectId: "proj-1", mutation: { kind: "rename", name: "Renamed" }, expectedUpdateTime: preUpdateTime });
+      expect(result.status).toBe("updated");
+    });
+
+    it("malformed TEAM_WORKSPACES_CANARY_WORKSPACE_IDS fails that axis closed WITHOUT poisoning global admission", async () => {
+      teamWorkspacesEnabled = true;
+      teamWorkspacesCanaryWorkspaceIds = "*"; // malformed
+      seedWorkspace();
+      seedMembership(OWNER_UID, "owner");
+      seedProject("proj-1");
+      const preUpdateTime = stores.projects.get("proj-1")!.updateTime;
+      const result = await updateTeamProjectFields({ uid: OWNER_UID, workspaceId: WS_ID, projectId: "proj-1", mutation: { kind: "rename", name: "Renamed" }, expectedUpdateTime: preUpdateTime });
+      expect(result.status).toBe("updated");
+    });
   });
 });

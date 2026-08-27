@@ -53,8 +53,8 @@ import { randomUUID } from "crypto";
 import { Timestamp } from "firebase-admin/firestore";
 import { adminDb } from "@/lib/firebase/admin";
 import { logger } from "@/lib/logger";
-import { TEAM_WORKSPACES_ENABLED, TEAM_WORKSPACES_CANARY_UIDS } from "@/lib/env";
-import { resolveTeamWorkspacesMode } from "@/lib/workspaces/teamWorkspacesRollout";
+import { TEAM_WORKSPACES_ENABLED, TEAM_WORKSPACES_CANARY_UIDS, TEAM_WORKSPACES_CANARY_WORKSPACE_IDS } from "@/lib/env";
+import { resolveTeamWorkspaceTargetAdmission } from "@/lib/workspaces/teamWorkspaceTargetAdmission";
 import { authorizeTeamWorkspaceMutationInTransaction, type TeamMutationAuthorizationDenialReason } from "@/lib/workspaces/authorizeTeamWorkspaceMutationInTransaction";
 import { roleHasCapability } from "@/lib/workspaces/capabilities";
 import { isWellFormedProjectV1 } from "@/lib/projects/types";
@@ -88,8 +88,14 @@ export async function authorizeTeamClaimVerificationAdmission(args: {
   workspaceId: string;
   projectId: string | null;
 }): Promise<Gate1Result> {
-  const rollout = resolveTeamWorkspacesMode({ uid: args.uid, globalEnabled: TEAM_WORKSPACES_ENABLED, canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS });
-  if (!rollout.enabled) {
+  const admission = resolveTeamWorkspaceTargetAdmission({
+    uid: args.uid,
+    workspaceId: args.workspaceId,
+    globalEnabled: TEAM_WORKSPACES_ENABLED,
+    canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS,
+    canaryWorkspaceIdsRaw: TEAM_WORKSPACES_CANARY_WORKSPACE_IDS,
+  });
+  if (!admission.enabled) {
     return { status: "team_workspaces_disabled" };
   }
   if (!adminDb) {
@@ -190,8 +196,14 @@ export async function saveTeamClaimVerification(args: {
   auditBundle: ClaimVerificationFirestoreDoc["auditBundle"];
   selectedModels: string[];
 }): Promise<Gate2Result> {
-  const rollout = resolveTeamWorkspacesMode({ uid: args.uid, globalEnabled: TEAM_WORKSPACES_ENABLED, canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS });
-  if (!rollout.enabled) {
+  const admission = resolveTeamWorkspaceTargetAdmission({
+    uid: args.uid,
+    workspaceId: args.workspaceId,
+    globalEnabled: TEAM_WORKSPACES_ENABLED,
+    canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS,
+    canaryWorkspaceIdsRaw: TEAM_WORKSPACES_CANARY_WORKSPACE_IDS,
+  });
+  if (!admission.enabled) {
     return { status: "team_workspaces_disabled" };
   }
   if (!adminDb) {

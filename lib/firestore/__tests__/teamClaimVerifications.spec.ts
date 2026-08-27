@@ -109,12 +109,16 @@ const firestoreUnavailableFlag = { value: false };
 
 let teamWorkspacesEnabled = true;
 let teamWorkspacesCanaryUids: string | undefined = undefined;
+let teamWorkspacesCanaryWorkspaceIds: string | undefined = undefined;
 jest.mock("@/lib/env", () => ({
   get TEAM_WORKSPACES_ENABLED() {
     return teamWorkspacesEnabled;
   },
   get TEAM_WORKSPACES_CANARY_UIDS() {
     return teamWorkspacesCanaryUids;
+  },
+  get TEAM_WORKSPACES_CANARY_WORKSPACE_IDS() {
+    return teamWorkspacesCanaryWorkspaceIds;
   },
 }));
 
@@ -133,6 +137,7 @@ import { authorizeTeamClaimVerificationAdmission, saveTeamClaimVerification } fr
 import { validateTeamClaimVerificationRowShape } from "@/lib/workspaces/teamClaimVerificationRowValidation";
 
 const WS_ID = "ws-team-1";
+const WS_OTHER_ID = "ws-team-other";
 const OWNER_UID = "owner-1";
 const MEMBER_UID = "member-1";
 const REVIEWER_UID = "reviewer-1";
@@ -162,6 +167,19 @@ function seedProject(id: string, overrides: Record<string, unknown> = {}) {
   return data;
 }
 
+function seedWorkspaceById(id: string, overrides: Record<string, unknown> = {}) {
+  const data = { schemaVersion: 1, id, type: "team", name: "Other Team", ownerUserId: OWNER_UID, createdByUserId: OWNER_UID, createdAt: ts(1000), updatedAt: ts(1000), ...overrides };
+  stores.workspaces.set(id, { data, updateTime: nextUpdateTime() });
+  return data;
+}
+
+function seedMembershipInWorkspace(workspaceId: string, uid: string, role: string, overrides: Record<string, unknown> = {}) {
+  const id = computeMembershipId(workspaceId, uid);
+  const data = { schemaVersion: 1, id, workspaceId, uid, role, status: "active", createdAt: ts(1000), updatedAt: ts(1000), invitedByUserId: null, removedAt: null, removedByUserId: null, ...overrides };
+  stores.workspaceMemberships.set(id, { data, updateTime: nextUpdateTime() });
+  return data;
+}
+
 function claimArgs(overrides: Record<string, unknown> = {}) {
   return {
     uid: MEMBER_UID,
@@ -187,6 +205,7 @@ beforeEach(() => {
   firestoreUnavailableFlag.value = false;
   teamWorkspacesEnabled = true;
   teamWorkspacesCanaryUids = undefined;
+  teamWorkspacesCanaryWorkspaceIds = undefined;
   mockAdminDb.runTransaction.mockClear();
   seedWorkspace();
   seedMembership(OWNER_UID, "owner");
@@ -300,6 +319,77 @@ describe("authorizeTeamClaimVerificationAdmission — zero-write invariant (Corr
   it("denied outcome -> also zero writes attempted", async () => {
     await authorizeTeamClaimVerificationAdmission({ uid: OUTSIDER_UID, workspaceId: WS_ID, projectId: null });
     expect(writeAttempts).toEqual([]);
+  });
+});
+
+describe("authorizeTeamClaimVerificationAdmission — Workspace-canary target admission (Phase 10B.3.2A)", () => {
+  it("uid-canary only (global off) -> authorized", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryUids = MEMBER_UID;
+    const result = await authorizeTeamClaimVerificationAdmission({ uid: MEMBER_UID, workspaceId: WS_ID, projectId: null });
+    expect(result).toEqual({ status: "authorized", workspaceId: WS_ID, projectId: null });
+  });
+
+  it("Workspace-canary only, active member with research.create -> authorized", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    const result = await authorizeTeamClaimVerificationAdmission({ uid: MEMBER_UID, workspaceId: WS_ID, projectId: null });
+    expect(result).toEqual({ status: "authorized", workspaceId: WS_ID, projectId: null });
+  });
+
+  it("Workspace-canary only, reviewer (no research.create) -> insufficient_capability, not an admission failure", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    const result = await authorizeTeamClaimVerificationAdmission({ uid: REVIEWER_UID, workspaceId: WS_ID, projectId: null });
+    expect(result).toEqual({ status: "unauthorized", reason: "insufficient_capability" });
+  });
+
+  it("Workspace-canary only, no membership -> membership_not_found", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    const result = await authorizeTeamClaimVerificationAdmission({ uid: OUTSIDER_UID, workspaceId: WS_ID, projectId: null });
+    expect(result).toEqual({ status: "unauthorized", reason: "membership_not_found" });
+  });
+
+  it("Workspace-canary only, removed membership -> membership_removed", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    seedMembership(MEMBER_UID, "member", { status: "removed", removedAt: ts(2000), removedByUserId: OWNER_UID });
+    const result = await authorizeTeamClaimVerificationAdmission({ uid: MEMBER_UID, workspaceId: WS_ID, projectId: null });
+    expect(result).toEqual({ status: "unauthorized", reason: "membership_removed" });
+  });
+
+  it("MANDATORY cross-target: Workspace-canary admits WS_ID only; caller also has a valid membership in WS_OTHER_ID, but WS_OTHER_ID is not itself admitted -> team_workspaces_disabled, not authorized via the caller's unrelated admitted-Workspace membership", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID; // only WS_ID admitted, not WS_OTHER_ID
+    seedWorkspaceById(WS_OTHER_ID);
+    seedMembershipInWorkspace(WS_OTHER_ID, MEMBER_UID, "member");
+    const result = await authorizeTeamClaimVerificationAdmission({ uid: MEMBER_UID, workspaceId: WS_OTHER_ID, projectId: null });
+    expect(result).toEqual({ status: "team_workspaces_disabled" });
+  });
+
+  it("MANDATORY cross-Workspace resource mismatch: Workspace-canary admits WS_ID and caller has a valid WS_ID membership with research.create+research.organize, but the supplied projectId's own canonical workspaceId is a different, unrelated Workspace -> project_not_found, never authorized via the caller's WS_ID admission", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    seedMembership(MEMBER_UID, "admin");
+    seedProject(PROJECT_ID, { workspaceId: "ws-other" });
+    const result = await authorizeTeamClaimVerificationAdmission({ uid: MEMBER_UID, workspaceId: WS_ID, projectId: PROJECT_ID });
+    expect(result).toEqual({ status: "project_not_found" });
+  });
+
+  it("malformed Workspace-canary list, global/uid off -> team_workspaces_disabled (fails closed)", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = "*";
+    const result = await authorizeTeamClaimVerificationAdmission({ uid: MEMBER_UID, workspaceId: WS_ID, projectId: null });
+    expect(result).toEqual({ status: "team_workspaces_disabled" });
+  });
+
+  it("malformed Workspace-canary list does not poison a valid uid-canary admission", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryUids = MEMBER_UID;
+    teamWorkspacesCanaryWorkspaceIds = "*";
+    const result = await authorizeTeamClaimVerificationAdmission({ uid: MEMBER_UID, workspaceId: WS_ID, projectId: null });
+    expect(result).toEqual({ status: "authorized", workspaceId: WS_ID, projectId: null });
   });
 });
 
@@ -438,5 +528,52 @@ describe("saveTeamClaimVerification — races (Gate 1 must not authorize Gate 2)
     seedProject(PROJECT_ID);
     const gate2Direct = await saveTeamClaimVerification(claimArgs({ uid: OWNER_UID, projectId: PROJECT_ID }) as any);
     expect(gate2Direct.status).toBe("created");
+  });
+});
+
+describe("saveTeamClaimVerification — Workspace-canary target admission (Phase 10B.3.2A)", () => {
+  it("Workspace-canary only, active member with research.create -> created", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    const result = await saveTeamClaimVerification(claimArgs() as any);
+    expect(result.status).toBe("created");
+  });
+
+  it("Workspace-canary only, reviewer (no research.create) -> insufficient_capability, zero artifact", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    const result = await saveTeamClaimVerification(claimArgs({ uid: REVIEWER_UID }) as any);
+    expect(result).toEqual({ status: "unauthorized", reason: "insufficient_capability" });
+    expect(stores.verifications.size).toBe(0);
+  });
+
+  it("MANDATORY cross-target: Workspace-canary admits WS_ID only; caller has a valid membership in WS_OTHER_ID too, but calling with workspaceId: WS_OTHER_ID (not itself admitted) -> team_workspaces_disabled, zero writes — the caller's admitted status for WS_ID never carries over to a different target workspace", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID; // only WS_ID admitted
+    seedWorkspaceById(WS_OTHER_ID);
+    seedMembershipInWorkspace(WS_OTHER_ID, MEMBER_UID, "member");
+    const result = await saveTeamClaimVerification(claimArgs({ workspaceId: WS_OTHER_ID }) as any);
+    expect(result).toEqual({ status: "team_workspaces_disabled" });
+    expect(stores.verifications.size).toBe(0);
+    expect(writeAttempts).toEqual([]);
+  });
+
+  it("MANDATORY cross-Workspace resource mismatch: Workspace-canary admits WS_ID and caller has a valid WS_ID membership with research.create+research.organize, but the supplied projectId's own canonical workspaceId is a different, unrelated Workspace -> project_not_found, zero writes", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    seedMembership(MEMBER_UID, "admin");
+    seedProject(PROJECT_ID, { workspaceId: "ws-other" });
+    const result = await saveTeamClaimVerification(claimArgs({ projectId: PROJECT_ID }) as any);
+    expect(result).toEqual({ status: "project_not_found" });
+    expect(stores.verifications.size).toBe(0);
+    expect(writeAttempts).toEqual([]);
+  });
+
+  it("malformed Workspace-canary list, global/uid off -> team_workspaces_disabled, zero writes", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = "*";
+    const result = await saveTeamClaimVerification(claimArgs() as any);
+    expect(result).toEqual({ status: "team_workspaces_disabled" });
+    expect(writeAttempts).toEqual([]);
   });
 });

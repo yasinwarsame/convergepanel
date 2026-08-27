@@ -131,12 +131,16 @@ jest.mock("@/lib/firebase/admin", () => ({
 
 let teamWorkspacesEnabled = true;
 let teamWorkspacesCanaryUids: string | undefined = undefined;
+let teamWorkspacesCanaryWorkspaceIds: string | undefined = undefined;
 jest.mock("@/lib/env", () => ({
   get TEAM_WORKSPACES_ENABLED() {
     return teamWorkspacesEnabled;
   },
   get TEAM_WORKSPACES_CANARY_UIDS() {
     return teamWorkspacesCanaryUids;
+  },
+  get TEAM_WORKSPACES_CANARY_WORKSPACE_IDS() {
+    return teamWorkspacesCanaryWorkspaceIds;
   },
 }));
 
@@ -247,6 +251,7 @@ beforeEach(() => {
   resetStores();
   teamWorkspacesEnabled = true;
   teamWorkspacesCanaryUids = undefined;
+  teamWorkspacesCanaryWorkspaceIds = undefined;
   firestoreUnavailableFlag.value = false;
   transactionShouldThrow.value = false;
   concurrentMutationHook = null;
@@ -276,6 +281,173 @@ describe("infrastructure gates", () => {
     const result = await call({ targetProjectId: PROJECT_ID });
     expect(result.status).toBe("transaction_failed");
     expect(logger.warn).toHaveBeenCalled();
+  });
+});
+
+// Phase 10B.3.2A — target-Workspace admission migrated from
+// resolveTeamWorkspacesMode() to resolveTeamWorkspaceTargetAdmission().
+// This function is a single-gate function (no separate route-level
+// precheck), so every admission path is exercised directly here.
+describe("target-Workspace admission (resolveTeamWorkspaceTargetAdmission)", () => {
+  it("A — global enabled -> admitted (unchanged regression)", async () => {
+    teamWorkspacesEnabled = true;
+    seedRun({ projectId: null });
+    seedProject(PROJECT_ID);
+    const result = await call({ targetProjectId: PROJECT_ID });
+    expect(result.status).toBe("associated");
+  });
+
+  it("B — uid-canary admits caller regardless of Workspace-canary axis -> admitted", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryUids = MEMBER_UID;
+    teamWorkspacesCanaryWorkspaceIds = undefined;
+    seedRun({ projectId: null });
+    seedProject(PROJECT_ID);
+    const result = await call({ targetProjectId: PROJECT_ID });
+    expect(result.status).toBe("associated");
+  });
+
+  it("C — Workspace-canary-only, target Workspace admitted, caller has active membership+capability -> admitted", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryUids = undefined;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    seedRun({ projectId: null });
+    seedProject(PROJECT_ID);
+    const result = await call({ targetProjectId: PROJECT_ID });
+    expect(result.status).toBe("associated");
+  });
+
+  it("D — Workspace-canary-only, caller admitted but lacks research.organize (Reviewer) -> denied at capability, not admission", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryUids = undefined;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    seedMembership(REVIEWER_UID, "reviewer");
+    seedRun({ projectId: null });
+    seedProject(PROJECT_ID);
+    const result = await call({ uid: REVIEWER_UID, targetProjectId: PROJECT_ID });
+    expect(result).toEqual({ status: "unauthorized", reason: "insufficient_capability" });
+  });
+
+  it("E — Workspace-canary-only, target admitted but caller has no membership -> denied (membership_not_found, not concealed differently than the pre-migration path)", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryUids = undefined;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    const result = await call({ uid: OUTSIDER_UID });
+    expect(result).toEqual({ status: "unauthorized", reason: "membership_not_found" });
+  });
+
+  it("F — Workspace-canary-only, caller's membership was removed -> denied (membership_removed)", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryUids = undefined;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    seedMembership(MEMBER_UID, "member", WS_ID, { status: "removed", removedAt: NOW, removedByUserId: OWNER_UID });
+    const result = await call();
+    expect(result).toEqual({ status: "unauthorized", reason: "membership_removed" });
+  });
+
+  it("G — target Workspace NOT in the canary list (and global/uid off) -> team_workspaces_disabled, zero Firestore access", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryUids = undefined;
+    teamWorkspacesCanaryWorkspaceIds = OTHER_WS_ID; // a different Workspace is admitted, not WS_ID
+    seedRun({ projectId: null });
+    const result = await call({ targetProjectId: PROJECT_ID });
+    expect(result.status).toBe("team_workspaces_disabled");
+    expect(mockAdminDb.runTransaction).not.toHaveBeenCalled();
+  });
+
+  it("H — malformed Workspace-canary list (too many entries) fails that axis closed but does not poison a valid uid-canary admission", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryUids = MEMBER_UID;
+    teamWorkspacesCanaryWorkspaceIds = Array.from({ length: 11 }, (_, i) => `ws-${i}`).join(",");
+    seedRun({ projectId: null });
+    seedProject(PROJECT_ID);
+    const result = await call({ targetProjectId: PROJECT_ID });
+    expect(result.status).toBe("associated");
+  });
+
+  it("I — malformed Workspace-canary list (too many entries) does not broaden access when no other axis admits -> team_workspaces_disabled", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryUids = undefined;
+    teamWorkspacesCanaryWorkspaceIds = Array.from({ length: 11 }, (_, i) => `ws-${i}`).join(",");
+    seedRun({ projectId: null });
+    const result = await call({ targetProjectId: PROJECT_ID });
+    expect(result.status).toBe("team_workspaces_disabled");
+    expect(mockAdminDb.runTransaction).not.toHaveBeenCalled();
+  });
+
+  it("J — malformed Workspace-canary list (control character entry) fails closed, does not broaden access", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryUids = undefined;
+    teamWorkspacesCanaryWorkspaceIds = `${WS_ID} `;
+    seedRun({ projectId: null });
+    const result = await call({ targetProjectId: PROJECT_ID });
+    expect(result.status).toBe("team_workspaces_disabled");
+    expect(mockAdminDb.runTransaction).not.toHaveBeenCalled();
+  });
+});
+
+// Mandatory cross-Workspace run/project binding matrix for Phase 10B.3.2A —
+// the target-Workspace admission axis must never be conflatable with the
+// run's/project's own canonical workspaceId binding, which is enforced
+// entirely by the pre-existing, unmigrated run/project integrity checks
+// above (`run_not_found` for a foreign-Workspace run, `target_not_found`
+// for a foreign-Workspace project).
+describe("cross-Workspace binding matrix (Workspace-canary admission never substitutes for canonical binding)", () => {
+  function seedOtherWorkspace(overrides: Record<string, unknown> = {}) {
+    stores.workspaces.set(
+      OTHER_WS_ID,
+      asPersisted({ schemaVersion: 1, id: OTHER_WS_ID, type: "team", name: "Other Team", ownerUserId: OWNER_UID, createdByUserId: OWNER_UID, createdAt: NOW, updatedAt: NOW, ...overrides })
+    );
+  }
+
+  beforeEach(() => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryUids = undefined;
+  });
+
+  it("1 — W1 run + W1 project + caller Workspace-canary-admitted for W1 with research.organize -> SUCCESS", async () => {
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    seedRun({ workspaceId: WS_ID, projectId: null });
+    seedProject(PROJECT_ID, { workspaceId: WS_ID });
+    const result = await call({ workspaceId: WS_ID, targetProjectId: PROJECT_ID });
+    expect(result.status).toBe("associated");
+  });
+
+  it("2 — W1 run + W2 (mismatched) project -> DENY as target_not_found, regardless of admission outcome", async () => {
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    seedOtherWorkspace();
+    seedRun({ workspaceId: WS_ID, projectId: null });
+    seedProject(PROJECT_ID, { workspaceId: OTHER_WS_ID });
+    const result = await call({ workspaceId: WS_ID, targetProjectId: PROJECT_ID });
+    expect(result.status).toBe("target_not_found");
+  });
+
+  it("3 — W2 (mismatched) run + W1 project -> DENY as run_not_found", async () => {
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    seedOtherWorkspace();
+    seedRun({ workspaceId: OTHER_WS_ID, projectId: null });
+    seedProject(PROJECT_ID, { workspaceId: WS_ID });
+    const result = await call({ workspaceId: WS_ID, targetProjectId: PROJECT_ID });
+    expect(result.status).toBe("run_not_found");
+  });
+
+  it("4 — W2 run + W2 project, caller only Workspace-canary-admitted for W1 (W2 not admitted) -> DENY as an admission failure, before any run/project read", async () => {
+    teamWorkspacesCanaryWorkspaceIds = WS_ID; // W2 (OTHER_WS_ID) is NOT in the list
+    seedOtherWorkspace();
+    seedMembership(MEMBER_UID, "member", OTHER_WS_ID);
+    stores.runs.set(RUN_ID, asPersisted({ userId: MEMBER_UID, workspaceId: OTHER_WS_ID, question: "q", selectedModels: [], status: "complete", createdAt: NOW, projectId: null }));
+    stores.projects.set(PROJECT_ID, asPersisted({ schemaVersion: 1, id: PROJECT_ID, workspaceId: OTHER_WS_ID, name: "P", status: "active", createdByUserId: OWNER_UID, createdAt: NOW, updatedAt: NOW }));
+    const result = await call({ workspaceId: OTHER_WS_ID, targetProjectId: PROJECT_ID });
+    expect(result.status).toBe("team_workspaces_disabled");
+    expect(mockAdminDb.runTransaction).not.toHaveBeenCalled();
+  });
+
+  it("5 — uid-canary/global-enabled callers retain identical binding-mismatch denial behavior after this migration (regression)", async () => {
+    teamWorkspacesEnabled = true; // global path, unaffected by the target-admission migration
+    seedOtherWorkspace();
+    seedRun({ workspaceId: OTHER_WS_ID, projectId: null });
+    const result = await call({ workspaceId: WS_ID, targetProjectId: PROJECT_ID });
+    expect(result.status).toBe("run_not_found");
   });
 });
 
