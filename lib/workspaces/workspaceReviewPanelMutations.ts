@@ -88,8 +88,8 @@
 import "server-only";
 import { adminDb } from "@/lib/firebase/admin";
 import { logger } from "@/lib/logger";
-import { TEAM_WORKSPACES_ENABLED, TEAM_WORKSPACES_CANARY_UIDS } from "@/lib/env";
-import { resolveTeamWorkspacesMode } from "./teamWorkspacesRollout";
+import { TEAM_WORKSPACES_ENABLED, TEAM_WORKSPACES_CANARY_UIDS, TEAM_WORKSPACES_CANARY_WORKSPACE_IDS } from "@/lib/env";
+import { resolveTeamWorkspaceTargetAdmission } from "./teamWorkspaceTargetAdmission";
 import { authorizeTeamWorkspaceMutationInTransaction, type TeamMutationAuthorizationDenialReason } from "./authorizeTeamWorkspaceMutationInTransaction";
 import { roleHasCapability } from "./capabilities";
 import { resolveWorkspaceReviewTarget } from "./resolveWorkspaceReviewTarget";
@@ -309,8 +309,14 @@ export async function putWorkspaceReviewPanel(args: {
   expectedRevision: number;
   now?: string;
 }): Promise<PutWorkspaceReviewPanelResult> {
-  const rollout = resolveTeamWorkspacesMode({ uid: args.uid, globalEnabled: TEAM_WORKSPACES_ENABLED, canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS });
-  if (!rollout.enabled) return { ok: false, reason: "team_workspaces_disabled" };
+  const admission = resolveTeamWorkspaceTargetAdmission({
+    uid: args.uid,
+    workspaceId: args.workspaceId,
+    globalEnabled: TEAM_WORKSPACES_ENABLED,
+    canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS,
+    canaryWorkspaceIdsRaw: TEAM_WORKSPACES_CANARY_WORKSPACE_IDS,
+  });
+  if (!admission.enabled) return { ok: false, reason: "team_workspaces_disabled" };
   if (!adminDb) return { ok: false, reason: "firestore_unavailable" };
 
   const now = args.now ?? new Date().toISOString();
@@ -417,8 +423,14 @@ export type DeleteWorkspaceReviewPanelResult = { ok: true } | { ok: false; reaso
 
 /** Never a physical delete — writes a terminal `status: "cancelled"` configuration, preserving the reviewer list, exactly mirroring `cancelAdaptiveHumanReviewPanel()`. Drain-eligible — no Approval Workflow gate anywhere in this function or its caller. */
 export async function deleteWorkspaceReviewPanel(args: { uid: string; workspaceId: string; runId: string; expectedRevision: number; now?: string }): Promise<DeleteWorkspaceReviewPanelResult> {
-  const rollout = resolveTeamWorkspacesMode({ uid: args.uid, globalEnabled: TEAM_WORKSPACES_ENABLED, canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS });
-  if (!rollout.enabled) return { ok: false, reason: "team_workspaces_disabled" };
+  const admission = resolveTeamWorkspaceTargetAdmission({
+    uid: args.uid,
+    workspaceId: args.workspaceId,
+    globalEnabled: TEAM_WORKSPACES_ENABLED,
+    canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS,
+    canaryWorkspaceIdsRaw: TEAM_WORKSPACES_CANARY_WORKSPACE_IDS,
+  });
+  if (!admission.enabled) return { ok: false, reason: "team_workspaces_disabled" };
   if (!adminDb) return { ok: false, reason: "firestore_unavailable" };
 
   const now = args.now ?? new Date().toISOString();
@@ -513,8 +525,14 @@ export async function submitWorkspaceReviewPanelVote(args: {
   conditions?: string[];
   now?: string;
 }): Promise<SubmitWorkspaceReviewPanelVoteResult> {
-  const rollout = resolveTeamWorkspacesMode({ uid: args.uid, globalEnabled: TEAM_WORKSPACES_ENABLED, canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS });
-  if (!rollout.enabled) return { ok: false, reason: "team_workspaces_disabled" };
+  const admission = resolveTeamWorkspaceTargetAdmission({
+    uid: args.uid,
+    workspaceId: args.workspaceId,
+    globalEnabled: TEAM_WORKSPACES_ENABLED,
+    canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS,
+    canaryWorkspaceIdsRaw: TEAM_WORKSPACES_CANARY_WORKSPACE_IDS,
+  });
+  if (!admission.enabled) return { ok: false, reason: "team_workspaces_disabled" };
   if (!adminDb) return { ok: false, reason: "firestore_unavailable" };
 
   const now = args.now ?? new Date().toISOString();
@@ -615,8 +633,14 @@ export type FinalizeWorkspaceReviewPanelResult = { ok: true; status: AdaptiveRev
 
 /** No Approval Workflow gate — drain-eligible. Requires `reviews.manage` (any manager may finalize an already-`ready` panel, mirroring the legacy finalize route's own "mechanical, not an executive judgment call" rationale). */
 export async function finalizeWorkspaceReviewPanel(args: { uid: string; workspaceId: string; runId: string; expectedPanelRevision: number; expectedGovernanceUpdatedAt: string; now?: string }): Promise<FinalizeWorkspaceReviewPanelResult> {
-  const rollout = resolveTeamWorkspacesMode({ uid: args.uid, globalEnabled: TEAM_WORKSPACES_ENABLED, canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS });
-  if (!rollout.enabled) return { ok: false, reason: "team_workspaces_disabled" };
+  const admission = resolveTeamWorkspaceTargetAdmission({
+    uid: args.uid,
+    workspaceId: args.workspaceId,
+    globalEnabled: TEAM_WORKSPACES_ENABLED,
+    canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS,
+    canaryWorkspaceIdsRaw: TEAM_WORKSPACES_CANARY_WORKSPACE_IDS,
+  });
+  if (!admission.enabled) return { ok: false, reason: "team_workspaces_disabled" };
   if (!adminDb) return { ok: false, reason: "firestore_unavailable" };
 
   const now = args.now ?? new Date().toISOString();
@@ -877,8 +901,14 @@ export async function overrideWorkspaceReviewPanel(args: {
   conditions?: string[];
   now?: string;
 }): Promise<OverrideWorkspaceReviewPanelResult> {
-  const rollout = resolveTeamWorkspacesMode({ uid: args.uid, globalEnabled: TEAM_WORKSPACES_ENABLED, canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS });
-  if (!rollout.enabled) return { ok: false, reason: "team_workspaces_disabled" };
+  const admission = resolveTeamWorkspaceTargetAdmission({
+    uid: args.uid,
+    workspaceId: args.workspaceId,
+    globalEnabled: TEAM_WORKSPACES_ENABLED,
+    canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS,
+    canaryWorkspaceIdsRaw: TEAM_WORKSPACES_CANARY_WORKSPACE_IDS,
+  });
+  if (!admission.enabled) return { ok: false, reason: "team_workspaces_disabled" };
   if (!adminDb) return { ok: false, reason: "firestore_unavailable" };
 
   const now = args.now ?? new Date().toISOString();
