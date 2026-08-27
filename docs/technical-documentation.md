@@ -856,6 +856,16 @@ A separate, panel-based review workflow layered on top of the adaptive schema sy
 
 **Seed/test harness:** `scripts/seed-adaptive-multi-reviewer-e2e.ts` / `scripts/cleanup-adaptive-multi-reviewer-e2e.ts` — six deterministic scenarios (A–F) under the `gov-e2e-seed-` namespace, safe to run against production since this repo has no separate dev/staging Firebase project (`ALLOW_NON_PROD_GOVERNANCE_SEED=true` + `--confirm-project=convergepanel` both required). Cleanup defaults to dry-run; every candidate path is namespace-checked independently before any delete.
 
+### Workspace Approval Workflow (Phase 9) — dark, Production-canary-proven, internal use only
+
+A **separate, newer** governance system layered on the same `governanceRecord.humanReview` shape, scoped to the new Workspace model (`app/api/workspaces/[workspaceId]/...`) rather than the legacy `teams`/`teamRuns` collections the Multi-Reviewer Governance section above uses — do not conflate the two; they have independent env-var gates, independent admission resolvers, and never share code paths. Covers: single-reviewer assignment/decision/resubmit, multi-reviewer panel (create/reconfigure/vote/finalize/cancel), and Owner Override.
+
+**Two independent, additive gates**, both required: Team Workspace access (`resolveTeamWorkspacesMode()`, `TEAM_WORKSPACES_ENABLED`/`TEAM_WORKSPACES_CANARY_UIDS`) and Approval Workflow admission (`resolveApprovalWorkflowAdmission()`, `APPROVAL_WORKFLOW_ENABLED`/`APPROVAL_WORKFLOW_CANARY_UIDS`, `lib/workspaces/approvalWorkflowRollout.ts`). An existing open panel is independently **drain-reachable** (vote/finalize/cancel/Override) even once Approval admission is withdrawn for its participants — only *new* governance work (queue, assignment, ordinary decision, resubmit, panel create/reconfigure) requires live admission.
+
+**Current Production state: both gates dark** (`APPROVAL_WORKFLOW_ENABLED=false`/unset, canary UID list empty/absent). A full controlled Production canary (Phase 9D.0–9D.6) exercised every mutation path — ordinary assignment/changes-requested/resubmit, panel quorum/finalize, panel cancel + cancelled-panel ordinary fallback, and Owner Override under Approval drain — against real Production data with zero security defects and zero unexplained state drift. The canary validated the **governance state machine**; it is not itself authorization for external, broad, or global rollout — see the runbook below for the exact rollout-tier decision and outstanding prerequisites (Team invite-canary admission, panel-mutation audit coverage, UI post-mutation reconciliation).
+
+Full operational detail, the executed canary closeout (tested source SHA, final governance matrix, rollback procedure, technical debt register, recanary policy): **[`docs/operations/workspace-governance-canary-runbook.md`](./operations/workspace-governance-canary-runbook.md)**.
+
 ---
 
 ## Adaptive Research Export
