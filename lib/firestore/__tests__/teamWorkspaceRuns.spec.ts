@@ -97,12 +97,16 @@ const firestoreUnavailableFlag = { value: false };
 
 let teamWorkspacesEnabled = true;
 let teamWorkspacesCanaryUids: string | undefined = undefined;
+let teamWorkspacesCanaryWorkspaceIds: string | undefined = undefined;
 jest.mock("@/lib/env", () => ({
   get TEAM_WORKSPACES_ENABLED() {
     return teamWorkspacesEnabled;
   },
   get TEAM_WORKSPACES_CANARY_UIDS() {
     return teamWorkspacesCanaryUids;
+  },
+  get TEAM_WORKSPACES_CANARY_WORKSPACE_IDS() {
+    return teamWorkspacesCanaryWorkspaceIds;
   },
 }));
 
@@ -195,6 +199,7 @@ beforeEach(() => {
   firestoreUnavailableFlag.value = false;
   teamWorkspacesEnabled = true;
   teamWorkspacesCanaryUids = undefined;
+  teamWorkspacesCanaryWorkspaceIds = undefined;
   mockAdminDb.runTransaction.mockClear();
   seedWorkspace();
   seedMembership(OWNER_UID, "owner");
@@ -214,6 +219,80 @@ describe("createTeamWorkspaceRun — rollout", () => {
     firestoreUnavailableFlag.value = true;
     const result = await createTeamWorkspaceRun(baseArgs());
     expect(result).toEqual({ status: "firestore_unavailable" });
+  });
+});
+
+describe("createTeamWorkspaceRun — Workspace-scoped Team canary admission (Phase 10B.3.2A)", () => {
+  // Category A (global-enabled success) already covered throughout this
+  // file's default beforeEach (teamWorkspacesEnabled=true) — e.g. the
+  // "Unfiled" success test below. Not duplicated here.
+
+  it("Category B: uid-canary, global disabled -> created", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryUids = `other-uid,${MEMBER_UID}`;
+    const result = await createTeamWorkspaceRun(baseArgs());
+    expect(result.status).toBe("created");
+  });
+
+  it("Category C: Workspace-canary-only (global/uid disabled, target workspaceId admitted, caller has active membership + research.create) -> created; run's own canonical workspaceId field equals the exact id used for admission", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryUids = undefined;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    const result = await createTeamWorkspaceRun(baseArgs());
+    expect(result.status).toBe("created");
+    if (result.status !== "created") throw new Error("expected created");
+    const stored = stores.runs.get(result.runId);
+    expect(stored!.data.workspaceId).toBe(WS_ID);
+  });
+
+  it("Category D: Workspace-canary-only, caller lacks research.create (reviewer role) -> insufficient_capability, no run created", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    const result = await createTeamWorkspaceRun(baseArgs({ uid: REVIEWER_UID }));
+    expect(result).toEqual({ status: "unauthorized", reason: "insufficient_capability" });
+    expect(stores.runs.size).toBe(0);
+  });
+
+  it("Category E: Workspace-canary-only, caller has NO membership in the admitted Workspace -> membership_not_found, no run created", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    const result = await createTeamWorkspaceRun(baseArgs({ uid: OUTSIDER_UID }));
+    expect(result).toEqual({ status: "unauthorized", reason: "membership_not_found" });
+    expect(stores.runs.size).toBe(0);
+  });
+
+  it("Category F: Workspace-canary-only, caller's membership was removed -> membership_removed, no run created", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    seedMembership(MEMBER_UID, "member", { status: "removed", removedAt: ts(2000), removedByUserId: OWNER_UID });
+    const result = await createTeamWorkspaceRun(baseArgs());
+    expect(result).toEqual({ status: "unauthorized", reason: "membership_removed" });
+    expect(stores.runs.size).toBe(0);
+  });
+
+  it("Category G: target workspaceId NOT in TEAM_WORKSPACES_CANARY_WORKSPACE_IDS, global/uid disabled -> team_workspaces_disabled with ZERO Firestore access", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = "some-other-workspace-id";
+    const result = await createTeamWorkspaceRun(baseArgs());
+    expect(result).toEqual({ status: "team_workspaces_disabled" });
+    expect(mockAdminDb.runTransaction).not.toHaveBeenCalled();
+  });
+
+  it("Category I: malformed Workspace-canary list (>10 entries) does not poison an otherwise-valid uid-canary admission -> created", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryUids = MEMBER_UID;
+    teamWorkspacesCanaryWorkspaceIds = Array.from({ length: 11 }, (_, i) => `ws-${i}`).join(",");
+    const result = await createTeamWorkspaceRun(baseArgs());
+    expect(result.status).toBe("created");
+  });
+
+  it("Category J: malformed Workspace-canary list (>10 entries, WOULD have included WS_ID) does NOT grant access -> team_workspaces_disabled, ZERO Firestore access, fails closed rather than broadening", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryUids = undefined;
+    teamWorkspacesCanaryWorkspaceIds = [WS_ID, ...Array.from({ length: 10 }, (_, i) => `ws-${i}`)].join(",");
+    const result = await createTeamWorkspaceRun(baseArgs());
+    expect(result).toEqual({ status: "team_workspaces_disabled" });
+    expect(mockAdminDb.runTransaction).not.toHaveBeenCalled();
   });
 });
 

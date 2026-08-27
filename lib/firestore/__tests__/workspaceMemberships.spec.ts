@@ -124,12 +124,16 @@ const firestoreUnavailableFlag = { value: false };
 
 let teamWorkspacesEnabled = true;
 let teamWorkspacesCanaryUids: string | undefined = undefined;
+let teamWorkspacesCanaryWorkspaceIds: string | undefined = undefined;
 jest.mock("@/lib/env", () => ({
   get TEAM_WORKSPACES_ENABLED() {
     return teamWorkspacesEnabled;
   },
   get TEAM_WORKSPACES_CANARY_UIDS() {
     return teamWorkspacesCanaryUids;
+  },
+  get TEAM_WORKSPACES_CANARY_WORKSPACE_IDS() {
+    return teamWorkspacesCanaryWorkspaceIds;
   },
 }));
 
@@ -190,6 +194,7 @@ beforeEach(() => {
   firestoreUnavailableFlag.value = false;
   teamWorkspacesEnabled = true;
   teamWorkspacesCanaryUids = undefined;
+  teamWorkspacesCanaryWorkspaceIds = undefined;
 });
 
 describe("getWorkspaceMembershipForBinding", () => {
@@ -630,5 +635,220 @@ describe("transferTeamWorkspaceOwnership", () => {
       });
       expect(result.status).toBe("transferred");
     });
+  });
+
+  describe("Phase 10B.3.2A — Workspace-canary target admission", () => {
+    it("Workspace-canary-only: caller is the canonical Owner and Workspace-canary admitted for the target -> transfer SUCCEEDS, even with global off and callerUid not in the uid-canary", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryWorkspaceIds = WS_ID;
+      const tokens = seedHappyPath();
+      const result = await transferTeamWorkspaceOwnership({
+        workspaceId: WS_ID,
+        callerUid: OWNER_UID,
+        newOwnerUid: OTHER_UID,
+        expectedWorkspaceUpdateTime: tokens.workspaceUpdateTime,
+        expectedOldOwnerMembershipUpdateTime: tokens.oldOwnerUpdateTime,
+        expectedNewOwnerMembershipUpdateTime: tokens.newOwnerUpdateTime,
+      });
+      expect(result.status).toBe("transferred");
+    });
+
+    it("Workspace-canary-only: caller has an active membership (admission granted) but is NOT the Owner -> transfer FAILS via the owner-authority check, not via admission", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryWorkspaceIds = WS_ID;
+      // OTHER_UID is Workspace-canary admitted (target admitted, membership
+      // exists) but holds role "admin", not "owner" — admission succeeds,
+      // isCanonicalTeamOwnerMembership() must be what denies this.
+      const workspaceUpdateTime = seedTeamWorkspace();
+      const callerUpdateTime = seedMembership(OTHER_UID, "admin");
+      const targetUpdateTime = seedMembership("member-2", "member");
+      const result = await transferTeamWorkspaceOwnership({
+        workspaceId: WS_ID,
+        callerUid: OTHER_UID,
+        newOwnerUid: "member-2",
+        expectedWorkspaceUpdateTime: workspaceUpdateTime,
+        expectedOldOwnerMembershipUpdateTime: callerUpdateTime,
+        expectedNewOwnerMembershipUpdateTime: targetUpdateTime,
+      });
+      expect(result.status).toBe("caller_not_owner");
+      expect(stores.workspaces.get(WS_ID)!.data.ownerUserId).toBe(OWNER_UID);
+    });
+
+    it("Workspace-canary admitted for the target workspace, but a membership belonging to a DIFFERENT workspace cannot be used as the successor", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryWorkspaceIds = WS_ID;
+      const workspaceUpdateTime = seedTeamWorkspace();
+      const oldOwnerUpdateTime = seedMembership(OWNER_UID, "owner");
+      // No membership document exists at computeMembershipId(WS_ID, OTHER_UID)
+      // — only a foreign one bound to a different workspace — so the
+      // canonical binding lookup correctly reports not-found rather than
+      // treating any membership row for OTHER_UID as eligible.
+      const foreignId = computeMembershipId("some-other-ws", OTHER_UID);
+      stores.workspaceMemberships.set(foreignId, {
+        data: { schemaVersion: 1, id: foreignId, workspaceId: "some-other-ws", uid: OTHER_UID, role: "member", status: "active", createdAt: Timestamp.now(), updatedAt: Timestamp.now(), invitedByUserId: null, removedAt: null, removedByUserId: null },
+        updateTime: nextUpdateTime(),
+      });
+      const result = await transferTeamWorkspaceOwnership({
+        workspaceId: WS_ID,
+        callerUid: OWNER_UID,
+        newOwnerUid: OTHER_UID,
+        expectedWorkspaceUpdateTime: workspaceUpdateTime,
+        expectedOldOwnerMembershipUpdateTime: oldOwnerUpdateTime,
+        expectedNewOwnerMembershipUpdateTime: nextUpdateTime(),
+      });
+      expect(result.status).toBe("new_owner_membership_not_found");
+      expect(stores.workspaces.get(WS_ID)!.data.ownerUserId).toBe(OWNER_UID);
+    });
+
+    it("Workspace-canary admitted + caller has no membership at all in the target workspace -> denied", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryWorkspaceIds = WS_ID;
+      seedTeamWorkspace();
+      const result = await transferTeamWorkspaceOwnership({
+        workspaceId: WS_ID,
+        callerUid: OWNER_UID,
+        newOwnerUid: OTHER_UID,
+        expectedWorkspaceUpdateTime: Timestamp.now(),
+        expectedOldOwnerMembershipUpdateTime: Timestamp.now(),
+        expectedNewOwnerMembershipUpdateTime: Timestamp.now(),
+      });
+      expect(result.status).toBe("caller_not_owner");
+    });
+
+    it("Workspace-canary admitted + caller's membership was removed -> denied", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryWorkspaceIds = WS_ID;
+      const workspaceUpdateTime = seedTeamWorkspace();
+      const callerUpdateTime = seedMembership(OWNER_UID, "owner", { status: "removed", removedAt: Timestamp.now(), removedByUserId: "someone" });
+      const targetUpdateTime = seedMembership(OTHER_UID, "member");
+      const result = await transferTeamWorkspaceOwnership({
+        workspaceId: WS_ID,
+        callerUid: OWNER_UID,
+        newOwnerUid: OTHER_UID,
+        expectedWorkspaceUpdateTime: workspaceUpdateTime,
+        expectedOldOwnerMembershipUpdateTime: callerUpdateTime,
+        expectedNewOwnerMembershipUpdateTime: targetUpdateTime,
+      });
+      expect(result.status).toBe("caller_not_owner");
+      expect(stores.workspaces.get(WS_ID)!.data.ownerUserId).toBe(OWNER_UID);
+    });
+
+    it("target workspace NOT admitted at all -> denied, zero Firestore access (concealed team_workspaces_disabled)", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryWorkspaceIds = "some-other-workspace";
+      const result = await transferTeamWorkspaceOwnership({
+        workspaceId: WS_ID,
+        callerUid: OWNER_UID,
+        newOwnerUid: OTHER_UID,
+        expectedWorkspaceUpdateTime: Timestamp.now(),
+        expectedOldOwnerMembershipUpdateTime: Timestamp.now(),
+        expectedNewOwnerMembershipUpdateTime: Timestamp.now(),
+      });
+      expect(result.status).toBe("team_workspaces_disabled");
+      expect(mockAdminDb.runTransaction).not.toHaveBeenCalled();
+    });
+
+    it("global ON is unaffected by a malformed Workspace-canary list", async () => {
+      teamWorkspacesEnabled = true;
+      teamWorkspacesCanaryWorkspaceIds = "*";
+      const tokens = seedHappyPath();
+      const result = await transferTeamWorkspaceOwnership({
+        workspaceId: WS_ID,
+        callerUid: OWNER_UID,
+        newOwnerUid: OTHER_UID,
+        expectedWorkspaceUpdateTime: tokens.workspaceUpdateTime,
+        expectedOldOwnerMembershipUpdateTime: tokens.oldOwnerUpdateTime,
+        expectedNewOwnerMembershipUpdateTime: tokens.newOwnerUpdateTime,
+      });
+      expect(result.status).toBe("transferred");
+    });
+
+    it("uid-canary admission survives a malformed Workspace-canary list", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryUids = OWNER_UID;
+      teamWorkspacesCanaryWorkspaceIds = "*";
+      const tokens = seedHappyPath();
+      const result = await transferTeamWorkspaceOwnership({
+        workspaceId: WS_ID,
+        callerUid: OWNER_UID,
+        newOwnerUid: OTHER_UID,
+        expectedWorkspaceUpdateTime: tokens.workspaceUpdateTime,
+        expectedOldOwnerMembershipUpdateTime: tokens.oldOwnerUpdateTime,
+        expectedNewOwnerMembershipUpdateTime: tokens.newOwnerUpdateTime,
+      });
+      expect(result.status).toBe("transferred");
+    });
+
+    it("Workspace-canary admission survives a malformed uid-canary list", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryUids = "*";
+      teamWorkspacesCanaryWorkspaceIds = WS_ID;
+      const tokens = seedHappyPath();
+      const result = await transferTeamWorkspaceOwnership({
+        workspaceId: WS_ID,
+        callerUid: OWNER_UID,
+        newOwnerUid: OTHER_UID,
+        expectedWorkspaceUpdateTime: tokens.workspaceUpdateTime,
+        expectedOldOwnerMembershipUpdateTime: tokens.oldOwnerUpdateTime,
+        expectedNewOwnerMembershipUpdateTime: tokens.newOwnerUpdateTime,
+      });
+      expect(result.status).toBe("transferred");
+    });
+
+    it("a successful Workspace-canary-admitted transfer never touches capacity — no membership document is created or destroyed, only existing rows' role field is updated in place", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryWorkspaceIds = WS_ID;
+      const tokens = seedHappyPath();
+      const membershipCountBefore = stores.workspaceMemberships.size;
+      const workspaceCountBefore = stores.workspaces.size;
+      const result = await transferTeamWorkspaceOwnership({
+        workspaceId: WS_ID,
+        callerUid: OWNER_UID,
+        newOwnerUid: OTHER_UID,
+        expectedWorkspaceUpdateTime: tokens.workspaceUpdateTime,
+        expectedOldOwnerMembershipUpdateTime: tokens.oldOwnerUpdateTime,
+        expectedNewOwnerMembershipUpdateTime: tokens.newOwnerUpdateTime,
+      });
+      expect(result.status).toBe("transferred");
+      // Same two membership rows still present, same two collections'
+      // document counts unchanged — no capacity primitive (which would
+      // manifest as a write to a distinct capacity document/collection,
+      // or a create/delete changing these counts) was ever invoked.
+      expect(stores.workspaceMemberships.size).toBe(membershipCountBefore);
+      expect(stores.workspaces.size).toBe(workspaceCountBefore);
+      expect(stores.workspaceMemberships.has(computeMembershipId(WS_ID, OWNER_UID))).toBe(true);
+      expect(stores.workspaceMemberships.has(computeMembershipId(WS_ID, OTHER_UID))).toBe(true);
+    });
+  });
+});
+
+describe("Phase 10B.3.2A — createTeamWorkspace remains strictly user-scoped (Team Workspace creation regression)", () => {
+  it("a caller who is Workspace-canary-admitted for an EXISTING workspace, but not global-enabled and not uid-canary, still CANNOT create a NEW Team Workspace — createTeamWorkspace() has no workspaceId to admit against and intentionally still calls only resolveTeamWorkspacesMode({uid})", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryUids = undefined;
+    // OWNER_UID is Workspace-canary admitted for WS_ID (would pass
+    // resolveTeamWorkspaceTargetAdmission for that specific workspace),
+    // proven by first exercising a successful Workspace-canary-gated
+    // operation for the SAME uid before attempting creation.
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    const workspaceUpdateTime = seedTeamWorkspace();
+    const oldOwnerUpdateTime = seedMembership(OWNER_UID, "owner");
+    const newOwnerUpdateTime = seedMembership(OTHER_UID, "member");
+    const transferResult = await transferTeamWorkspaceOwnership({
+      workspaceId: WS_ID,
+      callerUid: OWNER_UID,
+      newOwnerUid: OTHER_UID,
+      expectedWorkspaceUpdateTime: workspaceUpdateTime,
+      expectedOldOwnerMembershipUpdateTime: oldOwnerUpdateTime,
+      expectedNewOwnerMembershipUpdateTime: newOwnerUpdateTime,
+    });
+    expect(transferResult.status).toBe("transferred"); // proves Workspace-canary admission genuinely holds for OWNER_UID
+
+    // Now the SAME uid, still only Workspace-canary admitted (for a
+    // workspace, not a creation action) and still neither global nor
+    // uid-canary enabled, attempts to create a brand-new Team Workspace.
+    const createResult = await createTeamWorkspace({ uid: OWNER_UID, name: "Should Not Be Created" });
+    expect(createResult.status).toBe("team_workspaces_disabled");
+    expect(mockAdminDb.runTransaction).toHaveBeenCalledTimes(1); // only the transfer above ran a transaction
   });
 });

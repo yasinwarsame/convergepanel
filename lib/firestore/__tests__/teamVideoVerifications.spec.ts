@@ -129,12 +129,16 @@ const firestoreUnavailableFlag = { value: false };
 
 let teamWorkspacesEnabled = true;
 let teamWorkspacesCanaryUids: string | undefined = undefined;
+let teamWorkspacesCanaryWorkspaceIds: string | undefined = undefined;
 jest.mock("@/lib/env", () => ({
   get TEAM_WORKSPACES_ENABLED() {
     return teamWorkspacesEnabled;
   },
   get TEAM_WORKSPACES_CANARY_UIDS() {
     return teamWorkspacesCanaryUids;
+  },
+  get TEAM_WORKSPACES_CANARY_WORKSPACE_IDS() {
+    return teamWorkspacesCanaryWorkspaceIds;
   },
 }));
 
@@ -248,6 +252,7 @@ beforeEach(() => {
   firestoreUnavailableFlag.value = false;
   teamWorkspacesEnabled = true;
   teamWorkspacesCanaryUids = undefined;
+  teamWorkspacesCanaryWorkspaceIds = undefined;
   mockAdminDb.runTransaction.mockClear();
   seedWorkspace();
   seedMembership(OWNER_UID, "owner");
@@ -294,6 +299,67 @@ describe("authorizeTeamVideoVerificationAdmission — authorization", () => {
     seedMembership(MEMBER_UID, "member", { status: "removed", removedAt: ts(2000), removedByUserId: OWNER_UID });
     const result = await authorizeTeamVideoVerificationAdmission({ uid: MEMBER_UID, workspaceId: WS_ID, projectId: null });
     expect(result).toEqual({ status: "unauthorized", reason: "membership_removed" });
+  });
+});
+
+describe("authorizeTeamVideoVerificationAdmission — Workspace-scoped canary admission (Phase 10B.3.2A)", () => {
+  it("global off, uid-canary off, Workspace-canary admits this exact workspaceId -> member with research.create authorized", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    const result = await authorizeTeamVideoVerificationAdmission({ uid: MEMBER_UID, workspaceId: WS_ID, projectId: null });
+    expect(result).toEqual({ status: "authorized", workspaceId: WS_ID, projectId: null });
+  });
+
+  it("uid-canary admits this uid regardless of Workspace-canary state -> authorized", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryUids = MEMBER_UID;
+    teamWorkspacesCanaryWorkspaceIds = undefined;
+    const result = await authorizeTeamVideoVerificationAdmission({ uid: MEMBER_UID, workspaceId: WS_ID, projectId: null });
+    expect(result).toEqual({ status: "authorized", workspaceId: WS_ID, projectId: null });
+  });
+
+  it("Workspace-canary admits the target, but caller lacks research.create (reviewer) -> insufficient_capability — admission is not authorization", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    const result = await authorizeTeamVideoVerificationAdmission({ uid: REVIEWER_UID, workspaceId: WS_ID, projectId: null });
+    expect(result).toEqual({ status: "unauthorized", reason: "insufficient_capability" });
+  });
+
+  it("Workspace-canary admits the target, caller has no membership at all -> membership_not_found", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    const result = await authorizeTeamVideoVerificationAdmission({ uid: OUTSIDER_UID, workspaceId: WS_ID, projectId: null });
+    expect(result).toEqual({ status: "unauthorized", reason: "membership_not_found" });
+  });
+
+  it("Workspace-canary admits the target, caller's membership was removed -> membership_removed", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    seedMembership(MEMBER_UID, "member", { status: "removed", removedAt: ts(2000), removedByUserId: OWNER_UID });
+    const result = await authorizeTeamVideoVerificationAdmission({ uid: MEMBER_UID, workspaceId: WS_ID, projectId: null });
+    expect(result).toEqual({ status: "unauthorized", reason: "membership_removed" });
+  });
+
+  it("target workspaceId is NOT in the Workspace-canary list (a different workspace is) and global/uid are off -> team_workspaces_disabled, zero Firestore access", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = "ws-some-other-workspace";
+    const result = await authorizeTeamVideoVerificationAdmission({ uid: MEMBER_UID, workspaceId: WS_ID, projectId: null });
+    expect(result).toEqual({ status: "team_workspaces_disabled" });
+    expect(mockAdminDb.runTransaction).not.toHaveBeenCalled();
+  });
+
+  it("malformed Workspace-canary list (too many entries) does NOT poison global admission — global still admits", async () => {
+    teamWorkspacesEnabled = true;
+    teamWorkspacesCanaryWorkspaceIds = Array.from({ length: 11 }, (_, i) => `ws-${i}`).join(",");
+    const result = await authorizeTeamVideoVerificationAdmission({ uid: MEMBER_UID, workspaceId: WS_ID, projectId: null });
+    expect(result).toEqual({ status: "authorized", workspaceId: WS_ID, projectId: null });
+  });
+
+  it("malformed Workspace-canary list fails closed on the Workspace-canary axis specifically — global/uid both off -> denied, never broadens access", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = "not a valid id/with a slash";
+    const result = await authorizeTeamVideoVerificationAdmission({ uid: MEMBER_UID, workspaceId: WS_ID, projectId: null });
+    expect(result).toEqual({ status: "team_workspaces_disabled" });
   });
 });
 
@@ -505,6 +571,49 @@ describe("saveTeamVideoVerification — rollout", () => {
     firestoreUnavailableFlag.value = true;
     const result = await saveTeamVideoVerification(videoArgs() as any);
     expect(result).toEqual({ status: "firestore_unavailable" });
+  });
+});
+
+describe("saveTeamVideoVerification — Workspace-scoped canary admission (Phase 10B.3.2A)", () => {
+  it("global off, uid-canary off, Workspace-canary admits this workspaceId -> created", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    const result = await saveTeamVideoVerification(videoArgs() as any);
+    expect(result.status).toBe("created");
+  });
+
+  it("Workspace-canary admits the target, but caller lacks research.create (reviewer) -> insufficient_capability", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    const result = await saveTeamVideoVerification(videoArgs({ uid: REVIEWER_UID }) as any);
+    expect(result).toEqual({ status: "unauthorized", reason: "insufficient_capability" });
+  });
+
+  it("target workspaceId not in the Workspace-canary list, global/uid off -> team_workspaces_disabled, zero writes", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = "ws-some-other-workspace";
+    const result = await saveTeamVideoVerification(videoArgs() as any);
+    expect(result).toEqual({ status: "team_workspaces_disabled" });
+    expect(stores.videoVerifications.size).toBe(0);
+  });
+
+  it("MANDATORY cross-Workspace test: caller is Workspace-canary-admitted for W1 with a valid W1 membership, but the projectId supplied belongs to a DIFFERENT workspace W2 — DENIED as project_not_found, no artifact created. Proves Gate 2 re-derives the project's own canonical workspaceId binding rather than trusting the caller-admitted W1 context.", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID; // caller admitted only for W1 = WS_ID
+    const W2 = "ws-other-team";
+    stores.projects.set(PROJECT_ID, { data: { schemaVersion: 1, id: PROJECT_ID, workspaceId: W2, name: "W2 Project", status: "active", createdByUserId: OWNER_UID, createdAt: ts(1000), updatedAt: ts(1000) }, updateTime: nextUpdateTime() });
+
+    const result = await saveTeamVideoVerification(videoArgs({ uid: OWNER_UID, workspaceId: WS_ID, projectId: PROJECT_ID }) as any);
+    expect(result).toEqual({ status: "project_not_found" });
+    expect(stores.videoVerifications.size).toBe(0);
+  });
+
+  it("malformed Workspace-canary list does not poison uid-canary admission — uid-canary still admits and creates", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryUids = MEMBER_UID;
+    teamWorkspacesCanaryWorkspaceIds = "not a valid id/with a slash";
+    const result = await saveTeamVideoVerification(videoArgs() as any);
+    expect(result.status).toBe("created");
   });
 });
 

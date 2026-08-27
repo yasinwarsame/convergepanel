@@ -27,8 +27,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { resolveRequestIdentity } from "@/lib/auth/resolveRequestIdentity";
 import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelemetry";
 import { ModelId } from "@/lib/types";
-import { OPENAI_API_KEY, ANTHROPIC_API_KEY, XAI_API_KEY, PERPLEXITY_API_KEY, GEMINI_API_KEY, TEAM_WORKSPACES_ENABLED, TEAM_WORKSPACES_CANARY_UIDS } from "@/lib/env";
-import { resolveTeamWorkspacesMode } from "@/lib/workspaces/teamWorkspacesRollout";
+import { OPENAI_API_KEY, ANTHROPIC_API_KEY, XAI_API_KEY, PERPLEXITY_API_KEY, GEMINI_API_KEY, TEAM_WORKSPACES_ENABLED, TEAM_WORKSPACES_CANARY_UIDS, TEAM_WORKSPACES_CANARY_WORKSPACE_IDS } from "@/lib/env";
+import { resolveTeamWorkspaceTargetAdmission } from "@/lib/workspaces/teamWorkspaceTargetAdmission";
 import { authorizeTeamClaimVerificationAdmission, saveTeamClaimVerification } from "@/lib/firestore/teamClaimVerifications";
 import { validateUserSubscription } from "@/lib/stripe/subscriptionValidation";
 import { checkAndIncrementUsageForRun } from "@/lib/stripe/usageCheck";
@@ -179,10 +179,16 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
     }
 
     // ============================================
-    // PURE TEAM ROLLOUT CHECK
+    // TARGET-WORKSPACE ADMISSION CHECK (Phase 10B.3.2A)
     // ============================================
-    const rollout = resolveTeamWorkspacesMode({ uid, globalEnabled: TEAM_WORKSPACES_ENABLED, canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS });
-    if (!rollout.enabled) {
+    const admission = resolveTeamWorkspaceTargetAdmission({
+      uid,
+      workspaceId,
+      globalEnabled: TEAM_WORKSPACES_ENABLED,
+      canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS,
+      canaryWorkspaceIdsRaw: TEAM_WORKSPACES_CANARY_WORKSPACE_IDS,
+    });
+    if (!admission.enabled) {
       const { status, body: errBody } = teamWorkspacesDisabledResponse();
       return NextResponse.json(errBody, { status });
     }

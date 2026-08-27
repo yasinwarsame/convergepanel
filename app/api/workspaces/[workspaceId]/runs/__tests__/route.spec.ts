@@ -45,6 +45,7 @@ let adaptiveSchemasEnabled = false;
 let adaptiveSchemasCanaryUids: string | undefined = undefined;
 let teamWorkspacesEnabled = true;
 let teamWorkspacesCanaryUids: string | undefined = undefined;
+let teamWorkspacesCanaryWorkspaceIds: string | undefined = undefined;
 jest.mock("@/lib/env", () => ({
   get ADAPTIVE_SCHEMAS_ENABLED() {
     return adaptiveSchemasEnabled;
@@ -57,6 +58,9 @@ jest.mock("@/lib/env", () => ({
   },
   get TEAM_WORKSPACES_CANARY_UIDS() {
     return teamWorkspacesCanaryUids;
+  },
+  get TEAM_WORKSPACES_CANARY_WORKSPACE_IDS() {
+    return teamWorkspacesCanaryWorkspaceIds;
   },
 }));
 
@@ -130,6 +134,7 @@ beforeEach(() => {
   adaptiveSchemasCanaryUids = undefined;
   teamWorkspacesEnabled = true;
   teamWorkspacesCanaryUids = undefined;
+  teamWorkspacesCanaryWorkspaceIds = undefined;
   mockedCheckAndIncrementUsage.mockResolvedValue({
     allowed: true,
     runsThisMonth: 1,
@@ -406,6 +411,79 @@ describe("POST /api/workspaces/[workspaceId]/runs — rollout (Correction 2/17/2
     expect(mockedCheckAndIncrementUsage).not.toHaveBeenCalled();
     expect(mockedCreateTeamWorkspaceRun).not.toHaveBeenCalled();
     expect(mockedExecuteOrdinaryRun).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/workspaces/[workspaceId]/runs — Phase 10B.3.2A Workspace-scoped Team canary admission", () => {
+  // Category A (global-enabled success) is already covered throughout this
+  // file's default beforeEach (teamWorkspacesEnabled=true) — e.g. "Team
+  // create success" above. Not duplicated here.
+  //
+  // Categories D/E/F (wrong-role / no-membership / removed-membership
+  // denial) are NOT re-derived at this layer: this route delegates entirely
+  // to createTeamWorkspaceRun() (mocked here) for membership/capability
+  // checks — those categories are covered against a real Firestore fake in
+  // lib/firestore/__tests__/teamWorkspaceRuns.spec.ts. This file only
+  // proves the route's OWN admission gate composes correctly with the
+  // (mocked) service response.
+
+  it("Category B: uid-canary, global disabled -> admission passes, createTeamWorkspaceRun invoked, 200", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryUids = `other-uid,${UID}`;
+    mockedCreateTeamWorkspaceRun.mockResolvedValueOnce({ status: "created", runId: "run-uid-canary", workspaceId: WS_ID, projectId: null });
+    mockedExecuteOrdinaryRun.mockResolvedValueOnce({ status: 200, body: { ok: true, results: [], runId: "run-uid-canary" } });
+    const res = await POST(buildPostRequest(buildPostBody()), { params: { workspaceId: WS_ID } });
+    expect(res.status).toBe(200);
+    expect(mockedCreateTeamWorkspaceRun).toHaveBeenCalledTimes(1);
+  });
+
+  it("Category C: Workspace-canary-only (global/uid disabled, target workspaceId admitted) -> admission passes, createTeamWorkspaceRun invoked, 200", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryUids = undefined;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    mockedCreateTeamWorkspaceRun.mockResolvedValueOnce({ status: "created", runId: "run-ws-canary", workspaceId: WS_ID, projectId: null });
+    mockedExecuteOrdinaryRun.mockResolvedValueOnce({ status: 200, body: { ok: true, results: [], runId: "run-ws-canary" } });
+    const res = await POST(buildPostRequest(buildPostBody()), { params: { workspaceId: WS_ID } });
+    expect(res.status).toBe(200);
+    expect(mockedCreateTeamWorkspaceRun).toHaveBeenCalledTimes(1);
+  });
+
+  it("Category C variant: Workspace-canary-admitted, service denies insufficient_capability (wrong role) -> 403, identical mapping to the global-admitted case", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    mockedCreateTeamWorkspaceRun.mockResolvedValueOnce({ status: "unauthorized", reason: "insufficient_capability" });
+    const res = await POST(buildPostRequest(buildPostBody()), { params: { workspaceId: WS_ID } });
+    expect(res.status).toBe(403);
+    expect(mockedExecuteOrdinaryRun).not.toHaveBeenCalled();
+  });
+
+  it("Category G: target workspaceId NOT in TEAM_WORKSPACES_CANARY_WORKSPACE_IDS, global/uid disabled -> 503 team_workspaces_disabled, createTeamWorkspaceRun never called", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = "some-other-workspace-id";
+    const res = await POST(buildPostRequest(buildPostBody()), { params: { workspaceId: WS_ID } });
+    expect(res.status).toBe(503);
+    const body = await res.json();
+    expect(body.errorCode).toBe("team_workspaces_disabled");
+    expect(mockedCreateTeamWorkspaceRun).not.toHaveBeenCalled();
+  });
+
+  it("Category I: malformed Workspace-canary list (>10 entries) does not poison an otherwise-valid uid-canary admission -> still 200", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryUids = UID;
+    teamWorkspacesCanaryWorkspaceIds = Array.from({ length: 11 }, (_, i) => `ws-${i}`).join(",");
+    mockedCreateTeamWorkspaceRun.mockResolvedValueOnce({ status: "created", runId: "run-malformed-list-uid-ok", workspaceId: WS_ID, projectId: null });
+    mockedExecuteOrdinaryRun.mockResolvedValueOnce({ status: 200, body: { ok: true, results: [], runId: "run-malformed-list-uid-ok" } });
+    const res = await POST(buildPostRequest(buildPostBody()), { params: { workspaceId: WS_ID } });
+    expect(res.status).toBe(200);
+  });
+
+  it("Category J: malformed Workspace-canary list (>10 entries, WOULD have included WS_ID) does NOT grant access -> 503, fails closed rather than broadening", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryUids = undefined;
+    teamWorkspacesCanaryWorkspaceIds = [WS_ID, ...Array.from({ length: 10 }, (_, i) => `ws-${i}`)].join(",");
+    const res = await POST(buildPostRequest(buildPostBody()), { params: { workspaceId: WS_ID } });
+    expect(res.status).toBe(503);
+    expect(mockedCreateTeamWorkspaceRun).not.toHaveBeenCalled();
   });
 });
 

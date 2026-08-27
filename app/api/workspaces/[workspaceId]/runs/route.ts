@@ -39,8 +39,8 @@ import { internalErrorResponse, teamWorkspacesDisabledResponse, invalidRequestBo
 import { listTeamWorkspaceRuns, type TeamWorkspaceRunsScope } from "@/lib/workspaces/listTeamWorkspaceRuns";
 import { ModelId, RunPanelApiResponse } from "@/lib/types";
 import { splitQuestionAndContext } from "@/lib/questionContext";
-import { ADAPTIVE_SCHEMAS_ENABLED, ADAPTIVE_SCHEMAS_CANARY_UIDS, TEAM_WORKSPACES_ENABLED, TEAM_WORKSPACES_CANARY_UIDS } from "@/lib/env";
-import { resolveTeamWorkspacesMode } from "@/lib/workspaces/teamWorkspacesRollout";
+import { ADAPTIVE_SCHEMAS_ENABLED, ADAPTIVE_SCHEMAS_CANARY_UIDS, TEAM_WORKSPACES_ENABLED, TEAM_WORKSPACES_CANARY_UIDS, TEAM_WORKSPACES_CANARY_WORKSPACE_IDS } from "@/lib/env";
+import { resolveTeamWorkspaceTargetAdmission } from "@/lib/workspaces/teamWorkspaceTargetAdmission";
 import { resolveAdaptiveSchemasAdmission } from "@/lib/adaptiveSchema/adaptiveSchemasRollout";
 import { planAdaptiveRun, AdaptivePromptPlan, buildNonExecutionPayload } from "@/lib/adaptiveSchema/orchestrate";
 import { trackQueryClassified, trackRoutingOutcome } from "@/lib/adaptiveSchema/analytics";
@@ -263,12 +263,22 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
     }
 
     // ============================================
-    // PURE TEAM ROLLOUT CHECK — before adaptive planning (Correction 2):
-    // the Workspace-qualified Team endpoint must be dark/disabled as a
-    // Team feature before any ordinary Team execution planning happens.
+    // TARGET-WORKSPACE ADMISSION CHECK — before adaptive planning
+    // (Correction 2): the Workspace-qualified Team endpoint must be
+    // dark/disabled as a Team feature before any ordinary Team execution
+    // planning happens. Phase 10B.3.2A: target-aware (global OR uid-canary
+    // OR THIS Workspace's own canary admission), evaluated against the
+    // same `workspaceId` that will be written as this run's own canonical
+    // `workspaceId` field below — never a different value.
     // ============================================
-    const rollout = resolveTeamWorkspacesMode({ uid, globalEnabled: TEAM_WORKSPACES_ENABLED, canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS });
-    if (!rollout.enabled) {
+    const admission = resolveTeamWorkspaceTargetAdmission({
+      uid,
+      workspaceId,
+      globalEnabled: TEAM_WORKSPACES_ENABLED,
+      canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS,
+      canaryWorkspaceIdsRaw: TEAM_WORKSPACES_CANARY_WORKSPACE_IDS,
+    });
+    if (!admission.enabled) {
       const { status, body: errBody } = teamWorkspacesDisabledResponse();
       return NextResponse.json(errBody, { status });
     }

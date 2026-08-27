@@ -12,8 +12,9 @@ import { Status } from "google-gax";
 import { Timestamp } from "firebase-admin/firestore";
 import { adminDb } from "@/lib/firebase/admin";
 import { logger } from "@/lib/logger";
-import { TEAM_WORKSPACES_ENABLED, TEAM_WORKSPACES_CANARY_UIDS } from "@/lib/env";
+import { TEAM_WORKSPACES_ENABLED, TEAM_WORKSPACES_CANARY_UIDS, TEAM_WORKSPACES_CANARY_WORKSPACE_IDS } from "@/lib/env";
 import { resolveTeamWorkspacesMode } from "@/lib/workspaces/teamWorkspacesRollout";
+import { resolveTeamWorkspaceTargetAdmission } from "@/lib/workspaces/teamWorkspaceTargetAdmission";
 import { computeMembershipId } from "@/lib/workspaces/membershipId";
 import { validateMembershipBinding } from "@/lib/workspaces/membershipBinding";
 import { isCanonicalTeamOwnerMembership } from "@/lib/workspaces/ownerInvariant";
@@ -221,8 +222,14 @@ export async function transferTeamWorkspaceOwnership(args: {
   expectedOldOwnerMembershipUpdateTime: Timestamp;
   expectedNewOwnerMembershipUpdateTime: Timestamp;
 }): Promise<TransferTeamWorkspaceOwnershipResult> {
-  const rollout = resolveTeamWorkspacesMode({ uid: args.callerUid, globalEnabled: TEAM_WORKSPACES_ENABLED, canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS });
-  if (!rollout.enabled) {
+  const admission = resolveTeamWorkspaceTargetAdmission({
+    uid: args.callerUid,
+    workspaceId: args.workspaceId,
+    globalEnabled: TEAM_WORKSPACES_ENABLED,
+    canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS,
+    canaryWorkspaceIdsRaw: TEAM_WORKSPACES_CANARY_WORKSPACE_IDS,
+  });
+  if (!admission.enabled) {
     return { status: "team_workspaces_disabled" };
   }
   if (!adminDb) {
