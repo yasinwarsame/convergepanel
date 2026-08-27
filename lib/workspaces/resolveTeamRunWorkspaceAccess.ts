@@ -7,11 +7,23 @@
  * prevent (Phase 8C-B.0.1 hardening).
  *
  * Ordering is security-critical and mandatory:
- *   1. `resolveTeamWorkspacesMode()` — pure, zero I/O. A disabled/
- *      non-canary caller is denied with ZERO Firestore reads, before
+ *   1. Target-Workspace admission (Phase 10B.3.1: `resolveTeamWorkspaceTargetAdmission()`,
+ *      evaluated against the caller-supplied `args.workspaceId` directly)
+ *      — pure, zero I/O. A caller/target pair admitted by NEITHER global,
+ *      nor uid-canary, nor this specific Workspace's own canary
+ *      admission is denied with ZERO Firestore reads, before
  *      `resolveWorkspaceAccess()` (which would otherwise call
- *      `getWorkspace()` unconditionally) is ever invoked.
- *   2. Only after rollout admission: the existing, UNMODIFIED
+ *      `getWorkspace()` unconditionally) is ever invoked. This is a
+ *      pre-filter only, never a substitute for the real authorization
+ *      below — `resolveWorkspaceAccess()` independently re-evaluates
+ *      target admission itself (against the canonical `workspace.id` it
+ *      loads), so this step can never grant anything on its own; it only
+ *      ever narrows which requests bother reading Firestore at all. Prior
+ *      to Phase 10B.3.1 this step used the USER-scoped
+ *      `resolveTeamWorkspacesMode()`, which would have denied a
+ *      legitimate Workspace-canary-only caller before step 2 ever got a
+ *      chance to admit them — replaced, not merely relocated.
+ *   2. Only after that pre-filter: the existing, UNMODIFIED
  *      `resolveWorkspaceAccess()` is called exactly once — never a
  *      separate `getWorkspace()`, never a reimplementation of its
  *      Workspace/membership/owner-integrity logic.
@@ -32,8 +44,8 @@
  */
 
 import "server-only";
-import { TEAM_WORKSPACES_ENABLED, TEAM_WORKSPACES_CANARY_UIDS } from "@/lib/env";
-import { resolveTeamWorkspacesMode } from "./teamWorkspacesRollout";
+import { TEAM_WORKSPACES_ENABLED, TEAM_WORKSPACES_CANARY_UIDS, TEAM_WORKSPACES_CANARY_WORKSPACE_IDS } from "@/lib/env";
+import { resolveTeamWorkspaceTargetAdmission } from "./teamWorkspaceTargetAdmission";
 import { resolveWorkspaceAccess } from "./resolveWorkspaceAccess";
 import type { WorkspaceMembershipV1 } from "./membershipTypes";
 import type { WorkspaceCapability } from "./capabilities";
@@ -61,10 +73,17 @@ export type ResolveTeamRunWorkspaceAccessResult =
     };
 
 export async function resolveTeamRunWorkspaceAccess(args: { uid: string; workspaceId: string }): Promise<ResolveTeamRunWorkspaceAccessResult> {
-  // Step 1 — rollout gate FIRST. Pure, zero I/O. Nothing below this line
-  // runs for a caller not admitted to Team Workspaces at all.
-  const rollout = resolveTeamWorkspacesMode({ uid: args.uid, globalEnabled: TEAM_WORKSPACES_ENABLED, canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS });
-  if (!rollout.enabled) {
+  // Step 1 — target-Workspace admission pre-filter FIRST. Pure, zero I/O.
+  // Nothing below this line runs for a caller/target pair not admitted by
+  // any mechanism.
+  const admission = resolveTeamWorkspaceTargetAdmission({
+    uid: args.uid,
+    workspaceId: args.workspaceId,
+    globalEnabled: TEAM_WORKSPACES_ENABLED,
+    canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS,
+    canaryWorkspaceIdsRaw: TEAM_WORKSPACES_CANARY_WORKSPACE_IDS,
+  });
+  if (!admission.enabled) {
     return { granted: false, reason: "team_workspaces_disabled" };
   }
 

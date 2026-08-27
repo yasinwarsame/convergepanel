@@ -20,8 +20,8 @@
 
 import "server-only";
 import { logger } from "@/lib/logger";
-import { TEAM_WORKSPACES_ENABLED, TEAM_WORKSPACES_CANARY_UIDS } from "@/lib/env";
-import { resolveTeamWorkspacesMode } from "./teamWorkspacesRollout";
+import { TEAM_WORKSPACES_ENABLED, TEAM_WORKSPACES_CANARY_UIDS, TEAM_WORKSPACES_CANARY_WORKSPACE_IDS } from "@/lib/env";
+import { resolveTeamWorkspaceTargetAdmission } from "./teamWorkspaceTargetAdmission";
 import { getWorkspace } from "@/lib/firestore/workspaces";
 import { getWorkspaceMembershipForBinding } from "@/lib/firestore/workspaceMemberships";
 import { isCanonicalTeamOwnerMembership } from "./ownerInvariant";
@@ -83,16 +83,37 @@ export async function resolveWorkspaceAccess(args: { uid: string; workspaceId: s
     return { granted: true, workspaceType: "personal", workspace };
   }
 
-  // workspace.type === "team"
-  const rollout = resolveTeamWorkspacesMode({ uid: args.uid, globalEnabled: TEAM_WORKSPACES_ENABLED, canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS });
-  if (!rollout.enabled) {
+  // workspace.type === "team" — Phase 10B.3.1: target-Workspace admission
+  // (global OR uid-canary OR this specific Workspace's own canary
+  // admission), not the old user-scoped-only check. Composed via the
+  // reviewed Phase 10B.1 foundation, never re-derived locally. Evaluated
+  // against `workspace.id` (already loaded/validated above, the SAME
+  // canonical value `getWorkspace()` bound to the requested id) — kept in
+  // this existing position (after the Workspace load, before the
+  // membership load) rather than moved earlier, preserving this module's
+  // own "two Firestore reads maximum" invariant; admission for a KNOWN
+  // workspaceId string is a pure, zero-I/O computation either way, so
+  // reordering would not have saved a read, only complicated the flow.
+  const admission = resolveTeamWorkspaceTargetAdmission({
+    uid: args.uid,
+    workspaceId: workspace.id,
+    globalEnabled: TEAM_WORKSPACES_ENABLED,
+    canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS,
+    canaryWorkspaceIdsRaw: TEAM_WORKSPACES_CANARY_WORKSPACE_IDS,
+  });
+  if (!admission.enabled) {
     // Mirrors WORKSPACES_ENABLED's flag-safety invariant (see
     // docs/workspaces/architecture.md's "Feature flag safety" section):
     // the flag can only ever narrow access, never widen it or redirect it
-    // to a different authorization model. A disabled/non-canary caller
+    // to a different authorization model. A disabled/non-admitted caller
     // denies outright — it never falls back to treating the Team
     // Workspace as if it were Personal, and never grants access via any
-    // other path.
+    // other path. `reason` stays "team_workspaces_disabled" — the
+    // internal diagnostic vocabulary is unchanged; external concealment
+    // (never letting a caller distinguish "not admitted at all" from
+    // "this Workspace isn't canary-admitted") is each consumer route's
+    // own responsibility, exactly as already established and reviewed
+    // for the invitation routes in Phase 10B.2.
     return { granted: false, reason: "team_workspaces_disabled" };
   }
 

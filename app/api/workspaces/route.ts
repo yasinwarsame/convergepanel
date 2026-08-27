@@ -35,7 +35,8 @@ import { createTeamWorkspace } from "@/lib/firestore/workspaceMemberships";
 import { teamWorkspacesDisabledResponse, invalidRequestBodyResponse, unexpectedFieldResponse, invalidTeamWorkspaceNameResponse, internalErrorResponse } from "@/lib/workspaces/teamWorkspaceErrorResponse";
 import { resolveTeamWorkspacesMode } from "@/lib/workspaces/teamWorkspacesRollout";
 import { listViewerTeamWorkspaces, VIEWER_WORKSPACE_LIST_DEFAULT_PAGE_SIZE, VIEWER_WORKSPACE_LIST_MAX_PAGE_SIZE } from "@/lib/workspaces/listViewerTeamWorkspaces";
-import { TEAM_WORKSPACES_ENABLED, TEAM_WORKSPACES_CANARY_UIDS } from "@/lib/env";
+import { listWorkspaceCanaryMembershipsForUid } from "@/lib/workspaces/resolveWorkspaceCanaryMembershipsForUid";
+import { TEAM_WORKSPACES_ENABLED, TEAM_WORKSPACES_CANARY_UIDS, TEAM_WORKSPACES_CANARY_WORKSPACE_IDS } from "@/lib/env";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -56,23 +57,44 @@ export async function GET(req: NextRequest) {
   const uid = uidOrRes;
 
   const rollout = resolveTeamWorkspacesMode({ uid, globalEnabled: TEAM_WORKSPACES_ENABLED, canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS });
-  if (!rollout.enabled) {
+
+  if (rollout.enabled) {
+    // MODE A — global/uid-canary admitted. Unchanged existing behavior,
+    // unchanged pagination/cursor semantics — never touched by the
+    // Workspace-canary branch below.
+    const { searchParams } = req.nextUrl;
+    const limitRaw = parseInt(searchParams.get("limit") || String(VIEWER_WORKSPACE_LIST_DEFAULT_PAGE_SIZE), 10);
+    const limit = Math.min(VIEWER_WORKSPACE_LIST_MAX_PAGE_SIZE, Math.max(1, Number.isFinite(limitRaw) ? limitRaw : VIEWER_WORKSPACE_LIST_DEFAULT_PAGE_SIZE));
+    const cursor = searchParams.get("cursor");
+
+    const result = await listViewerTeamWorkspaces({ uid, cursor, limit });
+    if (result.status !== "ok") {
+      const { status, body } = internalErrorResponse();
+      return NextResponse.json(body, { status });
+    }
+
+    return NextResponse.json({ ok: true, items: result.items, nextCursor: result.nextCursor, hasMore: result.hasMore }, { status: 200 });
+  }
+
+  // MODE B — not global/uid-canary admitted. Bounded (≤10) Workspace-canary
+  // discovery: a fully non-admitted caller and a caller who belongs to
+  // zero admitted Workspaces are byte-identically concealed as the SAME
+  // 503 this route has always returned for "not admitted" — a caller can
+  // never distinguish "no Workspace-canary list configured" from "list
+  // configured but I have no active membership in any of it."
+  const canaryResult = await listWorkspaceCanaryMembershipsForUid({ uid, canaryWorkspaceIdsRaw: TEAM_WORKSPACES_CANARY_WORKSPACE_IDS });
+  if (canaryResult.status !== "ok") {
+    const { status, body } = internalErrorResponse();
+    return NextResponse.json(body, { status });
+  }
+  if (canaryResult.items.length === 0) {
     const { status, body } = teamWorkspacesDisabledResponse();
     return NextResponse.json(body, { status });
   }
 
-  const { searchParams } = req.nextUrl;
-  const limitRaw = parseInt(searchParams.get("limit") || String(VIEWER_WORKSPACE_LIST_DEFAULT_PAGE_SIZE), 10);
-  const limit = Math.min(VIEWER_WORKSPACE_LIST_MAX_PAGE_SIZE, Math.max(1, Number.isFinite(limitRaw) ? limitRaw : VIEWER_WORKSPACE_LIST_DEFAULT_PAGE_SIZE));
-  const cursor = searchParams.get("cursor");
-
-  const result = await listViewerTeamWorkspaces({ uid, cursor, limit });
-  if (result.status !== "ok") {
-    const { status, body } = internalErrorResponse();
-    return NextResponse.json(body, { status });
-  }
-
-  return NextResponse.json({ ok: true, items: result.items, nextCursor: result.nextCursor, hasMore: result.hasMore }, { status: 200 });
+  // Bounded by construction (≤10 configured ids) — never paginate this
+  // branch, and never mix its cursor semantics with Mode A's.
+  return NextResponse.json({ ok: true, items: canaryResult.items, nextCursor: null, hasMore: false }, { status: 200 });
 }
 
 export async function POST(req: NextRequest) {

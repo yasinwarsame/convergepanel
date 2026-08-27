@@ -8,12 +8,16 @@
 
 let teamWorkspacesEnabled = true;
 let teamWorkspacesCanaryUids: string | undefined = undefined;
+let teamWorkspacesCanaryWorkspaceIds: string | undefined = undefined;
 jest.mock("@/lib/env", () => ({
   get TEAM_WORKSPACES_ENABLED() {
     return teamWorkspacesEnabled;
   },
   get TEAM_WORKSPACES_CANARY_UIDS() {
     return teamWorkspacesCanaryUids;
+  },
+  get TEAM_WORKSPACES_CANARY_WORKSPACE_IDS() {
+    return teamWorkspacesCanaryWorkspaceIds;
   },
 }));
 
@@ -68,6 +72,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   teamWorkspacesEnabled = true;
   teamWorkspacesCanaryUids = undefined;
+  teamWorkspacesCanaryWorkspaceIds = undefined;
 });
 
 describe("Personal Workspace path", () => {
@@ -129,6 +134,82 @@ describe("Team Workspace path", () => {
       mockGetWorkspaceMembershipForBinding.mockResolvedValue({ status: "found", membership: membership("owner") });
       const result = await resolveWorkspaceAccess({ uid: UID, workspaceId: WS_ID });
       expect(result).toEqual({ granted: false, reason: "team_workspaces_disabled" });
+    });
+  });
+
+  describe("Phase 10B.3.1 — Workspace-canary target admission", () => {
+    it("Workspace-canary admitted + active member -> grant, without needing global/uid-canary", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryWorkspaceIds = WS_ID;
+      mockGetWorkspaceMembershipForBinding.mockResolvedValue({ status: "found", membership: membership("member") });
+      const result = await resolveWorkspaceAccess({ uid: UID, workspaceId: WS_ID });
+      expect(result.granted).toBe(true);
+    });
+
+    it("Workspace-canary admitted + no membership -> deny (admission never substitutes for membership authorization)", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryWorkspaceIds = WS_ID;
+      mockGetWorkspaceMembershipForBinding.mockResolvedValue({ status: "not_found" });
+      const result = await resolveWorkspaceAccess({ uid: UID, workspaceId: WS_ID });
+      expect(result).toEqual({ granted: false, reason: "membership_not_found" });
+    });
+
+    it("Workspace-canary admitted + removed membership -> deny", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryWorkspaceIds = WS_ID;
+      mockGetWorkspaceMembershipForBinding.mockResolvedValue({ status: "found", membership: membership("member", { status: "removed", removedAt: NOW, removedByUserId: "someone" }) });
+      const result = await resolveWorkspaceAccess({ uid: UID, workspaceId: WS_ID });
+      expect(result).toEqual({ granted: false, reason: "membership_removed" });
+    });
+
+    it("Workspace-canary admitted + malformed membership -> fail closed", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryWorkspaceIds = WS_ID;
+      mockGetWorkspaceMembershipForBinding.mockResolvedValue({ status: "malformed" });
+      const result = await resolveWorkspaceAccess({ uid: UID, workspaceId: WS_ID });
+      expect(result).toEqual({ granted: false, reason: "membership_malformed" });
+    });
+
+    it("this Workspace NOT admitted + caller has an active OLD membership -> target denial, membership never even read", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryWorkspaceIds = "some-other-workspace";
+      const result = await resolveWorkspaceAccess({ uid: UID, workspaceId: WS_ID });
+      expect(result).toEqual({ granted: false, reason: "team_workspaces_disabled" });
+      expect(mockGetWorkspaceMembershipForBinding).not.toHaveBeenCalled();
+    });
+
+    it("owner-integrity violation still denies even when Workspace-canary admitted", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryWorkspaceIds = WS_ID;
+      mockGetWorkspaceMembershipForBinding.mockResolvedValue({ status: "found", membership: membership("owner", { uid: "not-the-real-owner" }) });
+      const result = await resolveWorkspaceAccess({ uid: "not-the-real-owner", workspaceId: WS_ID });
+      expect(result).toEqual({ granted: false, reason: "owner_integrity_violation" });
+    });
+
+    it("global ON is unaffected by a malformed Workspace-canary list", async () => {
+      teamWorkspacesEnabled = true;
+      teamWorkspacesCanaryWorkspaceIds = "*";
+      mockGetWorkspaceMembershipForBinding.mockResolvedValue({ status: "found", membership: membership("member") });
+      const result = await resolveWorkspaceAccess({ uid: UID, workspaceId: WS_ID });
+      expect(result.granted).toBe(true);
+    });
+
+    it("UID-canary admission survives a malformed Workspace-canary list", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryUids = UID;
+      teamWorkspacesCanaryWorkspaceIds = "*";
+      mockGetWorkspaceMembershipForBinding.mockResolvedValue({ status: "found", membership: membership("member") });
+      const result = await resolveWorkspaceAccess({ uid: UID, workspaceId: WS_ID });
+      expect(result.granted).toBe(true);
+    });
+
+    it("Workspace-canary admission survives a malformed UID-canary list", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryUids = "*";
+      teamWorkspacesCanaryWorkspaceIds = WS_ID;
+      mockGetWorkspaceMembershipForBinding.mockResolvedValue({ status: "found", membership: membership("member") });
+      const result = await resolveWorkspaceAccess({ uid: UID, workspaceId: WS_ID });
+      expect(result.granted).toBe(true);
     });
   });
 
