@@ -368,6 +368,15 @@ describe("authorizeTeamClaimVerificationAdmission — Workspace-canary target ad
     expect(result).toEqual({ status: "team_workspaces_disabled" });
   });
 
+  it("MANDATORY cross-Workspace resource mismatch: Workspace-canary admits WS_ID and caller has a valid WS_ID membership with research.create+research.organize, but the supplied projectId's own canonical workspaceId is a different, unrelated Workspace -> project_not_found, never authorized via the caller's WS_ID admission", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    seedMembership(MEMBER_UID, "admin");
+    seedProject(PROJECT_ID, { workspaceId: "ws-other" });
+    const result = await authorizeTeamClaimVerificationAdmission({ uid: MEMBER_UID, workspaceId: WS_ID, projectId: PROJECT_ID });
+    expect(result).toEqual({ status: "project_not_found" });
+  });
+
   it("malformed Workspace-canary list, global/uid off -> team_workspaces_disabled (fails closed)", async () => {
     teamWorkspacesEnabled = false;
     teamWorkspacesCanaryWorkspaceIds = "*";
@@ -545,6 +554,17 @@ describe("saveTeamClaimVerification — Workspace-canary target admission (Phase
     seedMembershipInWorkspace(WS_OTHER_ID, MEMBER_UID, "member");
     const result = await saveTeamClaimVerification(claimArgs({ workspaceId: WS_OTHER_ID }) as any);
     expect(result).toEqual({ status: "team_workspaces_disabled" });
+    expect(stores.verifications.size).toBe(0);
+    expect(writeAttempts).toEqual([]);
+  });
+
+  it("MANDATORY cross-Workspace resource mismatch: Workspace-canary admits WS_ID and caller has a valid WS_ID membership with research.create+research.organize, but the supplied projectId's own canonical workspaceId is a different, unrelated Workspace -> project_not_found, zero writes", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    seedMembership(MEMBER_UID, "admin");
+    seedProject(PROJECT_ID, { workspaceId: "ws-other" });
+    const result = await saveTeamClaimVerification(claimArgs({ projectId: PROJECT_ID }) as any);
+    expect(result).toEqual({ status: "project_not_found" });
     expect(stores.verifications.size).toBe(0);
     expect(writeAttempts).toEqual([]);
   });
