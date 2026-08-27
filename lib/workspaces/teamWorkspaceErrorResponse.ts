@@ -58,3 +58,17 @@ export function newOwnerNotEligibleResponse(): { status: number; body: TeamWorks
 export function staleUpdateTimeConflictResponse(): { status: number; body: TeamWorkspaceErrorBody } {
   return { status: 409, body: { ok: false, errorCode: "conflict", message: "This Workspace changed since you last loaded it. Please refresh and try again." } };
 }
+
+/**
+ * Phase 10B.2 — the Workspace-canary member-capacity limit has been
+ * reached. Safe to be relatively transparent to the caller here (unlike
+ * `team_workspace_not_found`'s concealment): by the time this can occur,
+ * the caller has already passed target-Workspace admission AND normal
+ * membership/capability authorization, so they already know the target
+ * Workspace exists and that they administer it — there is no Workspace-
+ * canary state left to hide from them. Never echoes `reservedCount` or
+ * the configured limit itself, only the fact that capacity is exhausted.
+ */
+export function workspaceMemberCapacityReachedResponse(): { status: number; body: TeamWorkspaceErrorBody } {
+  return { status: 409, body: { ok: false, errorCode: "workspace_member_capacity_reached", message: "This Workspace has reached its member limit." } };
+}

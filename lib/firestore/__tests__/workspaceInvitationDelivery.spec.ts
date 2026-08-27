@@ -136,21 +136,21 @@ beforeEach(() => {
 });
 
 describe("recordWorkspaceInvitationDeliveryResult — rollout gate", () => {
-  it("A. Team Workspace rollout globally disabled -> team_workspaces_disabled, zero Firestore access", async () => {
+  it("A. Team Workspace rollout globally disabled -> team_workspaces_disabled (Phase 10B.2: evaluated INSIDE the transaction, against the invitation's own canonical workspaceId — one Firestore read still occurs)", async () => {
     teamWorkspacesEnabled = false;
     seedInvitation("inv-1", { deliveryVersion: 1 });
     const result = await recordWorkspaceInvitationDeliveryResult({ uid: UID, invitationId: "inv-1", deliveryVersion: 1, status: "sent", providerMessageId: "msg" });
     expect(result).toEqual({ status: "team_workspaces_disabled" });
-    expect(mockAdminDb.runTransaction).not.toHaveBeenCalled();
+    expect(mockAdminDb.runTransaction).toHaveBeenCalled();
   });
 
-  it("B. global disabled + requester not in canary -> denied, zero Firestore access", async () => {
+  it("B. global disabled + requester not in canary (uid or target Workspace) -> denied", async () => {
     teamWorkspacesEnabled = false;
     teamWorkspacesCanaryUids = "some-other-uid,another-uid";
     seedInvitation("inv-1", { deliveryVersion: 1 });
     const result = await recordWorkspaceInvitationDeliveryResult({ uid: UID, invitationId: "inv-1", deliveryVersion: 1, status: "sent", providerMessageId: "msg" });
     expect(result).toEqual({ status: "team_workspaces_disabled" });
-    expect(mockAdminDb.runTransaction).not.toHaveBeenCalled();
+    expect(mockAdminDb.runTransaction).toHaveBeenCalled();
   });
 
   it("C. global disabled + requester IS in the existing Team Workspace canary -> proceeds", async () => {

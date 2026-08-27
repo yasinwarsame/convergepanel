@@ -1151,13 +1151,13 @@ describe("acceptWorkspaceInvitation", () => {
     expect(stores.workspaceMemberships.has(computeMembershipId(WS_ID, INVITEE_UID))).toBe(false);
   });
 
-  it("rollout disabled -> team_workspaces_disabled (after the Auth lookup, before Firestore access)", async () => {
+  it("target-Workspace admission denied -> invitation_invalid_or_expired (Phase 10B.2: admission is evaluated INSIDE the transaction, after email match, and concealed identically to every other invitation-invalid case — never a distinguishable team_workspaces_disabled)", async () => {
     teamWorkspacesEnabled = false;
     const { rawToken } = seedInvitation("inv-1");
     seedGuard(WS_ID, INVITEE_EMAIL, "inv-1");
     registerAuthUser(INVITEE_UID, INVITEE_EMAIL, true);
     const result = await acceptWorkspaceInvitation({ uid: INVITEE_UID, invitationId: "inv-1", rawToken });
-    expect(result).toEqual({ status: "team_workspaces_disabled" });
+    expect(result).toEqual({ status: "invitation_invalid_or_expired" });
   });
 
   it("invalid input (empty invitationId/rawToken) is rejected before any lookup", async () => {

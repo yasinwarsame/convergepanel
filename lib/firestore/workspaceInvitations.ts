@@ -33,8 +33,9 @@ import "server-only";
 import { Timestamp } from "firebase-admin/firestore";
 import { adminDb, adminAuth } from "@/lib/firebase/admin";
 import { logger } from "@/lib/logger";
-import { TEAM_WORKSPACES_ENABLED, TEAM_WORKSPACES_CANARY_UIDS } from "@/lib/env";
-import { resolveTeamWorkspacesMode } from "@/lib/workspaces/teamWorkspacesRollout";
+import { TEAM_WORKSPACES_ENABLED, TEAM_WORKSPACES_CANARY_UIDS, TEAM_WORKSPACES_CANARY_WORKSPACE_IDS } from "@/lib/env";
+import { resolveTeamWorkspaceTargetAdmission, capacityControlled } from "@/lib/workspaces/teamWorkspaceTargetAdmission";
+import { reserveTeamWorkspaceCanarySlot, releaseTeamWorkspaceCanarySlot } from "@/lib/workspaces/teamWorkspaceCanaryCapacity";
 import { authorizeTeamWorkspaceMutationInTransaction, type TeamMutationAuthorizationDenialReason } from "@/lib/workspaces/authorizeTeamWorkspaceMutationInTransaction";
 import { resolveWorkspaceAccess } from "@/lib/workspaces/resolveWorkspaceAccess";
 import { canManageInvitationTargetRole } from "@/lib/workspaces/invitationRoleAuthority";
@@ -79,6 +80,22 @@ function addSeconds(ts: Timestamp, seconds: number): Timestamp {
   return new Timestamp(ts.seconds + seconds, ts.nanoseconds);
 }
 
+/**
+ * Phase 10B.2 — the single call shape every invitation-admin operation
+ * uses to decide target-Workspace Team admission. Composes the reviewed
+ * Phase 10B.1 foundation (`resolveTeamWorkspaceTargetAdmission()`)
+ * against this file's own env bindings; never re-derives precedence
+ * logic locally.
+ */
+function isTargetWorkspaceAdmitted(uid: string, workspaceId: string): boolean {
+  return resolveTeamWorkspaceTargetAdmission({ uid, workspaceId, globalEnabled: TEAM_WORKSPACES_ENABLED, canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS, canaryWorkspaceIdsRaw: TEAM_WORKSPACES_CANARY_WORKSPACE_IDS }).enabled;
+}
+
+/** Same composition for the capacity-scope predicate — see `capacityControlled()`'s own doc comment for why it deliberately takes no uid. */
+function isWorkspaceCapacityControlled(workspaceId: string): boolean {
+  return capacityControlled({ workspaceId, globalEnabled: TEAM_WORKSPACES_ENABLED, canaryWorkspaceIdsRaw: TEAM_WORKSPACES_CANARY_WORKSPACE_IDS });
+}
+
 // ==================================================================
 // CREATE
 // ==================================================================
@@ -102,6 +119,7 @@ export type CreateWorkspaceInvitationResult =
   | { status: "invalid_email" }
   | { status: "invalid_role" }
   | { status: "duplicate_live_invitation" }
+  | { status: "workspace_member_capacity_reached" }
   | { status: "state_corruption" }
   | { status: "create_failed" };
 
@@ -113,8 +131,7 @@ export type CreateWorkspaceInvitationResult =
  * second set of security material for the same logical create attempt.
  */
 export async function createWorkspaceInvitation(args: { uid: string; workspaceId: string; email: unknown; role: unknown }): Promise<CreateWorkspaceInvitationResult> {
-  const rollout = resolveTeamWorkspacesMode({ uid: args.uid, globalEnabled: TEAM_WORKSPACES_ENABLED, canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS });
-  if (!rollout.enabled) {
+  if (!isTargetWorkspaceAdmitted(args.uid, args.workspaceId)) {
     return { status: "team_workspaces_disabled" };
   }
   if (!adminDb) {
@@ -144,6 +161,7 @@ export async function createWorkspaceInvitation(args: { uid: string; workspaceId
     | { kind: "unauthorized"; reason: TeamMutationAuthorizationDenialReason }
     | { kind: "role_target_forbidden" }
     | { kind: "duplicate_live_invitation" }
+    | { kind: "workspace_member_capacity_reached" }
     | { kind: "state_corruption" };
 
   let txResult: TxResult;
@@ -157,6 +175,17 @@ export async function createWorkspaceInvitation(args: { uid: string; workspaceId
       if (!canManageInvitationTargetRole({ callerRole: auth.membership.role, targetRole: requestedRole })) {
         return { kind: "role_target_forbidden" };
       }
+
+      // Capacity classification (Phase 10A.4 state-based reservation model,
+      // Phase 10B.2 integration): a brand-new guard, or one whose current
+      // invitation is accepted/revoked, means this create is a GENUINELY
+      // NEW reservation (+1, subject to the cap). A guard whose current
+      // invitation is pending-but-expired means the replacement inherits
+      // that SAME already-counted reservation — net delta 0, and the
+      // replacement must succeed even at/above the cap (see branch C
+      // below). Never set true/false based on expiresAt for any other
+      // reason — reservation ownership is state-based, not wall-clock.
+      let priorReservationCarriesOver = false;
 
       const guardSnap = await tx.get(guardRef);
       if (guardSnap.exists) {
@@ -182,6 +211,20 @@ export async function createWorkspaceInvitation(args: { uid: string; workspaceId
           return { kind: "duplicate_live_invitation" };
         }
         // pending+expired, accepted, or revoked — supersede below.
+        if (currentData.status === "pending") {
+          // Expired-but-still-pending: its reservation carries over.
+          priorReservationCarriesOver = true;
+        }
+      }
+
+      if (!priorReservationCarriesOver && isWorkspaceCapacityControlled(args.workspaceId)) {
+        const reserve = await reserveTeamWorkspaceCanarySlot(tx, args.workspaceId);
+        if (reserve.status === "capacity_reached") {
+          return { kind: "workspace_member_capacity_reached" };
+        }
+        if (reserve.status !== "reserved") {
+          return { kind: "state_corruption" };
+        }
       }
 
       const now = Timestamp.now();
@@ -227,6 +270,8 @@ export async function createWorkspaceInvitation(args: { uid: string; workspaceId
       return { status: "role_target_forbidden" };
     case "duplicate_live_invitation":
       return { status: "duplicate_live_invitation" };
+    case "workspace_member_capacity_reached":
+      return { status: "workspace_member_capacity_reached" };
     case "state_corruption":
       return { status: "state_corruption" };
     case "created":
@@ -276,8 +321,7 @@ export async function resendWorkspaceInvitation(args: { uid: string; workspaceId
   }
   const expectedDeliveryVersion = args.expectedDeliveryVersion;
 
-  const rollout = resolveTeamWorkspacesMode({ uid: args.uid, globalEnabled: TEAM_WORKSPACES_ENABLED, canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS });
-  if (!rollout.enabled) {
+  if (!isTargetWorkspaceAdmitted(args.uid, args.workspaceId)) {
     return { status: "team_workspaces_disabled" };
   }
   if (!adminDb) {
@@ -407,8 +451,7 @@ export async function revokeWorkspaceInvitation(args: { uid: string; workspaceId
   }
   const expectedDeliveryVersion = args.expectedDeliveryVersion;
 
-  const rollout = resolveTeamWorkspacesMode({ uid: args.uid, globalEnabled: TEAM_WORKSPACES_ENABLED, canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS });
-  if (!rollout.enabled) {
+  if (!isTargetWorkspaceAdmitted(args.uid, args.workspaceId)) {
     return { status: "team_workspaces_disabled" };
   }
   if (!adminDb) {
@@ -470,8 +513,23 @@ export async function revokeWorkspaceInvitation(args: { uid: string; workspaceId
         return { kind: "invalid_state_for_revoke" };
       }
       if (invitationData.status === "revoked") {
-        // Idempotent success — this invitation is still the guard's current target (already confirmed above).
+        // Idempotent success — this invitation is still the guard's current
+        // target (already confirmed above). No capacity read/write here:
+        // an already-revoked invitation's reservation was already released
+        // on its FIRST revoke; a second decrement would underflow.
         return { kind: "already_revoked", invitationId: invitationData.id };
+      }
+
+      // First pending -> revoked transition: this invitation was counted
+      // as a reservation whether live or expired (Phase 10A.4 state-based
+      // model) — release exactly once, in the SAME transaction as the
+      // status write below. A capacity failure aborts the whole revoke:
+      // the invitation stays pending, nothing partially transitions.
+      if (isWorkspaceCapacityControlled(args.workspaceId)) {
+        const release = await releaseTeamWorkspaceCanarySlot(tx, args.workspaceId);
+        if (release.status !== "released") {
+          return { kind: "state_corruption" };
+        }
       }
 
       const now = Timestamp.now();
@@ -510,7 +568,6 @@ export async function revokeWorkspaceInvitation(args: { uid: string; workspaceId
 
 export type AcceptWorkspaceInvitationResult =
   | { status: "accepted"; invitationId: string; workspaceId: string; role: WorkspaceInvitationRole; membershipId: string; alreadyMember: boolean; effectiveRole: WorkspaceMembershipRole }
-  | { status: "team_workspaces_disabled" }
   | { status: "firestore_unavailable" }
   | { status: "invalid_input" }
   | { status: "email_verification_required" }
@@ -528,6 +585,24 @@ export type AcceptWorkspaceInvitationResult =
  * it, never re-derives it). `resolveRequestIdentity()` is never modified
  * or broadened — the authoritative account email comes from
  * `adminAuth.getUser(uid)` directly, a narrow, acceptance-local lookup.
+ *
+ * Phase 10B.2 reorders the transaction body (Phase 10A.2/10A.4's frozen
+ * design) so that:
+ *   - `workspaceId` is NEVER accepted from the caller — it is derived
+ *     exclusively from the stored invitation document, inside the
+ *     transaction, at the point it's first read (step 1) — never earlier,
+ *     never from any request field.
+ *   - the verified email match (step in the middle of the transaction, at
+ *     the position marked below) happens BEFORE target-Workspace
+ *     admission is evaluated, so a wrong-email caller's response can
+ *     never differ based on whether the target Workspace happens to be
+ *     canary-admitted — closing that oracle.
+ *   - target-Workspace admission denial maps to the SAME generic
+ *     `invitation_invalid_or_expired` concealed result as every other
+ *     invitation-invalid case — never a distinguishable
+ *     `team_workspaces_disabled`, which no longer exists as a possible
+ *     result of this function at all (the old USER-only pre-transaction
+ *     gate is removed, not merely relocated).
  */
 export async function acceptWorkspaceInvitation(args: { uid: string; invitationId: unknown; rawToken: unknown }): Promise<AcceptWorkspaceInvitationResult> {
   if (typeof args.invitationId !== "string" || args.invitationId.length === 0) {
@@ -560,10 +635,6 @@ export async function acceptWorkspaceInvitation(args: { uid: string; invitationI
     return { status: "auth_lookup_failed" };
   }
 
-  const rollout = resolveTeamWorkspacesMode({ uid: args.uid, globalEnabled: TEAM_WORKSPACES_ENABLED, canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS });
-  if (!rollout.enabled) {
-    return { status: "team_workspaces_disabled" };
-  }
   if (!adminDb) {
     return { status: "firestore_unavailable" };
   }
@@ -612,7 +683,23 @@ export async function acceptWorkspaceInvitation(args: { uid: string; invitationI
         return { kind: "invitation_invalid_or_expired" };
       }
 
-      // 3. Workspace.
+      // 3. Verified email match — deliberately BEFORE target-Workspace
+      // admission (step 4) so a wrong-email caller's response is
+      // identical regardless of the target Workspace's canary state.
+      if (verifiedEmail !== invitationData.normalizedEmail) {
+        return { kind: "invitation_email_mismatch" };
+      }
+
+      // 4. Target-Workspace Team admission — workspaceId derived ONLY
+      // from the invitation document just read above, never from any
+      // caller-supplied field. Denial is concealed identically to every
+      // other invitation-invalid case, never a distinguishable
+      // team_workspaces_disabled.
+      if (!isTargetWorkspaceAdmitted(args.uid, invitationData.workspaceId)) {
+        return { kind: "invitation_invalid_or_expired" };
+      }
+
+      // 5. Workspace.
       const workspaceRef = adminDb!.collection("workspaces").doc(invitationData.workspaceId);
       const workspaceSnap = await tx.get(workspaceRef);
       if (!workspaceSnap.exists) {
@@ -624,7 +711,7 @@ export async function acceptWorkspaceInvitation(args: { uid: string; invitationI
       }
       const workspace = workspaceData as TeamWorkspaceV1;
 
-      // 4. Owner-membership integrity.
+      // 6. Owner-membership integrity.
       const ownerMembershipId = computeMembershipId(workspace.id, workspace.ownerUserId);
       const ownerRef = adminDb!.collection("workspaceMemberships").doc(ownerMembershipId);
       const ownerSnap = await tx.get(ownerRef);
@@ -636,18 +723,16 @@ export async function acceptWorkspaceInvitation(args: { uid: string; invitationI
         return { kind: "invitation_invalid_or_expired" };
       }
 
-      if (verifiedEmail !== invitationData.normalizedEmail) {
-        return { kind: "invitation_email_mismatch" };
-      }
-
-      // 5. Caller's own membership.
+      // 7. Caller's own membership — read-only classification, no write
+      // staged yet (capacity's own reads, step 8, must still precede
+      // every write in this transaction).
       const membershipId = computeMembershipId(invitationData.workspaceId, args.uid);
       const membershipRef = args.uid === workspace.ownerUserId ? ownerRef : adminDb!.collection("workspaceMemberships").doc(membershipId);
       const membershipSnap = args.uid === workspace.ownerUserId ? ownerSnap : await tx.get(membershipRef);
 
-      const now = Timestamp.now();
       let effectiveRole: WorkspaceMembershipRole;
       let alreadyMember = false;
+      let membershipWrite: "reactivate" | "create" | "none";
 
       if (membershipSnap.exists) {
         const existing = validateMembershipBinding(membershipSnap.data(), { workspaceId: invitationData.workspaceId, uid: args.uid });
@@ -657,20 +742,44 @@ export async function acceptWorkspaceInvitation(args: { uid: string; invitationI
         if (existing.status === "active") {
           alreadyMember = true;
           effectiveRole = existing.role;
-          // No membership mutation — role is never silently changed.
+          membershipWrite = "none"; // No membership mutation — role is never silently changed.
         } else {
           // status === "removed" — reactivate. createdAt PRESERVED.
-          tx.update(membershipRef, {
-            status: "active",
-            role: invitationData.role,
-            updatedAt: now,
-            invitedByUserId: invitationData.invitedByUserId,
-            removedAt: null,
-            removedByUserId: null,
-          });
           effectiveRole = invitationData.role;
+          membershipWrite = "reactivate";
         }
       } else {
+        effectiveRole = invitationData.role;
+        membershipWrite = "create";
+      }
+
+      // 8. Capacity adjustment. A valid reserved invitation already owns
+      // its seat (Phase 10A.4): new-membership and reactivation are
+      // ALWAYS delta 0 and never consult capacity at all — a reserved
+      // invitation must be acceptable even at/above the cap. Only the
+      // already-active branch releases a redundant reservation (-1),
+      // exactly once, in the SAME transaction as the writes below. A
+      // capacity failure here aborts the whole acceptance atomically: no
+      // membership mutation, no invitation mutation, no capacity mutation.
+      if (alreadyMember && isWorkspaceCapacityControlled(invitationData.workspaceId)) {
+        const release = await releaseTeamWorkspaceCanarySlot(tx, invitationData.workspaceId);
+        if (release.status !== "released") {
+          return { kind: "state_corruption" };
+        }
+      }
+
+      // 9. Stage writes — all reads (including capacity's own) are complete.
+      const now = Timestamp.now();
+      if (membershipWrite === "reactivate") {
+        tx.update(membershipRef, {
+          status: "active",
+          role: invitationData.role,
+          updatedAt: now,
+          invitedByUserId: invitationData.invitedByUserId,
+          removedAt: null,
+          removedByUserId: null,
+        });
+      } else if (membershipWrite === "create") {
         const newMembership: WorkspaceMembershipV1 = {
           schemaVersion: 1,
           id: membershipId,
@@ -685,7 +794,6 @@ export async function acceptWorkspaceInvitation(args: { uid: string; invitationI
           removedByUserId: null,
         };
         tx.create(membershipRef, newMembership);
-        effectiveRole = invitationData.role;
       }
 
       tx.update(invitationRef, { status: "accepted", acceptedAt: now, acceptedByUserId: args.uid, updatedAt: now });
@@ -766,13 +874,24 @@ function chunk<T>(items: T[], size: number): T[][] {
  * superseded-but-still-`pending`-flagged rows. See module doc comment.
  */
 export async function listWorkspaceInvitations(args: { uid: string; workspaceId: string }): Promise<ListWorkspaceInvitationsResult> {
-  const rollout = resolveTeamWorkspacesMode({ uid: args.uid, globalEnabled: TEAM_WORKSPACES_ENABLED, canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS });
-  if (!rollout.enabled) {
+  if (!isTargetWorkspaceAdmitted(args.uid, args.workspaceId)) {
     return { status: "team_workspaces_disabled" };
   }
   if (!adminDb) {
     return { status: "firestore_unavailable" };
   }
+
+  // NOTE (Phase 10B.2 scope boundary): `resolveWorkspaceAccess()` below
+  // still performs its OWN internal user-scoped `resolveTeamWorkspacesMode()`
+  // gate (Phase 10B.3's responsibility, not this phase's) — so a
+  // Workspace-canary-only (non-uid-canary) caller who now passes the
+  // target-admission check above will still be denied by that inner gate
+  // today, via the SAME `team_workspaces_disabled` reason this function's
+  // own switch below already maps to the same concealed response. This
+  // migration does not yet GRANT list access to such a caller; it only
+  // means the outer gate is no longer the thing blocking them, and fixes
+  // this outer path onto the reviewed target-admission primitive ahead of
+  // Phase 10B.3.
 
   const access = await resolveWorkspaceAccess({ uid: args.uid, workspaceId: args.workspaceId });
   if (!access.granted) {

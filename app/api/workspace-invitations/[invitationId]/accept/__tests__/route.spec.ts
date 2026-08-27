@@ -137,10 +137,11 @@ it("state corruption -> 500", async () => {
   expect(res.status).toBe(500);
 });
 
-it("team_workspaces_disabled -> 503", async () => {
-  mockedAcceptWorkspaceInvitation.mockResolvedValue({ status: "team_workspaces_disabled" });
-  const { res } = await callRoute(VALID_BODY);
-  expect(res.status).toBe(503);
+it("target-Workspace admission denied -> invitation_invalid_or_expired (404) — Phase 10B.2: team_workspaces_disabled is no longer a possible acceptWorkspaceInvitation() result at all; admission denial is concealed identically to every other invitation-invalid case", async () => {
+  mockedAcceptWorkspaceInvitation.mockResolvedValue({ status: "invitation_invalid_or_expired" });
+  const { res, json } = await callRoute(VALID_BODY);
+  expect(res.status).toBe(404);
+  expect(json.errorCode).toBe("invitation_invalid_or_expired");
 });
 
 it("accepted new membership -> 200, exposes workspaceId/alreadyMember/effectiveRole", async () => {

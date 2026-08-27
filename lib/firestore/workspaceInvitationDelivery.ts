@@ -12,27 +12,37 @@
  * `stale_delivery_result` is returned — never treated as a failure of the
  * invitation itself.
  *
- * Respects the SAME Team Workspace rollout gate as every other invitation
- * operation — `resolveTeamWorkspacesMode()` /
- * `TEAM_WORKSPACES_ENABLED` / `TEAM_WORKSPACES_CANARY_UIDS` — evaluated
- * against the authenticated REQUESTER's `uid` (the future 8D.2 route's
- * own caller, e.g. the admin who triggered a resend, or the system
- * identity behind the create/resend orchestration), never against the
- * invitation's `invitedByUserId` or any other stored field. This is a
- * gate check only, exactly like every other invitation function's own
- * rollout check — it does NOT re-derive `members.invite`/`members.manage`
- * authorization, which belongs solely to the originating create/resend
- * operation. No invitation-specific rollout flag exists or is introduced
- * here (Phase 8D.0.2 froze reuse of the existing primitive for every
- * invitation Firestore operation, this one included).
+ * Respects the SAME target-Workspace Team admission every other
+ * invitation operation now uses (Phase 10B.2) —
+ * `resolveTeamWorkspaceTargetAdmission()` — evaluated against the
+ * authenticated REQUESTER's `uid` (the route's own caller, e.g. the admin
+ * who triggered a resend, or the system identity behind the create/resend
+ * orchestration) AND the invitation's own canonical `workspaceId`, never
+ * against `invitedByUserId` or any other stored field. This is a gate
+ * check only, exactly like every other invitation function's own
+ * admission check — it does NOT re-derive `members.invite`/
+ * `members.manage` authorization, which belongs solely to the originating
+ * create/resend operation.
+ *
+ * `workspaceId` is derived from the invitation document this function
+ * ALREADY reads for its own `deliveryVersion`/OCC bookkeeping (Option B
+ * of the Phase 10A.2 design closure) — never accepted as a caller-supplied
+ * parameter, and never a second, separate read: admission is evaluated
+ * from the SAME `tx.get()` this function always performed, just after
+ * that read completes rather than before the transaction opens. This is
+ * what closes the defect the Phase 10A.1/10A.2 audits identified: a
+ * Workspace-scoped-only (non-uid-canary) authorized inviter could
+ * previously create an invitation successfully but have this function
+ * deny its own delivery-result bookkeeping, since the old check evaluated
+ * only the USER-scoped resolver against the requester's `uid` alone.
  */
 
 import "server-only";
 import { Timestamp } from "firebase-admin/firestore";
 import { adminDb } from "@/lib/firebase/admin";
 import { logger } from "@/lib/logger";
-import { TEAM_WORKSPACES_ENABLED, TEAM_WORKSPACES_CANARY_UIDS } from "@/lib/env";
-import { resolveTeamWorkspacesMode } from "@/lib/workspaces/teamWorkspacesRollout";
+import { TEAM_WORKSPACES_ENABLED, TEAM_WORKSPACES_CANARY_UIDS, TEAM_WORKSPACES_CANARY_WORKSPACE_IDS } from "@/lib/env";
+import { resolveTeamWorkspaceTargetAdmission } from "@/lib/workspaces/teamWorkspaceTargetAdmission";
 import { isWellFormedWorkspaceInvitationV1, WORKSPACE_INVITATION_DELIVERY_STATUSES, type WorkspaceInvitationDeliveryStatus } from "./workspaceInvitations";
 
 function isPositiveInteger(value: unknown): value is number {
@@ -78,18 +88,11 @@ export async function recordWorkspaceInvitationDeliveryResult(args: {
   const deliveryStatus = args.status as WorkspaceInvitationDeliveryStatus;
   const providerMessageId = args.providerMessageId as string | null;
 
-  // Rollout gate, evaluated before ANY Firestore access — same primitive,
-  // same env vars, same convention as every other invitation operation.
-  const rollout = resolveTeamWorkspacesMode({ uid, globalEnabled: TEAM_WORKSPACES_ENABLED, canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS });
-  if (!rollout.enabled) {
-    return { status: "team_workspaces_disabled" };
-  }
-
   if (!adminDb) {
     return { status: "firestore_unavailable" };
   }
 
-  type TxResult = { kind: "recorded" } | { kind: "stale" } | { kind: "not_found" } | { kind: "state_corruption" };
+  type TxResult = { kind: "recorded" } | { kind: "stale" } | { kind: "not_found" } | { kind: "not_admitted" } | { kind: "state_corruption" };
 
   let txResult: TxResult;
   try {
@@ -103,6 +106,20 @@ export async function recordWorkspaceInvitationDeliveryResult(args: {
       if (!isWellFormedWorkspaceInvitationV1(data) || data.id !== invitationId) {
         return { kind: "state_corruption" };
       }
+
+      // Target-Workspace admission, derived from THIS SAME read's own
+      // workspaceId field — no extra read, no caller-supplied workspaceId.
+      const admission = resolveTeamWorkspaceTargetAdmission({
+        uid,
+        workspaceId: data.workspaceId,
+        globalEnabled: TEAM_WORKSPACES_ENABLED,
+        canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS,
+        canaryWorkspaceIdsRaw: TEAM_WORKSPACES_CANARY_WORKSPACE_IDS,
+      });
+      if (!admission.enabled) {
+        return { kind: "not_admitted" };
+      }
+
       if (data.deliveryVersion !== deliveryVersion) {
         return { kind: "stale" };
       }
@@ -124,6 +141,8 @@ export async function recordWorkspaceInvitationDeliveryResult(args: {
   switch (txResult.kind) {
     case "not_found":
       return { status: "invitation_not_found" };
+    case "not_admitted":
+      return { status: "team_workspaces_disabled" };
     case "state_corruption":
       return { status: "state_corruption" };
     case "stale":
