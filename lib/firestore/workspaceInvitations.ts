@@ -38,9 +38,9 @@ import { resolveTeamWorkspacesMode } from "@/lib/workspaces/teamWorkspacesRollou
 import { authorizeTeamWorkspaceMutationInTransaction, type TeamMutationAuthorizationDenialReason } from "@/lib/workspaces/authorizeTeamWorkspaceMutationInTransaction";
 import { resolveWorkspaceAccess } from "@/lib/workspaces/resolveWorkspaceAccess";
 import { canManageInvitationTargetRole } from "@/lib/workspaces/invitationRoleAuthority";
-import { normalizeInvitationEmail, isValidNormalizedInvitationEmail } from "@/lib/workspaces/invitationEmail";
+import { normalizeInvitationEmail } from "@/lib/workspaces/invitationEmail";
 import { computeWorkspaceInvitationKey } from "@/lib/workspaces/invitationKey";
-import { generateWorkspaceInvitationToken, hashWorkspaceInvitationToken, verifyWorkspaceInvitationToken, isWellFormedInvitationTokenHash } from "@/lib/workspaces/invitationToken";
+import { generateWorkspaceInvitationToken, hashWorkspaceInvitationToken, verifyWorkspaceInvitationToken } from "@/lib/workspaces/invitationToken";
 import { computeMembershipId } from "@/lib/workspaces/membershipId";
 import { validateMembershipBinding } from "@/lib/workspaces/membershipBinding";
 import { isCanonicalTeamOwnerMembership } from "@/lib/workspaces/ownerInvariant";
@@ -48,124 +48,35 @@ import { isWellFormedWorkspaceV1, type TeamWorkspaceV1 } from "@/lib/workspaces/
 import type { WorkspaceMembershipRole, WorkspaceMembershipV1 } from "@/lib/workspaces/membershipTypes";
 
 // ==================================================================
-// Canonical types
+// Canonical types — extracted to `invitationTypes.ts` in Phase 10B.1 for
+// dependency hygiene (see that module's doc comment); re-exported here
+// unchanged so no existing importer of this file is affected.
 // ==================================================================
 
-export type WorkspaceInvitationRole = "admin" | "member" | "reviewer" | "viewer";
-export const WORKSPACE_INVITATION_ROLES: readonly WorkspaceInvitationRole[] = ["admin", "member", "reviewer", "viewer"];
+export {
+  WORKSPACE_INVITATION_ROLES,
+  WORKSPACE_INVITATION_STATUSES,
+  WORKSPACE_INVITATION_DELIVERY_STATUSES,
+  isWellFormedWorkspaceInvitationV1,
+  isWellFormedWorkspaceInvitationKeyV1,
+} from "@/lib/workspaces/invitationTypes";
+export type { WorkspaceInvitationRole, WorkspaceInvitationStatus, WorkspaceInvitationDeliveryStatus, WorkspaceInvitationV1, WorkspaceInvitationKeyV1 } from "@/lib/workspaces/invitationTypes";
 
-export type WorkspaceInvitationStatus = "pending" | "accepted" | "revoked";
-export const WORKSPACE_INVITATION_STATUSES: readonly WorkspaceInvitationStatus[] = ["pending", "accepted", "revoked"];
-
-export type WorkspaceInvitationDeliveryStatus = "sent" | "failed";
-export const WORKSPACE_INVITATION_DELIVERY_STATUSES: readonly WorkspaceInvitationDeliveryStatus[] = ["sent", "failed"];
-
-/** The invitation document itself, at `workspaceInvitations/{id}` where `id` is a Firestore auto-id — see module doc comment for why (mirrors `workspaces/{id}`'s own auto-id convention, not a prefixed-UUID scheme). */
-export interface WorkspaceInvitationV1 {
-  schemaVersion: 1;
-  id: string;
-  workspaceId: string;
-  normalizedEmail: string;
-  role: WorkspaceInvitationRole;
-  status: WorkspaceInvitationStatus;
-  tokenHash: string;
-  expiresAt: Timestamp;
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
-  invitedByUserId: string;
-  acceptedAt: Timestamp | null;
-  acceptedByUserId: string | null;
-  revokedAt: Timestamp | null;
-  revokedByUserId: string | null;
-  /** Email/token issuance version — starts at 1, incremented by resend only. Never incremented by revoke. */
-  deliveryVersion: number;
-  lastDeliveryAttemptAt: Timestamp | null;
-  lastDeliveryStatus: WorkspaceInvitationDeliveryStatus | null;
-  /** The `deliveryVersion` the last successfully-recorded (non-stale) delivery result actually corresponds to — makes the persisted metadata self-describing. */
-  lastDeliveryVersion: number | null;
-  providerMessageId: string | null;
-}
-
-/** The current-invitation guard, at `workspaceInvitationKeys/{wik_*}` — see `invitationKey.ts`. No token material. */
-export interface WorkspaceInvitationKeyV1 {
-  workspaceId: string;
-  normalizedEmail: string;
-  currentInvitationId: string;
-  updatedAt: Timestamp;
-}
+import {
+  WORKSPACE_INVITATION_ROLES,
+  isPositiveInteger,
+  isWellFormedWorkspaceInvitationV1,
+  isWellFormedWorkspaceInvitationKeyV1,
+  type WorkspaceInvitationRole,
+  type WorkspaceInvitationV1,
+  type WorkspaceInvitationKeyV1,
+  type WorkspaceInvitationDeliveryStatus,
+} from "@/lib/workspaces/invitationTypes";
 
 const INVITATION_TTL_SECONDS = 7 * 24 * 60 * 60;
 
 function addSeconds(ts: Timestamp, seconds: number): Timestamp {
   return new Timestamp(ts.seconds + seconds, ts.nanoseconds);
-}
-
-function isPositiveInteger(value: unknown): value is number {
-  return typeof value === "number" && Number.isInteger(value) && value >= 1;
-}
-
-// ==================================================================
-// Validators — never a blind cast; every authorization/state decision in
-// this module depends on these.
-// ==================================================================
-
-export function isWellFormedWorkspaceInvitationV1(data: unknown): data is WorkspaceInvitationV1 {
-  if (typeof data !== "object" || data === null) return false;
-  const d = data as Record<string, unknown>;
-
-  if (d.schemaVersion !== 1) return false;
-  if (typeof d.id !== "string" || d.id.length === 0) return false;
-  if (typeof d.workspaceId !== "string" || d.workspaceId.length === 0) return false;
-  if (!isValidNormalizedInvitationEmail(d.normalizedEmail)) return false;
-  if (typeof d.role !== "string" || !WORKSPACE_INVITATION_ROLES.includes(d.role as WorkspaceInvitationRole)) return false;
-  if (typeof d.status !== "string" || !WORKSPACE_INVITATION_STATUSES.includes(d.status as WorkspaceInvitationStatus)) return false;
-  if (!isWellFormedInvitationTokenHash(d.tokenHash)) return false;
-  if (!(d.expiresAt instanceof Timestamp)) return false;
-  if (!(d.createdAt instanceof Timestamp)) return false;
-  if (!(d.updatedAt instanceof Timestamp)) return false;
-  if (typeof d.invitedByUserId !== "string" || d.invitedByUserId.length === 0) return false;
-
-  const acceptedAtNull = d.acceptedAt === null;
-  const acceptedByNull = d.acceptedByUserId === null;
-  if (acceptedAtNull !== acceptedByNull) return false;
-  if (!acceptedAtNull) {
-    if (!(d.acceptedAt instanceof Timestamp)) return false;
-    if (!(typeof d.acceptedByUserId === "string" && d.acceptedByUserId.length > 0)) return false;
-  }
-
-  const revokedAtNull = d.revokedAt === null;
-  const revokedByNull = d.revokedByUserId === null;
-  if (revokedAtNull !== revokedByNull) return false;
-  if (!revokedAtNull) {
-    if (!(d.revokedAt instanceof Timestamp)) return false;
-    if (!(typeof d.revokedByUserId === "string" && d.revokedByUserId.length > 0)) return false;
-  }
-
-  // Status/removal-field coherence — mirrors membershipTypes.ts's
-  // status/removedAt coherence pattern.
-  if (d.status === "accepted" && acceptedAtNull) return false;
-  if (d.status !== "accepted" && !acceptedAtNull) return false;
-  if (d.status === "revoked" && revokedAtNull) return false;
-  if (d.status !== "revoked" && !revokedAtNull) return false;
-
-  if (!isPositiveInteger(d.deliveryVersion)) return false;
-  if (!(d.lastDeliveryAttemptAt === null || d.lastDeliveryAttemptAt instanceof Timestamp)) return false;
-  if (!(d.lastDeliveryStatus === null || (typeof d.lastDeliveryStatus === "string" && WORKSPACE_INVITATION_DELIVERY_STATUSES.includes(d.lastDeliveryStatus as WorkspaceInvitationDeliveryStatus)))) return false;
-  if (!(d.lastDeliveryVersion === null || isPositiveInteger(d.lastDeliveryVersion))) return false;
-  // Deliberately NOT required merely because lastDeliveryStatus === "failed" — a failed send may have no provider-assigned id.
-  if (!(d.providerMessageId === null || (typeof d.providerMessageId === "string" && d.providerMessageId.length > 0))) return false;
-
-  return true;
-}
-
-export function isWellFormedWorkspaceInvitationKeyV1(data: unknown): data is WorkspaceInvitationKeyV1 {
-  if (typeof data !== "object" || data === null) return false;
-  const d = data as Record<string, unknown>;
-  if (typeof d.workspaceId !== "string" || d.workspaceId.length === 0) return false;
-  if (!isValidNormalizedInvitationEmail(d.normalizedEmail)) return false;
-  if (typeof d.currentInvitationId !== "string" || d.currentInvitationId.length === 0) return false;
-  if (!(d.updatedAt instanceof Timestamp)) return false;
-  return true;
 }
 
 // ==================================================================

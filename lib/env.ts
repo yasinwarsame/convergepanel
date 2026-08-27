@@ -365,6 +365,28 @@ export const TEAM_WORKSPACES_ENABLED = process.env.TEAM_WORKSPACES_ENABLED === "
 export const TEAM_WORKSPACES_CANARY_UIDS = process.env.TEAM_WORKSPACES_CANARY_UIDS;
 
 /**
+ * Workspace-Scoped Team Canary, Phase 10B.1 — structural sibling of
+ * `TEAM_WORKSPACES_CANARY_UIDS` above, but the admission unit is a
+ * Workspace id rather than a Firebase uid: an optional, server-only
+ * comma-separated Workspace-id allowlist letting Team Workspace backend
+ * capability be activated for a small number of explicitly named
+ * Workspaces (any member acting within one) while `TEAM_WORKSPACES_ENABLED`
+ * stays `false` — additive to, and evaluated independently of,
+ * `TEAM_WORKSPACES_CANARY_UIDS`. Raw, unparsed string —
+ * `lib/workspaces/teamWorkspaceTargetAdmission.ts` owns all parsing/
+ * validation/matching/precedence logic for this variable, exactly mirroring
+ * how `teamWorkspacesRollout.ts` owns `TEAM_WORKSPACES_CANARY_UIDS`.
+ *
+ * Not configured by this phase — see Phase 10B.1's foundation-only scope.
+ * Absent parses to an empty (valid, not malformed) allowlist, the same
+ * fail-closed convention as every canary allowlist in this file.
+ *
+ * Never prefixed `NEXT_PUBLIC_` — server-only decision, never exposed to
+ * any response body or client-readable config.
+ */
+export const TEAM_WORKSPACES_CANARY_WORKSPACE_IDS = process.env.TEAM_WORKSPACES_CANARY_WORKSPACE_IDS;
+
+/**
  * Approval Workflow (Phase 9B.4) — dark backend admission gate for the
  * first PUBLIC Phase 9 route (`GET /api/workspaces/{workspaceId}/review-queue`).
  * Structural mirror of `TEAM_WORKSPACES_ENABLED`/`TEAM_WORKSPACES_CANARY_UIDS`
