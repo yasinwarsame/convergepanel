@@ -36,6 +36,11 @@ jest.mock("@/lib/workspaces/listViewerTeamWorkspaces", () => ({
   listViewerTeamWorkspaces: (...args: unknown[]) => mockedListViewerTeamWorkspaces(...args),
 }));
 
+const mockedListWorkspaceCanaryMembershipsForUid = jest.fn();
+jest.mock("@/lib/workspaces/resolveWorkspaceCanaryMembershipsForUid", () => ({
+  listWorkspaceCanaryMembershipsForUid: (...args: unknown[]) => mockedListWorkspaceCanaryMembershipsForUid(...args),
+}));
+
 import { NextRequest } from "next/server";
 import { GET, POST } from "@/app/api/workspaces/route";
 
@@ -65,6 +70,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   teamRolloutEnabled = true;
   mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: UID, source: "session_cookie" });
+  mockedListWorkspaceCanaryMembershipsForUid.mockResolvedValue({ status: "ok", items: [] });
 });
 
 it("401s when unauthenticated", async () => {
@@ -135,7 +141,7 @@ describe("GET /api/workspaces — Phase 9C.1-R1C list endpoint", () => {
     expect(mockedListViewerTeamWorkspaces).not.toHaveBeenCalled();
   });
 
-  it("503s when Team Workspaces rollout is off — never reaches Firestore", async () => {
+  it("503s when Team Workspaces rollout is off and Workspace-canary discovery finds zero surviving memberships — never reaches Mode A's Firestore path", async () => {
     teamRolloutEnabled = false;
     const { res, json } = await callGet();
     expect(res.status).toBe(503);
@@ -188,5 +194,52 @@ describe("GET /api/workspaces — Phase 9C.1-R1C list endpoint", () => {
     for (const item of json.items) {
       expect(Object.keys(item).sort()).toEqual(["name", "workspaceId"]);
     }
+  });
+
+  describe("Mode B — Phase 10B.3.1 Workspace-canary discovery (rollout off)", () => {
+    beforeEach(() => {
+      teamRolloutEnabled = false;
+    });
+
+    it("empty Workspace-canary list (or absent) -> byte-identical 503 to a fully non-admitted caller", async () => {
+      mockedListWorkspaceCanaryMembershipsForUid.mockResolvedValue({ status: "ok", items: [] });
+      const { res, json } = await callGet();
+      expect(res.status).toBe(503);
+      expect(json.errorCode).toBe("team_workspaces_disabled");
+    });
+
+    it("one admitted Workspace with active membership -> 200, contains that Workspace only, hasMore false, nextCursor null", async () => {
+      mockedListWorkspaceCanaryMembershipsForUid.mockResolvedValue({ status: "ok", items: [{ workspaceId: "ws-1", name: "Acme" }] });
+      const { res, json } = await callGet();
+      expect(res.status).toBe(200);
+      expect(json.items).toEqual([{ workspaceId: "ws-1", name: "Acme" }]);
+      expect(json.hasMore).toBe(false);
+      expect(json.nextCursor).toBeNull();
+    });
+
+    it("multiple admitted Workspaces the caller belongs to -> all returned, Mode A's list function never called", async () => {
+      mockedListWorkspaceCanaryMembershipsForUid.mockResolvedValue({
+        status: "ok",
+        items: [
+          { workspaceId: "ws-1", name: "Acme" },
+          { workspaceId: "ws-2", name: "Beta" },
+        ],
+      });
+      const { json } = await callGet();
+      expect(json.items).toHaveLength(2);
+      expect(mockedListViewerTeamWorkspaces).not.toHaveBeenCalled();
+    });
+
+    it("lookup_failed -> 500, never 503 (distinguishes real infrastructure failure from ordinary non-admission)", async () => {
+      mockedListWorkspaceCanaryMembershipsForUid.mockResolvedValue({ status: "lookup_failed" });
+      const { res } = await callGet();
+      expect(res.status).toBe(500);
+    });
+
+    it("passes only the authenticated uid to the shared discovery helper — never a client-supplied value", async () => {
+      mockedListWorkspaceCanaryMembershipsForUid.mockResolvedValue({ status: "ok", items: [] });
+      await callGet();
+      expect(mockedListWorkspaceCanaryMembershipsForUid.mock.calls[0][0]).toMatchObject({ uid: UID });
+    });
   });
 });

@@ -55,6 +55,7 @@ let approvalGlobal = false;
 let approvalCanary: string | undefined = undefined;
 let teamGlobal = true; // Phase 9C.1-R1C — default true so existing "eligible" scenarios need no per-test change; false-path covered by dedicated tests below.
 let teamCanary: string | undefined = undefined;
+let teamCanaryWorkspaceIds: string | undefined = undefined;
 jest.mock("@/lib/env", () => ({
   get PERSONAL_WORKSPACE_UI_ENABLED() {
     return uiGlobal;
@@ -74,11 +75,19 @@ jest.mock("@/lib/env", () => ({
   get TEAM_WORKSPACES_CANARY_UIDS() {
     return teamCanary;
   },
+  get TEAM_WORKSPACES_CANARY_WORKSPACE_IDS() {
+    return teamCanaryWorkspaceIds;
+  },
 }));
 
 const mockedResolveViewerTeamWorkspaceSelection = jest.fn();
 jest.mock("@/lib/workspaces/resolveViewerTeamWorkspaceSelection", () => ({
   resolveViewerTeamWorkspaceSelection: (...args: any[]) => mockedResolveViewerTeamWorkspaceSelection(...args),
+}));
+
+const mockedResolveWorkspaceCanaryMembershipsForUid = jest.fn();
+jest.mock("@/lib/workspaces/resolveWorkspaceCanaryMembershipsForUid", () => ({
+  resolveWorkspaceCanaryMembershipsForUid: (...args: any[]) => mockedResolveWorkspaceCanaryMembershipsForUid(...args),
 }));
 
 import { NextRequest } from "next/server";
@@ -119,10 +128,12 @@ beforeEach(() => {
   approvalCanary = undefined;
   teamGlobal = true;
   teamCanary = undefined;
+  teamCanaryWorkspaceIds = undefined;
   jest.clearAllMocks();
   mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: UID });
   mockedGetUser.mockResolvedValue({ email: "user@example.com" });
   mockedResolveViewerTeamWorkspaceSelection.mockResolvedValue({ kind: "none" });
+  mockedResolveWorkspaceCanaryMembershipsForUid.mockResolvedValue({ status: "ok", workspaceIds: [] });
 });
 
 describe("GET /api/user/usage — auth", () => {
@@ -323,5 +334,70 @@ describe("GET /api/user/usage — workspaceReviewsUiEnabled", () => {
     const res = await GET(buildRequest());
     const json = await res.json();
     expect(JSON.stringify(json)).not.toContain("ws-should-not-leak");
+  });
+
+  describe("Phase 10B.3.1 — Workspace-canary-only admission", () => {
+    beforeEach(() => {
+      approvalGlobal = true; // Approval Workflow admission remains an unconditional prerequisite either way.
+      teamGlobal = false;
+      teamCanary = undefined;
+    });
+
+    it("true: Workspace-canary-only, active relevant membership survives", async () => {
+      mockedResolveWorkspaceCanaryMembershipsForUid.mockResolvedValue({ status: "ok", workspaceIds: ["ws-1"] });
+      const res = await GET(buildRequest());
+      const json = await res.json();
+      expect(json.workspaceReviewsUiEnabled).toBe(true);
+      expect(mockedResolveViewerTeamWorkspaceSelection).not.toHaveBeenCalled(); // Mode A path never invoked
+    });
+
+    it("false: Workspace-canary configured, but no surviving membership", async () => {
+      mockedResolveWorkspaceCanaryMembershipsForUid.mockResolvedValue({ status: "ok", workspaceIds: [] });
+      const res = await GET(buildRequest());
+      const json = await res.json();
+      expect(json.workspaceReviewsUiEnabled).toBe(false);
+    });
+
+    it("false: lookup_failed never falls open", async () => {
+      mockedResolveWorkspaceCanaryMembershipsForUid.mockResolvedValue({ status: "lookup_failed" });
+      const res = await GET(buildRequest());
+      const json = await res.json();
+      expect(json.workspaceReviewsUiEnabled).toBe(false);
+    });
+
+    it("false: Approval Workflow admission still required — Workspace-canary membership alone is not sufficient", async () => {
+      approvalGlobal = false;
+      approvalCanary = undefined;
+      mockedResolveWorkspaceCanaryMembershipsForUid.mockResolvedValue({ status: "ok", workspaceIds: ["ws-1"] });
+      const res = await GET(buildRequest());
+      const json = await res.json();
+      expect(json.workspaceReviewsUiEnabled).toBe(false);
+      expect(mockedResolveWorkspaceCanaryMembershipsForUid).not.toHaveBeenCalled(); // cheapest-gate-first — never even reached
+    });
+
+    it("does not turn into 'any membership counts' — a caller whose only membership is in a NON-admitted Workspace must answer false, not reuse resolveViewerTeamWorkspaceSelection's raw cardinality", async () => {
+      // The shared helper itself is responsible for this filtering; here we
+      // simply confirm the route trusts its `workspaceIds` output directly
+      // rather than falling back to any other broader signal.
+      mockedResolveWorkspaceCanaryMembershipsForUid.mockResolvedValue({ status: "ok", workspaceIds: [] });
+      mockedResolveViewerTeamWorkspaceSelection.mockResolvedValue({ kind: "single", workspaceId: "ws-irrelevant" }); // must be ignored — Mode A is not this caller's admission source
+      const res = await GET(buildRequest());
+      const json = await res.json();
+      expect(json.workspaceReviewsUiEnabled).toBe(false);
+    });
+
+    it("uses the server-resolved uid, never a client-supplied one", async () => {
+      mockedResolveWorkspaceCanaryMembershipsForUid.mockResolvedValue({ status: "ok", workspaceIds: ["ws-1"] });
+      await GET(buildRequest());
+      expect(mockedResolveWorkspaceCanaryMembershipsForUid.mock.calls[0][0]).toMatchObject({ uid: UID });
+    });
+
+    it("response leak check: boolean only, never a Workspace id, canary source, or membership count", async () => {
+      mockedResolveWorkspaceCanaryMembershipsForUid.mockResolvedValue({ status: "ok", workspaceIds: ["ws-should-not-leak"] });
+      const res = await GET(buildRequest());
+      const json = await res.json();
+      expect(JSON.stringify(json)).not.toContain("ws-should-not-leak");
+      expect(typeof json.workspaceReviewsUiEnabled).toBe("boolean");
+    });
   });
 });

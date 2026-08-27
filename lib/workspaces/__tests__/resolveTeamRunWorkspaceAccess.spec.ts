@@ -9,12 +9,16 @@
 
 let teamWorkspacesEnabled = true;
 let teamWorkspacesCanaryUids: string | undefined = undefined;
+let teamWorkspacesCanaryWorkspaceIds: string | undefined = undefined;
 jest.mock("@/lib/env", () => ({
   get TEAM_WORKSPACES_ENABLED() {
     return teamWorkspacesEnabled;
   },
   get TEAM_WORKSPACES_CANARY_UIDS() {
     return teamWorkspacesCanaryUids;
+  },
+  get TEAM_WORKSPACES_CANARY_WORKSPACE_IDS() {
+    return teamWorkspacesCanaryWorkspaceIds;
   },
 }));
 
@@ -43,6 +47,7 @@ function membership(role: WorkspaceMembershipRole, overrides: Partial<WorkspaceM
 beforeEach(() => {
   teamWorkspacesEnabled = true;
   teamWorkspacesCanaryUids = undefined;
+  teamWorkspacesCanaryWorkspaceIds = undefined;
   mockResolveWorkspaceAccess.mockReset();
 });
 
@@ -69,6 +74,33 @@ describe("resolveTeamRunWorkspaceAccess — rollout-first ordering (security cri
     mockResolveWorkspaceAccess.mockResolvedValueOnce({ granted: true, workspaceType: "team", workspace: teamWorkspace(), membership: membership("owner"), capabilities: ["research.read"] });
     await resolveTeamRunWorkspaceAccess({ uid: UID, workspaceId: WS_ID });
     expect(mockResolveWorkspaceAccess).toHaveBeenCalledTimes(1);
+  });
+
+  describe("Phase 10B.3.1 — target-Workspace admission pre-filter (no longer UID-only)", () => {
+    it("global off, uid NOT canaried, but THIS Workspace is Workspace-canary admitted -> pre-filter passes, resolveWorkspaceAccess called once", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryWorkspaceIds = WS_ID;
+      mockResolveWorkspaceAccess.mockResolvedValueOnce({ granted: true, workspaceType: "team", workspace: teamWorkspace(), membership: membership("member"), capabilities: ["research.read"] });
+      const result = await resolveTeamRunWorkspaceAccess({ uid: UID, workspaceId: WS_ID });
+      expect(result.granted).toBe(true);
+      expect(mockResolveWorkspaceAccess).toHaveBeenCalledTimes(1);
+    });
+
+    it("global off, uid NOT canaried, and this Workspace is NOT Workspace-canary admitted -> denied with ZERO Workspace reads (pre-filter still functions as a real gate, not merely relocated)", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryWorkspaceIds = "some-other-workspace";
+      const result = await resolveTeamRunWorkspaceAccess({ uid: UID, workspaceId: WS_ID });
+      expect(result).toEqual({ granted: false, reason: "team_workspaces_disabled" });
+      expect(mockResolveWorkspaceAccess).not.toHaveBeenCalled();
+    });
+
+    it("Workspace-canary pre-filter passing does NOT itself grant access — resolveWorkspaceAccess's own denial (e.g. no membership) still wins", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryWorkspaceIds = WS_ID;
+      mockResolveWorkspaceAccess.mockResolvedValueOnce({ granted: false, reason: "membership_not_found" });
+      const result = await resolveTeamRunWorkspaceAccess({ uid: UID, workspaceId: WS_ID });
+      expect(result).toEqual({ granted: false, reason: "membership_not_found" });
+    });
   });
 });
 

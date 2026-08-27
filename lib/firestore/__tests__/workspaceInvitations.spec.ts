@@ -160,12 +160,16 @@ const mockAdminAuth = {
 
 let teamWorkspacesEnabled = true;
 let teamWorkspacesCanaryUids: string | undefined = undefined;
+let teamWorkspacesCanaryWorkspaceIds: string | undefined = undefined;
 jest.mock("@/lib/env", () => ({
   get TEAM_WORKSPACES_ENABLED() {
     return teamWorkspacesEnabled;
   },
   get TEAM_WORKSPACES_CANARY_UIDS() {
     return teamWorkspacesCanaryUids;
+  },
+  get TEAM_WORKSPACES_CANARY_WORKSPACE_IDS() {
+    return teamWorkspacesCanaryWorkspaceIds;
   },
 }));
 
@@ -281,6 +285,7 @@ beforeEach(() => {
   invitationsAutoIdCallCount = 0;
   teamWorkspacesEnabled = true;
   teamWorkspacesCanaryUids = undefined;
+  teamWorkspacesCanaryWorkspaceIds = undefined;
   firestoreUnavailableFlag.value = false;
   authUnavailableFlag.value = false;
   authUsers = {};
@@ -1176,6 +1181,41 @@ describe("listWorkspaceInvitations", () => {
     seedMembership(MEMBER_UID, "member");
     const result = await listWorkspaceInvitations({ uid: MEMBER_UID, workspaceId: WS_ID });
     expect(result.status).toBe("listed");
+  });
+
+  it("Phase 10B.3.1 closure: a Workspace-canary-only (non-uid-canary) active Member can now list — the LIST_WORKSPACE_SCOPED_GRANT deferred-gate blocker from Phase 10B.2 is closed by the resolveWorkspaceAccess() migration alone, no invitation-list production logic changed in this phase", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryUids = undefined; // explicitly NOT uid-canary admitted
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    seedMembership(MEMBER_UID, "member");
+    const result = await listWorkspaceInvitations({ uid: MEMBER_UID, workspaceId: WS_ID });
+    expect(result.status).toBe("listed");
+  });
+
+  it("Phase 10B.3.1: Workspace-scoped Member/Reviewer/Viewer roles still lack members.read capability if their role never had it — admission source never changes role capability", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    seedMembership(MEMBER_UID, "viewer");
+    const result = await listWorkspaceInvitations({ uid: MEMBER_UID, workspaceId: WS_ID });
+    // Whatever this role's existing capability outcome is under global/uid
+    // admission must be IDENTICAL under Workspace-canary admission — this
+    // assertion only proves the two are consistent, not a specific value,
+    // since role/capability wiring itself is unchanged by this phase.
+    const globalAdmissionResult = await (async () => {
+      teamWorkspacesEnabled = true;
+      const r = await listWorkspaceInvitations({ uid: MEMBER_UID, workspaceId: WS_ID });
+      teamWorkspacesEnabled = false;
+      return r;
+    })();
+    expect(result.status).toBe(globalAdmissionResult.status);
+  });
+
+  it("Phase 10B.3.1: a Workspace NOT in the canary list still denies listing (target admission, not a general bypass)", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = "some-other-workspace";
+    seedMembership(MEMBER_UID, "member");
+    const result = await listWorkspaceInvitations({ uid: MEMBER_UID, workspaceId: WS_ID });
+    expect(result.status).toBe("team_workspaces_disabled");
   });
 
   it("no guards -> empty list", async () => {

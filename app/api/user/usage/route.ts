@@ -23,6 +23,7 @@ import { resolveProjectsUiEligibility } from "@/lib/projects/projectsUiEligibili
 import { resolveApprovalWorkflowAdmission } from "@/lib/workspaces/approvalWorkflowRollout";
 import { resolveTeamWorkspacesMode } from "@/lib/workspaces/teamWorkspacesRollout";
 import { resolveViewerTeamWorkspaceSelection } from "@/lib/workspaces/resolveViewerTeamWorkspaceSelection";
+import { resolveWorkspaceCanaryMembershipsForUid } from "@/lib/workspaces/resolveWorkspaceCanaryMembershipsForUid";
 import {
   PERSONAL_WORKSPACE_UI_ENABLED,
   PERSONAL_WORKSPACE_UI_CANARY_UIDS,
@@ -34,6 +35,7 @@ import {
   APPROVAL_WORKFLOW_CANARY_UIDS,
   TEAM_WORKSPACES_ENABLED,
   TEAM_WORKSPACES_CANARY_UIDS,
+  TEAM_WORKSPACES_CANARY_WORKSPACE_IDS,
 } from "@/lib/env";
 
 /**
@@ -90,14 +92,35 @@ function projectsUiEnabledFor(uid: string): boolean {
  * are both pure/zero-I/O and checked first, so the non-canary majority of
  * requests never reach the bounded Firestore scan below — mirroring the
  * "cheapest gate first" convention used by every other Phase 9 route.
+ *
+ * Phase 10B.3.1: Approval Workflow admission remains an UNCONDITIONAL
+ * prerequisite either way — a Workspace-canary-only caller who somehow
+ * lacks Approval Workflow admission still gets `false`, exactly as a
+ * global/uid-canary Team caller always has. Team admission is now
+ * additive: the EXISTING global/uid-canary path (`resolveViewerTeamWorkspaceSelection()`,
+ * unchanged) is tried first; only when that's not the caller's admission
+ * source does a SEPARATE, bounded (≤10 point reads) Workspace-canary
+ * check run, via the shared `resolveWorkspaceCanaryMembershipsForUid()`
+ * primitive — never a reuse of `resolveViewerTeamWorkspaceSelection()`'s
+ * own raw cardinality, since that function counts ALL of a uid's active
+ * memberships regardless of Workspace-canary admission (a uid could have
+ * an active membership in a non-admitted Workspace and nothing else,
+ * which must still answer `false` here). The response remains a bare
+ * boolean either way — never leaks Workspace ids, canary source, or
+ * membership count, and never distinguishes WHY it's `false`.
  */
 async function workspaceReviewsUiEnabledFor(uid: string): Promise<boolean> {
   const admission = resolveApprovalWorkflowAdmission({ uid, globalEnabled: APPROVAL_WORKFLOW_ENABLED, canaryUidsRaw: APPROVAL_WORKFLOW_CANARY_UIDS });
   if (!admission.admitted) return false;
+
   const teamRollout = resolveTeamWorkspacesMode({ uid, globalEnabled: TEAM_WORKSPACES_ENABLED, canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS });
-  if (!teamRollout.enabled) return false;
-  const selection = await resolveViewerTeamWorkspaceSelection(uid);
-  return selection.kind === "single" || selection.kind === "multiple";
+  if (teamRollout.enabled) {
+    const selection = await resolveViewerTeamWorkspaceSelection(uid);
+    return selection.kind === "single" || selection.kind === "multiple";
+  }
+
+  const canaryMemberships = await resolveWorkspaceCanaryMembershipsForUid({ uid, canaryWorkspaceIdsRaw: TEAM_WORKSPACES_CANARY_WORKSPACE_IDS });
+  return canaryMemberships.status === "ok" && canaryMemberships.workspaceIds.length > 0;
 }
 
 function clientGovernanceRole(
