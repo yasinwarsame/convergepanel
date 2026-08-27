@@ -148,10 +148,17 @@ describe("POST — core domain mapping (no email on denial)", () => {
     expect(mockedSendWorkspaceInvitationEmail).not.toHaveBeenCalled();
   });
 
-  it("team_workspaces_disabled -> 503, zero email calls", async () => {
+  it("team_workspaces_disabled (target-Workspace admission denied) -> 404 concealed, zero email calls (Phase 10B.2 closes the target-Workspace-canary oracle: never a distinguishable 503)", async () => {
     mockedCreateWorkspaceInvitation.mockResolvedValue({ status: "team_workspaces_disabled" });
     const { res } = await callPost(VALID_BODY);
-    expect(res.status).toBe(503);
+    expect(res.status).toBe(404);
+    expect(mockedSendWorkspaceInvitationEmail).not.toHaveBeenCalled();
+  });
+
+  it("workspace_member_capacity_reached -> 409, zero email calls", async () => {
+    mockedCreateWorkspaceInvitation.mockResolvedValue({ status: "workspace_member_capacity_reached" });
+    const { res } = await callPost(VALID_BODY);
+    expect(res.status).toBe(409);
     expect(mockedSendWorkspaceInvitationEmail).not.toHaveBeenCalled();
   });
 
@@ -284,10 +291,10 @@ describe("GET — list", () => {
     expect(mockedListWorkspaceInvitations).not.toHaveBeenCalled();
   });
 
-  it("team_workspaces_disabled -> 503", async () => {
+  it("team_workspaces_disabled (target-Workspace admission denied) -> 404 concealed (Phase 10B.2: collapses into the same concealed family as workspace_not_found)", async () => {
     mockedListWorkspaceInvitations.mockResolvedValue({ status: "team_workspaces_disabled" });
     const { res } = await callGet();
-    expect(res.status).toBe(503);
+    expect(res.status).toBe(404);
   });
 
   it("concealed Workspace denial -> 404", async () => {

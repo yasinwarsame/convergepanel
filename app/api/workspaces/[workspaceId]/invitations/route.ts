@@ -22,7 +22,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { resolveRequestIdentity } from "@/lib/auth/resolveRequestIdentity";
 import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelemetry";
 import { checkRateLimit } from "@/lib/security/rateLimit";
-import { teamWorkspacesDisabledResponse, invalidRequestBodyResponse, unexpectedFieldResponse, internalErrorResponse } from "@/lib/workspaces/teamWorkspaceErrorResponse";
+import { teamWorkspacesDisabledResponse, invalidRequestBodyResponse, unexpectedFieldResponse, internalErrorResponse, workspaceMemberCapacityReachedResponse } from "@/lib/workspaces/teamWorkspaceErrorResponse";
 import { teamProjectAuthorizationDeniedResponse, teamWorkspaceReadNotFoundResponse } from "@/lib/projects/teamProjectErrorResponse";
 import { createWorkspaceInvitation, listWorkspaceInvitations, type CreateWorkspaceInvitationResult } from "@/lib/firestore/workspaceInvitations";
 import { getWorkspace } from "@/lib/firestore/workspaces";
@@ -47,10 +47,21 @@ async function getUid(req: NextRequest, method: "GET" | "POST"): Promise<string 
 }
 
 /** Maps every non-"created" `createWorkspaceInvitation()` result to its public HTTP response. */
+/**
+ * `team_workspaces_disabled` maps to the SAME concealed
+ * `team_workspace_not_found` shape `resolveWorkspaceAccess()`-family
+ * denials already use (`teamWorkspaceReadNotFoundResponse()`), never to a
+ * distinguishable 503 — Phase 10B.2's target-denial concealment closure.
+ * This is a deliberate response-shape change from the pre-10B.2
+ * behavior (which returned 503 here) for any caller not currently
+ * admitted by any mechanism, since the whole point is that such a caller
+ * must never be able to tell "not admitted at all" apart from "this
+ * specific Workspace isn't canary-admitted" — see Phase 10A.2/10A.4.
+ */
 function mapCreateDenial(result: Exclude<CreateWorkspaceInvitationResult, { status: "created" }>): { status: number; body: unknown } {
   switch (result.status) {
     case "team_workspaces_disabled":
-      return teamWorkspacesDisabledResponse();
+      return teamWorkspaceReadNotFoundResponse();
     case "unauthorized":
       return teamProjectAuthorizationDeniedResponse(result.reason);
     case "role_target_forbidden":
@@ -61,6 +72,8 @@ function mapCreateDenial(result: Exclude<CreateWorkspaceInvitationResult, { stat
       return { status: 400, body: { ok: false, errorCode: "invalid_role", message: "A valid role is required." } };
     case "duplicate_live_invitation":
       return { status: 409, body: { ok: false, errorCode: "duplicate_live_invitation", message: "A live invitation already exists for this email address." } };
+    case "workspace_member_capacity_reached":
+      return workspaceMemberCapacityReachedResponse();
     case "firestore_unavailable":
     case "state_corruption":
     case "create_failed":
@@ -169,36 +182,36 @@ export async function GET(req: NextRequest, { params }: { params: { workspaceId:
   switch (result.status) {
     case "listed":
       return NextResponse.json({ ok: true, invitations: result.invitations });
-    case "team_workspaces_disabled": {
-      const { status, body } = teamWorkspacesDisabledResponse();
-      return NextResponse.json(body, { status });
-    }
-    case "insufficient_capability": {
-      const { status, body } = teamProjectAuthorizationDeniedResponse("insufficient_capability");
-      return NextResponse.json(body, { status });
-    }
+    case "team_workspaces_disabled":
     case "workspace_not_found":
     case "workspace_malformed":
     case "membership_not_found":
     case "membership_removed":
     case "membership_malformed":
     case "owner_integrity_violation": {
+      // Phase 10B.2: `team_workspaces_disabled` (whether from this
+      // route's own target-admission gate or from the still-uid-only
+      // `resolveWorkspaceAccess()` call inside `listWorkspaceInvitations()`
+      // — see that function's own Phase 10B.2 note) now collapses into the
+      // SAME concealed shape as every other denial reason, closing the
+      // target-Workspace-canary oracle.
       const { status, body } = teamWorkspaceReadNotFoundResponse();
+      return NextResponse.json(body, { status });
+    }
+    case "insufficient_capability": {
+      const { status, body } = teamProjectAuthorizationDeniedResponse("insufficient_capability");
       return NextResponse.json(body, { status });
     }
     case "firestore_unavailable":
     case "lookup_failed": {
       // Both represent transient infrastructure unavailability at the
-      // resolveWorkspaceAccess()-family read boundary — the SAME class the
-      // established Team-route precedent (e.g. the Team Video dedup-hit
-      // block's `readAccess.reason === "team_workspaces_disabled" ||
-      // readAccess.reason === "lookup_failed"` branch) already groups with
-      // rollout-disabled, reusing the identical concealed response rather
-      // than a distinct 500. `firestore_unavailable` here is the same
-      // underlying "adminDb is null" condition resolveWorkspaceAccess()
-      // itself collapses into its own `lookup_failed` reason one layer
-      // deeper — never a data-corruption class, so it never shares
-      // state_corruption's 500 mapping.
+      // resolveWorkspaceAccess()-family read boundary — kept on the
+      // repository's PRE-EXISTING 503 mapping, deliberately UNCHANGED by
+      // Phase 10B.2's concealment work: a true infrastructure outage is
+      // not evidence about admission/existence, and this route's own
+      // prior precedent already distinguished it from a data-corruption
+      // 500. Only `team_workspaces_disabled` (a genuine admission denial)
+      // moved to the concealed 404 family above — this class did not.
       const { status, body } = teamWorkspacesDisabledResponse();
       return NextResponse.json(body, { status });
     }

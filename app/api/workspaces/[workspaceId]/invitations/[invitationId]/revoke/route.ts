@@ -11,8 +11,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveRequestIdentity } from "@/lib/auth/resolveRequestIdentity";
 import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelemetry";
-import { teamWorkspacesDisabledResponse, invalidRequestBodyResponse, unexpectedFieldResponse, internalErrorResponse } from "@/lib/workspaces/teamWorkspaceErrorResponse";
-import { teamProjectAuthorizationDeniedResponse } from "@/lib/projects/teamProjectErrorResponse";
+import { invalidRequestBodyResponse, unexpectedFieldResponse, internalErrorResponse } from "@/lib/workspaces/teamWorkspaceErrorResponse";
+import { teamProjectAuthorizationDeniedResponse, teamWorkspaceReadNotFoundResponse } from "@/lib/projects/teamProjectErrorResponse";
 import { revokeWorkspaceInvitation, type RevokeWorkspaceInvitationResult } from "@/lib/firestore/workspaceInvitations";
 
 export const runtime = "nodejs";
@@ -30,10 +30,11 @@ async function getUid(req: NextRequest): Promise<string | NextResponse> {
   return NextResponse.json({ ok: false, errorCode: "auth_error", message: "Authentication failed." }, { status: 401 });
 }
 
+/** `team_workspaces_disabled` maps to the concealed 404 team_workspace_not_found family — Phase 10B.2's target-denial concealment closure (see the create-route's identical comment). */
 function mapRevokeDenial(result: Exclude<RevokeWorkspaceInvitationResult, { status: "revoked" }>): { status: number; body: unknown } {
   switch (result.status) {
     case "team_workspaces_disabled":
-      return teamWorkspacesDisabledResponse();
+      return teamWorkspaceReadNotFoundResponse();
     case "invalid_delivery_version":
       return { status: 400, body: { ok: false, errorCode: "invalid_delivery_version", message: "A valid expectedDeliveryVersion is required." } };
     case "unauthorized":

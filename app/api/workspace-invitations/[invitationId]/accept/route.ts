@@ -18,7 +18,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { resolveRequestIdentity } from "@/lib/auth/resolveRequestIdentity";
 import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelemetry";
 import { invalidRequestBodyResponse, unexpectedFieldResponse, internalErrorResponse } from "@/lib/workspaces/teamWorkspaceErrorResponse";
-import { teamWorkspacesDisabledResponse } from "@/lib/workspaces/teamWorkspaceErrorResponse";
 import { acceptWorkspaceInvitation, type AcceptWorkspaceInvitationResult } from "@/lib/firestore/workspaceInvitations";
 
 export const runtime = "nodejs";
@@ -36,10 +35,17 @@ async function getUid(req: NextRequest): Promise<string | NextResponse> {
   return NextResponse.json({ ok: false, errorCode: "auth_error", message: "Authentication failed." }, { status: 401 });
 }
 
+/**
+ * Phase 10B.2: `team_workspaces_disabled` is no longer a possible result
+ * of `acceptWorkspaceInvitation()` at all — target-Workspace admission is
+ * now evaluated INSIDE the transaction, after invitation validity and
+ * email match, and its denial maps directly to `invitation_invalid_or_expired`
+ * (handled below) rather than a distinguishable status. TypeScript's
+ * exhaustiveness checking on `AcceptWorkspaceInvitationResult` is what
+ * enforces this switch has no stray case for a status that can't occur.
+ */
 function mapAcceptDenial(result: Exclude<AcceptWorkspaceInvitationResult, { status: "accepted" }>): { status: number; body: unknown } {
   switch (result.status) {
-    case "team_workspaces_disabled":
-      return teamWorkspacesDisabledResponse();
     case "invalid_input": {
       const { status, body } = invalidRequestBodyResponse();
       return { status, body };
