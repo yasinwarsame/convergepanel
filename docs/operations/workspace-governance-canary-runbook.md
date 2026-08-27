@@ -4,6 +4,59 @@ Phase 9C.5 hardening/canary-readiness output. Covers the **Workspace-bound** App
 
 This document is the **operational** companion to the source-level work in Phases 9B.1–9C.5. It does not re-derive the feature's design — see `docs/technical-documentation.md` and the Phase 9 review contracts frozen across 9C.1–9C.4 for that.
 
+## 0. Phase 9D canary closeout (executed) — READY_FOR_INTERNAL_RECANARY_ONLY
+
+Sections 1–9 below were written *before* the Phase 9D canary ran, as the execution plan. This section records what actually happened. §§1–9 remain accurate as reference/procedure for a future recanary; they are not superseded.
+
+**Canary-tested source:** `c28edbbf88a578a4c53516ecdf528f8e3c8e82c7`. Every result below was produced against this exact Production source SHA, independently verified via two convergent sources (GitHub commit-status + `vercel inspect` on the live alias) before and after every mutation phase. As of this closeout, `origin/main` and live Production are still exactly this SHA — no drift.
+
+**Controlled identity geometry** (role aliases only — no UIDs recorded here): `A` = Workspace Owner (assignment/panel management, Override); `B` = Member, creator of all four purpose-built fixture runs; `C`, `D` = Reviewers. `C != D != B != A` throughout, verified at every step.
+
+**Final governance matrix** (one dedicated internal-canary Workspace, one project, four purpose-built runs plus two preserved control artifacts):
+
+| Run | Final state | Key paths proven |
+|---|---|---|
+| **RUN_B** | `APPROVED_ORDINARY` — unfiled, creator B, reviewer C | Assignment + assignment OCC · `changes_requested` → creator resubmit (assignment preserved) → ordinary final approval · governance OCC · self-review suppression · full ordinary-decision audit chain |
+| **RUN_C** | `PANEL_FINALIZED_APPROVED` — filed, panel C+D, quorum 2 | Panel create · panel OCC · vote authorization/quorum · finalize + finalize OCC · `decidedVia: multi_reviewer_panel` · full finalize audit chain |
+| **RUN_D** | `APPROVED_ORDINARY_AFTER_CANCELLED_PANEL` — unfiled | Open-panel assignment exclusion (real `409 active_panel`, not OCC) · one historical C vote survives cancellation · cancel OCC · cancelled-panel ordinary fallback · ordinary decision stays attributionally distinct from the cancelled panel |
+| **RUN_E** | `OWNER_OVERRIDE_APPROVED_UNDER_DRAIN` — filed, panel C+D | Panel created while Approval-admitted · Approval canary fully withdrawn + redeploy · general queue denied (`404`) while direct existing-panel detail stayed reachable (`200`, `mode:"drain"`) · reconfigure denied at admission layer (`404`, not OCC) · vote/cancel/finalize routes proven drain-reachable (real votes; `409` OCC — never `404` admission denial — on cancel/finalize stale probes) · Owner Override executed, dual OCC, justification persisted, `decidedVia: multi_reviewer_owner_override`, richest audit trail of any mutation (4 writes) |
+| Negative control | Unchanged | Non-adaptive, no `governanceRecord`, never appeared in any queue view or resolved as a review target for any of the four identities |
+| Adaptive-admission proof | Unchanged | Adaptive, governance-eligible, deliberately preserved as a control artifact — never repurposed as a fifth mutation fixture |
+
+**The single most important boundary proof:** under Approval drain, new-work routes and existing-open-panel routes fail with genuinely different HTTP semantics — `404` (concealed admission denial, rejected before any transaction) versus `409` (real canonical OCC/panel-state validation, meaning the request reached the panel). This distinction was verified directly, not inferred from UI state, on the reconfigure-denial probe, the stale-cancel probe, and the stale-finalize probe.
+
+**Current Production configuration:** `APPROVAL_WORKFLOW_ENABLED` off/unset; `APPROVAL_WORKFLOW_CANARY_UIDS` absent (deleted, not merely emptied — confirmed via direct env read-back, no ambiguity this time); `TEAM_WORKSPACES_ENABLED` off/dark, `TEAM_WORKSPACES_CANARY_UIDS` unchanged from its pre-canary controlled set; Adaptive config untouched by this canary. This is the safe holding state the canary was left in — see §2 for the mechanics, already exercised as part of Phase 9D.5.
+
+**Rollout decision: `READY_FOR_INTERNAL_RECANARY_ONLY`.** The governance state machine is Production-proven end-to-end. This is explicitly *not* authorization for external, broad, or global rollout — those remain blocked pending the prerequisites below. Full tier-by-tier reasoning:
+
+| Tier | Status | Blocker / condition |
+|---|---|---|
+| 0 — Dark | READY | Current state |
+| 1 — Internal controlled recanary | READY | No further prerequisite beyond the standard freeze/provenance protocol in §5–§6 |
+| 2 — Small external Team canary | READY_WITH_CONDITIONS | Team invite-canary acceptance behavior (below) must be resolved/redesigned; env-observability operator procedure formalized; customer-facing audit/governance copy reviewed against actual coverage; explicit cohort/rollback/support plan defined |
+| 3 — Broad Team rollout | BLOCKED | Panel-mutation audit coverage and governance-audit-durability debts need disposition; post-mutation UI reconciliation lag needs to be either reproduced-and-fixed or conclusively shown non-reproducible; also blocked by product strategy (broad Team rollout is intentionally deferred independent of this canary) |
+| 4 — Global/GA | BLOCKED | Everything Tier 3 requires, plus operational/support readiness outside this canary's scope |
+
+**Open technical debt at closeout** (see also §7–§8 below for pre-existing rollback/stop criteria that remain in force):
+
+| ID | Status | Rollout impact |
+|---|---|---|
+| `TECH_DEBT_GOVERNANCE_AUDIT_DURABILITY` | Open, architectural | Every write that source defines succeeded in Production with zero misses across 3 mutation phases; the underlying best-effort/post-commit architecture is still unproven under real partial-failure conditions. Disposition (harden or explicitly accept) required before Tier 3. |
+| `TECH_DEBT_WORKSPACE_PANEL_MUTATION_AUDIT_COVERAGE` | Open, architectural | Confirmed in Production: panel create/vote/cancel write **zero** immutable secondary record (the canonical resource document is the only evidence); finalize writes 3; Owner Override writes 4. This inverted coverage (rarest action = best audit trail) needs a positioning review before Tier 2 and either implementation hardening or an explicit product decision before Tier 3. |
+| `TECH_DEBT_TEAM_INVITE_CANARY_ACCEPTANCE` | Open, product decision | While Team is globally dark, `acceptWorkspaceInvitation()` independently re-checks the *invitee's* own Team-canary admission, not just the inviter's — discovered during fixture construction, worked around only because every controlled identity was pre-admitted. **Concrete Tier 2 blocker** for any real external invitee. |
+| `TECH_DEBT_VERCEL_SENSITIVE_ENV_OBSERVABILITY` | Open, operational | `vercel env pull` was repeatedly ambiguous for canary UID variables specifically (not other env vars) across this canary; every case was resolved via a real functional admission/denial probe, never by trusting the CLI read-back. See the operator procedure below. Does not affect authorization correctness; formalize before Tier 3. |
+| `TECH_DEBT_9D2_POST_MUTATION_UI_RECONCILIATION` | Open, non-blocking (safety-wise) | Recurred non-reproducibly (same operation, same component, different phases: RUN_B assignment/approval once stale, RUN_D's equivalents immediate, one RUN_E vote UI no-op). Never produced an exploitable stale-actionable control — every occurrence was independently confirmed harmless via a direct OCC/authorization read. Does not block Tier 1; should be diagnosed before Tier 3. |
+
+Unchanged from pre-canary: `TECH_DEBT_ADAPTIVE_PLANNER_AUTH_ORDERING` (separate Adaptive rollout axis, no Approval impact), `TECH_DEBT_9C4_PANEL_LOOKUP_FAILURE_DEDICATED_TEST` (not exercised by this canary — happy paths only, stays open), `TECH_DEBT_9C3_RECONCILIATION_WINDOW_PERMANENT_TEST` (distinct mechanism from the UI lag above, stays open). `TECH_DEBT_9C3_MUTATION_LOCK_THROW_BACKSTOP` is **resolved** (confirmed via real `try/finally` since Phase 9C.3-R2C).
+
+**Vercel sensitive-env operator procedure** (the concrete lesson from repeated ambiguous read-back during this canary): do not treat `vercel env pull` as authoritative for a canary UID variable's stored value. After any such change: (1) make one controlled write attempt — do not retry blindly if the CLI reports success but read-back looks wrong; (2) if ambiguous, have the operator confirm/complete the change via the Vercel dashboard directly; (3) redeploy the exact reviewed source SHA (env changes to an existing deployment do not take effect until a fresh deployment); (4) verify the new deployment's source SHA via the two-source method in §5; (5) prove the change functionally — a real admission or denial probe against the actual route, never inferred from `env pull` alone.
+
+**Recanary / source-change policy:** the SHA above (`c28edbbf88a578a4c53516ecdf528f8e3c8e82c7`) is what was tested. A future change touching `lib/workspaces/workspaceReview*.ts`, `reviewContext.ts`, any `review-*` route, or the OCC/panel/vote/finalize/cancel/override logic requires focused review, relevant permanent tests, the normal protected-merge path, fresh Production provenance verification, and a **targeted** recanary of the specific invariant the change touches — not a full re-run of Phases 9D.0–9D.6. An unrelated source change follows the normal release workflow with no recanary requirement.
+
+**Fixture preservation:** the dedicated canary Workspace, its project, RUN_B/C/D/E, the negative control, and the adaptive-admission proof are intentional Production canary evidence, not customer data. They should not be deleted or modified casually — retained pending an explicit future retention/cleanup decision.
+
+**Product-promise gap:** whether ConvergePanel's actual customer-facing governance/audit copy overclaims relative to the coverage documented above (`TECH_DEBT_WORKSPACE_PANEL_MUTATION_AUDIT_COVERAGE`) was **not assessed** in this canary — it requires a narrowly-scoped review of the actual copy, which was out of scope for a Production application-state audit. Flagged as a follow-up, not resolved either way.
+
 ## 1. Release state model (as of Phase 9C.5)
 
 Two independent, additive gates, both required, exactly mirroring the Team Workspaces canary precedent (`lib/workspaces/teamWorkspacesRollout.ts`):
@@ -53,7 +106,7 @@ The 8 review-queue-specific composite indexes, independently re-derived from the
 
 All 8 are present in `firestore.indexes.json` with exactly these field orders (verified 2026-08-26 against the actual query code — not from memory). Two additional `runs` indexes (`workspaceId ASC, createdAt DESC` and `workspaceId ASC, projectId ASC, createdAt DESC`, no status filter) also exist in the same file but belong to `lib/workspaces/listTeamWorkspaceRuns.ts` (the Workspace research list page), not the review queue — do not conflate them when auditing "queue readiness."
 
-**Status entering Phase 9D: `DEFINED_NOT_DEPLOYED`.** Deployment command (do not run until Phase 9D, and only after step 1 below):
+**Status entering Phase 9D: `DEFINED_NOT_DEPLOYED`. Status at Phase 9D.6 closeout: all 8 deployed and confirmed `READY`** (Phase 9D.0 preflight). Deployment command (kept for reference / a future recanary needing a fresh project):
 
 ```bash
 # 1. Confirm the checked-out SHA matches the intended Production release SHA.
@@ -76,7 +129,7 @@ Abort/rollback: an index deploy is additive and non-destructive — if a definit
 
 ## 5. Vercel Production source-SHA provenance
 
-**Status as of this document: `BLOCKED_BY_ACCOUNT_SCOPE`.** Attempted via the Vercel MCP integration (`list_deployments` against project `prj_g59RoJlSaZmBQX2aSKmWrQI7JvhV`, team `team_Vh8IpYZQKv5TJTh1XAuO32sm`): `403 Forbidden — Not authorized: Trying to access resource under scope "convergepanel-ai". You must re-authenticate to this scope or use a token with access to this scope.` This is a pre-existing account-access gap, not something this phase (or Phase 9D) should attempt to route around (e.g., via a different account, a manual deploy, or trusting an unverified deployment). Resolve the underlying Vercel account/token scope access before Phase 9D proceeds past this precondition — do not substitute "the push succeeded" or "the preview deployment passed" as equivalent proof of Production source SHA.
+**Status as of this document: `BLOCKED_BY_ACCOUNT_SCOPE` (Vercel MCP integration only). Resolved for Phase 9D via the local `vercel` CLI**, which has its own, separately-authenticated session with working `--scope convergepanel-ai` access (`vercel inspect <domain> --scope convergepanel-ai`, `vercel ls --scope convergepanel-ai --prod`) — unlike the MCP tool, which still returns `403 Forbidden` against project `prj_g59RoJlSaZmBQX2aSKmWrQI7JvhV` / team `team_Vh8IpYZQKv5TJTh1XAuO32sm`. Every Production source-SHA verification across Phases 9D.0–9D.6 used the two-source method: `vercel inspect` on the live alias, cross-checked against GitHub's own Vercel commit-status (`gh api repos/.../commits/<SHA>/status`, `target_url` embeds the same deployment ID) — both must converge on the identical deployment ID. Do not substitute "the push succeeded" or "the preview deployment passed" for this.
 
 ## 6. Phase 9D canary sequence (documented only — do not execute from this repo/session)
 
