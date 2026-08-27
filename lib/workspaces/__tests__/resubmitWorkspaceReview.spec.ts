@@ -137,12 +137,16 @@ jest.mock("@/lib/firebase/admin", () => ({
 
 let teamWorkspacesEnabled = true;
 let teamWorkspacesCanaryUids: string | undefined = undefined;
+let teamWorkspacesCanaryWorkspaceIds: string | undefined = undefined;
 jest.mock("@/lib/env", () => ({
   get TEAM_WORKSPACES_ENABLED() {
     return teamWorkspacesEnabled;
   },
   get TEAM_WORKSPACES_CANARY_UIDS() {
     return teamWorkspacesCanaryUids;
+  },
+  get TEAM_WORKSPACES_CANARY_WORKSPACE_IDS() {
+    return teamWorkspacesCanaryWorkspaceIds;
   },
 }));
 
@@ -303,6 +307,7 @@ beforeEach(() => {
   resetStores();
   teamWorkspacesEnabled = true;
   teamWorkspacesCanaryUids = undefined;
+  teamWorkspacesCanaryWorkspaceIds = undefined;
   firestoreUnavailableFlag.value = false;
   transactionShouldThrow.value = false;
   concurrentMutationHook = null;
@@ -641,5 +646,87 @@ describe("transaction read/write ordering", () => {
     seedAssignment();
     const result = await call();
     expect(result.ok).toBe(true);
+  });
+});
+
+// ============================================
+// Phase 10B.3.2B.1 — Workspace-canary target admission. The rollout gate
+// (resolveTeamWorkspaceTargetAdmission) is admission ONLY — every test below
+// proves the creator/manager rule, OCC, status-transition, and canonical-run
+// binding checks are byte-identical and independent of admission source.
+// ============================================
+
+describe("Workspace-canary target admission (Phase 10B.3.2B.1)", () => {
+  it("uid-canary only (global off), creator: allowed", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryUids = CREATOR_UID;
+    expect((await call({ uid: CREATOR_UID })).ok).toBe(true);
+  });
+
+  it("Workspace-canary only (global/uid off), creator: allowed", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    expect((await call({ uid: CREATOR_UID })).ok).toBe(true);
+  });
+
+  it("Workspace-canary only, manager (Admin, not creator): allowed", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    expect((await call({ uid: ADMIN_UID })).ok).toBe(true);
+  });
+
+  it("Workspace-canary only, Member (neither creator nor manager): denied not_creator_or_manager, not an admission failure", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    expect(await call({ uid: MEMBER_UID })).toEqual({ ok: false, reason: "not_creator_or_manager" });
+  });
+
+  it("Workspace-canary only, no membership: denied", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    expect(await call({ uid: OUTSIDER_UID })).toEqual({ ok: false, reason: "membership_not_found" });
+  });
+
+  it("Workspace-canary only, caller's membership removed: denied", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    seedMembership(CREATOR_UID, "member", WS_ID, { status: "removed", removedAt: NOW, removedByUserId: OWNER_UID });
+    expect(await call({ uid: CREATOR_UID })).toEqual({ ok: false, reason: "membership_removed" });
+  });
+
+  it("target Workspace not admitted (not global/uid/workspace-canary): denied, zero Firestore access", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = OTHER_WS_ID;
+    const result = await call({ uid: CREATOR_UID });
+    expect(result).toEqual({ ok: false, reason: "team_workspaces_disabled" });
+    expect(mockAdminDb.runTransaction).not.toHaveBeenCalled();
+  });
+
+  it("malformed Workspace-canary list does not poison a valid uid-canary admission", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryUids = CREATOR_UID;
+    teamWorkspacesCanaryWorkspaceIds = "*";
+    expect((await call({ uid: CREATOR_UID })).ok).toBe(true);
+  });
+
+  it("malformed Workspace-canary list fails closed (global/uid off)", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = "*";
+    expect(await call({ uid: CREATOR_UID })).toEqual({ ok: false, reason: "team_workspaces_disabled" });
+  });
+
+  it("MANDATORY cross-Workspace resource binding: caller genuinely admitted+manager in WS_ID, but the target RUN canonically belongs to OTHER_WS_ID -> denied run_not_found, must be a canonical binding denial, never merely 'OTHER_WS_ID not admitted'", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    seedRun({ workspaceId: OTHER_WS_ID });
+    const result = await call({ uid: ADMIN_UID, workspaceId: WS_ID });
+    expect(result).toEqual({ ok: false, reason: "run_not_found" });
+  });
+
+  it("MANDATORY cross-Workspace: caller genuinely admitted+creator in WS_ID cannot resubmit by supplying a DIFFERENT, non-admitted target Workspace either — target admission is evaluated on the supplied workspaceId itself", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    const result = await call({ uid: CREATOR_UID, workspaceId: OTHER_WS_ID });
+    expect(result).toEqual({ ok: false, reason: "team_workspaces_disabled" });
   });
 });

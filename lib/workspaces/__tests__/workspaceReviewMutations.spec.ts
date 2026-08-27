@@ -154,12 +154,16 @@ jest.mock("@/lib/firebase/admin", () => ({
 
 let teamWorkspacesEnabled = true;
 let teamWorkspacesCanaryUids: string | undefined = undefined;
+let teamWorkspacesCanaryWorkspaceIds: string | undefined = undefined;
 jest.mock("@/lib/env", () => ({
   get TEAM_WORKSPACES_ENABLED() {
     return teamWorkspacesEnabled;
   },
   get TEAM_WORKSPACES_CANARY_UIDS() {
     return teamWorkspacesCanaryUids;
+  },
+  get TEAM_WORKSPACES_CANARY_WORKSPACE_IDS() {
+    return teamWorkspacesCanaryWorkspaceIds;
   },
 }));
 
@@ -308,6 +312,7 @@ beforeEach(() => {
   resetStores();
   teamWorkspacesEnabled = true;
   teamWorkspacesCanaryUids = undefined;
+  teamWorkspacesCanaryWorkspaceIds = undefined;
   firestoreUnavailableFlag.value = false;
   transactionShouldThrow.value = false;
   transactionAttemptCount.value = 0;
@@ -905,5 +910,213 @@ describe("submitWorkspaceReviewDecision — history/audit composition", () => {
     expect(mockedWriteAdaptiveHumanReviewEvent).toHaveBeenCalledWith(expect.objectContaining({ runId: RUN_ID, teamId: null, prevStatus: "unreviewed", nextStatus: "approved" }));
     expect(mockedCreateAdaptiveHumanReviewHistory).toHaveBeenCalledTimes(1);
     expect(mockedWriteAdaptiveAdminAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ actorUid: REVIEWER_UID, teamId: null, runId: RUN_ID, newStatus: "approved" }));
+  });
+});
+
+// ============================================
+// Phase 10B.3.2B.1 — Workspace-canary target admission.
+// The rollout gate (resolveTeamWorkspaceTargetAdmission) is admission ONLY —
+// every test below proves membership/capability/canonical-binding/self-review
+// checks are byte-identical and independent of which admission source (global,
+// uid-canary, Workspace-canary) let the caller through.
+// ============================================
+
+describe("putWorkspaceReviewAssignment — Workspace-canary target admission (Phase 10B.3.2B.1)", () => {
+  it("uid-canary only (global off): allowed", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryUids = OWNER_UID;
+    expect((await putCall({ dueAt: null })).ok).toBe(true);
+  });
+
+  it("Workspace-canary only (global/uid off), active manager: allowed", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    expect((await putCall({ dueAt: null })).ok).toBe(true);
+  });
+
+  it("Workspace-canary only, Member (no reviews.manage): denied at the CAPABILITY check, not admission", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    expect(await putCall({ uid: MEMBER_UID, dueAt: null })).toEqual({ ok: false, reason: "insufficient_capability" });
+  });
+
+  it("Workspace-canary only, no membership: denied", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    expect(await putCall({ uid: OUTSIDER_UID, dueAt: null })).toEqual({ ok: false, reason: "membership_not_found" });
+  });
+
+  it("Workspace-canary only, caller's membership removed: denied", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    seedMembership(OWNER_UID, "owner", WS_ID, { status: "removed" });
+    expect((await putCall({ dueAt: null })).ok).toBe(false);
+  });
+
+  it("target Workspace not admitted (not global/uid/workspace-canary): denied, zero Firestore access", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = OTHER_WS_ID;
+    const result = await putCall({ dueAt: null });
+    expect(result).toEqual({ ok: false, reason: "team_workspaces_disabled" });
+    expect(mockAdminDb.runTransaction).not.toHaveBeenCalled();
+  });
+
+  it("malformed Workspace-canary list does not poison a valid uid-canary admission", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryUids = OWNER_UID;
+    teamWorkspacesCanaryWorkspaceIds = "*";
+    expect((await putCall({ dueAt: null })).ok).toBe(true);
+  });
+
+  it("malformed Workspace-canary list fails closed (global/uid off)", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = "*";
+    expect(await putCall({ dueAt: null })).toEqual({ ok: false, reason: "team_workspaces_disabled" });
+  });
+
+  it("MANDATORY reviewer-membership cross-Workspace: caller genuinely admitted+manager in WS_ID, but the target reviewer is only a member of OTHER_WS_ID -> denied target_not_eligible, never assignable across Workspaces merely because the caller is admitted", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    stores.workspaceMemberships.delete(computeMembershipId(WS_ID, REVIEWER2_UID));
+    seedMembership(REVIEWER2_UID, "reviewer", OTHER_WS_ID);
+    expect(await putCall({ assignedReviewerUserId: REVIEWER2_UID, dueAt: null })).toEqual({ ok: false, reason: { kind: "target_not_eligible", reason: "not_found" } });
+  });
+
+  it("MANDATORY cross-Workspace resource binding: caller genuinely admitted+manager in WS_ID, but the target RUN canonically belongs to OTHER_WS_ID -> denied run_not_found, canonical binding is never bypassable by admission", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    seedRun({ workspaceId: OTHER_WS_ID });
+    const result = await putCall({ workspaceId: WS_ID, dueAt: null });
+    expect(result).toEqual({ ok: false, reason: "run_not_found" });
+  });
+});
+
+describe("deleteWorkspaceReviewAssignment — Workspace-canary target admission (Phase 10B.3.2B.1)", () => {
+  it("uid-canary only (global off): allowed", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryUids = OWNER_UID;
+    seedAssignment();
+    expect((await deleteCall()).ok).toBe(true);
+  });
+
+  it("Workspace-canary only, active manager: allowed", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    seedAssignment();
+    expect((await deleteCall()).ok).toBe(true);
+  });
+
+  it("Workspace-canary only, Member (no reviews.manage): denied at capability check, not admission", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    seedAssignment();
+    expect(await deleteCall({ uid: MEMBER_UID })).toEqual({ ok: false, reason: "insufficient_capability" });
+  });
+
+  it("Workspace-canary only, no membership: denied", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    seedAssignment();
+    expect(await deleteCall({ uid: OUTSIDER_UID })).toEqual({ ok: false, reason: "membership_not_found" });
+  });
+
+  it("target Workspace not admitted: denied, zero Firestore access", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = OTHER_WS_ID;
+    seedAssignment();
+    const result = await deleteCall();
+    expect(result).toEqual({ ok: false, reason: "team_workspaces_disabled" });
+    expect(mockAdminDb.runTransaction).not.toHaveBeenCalled();
+  });
+
+  it("malformed Workspace-canary list does not poison a valid uid-canary admission", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryUids = OWNER_UID;
+    teamWorkspacesCanaryWorkspaceIds = "*";
+    seedAssignment();
+    expect((await deleteCall()).ok).toBe(true);
+  });
+
+  it("MANDATORY cross-Workspace resource binding: caller genuinely admitted+manager in WS_ID, but the target RUN canonically belongs to OTHER_WS_ID -> denied run_not_found", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    seedRun({ workspaceId: OTHER_WS_ID });
+    seedAssignment({ workspaceId: OTHER_WS_ID });
+    const result = await deleteCall({ workspaceId: WS_ID });
+    expect(result).toEqual({ ok: false, reason: "run_not_found" });
+  });
+});
+
+describe("submitWorkspaceReviewDecision — Workspace-canary target admission (Phase 10B.3.2B.1)", () => {
+  it("uid-canary only (global off): allowed", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryUids = REVIEWER_UID;
+    seedAssignment({ assignedReviewerUserId: REVIEWER_UID });
+    expect((await decisionCall()).ok).toBe(true);
+  });
+
+  it("Workspace-canary only, assigned Reviewer: allowed", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    seedAssignment({ assignedReviewerUserId: REVIEWER_UID });
+    expect((await decisionCall()).ok).toBe(true);
+  });
+
+  it("Workspace-canary only, Viewer (no reviews.submit): denied at capability check, not admission", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    seedAssignment({ assignedReviewerUserId: VIEWER_UID });
+    const result = await decisionCall({ uid: VIEWER_UID });
+    expect(result.ok).toBe(false);
+  });
+
+  it("Workspace-canary only, no membership: denied", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    const result = await decisionCall({ uid: OUTSIDER_UID });
+    expect(result.ok).toBe(false);
+  });
+
+  it("target Workspace not admitted: denied, zero Firestore access", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = OTHER_WS_ID;
+    seedAssignment({ assignedReviewerUserId: REVIEWER_UID });
+    const result = await decisionCall();
+    expect(result).toEqual({ ok: false, reason: "team_workspaces_disabled" });
+    expect(mockAdminDb.runTransaction).not.toHaveBeenCalled();
+  });
+
+  it("malformed Workspace-canary list does not poison a valid uid-canary admission", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryUids = REVIEWER_UID;
+    teamWorkspacesCanaryWorkspaceIds = "*";
+    seedAssignment({ assignedReviewerUserId: REVIEWER_UID });
+    expect((await decisionCall()).ok).toBe(true);
+  });
+
+  it("MANDATORY self-review regression: Workspace-canary-only Owner who is ALSO the artifact's canonical creator -> DENIED as self-review; Workspace admission never turns Owner into an ordinary self-reviewer (Owner Override is a separate Phase 9 panel mechanism, untouched here)", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    seedRun({ userId: OWNER_UID });
+    seedAssignment({ assignedReviewerUserId: OWNER_UID });
+    const result = await decisionCall({ uid: OWNER_UID });
+    expect(result).toEqual({ ok: false, reason: { kind: "not_authorized", reason: "self_review" } });
+  });
+
+  it("MANDATORY wrong-reviewer regression under Workspace-canary: an active, reviews.submit-capable Workspace-canary-admitted Member who is NOT the canonical assigned reviewer -> DENIED not_assigned, assignment identity is not weakened to capability-only", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    seedAssignment({ assignedReviewerUserId: REVIEWER_UID });
+    const result = await decisionCall({ uid: MEMBER_UID });
+    expect(result).toEqual({ ok: false, reason: { kind: "not_authorized", reason: "not_assigned" } });
+  });
+
+  it("MANDATORY cross-Workspace resource binding: caller genuinely admitted+assigned-reviewer in WS_ID, but the target RUN canonically belongs to OTHER_WS_ID -> denied run_not_found, not merely OTHER_WS_ID-non-admission", async () => {
+    teamWorkspacesEnabled = false;
+    teamWorkspacesCanaryWorkspaceIds = WS_ID;
+    seedRun({ workspaceId: OTHER_WS_ID });
+    seedAssignment({ assignedReviewerUserId: REVIEWER_UID, workspaceId: OTHER_WS_ID });
+    const result = await decisionCall({ workspaceId: WS_ID });
+    expect(result).toEqual({ ok: false, reason: "run_not_found" });
   });
 });
