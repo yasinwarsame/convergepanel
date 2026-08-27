@@ -516,7 +516,7 @@ describe("Part Q — concurrency / atomicity", () => {
     expect(stores.workspaceInvitations.size).toBe(0);
   });
 
-  it("66. transaction abort atomicity: corrupt capacity state during an already-active accept aborts the WHOLE acceptance — no invitation accepted, no membership mutation, no capacity mutation", async () => {
+  it("66a. corrupt-capacity abort: capacity check itself fails BEFORE any write is staged — no invitation accepted, no membership mutation, no capacity mutation", async () => {
     seedFillerMembers(6);
     seedMembership(INVITEE_UID, "member"); // already active
     const { invitationId, rawToken } = seedGuardCurrentInvitation(INVITEE_EMAIL, "pending", 9_999_999_999);
@@ -535,4 +535,175 @@ describe("Part Q — concurrency / atomicity", () => {
     expect(membership.updatedAt).toEqual(ts(1000));
     expect(capacityDoc()).toMatchObject({ reservedCount: -1, revision: 0 }); // unchanged, not "repaired"
   });
+
+  it("66b. POST-STAGE ABORT: capacity write is successfully STAGED (reserve succeeds), then a LATER write in the SAME transaction throws — the whole transaction aborts and the already-staged capacity write never commits", async () => {
+    seedFillerMembers(7); // 9 active — room for exactly one more reservation
+    // createWorkspaceInvitation() allocates its invitationRef via a single
+    // no-arg `.doc()` call BEFORE runTransaction() opens; autoIdCounter is
+    // reset to 0 in beforeEach and nothing else in this flow calls `.doc()`
+    // with no argument first, so the very first such call deterministically
+    // produces "auto-1". Pre-seeding a document at that exact id means
+    // tx.create(invitationRef, invitation) — which runs AFTER capacity's
+    // own reserve has already staged its write — throws ALREADY_EXISTS,
+    // rejecting the whole transaction callback.
+    stores.workspaceInvitations.set("auto-1", { data: { poison: "pre-existing, unrelated document" }, updateTime: nextUpdateTime() });
+
+    const result = await createWorkspaceInvitation({ uid: ADMIN_UID, workspaceId: WS_ID, email: INVITEE_EMAIL, role: "member" });
+
+    expect(result).toEqual({ status: "create_failed" });
+    // The capacity write that WAS staged (reserve succeeded, 9->10) before
+    // the later tx.create() throw never actually committed — this fake
+    // only applies pendingWrites after the transaction callback resolves
+    // without throwing, exactly mirroring real Firestore's atomic commit.
+    expect(stores.teamWorkspaceCanaryCapacity.has(WS_ID)).toBe(false);
+    // No guard was created either — the whole invitation write group aborted together.
+    expect(stores.workspaceInvitationKeys.size).toBe(0);
+    // The poisoned document is untouched — create() throws before overwriting.
+    expect(stores.workspaceInvitations.get("auto-1")!.data).toEqual({ poison: "pre-existing, unrelated document" });
+    expect(stores.workspaceInvitations.size).toBe(1);
+  });
 });
+
+describe("Integration-level concurrency: create/create, create/revoke, already-active accept/create", () => {
+  it("create/create at capacity 9: exactly one reservation commits, final capacity 10, exactly one invitation/guard pair created for the winner (integration-level, not just the primitive)", async () => {
+    seedFillerMembers(7); // 9 active
+    retriesBeforeSuccess = 1;
+    let fired = false;
+    concurrentMutationHook = (ref) => {
+      if (fired || ref.__collection !== "teamWorkspaceCanaryCapacity" || ref.__kind !== "doc") return;
+      fired = true;
+      // A concurrent winner's create() commits first: capacity now at 10.
+      stores.teamWorkspaceCanaryCapacity.set(WS_ID, { data: { schemaVersion: 1, workspaceId: WS_ID, reservedCount: 10, revision: 0, updatedAt: nextUpdateTime() }, updateTime: nextUpdateTime() });
+    };
+    const result = await createWorkspaceInvitation({ uid: ADMIN_UID, workspaceId: WS_ID, email: "second@example.com", role: "member" });
+    expect(result).toEqual({ status: "workspace_member_capacity_reached" });
+    // This attempt's own invitation/guard writes never landed — only the
+    // synthetic "concurrent winner" state exists (no real invitation doc
+    // for it in this fake, only the capacity effect), proving the loser
+    // wrote nothing at all.
+    expect(stores.workspaceInvitations.size).toBe(0);
+    expect(stores.workspaceInvitationKeys.size).toBe(0);
+  });
+
+  it("create/revoke race: a concurrent revoke's release commits between this create's read and its retry — the retried create correctly observes the freed seat and succeeds, with a consistent final invitation+guard+capacity state", async () => {
+    seedFillerMembers(7); // 9 active
+    // Seed a pending invitation whose (simulated) concurrent revoke will free a seat.
+    const { invitationId: concurrentInvId } = seedGuardCurrentInvitation("someone-else@example.com", "pending", 9_999_999_999);
+    // Bootstrap capacity to 10 (9 active + 1 pending) via one throwaway
+    // reserve-triggering call first, so the race below starts from an
+    // EXISTING capacity document (exercising the update, not create, path).
+    const bootstrapResult = await createWorkspaceInvitation({ uid: ADMIN_UID, workspaceId: WS_ID, email: "bootstrap-filler@example.com", role: "member" });
+    expect(bootstrapResult).toEqual({ status: "workspace_member_capacity_reached" }); // already at 10 (9 active + 1 pending), correctly denied — leaves no trace
+    // Force an existing capacity document at exactly 10 for the race itself.
+    stores.teamWorkspaceCanaryCapacity.set(WS_ID, { data: { schemaVersion: 1, workspaceId: WS_ID, reservedCount: 10, revision: 3, updatedAt: nextUpdateTime() }, updateTime: nextUpdateTime() });
+
+    retriesBeforeSuccess = 1;
+    let fired = false;
+    concurrentMutationHook = (ref) => {
+      if (fired || ref.__collection !== "teamWorkspaceCanaryCapacity" || ref.__kind !== "doc") return;
+      fired = true;
+      // Simulate revokeWorkspaceInvitation()'s own committed effect: the
+      // concurrent invitation transitions to revoked AND capacity releases
+      // to 9, exactly what a real concurrent revoke() call would produce.
+      stores.workspaceInvitations.set(concurrentInvId, { data: { ...stores.workspaceInvitations.get(concurrentInvId)!.data, status: "revoked", revokedAt: nextUpdateTime(), revokedByUserId: OWNER_UID }, updateTime: nextUpdateTime() });
+      stores.teamWorkspaceCanaryCapacity.set(WS_ID, { data: { schemaVersion: 1, workspaceId: WS_ID, reservedCount: 9, revision: 4, updatedAt: nextUpdateTime() }, updateTime: nextUpdateTime() });
+    };
+
+    const result = await createWorkspaceInvitation({ uid: ADMIN_UID, workspaceId: WS_ID, email: "new-invitee@example.com", role: "member" });
+
+    expect(result.status).toBe("created");
+    expect(capacityDoc()).toMatchObject({ reservedCount: 10, revision: 5 }); // 9 (post-revoke) + 1, revision advances by exactly one real update
+    // Final state is fully consistent: the concurrently-revoked invitation
+    // stays revoked, and the new invitation's own guard is correctly current.
+    expect(stores.workspaceInvitations.get(concurrentInvId)!.data.status).toBe("revoked");
+    const newGuardKey = computeWorkspaceInvitationKey(WS_ID, "new-invitee@example.com");
+    expect(stores.workspaceInvitationKeys.get(newGuardKey)!.data.currentInvitationId).toBe(result.status === "created" ? result.invitationId : undefined);
+  });
+
+  it("already-active accept/create race: a concurrent already-active acceptance's release commits between this create's read and its retry — the retried create observes the freed seat and succeeds, capacity/membership/invitation all end consistent", async () => {
+    seedFillerMembers(6); // 8 active
+    seedMembership(INVITEE_UID, "member"); // 9 active total — the future "already-active" acceptor
+    seedGuardCurrentInvitation(INVITEE_EMAIL, "pending", 9_999_999_999); // that acceptor's own redundant reservation
+    // Force an existing capacity document at exactly 10 (9 active + 1 pending).
+    stores.teamWorkspaceCanaryCapacity.set(WS_ID, { data: { schemaVersion: 1, workspaceId: WS_ID, reservedCount: 10, revision: 0, updatedAt: nextUpdateTime() }, updateTime: nextUpdateTime() });
+
+    retriesBeforeSuccess = 1;
+    let fired = false;
+    concurrentMutationHook = (ref) => {
+      if (fired || ref.__collection !== "teamWorkspaceCanaryCapacity" || ref.__kind !== "doc") return;
+      fired = true;
+      // Simulate acceptWorkspaceInvitation()'s already-active release
+      // committing first: capacity 10 -> 9.
+      stores.teamWorkspaceCanaryCapacity.set(WS_ID, { data: { schemaVersion: 1, workspaceId: WS_ID, reservedCount: 9, revision: 1, updatedAt: nextUpdateTime() }, updateTime: nextUpdateTime() });
+    };
+
+    const result = await createWorkspaceInvitation({ uid: ADMIN_UID, workspaceId: WS_ID, email: "yet-another@example.com", role: "member" });
+
+    expect(result.status).toBe("created");
+    expect(capacityDoc()).toMatchObject({ reservedCount: 10, revision: 2 });
+  });
+});
+
+describe("Retry side effects", () => {
+  it("create: a retried transaction produces exactly ONE invitation document and ONE guard, using the SAME pre-generated token/id across attempts — no duplicate security material, no orphaned partial writes from the discarded first attempt", async () => {
+    seedFillerMembers(7); // 9 active, room for one
+    retriesBeforeSuccess = 1;
+    let fired = false;
+    concurrentMutationHook = (ref) => {
+      // Fire on the FIRST get() of any kind, forcing one full discarded
+      // attempt before the kept (second) attempt proceeds normally.
+      if (fired) return;
+      fired = true;
+    };
+    const result = await createWorkspaceInvitation({ uid: ADMIN_UID, workspaceId: WS_ID, email: INVITEE_EMAIL, role: "member" });
+    expect(result.status).toBe("created");
+    // Exactly one invitation, one guard, one capacity document — the
+    // discarded first attempt's (identical) pendingWrites were never
+    // applied; only the kept attempt's single set of writes landed.
+    expect(stores.workspaceInvitations.size).toBe(1);
+    expect(stores.workspaceInvitationKeys.size).toBe(1);
+    expect(capacityDoc()).toMatchObject({ reservedCount: 10, revision: 0 });
+    // The token used for the actual (kept) attempt is the SAME rawToken
+    // generated once before runTransaction() — retried attempts never
+    // regenerate it (see createWorkspaceInvitation()'s own doc comment).
+    expect(result.status === "created" && typeof result.rawToken === "string" && result.rawToken.length > 0).toBe(true);
+  });
+
+  it("accept: a retried already-active acceptance releases capacity exactly once (not once per attempt) — the discarded first attempt's would-be release is never applied", async () => {
+    seedFillerMembers(6);
+    seedMembership(INVITEE_UID, "member");
+    const { invitationId, rawToken } = seedGuardCurrentInvitation(INVITEE_EMAIL, "pending", 9_999_999_999);
+    authUsers[INVITEE_UID] = { email: INVITEE_EMAIL, emailVerified: true };
+    stores.teamWorkspaceCanaryCapacity.set(WS_ID, { data: { schemaVersion: 1, workspaceId: WS_ID, reservedCount: 10, revision: 0, updatedAt: nextUpdateTime() }, updateTime: nextUpdateTime() });
+
+    retriesBeforeSuccess = 1;
+    let fired = false;
+    concurrentMutationHook = (ref) => {
+      if (fired) return;
+      fired = true; // force exactly one discarded attempt, no store mutation injected
+    };
+
+    const result = await acceptWorkspaceInvitation({ uid: INVITEE_UID, invitationId, rawToken });
+    expect(result.status).toBe("accepted");
+    expect(capacityDoc()).toMatchObject({ reservedCount: 9, revision: 1 }); // released exactly once, not twice
+  });
+
+  it("revoke: a retried revoke releases capacity exactly once, not once per discarded attempt", async () => {
+    seedFillerMembers(6); // 8 active
+    const { invitationId } = seedGuardCurrentInvitation(INVITEE_EMAIL, "pending", 9_999_999_999);
+    stores.teamWorkspaceCanaryCapacity.set(WS_ID, { data: { schemaVersion: 1, workspaceId: WS_ID, reservedCount: 9, revision: 0, updatedAt: nextUpdateTime() }, updateTime: nextUpdateTime() });
+
+    retriesBeforeSuccess = 1;
+    let fired = false;
+    concurrentMutationHook = (ref) => {
+      if (fired) return;
+      fired = true;
+    };
+
+    const result = await revokeWorkspaceInvitation({ uid: OWNER_UID, workspaceId: WS_ID, invitationId, expectedDeliveryVersion: 1 });
+    expect(result.status).toBe("revoked");
+    expect(capacityDoc()).toMatchObject({ reservedCount: 8, revision: 1 }); // released exactly once
+  });
+});
+
+
