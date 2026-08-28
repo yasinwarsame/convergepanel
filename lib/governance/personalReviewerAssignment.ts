@@ -31,6 +31,18 @@
  * writes) rather than reimplementing any of it. Never touches team runs —
  * the caller only reaches this module when `loadUserAndTeam(uid).team` is
  * absent.
+ *
+ * `loadUserAndTeam(uid).team` distinguishes only the LEGACY `users/{uid}.
+ * teamId` concept — it has no idea Team Workspaces exist. A run can be
+ * canonically Team-Workspace-associated regardless of whether its owner
+ * has a legacy team, so this module independently re-verifies the RUN
+ * itself (never trusting the caller's routing decision alone) using the
+ * same canonical `validateRunWorkspaceAssociation()` every personal-route
+ * read/decision surface already uses: only "legacy" (pre-Workspace-binding
+ * runs) or "valid" (genuinely personal-Workspace-bound runs) are eligible
+ * for personal reviewer propagation; "invalid" — which is exactly what a
+ * Team Workspace run's `workspaceId` produces — fails closed with no
+ * assignment written.
  */
 
 import { logger } from "@/lib/logger";
@@ -41,6 +53,7 @@ import {
 } from "@/lib/firestore/runs";
 import { buildAdaptiveHumanReviewAssignmentHistoryEntry } from "@/lib/governance/adaptiveHumanReviewAssignment";
 import { writeAdaptiveAssignmentAdminAuditEvent } from "@/lib/governance/auditLog";
+import { validateRunWorkspaceAssociation } from "@/lib/workspaces/runWorkspaceIntegrity";
 
 /**
  * Pure. "Reviewer configured" means the OWNER's own doc names a reviewer —
@@ -80,6 +93,7 @@ export type PropagatePersonalReviewerAssignmentResult =
   | { status: "reviewer_unavailable" }
   | { status: "already_assigned" }
   | { status: "not_pending" }
+  | { status: "not_personal_association" }
   | { status: "failed" };
 
 /**
@@ -116,6 +130,22 @@ export async function propagatePersonalReviewerAssignment(args: {
   if (!adminDb) return { status: "failed" };
 
   try {
+    // Team Workspace boundary guard — checked first, unconditionally, and
+    // re-derived from the run's OWN persisted data rather than trusted from
+    // the caller. A Team Workspace run's `workspaceId` can never equal its
+    // owner's deterministic personal-Workspace id, so it always resolves
+    // to "invalid" here; only "legacy" (no Workspace binding at all) and
+    // "valid" (genuinely personal-Workspace-bound) runs may proceed.
+    const runSnap = await adminDb.collection("runs").doc(args.runId).get();
+    if (!runSnap.exists) {
+      logger.warn("[personalReviewerAssignment] Run document not found during propagation", { runId: args.runId });
+      return { status: "failed" };
+    }
+    const association = await validateRunWorkspaceAssociation(runSnap.data() ?? {});
+    if (association.classification === "invalid") {
+      return { status: "not_personal_association" };
+    }
+
     const ownerSnap = await adminDb.collection("users").doc(args.ownerUserId).get();
     const reviewerUserId = ownerConfiguredReviewerUid(ownerSnap.data());
     if (!reviewerUserId) {

@@ -191,7 +191,14 @@ export type OrdinaryRunAdaptivePayload = {
    * created this request. Omitted for team runs and for reload/
    * already-initialized runs — never re-attempted or re-derived.
    */
-  personalReviewerAssignmentStatus?: "assigned" | "not_configured" | "reviewer_unavailable" | "already_assigned" | "not_pending" | "failed";
+  personalReviewerAssignmentStatus?:
+    | "assigned"
+    | "not_configured"
+    | "reviewer_unavailable"
+    | "already_assigned"
+    | "not_pending"
+    | "not_personal_association"
+    | "failed";
   /**
    * Adaptive Synthesis Report, Phase 1 (docs/adaptive-synthesis-report-design.md
    * §4.1) — compact human-review state for the top summary bar. Never

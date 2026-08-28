@@ -35,6 +35,13 @@ jest.mock("@/lib/logger", () => ({
   logger: { warn: jest.fn(), error: jest.fn(), info: jest.fn() },
 }));
 
+// Real `validateRunWorkspaceAssociation()` is used unmocked (Team Workspace
+// Boundary Hardening) — it needs WORKSPACES_ENABLED for its "valid" branch's
+// getWorkspace() lookup. `getWorkspace()` itself reads through the SAME
+// mockAdminDb below (collection name "workspaces"), so no separate
+// @/lib/firestore/workspaces mock is needed.
+jest.mock("@/lib/env", () => ({ WORKSPACES_ENABLED: true }));
+
 import {
   ownerConfiguredReviewerUid,
   reviewerStillAvailable,
@@ -43,6 +50,39 @@ import {
 
 function setUser(uid: string, data: Record<string, unknown>) {
   userDocs.set(`users/${uid}`, data);
+}
+
+function setRun(runId: string, data: Record<string, unknown>) {
+  userDocs.set(`runs/${runId}`, data);
+}
+
+function setWorkspace(workspaceId: string, data: Record<string, unknown>) {
+  userDocs.set(`workspaces/${workspaceId}`, data);
+}
+
+/** A pre-Workspace-binding ("legacy" per validateRunWorkspaceAssociation) run — no `workspaceId` property at all. Personal reviewer propagation must remain eligible for this shape unchanged. */
+function setLegacyRun(runId: string) {
+  setRun(runId, {});
+}
+
+/** A genuinely personal-Workspace-bound ("valid") run, plus its matching Personal Workspace document. */
+function setPersonalWorkspaceBoundRun(runId: string, ownerUserId: string) {
+  const workspaceId = `personal-${ownerUserId}`;
+  setRun(runId, { userId: ownerUserId, workspaceId });
+  setWorkspace(workspaceId, {
+    schemaVersion: 1,
+    id: workspaceId,
+    type: "personal",
+    name: "Personal",
+    ownerUserId,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  });
+}
+
+/** A Team Workspace-associated run — the exact incident shape: `workspaceId` is a real (non-deterministic) Team Workspace id, never equal to the owner's personal-Workspace id. */
+function setTeamWorkspaceRun(runId: string, ownerUserId: string, teamWorkspaceId: string) {
+  setRun(runId, { userId: ownerUserId, workspaceId: teamWorkspaceId });
 }
 
 beforeEach(() => {
@@ -96,6 +136,7 @@ describe("reviewerStillAvailable", () => {
 
 describe("propagatePersonalReviewerAssignment", () => {
   it("returns not_configured when the owner has no reviewer configured", async () => {
+    setLegacyRun("run-1");
     setUser("owner-1", {});
     const result = await propagatePersonalReviewerAssignment({ runId: "run-1", ownerUserId: "owner-1" });
     expect(result).toEqual({ status: "not_configured" });
@@ -103,6 +144,7 @@ describe("propagatePersonalReviewerAssignment", () => {
   });
 
   it("returns reviewer_unavailable when the configured reviewer has since disabled availability", async () => {
+    setLegacyRun("run-1");
     setUser("owner-1", { governanceReviewerUid: "reviewer-1", governanceReviewerEmail: "r@example.com" });
     setUser("reviewer-1", { governanceReviewerEnabled: false });
     const result = await propagatePersonalReviewerAssignment({ runId: "run-1", ownerUserId: "owner-1" });
@@ -111,6 +153,7 @@ describe("propagatePersonalReviewerAssignment", () => {
   });
 
   it("Step 6: returns reviewer_unavailable when the configured reviewer's account no longer exists at all (deleted, not merely disabled)", async () => {
+    setLegacyRun("run-1");
     setUser("owner-1", { governanceReviewerUid: "reviewer-deleted", governanceReviewerEmail: "gone@example.com" });
     // No setUser("reviewer-deleted", ...) — the doc genuinely does not exist.
     const result = await propagatePersonalReviewerAssignment({ runId: "run-1", ownerUserId: "owner-1" });
@@ -119,6 +162,7 @@ describe("propagatePersonalReviewerAssignment", () => {
   });
 
   it("Step 6: refuses a self-assignment data anomaly even if a config somehow named the owner as their own reviewer", async () => {
+    setLegacyRun("run-1");
     setUser("owner-1", {
       governanceReviewerUid: "owner-1",
       governanceReviewerEmail: "self@example.com",
@@ -130,6 +174,7 @@ describe("propagatePersonalReviewerAssignment", () => {
   });
 
   it("assigns the configured, still-available reviewer and records history + audit", async () => {
+    setLegacyRun("run-1");
     setUser("owner-1", { governanceReviewerUid: "reviewer-1", governanceReviewerEmail: "r@example.com" });
     setUser("reviewer-1", { governanceReviewerEnabled: true });
     mockSubmitAdaptiveHumanReviewAssignment.mockResolvedValue({
@@ -168,6 +213,8 @@ describe("propagatePersonalReviewerAssignment", () => {
 
   it("Step 7: a later reviewer-configuration change affects only future runs — an existing run's assignment is never re-derived or touched", async () => {
     // Run A is created while Reviewer A is configured.
+    setLegacyRun("run-A");
+    setLegacyRun("run-B");
     setUser("owner-1", { governanceReviewerUid: "reviewer-A", governanceReviewerEmail: "a@example.com" });
     setUser("reviewer-A", { governanceReviewerEnabled: true });
     mockSubmitAdaptiveHumanReviewAssignment.mockResolvedValueOnce({
@@ -228,6 +275,7 @@ describe("propagatePersonalReviewerAssignment", () => {
   });
 
   it("returns already_assigned (never overwrites) when the transaction reports a stale revision — e.g. a concurrent/duplicate trigger", async () => {
+    setLegacyRun("run-1");
     setUser("owner-1", { governanceReviewerUid: "reviewer-1", governanceReviewerEmail: "r@example.com" });
     setUser("reviewer-1", { governanceReviewerEnabled: true });
     mockSubmitAdaptiveHumanReviewAssignment.mockResolvedValue({ ok: false, reason: "stale_revision" });
@@ -238,6 +286,7 @@ describe("propagatePersonalReviewerAssignment", () => {
   });
 
   it("Step 11: two genuinely concurrent (Promise.all) triggers against the same fresh run produce exactly one effective assignment", async () => {
+    setLegacyRun("run-concurrent");
     setUser("owner-1", { governanceReviewerUid: "reviewer-1", governanceReviewerEmail: "r@example.com" });
     setUser("reviewer-1", { governanceReviewerEnabled: true });
 
@@ -286,6 +335,7 @@ describe("propagatePersonalReviewerAssignment", () => {
   });
 
   it("returns not_pending when the run's review is no longer pending (terminal-state protection)", async () => {
+    setLegacyRun("run-1");
     setUser("owner-1", { governanceReviewerUid: "reviewer-1", governanceReviewerEmail: "r@example.com" });
     setUser("reviewer-1", { governanceReviewerEnabled: true });
     mockSubmitAdaptiveHumanReviewAssignment.mockResolvedValue({ ok: false, reason: "not_pending" });
@@ -295,6 +345,7 @@ describe("propagatePersonalReviewerAssignment", () => {
   });
 
   it("returns failed (never throws) on any other submit failure reason", async () => {
+    setLegacyRun("run-1");
     setUser("owner-1", { governanceReviewerUid: "reviewer-1", governanceReviewerEmail: "r@example.com" });
     setUser("reviewer-1", { governanceReviewerEnabled: true });
     mockSubmitAdaptiveHumanReviewAssignment.mockResolvedValue({ ok: false, reason: "write_failed" });
@@ -304,6 +355,7 @@ describe("propagatePersonalReviewerAssignment", () => {
   });
 
   it("never throws when history or audit writes fail after a successful assignment (assignment itself still reported as assigned)", async () => {
+    setLegacyRun("run-1");
     setUser("owner-1", { governanceReviewerUid: "reviewer-1", governanceReviewerEmail: "r@example.com" });
     setUser("reviewer-1", { governanceReviewerEnabled: true });
     mockSubmitAdaptiveHumanReviewAssignment.mockResolvedValue({
@@ -326,5 +378,130 @@ describe("propagatePersonalReviewerAssignment", () => {
 
     const result = await propagatePersonalReviewerAssignment({ runId: "run-1", ownerUserId: "owner-1" });
     expect(result).toEqual({ status: "assigned", reviewerUserId: "reviewer-1" });
+  });
+
+  it("returns failed (never throws) when the run document itself cannot be found", async () => {
+    // No setRun/setLegacyRun call — the run genuinely does not exist.
+    setUser("owner-1", { governanceReviewerUid: "reviewer-1", governanceReviewerEmail: "r@example.com" });
+    setUser("reviewer-1", { governanceReviewerEnabled: true });
+    const result = await propagatePersonalReviewerAssignment({ runId: "run-missing", ownerUserId: "owner-1" });
+    expect(result).toEqual({ status: "failed" });
+    expect(mockSubmitAdaptiveHumanReviewAssignment).not.toHaveBeenCalled();
+  });
+});
+
+describe("propagatePersonalReviewerAssignment — Team Workspace boundary (Phase 10C.4A-F hardening)", () => {
+  // Incident reproduction: 10C.4A found a Team Workspace run — owned by a
+  // user with no LEGACY team, so the caller's own loadUserAndTeam(uid).team
+  // check let this module run at all — receive a stray, membership-blind
+  // reviewer assignment purely because the owner had a personal System-C
+  // reviewer configured. The reviewer was never a Team Workspace member.
+  it("INCIDENT REPRODUCTION: a Team Workspace run never receives a personal reviewer assignment, even when the owner has no legacy team and a personal reviewer is configured", async () => {
+    setTeamWorkspaceRun("run-team-1", "owner-1", "zL1EMo5CFykLFDIoJvk5");
+    setUser("owner-1", { governanceReviewerUid: "admin-reviewer", governanceReviewerEmail: "admin@example.com" });
+    // The configured reviewer is enabled and NOT a Team Workspace member —
+    // this module has no membership concept at all, which is exactly why
+    // the guard must be association-based, not membership-based.
+    setUser("admin-reviewer", { governanceReviewerEnabled: true });
+
+    const result = await propagatePersonalReviewerAssignment({ runId: "run-team-1", ownerUserId: "owner-1" });
+
+    expect(result).toEqual({ status: "not_personal_association" });
+    expect(mockSubmitAdaptiveHumanReviewAssignment).not.toHaveBeenCalled();
+    expect(mockCreateAdaptiveHumanReviewAssignmentHistory).not.toHaveBeenCalled();
+    expect(mockWriteAdaptiveAssignmentAdminAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("ADMIN/NON-MEMBER SHAPE: fails closed even when the configured reviewer carries elevated (e.g. admin) status elsewhere — this module never consults custom claims or membership, only run association", async () => {
+    setTeamWorkspaceRun("run-team-2", "owner-2", "anotherTeamWorkspaceId99");
+    setUser("owner-2", { governanceReviewerUid: "elevated-reviewer", governanceReviewerEmail: "elevated@example.com" });
+    setUser("elevated-reviewer", { governanceReviewerEnabled: true });
+
+    const result = await propagatePersonalReviewerAssignment({ runId: "run-team-2", ownerUserId: "owner-2" });
+
+    expect(result).toEqual({ status: "not_personal_association" });
+    expect(mockSubmitAdaptiveHumanReviewAssignment).not.toHaveBeenCalled();
+  });
+
+  it("TEAM-MEMBER-OVERLAP NEGATIVE: still refuses even when the configured personal reviewer happens to also be a valid Team Workspace member — Team assignment must come from Team governance, never an identity coincidence", async () => {
+    setTeamWorkspaceRun("run-team-3", "owner-3", "zL1EMo5CFykLFDIoJvk5");
+    setUser("owner-3", { governanceReviewerUid: "team-member-reviewer", governanceReviewerEmail: "member@example.com" });
+    // Deliberately configured to look exactly like a legitimate Team
+    // reviewer would (enabled, real account) — membership is irrelevant to
+    // this module's decision either way, which this test proves by never
+    // consulting a workspaceMemberships fixture at all.
+    setUser("team-member-reviewer", { governanceReviewerEnabled: true });
+
+    const result = await propagatePersonalReviewerAssignment({ runId: "run-team-3", ownerUserId: "owner-3" });
+
+    expect(result).toEqual({ status: "not_personal_association" });
+    expect(mockSubmitAdaptiveHumanReviewAssignment).not.toHaveBeenCalled();
+  });
+
+  it("POSITIVE — LEGACY (pre-Workspace-binding, no workspaceId field): personal reviewer propagation is unaffected by the new guard", async () => {
+    setLegacyRun("run-legacy-positive");
+    setUser("owner-4", { governanceReviewerUid: "reviewer-legacy", governanceReviewerEmail: "r@example.com" });
+    setUser("reviewer-legacy", { governanceReviewerEnabled: true });
+    mockSubmitAdaptiveHumanReviewAssignment.mockResolvedValue({
+      ok: true,
+      assignment: {
+        schemaVersion: 1,
+        teamId: null,
+        runId: "run-legacy-positive",
+        assignedReviewerUserId: "reviewer-legacy",
+        assignedAt: "2026-08-28T18:00:00.000Z",
+        assignedByUserId: "owner-4",
+        updatedAt: "2026-08-28T18:00:00.000Z",
+        updatedByUserId: "owner-4",
+        revision: 1,
+      },
+      previousReviewerUserId: null,
+    });
+
+    const result = await propagatePersonalReviewerAssignment({ runId: "run-legacy-positive", ownerUserId: "owner-4" });
+
+    expect(result).toEqual({ status: "assigned", reviewerUserId: "reviewer-legacy" });
+    expect(mockSubmitAdaptiveHumanReviewAssignment).toHaveBeenCalledWith(
+      expect.objectContaining({ runId: "run-legacy-positive", newReviewerUserId: "reviewer-legacy" })
+    );
+  });
+
+  it("POSITIVE — VALID (modern personal runs DO carry a workspaceId, per Personal Workspace Phase 3): personal reviewer propagation still fires for a genuinely personal-Workspace-bound run", async () => {
+    setPersonalWorkspaceBoundRun("run-personal-bound", "owner-5");
+    setUser("owner-5", { governanceReviewerUid: "reviewer-bound", governanceReviewerEmail: "r@example.com" });
+    setUser("reviewer-bound", { governanceReviewerEnabled: true });
+    mockSubmitAdaptiveHumanReviewAssignment.mockResolvedValue({
+      ok: true,
+      assignment: {
+        schemaVersion: 1,
+        teamId: null,
+        runId: "run-personal-bound",
+        assignedReviewerUserId: "reviewer-bound",
+        assignedAt: "2026-08-28T18:00:00.000Z",
+        assignedByUserId: "owner-5",
+        updatedAt: "2026-08-28T18:00:00.000Z",
+        updatedByUserId: "owner-5",
+        revision: 1,
+      },
+      previousReviewerUserId: null,
+    });
+
+    const result = await propagatePersonalReviewerAssignment({ runId: "run-personal-bound", ownerUserId: "owner-5" });
+
+    expect(result).toEqual({ status: "assigned", reviewerUserId: "reviewer-bound" });
+    expect(mockSubmitAdaptiveHumanReviewAssignment).toHaveBeenCalledWith(
+      expect.objectContaining({ runId: "run-personal-bound", newReviewerUserId: "reviewer-bound" })
+    );
+  });
+
+  it("MALFORMED/UNKNOWN ASSOCIATION: fails closed (no assignment) rather than guessing, when workspaceId is present but malformed", async () => {
+    setRun("run-malformed", { workspaceId: "" }); // present but empty — validateRunWorkspaceAssociation -> invalid
+    setUser("owner-6", { governanceReviewerUid: "reviewer-6", governanceReviewerEmail: "r@example.com" });
+    setUser("reviewer-6", { governanceReviewerEnabled: true });
+
+    const result = await propagatePersonalReviewerAssignment({ runId: "run-malformed", ownerUserId: "owner-6" });
+
+    expect(result).toEqual({ status: "not_personal_association" });
+    expect(mockSubmitAdaptiveHumanReviewAssignment).not.toHaveBeenCalled();
   });
 });
