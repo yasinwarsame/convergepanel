@@ -27,7 +27,7 @@ import { checkRateLimit } from "@/lib/security/rateLimit";
 import { associateTeamRunWithProject } from "@/lib/projects/associateTeamRunWithProject";
 import { writeTeamProjectEventSafely } from "@/lib/projects/writeTeamProjectEventSafely";
 import { logger } from "@/lib/logger";
-import { teamWorkspacesDisabledResponse, invalidRequestBodyResponse, unexpectedFieldResponse, internalErrorResponse } from "@/lib/workspaces/teamWorkspaceErrorResponse";
+import { invalidRequestBodyResponse, unexpectedFieldResponse, internalErrorResponse } from "@/lib/workspaces/teamWorkspaceErrorResponse";
 import { teamProjectAuthorizationDeniedResponse } from "@/lib/projects/teamProjectErrorResponse";
 import {
   runNotFoundConcealedResponse,
@@ -132,7 +132,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { workspaceI
       return NextResponse.json({ ok: true, runId: result.runId, workspaceId: result.workspaceId, projectId: result.toProjectId });
     }
     case "team_workspaces_disabled": {
-      const { status, body } = teamWorkspacesDisabledResponse();
+      // Phase 10C.1A: concealed identically to "unauthorized" below.
+      const { status, body } = teamProjectAuthorizationDeniedResponse("team_workspaces_disabled");
       return NextResponse.json(body, { status });
     }
     case "unauthorized": {

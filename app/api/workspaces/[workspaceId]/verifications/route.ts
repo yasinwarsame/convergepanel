@@ -45,7 +45,7 @@ import { applyTeamGovernancePipeline, mergeGovernanceIntoBody } from "@/lib/gove
 import { adminDb } from "@/lib/firebase/admin";
 import type { UserProfile } from "@/lib/types";
 import { validateNullableProjectIdValue } from "@/lib/projects/runProjectAssociationBody";
-import { teamWorkspacesDisabledResponse, invalidRequestBodyResponse, unexpectedFieldResponse, internalErrorResponse } from "@/lib/workspaces/teamWorkspaceErrorResponse";
+import { invalidRequestBodyResponse, unexpectedFieldResponse, internalErrorResponse } from "@/lib/workspaces/teamWorkspaceErrorResponse";
 import { teamProjectAuthorizationDeniedResponse } from "@/lib/projects/teamProjectErrorResponse";
 import { runProjectAssociationTargetNotFoundResponse, projectArchivedTargetResponse } from "@/lib/projects/projectErrorResponse";
 import { logger } from "@/lib/logger";
@@ -85,8 +85,11 @@ async function getUid(req: NextRequest): Promise<string | NextResponse> {
 
 function mapGateDenial(result: { status: string; reason?: unknown }): { status: number; body: unknown } {
   switch (result.status) {
+    // Phase 10C.1A: "team_workspaces_disabled" (rollout non-admission) is
+    // concealed identically to "unauthorized" — previously a distinct
+    // 503 that let a caller who already knows this Workspace ID
+    // distinguish "not admitted" from "admitted but I have no access."
     case "team_workspaces_disabled":
-      return teamWorkspacesDisabledResponse();
     case "unauthorized":
       return teamProjectAuthorizationDeniedResponse(result.reason as any);
     case "project_not_found":
@@ -189,7 +192,9 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
       canaryWorkspaceIdsRaw: TEAM_WORKSPACES_CANARY_WORKSPACE_IDS,
     });
     if (!admission.enabled) {
-      const { status, body: errBody } = teamWorkspacesDisabledResponse();
+      // Phase 10C.1A: concealed identically to the gate1/gate2 "unauthorized"
+      // mapping below (mapGateDenial), not a distinct 503.
+      const { status, body: errBody } = teamProjectAuthorizationDeniedResponse("team_workspaces_disabled");
       return NextResponse.json(errBody, { status });
     }
 

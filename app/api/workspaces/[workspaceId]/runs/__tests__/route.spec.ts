@@ -195,10 +195,24 @@ describe("POST /api/workspaces/[workspaceId]/runs — identity telemetry (Phase 
 });
 
 describe("GET /api/workspaces/[workspaceId]/runs — access denial mapping", () => {
-  it("team_workspaces_disabled -> 503", async () => {
+  it("Phase 10C.1A: team_workspaces_disabled -> concealed 404 (not a distinguishable 503)", async () => {
     mockedResolveTeamRunWorkspaceAccess.mockResolvedValueOnce({ granted: false, reason: "team_workspaces_disabled" });
     const res = await GET(buildRequest(), { params: { workspaceId: WS_ID } });
-    expect(res.status).toBe(503);
+    expect(res.status).toBe(404);
+    expect((await res.json()).errorCode).toBe("team_workspace_not_found");
+  });
+
+  it("F1 parity: team_workspaces_disabled (Case 1) is byte-identical to workspace_not_found (Case 2)", async () => {
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValueOnce({ granted: false, reason: "team_workspaces_disabled" });
+    const notAdmittedRes = await GET(buildRequest(), { params: { workspaceId: WS_ID } });
+    const notAdmittedJson = await notAdmittedRes.json();
+
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValueOnce({ granted: false, reason: "workspace_not_found" });
+    const admittedButForeignRes = await GET(buildRequest(), { params: { workspaceId: WS_ID } });
+    const admittedButForeignJson = await admittedButForeignRes.json();
+
+    expect(notAdmittedRes.status).toBe(admittedButForeignRes.status);
+    expect(JSON.stringify(notAdmittedJson)).toBe(JSON.stringify(admittedButForeignJson));
   });
 
   it("lookup_failed -> 503", async () => {
@@ -401,15 +415,38 @@ describe("POST /api/workspaces/[workspaceId]/runs — request body contract", ()
 });
 
 describe("POST /api/workspaces/[workspaceId]/runs — rollout (Correction 2/17/20)", () => {
-  it("disabled -> 503 team_workspaces_disabled; quota/adaptive-plan/create/execution all zero calls", async () => {
+  it("Phase 10C.1A: disabled -> concealed 404 (not a distinguishable 503); quota/adaptive-plan/create/execution all zero calls", async () => {
     teamWorkspacesEnabled = false;
     const res = await POST(buildPostRequest(buildPostBody()), { params: { workspaceId: WS_ID } });
-    expect(res.status).toBe(503);
+    expect(res.status).toBe(404);
     const body = await res.json();
-    expect(body.errorCode).toBe("team_workspaces_disabled");
+    expect(body.errorCode).toBe("team_workspace_not_found");
     expect(mockedPlanAdaptiveRun).not.toHaveBeenCalled();
     expect(mockedCheckAndIncrementUsage).not.toHaveBeenCalled();
     expect(mockedCreateTeamWorkspaceRun).not.toHaveBeenCalled();
+    expect(mockedExecuteOrdinaryRun).not.toHaveBeenCalled();
+  });
+
+  it("F1 parity: not-admitted (Case 1, pre-gate) is byte-identical to createTeamWorkspaceRun's own concealed unauthorized denial (Case 2)", async () => {
+    teamWorkspacesEnabled = false;
+    const notAdmittedRes = await POST(buildPostRequest(buildPostBody()), { params: { workspaceId: WS_ID } });
+    const notAdmittedJson = await notAdmittedRes.json();
+
+    teamWorkspacesEnabled = true;
+    mockedCreateTeamWorkspaceRun.mockResolvedValueOnce({ status: "unauthorized", reason: "membership_removed" });
+    const admittedButForeignRes = await POST(buildPostRequest(buildPostBody()), { params: { workspaceId: WS_ID } });
+    const admittedButForeignJson = await admittedButForeignRes.json();
+
+    expect(notAdmittedRes.status).toBe(admittedButForeignRes.status);
+    expect(JSON.stringify(notAdmittedJson)).toBe(JSON.stringify(admittedButForeignJson));
+  });
+
+  it("Phase 10C.1A: createTeamWorkspaceRun's own team_workspaces_disabled status (Gate-2-style re-derivation) -> concealed 404, identical to the pre-gate mapping", async () => {
+    mockedCreateTeamWorkspaceRun.mockResolvedValueOnce({ status: "team_workspaces_disabled" });
+    const res = await POST(buildPostRequest(buildPostBody()), { params: { workspaceId: WS_ID } });
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.errorCode).toBe("team_workspace_not_found");
     expect(mockedExecuteOrdinaryRun).not.toHaveBeenCalled();
   });
 });
@@ -457,13 +494,13 @@ describe("POST /api/workspaces/[workspaceId]/runs — Phase 10B.3.2A Workspace-s
     expect(mockedExecuteOrdinaryRun).not.toHaveBeenCalled();
   });
 
-  it("Category G: target workspaceId NOT in TEAM_WORKSPACES_CANARY_WORKSPACE_IDS, global/uid disabled -> 503 team_workspaces_disabled, createTeamWorkspaceRun never called", async () => {
+  it("Category G: target workspaceId NOT in TEAM_WORKSPACES_CANARY_WORKSPACE_IDS, global/uid disabled -> concealed 404, createTeamWorkspaceRun never called", async () => {
     teamWorkspacesEnabled = false;
     teamWorkspacesCanaryWorkspaceIds = "some-other-workspace-id";
     const res = await POST(buildPostRequest(buildPostBody()), { params: { workspaceId: WS_ID } });
-    expect(res.status).toBe(503);
+    expect(res.status).toBe(404);
     const body = await res.json();
-    expect(body.errorCode).toBe("team_workspaces_disabled");
+    expect(body.errorCode).toBe("team_workspace_not_found");
     expect(mockedCreateTeamWorkspaceRun).not.toHaveBeenCalled();
   });
 
@@ -477,12 +514,12 @@ describe("POST /api/workspaces/[workspaceId]/runs — Phase 10B.3.2A Workspace-s
     expect(res.status).toBe(200);
   });
 
-  it("Category J: malformed Workspace-canary list (>10 entries, WOULD have included WS_ID) does NOT grant access -> 503, fails closed rather than broadening", async () => {
+  it("Category J: malformed Workspace-canary list (>10 entries, WOULD have included WS_ID) does NOT grant access -> concealed 404, fails closed rather than broadening", async () => {
     teamWorkspacesEnabled = false;
     teamWorkspacesCanaryUids = undefined;
     teamWorkspacesCanaryWorkspaceIds = [WS_ID, ...Array.from({ length: 10 }, (_, i) => `ws-${i}`)].join(",");
     const res = await POST(buildPostRequest(buildPostBody()), { params: { workspaceId: WS_ID } });
-    expect(res.status).toBe(503);
+    expect(res.status).toBe(404);
     expect(mockedCreateTeamWorkspaceRun).not.toHaveBeenCalled();
   });
 });
@@ -528,13 +565,13 @@ describe("POST /api/workspaces/[workspaceId]/runs — Phase 9D.0-A adaptive sche
     expect(mockedExecuteOrdinaryRun).toHaveBeenCalledTimes(1);
   });
 
-  it("SECURITY: adaptive-schema canary admission does NOT bypass Team Workspace authorization — canary uid + Team Workspaces globally disabled -> still 503 team_workspaces_disabled, planAdaptiveRun never called, identical to non-canary denial", async () => {
+  it("SECURITY: adaptive-schema canary admission does NOT bypass Team Workspace authorization — canary uid + Team Workspaces globally disabled -> still concealed 404, planAdaptiveRun never called, identical to non-canary denial", async () => {
     adaptiveSchemasCanaryUids = UID;
     teamWorkspacesEnabled = false;
     const res = await POST(buildPostRequest(buildPostBody()), { params: { workspaceId: WS_ID } });
-    expect(res.status).toBe(503);
+    expect(res.status).toBe(404);
     const body = await res.json();
-    expect(body.errorCode).toBe("team_workspaces_disabled");
+    expect(body.errorCode).toBe("team_workspace_not_found");
     expect(mockedPlanAdaptiveRun).not.toHaveBeenCalled();
     expect(mockedCheckAndIncrementUsage).not.toHaveBeenCalled();
     expect(mockedCreateTeamWorkspaceRun).not.toHaveBeenCalled();

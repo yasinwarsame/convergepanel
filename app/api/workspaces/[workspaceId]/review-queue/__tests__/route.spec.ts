@@ -121,10 +121,22 @@ describe("Approval Workflow admission gate", () => {
 });
 
 describe("Team Workspace access denial mapping", () => {
-  it("team_workspaces_disabled -> 503", async () => {
+  it("Phase 10C.1A: team_workspaces_disabled -> concealed 404 (not a distinguishable 503)", async () => {
     mockedResolveTeamRunWorkspaceAccess.mockResolvedValueOnce({ granted: false, reason: "team_workspaces_disabled" });
     const res = await GET(buildRequest("?view=needs_review"), { params: { workspaceId: WS_ID } });
-    expect(res.status).toBe(503);
+    expect(res.status).toBe(404);
+    expect((await res.json()).errorCode).toBe("team_workspace_not_found");
+  });
+
+  it("F1 parity: team_workspaces_disabled (Case 1) is byte-identical to workspace_not_found (Case 2)", async () => {
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValueOnce({ granted: false, reason: "team_workspaces_disabled" });
+    const notAdmittedRes = await GET(buildRequest("?view=needs_review"), { params: { workspaceId: WS_ID } });
+    const notAdmittedJson = await notAdmittedRes.json();
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValueOnce({ granted: false, reason: "workspace_not_found" });
+    const admittedButForeignRes = await GET(buildRequest("?view=needs_review"), { params: { workspaceId: WS_ID } });
+    const admittedButForeignJson = await admittedButForeignRes.json();
+    expect(notAdmittedRes.status).toBe(admittedButForeignRes.status);
+    expect(JSON.stringify(notAdmittedJson)).toBe(JSON.stringify(admittedButForeignJson));
   });
 
   it("lookup_failed -> 503 (infra failure distinguishable from absence)", async () => {

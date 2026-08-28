@@ -136,11 +136,27 @@ it.each([
   ["old_owner_membership_stale", 409],
   ["new_owner_membership_stale", 409],
   ["stale_precondition", 409],
-  ["team_workspaces_disabled", 503],
+  ["team_workspaces_disabled", 403],
   ["firestore_unavailable", 500],
   ["transaction_failed", 500],
 ])("maps service status %s -> HTTP %d", async (status, expectedHttp) => {
   mockedTransfer.mockResolvedValue({ status });
   const { res } = await callRoute(VALID_BODY);
   expect(res.status).toBe(expectedHttp);
+});
+
+it("Phase 10C.1A: F1 parity — team_workspaces_disabled (Case 1) is byte-identical to workspace_not_found/caller_not_owner (Case 2), all in the SAME notCanonicalOwner family", async () => {
+  mockedTransfer.mockResolvedValue({ status: "team_workspaces_disabled" });
+  const notAdmitted = await callRoute(VALID_BODY);
+
+  mockedTransfer.mockResolvedValue({ status: "workspace_not_found" });
+  const admittedButForeign = await callRoute(VALID_BODY);
+
+  mockedTransfer.mockResolvedValue({ status: "caller_not_owner" });
+  const notOwner = await callRoute(VALID_BODY);
+
+  expect(notAdmitted.res.status).toBe(admittedButForeign.res.status);
+  expect(notAdmitted.res.status).toBe(notOwner.res.status);
+  expect(JSON.stringify(notAdmitted.json)).toBe(JSON.stringify(admittedButForeign.json));
+  expect(JSON.stringify(notAdmitted.json)).toBe(JSON.stringify(notOwner.json));
 });

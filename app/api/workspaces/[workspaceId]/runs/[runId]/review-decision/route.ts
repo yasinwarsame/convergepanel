@@ -21,7 +21,7 @@ import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelem
 import { APPROVAL_WORKFLOW_ENABLED, APPROVAL_WORKFLOW_CANARY_UIDS } from "@/lib/env";
 import { resolveApprovalWorkflowAdmission } from "@/lib/workspaces/approvalWorkflowRollout";
 import { teamRunWorkspaceNotFoundConcealedResponse, teamRunInsufficientCapabilityResponse } from "@/lib/workspaces/teamRunAccessResponse";
-import { teamWorkspacesDisabledResponse, internalErrorResponse } from "@/lib/workspaces/teamWorkspaceErrorResponse";
+import { internalErrorResponse } from "@/lib/workspaces/teamWorkspaceErrorResponse";
 import { submitWorkspaceReviewDecision, type SubmitWorkspaceReviewDecisionFailureReason } from "@/lib/workspaces/workspaceReviewMutations";
 import { parseAdaptiveReviewDecisionRequest } from "@/lib/governance/adaptiveHumanReviewRequest";
 import type { TeamMutationAuthorizationDenialReason } from "@/lib/workspaces/authorizeTeamWorkspaceMutationInTransaction";
@@ -51,10 +51,9 @@ function authDenialResponse(reason: TeamMutationAuthorizationDenialReason): Next
 }
 
 function decisionErrorResponse(reason: SubmitWorkspaceReviewDecisionFailureReason): NextResponse {
-  if (reason === "team_workspaces_disabled") {
-    const { status, body } = teamWorkspacesDisabledResponse();
-    return NextResponse.json(body, { status });
-  }
+  // Phase 10C.1A: "team_workspaces_disabled" falls through to the same
+  // concealed authDenialResponse() mapping as every other non-infrastructure
+  // denial reason below, closing the rollout-admission oracle.
   if (reason === "firestore_unavailable" || reason === "write_failed" || reason === "unsupported_version" || reason === "governance_record_malformed") {
     const { status, body } = internalErrorResponse();
     return NextResponse.json(body, { status });

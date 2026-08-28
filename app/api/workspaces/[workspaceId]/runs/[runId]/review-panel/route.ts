@@ -39,7 +39,7 @@ import { APPROVAL_WORKFLOW_ENABLED, APPROVAL_WORKFLOW_CANARY_UIDS } from "@/lib/
 import { resolveApprovalWorkflowAdmission } from "@/lib/workspaces/approvalWorkflowRollout";
 import { resolveTeamRunWorkspaceAccess } from "@/lib/workspaces/resolveTeamRunWorkspaceAccess";
 import { teamRunAccessDeniedResponse, teamRunWorkspaceNotFoundConcealedResponse, teamRunInsufficientCapabilityResponse } from "@/lib/workspaces/teamRunAccessResponse";
-import { teamWorkspacesDisabledResponse, internalErrorResponse } from "@/lib/workspaces/teamWorkspaceErrorResponse";
+import { internalErrorResponse } from "@/lib/workspaces/teamWorkspaceErrorResponse";
 import {
   getWorkspaceReviewPanel,
   putWorkspaceReviewPanel,
@@ -82,10 +82,9 @@ function authDenialResponse(reason: TeamMutationAuthorizationDenialReason): Next
 }
 
 function mutationErrorResponse(reason: PutWorkspaceReviewPanelFailureReason | DeleteWorkspaceReviewPanelFailureReason): NextResponse {
-  if (reason === "team_workspaces_disabled") {
-    const { status, body } = teamWorkspacesDisabledResponse();
-    return NextResponse.json(body, { status });
-  }
+  // Phase 10C.1A: "team_workspaces_disabled" falls through to the same
+  // concealed authDenialResponse() mapping as every other non-infrastructure
+  // denial reason below, closing the rollout-admission oracle.
   if (reason === "firestore_unavailable" || reason === "write_failed") {
     const { status, body } = internalErrorResponse();
     return NextResponse.json(body, { status });

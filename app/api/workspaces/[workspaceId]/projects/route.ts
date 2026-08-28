@@ -16,7 +16,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { resolveRequestIdentity } from "@/lib/auth/resolveRequestIdentity";
 import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelemetry";
 import { resolveWorkspaceAccess } from "@/lib/workspaces/resolveWorkspaceAccess";
-import { teamWorkspacesDisabledResponse, invalidRequestBodyResponse, unexpectedFieldResponse, internalErrorResponse } from "@/lib/workspaces/teamWorkspaceErrorResponse";
+import { invalidRequestBodyResponse, unexpectedFieldResponse, internalErrorResponse } from "@/lib/workspaces/teamWorkspaceErrorResponse";
 import { invalidProjectNameResponse, invalidProjectListStatusResponse, tooManyProjectsResponse } from "@/lib/projects/projectErrorResponse";
 import { teamProjectAuthorizationDeniedResponse, teamWorkspaceReadNotFoundResponse } from "@/lib/projects/teamProjectErrorResponse";
 import { parseProjectListStatusQuery } from "@/lib/projects/projectListStatusQuery";
@@ -55,10 +55,11 @@ export async function GET(req: NextRequest, { params }: { params: { workspaceId:
 
   const access = await resolveWorkspaceAccess({ uid, workspaceId });
   if (!access.granted) {
-    if (access.reason === "team_workspaces_disabled") {
-      const { status, body } = teamWorkspacesDisabledResponse();
-      return NextResponse.json(body, { status });
-    }
+    // Phase 10C.1A: `team_workspaces_disabled` (rollout non-admission) is
+    // concealed identically to every other denial reason — previously it
+    // returned the distinct shared 503, letting a caller who already knows
+    // this Workspace ID distinguish "not admitted" from "admitted but I
+    // have no access."
     const { status, body } = teamWorkspaceReadNotFoundResponse();
     return NextResponse.json(body, { status });
   }
@@ -176,7 +177,9 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
       );
     }
     case "team_workspaces_disabled": {
-      const { status, body } = teamWorkspacesDisabledResponse();
+      // Phase 10C.1A: concealed identically to "unauthorized" below, not a
+      // distinct 503 — closes the rollout-admission oracle for this route.
+      const { status, body } = teamProjectAuthorizationDeniedResponse("team_workspaces_disabled");
       return NextResponse.json(body, { status });
     }
     case "unauthorized": {

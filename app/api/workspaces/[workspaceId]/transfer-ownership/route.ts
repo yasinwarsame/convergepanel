@@ -32,7 +32,6 @@ import { parseTransferOwnershipBody } from "@/lib/workspaces/teamWorkspaceMutati
 import { validateUpdateTimeToken } from "@/lib/projects/updateTimeToken";
 import { transferTeamWorkspaceOwnership } from "@/lib/firestore/workspaceMemberships";
 import {
-  teamWorkspacesDisabledResponse,
   invalidRequestBodyResponse,
   unexpectedFieldResponse,
   invalidUpdateTimeResponse,
@@ -108,10 +107,12 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
         oldOwnerMembership: result.oldOwnerMembership,
         newOwnerMembership: result.newOwnerMembership,
       });
-    case "team_workspaces_disabled": {
-      const { status, body } = teamWorkspacesDisabledResponse();
-      return NextResponse.json(body, { status });
-    }
+    // Phase 10C.1A: "team_workspaces_disabled" (rollout non-admission)
+    // joins the SAME concealed family as "workspace_not_found"/
+    // "caller_not_owner" below — previously a distinct 503 that let a
+    // caller who already knows this Workspace ID distinguish "not
+    // admitted" from "admitted but I'm not the canonical Owner."
+    case "team_workspaces_disabled":
     case "workspace_not_found":
     case "caller_not_owner": {
       // Collapsed identically: a caller who isn't the canonical Owner

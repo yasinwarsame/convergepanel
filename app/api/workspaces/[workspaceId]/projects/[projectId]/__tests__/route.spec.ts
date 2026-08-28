@@ -149,11 +149,20 @@ it("409s on precondition_failed", async () => {
   expect(json.errorCode).toBe("conflict");
 });
 
-it("503s when team_workspaces_disabled", async () => {
+it("Phase 10C.1A: team_workspaces_disabled -> concealed 404 (not a distinguishable 503)", async () => {
   mockedUpdateTeamProjectFields.mockResolvedValue({ status: "team_workspaces_disabled" });
   const { res, json } = await callRoute(VALID_BODY);
-  expect(res.status).toBe(503);
-  expect(json.errorCode).toBe("team_workspaces_disabled");
+  expect(res.status).toBe(404);
+  expect(json.errorCode).toBe("team_workspace_not_found");
+});
+
+it("F1 parity: team_workspaces_disabled (Case 1) is byte-identical to an unauthorized/workspace_not_found denial (Case 2)", async () => {
+  mockedUpdateTeamProjectFields.mockResolvedValue({ status: "team_workspaces_disabled" });
+  const notAdmitted = await callRoute(VALID_BODY);
+  mockedUpdateTeamProjectFields.mockResolvedValue({ status: "unauthorized", reason: "workspace_not_found" });
+  const admittedButForeign = await callRoute(VALID_BODY);
+  expect(notAdmitted.res.status).toBe(admittedButForeign.res.status);
+  expect(JSON.stringify(notAdmitted.json)).toBe(JSON.stringify(admittedButForeign.json));
 });
 
 it("500s on update_failed", async () => {

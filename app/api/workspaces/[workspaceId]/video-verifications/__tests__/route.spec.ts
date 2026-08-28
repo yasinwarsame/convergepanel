@@ -285,15 +285,28 @@ describe("POST /api/workspaces/[workspaceId]/video-verifications — body contra
 // ROLLOUT
 // ============================================================
 describe("POST /api/workspaces/[workspaceId]/video-verifications — rollout", () => {
-  it("disabled -> 503, zero Gate 1/dedup/generic/execution", async () => {
+  it("Phase 10C.1A: disabled -> concealed 404 (not a distinguishable 503), zero Gate 1/dedup/generic/execution", async () => {
     mockedResolveTeamWorkspacesMode.mockReturnValueOnce({ enabled: false, source: "off" });
     const res = await POST(buildPostRequest(buildBody()), { params: { workspaceId: WS_ID } });
-    expect(res.status).toBe(503);
-    expect((await res.json()).errorCode).toBe("team_workspaces_disabled");
+    expect(res.status).toBe(404);
+    expect((await res.json()).errorCode).toBe("team_workspace_not_found");
     expect(mockedAuthorizeGate1).not.toHaveBeenCalled();
     expect(mockedFindDedupCandidate).not.toHaveBeenCalled();
     expect(mockedCheckAndIncrementUsage).not.toHaveBeenCalled();
     expect(mockedExecuteVideoVerification).not.toHaveBeenCalled();
+  });
+
+  it("F1 parity: not-admitted (Case 1) is byte-identical to Gate 1's own concealed unauthorized denial (Case 2)", async () => {
+    mockedResolveTeamWorkspacesMode.mockReturnValueOnce({ enabled: false, source: "off" });
+    const notAdmittedRes = await POST(buildPostRequest(buildBody()), { params: { workspaceId: WS_ID } });
+    const notAdmittedJson = await notAdmittedRes.json();
+
+    mockedAuthorizeGate1.mockResolvedValueOnce({ status: "unauthorized", reason: "membership_removed" });
+    const admittedButForeignRes = await POST(buildPostRequest(buildBody()), { params: { workspaceId: WS_ID } });
+    const admittedButForeignJson = await admittedButForeignRes.json();
+
+    expect(notAdmittedRes.status).toBe(admittedButForeignRes.status);
+    expect(JSON.stringify(notAdmittedJson)).toBe(JSON.stringify(admittedButForeignJson));
   });
 });
 
@@ -309,12 +322,12 @@ describe("POST /api/workspaces/[workspaceId]/video-verifications — Workspace-s
     expect(mockedAuthorizeGate1).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: WS_ID }));
   });
 
-  it("global/uid-canary both off, Workspace-canary configured for a DIFFERENT workspace only -> 503, zero Gate 1/dedup/generic/execution", async () => {
+  it("global/uid-canary both off, Workspace-canary configured for a DIFFERENT workspace only -> concealed 404, zero Gate 1/dedup/generic/execution", async () => {
     mockedResolveTeamWorkspacesMode.mockReturnValueOnce({ enabled: false, source: "off" });
     mockedTeamWorkspacesCanaryWorkspaceIds = "ws-some-other-workspace";
     const res = await POST(buildPostRequest(buildBody()), { params: { workspaceId: WS_ID } });
-    expect(res.status).toBe(503);
-    expect((await res.json()).errorCode).toBe("team_workspaces_disabled");
+    expect(res.status).toBe(404);
+    expect((await res.json()).errorCode).toBe("team_workspace_not_found");
     expect(mockedAuthorizeGate1).not.toHaveBeenCalled();
     expect(mockedFindDedupCandidate).not.toHaveBeenCalled();
     expect(mockedCheckAndIncrementUsage).not.toHaveBeenCalled();
@@ -328,11 +341,11 @@ describe("POST /api/workspaces/[workspaceId]/video-verifications — Workspace-s
     expect(res.status).toBe(200);
   });
 
-  it("malformed Workspace-canary list fails closed on its own axis — global/uid off -> 503, never broadens access", async () => {
+  it("malformed Workspace-canary list fails closed on its own axis — global/uid off -> concealed 404, never broadens access", async () => {
     mockedResolveTeamWorkspacesMode.mockReturnValueOnce({ enabled: false, source: "off" });
     mockedTeamWorkspacesCanaryWorkspaceIds = "not a valid id/with a slash";
     const res = await POST(buildPostRequest(buildBody()), { params: { workspaceId: WS_ID } });
-    expect(res.status).toBe(503);
+    expect(res.status).toBe(404);
   });
 });
 
@@ -351,10 +364,11 @@ describe("POST /api/workspaces/[workspaceId]/video-verifications — Gate 1", ()
     expect(mockedSaveGate2).not.toHaveBeenCalled();
   });
 
-  it("team_workspaces_disabled -> 503", async () => {
+  it("Phase 10C.1A: team_workspaces_disabled -> concealed 404 (not a distinguishable 503)", async () => {
     mockedAuthorizeGate1.mockResolvedValueOnce({ status: "team_workspaces_disabled" });
     const res = await POST(buildPostRequest(buildBody()), { params: { workspaceId: WS_ID } });
-    expect(res.status).toBe(503);
+    expect(res.status).toBe(404);
+    expect((await res.json()).errorCode).toBe("team_workspace_not_found");
   });
 
   it("project_not_found -> 404", async () => {

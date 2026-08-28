@@ -212,10 +212,22 @@ describe("PUT — admission and validation", () => {
     expect(res.status).toBe(404);
   });
 
-  it("team_workspaces_disabled -> 503", async () => {
+  it("Phase 10C.1A: team_workspaces_disabled -> concealed 404 (not a distinguishable 503)", async () => {
     mockedPutWorkspaceReviewPanel.mockResolvedValueOnce({ ok: false, reason: "team_workspaces_disabled" });
     const res = await PUT(buildRequest("PUT", { reviewerUserIds: ["a", "b"], expectedRevision: 0 }), { params: { workspaceId: WS_ID, runId: RUN_ID } });
-    expect(res.status).toBe(503);
+    expect(res.status).toBe(404);
+    expect((await res.json()).errorCode).toBe("team_workspace_not_found");
+  });
+
+  it("F1 parity: team_workspaces_disabled (Case 1) is byte-identical to run_not_found (Case 2)", async () => {
+    mockedPutWorkspaceReviewPanel.mockResolvedValueOnce({ ok: false, reason: "team_workspaces_disabled" });
+    const notAdmittedRes = await PUT(buildRequest("PUT", { reviewerUserIds: ["a", "b"], expectedRevision: 0 }), { params: { workspaceId: WS_ID, runId: RUN_ID } });
+    const notAdmittedJson = await notAdmittedRes.json();
+    mockedPutWorkspaceReviewPanel.mockResolvedValueOnce({ ok: false, reason: "run_not_found" });
+    const admittedButForeignRes = await PUT(buildRequest("PUT", { reviewerUserIds: ["a", "b"], expectedRevision: 0 }), { params: { workspaceId: WS_ID, runId: RUN_ID } });
+    const admittedButForeignJson = await admittedButForeignRes.json();
+    expect(notAdmittedRes.status).toBe(admittedButForeignRes.status);
+    expect(JSON.stringify(notAdmittedJson)).toBe(JSON.stringify(admittedButForeignJson));
   });
 });
 

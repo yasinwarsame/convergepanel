@@ -8,15 +8,22 @@
  * failure is not evidence about whether the Workspace/membership exists,
  * and collapsing it into the same 404 as "genuinely not found" would
  * make a transient Firestore outage indistinguishable from (and
- * retried the same way as) a real absence. Every other reason — Workspace
+ * retried the same way as) a real absence.
+ *
+ * Phase 10C.1A (F1 concealment correction): `team_workspaces_disabled` is
+ * now concealed identically to every other denial reason — Workspace
  * absent/malformed, wrong type, membership absent/removed/malformed,
- * owner-integrity violation — is concealed identically as one 404, so a
- * non-member can never learn which of those is actually true.
- * `team_workspaces_disabled` reuses the existing shared 503 response
- * unchanged (`lib/workspaces/teamWorkspaceErrorResponse.ts`).
+ * owner-integrity violation — via the SAME 404. Previously it returned the
+ * distinct shared 503 `teamWorkspacesDisabledResponse()`, which let a
+ * caller who already knows a target Workspace ID distinguish "not
+ * Workspace-canary admitted" (503) from "admitted but I have no access"
+ * (404) — a rollout-cohort-membership oracle. `lookup_failed` is
+ * deliberately NOT touched by this correction: it remains its own distinct
+ * 503, since a genuine infrastructure failure is not evidence about
+ * admission state either way.
  */
 
-import { teamWorkspacesDisabledResponse, type TeamWorkspaceErrorBody } from "./teamWorkspaceErrorResponse";
+import type { TeamWorkspaceErrorBody } from "./teamWorkspaceErrorResponse";
 import type { ResolveTeamRunWorkspaceAccessResult } from "./resolveTeamRunWorkspaceAccess";
 
 type Denied = Extract<ResolveTeamRunWorkspaceAccessResult, { granted: false }>;
@@ -35,10 +42,9 @@ export function teamRunInsufficientCapabilityResponse(): { status: number; body:
 
 export function teamRunAccessDeniedResponse(reason: Denied["reason"]): { status: number; body: TeamWorkspaceErrorBody } {
   switch (reason) {
-    case "team_workspaces_disabled":
-      return teamWorkspacesDisabledResponse();
     case "lookup_failed":
       return teamRunLookupUnavailableResponse();
+    case "team_workspaces_disabled":
     case "workspace_not_found":
     case "workspace_malformed":
     case "wrong_workspace_type":

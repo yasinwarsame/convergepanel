@@ -228,14 +228,27 @@ describe("POST /api/workspaces/[workspaceId]/verifications — body contract", (
 });
 
 describe("POST /api/workspaces/[workspaceId]/verifications — rollout", () => {
-  it("disabled -> 503 team_workspaces_disabled; zero Gate 1, quota, model calls", async () => {
+  it("Phase 10C.1A: disabled -> concealed 404 (not a distinguishable 503); zero Gate 1, quota, model calls", async () => {
     mockedResolveTeamWorkspacesMode.mockReturnValueOnce({ enabled: false, source: "off" });
     const res = await POST(buildPostRequest(buildBody()), { params: { workspaceId: WS_ID } });
-    expect(res.status).toBe(503);
-    expect((await res.json()).errorCode).toBe("team_workspaces_disabled");
+    expect(res.status).toBe(404);
+    expect((await res.json()).errorCode).toBe("team_workspace_not_found");
     expect(mockedAuthorizeGate1).not.toHaveBeenCalled();
     expect(mockedCheckAndIncrementUsage).not.toHaveBeenCalled();
     expect(mockedRunClaimVerificationPanel).not.toHaveBeenCalled();
+  });
+
+  it("F1 parity: not-admitted (Case 1) is byte-identical to Gate 1's own concealed unauthorized denial (Case 2)", async () => {
+    mockedResolveTeamWorkspacesMode.mockReturnValueOnce({ enabled: false, source: "off" });
+    const notAdmittedRes = await POST(buildPostRequest(buildBody()), { params: { workspaceId: WS_ID } });
+    const notAdmittedJson = await notAdmittedRes.json();
+
+    mockedAuthorizeGate1.mockResolvedValueOnce({ status: "unauthorized", reason: "membership_removed" });
+    const admittedButForeignRes = await POST(buildPostRequest(buildBody()), { params: { workspaceId: WS_ID } });
+    const admittedButForeignJson = await admittedButForeignRes.json();
+
+    expect(notAdmittedRes.status).toBe(admittedButForeignRes.status);
+    expect(JSON.stringify(notAdmittedJson)).toBe(JSON.stringify(admittedButForeignJson));
   });
 });
 
@@ -248,20 +261,20 @@ describe("POST /api/workspaces/[workspaceId]/verifications — Workspace-canary 
     expect(mockedAuthorizeGate1).toHaveBeenCalledTimes(1);
   });
 
-  it("global/uid off, a DIFFERENT Workspace id is canary-admitted, not the URL's -> 503, proves workspaceId is bound to the URL param, not reused from an unrelated admitted Workspace", async () => {
+  it("global/uid off, a DIFFERENT Workspace id is canary-admitted, not the URL's -> concealed 404, proves workspaceId is bound to the URL param, not reused from an unrelated admitted Workspace", async () => {
     mockedResolveTeamWorkspacesMode.mockReturnValue({ enabled: false, source: "off" });
     teamWorkspacesCanaryWorkspaceIds = "ws-team-other";
     const res = await POST(buildPostRequest(buildBody()), { params: { workspaceId: WS_ID } });
-    expect(res.status).toBe(503);
-    expect((await res.json()).errorCode).toBe("team_workspaces_disabled");
+    expect(res.status).toBe(404);
+    expect((await res.json()).errorCode).toBe("team_workspace_not_found");
     expect(mockedAuthorizeGate1).not.toHaveBeenCalled();
   });
 
-  it("global/uid off, malformed Workspace-canary list -> 503, fails closed", async () => {
+  it("global/uid off, malformed Workspace-canary list -> concealed 404, fails closed", async () => {
     mockedResolveTeamWorkspacesMode.mockReturnValue({ enabled: false, source: "off" });
     teamWorkspacesCanaryWorkspaceIds = "*";
     const res = await POST(buildPostRequest(buildBody()), { params: { workspaceId: WS_ID } });
-    expect(res.status).toBe(503);
+    expect(res.status).toBe(404);
     expect(mockedAuthorizeGate1).not.toHaveBeenCalled();
   });
 });
@@ -276,10 +289,11 @@ describe("POST /api/workspaces/[workspaceId]/verifications — Gate 1 ordering (
     expect(mockedSaveGate2).not.toHaveBeenCalled();
   });
 
-  it("Gate 1 team_workspaces_disabled -> 503", async () => {
+  it("Phase 10C.1A: Gate 1 team_workspaces_disabled -> concealed 404 (not a distinguishable 503)", async () => {
     mockedAuthorizeGate1.mockResolvedValueOnce({ status: "team_workspaces_disabled" });
     const res = await POST(buildPostRequest(buildBody()), { params: { workspaceId: WS_ID } });
-    expect(res.status).toBe(503);
+    expect(res.status).toBe(404);
+    expect((await res.json()).errorCode).toBe("team_workspace_not_found");
   });
 
   it("Gate 1 project_not_found -> 404", async () => {

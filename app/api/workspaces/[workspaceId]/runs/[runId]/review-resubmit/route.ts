@@ -14,7 +14,7 @@ import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelem
 import { APPROVAL_WORKFLOW_ENABLED, APPROVAL_WORKFLOW_CANARY_UIDS } from "@/lib/env";
 import { resolveApprovalWorkflowAdmission } from "@/lib/workspaces/approvalWorkflowRollout";
 import { teamRunWorkspaceNotFoundConcealedResponse } from "@/lib/workspaces/teamRunAccessResponse";
-import { teamWorkspacesDisabledResponse, internalErrorResponse } from "@/lib/workspaces/teamWorkspaceErrorResponse";
+import { internalErrorResponse } from "@/lib/workspaces/teamWorkspaceErrorResponse";
 import { resubmitWorkspaceReview, type ResubmitWorkspaceReviewFailureReason } from "@/lib/workspaces/resubmitWorkspaceReview";
 
 export const runtime = "nodejs";
@@ -33,15 +33,16 @@ async function getUid(req: NextRequest): Promise<string | NextResponse> {
 }
 
 function resubmitErrorResponse(reason: ResubmitWorkspaceReviewFailureReason): NextResponse {
-  if (reason === "team_workspaces_disabled") {
-    const { status, body } = teamWorkspacesDisabledResponse();
-    return NextResponse.json(body, { status });
-  }
   if (reason === "firestore_unavailable" || reason === "write_failed" || reason === "unsupported_version" || reason === "governance_record_malformed") {
     const { status, body } = internalErrorResponse();
     return NextResponse.json(body, { status });
   }
   if (
+    // Phase 10C.1A: "team_workspaces_disabled" (rollout non-admission) now
+    // joins this same concealed-404 family — previously a distinct 503
+    // that let a caller who already knows this Workspace/run ID
+    // distinguish "not admitted" from "admitted but no access."
+    reason === "team_workspaces_disabled" ||
     reason === "run_not_found" ||
     reason === "governance_record_absent" ||
     reason === "workspace_not_found" ||
