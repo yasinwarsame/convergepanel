@@ -33,6 +33,7 @@
 import "server-only";
 import type { Transaction } from "firebase-admin/firestore";
 import { adminDb } from "@/lib/firebase/admin";
+import { logger } from "@/lib/logger";
 import { computeMembershipId } from "./membershipId";
 import { validateMembershipBinding } from "./membershipBinding";
 import { isCanonicalTeamOwnerMembership } from "./ownerInvariant";
@@ -58,10 +59,24 @@ export type TeamMutationAuthorizationResult =
  *   1. Workspace W: exists, well-formed, `id === workspaceId`, `type === "team"`.
  *   2. Caller's own membership at `computeMembershipId(workspaceId, uid)`:
  *      exists, well-formed, bound to this exact (workspaceId, uid), `status === "active"`.
- *   3. Canonical owner membership at `computeMembershipId(workspaceId, W.ownerUserId)`
+ *   3. Owner-integrity hardening, Case A (10B.3.2B.2-H1): if the CALLER's own
+ *      membership claims `role === "owner"`, it must itself satisfy
+ *      `isCanonicalTeamOwnerMembership()` — i.e. `workspace.ownerUserId` must
+ *      actually equal this caller's uid. A membership document whose role
+ *      falsely claims "owner" while `workspace.ownerUserId` names someone
+ *      else is an integrity violation, not a lower-privilege grant: the
+ *      ENTIRE authorization denies, exactly mirroring
+ *      `resolveWorkspaceAccess.ts`'s own established Case-A check on the
+ *      read path — this function reuses the same neutral
+ *      `isCanonicalTeamOwnerMembership()` invariant, never a second,
+ *      subtly different definition of "valid owner."
+ *   4. Canonical owner membership at `computeMembershipId(workspaceId, W.ownerUserId)`
  *      (deduplicated to the SAME read as step 2 when `uid === W.ownerUserId`):
  *      exists, well-formed, and `isCanonicalTeamOwnerMembership()` holds.
- *   4. `roleHasCapability(callerMembership.role, requiredCapability)`.
+ *      This is Case B — the workspace's TRUE owner's own membership is
+ *      corrupted/missing — and was already enforced for every caller before
+ *      this hardening; unchanged here.
+ *   5. `roleHasCapability(callerMembership.role, requiredCapability)`.
  *
  * Never checks rollout eligibility (`TEAM_WORKSPACES_ENABLED`/
  * `TEAM_WORKSPACES_CANARY_UIDS`) — that gate runs in the CALLER, before
@@ -114,6 +129,15 @@ export async function authorizeTeamWorkspaceMutationInTransaction(
   }
   if (callerMembership.status !== "active") {
     return { ok: false, reason: "membership_removed" };
+  }
+
+  if (callerMembership.role === "owner" && !isCanonicalTeamOwnerMembership({ workspace, membership: callerMembership })) {
+    logger.error("[workspaces/authorizeTeamWorkspaceMutationInTransaction] Owner-role membership does not match workspace.ownerUserId — integrity violation, denying entire authorization", {
+      workspaceId: args.workspaceId,
+      membershipUid: callerMembership.uid,
+      workspaceOwnerUserId: workspace.ownerUserId,
+    });
+    return { ok: false, reason: "owner_integrity_violation" };
   }
 
   let ownerMembership: WorkspaceMembershipV1;

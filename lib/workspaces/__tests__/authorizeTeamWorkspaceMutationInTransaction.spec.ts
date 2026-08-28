@@ -196,4 +196,71 @@ describe("authorizeTeamWorkspaceMutationInTransaction", () => {
     const result = await authorizeTeamWorkspaceMutationInTransaction(makeTx(docs) as any, { uid: MEMBER_UID, workspaceId: WS_ID, requiredCapability: "projects.create" });
     expect(result).toEqual({ ok: false, reason: "owner_integrity_violation" });
   });
+
+  // ============================================
+  // Owner-integrity hardening (10B.3.2B.2-H1) — Case A: a CALLER whose own
+  // membership document claims role: "owner" while the genuine canonical
+  // owner (workspace.ownerUserId) is someone else entirely. The genuine
+  // owner's own membership document is untouched/valid throughout — this is
+  // NOT the already-covered "canonical owner corrupted" (Case B) scenario
+  // above, it's an attacker-controlled or corrupted SELF membership row
+  // claiming an owner identity it does not hold.
+  // ============================================
+
+  describe("owner-integrity hardening — Case A: attacker membership falsely claims role: owner", () => {
+    it("denies reviews.override to a non-owner uid whose own membership document says role: owner (owner_integrity_violation), even though the genuine canonical owner's membership is completely valid", async () => {
+      const ATTACKER_UID = "attacker-1";
+      const docs = docsFor({
+        workspace: workspaceDoc(), // ownerUserId: OWNER_UID
+        memberships: {
+          [OWNER_UID]: membershipDoc(OWNER_UID, "owner"), // genuine owner — untouched, valid
+          [ATTACKER_UID]: membershipDoc(ATTACKER_UID, "owner"), // corrupted/attacker-controlled self row
+        },
+      });
+      const result = await authorizeTeamWorkspaceMutationInTransaction(makeTx(docs) as any, { uid: ATTACKER_UID, workspaceId: WS_ID, requiredCapability: "reviews.override" });
+      expect(result).toEqual({ ok: false, reason: "owner_integrity_violation" });
+    });
+
+    it("does not merely deny reviews.override — the entire authorization fails closed, never falling back to any lower-privilege grant for the attacker's role: owner row", async () => {
+      const ATTACKER_UID = "attacker-1";
+      const docs = docsFor({
+        workspace: workspaceDoc(),
+        memberships: { [OWNER_UID]: membershipDoc(OWNER_UID, "owner"), [ATTACKER_UID]: membershipDoc(ATTACKER_UID, "owner") },
+      });
+      // research.read is a capability every real role (including Owner) holds — proving this isn't
+      // merely a reviews.override-specific carve-out, the whole result denies for ANY capability.
+      const result = await authorizeTeamWorkspaceMutationInTransaction(makeTx(docs) as any, { uid: ATTACKER_UID, workspaceId: WS_ID, requiredCapability: "research.read" });
+      expect(result).toEqual({ ok: false, reason: "owner_integrity_violation" });
+    });
+
+    it("legitimate canonical Owner (uid === workspace.ownerUserId, role: owner) is unaffected by the hardening — still authorized exactly as before", async () => {
+      const docs = docsFor({ workspace: workspaceDoc(), memberships: { [OWNER_UID]: membershipDoc(OWNER_UID, "owner") } });
+      const result = await authorizeTeamWorkspaceMutationInTransaction(makeTx(docs) as any, { uid: OWNER_UID, workspaceId: WS_ID, requiredCapability: "reviews.override" });
+      expect(result.ok).toBe(true);
+    });
+
+    it("ordinary non-owner roles (Admin/Member/Reviewer/Viewer) are unaffected by the hardening — the new check only fires when a membership's OWN role field claims owner", async () => {
+      const ADMIN_UID = "admin-1";
+      for (const [uid, role, capability, expectAuthorized] of [
+        [ADMIN_UID, "admin", "projects.create", true],
+        [MEMBER_UID, "member", "projects.create", true],
+        [REVIEWER_UID, "reviewer", "projects.create", false],
+        ["viewer-1", "viewer", "projects.create", false],
+      ] as const) {
+        const docs = docsFor({ workspace: workspaceDoc(), memberships: { [OWNER_UID]: membershipDoc(OWNER_UID, "owner"), [uid]: membershipDoc(uid, role) } });
+        const result = await authorizeTeamWorkspaceMutationInTransaction(makeTx(docs) as any, { uid, workspaceId: WS_ID, requiredCapability: capability });
+        expect(result.ok).toBe(expectAuthorized);
+      }
+    });
+
+    it("a foreign-Workspace membership document claiming role: owner (wrong workspaceId binding) is denied at membership_malformed — the binding check runs before the new owner-integrity check, never reaching it", async () => {
+      const ATTACKER_UID = "attacker-1";
+      const docs = docsFor({
+        workspace: workspaceDoc(),
+        memberships: { [OWNER_UID]: membershipDoc(OWNER_UID, "owner"), [ATTACKER_UID]: { ...membershipDoc(ATTACKER_UID, "owner"), workspaceId: "some-other-ws" } },
+      });
+      const result = await authorizeTeamWorkspaceMutationInTransaction(makeTx(docs) as any, { uid: ATTACKER_UID, workspaceId: WS_ID, requiredCapability: "reviews.override" });
+      expect(result).toEqual({ ok: false, reason: "membership_malformed" });
+    });
+  });
 });
