@@ -46,6 +46,20 @@ const RUN_ID = "run-1";
 function baseContext(overrides: Partial<WorkspaceReviewContext> = {}): WorkspaceReviewContext {
   return {
     run: { runId: RUN_ID, workspaceId: WS_ID, projectId: null, label: "What are the top risks?" },
+    // Every existing scenario in this file predates the 10C.4A-U2 decision
+    // receipt and assumes content was always available — a structurally
+    // valid default here preserves those scenarios unchanged; the
+    // unavailable-receipt gate is covered by its own dedicated tests.
+    decisionReceipt: {
+      conclusion: "Overall risk is moderate.",
+      basis: ["Historical incident rate", "Current mitigation coverage"],
+      assumptions: ["Mitigations remain funded"],
+      uncertainties: ["Long-tail vendor risk"],
+      limitations: ["One model did not return usable output"],
+      sources: [],
+      sourceBacked: true,
+      humanReviewNeeded: true,
+    },
     review: { status: "unreviewed", reviewedAt: null, governanceUpdatedAt: "gov-1" },
     assignment: null,
     assignmentRevision: 0,
@@ -265,5 +279,75 @@ describe("WorkspaceRunReviewSection — stale response protection (§61/§144)",
     const text = JSON.stringify(renderer.toJSON());
     expect(text).toContain("Approved");
     expect(text).not.toContain("Rejected");
+  });
+});
+
+describe("WorkspaceRunReviewSection — Decision Receipt (10C.4A-U2)", () => {
+  const ASSIGNED_REVIEWER_VIEWER = {
+    mode: "normal" as const,
+    isCreator: false,
+    canManageAssignment: false,
+    canSubmitDecision: true,
+    canResubmit: false,
+    canCreatePanel: false,
+    canReconfigurePanel: false,
+    canCancelPanel: false,
+    canVote: false,
+    hasVoted: false,
+    canFinalize: false,
+    canOverride: false,
+  };
+
+  it("A: renders the Decision Receipt content (conclusion, basis, assumptions, uncertainties, limitations) when present", async () => {
+    const renderer = await render(baseContext());
+    const text = JSON.stringify(renderer.toJSON());
+    expect(text).toContain("Overall risk is moderate.");
+    expect(text).toContain("Historical incident rate");
+    expect(text).toContain("Mitigations remain funded");
+    expect(text).toContain("Long-tail vendor risk");
+    expect(text).toContain("One model did not return usable output");
+  });
+
+  it("B: Decision Receipt renders before the ordinary decision controls in the component tree", async () => {
+    const renderer = await render(baseContext({ viewer: ASSIGNED_REVIEWER_VIEWER }));
+    const serialized = JSON.stringify(renderer.toJSON());
+    const receiptPos = serialized.indexOf("Overall risk is moderate.");
+    const decisionFormPos = serialized.indexOf("mock-decision-form");
+    expect(receiptPos).toBeGreaterThanOrEqual(0);
+    expect(decisionFormPos).toBeGreaterThanOrEqual(0);
+    expect(receiptPos).toBeLessThan(decisionFormPos);
+  });
+
+  it("C: assigned Reviewer + receipt present: decision form IS mounted", async () => {
+    const renderer = await render(baseContext({ viewer: ASSIGNED_REVIEWER_VIEWER }));
+    const text = JSON.stringify(renderer.toJSON());
+    expect(text).toContain("mock-decision-form");
+  });
+
+  it("D: assigned Reviewer + receipt missing/malformed: decision form is NOT mounted, unavailable message shown instead", async () => {
+    const renderer = await render(
+      baseContext({
+        viewer: ASSIGNED_REVIEWER_VIEWER,
+        decisionReceipt: { conclusion: "x", basis: [], assumptions: [], uncertainties: [] } as any, // missing limitations/sources/sourceBacked/humanReviewNeeded
+      })
+    );
+    const text = JSON.stringify(renderer.toJSON());
+    expect(text).not.toContain("mock-decision-form");
+    expect(text).toContain("Review content is unavailable. A decision cannot be submitted until the review content is available.");
+  });
+
+  it("E: Viewer role (canSubmitDecision=false) + receipt present: receipt visible, decision form not mounted (existing capability rule, unaffected by the new gate)", async () => {
+    const renderer = await render(
+      baseContext({ viewer: { ...ASSIGNED_REVIEWER_VIEWER, canSubmitDecision: false } })
+    );
+    const text = JSON.stringify(renderer.toJSON());
+    expect(text).toContain("Overall risk is moderate.");
+    expect(text).not.toContain("mock-decision-form");
+  });
+
+  it("I: malformed receipt renders the unavailable message even for a viewer with no decision authority", async () => {
+    const renderer = await render(baseContext({ decisionReceipt: null as any }));
+    const text = JSON.stringify(renderer.toJSON());
+    expect(text).toContain("Review content is unavailable. A decision cannot be submitted until the review content is available.");
   });
 });

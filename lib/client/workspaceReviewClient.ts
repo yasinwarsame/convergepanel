@@ -87,6 +87,48 @@ export interface ReviewContextPanelInfo {
   finalizedAt: string | null;
 }
 
+/** Client-safe mirror of `lib/workspaces/reviewContext.ts`'s `ReviewContextDecisionReceiptInfo` — the review artifact itself (same shape `governanceRecord.decisionReceipt` carries for every governed adaptive run), distinct from `review` (the decision OUTCOME). `sources` is carried for data-contract completeness but is not currently rendered. */
+export interface ReviewContextDecisionReceiptInfo {
+  conclusion: string;
+  basis: string[];
+  assumptions: string[];
+  uncertainties: string[];
+  limitations: string[];
+  sources: string[];
+  sourceBacked: boolean;
+  humanReviewNeeded: boolean;
+}
+
+/**
+ * REVIEW_DECISION_UI_REQUIRES_DECISION_RECEIPT (10C.4A-U2) — the one
+ * client-side gate every terminal human-decision control on the Team
+ * review surface must pass before it may render as actionable: ordinary
+ * decision submission, panel voting, and Owner Override. `parseReviewContext()`
+ * below only shallow-validates the response envelope (matching this
+ * module's existing convention for `assignment`/`panel`/etc.) — this is the
+ * genuinely defensive check for THIS specific field, since a reviewer must
+ * never be presented with decision controls for content that didn't
+ * actually arrive intact. In practice the server always sends a
+ * structurally valid receipt (`parseGovernanceRecord()` fails the whole
+ * governance record closed if `decisionReceipt` doesn't validate — see
+ * `lib/adaptiveSchema/governanceRecordParser.ts`), so this exists as a
+ * defensive backstop against wire corruption or a future schema change,
+ * not a state that fires against current data.
+ */
+export function hasUsableDecisionReceipt(receipt: unknown): receipt is ReviewContextDecisionReceiptInfo {
+  if (!isPlainObject(receipt)) return false;
+  return (
+    typeof receipt.conclusion === "string" &&
+    Array.isArray(receipt.basis) &&
+    Array.isArray(receipt.assumptions) &&
+    Array.isArray(receipt.uncertainties) &&
+    Array.isArray(receipt.limitations) &&
+    Array.isArray(receipt.sources) &&
+    typeof receipt.sourceBacked === "boolean" &&
+    typeof receipt.humanReviewNeeded === "boolean"
+  );
+}
+
 export interface ReviewContextViewerInfo {
   mode: "normal" | "drain";
   isCreator: boolean;
@@ -106,6 +148,7 @@ export interface ReviewContextViewerInfo {
 
 export interface WorkspaceReviewContext {
   run: { runId: string; workspaceId: string; projectId: string | null; label: string };
+  decisionReceipt: ReviewContextDecisionReceiptInfo;
   review: ReviewContextReviewInfo;
   assignment: ReviewContextAssignmentInfo | null;
   /** Independent from `assignment` — see module doc comment. Never 0 merely because `assignment` is null. */

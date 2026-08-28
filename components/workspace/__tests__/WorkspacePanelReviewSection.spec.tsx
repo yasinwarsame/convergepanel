@@ -88,12 +88,25 @@ function makePanel(overrides: Partial<ReviewContextPanelInfo> = {}): ReviewConte
   };
 }
 
-function setup(props: { panel: ReviewContextPanelInfo | null; viewer: WorkspaceReviewContext["viewer"]; onMutated?: jest.Mock }) {
+function setup(props: { panel: ReviewContextPanelInfo | null; viewer: WorkspaceReviewContext["viewer"]; onMutated?: jest.Mock; decisionReceiptUsable?: boolean }) {
   let renderer!: TestRenderer.ReactTestRenderer;
   const onMutated = props.onMutated ?? jest.fn();
   act(() => {
     renderer = TestRenderer.create(
-      createElement(WorkspacePanelReviewSection, { workspaceId: WS_ID, runId: RUN_ID, mode: props.viewer.mode, panel: props.panel, review: REVIEW, viewer: props.viewer, onMutated })
+      createElement(WorkspacePanelReviewSection, {
+        workspaceId: WS_ID,
+        runId: RUN_ID,
+        mode: props.viewer.mode,
+        panel: props.panel,
+        review: REVIEW,
+        viewer: props.viewer,
+        onMutated,
+        // Every existing scenario in this file predates the 10C.4A-U2
+        // decision-receipt gate and assumes content was always available —
+        // defaulting to `true` here preserves those scenarios unchanged;
+        // the gate's own behavior is covered by dedicated tests instead.
+        decisionReceiptUsable: props.decisionReceiptUsable ?? true,
+      })
     );
   });
   return { renderer, onMutated };
@@ -670,6 +683,37 @@ describe("WorkspacePanelReviewSection — voting (§43/§44/§119/§120)", () =>
     expect(onMutated).toHaveBeenCalledTimes(1);
     expect(JSON.stringify(renderer.toJSON())).toContain("This panel changed while you were editing");
   });
+
+  it("G: canVote=true, hasVoted=false, decisionReceiptUsable=true (default): vote form IS mounted", async () => {
+    let renderer!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      ({ renderer } = setup({ panel: makePanel(), viewer: makeViewer({ canVote: true, hasVoted: false }) }));
+      await Promise.resolve();
+    });
+    expect(JSON.stringify(renderer.toJSON())).toContain("Your vote");
+  });
+
+  it("H (10C.4A-U2): canVote=true, hasVoted=false, decisionReceiptUsable=false: vote form is NOT mounted, unavailable message shown instead — a panel reviewer must never cast a blind vote", async () => {
+    let renderer!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      ({ renderer } = setup({ panel: makePanel(), viewer: makeViewer({ canVote: true, hasVoted: false }), decisionReceiptUsable: false }));
+      await Promise.resolve();
+    });
+    const text = JSON.stringify(renderer.toJSON());
+    expect(text).not.toContain("Your vote");
+    expect(text).not.toContain("You already voted");
+    expect(text).toContain("Review content is unavailable. A decision cannot be submitted until the review content is available.");
+    expect(mockedSubmitPanelVote).not.toHaveBeenCalled();
+  });
+
+  it("already-voted state is unaffected by decisionReceiptUsable — a cast vote is never hidden retroactively", async () => {
+    let renderer!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      ({ renderer } = setup({ panel: makePanel(), viewer: makeViewer({ canVote: true, hasVoted: true }), decisionReceiptUsable: false }));
+      await Promise.resolve();
+    });
+    expect(JSON.stringify(renderer.toJSON())).toContain("You already voted");
+  });
 });
 
 describe("WorkspacePanelReviewSection — finalize (§55/§57/§126/§127)", () => {
@@ -784,6 +828,17 @@ describe("WorkspacePanelReviewSection — Owner Override (Phase 9C.4, §26-§45)
     expect(text).toContain("Owner override");
     expect(text).toContain("Panel review");
     expect(text).toContain("exceptional governance decision");
+  });
+
+  it("10C.4A-U2: canOverride=true, panel open, decisionReceiptUsable=false: Override does NOT render — an Owner must never override a decision based on content they cannot inspect", async () => {
+    let renderer!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      ({ renderer } = setup({ panel: makePanel(), viewer: makeViewer({ canOverride: true }), decisionReceiptUsable: false }));
+      await Promise.resolve();
+    });
+    const text = JSON.stringify(renderer.toJSON());
+    expect(text).not.toContain("Owner override");
+    expect(text).toContain("Panel review");
   });
 
   it("canOverride=true but panel finalized: Override does not render (backend's own canOverride never true here, but verified defensively too)", async () => {

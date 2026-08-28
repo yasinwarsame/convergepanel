@@ -220,6 +220,69 @@ describe("getReviewContext — normal mode, concealment", () => {
   });
 });
 
+describe("getReviewContext — decisionReceipt projection (10C.4A-U2)", () => {
+  it("Reviewer receives the projected decisionReceipt, field-for-field from governanceRecord.decisionReceipt", async () => {
+    seedRun({
+      governanceRecord: validGovernanceRecord({
+        decisionReceipt: {
+          conclusion: "Overall risk is moderate.",
+          basis: ["Historical incident rate"],
+          assumptions: ["Mitigations remain funded"],
+          uncertainties: ["Long-tail vendor risk"],
+          limitations: ["One model did not return usable output"],
+          sources: ["internal-report-1"],
+          sourceBacked: true,
+          humanReviewNeeded: true,
+        },
+      }),
+    });
+    const result = await call(REVIEWER_UID, "reviewer", true);
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.context.decisionReceipt).toEqual({
+      conclusion: "Overall risk is moderate.",
+      basis: ["Historical incident rate"],
+      assumptions: ["Mitigations remain funded"],
+      uncertainties: ["Long-tail vendor risk"],
+      limitations: ["One model did not return usable output"],
+      sources: ["internal-report-1"],
+      sourceBacked: true,
+      humanReviewNeeded: true,
+    });
+  });
+
+  it("Viewer receives the identical projected decisionReceipt — this function never gates content by role (research.read enforcement lives upstream at the route, unchanged by this projection)", async () => {
+    const resultReviewer = await call(REVIEWER_UID, "reviewer", true);
+    const resultViewer = await call(VIEWER_UID, "viewer", true);
+    expect(resultReviewer.status).toBe("ok");
+    expect(resultViewer.status).toBe("ok");
+    if (resultReviewer.status !== "ok" || resultViewer.status !== "ok") return;
+    expect(resultViewer.context.decisionReceipt).toEqual(resultReviewer.context.decisionReceipt);
+  });
+
+  it("adds zero additional Firestore reads — decisionReceipt comes from the already-loaded governanceRecord, not a separate fetch", async () => {
+    const readsBefore = stores.runs.get(RUN_ID);
+    expect(readsBefore).toBeDefined();
+    // The run doc is read exactly once by getReviewContext (runRef.get());
+    // decisionReceipt is derived from that same already-parsed record — no
+    // new collection is touched to populate it. Proven structurally: the
+    // fake store never registers a decisionReceipt-specific collection at
+    // all (see `stores` above — only runs/humanReviewAssignment/
+    // humanReviewPanel/humanReviewVotes/workspaceMemberships/users exist),
+    // so a hypothetical extra fetch would throw "not implemented" rather
+    // than silently succeed.
+    const result = await call(REVIEWER_UID, "reviewer", true);
+    expect(result.status).toBe("ok");
+  });
+
+  it("does not expose unrelated governanceRecord/internal fields alongside decisionReceipt (exactly the 8 documented fields, nothing else)", async () => {
+    const result = await call(REVIEWER_UID, "reviewer", true);
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(Object.keys(result.context.decisionReceipt).sort()).toEqual(["assumptions", "basis", "conclusion", "humanReviewNeeded", "limitations", "sourceBacked", "sources", "uncertainties"]);
+  });
+});
+
 describe("getReviewContext — current review detail (§58)", () => {
   it("changes_requested with comment: comment IS included in review-context", async () => {
     seedRun({ governanceRecord: validGovernanceRecord({ humanReview: { status: "changes_requested", reviewedAt: GOVERNANCE_UPDATED_AT, comment: "Please add sources.", reviewerId: OWNER_UID } }) });

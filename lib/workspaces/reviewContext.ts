@@ -120,6 +120,31 @@ export interface ReviewContextPanelInfo {
   finalizedAt: string | null;
 }
 
+/**
+ * Team Workspace Boundary Hardening follow-up (10C.4A-U2) — the same
+ * uniform eight-field decision-receipt shape `governanceRecord.
+ * decisionReceipt` already carries for every governed adaptive run
+ * (`AdaptiveDecisionReceipt`), projected here field-for-field. This is the
+ * ONLY substantive review artifact currently surfaced anywhere in this
+ * product (Personal review already renders the identical fields) — never
+ * the raw `adaptiveOutput` envelope, which is out of scope. `record` is
+ * already loaded above for `review.status`/`governanceUpdatedAt`, so this
+ * adds zero additional Firestore reads. `sources` is included in the DTO
+ * for data-contract completeness (already legitimately readable by anyone
+ * passing `research.read`) but is deliberately NOT rendered by the Team
+ * review UI yet — see `TECH_DEBT_DECISION_RECEIPT_SOURCES_NOT_RENDERED`.
+ */
+export interface ReviewContextDecisionReceiptInfo {
+  conclusion: string;
+  basis: string[];
+  assumptions: string[];
+  uncertainties: string[];
+  limitations: string[];
+  sources: string[];
+  sourceBacked: boolean;
+  humanReviewNeeded: boolean;
+}
+
 export interface ReviewContextViewerInfo {
   mode: "normal" | "drain";
   isCreator: boolean;
@@ -147,6 +172,8 @@ export interface ReviewContextViewerInfo {
 export interface ReviewContextDto {
   run: ReviewContextRunInfo;
   review: ReviewContextReviewInfo;
+  /** See `ReviewContextDecisionReceiptInfo` doc comment — the review artifact itself, distinct from `review` (the decision OUTCOME). */
+  decisionReceipt: ReviewContextDecisionReceiptInfo;
   assignment: ReviewContextAssignmentInfo | null;
   /**
    * Phase 9B.7 — "no active reviewer" and "the assignment resource has
@@ -352,6 +379,16 @@ export async function getReviewContext(args: { workspaceId: string; runId: strin
 
     const context: ReviewContextDto = {
       run: { runId: args.runId, workspaceId: target.workspaceId, projectId: target.projectId, label: truncateRunLabel(typeof runData.question === "string" ? runData.question : "") },
+      decisionReceipt: {
+        conclusion: record.decisionReceipt.conclusion,
+        basis: record.decisionReceipt.basis,
+        assumptions: record.decisionReceipt.assumptions,
+        uncertainties: record.decisionReceipt.uncertainties,
+        limitations: record.decisionReceipt.limitations,
+        sources: record.decisionReceipt.sources,
+        sourceBacked: record.decisionReceipt.sourceBacked,
+        humanReviewNeeded: record.decisionReceipt.humanReviewNeeded,
+      },
       review: {
         status: record.humanReview.status,
         reviewedAt: record.humanReview.reviewedAt ?? null,

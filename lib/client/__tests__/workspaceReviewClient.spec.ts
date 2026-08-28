@@ -30,6 +30,7 @@ import {
   buildPanelFinalizeRequest,
   buildOverrideRequest,
   currentPanelRevision,
+  hasUsableDecisionReceipt,
   type WorkspaceReviewContext,
   type ReviewContextPanelInfo,
 } from "@/lib/client/workspaceReviewClient";
@@ -279,5 +280,41 @@ describe("buildOverrideRequest — Phase 9C.4: the SAME two-domain shape as buil
     const review = { status: "unreviewed" as const, reviewedAt: null, governanceUpdatedAt: "gov-1" };
     const body = buildOverrideRequest(panel, review, { status: "approved_with_conditions", justification: "Approved with conditions.", conditions: ["Verify primary source"] });
     expect(body.conditions).toEqual(["Verify primary source"]);
+  });
+});
+
+describe("hasUsableDecisionReceipt — 10C.4A-U2 defensive validator (REVIEW_DECISION_UI_REQUIRES_DECISION_RECEIPT)", () => {
+  const VALID = {
+    conclusion: "x",
+    basis: ["a"],
+    assumptions: [],
+    uncertainties: [],
+    limitations: [],
+    sources: [],
+    sourceBacked: true,
+    humanReviewNeeded: false,
+  };
+
+  it("accepts a structurally complete receipt", () => {
+    expect(hasUsableDecisionReceipt(VALID)).toBe(true);
+  });
+
+  it("accepts empty arrays and false booleans — absence of content is not the same as malformed shape", () => {
+    expect(hasUsableDecisionReceipt({ ...VALID, basis: [], sourceBacked: false, humanReviewNeeded: false })).toBe(true);
+  });
+
+  it.each([null, undefined, "string", 42, [], true])("rejects non-plain-object input: %p", (value) => {
+    expect(hasUsableDecisionReceipt(value)).toBe(false);
+  });
+
+  it.each(["conclusion", "basis", "assumptions", "uncertainties", "limitations", "sources", "sourceBacked", "humanReviewNeeded"])("rejects a receipt missing the %s field", (field) => {
+    const { [field]: _omit, ...rest } = VALID as Record<string, unknown>;
+    expect(hasUsableDecisionReceipt(rest)).toBe(false);
+  });
+
+  it("rejects wrong field types (conclusion as number, basis as string instead of array)", () => {
+    expect(hasUsableDecisionReceipt({ ...VALID, conclusion: 1 })).toBe(false);
+    expect(hasUsableDecisionReceipt({ ...VALID, basis: "not-an-array" })).toBe(false);
+    expect(hasUsableDecisionReceipt({ ...VALID, sourceBacked: "yes" })).toBe(false);
   });
 });

@@ -55,7 +55,17 @@ beforeEach(() => {
   mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: UID });
   approvalWorkflowEnabled = true;
   mockedResolveTeamRunWorkspaceAccess.mockResolvedValue(grantedAccess());
-  mockedGetReviewContext.mockResolvedValue({ status: "ok", context: { run: {}, review: {}, assignment: null, panel: null, viewer: { mode: "normal" } } });
+  mockedGetReviewContext.mockResolvedValue({
+    status: "ok",
+    context: {
+      run: {},
+      decisionReceipt: { conclusion: "x", basis: [], assumptions: [], uncertainties: [], limitations: [], sources: [], sourceBacked: true, humanReviewNeeded: false },
+      review: {},
+      assignment: null,
+      panel: null,
+      viewer: { mode: "normal" },
+    },
+  });
 });
 
 describe("admission ordering — Team Workspace access FIRST", () => {
@@ -105,6 +115,21 @@ describe("result mapping", () => {
     const body = await res.json();
     expect(body.ok).toBe(true);
     expect(body.context).toBeDefined();
+  });
+
+  it("10C.4A-U2: decisionReceipt flows through unmodified to an authorized caller's response", async () => {
+    const res = await GET(buildRequest(), { params: { workspaceId: WS_ID, runId: RUN_ID } });
+    const body = await res.json();
+    expect(body.context.decisionReceipt).toEqual({ conclusion: "x", basis: [], assumptions: [], uncertainties: [], limitations: [], sources: [], sourceBacked: true, humanReviewNeeded: false });
+  });
+
+  it("10C.4A-U2: a caller denied at the existing Team access/capability gate never receives decisionReceipt — getReviewContext (and thus the receipt) is never reached", async () => {
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValueOnce({ granted: false, reason: "membership_not_found" });
+    const res = await GET(buildRequest(), { params: { workspaceId: WS_ID, runId: RUN_ID } });
+    const body = await res.json();
+    expect(res.status).toBe(404);
+    expect(body.context).toBeUndefined();
+    expect(mockedGetReviewContext).not.toHaveBeenCalled();
   });
 
   it("run_not_found -> concealed 404", async () => {
