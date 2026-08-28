@@ -87,43 +87,71 @@ export interface ReviewContextPanelInfo {
   finalizedAt: string | null;
 }
 
-/** Client-safe mirror of `lib/workspaces/reviewContext.ts`'s `ReviewContextDecisionReceiptInfo` — the review artifact itself (same shape `governanceRecord.decisionReceipt` carries for every governed adaptive run), distinct from `review` (the decision OUTCOME). `sources` is carried for data-contract completeness but is not currently rendered. */
+/**
+ * Client-safe mirror of `lib/workspaces/reviewContext.ts`'s
+ * `ReviewContextDecisionReceiptInfo` — the review artifact itself (same
+ * shape `governanceRecord.decisionReceipt` carries for every governed
+ * adaptive run), distinct from `review` (the decision OUTCOME).
+ * `AdaptiveDecisionReceipt.sources` is deliberately NOT projected here
+ * (10C.4A-U2C data-minimization correction) — the Team review UI has
+ * never rendered it, and there is no concrete requirement to send it to
+ * the browser unused.
+ */
 export interface ReviewContextDecisionReceiptInfo {
   conclusion: string;
   basis: string[];
   assumptions: string[];
   uncertainties: string[];
   limitations: string[];
-  sources: string[];
   sourceBacked: boolean;
   humanReviewNeeded: boolean;
 }
 
 /**
- * REVIEW_DECISION_UI_REQUIRES_DECISION_RECEIPT (10C.4A-U2) — the one
- * client-side gate every terminal human-decision control on the Team
- * review surface must pass before it may render as actionable: ordinary
- * decision submission, panel voting, and Owner Override. `parseReviewContext()`
- * below only shallow-validates the response envelope (matching this
- * module's existing convention for `assignment`/`panel`/etc.) — this is the
- * genuinely defensive check for THIS specific field, since a reviewer must
- * never be presented with decision controls for content that didn't
- * actually arrive intact. In practice the server always sends a
- * structurally valid receipt (`parseGovernanceRecord()` fails the whole
- * governance record closed if `decisionReceipt` doesn't validate — see
- * `lib/adaptiveSchema/governanceRecordParser.ts`), so this exists as a
- * defensive backstop against wire corruption or a future schema change,
- * not a state that fires against current data.
+ * REVIEW_DECISION_UI_REQUIRES_DECISION_RECEIPT (10C.4A-U2, corrected
+ * 10C.4A-U2C) — the one client-side gate every terminal human-decision
+ * control on the Team review surface must pass before it may render as
+ * actionable: ordinary decision submission, panel voting, and Owner
+ * Override.
+ *
+ * Structural validity alone is NOT sufficient — a receipt can be
+ * structurally well-formed (every field present, correctly typed) while
+ * substantively empty, and that is a real, reachable state, not a
+ * hypothetical one. Audited all 9 `decisionReceiptBuilder.ts` builders
+ * directly: `ranked_enumeration`, `comparison_matrix`, `checklist_taxonomy`,
+ * and `decision_support` always build `conclusion` from a template/lookup
+ * string that is non-empty by construction even in their own worst case
+ * (zero items, no convergence, etc.) — but `definition_explanation`,
+ * `causal_explanation`, `deep_research`, `evidence_review`, and
+ * `bias_blindspot_audit` pass a raw per-model field straight through
+ * (`result.primary.directAnswer`, `result.directAnswer`,
+ * `result.executiveSummary`, `result.overallAssessment`, `result.summary`)
+ * whose upstream alignment logic can legitimately resolve to an empty
+ * string when every contributing model returned no usable text for that
+ * field (a partial-degradation case, not a total-failure one — the run
+ * still persists a valid `governanceRecord`). `parseGovernanceRecord()`
+ * does not reject this: `AdaptiveDecisionReceipt.conclusion` is typed
+ * `string`, and an empty string is a valid string.
+ *
+ * The correct minimum contract, established from this audit rather than
+ * assumed, is `conclusion.trim().length > 0` — NOT "at least one
+ * supporting item present." A non-empty conclusion with every supporting
+ * list empty is itself a legitimate, honestly-communicative receipt for
+ * at least three schemas' own "nothing found" paths (e.g.
+ * `comparison_matrix`'s "did not converge" conclusion, or
+ * `definition_explanation`'s "No definition could be produced" fallback)
+ * — requiring supporting content would make those valid receipts
+ * incorrectly unusable. Supporting lists are therefore left unchecked.
  */
 export function hasUsableDecisionReceipt(receipt: unknown): receipt is ReviewContextDecisionReceiptInfo {
   if (!isPlainObject(receipt)) return false;
   return (
     typeof receipt.conclusion === "string" &&
+    receipt.conclusion.trim().length > 0 &&
     Array.isArray(receipt.basis) &&
     Array.isArray(receipt.assumptions) &&
     Array.isArray(receipt.uncertainties) &&
     Array.isArray(receipt.limitations) &&
-    Array.isArray(receipt.sources) &&
     typeof receipt.sourceBacked === "boolean" &&
     typeof receipt.humanReviewNeeded === "boolean"
   );

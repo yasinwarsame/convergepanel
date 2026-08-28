@@ -245,10 +245,30 @@ describe("getReviewContext — decisionReceipt projection (10C.4A-U2)", () => {
       assumptions: ["Mitigations remain funded"],
       uncertainties: ["Long-tail vendor risk"],
       limitations: ["One model did not return usable output"],
-      sources: ["internal-report-1"],
       sourceBacked: true,
       humanReviewNeeded: true,
     });
+  });
+
+  it("10C.4A-U2C: sources is deliberately NOT projected — data minimization, the Team UI never renders it", async () => {
+    seedRun({
+      governanceRecord: validGovernanceRecord({
+        decisionReceipt: {
+          conclusion: "Overall risk is moderate.",
+          basis: [],
+          assumptions: [],
+          uncertainties: [],
+          limitations: [],
+          sources: ["internal-report-1"],
+          sourceBacked: true,
+          humanReviewNeeded: true,
+        },
+      }),
+    });
+    const result = await call(REVIEWER_UID, "reviewer", true);
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect("sources" in result.context.decisionReceipt).toBe(false);
   });
 
   it("Viewer receives the identical projected decisionReceipt — this function never gates content by role (research.read enforcement lives upstream at the route, unchanged by this projection)", async () => {
@@ -275,11 +295,11 @@ describe("getReviewContext — decisionReceipt projection (10C.4A-U2)", () => {
     expect(result.status).toBe("ok");
   });
 
-  it("does not expose unrelated governanceRecord/internal fields alongside decisionReceipt (exactly the 8 documented fields, nothing else)", async () => {
+  it("does not expose unrelated governanceRecord/internal fields alongside decisionReceipt (exactly the 7 projected fields, nothing else — sources deliberately excluded)", async () => {
     const result = await call(REVIEWER_UID, "reviewer", true);
     expect(result.status).toBe("ok");
     if (result.status !== "ok") return;
-    expect(Object.keys(result.context.decisionReceipt).sort()).toEqual(["assumptions", "basis", "conclusion", "humanReviewNeeded", "limitations", "sourceBacked", "sources", "uncertainties"]);
+    expect(Object.keys(result.context.decisionReceipt).sort()).toEqual(["assumptions", "basis", "conclusion", "humanReviewNeeded", "limitations", "sourceBacked", "uncertainties"]);
   });
 });
 

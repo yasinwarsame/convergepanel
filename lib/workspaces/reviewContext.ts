@@ -121,18 +121,22 @@ export interface ReviewContextPanelInfo {
 }
 
 /**
- * Team Workspace Boundary Hardening follow-up (10C.4A-U2) — the same
- * uniform eight-field decision-receipt shape `governanceRecord.
+ * Team Workspace Boundary Hardening follow-up (10C.4A-U2, corrected
+ * 10C.4A-U2C) — the same decision-receipt shape `governanceRecord.
  * decisionReceipt` already carries for every governed adaptive run
- * (`AdaptiveDecisionReceipt`), projected here field-for-field. This is the
- * ONLY substantive review artifact currently surfaced anywhere in this
- * product (Personal review already renders the identical fields) — never
- * the raw `adaptiveOutput` envelope, which is out of scope. `record` is
- * already loaded above for `review.status`/`governanceUpdatedAt`, so this
- * adds zero additional Firestore reads. `sources` is included in the DTO
- * for data-contract completeness (already legitimately readable by anyone
- * passing `research.read`) but is deliberately NOT rendered by the Team
- * review UI yet — see `TECH_DEBT_DECISION_RECEIPT_SOURCES_NOT_RENDERED`.
+ * (`AdaptiveDecisionReceipt`), projected here — but deliberately NOT
+ * field-for-field. This is the ONLY substantive review artifact currently
+ * surfaced anywhere in this product (Personal review already renders the
+ * identical fields, minus `sources`) — never the raw `adaptiveOutput`
+ * envelope, which is out of scope. `record` is already loaded above for
+ * `review.status`/`governanceUpdatedAt`, so this adds zero additional
+ * Firestore reads.
+ *
+ * `sources` is deliberately OMITTED (10C.4A-U2C data-minimization
+ * correction) — the Team review UI has never rendered it, and there is no
+ * concrete requirement to transmit it to the browser unused. `research.read`
+ * still legitimately permits reading it server-side if a future feature
+ * needs it; this DTO simply doesn't project it today.
  */
 export interface ReviewContextDecisionReceiptInfo {
   conclusion: string;
@@ -140,7 +144,6 @@ export interface ReviewContextDecisionReceiptInfo {
   assumptions: string[];
   uncertainties: string[];
   limitations: string[];
-  sources: string[];
   sourceBacked: boolean;
   humanReviewNeeded: boolean;
 }
@@ -385,7 +388,6 @@ export async function getReviewContext(args: { workspaceId: string; runId: strin
         assumptions: record.decisionReceipt.assumptions,
         uncertainties: record.decisionReceipt.uncertainties,
         limitations: record.decisionReceipt.limitations,
-        sources: record.decisionReceipt.sources,
         sourceBacked: record.decisionReceipt.sourceBacked,
         humanReviewNeeded: record.decisionReceipt.humanReviewNeeded,
       },

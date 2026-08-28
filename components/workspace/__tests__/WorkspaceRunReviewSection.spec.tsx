@@ -56,7 +56,6 @@ function baseContext(overrides: Partial<WorkspaceReviewContext> = {}): Workspace
       assumptions: ["Mitigations remain funded"],
       uncertainties: ["Long-tail vendor risk"],
       limitations: ["One model did not return usable output"],
-      sources: [],
       sourceBacked: true,
       humanReviewNeeded: true,
     },
@@ -328,12 +327,54 @@ describe("WorkspaceRunReviewSection — Decision Receipt (10C.4A-U2)", () => {
     const renderer = await render(
       baseContext({
         viewer: ASSIGNED_REVIEWER_VIEWER,
-        decisionReceipt: { conclusion: "x", basis: [], assumptions: [], uncertainties: [] } as any, // missing limitations/sources/sourceBacked/humanReviewNeeded
+        decisionReceipt: { conclusion: "x", basis: [], assumptions: [], uncertainties: [] } as any, // missing limitations/sourceBacked/humanReviewNeeded
       })
     );
     const text = JSON.stringify(renderer.toJSON());
     expect(text).not.toContain("mock-decision-form");
     expect(text).toContain("Review content is unavailable. A decision cannot be submitted until the review content is available.");
+  });
+
+  it("10C.4A-U2C CENTRAL CORRECTION: assigned Reviewer + structurally-complete-but-substantively-empty receipt (empty conclusion, empty arrays — the reachable deep_research/evidence_review/bias_blindspot_audit partial-degradation shape): decision form is NOT mounted", async () => {
+    const renderer = await render(
+      baseContext({
+        viewer: ASSIGNED_REVIEWER_VIEWER,
+        decisionReceipt: { conclusion: "", basis: [], assumptions: [], uncertainties: [], limitations: [], sourceBacked: false, humanReviewNeeded: true },
+      })
+    );
+    const text = JSON.stringify(renderer.toJSON());
+    expect(text).not.toContain("mock-decision-form");
+    expect(text).toContain("Review content is unavailable. A decision cannot be submitted until the review content is available.");
+  });
+
+  it("10C.4A-U2C: whitespace-only conclusion is treated the same as empty — decision form NOT mounted", async () => {
+    const renderer = await render(
+      baseContext({
+        viewer: ASSIGNED_REVIEWER_VIEWER,
+        decisionReceipt: { conclusion: "   \n\t ", basis: [], assumptions: [], uncertainties: [], limitations: [], sourceBacked: false, humanReviewNeeded: true },
+      })
+    );
+    const text = JSON.stringify(renderer.toJSON());
+    expect(text).not.toContain("mock-decision-form");
+  });
+
+  it("10C.4A-U2C: a non-empty conclusion with every supporting array empty remains USABLE — a legitimate 'nothing found' receipt must not be wrongly blocked", async () => {
+    const renderer = await render(
+      baseContext({
+        viewer: ASSIGNED_REVIEWER_VIEWER,
+        decisionReceipt: {
+          conclusion: "The panel did not converge on enough shared subjects and attributes for a comparison.",
+          basis: [],
+          assumptions: [],
+          uncertainties: [],
+          limitations: [],
+          sourceBacked: false,
+          humanReviewNeeded: true,
+        },
+      })
+    );
+    const text = JSON.stringify(renderer.toJSON());
+    expect(text).toContain("mock-decision-form");
   });
 
   it("E: Viewer role (canSubmitDecision=false) + receipt present: receipt visible, decision form not mounted (existing capability rule, unaffected by the new gate)", async () => {
@@ -348,6 +389,19 @@ describe("WorkspaceRunReviewSection — Decision Receipt (10C.4A-U2)", () => {
   it("I: malformed receipt renders the unavailable message even for a viewer with no decision authority", async () => {
     const renderer = await render(baseContext({ decisionReceipt: null as any }));
     const text = JSON.stringify(renderer.toJSON());
+    expect(text).toContain("Review content is unavailable. A decision cannot be submitted until the review content is available.");
+  });
+
+  it("10C.4A-U2C: end-to-end wiring — an empty-conclusion receipt computed at this level also blocks panel voting in the real (unmocked) WorkspacePanelReviewSection it's threaded into", async () => {
+    const renderer = await render(
+      baseContext({
+        decisionReceipt: { conclusion: "", basis: [], assumptions: [], uncertainties: [], limitations: [], sourceBacked: false, humanReviewNeeded: true },
+        panel: { status: "open", revision: 1, reviewers: [{ uid: "u1", displayName: "Me" }, { uid: "u2", displayName: "Other" }], voteSummary: { submittedCount: 0, aggregationState: "waiting" }, createdAt: "x", updatedAt: "x", finalizedAt: null },
+        viewer: { mode: "normal", isCreator: false, canManageAssignment: false, canSubmitDecision: false, canResubmit: false, canCreatePanel: false, canReconfigurePanel: false, canCancelPanel: false, canVote: true, hasVoted: false, canFinalize: false, canOverride: false },
+      })
+    );
+    const text = JSON.stringify(renderer.toJSON());
+    expect(text).not.toContain("Your vote");
     expect(text).toContain("Review content is unavailable. A decision cannot be submitted until the review content is available.");
   });
 });

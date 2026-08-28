@@ -18,10 +18,12 @@
  * Markdown processing, no `dangerouslySetInnerHTML`, matching the source
  * Personal presentation exactly.
  *
- * `sources` is intentionally not rendered here (see
- * `TECH_DEBT_DECISION_RECEIPT_SOURCES_NOT_RENDERED`) — out of scope for
- * this fix, which exists to surface the already-established review
- * summary, not to build a new evidence-navigation surface.
+ * `AdaptiveDecisionReceipt.sources` is not part of this section's props at
+ * all (10C.4A-U2C) — the Team DTO deliberately never projects it, since
+ * nothing here renders it and there was no concrete requirement to send
+ * it to the browser unused. Out of scope for this fix either way, which
+ * exists to surface the already-established review summary, not to build
+ * a new evidence-navigation surface.
  */
 
 import { useState } from "react";

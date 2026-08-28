@@ -59,7 +59,7 @@ beforeEach(() => {
     status: "ok",
     context: {
       run: {},
-      decisionReceipt: { conclusion: "x", basis: [], assumptions: [], uncertainties: [], limitations: [], sources: [], sourceBacked: true, humanReviewNeeded: false },
+      decisionReceipt: { conclusion: "x", basis: [], assumptions: [], uncertainties: [], limitations: [], sourceBacked: true, humanReviewNeeded: false },
       review: {},
       assignment: null,
       panel: null,
@@ -120,7 +120,7 @@ describe("result mapping", () => {
   it("10C.4A-U2: decisionReceipt flows through unmodified to an authorized caller's response", async () => {
     const res = await GET(buildRequest(), { params: { workspaceId: WS_ID, runId: RUN_ID } });
     const body = await res.json();
-    expect(body.context.decisionReceipt).toEqual({ conclusion: "x", basis: [], assumptions: [], uncertainties: [], limitations: [], sources: [], sourceBacked: true, humanReviewNeeded: false });
+    expect(body.context.decisionReceipt).toEqual({ conclusion: "x", basis: [], assumptions: [], uncertainties: [], limitations: [], sourceBacked: true, humanReviewNeeded: false });
   });
 
   it("10C.4A-U2: a caller denied at the existing Team access/capability gate never receives decisionReceipt — getReviewContext (and thus the receipt) is never reached", async () => {
