@@ -98,11 +98,20 @@ describe("GET (list)", () => {
     expect(mockedListTeamProjects).not.toHaveBeenCalled();
   });
 
-  it("503s when team_workspaces_disabled", async () => {
+  it("Phase 10C.1A: team_workspaces_disabled -> concealed 404 (not a distinguishable 503) — closes the rollout-admission oracle", async () => {
     mockedResolveWorkspaceAccess.mockResolvedValue({ granted: false, reason: "team_workspaces_disabled" });
     const { res, json } = await callGet();
-    expect(res.status).toBe(503);
-    expect(json.errorCode).toBe("team_workspaces_disabled");
+    expect(res.status).toBe(404);
+    expect(json.errorCode).toBe("team_workspace_not_found");
+  });
+
+  it("F1 parity: team_workspaces_disabled (Case 1) is byte-identical to workspace_not_found (Case 2)", async () => {
+    mockedResolveWorkspaceAccess.mockResolvedValue({ granted: false, reason: "team_workspaces_disabled" });
+    const notAdmitted = await callGet();
+    mockedResolveWorkspaceAccess.mockResolvedValue({ granted: false, reason: "workspace_not_found" });
+    const admittedButForeign = await callGet();
+    expect(notAdmitted.res.status).toBe(admittedButForeign.res.status);
+    expect(JSON.stringify(notAdmitted.json)).toBe(JSON.stringify(admittedButForeign.json));
   });
 
   it("404s if the resolved workspace is Personal-typed, not Team", async () => {
@@ -226,11 +235,20 @@ describe("POST (create)", () => {
     expect(json.ok).toBe(true);
   });
 
-  it("503s when team_workspaces_disabled", async () => {
+  it("Phase 10C.1A: team_workspaces_disabled -> concealed 404 (not a distinguishable 503) — closes the rollout-admission oracle", async () => {
     mockedCreateTeamProject.mockResolvedValue({ status: "team_workspaces_disabled" });
     const { res, json } = await callPost({ name: "P" });
-    expect(res.status).toBe(503);
-    expect(json.errorCode).toBe("team_workspaces_disabled");
+    expect(res.status).toBe(404);
+    expect(json.errorCode).toBe("team_workspace_not_found");
+  });
+
+  it("F1 parity: team_workspaces_disabled (Case 1) is byte-identical to a concealed unauthorized denial (Case 2)", async () => {
+    mockedCreateTeamProject.mockResolvedValue({ status: "team_workspaces_disabled" });
+    const notAdmitted = await callPost({ name: "P" });
+    mockedCreateTeamProject.mockResolvedValue({ status: "unauthorized", reason: "membership_removed" });
+    const admittedButForeign = await callPost({ name: "P" });
+    expect(notAdmitted.res.status).toBe(admittedButForeign.res.status);
+    expect(JSON.stringify(notAdmitted.json)).toBe(JSON.stringify(admittedButForeign.json));
   });
 
   it("429s (too_many_projects) when the abuse guard trips, without calling createTeamProject", async () => {

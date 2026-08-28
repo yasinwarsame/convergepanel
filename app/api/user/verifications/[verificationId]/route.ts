@@ -116,16 +116,20 @@ export async function GET(
 
     const access = await resolveTeamRunWorkspaceAccess({ uid, workspaceId });
     if (!access.granted) {
-      if (access.reason === "team_workspaces_disabled" || access.reason === "lookup_failed") {
+      if (access.reason === "lookup_failed") {
+        // Genuine infrastructure failure — deliberately untouched by
+        // Phase 10C.1A, kept distinct from every concealed reason below.
         return NextResponse.json(
           { ok: false, errorCode: "team_workspaces_disabled", message: "Team Workspaces are not available right now." },
           { status: 503 }
         );
       }
-      // Every other denial reason (workspace absent/malformed/wrong
-      // type, membership absent/removed/malformed, owner-integrity
-      // violation) collapses to the same concealed 404 — a non-member
-      // must never learn which of those is actually true.
+      // Phase 10C.1A: "team_workspaces_disabled" (rollout non-admission)
+      // now joins every other denial reason (workspace absent/malformed/
+      // wrong type, membership absent/removed/malformed, owner-integrity
+      // violation) in the same concealed 404 — a non-member (or a caller
+      // whose target Workspace isn't rollout-admitted) must never learn
+      // which of those is actually true.
       return NextResponse.json(
         { ok: false, errorCode: "not_found", message: "Claim not found." },
         { status: 404 }
@@ -183,14 +187,18 @@ export async function GET(
 
     const access = await resolveTeamRunWorkspaceAccess({ uid, workspaceId });
     if (!access.granted) {
-      if (access.reason === "team_workspaces_disabled" || access.reason === "lookup_failed") {
+      if (access.reason === "lookup_failed") {
+        // Genuine infrastructure failure — deliberately untouched by
+        // Phase 10C.1A, kept distinct from every concealed reason below.
         return NextResponse.json(
           { ok: false, errorCode: "team_workspaces_disabled", message: "Team Workspaces are not available right now." },
           { status: 503 }
         );
       }
-      // Every other denial reason collapses to the same concealed 404 —
-      // a non-member must never learn which of those is actually true.
+      // Phase 10C.1A: "team_workspaces_disabled" (rollout non-admission)
+      // now joins every other denial reason in the same concealed 404 —
+      // a non-member (or a caller whose target Workspace isn't
+      // rollout-admitted) must never learn which of those is actually true.
       return NextResponse.json(
         { ok: false, errorCode: "not_found", message: "Video verification not found." },
         { status: 404 }

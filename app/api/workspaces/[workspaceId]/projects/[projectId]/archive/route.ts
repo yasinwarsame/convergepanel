@@ -17,7 +17,7 @@ import { validateUpdateTimeToken } from "@/lib/projects/updateTimeToken";
 import { updateTeamProjectFields } from "@/lib/firestore/teamProjects";
 import { toTeamProjectSummaryDto } from "@/lib/projects/teamProjectDto";
 import { writeTeamProjectEventSafely as writeSafely } from "@/lib/projects/writeTeamProjectEventSafely";
-import { teamWorkspacesDisabledResponse, invalidRequestBodyResponse, unexpectedFieldResponse, invalidUpdateTimeResponse, internalErrorResponse } from "@/lib/workspaces/teamWorkspaceErrorResponse";
+import { invalidRequestBodyResponse, unexpectedFieldResponse, invalidUpdateTimeResponse, internalErrorResponse } from "@/lib/workspaces/teamWorkspaceErrorResponse";
 import { staleUpdateTimeConflictResponse } from "@/lib/projects/projectErrorResponse";
 import { teamProjectAuthorizationDeniedResponse, teamProjectNotFoundConcealedResponse, teamProjectInvalidStatusTransitionResponse } from "@/lib/projects/teamProjectErrorResponse";
 
@@ -82,7 +82,8 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
       });
     }
     case "team_workspaces_disabled": {
-      const { status, body } = teamWorkspacesDisabledResponse();
+      // Phase 10C.1A: concealed identically to "unauthorized" below.
+      const { status, body } = teamProjectAuthorizationDeniedResponse("team_workspaces_disabled");
       return NextResponse.json(body, { status });
     }
     case "unauthorized": {

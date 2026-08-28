@@ -88,7 +88,7 @@ import { evaluateAndStoreGovernance } from "@/lib/governance/evaluateAndStore";
 import { adminDb } from "@/lib/firebase/admin";
 import { FieldValue } from "firebase-admin/firestore";
 import { validateNullableProjectIdValue } from "@/lib/projects/runProjectAssociationBody";
-import { teamWorkspacesDisabledResponse, invalidRequestBodyResponse, unexpectedFieldResponse, internalErrorResponse } from "@/lib/workspaces/teamWorkspaceErrorResponse";
+import { invalidRequestBodyResponse, unexpectedFieldResponse, internalErrorResponse } from "@/lib/workspaces/teamWorkspaceErrorResponse";
 import { teamProjectAuthorizationDeniedResponse } from "@/lib/projects/teamProjectErrorResponse";
 import { runProjectAssociationTargetNotFoundResponse, projectArchivedTargetResponse } from "@/lib/projects/projectErrorResponse";
 import { mapStoredVideoVerificationToClientPayload } from "@/lib/user/mapStoredVideoVerificationToClientPayload";
@@ -108,8 +108,9 @@ const ALLOWED_BODY_KEYS = new Set(["frames", "metadata", "warnings", "projectId"
 
 function mapGateDenial(result: { status: string; reason?: unknown }): { status: number; body: unknown } {
   switch (result.status) {
+    // Phase 10C.1A: "team_workspaces_disabled" concealed identically to
+    // "unauthorized" — closes the rollout-admission oracle.
     case "team_workspaces_disabled":
-      return teamWorkspacesDisabledResponse();
     case "unauthorized":
       return teamProjectAuthorizationDeniedResponse(result.reason as any);
     case "project_not_found":
@@ -312,7 +313,9 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
       canaryWorkspaceIdsRaw: TEAM_WORKSPACES_CANARY_WORKSPACE_IDS,
     });
     if (!admission.enabled) {
-      const { status, body: errBody } = teamWorkspacesDisabledResponse();
+      // Phase 10C.1A: concealed identically to the gate1/gate2 "unauthorized"
+      // mapping below (mapGateDenial), not a distinct 503.
+      const { status, body: errBody } = teamProjectAuthorizationDeniedResponse("team_workspaces_disabled");
       return NextResponse.json(errBody, { status });
     }
 
@@ -402,17 +405,25 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
 
       const readAccess = await resolveTeamRunWorkspaceAccess({ uid, workspaceId: rowValidation.workspaceId });
       if (!readAccess.granted) {
-        if (readAccess.reason === "team_workspaces_disabled" || readAccess.reason === "lookup_failed") {
+        if (readAccess.reason === "lookup_failed") {
+          // Genuine infrastructure failure — deliberately untouched by
+          // Phase 10C.1A-I-R1, kept distinct from every concealed reason
+          // below.
           return NextResponse.json(
             { ok: false, errorCode: "team_workspaces_disabled", message: "Team Workspaces are not available right now." },
             { status: 503 }
           );
         }
-        // Every other denial reason (workspace absent/malformed/wrong
-        // type, membership absent/removed/malformed, owner-integrity
-        // violation) collapses to the same concealed 404 — never falls
-        // through to creation, and never spends provider quota waiting
-        // for Gate 2 to rediscover a revocation this check already saw.
+        // Phase 10C.1A-I-R1: "team_workspaces_disabled" (rollout
+        // non-admission) now joins every other denial reason (workspace
+        // absent/malformed/wrong type, membership absent/removed/
+        // malformed, owner-integrity violation) in the same concealed
+        // 404 — a caller who already knows this candidate's Workspace ID
+        // must never learn whether that Workspace is simply not yet
+        // Workspace-canary admitted, versus admitted but genuinely
+        // inaccessible to this caller. Never falls through to creation,
+        // and never spends provider quota waiting for Gate 2 to
+        // rediscover a revocation this check already saw.
         return NextResponse.json(
           { ok: false, errorCode: "not_found", message: "Video verification not found." },
           { status: 404 }

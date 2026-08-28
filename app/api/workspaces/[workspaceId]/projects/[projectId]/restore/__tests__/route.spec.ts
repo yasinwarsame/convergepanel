@@ -133,8 +133,9 @@ it("Mutation P proof: even if the event writer rejects, the route still returns 
   expect(res.status).toBe(200);
 });
 
-it("503s when team_workspaces_disabled", async () => {
+it("Phase 10C.1A: team_workspaces_disabled -> concealed 404 (not a distinguishable 503)", async () => {
   mockedUpdateTeamProjectFields.mockResolvedValue({ status: "team_workspaces_disabled" });
-  const { res } = await callRoute(VALID_BODY);
-  expect(res.status).toBe(503);
+  const { res, json } = await callRoute(VALID_BODY);
+  expect(res.status).toBe(404);
+  expect(json.errorCode).toBe("team_workspace_not_found");
 });

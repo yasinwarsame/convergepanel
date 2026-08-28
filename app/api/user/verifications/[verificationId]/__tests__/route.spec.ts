@@ -149,14 +149,27 @@ describe("GET /api/user/verifications/[verificationId] — Team Claim read class
     expect(res.status).toBe(404);
   });
 
-  it("rollout disabled -> 503, not a concealed 404", async () => {
+  it("Phase 10C.1A: rollout disabled -> concealed 404 (not a distinguishable 503)", async () => {
     store["vcl-team-1"] = teamRow();
     mockedResolveTeamRunWorkspaceAccess.mockResolvedValueOnce({ granted: false, reason: "team_workspaces_disabled" });
     const res = await GET(buildRequest("vcl-team-1"), ctx("vcl-team-1"));
-    expect(res.status).toBe(503);
+    expect(res.status).toBe(404);
+    expect((await res.json()).errorCode).toBe("not_found");
   });
 
-  it("lookup infrastructure failure -> 503", async () => {
+  it("F1 parity: team_workspaces_disabled (Case 1) is byte-identical to owner_integrity_violation (Case 2)", async () => {
+    store["vcl-team-1"] = teamRow();
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValueOnce({ granted: false, reason: "team_workspaces_disabled" });
+    const notAdmittedRes = await GET(buildRequest("vcl-team-1"), ctx("vcl-team-1"));
+    const notAdmittedJson = await notAdmittedRes.json();
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValueOnce({ granted: false, reason: "owner_integrity_violation" });
+    const admittedButForeignRes = await GET(buildRequest("vcl-team-1"), ctx("vcl-team-1"));
+    const admittedButForeignJson = await admittedButForeignRes.json();
+    expect(notAdmittedRes.status).toBe(admittedButForeignRes.status);
+    expect(JSON.stringify(notAdmittedJson)).toBe(JSON.stringify(admittedButForeignJson));
+  });
+
+  it("lookup infrastructure failure -> 503 (deliberately untouched by Phase 10C.1A — genuine infrastructure failure)", async () => {
     store["vcl-team-1"] = teamRow();
     mockedResolveTeamRunWorkspaceAccess.mockResolvedValueOnce({ granted: false, reason: "lookup_failed" });
     const res = await GET(buildRequest("vcl-team-1"), ctx("vcl-team-1"));
@@ -265,14 +278,27 @@ describe("GET /api/user/verifications/[verificationId] — Team Video read class
     expect(res.status).toBe(404);
   });
 
-  it("rollout disabled -> 503, not a concealed 404", async () => {
+  it("Phase 10C.1A: rollout disabled -> concealed 404 (not a distinguishable 503)", async () => {
     store["vid-team-1"] = teamVideoRow();
     mockedResolveTeamRunWorkspaceAccess.mockResolvedValueOnce({ granted: false, reason: "team_workspaces_disabled" });
     const res = await GET(buildRequest("vid-team-1", "?collection=videoVerifications"), ctx("vid-team-1"));
-    expect(res.status).toBe(503);
+    expect(res.status).toBe(404);
+    expect((await res.json()).errorCode).toBe("not_found");
   });
 
-  it("lookup infrastructure failure -> 503", async () => {
+  it("F1 parity: team_workspaces_disabled (Case 1) is byte-identical to owner_integrity_violation (Case 2)", async () => {
+    store["vid-team-1"] = teamVideoRow();
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValueOnce({ granted: false, reason: "team_workspaces_disabled" });
+    const notAdmittedRes = await GET(buildRequest("vid-team-1", "?collection=videoVerifications"), ctx("vid-team-1"));
+    const notAdmittedJson = await notAdmittedRes.json();
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValueOnce({ granted: false, reason: "owner_integrity_violation" });
+    const admittedButForeignRes = await GET(buildRequest("vid-team-1", "?collection=videoVerifications"), ctx("vid-team-1"));
+    const admittedButForeignJson = await admittedButForeignRes.json();
+    expect(notAdmittedRes.status).toBe(admittedButForeignRes.status);
+    expect(JSON.stringify(notAdmittedJson)).toBe(JSON.stringify(admittedButForeignJson));
+  });
+
+  it("lookup infrastructure failure -> 503 (deliberately untouched by Phase 10C.1A — genuine infrastructure failure)", async () => {
     store["vid-team-1"] = teamVideoRow();
     mockedResolveTeamRunWorkspaceAccess.mockResolvedValueOnce({ granted: false, reason: "lookup_failed" });
     const res = await GET(buildRequest("vid-team-1", "?collection=videoVerifications"), ctx("vid-team-1"));

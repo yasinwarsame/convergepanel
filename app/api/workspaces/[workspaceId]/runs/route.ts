@@ -35,7 +35,7 @@ import { resolveRequestIdentity } from "@/lib/auth/resolveRequestIdentity";
 import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelemetry";
 import { resolveTeamRunWorkspaceAccess } from "@/lib/workspaces/resolveTeamRunWorkspaceAccess";
 import { teamRunAccessDeniedResponse, teamRunInsufficientCapabilityResponse } from "@/lib/workspaces/teamRunAccessResponse";
-import { internalErrorResponse, teamWorkspacesDisabledResponse, invalidRequestBodyResponse, unexpectedFieldResponse } from "@/lib/workspaces/teamWorkspaceErrorResponse";
+import { internalErrorResponse, invalidRequestBodyResponse, unexpectedFieldResponse } from "@/lib/workspaces/teamWorkspaceErrorResponse";
 import { listTeamWorkspaceRuns, type TeamWorkspaceRunsScope } from "@/lib/workspaces/listTeamWorkspaceRuns";
 import { ModelId, RunPanelApiResponse } from "@/lib/types";
 import { splitQuestionAndContext } from "@/lib/questionContext";
@@ -279,7 +279,9 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
       canaryWorkspaceIdsRaw: TEAM_WORKSPACES_CANARY_WORKSPACE_IDS,
     });
     if (!admission.enabled) {
-      const { status, body: errBody } = teamWorkspacesDisabledResponse();
+      // Phase 10C.1A: concealed identically to the "unauthorized" mapping
+      // below, not a distinct 503.
+      const { status, body: errBody } = teamProjectAuthorizationDeniedResponse("team_workspaces_disabled");
       return NextResponse.json(errBody, { status });
     }
 
@@ -374,7 +376,8 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
     if (created.status !== "created") {
       switch (created.status) {
         case "team_workspaces_disabled": {
-          const { status, body: errBody } = teamWorkspacesDisabledResponse();
+          // Phase 10C.1A: concealed identically to "unauthorized" below.
+          const { status, body: errBody } = teamProjectAuthorizationDeniedResponse("team_workspaces_disabled");
           return NextResponse.json(errBody, { status });
         }
         case "unauthorized": {

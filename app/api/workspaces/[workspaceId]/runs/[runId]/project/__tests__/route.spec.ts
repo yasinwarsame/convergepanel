@@ -184,12 +184,21 @@ describe("success responses + DTO shape", () => {
 });
 
 describe("error status mapping", () => {
-  it("team_workspaces_disabled -> 503", async () => {
+  it("Phase 10C.1A: team_workspaces_disabled -> concealed 404 (not a distinguishable 503)", async () => {
     mockedAssociateTeamRunWithProject.mockResolvedValue({ status: "team_workspaces_disabled" });
     const { res, json } = await callPatch({ projectId: PROJECT_ID, expectedProjectId: null });
-    expect(res.status).toBe(503);
-    expect(json.errorCode).toBe("team_workspaces_disabled");
+    expect(res.status).toBe(404);
+    expect(json.errorCode).toBe("team_workspace_not_found");
     expect(mockedWriteTeamProjectEventSafely).not.toHaveBeenCalled();
+  });
+
+  it("F1 parity: team_workspaces_disabled (Case 1) is byte-identical to an unauthorized/workspace_not_found denial (Case 2)", async () => {
+    mockedAssociateTeamRunWithProject.mockResolvedValue({ status: "team_workspaces_disabled" });
+    const notAdmitted = await callPatch({ projectId: PROJECT_ID, expectedProjectId: null });
+    mockedAssociateTeamRunWithProject.mockResolvedValue({ status: "unauthorized", reason: "workspace_not_found" });
+    const admittedButForeign = await callPatch({ projectId: PROJECT_ID, expectedProjectId: null });
+    expect(notAdmitted.res.status).toBe(admittedButForeign.res.status);
+    expect(JSON.stringify(notAdmitted.json)).toBe(JSON.stringify(admittedButForeign.json));
   });
 
   const authReasons: Array<[string, number, string]> = [

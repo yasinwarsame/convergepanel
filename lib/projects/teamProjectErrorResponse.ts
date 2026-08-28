@@ -22,8 +22,16 @@ export type TeamProjectErrorBody = { ok: false; errorCode: string; message: stri
  * absent/malformed, no/removed/malformed membership, owner-integrity
  * violation) collapses to the SAME concealed 404 — a non-member must never
  * learn which of those is actually true (Section 21).
+ *
+ * Phase 10C.1A (F1 concealment correction): the accepted reason type also
+ * includes the rollout-admission denial `"team_workspaces_disabled"` —
+ * which previously bypassed this function entirely in favor of a distinct
+ * shared 503, letting a caller who already knows a target Workspace ID
+ * distinguish "not Workspace-canary admitted" from "admitted but I have no
+ * access." It now falls into the same concealed 404 branch as every other
+ * non-capability reason, closing that oracle.
  */
-export function teamProjectAuthorizationDeniedResponse(reason: TeamMutationAuthorizationDenialReason): { status: number; body: TeamProjectErrorBody } {
+export function teamProjectAuthorizationDeniedResponse(reason: TeamMutationAuthorizationDenialReason | "team_workspaces_disabled"): { status: number; body: TeamProjectErrorBody } {
   if (reason === "insufficient_capability") {
     return { status: 403, body: { ok: false, errorCode: "insufficient_capability", message: "You do not have permission to perform this action in this Workspace." } };
   }
