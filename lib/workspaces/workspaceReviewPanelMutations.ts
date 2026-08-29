@@ -97,6 +97,7 @@ import { isValidAssignmentTarget, violatesDecisionSelfReviewGuard, type Workspac
 import { computeMembershipId } from "./membershipId";
 import { validateMembershipBinding } from "./membershipBinding";
 import { parseGovernanceRecord, isHumanReviewStatusReviewable } from "@/lib/adaptiveSchema/governanceRecordParser";
+import { isSubstantiveDecisionReceiptConclusion } from "@/lib/adaptiveSchema/decisionReceiptUsability";
 import {
   parseAdaptiveHumanReviewPanel,
   buildNextAdaptiveHumanReviewPanel,
@@ -501,6 +502,7 @@ export type SubmitWorkspaceReviewPanelVoteFailureReason =
   | "not_pending"
   | "vote_conflict"
   | "vote_malformed"
+  | "review_content_unavailable"
   | "write_failed";
 
 export type SubmitWorkspaceReviewPanelVoteResult =
@@ -580,6 +582,17 @@ export async function submitWorkspaceReviewPanelVote(args: {
       const candidate: WorkspaceReviewCandidate = { uid: args.uid, workspaceId: args.workspaceId, role: auth.membership.role, status: auth.membership.status };
       const eligibility = isValidAssignmentTarget({ candidate, runWorkspaceId: args.workspaceId, creatorUid: target.creatorUid });
       if (!eligibility.eligible) return { ok: false, reason: "not_reviewer" as const };
+
+      // Team Workspace Boundary Hardening, backend correction (10C.4A-U2B)
+      // — canonical governance-state integrity, checked LAST, only after
+      // every identity/authorization/panel-eligibility check above has
+      // already succeeded, so this can never become an authorization
+      // oracle. `govParse.record` is already loaded above (and narrowed
+      // non-null by the reviewable-status guard) — zero additional
+      // Firestore reads.
+      if (!isSubstantiveDecisionReceiptConclusion(govParse.record.decisionReceipt.conclusion)) {
+        return { ok: false, reason: "review_content_unavailable" as const };
+      }
 
       const nextVote = buildAdaptiveHumanReviewVote({ teamId: null, runId: args.runId, panelRevision: args.panelRevision, reviewerUserId: args.uid, status: args.status, comment: args.comment, conditions: args.conditions, now });
 
@@ -874,6 +887,7 @@ export type OverrideWorkspaceReviewPanelFailureReason =
   | "panel_stale"
   | "panel_already_finalized"
   | "inconsistent_finalization_state"
+  | "review_content_unavailable"
   | "write_failed";
 
 export type OverrideWorkspaceReviewPanelResult = { ok: true; status: AdaptiveReviewFinalStatus; finalizedAt: string } | { ok: false; reason: OverrideWorkspaceReviewPanelFailureReason };
@@ -973,6 +987,17 @@ export async function overrideWorkspaceReviewPanel(args: {
       if (record.updatedAt !== args.expectedGovernanceUpdatedAt) return { ok: false, reason: "governance_stale" as const };
       if (!isHumanReviewStatusReviewable(record.humanReview.status)) return { ok: false, reason: "not_pending" as const };
       if (panel.revision !== args.expectedPanelRevision) return { ok: false, reason: "panel_stale" as const };
+
+      // Team Workspace Boundary Hardening, backend correction (10C.4A-U2B)
+      // — canonical governance-state integrity, checked LAST in the
+      // genuinely-new-write path only (never in the idempotent-retry
+      // branch above, which re-confirms an ALREADY-COMPLETED override and
+      // performs no new write). Checked only after every identity/
+      // authorization/OCC check has already succeeded, so this can never
+      // become an authorization oracle. Zero additional Firestore reads.
+      if (!isSubstantiveDecisionReceiptConclusion(record.decisionReceipt.conclusion)) {
+        return { ok: false, reason: "review_content_unavailable" as const };
+      }
 
       const finalDecisionId = buildWorkspacePanelOverrideDecisionId({ workspaceId: args.workspaceId, runId: args.runId, panelRevision: panel.revision, status: args.status, justification: args.justification, conditions: args.conditions });
       const humanReview = buildOverriddenMultiReviewerHumanReview({ finalStatus: args.status, overridingOwnerUid: args.uid, reviewedAt: now, justification: args.justification, conditions: args.conditions, panelRevision: panel.revision });

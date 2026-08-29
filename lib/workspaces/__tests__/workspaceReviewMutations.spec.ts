@@ -838,6 +838,45 @@ describe("submitWorkspaceReviewDecision — authorization", () => {
   });
 });
 
+describe("submitWorkspaceReviewDecision — backend receipt-usability invariant (10C.4A-U2B, canonical governance-state integrity, independent of the UI safeguard)", () => {
+  it("empty conclusion: DENIED before any canonical decision write, even for an otherwise fully-authorized caller", async () => {
+    seedRun({ governanceRecord: validGovernanceRecord({ decisionReceipt: { conclusion: "", basis: [], assumptions: [], uncertainties: [], limitations: [], sources: [], sourceBacked: false, humanReviewNeeded: true } }) });
+    seedAssignment({ assignedReviewerUserId: REVIEWER_UID });
+    const result = await decisionCall();
+    expect(result).toEqual({ ok: false, reason: "review_content_unavailable" });
+    // No side effect: canonical humanReview state is untouched.
+    const runData = stores.runs.get(RUN_ID) as Record<string, any>;
+    expect(runData.governanceRecord.humanReview.status).toBe("unreviewed");
+    expect(runData.governanceRecord.updatedAt).toBe(GOVERNANCE_UPDATED_AT);
+  });
+
+  it("whitespace-only conclusion: DENIED, identical to empty", async () => {
+    seedRun({ governanceRecord: validGovernanceRecord({ decisionReceipt: { conclusion: "   \n\t ", basis: [], assumptions: [], uncertainties: [], limitations: [], sources: [], sourceBacked: false, humanReviewNeeded: true } }) });
+    seedAssignment({ assignedReviewerUserId: REVIEWER_UID });
+    expect(await decisionCall()).toEqual({ ok: false, reason: "review_content_unavailable" });
+  });
+
+  it("meaningful conclusion with every supporting array empty: ALLOWED — the frozen contract requires only a non-empty conclusion, never supporting content", async () => {
+    seedRun({ governanceRecord: validGovernanceRecord({ decisionReceipt: { conclusion: "The panel did not converge on enough shared subjects for a comparison.", basis: [], assumptions: [], uncertainties: [], limitations: [], sources: [], sourceBacked: false, humanReviewNeeded: true } }) });
+    seedAssignment({ assignedReviewerUserId: REVIEWER_UID });
+    expect((await decisionCall()).ok).toBe(true);
+  });
+
+  it("receipt-usability is checked AFTER authorization — an unauthorized (unassigned) caller still receives the existing authorization denial, never a receipt-state oracle", async () => {
+    seedRun({ governanceRecord: validGovernanceRecord({ decisionReceipt: { conclusion: "", basis: [], assumptions: [], uncertainties: [], limitations: [], sources: [], sourceBacked: false, humanReviewNeeded: true } }) });
+    // No seedAssignment() — REVIEWER_UID is not assigned to this run.
+    const result = await decisionCall({ uid: REVIEWER_UID });
+    expect(result).toEqual({ ok: false, reason: { kind: "not_authorized", reason: "not_assigned" } });
+  });
+
+  it("receipt-usability is checked AFTER OCC — a stale expectedUpdatedAt still receives the existing OCC denial first", async () => {
+    seedRun({ governanceRecord: validGovernanceRecord({ decisionReceipt: { conclusion: "", basis: [], assumptions: [], uncertainties: [], limitations: [], sources: [], sourceBacked: false, humanReviewNeeded: true } }) });
+    seedAssignment({ assignedReviewerUserId: REVIEWER_UID });
+    const result = await decisionCall({ expectedUpdatedAt: "stale-token" });
+    expect(result).toEqual({ ok: false, reason: "stale_expected_updated_at" });
+  });
+});
+
 describe("submitWorkspaceReviewDecision — status", () => {
   it("unreviewed: ALLOW", async () => {
     seedAssignment({ assignedReviewerUserId: REVIEWER_UID });

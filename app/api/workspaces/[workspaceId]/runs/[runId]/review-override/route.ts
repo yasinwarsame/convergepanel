@@ -86,6 +86,9 @@ function overrideErrorResponse(reason: OverrideWorkspaceReviewPanelFailureReason
   if (reason === "panel_stale") return errorResponse(409, "panel_stale", "This panel changed since you last viewed it. Please refresh and try again.");
   if (reason === "panel_already_finalized") return errorResponse(409, "panel_already_finalized", "This panel has already been finalized and cannot be overridden again.");
   if (reason === "inconsistent_finalization_state") return errorResponse(409, "inconsistent_finalization_state", "This run's review state is inconsistent and could not be verified.");
+  if (reason === "review_content_unavailable") {
+    return errorResponse(409, "review_content_unavailable", "This run's review content is not currently available. An override cannot be submitted until it is.");
+  }
   return authDenialResponse(reason as TeamMutationAuthorizationDenialReason);
 }
 

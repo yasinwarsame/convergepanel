@@ -34,6 +34,7 @@
 
 import type { User } from "firebase/auth";
 import { authedFetch } from "./authedFetch";
+import { isSubstantiveDecisionReceiptConclusion } from "@/lib/adaptiveSchema/decisionReceiptUsability";
 
 // ============================================
 // Client-safe DTO mirrors
@@ -142,12 +143,21 @@ export interface ReviewContextDecisionReceiptInfo {
  * `definition_explanation`'s "No definition could be produced" fallback)
  * — requiring supporting content would make those valid receipts
  * incorrectly unusable. Supporting lists are therefore left unchecked.
+ *
+ * The substantive check itself (`isSubstantiveDecisionReceiptConclusion`)
+ * is shared verbatim with the backend mutation functions
+ * (`submitWorkspaceReviewDecision`, `submitWorkspaceReviewPanelVote`,
+ * `overrideWorkspaceReviewPanel`) — this is a UI usability safeguard,
+ * never the canonical enforcement; the backend independently re-checks
+ * the identical invariant against the transactionally-read
+ * `governanceRecord` before persisting any of those three decisions,
+ * regardless of what this client-side check already filtered out.
  */
 export function hasUsableDecisionReceipt(receipt: unknown): receipt is ReviewContextDecisionReceiptInfo {
   if (!isPlainObject(receipt)) return false;
   return (
     typeof receipt.conclusion === "string" &&
-    receipt.conclusion.trim().length > 0 &&
+    isSubstantiveDecisionReceiptConclusion(receipt.conclusion) &&
     Array.isArray(receipt.basis) &&
     Array.isArray(receipt.assumptions) &&
     Array.isArray(receipt.uncertainties) &&

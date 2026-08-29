@@ -123,6 +123,14 @@ describe("result mapping", () => {
     expect(res.status).toBe(409);
   });
 
+  it("10C.4A-U2B: review_content_unavailable -> 409, distinct code, never 401/403", async () => {
+    mockedSubmitWorkspaceReviewPanelVote.mockResolvedValueOnce({ ok: false, reason: "review_content_unavailable" });
+    const res = await POST(buildRequest(validBody()), { params: { workspaceId: WS_ID, runId: RUN_ID } });
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error.code).toBe("review_content_unavailable");
+  });
+
   it("panel_absent -> concealed 404", async () => {
     mockedSubmitWorkspaceReviewPanelVote.mockResolvedValueOnce({ ok: false, reason: "panel_absent" });
     const res = await POST(buildRequest(validBody()), { params: { workspaceId: WS_ID, runId: RUN_ID } });

@@ -62,6 +62,9 @@ function voteErrorResponse(reason: SubmitWorkspaceReviewPanelVoteFailureReason):
   if (reason === "panel_stale") return errorResponse(409, "panel_stale", "This panel has changed since you last viewed it. Please refresh and try again.");
   if (reason === "not_pending") return errorResponse(409, "not_pending", "This review is no longer pending — votes can only be cast while a review is pending.");
   if (reason === "vote_conflict") return errorResponse(409, "vote_conflict", "You have already submitted a different vote for this panel revision.");
+  if (reason === "review_content_unavailable") {
+    return errorResponse(409, "review_content_unavailable", "This run's review content is not currently available. A vote cannot be submitted until it is.");
+  }
   if (reason === "vote_malformed") {
     const { status, body } = internalErrorResponse();
     return NextResponse.json(body, { status });
