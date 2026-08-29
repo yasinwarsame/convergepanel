@@ -132,6 +132,7 @@ import PanelReviewerSelector from "./PanelReviewerSelector";
 import PanelVoteForm from "./PanelVoteForm";
 import PanelFinalizeCancelControls from "./PanelFinalizeCancelControls";
 import OwnerOverrideForm from "./OwnerOverrideForm";
+import { DECISION_RECEIPT_UNAVAILABLE_MESSAGE } from "./DecisionReceiptSection";
 
 type PanelViewerFlags = Pick<WorkspaceReviewContext["viewer"], "canCreatePanel" | "canReconfigurePanel" | "canCancelPanel" | "canVote" | "hasVoted" | "canFinalize" | "canOverride">;
 
@@ -143,6 +144,7 @@ export default function WorkspacePanelReviewSection({
   review,
   viewer,
   onMutated,
+  decisionReceiptUsable,
 }: {
   workspaceId: string;
   runId: string;
@@ -153,6 +155,15 @@ export default function WorkspacePanelReviewSection({
   viewer: PanelViewerFlags;
   /** Phase 9C.3-R2C — MUST be genuinely awaitable; see `WorkspaceRunReviewSection.tsx`'s `refreshContext` doc comment. */
   onMutated: () => Promise<void>;
+  /**
+   * REVIEW_DECISION_UI_REQUIRES_DECISION_RECEIPT (10C.4A-U2) — additive UI
+   * safety, never backend authorization. Gates ONLY the two controls here
+   * that make a fresh content-based human decision: casting a vote and
+   * Owner Override. Finalize/Cancel are procedural (finalize aggregates
+   * already-cast votes; cancel doesn't require inspecting the artifact at
+   * all) and are deliberately NOT gated on this.
+   */
+  decisionReceiptUsable: boolean;
 }) {
   const { user, authReady } = useAuth();
 
@@ -346,7 +357,7 @@ export default function WorkspacePanelReviewSection({
             <p>{progress.secondary}</p>
           </div>
 
-          {viewer.canVote && !viewer.hasVoted && (
+          {viewer.canVote && !viewer.hasVoted && decisionReceiptUsable && (
             <div className="mt-4">
               <PanelVoteForm
                 workspaceId={workspaceId}
@@ -360,6 +371,9 @@ export default function WorkspacePanelReviewSection({
             </div>
           )}
           {viewer.canVote && viewer.hasVoted && <p className="mt-3 text-xs text-cp-muted">You already voted.</p>}
+          {viewer.canVote && !viewer.hasVoted && !decisionReceiptUsable && (
+            <p className="mt-3 text-xs text-cp-muted">{DECISION_RECEIPT_UNAVAILABLE_MESSAGE}</p>
+          )}
 
           {/* Phase 9C.4-R1C — drain never admits reconfiguration, regardless of `viewer.canReconfigurePanel` (defensive; see module doc). */}
           {mode === "normal" && viewer.canReconfigurePanel && (
@@ -423,7 +437,7 @@ export default function WorkspacePanelReviewSection({
      * semantic separation from peer review. It participates in the SAME
      * shared lock as vote/finalize/cancel (see module doc comment).
      */}
-    {panel.status === "open" && viewer.canOverride && (
+    {panel.status === "open" && viewer.canOverride && decisionReceiptUsable && (
       <OwnerOverrideForm
         workspaceId={workspaceId}
         runId={runId}

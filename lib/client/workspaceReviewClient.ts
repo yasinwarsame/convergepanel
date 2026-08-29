@@ -34,6 +34,7 @@
 
 import type { User } from "firebase/auth";
 import { authedFetch } from "./authedFetch";
+import { isSubstantiveDecisionReceiptConclusion } from "@/lib/adaptiveSchema/decisionReceiptUsability";
 
 // ============================================
 // Client-safe DTO mirrors
@@ -87,6 +88,85 @@ export interface ReviewContextPanelInfo {
   finalizedAt: string | null;
 }
 
+/**
+ * Client-safe mirror of `lib/workspaces/reviewContext.ts`'s
+ * `ReviewContextDecisionReceiptInfo` — the review artifact itself (same
+ * shape `governanceRecord.decisionReceipt` carries for every governed
+ * adaptive run), distinct from `review` (the decision OUTCOME).
+ * `AdaptiveDecisionReceipt.sources` is deliberately NOT projected here
+ * (10C.4A-U2C data-minimization correction) — the Team review UI has
+ * never rendered it, and there is no concrete requirement to send it to
+ * the browser unused.
+ */
+export interface ReviewContextDecisionReceiptInfo {
+  conclusion: string;
+  basis: string[];
+  assumptions: string[];
+  uncertainties: string[];
+  limitations: string[];
+  sourceBacked: boolean;
+  humanReviewNeeded: boolean;
+}
+
+/**
+ * REVIEW_DECISION_UI_REQUIRES_DECISION_RECEIPT (10C.4A-U2, corrected
+ * 10C.4A-U2C) — the one client-side gate every terminal human-decision
+ * control on the Team review surface must pass before it may render as
+ * actionable: ordinary decision submission, panel voting, and Owner
+ * Override.
+ *
+ * Structural validity alone is NOT sufficient — a receipt can be
+ * structurally well-formed (every field present, correctly typed) while
+ * substantively empty, and that is a real, reachable state, not a
+ * hypothetical one. Audited all 9 `decisionReceiptBuilder.ts` builders
+ * directly: `ranked_enumeration`, `comparison_matrix`, `checklist_taxonomy`,
+ * and `decision_support` always build `conclusion` from a template/lookup
+ * string that is non-empty by construction even in their own worst case
+ * (zero items, no convergence, etc.) — but `definition_explanation`,
+ * `causal_explanation`, `deep_research`, `evidence_review`, and
+ * `bias_blindspot_audit` pass a raw per-model field straight through
+ * (`result.primary.directAnswer`, `result.directAnswer`,
+ * `result.executiveSummary`, `result.overallAssessment`, `result.summary`)
+ * whose upstream alignment logic can legitimately resolve to an empty
+ * string when every contributing model returned no usable text for that
+ * field (a partial-degradation case, not a total-failure one — the run
+ * still persists a valid `governanceRecord`). `parseGovernanceRecord()`
+ * does not reject this: `AdaptiveDecisionReceipt.conclusion` is typed
+ * `string`, and an empty string is a valid string.
+ *
+ * The correct minimum contract, established from this audit rather than
+ * assumed, is `conclusion.trim().length > 0` — NOT "at least one
+ * supporting item present." A non-empty conclusion with every supporting
+ * list empty is itself a legitimate, honestly-communicative receipt for
+ * at least three schemas' own "nothing found" paths (e.g.
+ * `comparison_matrix`'s "did not converge" conclusion, or
+ * `definition_explanation`'s "No definition could be produced" fallback)
+ * — requiring supporting content would make those valid receipts
+ * incorrectly unusable. Supporting lists are therefore left unchecked.
+ *
+ * The substantive check itself (`isSubstantiveDecisionReceiptConclusion`)
+ * is shared verbatim with the backend mutation functions
+ * (`submitWorkspaceReviewDecision`, `submitWorkspaceReviewPanelVote`,
+ * `overrideWorkspaceReviewPanel`) — this is a UI usability safeguard,
+ * never the canonical enforcement; the backend independently re-checks
+ * the identical invariant against the transactionally-read
+ * `governanceRecord` before persisting any of those three decisions,
+ * regardless of what this client-side check already filtered out.
+ */
+export function hasUsableDecisionReceipt(receipt: unknown): receipt is ReviewContextDecisionReceiptInfo {
+  if (!isPlainObject(receipt)) return false;
+  return (
+    typeof receipt.conclusion === "string" &&
+    isSubstantiveDecisionReceiptConclusion(receipt.conclusion) &&
+    Array.isArray(receipt.basis) &&
+    Array.isArray(receipt.assumptions) &&
+    Array.isArray(receipt.uncertainties) &&
+    Array.isArray(receipt.limitations) &&
+    typeof receipt.sourceBacked === "boolean" &&
+    typeof receipt.humanReviewNeeded === "boolean"
+  );
+}
+
 export interface ReviewContextViewerInfo {
   mode: "normal" | "drain";
   isCreator: boolean;
@@ -106,6 +186,7 @@ export interface ReviewContextViewerInfo {
 
 export interface WorkspaceReviewContext {
   run: { runId: string; workspaceId: string; projectId: string | null; label: string };
+  decisionReceipt: ReviewContextDecisionReceiptInfo;
   review: ReviewContextReviewInfo;
   assignment: ReviewContextAssignmentInfo | null;
   /** Independent from `assignment` — see module doc comment. Never 0 merely because `assignment` is null. */

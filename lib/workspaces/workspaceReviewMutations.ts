@@ -56,6 +56,7 @@ import { computeMembershipId } from "./membershipId";
 import { validateMembershipBinding } from "./membershipBinding";
 import { parseAdaptiveHumanReviewPanel } from "@/lib/governance/adaptiveHumanReviewPanel";
 import { parseGovernanceRecord, applyHumanReviewUpdate, isHumanReviewStatusReviewable } from "@/lib/adaptiveSchema/governanceRecordParser";
+import { isSubstantiveDecisionReceiptConclusion } from "@/lib/adaptiveSchema/decisionReceiptUsability";
 import {
   isCanonicalDueAt,
   buildNextAdaptiveHumanReviewAssignment,
@@ -479,6 +480,7 @@ export type SubmitWorkspaceReviewDecisionFailureReason =
   | "stale_expected_updated_at"
   | "not_reviewable"
   | { kind: "not_authorized"; reason: OrdinaryReviewerAuthorizationDenialReason }
+  | "review_content_unavailable"
   | "write_failed";
 
 export type SubmitWorkspaceReviewDecisionResult =
@@ -551,6 +553,20 @@ export async function submitWorkspaceReviewDecision(args: {
       const reviewerCandidate: WorkspaceReviewCandidate = { uid: args.uid, workspaceId: args.workspaceId, role: auth.membership.role, status: auth.membership.status };
       const authz = isOrdinaryReviewerAuthorized({ reviewer: reviewerCandidate, runWorkspaceId: args.workspaceId, creatorUid: target.creatorUid, hasCanonicalAssignment });
       if (!authz.authorized) return { ok: false, reason: { kind: "not_authorized" as const, reason: authz.reason } };
+
+      // Team Workspace Boundary Hardening, backend correction (10C.4A-U2B)
+      // — canonical governance-state integrity, independent of and in
+      // addition to the UI safeguard. Checked LAST, only after every
+      // identity/authorization/OCC check above has already succeeded, so
+      // this can never become an authorization oracle for a caller who
+      // isn't otherwise entitled to decide on this run. Reads
+      // `record.decisionReceipt` already loaded above — zero additional
+      // Firestore reads, and evaluated against the SAME transactionally-
+      // read `governanceRecord`, so a receipt that changes between page
+      // load and submission is caught here, not merely at the client.
+      if (!isSubstantiveDecisionReceiptConclusion(record.decisionReceipt.conclusion)) {
+        return { ok: false, reason: "review_content_unavailable" as const };
+      }
 
       const priorStatus = record.humanReview.status;
       const updateResult = applyHumanReviewUpdate(record, { status: args.update.status, comment: args.update.comment, conditions: args.update.conditions, reviewedAt: now, reviewerId: args.uid }, now);

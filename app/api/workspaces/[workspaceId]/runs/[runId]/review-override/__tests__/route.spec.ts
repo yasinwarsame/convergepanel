@@ -109,6 +109,14 @@ describe("result mapping", () => {
     expect(res.status).toBe(409);
   });
 
+  it("10C.4A-U2B: review_content_unavailable -> 409, distinct code, never 401/403", async () => {
+    mockedOverrideWorkspaceReviewPanel.mockResolvedValueOnce({ ok: false, reason: "review_content_unavailable" });
+    const res = await POST(buildRequest(validBody()), { params: { workspaceId: WS_ID, runId: RUN_ID } });
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error.code).toBe("review_content_unavailable");
+  });
+
   it("insufficient_capability (missing reviews.override or research.read) -> 403", async () => {
     mockedOverrideWorkspaceReviewPanel.mockResolvedValueOnce({ ok: false, reason: "insufficient_capability" });
     const res = await POST(buildRequest(validBody()), { params: { workspaceId: WS_ID, runId: RUN_ID } });

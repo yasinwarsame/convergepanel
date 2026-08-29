@@ -51,8 +51,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
-import { getReviewContext, GENERIC_CONTEXT_ERROR_MESSAGE, REVIEW_UNAVAILABLE_MESSAGE, COMPLETION_MODE_BANNER_MESSAGE, type WorkspaceReviewContext } from "@/lib/client/workspaceReviewClient";
+import { getReviewContext, hasUsableDecisionReceipt, GENERIC_CONTEXT_ERROR_MESSAGE, REVIEW_UNAVAILABLE_MESSAGE, COMPLETION_MODE_BANNER_MESSAGE, type WorkspaceReviewContext } from "@/lib/client/workspaceReviewClient";
 import { getReviewStatusLabel, getReviewStatusBadgeClass, isApprovedWithConditions, formatAbsoluteDate } from "@/lib/workspaces/reviewQueuePresentation";
+import DecisionReceiptSection from "./DecisionReceiptSection";
 import ReviewAssignmentCard from "./ReviewAssignmentCard";
 import ReviewDecisionForm from "./ReviewDecisionForm";
 import ReviewResubmitAction from "./ReviewResubmitAction";
@@ -138,7 +139,7 @@ export default function WorkspaceRunReviewSection({ workspaceId, runId }: { work
 
   if (!context) return null;
 
-  const { review, assignment, assignmentRevision, panel, viewer } = context;
+  const { review, decisionReceipt, assignment, assignmentRevision, panel, viewer } = context;
   const statusLabel = getReviewStatusLabel(review.status);
   const statusClass = getReviewStatusBadgeClass(review.status);
   const caption = decidedViaCaption(review.decidedVia);
@@ -148,9 +149,21 @@ export default function WorkspaceRunReviewSection({ workspaceId, runId }: { work
   const panelOpen = panel?.status === "open";
   const isDrain = viewer.mode === "drain";
 
+  // REVIEW_DECISION_UI_REQUIRES_DECISION_RECEIPT (10C.4A-U2) — a reviewer
+  // must never be presented with actionable terminal-decision controls
+  // (ordinary decision, panel vote, Owner Override) for an artifact that
+  // didn't actually arrive. See hasUsableDecisionReceipt()'s own doc
+  // comment for why this is a defensive backstop, not a state expected
+  // against current data. Additive UI safety only — never a substitute
+  // for the independent backend authorization each mutation route already
+  // enforces.
+  const receiptUsable = hasUsableDecisionReceipt(decisionReceipt);
+
   return (
     <section className="mt-8 space-y-4">
       <h2 className="text-lg font-semibold text-cp-text">Review</h2>
+
+      <DecisionReceiptSection receipt={decisionReceipt} />
 
       <div className="rounded-xl border border-cp-border bg-cp-surface p-5 shadow-sm">
         <div className="flex flex-wrap items-center gap-2">
@@ -181,13 +194,24 @@ export default function WorkspaceRunReviewSection({ workspaceId, runId }: { work
         </div>
       )}
 
-      <WorkspacePanelReviewSection workspaceId={workspaceId} runId={runId} mode={viewer.mode} panel={panel} review={review} viewer={viewer} onMutated={refreshContext} />
+      <WorkspacePanelReviewSection
+        workspaceId={workspaceId}
+        runId={runId}
+        mode={viewer.mode}
+        panel={panel}
+        review={review}
+        viewer={viewer}
+        onMutated={refreshContext}
+        decisionReceiptUsable={receiptUsable}
+      />
 
       {!isDrain && !panelOpen && (
         <ReviewAssignmentCard workspaceId={workspaceId} runId={runId} assignment={assignment} assignmentRevision={assignmentRevision} canManageAssignment={viewer.canManageAssignment} onMutated={refreshContext} />
       )}
 
-      {!isDrain && !panelOpen && viewer.canSubmitDecision && <ReviewDecisionForm workspaceId={workspaceId} runId={runId} review={review} canSubmitDecision={viewer.canSubmitDecision} onMutated={refreshContext} />}
+      {!isDrain && !panelOpen && viewer.canSubmitDecision && receiptUsable && (
+        <ReviewDecisionForm workspaceId={workspaceId} runId={runId} review={review} canSubmitDecision={viewer.canSubmitDecision} onMutated={refreshContext} />
+      )}
 
       {!isDrain && !panelOpen && viewer.canResubmit && <ReviewResubmitAction workspaceId={workspaceId} runId={runId} review={review} canResubmit={viewer.canResubmit} onMutated={refreshContext} />}
     </section>

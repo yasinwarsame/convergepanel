@@ -124,6 +124,14 @@ describe("result mapping", () => {
     expect(res.status).toBe(409);
   });
 
+  it("10C.4A-U2B: review_content_unavailable -> 409, distinct code, never 401/403 (authorization was already established by the time this reason can fire)", async () => {
+    mockedSubmitWorkspaceReviewDecision.mockResolvedValueOnce({ ok: false, reason: "review_content_unavailable" });
+    const res = await POST(buildRequest(validBody()), { params: { workspaceId: WS_ID, runId: RUN_ID } });
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error.code).toBe("review_content_unavailable");
+  });
+
   it("not_authorized (unassigned) -> 403, never distinguishable from other not_authorized sub-reasons", async () => {
     mockedSubmitWorkspaceReviewDecision.mockResolvedValueOnce({ ok: false, reason: { kind: "not_authorized", reason: "not_assigned" } });
     const resA = await POST(buildRequest(validBody()), { params: { workspaceId: WS_ID, runId: RUN_ID } });

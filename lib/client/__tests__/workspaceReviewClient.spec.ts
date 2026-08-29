@@ -30,6 +30,7 @@ import {
   buildPanelFinalizeRequest,
   buildOverrideRequest,
   currentPanelRevision,
+  hasUsableDecisionReceipt,
   type WorkspaceReviewContext,
   type ReviewContextPanelInfo,
 } from "@/lib/client/workspaceReviewClient";
@@ -279,5 +280,112 @@ describe("buildOverrideRequest — Phase 9C.4: the SAME two-domain shape as buil
     const review = { status: "unreviewed" as const, reviewedAt: null, governanceUpdatedAt: "gov-1" };
     const body = buildOverrideRequest(panel, review, { status: "approved_with_conditions", justification: "Approved with conditions.", conditions: ["Verify primary source"] });
     expect(body.conditions).toEqual(["Verify primary source"]);
+  });
+});
+
+describe("hasUsableDecisionReceipt — 10C.4A-U2C corrected defensive validator (REVIEW_DECISION_UI_REQUIRES_DECISION_RECEIPT)", () => {
+  const VALID = {
+    conclusion: "x",
+    basis: ["a"],
+    assumptions: [],
+    uncertainties: [],
+    limitations: [],
+    sourceBacked: true,
+    humanReviewNeeded: false,
+  };
+
+  it("accepts a structurally complete receipt with a non-empty conclusion", () => {
+    expect(hasUsableDecisionReceipt(VALID)).toBe(true);
+  });
+
+  it("A: normal complete receipt is usable", () => {
+    expect(hasUsableDecisionReceipt({ ...VALID, basis: ["a", "b"], assumptions: ["c"] })).toBe(true);
+  });
+
+  it("accepts every supporting array empty — a non-empty conclusion with zero supporting items is a legitimate receipt for at least 3 schemas' own 'nothing found' paths (comparison_matrix's non-convergence conclusion, definition_explanation's 'no definition could be produced' fallback, ranked_enumeration's zero-item case) — requiring supporting content would make those valid receipts incorrectly unusable", () => {
+    expect(hasUsableDecisionReceipt({ ...VALID, basis: [], sourceBacked: false, humanReviewNeeded: false })).toBe(true);
+  });
+
+  it("B/10C.4A-U2C central fix: rejects a structurally valid but substantively empty receipt (empty conclusion, all arrays empty) — the exact reachable partial-degradation state this predicate exists to catch", () => {
+    expect(
+      hasUsableDecisionReceipt({
+        conclusion: "",
+        basis: [],
+        assumptions: [],
+        uncertainties: [],
+        limitations: [],
+        sourceBacked: false,
+        humanReviewNeeded: false,
+      })
+    ).toBe(false);
+  });
+
+  it("C: rejects a whitespace-only conclusion", () => {
+    expect(hasUsableDecisionReceipt({ ...VALID, conclusion: "   " })).toBe(false);
+    expect(hasUsableDecisionReceipt({ ...VALID, conclusion: "\n\t " })).toBe(false);
+  });
+
+  it.each([null, undefined, "string", 42, [], true])("E/F: rejects non-plain-object input: %p", (value) => {
+    expect(hasUsableDecisionReceipt(value)).toBe(false);
+  });
+
+  it.each(["conclusion", "basis", "assumptions", "uncertainties", "limitations", "sourceBacked", "humanReviewNeeded"])("D: rejects a receipt missing the %s field", (field) => {
+    const { [field]: _omit, ...rest } = VALID as Record<string, unknown>;
+    expect(hasUsableDecisionReceipt(rest)).toBe(false);
+  });
+
+  it("F: rejects wrong field types (conclusion as number, basis as string instead of array)", () => {
+    expect(hasUsableDecisionReceipt({ ...VALID, conclusion: 1 })).toBe(false);
+    expect(hasUsableDecisionReceipt({ ...VALID, basis: "not-an-array" })).toBe(false);
+    expect(hasUsableDecisionReceipt({ ...VALID, sourceBacked: "yes" })).toBe(false);
+  });
+
+  it("no longer accepts (or requires) a sources field at all — deliberately removed from the Team projection (10C.4A-U2C data minimization)", () => {
+    expect(hasUsableDecisionReceipt(VALID)).toBe(true);
+    expect("sources" in VALID).toBe(false);
+  });
+
+  describe("partial-degradation real-schema fixtures — reachable via decisionReceiptBuilder.ts's raw per-model pass-through for these 3 of 9 schemas when every contributing model returns empty/whitespace text for the relevant field", () => {
+    it("deep_research: conclusion sourced from result.executiveSummary, which deepResearchAlignment.ts falls back to '' when no model returns usable text — must be UNUSABLE", () => {
+      expect(
+        hasUsableDecisionReceipt({
+          conclusion: "", // modeOrLongest(...).filter(s => s.trim().length > 0) || "" resolved to ""
+          basis: ["Finding A (2 of 3 models)"], // other fields can still have content even when executiveSummary is empty
+          assumptions: [],
+          uncertainties: ["Evidence gap: no consensus on scope"],
+          limitations: [],
+          sourceBacked: true,
+          humanReviewNeeded: true,
+        })
+      ).toBe(false);
+    });
+
+    it("evidence_review: conclusion sourced from result.overallAssessment, same '' fallback in evidenceReviewAlignment.ts — must be UNUSABLE", () => {
+      expect(
+        hasUsableDecisionReceipt({
+          conclusion: "",
+          basis: ["Overall strength: moderate"],
+          assumptions: [],
+          uncertainties: [],
+          limitations: [],
+          sourceBacked: false,
+          humanReviewNeeded: true,
+        })
+      ).toBe(false);
+    });
+
+    it("bias_blindspot_audit: conclusion sourced from result.summary, same '' fallback in biasBlindspotAlignment.ts — must be UNUSABLE", () => {
+      expect(
+        hasUsableDecisionReceipt({
+          conclusion: "",
+          basis: [],
+          assumptions: [],
+          uncertainties: ["Shared assumption: all models assumed US jurisdiction"],
+          limitations: [],
+          sourceBacked: false,
+          humanReviewNeeded: true,
+        })
+      ).toBe(false);
+    });
   });
 });

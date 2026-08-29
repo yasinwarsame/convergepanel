@@ -694,6 +694,35 @@ describe("submitWorkspaceReviewPanelVote", () => {
   });
 });
 
+describe("submitWorkspaceReviewPanelVote — backend receipt-usability invariant (10C.4A-U2B, canonical governance-state integrity, independent of the UI safeguard)", () => {
+  it("empty conclusion: DENIED before any vote document is written, even for an otherwise-eligible panel reviewer", async () => {
+    seedRun({ governanceRecord: validGovernanceRecord({ decisionReceipt: { conclusion: "", basis: [], assumptions: [], uncertainties: [], limitations: [], sources: [], sourceBacked: false, humanReviewNeeded: true } }) });
+    seedPanel({ revision: 1 });
+    const result = await voteCall();
+    expect(result).toEqual({ ok: false, reason: "review_content_unavailable" });
+    expect(stores.humanReviewVotes.get(`${RUN_ID}::${buildAdaptiveHumanReviewVoteId(1, OWNER_UID)}`)).toBeUndefined();
+  });
+
+  it("whitespace-only conclusion: DENIED, identical to empty", async () => {
+    seedRun({ governanceRecord: validGovernanceRecord({ decisionReceipt: { conclusion: "   ", basis: [], assumptions: [], uncertainties: [], limitations: [], sources: [], sourceBacked: false, humanReviewNeeded: true } }) });
+    seedPanel({ revision: 1 });
+    expect(await voteCall()).toEqual({ ok: false, reason: "review_content_unavailable" });
+  });
+
+  it("meaningful conclusion with every supporting array empty: ALLOWED", async () => {
+    seedRun({ governanceRecord: validGovernanceRecord({ decisionReceipt: { conclusion: "The panel did not converge on enough shared subjects for a comparison.", basis: [], assumptions: [], uncertainties: [], limitations: [], sources: [], sourceBacked: false, humanReviewNeeded: true } }) });
+    seedPanel({ revision: 1 });
+    expect((await voteCall()).ok).toBe(true);
+  });
+
+  it("receipt-usability is checked AFTER panel eligibility — a non-reviewer still receives the existing not_reviewer denial, never a receipt-state oracle", async () => {
+    seedRun({ governanceRecord: validGovernanceRecord({ decisionReceipt: { conclusion: "", basis: [], assumptions: [], uncertainties: [], limitations: [], sources: [], sourceBacked: false, humanReviewNeeded: true } }) });
+    seedPanel({ revision: 1, reviewerUserIds: [OWNER_UID, ADMIN_UID].sort() });
+    const result = await voteCall({ uid: REVIEWER_UID });
+    expect(result).toEqual({ ok: false, reason: "not_reviewer" });
+  });
+});
+
 // ============================================
 // POST finalize
 // ============================================
@@ -932,6 +961,47 @@ describe("overrideWorkspaceReviewPanel", () => {
     expect(first.ok).toBe(true);
     const second = await overrideCall({ status: "rejected", justification: "different reasoning" });
     expect(second).toEqual({ ok: false, reason: "panel_already_finalized" });
+  });
+});
+
+describe("overrideWorkspaceReviewPanel — backend receipt-usability invariant (10C.4A-U2B, canonical governance-state integrity, independent of the UI safeguard)", () => {
+  it("empty conclusion: DENIED before any override write, even for a canonical Owner with reviews.override", async () => {
+    seedRun({ governanceRecord: validGovernanceRecord({ decisionReceipt: { conclusion: "", basis: [], assumptions: [], uncertainties: [], limitations: [], sources: [], sourceBacked: false, humanReviewNeeded: true } }) });
+    seedPanel({ revision: 1 });
+    const result = await overrideCall();
+    expect(result).toEqual({ ok: false, reason: "review_content_unavailable" });
+    expect(mockedCreateAdaptivePanelOverrideHistory).not.toHaveBeenCalled();
+    expect(mockedWriteAdaptivePanelOverrideGovernanceEvent).not.toHaveBeenCalled();
+    expect(mockedWriteAdaptivePanelOverrideAdminAuditEvent).not.toHaveBeenCalled();
+    const stored = stores.runs.get(RUN_ID) as any;
+    expect(stored.governanceRecord.humanReview.status).toBe("unreviewed");
+  });
+
+  it("whitespace-only conclusion: DENIED, identical to empty", async () => {
+    seedRun({ governanceRecord: validGovernanceRecord({ decisionReceipt: { conclusion: "  \n ", basis: [], assumptions: [], uncertainties: [], limitations: [], sources: [], sourceBacked: false, humanReviewNeeded: true } }) });
+    seedPanel({ revision: 1 });
+    expect(await overrideCall()).toEqual({ ok: false, reason: "review_content_unavailable" });
+  });
+
+  it("meaningful conclusion with every supporting array empty: ALLOWED", async () => {
+    seedRun({ governanceRecord: validGovernanceRecord({ decisionReceipt: { conclusion: "The panel did not converge on enough shared subjects for a comparison.", basis: [], assumptions: [], uncertainties: [], limitations: [], sources: [], sourceBacked: false, humanReviewNeeded: true } }) });
+    seedPanel({ revision: 1 });
+    expect((await overrideCall()).ok).toBe(true);
+  });
+
+  it("receipt-usability is checked AFTER capability authorization — a non-Owner still receives the existing insufficient_capability denial, never a receipt-state oracle", async () => {
+    seedRun({ governanceRecord: validGovernanceRecord({ decisionReceipt: { conclusion: "", basis: [], assumptions: [], uncertainties: [], limitations: [], sources: [], sourceBacked: false, humanReviewNeeded: true } }) });
+    seedPanel({ revision: 1 });
+    const result = await overrideCall({ uid: ADMIN_UID });
+    expect(result).toEqual({ ok: false, reason: "insufficient_capability" });
+  });
+
+  it("the idempotent-retry branch (re-confirming an ALREADY-overridden panel) never reaches the receipt-usability check at all — it performs no new write and returns before that code path (see overrideWorkspaceReviewPanel's own early-return for panel.status === 'finalized')", async () => {
+    seedPanel({ revision: 1 });
+    const first = await overrideCall();
+    expect(first.ok).toBe(true);
+    const retry = await overrideCall();
+    expect(retry).toEqual({ ok: true, status: "approved", finalizedAt: MUTATE_NOW });
   });
 });
 

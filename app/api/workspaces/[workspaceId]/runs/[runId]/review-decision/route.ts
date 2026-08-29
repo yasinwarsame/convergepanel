@@ -74,6 +74,9 @@ function decisionErrorResponse(reason: SubmitWorkspaceReviewDecisionFailureReaso
   if (reason === "not_reviewable") {
     return errorResponse(409, "not_reviewable", "This run already has a final review decision.");
   }
+  if (reason === "review_content_unavailable") {
+    return errorResponse(409, "review_content_unavailable", "This run's review content is not currently available. A decision cannot be submitted until it is.");
+  }
   if (typeof reason === "object" && reason.kind === "not_authorized") {
     // Every sub-reason (not_found/removed/cross_workspace/insufficient_capability/self_review/not_assigned)
     // collapses to the SAME external shape — never a distinguishable oracle
