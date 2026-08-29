@@ -1,59 +1,96 @@
 /**
  * Decision Receipt Presentation + Source Enrichment, Phase 10D.1
- * (corrected in Phase 10D.1C) — a deterministic, zero-LLM-call "Review
- * Overview" paragraph orienting a Team Workspace reviewer before they
- * read the full Decision Receipt: the question asked, how much of the
- * panel actually contributed usable material, and a brief, non-duplicating
- * indication of the kind of result reached — never the full substantive
- * finding itself, which belongs exclusively to "Panel Conclusion"
- * (`decisionReceiptBuilder.ts`'s already-computed `conclusion`, rendered
- * verbatim and unabridged by `DecisionReceiptSection.tsx`).
+ * (corrected in Phase 10D.1C, corrected again in Phase 10D.1C2) — a
+ * deterministic, zero-LLM-call "Review Overview" paragraph orienting a
+ * Team Workspace reviewer before they read the full Decision Receipt: the
+ * question asked, how much of the panel actually contributed usable
+ * material, and a concise, accurate indication of what the panel actually
+ * found — never the complete substantive reasoning itself, which belongs
+ * to "Panel Conclusion" (`decisionReceiptBuilder.ts`'s already-computed
+ * `conclusion`, rendered verbatim and unabridged by
+ * `DecisionReceiptSection.tsx`).
  *
- * FROZEN RESPONSIBILITY SPLIT (10D.1C):
- *   Review Overview  = orientation + participation + high-level result KIND
+ * FROZEN RESPONSIBILITY SPLIT (10D.1C, reaffirmed 10D.1C2):
+ *   Review Overview  = orientation + participation + concise RESULT DIRECTION
  *   Panel Conclusion = the full substantive synthesized finding
- * The overview must never reproduce the full conclusion text — see
- * `NON_REDUNDANCY CONTRACT` below for how that's structurally guaranteed,
- * not just aspired to.
  *
- * PARTICIPATION SEMANTICS (10D.1C correction — see commonResponseMeta.ts):
- * `totalModels` = every model this run actually dispatched a call to
- * (`ModelResult[]` passed into `finalizeAdaptiveRun` — the full attempted
- * set, per this codebase's `Promise.allSettled`-over-the-connector-map
- * architecture). `modelsWithUsableOutput` = the strictly narrower count of
- * those that BOTH succeeded at the connector level AND passed adaptive
- * schema validation (`commonResponseMeta.ts`'s own doc comment: "a
- * connector 'success' containing malformed JSON does not count here").
- * The PRIOR version of this builder used `successfulModels`
- * (connector-level success only) for wording that said "producing usable
- * results" — a real semantic mismatch, since a model can connector-succeed
- * with unusable (schema-invalid) output. `successfulModels` is
- * deliberately NOT an input to this module at all anymore; only the
- * correct, stricter field is used.
+ * 10D.1C2 CORRECTION — WHY THIS CHANGED AGAIN: the 10D.1C version refused
+ * to excerpt any single-sentence conclusion at all (treating "first
+ * sentence spans the whole conclusion" as "no safe excerpt exists"), and
+ * fell back to a neutral, content-free `sourceBacked`-derived sentence
+ * instead. Since most of the 9 schemas' conclusions ARE a single sentence,
+ * that meant the overwhelmingly common case silently omitted the actual
+ * Panel result and substituted source-provenance status for it —
+ * `sourceBacked` answers "did the panel cite sources," not "what did the
+ * panel conclude." That is a real product defect, not a style choice: the
+ * Review Overview's whole purpose is to let a reviewer read one paragraph
+ * and know broadly what the panel found.
  *
- * NON-REDUNDANCY CONTRACT: the "kind of result" clause is built so the
- * FULL trimmed conclusion can never appear as a substring of the overview.
- * For a genuinely multi-sentence conclusion, only its FIRST sentence is
- * ever excerpted (`firstSentenceExcerpt()`), and that function itself
- * refuses to return an "excerpt" that turns out to BE the whole
- * conclusion (the overwhelmingly common case — most of the 9 schemas'
- * conclusions are exactly one sentence). In that case a neutral,
- * content-free status sentence is used instead, built only from two other
- * already-canonical fields (`sourceBacked`, `humanReviewNeeded`) — never
- * inventing a new cross-schema signal, and never restating what the
- * conclusion actually says.
+ * CORRECTED NON-REDUNDANCY CONTRACT (10D.1C2): the goal is LOW REDUNDANCY
+ * + COMPLETE ORIENTATION, not zero textual overlap at any cost.
+ *   - Genuinely multi-sentence conclusion: excerpt only the first sentence
+ *     (word-boundary-safe if that sentence itself exceeds the excerpt
+ *     budget) — a strictly shorter, non-verbatim excerpt of the whole.
+ *   - Single-sentence (or no detectable terminal punctuation) conclusion
+ *     at or under `MAX_EXCERPT_LENGTH`: used in full. Some overlap with
+ *     "Panel Conclusion" is unavoidable here — the conclusion is already
+ *     concise — but omitting it entirely to avoid that overlap would
+ *     fail the actual product requirement (communicate the Panel's
+ *     result), so a short verbatim quote is accepted deliberately.
+ *   - Single-sentence conclusion over `MAX_EXCERPT_LENGTH`: word-boundary
+ *     truncated with an ellipsis — still a genuine, strictly shorter
+ *     excerpt, never the complete text.
+ * See `buildConclusionExcerpt()` for the implementation of this contract.
+ * `MAX_EXCERPT_LENGTH` (150 chars) is chosen so the result-direction
+ * clause reads as roughly one clause of a paragraph — long enough to
+ * carry a real single-sentence conclusion in full, short enough that a
+ * multi-sentence or run-on conclusion still gets meaningfully condensed
+ * rather than reproduced.
+ *
+ * WORD-BOUNDARY SAFETY (10D.1C2): any truncation goes through
+ * `wordBoundaryTruncate()`, which never cuts inside a word — it backs up
+ * to the last whitespace within budget (or, for the pathological case of
+ * a single word longer than the budget, extends forward to the next
+ * whitespace as a last resort) rather than the raw `.slice(0, N)` the
+ * 10D.1C version used, which could split a word mid-character. Trailing
+ * punctuation/whitespace is stripped before the ellipsis is appended so
+ * an excerpt never ends in an artifact like `"..."` or `"?..."`.
+ *
+ * NO SEMANTIC REWRITING: every excerpt is a raw substring starting at
+ * position 0 of the (trimmed) conclusion — never reordered, paraphrased,
+ * or re-punctuated beyond trailing-artifact cleanup. Because truncation
+ * only ever removes text from the END, a leading qualifier ("not", "may",
+ * "is unclear whether") is always preserved; polarity and certainty can
+ * never be flipped by this process.
+ *
+ * PARTICIPATION SEMANTICS (10D.1C correction, unchanged by 10D.1C2 — see
+ * commonResponseMeta.ts): `totalModels` = every model this run actually
+ * dispatched a call to (`ModelResult[]` passed into `finalizeAdaptiveRun`
+ * — the full attempted set, per this codebase's
+ * `Promise.allSettled`-over-the-connector-map architecture).
+ * `modelsWithUsableOutput` = the strictly narrower count of those that
+ * BOTH succeeded at the connector level AND passed adaptive schema
+ * validation. `successfulModels` (connector-level success only) is
+ * deliberately NOT an input to this module — using it for "usable"
+ * wording would overstate panel participation.
+ *
+ * `sourceBacked`/`humanReviewNeeded` are neutral workflow/provenance
+ * signals, not result direction — kept only as a supplemental sentence
+ * when human review was flagged; `sourceBacked` is no longer read by this
+ * module at all as of 10D.1C2 (it added no information beyond what
+ * `DecisionReceiptSection.tsx` already displays as its own badge directly
+ * under Panel Conclusion, and it must never substitute for actual result
+ * content).
  *
  * Deliberately does NOT attempt a per-schema "the panel agreed/disagreed"
  * classification — no single canonical convergence signal exists across
- * all 9 dedicated schemas (`disagreements[]`, `isContested`,
- * `lowConfidenceItems`, etc. are schema-specific, not a shared field), and
- * inventing one here would be exactly the kind of new supporting reasoning
- * Phase 10D.1/10D.1C are scoped to avoid (that's 10D.2's job, per-schema,
- * if pursued at all).
+ * all 9 dedicated schemas, and inventing one here would be exactly the
+ * kind of new supporting reasoning Phase 10D.1/10D.1C/10D.1C2 are scoped
+ * to avoid (that's 10D.2's job, per-schema, if pursued at all).
  */
 
 const MAX_OVERVIEW_QUESTION_LENGTH = 200; // mirrors reviewContext.ts's existing truncateRunLabel() precedent
-const MAX_EXCERPT_LENGTH = 150; // generous enough for one real sentence, still visibly shorter than a multi-sentence conclusion
+const MAX_EXCERPT_LENGTH = 150; // see file header: long enough for a real single-sentence conclusion in full, short enough to meaningfully condense a longer one
 
 function pluralize(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? "" : "s"}`;
@@ -68,21 +105,70 @@ function truncateForOverview(s: string): string {
   return t.length <= MAX_OVERVIEW_QUESTION_LENGTH ? t : `${t.slice(0, MAX_OVERVIEW_QUESTION_LENGTH)}…`;
 }
 
+/** Strips trailing whitespace/punctuation so an ellipsis never follows another punctuation mark (no "...", "?...", etc.). */
+function stripTrailingPunctuation(s: string): string {
+  return s.replace(/[\s.,;:!?…\-–—]+$/, "");
+}
+
 /**
- * Returns the conclusion's first sentence ONLY if it is a genuine, strictly
- * shorter proper excerpt of a real multi-sentence conclusion — `null` for
- * every other case (no detectable sentence boundary, or the "first
- * sentence" turns out to span the entire trimmed conclusion, which is the
- * common single-sentence-conclusion case). Callers must treat `null` as
- * "no safe excerpt exists," never as "use the whole thing instead."
+ * Truncates `s` to at most `maxLength` characters without cutting inside a
+ * word. Backs up to the last whitespace within budget; if none exists
+ * (a single "word" longer than the whole budget — pathological, but
+ * possible for e.g. a URL or unbroken token), extends forward to the next
+ * whitespace instead of splitting it, falling back to a raw cut only if
+ * no whitespace exists anywhere in the string. Only appends an ellipsis
+ * when content was actually omitted.
  */
-function firstSentenceExcerpt(conclusion: string): string | null {
+function wordBoundaryTruncate(s: string, maxLength: number): string {
+  if (s.length <= maxLength) return s;
+
+  const withinBudget = s.slice(0, maxLength);
+  const lastSpace = withinBudget.lastIndexOf(" ");
+  if (lastSpace > 0) {
+    return `${stripTrailingPunctuation(withinBudget.slice(0, lastSpace))}…`;
+  }
+
+  // No whitespace within budget (one very long leading "word") — extend forward to the next whitespace instead of cutting it.
+  const nextSpace = s.indexOf(" ", maxLength);
+  if (nextSpace > 0) {
+    return `${stripTrailingPunctuation(s.slice(0, nextSpace))}…`;
+  }
+
+  // No whitespace anywhere — an unavoidable raw cut is the only option left.
+  return `${stripTrailingPunctuation(withinBudget)}…`;
+}
+
+interface ConclusionExcerpt {
+  /** The excerpt text, never semantically rewritten — always a raw prefix of the trimmed conclusion (possibly the whole thing). */
+  text: string;
+  /** `true` when `text` is the complete trimmed conclusion (short-conclusion case) — callers use this to choose non-"begins" wording, since the excerpt doesn't "begin" the finding, it IS the finding. */
+  isFullConclusion: boolean;
+}
+
+/**
+ * Deterministic, no-LLM, no-rewriting excerpt of a conclusion for use in
+ * the Review Overview. See file header NON-REDUNDANCY CONTRACT for the
+ * three cases this implements. Returns `null` only for an empty/blank
+ * conclusion — callers must not fabricate result direction in that case.
+ */
+function buildConclusionExcerpt(conclusion: string): ConclusionExcerpt | null {
   const trimmed = conclusion.trim();
-  const match = trimmed.match(/^(.+?[.?!])(\s|$)/);
-  if (!match) return null;
-  const first = match[1].trim();
-  if (first.length >= trimmed.length) return null; // the "first sentence" WAS the whole conclusion — no genuine excerpt
-  return first.length <= MAX_EXCERPT_LENGTH ? first : `${first.slice(0, MAX_EXCERPT_LENGTH)}…`;
+  if (trimmed.length === 0) return null;
+
+  const sentenceMatch = trimmed.match(/^(.+?[.?!])(\s|$)/);
+  const firstSentence = sentenceMatch ? sentenceMatch[1].trim() : null;
+  const isGenuineMultiSentence = firstSentence !== null && firstSentence.length < trimmed.length;
+
+  if (isGenuineMultiSentence) {
+    const sentence = firstSentence as string;
+    return { text: wordBoundaryTruncate(sentence, MAX_EXCERPT_LENGTH), isFullConclusion: false };
+  }
+
+  if (trimmed.length <= MAX_EXCERPT_LENGTH) {
+    return { text: trimmed, isFullConclusion: true };
+  }
+
+  return { text: wordBoundaryTruncate(trimmed, MAX_EXCERPT_LENGTH), isFullConclusion: false };
 }
 
 export interface ReviewOverviewInput {
@@ -100,9 +186,9 @@ export interface ReviewOverviewInput {
    * metric under the word "usable."
    */
   modelsWithUsableOutput: number | null;
-  /** `decisionReceipt.conclusion`, already computed — only ever excerpted (first sentence, multi-sentence conclusions only) or referenced by presence, never reproduced in full here. */
+  /** `decisionReceipt.conclusion`, already computed — excerpted per `buildConclusionExcerpt()`, never rewritten. */
   conclusion: string;
-  /** `decisionReceipt.sourceBacked` — reused verbatim for the neutral result-kind clause when no safe excerpt exists; never re-derived. */
+  /** `decisionReceipt.sourceBacked` — retained on the input type for backward compatibility with callers, but no longer read by `buildReviewOverview()` as of 10D.1C2 (see file header). */
   sourceBacked: boolean;
   humanReviewNeeded: boolean;
 }
@@ -130,16 +216,9 @@ export function buildReviewOverview(input: ReviewOverviewInput): string {
     );
   }
 
-  const conclusion = input.conclusion.trim();
-  if (conclusion.length > 0) {
-    const excerpt = firstSentenceExcerpt(conclusion);
-    sentences.push(
-      excerpt
-        ? `The panel's finding begins: ${excerpt}`
-        : input.sourceBacked
-          ? "The panel reached a source-backed conclusion."
-          : "The panel reached a conclusion, though no sources were cited."
-    );
+  const excerpt = buildConclusionExcerpt(input.conclusion);
+  if (excerpt) {
+    sentences.push(excerpt.isFullConclusion ? `The panel's finding: ${excerpt.text}` : `The panel's finding begins: ${excerpt.text}`);
   }
 
   if (input.humanReviewNeeded) {

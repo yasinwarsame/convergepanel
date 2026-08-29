@@ -402,7 +402,7 @@ describe("getReviewContext — reviewOverview (Phase 10D.1, corrected 10D.1C)", 
     expect(result.context.reviewOverview).not.toMatch(/usable/i);
   });
 
-  it("never reproduces the full panel conclusion verbatim in the overview, even though it is included unabridged in the decisionReceipt for Panel Conclusion rendering", async () => {
+  it("Phase 10D.1C2: a short conclusion's real result direction IS included in the overview (not substituted with a sourceBacked-only status), and the same full conclusion is also present unabridged in decisionReceipt for Panel Conclusion rendering", async () => {
     seedRun({
       governanceRecord: validGovernanceRecord({
         decisionReceipt: { conclusion: "Go: Option A.", basis: [], assumptions: [], uncertainties: [], limitations: [], sources: [], sourceBacked: true, humanReviewNeeded: true },
@@ -411,10 +411,25 @@ describe("getReviewContext — reviewOverview (Phase 10D.1, corrected 10D.1C)", 
     const result = await call(REVIEWER_UID, "reviewer", true);
     expect(result.status).toBe("ok");
     if (result.status !== "ok") return;
-    expect(result.context.reviewOverview).not.toContain("Go: Option A.");
+    expect(result.context.reviewOverview).toContain("The panel's finding: Go: Option A.");
     expect(result.context.reviewOverview).toContain("This result was flagged for human review.");
-    // The full conclusion still appears, unabridged, in decisionReceipt.conclusion — the source of "Panel Conclusion" rendering.
+    // The full conclusion also appears, unabridged, in decisionReceipt.conclusion — the source of "Panel Conclusion" rendering (a short conclusion legitimately appears in both places; see reviewOverviewBuilder.ts's non-redundancy contract for why this overlap is accepted for short conclusions specifically).
     expect(result.context.decisionReceipt.conclusion).toBe("Go: Option A.");
+  });
+
+  it("Phase 10D.1C2: a genuinely multi-sentence conclusion is still NOT reproduced in full in the overview — only its first sentence is excerpted", async () => {
+    const conclusion = "Remote work modestly reduces measured productivity overall. However, effects vary substantially by industry and task type.";
+    seedRun({
+      governanceRecord: validGovernanceRecord({
+        decisionReceipt: { conclusion, basis: [], assumptions: [], uncertainties: [], limitations: [], sources: [], sourceBacked: true, humanReviewNeeded: false },
+      }),
+    });
+    const result = await call(REVIEWER_UID, "reviewer", true);
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.context.reviewOverview).not.toContain(conclusion);
+    expect(result.context.reviewOverview).toContain("The panel's finding begins: Remote work modestly reduces measured productivity overall.");
+    expect(result.context.decisionReceipt.conclusion).toBe(conclusion);
   });
 
   it("is identical for Reviewer and Viewer — presentation-only, never role-gated", async () => {
