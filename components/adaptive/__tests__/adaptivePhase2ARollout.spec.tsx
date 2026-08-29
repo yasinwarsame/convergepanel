@@ -79,7 +79,7 @@ function roundTrip(value: unknown): unknown {
 const deepResearchResult: DeepResearchResult = {
   executiveSummary: "Remote work modestly reduces measured productivity overall.",
   findings: [
-    { id: "f1", title: "Output drops for collaborative tasks", summary: "Sync-heavy work suffers most.", category: "General", evidenceStrength: "strong", sourceBacked: true, coverageCount: 2, totalModels: 2, coverageRatio: 1, contributingModels: ["chatgpt", "claude"] },
+    { id: "f1", title: "Output drops for collaborative tasks", summary: "Sync-heavy work suffers most.", category: "General", evidenceStrength: "strong", sourceBacked: true, sources: [], coverageCount: 2, totalModels: 2, coverageRatio: 1, contributingModels: ["chatgpt", "claude"] },
   ],
   lowConfidenceFindings: [],
   disagreements: [{ label: "Whether the effect is temporary or persists long-term", supportingModels: ["chatgpt"] }],
@@ -104,6 +104,7 @@ const decisionSupportResult: DecisionSupportResult = {
   sensitivityFindings: [],
   humanReviewNeeded: false,
   sourceBacked: true,
+  sources: [],
   totalModels: 2,
 };
 
@@ -116,6 +117,7 @@ const causalExplanationResult: CausalExplanationResult = {
   unknowns: ["Individual variation in sensitivity"],
   testsOrEvidenceNeeded: [],
   sourceBacked: true,
+  sources: [],
   totalModels: 2,
 };
 

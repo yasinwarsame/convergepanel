@@ -89,14 +89,25 @@ export interface ReviewContextPanelInfo {
 }
 
 /**
+ * Client-safe mirror of `lib/workspaces/reviewContext.ts`'s own
+ * `NormalizedSourceLink` — a genuinely clickable http(s) source link,
+ * never a raw label. See `sourceUrlNormalization.ts` for the
+ * normalization rules (server-side only; this is just the wire shape).
+ */
+export interface NormalizedSourceLink {
+  url: string;
+  hostname: string;
+}
+
+/**
  * Client-safe mirror of `lib/workspaces/reviewContext.ts`'s
  * `ReviewContextDecisionReceiptInfo` — the review artifact itself (same
  * shape `governanceRecord.decisionReceipt` carries for every governed
  * adaptive run), distinct from `review` (the decision OUTCOME).
- * `AdaptiveDecisionReceipt.sources` is deliberately NOT projected here
- * (10C.4A-U2C data-minimization correction) — the Team review UI has
- * never rendered it, and there is no concrete requirement to send it to
- * the browser unused.
+ * `sources` was reintroduced in Phase 10D.1 (previously omitted per
+ * 10C.4A-U2C's data-minimization correction, before the Team review UI
+ * rendered a sources section at all) — already normalized to genuine
+ * http(s) links server-side, never the raw mixed label/URL list.
  */
 export interface ReviewContextDecisionReceiptInfo {
   conclusion: string;
@@ -104,6 +115,7 @@ export interface ReviewContextDecisionReceiptInfo {
   assumptions: string[];
   uncertainties: string[];
   limitations: string[];
+  sources: NormalizedSourceLink[];
   sourceBacked: boolean;
   humanReviewNeeded: boolean;
 }
@@ -162,6 +174,7 @@ export function hasUsableDecisionReceipt(receipt: unknown): receipt is ReviewCon
     Array.isArray(receipt.assumptions) &&
     Array.isArray(receipt.uncertainties) &&
     Array.isArray(receipt.limitations) &&
+    Array.isArray(receipt.sources) &&
     typeof receipt.sourceBacked === "boolean" &&
     typeof receipt.humanReviewNeeded === "boolean"
   );
@@ -186,6 +199,8 @@ export interface ReviewContextViewerInfo {
 
 export interface WorkspaceReviewContext {
   run: { runId: string; workspaceId: string; projectId: string | null; label: string };
+  /** Phase 10D.1 — see `lib/workspaces/reviewContext.ts`'s `ReviewContextDto.reviewOverview` doc comment. */
+  reviewOverview: string;
   decisionReceipt: ReviewContextDecisionReceiptInfo;
   review: ReviewContextReviewInfo;
   assignment: ReviewContextAssignmentInfo | null;
@@ -412,6 +427,7 @@ function parseReviewContext(data: unknown): WorkspaceReviewContext | null {
   if (!isPlainObject(review) || typeof review.status !== "string" || typeof review.governanceUpdatedAt !== "string") return null;
   if (!isPlainObject(viewer) || typeof viewer.mode !== "string") return null;
   if (typeof context.assignmentRevision !== "number") return null;
+  if (typeof context.reviewOverview !== "string") return null;
   return context as unknown as WorkspaceReviewContext;
 }
 

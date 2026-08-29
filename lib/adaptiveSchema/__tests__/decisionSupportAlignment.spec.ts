@@ -411,3 +411,25 @@ describe("buildDecisionSupportResult — empty and malformed input", () => {
     expect(result.recommendation.action).toBe("escalate");
   });
 });
+
+describe("buildDecisionSupportResult — sources (Phase 10D.1)", () => {
+  it("preserves every model's own sources, exact-string deduplicated", () => {
+    const result = buildDecisionSupportResult(
+      perModel([
+        ["chatgpt", fields({ sources: ["https://example.com/a", "Gartner report"] })],
+        ["claude", fields({ sources: ["https://example.com/a", "https://example.com/b"] })],
+      ])
+    );
+    expect(result.sources).toEqual(["https://example.com/a", "Gartner report", "https://example.com/b"]);
+  });
+
+  it("is an empty array when no model cited a source", () => {
+    const result = buildDecisionSupportResult(perModel([["chatgpt", fields({ options: ["HubSpot"] })]]));
+    expect(result.sources).toEqual([]);
+  });
+
+  it("is an empty array for a totally empty perModel input", () => {
+    const result = buildDecisionSupportResult([]);
+    expect(result.sources).toEqual([]);
+  });
+});

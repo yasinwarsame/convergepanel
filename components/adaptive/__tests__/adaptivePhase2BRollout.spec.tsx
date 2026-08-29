@@ -145,6 +145,7 @@ const evidenceReviewResult: EvidenceReviewResult = {
   applicabilityCaveats: [],
   recommendedChecks: [],
   sourceBacked: true,
+  sources: [],
   totalModels: 3,
 };
 
@@ -173,6 +174,7 @@ const biasBlindspotAuditResult: BiasBlindspotAuditResult = {
     homogeneityFlag: false,
   },
   followUpQuestions: [],
+  sources: [],
   totalModels: 3,
 };
 

@@ -51,6 +51,9 @@ import { computeMembershipId } from "./membershipId";
 import { validateMembershipBinding } from "./membershipBinding";
 import { roleHasCapability } from "./capabilities";
 import { parseGovernanceRecord, isHumanReviewStatusReviewable } from "@/lib/adaptiveSchema/governanceRecordParser";
+import { parsePersistedAdaptiveOutput } from "@/lib/adaptiveSchema/persistedOutput";
+import { normalizeSourceUrls, type NormalizedSourceLink } from "@/lib/adaptiveSchema/sourceUrlNormalization";
+import { buildReviewOverview } from "@/lib/adaptiveSchema/reviewOverviewBuilder";
 import { isCanonicalDueAt, type AdaptiveHumanReviewAssignmentV1 } from "@/lib/governance/adaptiveHumanReviewAssignment";
 import { parseAdaptiveHumanReviewPanel, type AdaptiveHumanReviewPanelV1 } from "@/lib/governance/adaptiveHumanReviewPanel";
 import { aggregateAdaptiveReviewVotes } from "@/lib/governance/adaptiveReviewAggregation";
@@ -122,21 +125,24 @@ export interface ReviewContextPanelInfo {
 
 /**
  * Team Workspace Boundary Hardening follow-up (10C.4A-U2, corrected
- * 10C.4A-U2C) — the same decision-receipt shape `governanceRecord.
- * decisionReceipt` already carries for every governed adaptive run
- * (`AdaptiveDecisionReceipt`), projected here — but deliberately NOT
- * field-for-field. This is the ONLY substantive review artifact currently
- * surfaced anywhere in this product (Personal review already renders the
- * identical fields, minus `sources`) — never the raw `adaptiveOutput`
- * envelope, which is out of scope. `record` is already loaded above for
- * `review.status`/`governanceUpdatedAt`, so this adds zero additional
- * Firestore reads.
+ * 10C.4A-U2C; `sources` reintroduced in Phase 10D.1) — the same
+ * decision-receipt shape `governanceRecord.decisionReceipt` already
+ * carries for every governed adaptive run (`AdaptiveDecisionReceipt`),
+ * projected here — but deliberately NOT field-for-field. This is the ONLY
+ * substantive review artifact currently surfaced anywhere in this product
+ * — never the raw `adaptiveOutput` envelope, which is out of scope.
+ * `record` is already loaded above for `review.status`/`governanceUpdatedAt`,
+ * so this adds zero additional Firestore reads.
  *
- * `sources` is deliberately OMITTED (10C.4A-U2C data-minimization
- * correction) — the Team review UI has never rendered it, and there is no
- * concrete requirement to transmit it to the browser unused. `research.read`
- * still legitimately permits reading it server-side if a future feature
- * needs it; this DTO simply doesn't project it today.
+ * `sources` was OMITTED between 10C.4A-U2C and Phase 10D.1 (a
+ * data-minimization correction for an unused field) — reintroduced now
+ * that the Team review UI actually renders a "Sources cited by the panel"
+ * section. Deliberately NOT the raw `AdaptiveDecisionReceipt.sources`
+ * (which mixes plain-text labels with URLs, per each schema's own field
+ * spec) — normalized here to only the subset that parses as a genuine
+ * http(s) URL (`normalizeSourceUrls()`), so nothing non-actionable is
+ * transmitted to the client (Phase 10D.1's data-minimization requirement:
+ * transmit only what's actually rendered).
  */
 export interface ReviewContextDecisionReceiptInfo {
   conclusion: string;
@@ -144,6 +150,7 @@ export interface ReviewContextDecisionReceiptInfo {
   assumptions: string[];
   uncertainties: string[];
   limitations: string[];
+  sources: NormalizedSourceLink[];
   sourceBacked: boolean;
   humanReviewNeeded: boolean;
 }
@@ -175,6 +182,15 @@ export interface ReviewContextViewerInfo {
 export interface ReviewContextDto {
   run: ReviewContextRunInfo;
   review: ReviewContextReviewInfo;
+  /**
+   * Phase 10D.1 — a deterministic, zero-LLM-call presentation paragraph
+   * (question, model participation, the panel's existing conclusion,
+   * human-review flag) — never a new canonical governance judgment, never
+   * persisted, recomputed fresh on every read from data that's already
+   * canonical elsewhere (`run.question`, `adaptiveOutput.meta`,
+   * `decisionReceipt`). See `buildReviewOverview()`.
+   */
+  reviewOverview: string;
   /** See `ReviewContextDecisionReceiptInfo` doc comment — the review artifact itself, distinct from `review` (the decision OUTCOME). */
   decisionReceipt: ReviewContextDecisionReceiptInfo;
   assignment: ReviewContextAssignmentInfo | null;
@@ -380,14 +396,33 @@ export async function getReviewContext(args: { workspaceId: string; runId: strin
       canReconfigurePanel = false;
     }
 
+    // ---- Phase 10D.1: model-participation counts for the Review Overview,
+    // sourced from the SAME already-loaded `runData.adaptiveOutput` field —
+    // zero additional Firestore reads. A parse failure (absent/corrupted/
+    // pre-Phase-1 persisted output) yields `null` counts, never a guessed
+    // 0 — `buildReviewOverview()` omits the model-participation sentence
+    // entirely rather than fabricate one. ----
+    const adaptiveOutputParse = parsePersistedAdaptiveOutput(runData.adaptiveOutput);
+    const totalModels = adaptiveOutputParse.ok ? (adaptiveOutputParse.output.meta.totalModels ?? null) : null;
+    const successfulModels = adaptiveOutputParse.ok ? (adaptiveOutputParse.output.meta.successfulModels ?? null) : null;
+    const question = typeof runData.question === "string" ? runData.question : "";
+
     const context: ReviewContextDto = {
-      run: { runId: args.runId, workspaceId: target.workspaceId, projectId: target.projectId, label: truncateRunLabel(typeof runData.question === "string" ? runData.question : "") },
+      run: { runId: args.runId, workspaceId: target.workspaceId, projectId: target.projectId, label: truncateRunLabel(question) },
+      reviewOverview: buildReviewOverview({
+        question,
+        totalModels,
+        successfulModels,
+        conclusion: record.decisionReceipt.conclusion,
+        humanReviewNeeded: record.decisionReceipt.humanReviewNeeded,
+      }),
       decisionReceipt: {
         conclusion: record.decisionReceipt.conclusion,
         basis: record.decisionReceipt.basis,
         assumptions: record.decisionReceipt.assumptions,
         uncertainties: record.decisionReceipt.uncertainties,
         limitations: record.decisionReceipt.limitations,
+        sources: normalizeSourceUrls(record.decisionReceipt.sources),
         sourceBacked: record.decisionReceipt.sourceBacked,
         humanReviewNeeded: record.decisionReceipt.humanReviewNeeded,
       },

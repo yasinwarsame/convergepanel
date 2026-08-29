@@ -253,8 +253,8 @@ describe("PanelEvidenceSection — Phase 2A batch 1 (deep_research/decision_supp
     return {
       executiveSummary: "Remote work modestly reduces measured productivity.",
       findings: [
-        { id: "f1", title: "Finding A", summary: "s", category: "General", evidenceStrength: "strong", sourceBacked: true, coverageCount: 2, totalModels: 2, coverageRatio: 1, contributingModels: ["chatgpt", "claude"] as any },
-        { id: "f2", title: "Finding B", summary: "s2", category: "General", evidenceStrength: "contested", sourceBacked: false, coverageCount: 1, totalModels: 2, coverageRatio: 0.5, contributingModels: ["chatgpt"] as any },
+        { id: "f1", title: "Finding A", summary: "s", category: "General", evidenceStrength: "strong", sourceBacked: true, sources: [], coverageCount: 2, totalModels: 2, coverageRatio: 1, contributingModels: ["chatgpt", "claude"] as any },
+        { id: "f2", title: "Finding B", summary: "s2", category: "General", evidenceStrength: "contested", sourceBacked: false, sources: [], coverageCount: 1, totalModels: 2, coverageRatio: 0.5, contributingModels: ["chatgpt"] as any },
       ],
       lowConfidenceFindings: [],
       disagreements: [],
@@ -289,7 +289,7 @@ describe("PanelEvidenceSection — Phase 2A batch 1 (deep_research/decision_supp
         schemaId: "deep_research",
         deepResearch: deepResearchFixture({
           lowConfidenceFindings: [
-            { id: "lc1", title: "Rare finding", summary: "Raised by only one model.", category: "General", evidenceStrength: "unknown", sourceBacked: false, coverageCount: 1, totalModels: 3, coverageRatio: 0.33, contributingModels: ["chatgpt"] as any },
+            { id: "lc1", title: "Rare finding", summary: "Raised by only one model.", category: "General", evidenceStrength: "unknown", sourceBacked: false, sources: [], coverageCount: 1, totalModels: 3, coverageRatio: 0.33, contributingModels: ["chatgpt"] as any },
           ],
         }),
         modelsUsed: ["chatgpt", "claude", "grok"] as ModelId[],
@@ -315,6 +315,7 @@ describe("PanelEvidenceSection — Phase 2A batch 1 (deep_research/decision_supp
       sensitivityFindings: [],
       humanReviewNeeded: false,
       sourceBacked: true,
+      sources: [],
       totalModels: 2,
       ...overrides,
     };
@@ -363,6 +364,7 @@ describe("PanelEvidenceSection — Phase 2A batch 1 (deep_research/decision_supp
       unknowns: [],
       testsOrEvidenceNeeded: [],
       sourceBacked: true,
+      sources: [],
       totalModels: 2,
       ...overrides,
     };
@@ -604,6 +606,7 @@ describe("PanelEvidenceSection — Phase 2B batch 2 (ranked_enumeration/checklis
       applicabilityCaveats: [],
       recommendedChecks: [],
       sourceBacked: true,
+      sources: [],
       totalModels: 2,
       ...overrides,
     };
@@ -658,6 +661,7 @@ describe("PanelEvidenceSection — Phase 2B batch 2 (ranked_enumeration/checklis
         homogeneityFlag: false,
       },
       followUpQuestions: [],
+      sources: [],
       totalModels: 2,
       ...overrides,
     };

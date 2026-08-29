@@ -390,3 +390,35 @@ describe("buildBiasBlindspotAuditResult — coverage denominator and malformed i
     expect(result.totalModels).toBe(2);
   });
 });
+
+describe("buildBiasBlindspotAuditResult — sources (Phase 10D.1)", () => {
+  afterEach(() => jest.clearAllMocks());
+
+  it("preserves every model's own sources, exact-string deduplicated, independent of Tier 3's citation-COUNT diagnostics", async () => {
+    mockTierCalls();
+    const results = rawResults(["chatgpt", "claude"]);
+    const result = await buildBiasBlindspotAuditResult(
+      perModel([
+        ["chatgpt", fields({ sources: ["https://example.com/a", "World Bank data"] })],
+        ["claude", fields({ sources: ["https://example.com/a", "https://example.com/b"] })],
+      ]),
+      2,
+      "q",
+      results
+    );
+    expect(result.sources).toEqual(["https://example.com/a", "World Bank data", "https://example.com/b"]);
+  });
+
+  it("is an empty array when no model cited a source", async () => {
+    mockTierCalls();
+    const results = rawResults(["chatgpt"]);
+    const result = await buildBiasBlindspotAuditResult(perModel([["chatgpt", fields()]]), 1, "q", results);
+    expect(result.sources).toEqual([]);
+  });
+
+  it("is an empty array for a totally empty perModel input", async () => {
+    mockTierCalls();
+    const result = await buildBiasBlindspotAuditResult([], 2, "q", []);
+    expect(result.sources).toEqual([]);
+  });
+});

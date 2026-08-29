@@ -104,6 +104,8 @@ export function buildEvidenceReviewResult(
   const overallAssessment = modeOrLongest(perModel.map((p) => p.fields.overallAssessment).filter((s) => s.trim().length > 0)) || "";
   const modelsWithSources = new Set(perModel.filter((p) => p.fields.sources.length > 0).map((p) => p.modelId));
   const sourceBacked = modelsWithSources.size > 0;
+  // Phase 10D.1 — exact-string dedup only (mirrors decisionReceiptBuilder.ts's dedupeExact), never fuzzy-clustered: two distinct source labels/URLs should never be merged just because they're textually similar.
+  const sources = Array.from(new Set(perModel.flatMap((p) => p.fields.sources).map((s) => s.trim()).filter((s) => s.length > 0)));
 
   let index = 0;
   const entries: RawEntry[] = perModel.flatMap(({ modelId, fields }) =>
@@ -132,6 +134,7 @@ export function buildEvidenceReviewResult(
       applicabilityCaveats,
       recommendedChecks,
       sourceBacked,
+      sources,
       totalModels,
     };
   }
@@ -208,6 +211,7 @@ export function buildEvidenceReviewResult(
     applicabilityCaveats,
     recommendedChecks,
     sourceBacked,
+    sources,
     totalModels,
   };
 }

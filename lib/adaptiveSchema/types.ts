@@ -493,6 +493,8 @@ export interface CausalExplanationResult {
   testsOrEvidenceNeeded: string[];
   /** True when at least one contributing model cited a source anywhere in its response — response-level, not attributed to any specific factor (see AggregatedCausalFactor.sourceBacked for the per-factor approximation). */
   sourceBacked: boolean;
+  /** Phase 10D.1 — response-level union of every contributing model's own `sources` field, exact-string deduplicated, first-seen order. Plain labels AND URLs both survive here; URL-only filtering for display happens at the decision-receipt/UI boundary, never here. */
+  sources: string[];
   /** Models actually attempted for this run — the honest denominator behind every coverageRatio above, reported once here rather than repeated per-factor/link. */
   totalModels: number;
 }
@@ -637,6 +639,8 @@ export interface AggregatedResearchFinding {
   /** Deliberately conservative, same rule as AggregatedCausalFactor.evidenceStrength — "unknown" unless a genuine independent signal exists (this finding is also flagged in disagreements). Never "strong"/"moderate"/"weak" purely from model repetition. */
   evidenceStrength: CausalEvidenceStrength;
   sourceBacked: boolean;
+  /** Phase 10D.1 — union of `sources` from every model contributing to this specific finding, exact-string deduplicated, first-seen order. Plain labels AND URLs both survive here; URL-only filtering for display happens at the decision-receipt/UI boundary, never here. */
+  sources: string[];
   coverageCount: number;
   totalModels: number;
   coverageRatio: number;
@@ -735,6 +739,8 @@ export interface EvidenceReviewResult {
   recommendedChecks: string[];
   /** True when at least one contributing model cited a source anywhere in its response. Response-level, matching causal_explanation's/definition_explanation's approximation (the wire layer has no per-dimension source attribution). */
   sourceBacked: boolean;
+  /** Phase 10D.1 — response-level union of every contributing model's own `sources` field, exact-string deduplicated, first-seen order. Plain labels AND URLs both survive here; URL-only filtering for display happens at the decision-receipt/UI boundary, never here. */
+  sources: string[];
   totalModels: number;
 }
 
@@ -812,6 +818,8 @@ export interface BiasBlindspotAuditResult {
   /** Tier 3. */
   structuralDiagnostics: BiasStructuralDiagnostics;
   followUpQuestions: string[];
+  /** Phase 10D.1 — response-level union of every contributing model's own `sources` field, exact-string deduplicated, first-seen order. Plain labels AND URLs both survive here; URL-only filtering for display happens at the decision-receipt/UI boundary, never here. */
+  sources: string[];
   totalModels: number;
 }
 
@@ -953,6 +961,8 @@ export interface DecisionSupportResult {
   reversibleNextStep?: string;
   humanReviewNeeded: boolean;
   sourceBacked: boolean;
+  /** Phase 10D.1 — response-level union of every contributing model's own `sources` field, exact-string deduplicated, first-seen order. Plain labels AND URLs both survive here; URL-only filtering for display happens at the decision-receipt/UI boundary, never here. */
+  sources: string[];
   totalModels: number;
 }
 

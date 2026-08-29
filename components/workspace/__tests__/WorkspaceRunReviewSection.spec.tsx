@@ -46,6 +46,7 @@ const RUN_ID = "run-1";
 function baseContext(overrides: Partial<WorkspaceReviewContext> = {}): WorkspaceReviewContext {
   return {
     run: { runId: RUN_ID, workspaceId: WS_ID, projectId: null, label: "What are the top risks?" },
+    reviewOverview: "This review covers the question: \"What are the top risks?\" The panel's overall finding: Overall risk is moderate.",
     // Every existing scenario in this file predates the 10C.4A-U2 decision
     // receipt and assumes content was always available — a structurally
     // valid default here preserves those scenarios unchanged; the
@@ -56,6 +57,7 @@ function baseContext(overrides: Partial<WorkspaceReviewContext> = {}): Workspace
       assumptions: ["Mitigations remain funded"],
       uncertainties: ["Long-tail vendor risk"],
       limitations: ["One model did not return usable output"],
+      sources: [{ url: "https://example.com/risk-report", hostname: "example.com" }],
       sourceBacked: true,
       humanReviewNeeded: true,
     },
@@ -339,7 +341,7 @@ describe("WorkspaceRunReviewSection — Decision Receipt (10C.4A-U2)", () => {
     const renderer = await render(
       baseContext({
         viewer: ASSIGNED_REVIEWER_VIEWER,
-        decisionReceipt: { conclusion: "", basis: [], assumptions: [], uncertainties: [], limitations: [], sourceBacked: false, humanReviewNeeded: true },
+        decisionReceipt: { conclusion: "", basis: [], assumptions: [], uncertainties: [], limitations: [], sources: [], sourceBacked: false, humanReviewNeeded: true },
       })
     );
     const text = JSON.stringify(renderer.toJSON());
@@ -351,7 +353,7 @@ describe("WorkspaceRunReviewSection — Decision Receipt (10C.4A-U2)", () => {
     const renderer = await render(
       baseContext({
         viewer: ASSIGNED_REVIEWER_VIEWER,
-        decisionReceipt: { conclusion: "   \n\t ", basis: [], assumptions: [], uncertainties: [], limitations: [], sourceBacked: false, humanReviewNeeded: true },
+        decisionReceipt: { conclusion: "   \n\t ", basis: [], assumptions: [], uncertainties: [], limitations: [], sources: [], sourceBacked: false, humanReviewNeeded: true },
       })
     );
     const text = JSON.stringify(renderer.toJSON());
@@ -368,6 +370,7 @@ describe("WorkspaceRunReviewSection — Decision Receipt (10C.4A-U2)", () => {
           assumptions: [],
           uncertainties: [],
           limitations: [],
+          sources: [],
           sourceBacked: false,
           humanReviewNeeded: true,
         },
@@ -395,7 +398,7 @@ describe("WorkspaceRunReviewSection — Decision Receipt (10C.4A-U2)", () => {
   it("10C.4A-U2C: end-to-end wiring — an empty-conclusion receipt computed at this level also blocks panel voting in the real (unmocked) WorkspacePanelReviewSection it's threaded into", async () => {
     const renderer = await render(
       baseContext({
-        decisionReceipt: { conclusion: "", basis: [], assumptions: [], uncertainties: [], limitations: [], sourceBacked: false, humanReviewNeeded: true },
+        decisionReceipt: { conclusion: "", basis: [], assumptions: [], uncertainties: [], limitations: [], sources: [], sourceBacked: false, humanReviewNeeded: true },
         panel: { status: "open", revision: 1, reviewers: [{ uid: "u1", displayName: "Me" }, { uid: "u2", displayName: "Other" }], voteSummary: { submittedCount: 0, aggregationState: "waiting" }, createdAt: "x", updatedAt: "x", finalizedAt: null },
         viewer: { mode: "normal", isCreator: false, canManageAssignment: false, canSubmitDecision: false, canResubmit: false, canCreatePanel: false, canReconfigurePanel: false, canCancelPanel: false, canVote: true, hasVoted: false, canFinalize: false, canOverride: false },
       })

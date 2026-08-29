@@ -125,6 +125,19 @@ function seedRun(overrides: Record<string, unknown> = {}) {
   stores.runs.set(RUN_ID, asPersisted({ userId: CREATOR_UID, workspaceId: WS_ID, projectId: null, question: "What is the outlook?", createdAt: NOW, governanceRecord: validGovernanceRecord(), ...overrides }));
 }
 
+/** Minimal valid PersistedAdaptiveOutputV1 shape (decision_support) — enough to pass parsePersistedAdaptiveOutput()'s structural check, so getReviewContext() can read `meta.totalModels`/`successfulModels` for the Phase 10D.1 Review Overview. */
+function validAdaptiveOutput(overrides: { totalModels?: number; successfulModels?: number } = {}) {
+  return asPersisted({
+    version: 1,
+    schemaId: "decision_support",
+    answerShape: "decision_support_view",
+    classification: { queryType: "decision_support" },
+    meta: { ...(overrides.totalModels !== undefined ? { totalModels: overrides.totalModels } : {}), ...(overrides.successfulModels !== undefined ? { successfulModels: overrides.successfulModels } : {}) },
+    generatedAt: "2026-08-01T00:00:00.000Z",
+    result: { decisionQuestion: "x", options: [], recommendation: {}, totalModels: overrides.totalModels ?? 0 },
+  });
+}
+
 function seedAssignment(overrides: Record<string, unknown> = {}) {
   stores.humanReviewAssignment.set(
     `${RUN_ID}::current`,
@@ -230,7 +243,7 @@ describe("getReviewContext — decisionReceipt projection (10C.4A-U2)", () => {
           assumptions: ["Mitigations remain funded"],
           uncertainties: ["Long-tail vendor risk"],
           limitations: ["One model did not return usable output"],
-          sources: ["internal-report-1"],
+          sources: ["https://example.com/internal-report"],
           sourceBacked: true,
           humanReviewNeeded: true,
         },
@@ -245,12 +258,13 @@ describe("getReviewContext — decisionReceipt projection (10C.4A-U2)", () => {
       assumptions: ["Mitigations remain funded"],
       uncertainties: ["Long-tail vendor risk"],
       limitations: ["One model did not return usable output"],
+      sources: [{ url: "https://example.com/internal-report", hostname: "example.com" }],
       sourceBacked: true,
       humanReviewNeeded: true,
     });
   });
 
-  it("10C.4A-U2C: sources is deliberately NOT projected — data minimization, the Team UI never renders it", async () => {
+  it("Phase 10D.1: sources is projected, normalized to genuine http(s) links only — a plain-text label (not a URL) is dropped, never sent to the client as a broken link", async () => {
     seedRun({
       governanceRecord: validGovernanceRecord({
         decisionReceipt: {
@@ -259,7 +273,7 @@ describe("getReviewContext — decisionReceipt projection (10C.4A-U2)", () => {
           assumptions: [],
           uncertainties: [],
           limitations: [],
-          sources: ["internal-report-1"],
+          sources: ["internal-report-1", "https://example.com/a"],
           sourceBacked: true,
           humanReviewNeeded: true,
         },
@@ -268,7 +282,28 @@ describe("getReviewContext — decisionReceipt projection (10C.4A-U2)", () => {
     const result = await call(REVIEWER_UID, "reviewer", true);
     expect(result.status).toBe("ok");
     if (result.status !== "ok") return;
-    expect("sources" in result.context.decisionReceipt).toBe(false);
+    expect(result.context.decisionReceipt.sources).toEqual([{ url: "https://example.com/a", hostname: "example.com" }]);
+  });
+
+  it("Phase 10D.1: sources projects to an empty array (not omitted) when the canonical receipt has no sources", async () => {
+    seedRun({
+      governanceRecord: validGovernanceRecord({
+        decisionReceipt: {
+          conclusion: "Overall risk is moderate.",
+          basis: [],
+          assumptions: [],
+          uncertainties: [],
+          limitations: [],
+          sources: [],
+          sourceBacked: false,
+          humanReviewNeeded: true,
+        },
+      }),
+    });
+    const result = await call(REVIEWER_UID, "reviewer", true);
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.context.decisionReceipt.sources).toEqual([]);
   });
 
   it("Viewer receives the identical projected decisionReceipt — this function never gates content by role (research.read enforcement lives upstream at the route, unchanged by this projection)", async () => {
@@ -295,11 +330,87 @@ describe("getReviewContext — decisionReceipt projection (10C.4A-U2)", () => {
     expect(result.status).toBe("ok");
   });
 
-  it("does not expose unrelated governanceRecord/internal fields alongside decisionReceipt (exactly the 7 projected fields, nothing else — sources deliberately excluded)", async () => {
+  it("does not expose unrelated governanceRecord/internal fields alongside decisionReceipt (exactly the 8 projected fields, nothing else)", async () => {
     const result = await call(REVIEWER_UID, "reviewer", true);
     expect(result.status).toBe("ok");
     if (result.status !== "ok") return;
-    expect(Object.keys(result.context.decisionReceipt).sort()).toEqual(["assumptions", "basis", "conclusion", "humanReviewNeeded", "limitations", "sourceBacked", "uncertainties"]);
+    expect(Object.keys(result.context.decisionReceipt).sort()).toEqual([
+      "assumptions",
+      "basis",
+      "conclusion",
+      "humanReviewNeeded",
+      "limitations",
+      "sourceBacked",
+      "sources",
+      "uncertainties",
+    ]);
+  });
+});
+
+describe("getReviewContext — reviewOverview (Phase 10D.1)", () => {
+  it("includes the question and model-participation counts when adaptiveOutput is present and successfulModels < totalModels", async () => {
+    seedRun({ adaptiveOutput: validAdaptiveOutput({ totalModels: 4, successfulModels: 3 }) });
+    const result = await call(REVIEWER_UID, "reviewer", true);
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.context.reviewOverview).toContain('"What is the outlook?"');
+    expect(result.context.reviewOverview).toContain("A panel of 4 models was consulted, with 3 models producing usable results.");
+  });
+
+  it("uses 'all produced usable results' phrasing when every model succeeded", async () => {
+    seedRun({ adaptiveOutput: validAdaptiveOutput({ totalModels: 2, successfulModels: 2 }) });
+    const result = await call(REVIEWER_UID, "reviewer", true);
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.context.reviewOverview).toContain("A panel of 2 models was consulted, and all produced usable results.");
+  });
+
+  it("handles exactly one successful model without misplural", async () => {
+    seedRun({ adaptiveOutput: validAdaptiveOutput({ totalModels: 1, successfulModels: 1 }) });
+    const result = await call(REVIEWER_UID, "reviewer", true);
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.context.reviewOverview).toContain("A panel of 1 model was consulted, and all produced usable results.");
+  });
+
+  it("omits the model-participation sentence entirely (never fabricates a count) when adaptiveOutput is absent — the common case for a run with no Milestone 2 persisted output", async () => {
+    seedRun(); // no adaptiveOutput field at all
+    const result = await call(REVIEWER_UID, "reviewer", true);
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.context.reviewOverview).not.toMatch(/panel of/i);
+    expect(result.context.reviewOverview).toContain('"What is the outlook?"');
+  });
+
+  it("omits the model-participation sentence when adaptiveOutput is malformed/corrupted — fails closed to 'unknown count', never a guessed 0", async () => {
+    seedRun({ adaptiveOutput: { version: 1, schemaId: "not_a_real_schema" } });
+    const result = await call(REVIEWER_UID, "reviewer", true);
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.context.reviewOverview).not.toMatch(/panel of/i);
+  });
+
+  it("includes the panel's existing conclusion verbatim, and the human-review-flagged sentence when set", async () => {
+    seedRun({
+      governanceRecord: validGovernanceRecord({
+        decisionReceipt: { conclusion: "Go: Option A.", basis: [], assumptions: [], uncertainties: [], limitations: [], sources: [], sourceBacked: true, humanReviewNeeded: true },
+      }),
+    });
+    const result = await call(REVIEWER_UID, "reviewer", true);
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.context.reviewOverview).toContain("The panel's overall finding: Go: Option A.");
+    expect(result.context.reviewOverview).toContain("This result was flagged for human review.");
+  });
+
+  it("is identical for Reviewer and Viewer — presentation-only, never role-gated", async () => {
+    seedRun({ adaptiveOutput: validAdaptiveOutput({ totalModels: 3, successfulModels: 2 }) });
+    const resultReviewer = await call(REVIEWER_UID, "reviewer", true);
+    const resultViewer = await call(VIEWER_UID, "viewer", true);
+    expect(resultReviewer.status).toBe("ok");
+    expect(resultViewer.status).toBe("ok");
+    if (resultReviewer.status !== "ok" || resultViewer.status !== "ok") return;
+    expect(resultViewer.context.reviewOverview).toBe(resultReviewer.context.reviewOverview);
   });
 });
 

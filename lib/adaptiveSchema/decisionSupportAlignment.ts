@@ -275,6 +275,7 @@ export function buildDecisionSupportResult(
       sensitivityFindings: [],
       humanReviewNeeded: true,
       sourceBacked: false,
+      sources: [],
       totalModels,
     };
   }
@@ -282,6 +283,8 @@ export function buildDecisionSupportResult(
   const decisionQuestion = modeOrLongest(perModel.map((p) => p.fields.decisionQuestion));
   const modelsWithSources = new Set(perModel.filter((p) => p.fields.sources.length > 0).map((p) => p.modelId));
   const sourceBacked = modelsWithSources.size > 0;
+  // Phase 10D.1 — exact-string dedup only (mirrors decisionReceiptBuilder.ts's dedupeExact), never fuzzy-clustered.
+  const sources = Array.from(new Set(perModel.flatMap((p) => p.fields.sources).map((s) => s.trim()).filter((s) => s.length > 0)));
 
   // ── Options axis. DecisionSupportResult has no low-confidence bucket for
   // options (unlike comparison_matrix's subjects/attributes) — a decision's
@@ -539,6 +542,7 @@ export function buildDecisionSupportResult(
     ...(reversibleNextStep !== undefined ? { reversibleNextStep } : {}),
     humanReviewNeeded,
     sourceBacked,
+    sources,
     totalModels,
   };
 }
