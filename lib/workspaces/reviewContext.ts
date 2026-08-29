@@ -396,15 +396,20 @@ export async function getReviewContext(args: { workspaceId: string; runId: strin
       canReconfigurePanel = false;
     }
 
-    // ---- Phase 10D.1: model-participation counts for the Review Overview,
-    // sourced from the SAME already-loaded `runData.adaptiveOutput` field —
-    // zero additional Firestore reads. A parse failure (absent/corrupted/
-    // pre-Phase-1 persisted output) yields `null` counts, never a guessed
-    // 0 — `buildReviewOverview()` omits the model-participation sentence
-    // entirely rather than fabricate one. ----
+    // ---- Phase 10D.1, corrected 10D.1C: model-participation counts for the
+    // Review Overview, sourced from the SAME already-loaded
+    // `runData.adaptiveOutput` field — zero additional Firestore reads. A
+    // parse failure (absent/corrupted/pre-Phase-1 persisted output) yields
+    // `null` counts, never a guessed 0. `modelsWithUsableOutput` — NOT
+    // `successfulModels` — is the correct field for "produced usable
+    // results": it requires BOTH connector-level success AND adaptive
+    // schema validation (see `commonResponseMeta.ts`'s own doc comment).
+    // Using `successfulModels` here would count a connector-succeeded but
+    // schema-invalid response as "usable," overstating panel participation
+    // — this was Phase 10D.1's original defect, corrected in 10D.1C. ----
     const adaptiveOutputParse = parsePersistedAdaptiveOutput(runData.adaptiveOutput);
     const totalModels = adaptiveOutputParse.ok ? (adaptiveOutputParse.output.meta.totalModels ?? null) : null;
-    const successfulModels = adaptiveOutputParse.ok ? (adaptiveOutputParse.output.meta.successfulModels ?? null) : null;
+    const modelsWithUsableOutput = adaptiveOutputParse.ok ? (adaptiveOutputParse.output.meta.modelsWithUsableOutput ?? null) : null;
     const question = typeof runData.question === "string" ? runData.question : "";
 
     const context: ReviewContextDto = {
@@ -412,8 +417,9 @@ export async function getReviewContext(args: { workspaceId: string; runId: strin
       reviewOverview: buildReviewOverview({
         question,
         totalModels,
-        successfulModels,
+        modelsWithUsableOutput,
         conclusion: record.decisionReceipt.conclusion,
+        sourceBacked: record.decisionReceipt.sourceBacked,
         humanReviewNeeded: record.decisionReceipt.humanReviewNeeded,
       }),
       decisionReceipt: {

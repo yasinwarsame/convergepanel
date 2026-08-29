@@ -15,14 +15,15 @@
  * scraping, no HTML fetch. A URL with no title is displayed by its own
  * hostname — nothing is invented.
  *
- * Cap rationale: each model may cite up to 5 source labels per response
- * (schemaRegistry.ts's per-schema `sources` field spec, `maxItems: 5`), and
- * a panel run today has at most a handful of contributing models — the
- * deduplicated union realistically lands in the single digits. 10 is a
- * generous ceiling above that realistic range while still bounding a
- * pathological case (e.g. every model repeating the same handful of URLs
- * with trivial query-string variations that survive exact-string dedup
- * upstream).
+ * Cap rationale: each model may cite up to 5 source labels per response for
+ * most schemas, or up to 8 for `deep_research` specifically
+ * (schemaRegistry.ts's per-schema `sources` field spec — not a single
+ * uniform limit across all 9), and a panel run today has at most a handful
+ * of contributing models — the deduplicated union realistically lands in
+ * the single digits even at the higher per-model ceiling. 10 is a generous
+ * bound above that realistic range while still bounding a pathological
+ * case (e.g. every model repeating the same handful of URLs with trivial
+ * query-string variations that survive exact-string dedup upstream).
  */
 
 const MAX_DISPLAYED_SOURCES = 10;

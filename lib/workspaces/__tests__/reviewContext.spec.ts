@@ -125,14 +125,17 @@ function seedRun(overrides: Record<string, unknown> = {}) {
   stores.runs.set(RUN_ID, asPersisted({ userId: CREATOR_UID, workspaceId: WS_ID, projectId: null, question: "What is the outlook?", createdAt: NOW, governanceRecord: validGovernanceRecord(), ...overrides }));
 }
 
-/** Minimal valid PersistedAdaptiveOutputV1 shape (decision_support) — enough to pass parsePersistedAdaptiveOutput()'s structural check, so getReviewContext() can read `meta.totalModels`/`successfulModels` for the Phase 10D.1 Review Overview. */
-function validAdaptiveOutput(overrides: { totalModels?: number; successfulModels?: number } = {}) {
+/** Minimal valid PersistedAdaptiveOutputV1 shape (decision_support) — enough to pass parsePersistedAdaptiveOutput()'s structural check, so getReviewContext() can read `meta.totalModels`/`meta.modelsWithUsableOutput` for the Phase 10D.1/10D.1C Review Overview. Deliberately does NOT accept a `successfulModels` override — that field is never read by the (corrected) Review Overview builder. */
+function validAdaptiveOutput(overrides: { totalModels?: number; modelsWithUsableOutput?: number } = {}) {
   return asPersisted({
     version: 1,
     schemaId: "decision_support",
     answerShape: "decision_support_view",
     classification: { queryType: "decision_support" },
-    meta: { ...(overrides.totalModels !== undefined ? { totalModels: overrides.totalModels } : {}), ...(overrides.successfulModels !== undefined ? { successfulModels: overrides.successfulModels } : {}) },
+    meta: {
+      ...(overrides.totalModels !== undefined ? { totalModels: overrides.totalModels } : {}),
+      ...(overrides.modelsWithUsableOutput !== undefined ? { modelsWithUsableOutput: overrides.modelsWithUsableOutput } : {}),
+    },
     generatedAt: "2026-08-01T00:00:00.000Z",
     result: { decisionQuestion: "x", options: [], recommendation: {}, totalModels: overrides.totalModels ?? 0 },
   });
@@ -347,30 +350,30 @@ describe("getReviewContext — decisionReceipt projection (10C.4A-U2)", () => {
   });
 });
 
-describe("getReviewContext — reviewOverview (Phase 10D.1)", () => {
-  it("includes the question and model-participation counts when adaptiveOutput is present and successfulModels < totalModels", async () => {
-    seedRun({ adaptiveOutput: validAdaptiveOutput({ totalModels: 4, successfulModels: 3 }) });
+describe("getReviewContext — reviewOverview (Phase 10D.1, corrected 10D.1C)", () => {
+  it("includes the question and model-participation counts, using modelsWithUsableOutput (schema-validated), never a connector-success-only count", async () => {
+    seedRun({ adaptiveOutput: validAdaptiveOutput({ totalModels: 4, modelsWithUsableOutput: 3 }) });
     const result = await call(REVIEWER_UID, "reviewer", true);
     expect(result.status).toBe("ok");
     if (result.status !== "ok") return;
     expect(result.context.reviewOverview).toContain('"What is the outlook?"');
-    expect(result.context.reviewOverview).toContain("A panel of 4 models was consulted, with 3 models producing usable results.");
+    expect(result.context.reviewOverview).toContain("Of 4 models attempted, 3 produced usable results.");
   });
 
-  it("uses 'all produced usable results' phrasing when every model succeeded", async () => {
-    seedRun({ adaptiveOutput: validAdaptiveOutput({ totalModels: 2, successfulModels: 2 }) });
+  it("reports 0 usable when every model connector-succeeded but none passed schema validation — never overstates via a looser metric", async () => {
+    seedRun({ adaptiveOutput: validAdaptiveOutput({ totalModels: 4, modelsWithUsableOutput: 0 }) });
     const result = await call(REVIEWER_UID, "reviewer", true);
     expect(result.status).toBe("ok");
     if (result.status !== "ok") return;
-    expect(result.context.reviewOverview).toContain("A panel of 2 models was consulted, and all produced usable results.");
+    expect(result.context.reviewOverview).toContain("Of 4 models attempted, 0 produced usable results.");
   });
 
-  it("handles exactly one successful model without misplural", async () => {
-    seedRun({ adaptiveOutput: validAdaptiveOutput({ totalModels: 1, successfulModels: 1 }) });
+  it("handles exactly one attempted/usable model without misplural", async () => {
+    seedRun({ adaptiveOutput: validAdaptiveOutput({ totalModels: 1, modelsWithUsableOutput: 1 }) });
     const result = await call(REVIEWER_UID, "reviewer", true);
     expect(result.status).toBe("ok");
     if (result.status !== "ok") return;
-    expect(result.context.reviewOverview).toContain("A panel of 1 model was consulted, and all produced usable results.");
+    expect(result.context.reviewOverview).toContain("Of 1 model attempted, 1 produced a usable result.");
   });
 
   it("omits the model-participation sentence entirely (never fabricates a count) when adaptiveOutput is absent — the common case for a run with no Milestone 2 persisted output", async () => {
@@ -378,7 +381,7 @@ describe("getReviewContext — reviewOverview (Phase 10D.1)", () => {
     const result = await call(REVIEWER_UID, "reviewer", true);
     expect(result.status).toBe("ok");
     if (result.status !== "ok") return;
-    expect(result.context.reviewOverview).not.toMatch(/panel of/i);
+    expect(result.context.reviewOverview).not.toMatch(/model/i);
     expect(result.context.reviewOverview).toContain('"What is the outlook?"');
   });
 
@@ -387,10 +390,19 @@ describe("getReviewContext — reviewOverview (Phase 10D.1)", () => {
     const result = await call(REVIEWER_UID, "reviewer", true);
     expect(result.status).toBe("ok");
     if (result.status !== "ok") return;
-    expect(result.context.reviewOverview).not.toMatch(/panel of/i);
+    expect(result.context.reviewOverview).not.toMatch(/model/i);
   });
 
-  it("includes the panel's existing conclusion verbatim, and the human-review-flagged sentence when set", async () => {
+  it("historical fallback: totalModels present but modelsWithUsableOutput absent (legacy pre-Milestone-2 envelope) — degrades to attempted-only, never substitutes a different metric under 'usable'", async () => {
+    seedRun({ adaptiveOutput: validAdaptiveOutput({ totalModels: 4 }) });
+    const result = await call(REVIEWER_UID, "reviewer", true);
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.context.reviewOverview).toContain("A panel of 4 models was attempted for this review.");
+    expect(result.context.reviewOverview).not.toMatch(/usable/i);
+  });
+
+  it("never reproduces the full panel conclusion verbatim in the overview, even though it is included unabridged in the decisionReceipt for Panel Conclusion rendering", async () => {
     seedRun({
       governanceRecord: validGovernanceRecord({
         decisionReceipt: { conclusion: "Go: Option A.", basis: [], assumptions: [], uncertainties: [], limitations: [], sources: [], sourceBacked: true, humanReviewNeeded: true },
@@ -399,12 +411,14 @@ describe("getReviewContext — reviewOverview (Phase 10D.1)", () => {
     const result = await call(REVIEWER_UID, "reviewer", true);
     expect(result.status).toBe("ok");
     if (result.status !== "ok") return;
-    expect(result.context.reviewOverview).toContain("The panel's overall finding: Go: Option A.");
+    expect(result.context.reviewOverview).not.toContain("Go: Option A.");
     expect(result.context.reviewOverview).toContain("This result was flagged for human review.");
+    // The full conclusion still appears, unabridged, in decisionReceipt.conclusion — the source of "Panel Conclusion" rendering.
+    expect(result.context.decisionReceipt.conclusion).toBe("Go: Option A.");
   });
 
   it("is identical for Reviewer and Viewer — presentation-only, never role-gated", async () => {
-    seedRun({ adaptiveOutput: validAdaptiveOutput({ totalModels: 3, successfulModels: 2 }) });
+    seedRun({ adaptiveOutput: validAdaptiveOutput({ totalModels: 3, modelsWithUsableOutput: 2 }) });
     const resultReviewer = await call(REVIEWER_UID, "reviewer", true);
     const resultViewer = await call(VIEWER_UID, "viewer", true);
     expect(resultReviewer.status).toBe("ok");
