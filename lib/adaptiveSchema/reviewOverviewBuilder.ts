@@ -29,32 +29,59 @@
  * CORRECTED NON-REDUNDANCY CONTRACT (10D.1C2): the goal is LOW REDUNDANCY
  * + COMPLETE ORIENTATION, not zero textual overlap at any cost.
  *   - Genuinely multi-sentence conclusion: excerpt only the first sentence
- *     (word-boundary-safe if that sentence itself exceeds the excerpt
- *     budget) — a strictly shorter, non-verbatim excerpt of the whole.
+ *     (hard-bounded, Unicode-safe truncation if that sentence itself
+ *     exceeds the excerpt budget — see `hardBoundedTruncate()` below) — a
+ *     strictly shorter, non-verbatim excerpt of the whole.
  *   - Single-sentence (or no detectable terminal punctuation) conclusion
- *     at or under `MAX_EXCERPT_LENGTH`: used in full. Some overlap with
- *     "Panel Conclusion" is unavoidable here — the conclusion is already
- *     concise — but omitting it entirely to avoid that overlap would
- *     fail the actual product requirement (communicate the Panel's
- *     result), so a short verbatim quote is accepted deliberately.
- *   - Single-sentence conclusion over `MAX_EXCERPT_LENGTH`: word-boundary
- *     truncated with an ellipsis — still a genuine, strictly shorter
- *     excerpt, never the complete text.
+ *     at or under `MAX_EXCERPT_CODE_POINTS`: used in full. Some overlap
+ *     with "Panel Conclusion" is unavoidable here — the conclusion is
+ *     already concise — but omitting it entirely to avoid that overlap
+ *     would fail the actual product requirement (communicate the
+ *     Panel's result), so a short verbatim quote is accepted
+ *     deliberately.
+ *   - Single-sentence conclusion over `MAX_EXCERPT_CODE_POINTS`:
+ *     hard-bounded, Unicode-safe truncation with an ellipsis — still a
+ *     genuine, strictly shorter excerpt, never the complete text.
  * See `buildConclusionExcerpt()` for the implementation of this contract.
- * `MAX_EXCERPT_LENGTH` (150 chars) is chosen so the result-direction
+ * `MAX_EXCERPT_CODE_POINTS` (150) is chosen so the result-direction
  * clause reads as roughly one clause of a paragraph — long enough to
  * carry a real single-sentence conclusion in full, short enough that a
  * multi-sentence or run-on conclusion still gets meaningfully condensed
  * rather than reproduced.
  *
- * WORD-BOUNDARY SAFETY (10D.1C2): any truncation goes through
- * `wordBoundaryTruncate()`, which never cuts inside a word — it backs up
- * to the last whitespace within budget (or, for the pathological case of
- * a single word longer than the budget, extends forward to the next
- * whitespace as a last resort) rather than the raw `.slice(0, N)` the
- * 10D.1C version used, which could split a word mid-character. Trailing
+ * HARD-BOUNDED, UNICODE-SAFE TRUNCATION (10D.1C3 — corrects 10D.1C2):
+ * the 10D.1C2 `wordBoundaryTruncate()` had two real defects, both found by
+ * independent review and confirmed by direct execution: (1) its "no space
+ * within budget" fallback searched FORWARD for the next whitespace with
+ * no re-cap, so a long unbroken token (a URL, a base64 blob, any run-on
+ * text — none of which is bounded by the upstream per-field `maxWords`
+ * check, since a single unbroken token counts as exactly one "word" no
+ * matter how many characters long) could produce an excerpt of
+ * unbounded length; (2) it truncated by raw UTF-16 `.slice()` index,
+ * which can split a surrogate pair (a non-BMP character — many emoji —
+ * is TWO UTF-16 code units but ONE Unicode code point) and leave an
+ * unpaired surrogate in the output, rendering as a broken glyph.
+ *
+ * `hardBoundedTruncate()` replaces it with a strict contract: the
+ * returned string, INCLUDING any appended ellipsis, never exceeds
+ * `MAX_EXCERPT_CODE_POINTS` Unicode code points — code points, not UTF-16
+ * code units, specifically so a surrogate pair is never split. For
+ * ordinary spaced prose it prefers the last whitespace boundary that fits
+ * the budget (reserving one code point for the ellipsis); when no such
+ * boundary exists within budget (the pathological unbroken-token case),
+ * it hard-cuts at the code-point-safe limit rather than searching past
+ * it — boundedness always wins over preserving a whole token. There is
+ * no longer any "extend forward" branch at all. Trailing
  * punctuation/whitespace is stripped before the ellipsis is appended so
  * an excerpt never ends in an artifact like `"..."` or `"?..."`.
+ *
+ * Grapheme-cluster-perfect truncation (never splitting a base character
+ * from a combining mark) is intentionally NOT attempted here — code-point
+ * safety already prevents the visibly-broken-glyph failure mode
+ * (unpaired surrogates); a combining mark separated from its base is a
+ * much smaller cosmetic edge case, and reaching for full grapheme
+ * segmentation would mean a new dependency for a phase scoped narrowly
+ * to closing the two confirmed P2s.
  *
  * NO SEMANTIC REWRITING: every excerpt is a raw substring starting at
  * position 0 of the (trimmed) conclusion — never reordered, paraphrased,
@@ -90,7 +117,15 @@
  */
 
 const MAX_OVERVIEW_QUESTION_LENGTH = 200; // mirrors reviewContext.ts's existing truncateRunLabel() precedent
-const MAX_EXCERPT_LENGTH = 150; // see file header: long enough for a real single-sentence conclusion in full, short enough to meaningfully condense a longer one
+/**
+ * Unicode CODE POINTS, not UTF-16 code units or bytes — this is the
+ * maximum length of the FINAL returned excerpt, ellipsis included. See
+ * `hardBoundedTruncate()`. 150 is long enough to carry a real
+ * single-sentence conclusion in full, short enough to meaningfully
+ * condense a longer one.
+ */
+const MAX_EXCERPT_CODE_POINTS = 150;
+const ELLIPSIS = "…"; // a single Unicode code point — its budget is reserved explicitly in hardBoundedTruncate()
 
 function pluralize(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? "" : "s"}`;
@@ -110,32 +145,41 @@ function stripTrailingPunctuation(s: string): string {
   return s.replace(/[\s.,;:!?…\-–—]+$/, "");
 }
 
+/** Number of Unicode code points in `s` — `Array.from` iterates by code point, so a surrogate-pair (non-BMP) character counts as one, not two. */
+function codePointLength(s: string): number {
+  return Array.from(s).length;
+}
+
 /**
- * Truncates `s` to at most `maxLength` characters without cutting inside a
- * word. Backs up to the last whitespace within budget; if none exists
- * (a single "word" longer than the whole budget — pathological, but
- * possible for e.g. a URL or unbroken token), extends forward to the next
- * whitespace instead of splitting it, falling back to a raw cut only if
- * no whitespace exists anywhere in the string. Only appends an ellipsis
- * when content was actually omitted.
+ * Truncates `s` to at most `maxCodePoints` UNICODE CODE POINTS — never
+ * UTF-16 code units — including any appended ellipsis. This is a hard
+ * bound: no branch below may return a string longer than `maxCodePoints`
+ * code points, regardless of input. See file header HARD-BOUNDED,
+ * UNICODE-SAFE TRUNCATION for the two defects this fixes.
+ *
+ * Policy: prefer the last whitespace boundary that fits within budget
+ * (ordinary spaced prose); if none exists within budget (a pathological
+ * unbroken token), hard-cut at the code-point-safe content limit — never
+ * search or extend past `maxCodePoints` to preserve a whole token.
  */
-function wordBoundaryTruncate(s: string, maxLength: number): string {
-  if (s.length <= maxLength) return s;
+function hardBoundedTruncate(s: string, maxCodePoints: number): string {
+  if (codePointLength(s) <= maxCodePoints) return s;
 
-  const withinBudget = s.slice(0, maxLength);
-  const lastSpace = withinBudget.lastIndexOf(" ");
-  if (lastSpace > 0) {
-    return `${stripTrailingPunctuation(withinBudget.slice(0, lastSpace))}…`;
+  const contentBudget = maxCodePoints - 1; // reserve exactly one code point for the ellipsis
+  const codePoints = Array.from(s);
+  const withinBudget = codePoints.slice(0, contentBudget);
+
+  let lastWhitespaceIndex = -1;
+  for (let i = withinBudget.length - 1; i > 0; i--) {
+    if (/\s/.test(withinBudget[i])) {
+      lastWhitespaceIndex = i;
+      break;
+    }
   }
 
-  // No whitespace within budget (one very long leading "word") — extend forward to the next whitespace instead of cutting it.
-  const nextSpace = s.indexOf(" ", maxLength);
-  if (nextSpace > 0) {
-    return `${stripTrailingPunctuation(s.slice(0, nextSpace))}…`;
-  }
+  const contentStr = lastWhitespaceIndex > 0 ? withinBudget.slice(0, lastWhitespaceIndex).join("") : withinBudget.join("");
 
-  // No whitespace anywhere — an unavoidable raw cut is the only option left.
-  return `${stripTrailingPunctuation(withinBudget)}…`;
+  return `${stripTrailingPunctuation(contentStr)}${ELLIPSIS}`;
 }
 
 interface ConclusionExcerpt {
@@ -161,14 +205,14 @@ function buildConclusionExcerpt(conclusion: string): ConclusionExcerpt | null {
 
   if (isGenuineMultiSentence) {
     const sentence = firstSentence as string;
-    return { text: wordBoundaryTruncate(sentence, MAX_EXCERPT_LENGTH), isFullConclusion: false };
+    return { text: hardBoundedTruncate(sentence, MAX_EXCERPT_CODE_POINTS), isFullConclusion: false };
   }
 
-  if (trimmed.length <= MAX_EXCERPT_LENGTH) {
+  if (codePointLength(trimmed) <= MAX_EXCERPT_CODE_POINTS) {
     return { text: trimmed, isFullConclusion: true };
   }
 
-  return { text: wordBoundaryTruncate(trimmed, MAX_EXCERPT_LENGTH), isFullConclusion: false };
+  return { text: hardBoundedTruncate(trimmed, MAX_EXCERPT_CODE_POINTS), isFullConclusion: false };
 }
 
 export interface ReviewOverviewInput {

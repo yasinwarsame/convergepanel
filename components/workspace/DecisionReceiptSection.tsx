@@ -112,13 +112,13 @@ export default function DecisionReceiptSection({ receipt, reviewOverview }: { re
       {reviewOverview.length > 0 ? (
         <div className="mt-3">
           <h3 className="text-sm font-semibold text-cp-text">Review Overview</h3>
-          <p className="mt-1 text-sm leading-relaxed text-cp-muted">{reviewOverview}</p>
+          <p className="mt-1 break-all text-sm leading-relaxed text-cp-muted">{reviewOverview}</p>
         </div>
       ) : null}
 
       <div className="mt-4 border-t border-cp-border pt-3 first:mt-0 first:border-t-0 first:pt-0">
         <h3 className="text-sm font-semibold text-cp-text">Panel Conclusion</h3>
-        <p className="mt-1 text-sm leading-relaxed text-cp-text">{receipt.conclusion}</p>
+        <p className="mt-1 break-all text-sm leading-relaxed text-cp-text">{receipt.conclusion}</p>
         <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-cp-muted">
           <span>{receipt.sourceBacked ? "Source-backed" : "Not source-backed"}</span>
           <span aria-hidden>&middot;</span>

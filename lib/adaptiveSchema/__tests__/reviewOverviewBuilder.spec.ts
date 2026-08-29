@@ -183,8 +183,20 @@ describe("buildReviewOverview — non-redundancy contract for LONG / multi-sente
   });
 });
 
-describe("buildReviewOverview — word-boundary-safe truncation (Phase 10D.1C2, Part M)", () => {
-  it("never cuts a word in half when truncating a long single-sentence conclusion", () => {
+/** Unicode code-point count — matches the production definition exactly, never UTF-16 `.length`. */
+function codePointCount(s: string): number {
+  return Array.from(s).length;
+}
+
+/** Extracts the excerpt text from a "The panel's finding[ begins]: X" overview. */
+function extractExcerpt(overview: string): string {
+  const match = overview.match(/The panel's finding(?: begins)?: (.+?)(?: This result was flagged for human review\.)?$/);
+  expect(match).not.toBeNull();
+  return match![1];
+}
+
+describe("buildReviewOverview — hard-bounded, Unicode-safe truncation (Phase 10D.1C3, Parts G/H/I)", () => {
+  it("never cuts a word in half when truncating a long single-sentence conclusion with ordinary spaces", () => {
     const conclusion =
       "The panel evaluated a wide range of factors including company size, industry vertical, regulatory jurisdiction, and long-term strategic fit before reaching its recommendation.";
     const overview = buildReviewOverview(baseInput({ conclusion }));
@@ -195,36 +207,128 @@ describe("buildReviewOverview — word-boundary-safe truncation (Phase 10D.1C2, 
     expect(conclusion).toMatch(new RegExp(`\\b${lastWord}\\b`));
   });
 
-  it("boundary case: conclusion exactly 150 characters — included in full, no truncation", () => {
+  it("boundary case: conclusion exactly 150 code points — included in full, no truncation", () => {
     const conclusion = "A".repeat(149) + ".";
-    expect(conclusion.length).toBe(150);
+    expect(codePointCount(conclusion)).toBe(150);
     const overview = buildReviewOverview(baseInput({ conclusion }));
     expect(overview).toContain(`The panel's finding: ${conclusion}`);
     expect(overview).not.toContain("…");
   });
 
-  it("boundary case: conclusion just over 150 characters — truncated, word-boundary safe", () => {
-    const conclusion = "word ".repeat(30) + "final.";
-    expect(conclusion.length).toBeGreaterThan(150);
-    const overview = buildReviewOverview(baseInput({ conclusion }));
-    expect(overview).toContain("…");
-    expect(overview).not.toContain(conclusion);
-  });
-
-  it("boundary case: conclusion 149 characters — included in full", () => {
+  it("boundary case: conclusion 149 code points — included in full", () => {
     const conclusion = "A".repeat(148) + ".";
-    expect(conclusion.length).toBe(149);
+    expect(codePointCount(conclusion)).toBe(149);
     const overview = buildReviewOverview(baseInput({ conclusion }));
     expect(overview).toContain(`The panel's finding: ${conclusion}`);
   });
 
-  it("a single very long word with no whitespace within budget extends forward rather than cutting mid-word", () => {
-    const longToken = "x".repeat(200);
+  it("boundary case: conclusion 151 code points — truncated, excerpt (with ellipsis) never exceeds 150 code points", () => {
+    const conclusion = "word ".repeat(30) + "final.";
+    expect(codePointCount(conclusion)).toBeGreaterThan(150);
+    const overview = buildReviewOverview(baseInput({ conclusion }));
+    expect(overview).toContain("…");
+    expect(overview).not.toContain(conclusion);
+    expect(codePointCount(extractExcerpt(overview))).toBeLessThanOrEqual(150);
+  });
+
+  it("HARD BOUND (closes P2 #1): a 500-char unbroken ASCII token followed by trailing prose is hard-cut, never extended past the budget", () => {
+    const longToken = "x".repeat(500);
     const conclusion = `${longToken} rest of the sentence follows here.`;
     const overview = buildReviewOverview(baseInput({ conclusion }));
-    // The x-run immediately preceding an ellipsis, if any, must be the WHOLE 200-char token — never a partial cut of it.
-    const runBeforeEllipsis = overview.match(/x+(?=…)/)?.[0] ?? "";
-    expect(runBeforeEllipsis.length === 0 || runBeforeEllipsis.length === 200).toBe(true);
+    expect(codePointCount(extractExcerpt(overview))).toBeLessThanOrEqual(150);
+  });
+
+  it("HARD BOUND (closes P2 #1): a 5,000-char unbroken ASCII token followed by trailing prose is hard-cut to <=150 code points — never allowed to grow to the token's length", () => {
+    const longToken = "x".repeat(5000);
+    const conclusion = `${longToken} rest of the sentence follows here.`;
+    const overview = buildReviewOverview(baseInput({ conclusion }));
+    const excerpt = extractExcerpt(overview);
+    expect(codePointCount(excerpt)).toBeLessThanOrEqual(150);
+    // This is exactly the confirmed R3 defect scenario: previously produced a 5,001-character excerpt.
+    expect(excerpt.length).toBeLessThan(200);
+  });
+
+  it("HARD BOUND: a URL-like unbroken token (no internal whitespace) is hard-cut to the budget, not preserved whole", () => {
+    const urlToken = "https://example.com/" + "a".repeat(400) + "/report";
+    const conclusion = `${urlToken} is the primary source cited.`;
+    const overview = buildReviewOverview(baseInput({ conclusion }));
+    expect(codePointCount(extractExcerpt(overview))).toBeLessThanOrEqual(150);
+  });
+
+  it("HARD BOUND: a base64-like unbroken token is hard-cut to the budget", () => {
+    const base64Token = "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVphYmNkZWZnaGlqa2xtbm9wcXJzdHV2d3h5ejAxMjM0NTY3ODk=".repeat(10);
+    const conclusion = `${base64Token} was decoded and reviewed.`;
+    const overview = buildReviewOverview(baseInput({ conclusion }));
+    expect(codePointCount(extractExcerpt(overview))).toBeLessThanOrEqual(150);
+  });
+
+  it("a conclusion with no whitespace ANYWHERE (single pathological token, no trailing prose) is still hard-bounded to <=150 code points", () => {
+    const conclusion = "x".repeat(5000);
+    const overview = buildReviewOverview(baseInput({ conclusion }));
+    expect(codePointCount(extractExcerpt(overview))).toBeLessThanOrEqual(150);
+  });
+
+  it("SURROGATE SAFETY (closes P2 #2): a surrogate-pair emoji straddling the old raw-UTF-16 cut boundary never produces an unpaired surrogate", () => {
+    // Construct a no-whitespace string where a supplementary-plane emoji (😀, U+1F600 — 2 UTF-16 code units, 1 code point) straddles a raw UTF-16 cut at index (maxCodePoints - 1) = 149: 148 leading code units puts the emoji's high surrogate at index 148 and its low surrogate at index 149, so `.slice(0, 149)` would split it.
+    const prefix = "x".repeat(148);
+    const conclusion = prefix + "😀" + "y".repeat(50);
+    const overview = buildReviewOverview(baseInput({ conclusion }));
+    const excerpt = extractExcerpt(overview);
+    // No lone high surrogate (0xD800–0xDBFF) or lone low surrogate (0xDC00–0xDFFF) anywhere in the output.
+    for (let i = 0; i < excerpt.length; i++) {
+      const code = excerpt.charCodeAt(i);
+      const isHighSurrogate = code >= 0xd800 && code <= 0xdbff;
+      const isLowSurrogate = code >= 0xdc00 && code <= 0xdfff;
+      if (isHighSurrogate) {
+        expect(i + 1).toBeLessThan(excerpt.length);
+        const next = excerpt.charCodeAt(i + 1);
+        expect(next >= 0xdc00 && next <= 0xdfff).toBe(true); // must be immediately followed by its low surrogate
+      }
+      if (isLowSurrogate) {
+        expect(i).toBeGreaterThan(0);
+        const prev = excerpt.charCodeAt(i - 1);
+        expect(prev >= 0xd800 && prev <= 0xdbff).toBe(true); // must be immediately preceded by its high surrogate
+      }
+    }
+    expect(codePointCount(excerpt)).toBeLessThanOrEqual(150);
+  });
+
+  it("emoji-heavy conclusion (many surrogate-pair characters) is bounded by code points, not UTF-16 units, and contains no broken glyphs", () => {
+    const conclusion = "😀".repeat(200); // 200 code points, 400 UTF-16 code units, no whitespace anywhere
+    const overview = buildReviewOverview(baseInput({ conclusion }));
+    const excerpt = extractExcerpt(overview);
+    expect(codePointCount(excerpt)).toBeLessThanOrEqual(150);
+    // Every code point in the excerpt (up to the ellipsis) must be a complete emoji or the ellipsis — Array.from re-validates no lone surrogates survived.
+    const points = Array.from(excerpt);
+    for (const p of points) {
+      expect(p === "😀" || p === "…").toBe(true);
+    }
+  });
+
+  it("mixed ASCII + emoji conclusion truncates safely without splitting the emoji", () => {
+    const conclusion = "The panel found significant risk 😀".repeat(10);
+    const overview = buildReviewOverview(baseInput({ conclusion }));
+    const excerpt = extractExcerpt(overview);
+    expect(codePointCount(excerpt)).toBeLessThanOrEqual(150);
+    expect(excerpt).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/); // no lone high surrogate
+    expect(excerpt).not.toMatch(/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/); // no lone low surrogate
+  });
+
+  it("CJK / no-space text: hard bound preserved, no crash, no unbounded growth", () => {
+    const conclusion = "本" .repeat(300); // 300 CJK characters, no ASCII spaces anywhere
+    const overview = buildReviewOverview(baseInput({ conclusion }));
+    const excerpt = extractExcerpt(overview);
+    expect(codePointCount(excerpt)).toBeLessThanOrEqual(150);
+  });
+
+  it("combining-mark sequence (letter + combining accent) does not crash and stays within the hard bound; a split is an accepted cosmetic limitation, not a crash/corruption", () => {
+    const combiningE = "é"; // "e" + combining acute accent (2 code points, renders as one visual glyph "é")
+    const conclusion = (combiningE.repeat(80) + " trailing text follows after the mark sequence ends here for good measure.");
+    const overview = buildReviewOverview(baseInput({ conclusion }));
+    const excerpt = extractExcerpt(overview);
+    expect(codePointCount(excerpt)).toBeLessThanOrEqual(150);
+    // No exception thrown, no NaN/undefined leaking into the string.
+    expect(excerpt).not.toMatch(/undefined|NaN/);
   });
 
   it("never produces a doubled ellipsis or a punctuation-then-ellipsis artifact", () => {
@@ -238,6 +342,34 @@ describe("buildReviewOverview — word-boundary-safe truncation (Phase 10D.1C2, 
       "word ".repeat(28) + "value: (details, more-detail); further-elaboration continues past the budget line here for good measure.";
     const overview = buildReviewOverview(baseInput({ conclusion }));
     expect(overview).not.toMatch(/[,;:\-–—]…/);
+  });
+
+  it("property-style invariant: for a wide table of representative conclusions, the excerpt (with ellipsis) never exceeds 150 code points", () => {
+    const cases = [
+      "",
+      "A",
+      "A".repeat(149) + ".",
+      "A".repeat(150) + ".",
+      "A".repeat(151) + ".",
+      "This is ordinary prose that runs on for a while before it eventually reaches a natural stopping point after several clauses.",
+      "word ".repeat(60) + "end.",
+      "x".repeat(5000),
+      "x".repeat(5000) + " trailing prose after the token.",
+      "https://example.com/" + "a".repeat(1000),
+      "本".repeat(500),
+      "😀".repeat(300),
+      "é".repeat(200),
+      "First sentence here. Second sentence follows with more detail and elaboration that goes on for quite a while.",
+    ];
+    for (const conclusion of cases) {
+      const overview = buildReviewOverview(baseInput({ conclusion }));
+      if (conclusion.trim().length === 0) {
+        expect(overview).not.toMatch(/panel's finding/i);
+        continue;
+      }
+      const excerpt = extractExcerpt(overview);
+      expect(codePointCount(excerpt)).toBeLessThanOrEqual(150);
+    }
   });
 });
 
