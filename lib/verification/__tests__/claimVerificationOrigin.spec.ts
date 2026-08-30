@@ -20,7 +20,7 @@ function resetStore() {
   runsStore.clear();
 }
 
-const mockAdminDb: any = {
+let mockAdminDb: any = {
   collection: (name: string) => {
     if (name !== "runs") {
       throw new Error(`not implemented in claimVerificationOrigin fake: collection "${name}"`);
@@ -320,7 +320,6 @@ describe("resolveClaimVerificationOrigin — client-supplied input contract", ()
       claimId: "finding-1",
       callerUid: CALLER_UID,
       expectedWorkspaceId: null,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       claimText: "ATTACKER-SUPPLIED CLAIM TEXT",
     } as any);
     expect(result.status).toBe("resolved");
@@ -336,7 +335,6 @@ describe("resolveClaimVerificationOrigin — client-supplied input contract", ()
       claimId: "finding-1",
       callerUid: CALLER_UID,
       expectedWorkspaceId: WORKSPACE_B, // caller claims to expect a DIFFERENT workspace
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       origin: { type: "deep_research_claim", runId: RUN_ID, claimId: "finding-1", workspaceId: WORKSPACE_B },
     } as any);
     // The injected `origin` object claims WORKSPACE_B; the resolver must still
@@ -422,8 +420,8 @@ describe("resolveClaimVerificationOrigin — disclosure boundary (documented, no
   });
 });
 
-describe("resolveClaimVerificationOrigin — infrastructure failure", () => {
-  it("a genuine Firestore read failure is never reinterpreted as run_not_found", async () => {
+describe("resolveClaimVerificationOrigin — infrastructure failure propagates, it is never a domain result", () => {
+  it("a genuine Firestore read failure REJECTS the promise with the original error — never reinterpreted as run_not_found or any other denied reason", async () => {
     const original = mockAdminDb.collection;
     mockAdminDb.collection = (name: string) => {
       if (name !== "runs") throw new Error("unexpected collection");
@@ -436,10 +434,23 @@ describe("resolveClaimVerificationOrigin — infrastructure failure", () => {
       };
     };
     try {
-      const result = await resolveClaimVerificationOrigin({ runId: RUN_ID, claimId: "finding-1", callerUid: CALLER_UID, expectedWorkspaceId: null });
-      expect(result).toEqual({ status: "lookup_failed" });
+      await expect(
+        resolveClaimVerificationOrigin({ runId: RUN_ID, claimId: "finding-1", callerUid: CALLER_UID, expectedWorkspaceId: null })
+      ).rejects.toThrow("simulated Firestore outage");
     } finally {
       mockAdminDb.collection = original;
+    }
+  });
+
+  it("adminDb unavailable also REJECTS the promise, matching saveClaimVerification()'s own convention for the identical condition — never a denied reason", async () => {
+    const original = mockAdminDb;
+    mockAdminDb = null;
+    try {
+      await expect(
+        resolveClaimVerificationOrigin({ runId: RUN_ID, claimId: "finding-1", callerUid: CALLER_UID, expectedWorkspaceId: null })
+      ).rejects.toThrow("Firestore is not available");
+    } finally {
+      mockAdminDb = original;
     }
   });
 });

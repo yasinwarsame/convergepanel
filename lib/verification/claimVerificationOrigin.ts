@@ -41,18 +41,20 @@ export type ClaimVerificationOriginDenialReason =
  * contract) so a later creation phase can derive the verification's own
  * top-level `projectId` from the source run without a second Firestore
  * read — see PROJECT CONTRACT in the 11A.0C1 closure.
+ *
+ * Deliberately has NO variant for a genuine infrastructure failure. This
+ * union expresses exactly two things: "the domain request resolved to a
+ * usable claim" or "the domain request is invalid for one of five specific
+ * reasons." A Firestore outage is neither — it means the resolver could not
+ * determine an answer at all, which is not a fact about the caller's
+ * request. Collapsing it into either shape would let a caller mistake an
+ * operational outage for an authorization/domain result. See
+ * resolveClaimVerificationOrigin()'s own doc comment for how this
+ * propagates instead.
  */
 export type ClaimVerificationOriginResolution =
   | { status: "resolved"; origin: ClaimVerificationOrigin; claimText: string; projectId: string | null }
-  | { status: "denied"; reason: ClaimVerificationOriginDenialReason }
-  /**
-   * A genuine infrastructure failure (Firestore unavailable) — deliberately
-   * NOT one of the `denied` reasons above and never collapsed into
-   * `run_not_found`. Named to match this codebase's existing convention for
-   * the same failure mode (e.g. `listViewerTeamWorkspaces.ts`'s
-   * `{ status: "lookup_failed" }`), not invented for this module.
-   */
-  | { status: "lookup_failed" };
+  | { status: "denied"; reason: ClaimVerificationOriginDenialReason };
 
 /**
  * Exact-match only. Deliberately NOT fuzzy: no title matching, no summary
@@ -89,6 +91,17 @@ export function findClaimInDeepResearchFindings(
  * Scope is always resolved before the adaptive output is ever inspected,
  * so a scope-mismatched caller never learns anything about the run's
  * claim/schema contents.
+ *
+ * INFRASTRUCTURE FAILURE (deliberate, see ClaimVerificationOriginResolution's
+ * own doc comment): a genuine Firestore outage is not a domain result and is
+ * never caught/converted into one — this function lets it propagate as a
+ * rejected promise, exactly like `saveClaimVerification()`
+ * (lib/firestore/verifications.ts) throws `Error("Firestore is not
+ * available")` for the identical `!adminDb` condition rather than returning
+ * a structured failure. A caller of this resolver is expected to treat a
+ * thrown/rejected error as "we could not determine the answer," distinct
+ * from every `denied` reason above, which all mean "we determined the
+ * answer, and it is no."
  */
 export async function resolveClaimVerificationOrigin(args: {
   runId: string;
@@ -97,20 +110,14 @@ export async function resolveClaimVerificationOrigin(args: {
   expectedWorkspaceId: string | null;
 }): Promise<ClaimVerificationOriginResolution> {
   if (!adminDb) {
-    return { status: "lookup_failed" };
+    throw new Error("Firestore is not available");
   }
 
-  let raw: Record<string, unknown> | undefined;
-  try {
-    const snap = await adminDb.collection("runs").doc(args.runId).get();
-    if (!snap.exists) {
-      return { status: "denied", reason: "run_not_found" };
-    }
-    raw = snap.data();
-  } catch {
-    // Genuine Firestore failure — never reinterpreted as "no such run".
-    return { status: "lookup_failed" };
+  const snap = await adminDb.collection("runs").doc(args.runId).get();
+  if (!snap.exists) {
+    return { status: "denied", reason: "run_not_found" };
   }
+  const raw = snap.data();
 
   if (!raw) {
     return { status: "denied", reason: "run_not_found" };
