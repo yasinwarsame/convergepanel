@@ -5,6 +5,20 @@
  * plus one pure issuance helper: no route wiring, no UI, no persistence
  * write.
  *
+ * ============== 11A.2a — EVIDENCE SOURCE-REFERENCE EXTRACTION ==============
+ * The resolved result also carries `evidenceSources`, derived from the
+ * SAME exact finding object the selector fingerprint already
+ * cryptographically re-verified — never a second Firestore read, never a
+ * re-lookup by raw id, never concatenated across sections or findings.
+ * `normalizeEvidenceSourceReferences()` (`./evidenceSourceExtraction.ts`)
+ * is a pure, defensive normalizer over that finding's raw `sources` field
+ * (untrusted Firestore data — PR #112/Phase 10D.1's
+ * `AggregatedResearchFinding.sources: string[]`): malformed/missing
+ * sources degrade to `[]`, never to a denial — source-reference
+ * availability is subordinate metadata, not part of claim identity. These
+ * are SOURCE REFERENCES, not evidence content: surviving entries prove a
+ * model cited the URL, never what it said or whether it still says it.
+ *
  * ============== 11A.1C3 — PERSONAL WORKSPACE SCOPE CLASSIFICATION ==============
  * A source audit (11A.1C3A) established that this repository has TWO
  * equally-valid, permanent Personal-run representations — `workspaceId`
@@ -92,6 +106,7 @@ import { createHash, timingSafeEqual } from "crypto";
 import { adminDb } from "@/lib/firebase/admin";
 import { parsePersistedAdaptiveOutput } from "@/lib/adaptiveSchema/persistedOutput";
 import { classifyRunWorkspaceBindingShape } from "@/lib/workspaces/classifyRunWorkspaceBindingShape";
+import { normalizeEvidenceSourceReferences, type EvidenceSourceReference } from "./evidenceSourceExtraction";
 
 export interface ClaimVerificationOrigin {
   type: "deep_research_claim";
@@ -123,7 +138,7 @@ export type ClaimVerificationOriginDenialReason =
  * propagates instead.
  */
 export type ClaimVerificationOriginResolution =
-  | { status: "resolved"; origin: ClaimVerificationOrigin; claimText: string; projectId: string | null }
+  | { status: "resolved"; origin: ClaimVerificationOrigin; claimText: string; projectId: string | null; evidenceSources: EvidenceSourceReference[] }
   | { status: "denied"; reason: ClaimVerificationOriginDenialReason };
 
 export type DeepResearchClaimSection = "findings" | "lowConfidenceFindings";
@@ -408,10 +423,16 @@ export async function resolveClaimVerificationOrigin(args: {
 
   const projectId = typeof raw.projectId === "string" ? raw.projectId : null;
 
+  // Derived from the SAME `target` the fingerprint above just
+  // cryptographically re-verified — no second Firestore read, no
+  // re-lookup by raw id, no cross-section/cross-finding concatenation.
+  const evidenceSources = normalizeEvidenceSourceReferences(target.sources);
+
   return {
     status: "resolved",
     origin: { type: "deep_research_claim", runId: args.runId, claimId: args.claimId },
     claimText: target.summary,
     projectId,
+    evidenceSources,
   };
 }
