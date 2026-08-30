@@ -190,6 +190,7 @@ describe("resolveClaimVerificationOrigin — Personal", () => {
       origin: { type: "deep_research_claim", runId: RUN_ID, claimId },
       claimText: "Remote work modestly reduces measured productivity in most studies.",
       projectId: null,
+      evidenceSources: [],
     });
   });
 
@@ -213,6 +214,7 @@ describe("resolveClaimVerificationOrigin — Personal Workspace scope classifica
       origin: { type: "deep_research_claim", runId: RUN_ID, claimId },
       claimText: "Remote work modestly reduces measured productivity in most studies.",
       projectId: null,
+      evidenceSources: [],
     });
   });
 
@@ -900,6 +902,137 @@ describe("resolveClaimVerificationOrigin — project passthrough", () => {
     const result = await resolveClaimVerificationOrigin({ runId: RUN_ID, claimId, callerUid: CALLER_UID, expectedWorkspaceId: null });
     expect(result.status).toBe("resolved");
     if (result.status === "resolved") expect(result.projectId).toBeNull();
+  });
+});
+
+describe("resolveClaimVerificationOrigin — evidence source extraction (11A.2a)", () => {
+  it("A/B. resolved result derives evidenceSources from the target finding's own sources field", async () => {
+    const f = finding({ sources: ["https://a.example/1", "https://b.example/2"] });
+    seedRun({ adaptiveOutput: deepResearchOutput([f]) });
+    const claimId = selectorFor(RUN_ID, "findings", 0, f);
+    const result = await resolveClaimVerificationOrigin({ runId: RUN_ID, claimId, callerUid: CALLER_UID, expectedWorkspaceId: null });
+    expect(result.status).toBe("resolved");
+    if (result.status === "resolved") {
+      expect(result.evidenceSources).toEqual([
+        { url: "https://a.example/1", hostname: "a.example" },
+        { url: "https://b.example/2", hostname: "b.example" },
+      ]);
+    }
+  });
+
+  it("C. low-confidence finding sources are extracted identically to a normal finding", async () => {
+    const f = finding({ id: "lc-1", sources: ["https://lowconf.example/x"] });
+    seedRun({ adaptiveOutput: deepResearchOutput([finding()], [f]) });
+    const claimId = selectorFor(RUN_ID, "lowConfidenceFindings", 0, f);
+    const result = await resolveClaimVerificationOrigin({ runId: RUN_ID, claimId, callerUid: CALLER_UID, expectedWorkspaceId: null });
+    expect(result.status).toBe("resolved");
+    if (result.status === "resolved") {
+      expect(result.evidenceSources).toEqual([{ url: "https://lowconf.example/x", hostname: "lowconf.example" }]);
+    }
+  });
+
+  it("D. zero sources on a valid finding -> evidenceSources: [], claim still resolves", async () => {
+    const f = finding({ sources: [] });
+    seedRun({ adaptiveOutput: deepResearchOutput([f]) });
+    const claimId = selectorFor(RUN_ID, "findings", 0, f);
+    const result = await resolveClaimVerificationOrigin({ runId: RUN_ID, claimId, callerUid: CALLER_UID, expectedWorkspaceId: null });
+    expect(result.status).toBe("resolved");
+    if (result.status === "resolved") expect(result.evidenceSources).toEqual([]);
+  });
+
+  it("E. sources field absent on a valid finding -> evidenceSources: [], claim still resolves", async () => {
+    const f = finding();
+    seedRun({ adaptiveOutput: deepResearchOutput([f]) });
+    const claimId = selectorFor(RUN_ID, "findings", 0, f);
+    const result = await resolveClaimVerificationOrigin({ runId: RUN_ID, claimId, callerUid: CALLER_UID, expectedWorkspaceId: null });
+    expect(result.status).toBe("resolved");
+    if (result.status === "resolved") expect(result.evidenceSources).toEqual([]);
+  });
+
+  it("F/V. sources non-array on a valid finding -> evidenceSources: [], never invalidates the claim (malformed source metadata is subordinate to claim identity)", async () => {
+    const f = finding({ sources: "not-an-array" });
+    seedRun({ adaptiveOutput: deepResearchOutput([f]) });
+    const claimId = selectorFor(RUN_ID, "findings", 0, f);
+    const result = await resolveClaimVerificationOrigin({ runId: RUN_ID, claimId, callerUid: CALLER_UID, expectedWorkspaceId: null });
+    expect(result.status).toBe("resolved");
+    if (result.status === "resolved") expect(result.evidenceSources).toEqual([]);
+  });
+
+  it("G. mixed valid/malformed sources (including a dangerous scheme and a credential-bearing URL) -> only valid safe sources survive, claim still resolves", async () => {
+    const f = finding({ sources: ["https://valid.example/a", "javascript:alert(1)", "https://user:pass@evil.example/b", "NIST glossary"] });
+    seedRun({ adaptiveOutput: deepResearchOutput([f]) });
+    const claimId = selectorFor(RUN_ID, "findings", 0, f);
+    const result = await resolveClaimVerificationOrigin({ runId: RUN_ID, claimId, callerUid: CALLER_UID, expectedWorkspaceId: null });
+    expect(result.status).toBe("resolved");
+    if (result.status === "resolved") {
+      expect(result.evidenceSources).toEqual([{ url: "https://valid.example/a", hostname: "valid.example" }]);
+    }
+  });
+
+  it("P. Claim A cannot receive Claim B's sources — cross-finding isolation within the same section", async () => {
+    const fA = finding({ id: "finding-a", summary: "Claim A", sources: ["https://a-only.example/1"] });
+    const fB = finding({ id: "finding-b", summary: "Claim B", sources: ["https://b-only.example/1"] });
+    seedRun({ adaptiveOutput: deepResearchOutput([fA, fB]) });
+    const claimIdA = selectorFor(RUN_ID, "findings", 0, fA);
+    const claimIdB = selectorFor(RUN_ID, "findings", 1, fB);
+    const resultA = await resolveClaimVerificationOrigin({ runId: RUN_ID, claimId: claimIdA, callerUid: CALLER_UID, expectedWorkspaceId: null });
+    const resultB = await resolveClaimVerificationOrigin({ runId: RUN_ID, claimId: claimIdB, callerUid: CALLER_UID, expectedWorkspaceId: null });
+    expect(resultA.status).toBe("resolved");
+    expect(resultB.status).toBe("resolved");
+    if (resultA.status === "resolved") expect(resultA.evidenceSources).toEqual([{ url: "https://a-only.example/1", hostname: "a-only.example" }]);
+    if (resultB.status === "resolved") expect(resultB.evidenceSources).toEqual([{ url: "https://b-only.example/1", hostname: "b-only.example" }]);
+  });
+
+  it("Q. normal vs low-confidence section association isolation — same index, different sources, never concatenated or cross-contaminated", async () => {
+    const fNormal = finding({ id: "shared-id", sources: ["https://normal-section.example/1"] });
+    const fLow = finding({ id: "shared-id", sources: ["https://low-section.example/1"] });
+    seedRun({ adaptiveOutput: deepResearchOutput([fNormal], [fLow]) });
+    const claimIdNormal = selectorFor(RUN_ID, "findings", 0, fNormal);
+    const claimIdLow = selectorFor(RUN_ID, "lowConfidenceFindings", 0, fLow);
+    const resultNormal = await resolveClaimVerificationOrigin({ runId: RUN_ID, claimId: claimIdNormal, callerUid: CALLER_UID, expectedWorkspaceId: null });
+    const resultLow = await resolveClaimVerificationOrigin({ runId: RUN_ID, claimId: claimIdLow, callerUid: CALLER_UID, expectedWorkspaceId: null });
+    expect(resultNormal.status).toBe("resolved");
+    expect(resultLow.status).toBe("resolved");
+    if (resultNormal.status === "resolved") expect(resultNormal.evidenceSources).toEqual([{ url: "https://normal-section.example/1", hostname: "normal-section.example" }]);
+    if (resultLow.status === "resolved") expect(resultLow.evidenceSources).toEqual([{ url: "https://low-section.example/1", hostname: "low-section.example" }]);
+  });
+
+  it("R. Personal resolved origin includes evidenceSources", async () => {
+    const f = finding({ sources: ["https://personal.example/1"] });
+    seedRun({ adaptiveOutput: deepResearchOutput([f]) });
+    const claimId = selectorFor(RUN_ID, "findings", 0, f);
+    const result = await resolveClaimVerificationOrigin({ runId: RUN_ID, claimId, callerUid: CALLER_UID, expectedWorkspaceId: null });
+    expect(result.status).toBe("resolved");
+    if (result.status === "resolved") expect(result.evidenceSources).toEqual([{ url: "https://personal.example/1", hostname: "personal.example" }]);
+  });
+
+  it("S. Team resolved origin includes evidenceSources", async () => {
+    const f = finding({ sources: ["https://team.example/1"] });
+    seedRun({ workspaceId: WORKSPACE_A, adaptiveOutput: deepResearchOutput([f]) });
+    const claimId = selectorFor(RUN_ID, "findings", 0, f);
+    const result = await resolveClaimVerificationOrigin({ runId: RUN_ID, claimId, callerUid: CALLER_UID, expectedWorkspaceId: WORKSPACE_A });
+    expect(result.status).toBe("resolved");
+    if (result.status === "resolved") expect(result.evidenceSources).toEqual([{ url: "https://team.example/1", hostname: "team.example" }]);
+  });
+
+  it("T. a stale/tampered selector still denies before source extraction ever runs — no evidenceSources appears on a denied result", async () => {
+    const f = finding({ sources: ["https://original.example/1"] });
+    seedRun({ adaptiveOutput: deepResearchOutput([f]) });
+    const claimId = selectorFor(RUN_ID, "findings", 0, f);
+    // Canonical data changes after the selector was issued.
+    const mutated = finding({ id: f.id, summary: "Different content now", sources: ["https://different.example/1"] });
+    seedRun({ adaptiveOutput: deepResearchOutput([mutated]) });
+    const result = await resolveClaimVerificationOrigin({ runId: RUN_ID, claimId, callerUid: CALLER_UID, expectedWorkspaceId: null });
+    expect(result).toEqual({ status: "denied", reason: "claim_not_found" });
+    expect(result).not.toHaveProperty("evidenceSources");
+  });
+
+  it("U. malformed claim target (index out of range) remains claim_not_found, not affected by source extraction logic", async () => {
+    const f = finding({ sources: ["https://only-one.example/1"] });
+    seedRun({ adaptiveOutput: deepResearchOutput([f]) });
+    const claimId = selectorFor(RUN_ID, "findings", 5, f); // index 5 doesn't exist — only index 0 does
+    const result = await resolveClaimVerificationOrigin({ runId: RUN_ID, claimId, callerUid: CALLER_UID, expectedWorkspaceId: null });
+    expect(result).toEqual({ status: "denied", reason: "claim_not_found" });
   });
 });
 
