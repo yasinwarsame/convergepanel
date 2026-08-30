@@ -60,6 +60,7 @@ import { roleHasCapability } from "@/lib/workspaces/capabilities";
 import { isWellFormedProjectV1 } from "@/lib/projects/types";
 import { sanitizeForFirestore } from "@/lib/firestore/sanitizeForFirestore";
 import type { ClaimVerificationFirestoreDoc } from "@/lib/firestore/verifications";
+import type { ClaimVerificationOrigin } from "@/lib/verification/claimVerificationOrigin";
 
 // ============================================================
 // GATE 1 — execution admission (read-only, no write)
@@ -254,7 +255,13 @@ export async function saveTeamClaimVerification(args: {
         }
       }
 
-      const canonicalDoc: ClaimVerificationFirestoreDoc & { workspaceId: string; projectId: string | null } = {
+      // Phase 11A.1 — `origin` is optional on the base ClaimVerificationFirestoreDoc
+      // and carried through here explicitly for clarity; it is intentionally
+      // never set by this function yet. Writing it requires resolving it via
+      // resolveClaimVerificationOrigin() BEFORE this transaction opens (the
+      // resolver performs its own Firestore read and must not run inside an
+      // unrelated transaction) — that wiring is Phase 11A.3's job, not this one.
+      const canonicalDoc: ClaimVerificationFirestoreDoc & { workspaceId: string; projectId: string | null; origin?: ClaimVerificationOrigin } = {
         userId: args.uid,
         claim: args.claim,
         type: "claim_verification",
