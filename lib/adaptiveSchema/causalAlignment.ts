@@ -192,6 +192,7 @@ export function buildCausalExplanationResult(
       unknowns: [],
       testsOrEvidenceNeeded: [],
       sourceBacked: false,
+      sources: [],
       totalModels,
     };
   }
@@ -199,6 +200,8 @@ export function buildCausalExplanationResult(
   const directAnswer = modeOrLongest(perModel.map((p) => p.fields.directAnswer).filter((a) => a.trim().length > 0));
   const modelsWithSources = new Set(perModel.filter((p) => p.fields.sources.length > 0).map((p) => p.modelId));
   const sourceBacked = modelsWithSources.size > 0;
+  // Phase 10D.1 — exact-string dedup only (mirrors decisionReceiptBuilder.ts's dedupeExact), never fuzzy-clustered.
+  const sources = Array.from(new Set(perModel.flatMap((p) => p.fields.sources).map((s) => s.trim()).filter((s) => s.length > 0)));
 
   const usedFactorIds = new Set<string>();
 
@@ -319,6 +322,7 @@ export function buildCausalExplanationResult(
     unknowns,
     testsOrEvidenceNeeded,
     sourceBacked,
+    sources,
     totalModels,
   };
 }

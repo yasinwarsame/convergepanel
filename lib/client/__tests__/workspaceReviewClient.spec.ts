@@ -290,6 +290,7 @@ describe("hasUsableDecisionReceipt — 10C.4A-U2C corrected defensive validator 
     assumptions: [],
     uncertainties: [],
     limitations: [],
+    sources: [],
     sourceBacked: true,
     humanReviewNeeded: false,
   };
@@ -314,6 +315,7 @@ describe("hasUsableDecisionReceipt — 10C.4A-U2C corrected defensive validator 
         assumptions: [],
         uncertainties: [],
         limitations: [],
+        sources: [],
         sourceBacked: false,
         humanReviewNeeded: false,
       })
@@ -329,7 +331,7 @@ describe("hasUsableDecisionReceipt — 10C.4A-U2C corrected defensive validator 
     expect(hasUsableDecisionReceipt(value)).toBe(false);
   });
 
-  it.each(["conclusion", "basis", "assumptions", "uncertainties", "limitations", "sourceBacked", "humanReviewNeeded"])("D: rejects a receipt missing the %s field", (field) => {
+  it.each(["conclusion", "basis", "assumptions", "uncertainties", "limitations", "sources", "sourceBacked", "humanReviewNeeded"])("D: rejects a receipt missing the %s field", (field) => {
     const { [field]: _omit, ...rest } = VALID as Record<string, unknown>;
     expect(hasUsableDecisionReceipt(rest)).toBe(false);
   });
@@ -340,9 +342,14 @@ describe("hasUsableDecisionReceipt — 10C.4A-U2C corrected defensive validator 
     expect(hasUsableDecisionReceipt({ ...VALID, sourceBacked: "yes" })).toBe(false);
   });
 
-  it("no longer accepts (or requires) a sources field at all — deliberately removed from the Team projection (10C.4A-U2C data minimization)", () => {
-    expect(hasUsableDecisionReceipt(VALID)).toBe(true);
-    expect("sources" in VALID).toBe(false);
+  it("Phase 10D.1: sources is required and must be an array (reintroduced to the Team projection, superseding 10C.4A-U2C's removal) — a receipt with sources present and empty is still usable", () => {
+    expect(hasUsableDecisionReceipt({ ...VALID, sources: [] })).toBe(true);
+    expect(hasUsableDecisionReceipt({ ...VALID, sources: [{ url: "https://example.com/a", hostname: "example.com" }] })).toBe(true);
+  });
+
+  it("Phase 10D.1: rejects a receipt where sources is present but not an array", () => {
+    expect(hasUsableDecisionReceipt({ ...VALID, sources: "not-an-array" })).toBe(false);
+    expect(hasUsableDecisionReceipt({ ...VALID, sources: null })).toBe(false);
   });
 
   describe("partial-degradation real-schema fixtures — reachable via decisionReceiptBuilder.ts's raw per-model pass-through for these 3 of 9 schemas when every contributing model returns empty/whitespace text for the relevant field", () => {

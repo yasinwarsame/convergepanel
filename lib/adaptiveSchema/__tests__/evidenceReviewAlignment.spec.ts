@@ -195,6 +195,33 @@ describe("buildEvidenceReviewResult — source-backed and model coverage", () =>
   });
 });
 
+describe("buildEvidenceReviewResult — sources (Phase 10D.1)", () => {
+  it("preserves every model's own sources, exact-string deduplicated", () => {
+    const result = buildEvidenceReviewResult(
+      perModel([
+        ["chatgpt", fields({ sources: ["https://example.com/a", "Journal of Medicine"] })],
+        ["claude", fields({ sources: ["https://example.com/a", "https://example.com/b"] })],
+      ])
+    );
+    expect(result.sources).toEqual(["https://example.com/a", "Journal of Medicine", "https://example.com/b"]);
+  });
+
+  it("is an empty array when no model cited a source", () => {
+    const result = buildEvidenceReviewResult(perModel([["chatgpt", fields({})]]));
+    expect(result.sources).toEqual([]);
+  });
+
+  it("trims whitespace and drops empty entries", () => {
+    const result = buildEvidenceReviewResult(perModel([["chatgpt", fields({ sources: ["  https://example.com/a  ", "", "   "] })]]));
+    expect(result.sources).toEqual(["https://example.com/a"]);
+  });
+
+  it("is an empty array for a totally empty perModel input", () => {
+    const result = buildEvidenceReviewResult(perModel([["chatgpt", fields()], ["claude", fields()]]));
+    expect(result.sources).toEqual([]);
+  });
+});
+
 describe("buildEvidenceReviewResult — empty and malformed input", () => {
   it("never throws and returns an empty result when no model produced usable data", () => {
     const result = buildEvidenceReviewResult(perModel([["chatgpt", fields()], ["claude", fields()]]));

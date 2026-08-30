@@ -175,6 +175,31 @@ describe("buildDeepResearchResult — source support and model coverage", () => 
     expect(result.findings[0].sourceBacked).toBe(true);
   });
 
+  it("Phase 10D.1: preserves a finding's own per-finding sources, exact-string deduplicated across contributing models", async () => {
+    const result = await buildDeepResearchResult(
+      perModel([
+        ["chatgpt", fields({ findings: [finding({ id: "a", title: "X", summary: "A specific well-documented finding.", sources: ["https://example.com/a", "Journal of Labor Economics"] })] })],
+        ["claude", fields({ findings: [finding({ id: "a", title: "X", summary: "A specific well-documented finding.", sources: ["https://example.com/a"] })] })],
+      ])
+    );
+    expect(result.findings[0].sources).toEqual(["https://example.com/a", "Journal of Labor Economics"]);
+  });
+
+  it("Phase 10D.1: does NOT fall back to the coarser response-level sources for the preserved list — sourceBacked can be true via that fallback while sources stays empty, since there's no actual label/URL attached to preserve", async () => {
+    const result = await buildDeepResearchResult(
+      perModel([["chatgpt", fields({ findings: [finding({ id: "a", title: "X", summary: "A specific well-documented finding." })], sources: ["General survey report"] })]])
+    );
+    expect(result.findings[0].sourceBacked).toBe(true);
+    expect(result.findings[0].sources).toEqual([]);
+  });
+
+  it("Phase 10D.1: is an empty array when a finding has no sources at all", async () => {
+    const result = await buildDeepResearchResult(
+      perModel([["chatgpt", fields({ findings: [finding({ id: "a", title: "X", summary: "A specific well-documented finding." })] })]])
+    );
+    expect(result.findings[0].sources).toEqual([]);
+  });
+
   it("computes coverageRatio from the full attempted model count", async () => {
     const result = await buildDeepResearchResult(
       perModel([

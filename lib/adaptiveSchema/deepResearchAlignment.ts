@@ -182,6 +182,8 @@ export async function buildDeepResearchResult(
     const category = modeOrLongest(group.map((e) => (e.finding.category?.trim() ? e.finding.category.trim() : "General")));
     const contributingModels = Array.from(new Set(group.map((e) => e.modelId)));
     const sourceBacked = group.some((e) => (e.finding.sources && e.finding.sources.length > 0) || e.modelHadSources);
+    // Phase 10D.1 — per-finding union of `finding.sources` (the precise, per-finding attribution) across every model contributing to this cluster; exact-string dedup only, never fuzzy-clustered. Deliberately does NOT fall back to the coarser `modelHadSources` response-level flag — that signal has no actual label/URL attached to preserve.
+    const sources = Array.from(new Set(group.flatMap((e) => e.finding.sources ?? []).map((s) => s.trim()).filter((s) => s.length > 0)));
     const modelAssertedStrengths = group.map((e) => e.finding.evidenceStrength).filter((s): s is CausalEvidenceStrength => !!s);
     // "contested" wins if the panel itself disputes this finding OR any
     // contributing model already called it contested; otherwise fall back
@@ -197,6 +199,7 @@ export async function buildDeepResearchResult(
       category,
       evidenceStrength,
       sourceBacked,
+      sources,
       coverageCount: contributingModels.length,
       totalModels,
       coverageRatio: totalModels > 0 ? contributingModels.length / totalModels : 0,

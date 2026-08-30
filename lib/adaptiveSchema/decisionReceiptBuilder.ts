@@ -203,9 +203,10 @@ function buildCausalExplanationReceipt(result: CausalExplanationResult, meta: Co
     assumptions: [],
     uncertainties,
     limitations: dedupeExact(meta.limitations ?? []),
-    // No per-factor/response-level source LABEL list exists for this schema
-    // — only the sourceBacked approximation booleans. Nothing to preserve.
-    sources: [],
+    // Phase 10D.1 — recovered from the alignment module's own per-model
+    // `fields.sources`, previously computed only into the `sourceBacked`
+    // boolean and discarded. See causalAlignment.ts's `sources` computation.
+    sources: dedupeExact(result.sources),
     sourceBacked: meta.sourceBacked ?? result.sourceBacked,
     humanReviewNeeded: meta.humanReviewNeeded,
   };
@@ -264,9 +265,9 @@ function buildDeepResearchReceipt(result: DeepResearchResult, meta: CommonRespon
     assumptions: [],
     uncertainties,
     limitations: dedupeExact([...(meta.limitations ?? []), ...result.researchBoundaries]),
-    // AggregatedResearchFinding carries only a sourceBacked boolean, no
-    // source label list — nothing to preserve here.
-    sources: [],
+    // Phase 10D.1 — union of every finding's own recovered `sources` list.
+    // See deepResearchAlignment.ts's per-finding `sources` computation.
+    sources: dedupeExact(result.findings.flatMap((f) => f.sources)),
     sourceBacked: meta.sourceBacked ?? result.sourceCoverage.findingsWithSources > 0,
     humanReviewNeeded: meta.humanReviewNeeded,
   };
@@ -289,9 +290,9 @@ function buildEvidenceReviewReceipt(result: EvidenceReviewResult, meta: CommonRe
     assumptions: [],
     uncertainties,
     limitations: dedupeExact([...(meta.limitations ?? []), ...result.recommendedChecks.map((c) => `Recommended check: ${c}`)]),
-    // Only a response-level sourceBacked boolean exists — no per-dimension
-    // source label list to preserve.
-    sources: [],
+    // Phase 10D.1 — recovered from the alignment module's own per-model
+    // `fields.sources`. See evidenceReviewAlignment.ts's `sources` computation.
+    sources: dedupeExact(result.sources),
     sourceBacked: meta.sourceBacked ?? result.sourceBacked,
     humanReviewNeeded: meta.humanReviewNeeded,
   };
@@ -328,9 +329,10 @@ function buildBiasBlindspotAuditReceipt(result: BiasBlindspotAuditResult, meta: 
     assumptions: [],
     uncertainties,
     limitations: dedupeExact(meta.limitations ?? []),
-    // Tier 3 tracks citation COVERAGE (counts), never a raw source label
-    // list — nothing to preserve here without fabricating one.
-    sources: [],
+    // Phase 10D.1 — recovered from the alignment module's own per-model
+    // `fields.sources`, independent of Tier 3's citation-COUNT diagnostics.
+    // See biasBlindspotAlignment.ts's `sources` computation.
+    sources: dedupeExact(result.sources),
     sourceBacked: meta.sourceBacked ?? result.structuralDiagnostics.citationCoverage.modelsWithSources > 0,
     humanReviewNeeded: meta.humanReviewNeeded,
   };
@@ -391,9 +393,9 @@ function buildDecisionSupportReceipt(result: DecisionSupportResult, meta: Common
     assumptions: result.assumptions,
     uncertainties,
     limitations,
-    // No per-assessment source label list exists — only the response-level
-    // sourceBacked boolean (see decisionSupportAlignment.ts).
-    sources: [],
+    // Phase 10D.1 — recovered from the alignment module's own per-model
+    // `fields.sources`. See decisionSupportAlignment.ts's `sources` computation.
+    sources: dedupeExact(result.sources),
     // meta.humanReviewNeeded, for this schema specifically, already reuses
     // result.humanReviewNeeded directly (see
     // commonResponseMeta.ts::getAdaptiveHumanReviewSignals) — using meta

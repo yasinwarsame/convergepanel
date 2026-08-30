@@ -180,6 +180,7 @@ const causalExplanationResult: CausalExplanationResult = {
   unknowns: ["Long-run elasticity of supply"],
   testsOrEvidenceNeeded: ["A controlled natural experiment"],
   sourceBacked: false,
+  sources: [],
   totalModels: 2,
 };
 
@@ -203,7 +204,7 @@ const checklistTaxonomyResult: ChecklistTaxonomyResult = {
 const deepResearchResult: DeepResearchResult = {
   executiveSummary: "Remote work modestly reduces measured productivity in most studies.",
   findings: [
-    { id: "f1", title: "Productivity decline", summary: "x", category: "Labor economics", evidenceStrength: "moderate", sourceBacked: true, coverageCount: 2, totalModels: 2, coverageRatio: 1, contributingModels: [] },
+    { id: "f1", title: "Productivity decline", summary: "x", category: "Labor economics", evidenceStrength: "moderate", sourceBacked: true, sources: ["https://example.com/study"], coverageCount: 2, totalModels: 2, coverageRatio: 1, contributingModels: [] },
   ],
   lowConfidenceFindings: [],
   disagreements: [{ label: "Whether the effect is causal or selection-driven", supportingModels: [] }],
@@ -226,6 +227,7 @@ const evidenceReviewResult: EvidenceReviewResult = {
   applicabilityCaveats: ["Only studied in one country"],
   recommendedChecks: ["Check for replication"],
   sourceBacked: true,
+  sources: ["https://example.com/evidence-review-source"],
   totalModels: 2,
 };
 
@@ -247,6 +249,7 @@ const biasBlindspotAuditResult: BiasBlindspotAuditResult = {
     homogeneityMessage: "Unusually uniform agreement. Models may share training data or assumptions, so strong consensus is not independent verification.",
   },
   followUpQuestions: ["How does this compare internationally?"],
+  sources: ["https://example.com/bias-audit-source"],
   totalModels: 2,
 };
 
@@ -266,6 +269,7 @@ const decisionSupportResult: DecisionSupportResult = {
   reversibleNextStep: "Run a 2-week pilot with HubSpot.",
   humanReviewNeeded: false,
   sourceBacked: false,
+  sources: [],
   totalModels: 2,
 };
 
@@ -355,12 +359,12 @@ describe("buildAdaptiveDecisionReceipt — shared contract", () => {
       ranked_enumeration: { items: [], lowConfidenceItems: [], requestedCount: null, actualCount: 0, rankCorrelation: null, hasLiveQueryLogData: false, totalModels: 0 },
       comparison_matrix: { subjects: [], lowConfidenceSubjects: [], attributes: [], lowConfidenceAttributes: [], cells: [], hasVerifiedSourceData: false, totalModels: 0 },
       definition_explanation: { primary: null, alternateInterpretations: [], isAmbiguous: false, sourceBacked: false, totalModels: 0 },
-      causal_explanation: { directAnswer: "", factors: [], causalChain: [], confounders: [], disputedInterpretations: [], unknowns: [], testsOrEvidenceNeeded: [], sourceBacked: false, totalModels: 0 },
+      causal_explanation: { directAnswer: "", factors: [], causalChain: [], confounders: [], disputedInterpretations: [], unknowns: [], testsOrEvidenceNeeded: [], sourceBacked: false, sources: [], totalModels: 0 },
       checklist_taxonomy: { summary: "", categories: [], lowConfidenceItems: [], notes: [], totalModels: 0 },
       deep_research: { executiveSummary: "", findings: [], lowConfidenceFindings: [], disagreements: [], evidenceGaps: [], openQuestions: [], panelBlindSpots: [], researchBoundaries: [], recommendedNextSteps: [], sourceCoverage: { findingsWithSources: 0, totalFindings: 0, coverageRatio: 0 }, totalModels: 0 },
-      evidence_review: { overallAssessment: "", overallStrength: "unknown", dimensions: [], lowConfidenceDimensions: [], redFlags: [], strengths: [], applicabilityCaveats: [], recommendedChecks: [], sourceBacked: false, totalModels: 0 },
-      bias_blindspot_audit: { summary: "", attributedBiases: [], biasEmptyReason: null, panelBlindSpots: [], sharedAssumptions: [], missingStakeholders: [], structuralDiagnostics: { citationCoverage: { modelsWithSources: 0, totalModels: 0, ratio: 0 }, geographicBiasConcerns: [], sourceConcentrationConcerns: [], evidenceTypeConcerns: [], homogeneityFlag: false }, followUpQuestions: [], totalModels: 0 },
-      decision_support: { decisionQuestion: "", options: [], criteria: [], assessments: [], recommendation: { action: "escalate", rationale: "", caveats: [], isContested: false, supportCount: 0, totalModelsWithRecommendation: 0 }, assumptions: [], uncertainties: [], risks: [], sensitivityFindings: [], humanReviewNeeded: true, sourceBacked: false, totalModels: 0 },
+      evidence_review: { overallAssessment: "", overallStrength: "unknown", dimensions: [], lowConfidenceDimensions: [], redFlags: [], strengths: [], applicabilityCaveats: [], recommendedChecks: [], sourceBacked: false, sources: [], totalModels: 0 },
+      bias_blindspot_audit: { summary: "", attributedBiases: [], biasEmptyReason: null, panelBlindSpots: [], sharedAssumptions: [], missingStakeholders: [], structuralDiagnostics: { citationCoverage: { modelsWithSources: 0, totalModels: 0, ratio: 0 }, geographicBiasConcerns: [], sourceConcentrationConcerns: [], evidenceTypeConcerns: [], homogeneityFlag: false }, followUpQuestions: [], sources: [], totalModels: 0 },
+      decision_support: { decisionQuestion: "", options: [], criteria: [], assessments: [], recommendation: { action: "escalate", rationale: "", caveats: [], isContested: false, supportCount: 0, totalModelsWithRecommendation: 0 }, assumptions: [], uncertainties: [], risks: [], sensitivityFindings: [], humanReviewNeeded: true, sourceBacked: false, sources: [], totalModels: 0 },
     };
     for (const schemaId of ALL_SCHEMA_IDS) {
       expect(() => buildAdaptiveDecisionReceipt(envelope(schemaId, emptyFixtures[schemaId]))).not.toThrow();

@@ -139,7 +139,7 @@ export default function WorkspaceRunReviewSection({ workspaceId, runId }: { work
 
   if (!context) return null;
 
-  const { review, decisionReceipt, assignment, assignmentRevision, panel, viewer } = context;
+  const { review, decisionReceipt, reviewOverview, assignment, assignmentRevision, panel, viewer } = context;
   const statusLabel = getReviewStatusLabel(review.status);
   const statusClass = getReviewStatusBadgeClass(review.status);
   const caption = decidedViaCaption(review.decidedVia);
@@ -163,7 +163,7 @@ export default function WorkspaceRunReviewSection({ workspaceId, runId }: { work
     <section className="mt-8 space-y-4">
       <h2 className="text-lg font-semibold text-cp-text">Review</h2>
 
-      <DecisionReceiptSection receipt={decisionReceipt} />
+      <DecisionReceiptSection receipt={decisionReceipt} reviewOverview={reviewOverview} />
 
       <div className="rounded-xl border border-cp-border bg-cp-surface p-5 shadow-sm">
         <div className="flex flex-wrap items-center gap-2">

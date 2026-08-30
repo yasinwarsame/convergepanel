@@ -198,6 +198,27 @@ describe("buildCausalExplanationResult — model coverage and source-backed aggr
     expect(result.factors[0].sourceBacked).toBe(false);
     expect(result.sourceBacked).toBe(false);
   });
+
+  it("Phase 10D.1: preserves every model's own sources, exact-string deduplicated", () => {
+    const result = buildCausalExplanationResult(
+      perModel([
+        ["chatgpt", fields({ sources: ["https://example.com/a", "Federal Reserve report"] })],
+        ["claude", fields({ sources: ["https://example.com/a", "https://example.com/b"] })],
+      ]),
+      2
+    );
+    expect(result.sources).toEqual(["https://example.com/a", "Federal Reserve report", "https://example.com/b"]);
+  });
+
+  it("Phase 10D.1: is an empty array when no model cited a source", () => {
+    const result = buildCausalExplanationResult(perModel([["chatgpt", fields({ directCauses: ["Rising demand"] })]]), 1);
+    expect(result.sources).toEqual([]);
+  });
+
+  it("Phase 10D.1: is an empty array for a totally empty perModel input", () => {
+    const result = buildCausalExplanationResult(perModel([]), 0);
+    expect(result.sources).toEqual([]);
+  });
 });
 
 describe("buildCausalExplanationResult — correlation-only output never becomes a causal conclusion", () => {

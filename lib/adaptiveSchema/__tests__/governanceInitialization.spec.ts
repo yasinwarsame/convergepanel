@@ -59,6 +59,7 @@ const decisionSupportResult: DecisionSupportResult = {
   reversibleNextStep: "Run a 2-week pilot with HubSpot.",
   humanReviewNeeded: false,
   sourceBacked: false,
+  sources: [],
   totalModels: 2,
 };
 

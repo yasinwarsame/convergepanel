@@ -272,6 +272,8 @@ export async function buildBiasBlindspotAuditResult(
   });
 
   const structuralDiagnostics = computeStructuralDiagnostics(perModel, totalModels);
+  // Phase 10D.1 — exact-string dedup only (mirrors decisionReceiptBuilder.ts's dedupeExact), never fuzzy-clustered. Independent of computeStructuralDiagnostics()'s own `allSources` (that one feeds a clustering-based concentration ratio, not a preserved label/URL list).
+  const sources = Array.from(new Set(perModel.flatMap((p) => p.fields.sources).map((s) => s.trim()).filter((s) => s.length > 0)));
 
   return {
     summary,
@@ -282,6 +284,7 @@ export async function buildBiasBlindspotAuditResult(
     missingStakeholders,
     structuralDiagnostics,
     followUpQuestions,
+    sources,
     totalModels,
   };
 }
