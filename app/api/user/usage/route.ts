@@ -109,6 +109,25 @@ function projectsUiEnabledFor(uid: string): boolean {
  * boolean either way — never leaks Workspace ids, canary source, or
  * membership count, and never distinguishes WHY it's `false`.
  */
+/**
+ * Team Workspace Self-Service Onboarding — the single call site computing
+ * `teamWorkspacesUiEnabled`, a pure/zero-I/O ADMISSION-only signal
+ * (deliberately NOT `workspaceReviewsUiEnabledFor()`'s existing-membership
+ * requirement): the top-level "Team" nav entry must remain visible to an
+ * eligible uid with ZERO Workspace memberships, since it is itself the
+ * only path to creating a first Workspace. Team-canary-Workspace-only
+ * admission (a uid with no uid/global admission, but membership in a
+ * Workspace-canary-admitted Workspace) is intentionally NOT covered
+ * here — that caller already has no self-service creation path under
+ * `resolveTeamWorkspacesMode()`, and `workspaceReviewsUiEnabledFor()`
+ * above already reaches them for the Reviews link once they have a
+ * membership. This flag governs discoverability of Workspace CREATION
+ * specifically.
+ */
+function teamWorkspacesUiEnabledFor(uid: string): boolean {
+  return resolveTeamWorkspacesMode({ uid, globalEnabled: TEAM_WORKSPACES_ENABLED, canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS }).enabled;
+}
+
 async function workspaceReviewsUiEnabledFor(uid: string): Promise<boolean> {
   const admission = resolveApprovalWorkflowAdmission({ uid, globalEnabled: APPROVAL_WORKFLOW_ENABLED, canaryUidsRaw: APPROVAL_WORKFLOW_CANARY_UIDS });
   if (!admission.admitted) return false;
@@ -249,6 +268,7 @@ export async function GET(req: NextRequest) {
           workspaceUiEnabled: workspaceUiEnabledFor(uid),
           projectsUiEnabled: projectsUiEnabledFor(uid),
           workspaceReviewsUiEnabled: await workspaceReviewsUiEnabledFor(uid),
+          teamWorkspacesUiEnabled: teamWorkspacesUiEnabledFor(uid),
         },
         { status: 200 }
       );
@@ -357,6 +377,7 @@ export async function GET(req: NextRequest) {
         workspaceUiEnabled: workspaceUiEnabledFor(uid),
         projectsUiEnabled: projectsUiEnabledFor(uid),
         workspaceReviewsUiEnabled: await workspaceReviewsUiEnabledFor(uid),
+        teamWorkspacesUiEnabled: teamWorkspacesUiEnabledFor(uid),
       },
       { status: 200 }
     );
@@ -392,6 +413,7 @@ export async function GET(req: NextRequest) {
         workspaceUiEnabled: false,
         projectsUiEnabled: false,
         workspaceReviewsUiEnabled: false,
+        teamWorkspacesUiEnabled: false,
       },
       { status: 200 }
     );
