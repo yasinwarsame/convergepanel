@@ -91,6 +91,16 @@ interface UserUsageData {
    * mean hidden, same as every other capability flag here.
    */
   workspaceReviewsUiEnabled?: boolean;
+  /**
+   * Team Workspace Self-Service Onboarding — server-computed via
+   * `resolveTeamWorkspacesMode()` admission alone (no membership
+   * requirement, unlike `workspaceReviewsUiEnabled`) in `GET /api/user/usage`.
+   * Drives TopNav's Team link visibility only — never an authorization
+   * decision; every Team Workspace API re-derives admission
+   * independently. Absent/falsy must mean hidden, same as every other
+   * capability flag here.
+   */
+  teamWorkspacesUiEnabled?: boolean;
 }
 
 interface UseUserPlanReturn {
@@ -116,6 +126,8 @@ interface UseUserPlanReturn {
   projectsUiEnabled: boolean;
   /** Phase 9C.1 — see `UserUsageData.workspaceReviewsUiEnabled`. Always `false` while `loading`, on error, or when signed out — never optimistically `true`. */
   workspaceReviewsUiEnabled: boolean;
+  /** Team Workspace Self-Service Onboarding — see `UserUsageData.teamWorkspacesUiEnabled`. Always `false` while `loading`, on error, or when signed out — never optimistically `true`. */
+  teamWorkspacesUiEnabled: boolean;
   loading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
@@ -145,6 +157,7 @@ const DEFAULT_USAGE: UserUsageData = {
   workspaceUiEnabled: false,
   projectsUiEnabled: false,
   workspaceReviewsUiEnabled: false,
+  teamWorkspacesUiEnabled: false,
 };
 
 // Never throws — returns DEFAULT_USAGE on any error to prevent infinite loading states.
@@ -246,6 +259,7 @@ async function fetchUsage(user: any): Promise<UserUsageData> {
       workspaceUiEnabled: data.workspaceUiEnabled === true,
       projectsUiEnabled: data.projectsUiEnabled === true,
       workspaceReviewsUiEnabled: data.workspaceReviewsUiEnabled === true,
+      teamWorkspacesUiEnabled: data.teamWorkspacesUiEnabled === true,
     };
   } catch (err) {
     // Any network or unexpected error leads to default usage, no throwing.
@@ -400,6 +414,7 @@ export function useUserPlan(): UseUserPlanReturn {
     workspaceUiEnabled: usageData.workspaceUiEnabled === true,
     projectsUiEnabled: usageData.projectsUiEnabled === true,
     workspaceReviewsUiEnabled: usageData.workspaceReviewsUiEnabled === true,
+    teamWorkspacesUiEnabled: usageData.teamWorkspacesUiEnabled === true,
     loading: authLoading || loading,
     error,
     refresh,

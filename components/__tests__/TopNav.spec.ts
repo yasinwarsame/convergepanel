@@ -202,7 +202,7 @@ describe("TopNav — Phase 5C Workspace nav-item integration", () => {
   const mobileMenuBlock = extractBetween('{mobileMenuOpen && (', "</header>");
 
   it("destructures workspaceUiEnabled from useUserPlan(), the same server-computed capability source as governanceDashboardEligible/teamRole", () => {
-    expect(source).toMatch(/const \{ governanceDashboardEligible, plan: userPlan, loading: planLoading, teamRole, workspaceUiEnabled, projectsUiEnabled, workspaceReviewsUiEnabled \} = useUserPlan\(\);/);
+    expect(source).toMatch(/const \{ governanceDashboardEligible, plan: userPlan, loading: planLoading, teamRole, workspaceUiEnabled, projectsUiEnabled, workspaceReviewsUiEnabled, teamWorkspacesUiEnabled \} = useUserPlan\(\);/);
   });
 
   it("gates the desktop Workspace link on !loading && user && !planLoading && workspaceUiEnabled — same shape as the Governance/Team Reviews gates, never optimistically shown", () => {
@@ -262,7 +262,7 @@ describe("TopNav — Phase 7B Projects nav-item integration", () => {
   const mobileMenuBlock = extractBetween('{mobileMenuOpen && (', "</header>");
 
   it("destructures projectsUiEnabled from useUserPlan(), alongside workspaceUiEnabled — the same server-computed capability source", () => {
-    expect(source).toMatch(/const \{ governanceDashboardEligible, plan: userPlan, loading: planLoading, teamRole, workspaceUiEnabled, projectsUiEnabled, workspaceReviewsUiEnabled \} = useUserPlan\(\);/);
+    expect(source).toMatch(/const \{ governanceDashboardEligible, plan: userPlan, loading: planLoading, teamRole, workspaceUiEnabled, projectsUiEnabled, workspaceReviewsUiEnabled, teamWorkspacesUiEnabled \} = useUserPlan\(\);/);
   });
 
   it("gates the desktop Projects link on !loading && user && !planLoading && projectsUiEnabled — same shape as the Workspace gate, never optimistically shown", () => {
@@ -361,19 +361,18 @@ describe("TopNav — Reviews (Team Workspace) nav entry", () => {
     expect(reviewsIdx).toBeLessThan(myReviewsIdx);
   });
 
-  it("carries visible 'Reviews' text — never icon-only navigation", () => {
-    expect(desktopNavBlock).toMatch(/href="\/workspace\/reviews"[\s\S]{0,300}>\s*Reviews\s*</);
-    expect(mobileMenuBlock).toMatch(/href="\/workspace\/reviews"[\s\S]{0,300}>\s*Reviews\s*</);
+  it("carries visible 'Approval Queue' text — never icon-only navigation (Team Workspace Self-Service Onboarding relabeled this link for discoverability; route/gate unchanged)", () => {
+    expect(desktopNavBlock).toMatch(/href="\/workspace\/reviews"[\s\S]{0,300}>\s*Approval Queue\s*</);
+    expect(mobileMenuBlock).toMatch(/href="\/workspace\/reviews"[\s\S]{0,300}>\s*Approval Queue\s*</);
   });
 
   it("uses a label distinguishable from the pre-existing 'Team Reviews' (legacy) and 'My Reviews' (Personal) nav entries — no duplicate-label collision", () => {
     expect(desktopNavBlock).toContain("Team Reviews");
     expect(desktopNavBlock).toContain("My Reviews");
-    expect(desktopNavBlock).toMatch(/>\s*Reviews\s*</);
-    // The exact string "Reviews" (with no adjacent "Team "/"My ") must
-    // exist as its own distinct link label, not merely as a substring of
-    // the other two.
-    expect(desktopNavBlock.match(/>\s*Reviews\s*</g)?.length).toBeGreaterThanOrEqual(1);
+    expect(desktopNavBlock).toMatch(/>\s*Approval Queue\s*</);
+    // The exact string "Approval Queue" (distinct from "Team Reviews"/"My
+    // Reviews") must exist as its own distinct link label.
+    expect(desktopNavBlock.match(/>\s*Approval Queue\s*</g)?.length).toBeGreaterThanOrEqual(1);
   });
 
   it("wires aria-current=\"page\" for /workspace/reviews based on real pathname state, in both blocks", () => {
