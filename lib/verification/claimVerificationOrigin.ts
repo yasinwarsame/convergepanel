@@ -1,8 +1,24 @@
 /**
- * Evidence Workspace, Phase 11A.1 (corrected 11A.1C1/11A.1C2) — the durable
- * origin-linkage foundation for "Deep Research finding -> Verify This
- * Claim -> Claim Verification". This module is read-only derivation plus
- * one pure issuance helper: no route wiring, no UI, no persistence write.
+ * Evidence Workspace, Phase 11A.1 (corrected 11A.1C1/11A.1C2/11A.1C3) — the
+ * durable origin-linkage foundation for "Deep Research finding -> Verify
+ * This Claim -> Claim Verification". This module is read-only derivation
+ * plus one pure issuance helper: no route wiring, no UI, no persistence
+ * write.
+ *
+ * ============== 11A.1C3 — PERSONAL WORKSPACE SCOPE CLASSIFICATION ==============
+ * A source audit (11A.1C3A) established that this repository has TWO
+ * equally-valid, permanent Personal-run representations — `workspaceId`
+ * field absent ("legacy"), and `workspaceId === getPersonalWorkspaceId(run.userId)`
+ * ("personal", the Phase 3 Personal Workspace write path,
+ * `lib/workspaces/personalRunWorkspaceBinding.ts`) — neither of which is
+ * "no workspace" or "a Team workspace." An earlier version of this
+ * resolver treated ANY non-null `workspaceId` as proof of a Team-scoped
+ * run, which was directly reproduced to incorrectly deny a Personal
+ * Workspace-bound run's own owner with `workspace_mismatch`. Fixed by
+ * reusing the existing canonical structural classifier,
+ * `classifyRunWorkspaceBindingShape()` (`lib/workspaces/classifyRunWorkspaceBindingShape.ts`),
+ * rather than reimplementing `"personal-" + uid` comparison a third time
+ * — see `resolveClaimVerificationOrigin()`'s own scope-resolution block.
  *
  * FROZEN DATA CONTRACT — deliberately minimal. `workspaceId`, `projectId`,
  * a creator uid, a creation timestamp, and a separate claim-text snapshot
@@ -75,6 +91,7 @@ import "server-only";
 import { createHash, timingSafeEqual } from "crypto";
 import { adminDb } from "@/lib/firebase/admin";
 import { parsePersistedAdaptiveOutput } from "@/lib/adaptiveSchema/persistedOutput";
+import { classifyRunWorkspaceBindingShape } from "@/lib/workspaces/classifyRunWorkspaceBindingShape";
 
 export interface ClaimVerificationOrigin {
   type: "deep_research_claim";
@@ -247,8 +264,9 @@ export function buildDeepResearchClaimId(args: {
  * independently re-verify that selector against whatever is CURRENTLY
  * canonical, never to manufacture a new identity from a bare position.
  *
- * TEAM MEMBERSHIP BOUNDARY (deliberate, see 11A.0C1 Part H): this function
- * checks only whether the canonical run's OWN `workspaceId` equals
+ * TEAM MEMBERSHIP BOUNDARY (deliberate, see 11A.0C1 Part H): for a Team
+ * expectation, this function checks only whether the canonical run's own
+ * structural binding (via `classifyRunWorkspaceBindingShape()`) equals
  * `expectedWorkspaceId` — it does NOT check whether `callerUid` currently
  * has membership/capability in that workspace. That is the responsibility
  * of the existing Team route's Gate-1/Gate-2 authorization (already
@@ -297,12 +315,32 @@ export async function resolveClaimVerificationOrigin(args: {
     return { status: "denied", reason: "run_not_found" };
   }
 
-  const runWorkspaceId = typeof raw.workspaceId === "string" ? raw.workspaceId : null;
+  // Personal Workspace Scope Correction, 11A.1C3 — the repository has TWO
+  // equally-valid Personal representations (see classifyRunWorkspaceBindingShape's
+  // own doc comment): `workspaceId` field absent entirely ("legacy"), or
+  // `workspaceId === getPersonalWorkspaceId(run.userId)` ("personal", the
+  // Phase 3 write path). Neither is "no workspace" nor "a Team workspace" —
+  // both must be treated as Personal-origin-eligible here. Reuses the
+  // existing canonical structural classifier verbatim rather than
+  // reimplementing `"personal-" + uid` comparison a third time in this
+  // module. `hasWorkspaceIdField` is computed explicitly so an explicit
+  // `workspaceId: null` is never silently coerced into "field absent" —
+  // the classifier treats a present-but-non-string value as `invalid`,
+  // and that must fail closed, not fall back to legacy Personal.
+  const hasWorkspaceIdField = Object.prototype.hasOwnProperty.call(raw, "workspaceId");
+  const shape = classifyRunWorkspaceBindingShape({
+    hasWorkspaceIdField,
+    workspaceIdValue: raw.workspaceId,
+    userId: raw.userId,
+  });
 
   if (args.expectedWorkspaceId === null) {
-    // Caller expects a Personal-origin claim. A Team-scoped run can never
-    // satisfy that expectation, regardless of who owns it.
-    if (runWorkspaceId !== null) {
+    // Caller expects a Personal-origin claim. Both `legacy` and `personal`
+    // are valid Personal shapes; `non_personal_bound` (a real Team
+    // workspace, or any other explicit binding) and `invalid` (malformed
+    // or owner-inconsistent) can never satisfy a Personal expectation,
+    // regardless of who owns it — no fallback, no fuzzy recovery.
+    if (shape.kind !== "legacy" && shape.kind !== "personal") {
       return { status: "denied", reason: "workspace_mismatch" };
     }
     const owner = typeof raw.userId === "string" ? raw.userId : "";
@@ -310,10 +348,11 @@ export async function resolveClaimVerificationOrigin(args: {
       return { status: "denied", reason: "not_owner" };
     }
   } else {
-    // Caller expects a Team-origin claim for a specific workspace. Both "no
-    // workspace at all" (a Personal run) and "a different workspace" are
-    // the same denial: the run does not belong to the expected scope.
-    if (runWorkspaceId !== args.expectedWorkspaceId) {
+    // Caller expects a Team-origin claim for a specific workspace. A
+    // Personal shape (`legacy` or `personal`) never satisfies a Team
+    // expectation, and neither does `invalid` — only `non_personal_bound`
+    // can, and only when it exactly equals the expected workspace.
+    if (shape.kind !== "non_personal_bound" || shape.workspaceId !== args.expectedWorkspaceId) {
       return { status: "denied", reason: "workspace_mismatch" };
     }
     // No ownership/membership check here by design — see TEAM MEMBERSHIP

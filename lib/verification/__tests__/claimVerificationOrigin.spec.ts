@@ -56,6 +56,8 @@ const CALLER_UID = "user-1";
 const OTHER_UID = "user-2";
 const WORKSPACE_A = "ws-a";
 const WORKSPACE_B = "ws-b";
+const PERSONAL_WORKSPACE_ID_CALLER = "personal-" + CALLER_UID;
+const PERSONAL_WORKSPACE_ID_OTHER = "personal-" + OTHER_UID;
 
 interface RawFinding {
   id: string;
@@ -197,6 +199,81 @@ describe("resolveClaimVerificationOrigin — Personal", () => {
     const claimId = selectorFor(RUN_ID, "findings", 0, f);
     const result = await resolveClaimVerificationOrigin({ runId: RUN_ID, claimId, callerUid: CALLER_UID, expectedWorkspaceId: null });
     expect(result).toEqual({ status: "denied", reason: "not_owner" });
+  });
+});
+
+describe("resolveClaimVerificationOrigin — Personal Workspace scope classification (11A.1C3)", () => {
+  it("[PRIMARY DEFECT REGRESSION] Phase-3 Personal-Workspace-bound run (workspaceId = getPersonalWorkspaceId(owner)) resolves for its owner in Personal mode", async () => {
+    const f = finding({ summary: "Remote work modestly reduces measured productivity in most studies." });
+    seedRun({ userId: CALLER_UID, workspaceId: PERSONAL_WORKSPACE_ID_CALLER, adaptiveOutput: deepResearchOutput([f]) });
+    const claimId = selectorFor(RUN_ID, "findings", 0, f);
+    const result = await resolveClaimVerificationOrigin({ runId: RUN_ID, claimId, callerUid: CALLER_UID, expectedWorkspaceId: null });
+    expect(result).toEqual({
+      status: "resolved",
+      origin: { type: "deep_research_claim", runId: RUN_ID, claimId },
+      claimText: "Remote work modestly reduces measured productivity in most studies.",
+      projectId: null,
+    });
+  });
+
+  it("Phase-3 Personal-Workspace-bound run, wrong caller -> not_owner (not a scope mismatch)", async () => {
+    const f = finding();
+    seedRun({ userId: CALLER_UID, workspaceId: PERSONAL_WORKSPACE_ID_CALLER, adaptiveOutput: deepResearchOutput([f]) });
+    const claimId = selectorFor(RUN_ID, "findings", 0, f);
+    const result = await resolveClaimVerificationOrigin({ runId: RUN_ID, claimId, callerUid: OTHER_UID, expectedWorkspaceId: null });
+    expect(result).toEqual({ status: "denied", reason: "not_owner" });
+  });
+
+  it("CORRUPT BINDING: run.userId=caller but workspaceId=getPersonalWorkspaceId(OTHER user) -> workspace_mismatch for the run's own owner (never falls back to legacy Personal)", async () => {
+    const f = finding();
+    seedRun({ userId: CALLER_UID, workspaceId: PERSONAL_WORKSPACE_ID_OTHER, adaptiveOutput: deepResearchOutput([f]) });
+    const claimId = selectorFor(RUN_ID, "findings", 0, f);
+    const result = await resolveClaimVerificationOrigin({ runId: RUN_ID, claimId, callerUid: CALLER_UID, expectedWorkspaceId: null });
+    expect(result).toEqual({ status: "denied", reason: "workspace_mismatch" });
+  });
+
+  it("CORRUPT BINDING: same run, resolved as the OTHER user (whose id is embedded in the workspaceId) -> also workspace_mismatch, never granted access merely because the workspaceId embeds their uid", async () => {
+    const f = finding();
+    seedRun({ userId: CALLER_UID, workspaceId: PERSONAL_WORKSPACE_ID_OTHER, adaptiveOutput: deepResearchOutput([f]) });
+    const claimId = selectorFor(RUN_ID, "findings", 0, f);
+    const result = await resolveClaimVerificationOrigin({ runId: RUN_ID, claimId, callerUid: OTHER_UID, expectedWorkspaceId: null });
+    expect(result).toEqual({ status: "denied", reason: "workspace_mismatch" });
+  });
+
+  it("EXPLICIT NULL: workspaceId key present with value null (distinct from the key being absent entirely) -> workspace_mismatch, never coerced into legacy Personal", async () => {
+    const f = finding();
+    seedRun({ userId: CALLER_UID, workspaceId: null, adaptiveOutput: deepResearchOutput([f]) });
+    const claimId = selectorFor(RUN_ID, "findings", 0, f);
+    const result = await resolveClaimVerificationOrigin({ runId: RUN_ID, claimId, callerUid: CALLER_UID, expectedWorkspaceId: null });
+    expect(result).toEqual({ status: "denied", reason: "workspace_mismatch" });
+  });
+
+  it("INVALID SHAPE: workspaceId present but a non-string primitive -> workspace_mismatch, fails closed (never Personal, never Team)", async () => {
+    const f = finding();
+    seedRun({ userId: CALLER_UID, workspaceId: 12345, adaptiveOutput: deepResearchOutput([f]) });
+    const claimId = selectorFor(RUN_ID, "findings", 0, f);
+    const resultPersonal = await resolveClaimVerificationOrigin({ runId: RUN_ID, claimId, callerUid: CALLER_UID, expectedWorkspaceId: null });
+    const resultTeam = await resolveClaimVerificationOrigin({ runId: RUN_ID, claimId, callerUid: CALLER_UID, expectedWorkspaceId: WORKSPACE_A });
+    expect(resultPersonal).toEqual({ status: "denied", reason: "workspace_mismatch" });
+    expect(resultTeam).toEqual({ status: "denied", reason: "workspace_mismatch" });
+  });
+
+  it("RUN-OWNER-INVALID SHAPE: workspaceId well-formed but run.userId itself cannot produce a Personal Workspace id -> workspace_mismatch, fails closed", async () => {
+    const f = finding();
+    seedRun({ userId: "", workspaceId: PERSONAL_WORKSPACE_ID_CALLER, adaptiveOutput: deepResearchOutput([f]) });
+    const claimId = selectorFor(RUN_ID, "findings", 0, f);
+    const result = await resolveClaimVerificationOrigin({ runId: RUN_ID, claimId, callerUid: CALLER_UID, expectedWorkspaceId: null });
+    expect(result).toEqual({ status: "denied", reason: "workspace_mismatch" });
+  });
+
+  it("PERSONAL-AS-TEAM: a Phase-3 Personal-Workspace-bound run is never accepted against ANY Team expectation, even one that happens to equal its own personal workspaceId string", async () => {
+    const f = finding();
+    seedRun({ userId: CALLER_UID, workspaceId: PERSONAL_WORKSPACE_ID_CALLER, adaptiveOutput: deepResearchOutput([f]) });
+    const claimId = selectorFor(RUN_ID, "findings", 0, f);
+    const resultAgainstTeamA = await resolveClaimVerificationOrigin({ runId: RUN_ID, claimId, callerUid: CALLER_UID, expectedWorkspaceId: WORKSPACE_A });
+    const resultAgainstOwnPersonalIdAsTeam = await resolveClaimVerificationOrigin({ runId: RUN_ID, claimId, callerUid: CALLER_UID, expectedWorkspaceId: PERSONAL_WORKSPACE_ID_CALLER });
+    expect(resultAgainstTeamA).toEqual({ status: "denied", reason: "workspace_mismatch" });
+    expect(resultAgainstOwnPersonalIdAsTeam).toEqual({ status: "denied", reason: "workspace_mismatch" });
   });
 });
 
