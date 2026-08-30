@@ -7,6 +7,7 @@ import { adminDb } from "@/lib/firebase/admin";
 import { Timestamp } from "firebase-admin/firestore";
 import type { AuditBundle } from "@/lib/verification/auditBundle";
 import type { ClaimVerdict } from "@/lib/verification/claimVerdict";
+import type { ClaimVerificationOrigin } from "@/lib/verification/claimVerificationOrigin";
 import { sanitizeForFirestore } from "@/lib/firestore/sanitizeForFirestore";
 
 export type StoredVerificationModelSummary = {
@@ -34,6 +35,15 @@ export type ClaimVerificationFirestoreDoc = {
   selectedModels: string[];
   timestamp: Timestamp;
   governanceStatus?: "approved" | "needs_review" | "blocked";
+  /**
+   * Phase 11A.1 — present only when this verification was created via
+   * "Verify this claim" from a Deep Research finding. Optional, never
+   * `null`; absent on every verification created before this field
+   * existed. Write-once at creation (no update path in this codebase ever
+   * rewrites a verification document). Not yet written by any route as of
+   * this phase — see lib/verification/claimVerificationOrigin.ts.
+   */
+  origin?: ClaimVerificationOrigin;
 };
 
 export async function saveClaimVerification(
