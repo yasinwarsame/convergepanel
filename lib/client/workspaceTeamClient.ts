@@ -120,19 +120,62 @@ export interface WorkspaceInvitationItem {
 
 const VALID_INVITE_ROLES: ReadonlySet<string> = new Set(["admin", "member", "reviewer", "viewer"]);
 
-function isValidInvitation(value: unknown): value is WorkspaceInvitationItem {
+interface FirestoreTimestampLike {
+  _seconds: number;
+  _nanoseconds: number;
+}
+
+function isFirestoreTimestampLike(value: unknown): value is FirestoreTimestampLike {
   if (typeof value !== "object" || value === null) return false;
   const v = value as Record<string, unknown>;
   return (
-    typeof v.id === "string" &&
-    v.id.length > 0 &&
-    typeof v.normalizedEmail === "string" &&
-    typeof v.role === "string" &&
-    VALID_INVITE_ROLES.has(v.role) &&
-    typeof v.isExpired === "boolean" &&
-    typeof v.expiresAt === "string" &&
-    typeof v.deliveryVersion === "number"
+    typeof v._seconds === "number" &&
+    Number.isInteger(v._seconds) &&
+    Number.isFinite(v._seconds) &&
+    typeof v._nanoseconds === "number" &&
+    Number.isInteger(v._nanoseconds) &&
+    v._nanoseconds >= 0 &&
+    v._nanoseconds < 1_000_000_000
   );
+}
+
+/**
+ * Normalizes a transport timestamp into one canonical ISO-string client
+ * representation. The invitation-create route already serializes dates as
+ * ISO strings; the invitation-list route serializes raw Firestore
+ * Timestamp JSON (`{_seconds, _nanoseconds}`) — both are real, currently
+ * live server contracts, not hypothetical ones. Anything else (or a
+ * malformed Firestore shape) fails closed to null.
+ */
+function normalizeTimestamp(value: unknown): string | null {
+  if (typeof value === "string") {
+    if (value.length === 0 || Number.isNaN(Date.parse(value))) return null;
+    return value;
+  }
+  if (isFirestoreTimestampLike(value)) {
+    const date = new Date(value._seconds * 1000 + Math.floor(value._nanoseconds / 1_000_000));
+    return Number.isNaN(date.getTime()) ? null : date.toISOString();
+  }
+  return null;
+}
+
+function normalizeInvitation(value: unknown): WorkspaceInvitationItem | null {
+  if (typeof value !== "object" || value === null) return null;
+  const v = value as Record<string, unknown>;
+  const expiresAt = normalizeTimestamp(v.expiresAt);
+  if (
+    typeof v.id !== "string" ||
+    v.id.length === 0 ||
+    typeof v.normalizedEmail !== "string" ||
+    typeof v.role !== "string" ||
+    !VALID_INVITE_ROLES.has(v.role) ||
+    typeof v.isExpired !== "boolean" ||
+    expiresAt === null ||
+    typeof v.deliveryVersion !== "number"
+  ) {
+    return null;
+  }
+  return { id: v.id, normalizedEmail: v.normalizedEmail, role: v.role as WorkspaceInvitationRole, isExpired: v.isExpired, expiresAt, deliveryVersion: v.deliveryVersion };
 }
 
 export type FetchPendingInvitationsResult = { status: "ok"; invitations: WorkspaceInvitationItem[] } | { status: "error" };
@@ -150,8 +193,10 @@ export async function fetchPendingInvitations(args: { user: User | null; authRea
     const json = await res.json().catch(() => null);
     if (typeof json !== "object" || json === null) return { status: "error" };
     const d = json as Record<string, unknown>;
-    if (d.ok !== true || !Array.isArray(d.invitations) || !d.invitations.every(isValidInvitation)) return { status: "error" };
-    return { status: "ok", invitations: d.invitations as WorkspaceInvitationItem[] };
+    if (d.ok !== true || !Array.isArray(d.invitations)) return { status: "error" };
+    const invitations = d.invitations.map(normalizeInvitation);
+    if (invitations.some((i) => i === null)) return { status: "error" };
+    return { status: "ok", invitations: invitations as WorkspaceInvitationItem[] };
   } catch {
     return { status: "error" };
   }
@@ -179,12 +224,13 @@ export async function createInvitation(args: { user: User | null; authReady: boo
     const inv = d.invitation;
     if (typeof inv !== "object" || inv === null) return { status: "error" };
     const i = inv as Record<string, unknown>;
-    if (typeof i.id !== "string" || typeof i.normalizedEmail !== "string" || typeof i.role !== "string" || typeof i.expiresAt !== "string" || typeof i.deliveryVersion !== "number") {
+    const expiresAt = normalizeTimestamp(i.expiresAt);
+    if (typeof i.id !== "string" || typeof i.normalizedEmail !== "string" || typeof i.role !== "string" || expiresAt === null || typeof i.deliveryVersion !== "number") {
       return { status: "error" };
     }
     return {
       status: "ok",
-      invitation: { id: i.id, normalizedEmail: i.normalizedEmail, role: i.role as WorkspaceInvitationRole, isExpired: false, expiresAt: i.expiresAt, deliveryVersion: i.deliveryVersion },
+      invitation: { id: i.id, normalizedEmail: i.normalizedEmail, role: i.role as WorkspaceInvitationRole, isExpired: false, expiresAt, deliveryVersion: i.deliveryVersion },
     };
   } catch {
     return { status: "error" };
