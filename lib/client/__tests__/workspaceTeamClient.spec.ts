@@ -20,7 +20,7 @@ jest.mock("@/lib/client/authedFetch", () => ({
   authedFetch: (...args: any[]) => mockedAuthedFetch(...args),
 }));
 
-import { fetchPendingInvitations, createInvitation } from "@/lib/client/workspaceTeamClient";
+import { fetchPendingInvitations, createInvitation, resendInvitation } from "@/lib/client/workspaceTeamClient";
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -157,18 +157,19 @@ describe("fetchPendingInvitations — infrastructure", () => {
 describe("createInvitation — POST/create response still accepted", () => {
   it("accepts the existing ISO-string expiresAt contract from the create route", async () => {
     mockedAuthedFetch.mockResolvedValue(
-      jsonResponse({ ok: true, invitation: { id: "inv-new", normalizedEmail: "new@example.com", role: "member", expiresAt: "2027-01-01T00:00:00.000Z", deliveryVersion: 1 } })
+      jsonResponse({ ok: true, invitation: { id: "inv-new", normalizedEmail: "new@example.com", role: "member", expiresAt: "2027-01-01T00:00:00.000Z", deliveryVersion: 1 }, delivered: true })
     );
     const result = await createInvitation({ user: null, authReady: true, workspaceId: "ws-1", email: "new@example.com", role: "member" });
     expect(result).toEqual({
       status: "ok",
       invitation: { id: "inv-new", normalizedEmail: "new@example.com", role: "member", isExpired: false, expiresAt: "2027-01-01T00:00:00.000Z", deliveryVersion: 1 },
+      delivered: true,
     });
   });
 
   it("also accepts a Firestore-shaped expiresAt from the create route, for robustness against the same class of contract drift", async () => {
     mockedAuthedFetch.mockResolvedValue(
-      jsonResponse({ ok: true, invitation: { id: "inv-new", normalizedEmail: "new@example.com", role: "member", expiresAt: { _seconds: 1788336970, _nanoseconds: 0 }, deliveryVersion: 1 } })
+      jsonResponse({ ok: true, invitation: { id: "inv-new", normalizedEmail: "new@example.com", role: "member", expiresAt: { _seconds: 1788336970, _nanoseconds: 0 }, deliveryVersion: 1 }, delivered: true })
     );
     const result = await createInvitation({ user: null, authReady: true, workspaceId: "ws-1", email: "new@example.com", role: "member" });
     expect(result.status).toBe("ok");
@@ -177,8 +178,107 @@ describe("createInvitation — POST/create response still accepted", () => {
   });
 
   it("rejects a malformed expiresAt on create — fails closed", async () => {
-    mockedAuthedFetch.mockResolvedValue(jsonResponse({ ok: true, invitation: { id: "inv-new", normalizedEmail: "new@example.com", role: "member", expiresAt: { foo: "bar" }, deliveryVersion: 1 } }));
+    mockedAuthedFetch.mockResolvedValue(
+      jsonResponse({ ok: true, invitation: { id: "inv-new", normalizedEmail: "new@example.com", role: "member", expiresAt: { foo: "bar" }, deliveryVersion: 1 }, delivered: true })
+    );
     const result = await createInvitation({ user: null, authReady: true, workspaceId: "ws-1", email: "new@example.com", role: "member" });
+    expect(result).toEqual({ status: "error" });
+  });
+});
+
+// PHASE TEAM-INVITE-DELIVERY-R1 / TEAM-UI-I1C1 — the backend's own honest
+// `delivered`/`deliveryError` signal must never collapse into a generic
+// "ok" that a caller could mistake for "email sent". A 2xx response always
+// means the invitation record itself persisted (create) or the resend
+// itself succeeded — `delivered` is the ONLY thing that says whether email
+// dispatch was accepted by the provider.
+describe("createInvitation — delivered outcome (PHASE TEAM-INVITE-DELIVERY-R1 correction)", () => {
+  it("2xx + delivered:true -> status ok, delivered:true", async () => {
+    mockedAuthedFetch.mockResolvedValue(
+      jsonResponse({ ok: true, invitation: { id: "inv-1", normalizedEmail: "a@b.com", role: "member", expiresAt: "2027-01-01T00:00:00.000Z", deliveryVersion: 1 }, delivered: true })
+    );
+    const result = await createInvitation({ user: null, authReady: true, workspaceId: "ws-1", email: "a@b.com", role: "member" });
+    expect(result).toEqual({ status: "ok", delivered: true, invitation: { id: "inv-1", normalizedEmail: "a@b.com", role: "member", isExpired: false, expiresAt: "2027-01-01T00:00:00.000Z", deliveryVersion: 1 } });
+  });
+
+  it("2xx + delivered:false -> status ok, delivered:false (invitation still valid/created, NOT an error)", async () => {
+    mockedAuthedFetch.mockResolvedValue(
+      jsonResponse({
+        ok: true,
+        invitation: { id: "inv-1", normalizedEmail: "a@b.com", role: "member", expiresAt: "2027-01-01T00:00:00.000Z", deliveryVersion: 1 },
+        delivered: false,
+        deliveryError: "preview_delivery_disabled",
+      })
+    );
+    const result = await createInvitation({ user: null, authReady: true, workspaceId: "ws-1", email: "a@b.com", role: "member" });
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.delivered).toBe(false);
+    expect(result.invitation.id).toBe("inv-1");
+  });
+
+  it("the raw deliveryError string never reaches the parsed result — only the boolean is exposed", async () => {
+    mockedAuthedFetch.mockResolvedValue(
+      jsonResponse({
+        ok: true,
+        invitation: { id: "inv-1", normalizedEmail: "a@b.com", role: "member", expiresAt: "2027-01-01T00:00:00.000Z", deliveryVersion: 1 },
+        delivered: false,
+        deliveryError: "provider_rejected",
+      })
+    );
+    const result = await createInvitation({ user: null, authReady: true, workspaceId: "ws-1", email: "a@b.com", role: "member" });
+    expect(JSON.stringify(result)).not.toContain("provider_rejected");
+  });
+
+  it("missing delivered field -> fails closed to error (never silently assumes true)", async () => {
+    mockedAuthedFetch.mockResolvedValue(jsonResponse({ ok: true, invitation: { id: "inv-1", normalizedEmail: "a@b.com", role: "member", expiresAt: "2027-01-01T00:00:00.000Z", deliveryVersion: 1 } }));
+    const result = await createInvitation({ user: null, authReady: true, workspaceId: "ws-1", email: "a@b.com", role: "member" });
+    expect(result).toEqual({ status: "error" });
+  });
+
+  it("non-boolean delivered field -> fails closed to error", async () => {
+    mockedAuthedFetch.mockResolvedValue(
+      jsonResponse({ ok: true, invitation: { id: "inv-1", normalizedEmail: "a@b.com", role: "member", expiresAt: "2027-01-01T00:00:00.000Z", deliveryVersion: 1 }, delivered: "true" })
+    );
+    const result = await createInvitation({ user: null, authReady: true, workspaceId: "ws-1", email: "a@b.com", role: "member" });
+    expect(result).toEqual({ status: "error" });
+  });
+
+  it("non-2xx response is still a plain request failure (denied), independent of any delivered field", async () => {
+    mockedAuthedFetch.mockResolvedValue({ ok: false, status: 403, json: async () => ({ errorCode: "insufficient_capability", message: "You do not have permission to invite at this role." }) });
+    const result = await createInvitation({ user: null, authReady: true, workspaceId: "ws-1", email: "a@b.com", role: "admin" });
+    expect(result).toEqual({ status: "denied", errorCode: "insufficient_capability", message: "You do not have permission to invite at this role." });
+  });
+});
+
+describe("resendInvitation — delivered outcome (PHASE TEAM-INVITE-DELIVERY-R1 correction)", () => {
+  it("2xx + delivered:true -> status ok, delivered:true", async () => {
+    mockedAuthedFetch.mockResolvedValue(jsonResponse({ ok: true, invitation: { id: "inv-1" }, delivered: true }));
+    const result = await resendInvitation({ user: null, authReady: true, workspaceId: "ws-1", invitationId: "inv-1", expectedDeliveryVersion: 1 });
+    expect(result).toEqual({ status: "ok", delivered: true });
+  });
+
+  it("2xx + delivered:false -> status ok, delivered:false (resend itself succeeded, email dispatch did not)", async () => {
+    mockedAuthedFetch.mockResolvedValue(jsonResponse({ ok: true, invitation: { id: "inv-1" }, delivered: false, deliveryError: "preview_delivery_disabled" }));
+    const result = await resendInvitation({ user: null, authReady: true, workspaceId: "ws-1", invitationId: "inv-1", expectedDeliveryVersion: 1 });
+    expect(result).toEqual({ status: "ok", delivered: false });
+  });
+
+  it("missing delivered field -> fails closed to error", async () => {
+    mockedAuthedFetch.mockResolvedValue(jsonResponse({ ok: true, invitation: { id: "inv-1" } }));
+    const result = await resendInvitation({ user: null, authReady: true, workspaceId: "ws-1", invitationId: "inv-1", expectedDeliveryVersion: 1 });
+    expect(result).toEqual({ status: "error" });
+  });
+
+  it("non-2xx response is a plain request failure (denied)", async () => {
+    mockedAuthedFetch.mockResolvedValue({ ok: false, status: 409, json: async () => ({ errorCode: "stale_delivery_version", message: "This invitation has changed. Refresh and try again." }) });
+    const result = await resendInvitation({ user: null, authReady: true, workspaceId: "ws-1", invitationId: "inv-1", expectedDeliveryVersion: 1 });
+    expect(result).toEqual({ status: "denied", errorCode: "stale_delivery_version", message: "This invitation has changed. Refresh and try again." });
+  });
+
+  it("thrown fetch -> error, never throws", async () => {
+    mockedAuthedFetch.mockRejectedValue(new Error("network down"));
+    const result = await resendInvitation({ user: null, authReady: true, workspaceId: "ws-1", invitationId: "inv-1", expectedDeliveryVersion: 1 });
     expect(result).toEqual({ status: "error" });
   });
 });

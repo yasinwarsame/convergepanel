@@ -77,9 +77,14 @@ export default function WorkspaceMembersShell({
   const [inviting, setInviting] = useState(false);
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [inviteConfirmation, setInviteConfirmation] = useState<string | null>(null);
+  /** Invitation record created, but `delivered:false` — distinct from `inviteConfirmation` (truthful, full success) and `inviteError` (creation itself failed). Never claim "sent" here. */
+  const [inviteDeliveryWarning, setInviteDeliveryWarning] = useState<string | null>(null);
 
   const [pendingActionId, setPendingActionId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [actionConfirmation, setActionConfirmation] = useState<string | null>(null);
+  /** Resend succeeded (invitation still valid, delivery version advanced) but `delivered:false` — same distinction as `inviteDeliveryWarning`. */
+  const [actionDeliveryWarning, setActionDeliveryWarning] = useState<string | null>(null);
   const [confirmRevokeId, setConfirmRevokeId] = useState<string | null>(null);
 
   const membersRequestId = useRef(0);
@@ -135,6 +140,7 @@ export default function WorkspaceMembersShell({
   const openInviteForm = useCallback(() => {
     setInviteError(null);
     setInviteConfirmation(null);
+    setInviteDeliveryWarning(null);
     setShowInviteForm(true);
     setTimeout(() => emailInputRef.current?.focus(), 0);
   }, []);
@@ -160,11 +166,16 @@ export default function WorkspaceMembersShell({
       setInviting(true);
       setInviteError(null);
       setInviteConfirmation(null);
+      setInviteDeliveryWarning(null);
       const result = await createInvitation({ user, authReady, workspaceId, email: trimmed, role: inviteRole });
       setInviting(false);
       if (result.status === "ok") {
         setInviteEmail("");
-        setInviteConfirmation(`Invitation sent to ${result.invitation.normalizedEmail}.`);
+        if (result.delivered) {
+          setInviteConfirmation(`Invitation sent to ${result.invitation.normalizedEmail}.`);
+        } else {
+          setInviteDeliveryWarning("Invitation created, but the email couldn't be sent. You can try Resend.");
+        }
         loadInvitations();
       } else if (result.status === "denied") {
         setInviteError(result.message);
@@ -179,9 +190,16 @@ export default function WorkspaceMembersShell({
     async (invitation: WorkspaceInvitationItem) => {
       setPendingActionId(invitation.id);
       setActionError(null);
+      setActionConfirmation(null);
+      setActionDeliveryWarning(null);
       const result = await resendInvitation({ user, authReady, workspaceId, invitationId: invitation.id, expectedDeliveryVersion: invitation.deliveryVersion });
       setPendingActionId(null);
       if (result.status === "ok") {
+        if (result.delivered) {
+          setActionConfirmation("Invitation resent.");
+        } else {
+          setActionDeliveryWarning("Email could not be sent. Please try again.");
+        }
         loadInvitations();
       } else if (result.status === "denied") {
         setActionError(result.message);
@@ -196,6 +214,8 @@ export default function WorkspaceMembersShell({
     async (invitation: WorkspaceInvitationItem) => {
       setPendingActionId(invitation.id);
       setActionError(null);
+      setActionConfirmation(null);
+      setActionDeliveryWarning(null);
       const result = await revokeInvitation({ user, authReady, workspaceId, invitationId: invitation.id, expectedDeliveryVersion: invitation.deliveryVersion });
       setPendingActionId(null);
       setConfirmRevokeId(null);
@@ -332,9 +352,24 @@ export default function WorkspaceMembersShell({
               {inviteConfirmation}
             </p>
           )}
+          {inviteDeliveryWarning && (
+            <p role="status" className="mb-4 rounded-lg bg-cp-orange-soft px-3 py-2 text-sm font-medium text-cp-orange">
+              {inviteDeliveryWarning}
+            </p>
+          )}
+          {actionConfirmation && (
+            <p role="status" className="mb-4 text-sm font-medium text-cp-accent">
+              {actionConfirmation}
+            </p>
+          )}
           {actionError && (
             <p role="alert" className="mb-4 text-sm font-medium text-red-400">
               {actionError}
+            </p>
+          )}
+          {actionDeliveryWarning && (
+            <p role="status" className="mb-4 rounded-lg bg-cp-orange-soft px-3 py-2 text-sm font-medium text-cp-orange">
+              {actionDeliveryWarning}
             </p>
           )}
 

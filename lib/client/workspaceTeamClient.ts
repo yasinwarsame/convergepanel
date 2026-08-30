@@ -202,7 +202,21 @@ export async function fetchPendingInvitations(args: { user: User | null; authRea
   }
 }
 
-export type CreateInvitationResult = { status: "ok"; invitation: WorkspaceInvitationItem } | { status: "denied"; errorCode: string; message: string } | { status: "error" };
+/**
+ * `delivered` mirrors the backend's own honest, already-existing signal
+ * (the invitation-create/resend routes compute this from
+ * `sendWorkspaceInvitationEmail()`'s result, never from HTTP status alone).
+ * A 2xx response ALWAYS means the invitation record itself was created/
+ * resent successfully — `delivered:false` means email dispatch was not
+ * accepted by the provider (misconfiguration, provider rejection/outage,
+ * rate limit, or the Preview-environment safety guard), NOT that the
+ * invitation failed to persist. Callers must never collapse this into a
+ * generic "ok" without surfacing the distinction — that exact collapse
+ * was the PHASE TEAM-INVITE-DELIVERY-R1 defect (the UI claimed
+ * "Invitation sent" for every 2xx, even when the backend had already
+ * reported `delivered:false`).
+ */
+export type CreateInvitationResult = { status: "ok"; invitation: WorkspaceInvitationItem; delivered: boolean } | { status: "denied"; errorCode: string; message: string } | { status: "error" };
 
 export async function createInvitation(args: { user: User | null; authReady: boolean; workspaceId: string; email: string; role: WorkspaceInvitationRole }): Promise<CreateInvitationResult> {
   try {
@@ -221,6 +235,7 @@ export async function createInvitation(args: { user: User | null; authReady: boo
     }
     if (typeof json !== "object" || json === null) return { status: "error" };
     const d = json as Record<string, unknown>;
+    if (typeof d.delivered !== "boolean") return { status: "error" };
     const inv = d.invitation;
     if (typeof inv !== "object" || inv === null) return { status: "error" };
     const i = inv as Record<string, unknown>;
@@ -231,6 +246,7 @@ export async function createInvitation(args: { user: User | null; authReady: boo
     return {
       status: "ok",
       invitation: { id: i.id, normalizedEmail: i.normalizedEmail, role: i.role as WorkspaceInvitationRole, isExpired: false, expiresAt, deliveryVersion: i.deliveryVersion },
+      delivered: d.delivered,
     };
   } catch {
     return { status: "error" };
@@ -239,7 +255,10 @@ export async function createInvitation(args: { user: User | null; authReady: boo
 
 export type InvitationActionResult = { status: "ok" } | { status: "denied"; errorCode: string; message: string } | { status: "error" };
 
-export async function resendInvitation(args: { user: User | null; authReady: boolean; workspaceId: string; invitationId: string; expectedDeliveryVersion: number }): Promise<InvitationActionResult> {
+/** Same `delivered` contract as `CreateInvitationResult` — see its doc comment. Resend has no persistence-failure mode analogous to `denied` beyond the existing authorization/version-guard denials, which remain generic (no delivery outcome to report on denial). */
+export type ResendInvitationResult = { status: "ok"; delivered: boolean } | { status: "denied"; errorCode: string; message: string } | { status: "error" };
+
+export async function resendInvitation(args: { user: User | null; authReady: boolean; workspaceId: string; invitationId: string; expectedDeliveryVersion: number }): Promise<ResendInvitationResult> {
   try {
     const res = await authedFetch(`/api/workspaces/${encodeURIComponent(args.workspaceId)}/invitations/${encodeURIComponent(args.invitationId)}/resend`, {
       user: args.user,
@@ -248,13 +267,16 @@ export async function resendInvitation(args: { user: User | null; authReady: boo
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ expectedDeliveryVersion: args.expectedDeliveryVersion }),
     });
+    const json = await res.json().catch(() => null);
     if (!res.ok) {
-      const json = await res.json().catch(() => null);
       const errorCode = typeof (json as Record<string, unknown> | null)?.errorCode === "string" ? ((json as Record<string, unknown>).errorCode as string) : "unknown_error";
       const message = typeof (json as Record<string, unknown> | null)?.message === "string" ? ((json as Record<string, unknown>).message as string) : "This invitation could not be resent.";
       return { status: "denied", errorCode, message };
     }
-    return { status: "ok" };
+    if (typeof json !== "object" || json === null) return { status: "error" };
+    const d = json as Record<string, unknown>;
+    if (d.ok !== true || typeof d.delivered !== "boolean") return { status: "error" };
+    return { status: "ok", delivered: d.delivered };
   } catch {
     return { status: "error" };
   }
