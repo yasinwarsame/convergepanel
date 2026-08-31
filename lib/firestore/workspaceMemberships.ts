@@ -21,6 +21,7 @@ import { isCanonicalTeamOwnerMembership } from "@/lib/workspaces/ownerInvariant"
 import { authorizeTeamWorkspaceMutationInTransaction, type TeamMutationAuthorizationDenialReason } from "@/lib/workspaces/authorizeTeamWorkspaceMutationInTransaction";
 import { canManageMembershipTargetRole } from "@/lib/workspaces/membershipTargetAuthority";
 import { releaseTeamWorkspaceCanarySlot } from "@/lib/workspaces/teamWorkspaceCanaryCapacity";
+import { buildWorkspaceMembershipEventDocData } from "@/lib/workspaces/workspaceMembershipEvents";
 import type { WorkspaceMembershipRole, WorkspaceMembershipV1 } from "@/lib/workspaces/membershipTypes";
 import { isWellFormedWorkspaceV1, type TeamWorkspaceV1 } from "@/lib/workspaces/types";
 
@@ -373,6 +374,14 @@ export type RemoveWorkspaceMembershipResult =
  * membership document (identity, role, `createdAt`, invitation provenance)
  * is retained forever, only `status`/`removedAt`/`removedByUserId` change.
  *
+ * Governance Audit Durability, Phase TEAM-GOV-I1C1 — the canonical
+ * `workspace_member_removed` event (`workspaceMembershipEvents/{autoId}`)
+ * is written via `tx.set()` in step 9 below, inside this SAME transaction.
+ * `REMOVAL COMMITTED IFF AUDIT EVENT COMMITTED` for this operation: there
+ * is no code path where the membership transitions to `removed` without
+ * its event committing atomically alongside it, and no code path where
+ * the event exists without a corresponding committed removal.
+ *
  * Read/validate/write order inside the transaction (frozen, mirrors
  * `authorizeTeamWorkspaceMutationInTransaction()`'s own frozen-order
  * precedent and `teamWorkspaceCanaryCapacity.ts`'s read-before-write
@@ -409,6 +418,13 @@ export type RemoveWorkspaceMembershipResult =
  *      client-supplied), `updatedAt`. Every other field — `role`,
  *      `createdAt`, `invitedByUserId` — is left untouched, preserving full
  *      historical identity.
+ *   9. Stage `tx.set()` of the canonical `workspace_member_removed` event at
+ *      a freshly-allocated `workspaceMembershipEvents` doc ref, in the SAME
+ *      transaction as step 8 — both commit or neither does. `at` reuses
+ *      the exact `now` Timestamp from step 8, not an independent clock
+ *      read. See `buildWorkspaceMembershipEventDocData()`
+ *      (`lib/workspaces/workspaceMembershipEvents.ts`) — a pure, zero-I/O
+ *      document-shape builder; the write itself happens here via `tx.set()`.
  *
  * Rollout admission is checked BEFORE `runTransaction()`, mirroring
  * `transferTeamWorkspaceOwnership()`'s established precedent — zero reads
@@ -485,6 +501,20 @@ export async function removeWorkspaceMembership(args: { uid: string; workspaceId
 
       const now = Timestamp.now();
       tx.update(targetRef, { status: "removed", removedAt: now, removedByUserId: args.uid, updatedAt: now });
+
+      // Governance Audit Durability, Phase TEAM-GOV-I1C1 — the canonical
+      // removal event is written in the SAME transaction as the membership
+      // mutation above, via `tx.set()` on a freshly-allocated doc ref
+      // (`.doc()` with no argument generates a random ID locally, no
+      // Firestore read — safe to call here, after every read this
+      // transaction performs and alongside its other writes). Firestore
+      // retries the WHOLE callback on conflict; only the winning attempt's
+      // writes — membership update AND event — are ever committed, so a
+      // retry can never produce more than one persisted event for one
+      // successful logical removal. `at` reuses the SAME `now` instant as
+      // `removedAt`/`updatedAt` above, not an independent clock read.
+      const eventRef = adminDb!.collection("workspaceMembershipEvents").doc();
+      tx.set(eventRef, buildWorkspaceMembershipEventDocData({ eventType: "workspace_member_removed", actorUid: args.uid, targetUid: args.targetUid, workspaceId: args.workspaceId, previousRole: targetMembership.role, at: now }));
 
       return { kind: "removed", targetUid: args.targetUid, workspaceId: args.workspaceId, previousRole: targetMembership.role };
     });

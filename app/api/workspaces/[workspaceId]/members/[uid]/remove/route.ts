@@ -16,7 +16,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { resolveRequestIdentity } from "@/lib/auth/resolveRequestIdentity";
 import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelemetry";
 import { removeWorkspaceMembership } from "@/lib/firestore/workspaceMemberships";
-import { writeWorkspaceMembershipEvent } from "@/lib/workspaces/workspaceMembershipEvents";
 import { teamProjectAuthorizationDeniedResponse, teamWorkspaceReadNotFoundResponse } from "@/lib/projects/teamProjectErrorResponse";
 import {
   unexpectedFieldResponse,
@@ -65,7 +64,10 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
 
   switch (result.status) {
     case "removed": {
-      await writeWorkspaceMembershipEvent({ eventType: "workspace_member_removed", actorUid: uid, targetUid, workspaceId, previousRole: result.previousRole });
+      // Governance Audit Durability, Phase TEAM-GOV-I1C1 — the removal
+      // event is already committed atomically inside
+      // removeWorkspaceMembership()'s own transaction; no separate
+      // post-commit write happens here anymore.
       return NextResponse.json({ ok: true, removed: true });
     }
     case "already_removed":

@@ -1,9 +1,16 @@
 /**
  * Team Member Management, Phase 12A — POST
  * /api/workspaces/{workspaceId}/members/{uid}/remove tests. Mocks
- * removeWorkspaceMembership() and writeWorkspaceMembershipEvent() (each
- * independently tested elsewhere) — this suite covers auth, request-body
- * shape, status-code mapping, and call-wiring only.
+ * removeWorkspaceMembership() (independently tested elsewhere) — this
+ * suite covers auth, request-body shape, status-code mapping, and
+ * call-wiring only.
+ *
+ * Governance Audit Durability, Phase TEAM-GOV-I1C1 — the route no longer
+ * calls a separate event-writing function at all: the canonical removal
+ * event is now written atomically INSIDE removeWorkspaceMembership()'s
+ * own transaction (see lib/firestore/__tests__/workspaceMemberships.spec.ts
+ * for that proof). This file's job shrank accordingly — it only proves
+ * the route does not duplicate that responsibility.
  */
 
 const mockedResolveRequestIdentity = jest.fn();
@@ -15,11 +22,6 @@ jest.mock("@/lib/auth/identityResolutionTelemetry", () => ({ logIdentityResoluti
 const mockedRemoveWorkspaceMembership = jest.fn();
 jest.mock("@/lib/firestore/workspaceMemberships", () => ({
   removeWorkspaceMembership: (...args: unknown[]) => mockedRemoveWorkspaceMembership(...args),
-}));
-
-const mockedWriteWorkspaceMembershipEvent = jest.fn();
-jest.mock("@/lib/workspaces/workspaceMembershipEvents", () => ({
-  writeWorkspaceMembershipEvent: (...args: unknown[]) => mockedWriteWorkspaceMembershipEvent(...args),
 }));
 
 jest.mock("@/lib/logger", () => ({ logger: { warn: jest.fn(), info: jest.fn(), error: jest.fn(), debug: jest.fn() } }));
@@ -43,7 +45,6 @@ async function callRoute(rawBody?: string) {
 beforeEach(() => {
   jest.clearAllMocks();
   mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: UID, source: "session_cookie" });
-  mockedWriteWorkspaceMembershipEvent.mockResolvedValue(undefined);
 });
 
 describe("authentication", () => {
@@ -83,21 +84,26 @@ describe("request body", () => {
 });
 
 describe("success", () => {
-  it("removed -> 200, writes exactly one membership event with the previous role", async () => {
+  it("removed -> 200, response shape unchanged; the route calls removeWorkspaceMembership() exactly once and returns its result directly — no second, separate event-writing call exists in the route's source at all (that responsibility now lives entirely inside the transaction)", async () => {
     mockedRemoveWorkspaceMembership.mockResolvedValue({ status: "removed", targetUid: TARGET_UID, workspaceId: WS_ID, previousRole: "reviewer" });
     const { res, json } = await callRoute();
     expect(res.status).toBe(200);
     expect(json).toEqual({ ok: true, removed: true });
-    expect(mockedWriteWorkspaceMembershipEvent).toHaveBeenCalledTimes(1);
-    expect(mockedWriteWorkspaceMembershipEvent).toHaveBeenCalledWith({ eventType: "workspace_member_removed", actorUid: UID, targetUid: TARGET_UID, workspaceId: WS_ID, previousRole: "reviewer" });
+    expect(mockedRemoveWorkspaceMembership).toHaveBeenCalledTimes(1);
   });
 
-  it("already_removed -> 200, idempotent shape, NO duplicate audit event", async () => {
+  it("already_removed -> 200, idempotent shape", async () => {
     mockedRemoveWorkspaceMembership.mockResolvedValue({ status: "already_removed" });
     const { res, json } = await callRoute();
     expect(res.status).toBe(200);
     expect(json).toEqual({ ok: true, removed: true, alreadyRemoved: true });
-    expect(mockedWriteWorkspaceMembershipEvent).not.toHaveBeenCalled();
+  });
+
+  it("route source no longer imports lib/workspaces/workspaceMembershipEvents at all — the atomic write lives exclusively in removeWorkspaceMembership()'s own transaction", () => {
+    const fs = require("fs");
+    const path = require("path");
+    const source = fs.readFileSync(path.join(process.cwd(), "app/api/workspaces/[workspaceId]/members/[uid]/remove/route.ts"), "utf8");
+    expect(source).not.toMatch(/workspaceMembershipEvents/);
   });
 });
 

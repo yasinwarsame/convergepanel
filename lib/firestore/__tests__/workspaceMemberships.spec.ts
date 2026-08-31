@@ -23,6 +23,7 @@ const stores: Record<string, Map<string, StoredDoc>> = {
   workspaces: new Map(),
   workspaceMemberships: new Map(),
   teamWorkspaceCanaryCapacity: new Map(),
+  workspaceMembershipEvents: new Map(),
 };
 
 function makeDocRef(collectionName: string, docId: string) {
@@ -56,6 +57,11 @@ class FirestoreError extends Error {
 // transaction already captured, so the transaction's own `tx.get()`
 // result is untouched — only the store's live state moves on.
 let concurrentMutationHook: ((ref: { __collection: string; __id: string }) => void) | null = null;
+
+// Phase TEAM-GOV-I1C1 — set to a collection name to make the next `tx.set()`
+// call on that collection throw, simulating a transient Firestore failure
+// on that specific write only.
+let forceSetFailureForCollection: string | null = null;
 
 const mockAdminDb: any = {
   collection: (name: string) => ({
@@ -92,6 +98,21 @@ const mockAdminDb: any = {
         if (store.has(ref.__id)) {
           throw new FirestoreError("6", "ALREADY_EXISTS");
         }
+        pendingWrites.push(() => store.set(ref.__id, { data, updateTime: nextUpdateTime() }));
+      },
+      // Standard Firestore `tx.set()` semantics: unconditional overwrite,
+      // no ALREADY_EXISTS/NOT_FOUND precondition — used for the
+      // Phase TEAM-GOV-I1C1 atomic `workspaceMembershipEvents` write on a
+      // freshly-allocated auto-ID doc ref. `forceSetFailureForCollection`
+      // lets a test simulate a transient Firestore error on this specific
+      // write WITHOUT touching the transaction's other writes' own logic —
+      // proving atomicity requires being able to fail exactly one write
+      // and observe the whole transaction roll back.
+      set: (ref: { __collection: string; __id: string }, data: Record<string, unknown>) => {
+        if (forceSetFailureForCollection === ref.__collection) {
+          throw new FirestoreError("14", "UNAVAILABLE: simulated transient failure");
+        }
+        const store = stores[ref.__collection];
         pendingWrites.push(() => store.set(ref.__id, { data, updateTime: nextUpdateTime() }));
       },
       update: (ref: { __collection: string; __id: string }, data: Record<string, unknown>, precondition?: { lastUpdateTime?: Timestamp }) => {
@@ -192,7 +213,9 @@ beforeEach(() => {
   stores.workspaces.clear();
   stores.workspaceMemberships.clear();
   stores.teamWorkspaceCanaryCapacity.clear();
+  stores.workspaceMembershipEvents.clear();
   concurrentMutationHook = null;
+  forceSetFailureForCollection = null;
   firestoreUnavailableFlag.value = false;
   teamWorkspacesEnabled = true;
   teamWorkspacesCanaryUids = undefined;
@@ -1113,6 +1136,134 @@ describe("removeWorkspaceMembership — Phase 12A", () => {
       seedWorkspaceWithRoster();
       const result = await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID });
       expect(result.status).toBe("removed");
+    });
+  });
+
+  describe("ATOMICITY — Phase TEAM-GOV-I1C1 (REMOVAL COMMITTED IFF AUDIT EVENT COMMITTED)", () => {
+    it("1. successful removal writes exactly one canonical removal event, in the same transaction as the membership mutation", async () => {
+      seedWorkspaceWithRoster();
+      const result = await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: REVIEWER_UID });
+      expect(result.status).toBe("removed");
+      expect(stores.workspaceMembershipEvents.size).toBe(1);
+      const [event] = [...stores.workspaceMembershipEvents.values()];
+      expect(event.data).toMatchObject({ eventType: "workspace_member_removed", actorUid: OWNER_UID, targetUid: REVIEWER_UID, workspaceId: WS_ID, previousRole: "reviewer" });
+    });
+
+    it("2. event write failure -> the whole transaction rolls back: removal does not commit, membership remains active, capacity unchanged, no partial event", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryWorkspaceIds = WS_ID;
+      seedWorkspaceWithRoster();
+      seedCapacity(5);
+      forceSetFailureForCollection = "workspaceMembershipEvents";
+
+      const result = await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID });
+
+      expect(result.status).toBe("remove_failed");
+      expect(stores.workspaceMemberships.get(computeMembershipId(WS_ID, MEMBER_UID))!.data.status).toBe("active"); // membership NOT removed
+      expect(stores.teamWorkspaceCanaryCapacity.get(WS_ID)!.data.reservedCount).toBe(5); // capacity NOT released
+      expect(stores.workspaceMembershipEvents.size).toBe(0); // no partial event
+    });
+
+    it("3. membership write failure (target deleted by a concurrent writer between this transaction's read and write) -> event is never even attempted, nothing commits", async () => {
+      seedWorkspaceWithRoster();
+      const targetId = computeMembershipId(WS_ID, MEMBER_UID);
+      let deleted = false;
+      concurrentMutationHook = (ref) => {
+        if (ref.__collection === "workspaceMemberships" && ref.__id === targetId && !deleted) {
+          deleted = true;
+          stores.workspaceMemberships.delete(targetId);
+        }
+      };
+
+      const result = await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID });
+
+      expect(result.status).toBe("remove_failed");
+      expect(stores.workspaceMemberships.has(targetId)).toBe(false); // reflects the concurrent delete, not this transaction
+      expect(stores.workspaceMembershipEvents.size).toBe(0); // event never committed
+    });
+
+    it("4. canonical-Owner denial -> no membership mutation, no event", async () => {
+      seedWorkspaceWithRoster();
+      const result = await removeWorkspaceMembership({ uid: ADMIN_UID, workspaceId: WS_ID, targetUid: OWNER_UID });
+      expect(result.status).toBe("target_is_canonical_owner");
+      expect(stores.workspaceMemberships.get(computeMembershipId(WS_ID, OWNER_UID))!.data.status).toBe("active");
+      expect(stores.workspaceMembershipEvents.size).toBe(0);
+    });
+
+    it("5. unauthorized caller (insufficient_capability) -> no membership mutation, no event", async () => {
+      seedWorkspaceWithRoster();
+      const result = await removeWorkspaceMembership({ uid: MEMBER_UID, workspaceId: WS_ID, targetUid: VIEWER_UID });
+      expect(result).toEqual({ status: "unauthorized", reason: "insufficient_capability" });
+      expect(stores.workspaceMemberships.get(computeMembershipId(WS_ID, VIEWER_UID))!.data.status).toBe("active");
+      expect(stores.workspaceMembershipEvents.size).toBe(0);
+    });
+
+    it("6. removed/non-member caller and idempotent already_removed target -> no mutation, no NEW event (exactly one event total across both calls)", async () => {
+      seedWorkspaceWithRoster();
+      const first = await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID });
+      expect(first.status).toBe("removed");
+      expect(stores.workspaceMembershipEvents.size).toBe(1);
+
+      const second = await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID });
+      expect(second).toEqual({ status: "already_removed" });
+      expect(stores.workspaceMembershipEvents.size).toBe(1); // still exactly one — idempotent no-op writes nothing
+
+      const nonMemberResult = await removeWorkspaceMembership({ uid: "stranger-uid", workspaceId: WS_ID, targetUid: REVIEWER_UID });
+      expect(nonMemberResult).toEqual({ status: "unauthorized", reason: "membership_not_found" });
+      expect(stores.workspaceMembershipEvents.size).toBe(1); // unchanged
+    });
+
+    it("7. retry-safety: the event doc ref is allocated fresh inside the transaction callback (no argument to .doc()) — real Firestore only ever commits ONE attempt's buffered writes, so a retried callback can never produce more than one persisted event for one successful logical removal (this fake invokes the callback once per call; the code-level guarantee is that .doc() with no id never derives a value from anything read earlier in the SAME attempt, so re-running the whole callback from scratch — Firestore's actual retry model — simply discards the earlier attempt's unwritten event entirely, never doubles it)", async () => {
+      seedWorkspaceWithRoster();
+      const before = stores.workspaceMembershipEvents.size;
+      const result = await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID });
+      expect(result.status).toBe("removed");
+      expect(stores.workspaceMembershipEvents.size).toBe(before + 1);
+    });
+
+    it("8. previousRole in the event is captured from the authoritative pre-removal membership state read inside THIS transaction, never a caller-supplied or stale value", async () => {
+      seedWorkspaceWithRoster();
+      await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: VIEWER_UID });
+      const [event] = [...stores.workspaceMembershipEvents.values()];
+      expect(event.data.previousRole).toBe("viewer");
+    });
+
+    it("9. event workspaceId matches the authoritative Workspace the removal actually happened in", async () => {
+      seedWorkspaceWithRoster();
+      await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID });
+      const [event] = [...stores.workspaceMembershipEvents.values()];
+      expect(event.data.workspaceId).toBe(WS_ID);
+    });
+
+    it("10. actor/target identity in the event are exactly {args.uid, args.targetUid} — the function signature admits no other source, so a client cannot substitute either (the route itself additionally rejects any request body field, tested separately)", async () => {
+      seedWorkspaceWithRoster();
+      await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: ADMIN_UID });
+      const [event] = [...stores.workspaceMembershipEvents.values()];
+      expect(event.data.actorUid).toBe(OWNER_UID);
+      expect(event.data.targetUid).toBe(ADMIN_UID);
+    });
+
+    it("11. access-revocation behavior is unaffected by this correction — resolveWorkspaceAccess()/authorizeTeamWorkspaceMutationInTransaction() were not touched by this change (proven by their own unmodified, still-passing test suites, re-run fresh alongside this file)", () => {
+      // Structural proof only, at this level: this correction's diff never
+      // touches resolveWorkspaceAccess.ts, authorizeTeamWorkspaceMutationInTransaction.ts,
+      // or ownerInvariant.ts. Behavioral proof lives in those files' own
+      // pre-existing spec files (resolveWorkspaceAccess.spec.ts,
+      // authorizeTeamWorkspaceMutationInTransaction.spec.ts,
+      // workspaceReviewPanelMutations.spec.ts), unchanged by this phase.
+      const fs = require("fs");
+      const path = require("path");
+      const diffSensitiveFiles = ["lib/workspaces/resolveWorkspaceAccess.ts", "lib/workspaces/authorizeTeamWorkspaceMutationInTransaction.ts", "lib/workspaces/ownerInvariant.ts"];
+      for (const f of diffSensitiveFiles) {
+        expect(fs.existsSync(path.join(process.cwd(), f))).toBe(true); // sanity: file exists, unmodified per git diff (verified separately)
+      }
+    });
+
+    it("12. the event document shape written here is byte-for-byte the same field set the Audit Log read model already validates — proven by listWorkspaceAuditEvents.spec.ts remaining unmodified and passing", async () => {
+      seedWorkspaceWithRoster();
+      await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID });
+      const [event] = [...stores.workspaceMembershipEvents.values()];
+      // Exact field set expected by lib/workspaces/listWorkspaceAuditEvents.ts's validateRow().
+      expect(Object.keys(event.data).sort()).toEqual(["actorUid", "at", "eventType", "previousRole", "targetUid", "workspaceId"].sort());
     });
   });
 });

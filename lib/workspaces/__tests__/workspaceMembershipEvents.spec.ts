@@ -1,86 +1,51 @@
 /**
- * Team Member Management, Phase 12A — writeWorkspaceMembershipEvent() tests.
- * Structural mirror of `lib/projects/__tests__/projectEvents.spec.ts` — the
- * central property under test is identical: this function NEVER throws or
- * rejects, regardless of the underlying Firestore write outcome.
+ * Team Member Management, Phase 12A — `buildWorkspaceMembershipEventDocData()`
+ * tests.
+ *
+ * Governance Audit Durability, Phase TEAM-GOV-I1C1 — REWRITTEN. This
+ * module no longer performs any Firestore I/O of its own (the previous
+ * `writeWorkspaceMembershipEvent()` async writer was deleted): the actual
+ * write now happens via `tx.set()` inside `removeWorkspaceMembership()`'s
+ * transaction (`lib/firestore/__tests__/workspaceMemberships.spec.ts`
+ * covers that atomicity). This file now only proves the pure, zero-I/O
+ * document-shape builder is correct.
  */
 
-const addMock = jest.fn();
-const firestoreUnavailableFlag = { value: false };
+import { buildWorkspaceMembershipEventDocData } from "@/lib/workspaces/workspaceMembershipEvents";
+import { Timestamp } from "firebase-admin/firestore";
 
-const mockAdminDb: any = {
-  collection: (name: string) => ({
-    add: (data: Record<string, unknown>) => addMock(name, data),
-  }),
-};
+describe("buildWorkspaceMembershipEventDocData", () => {
+  const AT = Timestamp.now();
 
-jest.mock("@/lib/firebase/admin", () => ({
-  get adminDb() {
-    return firestoreUnavailableFlag.value ? null : mockAdminDb;
-  },
-}));
-
-jest.mock("@/lib/logger", () => ({
-  logger: { warn: jest.fn(), info: jest.fn(), error: jest.fn(), debug: jest.fn() },
-}));
-
-import { writeWorkspaceMembershipEvent } from "@/lib/workspaces/workspaceMembershipEvents";
-import { logger } from "@/lib/logger";
-
-beforeEach(() => {
-  jest.clearAllMocks();
-  firestoreUnavailableFlag.value = false;
-  addMock.mockResolvedValue({ id: "event-1" });
-});
-
-describe("writeWorkspaceMembershipEvent", () => {
-  it("writes into the dedicated workspaceMembershipEvents collection — never admin_audit_logs or any governance collection", async () => {
-    await writeWorkspaceMembershipEvent({ eventType: "workspace_member_removed", actorUid: "owner-1", targetUid: "member-1", workspaceId: "ws-1", previousRole: "member" });
-    expect(addMock).toHaveBeenCalledWith("workspaceMembershipEvents", expect.anything());
-  });
-
-  it("payload contains exactly the expected metadata fields — no extras, no display name, no email", async () => {
-    await writeWorkspaceMembershipEvent({ eventType: "workspace_member_removed", actorUid: "owner-1", targetUid: "member-1", workspaceId: "ws-1", previousRole: "member" });
-    const [, payload] = addMock.mock.calls[0];
+  it("payload contains exactly the expected metadata fields — no extras, no display name, no email", () => {
+    const payload = buildWorkspaceMembershipEventDocData({ eventType: "workspace_member_removed", actorUid: "owner-1", targetUid: "member-1", workspaceId: "ws-1", previousRole: "member", at: AT });
     expect(Object.keys(payload).sort()).toEqual(["actorUid", "at", "eventType", "previousRole", "targetUid", "workspaceId"].sort());
   });
 
-  it("actor and target are server-derived uids, carried verbatim — never re-derived or altered by this module", async () => {
-    await writeWorkspaceMembershipEvent({ eventType: "workspace_member_removed", actorUid: "owner-uid-exact", targetUid: "target-uid-exact", workspaceId: "ws-1", previousRole: "admin" });
-    const [, payload] = addMock.mock.calls[0];
+  it("actor and target are carried verbatim — never re-derived or altered by this module", () => {
+    const payload = buildWorkspaceMembershipEventDocData({ eventType: "workspace_member_removed", actorUid: "owner-uid-exact", targetUid: "target-uid-exact", workspaceId: "ws-1", previousRole: "admin", at: AT });
     expect(payload.actorUid).toBe("owner-uid-exact");
     expect(payload.targetUid).toBe("target-uid-exact");
     expect(payload.previousRole).toBe("admin");
+    expect(payload.workspaceId).toBe("ws-1");
+    expect(payload.eventType).toBe("workspace_member_removed");
   });
 
-  it("resolves (never throws) when the Firestore write succeeds", async () => {
-    await expect(writeWorkspaceMembershipEvent({ eventType: "workspace_member_removed", actorUid: "owner-1", targetUid: "member-1", workspaceId: "ws-1", previousRole: "member" })).resolves.toBeUndefined();
+  it("`at` is the exact caller-supplied Timestamp — never independently generated (proves single-clock-read consistency with the membership's own removedAt/updatedAt)", () => {
+    const payload = buildWorkspaceMembershipEventDocData({ eventType: "workspace_member_removed", actorUid: "owner-1", targetUid: "member-1", workspaceId: "ws-1", previousRole: "member", at: AT });
+    expect(payload.at).toBe(AT);
   });
 
-  it("resolves (never throws or rejects) even when the Firestore write itself throws", async () => {
-    addMock.mockRejectedValue(new Error("simulated Firestore outage"));
-    await expect(writeWorkspaceMembershipEvent({ eventType: "workspace_member_removed", actorUid: "owner-1", targetUid: "member-1", workspaceId: "ws-1", previousRole: "member" })).resolves.toBeUndefined();
-    expect(logger.warn).toHaveBeenCalled();
+  it("pure function: never throws, has no side effects, does not touch Firestore", () => {
+    const fs = require("fs");
+    const source = fs.readFileSync(require.resolve("@/lib/workspaces/workspaceMembershipEvents"), "utf8");
+    const fnBody = source.match(/export function buildWorkspaceMembershipEventDocData\([\s\S]*/)?.[0] ?? "";
+    expect(fnBody).not.toMatch(/adminDb|\.add\(|\.set\(|\.create\(|await /);
+    expect(source).not.toMatch(/^import.*adminDb/m);
   });
 
-  it("resolves (never throws) when Firestore is unavailable", async () => {
-    firestoreUnavailableFlag.value = true;
-    await expect(writeWorkspaceMembershipEvent({ eventType: "workspace_member_removed", actorUid: "owner-1", targetUid: "member-1", workspaceId: "ws-1", previousRole: "member" })).resolves.toBeUndefined();
-    expect(addMock).not.toHaveBeenCalled();
-  });
-
-  it("logs a structured warning (with eventType and workspaceId, no raw error object) on failure", async () => {
-    addMock.mockRejectedValue(new Error("boom"));
-    await writeWorkspaceMembershipEvent({ eventType: "workspace_member_removed", actorUid: "owner-1", targetUid: "member-1", workspaceId: "ws-42", previousRole: "viewer" });
-    expect(logger.warn).toHaveBeenCalledWith(
-      expect.stringContaining("Failed to write membership event"),
-      expect.objectContaining({ eventType: "workspace_member_removed", workspaceId: "ws-42" })
-    );
-  });
-
-  it("append-only random-ID write — uses .add(), never a deterministic .doc(id).create()", () => {
-    const source = require("fs").readFileSync(require.resolve("@/lib/workspaces/workspaceMembershipEvents"), "utf8");
-    expect(source).toMatch(/\.add\(/);
-    expect(source).not.toMatch(/\.doc\([^)]*\)\.create\(/);
+  it("is synchronous — returns a plain object directly, not a Promise", () => {
+    const result = buildWorkspaceMembershipEventDocData({ eventType: "workspace_member_removed", actorUid: "owner-1", targetUid: "member-1", workspaceId: "ws-1", previousRole: "member", at: AT });
+    expect(result).not.toBeInstanceOf(Promise);
   });
 });
