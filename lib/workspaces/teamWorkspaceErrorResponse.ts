@@ -72,3 +72,30 @@ export function staleUpdateTimeConflictResponse(): { status: number; body: TeamW
 export function workspaceMemberCapacityReachedResponse(): { status: number; body: TeamWorkspaceErrorBody } {
   return { status: 409, body: { ok: false, errorCode: "workspace_member_capacity_reached", message: "This Workspace has reached its member limit." } };
 }
+
+/**
+ * Phase 12A — the target of a member-removal action doesn't exist as an
+ * active member of this Workspace, or is malformed. Concealed identically
+ * for both cases (never distinguishing "never existed" from "malformed" or
+ * "belongs to another Workspace") — `computeMembershipId(workspaceId, uid)`
+ * already scopes the lookup to exactly this Workspace, so this response
+ * alone reveals nothing about any OTHER Workspace's membership state.
+ */
+export function membershipTargetNotFoundResponse(): { status: number; body: TeamWorkspaceErrorBody } {
+  return { status: 404, body: { ok: false, errorCode: "member_not_found", message: "This member could not be found." } };
+}
+
+/** The caller attempted to remove themselves through the ordinary member-management action. Safe to be explicit — the caller already knows who they targeted. A future "Leave Workspace" is a separate, not-yet-built feature. */
+export function selfRemovalRejectedResponse(): { status: number; body: TeamWorkspaceErrorBody } {
+  return { status: 409, body: { ok: false, errorCode: "self_removal_rejected", message: "You cannot remove yourself from this Workspace." } };
+}
+
+/** The target is the Workspace's canonical current Owner — ownership can only change through the dedicated ownership-transfer workflow, never through ordinary member removal, regardless of the caller's own role or capability. */
+export function targetIsCanonicalOwnerResponse(): { status: number; body: TeamWorkspaceErrorBody } {
+  return { status: 409, body: { ok: false, errorCode: "target_is_canonical_owner", message: "The Workspace Owner cannot be removed. Transfer ownership first." } };
+}
+
+/** The caller's role is not permitted to remove a member at the target's specific role (e.g. an Admin targeting another Admin) — safe to be explicit, mirroring `role_target_forbidden`'s existing invitation-side precedent. */
+export function membershipTargetRoleNotManageableResponse(): { status: number; body: TeamWorkspaceErrorBody } {
+  return { status: 403, body: { ok: false, errorCode: "role_target_forbidden", message: "You do not have permission to remove a member at this role." } };
+}

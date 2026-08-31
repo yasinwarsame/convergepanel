@@ -14,12 +14,19 @@ import { adminDb } from "@/lib/firebase/admin";
 import { logger } from "@/lib/logger";
 import { TEAM_WORKSPACES_ENABLED, TEAM_WORKSPACES_CANARY_UIDS, TEAM_WORKSPACES_CANARY_WORKSPACE_IDS } from "@/lib/env";
 import { resolveTeamWorkspacesMode } from "@/lib/workspaces/teamWorkspacesRollout";
-import { resolveTeamWorkspaceTargetAdmission } from "@/lib/workspaces/teamWorkspaceTargetAdmission";
+import { resolveTeamWorkspaceTargetAdmission, capacityControlled } from "@/lib/workspaces/teamWorkspaceTargetAdmission";
 import { computeMembershipId } from "@/lib/workspaces/membershipId";
 import { validateMembershipBinding } from "@/lib/workspaces/membershipBinding";
 import { isCanonicalTeamOwnerMembership } from "@/lib/workspaces/ownerInvariant";
-import type { WorkspaceMembershipV1 } from "@/lib/workspaces/membershipTypes";
+import { authorizeTeamWorkspaceMutationInTransaction, type TeamMutationAuthorizationDenialReason } from "@/lib/workspaces/authorizeTeamWorkspaceMutationInTransaction";
+import { canManageMembershipTargetRole } from "@/lib/workspaces/membershipTargetAuthority";
+import { releaseTeamWorkspaceCanarySlot } from "@/lib/workspaces/teamWorkspaceCanaryCapacity";
+import type { WorkspaceMembershipRole, WorkspaceMembershipV1 } from "@/lib/workspaces/membershipTypes";
 import { isWellFormedWorkspaceV1, type TeamWorkspaceV1 } from "@/lib/workspaces/types";
+
+function isWorkspaceCapacityControlled(workspaceId: string): boolean {
+  return capacityControlled({ workspaceId, globalEnabled: TEAM_WORKSPACES_ENABLED, canaryWorkspaceIdsRaw: TEAM_WORKSPACES_CANARY_WORKSPACE_IDS });
+}
 
 export type GetWorkspaceMembershipForBindingResult =
   | { status: "found"; membership: WorkspaceMembershipV1; documentUpdateTime: Timestamp }
@@ -344,4 +351,169 @@ export async function transferTeamWorkspaceOwnership(args: {
   }
 
   return result;
+}
+
+export type RemoveWorkspaceMembershipResult =
+  | { status: "removed"; targetUid: string; workspaceId: string; previousRole: WorkspaceMembershipRole }
+  | { status: "already_removed" }
+  | { status: "team_workspaces_disabled" }
+  | { status: "firestore_unavailable" }
+  | { status: "unauthorized"; reason: TeamMutationAuthorizationDenialReason }
+  | { status: "target_not_found" }
+  | { status: "target_malformed" }
+  | { status: "self_removal_rejected" }
+  | { status: "target_is_canonical_owner" }
+  | { status: "target_role_not_manageable" }
+  | { status: "state_corruption" }
+  | { status: "remove_failed" };
+
+/**
+ * Active Team Workspace member soft-removal, Phase 12A — the ONE canonical
+ * `active -> removed` membership transition. Never a hard delete: the
+ * membership document (identity, role, `createdAt`, invitation provenance)
+ * is retained forever, only `status`/`removedAt`/`removedByUserId` change.
+ *
+ * Read/validate/write order inside the transaction (frozen, mirrors
+ * `authorizeTeamWorkspaceMutationInTransaction()`'s own frozen-order
+ * precedent and `teamWorkspaceCanaryCapacity.ts`'s read-before-write
+ * contract):
+ *   1. `authorizeTeamWorkspaceMutationInTransaction()` — actor authenticated,
+ *      Workspace valid, actor membership active, owner-integrity Cases A/B,
+ *      `members.manage` capability. Actor role/membership are authoritative
+ *      at MUTATION time, never a pre-transaction snapshot.
+ *   2. Target membership, read fresh in the SAME transaction at
+ *      `computeMembershipId(workspaceId, targetUid)` — never trusted from
+ *      any caller-supplied role/state.
+ *   3. Idempotency: target already `status !== "active"` -> `already_removed`,
+ *      a benign no-op, never an error and never a second write.
+ *   4. Self-removal: `targetUid === callerUid` -> `self_removal_rejected`,
+ *      checked before the canonical-Owner check below so an Owner
+ *      attempting to remove themself gets one clear, specific reason.
+ *   5. Canonical-Owner protection: `isCanonicalTeamOwnerMembership()` on the
+ *      TARGET (never a bare `role === "owner"` string check) -> if true,
+ *      `target_is_canonical_owner`, unconditionally — this is checked even
+ *      though step 1 already re-validated the ACTOR's own owner-integrity;
+ *      this is a distinct check of the TARGET row. A corrupt extra
+ *      `role: "owner"` row that is NOT canonical does not hit this branch —
+ *      it is instead denied by step 6 below, since `"owner"` is never a
+ *      manageable target role for anyone, canonical or not.
+ *   6. `canManageMembershipTargetRole({callerRole, targetRole})` — the
+ *      Owner/Admin target-role policy matrix.
+ *   7. Capacity release (only if `isWorkspaceCapacityControlled()`), via the
+ *      canonical `releaseTeamWorkspaceCanarySlot()` helper — called BEFORE
+ *      the membership write below, per that module's own read-before-write
+ *      transaction-ordering contract (its own reads must precede every
+ *      other write in this transaction).
+ *   8. Stage the single `tx.update()`: `status: "removed"`, `removedAt`,
+ *      `removedByUserId` (server-derived from `args.uid`, never
+ *      client-supplied), `updatedAt`. Every other field — `role`,
+ *      `createdAt`, `invitedByUserId` — is left untouched, preserving full
+ *      historical identity.
+ *
+ * Rollout admission is checked BEFORE `runTransaction()`, mirroring
+ * `transferTeamWorkspaceOwnership()`'s established precedent — zero reads
+ * or writes occur for a uid outside the global/canary rollout.
+ */
+export async function removeWorkspaceMembership(args: { uid: string; workspaceId: string; targetUid: string }): Promise<RemoveWorkspaceMembershipResult> {
+  const admission = resolveTeamWorkspaceTargetAdmission({
+    uid: args.uid,
+    workspaceId: args.workspaceId,
+    globalEnabled: TEAM_WORKSPACES_ENABLED,
+    canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS,
+    canaryWorkspaceIdsRaw: TEAM_WORKSPACES_CANARY_WORKSPACE_IDS,
+  });
+  if (!admission.enabled) {
+    return { status: "team_workspaces_disabled" };
+  }
+  if (!adminDb) {
+    return { status: "firestore_unavailable" };
+  }
+
+  const targetMembershipId = computeMembershipId(args.workspaceId, args.targetUid);
+
+  type TxResult =
+    | { kind: "removed"; targetUid: string; workspaceId: string; previousRole: WorkspaceMembershipRole }
+    | { kind: "already_removed" }
+    | { kind: "unauthorized"; reason: TeamMutationAuthorizationDenialReason }
+    | { kind: "target_not_found" }
+    | { kind: "target_malformed" }
+    | { kind: "self_removal_rejected" }
+    | { kind: "target_is_canonical_owner" }
+    | { kind: "target_role_not_manageable" }
+    | { kind: "state_corruption" };
+
+  let txResult: TxResult;
+  try {
+    txResult = await adminDb.runTransaction<TxResult>(async (tx) => {
+      const auth = await authorizeTeamWorkspaceMutationInTransaction(tx, { uid: args.uid, workspaceId: args.workspaceId, requiredCapability: "members.manage" });
+      if (!auth.ok) {
+        return { kind: "unauthorized", reason: auth.reason };
+      }
+
+      const targetRef = adminDb!.collection("workspaceMemberships").doc(targetMembershipId);
+      const targetSnap = await tx.get(targetRef);
+      if (!targetSnap.exists) {
+        return { kind: "target_not_found" };
+      }
+      const targetMembership = validateMembershipBinding(targetSnap.data(), { workspaceId: args.workspaceId, uid: args.targetUid });
+      if (!targetMembership) {
+        return { kind: "target_malformed" };
+      }
+
+      if (targetMembership.status !== "active") {
+        return { kind: "already_removed" };
+      }
+
+      if (args.targetUid === args.uid) {
+        return { kind: "self_removal_rejected" };
+      }
+
+      if (isCanonicalTeamOwnerMembership({ workspace: auth.workspace, membership: targetMembership })) {
+        return { kind: "target_is_canonical_owner" };
+      }
+
+      if (!canManageMembershipTargetRole({ callerRole: auth.membership.role, targetRole: targetMembership.role })) {
+        return { kind: "target_role_not_manageable" };
+      }
+
+      if (isWorkspaceCapacityControlled(args.workspaceId)) {
+        const release = await releaseTeamWorkspaceCanarySlot(tx, args.workspaceId);
+        if (release.status !== "released") {
+          return { kind: "state_corruption" };
+        }
+      }
+
+      const now = Timestamp.now();
+      tx.update(targetRef, { status: "removed", removedAt: now, removedByUserId: args.uid, updatedAt: now });
+
+      return { kind: "removed", targetUid: args.targetUid, workspaceId: args.workspaceId, previousRole: targetMembership.role };
+    });
+  } catch (err) {
+    logger.warn("[firestore/workspaceMemberships] Membership removal transaction failed", {
+      workspaceId: args.workspaceId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return { status: "remove_failed" };
+  }
+
+  switch (txResult.kind) {
+    case "unauthorized":
+      return { status: "unauthorized", reason: txResult.reason };
+    case "target_not_found":
+      return { status: "target_not_found" };
+    case "target_malformed":
+      return { status: "target_malformed" };
+    case "already_removed":
+      return { status: "already_removed" };
+    case "self_removal_rejected":
+      return { status: "self_removal_rejected" };
+    case "target_is_canonical_owner":
+      return { status: "target_is_canonical_owner" };
+    case "target_role_not_manageable":
+      return { status: "target_role_not_manageable" };
+    case "state_corruption":
+      return { status: "state_corruption" };
+    case "removed":
+      return { status: "removed", targetUid: txResult.targetUid, workspaceId: txResult.workspaceId, previousRole: txResult.previousRole };
+  }
 }

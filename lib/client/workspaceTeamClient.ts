@@ -302,3 +302,38 @@ export async function revokeInvitation(args: { user: User | null; authReady: boo
     return { status: "error" };
   }
 }
+
+// ── Member removal ──────────────────────────────────────────────────────
+
+export type RemoveMemberResult = { status: "ok" } | { status: "denied"; errorCode: string; message: string } | { status: "error" };
+
+/**
+ * Soft-removes an active member (`status: "active" -> "removed"`). Server-
+ * authoritative — this route derives actor identity, target membership, and
+ * every authorization/invariant/capacity decision itself; the client
+ * submits nothing but the target uid, already present in the URL path. A
+ * 2xx response covers both a genuine removal and the idempotent
+ * already-removed no-op — the caller never needs to distinguish them, both
+ * simply mean "this member is no longer active" and should refresh the
+ * canonical member list.
+ */
+export async function removeMember(args: { user: User | null; authReady: boolean; workspaceId: string; targetUid: string }): Promise<RemoveMemberResult> {
+  try {
+    const res = await authedFetch(`/api/workspaces/${encodeURIComponent(args.workspaceId)}/members/${encodeURIComponent(args.targetUid)}/remove`, {
+      user: args.user,
+      authReady: args.authReady,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    if (!res.ok) {
+      const json = await res.json().catch(() => null);
+      const errorCode = typeof (json as Record<string, unknown> | null)?.errorCode === "string" ? ((json as Record<string, unknown>).errorCode as string) : "unknown_error";
+      const message = typeof (json as Record<string, unknown> | null)?.message === "string" ? ((json as Record<string, unknown>).message as string) : "We couldn't remove this member. Please try again.";
+      return { status: "denied", errorCode, message };
+    }
+    return { status: "ok" };
+  } catch {
+    return { status: "error" };
+  }
+}

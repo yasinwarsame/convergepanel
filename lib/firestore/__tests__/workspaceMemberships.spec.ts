@@ -22,6 +22,7 @@ type StoredDoc = { data: Record<string, unknown>; updateTime: Timestamp };
 const stores: Record<string, Map<string, StoredDoc>> = {
   workspaces: new Map(),
   workspaceMemberships: new Map(),
+  teamWorkspaceCanaryCapacity: new Map(),
 };
 
 function makeDocRef(collectionName: string, docId: string) {
@@ -142,7 +143,7 @@ jest.mock("@/lib/logger", () => ({
 }));
 
 import { computeMembershipId } from "@/lib/workspaces/membershipId";
-import { getWorkspaceMembershipForBinding, createTeamWorkspace, transferTeamWorkspaceOwnership } from "@/lib/firestore/workspaceMemberships";
+import { getWorkspaceMembershipForBinding, createTeamWorkspace, transferTeamWorkspaceOwnership, removeWorkspaceMembership } from "@/lib/firestore/workspaceMemberships";
 
 const OWNER_UID = "owner-1";
 const OTHER_UID = "member-1";
@@ -190,6 +191,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   stores.workspaces.clear();
   stores.workspaceMemberships.clear();
+  stores.teamWorkspaceCanaryCapacity.clear();
   concurrentMutationHook = null;
   firestoreUnavailableFlag.value = false;
   teamWorkspacesEnabled = true;
@@ -850,5 +852,267 @@ describe("Phase 10B.3.2A — createTeamWorkspace remains strictly user-scoped (T
     const createResult = await createTeamWorkspace({ uid: OWNER_UID, name: "Should Not Be Created" });
     expect(createResult.status).toBe("team_workspaces_disabled");
     expect(mockAdminDb.runTransaction).toHaveBeenCalledTimes(1); // only the transfer above ran a transaction
+  });
+});
+
+describe("removeWorkspaceMembership — Phase 12A", () => {
+  const ADMIN_UID = "admin-1";
+  const MEMBER_UID = "member-2";
+  const REVIEWER_UID = "reviewer-1";
+  const VIEWER_UID = "viewer-1";
+
+  function seedWorkspaceWithRoster(overrides: Record<string, unknown> = {}) {
+    seedTeamWorkspace(overrides);
+    seedMembership(OWNER_UID, "owner");
+    seedMembership(ADMIN_UID, "admin");
+    seedMembership(MEMBER_UID, "member");
+    seedMembership(REVIEWER_UID, "reviewer");
+    seedMembership(VIEWER_UID, "viewer");
+  }
+
+  function seedCapacity(reservedCount: number) {
+    stores.teamWorkspaceCanaryCapacity.set(WS_ID, {
+      data: { schemaVersion: 1, workspaceId: WS_ID, reservedCount, revision: 0, updatedAt: Timestamp.now() },
+      updateTime: nextUpdateTime(),
+    });
+  }
+
+  describe("OWNER removal matrix", () => {
+    it("E. Owner removes Admin -> success", async () => {
+      seedWorkspaceWithRoster();
+      const result = await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: ADMIN_UID });
+      expect(result).toEqual({ status: "removed", targetUid: ADMIN_UID, workspaceId: WS_ID, previousRole: "admin" });
+    });
+
+    it("F. Owner removes Member -> success", async () => {
+      seedWorkspaceWithRoster();
+      const result = await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID });
+      expect(result.status).toBe("removed");
+    });
+
+    it("G. Owner removes Reviewer -> success", async () => {
+      seedWorkspaceWithRoster();
+      const result = await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: REVIEWER_UID });
+      expect(result.status).toBe("removed");
+    });
+
+    it("H. Owner removes Viewer -> success", async () => {
+      seedWorkspaceWithRoster();
+      const result = await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: VIEWER_UID });
+      expect(result.status).toBe("removed");
+    });
+
+    it("I. Owner removes canonical Owner (self) -> denied (self_removal_rejected, checked before the canonical-Owner branch)", async () => {
+      seedWorkspaceWithRoster();
+      const result = await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: OWNER_UID });
+      expect(result.status).toBe("self_removal_rejected");
+      expect(stores.workspaceMemberships.get(computeMembershipId(WS_ID, OWNER_UID))!.data.status).toBe("active");
+    });
+
+    it("J. Owner self-removal -> denied", async () => {
+      seedWorkspaceWithRoster();
+      const result = await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: OWNER_UID });
+      expect(result.status).toBe("self_removal_rejected");
+    });
+  });
+
+  describe("ADMIN removal matrix", () => {
+    it("K. Admin removes Member -> success", async () => {
+      seedWorkspaceWithRoster();
+      const result = await removeWorkspaceMembership({ uid: ADMIN_UID, workspaceId: WS_ID, targetUid: MEMBER_UID });
+      expect(result.status).toBe("removed");
+    });
+
+    it("L. Admin removes Reviewer -> success", async () => {
+      seedWorkspaceWithRoster();
+      const result = await removeWorkspaceMembership({ uid: ADMIN_UID, workspaceId: WS_ID, targetUid: REVIEWER_UID });
+      expect(result.status).toBe("removed");
+    });
+
+    it("M. Admin removes Viewer -> success", async () => {
+      seedWorkspaceWithRoster();
+      const result = await removeWorkspaceMembership({ uid: ADMIN_UID, workspaceId: WS_ID, targetUid: VIEWER_UID });
+      expect(result.status).toBe("removed");
+    });
+
+    it("N. Admin removes another Admin -> denied", async () => {
+      seedWorkspaceWithRoster();
+      const secondAdminUid = "admin-2";
+      seedMembership(secondAdminUid, "admin");
+      const result = await removeWorkspaceMembership({ uid: ADMIN_UID, workspaceId: WS_ID, targetUid: secondAdminUid });
+      expect(result.status).toBe("target_role_not_manageable");
+      expect(stores.workspaceMemberships.get(computeMembershipId(WS_ID, secondAdminUid))!.data.status).toBe("active");
+    });
+
+    it("O. Admin removes Owner -> denied", async () => {
+      seedWorkspaceWithRoster();
+      const result = await removeWorkspaceMembership({ uid: ADMIN_UID, workspaceId: WS_ID, targetUid: OWNER_UID });
+      expect(result.status).toBe("target_is_canonical_owner");
+      expect(stores.workspaceMemberships.get(computeMembershipId(WS_ID, OWNER_UID))!.data.status).toBe("active");
+    });
+
+    it("P. Admin self-removal -> denied", async () => {
+      seedWorkspaceWithRoster();
+      const result = await removeWorkspaceMembership({ uid: ADMIN_UID, workspaceId: WS_ID, targetUid: ADMIN_UID });
+      expect(result.status).toBe("self_removal_rejected");
+    });
+  });
+
+  describe("LOWER ROLES cannot remove anyone", () => {
+    it("Q. Member removal attempt -> denied (insufficient_capability)", async () => {
+      seedWorkspaceWithRoster();
+      const result = await removeWorkspaceMembership({ uid: MEMBER_UID, workspaceId: WS_ID, targetUid: VIEWER_UID });
+      expect(result).toEqual({ status: "unauthorized", reason: "insufficient_capability" });
+    });
+
+    it("R. Reviewer removal attempt -> denied (insufficient_capability)", async () => {
+      seedWorkspaceWithRoster();
+      const result = await removeWorkspaceMembership({ uid: REVIEWER_UID, workspaceId: WS_ID, targetUid: VIEWER_UID });
+      expect(result).toEqual({ status: "unauthorized", reason: "insufficient_capability" });
+    });
+
+    it("S. Viewer removal attempt -> denied (insufficient_capability)", async () => {
+      seedWorkspaceWithRoster();
+      const result = await removeWorkspaceMembership({ uid: VIEWER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID });
+      expect(result).toEqual({ status: "unauthorized", reason: "insufficient_capability" });
+    });
+  });
+
+  describe("AUTH / concealment", () => {
+    it("C. non-member actor -> denied (membership_not_found)", async () => {
+      seedWorkspaceWithRoster();
+      const result = await removeWorkspaceMembership({ uid: "stranger-uid", workspaceId: WS_ID, targetUid: MEMBER_UID });
+      expect(result).toEqual({ status: "unauthorized", reason: "membership_not_found" });
+    });
+
+    it("D. target uid that only exists in a DIFFERENT Workspace is concealed as target_not_found (never enumerable via this Workspace's route)", async () => {
+      seedWorkspaceWithRoster();
+      const foreignUid = "foreign-member";
+      const foreignId = computeMembershipId("some-other-ws", foreignUid);
+      stores.workspaceMemberships.set(foreignId, {
+        data: { schemaVersion: 1, id: foreignId, workspaceId: "some-other-ws", uid: foreignUid, role: "member", status: "active", createdAt: Timestamp.now(), updatedAt: Timestamp.now(), invitedByUserId: null, removedAt: null, removedByUserId: null },
+        updateTime: nextUpdateTime(),
+      });
+      const result = await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: foreignUid });
+      expect(result.status).toBe("target_not_found");
+    });
+
+    it("B. Team Workspaces globally disabled and actor not in any canary -> team_workspaces_disabled, zero Firestore access", async () => {
+      seedWorkspaceWithRoster();
+      teamWorkspacesEnabled = false;
+      const result = await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID });
+      expect(result.status).toBe("team_workspaces_disabled");
+      expect(mockAdminDb.runTransaction).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("INTEGRITY", () => {
+    it("T. a corrupt extra role:\"owner\" membership (not canonical) is denied removal via role policy, never granted Owner protection it doesn't deserve, and never removable either", async () => {
+      seedWorkspaceWithRoster();
+      const corruptUid = "corrupt-owner-uid";
+      seedMembership(corruptUid, "owner"); // role says owner, but workspace.ownerUserId still points at OWNER_UID
+      const result = await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: corruptUid });
+      // Denied via ordinary role policy (owner is never a manageable target role for anyone) — NOT via target_is_canonical_owner, since this row is not canonical.
+      expect(result.status).toBe("target_role_not_manageable");
+      expect(stores.workspaceMemberships.get(computeMembershipId(WS_ID, corruptUid))!.data.status).toBe("active");
+    });
+
+    it("U. malformed target membership document fails closed", async () => {
+      seedWorkspaceWithRoster();
+      const targetId = computeMembershipId(WS_ID, MEMBER_UID);
+      stores.workspaceMemberships.set(targetId, {
+        data: { schemaVersion: 1, id: targetId, workspaceId: "wrong-ws", uid: MEMBER_UID, role: "member", status: "active", createdAt: Timestamp.now(), updatedAt: Timestamp.now(), invitedByUserId: null, removedAt: null, removedByUserId: null },
+        updateTime: nextUpdateTime(),
+      });
+      const result = await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID });
+      expect(result.status).toBe("target_malformed");
+    });
+
+    it("V/W/X/Y/Z. removal is a soft transition: membership document retained, status -> removed, removedAt/removedByUserId server-derived, role/createdAt/invitedByUserId preserved", async () => {
+      seedWorkspaceWithRoster();
+      const before = stores.workspaceMemberships.get(computeMembershipId(WS_ID, MEMBER_UID))!.data;
+      const result = await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID });
+      expect(result).toEqual({ status: "removed", targetUid: MEMBER_UID, workspaceId: WS_ID, previousRole: "member" });
+
+      const after = stores.workspaceMemberships.get(computeMembershipId(WS_ID, MEMBER_UID))!.data;
+      expect(after).toBeDefined(); // V — document retained, never deleted
+      expect(after.status).toBe("removed"); // W
+      expect(after.removedAt).toBeInstanceOf(Timestamp); // X
+      expect(after.removedByUserId).toBe(OWNER_UID); // Y — actor-derived, never client-supplied
+      expect(after.role).toBe("member"); // Z — previous role retained on the document itself
+      expect(after.createdAt).toEqual(before.createdAt);
+      expect(after.invitedByUserId).toEqual(before.invitedByUserId);
+    });
+  });
+
+  describe("IDEMPOTENCY", () => {
+    it("AA. second remove of an already-removed membership returns already_removed deterministically, not an error", async () => {
+      seedWorkspaceWithRoster();
+      const first = await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID });
+      expect(first.status).toBe("removed");
+      const second = await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID });
+      expect(second).toEqual({ status: "already_removed" });
+    });
+
+    it("AB. second remove does not alter removedAt/removedByUserId", async () => {
+      seedWorkspaceWithRoster();
+      await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID });
+      const afterFirst = stores.workspaceMemberships.get(computeMembershipId(WS_ID, MEMBER_UID))!.data;
+      await removeWorkspaceMembership({ uid: ADMIN_UID, workspaceId: WS_ID, targetUid: MEMBER_UID });
+      const afterSecond = stores.workspaceMemberships.get(computeMembershipId(WS_ID, MEMBER_UID))!.data;
+      expect(afterSecond.removedAt).toEqual(afterFirst.removedAt);
+      expect(afterSecond.removedByUserId).toBe(afterFirst.removedByUserId); // still OWNER_UID, not ADMIN_UID
+    });
+  });
+
+  describe("CAPACITY", () => {
+    it("AK. controlled mode releases exactly one active-membership capacity unit on removal", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryWorkspaceIds = WS_ID; // capacityControlled() true for this workspace
+      seedWorkspaceWithRoster();
+      seedCapacity(5);
+      const result = await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID });
+      expect(result.status).toBe("removed");
+      expect(stores.teamWorkspaceCanaryCapacity.get(WS_ID)!.data.reservedCount).toBe(4);
+    });
+
+    it("AL. global/uncontrolled mode never touches the capacity document at all", async () => {
+      seedWorkspaceWithRoster(); // teamWorkspacesEnabled stays true (global) — capacityControlled() is inert
+      const result = await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID });
+      expect(result.status).toBe("removed");
+      expect(stores.teamWorkspaceCanaryCapacity.size).toBe(0);
+    });
+
+    it("AM. underflow protection: a release that would take reservedCount below zero fails closed (state_corruption), and the membership is NOT removed — capacity release and membership mutation are in the same transaction", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryWorkspaceIds = WS_ID;
+      seedWorkspaceWithRoster();
+      seedCapacity(0);
+      const result = await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID });
+      expect(result.status).toBe("state_corruption");
+      expect(stores.workspaceMemberships.get(computeMembershipId(WS_ID, MEMBER_UID))!.data.status).toBe("active"); // no partial mutation
+    });
+
+    it("AN. idempotent second remove releases no additional capacity (already_removed short-circuits before the capacity step)", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryWorkspaceIds = WS_ID;
+      seedWorkspaceWithRoster();
+      seedCapacity(5);
+      await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID });
+      expect(stores.teamWorkspaceCanaryCapacity.get(WS_ID)!.data.reservedCount).toBe(4);
+      const second = await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID });
+      expect(second.status).toBe("already_removed");
+      expect(stores.teamWorkspaceCanaryCapacity.get(WS_ID)!.data.reservedCount).toBe(4); // unchanged
+    });
+  });
+
+  describe("rollout gate", () => {
+    it("succeeds for an actor in a valid uid-canary even when the global flag is off", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryUids = OWNER_UID;
+      seedWorkspaceWithRoster();
+      const result = await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID });
+      expect(result.status).toBe("removed");
+    });
   });
 });
