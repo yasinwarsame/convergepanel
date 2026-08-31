@@ -20,7 +20,7 @@ jest.mock("@/lib/client/authedFetch", () => ({
   authedFetch: (...args: any[]) => mockedAuthedFetch(...args),
 }));
 
-import { fetchPendingInvitations, createInvitation, resendInvitation } from "@/lib/client/workspaceTeamClient";
+import { fetchPendingInvitations, createInvitation, resendInvitation, fetchWorkspaceAuditEvents } from "@/lib/client/workspaceTeamClient";
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -279,6 +279,65 @@ describe("resendInvitation — delivered outcome (PHASE TEAM-INVITE-DELIVERY-R1 
   it("thrown fetch -> error, never throws", async () => {
     mockedAuthedFetch.mockRejectedValue(new Error("network down"));
     const result = await resendInvitation({ user: null, authReady: true, workspaceId: "ws-1", invitationId: "inv-1", expectedDeliveryVersion: 1 });
+    expect(result).toEqual({ status: "error" });
+  });
+});
+
+describe("fetchWorkspaceAuditEvents — Workspace Audit Log, Phase TEAM-GOV-I1", () => {
+  const VALID_EVENT = {
+    eventType: "workspace_member_removed",
+    occurredAt: "2026-08-31T20:46:25.000Z",
+    actor: { displayName: "Olivia Owner" },
+    target: { displayName: "Bob Member" },
+    previousRole: "member",
+  };
+
+  it("ok response is parsed into events/hasMore/nextCursor", async () => {
+    mockedAuthedFetch.mockResolvedValue(jsonResponse({ ok: true, events: [VALID_EVENT], hasMore: true, nextCursor: "cur-1" }));
+    const result = await fetchWorkspaceAuditEvents({ user: null, authReady: true, workspaceId: "ws-1" });
+    expect(result).toEqual({ status: "ok", events: [VALID_EVENT], hasMore: true, nextCursor: "cur-1" });
+  });
+
+  it("ok response with no nextCursor omits it", async () => {
+    mockedAuthedFetch.mockResolvedValue(jsonResponse({ ok: true, events: [], hasMore: false }));
+    const result = await fetchWorkspaceAuditEvents({ user: null, authReady: true, workspaceId: "ws-1" });
+    expect(result).toEqual({ status: "ok", events: [], hasMore: false });
+  });
+
+  it("a malformed event in the array (bad eventType) fails the whole response closed — never a partial/trusted-shape list", async () => {
+    mockedAuthedFetch.mockResolvedValue(jsonResponse({ ok: true, events: [{ ...VALID_EVENT, eventType: "something_else" }], hasMore: false }));
+    const result = await fetchWorkspaceAuditEvents({ user: null, authReady: true, workspaceId: "ws-1" });
+    expect(result).toEqual({ status: "error" });
+  });
+
+  it("an unrecognized previousRole fails closed", async () => {
+    mockedAuthedFetch.mockResolvedValue(jsonResponse({ ok: true, events: [{ ...VALID_EVENT, previousRole: "owner" }], hasMore: false }));
+    const result = await fetchWorkspaceAuditEvents({ user: null, authReady: true, workspaceId: "ws-1" });
+    expect(result).toEqual({ status: "error" });
+  });
+
+  it("an invalid occurredAt (unparsable date) fails closed", async () => {
+    mockedAuthedFetch.mockResolvedValue(jsonResponse({ ok: true, events: [{ ...VALID_EVENT, occurredAt: "not-a-date" }], hasMore: false }));
+    const result = await fetchWorkspaceAuditEvents({ user: null, authReady: true, workspaceId: "ws-1" });
+    expect(result).toEqual({ status: "error" });
+  });
+
+  it("non-2xx response maps to denied with the server's errorCode/message", async () => {
+    mockedAuthedFetch.mockResolvedValue({ ok: false, status: 403, json: async () => ({ errorCode: "insufficient_capability", message: "You do not have permission to view this Workspace's audit log." }) });
+    const result = await fetchWorkspaceAuditEvents({ user: null, authReady: true, workspaceId: "ws-1" });
+    expect(result).toEqual({ status: "denied", errorCode: "insufficient_capability", message: "You do not have permission to view this Workspace's audit log." });
+  });
+
+  it("cursor param is included in the request URL when provided", async () => {
+    mockedAuthedFetch.mockResolvedValue(jsonResponse({ ok: true, events: [], hasMore: false }));
+    await fetchWorkspaceAuditEvents({ user: null, authReady: true, workspaceId: "ws-1", cursor: "abc def" });
+    const calledUrl = mockedAuthedFetch.mock.calls[0][0] as string;
+    expect(calledUrl).toContain(encodeURIComponent("abc def"));
+  });
+
+  it("thrown fetch -> error, never throws", async () => {
+    mockedAuthedFetch.mockRejectedValue(new Error("network down"));
+    const result = await fetchWorkspaceAuditEvents({ user: null, authReady: true, workspaceId: "ws-1" });
     expect(result).toEqual({ status: "error" });
   });
 });

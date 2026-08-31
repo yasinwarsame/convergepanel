@@ -337,3 +337,63 @@ export async function removeMember(args: { user: User | null; authReady: boolean
     return { status: "error" };
   }
 }
+
+// ── Audit log ────────────────────────────────────────────────────────────
+
+export type WorkspaceAuditPreviousRole = "admin" | "member" | "reviewer" | "viewer";
+
+export interface WorkspaceAuditEventItem {
+  eventType: "workspace_member_removed";
+  occurredAt: string;
+  actor: { displayName: string };
+  target: { displayName: string };
+  previousRole: WorkspaceAuditPreviousRole;
+}
+
+const VALID_AUDIT_PREVIOUS_ROLES: ReadonlySet<string> = new Set(["admin", "member", "reviewer", "viewer"]);
+
+function isValidAuditEvent(value: unknown): value is WorkspaceAuditEventItem {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  if (v.eventType !== "workspace_member_removed") return false;
+  if (typeof v.occurredAt !== "string" || Number.isNaN(Date.parse(v.occurredAt))) return false;
+  if (typeof v.previousRole !== "string" || !VALID_AUDIT_PREVIOUS_ROLES.has(v.previousRole)) return false;
+  const actor = v.actor;
+  const target = v.target;
+  if (typeof actor !== "object" || actor === null || typeof (actor as Record<string, unknown>).displayName !== "string") return false;
+  if (typeof target !== "object" || target === null || typeof (target as Record<string, unknown>).displayName !== "string") return false;
+  return true;
+}
+
+export type FetchWorkspaceAuditEventsResult =
+  | { status: "ok"; events: WorkspaceAuditEventItem[]; hasMore: boolean; nextCursor?: string }
+  | { status: "denied"; errorCode: string; message: string }
+  | { status: "error" };
+
+export async function fetchWorkspaceAuditEvents(args: { user: User | null; authReady: boolean; workspaceId: string; cursor?: string; signal?: AbortSignal }): Promise<FetchWorkspaceAuditEventsResult> {
+  try {
+    const query = args.cursor ? `?cursor=${encodeURIComponent(args.cursor)}` : "";
+    const res = await authedFetch(`/api/workspaces/${encodeURIComponent(args.workspaceId)}/audit-events${query}`, {
+      user: args.user,
+      authReady: args.authReady,
+      method: "GET",
+      cache: "no-store",
+      signal: args.signal,
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok) {
+      const errorCode = typeof (json as Record<string, unknown> | null)?.errorCode === "string" ? ((json as Record<string, unknown>).errorCode as string) : "unknown_error";
+      const message = typeof (json as Record<string, unknown> | null)?.message === "string" ? ((json as Record<string, unknown>).message as string) : "Could not load the audit log.";
+      return { status: "denied", errorCode, message };
+    }
+    if (typeof json !== "object" || json === null) return { status: "error" };
+    const d = json as Record<string, unknown>;
+    if (d.ok !== true || !Array.isArray(d.events) || !d.events.every(isValidAuditEvent) || typeof d.hasMore !== "boolean") {
+      return { status: "error" };
+    }
+    const nextCursor = typeof d.nextCursor === "string" ? d.nextCursor : undefined;
+    return { status: "ok", events: d.events as WorkspaceAuditEventItem[], hasMore: d.hasMore, ...(nextCursor ? { nextCursor } : {}) };
+  } catch {
+    return { status: "error" };
+  }
+}

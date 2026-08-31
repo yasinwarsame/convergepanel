@@ -75,12 +75,15 @@ export default function WorkspaceMembersShell({
   callerRole,
   canInvite,
   canManageInvitations,
+  canReadAudit,
 }: {
   workspaceId: string;
   workspaceName: string;
   callerRole: WorkspaceMemberRole;
   canInvite: boolean;
   canManageInvitations: boolean;
+  /** Optional — omitted call sites (existing tests, any future embed) get no Audit Log nav link, never a crash. */
+  canReadAudit?: boolean;
 }) {
   const { user, authReady } = useAuth();
 
@@ -281,6 +284,15 @@ export default function WorkspaceMembersShell({
         <h1 className="text-2xl font-semibold text-cp-text">Members</h1>
         <p className="mt-1 text-sm text-cp-muted">{workspaceName}</p>
       </div>
+
+      {canReadAudit && (
+        <nav className="mb-6 flex gap-4 border-b border-cp-border-soft text-sm">
+          <span className="border-b-2 border-cp-accent px-1 pb-2 font-medium text-cp-text">Members</span>
+          <a href={`/workspace/team/${encodeURIComponent(workspaceId)}/audit`} className="px-1 pb-2 text-cp-muted hover:text-cp-text">
+            Audit Log
+          </a>
+        </nav>
+      )}
 
       {/* Active members */}
       <section aria-labelledby="active-members-heading" className="mb-8">

@@ -36,6 +36,7 @@ export default async function WorkspaceMembersPage({ params }: { params: { works
       callerRole={access.membership.role}
       canInvite={access.capabilities.includes("members.invite")}
       canManageInvitations={access.capabilities.includes("members.manage")}
+      canReadAudit={access.capabilities.includes("audit.read")}
     />
   );
 }

@@ -144,3 +144,32 @@ describe("resolveWorkspaceReviewerDisplayNames — batching, dedup, mixed input"
     expect(mockedResolveReviewerDisplayNames).not.toHaveBeenCalled();
   });
 });
+
+describe("resolveWorkspaceReviewerDisplayNames — Workspace Audit Log, Phase TEAM-GOV-I1: optional fallbackLabel", () => {
+  it("omitted fallbackLabel: defaults to REVIEWER_UNAVAILABLE_LABEL, identical to prior behavior (non-evidenced uid)", async () => {
+    const foreignUid = "foreign-user-uid";
+    const result = await resolveWorkspaceReviewerDisplayNames(WS_ID, [foreignUid]);
+    expect(result.get(foreignUid)).toBe(REVIEWER_UNAVAILABLE_LABEL);
+  });
+
+  it("custom fallbackLabel: used for a non-evidenced uid instead of REVIEWER_UNAVAILABLE_LABEL", async () => {
+    const foreignUid = "foreign-user-uid";
+    const result = await resolveWorkspaceReviewerDisplayNames(WS_ID, [foreignUid], "Unknown member");
+    expect(result.get(foreignUid)).toBe("Unknown member");
+    expect(result.get(foreignUid)).not.toBe(REVIEWER_UNAVAILABLE_LABEL);
+  });
+
+  it("custom fallbackLabel is forwarded as the underlying global resolver's own unresolvedLabel argument", async () => {
+    seedMembership(OWNER_UID, "owner");
+    await resolveWorkspaceReviewerDisplayNames(WS_ID, [OWNER_UID], "Unknown user");
+    expect(mockedResolveReviewerDisplayNames).toHaveBeenCalledWith([OWNER_UID], expect.any(Map), undefined, "Unknown user");
+  });
+
+  it("two calls with different fallbackLabels for the same uid produce independently correct fallbacks (Audit Log's actor-vs-target split)", async () => {
+    const foreignUid = "foreign-user-uid";
+    const asActor = await resolveWorkspaceReviewerDisplayNames(WS_ID, [foreignUid], "Unknown user");
+    const asTarget = await resolveWorkspaceReviewerDisplayNames(WS_ID, [foreignUid], "Unknown member");
+    expect(asActor.get(foreignUid)).toBe("Unknown user");
+    expect(asTarget.get(foreignUid)).toBe("Unknown member");
+  });
+});

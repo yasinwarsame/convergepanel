@@ -227,3 +227,21 @@ describe("WorkspaceMembersShell — canonical Owner is never offered Remove, str
   });
 });
 
+describe("WorkspaceMembersShell — Workspace Audit Log, Phase TEAM-GOV-I1: nav link", () => {
+  it("AP/AQ. canReadAudit truthy renders a nav link to the Audit Log page for this exact Workspace", () => {
+    expect(source).toMatch(/\{canReadAudit && \(/);
+    expect(source).toMatch(/\/workspace\/team\/\$\{encodeURIComponent\(workspaceId\)\}\/audit/);
+    expect(source).toMatch(/Audit Log/);
+  });
+
+  it("AR/AS/AT. canReadAudit is a real conditional gate, not always-rendered — Member/Reviewer/Viewer (who never receive canReadAudit:true from the server) see no link", () => {
+    const navBlock = source.match(/\{canReadAudit && \(([\s\S]*?)\)\}/);
+    expect(navBlock).not.toBeNull();
+    expect(navBlock![1]).toMatch(/<nav/);
+  });
+
+  it("canReadAudit is optional (backend-driven only) — an omitted prop never crashes the component", () => {
+    expect(source).toMatch(/canReadAudit\?: boolean/);
+  });
+});
+
