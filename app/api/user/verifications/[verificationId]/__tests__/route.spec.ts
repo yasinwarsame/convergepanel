@@ -285,7 +285,7 @@ describe("GET /api/user/verifications/[verificationId] — Phase 11A.5B: Persona
     expect(res.status).toBe(200);
   });
 
-  it("Team branch is unaffected — sourceResearch is not present at all on a Team verification response in this phase", async () => {
+  it("Phase 11A.5C update: an ordinary Team verification (no origin) now gets sourceResearch: null, matching Personal's identical legacy contract (superseded the prior 11A.5B-era 'absent entirely' expectation for Team)", async () => {
     const teamRow = {
       userId: "creator-uid",
       workspaceId: "ws-team-1",
@@ -307,7 +307,8 @@ describe("GET /api/user/verifications/[verificationId] — Phase 11A.5B: Persona
     const res = await GET(buildRequest("vcl-team-source"), ctx("vcl-team-source"));
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(Object.prototype.hasOwnProperty.call(body.payload, "sourceResearch")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(body.payload, "sourceResearch")).toBe(true);
+    expect(body.payload.sourceResearch).toBeNull();
   });
 });
 
@@ -445,6 +446,283 @@ describe("GET /api/user/verifications/[verificationId] — Team Claim read class
     const res = await GET(buildRequest("vcl-team-1"), ctx("vcl-team-1"));
     expect(res.status).toBe(404);
     expect(mockedResolveTeamRunWorkspaceAccess).not.toHaveBeenCalled();
+  });
+});
+
+describe("GET /api/user/verifications/[verificationId] — Phase 11A.5C: Team durable source-link (sourceResearch)", () => {
+  const WS_A = "ws-team-a";
+  const WS_B = "ws-team-b";
+  const RUN_ID = "run-team-source-1";
+
+  function finding(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "finding-1",
+      title: "A label",
+      summary: "A stable finding summary.",
+      category: "general",
+      evidenceStrength: "moderate",
+      sourceBacked: true,
+      coverageCount: 3,
+      totalModels: 4,
+      coverageRatio: 0.75,
+      contributingModels: ["claude", "chatgpt", "gemini"],
+      ...overrides,
+    };
+  }
+
+  function deepResearchOutput(findings: unknown[] = [finding()]) {
+    return {
+      version: 1,
+      schemaId: "deep_research",
+      answerShape: "deep_research_view",
+      classification: { queryType: "deep_research" },
+      meta: {},
+      generatedAt: "2026-01-01T00:00:00.000Z",
+      result: {
+        executiveSummary: "x",
+        findings,
+        lowConfidenceFindings: [],
+        disagreements: [],
+        evidenceGaps: [],
+        openQuestions: [],
+        panelBlindSpots: [],
+        researchBoundaries: [],
+        recommendedNextSteps: [],
+        sourceCoverage: { findingsWithSources: 1, totalFindings: 1, coverageRatio: 1 },
+        totalModels: 4,
+      },
+    };
+  }
+
+  function selectorFor(runId: string, f: ReturnType<typeof finding>): string {
+    const id = buildDeepResearchClaimId({ runId, section: "findings", index: 0, finding: f });
+    if (id === null) throw new Error("test setup: expected a valid selector");
+    return id;
+  }
+
+  function teamClaimRow(overrides: Record<string, unknown> = {}) {
+    return {
+      userId: "creator-uid",
+      workspaceId: WS_A,
+      projectId: null,
+      type: "claim_verification",
+      claim: "x",
+      verdict: "accurate",
+      consensusScore: 90,
+      confidenceLabel: "High",
+      evidenceQuality: "strong",
+      supportRatio: 100,
+      modelResults: [],
+      auditBundle: {},
+      selectedModels: [],
+      timestamp: Timestamp.now(),
+      ...overrides,
+    };
+  }
+
+  const GRANTED = { granted: true, workspace: {}, membership: {}, capabilities: ["research.read"] };
+
+  it("valid origin + source run in the SAME Workspace as the verification -> sourceResearch exposed with exact type/runId/claimId", async () => {
+    const f = finding();
+    const claimId = selectorFor(RUN_ID, f);
+    store["vcl-team-origin-1"] = teamClaimRow({ origin: { type: "deep_research_claim", runId: RUN_ID, claimId } });
+    store[RUN_ID] = { workspaceId: WS_A, userId: "creator-uid", adaptiveOutput: deepResearchOutput([f]) };
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValue(GRANTED);
+    const res = await GET(buildRequest("vcl-team-origin-1"), ctx("vcl-team-origin-1"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.payload.sourceResearch).toEqual({ type: "deep_research_claim", runId: RUN_ID, claimId });
+  });
+
+  it("source run missing -> verification still readable, sourceResearch: null", async () => {
+    const claimId = "v1:findings:0:" + "a".repeat(43);
+    store["vcl-team-origin-2"] = teamClaimRow({ origin: { type: "deep_research_claim", runId: "nonexistent-run", claimId } });
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValue(GRANTED);
+    const res = await GET(buildRequest("vcl-team-origin-2"), ctx("vcl-team-origin-2"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.payload.sourceResearch).toBeNull();
+  });
+
+  it("source run belongs to a DIFFERENT Workspace -> sourceResearch: null, no leak", async () => {
+    const f = finding();
+    const claimId = selectorFor(RUN_ID, f);
+    store["vcl-team-origin-3"] = teamClaimRow({ workspaceId: WS_A, origin: { type: "deep_research_claim", runId: RUN_ID, claimId } });
+    store[RUN_ID] = { workspaceId: WS_B, userId: "creator-uid", adaptiveOutput: deepResearchOutput([f]) };
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValue(GRANTED);
+    const res = await GET(buildRequest("vcl-team-origin-3"), ctx("vcl-team-origin-3"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.payload.sourceResearch).toBeNull();
+    expect(JSON.stringify(body)).not.toContain(WS_B);
+  });
+
+  it("CRITICAL: caller is granted access whenever asked (simulating standing in BOTH Workspace A and B), but verification belongs to A while its origin's run lives in B -> STILL sourceResearch: null", async () => {
+    const f = finding();
+    const claimId = selectorFor(RUN_ID, f);
+    store["vcl-team-origin-4"] = teamClaimRow({ workspaceId: WS_A, origin: { type: "deep_research_claim", runId: RUN_ID, claimId } });
+    store[RUN_ID] = { workspaceId: WS_B, userId: "creator-uid", adaptiveOutput: deepResearchOutput([f]) };
+    // Mock always grants, regardless of which workspaceId is asked about —
+    // the worst case for provenance containment: maximal caller access
+    // must still not resolve a cross-Workspace forged/corrupted origin,
+    // because containment depends on the RUN's own structural Workspace
+    // binding matching the verification's Workspace, not on what the
+    // caller happens to be authorized for.
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValue(GRANTED);
+    const res = await GET(buildRequest("vcl-team-origin-4"), ctx("vcl-team-origin-4"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.payload.sourceResearch).toBeNull();
+  });
+
+  it("current Team access denied at the source-link boundary (e.g. membership revoked between the route's own check and independent re-authorization) -> verification still readable, sourceResearch: null", async () => {
+    const f = finding();
+    const claimId = selectorFor(RUN_ID, f);
+    store["vcl-team-origin-5"] = teamClaimRow({ origin: { type: "deep_research_claim", runId: RUN_ID, claimId } });
+    store[RUN_ID] = { workspaceId: WS_A, userId: "creator-uid", adaptiveOutput: deepResearchOutput([f]) };
+    // First call (the route's own verification-read authorization) grants;
+    // second call (resolveTeamSourceResearchLink's independent
+    // re-derivation) denies — proving the helper does not simply trust
+    // that the route's earlier check still holds.
+    mockedResolveTeamRunWorkspaceAccess
+      .mockResolvedValueOnce(GRANTED)
+      .mockResolvedValueOnce({ granted: false, reason: "membership_removed" });
+    const res = await GET(buildRequest("vcl-team-origin-5"), ctx("vcl-team-origin-5"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.payload.sourceResearch).toBeNull();
+    expect(mockedResolveTeamRunWorkspaceAccess).toHaveBeenCalledTimes(2);
+  });
+
+  it("malformed origin object -> verification remains readable, sourceResearch: null", async () => {
+    store["vcl-team-origin-6"] = teamClaimRow({ origin: { type: "deep_research_claim", runId: RUN_ID } }); // missing claimId
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValue(GRANTED);
+    const res = await GET(buildRequest("vcl-team-origin-6"), ctx("vcl-team-origin-6"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.payload.sourceResearch).toBeNull();
+  });
+
+  it("unsupported origin type -> sourceResearch: null", async () => {
+    store["vcl-team-origin-7"] = teamClaimRow({ origin: { type: "unsupported_kind", runId: RUN_ID, claimId: "v1:findings:0:" + "a".repeat(43) } });
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValue(GRANTED);
+    const res = await GET(buildRequest("vcl-team-origin-7"), ctx("vcl-team-origin-7"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.payload.sourceResearch).toBeNull();
+  });
+
+  it("source run not deep_research -> sourceResearch: null", async () => {
+    const claimId = "v1:findings:0:" + "a".repeat(43);
+    store["vcl-team-origin-8"] = teamClaimRow({ origin: { type: "deep_research_claim", runId: RUN_ID, claimId } });
+    store[RUN_ID] = { workspaceId: WS_A, userId: "creator-uid", adaptiveOutput: { version: 1, schemaId: "causal_explanation", answerShape: "causal_map", classification: { queryType: "causal_explanation" }, meta: {}, generatedAt: "x", result: { directAnswer: "x", factors: [], interpretations: [], totalModels: 3 } } };
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValue(GRANTED);
+    const res = await GET(buildRequest("vcl-team-origin-8"), ctx("vcl-team-origin-8"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.payload.sourceResearch).toBeNull();
+  });
+
+  it("malformed persisted adaptive output on the source run -> sourceResearch: null, no uncontrolled 500", async () => {
+    const claimId = "v1:findings:0:" + "a".repeat(43);
+    store["vcl-team-origin-9"] = teamClaimRow({ origin: { type: "deep_research_claim", runId: RUN_ID, claimId } });
+    store[RUN_ID] = { workspaceId: WS_A, userId: "creator-uid", adaptiveOutput: { version: 1, schemaId: "deep_research", answerShape: "deep_research_view", classification: {}, meta: {}, generatedAt: "x", result: { executiveSummary: "x" } } };
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValue(GRANTED);
+    const res = await GET(buildRequest("vcl-team-origin-9"), ctx("vcl-team-origin-9"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.payload.sourceResearch).toBeNull();
+  });
+
+  it("stale/forged fingerprint claimId -> sourceResearch: null", async () => {
+    const f = finding();
+    const forged = "v1:findings:0:" + "z".repeat(43);
+    store["vcl-team-origin-10"] = teamClaimRow({ origin: { type: "deep_research_claim", runId: RUN_ID, claimId: forged } });
+    store[RUN_ID] = { workspaceId: WS_A, userId: "creator-uid", adaptiveOutput: deepResearchOutput([f]) };
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValue(GRANTED);
+    const res = await GET(buildRequest("vcl-team-origin-10"), ctx("vcl-team-origin-10"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.payload.sourceResearch).toBeNull();
+  });
+
+  it("verification.projectId differs from the source run's current projectId -> sourceResearch still exposed (no projectId equality required)", async () => {
+    const f = finding();
+    const claimId = selectorFor(RUN_ID, f);
+    store["vcl-team-origin-11"] = teamClaimRow({ projectId: "proj-at-creation-time", origin: { type: "deep_research_claim", runId: RUN_ID, claimId } });
+    store[RUN_ID] = { workspaceId: WS_A, userId: "creator-uid", projectId: "proj-currently-assigned-elsewhere", adaptiveOutput: deepResearchOutput([f]) };
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValue(GRANTED);
+    const res = await GET(buildRequest("vcl-team-origin-11"), ctx("vcl-team-origin-11"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.payload.sourceResearch).toEqual({ type: "deep_research_claim", runId: RUN_ID, claimId });
+  });
+
+  it("sourceResearch never contains projectId or workspaceId", async () => {
+    const f = finding();
+    const claimId = selectorFor(RUN_ID, f);
+    store["vcl-team-origin-12"] = teamClaimRow({ origin: { type: "deep_research_claim", runId: RUN_ID, claimId } });
+    store[RUN_ID] = { workspaceId: WS_A, userId: "creator-uid", adaptiveOutput: deepResearchOutput([f]) };
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValue(GRANTED);
+    const res = await GET(buildRequest("vcl-team-origin-12"), ctx("vcl-team-origin-12"));
+    const body = await res.json();
+    expect(Object.keys(body.payload.sourceResearch).sort()).toEqual(["claimId", "runId", "type"]);
+  });
+
+  it("sourceResearch never duplicates claim/title/summary text", async () => {
+    const f = finding();
+    const claimId = selectorFor(RUN_ID, f);
+    store["vcl-team-origin-13"] = teamClaimRow({ claim: "The verification's own immutable snapshot.", origin: { type: "deep_research_claim", runId: RUN_ID, claimId } });
+    store[RUN_ID] = { workspaceId: WS_A, userId: "creator-uid", adaptiveOutput: deepResearchOutput([f]) };
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValue(GRANTED);
+    const res = await GET(buildRequest("vcl-team-origin-13"), ctx("vcl-team-origin-13"));
+    const body = await res.json();
+    expect(body.payload.sourceResearch).not.toHaveProperty("claim");
+    expect(body.payload.sourceResearch).not.toHaveProperty("summary");
+    expect(body.payload.claim).toBe("The verification's own immutable snapshot.");
+  });
+
+  it("raw persisted origin never appears as a separate top-level field in the response JSON", async () => {
+    const f = finding();
+    const claimId = selectorFor(RUN_ID, f);
+    store["vcl-team-origin-14"] = teamClaimRow({ origin: { type: "deep_research_claim", runId: RUN_ID, claimId } });
+    store[RUN_ID] = { workspaceId: WS_A, userId: "creator-uid", adaptiveOutput: deepResearchOutput([f]) };
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValue(GRANTED);
+    const res = await GET(buildRequest("vcl-team-origin-14"), ctx("vcl-team-origin-14"));
+    const body = await res.json();
+    expect(Object.prototype.hasOwnProperty.call(body.payload, "origin")).toBe(false);
+  });
+
+  it("source-link resolution performs zero writes (mock has no write methods — a write attempt would throw and surface as a 500)", async () => {
+    const f = finding();
+    const claimId = selectorFor(RUN_ID, f);
+    store["vcl-team-origin-15"] = teamClaimRow({ origin: { type: "deep_research_claim", runId: RUN_ID, claimId } });
+    store[RUN_ID] = { workspaceId: WS_A, userId: "creator-uid", adaptiveOutput: deepResearchOutput([f]) };
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValue(GRANTED);
+    const res = await GET(buildRequest("vcl-team-origin-15"), ctx("vcl-team-origin-15"));
+    expect(res.status).toBe(200);
+  });
+
+  it("verification authorization occurs before source resolution — an unauthorized caller never reaches source-link resolution at all", async () => {
+    store["vcl-team-origin-16"] = teamClaimRow({ origin: { type: "deep_research_claim", runId: RUN_ID, claimId: "v1:findings:0:" + "a".repeat(43) } });
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValueOnce({ granted: false, reason: "membership_removed" });
+    const res = await GET(buildRequest("vcl-team-origin-16"), ctx("vcl-team-origin-16"));
+    expect(res.status).toBe(404);
+    // Only the route's own (denying) check ran — source-link resolution
+    // was never reached, so the mock was called exactly once.
+    expect(mockedResolveTeamRunWorkspaceAccess).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses the current Team run-access helper — re-derives access independently rather than trusting the route's earlier check", async () => {
+    const f = finding();
+    const claimId = selectorFor(RUN_ID, f);
+    store["vcl-team-origin-17"] = teamClaimRow({ origin: { type: "deep_research_claim", runId: RUN_ID, claimId } });
+    store[RUN_ID] = { workspaceId: WS_A, userId: "creator-uid", adaptiveOutput: deepResearchOutput([f]) };
+    mockedResolveTeamRunWorkspaceAccess.mockResolvedValue(GRANTED);
+    await GET(buildRequest("vcl-team-origin-17"), ctx("vcl-team-origin-17"));
+    expect(mockedResolveTeamRunWorkspaceAccess).toHaveBeenCalledTimes(2);
+    expect(mockedResolveTeamRunWorkspaceAccess).toHaveBeenNthCalledWith(1, { uid: UID, workspaceId: WS_A });
+    expect(mockedResolveTeamRunWorkspaceAccess).toHaveBeenNthCalledWith(2, { uid: UID, workspaceId: WS_A });
   });
 });
 
