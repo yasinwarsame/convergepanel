@@ -196,6 +196,14 @@ export async function saveTeamClaimVerification(args: {
   modelResults: ClaimVerificationFirestoreDoc["modelResults"];
   auditBundle: ClaimVerificationFirestoreDoc["auditBundle"];
   selectedModels: string[];
+  /**
+   * Phase 11A.3 — server-derived from `resolveClaimVerificationOrigin()`
+   * BEFORE this function is ever called (the resolver performs its own
+   * Firestore read and must not run inside this transaction). `undefined`
+   * for an ordinary Team verification — never set by this function on its
+   * own, never accepted as a pass-through of caller-supplied request data.
+   */
+  origin?: ClaimVerificationOrigin;
 }): Promise<Gate2Result> {
   const admission = resolveTeamWorkspaceTargetAdmission({
     uid: args.uid,
@@ -255,12 +263,10 @@ export async function saveTeamClaimVerification(args: {
         }
       }
 
-      // Phase 11A.1 — `origin` is optional on the base ClaimVerificationFirestoreDoc
-      // and carried through here explicitly for clarity; it is intentionally
-      // never set by this function yet. Writing it requires resolving it via
-      // resolveClaimVerificationOrigin() BEFORE this transaction opens (the
-      // resolver performs its own Firestore read and must not run inside an
-      // unrelated transaction) — that wiring is Phase 11A.3's job, not this one.
+      // Phase 11A.3 — `origin` (when the caller supplied one, already
+      // resolved before this transaction opened) is spread in explicitly,
+      // never `undefined`-assigned, matching `ClaimVerificationFirestoreDoc.origin`'s
+      // established absent-not-null convention (see lib/firestore/verifications.ts).
       const canonicalDoc: ClaimVerificationFirestoreDoc & { workspaceId: string; projectId: string | null; origin?: ClaimVerificationOrigin } = {
         userId: args.uid,
         claim: args.claim,
@@ -279,6 +285,7 @@ export async function saveTeamClaimVerification(args: {
         // treats an absent projectId identically to a malformed one.
         workspaceId: args.workspaceId,
         projectId: args.projectId,
+        ...(args.origin ? { origin: args.origin } : {}),
       };
       const safe = sanitizeForFirestore(canonicalDoc) as typeof canonicalDoc;
       tx.create(verificationRef, safe);

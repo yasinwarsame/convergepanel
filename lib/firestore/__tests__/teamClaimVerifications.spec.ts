@@ -466,6 +466,23 @@ describe("saveTeamClaimVerification — creates a canonical document", () => {
     const stored = stores.verifications.get(result.verificationId);
     expect(stored!.data.projectId).toBe(PROJECT_ID);
   });
+
+  it("Phase 11A.3 — origin, when supplied, is persisted verbatim into the canonical document via the REAL (unmocked) saveTeamClaimVerification()", async () => {
+    const origin = { type: "deep_research_claim", runId: "run-1", claimId: "v1:findings:0:" + "a".repeat(43) };
+    const result = await saveTeamClaimVerification(claimArgs({ origin }) as any);
+    expect(result.status).toBe("created");
+    if (result.status !== "created") throw new Error("expected created");
+    const stored = stores.verifications.get(result.verificationId);
+    expect(stored!.data.origin).toEqual(origin);
+  });
+
+  it("Phase 11A.3 — origin omitted (ordinary Team verification) -> the canonical document never contains an origin key at all", async () => {
+    const result = await saveTeamClaimVerification(claimArgs() as any);
+    expect(result.status).toBe("created");
+    if (result.status !== "created") throw new Error("expected created");
+    const stored = stores.verifications.get(result.verificationId);
+    expect(Object.prototype.hasOwnProperty.call(stored!.data, "origin")).toBe(false);
+  });
 });
 
 describe("saveTeamClaimVerification — races (Gate 1 must not authorize Gate 2)", () => {
