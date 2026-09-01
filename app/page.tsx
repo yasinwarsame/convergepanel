@@ -367,6 +367,19 @@ export default function Home() {
    * of "Back to verify claim." Never persisted, never sent as `origin`.
    */
   const [originLinkedTarget, setOriginLinkedTarget] = useState<{ runId: string; claimId: string } | null>(null);
+  /**
+   * Phase 11A.6 — durable "View source research" navigation. `focusClaimId`
+   * is the server-issued selector to bring into view once the source run
+   * reloads; it is set ONLY from the same `sourceResearch` object it was
+   * read from (see handleViewSourceResearch) — never combined with a
+   * runId/claimId pair from a different verification. `focusClaimNotFound`
+   * is set only after the reloaded research is inspected and the exact
+   * claimId genuinely isn't present among its (individually rendered)
+   * findings — this never falls back to matching by summary/id/index.
+   */
+  const [focusClaimId, setFocusClaimId] = useState<string | null>(null);
+  const [focusClaimNotFound, setFocusClaimNotFound] = useState(false);
+  const [sourceNavLoading, setSourceNavLoading] = useState(false);
   const [verificationPayload, setVerificationPayload] = useState<ClaimVerificationClientPayload | null>(
     null
   );
@@ -756,6 +769,8 @@ export default function Home() {
     // Reset state for new panel run
     setVerificationPayload(null);
     setOriginLinkedTarget(null); // 11A.4 — a stale "Verify this claim" target from the previous research would no longer refer to anything real once a new run starts
+    setFocusClaimId(null); // 11A.6 — a stale source-navigation target is equally meaningless once a new run starts
+    setFocusClaimNotFound(false);
     setViewingHistoryRunId(null);
     setError(null);
     setRunStatus("running");
@@ -1648,24 +1663,29 @@ export default function Home() {
     }
   };
 
-  const openHistoryItem = async (item: HistoryItem) => {
-    if (item.type === "research") {
-      setPanelTab("research");
-      setVerificationPayload(null);
-      setVideoVerificationPayload(null);
-      setError(null);
-      setViewingHistoryRunId(null);
-      setHistoryDetailLoadingId(item.id);
-      if (!authReady || !user) {
-        setHistoryDetailLoadingId(null);
-        setError("Sign in to load saved research results from your account.");
-        setQuestion(item.question);
-        setSelectedModels(item.selectedModels);
-        return;
-      }
+  /**
+   * Phase 11A.6 — the shared authenticated research-run reload core,
+   * extracted from openHistoryItem's research branch (behavior
+   * unchanged, only parameterized) so the durable "View source
+   * research" action (handleViewSourceResearch, below) can reuse the
+   * EXACT same reload path an ordinary history click already uses,
+   * rather than duplicating it or reading Firestore directly. Every
+   * state-setting side effect below is byte-identical to the original
+   * inline implementation this was extracted from.
+   */
+  const loadResearchRunIntoState = async (
+    runId: string,
+    fallback: { question: string; selectedModels: ModelId[] }
+  ): Promise<{ ok: true } | { ok: false; message: string }> => {
+      // Any fresh reload invalidates whatever exact-finding target was
+      // relevant to the PREVIOUSLY loaded run — a caller that wants to
+      // target a finding in THIS reload (handleViewSourceResearch) sets
+      // focusClaimId again after this call succeeds.
+      setFocusClaimId(null);
+      setFocusClaimNotFound(false);
       try {
         const { authedFetch } = await import("@/lib/client/authedFetch");
-        const res = await authedFetch(`/api/user/runs/${encodeURIComponent(item.id)}`, {
+        const res = await authedFetch(`/api/user/runs/${encodeURIComponent(runId)}`, {
           user,
           authReady,
           method: "GET",
@@ -1708,7 +1728,7 @@ export default function Home() {
         if (!res.ok || !data.ok || !data.results?.length) {
           throw new Error(typeof data.message === "string" ? data.message : "Could not load this run.");
         }
-        setQuestion(data.question ?? item.question);
+        setQuestion(data.question ?? fallback.question);
 
         // Query-Routing Redesign, Phase 1 / Phase 2 pilot history-reload fix
         // — restore the persisted adaptive envelope through the SAME
@@ -1751,12 +1771,12 @@ export default function Home() {
         setSelectedModels(
           Array.isArray(data.selectedModels) && data.selectedModels.length > 0
             ? data.selectedModels
-            : item.selectedModels
+            : fallback.selectedModels
         );
         setResults(data.results as ModelResult[]);
-        setCurrentRunId(data.runId ?? item.id);
+        setCurrentRunId(data.runId ?? runId);
         setRunStatus("complete");
-        setViewingHistoryRunId(data.runId ?? item.id);
+        setViewingHistoryRunId(data.runId ?? runId);
 
         const og = data.governanceStatus;
         setOrgGovernanceStatus(
@@ -1814,7 +1834,7 @@ export default function Home() {
           setSynthesisReport(data.synthesisCache.report);
           setSynthesisConsensusSummary(data.synthesisCache.consensusSummary ?? null);
           setSynthesisError(null);
-          setSynthesisGeneratedForRunId(data.runId ?? item.id);
+          setSynthesisGeneratedForRunId(data.runId ?? runId);
           const g = data.governance;
           setSynthesisGovernance(
             g &&
@@ -1846,12 +1866,13 @@ export default function Home() {
           ) {
             void generateSynthesisAutomatically(
               data.runId,
-              data.question ?? item.question,
+              data.question ?? fallback.question,
               data.results as ModelResult[],
               consensusForSynthesis
             );
           }
         }
+        return { ok: true };
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : "Could not load this run.";
         setError(msg);
@@ -1865,11 +1886,31 @@ export default function Home() {
         setSynthesisConsensusSummary(null);
         setSynthesisGeneratedForRunId(null);
         setOrgGovernanceStatus(null);
+        setQuestion(fallback.question);
+        setSelectedModels(fallback.selectedModels);
+        return { ok: false, message: msg };
+      }
+  };
+
+  const openHistoryItem = async (item: HistoryItem) => {
+    if (item.type === "research") {
+      setPanelTab("research");
+      setVerificationPayload(null);
+      setVideoVerificationPayload(null);
+      setError(null);
+      setViewingHistoryRunId(null);
+      setFocusClaimId(null);
+      setFocusClaimNotFound(false);
+      setHistoryDetailLoadingId(item.id);
+      if (!authReady || !user) {
+        setHistoryDetailLoadingId(null);
+        setError("Sign in to load saved research results from your account.");
         setQuestion(item.question);
         setSelectedModels(item.selectedModels);
-      } finally {
-        setHistoryDetailLoadingId(null);
+        return;
       }
+      await loadResearchRunIntoState(item.id, { question: item.question, selectedModels: item.selectedModels });
+      setHistoryDetailLoadingId(null);
       return;
     }
     if (item.type === "video_verification") {
@@ -2023,6 +2064,26 @@ export default function Home() {
   }, [authReady, user, router]);
 
   /**
+   * Phase 11A.6 — exact-finding-match detection for the reloaded source
+   * research. Runs only once the reload has actually finished
+   * (`runStatus === "complete"`); checks `finding.claimId` equality only,
+   * against `findings` alone (never `lowConfidenceFindings`, which are
+   * never individually rendered — see DeepResearchView). No summary,
+   * index, or `finding.id` fallback: if the exact claimId genuinely isn't
+   * present any more, that is surfaced as "not found," not silently
+   * matched to something else.
+   */
+  useEffect(() => {
+    if (!focusClaimId) {
+      setFocusClaimNotFound(false);
+      return;
+    }
+    if (runStatus !== "complete") return;
+    const findings = adaptivePanel?.deepResearch?.findings ?? [];
+    setFocusClaimNotFound(!findings.some((f) => f.claimId === focusClaimId));
+  }, [focusClaimId, runStatus, adaptivePanel]);
+
+  /**
    * Re-run the same panel with same question and models
    */
   const handleRerun = () => {
@@ -2058,6 +2119,39 @@ export default function Home() {
     if (typeof window !== "undefined") {
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
+  };
+
+  /**
+   * Phase 11A.6 — "View source research" on a reopened Personal
+   * verification. The chain this protects: `verificationPayload.sourceResearch`
+   * only ever tells the client WHICH run/finding to ask for — it is never
+   * treated as authorization or as the finding itself. `runId` and
+   * `claimId` are destructured together from that ONE object at the
+   * moment of use, so they can never be paired across two different
+   * verifications. The actual reload goes through the exact same
+   * authenticated `/api/user/runs/[runId]` path an ordinary history click
+   * uses (loadResearchRunIntoState) — this function adds no new server
+   * read of its own. `focusClaimId` is set only after that reload
+   * SUCCEEDS, from the same `source` object `runId` came from.
+   */
+  const handleViewSourceResearch = async () => {
+    const source = verificationPayload?.sourceResearch;
+    if (!source) return;
+    if (sourceNavLoading) return; // duplicate-request suppression
+    setSourceNavLoading(true);
+    const result = await loadResearchRunIntoState(source.runId, { question, selectedModels });
+    setSourceNavLoading(false);
+    if (!result.ok) {
+      // Deliberately more generic than loadResearchRunIntoState's own
+      // (non-generic) underlying message for this entry point
+      // specifically — this durable navigation action must never let a
+      // caller distinguish "run no longer exists" from "no longer
+      // authorized to read it" from the response alone.
+      setError("This source research is no longer available.");
+      return;
+    }
+    setFocusClaimId(source.claimId);
+    setPanelTab("research");
   };
 
   /**
@@ -2958,7 +3052,9 @@ export default function Home() {
                 {" — "}
                 {originLinkedTarget
                   ? "Saved to your history. Return to your research below, or start another check."
-                  : "Saved to your history. Start another check from the button below, or return to the claim composer."}
+                  : verificationPayload.sourceResearch
+                    ? "Saved to your history. View the source research below, start another check, or return to the claim composer."
+                    : "Saved to your history. Start another check from the button below, or return to the claim composer."}
               </p>
               <div className="flex shrink-0 gap-2">
                 {originLinkedTarget && (
@@ -2974,6 +3070,23 @@ export default function Home() {
                     className="rounded-xl border-2 border-cp-border bg-cp-surface px-4 py-2.5 text-sm font-semibold text-cp-muted shadow-sm transition-colors hover:border-violet-300 hover:bg-violet-50/80"
                   >
                     Back to research
+                  </button>
+                )}
+                {!originLinkedTarget && verificationPayload.sourceResearch && (
+                  // Phase 11A.6 — durable navigation: unlike "Back to
+                  // research" above (which relies on research already
+                  // being in memory from THIS session), this reopened
+                  // verification has no in-memory source research, so it
+                  // must be reloaded through the existing authenticated
+                  // run-read path (handleViewSourceResearch ->
+                  // loadResearchRunIntoState) before we can switch tabs.
+                  <button
+                    type="button"
+                    onClick={() => void handleViewSourceResearch()}
+                    disabled={sourceNavLoading}
+                    className="rounded-xl border-2 border-cp-border bg-cp-surface px-4 py-2.5 text-sm font-semibold text-cp-muted shadow-sm transition-colors hover:border-violet-300 hover:bg-violet-50/80 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {sourceNavLoading ? "Loading source research…" : "View source research"}
                   </button>
                 )}
                 <button
@@ -3032,6 +3145,19 @@ export default function Home() {
           </div>
         )}
 
+        {!verificationPayload && panelTab === "research" && runStatus === "complete" && focusClaimNotFound && (
+          // Phase 11A.6 — the reload succeeded (this research is genuinely
+          // authorized and current), but the exact finding the
+          // verification pointed to is no longer present in it. This is
+          // never inferred from a summary/index/id match — only the
+          // absence of an exact finding.claimId match, per the
+          // useEffect above.
+          <div className="mx-auto mt-4 w-full max-w-[900px] rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            We reloaded this research, but the exact finding this claim was verified from is no longer present in its current
+            results.
+          </div>
+        )}
+
         {!verificationPayload &&
           panelTab === "research" &&
           runStatus === "complete" &&
@@ -3064,6 +3190,7 @@ export default function Home() {
                 adaptive={adaptivePanel}
                 onRunFollowUp={handleRunFollowUp}
                 onVerifyClaim={handleVerifyClaimFromFindingClick}
+                focusClaimId={focusClaimId}
               />
             </div>
           </Suspense>

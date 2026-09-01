@@ -13,6 +13,7 @@
  * reused as-is from coverageAudit.ts).
  */
 
+import { useEffect, useRef } from "react";
 import { AggregatedResearchFinding, DeepResearchResult } from "@/lib/adaptiveSchema/types";
 import { Card, EmptyStateCard, SectionLabel, TintBadge, formatModelCoverage } from "./shared";
 import ModelChip from "@/components/ModelChip";
@@ -31,10 +32,12 @@ function FindingRow({
   finding,
   runId,
   onVerifyClaim,
+  focusClaimId,
 }: {
   finding: AggregatedResearchFinding;
   runId?: string | null;
   onVerifyClaim?: (args: { runId: string; claimId: string }) => void;
+  focusClaimId?: string | null;
 }) {
   // Phase 11A.4 — eligibility is exactly "the server attached a canonical
   // selector for this finding, and we know which run it came from." Never
@@ -43,8 +46,25 @@ function FindingRow({
   // lib/verification/claimVerificationOrigin.ts) replaced.
   const canVerify = Boolean(runId) && typeof finding.claimId === "string" && finding.claimId.length > 0;
 
+  // Phase 11A.6 — exact-match only: this is never a summary/id/index
+  // comparison, only the server-issued claimId itself.
+  const isFocused = Boolean(focusClaimId) && finding.claimId === focusClaimId;
+  const rowRef = useRef<HTMLLIElement | null>(null);
+  useEffect(() => {
+    if (isFocused) {
+      rowRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [isFocused]);
+
   return (
-    <li className="py-2 border-b border-slate-100 last:border-0">
+    <li
+      ref={rowRef}
+      className={
+        isFocused
+          ? "py-2 border-b border-slate-100 last:border-0 -mx-2 rounded-lg border-2 border-sky-300 bg-sky-50/70 px-2"
+          : "py-2 border-b border-slate-100 last:border-0"
+      }
+    >
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-sm font-medium text-slate-900">{finding.title}</span>
         <CoverageBadge coverageCount={finding.coverageCount} totalModels={finding.totalModels} />
@@ -88,10 +108,12 @@ export default function DeepResearchView({
   deepResearch,
   runId,
   onVerifyClaim,
+  focusClaimId,
 }: {
   deepResearch: DeepResearchResult;
   runId?: string | null;
   onVerifyClaim?: (args: { runId: string; claimId: string }) => void;
+  focusClaimId?: string | null;
 }) {
   const {
     executiveSummary,
@@ -150,7 +172,7 @@ export default function DeepResearchView({
           <div className="mt-3">
             <SectionLabel>Findings</SectionLabel>
             {isFlatFindings ? (
-              <ul>{findings.map((f) => <FindingRow key={f.id} finding={f} runId={runId} onVerifyClaim={onVerifyClaim} />)}</ul>
+              <ul>{findings.map((f) => <FindingRow key={f.id} finding={f} runId={runId} onVerifyClaim={onVerifyClaim} focusClaimId={focusClaimId} />)}</ul>
             ) : (
               <div className="space-y-3">
                 {Array.from(categoryGroups.entries()).map(([category, items]) => (
@@ -158,7 +180,7 @@ export default function DeepResearchView({
                     <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1">{category}</p>
                     <ul>
                       {items.map((f) => (
-                        <FindingRow key={f.id} finding={f} runId={runId} onVerifyClaim={onVerifyClaim} />
+                        <FindingRow key={f.id} finding={f} runId={runId} onVerifyClaim={onVerifyClaim} focusClaimId={focusClaimId} />
                       ))}
                     </ul>
                   </div>

@@ -223,4 +223,81 @@ describe("DeepResearchView", () => {
       expect(html).toContain('data-run-id="run-1"');
     });
   });
+
+  describe("Phase 11A.6 — exact-finding focus targeting", () => {
+    const CLAIM_ID_A = "v1:findings:0:" + "a".repeat(43);
+    const CLAIM_ID_B = "v1:findings:1:" + "b".repeat(43);
+
+    async function buildResultWithTwoFindings(claimIdA: string | null | undefined, claimIdB: string | null | undefined) {
+      mockGaps();
+      const result = await buildDeepResearchResult(
+        perModel([
+          [
+            "chatgpt",
+            fields({
+              findings: [
+                finding({
+                  id: "raw-id-0",
+                  title: "Finding A",
+                  summary: "Remote work modestly reduces measured productivity across most sampled industries.",
+                }),
+                finding({
+                  id: "raw-id-1",
+                  title: "Finding B",
+                  summary: "Employee retention rates improved significantly after the policy change was implemented in 2024.",
+                }),
+              ],
+            }),
+          ],
+        ])
+      );
+      return {
+        ...result,
+        findings: [
+          { ...result.findings[0], claimId: claimIdA },
+          { ...result.findings[1], claimId: claimIdB },
+        ],
+      };
+    }
+
+    it("a finding whose claimId exactly matches focusClaimId is visually emphasized", async () => {
+      const result = await buildResultWithTwoFindings(CLAIM_ID_A, CLAIM_ID_B);
+      const html = renderToStaticMarkup(
+        createElement(DeepResearchView, { deepResearch: result, runId: "run-1", focusClaimId: CLAIM_ID_A })
+      );
+      expect(html).toContain("border-sky-300");
+    });
+
+    it("only the exactly-matching finding is emphasized — its sibling is not, even though both are eligible", async () => {
+      const result = await buildResultWithTwoFindings(CLAIM_ID_A, CLAIM_ID_B);
+      const html = renderToStaticMarkup(
+        createElement(DeepResearchView, { deepResearch: result, runId: "run-1", focusClaimId: CLAIM_ID_B })
+      );
+      // Exactly one emphasized <li> should exist — count occurrences of the emphasis marker.
+      const emphasizedCount = (html.match(/border-sky-300/g) ?? []).length;
+      expect(emphasizedCount).toBe(1);
+    });
+
+    it("no focusClaimId at all -> no finding is emphasized", async () => {
+      const result = await buildResultWithTwoFindings(CLAIM_ID_A, CLAIM_ID_B);
+      const html = renderToStaticMarkup(createElement(DeepResearchView, { deepResearch: result, runId: "run-1" }));
+      expect(html).not.toContain("border-sky-300");
+    });
+
+    it("focusClaimId that matches nothing in this run's findings -> no finding is emphasized (never falls back to a nearest/summary match)", async () => {
+      const result = await buildResultWithTwoFindings(CLAIM_ID_A, CLAIM_ID_B);
+      const html = renderToStaticMarkup(
+        createElement(DeepResearchView, { deepResearch: result, runId: "run-1", focusClaimId: "v1:findings:9:" + "z".repeat(43) })
+      );
+      expect(html).not.toContain("border-sky-300");
+    });
+
+    it("a finding with claimId: null is never matched by a non-null focusClaimId", async () => {
+      const result = await buildResultWithTwoFindings(null, CLAIM_ID_B);
+      const html = renderToStaticMarkup(
+        createElement(DeepResearchView, { deepResearch: result, runId: "run-1", focusClaimId: CLAIM_ID_A })
+      );
+      expect(html).not.toContain("border-sky-300");
+    });
+  });
 });
