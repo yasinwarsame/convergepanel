@@ -70,7 +70,13 @@ export default function WorkspaceOverviewShell({
       // A failed invitations fetch degrades gracefully rather than
       // failing the whole panel — `teamInvited` can still be answered
       // correctly from `hasNonOwnerMember` alone (see module doc).
-      const hasPendingInvitation = invitationsResult.status === "ok" && invitationsResult.invitations.length > 0;
+      // Phase 12A.1C1 — an invitation whose status is still "pending" but
+      // whose deadline has passed must NOT count toward "Invite your
+      // team": it is no longer a usable invitation. Reuses the server's
+      // own canonical `isExpired` field (already computed and already
+      // displayed by WorkspaceMembersShell as "· Expired") rather than
+      // re-deriving expiration from `expiresAt` a second time.
+      const hasPendingInvitation = invitationsResult.status === "ok" && invitationsResult.invitations.some((inv) => !inv.isExpired);
       setState({
         status: "ready",
         activation: deriveWorkspaceActivationState({

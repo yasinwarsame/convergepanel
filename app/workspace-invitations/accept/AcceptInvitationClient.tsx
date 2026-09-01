@@ -200,7 +200,22 @@ export default function AcceptInvitationClient() {
 
     switch (next) {
       case "success":
-      case "already_member_success":
+      case "already_member_success": {
+        const acceptedWorkspaceId = typeof body?.workspaceId === "string" && body.workspaceId.length > 0 ? body.workspaceId : null;
+        // Phase 12A.1C1 — `workspaceId` is a REQUIRED field on every
+        // genuine 200/ok acceptance response (the accept API's typed
+        // result has no success variant that omits it). Its absence
+        // means this response is malformed under the current contract.
+        // Never silently reproduce the old "lands in Personal mode" bug
+        // by falling back to "/" — fail safely instead: never latch
+        // success, never clear the credential (so Retry can genuinely
+        // re-attempt), and surface the EXISTING generic failure UX.
+        if (!acceptedWorkspaceId) {
+          inFlightRef.current = false;
+          setIsAccepting(false);
+          setViewState("internal_error");
+          return;
+        }
         successLatchRef.current = true;
         clearInvitationAcceptance(window.sessionStorage);
         credentialRef.current = null;
@@ -209,11 +224,10 @@ export default function AcceptInvitationClient() {
         if (next === "already_member_success" && typeof body?.effectiveRole === "string") {
           setAlreadyMemberRole(body.effectiveRole);
         }
-        if (typeof body?.workspaceId === "string" && body.workspaceId.length > 0) {
-          setJoinedWorkspaceId(body.workspaceId);
-        }
+        setJoinedWorkspaceId(acceptedWorkspaceId);
         setViewState(next);
         return;
+      }
       case "invalid_or_expired":
         clearInvitationAcceptance(window.sessionStorage);
         credentialRef.current = null;
@@ -338,7 +352,20 @@ export default function AcceptInvitationClient() {
         <div>
           <h1>You&apos;ve joined the workspace</h1>
           <p>Your invitation has been accepted.</p>
-          <button type="button" onClick={() => router.replace(joinedWorkspaceId ? `/workspace/team/${encodeURIComponent(joinedWorkspaceId)}` : "/")}>
+          <button
+            type="button"
+            onClick={() => {
+              // By construction, this view only ever renders after a
+              // non-empty workspaceId was confirmed present on the
+              // acceptance response (see attemptAcceptance's malformed-
+              // success guard above) — this is never expected to be
+              // null. If it somehow is, do nothing rather than falling
+              // back to "/" (Personal mode) — that fallback is exactly
+              // the bug this phase exists to prevent.
+              if (!joinedWorkspaceId) return;
+              router.replace(`/workspace/team/${encodeURIComponent(joinedWorkspaceId)}`);
+            }}
+          >
             Go to your Workspace
           </button>
         </div>
@@ -349,7 +376,20 @@ export default function AcceptInvitationClient() {
         <div>
           <h1>You&apos;re already a member</h1>
           <p>You&apos;re already a member of this workspace{alreadyMemberRole ? ` as ${alreadyMemberRole}` : ""}.</p>
-          <button type="button" onClick={() => router.replace(joinedWorkspaceId ? `/workspace/team/${encodeURIComponent(joinedWorkspaceId)}` : "/")}>
+          <button
+            type="button"
+            onClick={() => {
+              // By construction, this view only ever renders after a
+              // non-empty workspaceId was confirmed present on the
+              // acceptance response (see attemptAcceptance's malformed-
+              // success guard above) — this is never expected to be
+              // null. If it somehow is, do nothing rather than falling
+              // back to "/" (Personal mode) — that fallback is exactly
+              // the bug this phase exists to prevent.
+              if (!joinedWorkspaceId) return;
+              router.replace(`/workspace/team/${encodeURIComponent(joinedWorkspaceId)}`);
+            }}
+          >
             Go to your Workspace
           </button>
         </div>

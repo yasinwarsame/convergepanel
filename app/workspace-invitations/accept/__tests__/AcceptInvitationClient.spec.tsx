@@ -214,7 +214,7 @@ describe("SINGLE-FLIGHT", () => {
     expect(global.fetch).toHaveBeenCalledTimes(1);
 
     await act(async () => {
-      resolveFetch({ status: 200, json: async () => ({ ok: true, alreadyMember: false }) });
+      resolveFetch({ status: 200, json: async () => ({ ok: true, workspaceId: "ws-1", alreadyMember: false }) });
     });
     expect(global.fetch).toHaveBeenCalledTimes(1);
   });
@@ -229,7 +229,7 @@ describe("EXPLICIT RETRY", () => {
     expect(global.fetch).toHaveBeenCalledTimes(1);
     expect(renderer.root.findByType("h1").props.children).toBe("Temporarily unavailable");
 
-    mockFetchOnce(200, { ok: true, alreadyMember: false });
+    mockFetchOnce(200, { ok: true, workspaceId: "ws-1", alreadyMember: false });
     const retryButton = findButton(renderer, "Retry")!;
     await act(async () => {
       await retryButton.props.onClick();
@@ -280,7 +280,7 @@ describe("RAPID DOUBLE RETRY (Phase 8D.3.4-R1 regression)", () => {
     expect(global.fetch).toHaveBeenCalledTimes(2);
 
     await act(async () => {
-      resolveRetryFetch({ status: 200, json: async () => ({ ok: true, alreadyMember: false }) });
+      resolveRetryFetch({ status: 200, json: async () => ({ ok: true, workspaceId: "ws-1", alreadyMember: false }) });
     });
 
     expect(global.fetch).toHaveBeenCalledTimes(2);
@@ -313,7 +313,7 @@ describe("RETRY CONTROL NON-ACTIONABLE WHILE IN FLIGHT", () => {
     expect(findButton(renderer, "Retry")).toBeUndefined();
 
     await act(async () => {
-      resolveRetryFetch({ status: 200, json: async () => ({ ok: true, alreadyMember: false }) });
+      resolveRetryFetch({ status: 200, json: async () => ({ ok: true, workspaceId: "ws-1", alreadyMember: false }) });
     });
     expect(renderer.root.findByType("h1").props.children).toBe("You've joined the workspace");
   });
@@ -322,7 +322,7 @@ describe("RETRY CONTROL NON-ACTIONABLE WHILE IN FLIGHT", () => {
 describe("SUCCESS CANNOT BE OVERWRITTEN (Phase 8D.3.4-R1 regression)", () => {
   it("success is a stable terminal state: no retry control exists afterward, no further fetch fires, and success survives further re-renders", async () => {
     setWindow({ hash: `#invitationId=${INVITATION_ID}&token=${SENTINEL}` });
-    mockFetchOnce(200, { ok: true, alreadyMember: false });
+    mockFetchOnce(200, { ok: true, workspaceId: "ws-1", alreadyMember: false });
     const renderer = await mount(authState({ user: AUTHENTICATED_USER, authReady: true, syncState: "authenticated", canMutate: true }));
 
     expect(renderer.root.findByType("h1").props.children).toBe("You've joined the workspace");
@@ -345,7 +345,7 @@ describe("SUCCESS CANNOT BE OVERWRITTEN (Phase 8D.3.4-R1 regression)", () => {
 describe("EXACT ACCEPT BODY", () => {
   it("POSTs to the exact endpoint with a body of exactly {token}", async () => {
     setWindow({ hash: `#invitationId=${INVITATION_ID}&token=${SENTINEL}` });
-    mockFetchOnce(200, { ok: true, alreadyMember: false });
+    mockFetchOnce(200, { ok: true, workspaceId: "ws-1", alreadyMember: false });
     await mount(authState({ user: AUTHENTICATED_USER, authReady: true, syncState: "authenticated", canMutate: true }));
 
     expect(global.fetch).toHaveBeenCalledTimes(1);
@@ -359,7 +359,7 @@ describe("RAW TOKEN — DOM / console / router / history boundary", () => {
   it("the sentinel token never appears outside the fetch request body", async () => {
     const consoleSpy = ["log", "warn", "error", "debug"].map((m) => jest.spyOn(console, m as "log"));
     const { win } = setWindow({ hash: `#invitationId=${INVITATION_ID}&token=${SENTINEL}` });
-    mockFetchOnce(200, { ok: true, alreadyMember: false });
+    mockFetchOnce(200, { ok: true, workspaceId: "ws-1", alreadyMember: false });
 
     const renderer = await mount(authState({ user: AUTHENTICATED_USER, authReady: true, syncState: "authenticated", canMutate: true }));
 
@@ -380,8 +380,8 @@ describe("RAW TOKEN — DOM / console / router / history boundary", () => {
 
 describe("RESPONSE MAPPING", () => {
   const CASES: Array<{ status: number; body: unknown; heading: string }> = [
-    { status: 200, body: { ok: true, alreadyMember: false }, heading: "You've joined the workspace" },
-    { status: 200, body: { ok: true, alreadyMember: true, effectiveRole: "member" }, heading: "You're already a member" },
+    { status: 200, body: { ok: true, workspaceId: "ws-1", alreadyMember: false }, heading: "You've joined the workspace" },
+    { status: 200, body: { ok: true, workspaceId: "ws-1", alreadyMember: true, effectiveRole: "member" }, heading: "You're already a member" },
     { status: 400, body: { ok: false, errorCode: "invalid_input" }, heading: "Invitation unavailable" },
     { status: 403, body: { ok: false, errorCode: "email_verification_required" }, heading: "Verify your email" },
     { status: 403, body: { ok: false, errorCode: "invitation_email_mismatch" }, heading: "Different account" },
@@ -488,7 +488,7 @@ describe("VERIFIED RETRY", () => {
     const renderer = await mount(authState({ user: AUTHENTICATED_USER, authReady: true, syncState: "authenticated", canMutate: true }));
     expect(global.fetch).toHaveBeenCalledTimes(1);
 
-    mockFetchOnce(200, { ok: true, alreadyMember: false });
+    mockFetchOnce(200, { ok: true, workspaceId: "ws-1", alreadyMember: false });
     const retryButton = findButton(renderer, "I've verified — retry")!;
     await act(async () => {
       await retryButton.props.onClick();
@@ -517,7 +517,7 @@ describe("RECOVERABLE RETENTION", () => {
     mockFetchOnce(status, { ok: false });
     const renderer = await mount(authState({ user: AUTHENTICATED_USER, authReady: true, syncState: "authenticated", canMutate: true }));
 
-    mockFetchOnce(200, { ok: true, alreadyMember: false });
+    mockFetchOnce(200, { ok: true, workspaceId: "ws-1", alreadyMember: false });
     const retryButton = findButton(renderer, "Retry")!;
     await act(async () => {
       await retryButton.props.onClick();
@@ -532,7 +532,7 @@ describe("RECOVERABLE RETENTION", () => {
 describe("NO FORBIDDEN STORAGE", () => {
   it("never touches localStorage, document.cookie, or IndexedDB", async () => {
     const { win } = setWindow({ hash: `#invitationId=${INVITATION_ID}&token=${SENTINEL}` });
-    mockFetchOnce(200, { ok: true, alreadyMember: false });
+    mockFetchOnce(200, { ok: true, workspaceId: "ws-1", alreadyMember: false });
     expect("localStorage" in win).toBe(false);
     expect("indexedDB" in win).toBe(false);
     expect("document" in win).toBe(false);
@@ -595,16 +595,42 @@ describe("Phase 12A.1 — post-acceptance redirect uses the response's own works
     expect(target).toContain(encodeURIComponent("ws with space"));
   });
 
-  it("a malformed 200 response missing workspaceId falls back to '/' rather than crashing or redirecting to an invalid URL", async () => {
+  it("Phase 12A.1C1 — a malformed 200 response MISSING workspaceId does NOT reach the success view at all, and NEVER redirects to '/' (Personal mode) — it fails safely into the existing generic error state instead", async () => {
     setWindow({ hash: `#invitationId=${INVITATION_ID}&token=${SENTINEL}` });
     mockFetchOnce(200, { ok: true, alreadyMember: false });
     const renderer = await mount(authState({ user: AUTHENTICATED_USER, authReady: true, syncState: "authenticated", canMutate: true }));
-    const button = findButton(renderer, "Go to your Workspace");
-    expect(button).toBeDefined();
+
+    // Never claims success for a malformed response.
+    expect(findButton(renderer, "Go to your Workspace")).toBeUndefined();
+    expect(mockedRouterReplace).not.toHaveBeenCalledWith("/");
+    expect(mockedRouterReplace).not.toHaveBeenCalled();
+    // Surfaces the existing generic failure UX, with a real Retry available.
+    expect(renderer.root.findByType("h1").props.children).toBe("Something went wrong");
+    expect(findButton(renderer, "Retry")).toBeDefined();
+  });
+
+  it("Phase 12A.1C1 — the same malformed-response guard applies to already_member_success (alreadyMember:true) responses too", async () => {
+    setWindow({ hash: `#invitationId=${INVITATION_ID}&token=${SENTINEL}` });
+    mockFetchOnce(200, { ok: true, alreadyMember: true, effectiveRole: "member" });
+    const renderer = await mount(authState({ user: AUTHENTICATED_USER, authReady: true, syncState: "authenticated", canMutate: true }));
+    expect(renderer.root.findByType("h1").props.children).toBe("Something went wrong");
+    expect(mockedRouterReplace).not.toHaveBeenCalled();
+  });
+
+  it("Phase 12A.1C1 — a malformed success response leaves the credential intact so a manual Retry can genuinely re-attempt acceptance", async () => {
+    setWindow({ hash: `#invitationId=${INVITATION_ID}&token=${SENTINEL}` });
+    mockFetchOnce(200, { ok: true, alreadyMember: false });
+    const renderer = await mount(authState({ user: AUTHENTICATED_USER, authReady: true, syncState: "authenticated", canMutate: true }));
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+
+    mockFetchOnce(200, { ok: true, workspaceId: "ws-recovered", alreadyMember: false });
+    const retryButton = findButton(renderer, "Retry")!;
+    expect(retryButton).toBeDefined();
     await act(async () => {
-      button!.props.onClick();
+      await retryButton.props.onClick();
     });
-    expect(mockedRouterReplace).toHaveBeenCalledWith("/");
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(renderer.root.findByType("h1").props.children).toBe("You've joined the workspace");
   });
 
   it("no remaining reference to the old hardcoded redirect-to-Personal-home behavior for the success paths", () => {

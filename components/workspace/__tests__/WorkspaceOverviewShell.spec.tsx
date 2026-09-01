@@ -45,10 +45,40 @@ function collaborator() {
   return { uid: "user-2", displayName: "Bob", role: "member", isCanonicalOwner: false, joinedAt: "2026-01-02T00:00:00.000Z" };
 }
 
+/**
+ * Phase 12A.1C1 — fixed, non-"today"-relative fixture: `isExpired` is the
+ * server's own canonical field (see `WorkspaceInvitationItem`), never
+ * recomputed from `expiresAt` here, so there is no date-boundary
+ * fragility in these tests.
+ */
+function invitation({ expired = false }: { expired?: boolean } = {}) {
+  return {
+    id: expired ? "inv-expired" : "inv-valid",
+    normalizedEmail: "teammate@example.com",
+    role: "member",
+    isExpired: expired,
+    expiresAt: "2026-01-01T00:00:00.000Z",
+    deliveryVersion: 1,
+  };
+}
+
 beforeEach(() => {
   jest.clearAllMocks();
   mockedUseAuth.mockReturnValue({ user: AUTHENTICATED_USER, authReady: true });
 });
+
+/**
+ * Phase 12A.1C1 — precise check for the ACTIVE "Invite your team" action
+ * link specifically (as opposed to the always-present row label text, or
+ * WorkspaceNav's unrelated "Members" link), by inspecting real rendered
+ * `<a>` elements rather than substring-matching the whole tree.
+ */
+function activeInviteLinkExists(renderer: TestRenderer.ReactTestRenderer): boolean {
+  return renderer.root.findAllByType("a").some((el) => {
+    const children = el.props.children;
+    return children === "Invite your team" || (Array.isArray(children) && children.join("") === "Invite your team");
+  });
+}
 
 async function mount(props: Partial<React.ComponentProps<typeof WorkspaceOverviewShell>> = {}) {
   let renderer!: TestRenderer.ReactTestRenderer;
@@ -88,15 +118,96 @@ describe("WorkspaceOverviewShell", () => {
     expect(text).toContain("Invite your team");
   });
 
-  it("a non-owner member alone (no pending invitation) marks the invite step complete", async () => {
+  it("a non-owner member alone (no pending invitation) marks the invite step complete — no active Invite link remains", async () => {
     mockedFetchWorkspaceMembers.mockResolvedValue({ status: "ok", members: [owner(), collaborator()] });
     mockedFetchPendingInvitations.mockResolvedValue({ status: "ok", invitations: [] });
     mockedFetchTeamProjectsExistence.mockResolvedValue({ status: "ok", hasAny: false });
     mockedFetchTeamResearchExistence.mockResolvedValue({ status: "ok", hasAny: false });
     const renderer = await mount();
+    expect(activeInviteLinkExists(renderer)).toBe(false);
     const text = JSON.stringify(renderer.toJSON());
-    // Invite step complete -> no active "Invite your team" link, but the Project step should be the visible focus.
     expect(text).toContain("Create your first project");
+  });
+
+  describe("Phase 12A.1C1 — expired-invitation activation matrix (Section H)", () => {
+    it("1. Owner only, no invitations -> Invite incomplete (active link present)", async () => {
+      mockedFetchWorkspaceMembers.mockResolvedValue({ status: "ok", members: [owner()] });
+      mockedFetchPendingInvitations.mockResolvedValue({ status: "ok", invitations: [] });
+      mockedFetchTeamProjectsExistence.mockResolvedValue({ status: "ok", hasAny: false });
+      mockedFetchTeamResearchExistence.mockResolvedValue({ status: "ok", hasAny: false });
+      const renderer = await mount();
+      expect(activeInviteLinkExists(renderer)).toBe(true);
+    });
+
+    it("2. a currently-valid (non-expired) pending invitation alone -> Invite complete", async () => {
+      mockedFetchWorkspaceMembers.mockResolvedValue({ status: "ok", members: [owner()] });
+      mockedFetchPendingInvitations.mockResolvedValue({ status: "ok", invitations: [invitation({ expired: false })] });
+      mockedFetchTeamProjectsExistence.mockResolvedValue({ status: "ok", hasAny: false });
+      mockedFetchTeamResearchExistence.mockResolvedValue({ status: "ok", hasAny: false });
+      const renderer = await mount();
+      expect(activeInviteLinkExists(renderer)).toBe(false);
+    });
+
+    it("3. an EXPIRED pending invitation only (no other member) -> Invite remains INCOMPLETE (the exact 12A.1-R1 gap this correction closes)", async () => {
+      mockedFetchWorkspaceMembers.mockResolvedValue({ status: "ok", members: [owner()] });
+      mockedFetchPendingInvitations.mockResolvedValue({ status: "ok", invitations: [invitation({ expired: true })] });
+      mockedFetchTeamProjectsExistence.mockResolvedValue({ status: "ok", hasAny: false });
+      mockedFetchTeamResearchExistence.mockResolvedValue({ status: "ok", hasAny: false });
+      const renderer = await mount();
+      expect(activeInviteLinkExists(renderer)).toBe(true);
+    });
+
+    it("4. a revoked invitation never appears in the pending list at all (server-side filtering) -> reduces to the empty-list case -> Invite incomplete", async () => {
+      // listWorkspaceInvitations only ever returns status:"pending" records —
+      // a revoked invitation is structurally absent from this response, not
+      // present-but-flagged. Simulating the empty list IS the correct
+      // simulation of "only a revoked invitation exists."
+      mockedFetchWorkspaceMembers.mockResolvedValue({ status: "ok", members: [owner()] });
+      mockedFetchPendingInvitations.mockResolvedValue({ status: "ok", invitations: [] });
+      mockedFetchTeamProjectsExistence.mockResolvedValue({ status: "ok", hasAny: false });
+      mockedFetchTeamResearchExistence.mockResolvedValue({ status: "ok", hasAny: false });
+      const renderer = await mount();
+      expect(activeInviteLinkExists(renderer)).toBe(true);
+    });
+
+    it("5. an accepted invitation record (now inactive as a pending item) without an active non-owner member does not independently complete the step", async () => {
+      // An accepted invitation becomes a membership and drops out of the
+      // pending list — identical simulation to (4): empty pending list,
+      // Owner-only membership.
+      mockedFetchWorkspaceMembers.mockResolvedValue({ status: "ok", members: [owner()] });
+      mockedFetchPendingInvitations.mockResolvedValue({ status: "ok", invitations: [] });
+      mockedFetchTeamProjectsExistence.mockResolvedValue({ status: "ok", hasAny: false });
+      mockedFetchTeamResearchExistence.mockResolvedValue({ status: "ok", hasAny: false });
+      const renderer = await mount();
+      expect(activeInviteLinkExists(renderer)).toBe(true);
+    });
+
+    it("6. an active non-owner member -> Invite complete regardless of invitation history", async () => {
+      mockedFetchWorkspaceMembers.mockResolvedValue({ status: "ok", members: [owner(), collaborator()] });
+      mockedFetchPendingInvitations.mockResolvedValue({ status: "ok", invitations: [] });
+      mockedFetchTeamProjectsExistence.mockResolvedValue({ status: "ok", hasAny: false });
+      mockedFetchTeamResearchExistence.mockResolvedValue({ status: "ok", hasAny: false });
+      const renderer = await mount();
+      expect(activeInviteLinkExists(renderer)).toBe(false);
+    });
+
+    it("7. an EXPIRED invitation coexisting with an active non-owner member -> Invite complete because the collaborator exists", async () => {
+      mockedFetchWorkspaceMembers.mockResolvedValue({ status: "ok", members: [owner(), collaborator()] });
+      mockedFetchPendingInvitations.mockResolvedValue({ status: "ok", invitations: [invitation({ expired: true })] });
+      mockedFetchTeamProjectsExistence.mockResolvedValue({ status: "ok", hasAny: false });
+      mockedFetchTeamResearchExistence.mockResolvedValue({ status: "ok", hasAny: false });
+      const renderer = await mount();
+      expect(activeInviteLinkExists(renderer)).toBe(false);
+    });
+
+    it("an expired invitation mixed with a still-valid one -> Invite complete (at least one currently-valid invitation exists)", async () => {
+      mockedFetchWorkspaceMembers.mockResolvedValue({ status: "ok", members: [owner()] });
+      mockedFetchPendingInvitations.mockResolvedValue({ status: "ok", invitations: [invitation({ expired: true }), invitation({ expired: false })] });
+      mockedFetchTeamProjectsExistence.mockResolvedValue({ status: "ok", hasAny: false });
+      mockedFetchTeamResearchExistence.mockResolvedValue({ status: "ok", hasAny: false });
+      const renderer = await mount();
+      expect(activeInviteLinkExists(renderer)).toBe(false);
+    });
   });
 
   it("a Workspace with real research existing renders no setup panel at all — the 'This Workspace is active' message instead", async () => {
