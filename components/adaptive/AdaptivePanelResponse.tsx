@@ -106,6 +106,8 @@ export interface AdaptivePanelResponseProps extends AdaptiveRendererProps {
   runId?: string | null;
   /** Threaded down to the Synthesis Report's Bias & Blind Spots Tier 2 cards' "Run follow-up" action. */
   onRunFollowUp?: (question: string) => void;
+  /** Phase 11A.4 — threaded down to DeepResearchView's per-finding "Verify this claim" action. */
+  onVerifyClaim?: (args: { runId: string; claimId: string }) => void;
 
   // ── Adaptive Synthesis Report, Phase 1 (docs/adaptive-synthesis-report-design.md
   // §4.1) — the top summary bar's own inputs. All optional so this component
@@ -140,6 +142,7 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
     question,
     runId,
     onRunFollowUp,
+    onVerifyClaim,
   } = props;
   const [viewMode, setViewMode] = useState<PanelViewMode>("list");
   const [pendingScrollSection, setPendingScrollSection] = useState<string | null>(null);
@@ -376,7 +379,7 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
     if (deepResearch) {
       return withBar(
         <div className="space-y-4">
-          <DeepResearchView deepResearch={deepResearch} />
+          <DeepResearchView deepResearch={deepResearch} runId={runId} onVerifyClaim={onVerifyClaim} />
           <ModelResponsesSection schema={schema} results={results} />
           <PanelEvidenceSection schemaId={schema.id} deepResearch={deepResearch} modelsUsed={results.map((r) => r.modelId)} />
           <ReviewGovernanceSection

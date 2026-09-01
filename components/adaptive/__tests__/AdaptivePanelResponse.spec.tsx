@@ -54,6 +54,76 @@ function comparisonCell(overrides: Partial<ComparisonCell> & Pick<ComparisonCell
   return { ...overrides };
 }
 
+describe("AdaptivePanelResponse — Phase 11A.4: runId/onVerifyClaim thread through to DeepResearchView", () => {
+  const CLAIM_ID = "v1:findings:0:" + "e".repeat(43);
+
+  function deepResearchFixture(): import("@/lib/adaptiveSchema/types").DeepResearchResult {
+    return {
+      executiveSummary: "x",
+      findings: [
+        {
+          id: "raw-0",
+          title: "A finding",
+          summary: "A finding summary.",
+          category: "General",
+          evidenceStrength: "unknown",
+          sourceBacked: false,
+          sources: [],
+          coverageCount: 1,
+          totalModels: 1,
+          coverageRatio: 1,
+          contributingModels: ["chatgpt"] as ModelId[],
+          claimId: CLAIM_ID,
+        },
+      ],
+      lowConfidenceFindings: [],
+      disagreements: [],
+      evidenceGaps: [],
+      openQuestions: [],
+      panelBlindSpots: [],
+      researchBoundaries: [],
+      recommendedNextSteps: [],
+      sourceCoverage: { findingsWithSources: 0, totalFindings: 1, coverageRatio: 0 },
+      totalModels: 1,
+    };
+  }
+
+  it("passes runId to DeepResearchView, which surfaces it via the finding action's data-run-id", () => {
+    const schema = SCHEMA_REGISTRY.deep_research;
+    const classification = baseClassification("deep_research");
+    const results = [modelResult("chatgpt", "deep_research", {})];
+    const html = renderToStaticMarkup(
+      createElement(AdaptivePanelResponse, {
+        schema,
+        classification,
+        results,
+        deepResearch: deepResearchFixture(),
+        question: "What does the research say?",
+        runId: "run-adaptive-1",
+      })
+    );
+    expect(html).toContain("Verify this claim");
+    expect(html).toContain('data-run-id="run-adaptive-1"');
+    expect(html).toContain(`data-claim-id="${CLAIM_ID}"`);
+  });
+
+  it("without a runId prop, the action is withheld even though the finding itself has a claimId", () => {
+    const schema = SCHEMA_REGISTRY.deep_research;
+    const classification = baseClassification("deep_research");
+    const results = [modelResult("chatgpt", "deep_research", {})];
+    const html = renderToStaticMarkup(
+      createElement(AdaptivePanelResponse, {
+        schema,
+        classification,
+        results,
+        deepResearch: deepResearchFixture(),
+        question: "What does the research say?",
+      })
+    );
+    expect(html).not.toContain("Verify this claim");
+  });
+});
+
 describe("AdaptivePanelResponse — comparison_matrix routes to ComparisonMatrixView", () => {
   it("renders the comparison grid directly, bypassing List/Compare/Synthesis and Trust Summary/Verification Gate entirely", () => {
     const schema = SCHEMA_REGISTRY.comparison_matrix;

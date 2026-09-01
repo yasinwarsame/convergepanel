@@ -59,6 +59,7 @@ import { PanelResultPublic } from "@/lib/panel/schemas";
 import { normalizeModelResultPublic, assertPublicStatus } from "@/lib/panel/normalize";
 import { logger } from "@/lib/logger";
 import { finalizeAdaptiveRun, AdaptivePromptPlan } from "@/lib/adaptiveSchema/orchestrate";
+import { attachDeepResearchClaimIds } from "@/lib/verification/attachDeepResearchClaimIds";
 import {
   trackPanelExecutionStarted,
   trackPanelExecutionCompleted,
@@ -714,7 +715,13 @@ export async function executeOrdinaryRun(args: ExecuteOrdinaryRunArgs): Promise<
         definitionExplanation: adaptiveOutput.definitionExplanation,
         causalExplanation: adaptiveOutput.causalExplanation,
         checklistTaxonomy: adaptiveOutput.checklistTaxonomy,
-        deepResearch: adaptiveOutput.deepResearch,
+        // Phase 11A.4 — attached ONLY on this response payload, never on
+        // `adaptiveOutput.persistedOutput` below (a fresh, non-mutating
+        // copy — see attachDeepResearchClaimIds()'s own doc comment for
+        // why this must never reach the Firestore write).
+        deepResearch: adaptiveOutput.deepResearch
+          ? attachDeepResearchClaimIds(runId, adaptiveOutput.deepResearch)
+          : adaptiveOutput.deepResearch,
         evidenceReview: adaptiveOutput.evidenceReview,
         biasBlindspotAudit: adaptiveOutput.biasBlindspotAudit,
         decisionSupport: adaptiveOutput.decisionSupport,

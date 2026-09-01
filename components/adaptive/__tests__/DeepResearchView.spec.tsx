@@ -172,4 +172,55 @@ describe("DeepResearchView", () => {
     expect(html).not.toMatch(/panel verdict/i);
     expect(html).not.toMatch(/\d+%\s*confiden/i);
   });
+
+  describe("Phase 11A.4 — 'Verify this claim' action", () => {
+    const CLAIM_ID = "v1:findings:0:" + "a".repeat(43);
+
+    async function buildResultWithOneFinding(claimId: string | null | undefined) {
+      mockGaps();
+      const result = await buildDeepResearchResult(
+        perModel([["chatgpt", fields({ findings: [finding({ id: "raw-id-0", title: "X", summary: "A finding." })] })]])
+      );
+      // buildDeepResearchResult never attaches claimId itself (that's this
+      // phase's server-response-time attachment, tested separately in
+      // attachDeepResearchClaimIds.spec.ts) — attach it here the same way
+      // the real response-shaping code would, to test the RENDERER's own
+      // eligibility/wiring logic in isolation.
+      return { ...result, findings: [{ ...result.findings[0], claimId }] };
+    }
+
+    it("an eligible finding (runId present, claimId present) shows 'Verify this claim'", async () => {
+      const result = await buildResultWithOneFinding(CLAIM_ID);
+      const html = renderToStaticMarkup(createElement(DeepResearchView, { deepResearch: result, runId: "run-1" }));
+      expect(html).toContain("Verify this claim");
+    });
+
+    it("a finding with claimId: null does not show the action", async () => {
+      const result = await buildResultWithOneFinding(null);
+      const html = renderToStaticMarkup(createElement(DeepResearchView, { deepResearch: result, runId: "run-1" }));
+      expect(html).not.toContain("Verify this claim");
+    });
+
+    it("a finding with claimId absent (undefined) does not show the action — e.g. a non-deep_research or legacy path that never attached one", async () => {
+      const result = await buildResultWithOneFinding(undefined);
+      const html = renderToStaticMarkup(createElement(DeepResearchView, { deepResearch: result, runId: "run-1" }));
+      expect(html).not.toContain("Verify this claim");
+    });
+
+    it("no runId at all -> the action is withheld even for a finding with a valid claimId", async () => {
+      const result = await buildResultWithOneFinding(CLAIM_ID);
+      const html = renderToStaticMarkup(createElement(DeepResearchView, { deepResearch: result, runId: null }));
+      expect(html).not.toContain("Verify this claim");
+    });
+
+    it("the button's locator data carries the CANONICAL claimId attached to the finding — never the raw finding.id, never derived from array position", async () => {
+      const result = await buildResultWithOneFinding(CLAIM_ID);
+      const html = renderToStaticMarkup(createElement(DeepResearchView, { deepResearch: result, runId: "run-1" }));
+      expect(html).toContain(`data-claim-id="${CLAIM_ID}"`);
+      // The raw finding id ("raw-id-0") must never appear as the locator —
+      // proves this isn't silently falling back to finding.id anywhere.
+      expect(html).not.toContain('data-claim-id="raw-id-0"');
+      expect(html).toContain('data-run-id="run-1"');
+    });
+  });
 });

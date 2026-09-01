@@ -21,6 +21,7 @@ import { validateRunWorkspaceAssociation } from "@/lib/workspaces/runWorkspaceIn
 import { classifyRunWorkspaceBindingShape } from "@/lib/workspaces/classifyRunWorkspaceBindingShape";
 import { resolveTeamRunWorkspaceAccess, type ResolveTeamRunWorkspaceAccessResult } from "@/lib/workspaces/resolveTeamRunWorkspaceAccess";
 import { classifyProjectIdFieldState } from "@/lib/projects/runProjectNormalizationEligibility";
+import { attachDeepResearchClaimIds } from "@/lib/verification/attachDeepResearchClaimIds";
 import { logger } from "@/lib/logger";
 
 type TeamAccessDenied = Extract<ResolveTeamRunWorkspaceAccessResult, { granted: false }>;
@@ -427,8 +428,19 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
     }
   }
 
+  // Phase 11A.4 — response-time only (see attachDeepResearchClaimIds()'s
+  // own doc comment): this route never writes, so there is no persistence
+  // risk here, but the same non-mutating helper is reused for a single
+  // source of the augmentation logic shared with the live run path in
+  // lib/runPanelExecution.ts.
+  const adaptiveOutputForResponse =
+    parsedAdaptive.ok && parsedAdaptive.output.schemaId === "deep_research"
+      ? { ...parsedAdaptive.output, result: attachDeepResearchClaimIds(runId, parsedAdaptive.output.result) }
+      : parsedAdaptive.ok
+        ? parsedAdaptive.output
+        : null;
   const adaptive = parsedAdaptive.ok
-    ? { status: "valid" as const, output: parsedAdaptive.output, humanReview, reviewRouting }
+    ? { status: "valid" as const, output: adaptiveOutputForResponse, humanReview, reviewRouting }
     : { status: parsedAdaptive.reason, output: null, humanReview: null, reviewRouting: "unknown" as const };
 
   // Phase 2 pilot history-reload fix, widened in Batch 3 persistence

@@ -645,6 +645,16 @@ export interface AggregatedResearchFinding {
   totalModels: number;
   coverageRatio: number;
   contributingModels: ModelId[];
+  /**
+   * Phase 11A.4 — the frozen `v1:<section>:<index>:<fingerprint>` selector
+   * (see lib/verification/claimVerificationOrigin.ts), server-attached ONLY
+   * at response-construction time (never persisted as part of this finding
+   * — the persisted `adaptiveOutput` document never carries this field).
+   * `null` when a valid selector could not be produced for this finding
+   * (malformed shape); a caller must not offer "Verify this claim" for a
+   * finding whose `claimId` is `null` or absent. Never computed client-side.
+   */
+  claimId?: string | null;
 }
 
 /** One preserved, materially distinct research disagreement — never dropped for low coverage, same as AggregatedCausalInterpretation. */
