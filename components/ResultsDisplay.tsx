@@ -671,6 +671,8 @@ interface ResultsDisplayProps {
   onRunFollowUp?: (question: string) => void;
   /** Phase 11A.4 — threaded down to DeepResearchView's per-finding "Verify this claim" action. */
   onVerifyClaim?: (args: { runId: string; claimId: string }) => void;
+  /** Phase 11A.6 — server-issued claimId to scroll to and emphasize in DeepResearchView, if present among this run's findings. */
+  focusClaimId?: string | null;
 }
 
 /**
@@ -705,6 +707,7 @@ export default function ResultsDisplay({
   adaptive,
   onRunFollowUp,
   onVerifyClaim,
+  focusClaimId,
 }: ResultsDisplayProps) {
   const { user, authReady } = useAuth();
   const results = Array.isArray(resultsProp) ? resultsProp : [];
@@ -1044,6 +1047,7 @@ export default function ResultsDisplay({
           meta={adaptive.meta}
           question={question}
           runId={runId}
+          focusClaimId={focusClaimId}
           onRunFollowUp={onRunFollowUp}
           onVerifyClaim={onVerifyClaim}
         />

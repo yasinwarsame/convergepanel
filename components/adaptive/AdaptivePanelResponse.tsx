@@ -108,6 +108,8 @@ export interface AdaptivePanelResponseProps extends AdaptiveRendererProps {
   onRunFollowUp?: (question: string) => void;
   /** Phase 11A.4 — threaded down to DeepResearchView's per-finding "Verify this claim" action. */
   onVerifyClaim?: (args: { runId: string; claimId: string }) => void;
+  /** Phase 11A.6 — server-issued claimId to scroll to and emphasize in DeepResearchView, if present among this run's findings. */
+  focusClaimId?: string | null;
 
   // ── Adaptive Synthesis Report, Phase 1 (docs/adaptive-synthesis-report-design.md
   // §4.1) — the top summary bar's own inputs. All optional so this component
@@ -143,6 +145,7 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
     runId,
     onRunFollowUp,
     onVerifyClaim,
+    focusClaimId,
   } = props;
   const [viewMode, setViewMode] = useState<PanelViewMode>("list");
   const [pendingScrollSection, setPendingScrollSection] = useState<string | null>(null);
@@ -379,7 +382,7 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
     if (deepResearch) {
       return withBar(
         <div className="space-y-4">
-          <DeepResearchView deepResearch={deepResearch} runId={runId} onVerifyClaim={onVerifyClaim} />
+          <DeepResearchView deepResearch={deepResearch} runId={runId} onVerifyClaim={onVerifyClaim} focusClaimId={focusClaimId} />
           <ModelResponsesSection schema={schema} results={results} />
           <PanelEvidenceSection schemaId={schema.id} deepResearch={deepResearch} modelsUsed={results.map((r) => r.modelId)} />
           <ReviewGovernanceSection
