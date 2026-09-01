@@ -14,6 +14,7 @@ import { validateTeamClaimVerificationRowShape } from "@/lib/workspaces/teamClai
 import { validateTeamVideoVerificationRowShape } from "@/lib/workspaces/teamVideoVerificationRowValidation";
 import { resolveTeamRunWorkspaceAccess } from "@/lib/workspaces/resolveTeamRunWorkspaceAccess";
 import { resolvePersonalSourceResearchLink } from "@/lib/verification/resolvePersonalSourceResearchLink";
+import { resolveTeamSourceResearchLink } from "@/lib/verification/resolveTeamSourceResearchLink";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -145,7 +146,16 @@ export async function GET(
 
     try {
       const data = raw as ClaimVerificationFirestoreDoc;
-      const payload = mapStoredVerificationToClientPayload(data, verificationId);
+      // Phase 11A.5C — Team durable source-link enrichment, DETAIL read
+      // only, applying the exact 11A.5B pattern with an independently
+      // Team-authorized boundary (see resolveTeamSourceResearchLink.ts's
+      // own doc comment for the provenance-containment invariant:
+      // `workspaceId` here is always this VERIFICATION's own persisted
+      // Workspace, never a caller-supplied value). Any failure of any
+      // kind collapses to `null` — never fails this (already-authorized)
+      // verification read.
+      const sourceResearch = await resolveTeamSourceResearchLink({ origin: data.origin, callerUid: uid, expectedWorkspaceId: workspaceId });
+      const payload = mapStoredVerificationToClientPayload(data, verificationId, { sourceResearch });
       return NextResponse.json({ ok: true, payload });
     } catch (e: unknown) {
       logger.error("[user/verifications/id] Team Claim map failed", { error: (e as Error)?.message });
