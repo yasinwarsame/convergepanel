@@ -47,6 +47,7 @@ import {
   resolveClaimVerificationOrigin,
   buildDeepResearchClaimId,
   parseDeepResearchClaimId,
+  verifyDeepResearchClaimFingerprint,
   type DeepResearchClaimSection,
 } from "@/lib/verification/claimVerificationOrigin";
 
@@ -1136,5 +1137,108 @@ describe("resolveClaimVerificationOrigin — failure precedence (frozen)", () =>
       expectedWorkspaceId: null,
     });
     expect(result).toEqual({ status: "denied", reason: "not_deep_research" });
+  });
+});
+
+describe("verifyDeepResearchClaimFingerprint — Phase 11A.5B read-time re-verification", () => {
+  it("exact Deep Research finding + exact runId -> valid", () => {
+    const f = finding();
+    const claimId = selectorFor(RUN_ID, "findings", 0, f);
+    expect(
+      verifyDeepResearchClaimFingerprint({ runId: RUN_ID, claimId, findings: [f], lowConfidenceFindings: [] })
+    ).toBe(true);
+  });
+
+  it("same finding + different runId -> invalid (runId is bound into the digest)", () => {
+    const f = finding();
+    const claimId = selectorFor(RUN_ID, "findings", 0, f);
+    expect(
+      verifyDeepResearchClaimFingerprint({ runId: OTHER_RUN_ID, claimId, findings: [f], lowConfidenceFindings: [] })
+    ).toBe(false);
+  });
+
+  it("changed summary at the same position -> invalid", () => {
+    const f = finding();
+    const claimId = selectorFor(RUN_ID, "findings", 0, f);
+    const mutated = { ...f, summary: "A completely different summary now lives here." };
+    expect(
+      verifyDeepResearchClaimFingerprint({ runId: RUN_ID, claimId, findings: [mutated], lowConfidenceFindings: [] })
+    ).toBe(false);
+  });
+
+  it("changed finding index (same content, different slot) -> invalid", () => {
+    const f = finding();
+    const claimId = selectorFor(RUN_ID, "findings", 0, f);
+    // Same finding now lives at index 1, with something else at index 0.
+    expect(
+      verifyDeepResearchClaimFingerprint({
+        runId: RUN_ID,
+        claimId,
+        findings: [finding({ id: "other", summary: "unrelated" }), f],
+        lowConfidenceFindings: [],
+      })
+    ).toBe(false);
+  });
+
+  it("changed section (findings vs lowConfidenceFindings) -> invalid", () => {
+    const f = finding();
+    const claimId = selectorFor(RUN_ID, "findings", 0, f);
+    expect(
+      verifyDeepResearchClaimFingerprint({ runId: RUN_ID, claimId, findings: [], lowConfidenceFindings: [f] })
+    ).toBe(false);
+  });
+
+  it("forged fingerprint segment (syntactically valid, cryptographically wrong) -> invalid", () => {
+    const f = finding();
+    const forged = "v1:findings:0:" + "Z".repeat(43);
+    expect(
+      verifyDeepResearchClaimFingerprint({ runId: RUN_ID, claimId: forged, findings: [f], lowConfidenceFindings: [] })
+    ).toBe(false);
+  });
+
+  it("valid historical persisted Deep Research output -> valid, no migration required (fingerprint is recomputed fresh, not stored)", () => {
+    // Simulates re-verifying a claimId that was computed and handed to a
+    // client at some earlier point in time, against data that has not
+    // changed since — exactly the 11A.5B read-time scenario.
+    const f = finding({ id: "historical-raw-id", summary: "A historical finding, unchanged since creation." });
+    const claimId = selectorFor("historical-run", "findings", 2, f);
+    expect(
+      verifyDeepResearchClaimFingerprint({
+        runId: "historical-run",
+        claimId,
+        findings: [finding(), finding({ id: "x" }), f],
+        lowConfidenceFindings: [],
+      })
+    ).toBe(true);
+  });
+
+  it("malformed claimId (fails parseDeepResearchClaimId) -> invalid, never throws", () => {
+    const f = finding();
+    expect(
+      verifyDeepResearchClaimFingerprint({ runId: RUN_ID, claimId: "not-a-real-selector", findings: [f], lowConfidenceFindings: [] })
+    ).toBe(false);
+  });
+
+  it("index out of range -> invalid, never throws", () => {
+    const f = finding();
+    const claimId = "v1:findings:5:" + "A".repeat(43);
+    expect(
+      verifyDeepResearchClaimFingerprint({ runId: RUN_ID, claimId, findings: [f], lowConfidenceFindings: [] })
+    ).toBe(false);
+  });
+
+  it("non-array findings/lowConfidenceFindings input -> invalid, never throws", () => {
+    const claimId = "v1:findings:0:" + "A".repeat(43);
+    expect(
+      verifyDeepResearchClaimFingerprint({ runId: RUN_ID, claimId, findings: undefined, lowConfidenceFindings: null })
+    ).toBe(false);
+  });
+
+  it("performs zero Firestore access — pure, synchronous, no adminDb usage", () => {
+    const moduleSource = readFileSync(require.resolve("../claimVerificationOrigin"), "utf8");
+    const fnStart = moduleSource.indexOf("export function verifyDeepResearchClaimFingerprint");
+    const fnBody = moduleSource.slice(fnStart, fnStart + 800);
+    expect(fnBody).not.toContain("adminDb");
+    expect(fnBody).not.toContain(".collection(");
   });
 });

@@ -232,6 +232,46 @@ export function parseDeepResearchClaimId(claimId: string): ParsedDeepResearchCla
 }
 
 /**
+ * Phase 11A.5B — pure, zero-I/O re-verification of a persisted `claimId`
+ * against ALREADY-LOADED, CURRENT `findings`/`lowConfidenceFindings`
+ * arrays. This is the exact same fingerprint check
+ * `resolveClaimVerificationOrigin()` performs internally, factored out so
+ * a READ-time caller (e.g. a stored-verification's durable source-link
+ * resolver) can reuse it without duplicating the digest algorithm and
+ * without misusing `resolveClaimVerificationOrigin()` itself as a
+ * general read-authorization grant — that function's own contract is
+ * scoped to the creation flow (see its TEAM MEMBERSHIP BOUNDARY comment
+ * above). This function performs no Firestore access and grants no
+ * authorization of any kind: the caller remains fully responsible for
+ * having already authorized itself to read the run this data came from.
+ * Returns `false` for anything malformed — never throws.
+ */
+export function verifyDeepResearchClaimFingerprint(args: {
+  runId: string;
+  claimId: string;
+  findings: unknown;
+  lowConfidenceFindings: unknown;
+}): boolean {
+  const parsed = parseDeepResearchClaimId(args.claimId);
+  if (!parsed) return false;
+  const { section, index, fingerprint } = parsed;
+
+  const candidates = section === "findings" ? args.findings : args.lowConfidenceFindings;
+  if (!Array.isArray(candidates)) return false;
+  const target = candidates[index];
+  if (!isFingerprintableFinding(target)) return false;
+
+  const expectedFingerprint = computeDeepResearchClaimFingerprint({
+    runId: args.runId,
+    section,
+    index,
+    rawId: target.id,
+    summary: target.summary,
+  });
+  return fingerprintsMatch(fingerprint, expectedFingerprint);
+}
+
+/**
  * Pure issuance helper — no Firestore access, no I/O. Computes the durable
  * selector for one specific finding occurrence. Intended to be called by a
  * FUTURE read-model (Phase 11A.4/11A.5), at the moment a finding is first

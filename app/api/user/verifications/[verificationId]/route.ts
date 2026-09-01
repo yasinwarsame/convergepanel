@@ -13,6 +13,7 @@ import { mapStoredVideoVerificationToClientPayload } from "@/lib/user/mapStoredV
 import { validateTeamClaimVerificationRowShape } from "@/lib/workspaces/teamClaimVerificationRowValidation";
 import { validateTeamVideoVerificationRowShape } from "@/lib/workspaces/teamVideoVerificationRowValidation";
 import { resolveTeamRunWorkspaceAccess } from "@/lib/workspaces/resolveTeamRunWorkspaceAccess";
+import { resolvePersonalSourceResearchLink } from "@/lib/verification/resolvePersonalSourceResearchLink";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -250,7 +251,15 @@ export async function GET(
     }
 
     const data = raw as ClaimVerificationFirestoreDoc;
-    const payload = mapStoredVerificationToClientPayload(data, verificationId);
+    // Phase 11A.5B — durable source-link enrichment, DETAIL read only
+    // (this route has no list/summary mode). Revalidates current
+    // authorization + the claim fingerprint against the source run's
+    // CURRENT canonical data; never trusts the persisted `origin` alone.
+    // Any failure of any kind collapses to `null` — never distinguishes
+    // a reason, and never fails this (already-authorized) verification
+    // read.
+    const sourceResearch = await resolvePersonalSourceResearchLink({ origin: data.origin, callerUid: uid });
+    const payload = mapStoredVerificationToClientPayload(data, verificationId, { sourceResearch });
     return NextResponse.json({ ok: true, payload });
   } catch (e: unknown) {
     logger.error("[user/verifications/id] map failed", { error: (e as Error)?.message });

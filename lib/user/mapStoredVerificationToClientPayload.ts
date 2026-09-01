@@ -2,17 +2,28 @@
  * User-facing server utilities: history payloads and cross-feature mappers.
  */
 
-import type { ClaimVerificationClientPayload } from "@/lib/verification/claimVerificationClientPayload";
+import type { ClaimVerificationClientPayload, ClaimVerificationSourceResearch } from "@/lib/verification/claimVerificationClientPayload";
 import type { ClaimVerificationFirestoreDoc } from "@/lib/firestore/verifications";
 import { buildAgreementDisagreementDigest } from "@/lib/verification/agreementDigest";
 
 /**
  * Rebuilds the client verification payload from a Firestore `verifications` document.
  * Used by history / detail APIs (server-only).
+ *
+ * Phase 11A.5B — `options.sourceResearch`, when the THIRD ARGUMENT IS
+ * SUPPLIED AT ALL, is spliced into the returned payload verbatim (object
+ * or `null`); when the third argument is omitted entirely, the returned
+ * payload has no `sourceResearch` key at all, preserving this function's
+ * pre-11A.5B behavior exactly for every existing/other caller. This
+ * function remains pure and performs no I/O of its own — the caller is
+ * responsible for having already authorized and resolved
+ * `sourceResearch` (see resolvePersonalSourceResearchLink()) before
+ * calling this mapper.
  */
 export function mapStoredVerificationToClientPayload(
   data: ClaimVerificationFirestoreDoc,
-  verificationId: string
+  verificationId: string,
+  options?: { sourceResearch: ClaimVerificationSourceResearch | null }
 ): ClaimVerificationClientPayload {
   const modelEvidence = (data.modelResults ?? []).map((m) => ({
     modelId: m.modelId,
@@ -66,5 +77,6 @@ export function mapStoredVerificationToClientPayload(
     data.governanceStatus === "blocked"
       ? { governanceStatus: data.governanceStatus }
       : {}),
+    ...(options ? { sourceResearch: options.sourceResearch } : {}),
   };
 }
