@@ -20,7 +20,14 @@ jest.mock("@/lib/client/authedFetch", () => ({
   authedFetch: (...args: any[]) => mockedAuthedFetch(...args),
 }));
 
-import { fetchPendingInvitations, createInvitation, resendInvitation, fetchWorkspaceAuditEvents } from "@/lib/client/workspaceTeamClient";
+import {
+  fetchPendingInvitations,
+  createInvitation,
+  resendInvitation,
+  fetchWorkspaceAuditEvents,
+  fetchTeamProjectsExistence,
+  fetchTeamResearchExistence,
+} from "@/lib/client/workspaceTeamClient";
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -338,6 +345,74 @@ describe("fetchWorkspaceAuditEvents — Workspace Audit Log, Phase TEAM-GOV-I1",
   it("thrown fetch -> error, never throws", async () => {
     mockedAuthedFetch.mockRejectedValue(new Error("network down"));
     const result = await fetchWorkspaceAuditEvents({ user: null, authReady: true, workspaceId: "ws-1" });
+    expect(result).toEqual({ status: "error" });
+  });
+});
+
+describe("fetchTeamProjectsExistence — Phase 12A.1 activation-state cheap existence check", () => {
+  it("requests with ?limit=1 — never a full list fetch", async () => {
+    mockedAuthedFetch.mockResolvedValue(jsonResponse({ ok: true, items: [], hasMore: false }));
+    await fetchTeamProjectsExistence({ user: null, authReady: true, workspaceId: "ws-1" });
+    const calledUrl = mockedAuthedFetch.mock.calls[0][0] as string;
+    expect(calledUrl).toContain("/api/workspaces/ws-1/projects");
+    expect(calledUrl).toContain("limit=1");
+  });
+
+  it("non-empty items -> hasAny: true", async () => {
+    mockedAuthedFetch.mockResolvedValue(jsonResponse({ ok: true, items: [{ id: "p1" }], hasMore: false }));
+    const result = await fetchTeamProjectsExistence({ user: null, authReady: true, workspaceId: "ws-1" });
+    expect(result).toEqual({ status: "ok", hasAny: true });
+  });
+
+  it("empty items -> hasAny: false", async () => {
+    mockedAuthedFetch.mockResolvedValue(jsonResponse({ ok: true, items: [], hasMore: false }));
+    const result = await fetchTeamProjectsExistence({ user: null, authReady: true, workspaceId: "ws-1" });
+    expect(result).toEqual({ status: "ok", hasAny: false });
+  });
+
+  it("non-2xx response -> error", async () => {
+    mockedAuthedFetch.mockResolvedValue({ ok: false, status: 403, json: async () => ({}) });
+    const result = await fetchTeamProjectsExistence({ user: null, authReady: true, workspaceId: "ws-1" });
+    expect(result).toEqual({ status: "error" });
+  });
+
+  it("malformed body (items missing) -> error, never a crash", async () => {
+    mockedAuthedFetch.mockResolvedValue(jsonResponse({ ok: true }));
+    const result = await fetchTeamProjectsExistence({ user: null, authReady: true, workspaceId: "ws-1" });
+    expect(result).toEqual({ status: "error" });
+  });
+
+  it("thrown fetch -> error, never throws", async () => {
+    mockedAuthedFetch.mockRejectedValue(new Error("network down"));
+    const result = await fetchTeamProjectsExistence({ user: null, authReady: true, workspaceId: "ws-1" });
+    expect(result).toEqual({ status: "error" });
+  });
+});
+
+describe("fetchTeamResearchExistence — Phase 12A.1 activation-state cheap existence check", () => {
+  it("requests with ?limit=1 against the runs endpoint", async () => {
+    mockedAuthedFetch.mockResolvedValue(jsonResponse({ ok: true, items: [], hasMore: false }));
+    await fetchTeamResearchExistence({ user: null, authReady: true, workspaceId: "ws-1" });
+    const calledUrl = mockedAuthedFetch.mock.calls[0][0] as string;
+    expect(calledUrl).toContain("/api/workspaces/ws-1/runs");
+    expect(calledUrl).toContain("limit=1");
+  });
+
+  it("non-empty items -> hasAny: true", async () => {
+    mockedAuthedFetch.mockResolvedValue(jsonResponse({ ok: true, items: [{ id: "r1" }], hasMore: false }));
+    const result = await fetchTeamResearchExistence({ user: null, authReady: true, workspaceId: "ws-1" });
+    expect(result).toEqual({ status: "ok", hasAny: true });
+  });
+
+  it("empty items -> hasAny: false", async () => {
+    mockedAuthedFetch.mockResolvedValue(jsonResponse({ ok: true, items: [], hasMore: false }));
+    const result = await fetchTeamResearchExistence({ user: null, authReady: true, workspaceId: "ws-1" });
+    expect(result).toEqual({ status: "ok", hasAny: false });
+  });
+
+  it("thrown fetch -> error, never throws", async () => {
+    mockedAuthedFetch.mockRejectedValue(new Error("network down"));
+    const result = await fetchTeamResearchExistence({ user: null, authReady: true, workspaceId: "ws-1" });
     expect(result).toEqual({ status: "error" });
   });
 });

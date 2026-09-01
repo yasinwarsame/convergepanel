@@ -69,8 +69,11 @@ describe("WorkspaceAuditLogShell — pagination (BD)", () => {
 });
 
 describe("WorkspaceAuditLogShell — navigation (T, Q)", () => {
-  it("cross-links back to the Members page for the same Workspace", () => {
-    expect(source).toMatch(/\/workspace\/team\/\$\{encodeURIComponent\(workspaceId\)\}\/members/);
+  it("Phase 12A.1 — cross-links back to Members/Overview via the shared WorkspaceNav, not a locally-duplicated tab strip", () => {
+    expect(source).toMatch(/import WorkspaceNav from ["']@\/components\/workspace\/WorkspaceNav["'];/);
+    expect(source).toMatch(/<WorkspaceNav workspaceId=\{workspaceId\} active="audit" showAudit \/>/);
+    // The old locally-duplicated <nav> markup must be gone — WorkspaceNav owns it now.
+    expect(source).not.toMatch(/<nav className="mb-6 flex gap-4/);
   });
 
   it("does not redirect into or import from the legacy /governance dashboard or lib/governance/ (components/teamGovernance/ is a separate, pre-existing shared UI namespace already reused by WorkspaceMembersShell — not the legacy AI-research Governance Dashboard)", () => {

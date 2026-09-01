@@ -397,3 +397,52 @@ export async function fetchWorkspaceAuditEvents(args: { user: User | null; authR
     return { status: "error" };
   }
 }
+
+// ── Activation-state existence checks (Phase 12A.1) ─────────────────────
+//
+// Cheap, no-new-endpoint existence checks reusing the already-shipped,
+// paginated Team Projects/runs list APIs with `?limit=1` — never a full
+// list fetch, never a dedicated count/summary endpoint. Only whether
+// `items.length > 0` matters; the actual item contents are discarded.
+
+export type FetchTeamWorkspaceExistenceResult = { status: "ok"; hasAny: boolean } | { status: "error" };
+
+export async function fetchTeamProjectsExistence(args: { user: User | null; authReady: boolean; workspaceId: string; signal?: AbortSignal }): Promise<FetchTeamWorkspaceExistenceResult> {
+  try {
+    const res = await authedFetch(`/api/workspaces/${encodeURIComponent(args.workspaceId)}/projects?limit=1`, {
+      user: args.user,
+      authReady: args.authReady,
+      method: "GET",
+      cache: "no-store",
+      signal: args.signal,
+    });
+    if (!res.ok) return { status: "error" };
+    const json = await res.json().catch(() => null);
+    if (typeof json !== "object" || json === null) return { status: "error" };
+    const d = json as Record<string, unknown>;
+    if (d.ok !== true || !Array.isArray(d.items)) return { status: "error" };
+    return { status: "ok", hasAny: d.items.length > 0 };
+  } catch {
+    return { status: "error" };
+  }
+}
+
+export async function fetchTeamResearchExistence(args: { user: User | null; authReady: boolean; workspaceId: string; signal?: AbortSignal }): Promise<FetchTeamWorkspaceExistenceResult> {
+  try {
+    const res = await authedFetch(`/api/workspaces/${encodeURIComponent(args.workspaceId)}/runs?limit=1`, {
+      user: args.user,
+      authReady: args.authReady,
+      method: "GET",
+      cache: "no-store",
+      signal: args.signal,
+    });
+    if (!res.ok) return { status: "error" };
+    const json = await res.json().catch(() => null);
+    if (typeof json !== "object" || json === null) return { status: "error" };
+    const d = json as Record<string, unknown>;
+    if (d.ok !== true || !Array.isArray(d.items)) return { status: "error" };
+    return { status: "ok", hasAny: d.items.length > 0 };
+  } catch {
+    return { status: "error" };
+  }
+}
