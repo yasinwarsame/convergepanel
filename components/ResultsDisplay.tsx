@@ -669,6 +669,8 @@ interface ResultsDisplayProps {
   adaptive?: AdaptivePanelPayload | null;
   /** Bias & Blind Spots Tier 2 cards' "Run follow-up" action (Synthesis Report) — pre-fills the question box, never auto-runs. */
   onRunFollowUp?: (question: string) => void;
+  /** Phase 11A.4 — threaded down to DeepResearchView's per-finding "Verify this claim" action. */
+  onVerifyClaim?: (args: { runId: string; claimId: string }) => void;
 }
 
 /**
@@ -702,6 +704,7 @@ export default function ResultsDisplay({
   orgGovernanceStatus,
   adaptive,
   onRunFollowUp,
+  onVerifyClaim,
 }: ResultsDisplayProps) {
   const { user, authReady } = useAuth();
   const results = Array.isArray(resultsProp) ? resultsProp : [];
@@ -1042,6 +1045,7 @@ export default function ResultsDisplay({
           question={question}
           runId={runId}
           onRunFollowUp={onRunFollowUp}
+          onVerifyClaim={onVerifyClaim}
         />
       </div>
     );

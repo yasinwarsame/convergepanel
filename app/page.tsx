@@ -51,6 +51,7 @@ import VideoUploader from "@/components/VideoUploader";
 import VideoVerificationResult from "@/components/VideoVerificationResult";
 import FileAttachButton from "@/components/FileAttachButton";
 import type { ClaimVerificationClientPayload } from "@/lib/verification/claimVerificationClientPayload";
+import { buildOriginLinkedVerifyClaimRequestBody } from "@/lib/verification/originLinkedVerifyClaimRequest";
 import type { VideoVerificationClientPayload } from "@/lib/verification/videoVerificationClientPayload";
 import type { PanelHistoryGovernanceStatus, PanelHistoryItem } from "@/lib/user/panelHistory";
 import { GovernanceChip } from "@/components/shared/GovernanceChip";
@@ -355,6 +356,17 @@ export default function Home() {
   const [panelTab, setPanelTab] = useState<"research" | "verify" | "video" | "history">("research");
   const [claimInput, setClaimInput] = useState("");
   const [verifyRunning, setVerifyRunning] = useState(false);
+  /**
+   * Phase 11A.4 — set when "Verify this claim" is clicked on a Deep
+   * Research finding. `runId`/`claimId` are the ONLY claim-identifying
+   * data ever sent to the server for this flow (see
+   * buildOriginLinkedVerifyClaimRequestBody()) — this state exists purely
+   * to drive the composer's UI (hide the free-text claim box, route the
+   * submit button to the origin-linked handler) and to know whether the
+   * current verification result should offer "Back to research" instead
+   * of "Back to verify claim." Never persisted, never sent as `origin`.
+   */
+  const [originLinkedTarget, setOriginLinkedTarget] = useState<{ runId: string; claimId: string } | null>(null);
   const [verificationPayload, setVerificationPayload] = useState<ClaimVerificationClientPayload | null>(
     null
   );
@@ -743,6 +755,7 @@ export default function Home() {
 
     // Reset state for new panel run
     setVerificationPayload(null);
+    setOriginLinkedTarget(null); // 11A.4 — a stale "Verify this claim" target from the previous research would no longer refer to anything real once a new run starts
     setViewingHistoryRunId(null);
     setError(null);
     setRunStatus("running");
@@ -1450,6 +1463,191 @@ export default function Home() {
     }
   };
 
+  /**
+   * Phase 11A.4 — "Verify this claim" from a Deep Research finding. The
+   * ONLY claim-identifying data ever sent is `originLinkedTarget.runId` /
+   * `.claimId` (via buildOriginLinkedVerifyClaimRequestBody) plus the
+   * selected models — never claim text, never a project id, never the
+   * persisted `origin` object. The server (11A.3's existing origin-linked
+   * request mode on this SAME route) resolves the authoritative claim,
+   * project, and origin from those two identifiers alone.
+   */
+  const handleVerifyClaimFromFinding = async () => {
+    const target = originLinkedTarget;
+    if (!target) return;
+    if (verifyRunning) return; // double-submit guard — see 11A.4's required non-vacuity mutation for this line
+    setViewingHistoryRunId(null);
+    if (!authReady || !user) {
+      setError("Please sign in to verify a claim");
+      return;
+    }
+    if (selectedModels.length < 2) {
+      setError("Please select at least 2 models");
+      return;
+    }
+
+    setError(null);
+    setVerifyRunning(true);
+    setVerificationPayload(null);
+    setClaimAttachedFile(null);
+
+    const initialStatuses = {} as Record<ModelId, "queued" | "thinking" | ModelStatus>;
+    selectedModels.forEach((id) => {
+      initialStatuses[id] = "queued";
+    });
+    setModelStatuses(initialStatuses);
+
+    setTimeout(() => {
+      setModelStatuses((prev) => {
+        const updated = { ...prev };
+        selectedModels.forEach((id) => {
+          if (updated[id] === "queued") updated[id] = "thinking";
+        });
+        return updated;
+      });
+    }, 100);
+
+    const requestBody = buildOriginLinkedVerifyClaimRequestBody({
+      runId: target.runId,
+      claimId: target.claimId,
+      models: selectedModels,
+    });
+
+    try {
+      const { authedFetch } = await import("@/lib/client/authedFetch");
+      let response = await authedFetch("/api/verify-claim", {
+        user,
+        authReady,
+        method: "POST",
+        body: JSON.stringify(requestBody),
+      });
+      if (response.status === 401 && user) {
+        response = await authedFetch("/api/verify-claim", {
+          user,
+          authReady,
+          forceTokenRefresh: true,
+          method: "POST",
+          body: JSON.stringify(requestBody),
+        });
+      }
+
+      const responseText = await response.text();
+      const contentType = response.headers.get("content-type");
+      if (!contentType || !contentType.includes("application/json")) {
+        setError(`Server error (${response.status}). Please try again.`);
+        setVerifyRunning(false);
+        setModelStatuses({} as Record<ModelId, "queued" | "thinking" | ModelStatus>);
+        return;
+      }
+
+      let data: any;
+      try {
+        data = JSON.parse(responseText);
+      } catch {
+        setError("Invalid response from server.");
+        setVerifyRunning(false);
+        setModelStatuses({} as Record<ModelId, "queued" | "thinking" | ModelStatus>);
+        return;
+      }
+
+      if (!data.ok) {
+        const errorCode = data.errorCode || data.error;
+        // Deliberately generic and uniform for origin_not_eligible — never
+        // reveals whether the underlying cause was a missing run, a
+        // foreign run, a stale/tampered fingerprint, malformed persisted
+        // output, or a scope mismatch (see resolveClaimVerificationOrigin's
+        // own denial-collapse contract).
+        let errorMessage = "Could not complete your claim.";
+        if (errorCode === "origin_not_eligible") {
+          errorMessage = "This claim could no longer be verified from the saved research.";
+        } else if (errorCode === "claim_too_long") {
+          errorMessage = "This claim is too long to verify.";
+        } else if (errorCode === "RUN_LIMIT_REACHED") {
+          const runsUsed = data.runsUsed ?? 0;
+          const runsLimit = data.runsLimit ?? data.maxRunsPerMonth ?? 0;
+          errorMessage = `You've reached your monthly run limit (${runsUsed} / ${runsLimit}). Resets ${data.resetsAt ? new Date(data.resetsAt).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }) : "next month"}.`;
+        } else if (errorCode === "PLAN_MODEL_LIMIT_REACHED") {
+          errorMessage = data.message || errorMessage;
+        } else if (typeof data.message === "string" && data.message.length > 0) {
+          errorMessage = data.message;
+        }
+        setErrorCode(errorCode === "RUN_LIMIT_REACHED" ? "RUN_LIMIT_REACHED" : errorCode || null);
+        setError(errorMessage);
+        if (errorCode === "RUN_LIMIT_REACHED") {
+          refreshUsage();
+          trackEvent("run_limit_reached", { plan: plan || "unknown", tab: panelTab });
+        }
+        setVerifyRunning(false);
+        setModelStatuses({} as Record<ModelId, "queued" | "thinking" | ModelStatus>);
+        return;
+      }
+
+      const claimText = typeof data.claim === "string" ? data.claim : "";
+      const payload: ClaimVerificationClientPayload = {
+        verificationId: data.verificationId,
+        claim: claimText,
+        verdict: data.verdict,
+        consensusScore: data.consensusScore,
+        confidenceLabel: data.confidenceLabel,
+        evidenceQuality: data.evidenceQuality,
+        supportRatio: data.supportRatio,
+        modelEvidence: data.modelEvidence,
+        aggregateSummary: data.aggregateSummary,
+        whereModelsAgree: data.whereModelsAgree || [],
+        whereModelsDisagree: data.whereModelsDisagree || [],
+        auditBundle: data.auditBundle,
+        accurateAmongUsable: data.accurateAmongUsable,
+        usableModelCount: data.usableModelCount,
+        governanceReviewRequired: data.governanceReviewRequired,
+        blockedByPolicy: data.blockedByPolicy,
+        policyBlockMessage: data.policyBlockMessage,
+        policyFlags: data.policyFlags,
+        governanceStatus:
+          data.governanceStatus === "approved" ||
+          data.governanceStatus === "needs_review" ||
+          data.governanceStatus === "blocked"
+            ? data.governanceStatus
+            : undefined,
+      };
+
+      setErrorCode(null);
+      setVerificationPayload(payload);
+      setHistoryItems((h) => {
+        const itemId = data.verificationId || `v-${Date.now()}`;
+        const newItem: HistoryItem = {
+          id: itemId,
+          type: "verification" as const,
+          title: claimText.slice(0, 88) + (claimText.length > 88 ? "…" : ""),
+          at: new Date().toISOString(),
+          claim: claimText,
+          verdict: data.verdict,
+          consensusScore: data.consensusScore,
+          payload,
+          governanceStatus: payload.governanceStatus,
+        };
+        const deduped = h.filter((x) => x.id !== itemId);
+        return [newItem, ...deduped].slice(0, MAX_HISTORY_LOCAL_STORAGE);
+      });
+
+      const finalStatuses = {} as Record<ModelId, "queued" | "thinking" | ModelStatus>;
+      data.modelEvidence?.forEach((row: { modelId: ModelId; status?: string }) => {
+        if (row?.modelId) {
+          finalStatuses[row.modelId] =
+            row.status === "failed" || row.status === "parse_error" ? "failed" : "ok";
+        }
+      });
+      setModelStatuses(finalStatuses);
+      await refreshUsage();
+      trackEvent("claim_verification", { models: selectedModels, plan: plan || "unknown" });
+    } catch (e: any) {
+      console.error("[verify-claim-origin-linked]", e);
+      setError("Network error. Please try again.");
+      setModelStatuses({} as Record<ModelId, "queued" | "thinking" | ModelStatus>);
+    } finally {
+      setVerifyRunning(false);
+    }
+  };
+
   const openHistoryItem = async (item: HistoryItem) => {
     if (item.type === "research") {
       setPanelTab("research");
@@ -1845,6 +2043,24 @@ export default function Home() {
   };
 
   /**
+   * Phase 11A.4 — "Verify this claim" clicked on a Deep Research finding.
+   * Only the finding's canonical runId/claimId are captured; no claim
+   * text, project, or origin data is read from the finding here or ever
+   * sent to the server (see handleVerifyClaimFromFinding).
+   */
+  const handleVerifyClaimFromFindingClick = (args: { runId: string; claimId: string }) => {
+    setOriginLinkedTarget({ runId: args.runId, claimId: args.claimId });
+    setVerificationPayload(null);
+    setError(null);
+    setErrorCode(null);
+    setClaimInput("");
+    setPanelTab("verify");
+    if (typeof window !== "undefined") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  };
+
+  /**
    * Handle "Add another model" action
    * 
    * Currently just re-runs the panel. In a future enhancement, this could
@@ -1864,11 +2080,16 @@ export default function Home() {
    * - Question is not empty
    */
   const canRunResearch = !!user && selectedModels.length >= 2 && question.trim().length > 0;
-  const canRunVerify =
-    !!user &&
-    selectedModels.length >= 2 &&
-    claimInput.trim().length > 0 &&
-    claimInput.trim().length <= MAX_CLAIM_CHARS;
+  // Phase 11A.4 — origin-linked mode has no client-side claim text to
+  // validate (the server resolves and enforces MAX_CLAIM_LEN on the
+  // authoritative claimText); only sign-in and a model selection are
+  // required client-side.
+  const canRunVerify = originLinkedTarget
+    ? !!user && selectedModels.length >= 2
+    : !!user &&
+      selectedModels.length >= 2 &&
+      claimInput.trim().length > 0 &&
+      claimInput.trim().length <= MAX_CLAIM_CHARS;
   const canRun =
     panelTab === "research"
       ? canRunResearch
@@ -2306,7 +2527,11 @@ export default function Home() {
               htmlFor={panelTab === "research" ? "question" : "claim"}
               className="block text-xs font-semibold text-cp-muted uppercase tracking-wide mb-1 px-6 pt-5"
             >
-              {panelTab === "research" ? "Question" : "Paste a claim to verify"}
+              {panelTab === "research"
+                ? "Question"
+                : originLinkedTarget
+                  ? "Verifying a claim from your research"
+                  : "Paste a claim to verify"}
             </label>
 
             {panelTab === "research" ? (
@@ -2327,6 +2552,15 @@ export default function Home() {
                 rows={4}
                 disabled={panelBusy}
               />
+            ) : originLinkedTarget ? (
+              // Phase 11A.4 — no free-text field at all in origin-linked
+              // mode: there is nothing here for the client to send as
+              // claim text. The server resolves and verifies the exact
+              // claim from `runId`/`claimId` alone.
+              <div id="claim" className="px-6 pb-4 text-sm text-cp-muted" aria-live="polite">
+                The claim text will be verified exactly as it appears in your saved research — it can&apos;t be edited
+                here. Choose your models below, then run the check.
+              </div>
             ) : (
               <textarea
                 id="claim"
@@ -2353,6 +2587,19 @@ export default function Home() {
                   <span className="font-semibold">Context:</span> section underneath. Anything after{" "}
                   <span className="font-mono">Context:</span> will be treated as source material for the panel.
                 </p>
+              ) : originLinkedTarget ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOriginLinkedTarget(null);
+                    setError(null);
+                    setErrorCode(null);
+                  }}
+                  disabled={panelBusy}
+                  className="text-xs font-medium text-cp-muted underline hover:text-cp-text disabled:opacity-50"
+                >
+                  Verify a different claim instead
+                </button>
               ) : (
                 <p className="text-xs text-cp-muted">
                   One sentence or multiple paragraphs — max {MAX_CLAIM_CHARS.toLocaleString()} characters (
@@ -2387,8 +2634,8 @@ export default function Home() {
                   }}
                 />
               )}
-              {/* File attach — Verify tab */}
-              {panelTab === "verify" && (
+              {/* File attach — Verify tab (ordinary claim entry only; origin-linked mode has no free-text field to attach into) */}
+              {panelTab === "verify" && !originLinkedTarget && (
                 <FileAttachButton
                   disabled={panelBusy}
                   attachedFileName={claimAttachedFile ?? undefined}
@@ -2515,7 +2762,13 @@ export default function Home() {
                     thinking vs. when results are ready. */}
                 <button
                 type="button"
-                  onClick={panelTab === "research" ? handleRunPanel : () => void handleVerifyClaim()}
+                  onClick={
+                    panelTab === "research"
+                      ? handleRunPanel
+                      : originLinkedTarget
+                        ? () => void handleVerifyClaimFromFinding()
+                        : () => void handleVerifyClaim()
+                  }
                 disabled={panelBusy || !canRun}
                 aria-busy={panelBusy}
                 className={`inline-flex w-full items-center justify-center gap-2 rounded-xl px-6 py-3 text-sm font-semibold shadow-sm transition-colors ${
@@ -2703,20 +2956,43 @@ export default function Home() {
               <p className="text-sm text-cp-muted">
                 <span className="font-semibold text-cp-text">Claim result</span>
                 {" — "}
-                Saved to your history. Start another check from the button below, or return to the claim composer.
+                {originLinkedTarget
+                  ? "Saved to your history. Return to your research below, or start another check."
+                  : "Saved to your history. Start another check from the button below, or return to the claim composer."}
               </p>
-              <button
-                type="button"
-                onClick={() => setVerificationPayload(null)}
-                className="shrink-0 rounded-xl border-2 border-cp-border bg-cp-surface px-4 py-2.5 text-sm font-semibold text-cp-muted shadow-sm transition-colors hover:border-violet-300 hover:bg-violet-50/80"
-              >
-                Back to verify claim
-              </button>
+              <div className="flex shrink-0 gap-2">
+                {originLinkedTarget && (
+                  // Phase 11A.4 — smallest available navigation: `results`/
+                  // `currentRunId` stay in state across a tab switch, so
+                  // returning to "research" re-shows the exact same
+                  // research the finding came from, with no second
+                  // client-authored origin record and no read of the
+                  // persisted `origin` field.
+                  <button
+                    type="button"
+                    onClick={() => setPanelTab("research")}
+                    className="rounded-xl border-2 border-cp-border bg-cp-surface px-4 py-2.5 text-sm font-semibold text-cp-muted shadow-sm transition-colors hover:border-violet-300 hover:bg-violet-50/80"
+                  >
+                    Back to research
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setVerificationPayload(null);
+                    setOriginLinkedTarget(null);
+                  }}
+                  className="rounded-xl border-2 border-cp-border bg-cp-surface px-4 py-2.5 text-sm font-semibold text-cp-muted shadow-sm transition-colors hover:border-violet-300 hover:bg-violet-50/80"
+                >
+                  Back to verify claim
+                </button>
+              </div>
             </div>
             <ClaimVerificationResult
               data={verificationPayload}
               onVerifyAnother={() => {
                 setVerificationPayload(null);
+                setOriginLinkedTarget(null);
                 setClaimInput("");
                 setPanelTab("verify");
               }}
@@ -2787,6 +3063,7 @@ export default function Home() {
                 orgGovernanceStatus={orgGovernanceStatus}
                 adaptive={adaptivePanel}
                 onRunFollowUp={handleRunFollowUp}
+                onVerifyClaim={handleVerifyClaimFromFindingClick}
               />
             </div>
           </Suspense>

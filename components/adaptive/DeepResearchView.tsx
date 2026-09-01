@@ -27,7 +27,22 @@ function CoverageBadge({ coverageCount, totalModels }: { coverageCount: number; 
   );
 }
 
-function FindingRow({ finding }: { finding: AggregatedResearchFinding }) {
+function FindingRow({
+  finding,
+  runId,
+  onVerifyClaim,
+}: {
+  finding: AggregatedResearchFinding;
+  runId?: string | null;
+  onVerifyClaim?: (args: { runId: string; claimId: string }) => void;
+}) {
+  // Phase 11A.4 — eligibility is exactly "the server attached a canonical
+  // selector for this finding, and we know which run it came from." Never
+  // derived from finding.id or this row's position in the array — those
+  // are exactly the unsound schemes claimId's own design (see
+  // lib/verification/claimVerificationOrigin.ts) replaced.
+  const canVerify = Boolean(runId) && typeof finding.claimId === "string" && finding.claimId.length > 0;
+
   return (
     <li className="py-2 border-b border-slate-100 last:border-0">
       <div className="flex flex-wrap items-center gap-2">
@@ -41,16 +56,43 @@ function FindingRow({ finding }: { finding: AggregatedResearchFinding }) {
         )}
       </div>
       <p className="mt-1 text-sm text-slate-700">{finding.summary}</p>
-      <div className="mt-1 flex flex-wrap gap-1">
-        {finding.contributingModels.map((modelId) => (
-          <ModelChip key={modelId} modelId={modelId} size="xs" />
-        ))}
+      <div className="mt-1.5 flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap gap-1">
+          {finding.contributingModels.map((modelId) => (
+            <ModelChip key={modelId} modelId={modelId} size="xs" />
+          ))}
+        </div>
+        {canVerify && (
+          <button
+            type="button"
+            // data-run-id/data-claim-id deliberately mirror the exact
+            // values the click handler closes over — this is what
+            // components/adaptive/__tests__/DeepResearchView.spec.tsx
+            // asserts against (via renderToStaticMarkup, this codebase's
+            // existing convention for these renderers — onClick closures
+            // themselves cannot be inspected from static markup).
+            data-run-id={runId}
+            data-claim-id={finding.claimId}
+            onClick={() => onVerifyClaim?.({ runId: runId as string, claimId: finding.claimId as string })}
+            className="ml-auto text-xs font-medium text-sky-700 hover:text-sky-900 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:ring-offset-1 rounded px-1"
+          >
+            Verify this claim
+          </button>
+        )}
       </div>
     </li>
   );
 }
 
-export default function DeepResearchView({ deepResearch }: { deepResearch: DeepResearchResult }) {
+export default function DeepResearchView({
+  deepResearch,
+  runId,
+  onVerifyClaim,
+}: {
+  deepResearch: DeepResearchResult;
+  runId?: string | null;
+  onVerifyClaim?: (args: { runId: string; claimId: string }) => void;
+}) {
   const {
     executiveSummary,
     findings,
@@ -108,7 +150,7 @@ export default function DeepResearchView({ deepResearch }: { deepResearch: DeepR
           <div className="mt-3">
             <SectionLabel>Findings</SectionLabel>
             {isFlatFindings ? (
-              <ul>{findings.map((f) => <FindingRow key={f.id} finding={f} />)}</ul>
+              <ul>{findings.map((f) => <FindingRow key={f.id} finding={f} runId={runId} onVerifyClaim={onVerifyClaim} />)}</ul>
             ) : (
               <div className="space-y-3">
                 {Array.from(categoryGroups.entries()).map(([category, items]) => (
@@ -116,7 +158,7 @@ export default function DeepResearchView({ deepResearch }: { deepResearch: DeepR
                     <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1">{category}</p>
                     <ul>
                       {items.map((f) => (
-                        <FindingRow key={f.id} finding={f} />
+                        <FindingRow key={f.id} finding={f} runId={runId} onVerifyClaim={onVerifyClaim} />
                       ))}
                     </ul>
                   </div>
