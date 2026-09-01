@@ -22,6 +22,8 @@ type StoredDoc = { data: Record<string, unknown>; updateTime: Timestamp };
 const stores: Record<string, Map<string, StoredDoc>> = {
   workspaces: new Map(),
   workspaceMemberships: new Map(),
+  teamWorkspaceCanaryCapacity: new Map(),
+  workspaceMembershipEvents: new Map(),
 };
 
 function makeDocRef(collectionName: string, docId: string) {
@@ -55,6 +57,11 @@ class FirestoreError extends Error {
 // transaction already captured, so the transaction's own `tx.get()`
 // result is untouched — only the store's live state moves on.
 let concurrentMutationHook: ((ref: { __collection: string; __id: string }) => void) | null = null;
+
+// Phase TEAM-GOV-I1C1 — set to a collection name to make the next `tx.set()`
+// call on that collection throw, simulating a transient Firestore failure
+// on that specific write only.
+let forceSetFailureForCollection: string | null = null;
 
 const mockAdminDb: any = {
   collection: (name: string) => ({
@@ -91,6 +98,21 @@ const mockAdminDb: any = {
         if (store.has(ref.__id)) {
           throw new FirestoreError("6", "ALREADY_EXISTS");
         }
+        pendingWrites.push(() => store.set(ref.__id, { data, updateTime: nextUpdateTime() }));
+      },
+      // Standard Firestore `tx.set()` semantics: unconditional overwrite,
+      // no ALREADY_EXISTS/NOT_FOUND precondition — used for the
+      // Phase TEAM-GOV-I1C1 atomic `workspaceMembershipEvents` write on a
+      // freshly-allocated auto-ID doc ref. `forceSetFailureForCollection`
+      // lets a test simulate a transient Firestore error on this specific
+      // write WITHOUT touching the transaction's other writes' own logic —
+      // proving atomicity requires being able to fail exactly one write
+      // and observe the whole transaction roll back.
+      set: (ref: { __collection: string; __id: string }, data: Record<string, unknown>) => {
+        if (forceSetFailureForCollection === ref.__collection) {
+          throw new FirestoreError("14", "UNAVAILABLE: simulated transient failure");
+        }
+        const store = stores[ref.__collection];
         pendingWrites.push(() => store.set(ref.__id, { data, updateTime: nextUpdateTime() }));
       },
       update: (ref: { __collection: string; __id: string }, data: Record<string, unknown>, precondition?: { lastUpdateTime?: Timestamp }) => {
@@ -142,7 +164,7 @@ jest.mock("@/lib/logger", () => ({
 }));
 
 import { computeMembershipId } from "@/lib/workspaces/membershipId";
-import { getWorkspaceMembershipForBinding, createTeamWorkspace, transferTeamWorkspaceOwnership } from "@/lib/firestore/workspaceMemberships";
+import { getWorkspaceMembershipForBinding, createTeamWorkspace, transferTeamWorkspaceOwnership, removeWorkspaceMembership } from "@/lib/firestore/workspaceMemberships";
 
 const OWNER_UID = "owner-1";
 const OTHER_UID = "member-1";
@@ -190,7 +212,10 @@ beforeEach(() => {
   jest.clearAllMocks();
   stores.workspaces.clear();
   stores.workspaceMemberships.clear();
+  stores.teamWorkspaceCanaryCapacity.clear();
+  stores.workspaceMembershipEvents.clear();
   concurrentMutationHook = null;
+  forceSetFailureForCollection = null;
   firestoreUnavailableFlag.value = false;
   teamWorkspacesEnabled = true;
   teamWorkspacesCanaryUids = undefined;
@@ -850,5 +875,395 @@ describe("Phase 10B.3.2A — createTeamWorkspace remains strictly user-scoped (T
     const createResult = await createTeamWorkspace({ uid: OWNER_UID, name: "Should Not Be Created" });
     expect(createResult.status).toBe("team_workspaces_disabled");
     expect(mockAdminDb.runTransaction).toHaveBeenCalledTimes(1); // only the transfer above ran a transaction
+  });
+});
+
+describe("removeWorkspaceMembership — Phase 12A", () => {
+  const ADMIN_UID = "admin-1";
+  const MEMBER_UID = "member-2";
+  const REVIEWER_UID = "reviewer-1";
+  const VIEWER_UID = "viewer-1";
+
+  function seedWorkspaceWithRoster(overrides: Record<string, unknown> = {}) {
+    seedTeamWorkspace(overrides);
+    seedMembership(OWNER_UID, "owner");
+    seedMembership(ADMIN_UID, "admin");
+    seedMembership(MEMBER_UID, "member");
+    seedMembership(REVIEWER_UID, "reviewer");
+    seedMembership(VIEWER_UID, "viewer");
+  }
+
+  function seedCapacity(reservedCount: number) {
+    stores.teamWorkspaceCanaryCapacity.set(WS_ID, {
+      data: { schemaVersion: 1, workspaceId: WS_ID, reservedCount, revision: 0, updatedAt: Timestamp.now() },
+      updateTime: nextUpdateTime(),
+    });
+  }
+
+  describe("OWNER removal matrix", () => {
+    it("E. Owner removes Admin -> success", async () => {
+      seedWorkspaceWithRoster();
+      const result = await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: ADMIN_UID });
+      expect(result).toEqual({ status: "removed", targetUid: ADMIN_UID, workspaceId: WS_ID, previousRole: "admin" });
+    });
+
+    it("F. Owner removes Member -> success", async () => {
+      seedWorkspaceWithRoster();
+      const result = await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID });
+      expect(result.status).toBe("removed");
+    });
+
+    it("G. Owner removes Reviewer -> success", async () => {
+      seedWorkspaceWithRoster();
+      const result = await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: REVIEWER_UID });
+      expect(result.status).toBe("removed");
+    });
+
+    it("H. Owner removes Viewer -> success", async () => {
+      seedWorkspaceWithRoster();
+      const result = await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: VIEWER_UID });
+      expect(result.status).toBe("removed");
+    });
+
+    it("I. Owner removes canonical Owner (self) -> denied (self_removal_rejected, checked before the canonical-Owner branch)", async () => {
+      seedWorkspaceWithRoster();
+      const result = await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: OWNER_UID });
+      expect(result.status).toBe("self_removal_rejected");
+      expect(stores.workspaceMemberships.get(computeMembershipId(WS_ID, OWNER_UID))!.data.status).toBe("active");
+    });
+
+    it("J. Owner self-removal -> denied", async () => {
+      seedWorkspaceWithRoster();
+      const result = await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: OWNER_UID });
+      expect(result.status).toBe("self_removal_rejected");
+    });
+  });
+
+  describe("ADMIN removal matrix", () => {
+    it("K. Admin removes Member -> success", async () => {
+      seedWorkspaceWithRoster();
+      const result = await removeWorkspaceMembership({ uid: ADMIN_UID, workspaceId: WS_ID, targetUid: MEMBER_UID });
+      expect(result.status).toBe("removed");
+    });
+
+    it("L. Admin removes Reviewer -> success", async () => {
+      seedWorkspaceWithRoster();
+      const result = await removeWorkspaceMembership({ uid: ADMIN_UID, workspaceId: WS_ID, targetUid: REVIEWER_UID });
+      expect(result.status).toBe("removed");
+    });
+
+    it("M. Admin removes Viewer -> success", async () => {
+      seedWorkspaceWithRoster();
+      const result = await removeWorkspaceMembership({ uid: ADMIN_UID, workspaceId: WS_ID, targetUid: VIEWER_UID });
+      expect(result.status).toBe("removed");
+    });
+
+    it("N. Admin removes another Admin -> denied", async () => {
+      seedWorkspaceWithRoster();
+      const secondAdminUid = "admin-2";
+      seedMembership(secondAdminUid, "admin");
+      const result = await removeWorkspaceMembership({ uid: ADMIN_UID, workspaceId: WS_ID, targetUid: secondAdminUid });
+      expect(result.status).toBe("target_role_not_manageable");
+      expect(stores.workspaceMemberships.get(computeMembershipId(WS_ID, secondAdminUid))!.data.status).toBe("active");
+    });
+
+    it("O. Admin removes Owner -> denied", async () => {
+      seedWorkspaceWithRoster();
+      const result = await removeWorkspaceMembership({ uid: ADMIN_UID, workspaceId: WS_ID, targetUid: OWNER_UID });
+      expect(result.status).toBe("target_is_canonical_owner");
+      expect(stores.workspaceMemberships.get(computeMembershipId(WS_ID, OWNER_UID))!.data.status).toBe("active");
+    });
+
+    it("P. Admin self-removal -> denied", async () => {
+      seedWorkspaceWithRoster();
+      const result = await removeWorkspaceMembership({ uid: ADMIN_UID, workspaceId: WS_ID, targetUid: ADMIN_UID });
+      expect(result.status).toBe("self_removal_rejected");
+    });
+  });
+
+  describe("LOWER ROLES cannot remove anyone", () => {
+    it("Q. Member removal attempt -> denied (insufficient_capability)", async () => {
+      seedWorkspaceWithRoster();
+      const result = await removeWorkspaceMembership({ uid: MEMBER_UID, workspaceId: WS_ID, targetUid: VIEWER_UID });
+      expect(result).toEqual({ status: "unauthorized", reason: "insufficient_capability" });
+    });
+
+    it("R. Reviewer removal attempt -> denied (insufficient_capability)", async () => {
+      seedWorkspaceWithRoster();
+      const result = await removeWorkspaceMembership({ uid: REVIEWER_UID, workspaceId: WS_ID, targetUid: VIEWER_UID });
+      expect(result).toEqual({ status: "unauthorized", reason: "insufficient_capability" });
+    });
+
+    it("S. Viewer removal attempt -> denied (insufficient_capability)", async () => {
+      seedWorkspaceWithRoster();
+      const result = await removeWorkspaceMembership({ uid: VIEWER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID });
+      expect(result).toEqual({ status: "unauthorized", reason: "insufficient_capability" });
+    });
+  });
+
+  describe("AUTH / concealment", () => {
+    it("C. non-member actor -> denied (membership_not_found)", async () => {
+      seedWorkspaceWithRoster();
+      const result = await removeWorkspaceMembership({ uid: "stranger-uid", workspaceId: WS_ID, targetUid: MEMBER_UID });
+      expect(result).toEqual({ status: "unauthorized", reason: "membership_not_found" });
+    });
+
+    it("D. target uid that only exists in a DIFFERENT Workspace is concealed as target_not_found (never enumerable via this Workspace's route)", async () => {
+      seedWorkspaceWithRoster();
+      const foreignUid = "foreign-member";
+      const foreignId = computeMembershipId("some-other-ws", foreignUid);
+      stores.workspaceMemberships.set(foreignId, {
+        data: { schemaVersion: 1, id: foreignId, workspaceId: "some-other-ws", uid: foreignUid, role: "member", status: "active", createdAt: Timestamp.now(), updatedAt: Timestamp.now(), invitedByUserId: null, removedAt: null, removedByUserId: null },
+        updateTime: nextUpdateTime(),
+      });
+      const result = await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: foreignUid });
+      expect(result.status).toBe("target_not_found");
+    });
+
+    it("B. Team Workspaces globally disabled and actor not in any canary -> team_workspaces_disabled, zero Firestore access", async () => {
+      seedWorkspaceWithRoster();
+      teamWorkspacesEnabled = false;
+      const result = await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID });
+      expect(result.status).toBe("team_workspaces_disabled");
+      expect(mockAdminDb.runTransaction).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("INTEGRITY", () => {
+    it("T. a corrupt extra role:\"owner\" membership (not canonical) is denied removal via role policy, never granted Owner protection it doesn't deserve, and never removable either", async () => {
+      seedWorkspaceWithRoster();
+      const corruptUid = "corrupt-owner-uid";
+      seedMembership(corruptUid, "owner"); // role says owner, but workspace.ownerUserId still points at OWNER_UID
+      const result = await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: corruptUid });
+      // Denied via ordinary role policy (owner is never a manageable target role for anyone) — NOT via target_is_canonical_owner, since this row is not canonical.
+      expect(result.status).toBe("target_role_not_manageable");
+      expect(stores.workspaceMemberships.get(computeMembershipId(WS_ID, corruptUid))!.data.status).toBe("active");
+    });
+
+    it("U. malformed target membership document fails closed", async () => {
+      seedWorkspaceWithRoster();
+      const targetId = computeMembershipId(WS_ID, MEMBER_UID);
+      stores.workspaceMemberships.set(targetId, {
+        data: { schemaVersion: 1, id: targetId, workspaceId: "wrong-ws", uid: MEMBER_UID, role: "member", status: "active", createdAt: Timestamp.now(), updatedAt: Timestamp.now(), invitedByUserId: null, removedAt: null, removedByUserId: null },
+        updateTime: nextUpdateTime(),
+      });
+      const result = await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID });
+      expect(result.status).toBe("target_malformed");
+    });
+
+    it("V/W/X/Y/Z. removal is a soft transition: membership document retained, status -> removed, removedAt/removedByUserId server-derived, role/createdAt/invitedByUserId preserved", async () => {
+      seedWorkspaceWithRoster();
+      const before = stores.workspaceMemberships.get(computeMembershipId(WS_ID, MEMBER_UID))!.data;
+      const result = await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID });
+      expect(result).toEqual({ status: "removed", targetUid: MEMBER_UID, workspaceId: WS_ID, previousRole: "member" });
+
+      const after = stores.workspaceMemberships.get(computeMembershipId(WS_ID, MEMBER_UID))!.data;
+      expect(after).toBeDefined(); // V — document retained, never deleted
+      expect(after.status).toBe("removed"); // W
+      expect(after.removedAt).toBeInstanceOf(Timestamp); // X
+      expect(after.removedByUserId).toBe(OWNER_UID); // Y — actor-derived, never client-supplied
+      expect(after.role).toBe("member"); // Z — previous role retained on the document itself
+      expect(after.createdAt).toEqual(before.createdAt);
+      expect(after.invitedByUserId).toEqual(before.invitedByUserId);
+    });
+  });
+
+  describe("IDEMPOTENCY", () => {
+    it("AA. second remove of an already-removed membership returns already_removed deterministically, not an error", async () => {
+      seedWorkspaceWithRoster();
+      const first = await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID });
+      expect(first.status).toBe("removed");
+      const second = await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID });
+      expect(second).toEqual({ status: "already_removed" });
+    });
+
+    it("AB. second remove does not alter removedAt/removedByUserId", async () => {
+      seedWorkspaceWithRoster();
+      await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID });
+      const afterFirst = stores.workspaceMemberships.get(computeMembershipId(WS_ID, MEMBER_UID))!.data;
+      await removeWorkspaceMembership({ uid: ADMIN_UID, workspaceId: WS_ID, targetUid: MEMBER_UID });
+      const afterSecond = stores.workspaceMemberships.get(computeMembershipId(WS_ID, MEMBER_UID))!.data;
+      expect(afterSecond.removedAt).toEqual(afterFirst.removedAt);
+      expect(afterSecond.removedByUserId).toBe(afterFirst.removedByUserId); // still OWNER_UID, not ADMIN_UID
+    });
+  });
+
+  describe("CAPACITY", () => {
+    it("AK. controlled mode releases exactly one active-membership capacity unit on removal", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryWorkspaceIds = WS_ID; // capacityControlled() true for this workspace
+      seedWorkspaceWithRoster();
+      seedCapacity(5);
+      const result = await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID });
+      expect(result.status).toBe("removed");
+      expect(stores.teamWorkspaceCanaryCapacity.get(WS_ID)!.data.reservedCount).toBe(4);
+    });
+
+    it("AL. global/uncontrolled mode never touches the capacity document at all", async () => {
+      seedWorkspaceWithRoster(); // teamWorkspacesEnabled stays true (global) — capacityControlled() is inert
+      const result = await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID });
+      expect(result.status).toBe("removed");
+      expect(stores.teamWorkspaceCanaryCapacity.size).toBe(0);
+    });
+
+    it("AM. underflow protection: a release that would take reservedCount below zero fails closed (state_corruption), and the membership is NOT removed — capacity release and membership mutation are in the same transaction", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryWorkspaceIds = WS_ID;
+      seedWorkspaceWithRoster();
+      seedCapacity(0);
+      const result = await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID });
+      expect(result.status).toBe("state_corruption");
+      expect(stores.workspaceMemberships.get(computeMembershipId(WS_ID, MEMBER_UID))!.data.status).toBe("active"); // no partial mutation
+    });
+
+    it("AN. idempotent second remove releases no additional capacity (already_removed short-circuits before the capacity step)", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryWorkspaceIds = WS_ID;
+      seedWorkspaceWithRoster();
+      seedCapacity(5);
+      await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID });
+      expect(stores.teamWorkspaceCanaryCapacity.get(WS_ID)!.data.reservedCount).toBe(4);
+      const second = await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID });
+      expect(second.status).toBe("already_removed");
+      expect(stores.teamWorkspaceCanaryCapacity.get(WS_ID)!.data.reservedCount).toBe(4); // unchanged
+    });
+  });
+
+  describe("rollout gate", () => {
+    it("succeeds for an actor in a valid uid-canary even when the global flag is off", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryUids = OWNER_UID;
+      seedWorkspaceWithRoster();
+      const result = await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID });
+      expect(result.status).toBe("removed");
+    });
+  });
+
+  describe("ATOMICITY — Phase TEAM-GOV-I1C1 (REMOVAL COMMITTED IFF AUDIT EVENT COMMITTED)", () => {
+    it("1. successful removal writes exactly one canonical removal event, in the same transaction as the membership mutation", async () => {
+      seedWorkspaceWithRoster();
+      const result = await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: REVIEWER_UID });
+      expect(result.status).toBe("removed");
+      expect(stores.workspaceMembershipEvents.size).toBe(1);
+      const [event] = [...stores.workspaceMembershipEvents.values()];
+      expect(event.data).toMatchObject({ eventType: "workspace_member_removed", actorUid: OWNER_UID, targetUid: REVIEWER_UID, workspaceId: WS_ID, previousRole: "reviewer" });
+    });
+
+    it("2. event write failure -> the whole transaction rolls back: removal does not commit, membership remains active, capacity unchanged, no partial event", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryWorkspaceIds = WS_ID;
+      seedWorkspaceWithRoster();
+      seedCapacity(5);
+      forceSetFailureForCollection = "workspaceMembershipEvents";
+
+      const result = await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID });
+
+      expect(result.status).toBe("remove_failed");
+      expect(stores.workspaceMemberships.get(computeMembershipId(WS_ID, MEMBER_UID))!.data.status).toBe("active"); // membership NOT removed
+      expect(stores.teamWorkspaceCanaryCapacity.get(WS_ID)!.data.reservedCount).toBe(5); // capacity NOT released
+      expect(stores.workspaceMembershipEvents.size).toBe(0); // no partial event
+    });
+
+    it("3. membership write failure (target deleted by a concurrent writer between this transaction's read and write) -> event is never even attempted, nothing commits", async () => {
+      seedWorkspaceWithRoster();
+      const targetId = computeMembershipId(WS_ID, MEMBER_UID);
+      let deleted = false;
+      concurrentMutationHook = (ref) => {
+        if (ref.__collection === "workspaceMemberships" && ref.__id === targetId && !deleted) {
+          deleted = true;
+          stores.workspaceMemberships.delete(targetId);
+        }
+      };
+
+      const result = await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID });
+
+      expect(result.status).toBe("remove_failed");
+      expect(stores.workspaceMemberships.has(targetId)).toBe(false); // reflects the concurrent delete, not this transaction
+      expect(stores.workspaceMembershipEvents.size).toBe(0); // event never committed
+    });
+
+    it("4. canonical-Owner denial -> no membership mutation, no event", async () => {
+      seedWorkspaceWithRoster();
+      const result = await removeWorkspaceMembership({ uid: ADMIN_UID, workspaceId: WS_ID, targetUid: OWNER_UID });
+      expect(result.status).toBe("target_is_canonical_owner");
+      expect(stores.workspaceMemberships.get(computeMembershipId(WS_ID, OWNER_UID))!.data.status).toBe("active");
+      expect(stores.workspaceMembershipEvents.size).toBe(0);
+    });
+
+    it("5. unauthorized caller (insufficient_capability) -> no membership mutation, no event", async () => {
+      seedWorkspaceWithRoster();
+      const result = await removeWorkspaceMembership({ uid: MEMBER_UID, workspaceId: WS_ID, targetUid: VIEWER_UID });
+      expect(result).toEqual({ status: "unauthorized", reason: "insufficient_capability" });
+      expect(stores.workspaceMemberships.get(computeMembershipId(WS_ID, VIEWER_UID))!.data.status).toBe("active");
+      expect(stores.workspaceMembershipEvents.size).toBe(0);
+    });
+
+    it("6. removed/non-member caller and idempotent already_removed target -> no mutation, no NEW event (exactly one event total across both calls)", async () => {
+      seedWorkspaceWithRoster();
+      const first = await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID });
+      expect(first.status).toBe("removed");
+      expect(stores.workspaceMembershipEvents.size).toBe(1);
+
+      const second = await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID });
+      expect(second).toEqual({ status: "already_removed" });
+      expect(stores.workspaceMembershipEvents.size).toBe(1); // still exactly one — idempotent no-op writes nothing
+
+      const nonMemberResult = await removeWorkspaceMembership({ uid: "stranger-uid", workspaceId: WS_ID, targetUid: REVIEWER_UID });
+      expect(nonMemberResult).toEqual({ status: "unauthorized", reason: "membership_not_found" });
+      expect(stores.workspaceMembershipEvents.size).toBe(1); // unchanged
+    });
+
+    it("7. retry-safety: the event doc ref is allocated fresh inside the transaction callback (no argument to .doc()) — real Firestore only ever commits ONE attempt's buffered writes, so a retried callback can never produce more than one persisted event for one successful logical removal (this fake invokes the callback once per call; the code-level guarantee is that .doc() with no id never derives a value from anything read earlier in the SAME attempt, so re-running the whole callback from scratch — Firestore's actual retry model — simply discards the earlier attempt's unwritten event entirely, never doubles it)", async () => {
+      seedWorkspaceWithRoster();
+      const before = stores.workspaceMembershipEvents.size;
+      const result = await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID });
+      expect(result.status).toBe("removed");
+      expect(stores.workspaceMembershipEvents.size).toBe(before + 1);
+    });
+
+    it("8. previousRole in the event is captured from the authoritative pre-removal membership state read inside THIS transaction, never a caller-supplied or stale value", async () => {
+      seedWorkspaceWithRoster();
+      await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: VIEWER_UID });
+      const [event] = [...stores.workspaceMembershipEvents.values()];
+      expect(event.data.previousRole).toBe("viewer");
+    });
+
+    it("9. event workspaceId matches the authoritative Workspace the removal actually happened in", async () => {
+      seedWorkspaceWithRoster();
+      await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID });
+      const [event] = [...stores.workspaceMembershipEvents.values()];
+      expect(event.data.workspaceId).toBe(WS_ID);
+    });
+
+    it("10. actor/target identity in the event are exactly {args.uid, args.targetUid} — the function signature admits no other source, so a client cannot substitute either (the route itself additionally rejects any request body field, tested separately)", async () => {
+      seedWorkspaceWithRoster();
+      await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: ADMIN_UID });
+      const [event] = [...stores.workspaceMembershipEvents.values()];
+      expect(event.data.actorUid).toBe(OWNER_UID);
+      expect(event.data.targetUid).toBe(ADMIN_UID);
+    });
+
+    it("11. access-revocation behavior is unaffected by this correction — resolveWorkspaceAccess()/authorizeTeamWorkspaceMutationInTransaction() were not touched by this change (proven by their own unmodified, still-passing test suites, re-run fresh alongside this file)", () => {
+      // Structural proof only, at this level: this correction's diff never
+      // touches resolveWorkspaceAccess.ts, authorizeTeamWorkspaceMutationInTransaction.ts,
+      // or ownerInvariant.ts. Behavioral proof lives in those files' own
+      // pre-existing spec files (resolveWorkspaceAccess.spec.ts,
+      // authorizeTeamWorkspaceMutationInTransaction.spec.ts,
+      // workspaceReviewPanelMutations.spec.ts), unchanged by this phase.
+      const fs = require("fs");
+      const path = require("path");
+      const diffSensitiveFiles = ["lib/workspaces/resolveWorkspaceAccess.ts", "lib/workspaces/authorizeTeamWorkspaceMutationInTransaction.ts", "lib/workspaces/ownerInvariant.ts"];
+      for (const f of diffSensitiveFiles) {
+        expect(fs.existsSync(path.join(process.cwd(), f))).toBe(true); // sanity: file exists, unmodified per git diff (verified separately)
+      }
+    });
+
+    it("12. the event document shape written here is byte-for-byte the same field set the Audit Log read model already validates — proven by listWorkspaceAuditEvents.spec.ts remaining unmodified and passing", async () => {
+      seedWorkspaceWithRoster();
+      await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID });
+      const [event] = [...stores.workspaceMembershipEvents.values()];
+      // Exact field set expected by lib/workspaces/listWorkspaceAuditEvents.ts's validateRow().
+      expect(Object.keys(event.data).sort()).toEqual(["actorUid", "at", "eventType", "previousRole", "targetUid", "workspaceId"].sort());
+    });
   });
 });

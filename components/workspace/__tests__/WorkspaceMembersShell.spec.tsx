@@ -109,3 +109,139 @@ describe("WorkspaceMembersShell — no raw provider/internal details ever render
     expect(source).toMatch(/actionDeliveryWarning[\s\S]{0,200}text-cp-orange/);
   });
 });
+
+/**
+ * PHASE TEAM-MGMT-12A-I1 — active member removal UI. Same jsdom/
+ * @testing-library-free constraint as above (confirmed again directly:
+ * `jest.config.ts` sets `testEnvironment: "node"`, and neither `jsdom` nor
+ * `@testing-library/react` is a dependency of this repo) — adding either
+ * would be an unrelated infrastructure change outside this narrow phase's
+ * authorized scope, so interactive removal behavior is proven the same way
+ * every other interactive behavior in this file already is: `readFileSync`
+ * + regex against the real component source.
+ */
+describe("WorkspaceMembersShell — Remove eligibility (client-side UX hint only; backend remains authoritative)", () => {
+  it("AU/AV. Owner-removable role set is exactly admin/member/reviewer/viewer — never owner", () => {
+    const match = source.match(/const OWNER_REMOVABLE_ROLES: readonly WorkspaceMemberRole\[\] = \[([^\]]*)\];/);
+    expect(match).not.toBeNull();
+    const roles = match![1].split(",").map((s) => s.trim().replace(/"/g, "")).filter(Boolean);
+    expect(roles.sort()).toEqual(["admin", "member", "reviewer", "viewer"].sort());
+  });
+
+  it("AX/AY/AZ/BA. Admin-removable role set is exactly member/reviewer/viewer — never admin, never owner", () => {
+    const match = source.match(/const ADMIN_REMOVABLE_ROLES: readonly WorkspaceMemberRole\[\] = \[([^\]]*)\];/);
+    expect(match).not.toBeNull();
+    const roles = match![1].split(",").map((s) => s.trim().replace(/"/g, "")).filter(Boolean);
+    expect(roles.sort()).toEqual(["member", "reviewer", "viewer"].sort());
+  });
+
+  it("owner is structurally excluded from canRemoveMemberRole for every caller — a hard-coded early return, not merely absent from a set", () => {
+    const match = source.match(/function canRemoveMemberRole\(callerRole: WorkspaceMemberRole, targetRole: WorkspaceMemberRole\): boolean \{([\s\S]*?)\n\}/);
+    expect(match).not.toBeNull();
+    expect(match![1]).toMatch(/if \(targetRole === "owner"\) return false;/);
+  });
+
+  it("BB. AW. eligibility requires ALL of: canManageInvitations (members.manage), not canonical Owner, not self, and canRemoveMemberRole — any one being false hides Remove", () => {
+    expect(source).toMatch(
+      /const eligibleForRemoval = canManageInvitations && !m\.isCanonicalOwner && m\.uid !== user\?\.uid && canRemoveMemberRole\(callerRole, m\.role\);/
+    );
+  });
+
+  it("BC. lower-role callers (member/reviewer/viewer) never see Remove — canRemoveMemberRole falls through to the unconditional false for any caller that isn't owner or admin", () => {
+    const match = source.match(/function canRemoveMemberRole\(callerRole: WorkspaceMemberRole, targetRole: WorkspaceMemberRole\): boolean \{([\s\S]*?)\n\}/);
+    expect(match).not.toBeNull();
+    const body = match![1];
+    // Only "owner" and "admin" branches return a role-set lookup; every other caller falls through.
+    const ownerBranch = body.indexOf('if (callerRole === "owner")');
+    const adminBranch = body.indexOf('if (callerRole === "admin")');
+    const fallthrough = body.trim().split("\n").pop()!.trim();
+    expect(ownerBranch).toBeGreaterThan(-1);
+    expect(adminBranch).toBeGreaterThan(ownerBranch);
+    expect(fallthrough).toBe("return false;");
+  });
+});
+
+describe("WorkspaceMembersShell — handleRemove wiring and safety", () => {
+  const handleRemove = extractFunctionBody("handleRemove");
+
+  it("BF. calls removeMember exactly once per invocation, via the canonical client helper", () => {
+    expect(handleRemove).toMatch(/const result = await removeMember\(\{ user, authReady, workspaceId, targetUid: member\.uid \}\);/);
+    const occurrences = (handleRemove.match(/removeMember\(/g) || []).length;
+    expect(occurrences).toBe(1);
+  });
+
+  it("BH. successful removal ('ok') refreshes the canonical member list via loadMembers() — never a locally-spliced member array", () => {
+    const okBranch = handleRemove.match(/if \(result\.status === "ok"\) \{([\s\S]*?)\} else if \(result\.status === "denied"\)/);
+    expect(okBranch).not.toBeNull();
+    expect(okBranch![1]).toMatch(/loadMembers\(\);/);
+    expect(okBranch![1]).not.toMatch(/setMembers\(/);
+  });
+
+  it("BI. denied/error branches never call loadMembers() with a fabricated success state, and never call setMembers directly — the member is not optimistically removed on failure", () => {
+    expect(handleRemove).not.toMatch(/setMembers\(/);
+  });
+
+  it("clears confirmRemoveUid after the attempt completes, regardless of outcome — the confirmation UI does not linger after a failed attempt", () => {
+    const beforeResult = handleRemove.indexOf("const result = await removeMember");
+    const clearConfirm = handleRemove.indexOf("setConfirmRemoveUid(null);");
+    expect(clearConfirm).toBeGreaterThan(beforeResult);
+  });
+});
+
+describe("WorkspaceMembersShell — Remove confirmation UX (BD/BE/BG/BJ)", () => {
+  it("BD. the Remove trigger button opens confirmation (setConfirmRemoveUid) — it does NOT call handleRemove directly; mutation only ever happens from the confirmation block", () => {
+    const triggerButtonMatch = source.match(/onClick=\{\(\) => \{\s*setRemoveError\(null\);\s*setRemoveConfirmation\(null\);\s*setConfirmRemoveUid\(m\.uid\);\s*\}\}/);
+    expect(triggerButtonMatch).not.toBeNull();
+    // handleRemove is only invoked from the "Remove member" confirm button, never from the initial trigger.
+    const handleRemoveCallSites = (source.match(/onClick=\{\(\) => handleRemove\(m\)\}/g) || []).length;
+    expect(handleRemoveCallSites).toBe(1);
+  });
+
+  it("BE. Cancel inside the confirmation block only clears confirmRemoveUid — it never calls handleRemove/removeMember", () => {
+    const confirmBlockMatch = source.match(/\{confirmRemoveUid === m\.uid && \(([\s\S]*?)\n\s{18}\)\}/);
+    expect(confirmBlockMatch).not.toBeNull();
+    const cancelButtonMatch = confirmBlockMatch![1].match(/onClick=\{\(\) => setConfirmRemoveUid\(null\)\}/);
+    expect(cancelButtonMatch).not.toBeNull();
+  });
+
+  it("BG. both the trigger and the destructive confirm button are disabled while a removal is pending — prevents duplicate submission", () => {
+    expect(source).toMatch(/onClick=\{\(\) => handleRemove\(m\)\}\s*disabled=\{isRemovePending\}/);
+    // The initial trigger button is also disabled while pending.
+    const triggerBlock = source.match(/eligibleForRemoval && confirmRemoveUid !== m\.uid && \(([\s\S]*?)\)\)\}/);
+    expect(triggerBlock).not.toBeNull();
+    expect(triggerBlock![1]).toMatch(/disabled=\{isRemovePending\}/);
+  });
+
+  it("BJ. confirmation copy explicitly communicates immediate, broad access loss — not a vague/generic warning", () => {
+    expect(source).toMatch(/They will immediately lose access to this Workspace and its projects, research, reviews, and governance information\./);
+  });
+
+  it("confirmation identifies the specific member by display name and target Workspace, not by uid", () => {
+    expect(source).toMatch(/Remove <span className="font-medium">\{m\.displayName\}<\/span> from \{workspaceName\}\?/);
+  });
+});
+
+describe("WorkspaceMembersShell — canonical Owner is never offered Remove, structurally", () => {
+  it("the eligibility expression itself excludes isCanonicalOwner — not merely relying on the role-policy helper's owner exclusion as a second line of defense", () => {
+    expect(source).toMatch(/!m\.isCanonicalOwner/);
+  });
+});
+
+describe("WorkspaceMembersShell — Workspace Audit Log, Phase TEAM-GOV-I1: nav link", () => {
+  it("AP/AQ. canReadAudit truthy renders a nav link to the Audit Log page for this exact Workspace", () => {
+    expect(source).toMatch(/\{canReadAudit && \(/);
+    expect(source).toMatch(/\/workspace\/team\/\$\{encodeURIComponent\(workspaceId\)\}\/audit/);
+    expect(source).toMatch(/Audit Log/);
+  });
+
+  it("AR/AS/AT. canReadAudit is a real conditional gate, not always-rendered — Member/Reviewer/Viewer (who never receive canReadAudit:true from the server) see no link", () => {
+    const navBlock = source.match(/\{canReadAudit && \(([\s\S]*?)\)\}/);
+    expect(navBlock).not.toBeNull();
+    expect(navBlock![1]).toMatch(/<nav/);
+  });
+
+  it("canReadAudit is optional (backend-driven only) — an omitted prop never crashes the component", () => {
+    expect(source).toMatch(/canReadAudit\?: boolean/);
+  });
+});
+

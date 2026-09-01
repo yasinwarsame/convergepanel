@@ -36,6 +36,19 @@
  * resolver only for the membership-evidenced subset — never a per-uid
  * Firestore round trip, and never a global-profile read attempted for a
  * non-evidenced uid at all (not merely a discarded result).
+ *
+ * Workspace Audit Log, Phase TEAM-GOV-I1 — `fallbackLabel` (optional,
+ * defaults to `REVIEWER_UNAVAILABLE_LABEL`) is the ONLY change: every
+ * existing caller/test is unaffected, since the default preserves the
+ * exact prior behavior. Added so a second Workspace surface (the Audit
+ * Log, whose "reviewer" framing doesn't fit) can supply its own
+ * contextual unresolved-identity label without duplicating this
+ * function's membership-evidence gate or its batching. Note this
+ * resolver's fallback is not always the literal `fallbackLabel` string:
+ * `resolveReviewerDisplayNames()` (the underlying global resolver, called
+ * only for the membership-evidenced subset) still degrades to a MASKED
+ * email when a user has no `name` set — `fallbackLabel` is only the
+ * FINAL fallback when neither a name nor any email is resolvable.
  */
 
 import "server-only";
@@ -49,9 +62,13 @@ export { REVIEWER_UNAVAILABLE_LABEL };
 /**
  * Never throws. Returns a `uid -> displayName` map covering every input
  * uid (deduplicated) — evidenced members get a resolved display name
- * (never the raw uid), everyone else gets `REVIEWER_UNAVAILABLE_LABEL`.
+ * (never the raw uid), everyone else gets `fallbackLabel`.
  */
-export async function resolveWorkspaceReviewerDisplayNames(workspaceId: string, uids: readonly string[]): Promise<Map<string, string>> {
+export async function resolveWorkspaceReviewerDisplayNames(
+  workspaceId: string,
+  uids: readonly string[],
+  fallbackLabel: string = REVIEWER_UNAVAILABLE_LABEL
+): Promise<Map<string, string>> {
   const uniqueUids = Array.from(new Set(uids));
   const result = new Map<string, string>();
   if (!adminDb || uniqueUids.length === 0) return result;
@@ -64,7 +81,7 @@ export async function resolveWorkspaceReviewerDisplayNames(workspaceId: string, 
     const uid = uniqueUids[i];
     const snap = snaps[i];
     if (!snap.exists) {
-      result.set(uid, REVIEWER_UNAVAILABLE_LABEL);
+      result.set(uid, fallbackLabel);
       continue;
     }
     // `active` OR `removed` both count as legitimate historical
@@ -72,7 +89,7 @@ export async function resolveWorkspaceReviewerDisplayNames(workspaceId: string, 
     // + self-consistency check is what fails a malformed document closed.
     const membership = validateMembershipBinding(snap.data(), { workspaceId, uid });
     if (!membership) {
-      result.set(uid, REVIEWER_UNAVAILABLE_LABEL);
+      result.set(uid, fallbackLabel);
       continue;
     }
     evidencedUids.push(uid);
@@ -81,8 +98,8 @@ export async function resolveWorkspaceReviewerDisplayNames(workspaceId: string, 
   if (evidencedUids.length > 0) {
     // The global resolver is invoked ONLY for the membership-evidenced
     // subset — a non-evidenced uid never reaches `users/{uid}` at all.
-    const nameByUid = await resolveReviewerDisplayNames(evidencedUids, new Map(), undefined, REVIEWER_UNAVAILABLE_LABEL);
-    for (const uid of evidencedUids) result.set(uid, nameByUid.get(uid) ?? REVIEWER_UNAVAILABLE_LABEL);
+    const nameByUid = await resolveReviewerDisplayNames(evidencedUids, new Map(), undefined, fallbackLabel);
+    for (const uid of evidencedUids) result.set(uid, nameByUid.get(uid) ?? fallbackLabel);
   }
 
   return result;

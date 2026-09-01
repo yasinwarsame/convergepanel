@@ -2,13 +2,14 @@
 
 /**
  * Team Workspace Self-Service Onboarding — the `/workspace/team/{workspaceId}/members`
- * client shell. Shows active members (with canonical Owner badge), pending
- * invitations, and (per `canInvite`/`canManageInvitations`) an Invite
- * Member form plus resend/revoke controls. Reuses the existing
- * invitation create/list/resend/revoke APIs verbatim — no new invitation
- * service. Active member role change/removal is explicitly OUT of scope
- * (deferred, per the frozen phase contract) — this shell is view + invite
- * + pending-invitation management only.
+ * client shell. Shows active members (with canonical Owner badge, and a
+ * Remove action per `canManageInvitations`/`canRemoveMemberRole()` —
+ * Phase 12A), pending invitations, and (per `canInvite`/
+ * `canManageInvitations`) an Invite Member form plus resend/revoke
+ * controls. Reuses the existing invitation create/list/resend/revoke APIs
+ * verbatim. Active member ROLE CHANGE and ownership transfer remain
+ * explicitly OUT of scope (Phase 12B/12C) — this shell is view + invite +
+ * pending-invitation management + active-member removal only.
  *
  * Every displayed field comes from the server's own allow-list DTOs
  * (`WorkspaceMemberItem`/`WorkspaceInvitationItem`) — no raw
@@ -23,6 +24,7 @@ import {
   createInvitation,
   resendInvitation,
   revokeInvitation,
+  removeMember,
   type WorkspaceMemberItem,
   type WorkspaceInvitationItem,
   type WorkspaceInvitationRole,
@@ -49,23 +51,49 @@ function permittedInviteRoles(callerRole: WorkspaceMemberRole): readonly Workspa
   return [];
 }
 
+/**
+ * UX-only mirror of the server's `canManageMembershipTargetRole()`
+ * (`lib/workspaces/membershipTargetAuthority.ts`) — hides the Remove
+ * control for a target the caller isn't permitted to remove; the backend
+ * independently re-enforces this exact policy regardless of what the UI
+ * shows. `"owner"` is never a removable target role for anyone, mirrored
+ * here as a hard `false` rather than inferred from role-set membership.
+ */
+const OWNER_REMOVABLE_ROLES: readonly WorkspaceMemberRole[] = ["admin", "member", "reviewer", "viewer"];
+const ADMIN_REMOVABLE_ROLES: readonly WorkspaceMemberRole[] = ["member", "reviewer", "viewer"];
+
+function canRemoveMemberRole(callerRole: WorkspaceMemberRole, targetRole: WorkspaceMemberRole): boolean {
+  if (targetRole === "owner") return false;
+  if (callerRole === "owner") return OWNER_REMOVABLE_ROLES.includes(targetRole);
+  if (callerRole === "admin") return ADMIN_REMOVABLE_ROLES.includes(targetRole);
+  return false;
+}
+
 export default function WorkspaceMembersShell({
   workspaceId,
   workspaceName,
   callerRole,
   canInvite,
   canManageInvitations,
+  canReadAudit,
 }: {
   workspaceId: string;
   workspaceName: string;
   callerRole: WorkspaceMemberRole;
   canInvite: boolean;
   canManageInvitations: boolean;
+  /** Optional — omitted call sites (existing tests, any future embed) get no Audit Log nav link, never a crash. */
+  canReadAudit?: boolean;
 }) {
   const { user, authReady } = useAuth();
 
   const [members, setMembers] = useState<WorkspaceMemberItem[]>([]);
   const [membersStatus, setMembersStatus] = useState<"loading" | "ready" | "error">("loading");
+
+  const [confirmRemoveUid, setConfirmRemoveUid] = useState<string | null>(null);
+  const [removePendingUid, setRemovePendingUid] = useState<string | null>(null);
+  const [removeError, setRemoveError] = useState<string | null>(null);
+  const [removeConfirmation, setRemoveConfirmation] = useState<string | null>(null);
 
   const [invitations, setInvitations] = useState<WorkspaceInvitationItem[]>([]);
   const [invitationsStatus, setInvitationsStatus] = useState<"loading" | "ready" | "error">("loading");
@@ -230,12 +258,41 @@ export default function WorkspaceMembersShell({
     [user, authReady, workspaceId, loadInvitations]
   );
 
+  const handleRemove = useCallback(
+    async (member: WorkspaceMemberItem) => {
+      setRemovePendingUid(member.uid);
+      setRemoveError(null);
+      setRemoveConfirmation(null);
+      const result = await removeMember({ user, authReady, workspaceId, targetUid: member.uid });
+      setRemovePendingUid(null);
+      setConfirmRemoveUid(null);
+      if (result.status === "ok") {
+        setRemoveConfirmation(`${member.displayName} was removed from the Workspace.`);
+        loadMembers();
+      } else if (result.status === "denied") {
+        setRemoveError(result.message);
+      } else {
+        setRemoveError("We couldn't remove this member. Please try again.");
+      }
+    },
+    [user, authReady, workspaceId, loadMembers]
+  );
+
   return (
     <main className="mx-auto max-w-3xl px-4 py-10 sm:py-14">
       <div className="mb-6">
         <h1 className="text-2xl font-semibold text-cp-text">Members</h1>
         <p className="mt-1 text-sm text-cp-muted">{workspaceName}</p>
       </div>
+
+      {canReadAudit && (
+        <nav className="mb-6 flex gap-4 border-b border-cp-border-soft text-sm">
+          <span className="border-b-2 border-cp-accent px-1 pb-2 font-medium text-cp-text">Members</span>
+          <a href={`/workspace/team/${encodeURIComponent(workspaceId)}/audit`} className="px-1 pb-2 text-cp-muted hover:text-cp-text">
+            Audit Log
+          </a>
+        </nav>
+      )}
 
       {/* Active members */}
       <section aria-labelledby="active-members-heading" className="mb-8">
@@ -248,20 +305,74 @@ export default function WorkspaceMembersShell({
           </div>
         )}
         {membersStatus === "error" && <ReviewErrorState message="We couldn't load this Workspace's members. Try again." onRetry={loadMembers} />}
+        {removeConfirmation && (
+          <p role="status" className="mb-3 text-sm font-medium text-cp-accent">
+            {removeConfirmation}
+          </p>
+        )}
+        {removeError && (
+          <p role="alert" className="mb-3 text-sm font-medium text-red-400">
+            {removeError}
+          </p>
+        )}
         {membersStatus === "ready" && members.length === 0 && (
           <div className="rounded-xl border border-cp-border bg-cp-raised px-6 py-8 text-center text-sm text-cp-muted shadow-sm">No members found.</div>
         )}
         {membersStatus === "ready" && members.length > 0 && (
           <ul className="divide-y divide-cp-border-soft rounded-xl border border-cp-border bg-cp-surface shadow-sm">
-            {members.map((m) => (
-              <li key={m.uid} className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
-                <span className="truncate text-sm font-medium text-cp-text">{m.displayName}</span>
-                <span className="inline-flex items-center gap-2 text-xs">
-                  {m.isCanonicalOwner && <span className="rounded-full bg-cp-primary-soft px-2 py-0.5 font-medium text-cp-accent">Owner</span>}
-                  <span className="rounded-full bg-cp-raised px-2 py-0.5 font-medium text-cp-muted">{ROLE_LABEL[m.role]}</span>
-                </span>
-              </li>
-            ))}
+            {members.map((m) => {
+              const eligibleForRemoval = canManageInvitations && !m.isCanonicalOwner && m.uid !== user?.uid && canRemoveMemberRole(callerRole, m.role);
+              const isRemovePending = removePendingUid === m.uid;
+              return (
+                <li key={m.uid} className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
+                  <span className="truncate text-sm font-medium text-cp-text">{m.displayName}</span>
+                  <span className="inline-flex items-center gap-2 text-xs">
+                    {m.isCanonicalOwner && <span className="rounded-full bg-cp-primary-soft px-2 py-0.5 font-medium text-cp-accent">Owner</span>}
+                    <span className="rounded-full bg-cp-raised px-2 py-0.5 font-medium text-cp-muted">{ROLE_LABEL[m.role]}</span>
+                    {eligibleForRemoval && confirmRemoveUid !== m.uid && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRemoveError(null);
+                          setRemoveConfirmation(null);
+                          setConfirmRemoveUid(m.uid);
+                        }}
+                        disabled={isRemovePending}
+                        className="rounded-lg border border-cp-border px-3 py-1.5 text-xs font-medium text-cp-text hover:bg-cp-raised focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent disabled:opacity-50"
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </span>
+                  {confirmRemoveUid === m.uid && (
+                    <div className="w-full rounded-lg bg-cp-raised px-3 py-3">
+                      <p className="text-sm text-cp-text">
+                        Remove <span className="font-medium">{m.displayName}</span> from {workspaceName}?
+                      </p>
+                      <p className="mt-1 text-xs text-cp-muted">They will immediately lose access to this Workspace and its projects, research, reviews, and governance information.</p>
+                      <div className="mt-3 flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleRemove(m)}
+                          disabled={isRemovePending}
+                          className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-600 disabled:opacity-50"
+                        >
+                          {isRemovePending ? "…" : "Remove member"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmRemoveUid(null)}
+                          disabled={isRemovePending}
+                          className="rounded-lg border border-cp-border px-3 py-1.5 text-xs font-medium text-cp-text hover:bg-cp-raised focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent disabled:opacity-50"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         )}
       </section>
