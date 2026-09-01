@@ -504,6 +504,29 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
         return originNotEligibleResponse();
       }
 
+      // Phase 11A.3C1 — project-aware PRE-EXECUTION authorization, closing
+      // the P1 PHASE 11A.3R1 found: Gate 1 above ran with `projectId: null`
+      // because the authoritative project wasn't known yet, so it could not
+      // validate the resolved source run's actual project (existence,
+      // workspace binding, active status, `research.organize` capability).
+      // Re-running the exact same PURE, read-only, no-write admission
+      // function — this time with the resolver-derived `projectId` — closes
+      // that gap using the identical policy Gate 2 independently re-derives
+      // at write time, without inventing a parallel authorization path and
+      // without weakening Gate 2 (Gate 2 still fully re-runs below, inside
+      // its own transaction, to guard against state changing during model
+      // execution). A denial here costs one extra read-only transaction
+      // instead of a wasted quota unit and five real model calls.
+      const projectPreflight = await authorizeTeamClaimVerificationAdmission({
+        uid,
+        workspaceId,
+        projectId: resolution.projectId,
+      });
+      if (projectPreflight.status !== "authorized") {
+        const { status, body: errBody } = mapGateDenial(projectPreflight);
+        return NextResponse.json(errBody, { status });
+      }
+
       if (resolution.claimText.length > MAX_CLAIM_LEN) {
         return NextResponse.json(
           { ok: false, errorCode: "claim_too_long", message: `Claim must be at most ${MAX_CLAIM_LEN} characters.` },

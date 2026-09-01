@@ -182,6 +182,119 @@ describe("POST /api/workspaces/[workspaceId]/verifications — Gate 1 -> resolve
   });
 });
 
+describe("POST /api/workspaces/[workspaceId]/verifications — project-aware pre-execution preflight (Phase 11A.3C1)", () => {
+  /**
+   * Reuses the exact same `authorizeTeamClaimVerificationAdmission()`
+   * (Gate 1) function as the preflight — its own project-state policy
+   * (archived/not-found/foreign-workspace/capability/null-project) is
+   * already exhaustively covered, against the real transactional fake, in
+   * lib/firestore/__tests__/teamClaimVerifications.spec.ts. These tests
+   * verify only that the ROUTE wires that reused, already-tested function
+   * in correctly: after origin resolution, with the resolver-derived
+   * projectId, before quota/model execution, and that Gate 2 still runs
+   * as the independent write-time race guard regardless.
+   */
+
+  it("preflight (second authorizeTeamClaimVerificationAdmission call) runs AFTER origin resolution and BEFORE quota/model execution, using the resolver-derived projectId", async () => {
+    mockedResolveClaimVerificationOrigin.mockResolvedValue({ status: "resolved", origin: ORIGIN, claimText: "x", projectId: "proj-resolved-1", evidenceSources: [] });
+    await post({ runId: ORIGIN.runId, claimId: ORIGIN.claimId });
+
+    expect(mockedAuthorizeGate1).toHaveBeenCalledTimes(2);
+    expect(mockedAuthorizeGate1).toHaveBeenNthCalledWith(1, expect.objectContaining({ uid: UID, workspaceId: WS_ID, projectId: null }));
+    expect(mockedAuthorizeGate1).toHaveBeenNthCalledWith(2, expect.objectContaining({ uid: UID, workspaceId: WS_ID, projectId: "proj-resolved-1" }));
+
+    const resolveOrder = mockedResolveClaimVerificationOrigin.mock.invocationCallOrder[0];
+    const preflightOrder = mockedAuthorizeGate1.mock.invocationCallOrder[1];
+    const usageOrder = mockedCheckAndIncrementUsage.mock.invocationCallOrder[0];
+    const panelOrder = mockedRunClaimVerificationPanel.mock.invocationCallOrder[0];
+    expect(resolveOrder).toBeLessThan(preflightOrder);
+    expect(preflightOrder).toBeLessThan(usageOrder);
+    expect(preflightOrder).toBeLessThan(panelOrder);
+  });
+
+  it("archived source project -> denied BEFORE quota/model execution, zero writes", async () => {
+    mockedResolveClaimVerificationOrigin.mockResolvedValue({ status: "resolved", origin: ORIGIN, claimText: "x", projectId: "proj-archived-1", evidenceSources: [] });
+    mockedAuthorizeGate1.mockImplementation(async (args: { projectId: string | null }) =>
+      args.projectId === null ? { status: "authorized", workspaceId: WS_ID, projectId: null } : { status: "project_archived" }
+    );
+    const res = await post({ runId: ORIGIN.runId, claimId: ORIGIN.claimId });
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(mockedCheckAndIncrementUsage).not.toHaveBeenCalled();
+    expect(mockedRunClaimVerificationPanel).not.toHaveBeenCalled();
+    expect(mockedSaveGate2).not.toHaveBeenCalled();
+  });
+
+  it("nonexistent/deleted (or malformed, or foreign-Workspace) source project -> project_not_found -> denied BEFORE quota/model execution, zero writes (the underlying policy collapses all three to the identical status/response, preserving the existing concealment contract — see teamClaimVerifications.spec.ts for that policy's own dedicated coverage)", async () => {
+    mockedResolveClaimVerificationOrigin.mockResolvedValue({ status: "resolved", origin: ORIGIN, claimText: "x", projectId: "proj-gone-1", evidenceSources: [] });
+    mockedAuthorizeGate1.mockImplementation(async (args: { projectId: string | null }) =>
+      args.projectId === null ? { status: "authorized", workspaceId: WS_ID, projectId: null } : { status: "project_not_found" }
+    );
+    const res = await post({ runId: ORIGIN.runId, claimId: ORIGIN.claimId });
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(mockedCheckAndIncrementUsage).not.toHaveBeenCalled();
+    expect(mockedRunClaimVerificationPanel).not.toHaveBeenCalled();
+    expect(mockedSaveGate2).not.toHaveBeenCalled();
+  });
+
+  it("missing research.organize capability for the resolved project -> insufficient_capability -> denied BEFORE quota/model execution, zero writes", async () => {
+    mockedResolveClaimVerificationOrigin.mockResolvedValue({ status: "resolved", origin: ORIGIN, claimText: "x", projectId: "proj-restricted-1", evidenceSources: [] });
+    mockedAuthorizeGate1.mockImplementation(async (args: { projectId: string | null }) =>
+      args.projectId === null ? { status: "authorized", workspaceId: WS_ID, projectId: null } : { status: "unauthorized", reason: "insufficient_capability" }
+    );
+    const res = await post({ runId: ORIGIN.runId, claimId: ORIGIN.claimId });
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(mockedCheckAndIncrementUsage).not.toHaveBeenCalled();
+    expect(mockedRunClaimVerificationPanel).not.toHaveBeenCalled();
+    expect(mockedSaveGate2).not.toHaveBeenCalled();
+  });
+
+  it("active project + fully authorized -> preflight succeeds -> quota exactly once, model execution exactly once, persistence exactly once", async () => {
+    mockedResolveClaimVerificationOrigin.mockResolvedValue({ status: "resolved", origin: ORIGIN, claimText: "x", projectId: "proj-active-1", evidenceSources: [] });
+    mockedAuthorizeGate1.mockResolvedValue({ status: "authorized", workspaceId: WS_ID, projectId: null }); // returned for BOTH calls regardless of projectId — proves a uniformly-authorizing preflight still lets the request through exactly once per stage
+    mockedSaveGate2.mockResolvedValue({ status: "created", verificationId: "vcl-3", workspaceId: WS_ID, projectId: "proj-active-1" });
+    const res = await post({ runId: ORIGIN.runId, claimId: ORIGIN.claimId });
+    expect(res.status).toBe(200);
+    expect(mockedCheckAndIncrementUsage).toHaveBeenCalledTimes(1);
+    expect(mockedRunClaimVerificationPanel).toHaveBeenCalledTimes(1);
+    expect(mockedSaveGate2).toHaveBeenCalledTimes(1);
+  });
+
+  it("no-project source run (projectId: null) -> preflight still runs (called with projectId: null) and succeeds -> existing Workspace-only authorization preserved, no project invented", async () => {
+    mockedResolveClaimVerificationOrigin.mockResolvedValue({ status: "resolved", origin: ORIGIN, claimText: "x", projectId: null, evidenceSources: [] });
+    const res = await post({ runId: ORIGIN.runId, claimId: ORIGIN.claimId });
+    expect(res.status).toBe(200);
+    expect(mockedAuthorizeGate1).toHaveBeenCalledTimes(2);
+    expect(mockedAuthorizeGate1).toHaveBeenNthCalledWith(2, expect.objectContaining({ projectId: null }));
+  });
+
+  it("client cannot influence the preflight's projectId — it is always the resolver's own return value, never anything from the request body (which cannot even contain projectId in origin-linked mode — see the unexpected_field test above)", async () => {
+    mockedResolveClaimVerificationOrigin.mockResolvedValue({ status: "resolved", origin: ORIGIN, claimText: "x", projectId: "resolver-owned-project", evidenceSources: [] });
+    await post({ runId: ORIGIN.runId, claimId: ORIGIN.claimId });
+    expect(mockedAuthorizeGate1).toHaveBeenNthCalledWith(2, expect.objectContaining({ projectId: "resolver-owned-project" }));
+  });
+
+  it("NO TOCTOU REGRESSION: preflight authorizes (project active at that moment), but the source project is archived/access is revoked before Gate 2 runs -> quota and model execution already happened (unavoidable, pre-existing race semantics), but Gate 2 still independently denies persistence -> zero artifact", async () => {
+    mockedResolveClaimVerificationOrigin.mockResolvedValue({ status: "resolved", origin: ORIGIN, claimText: "x", projectId: "proj-race-1", evidenceSources: [] });
+    mockedAuthorizeGate1.mockResolvedValue({ status: "authorized", workspaceId: WS_ID, projectId: null }); // preflight authorizes for both calls
+    mockedSaveGate2.mockResolvedValue({ status: "project_archived" }); // but the project changed state before Gate 2's own fresh re-derivation
+    const res = await post({ runId: ORIGIN.runId, claimId: ORIGIN.claimId });
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(mockedCheckAndIncrementUsage).toHaveBeenCalledTimes(1);
+    expect(mockedRunClaimVerificationPanel).toHaveBeenCalledTimes(1);
+    // Gate 2 was called and is the one that denied — it was NOT skipped or short-circuited by the preflight having already authorized.
+    expect(mockedSaveGate2).toHaveBeenCalledTimes(1);
+  });
+
+  it("stale membership revoked after preflight but before Gate 2 -> Gate 2 (not the preflight) still independently denies persistence -> zero artifact, proving the preflight has not made Gate 2 redundant", async () => {
+    mockedResolveClaimVerificationOrigin.mockResolvedValue({ status: "resolved", origin: ORIGIN, claimText: "x", projectId: "proj-race-2", evidenceSources: [] });
+    mockedAuthorizeGate1.mockResolvedValue({ status: "authorized", workspaceId: WS_ID, projectId: null });
+    mockedSaveGate2.mockResolvedValue({ status: "unauthorized", reason: "membership_removed" });
+    const res = await post({ runId: ORIGIN.runId, claimId: ORIGIN.claimId });
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(mockedSaveGate2).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("POST /api/workspaces/[workspaceId]/verifications — origin-linked success + persistence", () => {
   it("authorized Team member with matching source Workspace -> success", async () => {
     mockedResolveClaimVerificationOrigin.mockResolvedValue({ status: "resolved", origin: ORIGIN, claimText: "The sky is blue.", projectId: null, evidenceSources: [] });
