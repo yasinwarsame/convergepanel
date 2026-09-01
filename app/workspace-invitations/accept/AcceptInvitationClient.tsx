@@ -62,6 +62,7 @@ type AcceptanceViewState =
 
 interface AcceptResponseBody {
   ok?: boolean;
+  workspaceId?: string;
   alreadyMember?: boolean;
   effectiveRole?: string;
   errorCode?: string;
@@ -75,6 +76,14 @@ export default function AcceptInvitationClient() {
 
   const [viewState, setViewState] = useState<AcceptanceViewState>("initializing");
   const [alreadyMemberRole, setAlreadyMemberRole] = useState<string | null>(null);
+  /**
+   * Phase 12A.1 — the joined Workspace's id, read ONLY from this exact
+   * successful acceptance response (`acceptResult.workspaceId`), never
+   * inferred or looked up elsewhere. Drives the post-success redirect so
+   * an invited collaborator lands inside the Workspace they just joined
+   * instead of the Personal home page.
+   */
+  const [joinedWorkspaceId, setJoinedWorkspaceId] = useState<string | null>(null);
   const [verificationSendState, setVerificationSendState] = useState<"idle" | "pending" | "sent" | "failed">("idle");
   const [accountSwitchError, setAccountSwitchError] = useState(false);
   const [isAccepting, setIsAccepting] = useState(false);
@@ -199,6 +208,9 @@ export default function AcceptInvitationClient() {
         setIsAccepting(false);
         if (next === "already_member_success" && typeof body?.effectiveRole === "string") {
           setAlreadyMemberRole(body.effectiveRole);
+        }
+        if (typeof body?.workspaceId === "string" && body.workspaceId.length > 0) {
+          setJoinedWorkspaceId(body.workspaceId);
         }
         setViewState(next);
         return;
@@ -326,8 +338,8 @@ export default function AcceptInvitationClient() {
         <div>
           <h1>You&apos;ve joined the workspace</h1>
           <p>Your invitation has been accepted.</p>
-          <button type="button" onClick={() => router.replace("/")}>
-            Go to ConvergePanel
+          <button type="button" onClick={() => router.replace(joinedWorkspaceId ? `/workspace/team/${encodeURIComponent(joinedWorkspaceId)}` : "/")}>
+            Go to your Workspace
           </button>
         </div>
       );
@@ -337,8 +349,8 @@ export default function AcceptInvitationClient() {
         <div>
           <h1>You&apos;re already a member</h1>
           <p>You&apos;re already a member of this workspace{alreadyMemberRole ? ` as ${alreadyMemberRole}` : ""}.</p>
-          <button type="button" onClick={() => router.replace("/")}>
-            Go to ConvergePanel
+          <button type="button" onClick={() => router.replace(joinedWorkspaceId ? `/workspace/team/${encodeURIComponent(joinedWorkspaceId)}` : "/")}>
+            Go to your Workspace
           </button>
         </div>
       );

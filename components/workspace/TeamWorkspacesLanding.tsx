@@ -12,6 +12,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/AuthProvider";
 import { fetchWorkspaceList, type WorkspaceListItem } from "@/lib/client/workspaceListClient";
 import { createTeamWorkspace } from "@/lib/client/workspaceTeamClient";
@@ -22,6 +23,7 @@ const MAX_NAME_LENGTH = 200;
 
 export default function TeamWorkspacesLanding() {
   const { user, authReady } = useAuth();
+  const router = useRouter();
   const [items, setItems] = useState<WorkspaceListItem[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
@@ -119,14 +121,18 @@ export default function TeamWorkspacesLanding() {
       if (result.status === "ok") {
         setShowCreateForm(false);
         setName("");
-        runQuery();
+        // Phase 12A.1 — land the creator directly inside the Workspace
+        // they just created, using ONLY the authoritative workspaceId the
+        // creation response itself returned (never inferred from the
+        // name, never re-derived by searching the list).
+        router.push(`/workspace/team/${encodeURIComponent(result.workspace.workspaceId)}`);
       } else if (result.status === "invalid_name") {
         setCreateError("That Workspace name isn't valid. Try a shorter, plainer name.");
       } else {
         setCreateError("We couldn't create your Workspace. Please try again.");
       }
     },
-    [name, user, authReady, runQuery]
+    [name, user, authReady, router]
   );
 
   return (

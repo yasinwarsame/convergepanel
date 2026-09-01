@@ -31,6 +31,7 @@ import {
   type WorkspaceMemberRole,
 } from "@/lib/client/workspaceTeamClient";
 import ReviewErrorState from "@/components/teamGovernance/ReviewErrorState";
+import WorkspaceNav from "@/components/workspace/WorkspaceNav";
 
 const ROLE_LABEL: Record<WorkspaceMemberRole, string> = { owner: "Owner", admin: "Admin", member: "Member", reviewer: "Reviewer", viewer: "Viewer" };
 
@@ -285,14 +286,7 @@ export default function WorkspaceMembersShell({
         <p className="mt-1 text-sm text-cp-muted">{workspaceName}</p>
       </div>
 
-      {canReadAudit && (
-        <nav className="mb-6 flex gap-4 border-b border-cp-border-soft text-sm">
-          <span className="border-b-2 border-cp-accent px-1 pb-2 font-medium text-cp-text">Members</span>
-          <a href={`/workspace/team/${encodeURIComponent(workspaceId)}/audit`} className="px-1 pb-2 text-cp-muted hover:text-cp-text">
-            Audit Log
-          </a>
-        </nav>
-      )}
+      <WorkspaceNav workspaceId={workspaceId} active="members" showAudit={!!canReadAudit} />
 
       {/* Active members */}
       <section aria-labelledby="active-members-heading" className="mb-8">

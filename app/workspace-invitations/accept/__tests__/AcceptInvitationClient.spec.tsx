@@ -551,3 +551,67 @@ describe("NO FORBIDDEN STORAGE", () => {
     expect(source).not.toMatch(/indexedDB/i);
   });
 });
+
+describe("Phase 12A.1 — post-acceptance redirect uses the response's own workspaceId", () => {
+  it("success: clicking 'Go to your Workspace' redirects into the exact joined Workspace, from the response's workspaceId", async () => {
+    setWindow({ hash: `#invitationId=${INVITATION_ID}&token=${SENTINEL}` });
+    mockFetchOnce(200, { ok: true, workspaceId: "ws-abc123", alreadyMember: false, effectiveRole: "member" });
+    const renderer = await mount(authState({ user: AUTHENTICATED_USER, authReady: true, syncState: "authenticated", canMutate: true }));
+
+    expect(renderer.root.findByType("h1").props.children).toBe("You've joined the workspace");
+    const button = findButton(renderer, "Go to your Workspace");
+    expect(button).toBeDefined();
+    await act(async () => {
+      button!.props.onClick();
+    });
+    expect(mockedRouterReplace).toHaveBeenCalledWith("/workspace/team/ws-abc123");
+    expect(mockedRouterReplace).not.toHaveBeenCalledWith("/");
+  });
+
+  it("already_member_success: clicking 'Go to your Workspace' also redirects into the exact Workspace, not '/'", async () => {
+    setWindow({ hash: `#invitationId=${INVITATION_ID}&token=${SENTINEL}` });
+    mockFetchOnce(200, { ok: true, workspaceId: "ws-xyz789", alreadyMember: true, effectiveRole: "admin" });
+    const renderer = await mount(authState({ user: AUTHENTICATED_USER, authReady: true, syncState: "authenticated", canMutate: true }));
+
+    expect(renderer.root.findByType("h1").props.children).toBe("You're already a member");
+    const button = findButton(renderer, "Go to your Workspace");
+    expect(button).toBeDefined();
+    await act(async () => {
+      button!.props.onClick();
+    });
+    expect(mockedRouterReplace).toHaveBeenCalledWith("/workspace/team/ws-xyz789");
+    expect(mockedRouterReplace).not.toHaveBeenCalledWith("/");
+  });
+
+  it("workspaceId is URI-encoded in the redirect target", async () => {
+    setWindow({ hash: `#invitationId=${INVITATION_ID}&token=${SENTINEL}` });
+    mockFetchOnce(200, { ok: true, workspaceId: "ws with space", alreadyMember: false });
+    const renderer = await mount(authState({ user: AUTHENTICATED_USER, authReady: true, syncState: "authenticated", canMutate: true }));
+    const button = findButton(renderer, "Go to your Workspace");
+    await act(async () => {
+      button!.props.onClick();
+    });
+    const target = mockedRouterReplace.mock.calls[0][0] as string;
+    expect(target).toContain(encodeURIComponent("ws with space"));
+  });
+
+  it("a malformed 200 response missing workspaceId falls back to '/' rather than crashing or redirecting to an invalid URL", async () => {
+    setWindow({ hash: `#invitationId=${INVITATION_ID}&token=${SENTINEL}` });
+    mockFetchOnce(200, { ok: true, alreadyMember: false });
+    const renderer = await mount(authState({ user: AUTHENTICATED_USER, authReady: true, syncState: "authenticated", canMutate: true }));
+    const button = findButton(renderer, "Go to your Workspace");
+    expect(button).toBeDefined();
+    await act(async () => {
+      button!.props.onClick();
+    });
+    expect(mockedRouterReplace).toHaveBeenCalledWith("/");
+  });
+
+  it("no remaining reference to the old hardcoded redirect-to-Personal-home behavior for the success paths", () => {
+    const source = require("fs").readFileSync(
+      require("path").join(__dirname, "..", "AcceptInvitationClient.tsx"),
+      "utf8"
+    );
+    expect(source).not.toMatch(/onClick=\{\(\) => router\.replace\("\/"\)\}/);
+  });
+});

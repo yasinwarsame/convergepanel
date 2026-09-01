@@ -17,6 +17,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import { fetchWorkspaceAuditEvents, type WorkspaceAuditEventItem, type WorkspaceAuditPreviousRole } from "@/lib/client/workspaceTeamClient";
 import ReviewErrorState from "@/components/teamGovernance/ReviewErrorState";
+import WorkspaceNav from "@/components/workspace/WorkspaceNav";
 
 const ROLE_LABEL: Record<WorkspaceAuditPreviousRole, string> = { admin: "Admin", member: "Member", reviewer: "Reviewer", viewer: "Viewer" };
 
@@ -77,12 +78,7 @@ export default function WorkspaceAuditLogShell({ workspaceId, workspaceName }: {
         <p className="mt-1 text-sm text-cp-muted">{workspaceName}</p>
       </div>
 
-      <nav className="mb-6 flex gap-4 border-b border-cp-border-soft text-sm">
-        <a href={`/workspace/team/${encodeURIComponent(workspaceId)}/members`} className="px-1 pb-2 text-cp-muted hover:text-cp-text">
-          Members
-        </a>
-        <span className="border-b-2 border-cp-accent px-1 pb-2 font-medium text-cp-text">Audit Log</span>
-      </nav>
+      <WorkspaceNav workspaceId={workspaceId} active="audit" showAudit />
 
       {status === "loading" && (
         <div role="status" className="rounded-xl border border-cp-border bg-cp-surface px-6 py-10 text-center text-sm text-cp-muted shadow-sm">
