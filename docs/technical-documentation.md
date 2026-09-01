@@ -899,6 +899,24 @@ Two independent flags gate this, both required, checked in this order in `resolv
 
 ---
 
+## Team Workspaces — canary-scoped, member management + Audit Log merged 2026-09-01
+
+Shared/collaborative Workspaces, layered additively on top of the Personal Workspace foundation above — nothing about Personal Workspace behavior is affected. Full architecture, phase-by-phase design rationale, and the frozen role/capability model: **[`docs/workspaces/phase8-team-workspace-foundation.md`](./workspaces/phase8-team-workspace-foundation.md)** (foundation) and **[`docs/team-workspaces-architecture-audit.md`](./team-workspaces-architecture-audit.md)** (pre-Phase-8 data-model audit). This section only documents this doc's first real coverage of the subsystem plus what most recently merged — it is not a complete route/feature catalog; see the linked docs for that.
+
+**Membership model.** A Team Workspace (`workspaces/{workspaceId}`, `type: "team"`) has a `workspaceMemberships/{computeMembershipId(workspaceId, uid)}` document per member — `active` or `removed` status, never hard-deleted. Five roles, each a frozen, flat capability set (`lib/workspaces/capabilities.ts`): **Owner** (all capabilities, exactly one per Workspace, verified via `isCanonicalTeamOwnerMembership()` against `workspace.ownerUserId` — never a bare `role === "owner"` string check), **Admin**, **Member**, **Reviewer**, **Viewer**. Every mutation authorizes through the single canonical `resolveWorkspaceAccess()` (read paths) or `authorizeTeamWorkspaceMutationInTransaction()` (transaction-scoped writes) — no route re-derives membership/role logic inline. Rollout gate: `TEAM_WORKSPACES_ENABLED` / `TEAM_WORKSPACES_CANARY_UIDS` / `TEAM_WORKSPACES_CANARY_WORKSPACE_IDS` (see Environment Variables below) — **canary-scoped in Production as of 2026-09-01**, not enabled for the full user base.
+
+**Active member removal (Phase 12A).** Owner may remove Admin/Member/Reviewer/Viewer; Admin may remove Member/Reviewer/Viewer only (never another Admin); the canonical Owner can never be removed through ordinary member management — only through the pre-existing `transferTeamWorkspaceOwnership()` transaction. Self-removal is always rejected. Soft-removal only (`status: "active" → "removed"`, `removedAt`/`removedByUserId` server-derived) — the membership document, role, and invitation provenance are retained forever. `POST /api/workspaces/{workspaceId}/members/{uid}/remove`, empty request body (every fact is server-derived from the session + URL path).
+
+**Workspace Audit Log (Phase TEAM-GOV-I1).** A new Workspace-native governance surface — `GET /api/workspaces/{workspaceId}/audit-events` + `/workspace/team/{workspaceId}/audit` — gated on the `audit.read` capability (Owner/Admin only). Reads a new `workspaceMembershipEvents` collection (v1 scope: `workspace_member_removed` only). Deliberately independent of the legacy `/api/governance/audit` dashboard covered under Governance below — that surface's authorization model (admin-email / reviewer-assigner relationships, billing-plan gate, viewer's-own-actions-only filtering) has no Workspace-native concept and was judged the wrong foundation to extend. Bounded (default page size 20, max 50), deterministic `at DESC` + document-ID-tiebreak ordering with an opaque cursor, presentation DTO is an explicit allow-list (no raw UID/workspace ID ever reaches the client — actor/target render as resolved display names, falling back to "Unknown user"/"Unknown member").
+
+**Atomicity.** The `workspace_member_removed` event is written via `tx.set()` **inside the same Firestore transaction** as the membership removal itself — both commit or neither does (`REMOVAL COMMITTED IFF AUDIT EVENT COMMITTED`). This was a corrective fix during review: the first implementation wrote the event as a separate, best-effort, post-commit call (matching this codebase's usual event-writer pattern — see `admin_audit_logs`/`writeAuditEvent()` and `projectEvents`/`writeProjectEvent()` below), which would have allowed a real removal to leave zero audit trail on a transient write failure. That ordinary best-effort pattern remains correct and unchanged for every other event writer in this codebase; it was judged insufficient specifically for this authorization-changing, governance-relevant operation.
+
+**Firestore index.** `workspaceMembershipEvents`: `workspaceId ASC, at DESC` (`firestore.indexes.json`) — deployed to the Production Firestore project (`convergepanel`) via `firebase deploy --only firestore:indexes` on 2026-09-01, separately from the Vercel application deploy (Vercel does not deploy Firestore indexes as part of a Next.js build — this is a standing operational reminder for any future collection that needs a composite index).
+
+**Merge history:** implemented as two stacked PRs (#116 member removal, #117 Audit Log) reviewed independently, then combined and merged to `main` as a single atomic PR (#117 retargeted from `main`, PR #116 absorbed/marked merged automatically once its commits became reachable) to avoid a window where removal existed without its audit trail. Merging to `main` was confirmed to trigger an automatic Vercel Production deployment.
+
+---
+
 ## Firestore Data Model
 
 Primary database. Firebase Admin SDK is server-only — import with `"server-only"`.
@@ -907,7 +925,9 @@ Primary database. Firebase Admin SDK is server-only — import with `"server-onl
 |-----------|---------|
 | `users/{uid}` | User profile, plan, `runsThisMonth`, `usageMonth`, video quota, Stripe subscription state, governance fields |
 | `runs/{runId}` | Panel run: `userId`, `question`, `selectedModels`, `status`, `results`, `resultsCompact`, `totalTokens`, `tokensByProvider`, `synthesizedReportV2`, `synthesizedStructuredReport`, optional `workspaceId` (Personal adaptive runs only — see Workspaces section) |
-| `workspaces/{workspaceId}` | Personal Workspace: `id`, `schemaVersion`, `type` (`"personal"`), `ownerUserId`, `name`, `createdAt`, `updatedAt`. Deterministic id `personal-{uid}`, one per user, never mutated after creation except by re-provisioning an equivalent record |
+| `workspaces/{workspaceId}` | Personal Workspace (`type: "personal"`, deterministic id `personal-{uid}`) or Team Workspace (`type: "team"`, `ownerUserId`, `name`) — see Workspaces sections above |
+| `workspaceMemberships/{computeMembershipId(workspaceId,uid)}` | Team Workspace membership: `role` (owner/admin/member/reviewer/viewer), `status` (`active`/`removed`), `removedAt`/`removedByUserId` when removed, `createdAt`, `invitedByUserId`. Deterministic SHA-256 domain-separated id — never re-derived inline |
+| `workspaceMembershipEvents/{autoId}` | Append-only Team Workspace membership lifecycle events (v1: `workspace_member_removed` only), read by the Workspace Audit Log. Written atomically with the triggering membership mutation — see Team Workspaces section above |
 | `videoVerifications/{id}` | Video verification result with frames metadata, vision model outputs, verdict, consensus score |
 | `admin_audit_logs/{id}` | Append-only governance audit events |
 | `teams/{teamId}` | Team document with members, policyRules, settings, `adaptiveMultiReviewerSettings.enabled` (team opt-in) |
@@ -941,6 +961,9 @@ At runtime, `lib/env.ts` is the single source of truth for all server-side envir
 | `/api/admin/*` | Various | Admin management (requires `admin: true` custom claim) |
 | `/api/user/*` | Various | User profile read/update |
 | `/api/user/workspace` | POST | Ensure the authenticated user's Personal Workspace exists (idempotent); called by `/login` and `/signup`, awaited before redirect |
+| `/api/workspaces/[workspaceId]/*` | Various | Team Workspace routes — creation, members, invitations, projects, runs, review-queue/panel, ownership transfer. See Team Workspaces section above and the linked architecture docs for the full catalog |
+| `/api/workspaces/[workspaceId]/members/[uid]/remove` | POST | Soft-remove an active Team Workspace member (Phase 12A) — empty body, every fact server-derived |
+| `/api/workspaces/[workspaceId]/audit-events` | GET | Workspace Audit Log read (Phase TEAM-GOV-I1) — `audit.read` capability (Owner/Admin), bounded + cursor-paginated |
 
 ---
 
@@ -1000,6 +1023,15 @@ Firebase Admin tries credentials in the order listed above.
 | `PERSONAL_WORKSPACE_PROVISIONING_ENABLED` | Self-service provisioning on login/signup | `true` |
 | `PERSONAL_RUN_WORKSPACE_WRITES_ENABLED` | Global switch for writing `workspaceId` onto new Personal adaptive runs | `true` |
 | `PERSONAL_RUN_WORKSPACE_WRITE_CANARY_UIDS` | Optional account-scoped allowlist for staged write canaries, independent of the global flag | absent (not in use) |
+
+**Team Workspaces** (see Team Workspaces section above):
+
+| Variable | Used for | Production |
+|----------|---------|-----------|
+| `TEAM_WORKSPACES_ENABLED` | Global rollout switch — Team Workspace access, all mutations, and the Audit Log all gate on this first | canary-scoped as of 2026-09-01 (not global) |
+| `TEAM_WORKSPACES_CANARY_UIDS` | Comma-separated uid allowlist admitted independent of the global flag | populated (canary) |
+| `TEAM_WORKSPACES_CANARY_WORKSPACE_IDS` | Comma-separated Workspace-id allowlist admitted independent of the global flag/uid canary — also gates capacity accounting (`teamWorkspaceCanaryCapacity.ts`) | populated (canary) |
+| `APPROVAL_WORKFLOW_ENABLED` / `APPROVAL_WORKFLOW_CANARY_UIDS` | Workspace Approval Workflow (Phase 9) admission — independent second gate, see Governance section | both dark/unset in Production |
 
 ---
 
