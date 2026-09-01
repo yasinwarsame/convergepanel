@@ -21,6 +21,26 @@
  * scratch, inside its own transaction, at the moment the artifact is
  * actually created — see lib/firestore/teamClaimVerifications.ts's own
  * module doc for the full rationale.
+ *
+ * Evidence Workspace, Phase 11A.3 — added a second, DISTINCT request mode:
+ * origin-linked creation (`{runId, claimId}`), classified up front exactly
+ * like the Personal route (see app/api/verify-claim/route.ts's own header)
+ * so a caller can never supply a competing claim/origin/project value.
+ * `resolveClaimVerificationOrigin()` is NEVER treated as an authorization
+ * grant — both Gate 1 and Gate 2 still run in full for an origin-linked
+ * request, exactly as they do for an ordinary one; the resolver only ever
+ * supplies WHICH claim/project to act on, never WHETHER the caller may act.
+ * Frozen ordering for origin-linked mode (deliberately AFTER Gate 1, not
+ * before): rollout admission -> Gate 1 (called with `projectId: null`,
+ * since the inherited projectId isn't known yet) -> resolve origin
+ * (`expectedWorkspaceId` = this route's own URL `workspaceId`, closing
+ * cross-Workspace origin linkage) -> MAX_CLAIM_LEN -> shared execution
+ * core, which re-derives everything authoritatively at Gate 2 with the
+ * NOW-known inherited projectId. A caller whose inherited project they
+ * cannot organize still passes Gate 1 (which saw `projectId: null`) but is
+ * denied at Gate 2 — the same accepted "quota/tokens already spent, no
+ * refund" tradeoff this module's own header already documents for the
+ * identical race on the ordinary path.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -29,7 +49,7 @@ import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelem
 import { ModelId } from "@/lib/types";
 import { OPENAI_API_KEY, ANTHROPIC_API_KEY, XAI_API_KEY, PERPLEXITY_API_KEY, GEMINI_API_KEY, TEAM_WORKSPACES_ENABLED, TEAM_WORKSPACES_CANARY_UIDS, TEAM_WORKSPACES_CANARY_WORKSPACE_IDS } from "@/lib/env";
 import { resolveTeamWorkspaceTargetAdmission } from "@/lib/workspaces/teamWorkspaceTargetAdmission";
-import { authorizeTeamClaimVerificationAdmission, saveTeamClaimVerification } from "@/lib/firestore/teamClaimVerifications";
+import { authorizeTeamClaimVerificationAdmission, saveTeamClaimVerification, type Gate1Result } from "@/lib/firestore/teamClaimVerifications";
 import { validateUserSubscription } from "@/lib/stripe/subscriptionValidation";
 import { checkAndIncrementUsageForRun } from "@/lib/stripe/usageCheck";
 import { runClaimVerificationPanel } from "@/lib/verification/runClaimVerificationPanel";
@@ -50,6 +70,7 @@ import { teamProjectAuthorizationDeniedResponse } from "@/lib/projects/teamProje
 import { runProjectAssociationTargetNotFoundResponse, projectArchivedTargetResponse } from "@/lib/projects/projectErrorResponse";
 import { logger } from "@/lib/logger";
 import type { ModelVerdict } from "@/lib/verification/parseVerificationJson";
+import { resolveClaimVerificationOrigin, type ClaimVerificationOrigin } from "@/lib/verification/claimVerificationOrigin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -59,7 +80,9 @@ const MAX_CLAIM_LEN = 2000;
 const DEFAULT_MODELS: ModelId[] = ["claude", "chatgpt", "gemini", "grok", "perplexity"];
 const ALL_MODELS: Set<ModelId> = new Set(["chatgpt", "claude", "grok", "perplexity", "gemini"]);
 
-const ALLOWED_BODY_KEYS = new Set(["claim", "models", "projectId"]);
+const ORDINARY_ALLOWED_BODY_KEYS = new Set(["claim", "models", "projectId"]);
+/** Origin-linked mode's entire request contract — `projectId` is deliberately excluded: it is always server-derived from the source run, never client-supplied, for this mode. */
+const ORIGIN_LINKED_ALLOWED_BODY_KEYS = new Set(["runId", "claimId", "models"]);
 
 function totalTokensFromResult(result: { tokenUsage?: { totalTokens?: number } | null; rawResponse?: unknown }): number {
   if (result.tokenUsage?.totalTokens !== undefined && typeof result.tokenUsage.totalTokens === "number") {
@@ -103,6 +126,295 @@ function mapGateDenial(result: { status: string; reason?: unknown }): { status: 
   }
 }
 
+/**
+ * Phase 11A.3 — origin-linked mode's own denial response: ONE generic,
+ * indistinguishable shape for every resolver denial reason, mirroring
+ * app/api/verify-claim/route.ts's identical `originNotEligibleResponse()`
+ * and this codebase's established Team Workspace concealment convention.
+ */
+function originNotEligibleResponse(): NextResponse {
+  return NextResponse.json(
+    { ok: false, errorCode: "origin_not_eligible", message: "This claim could not be found or is not eligible for verification." },
+    { status: 404 }
+  );
+}
+
+type VerifyClaimRequestMode =
+  | { kind: "ordinary" }
+  | { kind: "origin_linked"; runId: string; claimId: string }
+  | { kind: "ambiguous" }
+  | { kind: "invalid_origin_locator" };
+
+/** Structural mirror of app/api/verify-claim/route.ts's identical classifier. */
+function classifyVerifyClaimRequestMode(body: Record<string, unknown>): VerifyClaimRequestMode {
+  const hasClaimKey = Object.prototype.hasOwnProperty.call(body, "claim");
+  const hasRunId = Object.prototype.hasOwnProperty.call(body, "runId");
+  const hasClaimId = Object.prototype.hasOwnProperty.call(body, "claimId");
+  const hasOriginLocator = hasRunId || hasClaimId;
+
+  if (hasClaimKey && hasOriginLocator) {
+    return { kind: "ambiguous" };
+  }
+  if (hasOriginLocator) {
+    if (!hasRunId || !hasClaimId) return { kind: "invalid_origin_locator" };
+    if (typeof body.runId !== "string" || body.runId.length === 0) return { kind: "invalid_origin_locator" };
+    if (typeof body.claimId !== "string" || body.claimId.length === 0) return { kind: "invalid_origin_locator" };
+    return { kind: "origin_linked", runId: body.runId, claimId: body.claimId };
+  }
+  return { kind: "ordinary" };
+}
+
+function parseSelectedModels(body: Record<string, unknown>): ModelId[] | null {
+  let selectedModels: ModelId[] = DEFAULT_MODELS;
+  if (Array.isArray(body.models) && body.models.length > 0) {
+    selectedModels = body.models.filter((m: unknown): m is ModelId => ALL_MODELS.has(m as ModelId));
+  }
+  if (selectedModels.length < MIN_MODELS) return null;
+  return selectedModels;
+}
+
+/** Rollout admission + Gate 1, shared by both request modes. Returns a denial NextResponse, or `null` to proceed. */
+async function checkAdmissionAndGate1(args: { uid: string; workspaceId: string; projectId: string | null }): Promise<NextResponse | null> {
+  const admission = resolveTeamWorkspaceTargetAdmission({
+    uid: args.uid,
+    workspaceId: args.workspaceId,
+    globalEnabled: TEAM_WORKSPACES_ENABLED,
+    canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS,
+    canaryWorkspaceIdsRaw: TEAM_WORKSPACES_CANARY_WORKSPACE_IDS,
+  });
+  if (!admission.enabled) {
+    const { status, body: errBody } = teamProjectAuthorizationDeniedResponse("team_workspaces_disabled");
+    return NextResponse.json(errBody, { status });
+  }
+
+  const gate1: Gate1Result = await authorizeTeamClaimVerificationAdmission({ uid: args.uid, workspaceId: args.workspaceId, projectId: args.projectId });
+  if (gate1.status !== "authorized") {
+    const { status, body: errBody } = mapGateDenial(gate1);
+    return NextResponse.json(errBody, { status });
+  }
+  return null;
+}
+
+/**
+ * Shared execution core for BOTH request modes — subscription check,
+ * quota, model execution, scoring, Gate 2 persistence, token accounting,
+ * and governance are identical regardless of where `claimText`/`projectId`/
+ * `origin` came from.
+ */
+async function executeAndPersistTeamClaimVerification(args: {
+  uid: string;
+  workspaceId: string;
+  claimText: string;
+  selectedModels: ModelId[];
+  projectId: string | null;
+  origin?: ClaimVerificationOrigin;
+}): Promise<NextResponse> {
+  const { uid, workspaceId, claimText, selectedModels, projectId, origin } = args;
+
+  try {
+    await validateUserSubscription(uid);
+  } catch (e: any) {
+    logger.warn("[workspaces/verifications POST] Subscription validation failed (non-blocking)", { error: e?.message });
+  }
+
+  const usage = await checkAndIncrementUsageForRun(uid, selectedModels.length);
+  if (!usage.allowed) {
+    if (usage.reason === "MODEL_LIMIT") {
+      return NextResponse.json(
+        { ok: false, errorCode: "PLAN_MODEL_LIMIT_REACHED", message: `Your plan allows up to ${usage.maxModelsPerRun} models per run.`, maxModelsPerRun: usage.maxModelsPerRun },
+        { status: 403 }
+      );
+    }
+    if (usage.reason === "RUN_LIMIT") {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "RUN_LIMIT_REACHED",
+          errorCode: "RUN_LIMIT_REACHED",
+          message: "You've reached your monthly run limit.",
+          runsUsed: usage.runsThisMonth,
+          runsLimit: usage.maxRunsPerMonth,
+          resetsAt: usage.resetsAt.toISOString(),
+          plan: usage.plan.toUpperCase(),
+        },
+        { status: 429 }
+      );
+    }
+  }
+
+  const apiKeys = {
+    chatgpt: OPENAI_API_KEY,
+    claude: ANTHROPIC_API_KEY,
+    grok: XAI_API_KEY,
+    perplexity: PERPLEXITY_API_KEY,
+    gemini: GEMINI_API_KEY,
+  };
+
+  const modelResults = await runClaimVerificationPanel(claimText, selectedModels, apiKeys);
+  const modelEvidence = buildClaimModelEvidence(modelResults);
+
+  const verdict = computeClaimVerdict(
+    modelEvidence.map((m) => ({
+      status: m.status,
+      verdict: m.status === "ok" ? (m.verdict as ModelVerdict) : undefined,
+    }))
+  );
+
+  const consensusRows = modelEvidence.map((m) => ({
+    status: m.status as "ok" | "parse_error" | "failed",
+    verdict: m.status === "ok" ? (m.verdict as ModelVerdict) : undefined,
+    confidence: m.status === "ok" ? (m.confidence as "high" | "medium" | "low") : undefined,
+  }));
+
+  const { consensusScore, confidenceLabel, summary: consensusSummary } = computeConsensusScoring({
+    mode: "verification",
+    modelRows: consensusRows,
+    aggregateVerdict: verdict,
+  });
+
+  const digest = buildAgreementDisagreementDigest(
+    modelEvidence.map((m) => ({ modelId: m.modelId, correctParts: m.correctParts, incorrectParts: m.incorrectParts }))
+  );
+
+  const aggregateSummary = {
+    totalModels: modelEvidence.length,
+    modelsAgreeAccurate: modelEvidence.filter((m) => m.verdict === "accurate").length,
+    modelsAgreeInaccurate: modelEvidence.filter((m) => m.verdict === "inaccurate").length,
+    modelsPartial: modelEvidence.filter((m) => m.verdict === "partially_accurate").length,
+    modelsUnverifiable: modelEvidence.filter((m) => m.verdict === "unverifiable" || m.verdict === "parse_error" || m.verdict === "failed").length,
+  };
+
+  const auditBundle = buildClaimVerificationAuditBundle({
+    claimLength: claimText.length,
+    modelEvidence,
+    verdict,
+    consensusScore,
+    confidenceLabel,
+    evidenceQuality: consensusSummary.evidenceQuality,
+  });
+
+  let totalTokens = 0;
+  for (const r of modelResults) {
+    totalTokens += totalTokensFromResult(r);
+  }
+
+  const gate2 = await saveTeamClaimVerification({
+    uid,
+    workspaceId,
+    projectId,
+    claim: claimText.slice(0, MAX_CLAIM_LEN),
+    verdict,
+    consensusScore,
+    confidenceLabel,
+    evidenceQuality: consensusSummary.evidenceQuality,
+    supportRatio: consensusSummary.supportRatio,
+    modelResults: modelEvidence,
+    auditBundle,
+    selectedModels,
+    ...(origin ? { origin } : {}),
+  });
+
+  try {
+    await incrementUserTokenUsage(uid, totalTokens);
+  } catch (tokErr: any) {
+    logger.warn("[workspaces/verifications POST] Token increment failed", { error: tokErr?.message });
+  }
+
+  if (gate2.status !== "created") {
+    // No Team artifact. No Personal fallback. No governance. No legacy
+    // team-governance projection. Quota and provider tokens above
+    // remain consumed — the accepted, explicitly frozen tradeoff.
+    const { status, body: errBody } = mapGateDenial(gate2);
+    return NextResponse.json(errBody, { status });
+  }
+
+  let orgGovernanceStatus: "approved" | "needs_review" | "blocked" | undefined;
+  try {
+    const governanceConsensusScore =
+      typeof consensusScore === "number" && !Number.isNaN(consensusScore)
+        ? consensusScore
+        : typeof consensusSummary.overallConsensusScore === "number" && !Number.isNaN(consensusSummary.overallConsensusScore)
+          ? consensusSummary.overallConsensusScore
+          : null;
+
+    const verificationGovernanceInput: GovernanceInput = {
+      consensusScore: governanceConsensusScore,
+      evidenceQuality: consensusSummary.evidenceQuality,
+      sourceBacked: false,
+      missingSourcesCount: 0,
+      modelHealth: {
+        ok: modelEvidence.filter((r) => r.status === "ok").length,
+        substituted: 0,
+        failed: modelEvidence.filter((r) => r.status !== "ok").length,
+      },
+      question: claimText.slice(0, MAX_CLAIM_LEN),
+      runType: "verification",
+      verificationVerdict: verdict,
+    };
+    const govResult = await evaluateAndStoreGovernance({
+      runId: gate2.verificationId,
+      collection: "verifications",
+      input: verificationGovernanceInput,
+      ownerUid: uid,
+    });
+    if (govResult) orgGovernanceStatus = govResult.governanceStatus;
+  } catch (govErr: unknown) {
+    logger.error("[governance] Team Claim verification evaluation failed", { error: (govErr as Error)?.message });
+  }
+
+  const usableForBanner = modelEvidence.filter((m) => m.status === "ok");
+  const accurateAmongUsable = usableForBanner.filter((m) => m.verdict === "accurate").length;
+
+  let userEmail = "";
+  if (adminDb) {
+    const uSnap = await adminDb.collection("users").doc(uid).get();
+    userEmail = String((uSnap.data() as UserProfile | undefined)?.email ?? "");
+  }
+
+  const gov = await applyTeamGovernancePipeline({
+    uid,
+    userEmail,
+    consensusSummary,
+    consensusScore,
+    type: "verification",
+    query: claimText,
+    verdict,
+    auditBundle,
+    verificationId: gate2.verificationId,
+  });
+
+  const responsePayload = mergeGovernanceIntoBody(
+    {
+      ok: true,
+      verificationId: gate2.verificationId,
+      claim: claimText,
+      verdict,
+      consensusScore,
+      confidenceLabel,
+      evidenceQuality: consensusSummary.evidenceQuality,
+      supportRatio: consensusSummary.supportRatio,
+      modelEvidence,
+      aggregateSummary,
+      whereModelsAgree: digest.whereModelsAgree,
+      whereModelsDisagree: digest.whereModelsDisagree,
+      auditBundle,
+      accurateAmongUsable,
+      usableModelCount: usableForBanner.length,
+      ...(orgGovernanceStatus ? { governanceStatus: orgGovernanceStatus } : {}),
+      workspaceId: gate2.workspaceId,
+      projectId: gate2.projectId,
+      usage: {
+        runsThisMonth: usage.runsThisMonth,
+        maxRunsPerMonth: usage.maxRunsPerMonth,
+        maxModelsPerRun: usage.maxModelsPerRun,
+      },
+    },
+    gov
+  );
+
+  return NextResponse.json(responsePayload, { status: 200 });
+}
+
 export async function POST(req: NextRequest, { params }: { params: { workspaceId: string } }) {
   try {
     // ============================================
@@ -143,8 +455,100 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
       const { status, body: errBody } = invalidRequestBodyResponse();
       return NextResponse.json(errBody, { status });
     }
+
+    const mode = classifyVerifyClaimRequestMode(body);
+    if (mode.kind === "ambiguous") {
+      return NextResponse.json(
+        { ok: false, errorCode: "ambiguous_request_mode", message: "A request may not combine a claim with an origin locator." },
+        { status: 400 }
+      );
+    }
+    if (mode.kind === "invalid_origin_locator") {
+      return NextResponse.json(
+        { ok: false, errorCode: "invalid_origin_locator", message: "An origin-linked request requires both runId and claimId." },
+        { status: 400 }
+      );
+    }
+
+    if (mode.kind === "origin_linked") {
+      // ============================================
+      // ORIGIN-LINKED MODE (Phase 11A.3)
+      // ============================================
+      for (const key of Object.keys(body)) {
+        if (!ORIGIN_LINKED_ALLOWED_BODY_KEYS.has(key)) {
+          const { status, body: errBody } = unexpectedFieldResponse();
+          return NextResponse.json(errBody, { status });
+        }
+      }
+
+      const selectedModels = parseSelectedModels(body);
+      if (!selectedModels) {
+        return NextResponse.json({ ok: false, errorCode: "not_enough_models", message: `Select at least ${MIN_MODELS} models.` }, { status: 400 });
+      }
+
+      // Gate 1 first, with projectId unknown (null) — see file header for
+      // why this ordering is deliberate, not an oversight.
+      const gateDenial = await checkAdmissionAndGate1({ uid, workspaceId, projectId: null });
+      if (gateDenial) return gateDenial;
+
+      const resolution = await resolveClaimVerificationOrigin({
+        runId: mode.runId,
+        claimId: mode.claimId,
+        callerUid: uid,
+        // Team scope — closes cross-Workspace origin linkage. The
+        // resolver denies workspace_mismatch if the source run's own
+        // structural binding doesn't exactly equal this URL's workspaceId.
+        expectedWorkspaceId: workspaceId,
+      });
+      if (resolution.status !== "resolved") {
+        return originNotEligibleResponse();
+      }
+
+      // Phase 11A.3C1 — project-aware PRE-EXECUTION authorization, closing
+      // the P1 PHASE 11A.3R1 found: Gate 1 above ran with `projectId: null`
+      // because the authoritative project wasn't known yet, so it could not
+      // validate the resolved source run's actual project (existence,
+      // workspace binding, active status, `research.organize` capability).
+      // Re-running the exact same PURE, read-only, no-write admission
+      // function — this time with the resolver-derived `projectId` — closes
+      // that gap using the identical policy Gate 2 independently re-derives
+      // at write time, without inventing a parallel authorization path and
+      // without weakening Gate 2 (Gate 2 still fully re-runs below, inside
+      // its own transaction, to guard against state changing during model
+      // execution). A denial here costs one extra read-only transaction
+      // instead of a wasted quota unit and five real model calls.
+      const projectPreflight = await authorizeTeamClaimVerificationAdmission({
+        uid,
+        workspaceId,
+        projectId: resolution.projectId,
+      });
+      if (projectPreflight.status !== "authorized") {
+        const { status, body: errBody } = mapGateDenial(projectPreflight);
+        return NextResponse.json(errBody, { status });
+      }
+
+      if (resolution.claimText.length > MAX_CLAIM_LEN) {
+        return NextResponse.json(
+          { ok: false, errorCode: "claim_too_long", message: `Claim must be at most ${MAX_CLAIM_LEN} characters.` },
+          { status: 400 }
+        );
+      }
+
+      return await executeAndPersistTeamClaimVerification({
+        uid,
+        workspaceId,
+        claimText: resolution.claimText,
+        selectedModels,
+        projectId: resolution.projectId,
+        origin: resolution.origin,
+      });
+    }
+
+    // ============================================
+    // ORDINARY MODE — unchanged from before this phase.
+    // ============================================
     for (const key of Object.keys(body)) {
-      if (!ALLOWED_BODY_KEYS.has(key)) {
+      if (!ORDINARY_ALLOWED_BODY_KEYS.has(key)) {
         const { status, body: errBody } = unexpectedFieldResponse();
         return NextResponse.json(errBody, { status });
       }
@@ -161,11 +565,8 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
       );
     }
 
-    let selectedModels: ModelId[] = DEFAULT_MODELS;
-    if (Array.isArray(body.models) && body.models.length > 0) {
-      selectedModels = body.models.filter((m: unknown): m is ModelId => ALL_MODELS.has(m as ModelId));
-    }
-    if (selectedModels.length < MIN_MODELS) {
+    const selectedModels = parseSelectedModels(body);
+    if (!selectedModels) {
       return NextResponse.json({ ok: false, errorCode: "not_enough_models", message: `Select at least ${MIN_MODELS} models.` }, { status: 400 });
     }
 
@@ -181,268 +582,16 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
       targetProjectId = parsedProjectId.value;
     }
 
-    // ============================================
-    // TARGET-WORKSPACE ADMISSION CHECK (Phase 10B.3.2A)
-    // ============================================
-    const admission = resolveTeamWorkspaceTargetAdmission({
+    const gateDenial = await checkAdmissionAndGate1({ uid, workspaceId, projectId: targetProjectId });
+    if (gateDenial) return gateDenial;
+
+    return await executeAndPersistTeamClaimVerification({
       uid,
       workspaceId,
-      globalEnabled: TEAM_WORKSPACES_ENABLED,
-      canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS,
-      canaryWorkspaceIdsRaw: TEAM_WORKSPACES_CANARY_WORKSPACE_IDS,
-    });
-    if (!admission.enabled) {
-      // Phase 10C.1A: concealed identically to the gate1/gate2 "unauthorized"
-      // mapping below (mapGateDenial), not a distinct 503.
-      const { status, body: errBody } = teamProjectAuthorizationDeniedResponse("team_workspaces_disabled");
-      return NextResponse.json(errBody, { status });
-    }
-
-    // ============================================
-    // GATE 1 — execution admission (no write). Must occur before quota
-    // and before any model call.
-    // ============================================
-    const gate1 = await authorizeTeamClaimVerificationAdmission({ uid, workspaceId, projectId: targetProjectId });
-    if (gate1.status !== "authorized") {
-      const { status, body: errBody } = mapGateDenial(gate1);
-      return NextResponse.json(errBody, { status });
-    }
-
-    // ============================================
-    // SUBSCRIPTION VALIDATION (best-effort, non-blocking) — same
-    // semantics/position as Personal (immediately before quota).
-    // ============================================
-    try {
-      await validateUserSubscription(uid);
-    } catch (e: any) {
-      logger.warn("[workspaces/verifications POST] Subscription validation failed (non-blocking)", { error: e?.message });
-    }
-
-    // ============================================
-    // PLAN LIMIT ENFORCEMENT
-    // ============================================
-    const usage = await checkAndIncrementUsageForRun(uid, selectedModels.length);
-    if (!usage.allowed) {
-      if (usage.reason === "MODEL_LIMIT") {
-        return NextResponse.json(
-          { ok: false, errorCode: "PLAN_MODEL_LIMIT_REACHED", message: `Your plan allows up to ${usage.maxModelsPerRun} models per run.`, maxModelsPerRun: usage.maxModelsPerRun },
-          { status: 403 }
-        );
-      }
-      if (usage.reason === "RUN_LIMIT") {
-        return NextResponse.json(
-          {
-            ok: false,
-            error: "RUN_LIMIT_REACHED",
-            errorCode: "RUN_LIMIT_REACHED",
-            message: "You've reached your monthly run limit.",
-            runsUsed: usage.runsThisMonth,
-            runsLimit: usage.maxRunsPerMonth,
-            resetsAt: usage.resetsAt.toISOString(),
-            plan: usage.plan.toUpperCase(),
-          },
-          { status: 429 }
-        );
-      }
-    }
-
-    // ============================================
-    // CLAIM EXECUTION — same functions Personal calls, unmodified.
-    // ============================================
-    const apiKeys = {
-      chatgpt: OPENAI_API_KEY,
-      claude: ANTHROPIC_API_KEY,
-      grok: XAI_API_KEY,
-      perplexity: PERPLEXITY_API_KEY,
-      gemini: GEMINI_API_KEY,
-    };
-
-    const modelResults = await runClaimVerificationPanel(claimRaw, selectedModels, apiKeys);
-    const modelEvidence = buildClaimModelEvidence(modelResults);
-
-    const verdict = computeClaimVerdict(
-      modelEvidence.map((m) => ({
-        status: m.status,
-        verdict: m.status === "ok" ? (m.verdict as ModelVerdict) : undefined,
-      }))
-    );
-
-    const consensusRows = modelEvidence.map((m) => ({
-      status: m.status as "ok" | "parse_error" | "failed",
-      verdict: m.status === "ok" ? (m.verdict as ModelVerdict) : undefined,
-      confidence: m.status === "ok" ? (m.confidence as "high" | "medium" | "low") : undefined,
-    }));
-
-    const { consensusScore, confidenceLabel, summary: consensusSummary } = computeConsensusScoring({
-      mode: "verification",
-      modelRows: consensusRows,
-      aggregateVerdict: verdict,
-    });
-
-    const digest = buildAgreementDisagreementDigest(
-      modelEvidence.map((m) => ({ modelId: m.modelId, correctParts: m.correctParts, incorrectParts: m.incorrectParts }))
-    );
-
-    const aggregateSummary = {
-      totalModels: modelEvidence.length,
-      modelsAgreeAccurate: modelEvidence.filter((m) => m.verdict === "accurate").length,
-      modelsAgreeInaccurate: modelEvidence.filter((m) => m.verdict === "inaccurate").length,
-      modelsPartial: modelEvidence.filter((m) => m.verdict === "partially_accurate").length,
-      modelsUnverifiable: modelEvidence.filter((m) => m.verdict === "unverifiable" || m.verdict === "parse_error" || m.verdict === "failed").length,
-    };
-
-    const auditBundle = buildClaimVerificationAuditBundle({
-      claimLength: claimRaw.length,
-      modelEvidence,
-      verdict,
-      consensusScore,
-      confidenceLabel,
-      evidenceQuality: consensusSummary.evidenceQuality,
-    });
-
-    // ============================================
-    // TOKEN ACCOUNTING — unconditional, same best-effort try/catch/log
-    // semantics as Personal, deliberately positioned AFTER the
-    // persistence attempt (Gate 2) so its own outcome never depends on
-    // Gate 2's result, exactly mirroring Personal's own relative
-    // ordering (token accounting after the save attempt, regardless of
-    // whether that attempt succeeded).
-    // ============================================
-    let totalTokens = 0;
-    for (const r of modelResults) {
-      totalTokens += totalTokensFromResult(r);
-    }
-
-    // ============================================
-    // GATE 2 — canonical persistence. Independently re-derives
-    // authorization from scratch; never trusts Gate 1.
-    // ============================================
-    const gate2 = await saveTeamClaimVerification({
-      uid,
-      workspaceId,
-      projectId: targetProjectId,
-      claim: claimRaw.slice(0, MAX_CLAIM_LEN),
-      verdict,
-      consensusScore,
-      confidenceLabel,
-      evidenceQuality: consensusSummary.evidenceQuality,
-      supportRatio: consensusSummary.supportRatio,
-      modelResults: modelEvidence,
-      auditBundle,
+      claimText: claimRaw,
       selectedModels,
+      projectId: targetProjectId,
     });
-
-    try {
-      await incrementUserTokenUsage(uid, totalTokens);
-    } catch (tokErr: any) {
-      logger.warn("[workspaces/verifications POST] Token increment failed", { error: tokErr?.message });
-    }
-
-    if (gate2.status !== "created") {
-      // No Team artifact. No Personal fallback. No governance. No legacy
-      // team-governance projection. Quota and provider tokens above
-      // remain consumed — the accepted, explicitly frozen tradeoff.
-      const { status, body: errBody } = mapGateDenial(gate2);
-      return NextResponse.json(errBody, { status });
-    }
-
-    // ============================================
-    // GOVERNANCE — only after Gate 2's tx.create() has actually
-    // committed. evaluateAndStoreGovernance()'s own set(...,{merge:true})
-    // would CREATE a partial, malformed document if the target didn't
-    // already exist — never call it before Gate 2 succeeds.
-    // ============================================
-    let orgGovernanceStatus: "approved" | "needs_review" | "blocked" | undefined;
-    try {
-      const governanceConsensusScore =
-        typeof consensusScore === "number" && !Number.isNaN(consensusScore)
-          ? consensusScore
-          : typeof consensusSummary.overallConsensusScore === "number" && !Number.isNaN(consensusSummary.overallConsensusScore)
-            ? consensusSummary.overallConsensusScore
-            : null;
-
-      const verificationGovernanceInput: GovernanceInput = {
-        consensusScore: governanceConsensusScore,
-        evidenceQuality: consensusSummary.evidenceQuality,
-        sourceBacked: false,
-        missingSourcesCount: 0,
-        modelHealth: {
-          ok: modelEvidence.filter((r) => r.status === "ok").length,
-          substituted: 0,
-          failed: modelEvidence.filter((r) => r.status !== "ok").length,
-        },
-        question: claimRaw.slice(0, MAX_CLAIM_LEN),
-        runType: "verification",
-        verificationVerdict: verdict,
-      };
-      const govResult = await evaluateAndStoreGovernance({
-        runId: gate2.verificationId,
-        collection: "verifications",
-        input: verificationGovernanceInput,
-        ownerUid: uid,
-      });
-      if (govResult) orgGovernanceStatus = govResult.governanceStatus;
-    } catch (govErr: unknown) {
-      logger.error("[governance] Team Claim verification evaluation failed", { error: (govErr as Error)?.message });
-    }
-
-    // ============================================
-    // LEGACY OLD-TEAM GOVERNANCE PIPELINE — unchanged legacy purpose,
-    // never used for Team Workspace authorization, only after Gate 2
-    // success (mirrors Personal's own structural nesting, where this
-    // sits after the save-attempt's try/catch too).
-    // ============================================
-    const usableForBanner = modelEvidence.filter((m) => m.status === "ok");
-    const accurateAmongUsable = usableForBanner.filter((m) => m.verdict === "accurate").length;
-
-    let userEmail = "";
-    if (adminDb) {
-      const uSnap = await adminDb.collection("users").doc(uid).get();
-      userEmail = String((uSnap.data() as UserProfile | undefined)?.email ?? "");
-    }
-
-    const gov = await applyTeamGovernancePipeline({
-      uid,
-      userEmail,
-      consensusSummary,
-      consensusScore,
-      type: "verification",
-      query: claimRaw,
-      verdict,
-      auditBundle,
-      verificationId: gate2.verificationId,
-    });
-
-    const responsePayload = mergeGovernanceIntoBody(
-      {
-        ok: true,
-        verificationId: gate2.verificationId,
-        claim: claimRaw,
-        verdict,
-        consensusScore,
-        confidenceLabel,
-        evidenceQuality: consensusSummary.evidenceQuality,
-        supportRatio: consensusSummary.supportRatio,
-        modelEvidence,
-        aggregateSummary,
-        whereModelsAgree: digest.whereModelsAgree,
-        whereModelsDisagree: digest.whereModelsDisagree,
-        auditBundle,
-        accurateAmongUsable,
-        usableModelCount: usableForBanner.length,
-        ...(orgGovernanceStatus ? { governanceStatus: orgGovernanceStatus } : {}),
-        workspaceId: gate2.workspaceId,
-        projectId: gate2.projectId,
-        usage: {
-          runsThisMonth: usage.runsThisMonth,
-          maxRunsPerMonth: usage.maxRunsPerMonth,
-          maxModelsPerRun: usage.maxModelsPerRun,
-        },
-      },
-      gov
-    );
-
-    return NextResponse.json(responsePayload, { status: 200 });
   } catch (err: any) {
     logger.error("[POST /api/workspaces/[workspaceId]/verifications] Unexpected error", { error: err?.message, stack: err?.stack });
     return NextResponse.json(
