@@ -52,4 +52,53 @@ describe("TeamResearchResultView", () => {
     const html = renderToStaticMarkup(createElement(TeamResearchResultView, { run: { runId: "run-1", results: [baseResult()] } }));
     expect(html).not.toMatch(/Approved|Blocked|Review/);
   });
+
+  describe("production hotfix — JSON-shaped rawTextFull is pretty-printed, not dumped raw", () => {
+    it("un-fenced JSON object (e.g. GPT-5.2/Perplexity style) is parsed and pretty-printed in a <pre> block", () => {
+      const raw = JSON.stringify({ scenarios: [{ label: "Moderate Crash", probability: 0.4 }] });
+      const html = renderToStaticMarkup(createElement(TeamResearchResultView, { run: { runId: "run-1", results: [baseResult({ rawTextFull: raw })] } }));
+      expect(html).toContain("<pre");
+      expect(html).toContain("&quot;scenarios&quot;");
+      expect(html).toContain("&quot;label&quot;: &quot;Moderate Crash&quot;");
+      // Pretty-printed (2-space indent), not the original single-line JSON.stringify output.
+      expect(html).not.toContain(raw.replace(/"/g, "&quot;"));
+    });
+
+    it("```json-fenced JSON (e.g. Claude/Grok/Gemini style) has its fence stripped and is pretty-printed", () => {
+      const raw = "```json\n" + JSON.stringify({ baseRates: ["one every 5-7 years"] }) + "\n```";
+      const html = renderToStaticMarkup(createElement(TeamResearchResultView, { run: { runId: "run-1", results: [baseResult({ rawTextFull: raw })] } }));
+      expect(html).toContain("<pre");
+      expect(html).toContain("&quot;baseRates&quot;");
+      expect(html).not.toContain("```");
+    });
+
+    it("plain prose (the ordinary case) still renders in a <p>, unchanged from before this hotfix", () => {
+      const html = renderToStaticMarkup(createElement(TeamResearchResultView, { run: { runId: "run-1", results: [baseResult({ rawTextFull: "The market size is approximately $50B." })] } }));
+      expect(html).not.toContain("<pre");
+      expect(html).toContain("The market size is approximately $50B.");
+    });
+
+    it("malformed/truncated JSON-looking text falls back to the plain <p> path, not a crash or empty render", () => {
+      const raw = '{"scenarios": [{"label": "Moderate Crash", "probability": 0.4';
+      const html = renderToStaticMarkup(createElement(TeamResearchResultView, { run: { runId: "run-1", results: [baseResult({ rawTextFull: raw })] } }));
+      expect(html).not.toContain("<pre");
+      expect(html).toContain("probability");
+    });
+
+    it("a bare JSON-parseable scalar (e.g. a quoted string) is NOT treated as structured output", () => {
+      const html = renderToStaticMarkup(createElement(TeamResearchResultView, { run: { runId: "run-1", results: [baseResult({ rawTextFull: '"just a quoted sentence."' })] } }));
+      expect(html).not.toContain("<pre");
+      expect(html).toContain("just a quoted sentence.");
+    });
+
+    it("a failed model's JSON-shaped error path is never run through JSON formatting", () => {
+      const html = renderToStaticMarkup(
+        createElement(TeamResearchResultView, {
+          run: { runId: "run-1", results: [baseResult({ status: "failed", rawTextFull: '{"ignored": true}', error: { message: "Provider timeout" } })] },
+        })
+      );
+      expect(html).not.toContain("<pre");
+      expect(html).toContain("Provider timeout");
+    });
+  });
 });
