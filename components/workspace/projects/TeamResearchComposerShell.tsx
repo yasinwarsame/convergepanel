@@ -120,7 +120,20 @@ export default function TeamResearchComposerShell({
 
       <div className="mt-2">
         <p className="text-xs font-medium uppercase tracking-wide text-cp-faint">{project.name}</p>
-        <h2 className="mt-1 text-xl font-semibold text-cp-text">Start research</h2>
+        {/*
+          Before/while composing: "Start research" (this is the permanent
+          per-Project action's own page — not to be confused with the
+          separate "Start Research" link on the Project detail page, which
+          this heading has no effect on). After a successful run: show the
+          actual submitted question (kept in `question` state, never
+          cleared except by "Start another research") rather than a stale
+          "Start research" label sitting above a completed result — falls
+          back to a generic "Research results" only in the unreachable
+          case `question` is somehow empty at that point.
+        */}
+        <h2 className="mt-1 text-xl font-semibold text-cp-text break-words">
+          {result ? (question.trim().length > 0 ? question : "Research results") : "Start research"}
+        </h2>
       </div>
 
       {!result && (
