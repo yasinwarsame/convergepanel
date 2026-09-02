@@ -31,6 +31,7 @@ export default async function WorkspaceOverviewPage({ params }: { params: { work
       workspaceName={access.workspace.name}
       canInvite={access.capabilities.includes("members.invite")}
       canManageInvitations={access.capabilities.includes("members.manage")}
+      canCreateProject={access.capabilities.includes("projects.create")}
       canReadAudit={access.capabilities.includes("audit.read")}
     />
   );

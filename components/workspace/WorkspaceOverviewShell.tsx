@@ -39,12 +39,14 @@ export default function WorkspaceOverviewShell({
   workspaceName,
   canInvite,
   canManageInvitations,
+  canCreateProject,
   canReadAudit,
 }: {
   workspaceId: string;
   workspaceName: string;
   canInvite: boolean;
   canManageInvitations: boolean;
+  canCreateProject: boolean;
   canReadAudit: boolean;
 }) {
   const { user, authReady } = useAuth();
@@ -111,7 +113,12 @@ export default function WorkspaceOverviewShell({
       {state.status === "error" && <ReviewErrorState message="We couldn't load this Workspace's setup status. Try again." onRetry={load} />}
 
       {state.status === "ready" && (
-        <WorkspaceActivationPanel workspaceId={workspaceId} activation={state.activation} canInvite={canInvite} />
+        <WorkspaceActivationPanel
+          workspaceId={workspaceId}
+          activation={state.activation}
+          canInvite={canInvite}
+          canCreateProject={canCreateProject}
+        />
       )}
 
       {state.status === "ready" && state.activation.isFullyActive && (
