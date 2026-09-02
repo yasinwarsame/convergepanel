@@ -17,7 +17,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { resolveRequestIdentity } from "@/lib/auth/resolveRequestIdentity";
 import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelemetry";
 import { checkRateLimit } from "@/lib/security/rateLimit";
-import { invalidRequestBodyResponse, unexpectedFieldResponse, internalErrorResponse } from "@/lib/workspaces/teamWorkspaceErrorResponse";
+import { invalidRequestBodyResponse, unexpectedFieldResponse, internalErrorResponse, seatLimitReachedResponse } from "@/lib/workspaces/teamWorkspaceErrorResponse";
 import { teamProjectAuthorizationDeniedResponse, teamWorkspaceReadNotFoundResponse } from "@/lib/projects/teamProjectErrorResponse";
 import { resendWorkspaceInvitation, type ResendWorkspaceInvitationResult } from "@/lib/firestore/workspaceInvitations";
 import { getWorkspace } from "@/lib/firestore/workspaces";
@@ -60,6 +60,8 @@ function mapResendDenial(result: Exclude<ResendWorkspaceInvitationResult, { stat
       return { status: 409, body: { ok: false, errorCode: "stale_superseded", message: "This invitation has been superseded by a newer one." } };
     case "invitation_version_conflict":
       return { status: 409, body: { ok: false, errorCode: "invitation_version_conflict", message: "This invitation changed since you last loaded it. Please refresh and try again." } };
+    case "seat_limit_reached":
+      return seatLimitReachedResponse();
     case "firestore_unavailable":
     case "state_corruption":
     case "resend_failed":

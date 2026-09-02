@@ -38,6 +38,7 @@ const stores: Record<string, Map<string, StoredDoc>> = {
   workspaceInvitations: new Map(),
   workspaceInvitationKeys: new Map(),
   teamWorkspaceCanaryCapacity: new Map(),
+  teamWorkspaceSeatAdmission: new Map(),
 };
 
 function resetStores() {
@@ -277,26 +278,49 @@ describe("target admission wiring", () => {
   });
 });
 
+/**
+ * Phase 12A.1S.1 note on this whole file: the permanent
+ * `TEAM_WORKSPACE_COLLABORATOR_SEAT_LIMIT` (5) is now ALWAYS-ON and checked
+ * FIRST, independent of the canary's own 10-member ceiling and independent
+ * of `TEAM_WORKSPACES_ENABLED` (see `teamWorkspaceSeatAdmission.ts` — never
+ * conditional on canary/global admission, per the PHASE 12A.1S.0 audit).
+ * Tests below that specifically want to probe the CANARY mechanism's OWN
+ * 9/10/11-occupancy boundary in isolation now seed `teamWorkspaceCanaryCapacity`
+ * DIRECTLY (bypassing its live-member-count bootstrap) rather than via
+ * `seedFillerMembers()`, and keep REAL active-member counts low (under the
+ * permanent limit) so the new, independent, always-on gate does not itself
+ * intercept the create first — exactly mirroring how a real Team Workspace
+ * could never legitimately reach 9-11 real occupants once this permanent
+ * limit ships, while still letting canary's own persisted-counter behavior
+ * be exercised precisely as these tests originally intended.
+ */
+function seedCanaryCapacityDirectly(reservedCount: number, revision = 0) {
+  stores.teamWorkspaceCanaryCapacity.set(WS_ID, { data: { schemaVersion: 1, workspaceId: WS_ID, reservedCount, revision, updatedAt: nextUpdateTime() }, updateTime: nextUpdateTime() });
+}
+
 describe("Part K — create + capacity", () => {
   it("A. occupancy 9 (2 members + 7 fillers), new invite -> created, capacity 10", async () => {
-    seedFillerMembers(7); // owner + admin + 7 fillers = 9
+    seedFillerMembers(2); // owner + admin + 2 fillers = 4 real active — under the permanent 5-seat limit
+    seedCanaryCapacityDirectly(9); // canary's OWN cache, decoupled from real member count — see file-level note above
     const result = await createWorkspaceInvitation({ uid: ADMIN_UID, workspaceId: WS_ID, email: INVITEE_EMAIL, role: "member" });
     expect(result.status).toBe("created");
-    expect(capacityDoc()).toMatchObject({ reservedCount: 10, revision: 0 });
+    expect(capacityDoc()).toMatchObject({ reservedCount: 10, revision: 1 });
   });
 
   it("B. occupancy 10, new invite -> workspace_member_capacity_reached, zero invitation/guard writes, capacity unchanged", async () => {
-    seedFillerMembers(8); // owner + admin + 8 fillers = 10
+    seedFillerMembers(2); // 4 real active — under the permanent 5-seat limit
+    seedCanaryCapacityDirectly(10);
     const before = stores.workspaceInvitations.size;
     const result = await createWorkspaceInvitation({ uid: ADMIN_UID, workspaceId: WS_ID, email: INVITEE_EMAIL, role: "member" });
     expect(result).toEqual({ status: "workspace_member_capacity_reached" });
     expect(stores.workspaceInvitations.size).toBe(before);
     expect(stores.workspaceInvitationKeys.size).toBe(0);
-    expect(stores.teamWorkspaceCanaryCapacity.has(WS_ID)).toBe(false); // rejection never persists bootstrap
+    expect(capacityDoc()).toMatchObject({ reservedCount: 10, revision: 0 }); // unchanged by the rejection
   });
 
   it("C. legacy occupancy 11, new invite -> denied, zero writes", async () => {
-    seedFillerMembers(9); // owner + admin + 9 fillers = 11
+    seedFillerMembers(2); // 4 real active — under the permanent 5-seat limit
+    seedCanaryCapacityDirectly(11);
     const result = await createWorkspaceInvitation({ uid: ADMIN_UID, workspaceId: WS_ID, email: INVITEE_EMAIL, role: "member" });
     expect(result).toEqual({ status: "workspace_member_capacity_reached" });
     expect(stores.workspaceInvitations.size).toBe(0);
@@ -324,28 +348,30 @@ describe("Part K — create + capacity", () => {
   });
 
   it("F. accepted prior, replacement at occupancy 9 -> +1 to 10 (new reservation, prior carries no reservation)", async () => {
-    seedFillerMembers(6); // owner + admin + 6 fillers = 8 active
+    seedFillerMembers(2); // 4 real active — under the permanent 5-seat limit
+    seedCanaryCapacityDirectly(8); // canary's OWN cache = the "8 active" base this test wants to start canary's reserve from
     seedGuardCurrentInvitation(INVITEE_EMAIL, "accepted", 9_999_999_999); // no reservation
-    // base = 8 active + 0 (accepted, not pending) = 8 -> reserve -> 9
+    // canary base = 8 -> reserve -> 9
     const result = await createWorkspaceInvitation({ uid: ADMIN_UID, workspaceId: WS_ID, email: INVITEE_EMAIL, role: "member" });
     expect(result.status).toBe("created");
-    expect(capacityDoc()).toMatchObject({ reservedCount: 9, revision: 0 });
+    expect(capacityDoc()).toMatchObject({ reservedCount: 9, revision: 1 });
   });
 
   it("G. revoked prior, replacement -> +1 (new reservation)", async () => {
-    seedFillerMembers(6);
+    seedFillerMembers(2); // 4 real active — under the permanent 5-seat limit
+    seedCanaryCapacityDirectly(8);
     seedGuardCurrentInvitation(INVITEE_EMAIL, "revoked", 9_999_999_999);
     const result = await createWorkspaceInvitation({ uid: ADMIN_UID, workspaceId: WS_ID, email: INVITEE_EMAIL, role: "member" });
     expect(result.status).toBe("created");
-    expect(capacityDoc()).toMatchObject({ reservedCount: 9, revision: 0 });
+    expect(capacityDoc()).toMatchObject({ reservedCount: 9, revision: 1 });
   });
 
-  it("global Team ON -> capacity inert even at occupancy 11", async () => {
+  it("global Team ON -> canary inert even at occupancy 11, but the PERMANENT seat limit is unconditional and still blocks this create (Phase 12A.1S.1 — never gated on TEAM_WORKSPACES_ENABLED)", async () => {
     teamWorkspacesEnabled = true;
-    seedFillerMembers(9); // 11 active
+    seedFillerMembers(9); // 11 active — genuinely over the permanent 5-seat limit
     const result = await createWorkspaceInvitation({ uid: ADMIN_UID, workspaceId: WS_ID, email: INVITEE_EMAIL, role: "member" });
-    expect(result.status).toBe("created");
-    expect(stores.teamWorkspaceCanaryCapacity.has(WS_ID)).toBe(false); // never even consulted
+    expect(result).toEqual({ status: "seat_limit_reached" });
+    expect(stores.teamWorkspaceCanaryCapacity.has(WS_ID)).toBe(false); // canary itself confirmed never even consulted
   });
 });
 
@@ -492,7 +518,8 @@ describe("Part N/54-56 — acceptance oracle parity", () => {
 
 describe("Part Q — concurrency / atomicity", () => {
   it("62. create/create at capacity 9: exactly one reservation commits, final capacity 10", async () => {
-    seedFillerMembers(7); // 9 active
+    seedFillerMembers(2); // 4 real active — under the permanent 5-seat limit
+    seedCanaryCapacityDirectly(9); // canary's OWN cache, decoupled from real member count
     retriesBeforeSuccess = 1;
     let fired = false;
     concurrentMutationHook = (ref) => {
@@ -537,7 +564,7 @@ describe("Part Q — concurrency / atomicity", () => {
   });
 
   it("66b. POST-STAGE ABORT: capacity write is successfully STAGED (reserve succeeds), then a LATER write in the SAME transaction throws — the whole transaction aborts and the already-staged capacity write never commits", async () => {
-    seedFillerMembers(7); // 9 active — room for exactly one more reservation
+    seedFillerMembers(2); // 4 real active — under the permanent 5-seat limit, room for exactly one more reservation on both canary and the permanent module
     // createWorkspaceInvitation() allocates its invitationRef via a single
     // no-arg `.doc()` call BEFORE runTransaction() opens; autoIdCounter is
     // reset to 0 in beforeEach and nothing else in this flow calls `.doc()`
@@ -551,11 +578,13 @@ describe("Part Q — concurrency / atomicity", () => {
     const result = await createWorkspaceInvitation({ uid: ADMIN_UID, workspaceId: WS_ID, email: INVITEE_EMAIL, role: "member" });
 
     expect(result).toEqual({ status: "create_failed" });
-    // The capacity write that WAS staged (reserve succeeded, 9->10) before
-    // the later tx.create() throw never actually committed — this fake
-    // only applies pendingWrites after the transaction callback resolves
-    // without throwing, exactly mirroring real Firestore's atomic commit.
+    // The capacity writes that WERE staged (both the permanent module's own
+    // reserve AND canary's reserve, each succeeding in turn) before the
+    // later tx.create() throw never actually committed — this fake only
+    // applies pendingWrites after the transaction callback resolves without
+    // throwing, exactly mirroring real Firestore's atomic commit.
     expect(stores.teamWorkspaceCanaryCapacity.has(WS_ID)).toBe(false);
+    expect(stores.teamWorkspaceSeatAdmission.has(WS_ID)).toBe(false); // Phase 12A.1S.1 — the permanent module's own staged write rolls back too
     // No guard was created either — the whole invitation write group aborted together.
     expect(stores.workspaceInvitationKeys.size).toBe(0);
     // The poisoned document is untouched — create() throws before overwriting.
@@ -566,7 +595,8 @@ describe("Part Q — concurrency / atomicity", () => {
 
 describe("Integration-level concurrency: create/create, create/revoke, already-active accept/create", () => {
   it("create/create at capacity 9: exactly one reservation commits, final capacity 10, exactly one invitation/guard pair created for the winner (integration-level, not just the primitive)", async () => {
-    seedFillerMembers(7); // 9 active
+    seedFillerMembers(2); // 4 real active — under the permanent 5-seat limit
+    seedCanaryCapacityDirectly(9); // canary's OWN cache, decoupled from real member count
     retriesBeforeSuccess = 1;
     let fired = false;
     concurrentMutationHook = (ref) => {
@@ -586,15 +616,14 @@ describe("Integration-level concurrency: create/create, create/revoke, already-a
   });
 
   it("create/revoke race: a concurrent revoke's release commits between this create's read and its retry — the retried create correctly observes the freed seat and succeeds, with a consistent final invitation+guard+capacity state", async () => {
-    seedFillerMembers(7); // 9 active
+    seedFillerMembers(2); // 4 real active — under the permanent 5-seat limit
     // Seed a pending invitation whose (simulated) concurrent revoke will free a seat.
     const { invitationId: concurrentInvId } = seedGuardCurrentInvitation("someone-else@example.com", "pending", 9_999_999_999);
-    // Bootstrap capacity to 10 (9 active + 1 pending) via one throwaway
-    // reserve-triggering call first, so the race below starts from an
-    // EXISTING capacity document (exercising the update, not create, path).
-    const bootstrapResult = await createWorkspaceInvitation({ uid: ADMIN_UID, workspaceId: WS_ID, email: "bootstrap-filler@example.com", role: "member" });
-    expect(bootstrapResult).toEqual({ status: "workspace_member_capacity_reached" }); // already at 10 (9 active + 1 pending), correctly denied — leaves no trace
-    // Force an existing capacity document at exactly 10 for the race itself.
+    // Force an existing canary capacity document at exactly 10, decoupled
+    // from real member count (Phase 12A.1S.1 — the permanent module's own
+    // real-occupancy check must stay under 5 for this create to reach
+    // canary's logic at all, so canary's own cache is seeded directly
+    // rather than bootstrapped from real member count).
     stores.teamWorkspaceCanaryCapacity.set(WS_ID, { data: { schemaVersion: 1, workspaceId: WS_ID, reservedCount: 10, revision: 3, updatedAt: nextUpdateTime() }, updateTime: nextUpdateTime() });
 
     retriesBeforeSuccess = 1;
@@ -621,8 +650,8 @@ describe("Integration-level concurrency: create/create, create/revoke, already-a
   });
 
   it("already-active accept/create race: a concurrent already-active acceptance's release commits between this create's read and its retry — the retried create observes the freed seat and succeeds, capacity/membership/invitation all end consistent", async () => {
-    seedFillerMembers(6); // 8 active
-    seedMembership(INVITEE_UID, "member"); // 9 active total — the future "already-active" acceptor
+    seedFillerMembers(1); // 3 real active + the acceptor below = 4 — under the permanent 5-seat limit (canary's own cache is seeded directly below regardless of real count)
+    seedMembership(INVITEE_UID, "member"); // the future "already-active" acceptor
     seedGuardCurrentInvitation(INVITEE_EMAIL, "pending", 9_999_999_999); // that acceptor's own redundant reservation
     // Force an existing capacity document at exactly 10 (9 active + 1 pending).
     stores.teamWorkspaceCanaryCapacity.set(WS_ID, { data: { schemaVersion: 1, workspaceId: WS_ID, reservedCount: 10, revision: 0, updatedAt: nextUpdateTime() }, updateTime: nextUpdateTime() });
@@ -646,7 +675,7 @@ describe("Integration-level concurrency: create/create, create/revoke, already-a
 
 describe("Retry side effects", () => {
   it("create: a retried transaction produces exactly ONE invitation document and ONE guard, using the SAME pre-generated token/id across attempts — no duplicate security material, no orphaned partial writes from the discarded first attempt", async () => {
-    seedFillerMembers(7); // 9 active, room for one
+    seedFillerMembers(2); // 4 real active — under the permanent 5-seat limit, room for one more
     retriesBeforeSuccess = 1;
     let fired = false;
     concurrentMutationHook = (ref) => {
@@ -662,7 +691,12 @@ describe("Retry side effects", () => {
     // applied; only the kept attempt's single set of writes landed.
     expect(stores.workspaceInvitations.size).toBe(1);
     expect(stores.workspaceInvitationKeys.size).toBe(1);
-    expect(capacityDoc()).toMatchObject({ reservedCount: 10, revision: 0 });
+    // Canary's own fresh live-count bootstrap (4 real active: owner + admin
+    // + 2 fillers) -> create path, reservedCount 5, revision 0 — validates
+    // the SAME bootstrap-then-create structural path the original 10/0
+    // assertion did, just at a value compatible with the permanent 5-seat
+    // limit's own independent real-occupancy check (Phase 12A.1S.1).
+    expect(capacityDoc()).toMatchObject({ reservedCount: 5, revision: 0 });
     // The token used for the actual (kept) attempt is the SAME rawToken
     // generated once before runTransaction() — retried attempts never
     // regenerate it (see createWorkspaceInvitation()'s own doc comment).

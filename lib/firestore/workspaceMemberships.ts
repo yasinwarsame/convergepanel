@@ -21,6 +21,7 @@ import { isCanonicalTeamOwnerMembership } from "@/lib/workspaces/ownerInvariant"
 import { authorizeTeamWorkspaceMutationInTransaction, type TeamMutationAuthorizationDenialReason } from "@/lib/workspaces/authorizeTeamWorkspaceMutationInTransaction";
 import { canManageMembershipTargetRole } from "@/lib/workspaces/membershipTargetAuthority";
 import { releaseTeamWorkspaceCanarySlot } from "@/lib/workspaces/teamWorkspaceCanaryCapacity";
+import { planTeamWorkspaceSeatRelease, commitTeamWorkspaceSeatRelease, type TeamWorkspaceSeatReleasePlan } from "@/lib/workspaces/teamWorkspaceSeatAdmission";
 import { buildWorkspaceMembershipEventDocData } from "@/lib/workspaces/workspaceMembershipEvents";
 import type { WorkspaceMembershipRole, WorkspaceMembershipV1 } from "@/lib/workspaces/membershipTypes";
 import { isWellFormedWorkspaceV1, type TeamWorkspaceV1 } from "@/lib/workspaces/types";
@@ -492,12 +493,28 @@ export async function removeWorkspaceMembership(args: { uid: string; workspaceId
         return { kind: "target_role_not_manageable" };
       }
 
+      // Permanent seat-limit release, Phase 12A.1S.1 — Section W: every
+      // target reachable at this point is a real, active, non-owner
+      // membership (Owner removal was already rejected above, and
+      // `status !== "active"` already returned `already_removed`) — so a
+      // successful removal unconditionally frees exactly one seat, no
+      // expiry-style condition needed (unlike the invitation-revoke call
+      // site — memberships have no expiry concept at all). Plan (read-only)
+      // before canary's own read-then-write release, commit (write-only)
+      // after it — see teamWorkspaceSeatAdmission.ts's ordering rationale.
+      const seatReleasePlan: TeamWorkspaceSeatReleasePlan = await planTeamWorkspaceSeatRelease(tx, args.workspaceId);
+      if (seatReleasePlan.kind === "state_corruption") {
+        return { kind: "state_corruption" };
+      }
+
       if (isWorkspaceCapacityControlled(args.workspaceId)) {
         const release = await releaseTeamWorkspaceCanarySlot(tx, args.workspaceId);
         if (release.status !== "released") {
           return { kind: "state_corruption" };
         }
       }
+
+      commitTeamWorkspaceSeatRelease(tx, args.workspaceId, seatReleasePlan);
 
       const now = Timestamp.now();
       tx.update(targetRef, { status: "removed", removedAt: now, removedByUserId: args.uid, updatedAt: now });

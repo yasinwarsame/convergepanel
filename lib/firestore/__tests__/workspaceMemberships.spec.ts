@@ -24,10 +24,14 @@ const stores: Record<string, Map<string, StoredDoc>> = {
   workspaceMemberships: new Map(),
   teamWorkspaceCanaryCapacity: new Map(),
   workspaceMembershipEvents: new Map(),
+  workspaceInvitations: new Map(),
+  workspaceInvitationKeys: new Map(),
+  teamWorkspaceSeatAdmission: new Map(),
 };
 
 function makeDocRef(collectionName: string, docId: string) {
   return {
+    __kind: "doc" as const,
     __collection: collectionName,
     __id: docId,
     id: docId,
@@ -38,6 +42,26 @@ function makeDocRef(collectionName: string, docId: string) {
       const entry = store.get(docId);
       return { exists: entry !== undefined, data: () => entry?.data, updateTime: entry?.updateTime };
     },
+  };
+}
+
+type QueryFilter = [string, string, unknown];
+
+/**
+ * Query-object support, Phase 12A.1S.1 — added so
+ * `teamWorkspaceSeatAdmission.ts`'s bootstrap/live-recompute
+ * `tx.get(collection.where(...).where(...))` reads (now ALWAYS reached by
+ * `removeWorkspaceMembership()` — unlike canary capacity, this module is
+ * never gated behind `isWorkspaceCapacityControlled()`/`TEAM_WORKSPACES_ENABLED`)
+ * work inside a transaction here. Mirrors
+ * `workspaceInvitationCapacityIntegration.spec.ts`'s `makeQuery()`.
+ */
+function makeQuery(collectionName: string, filters: QueryFilter[]): any {
+  return {
+    __kind: "query" as const,
+    __collection: collectionName,
+    __filters: filters,
+    where: (field: string, op: string, value: unknown) => makeQuery(collectionName, [...filters, [field, op, value]]),
   };
 }
 
@@ -66,6 +90,7 @@ let forceSetFailureForCollection: string | null = null;
 const mockAdminDb: any = {
   collection: (name: string) => ({
     doc: (docId?: string) => makeDocRef(name, docId ?? `auto-${++autoIdCounter}`),
+    where: (field: string, op: string, value: unknown) => makeQuery(name, [[field, op, value]]),
   }),
   runTransaction: jest.fn().mockImplementation(async (fn: (txn: any) => Promise<any>) => {
     // Real Firestore transactions buffer every write and apply them
@@ -86,7 +111,17 @@ const mockAdminDb: any = {
     // the way a real Firestore transaction does.
     const pendingWrites: Array<() => void> = [];
     const txn = {
-      get: async (ref: { __collection: string; __id: string }) => {
+      get: async (ref: any) => {
+        if (ref.__kind === "query") {
+          const store = stores[ref.__collection];
+          const docs: Array<{ id: string; data: () => Record<string, unknown>; exists: true; updateTime: Timestamp }> = [];
+          for (const [id, entry] of store.entries()) {
+            const matches = (ref.__filters as QueryFilter[]).every(([field, op, value]) => op === "==" && (entry.data as Record<string, unknown>)[field] === value);
+            if (matches) docs.push({ id, data: () => entry.data, exists: true, updateTime: entry.updateTime });
+          }
+          if (concurrentMutationHook) concurrentMutationHook(ref);
+          return { empty: docs.length === 0, docs, size: docs.length };
+        }
         const store = stores[ref.__collection];
         const entry = store.get(ref.__id);
         const snapshot = { exists: entry !== undefined, data: () => entry?.data, updateTime: entry?.updateTime };
@@ -214,6 +249,9 @@ beforeEach(() => {
   stores.workspaceMemberships.clear();
   stores.teamWorkspaceCanaryCapacity.clear();
   stores.workspaceMembershipEvents.clear();
+  stores.workspaceInvitations.clear();
+  stores.workspaceInvitationKeys.clear();
+  stores.teamWorkspaceSeatAdmission.clear();
   concurrentMutationHook = null;
   forceSetFailureForCollection = null;
   firestoreUnavailableFlag.value = false;

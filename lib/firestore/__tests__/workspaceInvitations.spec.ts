@@ -25,6 +25,7 @@ const stores: Record<string, Map<string, StoredDoc>> = {
   workspaceMemberships: new Map(),
   workspaceInvitations: new Map(),
   workspaceInvitationKeys: new Map(),
+  teamWorkspaceSeatAdmission: new Map(),
 };
 
 function resetStores() {
@@ -43,8 +44,11 @@ let concurrentMutationHook: ((ref: { __collection: string; __id: string }) => vo
 let retriesBeforeSuccess = 0;
 let invitationsAutoIdCallCount = 0;
 
+type QueryFilter = [string, string, unknown];
+
 function makeDocRef(collectionName: string, docId: string) {
   return {
+    __kind: "doc" as const,
     __collection: collectionName,
     __id: docId,
     id: docId,
@@ -52,6 +56,33 @@ function makeDocRef(collectionName: string, docId: string) {
       const store = stores[collectionName];
       const entry = store.get(docId);
       return { exists: entry !== undefined, data: () => entry?.data, updateTime: entry?.updateTime };
+    },
+  };
+}
+
+/**
+ * Query-object support, Phase 12A.1S.1 — added alongside the pre-existing
+ * doc-ref shape so `teamWorkspaceSeatAdmission.ts`'s bootstrap/live-recompute
+ * `tx.get(collection.where(...).where(...))` reads (now ALWAYS reached by
+ * revoke/accept/create — unlike canary capacity, this module is never
+ * gated behind an opt-in flag) work inside a transaction here, not merely
+ * in the separate, richer `workspaceInvitationCapacityIntegration.spec.ts`
+ * fake. Mirrors that file's `makeQuery()`/query-aware `txn.get()`.
+ */
+function makeQuery(collectionName: string, filters: QueryFilter[]): any {
+  return {
+    __kind: "query" as const,
+    __collection: collectionName,
+    __filters: filters,
+    where: (field: string, op: string, value: unknown) => makeQuery(collectionName, [...filters, [field, op, value]]),
+    get: async () => {
+      const store = stores[collectionName];
+      const docs: Array<{ id: string; data: () => Record<string, unknown>; exists: true; updateTime: Timestamp }> = [];
+      for (const [id, entry] of store.entries()) {
+        const matches = filters.every(([field, op, value]) => op === "==" && (entry.data as Record<string, unknown>)[field] === value);
+        if (matches) docs.push({ id, data: () => entry.data, exists: true, updateTime: entry.updateTime });
+      }
+      return { empty: docs.length === 0, docs };
     },
   };
 }
@@ -64,17 +95,7 @@ const mockAdminDb: any = {
       }
       return makeDocRef(name, docId ?? `auto-${++autoIdCounter}`);
     },
-    where: (field: string, op: string, value: unknown) => ({
-      get: async () => {
-        const store = stores[name];
-        const docs: Array<{ id: string; data: () => Record<string, unknown>; exists: true; updateTime: Timestamp }> = [];
-        for (const [id, entry] of store.entries()) {
-          const matches = op === "==" ? (entry.data as Record<string, unknown>)[field] === value : false;
-          if (matches) docs.push({ id, data: () => entry.data, exists: true, updateTime: entry.updateTime });
-        }
-        return { empty: docs.length === 0, docs };
-      },
-    }),
+    where: (field: string, op: string, value: unknown) => makeQuery(name, [[field, op, value]]),
   }),
   getAll: async (...refs: Array<{ __collection: string; __id: string }>) => {
     return refs.map((ref) => {
@@ -89,12 +110,20 @@ const mockAdminDb: any = {
     while (true) {
       const pendingWrites: Array<() => void> = [];
       const txn = {
-        get: async (ref: { __collection: string; __id: string }) => {
+        get: async (ref: any) => {
+          if (concurrentMutationHook) concurrentMutationHook(ref);
+          if (ref.__kind === "query") {
+            const store = stores[ref.__collection];
+            const docs: Array<{ id: string; data: () => Record<string, unknown>; exists: true; updateTime: Timestamp }> = [];
+            for (const [id, entry] of store.entries()) {
+              const matches = (ref.__filters as QueryFilter[]).every(([field, op, value]) => op === "==" && (entry.data as Record<string, unknown>)[field] === value);
+              if (matches) docs.push({ id, data: () => entry.data, exists: true, updateTime: entry.updateTime });
+            }
+            return { empty: docs.length === 0, docs, size: docs.length };
+          }
           const store = stores[ref.__collection];
           const entry = store.get(ref.__id);
-          const snapshot = { exists: entry !== undefined, data: () => entry?.data, updateTime: entry?.updateTime };
-          if (concurrentMutationHook) concurrentMutationHook(ref);
-          return snapshot;
+          return { exists: entry !== undefined, data: () => entry?.data, updateTime: entry?.updateTime };
         },
         create: (ref: { __collection: string; __id: string }, data: Record<string, unknown>) => {
           const store = stores[ref.__collection];
