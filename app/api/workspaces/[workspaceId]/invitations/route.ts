@@ -22,7 +22,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { resolveRequestIdentity } from "@/lib/auth/resolveRequestIdentity";
 import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelemetry";
 import { checkRateLimit } from "@/lib/security/rateLimit";
-import { teamWorkspacesDisabledResponse, invalidRequestBodyResponse, unexpectedFieldResponse, internalErrorResponse, workspaceMemberCapacityReachedResponse } from "@/lib/workspaces/teamWorkspaceErrorResponse";
+import { teamWorkspacesDisabledResponse, invalidRequestBodyResponse, unexpectedFieldResponse, internalErrorResponse, workspaceMemberCapacityReachedResponse, seatLimitReachedResponse } from "@/lib/workspaces/teamWorkspaceErrorResponse";
 import { teamProjectAuthorizationDeniedResponse, teamWorkspaceReadNotFoundResponse } from "@/lib/projects/teamProjectErrorResponse";
 import { createWorkspaceInvitation, listWorkspaceInvitations, type CreateWorkspaceInvitationResult } from "@/lib/firestore/workspaceInvitations";
 import { getWorkspace } from "@/lib/firestore/workspaces";
@@ -74,6 +74,8 @@ function mapCreateDenial(result: Exclude<CreateWorkspaceInvitationResult, { stat
       return { status: 409, body: { ok: false, errorCode: "duplicate_live_invitation", message: "A live invitation already exists for this email address." } };
     case "workspace_member_capacity_reached":
       return workspaceMemberCapacityReachedResponse();
+    case "seat_limit_reached":
+      return seatLimitReachedResponse();
     case "firestore_unavailable":
     case "state_corruption":
     case "create_failed":

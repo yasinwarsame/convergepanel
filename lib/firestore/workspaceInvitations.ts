@@ -36,6 +36,15 @@ import { logger } from "@/lib/logger";
 import { TEAM_WORKSPACES_ENABLED, TEAM_WORKSPACES_CANARY_UIDS, TEAM_WORKSPACES_CANARY_WORKSPACE_IDS } from "@/lib/env";
 import { resolveTeamWorkspaceTargetAdmission, capacityControlled } from "@/lib/workspaces/teamWorkspaceTargetAdmission";
 import { reserveTeamWorkspaceCanarySlot, releaseTeamWorkspaceCanarySlot } from "@/lib/workspaces/teamWorkspaceCanaryCapacity";
+import {
+  planTeamWorkspaceSeatReservation,
+  commitTeamWorkspaceSeatReservation,
+  planTeamWorkspaceSeatRelease,
+  commitTeamWorkspaceSeatRelease,
+  reserveTeamWorkspaceSeat,
+  type TeamWorkspaceSeatReservationPlan,
+  type TeamWorkspaceSeatReleasePlan,
+} from "@/lib/workspaces/teamWorkspaceSeatAdmission";
 import { authorizeTeamWorkspaceMutationInTransaction, type TeamMutationAuthorizationDenialReason } from "@/lib/workspaces/authorizeTeamWorkspaceMutationInTransaction";
 import { resolveWorkspaceAccess } from "@/lib/workspaces/resolveWorkspaceAccess";
 import { canManageInvitationTargetRole } from "@/lib/workspaces/invitationRoleAuthority";
@@ -120,6 +129,7 @@ export type CreateWorkspaceInvitationResult =
   | { status: "invalid_role" }
   | { status: "duplicate_live_invitation" }
   | { status: "workspace_member_capacity_reached" }
+  | { status: "seat_limit_reached" }
   | { status: "state_corruption" }
   | { status: "create_failed" };
 
@@ -162,6 +172,7 @@ export async function createWorkspaceInvitation(args: { uid: string; workspaceId
     | { kind: "role_target_forbidden" }
     | { kind: "duplicate_live_invitation" }
     | { kind: "workspace_member_capacity_reached" }
+    | { kind: "seat_limit_reached" }
     | { kind: "state_corruption" };
 
   let txResult: TxResult;
@@ -217,6 +228,26 @@ export async function createWorkspaceInvitation(args: { uid: string; workspaceId
         }
       }
 
+      // Permanent seat-limit reservation, Phase 12A.1S.1 — ALWAYS-ON,
+      // independent of TEAM_WORKSPACES_ENABLED/canary admission (unlike the
+      // canary reserve below). Its PLAN (read-only) must run BEFORE the
+      // canary reserve call, and its COMMIT (write-only) must run AFTER it
+      // — Firestore transactions require every read in the whole
+      // transaction to precede every write in the whole transaction, and
+      // `reserveTeamWorkspaceCanarySlot()` is itself an opaque
+      // read-then-write helper. See teamWorkspaceSeatAdmission.ts's own doc
+      // comment for the full ordering rationale.
+      let seatPlan: TeamWorkspaceSeatReservationPlan | null = null;
+      if (!priorReservationCarriesOver) {
+        seatPlan = await planTeamWorkspaceSeatReservation(tx, args.workspaceId);
+        if (seatPlan.kind === "limit_reached") {
+          return { kind: "seat_limit_reached" };
+        }
+        if (seatPlan.kind === "state_corruption") {
+          return { kind: "state_corruption" };
+        }
+      }
+
       if (!priorReservationCarriesOver && isWorkspaceCapacityControlled(args.workspaceId)) {
         const reserve = await reserveTeamWorkspaceCanarySlot(tx, args.workspaceId);
         if (reserve.status === "capacity_reached") {
@@ -225,6 +256,10 @@ export async function createWorkspaceInvitation(args: { uid: string; workspaceId
         if (reserve.status !== "reserved") {
           return { kind: "state_corruption" };
         }
+      }
+
+      if (seatPlan && seatPlan.kind === "admit") {
+        commitTeamWorkspaceSeatReservation(tx, args.workspaceId, seatPlan);
       }
 
       const now = Timestamp.now();
@@ -272,6 +307,8 @@ export async function createWorkspaceInvitation(args: { uid: string; workspaceId
       return { status: "duplicate_live_invitation" };
     case "workspace_member_capacity_reached":
       return { status: "workspace_member_capacity_reached" };
+    case "seat_limit_reached":
+      return { status: "seat_limit_reached" };
     case "state_corruption":
       return { status: "state_corruption" };
     case "created":
@@ -312,6 +349,7 @@ export type ResendWorkspaceInvitationResult =
   | { status: "invalid_state" }
   | { status: "stale_superseded" }
   | { status: "invitation_version_conflict" }
+  | { status: "seat_limit_reached" }
   | { status: "state_corruption" }
   | { status: "resend_failed" };
 
@@ -339,6 +377,7 @@ export async function resendWorkspaceInvitation(args: { uid: string; workspaceId
     | { kind: "invalid_state" }
     | { kind: "stale_superseded" }
     | { kind: "invitation_version_conflict" }
+    | { kind: "seat_limit_reached" }
     | { kind: "state_corruption" };
 
   let txResult: TxResult;
@@ -385,6 +424,33 @@ export async function resendWorkspaceInvitation(args: { uid: string; workspaceId
         return { kind: "role_target_forbidden" };
       }
 
+      // Permanent seat-limit reservation, Phase 12A.1S.1 — Section U:
+      // resending an invitation that is CURRENTLY EXPIRED (status stays
+      // "pending" forever; expiry is always computed, never persisted — see
+      // module doc comment) genuinely REACTIVATES it: its seat occupancy
+      // goes from 0 (excluded from the live-occupancy formula while
+      // expired) to 1 (valid again once this resend advances `expiresAt`).
+      // That is a real +1 admission, so it MUST pass the same gate as a
+      // brand-new reservation — never a loophole around the limit. A
+      // resend of an already-VALID pending invitation is delta 0 (it
+      // already occupies its seat) and never calls this at all. Canary
+      // capacity is never consulted here (unlike create/revoke) — resend
+      // never changes an invitation's `status`, and canary's own formula is
+      // state-based (status==="pending"), never expiry-based — so there is
+      // no other read-then-write helper to interleave with in this
+      // function, and the simple all-in-one `reserveTeamWorkspaceSeat()` is
+      // safe to use directly.
+      const resendReactivatesExpiredReservation = invitationData.expiresAt.toMillis() <= Timestamp.now().toMillis();
+      if (resendReactivatesExpiredReservation) {
+        const seatReserve = await reserveTeamWorkspaceSeat(tx, invitationData.workspaceId);
+        if (seatReserve.kind === "limit_reached") {
+          return { kind: "seat_limit_reached" };
+        }
+        if (seatReserve.kind !== "reserved") {
+          return { kind: "state_corruption" };
+        }
+      }
+
       const now = Timestamp.now();
       const expiresAt = addSeconds(now, INVITATION_TTL_SECONDS);
       const nextVersion = invitationData.deliveryVersion + 1;
@@ -411,6 +477,8 @@ export async function resendWorkspaceInvitation(args: { uid: string; workspaceId
       return { status: "stale_superseded" };
     case "invitation_version_conflict":
       return { status: "invitation_version_conflict" };
+    case "seat_limit_reached":
+      return { status: "seat_limit_reached" };
     case "state_corruption":
       return { status: "state_corruption" };
     case "resent":
@@ -520,16 +588,41 @@ export async function revokeWorkspaceInvitation(args: { uid: string; workspaceId
         return { kind: "already_revoked", invitationId: invitationData.id };
       }
 
-      // First pending -> revoked transition: this invitation was counted
-      // as a reservation whether live or expired (Phase 10A.4 state-based
-      // model) — release exactly once, in the SAME transaction as the
-      // status write below. A capacity failure aborts the whole revoke:
-      // the invitation stays pending, nothing partially transitions.
+      // First pending -> revoked transition, canary side (Phase 10A.4
+      // state-based model, unchanged): this invitation was counted as a
+      // canary reservation whether live or expired — release exactly once.
+      //
+      // Permanent seat-limit release, Phase 12A.1S.1 — Section V/N: unlike
+      // canary, this module's occupancy formula EXCLUDES expired pending
+      // invitations (see teamWorkspaceSeatAdmission.ts's doc comment).
+      // Revoking a CURRENTLY EXPIRED invitation is releasing a reservation
+      // that already occupies ZERO seats in the live formula — decrementing
+      // the cache here would make it stale LOW (undercounting true
+      // occupancy), violating the cache's stale-HIGH-never-LOW invariant.
+      // Only revoking a CURRENTLY VALID (non-expired) invitation frees a
+      // real seat. The plan (read-only) must run BEFORE canary's own
+      // read-then-write release call, and the commit (write-only) after it
+      // — see teamWorkspaceSeatAdmission.ts's ordering rationale.
+      const invitationCurrentlyValid = invitationData.expiresAt.toMillis() > Timestamp.now().toMillis();
+      let seatReleasePlan: TeamWorkspaceSeatReleasePlan | null = null;
+      if (invitationCurrentlyValid) {
+        seatReleasePlan = await planTeamWorkspaceSeatRelease(tx, args.workspaceId);
+        if (seatReleasePlan.kind === "state_corruption") {
+          return { kind: "state_corruption" };
+        }
+      }
+
+      // A capacity failure aborts the whole revoke: the invitation stays
+      // pending, nothing partially transitions.
       if (isWorkspaceCapacityControlled(args.workspaceId)) {
         const release = await releaseTeamWorkspaceCanarySlot(tx, args.workspaceId);
         if (release.status !== "released") {
           return { kind: "state_corruption" };
         }
+      }
+
+      if (seatReleasePlan) {
+        commitTeamWorkspaceSeatRelease(tx, args.workspaceId, seatReleasePlan);
       }
 
       const now = Timestamp.now();
@@ -753,19 +846,47 @@ export async function acceptWorkspaceInvitation(args: { uid: string; invitationI
         membershipWrite = "create";
       }
 
-      // 8. Capacity adjustment. A valid reserved invitation already owns
-      // its seat (Phase 10A.4): new-membership and reactivation are
-      // ALWAYS delta 0 and never consult capacity at all — a reserved
-      // invitation must be acceptable even at/above the cap. Only the
-      // already-active branch releases a redundant reservation (-1),
-      // exactly once, in the SAME transaction as the writes below. A
-      // capacity failure here aborts the whole acceptance atomically: no
-      // membership mutation, no invitation mutation, no capacity mutation.
+      // 8. Capacity adjustment, canary side (unchanged): a valid reserved
+      // invitation already owns its canary seat (Phase 10A.4):
+      // new-membership and reactivation are ALWAYS delta 0 and never
+      // consult canary capacity at all. Only the already-active branch
+      // releases a redundant canary reservation (-1).
+      //
+      // Permanent seat-limit release, Phase 12A.1S.1 — Section S: the SAME
+      // delta-0 reasoning holds for new-membership/reactivation under this
+      // module's own formula (a valid reserved invitation already occupies
+      // its seat; converting pending -> active is occupancy-neutral, since
+      // one collection stops counting it and the other starts). The
+      // already-active branch is the one genuine overlap: by this point in
+      // the transaction, step 1 already proved `invitationData.expiresAt >
+      // now` (a currently-valid reservation, occupying 1 seat under this
+      // module's formula) AND the caller already holds an active non-owner
+      // membership (occupying a 2nd seat for the SAME person) — releasing
+      // exactly once here is what collapses that back to 1 real seat for
+      // this person, independently re-derived from the live-occupancy
+      // formula, not copied from canary's own (differently-reasoned)
+      // release call. Plan (read-only) before canary's own read-then-write
+      // release, commit (write-only) after it — see
+      // teamWorkspaceSeatAdmission.ts's ordering rationale. A capacity
+      // failure here aborts the whole acceptance atomically: no membership
+      // mutation, no invitation mutation, no capacity mutation of any kind.
+      let seatReleasePlan: TeamWorkspaceSeatReleasePlan | null = null;
+      if (alreadyMember) {
+        seatReleasePlan = await planTeamWorkspaceSeatRelease(tx, invitationData.workspaceId);
+        if (seatReleasePlan.kind === "state_corruption") {
+          return { kind: "state_corruption" };
+        }
+      }
+
       if (alreadyMember && isWorkspaceCapacityControlled(invitationData.workspaceId)) {
         const release = await releaseTeamWorkspaceCanarySlot(tx, invitationData.workspaceId);
         if (release.status !== "released") {
           return { kind: "state_corruption" };
         }
+      }
+
+      if (seatReleasePlan) {
+        commitTeamWorkspaceSeatRelease(tx, invitationData.workspaceId, seatReleasePlan);
       }
 
       // 9. Stage writes — all reads (including capacity's own) are complete.

@@ -14,6 +14,18 @@
  * Every displayed field comes from the server's own allow-list DTOs
  * (`WorkspaceMemberItem`/`WorkspaceInvitationItem`) — no raw
  * document/UID beyond what those DTOs already expose.
+ *
+ * Permanent Team Workspace Collaborator-Seat Limit, Phase 12A.1S.1 — the
+ * "N of 5 collaborator seats used" count and the capacity-disabled "Invite
+ * Member" state are derived PURELY from `members`/`invitations`, already
+ * fetched here for their own existing purposes — no new network request.
+ * `TEAM_WORKSPACE_COLLABORATOR_SEAT_LIMIT` is the single shared source of
+ * truth for the number 5, imported directly (a plain, dependency-free
+ * constant — safe to import into client code, unlike the
+ * "server-only"-guarded `teamWorkspaceSeatAdmission.ts`). This client-side
+ * count is a DISPLAY aid only; the server independently and authoritatively
+ * enforces the limit on every invitation create/reactivating-resend — see
+ * that module's own doc comment.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -32,6 +44,7 @@ import {
 } from "@/lib/client/workspaceTeamClient";
 import ReviewErrorState from "@/components/teamGovernance/ReviewErrorState";
 import WorkspaceNav from "@/components/workspace/WorkspaceNav";
+import { TEAM_WORKSPACE_COLLABORATOR_SEAT_LIMIT } from "@/lib/workspaces/teamWorkspaceSeatLimit";
 
 const ROLE_LABEL: Record<WorkspaceMemberRole, string> = { owner: "Owner", admin: "Admin", member: "Member", reviewer: "Reviewer", viewer: "Viewer" };
 
@@ -279,6 +292,22 @@ export default function WorkspaceMembersShell({
     [user, authReady, workspaceId, loadMembers]
   );
 
+  // Permanent Team Workspace Collaborator-Seat Limit, Phase 12A.1S.1 — a
+  // pure display derivation from data ALREADY loaded above for its own
+  // existing purposes, never a new fetch. Mirrors the server's own
+  // authoritative formula exactly: active non-owner members (server DTO
+  // already exposes `isCanonicalOwner`, never re-derived from `role`
+  // alone) + non-expired pending invitations (server DTO already exposes
+  // `isExpired`, computed server-side from `expiresAt` — never re-derived
+  // client-side from a raw timestamp). `invitations` is only ever
+  // populated when `canManageInvitations` is true (see `loadInvitations()`
+  // above) — which is exactly the same gate the "Pending Invitations"
+  // section (where this count and the Invite Member button both live) is
+  // itself already rendered behind, so this count is never silently wrong
+  // due to a half-loaded invitations array.
+  const occupiedSeats = members.filter((m) => !m.isCanonicalOwner).length + invitations.filter((inv) => !inv.isExpired).length;
+  const atOrOverSeatLimit = occupiedSeats >= TEAM_WORKSPACE_COLLABORATOR_SEAT_LIMIT;
+
   return (
     <main className="mx-auto max-w-3xl px-4 py-10 sm:py-14">
       <div className="mb-6">
@@ -374,11 +403,11 @@ export default function WorkspaceMembersShell({
       {/* Pending invitations + invite */}
       {canManageInvitations && (
         <section aria-labelledby="pending-invitations-heading" className="mb-8">
-          <div className="mb-3 flex items-center justify-between">
+          <div className="mb-1 flex items-center justify-between">
             <h2 id="pending-invitations-heading" className="text-sm font-semibold uppercase tracking-wide text-cp-muted">
               Pending Invitations
             </h2>
-            {canInvite && !showInviteForm && (
+            {canInvite && !showInviteForm && !atOrOverSeatLimit && (
               <button
                 type="button"
                 onClick={openInviteForm}
@@ -387,7 +416,26 @@ export default function WorkspaceMembersShell({
                 Invite Member
               </button>
             )}
+            {/* Capacity-disabled — Phase 12A.1S.1 Section AB/AC: distinct from
+                the permission-gated state above (`!canInvite`, unchanged,
+                still hides the button entirely). This state NEVER hides the
+                button — a permanently visible product surface stays visible
+                even at full capacity, just disabled with a clear reason. */}
+            {canInvite && !showInviteForm && atOrOverSeatLimit && (
+              <button type="button" disabled aria-disabled="true" className="inline-flex cursor-not-allowed items-center justify-center rounded-lg bg-cp-raised px-3 py-1.5 text-xs font-medium text-cp-faint">
+                Invite Member
+              </button>
+            )}
           </div>
+          <p className="mb-3 text-xs text-cp-muted">
+            {`${occupiedSeats} of ${TEAM_WORKSPACE_COLLABORATOR_SEAT_LIMIT} collaborator seats used`}
+            <span className="text-cp-faint"> · The Workspace Owner does not count toward this limit.</span>
+          </p>
+          {canInvite && !showInviteForm && atOrOverSeatLimit && (
+            <p role="status" className="mb-4 rounded-lg bg-cp-orange-soft px-3 py-2 text-sm font-medium text-cp-orange">
+              This Workspace has reached its collaborator limit. Remove a member or revoke a pending invitation to free a seat.
+            </p>
+          )}
 
           {showInviteForm && (
             <form onSubmit={handleInvite} className="mb-4 rounded-xl border border-cp-border bg-cp-surface p-5 shadow-sm" aria-label="Invite Member">

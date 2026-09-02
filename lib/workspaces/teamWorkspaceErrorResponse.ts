@@ -90,6 +90,22 @@ export function selfRemovalRejectedResponse(): { status: number; body: TeamWorks
   return { status: 409, body: { ok: false, errorCode: "self_removal_rejected", message: "You cannot remove yourself from this Workspace." } };
 }
 
+/**
+ * Phase 12A.1S.1 — the permanent `TEAM_WORKSPACE_COLLABORATOR_SEAT_LIMIT`
+ * has been reached. Deliberately DISTINCT from
+ * `workspaceMemberCapacityReachedResponse()`'s `workspace_member_capacity_reached`
+ * (the Tier-2 rollout canary's own error) — this is the always-on,
+ * permanent product limit, and callers must be able to tell the two apart.
+ * Safe to be relatively transparent here (unlike `team_workspace_not_found`'s
+ * concealment): by the time this can occur, the caller has already passed
+ * target-Workspace admission and normal membership/capability
+ * authorization. Never echoes `reservedCount`/the configured limit itself,
+ * or the identity/email of any conflicting member or invitation.
+ */
+export function seatLimitReachedResponse(): { status: number; body: TeamWorkspaceErrorBody } {
+  return { status: 409, body: { ok: false, errorCode: "workspace_collaborator_limit_reached", message: "This Workspace has reached its collaborator limit." } };
+}
+
 /** The target is the Workspace's canonical current Owner — ownership can only change through the dedicated ownership-transfer workflow, never through ordinary member removal, regardless of the caller's own role or capability. */
 export function targetIsCanonicalOwnerResponse(): { status: number; body: TeamWorkspaceErrorBody } {
   return { status: 409, body: { ok: false, errorCode: "target_is_canonical_owner", message: "The Workspace Owner cannot be removed. Transfer ownership first." } };
