@@ -40,6 +40,7 @@ export default function WorkspaceOverviewShell({
   canInvite,
   canManageInvitations,
   canCreateProject,
+  canStartResearch,
   canReadAudit,
 }: {
   workspaceId: string;
@@ -47,6 +48,7 @@ export default function WorkspaceOverviewShell({
   canInvite: boolean;
   canManageInvitations: boolean;
   canCreateProject: boolean;
+  canStartResearch: boolean;
   canReadAudit: boolean;
 }) {
   const { user, authReady } = useAuth();
@@ -118,6 +120,7 @@ export default function WorkspaceOverviewShell({
           activation={state.activation}
           canInvite={canInvite}
           canCreateProject={canCreateProject}
+          canStartResearch={canStartResearch}
         />
       )}
 

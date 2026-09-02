@@ -1,8 +1,14 @@
 /**
- * Team Projects UI, Phase 12A.2 — GET /workspace/team/{workspaceId}/projects/{projectId}
- * server-gate tests. Same technique as the sibling gate specs: calls the
- * Server Component function directly and asserts real `next/navigation`
- * `notFound()` behavior (digest `"NEXT_NOT_FOUND"`).
+ * Team Project Research Composer, Phase 12A.3 —
+ * `GET /workspace/team/{workspaceId}/projects/{projectId}/research/new`
+ * server-gate tests. Same technique as the sibling Project detail gate
+ * spec: calls the Server Component function directly and asserts real
+ * `next/navigation` `notFound()` behavior (digest `"NEXT_NOT_FOUND"`).
+ *
+ * Extends the Project detail page's containment coverage with the two
+ * additional gates this route requires: the `research.create` +
+ * `research.organize` capability pair, and the Project-active-status
+ * check (an archived Project can never accept a new run).
  */
 
 const mockedResolveServerComponentIdentity = jest.fn();
@@ -20,20 +26,20 @@ jest.mock("@/lib/firestore/projects", () => ({
   getProject: (...args: any[]) => mockedGetProject(...args),
 }));
 
-jest.mock("@/components/workspace/projects/TeamProjectDetailShell", () => ({
+jest.mock("@/components/workspace/projects/TeamResearchComposerShell", () => ({
   __esModule: true,
   default: (props: any) => ({ __mockShell: true, props }),
 }));
 
-import TeamProjectDetailPage from "@/app/workspace/team/[workspaceId]/projects/[projectId]/page";
+import TeamProjectResearchComposerPage from "@/app/workspace/team/[workspaceId]/projects/[projectId]/research/new/page";
 
 const WS_ID = "ws-1";
 const OTHER_WS_ID = "ws-2";
 const PROJECT_ID = "proj-1";
-const UID = "uid-owner";
+const UID = "uid-member";
 
 function callPage(projectId: string = PROJECT_ID) {
-  return TeamProjectDetailPage({ params: { workspaceId: WS_ID, projectId } });
+  return TeamProjectResearchComposerPage({ params: { workspaceId: WS_ID, projectId } });
 }
 
 async function expectRealNotFound(promise: Promise<unknown>): Promise<void> {
@@ -53,7 +59,7 @@ function grantedTeamAccess(overrides: Partial<{ capabilities: string[] }> = {}) 
     workspaceType: "team",
     workspace: { id: WS_ID, name: "Acme Team" },
     membership: { role: "member" },
-    capabilities: ["workspace.read", "projects.read"],
+    capabilities: ["workspace.read", "projects.read", "research.create", "research.organize"],
     ...overrides,
   };
 }
@@ -62,7 +68,7 @@ beforeEach(() => {
   jest.clearAllMocks();
 });
 
-describe("TeamProjectDetailPage — gate (server-authoritative, UX-only re-check)", () => {
+describe("TeamProjectResearchComposerPage — gate (server-authoritative)", () => {
   it("unauthenticated -> notFound", async () => {
     mockedResolveServerComponentIdentity.mockResolvedValue(null);
     await expectRealNotFound(callPage());
@@ -83,24 +89,37 @@ describe("TeamProjectDetailPage — gate (server-authoritative, UX-only re-check
     await expectRealNotFound(callPage());
   });
 
-  it("granted Team role WITHOUT projects.read -> notFound, getProject never called", async () => {
+  it("missing projects.read -> notFound, getProject never called", async () => {
     mockedResolveServerComponentIdentity.mockResolvedValue({ uid: UID });
-    mockedResolveWorkspaceAccess.mockResolvedValue(grantedTeamAccess({ capabilities: ["workspace.read"] }));
+    mockedResolveWorkspaceAccess.mockResolvedValue(grantedTeamAccess({ capabilities: ["workspace.read", "research.create", "research.organize"] }));
     await expectRealNotFound(callPage());
     expect(mockedGetProject).not.toHaveBeenCalled();
+  });
+
+  it("has projects.read + research.create but NOT research.organize -> notFound (the exact pair createTeamWorkspaceRun() requires for a Project-bound run)", async () => {
+    mockedResolveServerComponentIdentity.mockResolvedValue({ uid: UID });
+    mockedResolveWorkspaceAccess.mockResolvedValue(grantedTeamAccess({ capabilities: ["workspace.read", "projects.read", "research.create"] }));
+    await expectRealNotFound(callPage());
+    expect(mockedGetProject).not.toHaveBeenCalled();
+  });
+
+  it("has projects.read + research.organize but NOT research.create -> notFound", async () => {
+    mockedResolveServerComponentIdentity.mockResolvedValue({ uid: UID });
+    mockedResolveWorkspaceAccess.mockResolvedValue(grantedTeamAccess({ capabilities: ["workspace.read", "projects.read", "research.organize"] }));
+    await expectRealNotFound(callPage());
+    expect(mockedGetProject).not.toHaveBeenCalled();
+  });
+
+  it("read-only role (projects.read + research.read only) -> notFound, no misleading composer rendered", async () => {
+    mockedResolveServerComponentIdentity.mockResolvedValue({ uid: UID });
+    mockedResolveWorkspaceAccess.mockResolvedValue(grantedTeamAccess({ capabilities: ["workspace.read", "projects.read", "research.read"] }));
+    await expectRealNotFound(callPage());
   });
 
   it("Project not found -> notFound", async () => {
     mockedResolveServerComponentIdentity.mockResolvedValue({ uid: UID });
     mockedResolveWorkspaceAccess.mockResolvedValue(grantedTeamAccess());
     mockedGetProject.mockResolvedValue({ status: "not_found" });
-    await expectRealNotFound(callPage());
-  });
-
-  it("Project malformed -> notFound", async () => {
-    mockedResolveServerComponentIdentity.mockResolvedValue({ uid: UID });
-    mockedResolveWorkspaceAccess.mockResolvedValue(grantedTeamAccess());
-    mockedGetProject.mockResolvedValue({ status: "malformed" });
     await expectRealNotFound(callPage());
   });
 
@@ -114,9 +133,29 @@ describe("TeamProjectDetailPage — gate (server-authoritative, UX-only re-check
     await expectRealNotFound(callPage());
   });
 
-  it("Project belonging to the exact requested Workspace -> renders the shell with correct project meta", async () => {
+  it("caller has access to BOTH Workspaces separately -> still notFound for a Project served through the WRONG Workspace's route (access to the other Workspace is never sufficient)", async () => {
     mockedResolveServerComponentIdentity.mockResolvedValue({ uid: UID });
-    mockedResolveWorkspaceAccess.mockResolvedValue(grantedTeamAccess({ capabilities: ["workspace.read", "projects.read", "audit.read"] }));
+    mockedResolveWorkspaceAccess.mockResolvedValue(grantedTeamAccess()); // grants access to WS_ID
+    mockedGetProject.mockResolvedValue({
+      status: "found",
+      project: { id: PROJECT_ID, workspaceId: OTHER_WS_ID, name: "Foreign Project", status: "active" },
+    });
+    await expectRealNotFound(callPage());
+  });
+
+  it("ARCHIVED Project -> notFound, never renders an enabled composer for a Project the backend would reject", async () => {
+    mockedResolveServerComponentIdentity.mockResolvedValue({ uid: UID });
+    mockedResolveWorkspaceAccess.mockResolvedValue(grantedTeamAccess());
+    mockedGetProject.mockResolvedValue({
+      status: "found",
+      project: { id: PROJECT_ID, workspaceId: WS_ID, name: "Old Project", status: "archived" },
+    });
+    await expectRealNotFound(callPage());
+  });
+
+  it("authorized + active Project in the correct Workspace -> renders the shell with correct route-bound context", async () => {
+    mockedResolveServerComponentIdentity.mockResolvedValue({ uid: UID });
+    mockedResolveWorkspaceAccess.mockResolvedValue(grantedTeamAccess({ capabilities: ["workspace.read", "projects.read", "research.create", "research.organize", "audit.read"] }));
     mockedGetProject.mockResolvedValue({
       status: "found",
       project: { id: PROJECT_ID, workspaceId: WS_ID, name: "ABC Acquisition", status: "active" },
@@ -125,7 +164,7 @@ describe("TeamProjectDetailPage — gate (server-authoritative, UX-only re-check
     expect(result.props.workspaceId).toBe(WS_ID);
     expect(result.props.workspaceName).toBe("Acme Team");
     expect(result.props.canReadAudit).toBe(true);
-    expect(result.props.project).toEqual({ id: PROJECT_ID, name: "ABC Acquisition", status: "active" });
+    expect(result.props.project).toEqual({ id: PROJECT_ID, name: "ABC Acquisition" });
   });
 
   it("getProject is called with exactly the route's projectId, never workspaceId or any other value", async () => {
@@ -137,27 +176,5 @@ describe("TeamProjectDetailPage — gate (server-authoritative, UX-only re-check
     });
     await callPage(PROJECT_ID);
     expect(mockedGetProject).toHaveBeenCalledWith(PROJECT_ID);
-  });
-
-  describe("PHASE 12A.3 — canStartResearch derivation (research.create AND research.organize)", () => {
-    async function propsWithCapabilities(capabilities: string[]) {
-      mockedResolveServerComponentIdentity.mockResolvedValue({ uid: UID });
-      mockedResolveWorkspaceAccess.mockResolvedValue(grantedTeamAccess({ capabilities }));
-      mockedGetProject.mockResolvedValue({ status: "found", project: { id: PROJECT_ID, workspaceId: WS_ID, name: "X", status: "active" } });
-      const result: any = await callPage();
-      return result.props.canStartResearch;
-    }
-
-    it("has BOTH research.create and research.organize -> canStartResearch: true", async () => {
-      expect(await propsWithCapabilities(["workspace.read", "projects.read", "research.create", "research.organize"])).toBe(true);
-    });
-
-    it("has research.create but NOT research.organize -> canStartResearch: false (matches the exact server requirement for a Project-bound run)", async () => {
-      expect(await propsWithCapabilities(["workspace.read", "projects.read", "research.create"])).toBe(false);
-    });
-
-    it("has neither -> canStartResearch: false", async () => {
-      expect(await propsWithCapabilities(["workspace.read", "projects.read"])).toBe(false);
-    });
   });
 });
