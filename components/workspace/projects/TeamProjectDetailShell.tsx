@@ -10,14 +10,22 @@
  *
  * Research is rendered READ-ONLY: no Move/Remove/Assign actions (PHASE
  * 12A.2 Section U/V — Team run→project (re)association UI is explicitly
- * deferred; there is no Team research composer yet for any of that to be
- * meaningful against), and each row is plain text, never a link into
- * `app/page.tsx` (the frozen architecture boundary — Personal composer
- * stays Personal-only) or any not-yet-existing Team run detail route.
- * "Start research" is intentionally absent here — PHASE 12A.3 is where
- * that becomes real.
+ * deferred), and each row is plain text, never a link into `app/page.tsx`
+ * (the frozen architecture boundary — Personal composer stays
+ * Personal-only) or any not-yet-existing Team run detail route.
+ *
+ * PHASE 12A.3 — "Start Research" is now real: a PERMANENT capability
+ * (mirrors "New Project"/"Invite Member"'s own established permanence),
+ * visible for an authorized caller regardless of existing run count,
+ * activation state, or how many previous runs this Project already has.
+ * Rendered only when `canStartResearch && project.status === "active"` —
+ * mirrors "New Project"'s own simpler hidden-not-disabled precedent
+ * (`canCreateProject`) rather than the seat-limit's visible-but-disabled
+ * pattern, since an archived Project or a lacking-capability caller has no
+ * partial "start research" affordance that would ever succeed.
  */
 
+import Link from "next/link";
 import WorkspaceNav from "@/components/workspace/WorkspaceNav";
 import { GovernanceChip } from "@/components/shared/GovernanceChip";
 import { SectionEmptyBox, SectionInitialErrorBox, SectionLoadingRow, SectionPagination } from "@/components/projects/SectionState";
@@ -75,14 +83,18 @@ export default function TeamProjectDetailShell({
   workspaceName,
   project,
   canReadAudit,
+  canStartResearch,
 }: {
   workspaceId: string;
   workspaceName: string;
   project: TeamProjectDetailMeta;
   canReadAudit: boolean;
+  canStartResearch: boolean;
 }) {
   const runs = useTeamProjectRuns({ workspaceId, projectId: project.id });
   const { items, hasMore, status, initialErrorCode, loadingMore, loadMoreErrorCode, loadMore, retryInitial, resetAndReloadFromStart } = runs;
+
+  const startResearchHref = `/workspace/team/${encodeURIComponent(workspaceId)}/projects/${encodeURIComponent(project.id)}/research/new`;
 
   return (
     <main className="mx-auto max-w-3xl px-4 py-10 sm:py-14">
@@ -92,11 +104,21 @@ export default function TeamProjectDetailShell({
 
       <WorkspaceNav workspaceId={workspaceId} active="projects" showAudit={canReadAudit} />
 
-      <div className="mt-2 flex flex-wrap items-center gap-3">
-        <h2 className="text-xl font-semibold text-cp-text break-words">{project.name}</h2>
-        <span className="rounded-full border border-cp-border px-2.5 py-0.5 text-xs font-medium text-cp-muted">
-          {project.status === "active" ? "Active" : "Archived"}
-        </span>
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <h2 className="text-xl font-semibold text-cp-text break-words">{project.name}</h2>
+          <span className="rounded-full border border-cp-border px-2.5 py-0.5 text-xs font-medium text-cp-muted">
+            {project.status === "active" ? "Active" : "Archived"}
+          </span>
+        </div>
+        {canStartResearch && project.status === "active" && (
+          <Link
+            href={startResearchHref}
+            className="inline-flex items-center justify-center rounded-lg bg-cp-accent px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent"
+          >
+            Start Research
+          </Link>
+        )}
       </div>
 
       <section className="mt-6">
@@ -109,14 +131,13 @@ export default function TeamProjectDetailShell({
             return <SectionInitialErrorBox message={copy.message} retry={copy.retry} onRetry={retryInitial} />;
           })()}
 
-        {status === "ready" && isDefinitiveEmptyTeamProjectRunsState({ status, items, hasMore }) && (
-          <SectionEmptyBox
-            lines={[
-              "No research in this project yet.",
-              "Team research will be started from this project once the dedicated Team research flow is available.",
-            ]}
-          />
-        )}
+        {status === "ready" &&
+          isDefinitiveEmptyTeamProjectRunsState({ status, items, hasMore }) &&
+          (canStartResearch && project.status === "active" ? (
+            <SectionEmptyBox lines={["No research in this project yet.", "Start research to run this Project's first panel."]} />
+          ) : (
+            <SectionEmptyBox lines={["No research in this project yet."]} />
+          ))}
 
         {status === "ready" && items.length > 0 && (
           <ul className="mt-4 space-y-2">

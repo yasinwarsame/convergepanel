@@ -19,19 +19,19 @@ import { deriveWorkspaceActivationState } from "@/lib/workspaces/activationState
 describe("PHASE 12A.2-I1 — Create Project is independent of Invite-your-team completion", () => {
   it("Invite step INCOMPLETE (no member, no pending invitation) + canCreateProject: true -> 'Create your first project' still renders as an ACTIVE link, never gated on Invite completion", () => {
     const activation = deriveWorkspaceActivationState({ hasNonOwnerMember: false, hasPendingInvitation: false, hasProject: false, hasResearch: false });
-    const html = renderToStaticMarkup(createElement(WorkspaceActivationPanel, { workspaceId: "ws-1", activation, canInvite: true, canCreateProject: true }));
+    const html = renderToStaticMarkup(createElement(WorkspaceActivationPanel, { workspaceId: "ws-1", activation, canInvite: true, canCreateProject: true, canStartResearch: true }));
     expect(html).toMatch(/<a[^>]*href="\/workspace\/team\/ws-1\/projects"[^>]*>Create your first project<\/a>/);
   });
 
   it("Invite step COMPLETE (has a member) but Project step incomplete -> 'Invite your team' shows complete while 'Create your first project' remains its own independent active step", () => {
     const activation = deriveWorkspaceActivationState({ hasNonOwnerMember: true, hasPendingInvitation: false, hasProject: false, hasResearch: false });
-    const html = renderToStaticMarkup(createElement(WorkspaceActivationPanel, { workspaceId: "ws-1", activation, canInvite: true, canCreateProject: true }));
+    const html = renderToStaticMarkup(createElement(WorkspaceActivationPanel, { workspaceId: "ws-1", activation, canInvite: true, canCreateProject: true, canStartResearch: true }));
     expect(html).toMatch(/<a[^>]*href="\/workspace\/team\/ws-1\/projects"[^>]*>Create your first project<\/a>/);
   });
 
   it("canInvite: false (unauthorized to invite) + canCreateProject: true -> Invite shows permission text, Create Project remains a fully active, unrelated link", () => {
     const activation = deriveWorkspaceActivationState({ hasNonOwnerMember: false, hasPendingInvitation: false, hasProject: false, hasResearch: false });
-    const html = renderToStaticMarkup(createElement(WorkspaceActivationPanel, { workspaceId: "ws-1", activation, canInvite: false, canCreateProject: true }));
+    const html = renderToStaticMarkup(createElement(WorkspaceActivationPanel, { workspaceId: "ws-1", activation, canInvite: false, canCreateProject: true, canStartResearch: true }));
     expect(html).not.toMatch(/<a[^>]*>Invite your team<\/a>/);
     expect(html).toMatch(/<a[^>]*href="\/workspace\/team\/ws-1\/projects"[^>]*>Create your first project<\/a>/);
   });

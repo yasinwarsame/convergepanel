@@ -52,6 +52,7 @@ export default async function TeamProjectDetailPage({ params }: { params: { work
       workspaceId={params.workspaceId}
       workspaceName={access.workspace.name}
       canReadAudit={access.capabilities.includes("audit.read")}
+      canStartResearch={access.capabilities.includes("research.create") && access.capabilities.includes("research.organize")}
       project={{ id: result.project.id, name: result.project.name, status: result.project.status }}
     />
   );
