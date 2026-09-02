@@ -10,9 +10,11 @@
  *
  * Research is rendered READ-ONLY: no Move/Remove/Assign actions (PHASE
  * 12A.2 Section U/V — Team run→project (re)association UI is explicitly
- * deferred), and each row is plain text, never a link into `app/page.tsx`
- * (the frozen architecture boundary — Personal composer stays
- * Personal-only) or any not-yet-existing Team run detail route.
+ * deferred). PHASE 12A.4 — each row is now a real link, but it still never
+ * links into `app/page.tsx` (the frozen architecture boundary — Personal
+ * composer stays Personal-only); it links only to the new, still-Team-only
+ * `/workspace/team/{workspaceId}/projects/{projectId}/research/{runId}`
+ * detail route.
  *
  * PHASE 12A.3 — "Start Research" is now real: a PERMANENT capability
  * (mirrors "New Project"/"Invite Member"'s own established permanence),
@@ -142,15 +144,20 @@ export default function TeamProjectDetailShell({
         {status === "ready" && items.length > 0 && (
           <ul className="mt-4 space-y-2">
             {items.map((item) => (
-              <li key={item.id} className="rounded-xl border-2 border-cp-border bg-cp-raised px-3 py-3">
-                <div className="flex items-start justify-between gap-2">
-                  <span className="min-w-0 flex-1">
-                    <span className="text-xs font-medium text-cp-faint">{new Date(item.at).toLocaleString()}</span>
-                    <span className="mt-1 block text-sm font-medium text-cp-text line-clamp-2">{item.question}</span>
-                    <span className="mt-1 block text-xs text-cp-muted">{teamRunStatusLine(item)}</span>
-                  </span>
-                  <GovernanceChip status={item.governanceStatus} />
-                </div>
+              <li key={item.id}>
+                <Link
+                  href={`/workspace/team/${encodeURIComponent(workspaceId)}/projects/${encodeURIComponent(project.id)}/research/${encodeURIComponent(item.id)}`}
+                  className="block rounded-xl border-2 border-cp-border bg-cp-raised px-3 py-3 hover:border-cp-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="min-w-0 flex-1">
+                      <span className="text-xs font-medium text-cp-faint">{new Date(item.at).toLocaleString()}</span>
+                      <span className="mt-1 block text-sm font-medium text-cp-text line-clamp-2">{item.question}</span>
+                      <span className="mt-1 block text-xs text-cp-muted">{teamRunStatusLine(item)}</span>
+                    </span>
+                    <GovernanceChip status={item.governanceStatus} />
+                  </div>
+                </Link>
               </li>
             ))}
           </ul>
