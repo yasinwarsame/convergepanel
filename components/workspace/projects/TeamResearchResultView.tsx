@@ -27,32 +27,35 @@
  * deliberately out of scope, unchanged from the original 12A.3 boundary.
  * This is presentation-only: if `rawTextFull` (after stripping an optional
  * fence, via the existing shared `stripJsonFences` helper) parses as a JSON
- * object/array, it's shown pretty-printed in a `<pre>` block instead of a
- * raw unformatted paragraph; any non-JSON text renders exactly as before.
+ * object/array, it's rendered as a readable research report via
+ * `StructuredResearchResult` (humanized labels, prose paragraphs, bullet
+ * lists, nested sections — no visible JSON syntax) instead of a raw
+ * unformatted paragraph; any non-JSON text renders exactly as before.
  */
 
 import { PANEL_MODELS, type PanelModelId } from "@/lib/panelModels";
 import { GovernanceChip } from "@/components/shared/GovernanceChip";
 import { stripJsonFences } from "@/lib/adaptiveSchema/util";
 import type { TeamResearchRunResult } from "@/hooks/useTeamProjectResearch";
+import StructuredResearchResult from "@/components/workspace/projects/StructuredResearchResult";
 
 function modelLabel(modelId: string): string {
   return PANEL_MODELS.find((m) => m.id === (modelId as PanelModelId))?.label ?? modelId;
 }
 
 /**
- * Returns pretty-printed JSON text if `rawTextFull` (after stripping an
- * optional markdown fence) parses as a JSON object/array, else `null` — a
- * bare JSON-parseable scalar (e.g. a quoted string or a number) is
- * deliberately NOT treated as "structured" here, since real model output in
- * this shape is always an object/array.
+ * Returns the parsed value if `rawTextFull` (after stripping an optional
+ * markdown fence) parses as a JSON object/array, else `null` — a bare
+ * JSON-parseable scalar (e.g. a quoted string or a number) is deliberately
+ * NOT treated as "structured" here, since real model output in this shape
+ * is always an object/array.
  */
-function formatIfJson(rawTextFull: string): string | null {
+function parseIfStructuredJson(rawTextFull: string): unknown | null {
   const candidate = stripJsonFences(rawTextFull);
   try {
     const parsed: unknown = JSON.parse(candidate);
     if (parsed !== null && typeof parsed === "object") {
-      return JSON.stringify(parsed, null, 2);
+      return parsed;
     }
     return null;
   } catch {
@@ -72,7 +75,7 @@ export default function TeamResearchResultView({ run }: { run: TeamResearchRunRe
 
       <ul className="mt-4 space-y-4">
         {run.results.map((result) => {
-          const prettyJson = result.status === "failed" ? null : formatIfJson(result.rawTextFull);
+          const structured = result.status === "failed" ? null : parseIfStructuredJson(result.rawTextFull);
           return (
             <li key={result.modelId} className="rounded-xl border-2 border-cp-border bg-cp-raised p-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -85,8 +88,10 @@ export default function TeamResearchResultView({ run }: { run: TeamResearchRunRe
               </div>
               {result.status === "failed" ? (
                 <p className="mt-2 text-sm text-cp-muted">{result.error?.message ?? "This model did not return a response."}</p>
-              ) : prettyJson !== null ? (
-                <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-words rounded-lg bg-cp-surface p-3 text-xs text-cp-text">{prettyJson}</pre>
+              ) : structured !== null ? (
+                <div className="mt-2 rounded-lg bg-cp-surface p-3">
+                  <StructuredResearchResult value={structured} />
+                </div>
               ) : (
                 <p className="mt-2 whitespace-pre-wrap text-sm text-cp-text">{result.rawTextFull}</p>
               )}
