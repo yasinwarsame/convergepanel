@@ -9,10 +9,12 @@
  * "step" state of its own, so it renders correctly on first load, after
  * a refresh, or from a different session (Section M/P).
  *
- * "Create your first project" and "Start research" render as inert,
- * clearly-labeled upcoming steps (not a link to anywhere) until Phase
- * 12A.2/12A.3 ship real destinations — this deliberately never fakes a
- * navigable action that doesn't exist yet (Section I).
+ * Phase 12A.2 — "Create your first project" now links to the real,
+ * permanent Team Projects surface (whose own empty state presents the
+ * actual create action — no duplicate creation logic lives here). "Start
+ * research" still renders as an inert, clearly-labeled upcoming step
+ * until Phase 12A.3 ships a real destination — this deliberately never
+ * fakes a navigable action that doesn't exist yet (Section I).
  *
  * Once `activation.isFullyActive` (real Team research exists), the panel
  * renders nothing at all — a mature Workspace's home page should not
@@ -60,17 +62,21 @@ export default function WorkspaceActivationPanel({
   workspaceId,
   activation,
   canInvite,
+  canCreateProject,
 }: {
   workspaceId: string;
   activation: WorkspaceActivationState;
   /** `members.invite` capability — gates whether "Invite your team" is an active link or inert status text (Section Q). */
   canInvite: boolean;
+  /** `projects.create` capability — gates whether "Create your first project" is an active link or inert status text, mirroring the Invite step's own capability-gated pattern (PHASE 12A.2 Section AB). */
+  canCreateProject: boolean;
 }) {
   if (activation.isFullyActive) {
     return null;
   }
 
   const membersHref = `/workspace/team/${encodeURIComponent(workspaceId)}/members`;
+  const projectsHref = `/workspace/team/${encodeURIComponent(workspaceId)}/projects`;
 
   return (
     <section aria-labelledby="workspace-setup-heading" className="mb-8 rounded-xl border border-cp-border bg-cp-surface p-5 shadow-sm">
@@ -84,7 +90,11 @@ export default function WorkspaceActivationPanel({
           complete={activation.teamInvited}
           action={canInvite ? { label: "Invite your team", href: membersHref } : { label: "Owner/Admin only", note: true }}
         />
-        <StepRow label="Create your first project" complete={activation.projectCreated} action={{ label: "Coming soon", note: true }} />
+        <StepRow
+          label="Create your first project"
+          complete={activation.projectCreated}
+          action={canCreateProject ? { label: "Create your first project", href: projectsHref } : { label: "Owner/Admin/Member only", note: true }}
+        />
         <StepRow label="Start research" complete={activation.researchStarted} action={{ label: "Coming soon", note: true }} />
       </ul>
     </section>

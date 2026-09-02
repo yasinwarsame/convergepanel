@@ -89,6 +89,7 @@ async function mount(props: Partial<React.ComponentProps<typeof WorkspaceOvervie
         workspaceName: "Acme Team",
         canInvite: true,
         canManageInvitations: true,
+        canCreateProject: true,
         canReadAudit: true,
         ...props,
       })

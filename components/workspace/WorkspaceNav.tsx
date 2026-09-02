@@ -9,13 +9,20 @@
  * "Audit Log" is included only when `showAudit` is true (the caller
  * passes the same `audit.read` capability check the page's own server
  * gate already performed — this is a UX hint only, never an
- * authorization decision). Structured so Phase 12A.2 can add a
- * "Projects" item without any further navigation-architecture change.
+ * authorization decision).
+ *
+ * Phase 12A.2 — "Projects" is added as a PERMANENT destination, always
+ * rendered alongside Overview/Members (never conditional on Workspace
+ * activation state, Project count, or research existence — every valid
+ * Team role already holds `projects.read` per the capability matrix, so
+ * there is no role for which this link would be misleading). This is the
+ * standing product invariant: Projects navigation must never disappear
+ * once the first Project exists.
  */
 
 import Link from "next/link";
 
-export type WorkspaceNavItem = "overview" | "members" | "audit";
+export type WorkspaceNavItem = "overview" | "projects" | "members" | "audit";
 
 export default function WorkspaceNav({
   workspaceId,
@@ -30,6 +37,7 @@ export default function WorkspaceNav({
   const base = `/workspace/team/${encodeURIComponent(workspaceId)}`;
   const items: { key: WorkspaceNavItem; label: string; href: string }[] = [
     { key: "overview", label: "Overview", href: base },
+    { key: "projects", label: "Projects", href: `${base}/projects` },
     { key: "members", label: "Members", href: `${base}/members` },
     ...(showAudit ? [{ key: "audit" as const, label: "Audit Log", href: `${base}/audit` }] : []),
   ];
