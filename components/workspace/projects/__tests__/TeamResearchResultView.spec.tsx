@@ -53,22 +53,35 @@ describe("TeamResearchResultView", () => {
     expect(html).not.toMatch(/Approved|Blocked|Review/);
   });
 
-  describe("production hotfix — JSON-shaped rawTextFull is pretty-printed, not dumped raw", () => {
-    it("un-fenced JSON object (e.g. GPT-5.2/Perplexity style) is parsed and pretty-printed in a <pre> block", () => {
+  describe("follow-up to PR #130 — JSON-shaped rawTextFull renders as a readable semantic report, not raw JSON", () => {
+    it("un-fenced JSON object (e.g. GPT-5.2/Perplexity style) is parsed and rendered semantically, not as raw JSON in a <pre> block", () => {
       const raw = JSON.stringify({ scenarios: [{ label: "Moderate Crash", probability: 0.4 }] });
       const html = renderToStaticMarkup(createElement(TeamResearchResultView, { run: { runId: "run-1", results: [baseResult({ rawTextFull: raw })] } }));
-      expect(html).toContain("<pre");
-      expect(html).toContain("&quot;scenarios&quot;");
-      expect(html).toContain("&quot;label&quot;: &quot;Moderate Crash&quot;");
-      // Pretty-printed (2-space indent), not the original single-line JSON.stringify output.
-      expect(html).not.toContain(raw.replace(/"/g, "&quot;"));
+      expect(html).not.toContain("<pre");
+      expect(html).not.toContain("&quot;scenarios&quot;");
+      expect(html).toContain("Scenarios");
+      expect(html).toContain("Moderate Crash");
+      expect(html).toContain("<li");
     });
 
-    it("```json-fenced JSON (e.g. Claude/Grok/Gemini style) has its fence stripped and is pretty-printed", () => {
+    it("```json-fenced JSON (e.g. Claude/Grok/Gemini style) has its fence stripped and is rendered semantically", () => {
       const raw = "```json\n" + JSON.stringify({ baseRates: ["one every 5-7 years"] }) + "\n```";
       const html = renderToStaticMarkup(createElement(TeamResearchResultView, { run: { runId: "run-1", results: [baseResult({ rawTextFull: raw })] } }));
-      expect(html).toContain("<pre");
-      expect(html).toContain("&quot;baseRates&quot;");
+      expect(html).not.toContain("<pre");
+      expect(html).not.toContain("&quot;baseRates&quot;");
+      expect(html).toContain("Base rates");
+      expect(html).toContain("one every 5-7 years");
+      expect(html).not.toContain("```");
+    });
+
+    it("```json-fenced top-level JSON array has its fence stripped and is rendered semantically", () => {
+      const raw = "```json\n" + JSON.stringify([{ label: "Option A" }, { label: "Option B" }]) + "\n```";
+      const html = renderToStaticMarkup(createElement(TeamResearchResultView, { run: { runId: "run-1", results: [baseResult({ rawTextFull: raw })] } }));
+      expect(html).not.toContain("<pre");
+      expect(html).not.toContain("&quot;label&quot;");
+      expect(html).toContain("Label");
+      expect(html).toContain("Option A");
+      expect(html).toContain("Option B");
       expect(html).not.toContain("```");
     });
 
@@ -99,6 +112,32 @@ describe("TeamResearchResultView", () => {
       );
       expect(html).not.toContain("<pre");
       expect(html).toContain("Provider timeout");
+    });
+
+    it("a mixed panel — one structured-JSON model, one plain-prose model, one failed model — renders all three correctly and independently", () => {
+      const html = renderToStaticMarkup(
+        createElement(TeamResearchResultView, {
+          run: {
+            runId: "run-1",
+            results: [
+              baseResult({ modelId: "chatgpt", rawTextFull: JSON.stringify({ directAnswer: "Yes, demand is the primary driver.", keyRisks: ["Supply shock", "Policy error"] }) }),
+              baseResult({ modelId: "claude", rawTextFull: "In plain prose: demand-side pressure looks dominant here." }),
+              baseResult({ modelId: "gemini", status: "failed", rawTextFull: '{"ignored": true}', error: { message: "Provider timeout" } }),
+            ],
+          },
+        })
+      );
+      // Structured model: humanized labels, no raw JSON syntax.
+      expect(html).toContain("Direct answer");
+      expect(html).toContain("Yes, demand is the primary driver.");
+      expect(html).toContain("Key risks");
+      expect(html).toContain("Supply shock");
+      expect(html).not.toContain("&quot;directAnswer&quot;");
+      // Prose model: unchanged plain-text rendering.
+      expect(html).toContain("In plain prose: demand-side pressure looks dominant here.");
+      // Failed model: error message, never JSON-formatted.
+      expect(html).toContain("Provider timeout");
+      expect(html).not.toContain("&quot;ignored&quot;");
     });
   });
 });
