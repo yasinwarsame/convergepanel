@@ -42,7 +42,19 @@ class FirestoreError extends Error {
 }
 
 function makeDocRef(collectionName: string, docId: string) {
-  return { __collection: collectionName, __id: docId, id: docId };
+  return {
+    __collection: collectionName,
+    __id: docId,
+    id: docId,
+    // Plain, non-transactional read — used by getTeamWorkspaceRun(), which
+    // (unlike createTeamWorkspaceRun()) is a simple read with no
+    // transaction of its own.
+    get: async () => {
+      const store = stores[collectionName];
+      const entry = store.get(docId);
+      return { exists: entry !== undefined, data: () => entry?.data, id: docId };
+    },
+  };
 }
 
 let concurrentMutationHook: ((ref: { __collection: string; __id: string }) => void) | null = null;
@@ -115,8 +127,10 @@ jest.mock("@/lib/logger", () => ({
 }));
 
 import { computeMembershipId } from "@/lib/workspaces/membershipId";
-import { createTeamWorkspaceRun } from "@/lib/firestore/teamWorkspaceRuns";
+import { createTeamWorkspaceRun, getTeamWorkspaceRun } from "@/lib/firestore/teamWorkspaceRuns";
 import { validateTeamRunRowShape } from "@/lib/workspaces/teamRunRowValidation";
+import { runDocumentToPublicResults } from "@/lib/user/runDocumentToPublicResults";
+import type { RunDocument } from "@/lib/panel/schemas";
 
 const WS_ID = "ws-team-1";
 const OWNER_UID = "owner-1";
@@ -471,5 +485,120 @@ describe("createTeamWorkspaceRun — legacy teamRuns collection protection", () 
     // asserted implicitly by every store lookup above resolving via
     // `stores[name]`, which would throw for an unrecognized collection
     // name (e.g. "teamRuns") rather than silently succeeding.
+  });
+});
+
+describe("getTeamWorkspaceRun — Team Research Detail, Phase 12A.4", () => {
+  const OTHER_PROJECT_ID = "proj-other";
+  const RUN_ID_FOR_DETAIL = "run-detail-1";
+
+  function seedRun(runId: string, overrides: Record<string, unknown> = {}) {
+    const data = {
+      userId: MEMBER_UID,
+      workspaceId: WS_ID,
+      projectId: PROJECT_ID,
+      question: "What is the capital of Kenya?",
+      selectedModels: ["chatgpt"],
+      status: "running",
+      createdAt: ts(1000),
+      ...overrides,
+    };
+    stores.runs.set(runId, { data, updateTime: nextUpdateTime() });
+    return data;
+  }
+
+  function sampleRunDocument(): RunDocument {
+    return {
+      runId: RUN_ID_FOR_DETAIL,
+      userId: MEMBER_UID,
+      createdAt: ts(1000),
+      question: "What is the capital of Kenya?",
+      selectedModels: ["chatgpt"],
+      perModel: [
+        {
+          modelId: "chatgpt",
+          status: "ok",
+          rawTextTruncated: "Nairobi.",
+          latencyMs: 120,
+          tokenUsage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+          wasTruncated: false,
+        },
+      ],
+      totals: { promptTokens: 10, completionTokens: 5, reasoningTokens: 0, totalTokens: 15 },
+      flags: { storageTruncated: false, synthesisTruncated: false },
+    };
+  }
+
+  it("firestore_unavailable when adminDb is null, no doc read attempted", async () => {
+    firestoreUnavailableFlag.value = true;
+    const result = await getTeamWorkspaceRun({ workspaceId: WS_ID, projectId: PROJECT_ID, runId: RUN_ID_FOR_DETAIL });
+    expect(result).toEqual({ status: "firestore_unavailable" });
+  });
+
+  it("run doesn't exist at all -> not_found", async () => {
+    const result = await getTeamWorkspaceRun({ workspaceId: WS_ID, projectId: PROJECT_ID, runId: "does-not-exist" });
+    expect(result).toEqual({ status: "not_found" });
+  });
+
+  it("run's workspaceId doesn't match the requested workspaceId -> not_found, concealed identically to a genuinely missing run", async () => {
+    seedRun(RUN_ID_FOR_DETAIL, { workspaceId: "ws-other", projectId: PROJECT_ID });
+    const result = await getTeamWorkspaceRun({ workspaceId: WS_ID, projectId: PROJECT_ID, runId: RUN_ID_FOR_DETAIL });
+    expect(result).toEqual({ status: "not_found" });
+  });
+
+  it("run's projectId doesn't match the requested projectId (same Workspace, different Project) -> not_found, concealed identically to a genuinely missing run", async () => {
+    seedRun(RUN_ID_FOR_DETAIL, { workspaceId: WS_ID, projectId: OTHER_PROJECT_ID });
+    const result = await getTeamWorkspaceRun({ workspaceId: WS_ID, projectId: PROJECT_ID, runId: RUN_ID_FOR_DETAIL });
+    expect(result).toEqual({ status: "not_found" });
+  });
+
+  it("run is genuinely Unfiled (projectId: null) -> not_found for any specific-Project request, never reinterpreted as a match", async () => {
+    seedRun(RUN_ID_FOR_DETAIL, { workspaceId: WS_ID, projectId: null });
+    const result = await getTeamWorkspaceRun({ workspaceId: WS_ID, projectId: PROJECT_ID, runId: RUN_ID_FOR_DETAIL });
+    expect(result).toEqual({ status: "not_found" });
+  });
+
+  it("matching Workspace + Project, status running -> pending variant, question/governanceStatus surfaced, no results field", async () => {
+    seedRun(RUN_ID_FOR_DETAIL, { status: "running", question: "How big is the TAM?" });
+    const result = await getTeamWorkspaceRun({ workspaceId: WS_ID, projectId: PROJECT_ID, runId: RUN_ID_FOR_DETAIL });
+    expect(result).toEqual({ status: "pending", runId: RUN_ID_FOR_DETAIL, question: "How big is the TAM?", governanceStatus: undefined });
+    expect((result as any).results).toBeUndefined();
+  });
+
+  it("matching Workspace + Project, an arbitrary non-complete status (e.g. 'error') -> pending variant, not treated as complete", async () => {
+    seedRun(RUN_ID_FOR_DETAIL, { status: "error" });
+    const result = await getTeamWorkspaceRun({ workspaceId: WS_ID, projectId: PROJECT_ID, runId: RUN_ID_FOR_DETAIL });
+    expect(result.status).toBe("pending");
+  });
+
+  it("matching Workspace + Project, status complete -> results converted via the real runDocumentToPublicResults(), not duplicated transform logic", async () => {
+    const runDocument = sampleRunDocument();
+    seedRun(RUN_ID_FOR_DETAIL, { status: "complete", runDocument, governanceStatus: "approved", question: "How big is the TAM?" });
+    const result = await getTeamWorkspaceRun({ workspaceId: WS_ID, projectId: PROJECT_ID, runId: RUN_ID_FOR_DETAIL });
+    expect(result.status).toBe("complete");
+    if (result.status !== "complete") throw new Error("expected complete");
+    expect(result.runId).toBe(RUN_ID_FOR_DETAIL);
+    expect(result.question).toBe("How big is the TAM?");
+    expect(result.governanceStatus).toBe("approved");
+    expect(result.results).toEqual(runDocumentToPublicResults(runDocument));
+    expect(result.results.length).toBe(1);
+    expect(result.results[0].modelId).toBe("chatgpt");
+  });
+
+  it("status complete but governanceStatus is an unrecognized/malformed value -> governanceStatus normalized to undefined, matching the composer's own whitelist validation", async () => {
+    const runDocument = sampleRunDocument();
+    seedRun(RUN_ID_FOR_DETAIL, { status: "complete", runDocument, governanceStatus: "totally_bogus" });
+    const result = await getTeamWorkspaceRun({ workspaceId: WS_ID, projectId: PROJECT_ID, runId: RUN_ID_FOR_DETAIL });
+    expect(result.status).toBe("complete");
+    if (result.status !== "complete") throw new Error("expected complete");
+    expect(result.governanceStatus).toBeUndefined();
+  });
+
+  it("status complete but runDocument is absent -> results is an empty array, not a crash", async () => {
+    seedRun(RUN_ID_FOR_DETAIL, { status: "complete" });
+    const result = await getTeamWorkspaceRun({ workspaceId: WS_ID, projectId: PROJECT_ID, runId: RUN_ID_FOR_DETAIL });
+    expect(result.status).toBe("complete");
+    if (result.status !== "complete") throw new Error("expected complete");
+    expect(result.results).toEqual([]);
   });
 });

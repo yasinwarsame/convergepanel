@@ -9,6 +9,12 @@
  * frozen boundary itself remains enforced and proven: the link always
  * points at `/workspace/team/{workspaceId}/projects/{projectId}/research/new`,
  * NEVER at `app/page.tsx` (the Personal composer) or `/api/run-panel`.
+ *
+ * PHASE 12A.4 — each research row is now itself a real link into the new
+ * Team-only research detail route
+ * (`/workspace/team/{workspaceId}/projects/{projectId}/research/{runId}`),
+ * proven below by asserting the exact `href` produced per row — never
+ * `app/page.tsx` or any Personal route.
  */
 
 import { createElement } from "react";
@@ -128,7 +134,7 @@ describe("TeamProjectDetailShell", () => {
     });
   });
 
-  it("renders each research item read-only — no interactive action controls (no Move/Remove/Assign)", async () => {
+  it("renders each research item with no interactive action controls (no Move/Remove/Assign) — read-only aside from navigation into the row itself", async () => {
     mockedUseTeamProjectRuns.mockReturnValue(
       runsResult({
         items: [
@@ -140,8 +146,50 @@ describe("TeamProjectDetailShell", () => {
     const text = JSON.stringify(renderer.toJSON());
     expect(text).toContain("What is the market size?");
     expect(text).toContain("2/2 model responses");
-    // No <a> or <button> at all inside a research row — this is a read-only surface.
+    // No <button> at all inside a research row — no Move/Remove/Assign
+    // action controls. The row's own <a> (asserted below) is navigation
+    // into the read-only detail page, not a mutation control.
     expect(renderer.root.findAllByType("button").length).toBe(0);
+  });
+
+  describe("PHASE 12A.4 — research rows are real links into the Team research detail route", () => {
+    // Deliberately excludes the "Start Research" link (href ends
+    // "/research/new") — only matches the per-row detail links.
+    function findRowLinks(renderer: TestRenderer.ReactTestRenderer) {
+      return renderer.root
+        .findAllByType("a")
+        .filter((el) => typeof el.props.href === "string" && /\/research\/[^/]+$/.test(el.props.href) && !el.props.href.endsWith("/research/new"));
+    }
+
+    it("single row -> href is exactly /workspace/team/{workspaceId}/projects/{projectId}/research/{runId}, never app/page.tsx or /api/run-panel", async () => {
+      mockedUseTeamProjectRuns.mockReturnValue(
+        runsResult({
+          items: [
+            { id: "run-1", at: "2026-01-01T00:00:00.000Z", question: "What is the market size?", selectedModels: ["chatgpt", "claude"], status: "complete", modelsOk: 2, modelsTotal: 2, projectId: "proj-1" },
+          ],
+        })
+      );
+      const renderer = await mount({ project: { id: "proj-1", name: "ABC Acquisition", status: "active" } });
+      const links = findRowLinks(renderer);
+      expect(links.length).toBe(1);
+      expect(links[0].props.href).toBe("/workspace/team/ws-1/projects/proj-1/research/run-1");
+      expect(links[0].props.href).not.toMatch(/^\/(\?|$)/);
+      expect(links[0].props.href).not.toBe("/api/run-panel");
+    });
+
+    it("multiple rows -> each links to its own distinct runId, in item order", async () => {
+      mockedUseTeamProjectRuns.mockReturnValue(
+        runsResult({
+          items: [
+            { id: "run-1", at: "2026-01-01T00:00:00.000Z", question: "First question", selectedModels: ["chatgpt"], status: "complete", modelsOk: 1, modelsTotal: 1, projectId: "proj-1" },
+            { id: "run-2", at: "2026-01-02T00:00:00.000Z", question: "Second question", selectedModels: ["claude"], status: "complete", modelsOk: 1, modelsTotal: 1, projectId: "proj-1" },
+          ],
+        })
+      );
+      const renderer = await mount({ project: { id: "proj-1", name: "ABC Acquisition", status: "active" } });
+      const hrefs = findRowLinks(renderer).map((l) => l.props.href);
+      expect(hrefs).toEqual(["/workspace/team/ws-1/projects/proj-1/research/run-1", "/workspace/team/ws-1/projects/proj-1/research/run-2"]);
+    });
   });
 
   it("passes workspaceId and projectId through to the runs hook exactly", async () => {
