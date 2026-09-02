@@ -44,6 +44,7 @@ import { doc, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase/client";
 import { UserProfile } from "@/lib/types";
 import { getPlanConfigById } from "@/lib/billing/planConfig";
+import { createGenerationGuard } from "@/lib/client/authGeneration";
 import { normalizeSelectedModels, getDefaultModelSelection } from "@/lib/utils/normalizeSelectedModels";
 import { perf, trackSlowLoad } from "@/lib/utils/performance";
 import ClaimVerificationResult from "@/components/ClaimVerificationResult";
@@ -279,6 +280,21 @@ export default function Home() {
   const router = useRouter();
   const openHistoryItemRef = useRef<((item: HistoryItem) => Promise<void>) | null>(null);
   const governanceDeepLinkHandled = useRef<string | null>(null);
+  /**
+   * Personal Research navigation/load arbitration (Phase 11A.6.1) — the ONE
+   * shared generation guard covering every writer that can commit
+   * research-run display state: `loadResearchRunIntoState` (History loads,
+   * "View source research", the governance deep-link mount effect — all
+   * three route through it) and `handleRunPanel` (starting a brand-new
+   * run). Each claims a new generation synchronously, before its first
+   * `await`; `loadResearchRunIntoState` checks `isCurrent` immediately
+   * before every state commit (success and failure paths) so a superseded
+   * load is a true no-op. Deliberately ONE instance, not one per call
+   * site — a per-control counter would let stale History still beat a
+   * newer "View source research", or a stale History load still beat a
+   * brand-new panel run.
+   */
+  const researchLoadGuard = useRef(createGenerationGuard()).current;
   const { user, loading: authLoading, authReady } = useAuth();
   
   // Track auth resolution
@@ -767,6 +783,14 @@ export default function Home() {
     }
 
     // Reset state for new panel run
+    // Personal Research navigation/load arbitration (Phase 11A.6.1) —
+    // claimed synchronously, before any await below. This run's own
+    // completion doesn't route through loadResearchRunIntoState and needs
+    // no isCurrent check of its own; the sole purpose here is to strip
+    // authority from whatever load (History click, "View source
+    // research", or a still-in-flight earlier run) came before it, so a
+    // stale completion from any of those can never overwrite this run.
+    researchLoadGuard.next();
     setVerificationPayload(null);
     setOriginLinkedTarget(null); // 11A.4 — a stale "Verify this claim" target from the previous research would no longer refer to anything real once a new run starts
     setFocusClaimId(null); // 11A.6 — a stale source-navigation target is equally meaningless once a new run starts
@@ -1675,12 +1699,32 @@ export default function Home() {
    */
   const loadResearchRunIntoState = async (
     runId: string,
-    fallback: { question: string; selectedModels: ModelId[] }
-  ): Promise<{ ok: true } | { ok: false; message: string }> => {
+    fallback: { question: string; selectedModels: ModelId[] },
+    /**
+     * Personal Research navigation/load arbitration (Phase 11A.6.1) — the
+     * exact-finding target this load should end up focused on once it
+     * commits, or `null` for an ordinary History load (no target). Passed
+     * in by the caller (e.g. `handleViewSourceResearch`) instead of being
+     * set as a second, unguarded statement after this function returns, so
+     * it commits ATOMICALLY with the run data it belongs to, under the
+     * SAME generation check below — a stale load can never pair a
+     * different, currently-displayed run with a focus target that doesn't
+     * belong to it.
+     */
+    focusClaimTarget: string | null = null
+  ): Promise<{ ok: true } | { ok: false; message: string } | { superseded: true }> => {
+      // Claimed synchronously, before the first await — this is the point
+      // the app decides "this is now the user's intended active research."
+      // Advancing the generation here also invalidates any OTHER in-flight
+      // loadResearchRunIntoState call (this is the ONE shared arbitration
+      // domain also used by handleRunPanel).
+      const gen = researchLoadGuard.next();
       // Any fresh reload invalidates whatever exact-finding target was
-      // relevant to the PREVIOUSLY loaded run — a caller that wants to
-      // target a finding in THIS reload (handleViewSourceResearch) sets
-      // focusClaimId again after this call succeeds.
+      // relevant to the PREVIOUSLY loaded run. This unconditional clear is
+      // safe (not a "stale write") because it runs synchronously in the
+      // same tick as the generation claim above — nothing can have
+      // superseded this call yet. The real target (if any) is set later,
+      // atomically with the run data, gated by the isCurrent check below.
       setFocusClaimId(null);
       setFocusClaimNotFound(false);
       try {
@@ -1727,6 +1771,18 @@ export default function Home() {
         };
         if (!res.ok || !data.ok || !data.results?.length) {
           throw new Error(typeof data.message === "string" ? data.message : "Could not load this run.");
+        }
+        // Personal Research navigation/load arbitration (Phase 11A.6.1) —
+        // a newer load (another History click, "View source research", or
+        // a brand-new handleRunPanel run) may have claimed a later
+        // generation while this fetch/parse was in flight. Checked once,
+        // synchronously, immediately after the awaited fetch/parse and
+        // before EVERY commit below — no await follows this check
+        // anywhere in this block, so nothing can invalidate it between the
+        // check and the commits it guards. A superseded call is a TRUE
+        // no-op: it returns without touching any shared display state.
+        if (!researchLoadGuard.isCurrent(gen)) {
+          return { superseded: true };
         }
         setQuestion(data.question ?? fallback.question);
 
@@ -1872,9 +1928,21 @@ export default function Home() {
             );
           }
         }
+        // Set atomically with the run data above, under the SAME
+        // generation check already passed — see focusClaimTarget's doc
+        // comment. `null` for an ordinary History load is a no-op value
+        // (already cleared at entry); a real target is only ever
+        // committed here, for the current call.
+        setFocusClaimId(focusClaimTarget);
         return { ok: true };
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : "Could not load this run.";
+        // Same arbitration as the success path above — a stale failure
+        // (e.g. run deleted, access revoked) must not clobber a newer,
+        // already-succeeded load's results/error/loading state.
+        if (!researchLoadGuard.isCurrent(gen)) {
+          return { superseded: true };
+        }
         setError(msg);
         setViewingHistoryRunId(null);
         setResults([]);
@@ -2139,8 +2207,21 @@ export default function Home() {
     if (!source) return;
     if (sourceNavLoading) return; // duplicate-request suppression
     setSourceNavLoading(true);
-    const result = await loadResearchRunIntoState(source.runId, { question, selectedModels });
+    // Phase 11A.6.1 — the focus-claim target is passed IN, not set as a
+    // second unguarded statement after this call returns, so it commits
+    // atomically with the run data under loadResearchRunIntoState's own
+    // generation check.
+    const result = await loadResearchRunIntoState(source.runId, { question, selectedModels }, source.claimId);
+    // Control-local: this button's own spinner. Safe to clear
+    // unconditionally regardless of whether this load was superseded.
     setSourceNavLoading(false);
+    if ("superseded" in result) {
+      // A newer navigation/run already took over while this fetch was in
+      // flight — true no-op. Must NOT show an error (that would clobber
+      // whatever the current, newer state is displaying) and must NOT
+      // switch tabs out from under the user's newer intent.
+      return;
+    }
     if (!result.ok) {
       // Deliberately more generic than loadResearchRunIntoState's own
       // (non-generic) underlying message for this entry point
@@ -2150,7 +2231,6 @@ export default function Home() {
       setError("This source research is no longer available.");
       return;
     }
-    setFocusClaimId(source.claimId);
     setPanelTab("research");
   };
 
