@@ -201,4 +201,78 @@ describe("TeamResearchComposerShell", () => {
     expect(backLink).toBeDefined();
     expect(backLink!.props.href).toBe(`/workspace/team/${WS_ID}/projects/proj-xyz`);
   });
+
+  describe("result-heading correction — stale 'Start research' must not remain above a completed result", () => {
+    it("before any submission, the heading reads 'Start research'", async () => {
+      const renderer = await mount();
+      expect(renderer.root.findByType("h2").props.children).toBe("Start research");
+    });
+
+    it("while composing (question typed, not yet submitted), the heading still reads 'Start research'", async () => {
+      const renderer = await mount();
+      const textarea = renderer.root.findByProps({ id: "team-research-question" });
+      await act(async () => {
+        textarea.props.onChange({ target: { value: "What is the market size?" } });
+      });
+      expect(renderer.root.findByType("h2").props.children).toBe("Start research");
+    });
+
+    it("after a successful run, the heading shows the actual submitted question, not 'Start research'", async () => {
+      const submit = jest.fn().mockResolvedValue({ status: "ok", run: { runId: "run-1", results: [] } });
+      mockedUseTeamProjectResearch.mockReturnValue(researchResult({ submit }));
+      const renderer = await mount();
+
+      const textarea = renderer.root.findByProps({ id: "team-research-question" });
+      await act(async () => {
+        textarea.props.onChange({ target: { value: "What is the market size for widgets?" } });
+      });
+      const form = renderer.root.findByType("form");
+      await act(async () => {
+        await form.props.onSubmit({ preventDefault: () => {} });
+      });
+
+      const h2 = renderer.root.findAllByType("h2")[0];
+      expect(h2.props.children).toBe("What is the market size for widgets?");
+      expect(h2.props.children).not.toBe("Start research");
+    });
+
+    it("'Start another research' resets the heading back to 'Start research', not the stale question", async () => {
+      const submit = jest.fn().mockResolvedValue({ status: "ok", run: { runId: "run-1", results: [] } });
+      mockedUseTeamProjectResearch.mockReturnValue(researchResult({ submit }));
+      const renderer = await mount();
+
+      const textarea = renderer.root.findByProps({ id: "team-research-question" });
+      await act(async () => {
+        textarea.props.onChange({ target: { value: "Q" } });
+      });
+      const form = renderer.root.findByType("form");
+      await act(async () => {
+        await form.props.onSubmit({ preventDefault: () => {} });
+      });
+      expect(renderer.root.findAllByType("h2")[0].props.children).toBe("Q");
+
+      const startAnotherButton = renderer.root.findAllByType("button").find((b) => b.props.children === "Start another research")!;
+      await act(async () => {
+        startAnotherButton.props.onClick();
+      });
+      expect(renderer.root.findByType("h2").props.children).toBe("Start research");
+    });
+
+    it("a failed submission leaves the heading as 'Start research' (no result was ever set)", async () => {
+      const submit = jest.fn().mockResolvedValue({ status: "error", errorCode: "RUN_LIMIT_REACHED", message: "You've reached your monthly run limit." });
+      mockedUseTeamProjectResearch.mockReturnValue(researchResult({ submit }));
+      const renderer = await mount();
+
+      const textarea = renderer.root.findByProps({ id: "team-research-question" });
+      await act(async () => {
+        textarea.props.onChange({ target: { value: "Q" } });
+      });
+      const form = renderer.root.findByType("form");
+      await act(async () => {
+        await form.props.onSubmit({ preventDefault: () => {} });
+      });
+
+      expect(renderer.root.findByType("h2").props.children).toBe("Start research");
+    });
+  });
 });
