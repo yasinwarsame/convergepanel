@@ -656,3 +656,56 @@ describe("fetchTeamResearchExistence — Phase 12A.1 activation-state cheap exis
     expect(result).toEqual({ status: "error" });
   });
 });
+
+describe("fetchWorkspaceAuditEvents — Phase PROJECT-AUDIT-AR-I1: Project lifecycle events", () => {
+  const ARCHIVED = { eventType: "workspace_project_archived", occurredAt: "2026-09-04T00:00:00.000Z", actor: { displayName: "Olivia Owner" }, project: { name: "Quarterly Diligence" } };
+  const RESTORED = { ...ARCHIVED, eventType: "workspace_project_restored" };
+  const MEMBER_REMOVED = { eventType: "workspace_member_removed", occurredAt: "2026-08-31T20:46:25.000Z", actor: { displayName: "Olivia Owner" }, target: { displayName: "Bob Member" }, previousRole: "member" };
+
+  it("a valid workspace_project_archived event is accepted as-is", async () => {
+    mockedAuthedFetch.mockResolvedValue(jsonResponse({ ok: true, events: [ARCHIVED], hasMore: false }));
+    expect(await fetchWorkspaceAuditEvents({ user: null, authReady: true, workspaceId: "ws-1" })).toEqual({ status: "ok", events: [ARCHIVED], hasMore: false });
+  });
+
+  it("a valid workspace_project_restored event is accepted as-is", async () => {
+    mockedAuthedFetch.mockResolvedValue(jsonResponse({ ok: true, events: [RESTORED], hasMore: false }));
+    expect(await fetchWorkspaceAuditEvents({ user: null, authReady: true, workspaceId: "ws-1" })).toEqual({ status: "ok", events: [RESTORED], hasMore: false });
+  });
+
+  it("a mixed page (member + Project events) is accepted with member-event validation unchanged", async () => {
+    mockedAuthedFetch.mockResolvedValue(jsonResponse({ ok: true, events: [RESTORED, MEMBER_REMOVED, ARCHIVED], hasMore: false }));
+    expect(await fetchWorkspaceAuditEvents({ user: null, authReady: true, workspaceId: "ws-1" })).toEqual({ status: "ok", events: [RESTORED, MEMBER_REMOVED, ARCHIVED], hasMore: false });
+  });
+
+  it.each([
+    ["missing project", (() => { const { project: _p, ...rest } = ARCHIVED; return rest; })()],
+    ["project.name empty", { ...ARCHIVED, project: { name: "" } }],
+    ["project.name non-string", { ...ARCHIVED, project: { name: 12 } }],
+    ["project is not an object", { ...ARCHIVED, project: "Quarterly Diligence" }],
+    ["missing actor", (() => { const { actor: _a, ...rest } = ARCHIVED; return rest; })()],
+    ["invalid occurredAt", { ...ARCHIVED, occurredAt: "nope" }],
+    ["unknown Project event type", { ...ARCHIVED, eventType: "workspace_project_deleted" }],
+  ])("a malformed Project event (%s) fails the whole response closed", async (_label, bad) => {
+    mockedAuthedFetch.mockResolvedValue(jsonResponse({ ok: true, events: [bad], hasMore: false }));
+    expect(await fetchWorkspaceAuditEvents({ user: null, authReady: true, workspaceId: "ws-1" })).toEqual({ status: "error" });
+  });
+
+  it("a Project event is NOT rescued by member-shaped fields, and a member event is NOT rescued by Project-shaped fields", async () => {
+    const projectMissingName = { eventType: "workspace_project_archived", occurredAt: ARCHIVED.occurredAt, actor: ARCHIVED.actor, target: { displayName: "Bob" }, previousRole: "member" };
+    mockedAuthedFetch.mockResolvedValue(jsonResponse({ ok: true, events: [projectMissingName], hasMore: false }));
+    expect(await fetchWorkspaceAuditEvents({ user: null, authReady: true, workspaceId: "ws-1" })).toEqual({ status: "error" });
+    const memberMissingRole = { eventType: "workspace_member_removed", occurredAt: ARCHIVED.occurredAt, actor: ARCHIVED.actor, target: { displayName: "Bob" }, project: { name: "X" } };
+    mockedAuthedFetch.mockResolvedValue(jsonResponse({ ok: true, events: [memberMissingRole], hasMore: false }));
+    expect(await fetchWorkspaceAuditEvents({ user: null, authReady: true, workspaceId: "ws-1" })).toEqual({ status: "error" });
+  });
+
+  it("the normalized Project DTO type carries no actorUid, workspaceId, projectId, or document id — extra raw fields from a response are not part of the contract the parser reads", () => {
+    const source = require("fs").readFileSync(require.resolve("@/lib/client/workspaceTeamClient"), "utf8");
+    const unionBlock = source.match(/export type WorkspaceAuditEventItem =[\s\S]*?;\n/)?.[0] ?? "";
+    expect(unionBlock).toMatch(/workspace_project_archived[^\n]*project: \{ name: string \}/);
+    expect(unionBlock).not.toMatch(/projectId|actorUid|workspaceId|\bid:/);
+    const validator = source.match(/function isValidAuditEvent\([\s\S]*?\n\}/)?.[0] ?? "";
+    expect(validator).not.toMatch(/projectId|actorUid|workspaceId/);
+  });
+});
+

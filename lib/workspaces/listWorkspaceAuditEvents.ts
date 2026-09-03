@@ -49,6 +49,20 @@
  * `workspace_member_role_changed` with a missing/invalid `newRole` is
  * malformed and skipped, same fail-closed posture as every other
  * validation branch here.
+ *
+ * Project Archive/Restore Audit Visibility, Phase PROJECT-AUDIT-AR-I1 —
+ * `"workspace_project_archived"` / `"workspace_project_restored"` added as
+ * the first PROJECT-shaped event types. `validateRow()` is restructured
+ * into COMMON checks (recognized `eventType`, `workspaceId`, `actorUid`,
+ * `at`) followed by a per-shape branch: MEMBER events keep their exact
+ * pre-existing requirements (`targetUid`, `previousRole`, and `newRole`
+ * for role-changed — byte-for-byte the same checks as before, only moved
+ * under the member branch); PROJECT events require a non-empty string
+ * `projectId` and `projectName` and are never forced through the member
+ * target/role schema. The DTO for a Project event exposes only
+ * `{eventType, occurredAt, actor.displayName, project.name}` — the stored
+ * `projectId` is NOT surfaced (same allow-list posture as `actorUid`/
+ * `targetUid`). `projectEvents` is still deliberately NOT read here.
  */
 
 import "server-only";
@@ -70,20 +84,34 @@ const VALID_PREVIOUS_ROLES: ReadonlySet<string> = new Set(["admin", "member", "r
 
 export type WorkspaceAuditPreviousRole = Exclude<WorkspaceMembershipRole, "owner">;
 
-export type WorkspaceAuditEventType = "workspace_member_removed" | "workspace_ownership_transferred" | "workspace_member_role_changed";
+export type WorkspaceAuditMemberEventType = "workspace_member_removed" | "workspace_ownership_transferred" | "workspace_member_role_changed";
+export type WorkspaceAuditProjectEventType = "workspace_project_archived" | "workspace_project_restored";
+export type WorkspaceAuditEventType = WorkspaceAuditMemberEventType | WorkspaceAuditProjectEventType;
 
-const VALID_EVENT_TYPES: ReadonlySet<string> = new Set(["workspace_member_removed", "workspace_ownership_transferred", "workspace_member_role_changed"]);
+const VALID_MEMBER_EVENT_TYPES: ReadonlySet<string> = new Set(["workspace_member_removed", "workspace_ownership_transferred", "workspace_member_role_changed"]);
+const VALID_PROJECT_EVENT_TYPES: ReadonlySet<string> = new Set(["workspace_project_archived", "workspace_project_restored"]);
+const VALID_EVENT_TYPES: ReadonlySet<string> = new Set([...VALID_MEMBER_EVENT_TYPES, ...VALID_PROJECT_EVENT_TYPES]);
 
 interface WorkspaceAuditEventDtoBase {
   occurredAt: string;
   actor: { displayName: string };
+}
+
+interface WorkspaceAuditMemberEventDtoBase extends WorkspaceAuditEventDtoBase {
   target: { displayName: string };
 }
 
+/** Project events expose the mutation-time name snapshot only — never `projectId`, never a link target. */
+interface WorkspaceAuditProjectEventDtoBase extends WorkspaceAuditEventDtoBase {
+  project: { name: string };
+}
+
 export type WorkspaceAuditEventDto =
-  | (WorkspaceAuditEventDtoBase & { eventType: "workspace_member_removed"; previousRole: WorkspaceAuditPreviousRole })
-  | (WorkspaceAuditEventDtoBase & { eventType: "workspace_ownership_transferred"; previousRole: WorkspaceAuditPreviousRole })
-  | (WorkspaceAuditEventDtoBase & { eventType: "workspace_member_role_changed"; previousRole: WorkspaceAuditPreviousRole; newRole: WorkspaceAuditPreviousRole });
+  | (WorkspaceAuditMemberEventDtoBase & { eventType: "workspace_member_removed"; previousRole: WorkspaceAuditPreviousRole })
+  | (WorkspaceAuditMemberEventDtoBase & { eventType: "workspace_ownership_transferred"; previousRole: WorkspaceAuditPreviousRole })
+  | (WorkspaceAuditMemberEventDtoBase & { eventType: "workspace_member_role_changed"; previousRole: WorkspaceAuditPreviousRole; newRole: WorkspaceAuditPreviousRole })
+  | (WorkspaceAuditProjectEventDtoBase & { eventType: "workspace_project_archived" })
+  | (WorkspaceAuditProjectEventDtoBase & { eventType: "workspace_project_restored" });
 
 export type ListWorkspaceAuditEventsResult =
   | { status: "ok"; items: WorkspaceAuditEventDto[]; hasMore: boolean; nextCursor?: string }
@@ -93,15 +121,24 @@ export type ListWorkspaceAuditEventsResult =
 type ValidatedRow =
   | { eventType: "workspace_member_removed"; occurredAtIso: string; actorUid: string; targetUid: string; previousRole: WorkspaceAuditPreviousRole }
   | { eventType: "workspace_ownership_transferred"; occurredAtIso: string; actorUid: string; targetUid: string; previousRole: WorkspaceAuditPreviousRole }
-  | { eventType: "workspace_member_role_changed"; occurredAtIso: string; actorUid: string; targetUid: string; previousRole: WorkspaceAuditPreviousRole; newRole: WorkspaceAuditPreviousRole };
+  | { eventType: "workspace_member_role_changed"; occurredAtIso: string; actorUid: string; targetUid: string; previousRole: WorkspaceAuditPreviousRole; newRole: WorkspaceAuditPreviousRole }
+  | { eventType: "workspace_project_archived"; occurredAtIso: string; actorUid: string; projectId: string; projectName: string }
+  | { eventType: "workspace_project_restored"; occurredAtIso: string; actorUid: string; projectId: string; projectName: string };
 
 /**
- * All three recognized event types share the same base validated fields
- * (`actorUid`/`targetUid`/`previousRole`/`at`) — validated once, before
- * branching on `eventType`. Only `workspace_member_role_changed` needs an
- * additional field (`newRole`), validated in its own branch; a row
- * claiming that event type with a missing/invalid `newRole` is malformed
- * and returns `null`, same as any other validation failure here.
+ * COMMON checks first (recognized `eventType`, exact `workspaceId`,
+ * non-empty `actorUid`, a Timestamp-like `at`), then ONE shape branch:
+ *   - MEMBER events (`workspace_member_removed`,
+ *     `workspace_ownership_transferred`, `workspace_member_role_changed`)
+ *     require non-empty `targetUid` + valid `previousRole`, and
+ *     role-changed additionally requires a valid `newRole` — exactly the
+ *     pre-AR-I1 requirements, unchanged.
+ *   - PROJECT events (`workspace_project_archived`,
+ *     `workspace_project_restored`) require non-empty string `projectId`
+ *     + `projectName` and have NO dependency on `targetUid`/
+ *     `previousRole`/`newRole`.
+ * Any failure returns `null` — the row is skipped, never repaired or
+ * rendered with a manufactured value.
  */
 function validateRow(id: string, raw: Record<string, unknown> | undefined, workspaceId: string): ValidatedRow | null {
   if (!raw) return null;
@@ -109,12 +146,8 @@ function validateRow(id: string, raw: Record<string, unknown> | undefined, works
   if (typeof eventType !== "string" || !VALID_EVENT_TYPES.has(eventType)) return null;
   if (raw.workspaceId !== workspaceId) return null;
   const actorUid = raw.actorUid;
-  const targetUid = raw.targetUid;
-  const previousRole = raw.previousRole;
   const at = raw.at;
   if (typeof actorUid !== "string" || actorUid.length === 0) return null;
-  if (typeof targetUid !== "string" || targetUid.length === 0) return null;
-  if (typeof previousRole !== "string" || !VALID_PREVIOUS_ROLES.has(previousRole)) return null;
   if (!at || typeof at !== "object" || typeof (at as { toDate?: unknown }).toDate !== "function") return null;
 
   let occurredAtIso: string;
@@ -123,6 +156,19 @@ function validateRow(id: string, raw: Record<string, unknown> | undefined, works
   } catch {
     return null;
   }
+
+  if (VALID_PROJECT_EVENT_TYPES.has(eventType)) {
+    const projectId = raw.projectId;
+    const projectName = raw.projectName;
+    if (typeof projectId !== "string" || projectId.length === 0) return null;
+    if (typeof projectName !== "string" || projectName.length === 0) return null;
+    return { eventType: eventType as WorkspaceAuditProjectEventType, occurredAtIso, actorUid, projectId, projectName };
+  }
+
+  const targetUid = raw.targetUid;
+  const previousRole = raw.previousRole;
+  if (typeof targetUid !== "string" || targetUid.length === 0) return null;
+  if (typeof previousRole !== "string" || !VALID_PREVIOUS_ROLES.has(previousRole)) return null;
 
   if (eventType === "workspace_member_role_changed") {
     const newRole = raw.newRole;
@@ -184,7 +230,7 @@ export async function listWorkspaceAuditEvents(args: { workspaceId: string; limi
     const uids = new Set<string>();
     for (const row of validated) {
       uids.add(row.actorUid);
-      uids.add(row.targetUid);
+      if ("targetUid" in row) uids.add(row.targetUid);
     }
     // Two bounded batch calls (never per-event) — a uid appearing as both
     // an actor (in one event) and a target (in another) is fetched at
@@ -199,9 +245,14 @@ export async function listWorkspaceAuditEvents(args: { workspaceId: string; limi
     ]);
 
     const items: WorkspaceAuditEventDto[] = validated.map((row) => {
+      const actor = { displayName: actorNames.get(row.actorUid) ?? UNKNOWN_AUDIT_ACTOR_LABEL };
+      if (row.eventType === "workspace_project_archived" || row.eventType === "workspace_project_restored") {
+        // Allow-list projection: name snapshot only — `projectId` is never surfaced.
+        return { eventType: row.eventType, occurredAt: row.occurredAtIso, actor, project: { name: row.projectName } };
+      }
       const base = {
         occurredAt: row.occurredAtIso,
-        actor: { displayName: actorNames.get(row.actorUid) ?? UNKNOWN_AUDIT_ACTOR_LABEL },
+        actor,
         target: { displayName: targetNames.get(row.targetUid) ?? UNKNOWN_AUDIT_TARGET_LABEL },
       };
       if (row.eventType === "workspace_member_role_changed") {

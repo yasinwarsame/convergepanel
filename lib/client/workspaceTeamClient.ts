@@ -462,33 +462,54 @@ export async function transferWorkspaceOwnership(args: {
 // ── Audit log ────────────────────────────────────────────────────────────
 
 export type WorkspaceAuditPreviousRole = "admin" | "member" | "reviewer" | "viewer";
-export type WorkspaceAuditEventType = "workspace_member_removed" | "workspace_ownership_transferred" | "workspace_member_role_changed";
+export type WorkspaceAuditMemberEventType = "workspace_member_removed" | "workspace_ownership_transferred" | "workspace_member_role_changed";
+export type WorkspaceAuditProjectEventType = "workspace_project_archived" | "workspace_project_restored";
+export type WorkspaceAuditEventType = WorkspaceAuditMemberEventType | WorkspaceAuditProjectEventType;
 
 /**
  * Team Member Management, Phase 12B — `newRole` is required when (and only
- * when) `eventType === "workspace_member_role_changed"`; the other two
+ * when) `eventType === "workspace_member_role_changed"`; the other member
  * event types never carry it. Encoded as a discriminated union, mirroring
  * the server's own `WorkspaceAuditEventDto` — `isValidAuditEvent()`
  * enforces this at the parse boundary rather than trusting an optional
  * field.
+ *
+ * Project Archive/Restore Audit Visibility, Phase PROJECT-AUDIT-AR-I1 —
+ * `workspace_project_archived` / `workspace_project_restored` are
+ * PROJECT-shaped: `actor` + `project.name` only. No `target`, no
+ * `previousRole`/`newRole`, and deliberately NO `projectId` (the server
+ * DTO never exposes it; this parser never reads it). Member-event
+ * validation is unchanged — the shared checks are split by shape, not
+ * loosened.
  */
 export type WorkspaceAuditEventItem =
   | { eventType: "workspace_member_removed"; occurredAt: string; actor: { displayName: string }; target: { displayName: string }; previousRole: WorkspaceAuditPreviousRole }
   | { eventType: "workspace_ownership_transferred"; occurredAt: string; actor: { displayName: string }; target: { displayName: string }; previousRole: WorkspaceAuditPreviousRole }
-  | { eventType: "workspace_member_role_changed"; occurredAt: string; actor: { displayName: string }; target: { displayName: string }; previousRole: WorkspaceAuditPreviousRole; newRole: WorkspaceAuditPreviousRole };
+  | { eventType: "workspace_member_role_changed"; occurredAt: string; actor: { displayName: string }; target: { displayName: string }; previousRole: WorkspaceAuditPreviousRole; newRole: WorkspaceAuditPreviousRole }
+  | { eventType: "workspace_project_archived"; occurredAt: string; actor: { displayName: string }; project: { name: string } }
+  | { eventType: "workspace_project_restored"; occurredAt: string; actor: { displayName: string }; project: { name: string } };
 
 const VALID_AUDIT_PREVIOUS_ROLES: ReadonlySet<string> = new Set(["admin", "member", "reviewer", "viewer"]);
-const VALID_AUDIT_EVENT_TYPES: ReadonlySet<string> = new Set(["workspace_member_removed", "workspace_ownership_transferred", "workspace_member_role_changed"]);
+const VALID_AUDIT_MEMBER_EVENT_TYPES: ReadonlySet<string> = new Set(["workspace_member_removed", "workspace_ownership_transferred", "workspace_member_role_changed"]);
+const VALID_AUDIT_PROJECT_EVENT_TYPES: ReadonlySet<string> = new Set(["workspace_project_archived", "workspace_project_restored"]);
+const VALID_AUDIT_EVENT_TYPES: ReadonlySet<string> = new Set([...VALID_AUDIT_MEMBER_EVENT_TYPES, ...VALID_AUDIT_PROJECT_EVENT_TYPES]);
 
 function isValidAuditEvent(value: unknown): value is WorkspaceAuditEventItem {
   if (typeof value !== "object" || value === null) return false;
   const v = value as Record<string, unknown>;
   if (typeof v.eventType !== "string" || !VALID_AUDIT_EVENT_TYPES.has(v.eventType)) return false;
   if (typeof v.occurredAt !== "string" || Number.isNaN(Date.parse(v.occurredAt))) return false;
-  if (typeof v.previousRole !== "string" || !VALID_AUDIT_PREVIOUS_ROLES.has(v.previousRole)) return false;
   const actor = v.actor;
-  const target = v.target;
   if (typeof actor !== "object" || actor === null || typeof (actor as Record<string, unknown>).displayName !== "string") return false;
+  if (VALID_AUDIT_PROJECT_EVENT_TYPES.has(v.eventType)) {
+    const project = v.project;
+    if (typeof project !== "object" || project === null) return false;
+    const name = (project as Record<string, unknown>).name;
+    if (typeof name !== "string" || name.length === 0) return false;
+    return true;
+  }
+  if (typeof v.previousRole !== "string" || !VALID_AUDIT_PREVIOUS_ROLES.has(v.previousRole)) return false;
+  const target = v.target;
   if (typeof target !== "object" || target === null || typeof (target as Record<string, unknown>).displayName !== "string") return false;
   if (v.eventType === "workspace_member_role_changed") {
     if (typeof v.newRole !== "string" || !VALID_AUDIT_PREVIOUS_ROLES.has(v.newRole)) return false;

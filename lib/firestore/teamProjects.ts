@@ -17,11 +17,31 @@
  * the write — see that module's doc comment for the revocation-race
  * rationale. Firestore internal transaction retries are the ONLY retry
  * mechanism in play; neither function wraps `runTransaction()` in any
- * application-level retry loop, and this module never imports
- * `writeProjectEvent` — event writing belongs exclusively to the route
- * layer, strictly after this module's exported functions have already
- * returned (see `docs/workspaces/phase8-team-workspace-foundation.md`'s
- * Phase 8C-A.1 event-ordering note).
+ * application-level retry loop.
+ *
+ * ================= EVENT-WRITING INVARIANT (revised) =================
+ * Phase 8C-A.1 froze: this module never imports `writeProjectEvent` /
+ * `writeTeamProjectEventSafely` / the `projectEvents` module. That
+ * NON-transactional, best-effort `.add()` writer must never run inside a
+ * transaction callback — Firestore may re-invoke the callback on a
+ * conflict, and a plain `.add()` would persist once per DISCARDED attempt.
+ * It stays route-layer-only, strictly after this module has returned.
+ *
+ * Phase PROJECT-AUDIT-AR-I1 narrows that rule to what it actually
+ * protects: `updateTeamProjectFields()` MAY — and for archive/restore
+ * MUST — write the authoritative Workspace Audit event
+ * (`workspaceMembershipEvents`, `workspace_project_archived` /
+ * `workspace_project_restored`) via `tx.set()` through the SAME
+ * `Transaction` handle as the Project write. A transactional `tx.set()`
+ * is buffered and committed only with the winning attempt, so a retried
+ * or aborted callback leaves no event, and `PROJECT LIFECYCLE CHANGE
+ * COMMITTED IFF WORKSPACE AUDIT EVENT COMMITTED` holds structurally —
+ * the same standard `removeWorkspaceMembership()` /
+ * `changeTeamWorkspaceMemberRole()` already enforce for membership
+ * events. The legacy post-commit `projectEvents` write in the route layer
+ * is unchanged and remains unread by Workspace Audit.
+ * (`lib/firestore/__tests__/teamProjectsNeverWritesEvents.spec.ts` is the
+ * structural guard for both halves of this invariant.)
  *
  * ================= POST-COMMIT READ FAILURE CONTRACT =================
  * `tx.create()`/`tx.update()` have no `WriteResult` of their own (unlike
@@ -63,6 +83,7 @@ import { logger } from "@/lib/logger";
 import { TEAM_WORKSPACES_ENABLED, TEAM_WORKSPACES_CANARY_UIDS, TEAM_WORKSPACES_CANARY_WORKSPACE_IDS } from "@/lib/env";
 import { resolveTeamWorkspaceTargetAdmission } from "@/lib/workspaces/teamWorkspaceTargetAdmission";
 import { authorizeTeamWorkspaceMutationInTransaction, type TeamMutationAuthorizationDenialReason } from "@/lib/workspaces/authorizeTeamWorkspaceMutationInTransaction";
+import { buildWorkspaceMembershipEventDocData } from "@/lib/workspaces/workspaceMembershipEvents";
 import { isWellFormedProjectV1, type ProjectV1 } from "@/lib/projects/types";
 
 export type CreateTeamProjectResult =
@@ -203,6 +224,20 @@ export type UpdateTeamProjectFieldsResult =
  *      fails on every Firestore-internal retry of this callback, exactly
  *      mirroring `transferTeamWorkspaceOwnership()`'s documented dual
  *      fast-path/authoritative precondition contract.
+ *   7. Phase PROJECT-AUDIT-AR-I1 — for `archive`/`restore` ONLY (never
+ *      `rename`), stage `tx.set()` of the canonical Workspace Audit event
+ *      (`workspace_project_archived` / `workspace_project_restored`) at a
+ *      freshly-allocated `workspaceMembershipEvents` doc ref, in this SAME
+ *      transaction. Every field is derived from state this transaction
+ *      itself read and validated: `actorUid` from the authorized
+ *      membership (step 1), `workspaceId`/`projectId`/`projectName` from
+ *      the bound Project (steps 2-3), `at` the exact `now` used for the
+ *      Project's own `updatedAt`. Nothing comes from the request. Both
+ *      writes are buffered in the same attempt: the lifecycle change
+ *      commits iff the event commits, and a discarded retry attempt
+ *      leaves neither. A same-state request never reaches this step
+ *      (step 4 already returned `invalid_transition`), so a rejected
+ *      attempt is never audited.
  *
  * The post-commit projection read (for `documentUpdateTime`) is issued
  * strictly AFTER step 6 has already committed, in its own try/catch — see
@@ -276,6 +311,27 @@ export async function updateTeamProjectFields(args: {
             : { status: "active", updatedAt: now };
 
       tx.update(projectRef as DocumentReference, data, { lastUpdateTime: args.expectedUpdateTime });
+
+      if (args.mutation.kind === "archive" || args.mutation.kind === "restore") {
+        // Step 7 — authoritative Workspace Audit event, buffered in this
+        // SAME transaction attempt as the lifecycle write above. `.doc()`
+        // with no argument allocates an id locally (no read), so it is safe
+        // after every read this transaction performs. See the module
+        // header's EVENT-WRITING INVARIANT for why this is a `tx.set()` and
+        // never the non-transactional `projectEvents` writer.
+        const eventRef = adminDb!.collection("workspaceMembershipEvents").doc();
+        tx.set(
+          eventRef,
+          buildWorkspaceMembershipEventDocData({
+            eventType: args.mutation.kind === "archive" ? "workspace_project_archived" : "workspace_project_restored",
+            actorUid: auth.membership.uid,
+            workspaceId: project.workspaceId,
+            projectId: project.id,
+            projectName: project.name,
+            at: now,
+          })
+        );
+      }
 
       return { kind: "updated", project: { ...project, ...data } };
     });

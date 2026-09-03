@@ -9,8 +9,14 @@
  * removed whom, from which role, and when).
  *
  * Every displayed field comes from the server's own allow-list
- * `WorkspaceAuditEventItem` DTO — no raw UID, membership ID, or Workspace
- * ID beyond what that DTO already exposes.
+ * `WorkspaceAuditEventItem` DTO — no raw UID, membership ID, Workspace
+ * ID, or Project ID beyond what that DTO already exposes.
+ *
+ * Project Archive/Restore Audit Visibility, Phase PROJECT-AUDIT-AR-I1 —
+ * two Project-shaped branches ("Project archived" / "Project restored")
+ * render the mutation-time name snapshot (`event.project.name`) with the
+ * same actor/timestamp footer as every other card. No Project link, no
+ * filter, no archive/restore control — audit rendering only.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -125,6 +131,32 @@ export default function WorkspaceAuditLogShell({ workspaceId, workspaceName }: {
                     <span>
                       {event.target.displayName}&apos;s previous role: <span className="font-medium text-cp-muted">{ROLE_LABEL[event.previousRole]}</span>
                     </span>
+                    <span>
+                      By: <span className="font-medium text-cp-muted">{event.actor.displayName}</span>
+                    </span>
+                    <span>{formatOccurredAt(event.occurredAt)}</span>
+                  </div>
+                </>
+              ) : event.eventType === "workspace_project_archived" ? (
+                <>
+                  <p className="text-sm font-medium text-cp-text">Project archived</p>
+                  <p className="mt-1 break-words text-sm text-cp-muted">
+                    <span className="font-medium text-cp-text">{event.project.name}</span> was archived.
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-cp-faint">
+                    <span>
+                      By: <span className="font-medium text-cp-muted">{event.actor.displayName}</span>
+                    </span>
+                    <span>{formatOccurredAt(event.occurredAt)}</span>
+                  </div>
+                </>
+              ) : event.eventType === "workspace_project_restored" ? (
+                <>
+                  <p className="text-sm font-medium text-cp-text">Project restored</p>
+                  <p className="mt-1 break-words text-sm text-cp-muted">
+                    <span className="font-medium text-cp-text">{event.project.name}</span> was restored.
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-cp-faint">
                     <span>
                       By: <span className="font-medium text-cp-muted">{event.actor.displayName}</span>
                     </span>

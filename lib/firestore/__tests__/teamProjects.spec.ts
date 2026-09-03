@@ -29,13 +29,18 @@ const stores: Record<string, Map<string, StoredDoc>> = {
   workspaces: new Map(),
   workspaceMemberships: new Map(),
   projects: new Map(),
+  workspaceMembershipEvents: new Map(),
 };
 
 function resetStores() {
   stores.workspaces.clear();
   stores.workspaceMemberships.clear();
   stores.projects.clear();
+  stores.workspaceMembershipEvents.clear();
 }
+
+/** Phase PROJECT-AUDIT-AR-I1 — when set, `tx.set()` on this collection throws (simulated transient failure of the Workspace Audit event write) so a test can prove the WHOLE transaction rolls back, lifecycle write included. */
+let forceSetFailureForCollection: string | null = null;
 
 /** When true, the NEXT non-transactional `.get()` call (i.e. the post-commit projection read — `projectRef.get()`, never `tx.get()`) throws instead of resolving, then resets itself. Simulates a transient Firestore read failure that happens strictly AFTER a transaction has already committed. */
 let failNextPostCommitGet = false;
@@ -115,6 +120,16 @@ const mockAdminDb: any = {
             }
           }
           pendingWrites.push(() => store.set(ref.__id, { data: { ...entry.data, ...data }, updateTime: nextUpdateTime() }));
+        },
+        // Standard `tx.set()` semantics (unconditional overwrite, buffered
+        // until commit) — used by the AR-I1 Workspace Audit event write on a
+        // freshly-allocated auto-ID ref. Mirrors workspaceMemberships.spec.ts.
+        set: (ref: { __collection: string; __id: string }, data: Record<string, unknown>) => {
+          if (forceSetFailureForCollection === ref.__collection) {
+            throw new FirestoreError("14", "UNAVAILABLE: simulated transient failure");
+          }
+          const store = stores[ref.__collection];
+          pendingWrites.push(() => store.set(ref.__id, { data, updateTime: nextUpdateTime() }));
         },
       };
 
@@ -230,6 +245,7 @@ function seedProject(id: string, overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   resetStores();
   concurrentMutationHook = null;
+  forceSetFailureForCollection = null;
   retriesBeforeSuccess = 0;
   projectsAutoIdCallCount = 0;
   failNextPostCommitGet = false;
@@ -936,3 +952,209 @@ describe("Phase 10B.3.2A — Workspace-canary target admission", () => {
     });
   });
 });
+
+describe("updateTeamProjectFields — Workspace Audit atomicity, Phase PROJECT-AUDIT-AR-I1", () => {
+  const PROJECT_NAME = "Quarterly Diligence";
+  function events() {
+    return [...stores.workspaceMembershipEvents.values()].map((e) => e.data);
+  }
+  function seedAll(status: "active" | "archived", actorRole = "owner", actorUid = OWNER_UID) {
+    seedWorkspace();
+    seedMembership(OWNER_UID, "owner");
+    if (actorUid !== OWNER_UID) seedMembership(actorUid, actorRole);
+    seedProject("proj-1", { status, name: PROJECT_NAME });
+    return stores.projects.get("proj-1")!.updateTime;
+  }
+
+  describe("ARCHIVE SUCCESS", () => {
+    it("one successful archive commits exactly one workspace_project_archived event, derived entirely from transaction-read state, with at === the Project's new updatedAt", async () => {
+      const token = seedAll("active", "admin", MEMBER_UID);
+      const before = stores.projects.get("proj-1")!.data;
+      const result = await updateTeamProjectFields({ uid: MEMBER_UID, workspaceId: WS_ID, projectId: "proj-1", mutation: { kind: "archive" }, expectedUpdateTime: token });
+      expect(result.status).toBe("updated");
+      const after = stores.projects.get("proj-1")!.data;
+      expect(after.status).toBe("archived");
+      expect(after.updatedAt).not.toEqual(before.updatedAt);
+      expect(events()).toHaveLength(1);
+      const [event] = events();
+      expect(event).toEqual({ eventType: "workspace_project_archived", actorUid: MEMBER_UID, workspaceId: WS_ID, projectId: "proj-1", projectName: PROJECT_NAME, at: after.updatedAt });
+      expect(Object.keys(event).sort()).toEqual(["actorUid", "at", "eventType", "projectId", "projectName", "workspaceId"]);
+      // Never member-shaped, never status-shaped, never a display name.
+      for (const forbidden of ["targetUid", "previousRole", "newRole", "previousStatus", "newStatus", "displayName", "createdByUserId"]) expect(event).not.toHaveProperty(forbidden);
+    });
+
+    it("projectName is the TRANSACTION-READ snapshot — a name that differs from anything the caller could supply is what gets stored", async () => {
+      const token = seedAll("active");
+      stores.projects.get("proj-1")!.data.name = "Name As Stored In Firestore";
+      await updateTeamProjectFields({ uid: OWNER_UID, workspaceId: WS_ID, projectId: "proj-1", mutation: { kind: "archive" }, expectedUpdateTime: token });
+      expect(events()[0].projectName).toBe("Name As Stored In Firestore");
+    });
+
+    it("event.workspaceId is the VALIDATED Project's workspaceId (which the writer has already proven equals the authorized Workspace) — a Project whose embedded workspaceId differs from the route is concealed and produces no event", async () => {
+      seedWorkspace();
+      seedMembership(OWNER_UID, "owner");
+      seedProject("proj-1", { workspaceId: "some-other-workspace", name: PROJECT_NAME });
+      const token = stores.projects.get("proj-1")!.updateTime;
+      const result = await updateTeamProjectFields({ uid: OWNER_UID, workspaceId: WS_ID, projectId: "proj-1", mutation: { kind: "archive" }, expectedUpdateTime: token });
+      expect(result).toEqual({ status: "project_not_found" });
+      expect(stores.projects.get("proj-1")!.data.status).toBe("active");
+      expect(events()).toHaveLength(0);
+    });
+
+    it("event provenance (non-vacuity fixture for Mutation M2): the event's workspaceId equals the validated Project's own embedded workspaceId, proven with a fixture where Workspace id and Project id strings differ", async () => {
+      const token = seedAll("active");
+      await updateTeamProjectFields({ uid: OWNER_UID, workspaceId: WS_ID, projectId: "proj-1", mutation: { kind: "archive" }, expectedUpdateTime: token });
+      const [event] = events();
+      expect(event.workspaceId).toBe(stores.projects.get("proj-1")!.data.workspaceId);
+      expect(event.projectId).toBe(stores.projects.get("proj-1")!.data.id);
+      expect(event.projectId).not.toBe(event.workspaceId);
+    });
+  });
+
+  describe("RESTORE SUCCESS", () => {
+    it("one successful restore commits exactly one workspace_project_restored event with the same provenance and at === updatedAt", async () => {
+      const token = seedAll("archived");
+      const result = await updateTeamProjectFields({ uid: OWNER_UID, workspaceId: WS_ID, projectId: "proj-1", mutation: { kind: "restore" }, expectedUpdateTime: token });
+      expect(result.status).toBe("updated");
+      const after = stores.projects.get("proj-1")!.data;
+      expect(after.status).toBe("active");
+      expect(events()).toEqual([{ eventType: "workspace_project_restored", actorUid: OWNER_UID, workspaceId: WS_ID, projectId: "proj-1", projectName: PROJECT_NAME, at: after.updatedAt }]);
+    });
+  });
+
+  describe("NO EVENT WITHOUT A COMMITTED LIFECYCLE CHANGE", () => {
+    it("unauthorized (Reviewer) archive/restore: no lifecycle write, no event", async () => {
+      for (const kind of ["archive", "restore"] as const) {
+        resetStores();
+        const token = seedAll(kind === "archive" ? "active" : "archived", "reviewer", REVIEWER_UID);
+        const result = await updateTeamProjectFields({ uid: REVIEWER_UID, workspaceId: WS_ID, projectId: "proj-1", mutation: { kind }, expectedUpdateTime: token });
+        expect(result).toEqual({ status: "unauthorized", reason: "insufficient_capability" });
+        expect(stores.projects.get("proj-1")!.data.status).toBe(kind === "archive" ? "active" : "archived");
+        expect(events()).toHaveLength(0);
+      }
+    });
+
+    it("non-member actor: concealed, no lifecycle write, no event", async () => {
+      const token = seedAll("active");
+      const result = await updateTeamProjectFields({ uid: OUTSIDER_UID, workspaceId: WS_ID, projectId: "proj-1", mutation: { kind: "archive" }, expectedUpdateTime: token });
+      expect(result).toEqual({ status: "unauthorized", reason: "membership_not_found" });
+      expect(events()).toHaveLength(0);
+    });
+
+    it("same-state: archive of an archived Project and restore of an active Project are rejected (invalid_transition) with no write and no event", async () => {
+      let token = seedAll("archived");
+      expect(await updateTeamProjectFields({ uid: OWNER_UID, workspaceId: WS_ID, projectId: "proj-1", mutation: { kind: "archive" }, expectedUpdateTime: token })).toEqual({ status: "invalid_transition" });
+      expect(events()).toHaveLength(0);
+      resetStores();
+      token = seedAll("active");
+      expect(await updateTeamProjectFields({ uid: OWNER_UID, workspaceId: WS_ID, projectId: "proj-1", mutation: { kind: "restore" }, expectedUpdateTime: token })).toEqual({ status: "invalid_transition" });
+      expect(events()).toHaveLength(0);
+    });
+
+    it("stale expectedUpdateTime: no lifecycle change, no event", async () => {
+      seedAll("active");
+      const result = await updateTeamProjectFields({ uid: OWNER_UID, workspaceId: WS_ID, projectId: "proj-1", mutation: { kind: "archive" }, expectedUpdateTime: ts(1) });
+      expect(result).toEqual({ status: "precondition_failed" });
+      expect(stores.projects.get("proj-1")!.data.status).toBe("active");
+      expect(events()).toHaveLength(0);
+    });
+
+    it("missing Project: no event", async () => {
+      seedWorkspace();
+      seedMembership(OWNER_UID, "owner");
+      expect(await updateTeamProjectFields({ uid: OWNER_UID, workspaceId: WS_ID, projectId: "nope", mutation: { kind: "archive" }, expectedUpdateTime: ts(1) })).toEqual({ status: "project_not_found" });
+      expect(events()).toHaveLength(0);
+    });
+  });
+
+  describe("RENAME stays outside Workspace Audit", () => {
+    it("a rename (active or archived Project) behaves exactly as before and creates NO Workspace Audit event of any type", async () => {
+      for (const status of ["active", "archived"] as const) {
+        resetStores();
+        const token = seedAll(status);
+        const result = await updateTeamProjectFields({ uid: OWNER_UID, workspaceId: WS_ID, projectId: "proj-1", mutation: { kind: "rename", name: "Renamed" }, expectedUpdateTime: token });
+        expect(result.status).toBe("updated");
+        expect(stores.projects.get("proj-1")!.data.name).toBe("Renamed");
+        expect(stores.projects.get("proj-1")!.data.status).toBe(status);
+        expect(events()).toHaveLength(0);
+      }
+    });
+  });
+
+  describe("ATOMICITY — PROJECT LIFECYCLE CHANGE COMMITTED IFF WORKSPACE AUDIT EVENT COMMITTED", () => {
+    it("A. event write failure -> the whole transaction fails: archive does NOT commit, status unchanged, no orphan event", async () => {
+      const token = seedAll("active");
+      forceSetFailureForCollection = "workspaceMembershipEvents";
+      const result = await updateTeamProjectFields({ uid: OWNER_UID, workspaceId: WS_ID, projectId: "proj-1", mutation: { kind: "archive" }, expectedUpdateTime: token });
+      expect(result).toEqual({ status: "update_failed" });
+      expect(stores.projects.get("proj-1")!.data.status).toBe("active");
+      expect(stores.projects.get("proj-1")!.updateTime).toEqual(token); // native updateTime untouched — nothing was applied
+      expect(events()).toHaveLength(0);
+    });
+
+    it("A'. event write failure on restore -> same rollback", async () => {
+      const token = seedAll("archived");
+      forceSetFailureForCollection = "workspaceMembershipEvents";
+      expect(await updateTeamProjectFields({ uid: OWNER_UID, workspaceId: WS_ID, projectId: "proj-1", mutation: { kind: "restore" }, expectedUpdateTime: token })).toEqual({ status: "update_failed" });
+      expect(stores.projects.get("proj-1")!.data.status).toBe("archived");
+      expect(events()).toHaveLength(0);
+    });
+
+    it("B. Firestore-internal retry: two discarded callback attempts leave NO event; the kept attempt commits exactly ONE event and exactly one lifecycle change", async () => {
+      const token = seedAll("active");
+      retriesBeforeSuccess = 2;
+      const result = await updateTeamProjectFields({ uid: OWNER_UID, workspaceId: WS_ID, projectId: "proj-1", mutation: { kind: "archive" }, expectedUpdateTime: token });
+      expect(result.status).toBe("updated");
+      expect(mockAdminDb.runTransaction).toHaveBeenCalledTimes(1);
+      expect(stores.projects.get("proj-1")!.data.status).toBe("archived");
+      expect(events()).toHaveLength(1);
+      expect(events()[0].at).toEqual(stores.projects.get("proj-1")!.data.updatedAt);
+    });
+
+    it("C. between-read-and-commit conflict: a concurrent write lands after this transaction's Project read; the authoritative precondition rejects the lifecycle write and NO orphan event is left — committed state and committed audit history agree", async () => {
+      const token = seedAll("active");
+      let getCount = 0;
+      concurrentMutationHook = (ref) => {
+        if (ref.__collection !== "projects") return;
+        getCount += 1;
+        if (getCount !== 1) return;
+        const entry = stores.projects.get("proj-1")!;
+        stores.projects.set("proj-1", { data: { ...entry.data, name: "Renamed By Someone Else" }, updateTime: nextUpdateTime() });
+      };
+      const result = await updateTeamProjectFields({ uid: OWNER_UID, workspaceId: WS_ID, projectId: "proj-1", mutation: { kind: "archive" }, expectedUpdateTime: token });
+      expect(result).toEqual({ status: "precondition_failed" });
+      expect(stores.projects.get("proj-1")!.data.status).toBe("active");
+      expect(events()).toHaveLength(0);
+    });
+
+    it("D. both directions: the lifecycle write and the event write are buffered in the SAME attempt — the event is only ever observable together with the committed status, never before it and never without it", async () => {
+      const token = seedAll("active");
+      // Observe the store from inside the callback (after both writes are
+      // staged but before commit): neither the status nor the event is
+      // visible yet — nothing leaks out of an uncommitted attempt.
+      let observedMidTransaction: { status: unknown; eventCount: number } | null = null;
+      const originalImpl = mockAdminDb.runTransaction.getMockImplementation();
+      mockAdminDb.runTransaction.mockImplementationOnce(async (fn: (txn: any) => Promise<any>) => {
+        return originalImpl(async (txn: any) => {
+          const r = await fn(txn);
+          observedMidTransaction = { status: stores.projects.get("proj-1")!.data.status, eventCount: stores.workspaceMembershipEvents.size };
+          return r;
+        });
+      });
+      const result = await updateTeamProjectFields({ uid: OWNER_UID, workspaceId: WS_ID, projectId: "proj-1", mutation: { kind: "archive" }, expectedUpdateTime: token });
+      expect(result.status).toBe("updated");
+      expect(observedMidTransaction).toEqual({ status: "active", eventCount: 0 });
+      expect(stores.projects.get("proj-1")!.data.status).toBe("archived");
+      expect(events()).toHaveLength(1);
+    });
+
+    it("the post-commit projection read failing does NOT affect the already-committed event (updated_projection_unavailable still has exactly one event)", async () => {
+      const token = seedAll("active");
+      failNextPostCommitGet = true;
+      const result = await updateTeamProjectFields({ uid: OWNER_UID, workspaceId: WS_ID, projectId: "proj-1", mutation: { kind: "archive" }, expectedUpdateTime: token });
+      expect(result.status).toBe("updated_projection_unavailable");
+      expect(events()).toHaveLength(1);
+    });
+  });
+});
+
