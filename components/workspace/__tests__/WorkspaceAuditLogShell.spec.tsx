@@ -91,6 +91,35 @@ describe("WorkspaceAuditLogShell — ownership-transfer event card content, Phas
   });
 });
 
+describe("WorkspaceAuditLogShell — role-changed event card content, Phase 12B", () => {
+  it("renders 'Role changed' as the event heading, as the else-branch of a three-way discrimination on event.eventType", () => {
+    expect(source).toMatch(/event\.eventType === "workspace_member_removed"/);
+    expect(source).toMatch(/event\.eventType === "workspace_ownership_transferred"/);
+    expect(source).toMatch(/Role changed/);
+  });
+
+  it("renders the target's resolved display name, never a raw uid field, for the role-changed branch", () => {
+    const roleChangedBranch = source.slice(source.indexOf("Role changed") - 50);
+    expect(roleChangedBranch).toMatch(/event\.target\.displayName/);
+  });
+
+  it("renders both the previous role and the new role via the shared ROLE_LABEL map, never a raw lowercase role string directly", () => {
+    const roleChangedBranch = source.slice(source.indexOf("Role changed") - 50, source.indexOf("Role changed") + 800);
+    expect(roleChangedBranch).toMatch(/ROLE_LABEL\[event\.previousRole\]/);
+    expect(roleChangedBranch).toMatch(/ROLE_LABEL\[event\.newRole\]/);
+  });
+
+  it("renders the actor's resolved display name with a 'By:' label for the role-changed branch", () => {
+    const roleChangedBranch = source.slice(source.indexOf("Role changed") - 50, source.indexOf("Role changed") + 1500);
+    expect(roleChangedBranch).toMatch(/By:[\s\S]{0,60}event\.actor\.displayName/);
+  });
+
+  it("no raw UID/workspaceId/document-id field is referenced in the role-changed branch either (DTO allow-list respected end-to-end)", () => {
+    const roleChangedBranch = source.slice(source.indexOf("Role changed") - 50, source.indexOf("Role changed") + 1500);
+    expect(roleChangedBranch).not.toMatch(/event\.actorUid|event\.targetUid|event\.uid|event\.workspaceId|event\.id\b/);
+  });
+});
+
 describe("WorkspaceAuditLogShell — navigation (T, Q)", () => {
   it("Phase 12A.1 — cross-links back to Members/Overview via the shared WorkspaceNav, not a locally-duplicated tab strip", () => {
     expect(source).toMatch(/import WorkspaceNav from ["']@\/components\/workspace\/WorkspaceNav["'];/);

@@ -39,6 +39,16 @@
  * target uids from BOTH event types are added to the same `uids` Set
  * before the existing batched calls, so a mixed page never issues more
  * than the same two bounded calls.
+ *
+ * Team Member Management, Phase 12B — `"workspace_member_role_changed"`
+ * added as a third recognized event type, and `ValidatedRow`/
+ * `WorkspaceAuditEventDto` widened from a flat shape to a discriminated
+ * union keyed on `eventType` (mirroring the write-side schema evolution in
+ * `workspaceMembershipEvents.ts`), since this event type genuinely needs
+ * an extra field (`newRole`) the other two do not. A row claiming
+ * `workspace_member_role_changed` with a missing/invalid `newRole` is
+ * malformed and skipped, same fail-closed posture as every other
+ * validation branch here.
  */
 
 import "server-only";
@@ -60,37 +70,38 @@ const VALID_PREVIOUS_ROLES: ReadonlySet<string> = new Set(["admin", "member", "r
 
 export type WorkspaceAuditPreviousRole = Exclude<WorkspaceMembershipRole, "owner">;
 
-export type WorkspaceAuditEventType = "workspace_member_removed" | "workspace_ownership_transferred";
+export type WorkspaceAuditEventType = "workspace_member_removed" | "workspace_ownership_transferred" | "workspace_member_role_changed";
 
-const VALID_EVENT_TYPES: ReadonlySet<string> = new Set(["workspace_member_removed", "workspace_ownership_transferred"]);
+const VALID_EVENT_TYPES: ReadonlySet<string> = new Set(["workspace_member_removed", "workspace_ownership_transferred", "workspace_member_role_changed"]);
 
-export interface WorkspaceAuditEventDto {
-  eventType: WorkspaceAuditEventType;
+interface WorkspaceAuditEventDtoBase {
   occurredAt: string;
   actor: { displayName: string };
   target: { displayName: string };
-  previousRole: WorkspaceAuditPreviousRole;
 }
+
+export type WorkspaceAuditEventDto =
+  | (WorkspaceAuditEventDtoBase & { eventType: "workspace_member_removed"; previousRole: WorkspaceAuditPreviousRole })
+  | (WorkspaceAuditEventDtoBase & { eventType: "workspace_ownership_transferred"; previousRole: WorkspaceAuditPreviousRole })
+  | (WorkspaceAuditEventDtoBase & { eventType: "workspace_member_role_changed"; previousRole: WorkspaceAuditPreviousRole; newRole: WorkspaceAuditPreviousRole });
 
 export type ListWorkspaceAuditEventsResult =
   | { status: "ok"; items: WorkspaceAuditEventDto[]; hasMore: boolean; nextCursor?: string }
   | { status: "invalid_cursor" }
   | { status: "query_failed" };
 
-interface ValidatedRow {
-  eventType: WorkspaceAuditEventType;
-  occurredAtIso: string;
-  actorUid: string;
-  targetUid: string;
-  previousRole: WorkspaceAuditPreviousRole;
-}
+type ValidatedRow =
+  | { eventType: "workspace_member_removed"; occurredAtIso: string; actorUid: string; targetUid: string; previousRole: WorkspaceAuditPreviousRole }
+  | { eventType: "workspace_ownership_transferred"; occurredAtIso: string; actorUid: string; targetUid: string; previousRole: WorkspaceAuditPreviousRole }
+  | { eventType: "workspace_member_role_changed"; occurredAtIso: string; actorUid: string; targetUid: string; previousRole: WorkspaceAuditPreviousRole; newRole: WorkspaceAuditPreviousRole };
 
 /**
- * Both recognized event types share an identical validated field set
- * (`actorUid`/`targetUid`/`previousRole`/`at`) — this validates that
- * shared shape once and only branches on `eventType` for the discriminant
- * itself. A future third event type with a genuinely different shape
- * would need its own branch here; these two do not.
+ * All three recognized event types share the same base validated fields
+ * (`actorUid`/`targetUid`/`previousRole`/`at`) — validated once, before
+ * branching on `eventType`. Only `workspace_member_role_changed` needs an
+ * additional field (`newRole`), validated in its own branch; a row
+ * claiming that event type with a missing/invalid `newRole` is malformed
+ * and returns `null`, same as any other validation failure here.
  */
 function validateRow(id: string, raw: Record<string, unknown> | undefined, workspaceId: string): ValidatedRow | null {
   if (!raw) return null;
@@ -113,13 +124,13 @@ function validateRow(id: string, raw: Record<string, unknown> | undefined, works
     return null;
   }
 
-  return {
-    eventType: eventType as WorkspaceAuditEventType,
-    occurredAtIso,
-    actorUid,
-    targetUid,
-    previousRole: previousRole as WorkspaceAuditPreviousRole,
-  };
+  if (eventType === "workspace_member_role_changed") {
+    const newRole = raw.newRole;
+    if (typeof newRole !== "string" || !VALID_PREVIOUS_ROLES.has(newRole)) return null;
+    return { eventType, occurredAtIso, actorUid, targetUid, previousRole: previousRole as WorkspaceAuditPreviousRole, newRole: newRole as WorkspaceAuditPreviousRole };
+  }
+
+  return { eventType: eventType as "workspace_member_removed" | "workspace_ownership_transferred", occurredAtIso, actorUid, targetUid, previousRole: previousRole as WorkspaceAuditPreviousRole };
 }
 
 export async function listWorkspaceAuditEvents(args: { workspaceId: string; limit: number; cursorRaw?: string | null }): Promise<ListWorkspaceAuditEventsResult> {
@@ -187,13 +198,17 @@ export async function listWorkspaceAuditEvents(args: { workspaceId: string; limi
       resolveWorkspaceReviewerDisplayNames(args.workspaceId, Array.from(uids), UNKNOWN_AUDIT_TARGET_LABEL),
     ]);
 
-    const items: WorkspaceAuditEventDto[] = validated.map((row) => ({
-      eventType: row.eventType,
-      occurredAt: row.occurredAtIso,
-      actor: { displayName: actorNames.get(row.actorUid) ?? UNKNOWN_AUDIT_ACTOR_LABEL },
-      target: { displayName: targetNames.get(row.targetUid) ?? UNKNOWN_AUDIT_TARGET_LABEL },
-      previousRole: row.previousRole,
-    }));
+    const items: WorkspaceAuditEventDto[] = validated.map((row) => {
+      const base = {
+        occurredAt: row.occurredAtIso,
+        actor: { displayName: actorNames.get(row.actorUid) ?? UNKNOWN_AUDIT_ACTOR_LABEL },
+        target: { displayName: targetNames.get(row.targetUid) ?? UNKNOWN_AUDIT_TARGET_LABEL },
+      };
+      if (row.eventType === "workspace_member_role_changed") {
+        return { ...base, eventType: row.eventType, previousRole: row.previousRole, newRole: row.newRole };
+      }
+      return { ...base, eventType: row.eventType, previousRole: row.previousRole };
+    });
 
     const lastScanned = pageDocs[pageDocs.length - 1];
     const lastScannedTs = firestoreSecondsNanos(lastScanned.data().at);

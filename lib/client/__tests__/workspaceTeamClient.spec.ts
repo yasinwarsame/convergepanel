@@ -29,6 +29,7 @@ import {
   fetchTeamResearchExistence,
   fetchWorkspaceMembers,
   transferWorkspaceOwnership,
+  changeMemberRole,
 } from "@/lib/client/workspaceTeamClient";
 
 beforeEach(() => {
@@ -473,6 +474,94 @@ describe("transferWorkspaceOwnership — Ownership Transfer UI, Phase TEAM-MGMT-
       expectedOldOwnerMembershipUpdateTime: TOKEN,
       expectedNewOwnerMembershipUpdateTime: TOKEN,
     });
+    expect(result).toEqual({ status: "error" });
+  });
+});
+
+describe("changeMemberRole — Team Member Management, Phase 12B", () => {
+  it("2xx with changed: true -> {status: 'ok', changed: true}", async () => {
+    mockedAuthedFetch.mockResolvedValue(jsonResponse({ ok: true, changed: true }));
+    const result = await changeMemberRole({ user: null, authReady: true, workspaceId: "ws-1", targetUid: "target-uid", role: "reviewer" });
+    expect(result).toEqual({ status: "ok", changed: true });
+  });
+
+  it("2xx with changed: false (no-op) -> {status: 'ok', changed: false} — never collapsed into the same shape as a genuine change", async () => {
+    mockedAuthedFetch.mockResolvedValue(jsonResponse({ ok: true, changed: false }));
+    const result = await changeMemberRole({ user: null, authReady: true, workspaceId: "ws-1", targetUid: "target-uid", role: "member" });
+    expect(result).toEqual({ status: "ok", changed: false });
+  });
+
+  it("sends exactly one POST request to the change-role route with only the target uid (in the URL) and the requested role in the body", async () => {
+    mockedAuthedFetch.mockResolvedValue(jsonResponse({ ok: true, changed: true }));
+    await changeMemberRole({ user: null, authReady: true, workspaceId: "ws-1", targetUid: "target-uid", role: "admin" });
+    expect(mockedAuthedFetch).toHaveBeenCalledTimes(1);
+    const [url, options] = mockedAuthedFetch.mock.calls[0];
+    expect(url).toBe("/api/workspaces/ws-1/members/target-uid/change-role");
+    expect(options.method).toBe("POST");
+    expect(JSON.parse(options.body)).toEqual({ role: "admin" });
+  });
+
+  it("non-2xx (role_change_forbidden) response maps to denied with the server's errorCode/message, never fabricated", async () => {
+    mockedAuthedFetch.mockResolvedValue({ ok: false, status: 403, json: async () => ({ errorCode: "role_change_forbidden", message: "You do not have permission to change this member's role." }) });
+    const result = await changeMemberRole({ user: null, authReady: true, workspaceId: "ws-1", targetUid: "target-uid", role: "admin" });
+    expect(result).toEqual({ status: "denied", errorCode: "role_change_forbidden", message: "You do not have permission to change this member's role." });
+  });
+
+  it("2xx response missing/malformed 'changed' field -> error, never a fabricated true/false", async () => {
+    mockedAuthedFetch.mockResolvedValue(jsonResponse({ ok: true }));
+    const result = await changeMemberRole({ user: null, authReady: true, workspaceId: "ws-1", targetUid: "target-uid", role: "member" });
+    expect(result).toEqual({ status: "error" });
+  });
+
+  it("non-2xx with an unparsable body still fails closed to a safe generic denied message, never throwing", async () => {
+    mockedAuthedFetch.mockResolvedValue({ ok: false, status: 500, json: async () => { throw new Error("not json"); } });
+    const result = await changeMemberRole({ user: null, authReady: true, workspaceId: "ws-1", targetUid: "target-uid", role: "member" });
+    expect(result).toEqual({ status: "denied", errorCode: "unknown_error", message: "We couldn't change this member's role. Please try again." });
+  });
+
+  it("thrown fetch -> error, never throws", async () => {
+    mockedAuthedFetch.mockRejectedValue(new Error("network down"));
+    const result = await changeMemberRole({ user: null, authReady: true, workspaceId: "ws-1", targetUid: "target-uid", role: "member" });
+    expect(result).toEqual({ status: "error" });
+  });
+});
+
+describe("fetchWorkspaceAuditEvents — Phase 12B: workspace_member_role_changed acceptance", () => {
+  it("accepts a workspace_member_role_changed event, including newRole", async () => {
+    const roleChangedEvent = {
+      eventType: "workspace_member_role_changed",
+      occurredAt: "2026-09-01T20:46:25.000Z",
+      actor: { displayName: "Olivia Owner" },
+      target: { displayName: "Mo Member" },
+      previousRole: "member",
+      newRole: "reviewer",
+    };
+    mockedAuthedFetch.mockResolvedValue(jsonResponse({ ok: true, events: [roleChangedEvent], hasMore: false }));
+    const result = await fetchWorkspaceAuditEvents({ user: null, authReady: true, workspaceId: "ws-1" });
+    expect(result).toEqual({ status: "ok", events: [roleChangedEvent], hasMore: false });
+  });
+
+  it("rejects a workspace_member_role_changed event missing newRole — fails closed rather than rendering an incomplete event", async () => {
+    mockedAuthedFetch.mockResolvedValue(
+      jsonResponse({
+        ok: true,
+        events: [{ eventType: "workspace_member_role_changed", occurredAt: "2026-09-01T20:46:25.000Z", actor: { displayName: "A" }, target: { displayName: "B" }, previousRole: "member" }],
+        hasMore: false,
+      })
+    );
+    const result = await fetchWorkspaceAuditEvents({ user: null, authReady: true, workspaceId: "ws-1" });
+    expect(result).toEqual({ status: "error" });
+  });
+
+  it("rejects a workspace_member_role_changed event with newRole: 'owner'", async () => {
+    mockedAuthedFetch.mockResolvedValue(
+      jsonResponse({
+        ok: true,
+        events: [{ eventType: "workspace_member_role_changed", occurredAt: "2026-09-01T20:46:25.000Z", actor: { displayName: "A" }, target: { displayName: "B" }, previousRole: "member", newRole: "owner" }],
+        hasMore: false,
+      })
+    );
+    const result = await fetchWorkspaceAuditEvents({ user: null, authReady: true, workspaceId: "ws-1" });
     expect(result).toEqual({ status: "error" });
   });
 });

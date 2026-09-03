@@ -360,6 +360,139 @@ describe("WorkspaceMembersShell — canonical Owner and self are never offered T
   });
 });
 
+/**
+ * Active Member Role Management, Phase 12B — same jsdom-free, `readFileSync`
+ * + regex approach as every other interactive-behavior test in this file
+ * (see the module-level doc comment above).
+ */
+
+describe("WorkspaceMembersShell — Change role eligibility (client-side UX hint only; backend remains authoritative)", () => {
+  it("canManageMemberRoleTarget delegates to canRemoveMemberRole — the same target-authority matrix, not a re-duplicated role set", () => {
+    expect(source).toMatch(/function canManageMemberRoleTarget\(callerRole: WorkspaceMemberRole, targetRole: WorkspaceMemberRole\): boolean \{\s*return canRemoveMemberRole\(callerRole, targetRole\);\s*\}/);
+  });
+
+  it("Owner-assignable destination role set is exactly admin/member/reviewer/viewer — never owner", () => {
+    const match = source.match(/const OWNER_ASSIGNABLE_ROLES: readonly MembershipDestinationRole\[\] = \[([^\]]*)\];/);
+    expect(match).not.toBeNull();
+    const roles = match![1].split(",").map((s) => s.trim().replace(/"/g, "")).filter(Boolean);
+    expect(roles.sort()).toEqual(["admin", "member", "reviewer", "viewer"].sort());
+  });
+
+  it("Admin-assignable destination role set is exactly member/reviewer/viewer — never admin, never owner", () => {
+    const match = source.match(/const ADMIN_ASSIGNABLE_ROLES: readonly MembershipDestinationRole\[\] = \[([^\]]*)\];/);
+    expect(match).not.toBeNull();
+    const roles = match![1].split(",").map((s) => s.trim().replace(/"/g, "")).filter(Boolean);
+    expect(roles.sort()).toEqual(["member", "reviewer", "viewer"].sort());
+  });
+
+  it("assignableDestinationRoles falls through to an empty array for any caller that isn't owner or admin — lower roles are structurally offered nothing", () => {
+    const match = source.match(/function assignableDestinationRoles\(callerRole: WorkspaceMemberRole\): readonly MembershipDestinationRole\[\] \{([\s\S]*?)\n\}/);
+    expect(match).not.toBeNull();
+    const fallthrough = match![1].trim().split("\n").pop()!.trim();
+    expect(fallthrough).toBe("return [];");
+  });
+
+  it("roleChangeOptionsFor excludes the target's own current role from the offered destinations — never offered as a 'new' role", () => {
+    expect(source).toMatch(/function roleChangeOptionsFor\(callerRole: WorkspaceMemberRole, targetRole: WorkspaceMemberRole\): MembershipDestinationRole\[\] \{\s*return assignableDestinationRoles\(callerRole\)\.filter\(\(r\) => r !== targetRole\);\s*\}/);
+  });
+
+  it("eligibility requires ALL of: canManageInvitations (members.manage), not canonical Owner, not self, target-authority, AND at least one legal destination role", () => {
+    expect(source).toMatch(
+      /const roleChangeOptions = roleChangeOptionsFor\(callerRole, m\.role\);\s*const eligibleForRoleChange = canManageInvitations && !m\.isCanonicalOwner && m\.uid !== user\?\.uid && canManageMemberRoleTarget\(callerRole, m\.role\) && roleChangeOptions\.length > 0;/
+    );
+  });
+});
+
+describe("WorkspaceMembersShell — handleRoleChange wiring and safety", () => {
+  const handleRoleChange = extractFunctionBody("handleRoleChange");
+
+  it("calls changeMemberRole exactly once per invocation, via the canonical client helper, with the target uid and the requested destination role", () => {
+    expect(handleRoleChange).toMatch(/const result = await changeMemberRole\(\{ user, authReady, workspaceId, targetUid: member\.uid, role: destinationRole \}\);/);
+    const occurrences = (handleRoleChange.match(/changeMemberRole\(/g) || []).length;
+    expect(occurrences).toBe(1);
+  });
+
+  it("a genuine change (result.changed === true) refreshes the canonical member list via loadMembers() — never a locally-computed role swap", () => {
+    const changedBranch = handleRoleChange.match(/if \(result\.changed\) \{([\s\S]*?)\} else \{/);
+    expect(changedBranch).not.toBeNull();
+    expect(changedBranch![1]).toMatch(/loadMembers\(\);/);
+    expect(changedBranch![1]).not.toMatch(/setMembers\(/);
+  });
+
+  it("a same-role no-op (result.changed === false) does NOT call loadMembers() — nothing actually moved on the server", () => {
+    const noopBranch = handleRoleChange.match(/\} else \{\s*setRoleChangeConfirmation\(`\$\{member\.displayName\} already has that role\.`\);\s*\}/);
+    expect(noopBranch).not.toBeNull();
+    expect(noopBranch![0]).not.toMatch(/loadMembers\(\);/);
+  });
+
+  it("never calls setMembers directly anywhere — no optimistic client-side role mutation on success or failure", () => {
+    expect(handleRoleChange).not.toMatch(/setMembers\(/);
+  });
+
+  it("a denied response surfaces the server's own already-sanitized message, never raw backend detail", () => {
+    expect(handleRoleChange).toMatch(/\} else if \(result\.status === "denied"\) \{\s*setRoleChangeError\(result\.message\);\s*\}/);
+  });
+
+  it("clears confirmRoleChangeUid and selectedDestinationRole after the attempt completes, regardless of outcome", () => {
+    const beforeResult = handleRoleChange.indexOf("const result = await changeMemberRole");
+    const clearConfirm = handleRoleChange.indexOf("setConfirmRoleChangeUid(null);");
+    const clearSelection = handleRoleChange.indexOf("setSelectedDestinationRole(null);");
+    expect(clearConfirm).toBeGreaterThan(beforeResult);
+    expect(clearSelection).toBeGreaterThan(beforeResult);
+  });
+});
+
+describe("WorkspaceMembersShell — Change role confirmation UX", () => {
+  it("the Change role trigger button opens confirmation (setConfirmRoleChangeUid) and pre-selects the first legal destination — it does NOT call handleRoleChange directly; mutation only ever happens from the confirmation block", () => {
+    const triggerButtonMatch = source.match(
+      /onClick=\{\(\) => \{\s*setRoleChangeError\(null\);\s*setRoleChangeConfirmation\(null\);\s*setSelectedDestinationRole\(roleChangeOptions\[0\] \?\? null\);\s*setConfirmRoleChangeUid\(m\.uid\);\s*\}\}/
+    );
+    expect(triggerButtonMatch).not.toBeNull();
+    const handleRoleChangeCallSites = (source.match(/onClick=\{\(\) => selectedDestinationRole && handleRoleChange\(m, selectedDestinationRole\)\}/g) || []).length;
+    expect(handleRoleChangeCallSites).toBe(1);
+  });
+
+  it("Cancel inside the confirmation block only clears confirmRoleChangeUid/selectedDestinationRole — its own onClick never calls handleRoleChange/changeMemberRole", () => {
+    const confirmBlockMatch = source.match(/\{confirmRoleChangeUid === m\.uid && \(([\s\S]*?)\n\s{18}\)\}/);
+    expect(confirmBlockMatch).not.toBeNull();
+    const cancelButtonMatch = confirmBlockMatch![1].match(/onClick=\{\(\) => \{\s*setConfirmRoleChangeUid\(null\);\s*setSelectedDestinationRole\(null\);\s*\}\}/);
+    expect(cancelButtonMatch).not.toBeNull();
+    expect(cancelButtonMatch![0]).not.toMatch(/handleRoleChange/);
+  });
+
+  it("the destination <select> is populated exclusively from roleChangeOptions for this row — never a hard-coded/static role list", () => {
+    const confirmBlockMatch = source.match(/\{confirmRoleChangeUid === m\.uid && \(([\s\S]*?)\n\s{18}\)\}/);
+    expect(confirmBlockMatch).not.toBeNull();
+    expect(confirmBlockMatch![1]).toMatch(/\{roleChangeOptions\.map\(\(r\) => \(/);
+  });
+
+  it("the confirm button is disabled when no destination role is selected, in addition to while pending — never submits with an empty selection", () => {
+    expect(source).toMatch(/onClick=\{\(\) => selectedDestinationRole && handleRoleChange\(m, selectedDestinationRole\)\}\s*disabled=\{isRoleChangePending \|\| !selectedDestinationRole\}/);
+  });
+
+  it("confirmation copy names the target, shows their current role, and explicitly warns permissions change immediately — never a vague 'Confirm'", () => {
+    expect(source).toMatch(/Change <span className="font-medium">\{m\.displayName\}<\/span>&apos;s role\?/);
+    expect(source).toMatch(/Current role: <span className="font-medium">\{ROLE_LABEL\[m\.role\]\}<\/span>/);
+    expect(source).toMatch(/Their Workspace permissions will change immediately\./);
+  });
+
+  it("the confirm button's own label is never a vague 'Confirm' — it explicitly reads 'Change role'", () => {
+    expect(source).toMatch(/\{isRoleChangePending \? "…" : "Change role"\}/);
+  });
+});
+
+describe("WorkspaceMembersShell — canonical Owner and self are never offered Change role, structurally", () => {
+  it("the eligibility expression itself excludes isCanonicalOwner and the caller's own row", () => {
+    expect(source).toMatch(/const eligibleForRoleChange = canManageInvitations && !m\.isCanonicalOwner && m\.uid !== user\?\.uid/);
+  });
+
+  it("owner is structurally excluded as a destination — MembershipDestinationRole cannot express it, and the assignable-role constants never contain the string \"owner\"", () => {
+    const ownerMatch = source.match(/const OWNER_ASSIGNABLE_ROLES[\s\S]*?const ADMIN_ASSIGNABLE_ROLES: readonly MembershipDestinationRole\[\] = \[([^\]]*)\];/);
+    expect(ownerMatch).not.toBeNull();
+    expect(ownerMatch![0]).not.toMatch(/"owner"/);
+  });
+});
+
 describe("WorkspaceMembersShell — Workspace Audit Log, Phase TEAM-GOV-I1/12A.1: nav link", () => {
   it("Phase 12A.1 — renders the shared WorkspaceNav, passing canReadAudit straight through as showAudit (not a locally-duplicated tab strip)", () => {
     expect(source).toMatch(/import WorkspaceNav from ["']@\/components\/workspace\/WorkspaceNav["'];/);

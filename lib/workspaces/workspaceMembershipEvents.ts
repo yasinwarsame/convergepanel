@@ -47,45 +47,54 @@
  * `"owner"`, since a non-owner is always the transfer target); `actorUid`
  * is the PREVIOUS Owner (who performed the transfer), `targetUid` is the
  * NEW Owner.
+ *
+ * Team Member Management, Phase 12B — `"workspace_member_role_changed"`
+ * added, and the module's shape widened from a single flat interface to a
+ * discriminated union keyed on `eventType`. Unlike ownership transfer
+ * (whose destination role is structurally implied by the event type
+ * itself, so the existing single `previousRole` field was always
+ * sufficient), a role change's destination genuinely varies per event and
+ * must be recorded explicitly as `newRole`. A flat interface with
+ * `newRole` merely optional would let a malformed/mistyped role-change
+ * event compile with `newRole` silently missing; the discriminated union
+ * makes that a compile-time error at every construction site instead.
+ * `workspace_member_removed` and `workspace_ownership_transferred` keep
+ * their original single-`previousRole` shape, byte-identical to what is
+ * already persisted for those two event types.
  */
 
 import "server-only";
 import type { Timestamp } from "firebase-admin/firestore";
 import type { WorkspaceMembershipRole } from "./membershipTypes";
 
-export type WorkspaceMembershipEventType = "workspace_member_removed" | "workspace_ownership_transferred";
+export type WorkspaceMembershipEventType = "workspace_member_removed" | "workspace_ownership_transferred" | "workspace_member_role_changed";
 
-export interface WorkspaceMembershipEventArgs {
-  eventType: WorkspaceMembershipEventType;
+interface WorkspaceMembershipEventIdentity {
   actorUid: string;
   targetUid: string;
   workspaceId: string;
-  previousRole: WorkspaceMembershipRole;
 }
 
-export interface WorkspaceMembershipEventDocData {
-  eventType: WorkspaceMembershipEventType;
-  actorUid: string;
-  targetUid: string;
-  workspaceId: string;
-  previousRole: WorkspaceMembershipRole;
-  at: Timestamp;
-}
+export type WorkspaceMembershipEventArgs =
+  | (WorkspaceMembershipEventIdentity & { eventType: "workspace_member_removed"; previousRole: WorkspaceMembershipRole })
+  | (WorkspaceMembershipEventIdentity & { eventType: "workspace_ownership_transferred"; previousRole: WorkspaceMembershipRole })
+  | (WorkspaceMembershipEventIdentity & { eventType: "workspace_member_role_changed"; previousRole: WorkspaceMembershipRole; newRole: WorkspaceMembershipRole });
+
+export type WorkspaceMembershipEventDocData =
+  | (WorkspaceMembershipEventIdentity & { eventType: "workspace_member_removed"; previousRole: WorkspaceMembershipRole; at: Timestamp })
+  | (WorkspaceMembershipEventIdentity & { eventType: "workspace_ownership_transferred"; previousRole: WorkspaceMembershipRole; at: Timestamp })
+  | (WorkspaceMembershipEventIdentity & { eventType: "workspace_member_role_changed"; previousRole: WorkspaceMembershipRole; newRole: WorkspaceMembershipRole; at: Timestamp });
 
 /**
  * Pure — no I/O, never throws. `at` is caller-supplied (never generated
  * here) so the event's timestamp can be the EXACT SAME `Timestamp.now()`
  * instant already computed for the membership's own `removedAt`/
- * `updatedAt` fields inside the same transaction, rather than a second,
- * independently-drifted clock read.
+ * `updatedAt`/`role` fields inside the same transaction, rather than a
+ * second, independently-drifted clock read. The return type is the exact
+ * matching union member — TypeScript narrows through `args`'s own
+ * discriminant, so this can never construct a `workspace_member_role_changed`
+ * doc missing `newRole`.
  */
 export function buildWorkspaceMembershipEventDocData(args: WorkspaceMembershipEventArgs & { at: Timestamp }): WorkspaceMembershipEventDocData {
-  return {
-    eventType: args.eventType,
-    actorUid: args.actorUid,
-    targetUid: args.targetUid,
-    workspaceId: args.workspaceId,
-    previousRole: args.previousRole,
-    at: args.at,
-  };
+  return { ...args };
 }

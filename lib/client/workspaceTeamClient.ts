@@ -361,6 +361,53 @@ export async function removeMember(args: { user: User | null; authReady: boolean
   }
 }
 
+// ── Role change ──────────────────────────────────────────────────────────
+
+export type MembershipDestinationRole = "admin" | "member" | "reviewer" | "viewer";
+
+/**
+ * Team Member Management, Phase 12B — `changed: true` means the target's
+ * role was genuinely mutated; `changed: false` means the requested
+ * destination already matched the target's current role (a benign
+ * server-side no-op — no write, no audit event). Callers must not collapse
+ * these into one generic "success" message, mirroring `CreateInvitationResult`'s
+ * `delivered` distinction — see that type's own doc comment for the same
+ * "don't erase a real backend distinction" rationale.
+ */
+export type ChangeMemberRoleResult = { status: "ok"; changed: boolean } | { status: "denied"; errorCode: string; message: string } | { status: "error" };
+
+/**
+ * Server-authoritative — this route derives actor identity, target
+ * membership, and every authorization/target/destination-role decision
+ * itself; the client submits only the requested destination role, already
+ * validated client-side for UX (`canManageMembershipTargetRole()`/
+ * `canAssignMembershipDestinationRole()` mirrors in
+ * `WorkspaceMembersShell.tsx`) but never trusted as authority.
+ */
+export async function changeMemberRole(args: { user: User | null; authReady: boolean; workspaceId: string; targetUid: string; role: MembershipDestinationRole }): Promise<ChangeMemberRoleResult> {
+  try {
+    const res = await authedFetch(`/api/workspaces/${encodeURIComponent(args.workspaceId)}/members/${encodeURIComponent(args.targetUid)}/change-role`, {
+      user: args.user,
+      authReady: args.authReady,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role: args.role }),
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok) {
+      const errorCode = typeof (json as Record<string, unknown> | null)?.errorCode === "string" ? ((json as Record<string, unknown>).errorCode as string) : "unknown_error";
+      const message = typeof (json as Record<string, unknown> | null)?.message === "string" ? ((json as Record<string, unknown>).message as string) : "We couldn't change this member's role. Please try again.";
+      return { status: "denied", errorCode, message };
+    }
+    if (typeof json !== "object" || json === null) return { status: "error" };
+    const d = json as Record<string, unknown>;
+    if (d.ok !== true || typeof d.changed !== "boolean") return { status: "error" };
+    return { status: "ok", changed: d.changed };
+  } catch {
+    return { status: "error" };
+  }
+}
+
 // ── Ownership transfer ───────────────────────────────────────────────────
 
 export type TransferWorkspaceOwnershipResult = { status: "ok" } | { status: "denied"; errorCode: string; message: string } | { status: "error" };
@@ -415,18 +462,23 @@ export async function transferWorkspaceOwnership(args: {
 // ── Audit log ────────────────────────────────────────────────────────────
 
 export type WorkspaceAuditPreviousRole = "admin" | "member" | "reviewer" | "viewer";
-export type WorkspaceAuditEventType = "workspace_member_removed" | "workspace_ownership_transferred";
+export type WorkspaceAuditEventType = "workspace_member_removed" | "workspace_ownership_transferred" | "workspace_member_role_changed";
 
-export interface WorkspaceAuditEventItem {
-  eventType: WorkspaceAuditEventType;
-  occurredAt: string;
-  actor: { displayName: string };
-  target: { displayName: string };
-  previousRole: WorkspaceAuditPreviousRole;
-}
+/**
+ * Team Member Management, Phase 12B — `newRole` is required when (and only
+ * when) `eventType === "workspace_member_role_changed"`; the other two
+ * event types never carry it. Encoded as a discriminated union, mirroring
+ * the server's own `WorkspaceAuditEventDto` — `isValidAuditEvent()`
+ * enforces this at the parse boundary rather than trusting an optional
+ * field.
+ */
+export type WorkspaceAuditEventItem =
+  | { eventType: "workspace_member_removed"; occurredAt: string; actor: { displayName: string }; target: { displayName: string }; previousRole: WorkspaceAuditPreviousRole }
+  | { eventType: "workspace_ownership_transferred"; occurredAt: string; actor: { displayName: string }; target: { displayName: string }; previousRole: WorkspaceAuditPreviousRole }
+  | { eventType: "workspace_member_role_changed"; occurredAt: string; actor: { displayName: string }; target: { displayName: string }; previousRole: WorkspaceAuditPreviousRole; newRole: WorkspaceAuditPreviousRole };
 
 const VALID_AUDIT_PREVIOUS_ROLES: ReadonlySet<string> = new Set(["admin", "member", "reviewer", "viewer"]);
-const VALID_AUDIT_EVENT_TYPES: ReadonlySet<string> = new Set(["workspace_member_removed", "workspace_ownership_transferred"]);
+const VALID_AUDIT_EVENT_TYPES: ReadonlySet<string> = new Set(["workspace_member_removed", "workspace_ownership_transferred", "workspace_member_role_changed"]);
 
 function isValidAuditEvent(value: unknown): value is WorkspaceAuditEventItem {
   if (typeof value !== "object" || value === null) return false;
@@ -438,6 +490,9 @@ function isValidAuditEvent(value: unknown): value is WorkspaceAuditEventItem {
   const target = v.target;
   if (typeof actor !== "object" || actor === null || typeof (actor as Record<string, unknown>).displayName !== "string") return false;
   if (typeof target !== "object" || target === null || typeof (target as Record<string, unknown>).displayName !== "string") return false;
+  if (v.eventType === "workspace_member_role_changed") {
+    if (typeof v.newRole !== "string" || !VALID_AUDIT_PREVIOUS_ROLES.has(v.newRole)) return false;
+  }
   return true;
 }
 

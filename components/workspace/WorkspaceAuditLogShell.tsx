@@ -114,7 +114,7 @@ export default function WorkspaceAuditLogShell({ workspaceId, workspaceName }: {
                     <span>{formatOccurredAt(event.occurredAt)}</span>
                   </div>
                 </>
-              ) : (
+              ) : event.eventType === "workspace_ownership_transferred" ? (
                 <>
                   <p className="text-sm font-medium text-cp-text">Ownership transferred</p>
                   <p className="mt-1 text-sm text-cp-muted">
@@ -125,6 +125,20 @@ export default function WorkspaceAuditLogShell({ workspaceId, workspaceName }: {
                     <span>
                       {event.target.displayName}&apos;s previous role: <span className="font-medium text-cp-muted">{ROLE_LABEL[event.previousRole]}</span>
                     </span>
+                    <span>
+                      By: <span className="font-medium text-cp-muted">{event.actor.displayName}</span>
+                    </span>
+                    <span>{formatOccurredAt(event.occurredAt)}</span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm font-medium text-cp-text">Role changed</p>
+                  <p className="mt-1 text-sm text-cp-muted">
+                    <span className="font-medium text-cp-text">{event.target.displayName}</span>&apos;s role changed from{" "}
+                    <span className="font-medium text-cp-text">{ROLE_LABEL[event.previousRole]}</span> to <span className="font-medium text-cp-text">{ROLE_LABEL[event.newRole]}</span>.
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-cp-faint">
                     <span>
                       By: <span className="font-medium text-cp-muted">{event.actor.displayName}</span>
                     </span>

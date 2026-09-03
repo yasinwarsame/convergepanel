@@ -115,3 +115,28 @@ export function targetIsCanonicalOwnerResponse(): { status: number; body: TeamWo
 export function membershipTargetRoleNotManageableResponse(): { status: number; body: TeamWorkspaceErrorBody } {
   return { status: 403, body: { ok: false, errorCode: "role_target_forbidden", message: "You do not have permission to remove a member at this role." } };
 }
+
+/**
+ * Phase 12B — the caller's role is not permitted to manage this specific
+ * target row, OR is not permitted to assign this specific destination
+ * role. Deliberately collapses BOTH `target_role_not_manageable` and
+ * `destination_role_not_permitted` (two distinct backend checks — see
+ * `changeTeamWorkspaceMemberRole()`) into the same concealed response:
+ * the caller never needs to distinguish "you can't touch this member" from
+ * "you can't assign that specific role" to correct their own action, and
+ * collapsing avoids revealing which of the two independent policies
+ * specifically fired.
+ */
+export function membershipRoleChangeNotPermittedResponse(): { status: number; body: TeamWorkspaceErrorBody } {
+  return { status: 403, body: { ok: false, errorCode: "role_change_forbidden", message: "You do not have permission to change this member's role." } };
+}
+
+/** The target membership isn't active (already removed) — role changes never reactivate a membership as a side effect. Concealed identically to `membershipTargetNotFoundResponse()`, consistent with this route family's existing posture: a role-change attempt against a stale Members-list row should prompt a refresh, not distinguish "removed" from "never existed." */
+export function membershipTargetNotActiveResponse(): { status: number; body: TeamWorkspaceErrorBody } {
+  return { status: 404, body: { ok: false, errorCode: "member_not_found", message: "This member could not be found." } };
+}
+
+/** The caller attempted to change their own role through the ordinary member-management action — unconditionally denied, no exceptions, even for the canonical Owner (who can never reach this action against themself in the first place, since the canonical-Owner check also fires). Safe to be explicit — the caller already knows who they targeted. */
+export function selfRoleChangeRejectedResponse(): { status: number; body: TeamWorkspaceErrorBody } {
+  return { status: 409, body: { ok: false, errorCode: "self_role_change_rejected", message: "You cannot change your own role." } };
+}
