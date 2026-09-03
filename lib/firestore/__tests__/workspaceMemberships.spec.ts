@@ -883,6 +883,196 @@ describe("transferTeamWorkspaceOwnership", () => {
       expect(stores.workspaceMemberships.has(computeMembershipId(WS_ID, OTHER_UID))).toBe(true);
     });
   });
+
+  describe("ATOMICITY — Phase TEAM-MGMT-12C (TRANSFER COMMITTED IFF AUDIT EVENT COMMITTED)", () => {
+    it("1. successful transfer writes exactly one workspace_ownership_transferred event, in the same transaction as the ownership mutation", async () => {
+      const tokens = seedHappyPath();
+      const result = await transferTeamWorkspaceOwnership({
+        workspaceId: WS_ID,
+        callerUid: OWNER_UID,
+        newOwnerUid: OTHER_UID,
+        expectedWorkspaceUpdateTime: tokens.workspaceUpdateTime,
+        expectedOldOwnerMembershipUpdateTime: tokens.oldOwnerUpdateTime,
+        expectedNewOwnerMembershipUpdateTime: tokens.newOwnerUpdateTime,
+      });
+      expect(result.status).toBe("transferred");
+      expect(stores.workspaceMembershipEvents.size).toBe(1);
+      const [event] = [...stores.workspaceMembershipEvents.values()];
+      expect(event.data).toMatchObject({
+        eventType: "workspace_ownership_transferred",
+        actorUid: OWNER_UID,
+        targetUid: OTHER_UID,
+        workspaceId: WS_ID,
+        previousRole: "member",
+      });
+    });
+
+    it("2. event write failure -> the whole transaction rolls back: ownership does not transfer, roles unchanged, no partial event", async () => {
+      const tokens = seedHappyPath();
+      forceSetFailureForCollection = "workspaceMembershipEvents";
+
+      const result = await transferTeamWorkspaceOwnership({
+        workspaceId: WS_ID,
+        callerUid: OWNER_UID,
+        newOwnerUid: OTHER_UID,
+        expectedWorkspaceUpdateTime: tokens.workspaceUpdateTime,
+        expectedOldOwnerMembershipUpdateTime: tokens.oldOwnerUpdateTime,
+        expectedNewOwnerMembershipUpdateTime: tokens.newOwnerUpdateTime,
+      });
+
+      expect(result.status).toBe("transaction_failed");
+      expect(stores.workspaces.get(WS_ID)!.data.ownerUserId).toBe(OWNER_UID); // ownership NOT transferred
+      expect(stores.workspaceMemberships.get(computeMembershipId(WS_ID, OWNER_UID))!.data.role).toBe("owner");
+      expect(stores.workspaceMemberships.get(computeMembershipId(WS_ID, OTHER_UID))!.data.role).toBe("member");
+      expect(stores.workspaceMembershipEvents.size).toBe(0); // no partial event
+    });
+
+    it("3. self-transfer denial -> no ownership mutation, no event", async () => {
+      const tokens = seedHappyPath();
+      const result = await transferTeamWorkspaceOwnership({
+        workspaceId: WS_ID,
+        callerUid: OWNER_UID,
+        newOwnerUid: OWNER_UID,
+        expectedWorkspaceUpdateTime: tokens.workspaceUpdateTime,
+        expectedOldOwnerMembershipUpdateTime: tokens.oldOwnerUpdateTime,
+        expectedNewOwnerMembershipUpdateTime: tokens.oldOwnerUpdateTime,
+      });
+      expect(result.status).toBe("self_transfer_rejected");
+      expect(stores.workspaceMembershipEvents.size).toBe(0);
+    });
+
+    it("4. non-Owner caller denial (caller_not_owner) -> no ownership mutation, no event", async () => {
+      const workspaceUpdateTime = seedTeamWorkspace();
+      const callerUpdateTime = seedMembership(OTHER_UID, "admin");
+      const targetUpdateTime = seedMembership("member-2", "member");
+      const result = await transferTeamWorkspaceOwnership({
+        workspaceId: WS_ID,
+        callerUid: OTHER_UID,
+        newOwnerUid: "member-2",
+        expectedWorkspaceUpdateTime: workspaceUpdateTime,
+        expectedOldOwnerMembershipUpdateTime: callerUpdateTime,
+        expectedNewOwnerMembershipUpdateTime: targetUpdateTime,
+      });
+      expect(result.status).toBe("caller_not_owner");
+      expect(stores.workspaceMembershipEvents.size).toBe(0);
+    });
+
+    it("5. ineligible new-Owner target (already removed) -> no ownership mutation, no event", async () => {
+      const workspaceUpdateTime = seedTeamWorkspace();
+      const oldOwnerUpdateTime = seedMembership(OWNER_UID, "owner");
+      const newOwnerUpdateTime = seedMembership(OTHER_UID, "member", { status: "removed", removedAt: Timestamp.now(), removedByUserId: OWNER_UID });
+      const result = await transferTeamWorkspaceOwnership({
+        workspaceId: WS_ID,
+        callerUid: OWNER_UID,
+        newOwnerUid: OTHER_UID,
+        expectedWorkspaceUpdateTime: workspaceUpdateTime,
+        expectedOldOwnerMembershipUpdateTime: oldOwnerUpdateTime,
+        expectedNewOwnerMembershipUpdateTime: newOwnerUpdateTime,
+      });
+      expect(result.status).toBe("new_owner_not_eligible");
+      expect(stores.workspaceMembershipEvents.size).toBe(0);
+    });
+
+    it("6. stale OCC token denial (any of the three) -> no ownership mutation, no event", async () => {
+      const tokens = seedHappyPath();
+      const staleToken = new Timestamp(1, 0);
+      const result = await transferTeamWorkspaceOwnership({
+        workspaceId: WS_ID,
+        callerUid: OWNER_UID,
+        newOwnerUid: OTHER_UID,
+        expectedWorkspaceUpdateTime: staleToken,
+        expectedOldOwnerMembershipUpdateTime: tokens.oldOwnerUpdateTime,
+        expectedNewOwnerMembershipUpdateTime: tokens.newOwnerUpdateTime,
+      });
+      expect(result.status).toBe("workspace_stale");
+      expect(stores.workspaceMembershipEvents.size).toBe(0);
+    });
+
+    it("7. event actorUid is the PREVIOUS Owner (the caller who performed the transfer), targetUid is the NEW Owner", async () => {
+      const tokens = seedHappyPath();
+      await transferTeamWorkspaceOwnership({
+        workspaceId: WS_ID,
+        callerUid: OWNER_UID,
+        newOwnerUid: OTHER_UID,
+        expectedWorkspaceUpdateTime: tokens.workspaceUpdateTime,
+        expectedOldOwnerMembershipUpdateTime: tokens.oldOwnerUpdateTime,
+        expectedNewOwnerMembershipUpdateTime: tokens.newOwnerUpdateTime,
+      });
+      const [event] = [...stores.workspaceMembershipEvents.values()];
+      expect(event.data.actorUid).toBe(OWNER_UID);
+      expect(event.data.targetUid).toBe(OTHER_UID);
+    });
+
+    it("8. event previousRole is the NEW Owner's role immediately BEFORE the transfer (never 'owner', since a non-owner is always the target) — proven across every eligible starting role", async () => {
+      for (const startingRole of ["admin", "member", "reviewer", "viewer"] as const) {
+        stores.workspaces.clear();
+        stores.workspaceMemberships.clear();
+        stores.workspaceMembershipEvents.clear();
+        const workspaceUpdateTime = seedTeamWorkspace();
+        const oldOwnerUpdateTime = seedMembership(OWNER_UID, "owner");
+        const newOwnerUpdateTime = seedMembership(OTHER_UID, startingRole);
+        const result = await transferTeamWorkspaceOwnership({
+          workspaceId: WS_ID,
+          callerUid: OWNER_UID,
+          newOwnerUid: OTHER_UID,
+          expectedWorkspaceUpdateTime: workspaceUpdateTime,
+          expectedOldOwnerMembershipUpdateTime: oldOwnerUpdateTime,
+          expectedNewOwnerMembershipUpdateTime: newOwnerUpdateTime,
+        });
+        expect(result.status).toBe("transferred");
+        const [event] = [...stores.workspaceMembershipEvents.values()];
+        expect(event.data.previousRole).toBe(startingRole);
+      }
+    });
+
+    it("9. event workspaceId matches the authoritative Workspace the transfer actually happened in", async () => {
+      const tokens = seedHappyPath();
+      await transferTeamWorkspaceOwnership({
+        workspaceId: WS_ID,
+        callerUid: OWNER_UID,
+        newOwnerUid: OTHER_UID,
+        expectedWorkspaceUpdateTime: tokens.workspaceUpdateTime,
+        expectedOldOwnerMembershipUpdateTime: tokens.oldOwnerUpdateTime,
+        expectedNewOwnerMembershipUpdateTime: tokens.newOwnerUpdateTime,
+      });
+      const [event] = [...stores.workspaceMembershipEvents.values()];
+      expect(event.data.workspaceId).toBe(WS_ID);
+    });
+
+    it("10. event 'at' is the SAME Timestamp instant as the mutation's own updatedAt fields — never a second, independently-drifted clock read", async () => {
+      const tokens = seedHappyPath();
+      await transferTeamWorkspaceOwnership({
+        workspaceId: WS_ID,
+        callerUid: OWNER_UID,
+        newOwnerUid: OTHER_UID,
+        expectedWorkspaceUpdateTime: tokens.workspaceUpdateTime,
+        expectedOldOwnerMembershipUpdateTime: tokens.oldOwnerUpdateTime,
+        expectedNewOwnerMembershipUpdateTime: tokens.newOwnerUpdateTime,
+      });
+      const persistedWorkspace = stores.workspaces.get(WS_ID)!.data as { updatedAt: Timestamp };
+      const persistedOldOwner = stores.workspaceMemberships.get(computeMembershipId(WS_ID, OWNER_UID))!.data as { updatedAt: Timestamp };
+      const [event] = [...stores.workspaceMembershipEvents.values()];
+      const eventAt = event.data.at as Timestamp;
+      expect(eventAt.seconds).toBe(persistedWorkspace.updatedAt.seconds);
+      expect(eventAt.nanoseconds).toBe(persistedWorkspace.updatedAt.nanoseconds);
+      expect(eventAt.seconds).toBe(persistedOldOwner.updatedAt.seconds);
+      expect(eventAt.nanoseconds).toBe(persistedOldOwner.updatedAt.nanoseconds);
+    });
+
+    it("11. the event document shape written here is byte-for-byte the same field set the Audit Log read model already validates — proven by listWorkspaceAuditEvents.spec.ts remaining unmodified-in-shape and passing", async () => {
+      const tokens = seedHappyPath();
+      await transferTeamWorkspaceOwnership({
+        workspaceId: WS_ID,
+        callerUid: OWNER_UID,
+        newOwnerUid: OTHER_UID,
+        expectedWorkspaceUpdateTime: tokens.workspaceUpdateTime,
+        expectedOldOwnerMembershipUpdateTime: tokens.oldOwnerUpdateTime,
+        expectedNewOwnerMembershipUpdateTime: tokens.newOwnerUpdateTime,
+      });
+      const [event] = [...stores.workspaceMembershipEvents.values()];
+      expect(Object.keys(event.data).sort()).toEqual(["actorUid", "at", "eventType", "previousRole", "targetUid", "workspaceId"].sort());
+    });
+  });
 });
 
 describe("Phase 10B.3.2A — createTeamWorkspace remains strictly user-scoped (Team Workspace creation regression)", () => {

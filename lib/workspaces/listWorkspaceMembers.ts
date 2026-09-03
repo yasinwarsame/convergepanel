@@ -16,6 +16,22 @@
  * own defensive `MAX_MEMBERS_SCANNED` limit on the query itself (a plain
  * two-equality-clause query Firestore's automatic indexing already
  * supports) rather than an unbounded collection scan.
+ *
+ * Ownership Transfer UI, Phase TEAM-MGMT-12C — each member's own OCC
+ * token (`updateTimeToken`, the membership document's native
+ * `DocumentSnapshot.updateTime`) and the Workspace document's own OCC
+ * token (`workspaceUpdateToken`) are now exposed, serialized via the
+ * already-existing `serializeUpdateTimeToken()`
+ * (`lib/projects/updateTimeToken.ts`) — never a reimplemented serializer.
+ * `POST /transfer-ownership` requires all three tokens
+ * (`expectedWorkspaceUpdateTime`/`expectedOldOwnerMembershipUpdateTime`/
+ * `expectedNewOwnerMembershipUpdateTime`) but, before this, nothing on the
+ * read path exposed them to a client — this closes that gap. The
+ * Workspace document is read once more here (a second, cheap doc-get,
+ * distinct from whatever read `resolveWorkspaceAccess()` already
+ * performed to authorize the caller) specifically to capture its
+ * `updateTime` — the already-resolved `args.workspace` this function
+ * receives carries no snapshot metadata, only application fields.
  */
 
 import "server-only";
@@ -26,6 +42,8 @@ import { isCanonicalTeamOwnerMembership } from "./ownerInvariant";
 import type { TeamWorkspaceV1 } from "./types";
 import type { WorkspaceMembershipRole } from "./membershipTypes";
 import { resolveReviewerDisplayNames, REVIEWER_UNAVAILABLE_LABEL } from "@/lib/governance/reviewerIdentity";
+import { serializeUpdateTimeToken, type UpdateTimeToken } from "@/lib/projects/updateTimeToken";
+import type { Timestamp } from "firebase-admin/firestore";
 
 const MAX_MEMBERS_SCANNED = 200;
 
@@ -39,9 +57,14 @@ export interface WorkspaceMemberDto {
   /** True only when this row passes the full `isCanonicalTeamOwnerMembership()` invariant — never merely `role === "owner"`. A corrupt extra "owner"-role row is still listed (fail-visible, not hidden), but never badged as canonical Owner. */
   isCanonicalOwner: boolean;
   joinedAt: string;
+  /** This membership document's own OCC token (`DocumentSnapshot.updateTime`, serialized) — required by ownership transfer as `expectedOldOwnerMembershipUpdateTime`/`expectedNewOwnerMembershipUpdateTime`. */
+  updateTimeToken: UpdateTimeToken;
 }
 
-export type ListWorkspaceMembersResult = { status: "listed"; members: WorkspaceMemberDto[] } | { status: "firestore_unavailable" } | { status: "query_failed" };
+export type ListWorkspaceMembersResult =
+  | { status: "listed"; members: WorkspaceMemberDto[]; workspaceUpdateToken: UpdateTimeToken }
+  | { status: "firestore_unavailable" }
+  | { status: "query_failed" };
 
 /**
  * `workspace` must already be the caller's own resolved, authorized
@@ -55,9 +78,24 @@ export async function listWorkspaceMembers(args: { workspace: TeamWorkspaceV1 })
   const workspaceId = args.workspace.id;
 
   try {
-    const snap = await db.collection("workspaceMemberships").where("workspaceId", "==", workspaceId).where("status", "==", "active").limit(MAX_MEMBERS_SCANNED).get();
+    const [snap, workspaceSnap] = await Promise.all([
+      db.collection("workspaceMemberships").where("workspaceId", "==", workspaceId).where("status", "==", "active").limit(MAX_MEMBERS_SCANNED).get(),
+      db.collection("workspaces").doc(workspaceId).get(),
+    ]);
 
-    const validated: { uid: string; role: WorkspaceMembershipRole; isCanonicalOwner: boolean; joinedAt: string }[] = [];
+    if (!workspaceSnap.exists) {
+      // The caller has already been authorized against this exact
+      // Workspace (via `resolveWorkspaceAccess()`) before this function is
+      // ever invoked — a missing document here would mean the Workspace
+      // was deleted in the narrow window between that authorization and
+      // this read, not a normal "not found" the caller should ever see as
+      // a member list. Fails closed rather than fabricating a token.
+      logger.warn("[workspaces/listWorkspaceMembers] Workspace document unexpectedly missing on the OCC-token read", { workspaceId });
+      return { status: "query_failed" };
+    }
+    const workspaceUpdateToken = serializeUpdateTimeToken(workspaceSnap.updateTime as Timestamp);
+
+    const validated: { uid: string; role: WorkspaceMembershipRole; isCanonicalOwner: boolean; joinedAt: string; updateTimeToken: UpdateTimeToken }[] = [];
     for (const doc of snap.docs) {
       const raw = doc.data() as Record<string, unknown>;
       // Discovered via query, not a known-uid lookup — `raw.uid` is
@@ -69,6 +107,7 @@ export async function listWorkspaceMembers(args: { workspace: TeamWorkspaceV1 })
         role: membership.role,
         isCanonicalOwner: isCanonicalTeamOwnerMembership({ workspace: args.workspace, membership }),
         joinedAt: membership.createdAt.toDate().toISOString(),
+        updateTimeToken: serializeUpdateTimeToken(doc.updateTime as Timestamp),
       });
     }
 
@@ -82,6 +121,7 @@ export async function listWorkspaceMembers(args: { workspace: TeamWorkspaceV1 })
         role: m.role,
         isCanonicalOwner: m.isCanonicalOwner,
         joinedAt: m.joinedAt,
+        updateTimeToken: m.updateTimeToken,
       }))
       .sort((a, b) => {
         const roleDelta = ROLE_SORT_ORDER[a.role] - ROLE_SORT_ORDER[b.role];
@@ -89,7 +129,7 @@ export async function listWorkspaceMembers(args: { workspace: TeamWorkspaceV1 })
         return a.displayName.localeCompare(b.displayName) || a.uid.localeCompare(b.uid);
       });
 
-    return { status: "listed", members };
+    return { status: "listed", members, workspaceUpdateToken };
   } catch (err) {
     logger.warn("[workspaces/listWorkspaceMembers] query failed", { workspaceId, error: err instanceof Error ? err.message : String(err) });
     return { status: "query_failed" };

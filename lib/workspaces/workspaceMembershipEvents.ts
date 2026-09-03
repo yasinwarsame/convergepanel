@@ -35,13 +35,25 @@
  * Metadata-only, by construction — no parameter through which a display
  * name, email, or any other PII could reach a written document; identities
  * are UIDs only, matching this event's server-derived actor/target.
+ *
+ * Phase TEAM-MGMT-12C — `"workspace_ownership_transferred"` added
+ * alongside `"workspace_member_removed"`. The SAME durability invariant
+ * applies: `transferTeamWorkspaceOwnership()`
+ * (`lib/firestore/workspaceMemberships.ts`) writes this event via its own
+ * `tx.set()`, inside the SAME transaction as the ownership mutation —
+ * `TRANSFER COMMITTED IFF AUDIT EVENT COMMITTED`. No new fields were
+ * needed: the existing generic `previousRole` field is reused as-is to
+ * hold the NEW Owner's role immediately before the transfer (never
+ * `"owner"`, since a non-owner is always the transfer target); `actorUid`
+ * is the PREVIOUS Owner (who performed the transfer), `targetUid` is the
+ * NEW Owner.
  */
 
 import "server-only";
 import type { Timestamp } from "firebase-admin/firestore";
 import type { WorkspaceMembershipRole } from "./membershipTypes";
 
-export type WorkspaceMembershipEventType = "workspace_member_removed";
+export type WorkspaceMembershipEventType = "workspace_member_removed" | "workspace_ownership_transferred";
 
 export interface WorkspaceMembershipEventArgs {
   eventType: WorkspaceMembershipEventType;

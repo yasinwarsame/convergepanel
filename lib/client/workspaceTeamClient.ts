@@ -59,15 +59,35 @@ export async function createTeamWorkspace(args: { user: User | null; authReady: 
 
 export type WorkspaceMemberRole = "owner" | "admin" | "member" | "reviewer" | "viewer";
 
+/**
+ * Ownership Transfer UI, Phase TEAM-MGMT-12C — the OCC wire token, losslessly
+ * mirroring the server's `UpdateTimeToken` (`lib/projects/updateTimeToken.ts`)
+ * as `{seconds, nanoseconds}`. Opaque to the client: never compared,
+ * displayed, or derived from — only round-tripped back to
+ * `POST /transfer-ownership` verbatim.
+ */
+export interface WorkspaceUpdateTimeToken {
+  seconds: number;
+  nanoseconds: number;
+}
+
 export interface WorkspaceMemberItem {
   uid: string;
   displayName: string;
   role: WorkspaceMemberRole;
   isCanonicalOwner: boolean;
   joinedAt: string;
+  /** This membership document's own OCC token — required as `expectedOldOwnerMembershipUpdateTime`/`expectedNewOwnerMembershipUpdateTime` when transferring ownership. */
+  updateTimeToken: WorkspaceUpdateTimeToken;
 }
 
 const VALID_ROLES: ReadonlySet<string> = new Set(["owner", "admin", "member", "reviewer", "viewer"]);
+
+function isValidUpdateTimeToken(value: unknown): value is WorkspaceUpdateTimeToken {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return typeof v.seconds === "number" && Number.isFinite(v.seconds) && typeof v.nanoseconds === "number" && Number.isFinite(v.nanoseconds);
+}
 
 function isValidMember(value: unknown): value is WorkspaceMemberItem {
   if (typeof value !== "object" || value === null) return false;
@@ -79,11 +99,12 @@ function isValidMember(value: unknown): value is WorkspaceMemberItem {
     typeof v.role === "string" &&
     VALID_ROLES.has(v.role) &&
     typeof v.isCanonicalOwner === "boolean" &&
-    typeof v.joinedAt === "string"
+    typeof v.joinedAt === "string" &&
+    isValidUpdateTimeToken(v.updateTimeToken)
   );
 }
 
-export type FetchWorkspaceMembersResult = { status: "ok"; members: WorkspaceMemberItem[] } | { status: "error" };
+export type FetchWorkspaceMembersResult = { status: "ok"; members: WorkspaceMemberItem[]; workspaceUpdateToken: WorkspaceUpdateTimeToken } | { status: "error" };
 
 export async function fetchWorkspaceMembers(args: { user: User | null; authReady: boolean; workspaceId: string; signal?: AbortSignal }): Promise<FetchWorkspaceMembersResult> {
   try {
@@ -98,8 +119,10 @@ export async function fetchWorkspaceMembers(args: { user: User | null; authReady
     const json = await res.json().catch(() => null);
     if (typeof json !== "object" || json === null) return { status: "error" };
     const d = json as Record<string, unknown>;
-    if (d.ok !== true || !Array.isArray(d.members) || !d.members.every(isValidMember)) return { status: "error" };
-    return { status: "ok", members: d.members as WorkspaceMemberItem[] };
+    if (d.ok !== true || !Array.isArray(d.members) || !d.members.every(isValidMember) || !isValidUpdateTimeToken(d.workspaceUpdateToken)) {
+      return { status: "error" };
+    }
+    return { status: "ok", members: d.members as WorkspaceMemberItem[], workspaceUpdateToken: d.workspaceUpdateToken };
   } catch {
     return { status: "error" };
   }
@@ -338,12 +361,64 @@ export async function removeMember(args: { user: User | null; authReady: boolean
   }
 }
 
+// ── Ownership transfer ───────────────────────────────────────────────────
+
+export type TransferWorkspaceOwnershipResult = { status: "ok" } | { status: "denied"; errorCode: string; message: string } | { status: "error" };
+
+/**
+ * Ownership Transfer UI, Phase TEAM-MGMT-12C —
+ * `POST /api/workspaces/{workspaceId}/transfer-ownership`. Mirrors
+ * `removeMember()`'s exact fail-closed response-parsing style: a 2xx
+ * response is `{status: "ok"}` (the caller must refetch members from the
+ * server — see `WorkspaceMembersShell.tsx`'s `loadMembers()` call after a
+ * successful transfer — never a client-derived role mutation); a non-2xx
+ * response is `{status: "denied", errorCode, message}` using the server's
+ * own already-sanitized `message` verbatim (the route's error-response
+ * helpers, `lib/workspaces/teamWorkspaceErrorResponse.ts`, never leak a
+ * raw uid, membership id, or backend error string); a thrown fetch is
+ * `{status: "error"}`, never re-thrown.
+ */
+export async function transferWorkspaceOwnership(args: {
+  user: User | null;
+  authReady: boolean;
+  workspaceId: string;
+  newOwnerUid: string;
+  expectedWorkspaceUpdateTime: WorkspaceUpdateTimeToken;
+  expectedOldOwnerMembershipUpdateTime: WorkspaceUpdateTimeToken;
+  expectedNewOwnerMembershipUpdateTime: WorkspaceUpdateTimeToken;
+}): Promise<TransferWorkspaceOwnershipResult> {
+  try {
+    const res = await authedFetch(`/api/workspaces/${encodeURIComponent(args.workspaceId)}/transfer-ownership`, {
+      user: args.user,
+      authReady: args.authReady,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        newOwnerUid: args.newOwnerUid,
+        expectedWorkspaceUpdateTime: args.expectedWorkspaceUpdateTime,
+        expectedOldOwnerMembershipUpdateTime: args.expectedOldOwnerMembershipUpdateTime,
+        expectedNewOwnerMembershipUpdateTime: args.expectedNewOwnerMembershipUpdateTime,
+      }),
+    });
+    if (!res.ok) {
+      const json = await res.json().catch(() => null);
+      const errorCode = typeof (json as Record<string, unknown> | null)?.errorCode === "string" ? ((json as Record<string, unknown>).errorCode as string) : "unknown_error";
+      const message = typeof (json as Record<string, unknown> | null)?.message === "string" ? ((json as Record<string, unknown>).message as string) : "We couldn't transfer ownership. Please try again.";
+      return { status: "denied", errorCode, message };
+    }
+    return { status: "ok" };
+  } catch {
+    return { status: "error" };
+  }
+}
+
 // ── Audit log ────────────────────────────────────────────────────────────
 
 export type WorkspaceAuditPreviousRole = "admin" | "member" | "reviewer" | "viewer";
+export type WorkspaceAuditEventType = "workspace_member_removed" | "workspace_ownership_transferred";
 
 export interface WorkspaceAuditEventItem {
-  eventType: "workspace_member_removed";
+  eventType: WorkspaceAuditEventType;
   occurredAt: string;
   actor: { displayName: string };
   target: { displayName: string };
@@ -351,11 +426,12 @@ export interface WorkspaceAuditEventItem {
 }
 
 const VALID_AUDIT_PREVIOUS_ROLES: ReadonlySet<string> = new Set(["admin", "member", "reviewer", "viewer"]);
+const VALID_AUDIT_EVENT_TYPES: ReadonlySet<string> = new Set(["workspace_member_removed", "workspace_ownership_transferred"]);
 
 function isValidAuditEvent(value: unknown): value is WorkspaceAuditEventItem {
   if (typeof value !== "object" || value === null) return false;
   const v = value as Record<string, unknown>;
-  if (v.eventType !== "workspace_member_removed") return false;
+  if (typeof v.eventType !== "string" || !VALID_AUDIT_EVENT_TYPES.has(v.eventType)) return false;
   if (typeof v.occurredAt !== "string" || Number.isNaN(Date.parse(v.occurredAt))) return false;
   if (typeof v.previousRole !== "string" || !VALID_AUDIT_PREVIOUS_ROLES.has(v.previousRole)) return false;
   const actor = v.actor;

@@ -27,6 +27,8 @@ import {
   fetchWorkspaceAuditEvents,
   fetchTeamProjectsExistence,
   fetchTeamResearchExistence,
+  fetchWorkspaceMembers,
+  transferWorkspaceOwnership,
 } from "@/lib/client/workspaceTeamClient";
 
 beforeEach(() => {
@@ -344,6 +346,155 @@ describe("fetchWorkspaceAuditEvents — Workspace Audit Log, Phase TEAM-GOV-I1",
 
   it("thrown fetch -> error, never throws", async () => {
     mockedAuthedFetch.mockRejectedValue(new Error("network down"));
+    const result = await fetchWorkspaceAuditEvents({ user: null, authReady: true, workspaceId: "ws-1" });
+    expect(result).toEqual({ status: "error" });
+  });
+});
+
+describe("fetchWorkspaceMembers — Ownership Transfer UI, Phase TEAM-MGMT-12C: OCC token exposure", () => {
+  const VALID_TOKEN = { seconds: 1723600000, nanoseconds: 0 };
+  const VALID_MEMBER = { uid: "member-1", displayName: "Test Member", role: "member", isCanonicalOwner: false, joinedAt: "2026-01-01T00:00:00.000Z", updateTimeToken: VALID_TOKEN };
+
+  it("ok response is parsed into members + workspaceUpdateToken", async () => {
+    mockedAuthedFetch.mockResolvedValue(jsonResponse({ ok: true, members: [VALID_MEMBER], workspaceUpdateToken: VALID_TOKEN }));
+    const result = await fetchWorkspaceMembers({ user: null, authReady: true, workspaceId: "ws-1" });
+    expect(result).toEqual({ status: "ok", members: [VALID_MEMBER], workspaceUpdateToken: VALID_TOKEN });
+  });
+
+  it("a member missing updateTimeToken fails the whole response closed", async () => {
+    const { updateTimeToken: _drop, ...memberWithoutToken } = VALID_MEMBER;
+    mockedAuthedFetch.mockResolvedValue(jsonResponse({ ok: true, members: [memberWithoutToken], workspaceUpdateToken: VALID_TOKEN }));
+    const result = await fetchWorkspaceMembers({ user: null, authReady: true, workspaceId: "ws-1" });
+    expect(result).toEqual({ status: "error" });
+  });
+
+  it("a missing top-level workspaceUpdateToken fails the whole response closed", async () => {
+    mockedAuthedFetch.mockResolvedValue(jsonResponse({ ok: true, members: [VALID_MEMBER] }));
+    const result = await fetchWorkspaceMembers({ user: null, authReady: true, workspaceId: "ws-1" });
+    expect(result).toEqual({ status: "error" });
+  });
+
+  it("a malformed workspaceUpdateToken (non-numeric seconds) fails closed", async () => {
+    mockedAuthedFetch.mockResolvedValue(jsonResponse({ ok: true, members: [VALID_MEMBER], workspaceUpdateToken: { seconds: "not-a-number", nanoseconds: 0 } }));
+    const result = await fetchWorkspaceMembers({ user: null, authReady: true, workspaceId: "ws-1" });
+    expect(result).toEqual({ status: "error" });
+  });
+
+  it("!res.ok -> error", async () => {
+    mockedAuthedFetch.mockResolvedValue(jsonResponse({ ok: false }, false));
+    const result = await fetchWorkspaceMembers({ user: null, authReady: true, workspaceId: "ws-1" });
+    expect(result).toEqual({ status: "error" });
+  });
+
+  it("thrown fetch -> error, never throws", async () => {
+    mockedAuthedFetch.mockRejectedValue(new Error("network down"));
+    const result = await fetchWorkspaceMembers({ user: null, authReady: true, workspaceId: "ws-1" });
+    expect(result).toEqual({ status: "error" });
+  });
+});
+
+describe("transferWorkspaceOwnership — Ownership Transfer UI, Phase TEAM-MGMT-12C", () => {
+  const TOKEN = { seconds: 1723600000, nanoseconds: 0 };
+
+  it("2xx -> status ok", async () => {
+    mockedAuthedFetch.mockResolvedValue(jsonResponse({ ok: true, workspace: {}, oldOwnerMembership: {}, newOwnerMembership: {} }));
+    const result = await transferWorkspaceOwnership({
+      user: null,
+      authReady: true,
+      workspaceId: "ws-1",
+      newOwnerUid: "target-uid",
+      expectedWorkspaceUpdateTime: TOKEN,
+      expectedOldOwnerMembershipUpdateTime: TOKEN,
+      expectedNewOwnerMembershipUpdateTime: TOKEN,
+    });
+    expect(result).toEqual({ status: "ok" });
+  });
+
+  it("sends exactly one POST request, to the transfer-ownership route, with the target uid and all three OCC tokens verbatim", async () => {
+    mockedAuthedFetch.mockResolvedValue(jsonResponse({ ok: true }));
+    await transferWorkspaceOwnership({
+      user: null,
+      authReady: true,
+      workspaceId: "ws-1",
+      newOwnerUid: "target-uid",
+      expectedWorkspaceUpdateTime: TOKEN,
+      expectedOldOwnerMembershipUpdateTime: { seconds: 1, nanoseconds: 2 },
+      expectedNewOwnerMembershipUpdateTime: { seconds: 3, nanoseconds: 4 },
+    });
+    expect(mockedAuthedFetch).toHaveBeenCalledTimes(1);
+    const [url, options] = mockedAuthedFetch.mock.calls[0];
+    expect(url).toBe("/api/workspaces/ws-1/transfer-ownership");
+    expect(options.method).toBe("POST");
+    const body = JSON.parse(options.body);
+    expect(body).toEqual({
+      newOwnerUid: "target-uid",
+      expectedWorkspaceUpdateTime: TOKEN,
+      expectedOldOwnerMembershipUpdateTime: { seconds: 1, nanoseconds: 2 },
+      expectedNewOwnerMembershipUpdateTime: { seconds: 3, nanoseconds: 4 },
+    });
+  });
+
+  it("non-2xx (conflict) response maps to denied with the server's errorCode/message, never fabricated", async () => {
+    mockedAuthedFetch.mockResolvedValue({ ok: false, status: 409, json: async () => ({ errorCode: "conflict", message: "This Workspace changed since you last loaded it. Please refresh and try again." }) });
+    const result = await transferWorkspaceOwnership({
+      user: null,
+      authReady: true,
+      workspaceId: "ws-1",
+      newOwnerUid: "target-uid",
+      expectedWorkspaceUpdateTime: TOKEN,
+      expectedOldOwnerMembershipUpdateTime: TOKEN,
+      expectedNewOwnerMembershipUpdateTime: TOKEN,
+    });
+    expect(result).toEqual({ status: "denied", errorCode: "conflict", message: "This Workspace changed since you last loaded it. Please refresh and try again." });
+  });
+
+  it("non-2xx with an unparsable body still fails closed to a safe generic denied message, never throwing", async () => {
+    mockedAuthedFetch.mockResolvedValue({ ok: false, status: 500, json: async () => { throw new Error("not json"); } });
+    const result = await transferWorkspaceOwnership({
+      user: null,
+      authReady: true,
+      workspaceId: "ws-1",
+      newOwnerUid: "target-uid",
+      expectedWorkspaceUpdateTime: TOKEN,
+      expectedOldOwnerMembershipUpdateTime: TOKEN,
+      expectedNewOwnerMembershipUpdateTime: TOKEN,
+    });
+    expect(result).toEqual({ status: "denied", errorCode: "unknown_error", message: "We couldn't transfer ownership. Please try again." });
+  });
+
+  it("thrown fetch -> error, never throws", async () => {
+    mockedAuthedFetch.mockRejectedValue(new Error("network down"));
+    const result = await transferWorkspaceOwnership({
+      user: null,
+      authReady: true,
+      workspaceId: "ws-1",
+      newOwnerUid: "target-uid",
+      expectedWorkspaceUpdateTime: TOKEN,
+      expectedOldOwnerMembershipUpdateTime: TOKEN,
+      expectedNewOwnerMembershipUpdateTime: TOKEN,
+    });
+    expect(result).toEqual({ status: "error" });
+  });
+});
+
+describe("fetchWorkspaceAuditEvents — Phase TEAM-MGMT-12C: workspace_ownership_transferred acceptance", () => {
+  it("accepts a workspace_ownership_transferred event", async () => {
+    const transferEvent = {
+      eventType: "workspace_ownership_transferred",
+      occurredAt: "2026-08-31T20:46:25.000Z",
+      actor: { displayName: "Olivia Owner" },
+      target: { displayName: "Adam Admin" },
+      previousRole: "admin",
+    };
+    mockedAuthedFetch.mockResolvedValue(jsonResponse({ ok: true, events: [transferEvent], hasMore: false }));
+    const result = await fetchWorkspaceAuditEvents({ user: null, authReady: true, workspaceId: "ws-1" });
+    expect(result).toEqual({ status: "ok", events: [transferEvent], hasMore: false });
+  });
+
+  it("still rejects an unrecognized eventType (fails closed, forward-compatible)", async () => {
+    mockedAuthedFetch.mockResolvedValue(
+      jsonResponse({ ok: true, events: [{ eventType: "some_future_event", occurredAt: "2026-08-31T20:46:25.000Z", actor: { displayName: "A" }, target: { displayName: "B" }, previousRole: "member" }], hasMore: false })
+    );
     const result = await fetchWorkspaceAuditEvents({ user: null, authReady: true, workspaceId: "ws-1" });
     expect(result).toEqual({ status: "error" });
   });

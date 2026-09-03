@@ -6,10 +6,18 @@
 
 import { Timestamp } from "firebase-admin/firestore";
 
+let updateTimeCounter = 0;
+function nextUpdateTime(): Timestamp {
+  updateTimeCounter += 1;
+  return new Timestamp(1_700_000_000 + updateTimeCounter, 0);
+}
+
 type StoredDoc = Record<string, unknown>;
-const stores: Record<string, Map<string, StoredDoc>> = {
+type StoredEntry = { data: StoredDoc; updateTime: Timestamp };
+const stores: Record<string, Map<string, StoredEntry>> = {
   workspaceMemberships: new Map(),
   users: new Map(),
+  workspaces: new Map(),
 };
 
 function resetStores() {
@@ -37,10 +45,10 @@ class FakeMembershipQuery {
     return this;
   }
   async get() {
-    let docs = Array.from(stores.workspaceMemberships.values());
-    for (const f of this.filters) docs = docs.filter((d) => d[f.field] === f.value);
-    if (this.limitCount !== null) docs = docs.slice(0, this.limitCount);
-    return { docs: docs.map((data) => ({ data: () => data })) };
+    let entries = Array.from(stores.workspaceMemberships.values());
+    for (const f of this.filters) entries = entries.filter((e) => e.data[f.field] === f.value);
+    if (this.limitCount !== null) entries = entries.slice(0, this.limitCount);
+    return { docs: entries.map((e) => ({ data: () => e.data, updateTime: e.updateTime })) };
   }
 }
 
@@ -49,8 +57,8 @@ function makeDocRef(collectionName: string, docId: string) {
     __collection: collectionName,
     __id: docId,
     get: async () => {
-      const data = stores[collectionName].get(docId);
-      return { exists: data !== undefined, data: () => data, id: docId };
+      const entry = stores[collectionName]?.get(docId);
+      return { exists: entry !== undefined, data: () => entry?.data, updateTime: entry?.updateTime, id: docId };
     },
   };
 }
@@ -62,8 +70,8 @@ const mockAdminDb: any = {
   }),
   getAll: async (...refs: { __collection: string; __id: string }[]) => {
     return refs.map((ref) => {
-      const data = stores[ref.__collection].get(ref.__id);
-      return { exists: data !== undefined, data: () => data, id: ref.__id };
+      const entry = stores[ref.__collection]?.get(ref.__id);
+      return { exists: entry !== undefined, data: () => entry?.data, updateTime: entry?.updateTime, id: ref.__id };
     });
   },
 };
@@ -96,18 +104,23 @@ function workspace(overrides: Partial<TeamWorkspaceV1> = {}): TeamWorkspaceV1 {
 function seedMembership(uid: string, role: string, workspaceId: string = WS_ID, overrides: Record<string, unknown> = {}) {
   const id = computeMembershipId(workspaceId, uid);
   const status = (overrides.status as string | undefined) ?? "active";
-  stores.workspaceMemberships.set(
-    id,
-    asPersisted({ schemaVersion: 1, id, workspaceId, uid, role, status: "active", createdAt: NOW, updatedAt: NOW, invitedByUserId: null, removedAt: status === "removed" ? NOW : null, removedByUserId: status === "removed" ? OWNER_UID : null, ...overrides })
-  );
+  const data = asPersisted({ schemaVersion: 1, id, workspaceId, uid, role, status: "active", createdAt: NOW, updatedAt: NOW, invitedByUserId: null, removedAt: status === "removed" ? NOW : null, removedByUserId: status === "removed" ? OWNER_UID : null, ...overrides });
+  stores.workspaceMemberships.set(id, { data, updateTime: nextUpdateTime() });
 }
 
 function seedUser(uid: string, overrides: Record<string, unknown> = {}) {
-  stores.users.set(uid, { name: "", email: "", ...overrides });
+  stores.users.set(uid, { data: { name: "", email: "", ...overrides }, updateTime: nextUpdateTime() });
+}
+
+/** Backs the second read `listWorkspaceMembers()` now performs (`workspaces/{workspaceId}`) purely to capture the Workspace document's own OCC `updateTime` — the passed-in `TeamWorkspaceV1` (see `workspace()` below) carries no snapshot metadata. */
+function seedWorkspaceDoc(workspaceId: string = WS_ID, overrides: Record<string, unknown> = {}) {
+  const data = { schemaVersion: 1, id: workspaceId, type: "team", name: "Test Workspace", ownerUserId: OWNER_UID, createdByUserId: OWNER_UID, createdAt: NOW, updatedAt: NOW, ...overrides };
+  stores.workspaces.set(workspaceId, { data, updateTime: nextUpdateTime() });
 }
 
 beforeEach(() => {
   resetStores();
+  seedWorkspaceDoc();
   seedMembership(OWNER_UID, "owner");
   seedMembership(ADMIN_UID, "admin");
   seedMembership(MEMBER_UID, "member");
@@ -209,13 +222,42 @@ describe("listWorkspaceMembers — identity resolution", () => {
 });
 
 describe("listWorkspaceMembers — projection safety", () => {
-  it("returned members carry only the allow-listed DTO fields (uid, displayName, role, isCanonicalOwner, joinedAt) — no raw Firestore document, no removedAt/removedByUserId/invitedByUserId/schemaVersion", async () => {
+  it("returned members carry only the allow-listed DTO fields (uid, displayName, role, isCanonicalOwner, joinedAt, updateTimeToken) — no raw Firestore document, no removedAt/removedByUserId/invitedByUserId/schemaVersion", async () => {
     const result = await listWorkspaceMembers({ workspace: workspace() });
     expect(result.status).toBe("listed");
     if (result.status !== "listed") return;
     for (const m of result.members) {
-      expect(Object.keys(m).sort()).toEqual(["displayName", "isCanonicalOwner", "joinedAt", "role", "uid"]);
+      expect(Object.keys(m).sort()).toEqual(["displayName", "isCanonicalOwner", "joinedAt", "role", "uid", "updateTimeToken"]);
     }
+  });
+});
+
+describe("listWorkspaceMembers — Ownership Transfer UI, Phase TEAM-MGMT-12C: OCC token exposure", () => {
+  it("each member's updateTimeToken is the losslessly-serialized native DocumentSnapshot.updateTime of THAT membership document, not a shared/derived value", async () => {
+    const result = await listWorkspaceMembers({ workspace: workspace() });
+    expect(result.status).toBe("listed");
+    if (result.status !== "listed") return;
+    const owner = result.members.find((m) => m.uid === OWNER_UID)!;
+    const admin = result.members.find((m) => m.uid === ADMIN_UID)!;
+    const expectedOwnerUpdateTime = stores.workspaceMemberships.get(computeMembershipId(WS_ID, OWNER_UID))!.updateTime;
+    const expectedAdminUpdateTime = stores.workspaceMemberships.get(computeMembershipId(WS_ID, ADMIN_UID))!.updateTime;
+    expect(owner.updateTimeToken).toEqual({ seconds: expectedOwnerUpdateTime.seconds, nanoseconds: expectedOwnerUpdateTime.nanoseconds });
+    expect(admin.updateTimeToken).toEqual({ seconds: expectedAdminUpdateTime.seconds, nanoseconds: expectedAdminUpdateTime.nanoseconds });
+    expect(owner.updateTimeToken).not.toEqual(admin.updateTimeToken);
+  });
+
+  it("workspaceUpdateToken is the losslessly-serialized native DocumentSnapshot.updateTime of the Workspace document itself, read fresh (not derived from any membership's updateTime)", async () => {
+    const result = await listWorkspaceMembers({ workspace: workspace() });
+    expect(result.status).toBe("listed");
+    if (result.status !== "listed") return;
+    const expectedWorkspaceUpdateTime = stores.workspaces.get(WS_ID)!.updateTime;
+    expect(result.workspaceUpdateToken).toEqual({ seconds: expectedWorkspaceUpdateTime.seconds, nanoseconds: expectedWorkspaceUpdateTime.nanoseconds });
+  });
+
+  it("a missing Workspace document at the OCC-token read fails closed to query_failed rather than fabricating a token", async () => {
+    stores.workspaces.delete(WS_ID);
+    const result = await listWorkspaceMembers({ workspace: workspace() });
+    expect(result.status).toBe("query_failed");
   });
 });
 

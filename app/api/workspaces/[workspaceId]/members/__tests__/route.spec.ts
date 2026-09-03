@@ -169,6 +169,16 @@ describe("GET /api/workspaces/[workspaceId]/members — infrastructure", () => {
   });
 });
 
+describe("GET /api/workspaces/[workspaceId]/members — Ownership Transfer UI, Phase TEAM-MGMT-12C: OCC token pass-through", () => {
+  it("passes result.workspaceUpdateToken through to the response verbatim, as a sibling field alongside members", async () => {
+    const token = { seconds: 1723600000, nanoseconds: 0 };
+    mockedListWorkspaceMembers.mockResolvedValue({ status: "listed", members: SAMPLE_MEMBERS, workspaceUpdateToken: token });
+    const { res, json } = await callGet();
+    expect(res.status).toBe(200);
+    expect(json).toEqual({ ok: true, members: SAMPLE_MEMBERS, workspaceUpdateToken: token });
+  });
+});
+
 describe("GET /api/workspaces/[workspaceId]/members — call wiring", () => {
   it("passes the resolved access.workspace object to listWorkspaceMembers() — never re-derives or re-fetches the Workspace itself", async () => {
     const access = grantedAccess(OWNER_CAPS, "owner");

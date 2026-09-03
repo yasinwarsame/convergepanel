@@ -227,6 +227,139 @@ describe("WorkspaceMembersShell — canonical Owner is never offered Remove, str
   });
 });
 
+/**
+ * Ownership Transfer UI, Phase TEAM-MGMT-12C — same jsdom-free,
+ * `readFileSync` + regex approach as every other interactive-behavior test
+ * in this file (see the module-level doc comment above).
+ */
+describe("WorkspaceMembersShell — Transfer ownership eligibility (client-side UX hint only; backend remains authoritative)", () => {
+  it("callerIsCanonicalOwner is derived from the caller's OWN row in members via m.isCanonicalOwner — never the coarser callerRole prop", () => {
+    expect(source).toMatch(/const callerIsCanonicalOwner = members\.some\(\(m\) => m\.uid === user\?\.uid && m\.isCanonicalOwner\);/);
+  });
+
+  it("canTransferOwnershipTo requires callerIsCanonicalOwner as a hard early-return — a non-Owner caller can never pass this check, structurally", () => {
+    const match = source.match(/function canTransferOwnershipTo\(callerIsCanonicalOwner: boolean, targetRole: WorkspaceMemberRole\): boolean \{([\s\S]*?)\n\}/);
+    expect(match).not.toBeNull();
+    expect(match![1]).toMatch(/if \(!callerIsCanonicalOwner\) return false;/);
+  });
+
+  it("canTransferOwnershipTo excludes role === \"owner\" targets — mirrors the backend's exact eligibility rule (role !== \"owner\")", () => {
+    const match = source.match(/function canTransferOwnershipTo\(callerIsCanonicalOwner: boolean, targetRole: WorkspaceMemberRole\): boolean \{([\s\S]*?)\n\}/);
+    expect(match).not.toBeNull();
+    expect(match![1]).toMatch(/if \(targetRole === "owner"\) return false;/);
+  });
+
+  it("eligibility for each row requires canTransferOwnershipTo(...) AND excludes the caller's own row (m.uid !== user?.uid)", () => {
+    expect(source).toMatch(/const eligibleForTransfer = canTransferOwnershipTo\(callerIsCanonicalOwner, m\.role\) && m\.uid !== user\?\.uid;/);
+  });
+});
+
+describe("WorkspaceMembersShell — handleTransfer wiring and safety", () => {
+  const handleTransfer = extractFunctionBody("handleTransfer");
+
+  it("calls transferWorkspaceOwnership exactly once per invocation, via the canonical client helper, with the target uid as newOwnerUid", () => {
+    expect(handleTransfer).toMatch(/const result = await transferWorkspaceOwnership\(\{/);
+    expect(handleTransfer).toMatch(/newOwnerUid: member\.uid,/);
+    const occurrences = (handleTransfer.match(/transferWorkspaceOwnership\(/g) || []).length;
+    expect(occurrences).toBe(1);
+  });
+
+  it("passes all three OCC tokens through: the Workspace-level token and each membership's own updateTimeToken", () => {
+    expect(handleTransfer).toMatch(/expectedWorkspaceUpdateTime: workspaceUpdateToken,/);
+    expect(handleTransfer).toMatch(/expectedOldOwnerMembershipUpdateTime: callerMember\.updateTimeToken,/);
+    expect(handleTransfer).toMatch(/expectedNewOwnerMembershipUpdateTime: member\.updateTimeToken,/);
+  });
+
+  it("successful transfer ('ok') refreshes the canonical member list via loadMembers() — never a locally-computed role swap", () => {
+    const okBranch = handleTransfer.match(/if \(result\.status === "ok"\) \{([\s\S]*?)\} else if \(result\.status === "denied" && result\.errorCode === "conflict"\)/);
+    expect(okBranch).not.toBeNull();
+    expect(okBranch![1]).toMatch(/loadMembers\(\);/);
+    expect(okBranch![1]).not.toMatch(/setMembers\(/);
+  });
+
+  it("never calls setMembers directly anywhere — no optimistic client-side role mutation on success or failure", () => {
+    expect(handleTransfer).not.toMatch(/setMembers\(/);
+  });
+
+  it("a stale-OCC/'conflict' denial shows a specific refresh-oriented message, distinct from the generic denied branch", () => {
+    expect(handleTransfer).toMatch(/result\.status === "denied" && result\.errorCode === "conflict"/);
+    expect(handleTransfer).toMatch(/setTransferError\("The Workspace changed before the transfer completed\. Refresh and try again\."\);/);
+  });
+
+  it("a generic denial surfaces the server's own already-sanitized message, never raw backend detail", () => {
+    const genericDeniedBranch = handleTransfer.match(/\} else if \(result\.status === "denied"\) \{([\s\S]*?)\} else \{/);
+    expect(genericDeniedBranch).not.toBeNull();
+    expect(genericDeniedBranch![1]).toMatch(/setTransferError\(result\.message\);/);
+  });
+
+  it("clears confirmTransferUid after the attempt completes, regardless of outcome", () => {
+    const beforeResult = handleTransfer.indexOf("const result = await transferWorkspaceOwnership");
+    // The FIRST setConfirmTransferUid(null) call is inside the early
+    // missing-token guard clause (before any request is even sent); the
+    // one that matters here — clearing confirmation after a completed
+    // attempt — is the LAST occurrence in the function body.
+    const clearConfirmAfterAttempt = handleTransfer.lastIndexOf("setConfirmTransferUid(null);");
+    expect(clearConfirmAfterAttempt).toBeGreaterThan(beforeResult);
+  });
+
+  it("guards against a missing caller row or missing workspaceUpdateToken (fails closed with a generic message, never proceeds to call the API with undefined tokens)", () => {
+    expect(handleTransfer).toMatch(/if \(!callerMember \|\| !workspaceUpdateToken\) \{/);
+  });
+});
+
+describe("WorkspaceMembersShell — Transfer ownership confirmation UX", () => {
+  it("the Transfer ownership trigger button opens confirmation (setConfirmTransferUid) — it does NOT call handleTransfer directly; mutation only ever happens from the confirmation block", () => {
+    const triggerButtonMatch = source.match(/onClick=\{\(\) => \{\s*setTransferError\(null\);\s*setTransferConfirmation\(null\);\s*setConfirmTransferUid\(m\.uid\);\s*\}\}/);
+    expect(triggerButtonMatch).not.toBeNull();
+    const handleTransferCallSites = (source.match(/onClick=\{\(\) => handleTransfer\(m\)\}/g) || []).length;
+    expect(handleTransferCallSites).toBe(1);
+  });
+
+  it("Cancel inside the transfer confirmation block clears confirmTransferUid via its own distinct onClick handler (never handleTransfer's)", () => {
+    const confirmBlockMatch = source.match(/\{confirmTransferUid === m\.uid && \(([\s\S]*?)\n\s{18}\)\}/);
+    expect(confirmBlockMatch).not.toBeNull();
+    const cancelButtonMatch = confirmBlockMatch![1].match(/onClick=\{\(\) => setConfirmTransferUid\(null\)\}/);
+    expect(cancelButtonMatch).not.toBeNull();
+    // Exactly one call site in the whole component invokes handleTransfer
+    // (the mutating confirm button, asserted separately above) — the
+    // Cancel button's own onClick is the distinct, literal
+    // setConfirmTransferUid(null) string just matched, never a call to
+    // handleTransfer.
+    expect(cancelButtonMatch![0]).not.toMatch(/handleTransfer/);
+  });
+
+  it("both the trigger and the confirm button are disabled while a transfer is pending — prevents duplicate submission", () => {
+    expect(source).toMatch(/onClick=\{\(\) => handleTransfer\(m\)\}\s*disabled=\{isTransferPending\}/);
+    const triggerBlock = source.match(/eligibleForTransfer && confirmTransferUid !== m\.uid && \(([\s\S]*?)\)\)\}/);
+    expect(triggerBlock).not.toBeNull();
+    expect(triggerBlock![1]).toMatch(/disabled=\{isTransferPending\}/);
+  });
+
+  it("confirmation copy names the target and explains the exact role consequences — never a vague 'Confirm' button", () => {
+    expect(source).toMatch(/Transfer ownership to <span className="font-medium">\{m\.displayName\}<\/span>\?/);
+    expect(source).toMatch(/will become the Workspace Owner\./);
+    expect(source).toMatch(/You will become an Admin\./);
+    expect(source).toMatch(/Only the new Owner will be able to transfer ownership again\./);
+    expect(source).not.toMatch(/>Confirm<\/button>/);
+  });
+
+  it("the confirm button's own label is never a vague 'Confirm' — it explicitly reads 'Transfer ownership'", () => {
+    expect(source).toMatch(/\{isTransferPending \? "…" : "Transfer ownership"\}/);
+  });
+});
+
+describe("WorkspaceMembersShell — canonical Owner and self are never offered Transfer ownership, structurally", () => {
+  it("targetRole === \"owner\" is excluded inside canTransferOwnershipTo itself, not merely relying on the caller-side member list never containing a second Owner row", () => {
+    const match = source.match(/function canTransferOwnershipTo\(callerIsCanonicalOwner: boolean, targetRole: WorkspaceMemberRole\): boolean \{([\s\S]*?)\n\}/);
+    expect(match).not.toBeNull();
+    expect(match![1]).toMatch(/targetRole === "owner"/);
+  });
+
+  it("the eligibility expression itself excludes the caller's own row (m.uid !== user?.uid)", () => {
+    expect(source).toMatch(/canTransferOwnershipTo\(callerIsCanonicalOwner, m\.role\) && m\.uid !== user\?\.uid/);
+  });
+});
+
 describe("WorkspaceMembersShell — Workspace Audit Log, Phase TEAM-GOV-I1/12A.1: nav link", () => {
   it("Phase 12A.1 — renders the shared WorkspaceNav, passing canReadAudit straight through as showAudit (not a locally-duplicated tab strip)", () => {
     expect(source).toMatch(/import WorkspaceNav from ["']@\/components\/workspace\/WorkspaceNav["'];/);

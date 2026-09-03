@@ -68,6 +68,29 @@ describe("WorkspaceAuditLogShell — pagination (BD)", () => {
   });
 });
 
+describe("WorkspaceAuditLogShell — ownership-transfer event card content, Phase TEAM-MGMT-12C", () => {
+  it("renders 'Ownership transferred' as the event heading, branching on event.eventType", () => {
+    expect(source).toMatch(/event\.eventType === "workspace_member_removed"/);
+    expect(source).toMatch(/Ownership transferred/);
+  });
+
+  it("renders the actor's and target's resolved display names, never a raw uid field, for the transfer branch", () => {
+    const transferBranch = source.slice(source.indexOf("Ownership transferred") - 50);
+    expect(transferBranch).toMatch(/event\.actor\.displayName/);
+    expect(transferBranch).toMatch(/event\.target\.displayName/);
+  });
+
+  it("renders the new Owner's previous role via the shared ROLE_LABEL map, never the raw lowercase role string directly", () => {
+    const transferBranch = source.slice(source.indexOf("Ownership transferred") - 50);
+    expect(transferBranch).toMatch(/ROLE_LABEL\[event\.previousRole\]/);
+  });
+
+  it("no raw UID/workspaceId/document-id field is referenced in the transfer branch either (DTO allow-list respected end-to-end)", () => {
+    const transferBranch = source.slice(source.indexOf("Ownership transferred") - 50, source.indexOf("Ownership transferred") + 1500);
+    expect(transferBranch).not.toMatch(/event\.actorUid|event\.targetUid|event\.uid|event\.workspaceId|event\.id\b/);
+  });
+});
+
 describe("WorkspaceAuditLogShell — navigation (T, Q)", () => {
   it("Phase 12A.1 — cross-links back to Members/Overview via the shared WorkspaceNav, not a locally-duplicated tab strip", () => {
     expect(source).toMatch(/import WorkspaceNav from ["']@\/components\/workspace\/WorkspaceNav["'];/);
