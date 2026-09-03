@@ -55,7 +55,11 @@ export async function GET(req: NextRequest, { params }: { params: { workspaceId:
   const result = await listWorkspaceMembers({ workspace: access.workspace });
   switch (result.status) {
     case "listed":
-      return NextResponse.json({ ok: true, members: result.members });
+      // Ownership Transfer UI, Phase TEAM-MGMT-12C — `workspaceUpdateToken`
+      // is a sibling field alongside `members` (each already carrying its
+      // own `updateTimeToken`), giving the Members page every OCC token
+      // `POST /transfer-ownership` requires, without a second request.
+      return NextResponse.json({ ok: true, members: result.members, workspaceUpdateToken: result.workspaceUpdateToken });
     case "firestore_unavailable":
     case "query_failed": {
       const { status, body } = internalErrorResponse();

@@ -7,9 +7,26 @@
  * Phase 12A), pending invitations, and (per `canInvite`/
  * `canManageInvitations`) an Invite Member form plus resend/revoke
  * controls. Reuses the existing invitation create/list/resend/revoke APIs
- * verbatim. Active member ROLE CHANGE and ownership transfer remain
- * explicitly OUT of scope (Phase 12B/12C) — this shell is view + invite +
- * pending-invitation management + active-member removal only.
+ * verbatim. Active member ROLE CHANGE (promote/demote) remains explicitly
+ * OUT of scope (Phase 12B) — this shell is view + invite +
+ * pending-invitation management + active-member removal + (Phase 12C)
+ * ownership transfer.
+ *
+ * Ownership Transfer UI, Phase TEAM-MGMT-12C — a "Transfer ownership"
+ * action is offered on every eligible row when the caller is the
+ * canonical Owner (`callerIsCanonicalOwner`, derived from the caller's OWN
+ * row in `members` via `m.isCanonicalOwner` — never the coarser
+ * `callerRole === "owner"` prop alone, mirroring how `isCanonicalOwner` is
+ * already used per-row elsewhere in this file for Remove-eligibility).
+ * Eligible targets mirror the backend's exact rule
+ * (`transferTeamWorkspaceOwnership()`): `status === "active"` (already
+ * true for every row in `members`) and `role !== "owner"`. Confirming
+ * calls `transferWorkspaceOwnership()` with the OCC tokens already present
+ * on `members`/the members-list response (`updateTimeToken` per row,
+ * `workspaceUpdateToken` at the top level) — never a second fetch merely
+ * to obtain them. On success this refetches the canonical member list via
+ * `loadMembers()`, exactly like `handleRemove()` already does — never a
+ * client-computed optimistic role swap.
  *
  * Every displayed field comes from the server's own allow-list DTOs
  * (`WorkspaceMemberItem`/`WorkspaceInvitationItem`) — no raw
@@ -37,10 +54,12 @@ import {
   resendInvitation,
   revokeInvitation,
   removeMember,
+  transferWorkspaceOwnership,
   type WorkspaceMemberItem,
   type WorkspaceInvitationItem,
   type WorkspaceInvitationRole,
   type WorkspaceMemberRole,
+  type WorkspaceUpdateTimeToken,
 } from "@/lib/client/workspaceTeamClient";
 import ReviewErrorState from "@/components/teamGovernance/ReviewErrorState";
 import WorkspaceNav from "@/components/workspace/WorkspaceNav";
@@ -83,6 +102,23 @@ function canRemoveMemberRole(callerRole: WorkspaceMemberRole, targetRole: Worksp
   return false;
 }
 
+/**
+ * Ownership Transfer UI, Phase TEAM-MGMT-12C — UX-only mirror of the
+ * backend's exact eligibility rule inside `transferTeamWorkspaceOwnership()`
+ * (`lib/firestore/workspaceMemberships.ts`): the target must be an active
+ * member (already true for every row in `members`) whose role is not
+ * `"owner"`. Checking `targetRole !== "owner"` directly — rather than
+ * `!target.isCanonicalOwner` — also correctly excludes a corrupt,
+ * non-canonical extra `role: "owner"` row (see
+ * `listWorkspaceMembers.spec.ts`'s "corrupt extra owner" coverage), which
+ * the backend would likewise reject as `new_owner_not_eligible`.
+ */
+function canTransferOwnershipTo(callerIsCanonicalOwner: boolean, targetRole: WorkspaceMemberRole): boolean {
+  if (!callerIsCanonicalOwner) return false;
+  if (targetRole === "owner") return false;
+  return true;
+}
+
 export default function WorkspaceMembersShell({
   workspaceId,
   workspaceName,
@@ -103,11 +139,18 @@ export default function WorkspaceMembersShell({
 
   const [members, setMembers] = useState<WorkspaceMemberItem[]>([]);
   const [membersStatus, setMembersStatus] = useState<"loading" | "ready" | "error">("loading");
+  /** Ownership Transfer UI, Phase TEAM-MGMT-12C — the Workspace document's own OCC token, alongside `members` (each already carrying its own `updateTimeToken`). `null` until the first successful `loadMembers()`. */
+  const [workspaceUpdateToken, setWorkspaceUpdateToken] = useState<WorkspaceUpdateTimeToken | null>(null);
 
   const [confirmRemoveUid, setConfirmRemoveUid] = useState<string | null>(null);
   const [removePendingUid, setRemovePendingUid] = useState<string | null>(null);
   const [removeError, setRemoveError] = useState<string | null>(null);
   const [removeConfirmation, setRemoveConfirmation] = useState<string | null>(null);
+
+  const [confirmTransferUid, setConfirmTransferUid] = useState<string | null>(null);
+  const [transferPendingUid, setTransferPendingUid] = useState<string | null>(null);
+  const [transferError, setTransferError] = useState<string | null>(null);
+  const [transferConfirmation, setTransferConfirmation] = useState<string | null>(null);
 
   const [invitations, setInvitations] = useState<WorkspaceInvitationItem[]>([]);
   const [invitationsStatus, setInvitationsStatus] = useState<"loading" | "ready" | "error">("loading");
@@ -142,9 +185,11 @@ export default function WorkspaceMembersShell({
       if (membersRequestId.current !== requestId) return;
       if (result.status === "ok") {
         setMembers(result.members);
+        setWorkspaceUpdateToken(result.workspaceUpdateToken);
         setMembersStatus("ready");
       } else {
         setMembers([]);
+        setWorkspaceUpdateToken(null);
         setMembersStatus("error");
       }
     })();
@@ -292,6 +337,42 @@ export default function WorkspaceMembersShell({
     [user, authReady, workspaceId, loadMembers]
   );
 
+  const handleTransfer = useCallback(
+    async (member: WorkspaceMemberItem) => {
+      const callerMember = members.find((m) => m.uid === user?.uid);
+      if (!callerMember || !workspaceUpdateToken) {
+        setTransferError("We couldn't transfer ownership. Please try again.");
+        setConfirmTransferUid(null);
+        return;
+      }
+      setTransferPendingUid(member.uid);
+      setTransferError(null);
+      setTransferConfirmation(null);
+      const result = await transferWorkspaceOwnership({
+        user,
+        authReady,
+        workspaceId,
+        newOwnerUid: member.uid,
+        expectedWorkspaceUpdateTime: workspaceUpdateToken,
+        expectedOldOwnerMembershipUpdateTime: callerMember.updateTimeToken,
+        expectedNewOwnerMembershipUpdateTime: member.updateTimeToken,
+      });
+      setTransferPendingUid(null);
+      setConfirmTransferUid(null);
+      if (result.status === "ok") {
+        setTransferConfirmation(`${member.displayName} is now the Workspace Owner.`);
+        loadMembers();
+      } else if (result.status === "denied" && result.errorCode === "conflict") {
+        setTransferError("The Workspace changed before the transfer completed. Refresh and try again.");
+      } else if (result.status === "denied") {
+        setTransferError(result.message);
+      } else {
+        setTransferError("We couldn't transfer ownership. Please try again.");
+      }
+    },
+    [members, user, authReady, workspaceId, workspaceUpdateToken, loadMembers]
+  );
+
   // Permanent Team Workspace Collaborator-Seat Limit, Phase 12A.1S.1 — a
   // pure display derivation from data ALREADY loaded above for its own
   // existing purposes, never a new fetch. Mirrors the server's own
@@ -307,6 +388,13 @@ export default function WorkspaceMembersShell({
   // due to a half-loaded invitations array.
   const occupiedSeats = members.filter((m) => !m.isCanonicalOwner).length + invitations.filter((inv) => !inv.isExpired).length;
   const atOrOverSeatLimit = occupiedSeats >= TEAM_WORKSPACE_COLLABORATOR_SEAT_LIMIT;
+
+  // Ownership Transfer UI, Phase TEAM-MGMT-12C — "am I the canonical
+  // Owner" derived from the caller's OWN row in `members`
+  // (`m.isCanonicalOwner`), not the coarser `callerRole === "owner"` prop
+  // alone — mirrors the precise per-row signal already used for the
+  // Remove-eligibility check elsewhere in this file.
+  const callerIsCanonicalOwner = members.some((m) => m.uid === user?.uid && m.isCanonicalOwner);
 
   return (
     <main className="mx-auto max-w-3xl px-4 py-10 sm:py-14">
@@ -338,6 +426,16 @@ export default function WorkspaceMembersShell({
             {removeError}
           </p>
         )}
+        {transferConfirmation && (
+          <p role="status" className="mb-3 text-sm font-medium text-cp-accent">
+            {transferConfirmation}
+          </p>
+        )}
+        {transferError && (
+          <p role="alert" className="mb-3 text-sm font-medium text-red-400">
+            {transferError}
+          </p>
+        )}
         {membersStatus === "ready" && members.length === 0 && (
           <div className="rounded-xl border border-cp-border bg-cp-raised px-6 py-8 text-center text-sm text-cp-muted shadow-sm">No members found.</div>
         )}
@@ -346,12 +444,28 @@ export default function WorkspaceMembersShell({
             {members.map((m) => {
               const eligibleForRemoval = canManageInvitations && !m.isCanonicalOwner && m.uid !== user?.uid && canRemoveMemberRole(callerRole, m.role);
               const isRemovePending = removePendingUid === m.uid;
+              const eligibleForTransfer = canTransferOwnershipTo(callerIsCanonicalOwner, m.role) && m.uid !== user?.uid;
+              const isTransferPending = transferPendingUid === m.uid;
               return (
                 <li key={m.uid} className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
                   <span className="truncate text-sm font-medium text-cp-text">{m.displayName}</span>
                   <span className="inline-flex items-center gap-2 text-xs">
                     {m.isCanonicalOwner && <span className="rounded-full bg-cp-primary-soft px-2 py-0.5 font-medium text-cp-accent">Owner</span>}
                     <span className="rounded-full bg-cp-raised px-2 py-0.5 font-medium text-cp-muted">{ROLE_LABEL[m.role]}</span>
+                    {eligibleForTransfer && confirmTransferUid !== m.uid && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTransferError(null);
+                          setTransferConfirmation(null);
+                          setConfirmTransferUid(m.uid);
+                        }}
+                        disabled={isTransferPending}
+                        className="rounded-lg border border-cp-border px-3 py-1.5 text-xs font-medium text-cp-text hover:bg-cp-raised focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent disabled:opacity-50"
+                      >
+                        Transfer ownership
+                      </button>
+                    )}
                     {eligibleForRemoval && confirmRemoveUid !== m.uid && (
                       <button
                         type="button"
@@ -367,6 +481,38 @@ export default function WorkspaceMembersShell({
                       </button>
                     )}
                   </span>
+                  {confirmTransferUid === m.uid && (
+                    <div className="w-full rounded-lg bg-cp-raised px-3 py-3">
+                      <p className="text-sm text-cp-text">
+                        Transfer ownership to <span className="font-medium">{m.displayName}</span>?
+                      </p>
+                      <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs text-cp-muted">
+                        <li>
+                          <span className="font-medium">{m.displayName}</span> will become the Workspace Owner.
+                        </li>
+                        <li>You will become an Admin.</li>
+                        <li>Only the new Owner will be able to transfer ownership again.</li>
+                      </ul>
+                      <div className="mt-3 flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleTransfer(m)}
+                          disabled={isTransferPending}
+                          className="rounded-lg bg-cp-accent px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent disabled:opacity-50"
+                        >
+                          {isTransferPending ? "…" : "Transfer ownership"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmTransferUid(null)}
+                          disabled={isTransferPending}
+                          className="rounded-lg border border-cp-border px-3 py-1.5 text-xs font-medium text-cp-text hover:bg-cp-raised focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent disabled:opacity-50"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
                   {confirmRemoveUid === m.uid && (
                     <div className="w-full rounded-lg bg-cp-raised px-3 py-3">
                       <p className="text-sm text-cp-text">

@@ -218,6 +218,17 @@ export type TransferTeamWorkspaceOwnershipResult =
  *      untouched); old membership -> role "admin" (status unchanged,
  *      still "active"); new membership -> role "owner". Every write
  *      carries its own caller-supplied `lastUpdateTime` precondition.
+ *   8. Write the canonical `workspace_ownership_transferred` event
+ *      (`workspaceMembershipEvents/{autoId}`) via `tx.set()`, in the SAME
+ *      transaction as step 7 — both commit or neither does, mirroring
+ *      `removeWorkspaceMembership()`'s own `TRANSFER COMMITTED IFF AUDIT
+ *      EVENT COMMITTED` invariant (renamed for this operation). `at`
+ *      reuses the exact `now` Timestamp already computed for step 7's own
+ *      `updatedAt` fields, never a second clock read. `previousRole` is
+ *      captured from `newOwnerMembership.role` BEFORE it is overwritten to
+ *      `"owner"` in the step-7 write above (the local variable itself is
+ *      never mutated — only a new object is returned to the caller — so
+ *      this read is safe regardless of statement order).
  *
  * No application-level retry wraps `runTransaction()` — only Firestore's
  * own internal optimistic-concurrency retry exists here, exactly
@@ -323,6 +334,24 @@ export async function transferTeamWorkspaceOwnership(args: {
       tx.update(workspaceRef, { ownerUserId: args.newOwnerUid, updatedAt: now }, { lastUpdateTime: args.expectedWorkspaceUpdateTime });
       tx.update(oldOwnerRef, { role: "admin", updatedAt: now }, { lastUpdateTime: args.expectedOldOwnerMembershipUpdateTime });
       tx.update(newOwnerRef, { role: "owner", updatedAt: now }, { lastUpdateTime: args.expectedNewOwnerMembershipUpdateTime });
+
+      // Step 8 — the canonical ownership-transfer event, in the SAME
+      // transaction as the three writes above (see module doc comment).
+      // `eventRef` is a freshly-allocated auto-ID ref (no argument to
+      // `.doc()`), same retry-safety discipline as
+      // `removeWorkspaceMembership()`'s own event write.
+      const eventRef = adminDb!.collection("workspaceMembershipEvents").doc();
+      tx.set(
+        eventRef,
+        buildWorkspaceMembershipEventDocData({
+          eventType: "workspace_ownership_transferred",
+          actorUid: args.callerUid,
+          targetUid: args.newOwnerUid,
+          workspaceId: args.workspaceId,
+          previousRole: newOwnerMembership.role,
+          at: now,
+        })
+      );
 
       return {
         status: "transferred",

@@ -98,19 +98,40 @@ export default function WorkspaceAuditLogShell({ workspaceId, workspaceName }: {
         <ul className="space-y-3">
           {events.map((event, i) => (
             <li key={i} className="rounded-xl border border-cp-border bg-cp-surface px-5 py-4 shadow-sm">
-              <p className="text-sm font-medium text-cp-text">Member removed</p>
-              <p className="mt-1 text-sm text-cp-muted">
-                <span className="font-medium text-cp-text">{event.target.displayName}</span> was removed from this Workspace.
-              </p>
-              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-cp-faint">
-                <span>
-                  Previous role: <span className="font-medium text-cp-muted">{ROLE_LABEL[event.previousRole]}</span>
-                </span>
-                <span>
-                  By: <span className="font-medium text-cp-muted">{event.actor.displayName}</span>
-                </span>
-                <span>{formatOccurredAt(event.occurredAt)}</span>
-              </div>
+              {event.eventType === "workspace_member_removed" ? (
+                <>
+                  <p className="text-sm font-medium text-cp-text">Member removed</p>
+                  <p className="mt-1 text-sm text-cp-muted">
+                    <span className="font-medium text-cp-text">{event.target.displayName}</span> was removed from this Workspace.
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-cp-faint">
+                    <span>
+                      Previous role: <span className="font-medium text-cp-muted">{ROLE_LABEL[event.previousRole]}</span>
+                    </span>
+                    <span>
+                      By: <span className="font-medium text-cp-muted">{event.actor.displayName}</span>
+                    </span>
+                    <span>{formatOccurredAt(event.occurredAt)}</span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm font-medium text-cp-text">Ownership transferred</p>
+                  <p className="mt-1 text-sm text-cp-muted">
+                    <span className="font-medium text-cp-text">{event.actor.displayName}</span> transferred ownership to{" "}
+                    <span className="font-medium text-cp-text">{event.target.displayName}</span>.
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-cp-faint">
+                    <span>
+                      {event.target.displayName}&apos;s previous role: <span className="font-medium text-cp-muted">{ROLE_LABEL[event.previousRole]}</span>
+                    </span>
+                    <span>
+                      By: <span className="font-medium text-cp-muted">{event.actor.displayName}</span>
+                    </span>
+                    <span>{formatOccurredAt(event.occurredAt)}</span>
+                  </div>
+                </>
+              )}
             </li>
           ))}
         </ul>

@@ -310,3 +310,89 @@ describe("listWorkspaceAuditEvents — event normalization / malformed rows", ()
     expect(r).toEqual({ status: "ok", items: [], hasMore: false });
   });
 });
+
+describe("listWorkspaceAuditEvents — Phase TEAM-MGMT-12C: workspace_ownership_transferred", () => {
+  function transferEvt(id: string, overrides: Partial<Record<string, unknown>> = {}): FakeDoc {
+    return evt(id, { eventType: "workspace_ownership_transferred", ...overrides });
+  }
+
+  it("a workspace_ownership_transferred row normalizes correctly into the DTO", async () => {
+    eventDocs = [transferEvt("e1", { actorUid: "old-owner", targetUid: "new-owner", previousRole: "admin" })];
+    mockResolveWorkspaceReviewerDisplayNames.mockResolvedValue(new Map([["old-owner", "Olivia Owner"], ["new-owner", "Adam Admin"]]));
+    const r = await listWorkspaceAuditEvents({ workspaceId: WS_ID, limit: 20 });
+    expect(r.status).toBe("ok");
+    if (r.status !== "ok") return;
+    expect(r.items).toHaveLength(1);
+    expect(r.items[0]).toEqual({
+      eventType: "workspace_ownership_transferred",
+      occurredAt: expect.any(String),
+      actor: { displayName: "Olivia Owner" },
+      target: { displayName: "Adam Admin" },
+      previousRole: "admin",
+    });
+  });
+
+  it("normalizes correctly for every valid previous role (admin/member/reviewer/viewer)", async () => {
+    eventDocs = [
+      transferEvt("e-admin", { previousRole: "admin", targetUid: "t-admin" }),
+      transferEvt("e-member", { previousRole: "member", targetUid: "t-member" }),
+      transferEvt("e-reviewer", { previousRole: "reviewer", targetUid: "t-reviewer" }),
+      transferEvt("e-viewer", { previousRole: "viewer", targetUid: "t-viewer" }),
+    ];
+    const r = await listWorkspaceAuditEvents({ workspaceId: WS_ID, limit: 20 });
+    expect(r.status).toBe("ok");
+    if (r.status !== "ok") return;
+    const roles = r.items.map((i) => i.previousRole).sort();
+    expect(roles).toEqual(["admin", "member", "reviewer", "viewer"]);
+    expect(r.items.every((i) => i.eventType === "workspace_ownership_transferred")).toBe(true);
+  });
+
+  it("malformed ownership-transfer row (previousRole: 'owner') is skipped, not crashed, matching the existing malformed-row policy", async () => {
+    eventDocs = [transferEvt("bad", { previousRole: "owner" }), transferEvt("good", { previousRole: "member" })];
+    const r = await listWorkspaceAuditEvents({ workspaceId: WS_ID, limit: 20 });
+    expect(r.status).toBe("ok");
+    if (r.status !== "ok") return;
+    expect(r.items).toHaveLength(1);
+    expect(r.items[0].previousRole).toBe("member");
+  });
+
+  it("malformed ownership-transfer row (missing actorUid) is skipped", async () => {
+    eventDocs = [transferEvt("bad", { actorUid: undefined }), transferEvt("good", { targetUid: "t-good" })];
+    const r = await listWorkspaceAuditEvents({ workspaceId: WS_ID, limit: 20 });
+    expect(r.status).toBe("ok");
+    if (r.status !== "ok") return;
+    expect(r.items).toHaveLength(1);
+  });
+
+  it("a mixed page (some workspace_member_removed, some workspace_ownership_transferred) normalizes both correctly, newest-first, with actor/target identity batched across BOTH event types in one set of calls", async () => {
+    eventDocs = [
+      evt("removed-1", { eventType: "workspace_member_removed", at: new FakeTimestamp(100, 0), actorUid: "actor-a", targetUid: "target-a" }),
+      transferEvt("transferred-1", { at: new FakeTimestamp(200, 0), actorUid: "actor-b", targetUid: "target-b" }),
+    ];
+    mockResolveWorkspaceReviewerDisplayNames.mockImplementation((_ws: string, uids: string[]) => {
+      const m = new Map<string, string>();
+      for (const uid of uids) m.set(uid, `Name(${uid})`);
+      return Promise.resolve(m);
+    });
+    const r = await listWorkspaceAuditEvents({ workspaceId: WS_ID, limit: 20 });
+    expect(r.status).toBe("ok");
+    if (r.status !== "ok") return;
+    expect(r.items).toHaveLength(2);
+    // newest-first: the transfer (at: 200) before the removal (at: 100).
+    expect(r.items[0].eventType).toBe("workspace_ownership_transferred");
+    expect(r.items[1].eventType).toBe("workspace_member_removed");
+    // Both events' actor/target uids resolved via the SAME two batched calls (never per-event/per-type).
+    expect(mockResolveWorkspaceReviewerDisplayNames).toHaveBeenCalledTimes(2);
+    const [actorCallArgs] = mockResolveWorkspaceReviewerDisplayNames.mock.calls;
+    const uidsPassedToFirstCall = actorCallArgs[1] as string[];
+    expect(new Set(uidsPassedToFirstCall)).toEqual(new Set(["actor-a", "target-a", "actor-b", "target-b"]));
+  });
+
+  it("an unrecognized future eventType is still skipped (forward-compatible), proving the widened check didn't accidentally accept everything", async () => {
+    eventDocs = [evt("other", { eventType: "some_future_event" })];
+    const r = await listWorkspaceAuditEvents({ workspaceId: WS_ID, limit: 20 });
+    expect(r.status).toBe("ok");
+    if (r.status !== "ok") return;
+    expect(r.items).toHaveLength(0);
+  });
+});

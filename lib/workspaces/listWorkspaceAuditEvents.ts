@@ -29,6 +29,16 @@
  * — the cursor must correspond to actual Firestore document order
  * regardless of a row's validation outcome, or a skipped/malformed row
  * between pages could cause a duplicate or gap on the next page.
+ *
+ * Phase TEAM-MGMT-12C — `"workspace_ownership_transferred"` added
+ * alongside `"workspace_member_removed"` as a second recognized event
+ * type. Both share an identical validated field set (`actorUid`,
+ * `targetUid`, `previousRole`, `at`) so `validateRow()` branches only on
+ * `eventType`, never duplicating the shared field checks. Identity
+ * resolution (`resolveWorkspaceReviewerDisplayNames`) is unchanged — actor/
+ * target uids from BOTH event types are added to the same `uids` Set
+ * before the existing batched calls, so a mixed page never issues more
+ * than the same two bounded calls.
  */
 
 import "server-only";
@@ -50,8 +60,12 @@ const VALID_PREVIOUS_ROLES: ReadonlySet<string> = new Set(["admin", "member", "r
 
 export type WorkspaceAuditPreviousRole = Exclude<WorkspaceMembershipRole, "owner">;
 
+export type WorkspaceAuditEventType = "workspace_member_removed" | "workspace_ownership_transferred";
+
+const VALID_EVENT_TYPES: ReadonlySet<string> = new Set(["workspace_member_removed", "workspace_ownership_transferred"]);
+
 export interface WorkspaceAuditEventDto {
-  eventType: "workspace_member_removed";
+  eventType: WorkspaceAuditEventType;
   occurredAt: string;
   actor: { displayName: string };
   target: { displayName: string };
@@ -64,16 +78,24 @@ export type ListWorkspaceAuditEventsResult =
   | { status: "query_failed" };
 
 interface ValidatedRow {
-  eventType: "workspace_member_removed";
+  eventType: WorkspaceAuditEventType;
   occurredAtIso: string;
   actorUid: string;
   targetUid: string;
   previousRole: WorkspaceAuditPreviousRole;
 }
 
+/**
+ * Both recognized event types share an identical validated field set
+ * (`actorUid`/`targetUid`/`previousRole`/`at`) — this validates that
+ * shared shape once and only branches on `eventType` for the discriminant
+ * itself. A future third event type with a genuinely different shape
+ * would need its own branch here; these two do not.
+ */
 function validateRow(id: string, raw: Record<string, unknown> | undefined, workspaceId: string): ValidatedRow | null {
   if (!raw) return null;
-  if (raw.eventType !== "workspace_member_removed") return null;
+  const eventType = raw.eventType;
+  if (typeof eventType !== "string" || !VALID_EVENT_TYPES.has(eventType)) return null;
   if (raw.workspaceId !== workspaceId) return null;
   const actorUid = raw.actorUid;
   const targetUid = raw.targetUid;
@@ -92,7 +114,7 @@ function validateRow(id: string, raw: Record<string, unknown> | undefined, works
   }
 
   return {
-    eventType: "workspace_member_removed",
+    eventType: eventType as WorkspaceAuditEventType,
     occurredAtIso,
     actorUid,
     targetUid,
