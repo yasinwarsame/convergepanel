@@ -49,3 +49,20 @@ describe("buildWorkspaceMembershipEventDocData", () => {
     expect(result).not.toBeInstanceOf(Promise);
   });
 });
+
+describe("buildWorkspaceMembershipEventDocData — Project lifecycle events, Phase PROJECT-AUDIT-AR-I1", () => {
+  const AT = Timestamp.now();
+
+  it.each(["workspace_project_archived", "workspace_project_restored"] as const)("%s payload contains exactly {eventType, actorUid, workspaceId, projectId, projectName, at} — no target/role/status fields, no display name", (eventType) => {
+    const payload = buildWorkspaceMembershipEventDocData({ eventType, actorUid: "owner-1", workspaceId: "ws-1", projectId: "proj-1", projectName: "Quarterly Diligence", at: AT });
+    expect(Object.keys(payload).sort()).toEqual(["actorUid", "at", "eventType", "projectId", "projectName", "workspaceId"]);
+    expect(payload).toEqual({ eventType, actorUid: "owner-1", workspaceId: "ws-1", projectId: "proj-1", projectName: "Quarterly Diligence", at: AT });
+  });
+
+  it("carries the Project name snapshot and identities verbatim — never re-derived, trimmed, or altered", () => {
+    const payload = buildWorkspaceMembershipEventDocData({ eventType: "workspace_project_archived", actorUid: "actor-exact", workspaceId: "ws-exact", projectId: "proj-exact", projectName: "  Exact Name  ", at: AT });
+    expect(payload).toMatchObject({ actorUid: "actor-exact", workspaceId: "ws-exact", projectId: "proj-exact", projectName: "  Exact Name  " });
+    expect(payload.at).toBe(AT);
+  });
+});
+

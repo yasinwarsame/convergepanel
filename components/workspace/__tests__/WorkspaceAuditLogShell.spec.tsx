@@ -136,3 +136,54 @@ describe("WorkspaceAuditLogShell — navigation (T, Q)", () => {
     expect(source).not.toMatch(/href=["'`]\/governance/);
   });
 });
+
+describe("WorkspaceAuditLogShell — Project lifecycle event cards, Phase PROJECT-AUDIT-AR-I1", () => {
+  const archivedBranch = source.match(/event\.eventType === "workspace_project_archived" \? \(([\s\S]*?)\) : event\.eventType === "workspace_project_restored"/)?.[1] ?? "";
+  const restoredBranch = source.match(/event\.eventType === "workspace_project_restored" \? \(([\s\S]*?)\) : \(/)?.[1] ?? "";
+
+  it("discriminates on BOTH new event types, each as its own branch, leaving the role-changed branch as the final else", () => {
+    expect(archivedBranch).not.toBe("");
+    expect(restoredBranch).not.toBe("");
+    expect(source).toMatch(/\) : \(\s*<>\s*<p className="text-sm font-medium text-cp-text">Role changed<\/p>/);
+  });
+
+  it("archived: heading 'Project archived', body '<name> was archived.', actor with 'By:' label, formatted timestamp", () => {
+    expect(archivedBranch).toMatch(/Project archived/);
+    expect(archivedBranch).toMatch(/\{event\.project\.name\}<\/span> was archived\./);
+    expect(archivedBranch).toMatch(/By:[\s\S]{0,60}event\.actor\.displayName/);
+    expect(archivedBranch).toMatch(/formatOccurredAt\(event\.occurredAt\)/);
+  });
+
+  it("restored: heading 'Project restored', body '<name> was restored.', actor with 'By:' label, formatted timestamp", () => {
+    expect(restoredBranch).toMatch(/Project restored/);
+    expect(restoredBranch).toMatch(/\{event\.project\.name\}<\/span> was restored\./);
+    expect(restoredBranch).toMatch(/By:[\s\S]{0,60}event\.actor\.displayName/);
+    expect(restoredBranch).toMatch(/formatOccurredAt\(event\.occurredAt\)/);
+  });
+
+  it("long Project names wrap inside the card (break-words on the body line) rather than overflowing", () => {
+    expect(archivedBranch).toMatch(/className="mt-1 break-words text-sm text-cp-muted"/);
+    expect(restoredBranch).toMatch(/className="mt-1 break-words text-sm text-cp-muted"/);
+  });
+
+  it("Project branches never reference role labels or a member target — the Project shape is rendered as itself, not forced through the member schema", () => {
+    for (const branch of [archivedBranch, restoredBranch]) {
+      expect(branch).not.toMatch(/ROLE_LABEL|previousRole|newRole|event\.target/);
+    }
+  });
+
+  it("no raw projectId, actorUid, workspaceId, or document id is referenced anywhere in the component (AZ guard extended to Project fields)", () => {
+    expect(source).not.toMatch(/event\.actorUid|event\.targetUid|event\.uid|event\.workspaceId|event\.id\b|event\.projectId|project\.id\b/);
+  });
+
+  it("no Project link, filter, or archive/restore control was added — audit rendering only", () => {
+    expect(source).not.toMatch(/href=\{`\/workspace\/team\/[^`]*projects/);
+    expect(source).not.toMatch(/archiveProject|restoreProject|onArchive|onRestore|<select/);
+  });
+
+  it("the actor fallback for an unresolved actor is server-provided ('Unknown user' comes from the DTO, the component never invents one)", () => {
+    expect(source).not.toMatch(/Unknown user/);
+    expect(source).toMatch(/event\.actor\.displayName/);
+  });
+});
+

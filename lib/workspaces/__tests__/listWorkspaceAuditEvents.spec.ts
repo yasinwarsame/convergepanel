@@ -481,3 +481,153 @@ describe("listWorkspaceAuditEvents — Phase 12B: workspace_member_role_changed"
     expect(mockResolveWorkspaceReviewerDisplayNames).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("listWorkspaceAuditEvents — Phase PROJECT-AUDIT-AR-I1: workspace_project_archived / workspace_project_restored", () => {
+  function projectEvt(id: string, overrides: Partial<Record<string, unknown>> = {}): FakeDoc {
+    return {
+      id,
+      data: {
+        eventType: "workspace_project_archived",
+        workspaceId: WS_ID,
+        actorUid: "actor-1",
+        projectId: "proj-1",
+        projectName: "Quarterly Diligence",
+        at: new FakeTimestamp(1723600000, 0),
+        ...overrides,
+      },
+    };
+  }
+  function namesByUid() {
+    mockResolveWorkspaceReviewerDisplayNames.mockImplementation((_ws: string, uids: string[]) => {
+      const m = new Map<string, string>();
+      for (const uid of uids) m.set(uid, `Name(${uid})`);
+      return Promise.resolve(m);
+    });
+  }
+
+  it("a workspace_project_archived row normalizes into a PROJECT-shaped DTO: actor + project.name only — no target, no role fields, no projectId", async () => {
+    eventDocs = [projectEvt("e1")];
+    namesByUid();
+    const r = await listWorkspaceAuditEvents({ workspaceId: WS_ID, limit: 20 });
+    expect(r.status).toBe("ok");
+    if (r.status !== "ok") return;
+    expect(r.items).toEqual([{ eventType: "workspace_project_archived", occurredAt: "2024-08-14T01:46:40.000Z", actor: { displayName: "Name(actor-1)" }, project: { name: "Quarterly Diligence" } }]);
+    expect(Object.keys(r.items[0]).sort()).toEqual(["actor", "eventType", "occurredAt", "project"]);
+  });
+
+  it("a workspace_project_restored row normalizes identically with its own eventType", async () => {
+    eventDocs = [projectEvt("e1", { eventType: "workspace_project_restored" })];
+    namesByUid();
+    const r = await listWorkspaceAuditEvents({ workspaceId: WS_ID, limit: 20 });
+    expect(r.status).toBe("ok");
+    if (r.status === "ok") expect(r.items[0].eventType).toBe("workspace_project_restored");
+  });
+
+  it("output never contains actorUid, projectId, workspaceId, or the raw event doc id for a Project event", async () => {
+    eventDocs = [projectEvt("evt-doc-id-777", { actorUid: "actor-secret", projectId: "proj-secret" })];
+    mockResolveWorkspaceReviewerDisplayNames.mockResolvedValue(new Map([["actor-secret", "Olivia Owner"]]));
+    const r = await listWorkspaceAuditEvents({ workspaceId: WS_ID, limit: 20 });
+    expect(r.status).toBe("ok");
+    if (r.status !== "ok") return;
+    const serialized = JSON.stringify(r.items);
+    expect(serialized).not.toMatch(/actor-secret|proj-secret|evt-doc-id-777/);
+    expect(serialized).not.toMatch(/"workspaceId"|"projectId"|"actorUid"|"targetUid"/);
+  });
+
+  it("actor resolution works with NO targetUid: the resolver is still called with the actor uid and the fallback applies when unresolved", async () => {
+    eventDocs = [projectEvt("e1", { actorUid: "gone-user" })];
+    mockResolveWorkspaceReviewerDisplayNames.mockResolvedValue(new Map());
+    const r = await listWorkspaceAuditEvents({ workspaceId: WS_ID, limit: 20 });
+    expect(r.status).toBe("ok");
+    if (r.status !== "ok") return;
+    expect(r.items[0].actor.displayName).toBe("Unknown user");
+    const [, uidsArg] = mockResolveWorkspaceReviewerDisplayNames.mock.calls[0];
+    expect(uidsArg).toEqual(["gone-user"]);
+  });
+
+  it.each([
+    ["missing projectId", { projectId: undefined }],
+    ["empty projectId", { projectId: "" }],
+    ["non-string projectId", { projectId: 42 }],
+    ["missing projectName", { projectName: undefined }],
+    ["empty projectName", { projectName: "" }],
+    ["non-string projectName", { projectName: { name: "x" } }],
+    ["malformed actorUid (empty)", { actorUid: "" }],
+    ["malformed actorUid (non-string)", { actorUid: 7 }],
+    ["foreign workspaceId (row-level re-validation)", { workspaceId: "ws-other" }],
+    ["malformed timestamp", { at: "2024-08-14" }],
+    ["unknown event type", { eventType: "workspace_project_deleted" }],
+  ])("a Project row with %s is malformed: skipped, never rendered — a valid sibling row still renders", async (_label, overrides) => {
+    eventDocs = [projectEvt("bad", overrides as Record<string, unknown>), projectEvt("good", { at: new FakeTimestamp(1723600001, 0) })];
+    namesByUid();
+    const r = await listWorkspaceAuditEvents({ workspaceId: WS_ID, limit: 20 });
+    expect(r.status).toBe("ok");
+    if (r.status !== "ok") return;
+    expect(r.items).toHaveLength(1);
+    expect(r.items[0]).toMatchObject({ eventType: "workspace_project_archived", project: { name: "Quarterly Diligence" } });
+  });
+
+  it("a Project row is NOT rescued by member-shaped fields (targetUid/previousRole present, projectName missing -> still malformed)", async () => {
+    eventDocs = [projectEvt("bad", { projectName: undefined, targetUid: "target-1", previousRole: "member" })];
+    namesByUid();
+    const r = await listWorkspaceAuditEvents({ workspaceId: WS_ID, limit: 20 });
+    expect(r.status).toBe("ok");
+    if (r.status === "ok") expect(r.items).toHaveLength(0);
+  });
+
+  it("member events are NOT rescued by Project-shaped fields: every existing member type still requires targetUid AND previousRole (and newRole for role-changed), exactly as before", async () => {
+    eventDocs = [
+      evt("m1", { eventType: "workspace_member_removed", targetUid: undefined, projectId: "p", projectName: "n" }),
+      evt("m2", { eventType: "workspace_ownership_transferred", previousRole: undefined, projectId: "p", projectName: "n" }),
+      evt("m3", { eventType: "workspace_member_role_changed", newRole: undefined, projectId: "p", projectName: "n" }),
+      evt("m4", { eventType: "workspace_member_removed", previousRole: "owner" }),
+      evt("m5", { eventType: "workspace_member_role_changed", newRole: "owner" }),
+      evt("ok-removed", { at: new FakeTimestamp(1723600010, 0) }),
+    ];
+    namesByUid();
+    const r = await listWorkspaceAuditEvents({ workspaceId: WS_ID, limit: 20 });
+    expect(r.status).toBe("ok");
+    if (r.status !== "ok") return;
+    expect(r.items).toHaveLength(1);
+    expect(r.items[0]).toMatchObject({ eventType: "workspace_member_removed", previousRole: "member", target: { displayName: "Name(target-1)" } });
+  });
+
+  it("a mixed page across all FIVE event types normalizes correctly, newest-first, doc-id tiebreak intact, with identity still batched in exactly two calls", async () => {
+    eventDocs = [
+      evt("removed-1", { eventType: "workspace_member_removed", at: new FakeTimestamp(100, 0), actorUid: "actor-a", targetUid: "target-a" }),
+      evt("transferred-1", { eventType: "workspace_ownership_transferred", at: new FakeTimestamp(200, 0), actorUid: "actor-b", targetUid: "target-b" }),
+      evt("changed-1", { eventType: "workspace_member_role_changed", newRole: "viewer", at: new FakeTimestamp(300, 0), actorUid: "actor-c", targetUid: "target-c" }),
+      projectEvt("archived-1", { at: new FakeTimestamp(400, 0), actorUid: "actor-d" }),
+      projectEvt("restored-1", { eventType: "workspace_project_restored", at: new FakeTimestamp(400, 0), actorUid: "actor-e", projectName: "Restored One" }),
+    ];
+    namesByUid();
+    const r = await listWorkspaceAuditEvents({ workspaceId: WS_ID, limit: 20 });
+    expect(r.status).toBe("ok");
+    if (r.status !== "ok") return;
+    // Same `at` (400) for the two Project rows -> documentId DESC tiebreak: "restored-1" > "archived-1".
+    expect(r.items.map((i) => i.eventType)).toEqual(["workspace_project_restored", "workspace_project_archived", "workspace_member_role_changed", "workspace_ownership_transferred", "workspace_member_removed"]);
+    expect(mockResolveWorkspaceReviewerDisplayNames).toHaveBeenCalledTimes(2);
+    const [, uidsArg] = mockResolveWorkspaceReviewerDisplayNames.mock.calls[0];
+    expect([...uidsArg].sort()).toEqual(["actor-a", "actor-b", "actor-c", "actor-d", "actor-e", "target-a", "target-b", "target-c"]);
+  });
+
+  it("pagination/cursor across a page boundary that splits member and Project rows has no duplicate or gap", async () => {
+    eventDocs = [
+      evt("r1", { at: new FakeTimestamp(10, 0) }),
+      projectEvt("p1", { at: new FakeTimestamp(20, 0) }),
+      evt("r2", { at: new FakeTimestamp(30, 0) }),
+      projectEvt("p2", { at: new FakeTimestamp(40, 0), eventType: "workspace_project_restored" }),
+    ];
+    namesByUid();
+    const page1 = await listWorkspaceAuditEvents({ workspaceId: WS_ID, limit: 2 });
+    expect(page1.status).toBe("ok");
+    if (page1.status !== "ok") return;
+    expect(page1.hasMore).toBe(true);
+    const page2 = await listWorkspaceAuditEvents({ workspaceId: WS_ID, limit: 2, cursorRaw: page1.nextCursor });
+    expect(page2.status).toBe("ok");
+    if (page2.status !== "ok") return;
+    expect(page2.hasMore).toBe(false);
+    expect([...page1.items, ...page2.items].map((i) => i.eventType)).toEqual(["workspace_project_restored", "workspace_member_removed", "workspace_project_archived", "workspace_member_removed"]);
+  });
+});
+

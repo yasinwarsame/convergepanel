@@ -61,13 +61,35 @@
  * `workspace_member_removed` and `workspace_ownership_transferred` keep
  * their original single-`previousRole` shape, byte-identical to what is
  * already persisted for those two event types.
+ *
+ * Project Archive/Restore Audit Visibility, Phase PROJECT-AUDIT-AR-I1 —
+ * `"workspace_project_archived"` / `"workspace_project_restored"` added as
+ * the first NON-member-shaped Workspace Audit events. They deliberately do
+ * NOT carry `targetUid`/`previousRole`/`newRole` (there is no member
+ * target and no role); instead they carry `projectId` plus a
+ * `projectName` SNAPSHOT taken from the transaction-read Project at
+ * mutation time, so the audit row stays historically legible after a
+ * later rename and the reader never needs a per-event Project lookup.
+ * Archive-vs-restore is encoded entirely by `eventType` — no
+ * `previousStatus`/`newStatus`. Written ONLY via `tx.set()` inside
+ * `updateTeamProjectFields()`'s own transaction (`lib/firestore/
+ * teamProjects.ts`) — never through the separate, best-effort
+ * `projectEvents` writer, which remains unchanged and unread by Workspace
+ * Audit. The collection keeps its `workspaceMembershipEvents` name: it is
+ * the single Workspace Audit source (one query, one cursor, one existing
+ * composite index), and renaming a live collection is out of scope.
  */
 
 import "server-only";
 import type { Timestamp } from "firebase-admin/firestore";
 import type { WorkspaceMembershipRole } from "./membershipTypes";
 
-export type WorkspaceMembershipEventType = "workspace_member_removed" | "workspace_ownership_transferred" | "workspace_member_role_changed";
+export type WorkspaceMembershipEventType =
+  | "workspace_member_removed"
+  | "workspace_ownership_transferred"
+  | "workspace_member_role_changed"
+  | "workspace_project_archived"
+  | "workspace_project_restored";
 
 interface WorkspaceMembershipEventIdentity {
   actorUid: string;
@@ -75,22 +97,35 @@ interface WorkspaceMembershipEventIdentity {
   workspaceId: string;
 }
 
+/** Project lifecycle events have an actor and a Workspace but NO member target — `targetUid` is structurally absent, never `null`/empty. */
+interface WorkspaceProjectEventIdentity {
+  actorUid: string;
+  workspaceId: string;
+  projectId: string;
+  /** Snapshot of the transaction-read Project name at mutation time — never resolved at read time, never client-supplied. */
+  projectName: string;
+}
+
 export type WorkspaceMembershipEventArgs =
   | (WorkspaceMembershipEventIdentity & { eventType: "workspace_member_removed"; previousRole: WorkspaceMembershipRole })
   | (WorkspaceMembershipEventIdentity & { eventType: "workspace_ownership_transferred"; previousRole: WorkspaceMembershipRole })
-  | (WorkspaceMembershipEventIdentity & { eventType: "workspace_member_role_changed"; previousRole: WorkspaceMembershipRole; newRole: WorkspaceMembershipRole });
+  | (WorkspaceMembershipEventIdentity & { eventType: "workspace_member_role_changed"; previousRole: WorkspaceMembershipRole; newRole: WorkspaceMembershipRole })
+  | (WorkspaceProjectEventIdentity & { eventType: "workspace_project_archived" })
+  | (WorkspaceProjectEventIdentity & { eventType: "workspace_project_restored" });
 
 export type WorkspaceMembershipEventDocData =
   | (WorkspaceMembershipEventIdentity & { eventType: "workspace_member_removed"; previousRole: WorkspaceMembershipRole; at: Timestamp })
   | (WorkspaceMembershipEventIdentity & { eventType: "workspace_ownership_transferred"; previousRole: WorkspaceMembershipRole; at: Timestamp })
-  | (WorkspaceMembershipEventIdentity & { eventType: "workspace_member_role_changed"; previousRole: WorkspaceMembershipRole; newRole: WorkspaceMembershipRole; at: Timestamp });
+  | (WorkspaceMembershipEventIdentity & { eventType: "workspace_member_role_changed"; previousRole: WorkspaceMembershipRole; newRole: WorkspaceMembershipRole; at: Timestamp })
+  | (WorkspaceProjectEventIdentity & { eventType: "workspace_project_archived"; at: Timestamp })
+  | (WorkspaceProjectEventIdentity & { eventType: "workspace_project_restored"; at: Timestamp });
 
 /**
  * Pure — no I/O, never throws. `at` is caller-supplied (never generated
  * here) so the event's timestamp can be the EXACT SAME `Timestamp.now()`
  * instant already computed for the membership's own `removedAt`/
- * `updatedAt`/`role` fields inside the same transaction, rather than a
- * second, independently-drifted clock read. The return type is the exact
+ * `updatedAt`/`role` fields (or a Project's own `updatedAt`) inside the
+ * same transaction, rather than a second, independently-drifted clock read. The return type is the exact
  * matching union member — TypeScript narrows through `args`'s own
  * discriminant, so this can never construct a `workspace_member_role_changed`
  * doc missing `newRole`.
