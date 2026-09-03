@@ -28,6 +28,25 @@
  * `loadMembers()`, exactly like `handleRemove()` already does — never a
  * client-computed optimistic role swap.
  *
+ * Active Member Role Management, Phase 12B — a "Change role" action is
+ * offered per-row, gated by the SAME target-authority policy as Remove
+ * (`canManageMemberRoleTarget()`, a UX-only mirror of
+ * `canManageMembershipTargetRole()` — never the canonical Owner, never
+ * self) PLUS destination-role eligibility (`roleChangeOptionsFor()`, a
+ * UX-only mirror of `canAssignMembershipDestinationRole()`): the row is
+ * hidden entirely when no legal destination role exists for this
+ * caller/target pair (e.g. an Admin viewing another Admin — Admin can
+ * neither manage nor promote-to another Admin). The destination selector
+ * excludes the target's current role and `"owner"` unconditionally. No
+ * OCC token is required (unlike Transfer) — the backend relies on native
+ * Firestore transaction serialization instead (see
+ * `changeTeamWorkspaceMemberRole()`'s own doc comment). Confirming calls
+ * `changeMemberRole()` and, on a genuine change (`changed: true`),
+ * refetches via `loadMembers()` exactly like Remove/Transfer — never an
+ * optimistic local role swap. A `changed: false` response (the requested
+ * role already matched) is reported without a refetch, since nothing on
+ * the server actually moved.
+ *
  * Every displayed field comes from the server's own allow-list DTOs
  * (`WorkspaceMemberItem`/`WorkspaceInvitationItem`) — no raw
  * document/UID beyond what those DTOs already expose.
@@ -55,11 +74,13 @@ import {
   revokeInvitation,
   removeMember,
   transferWorkspaceOwnership,
+  changeMemberRole,
   type WorkspaceMemberItem,
   type WorkspaceInvitationItem,
   type WorkspaceInvitationRole,
   type WorkspaceMemberRole,
   type WorkspaceUpdateTimeToken,
+  type MembershipDestinationRole,
 } from "@/lib/client/workspaceTeamClient";
 import ReviewErrorState from "@/components/teamGovernance/ReviewErrorState";
 import WorkspaceNav from "@/components/workspace/WorkspaceNav";
@@ -119,6 +140,40 @@ function canTransferOwnershipTo(callerIsCanonicalOwner: boolean, targetRole: Wor
   return true;
 }
 
+/**
+ * Active Member Role Management, Phase 12B — UX-only mirror of the
+ * backend's `canManageMembershipTargetRole()`. Identical matrix to
+ * `canRemoveMemberRole()` above (target authority is the same policy for
+ * both member removal and role change) — kept as its own named function at
+ * each Change-role call site for readability, rather than reusing a
+ * removal-specific name for an unrelated action.
+ */
+function canManageMemberRoleTarget(callerRole: WorkspaceMemberRole, targetRole: WorkspaceMemberRole): boolean {
+  return canRemoveMemberRole(callerRole, targetRole);
+}
+
+/**
+ * Active Member Role Management, Phase 12B — UX-only mirror of the
+ * backend's `canAssignMembershipDestinationRole()`
+ * (`lib/workspaces/membershipRoleAuthority.ts`). Deliberately a SEPARATE
+ * set from `canManageMemberRoleTarget()`'s target-authority matrix, even
+ * though the two happen to agree today — mirrors the backend's own
+ * separation rationale (see that module's doc comment).
+ */
+const OWNER_ASSIGNABLE_ROLES: readonly MembershipDestinationRole[] = ["admin", "member", "reviewer", "viewer"];
+const ADMIN_ASSIGNABLE_ROLES: readonly MembershipDestinationRole[] = ["member", "reviewer", "viewer"];
+
+function assignableDestinationRoles(callerRole: WorkspaceMemberRole): readonly MembershipDestinationRole[] {
+  if (callerRole === "owner") return OWNER_ASSIGNABLE_ROLES;
+  if (callerRole === "admin") return ADMIN_ASSIGNABLE_ROLES;
+  return [];
+}
+
+/** The legal destination roles for this specific caller/target pair, with the target's OWN current role excluded (never offered as a "new" role) and `"owner"` structurally excluded (`MembershipDestinationRole` cannot express it). An empty result means the Change-role control should not be shown at all for this row. */
+function roleChangeOptionsFor(callerRole: WorkspaceMemberRole, targetRole: WorkspaceMemberRole): MembershipDestinationRole[] {
+  return assignableDestinationRoles(callerRole).filter((r) => r !== targetRole);
+}
+
 export default function WorkspaceMembersShell({
   workspaceId,
   workspaceName,
@@ -151,6 +206,12 @@ export default function WorkspaceMembersShell({
   const [transferPendingUid, setTransferPendingUid] = useState<string | null>(null);
   const [transferError, setTransferError] = useState<string | null>(null);
   const [transferConfirmation, setTransferConfirmation] = useState<string | null>(null);
+
+  const [confirmRoleChangeUid, setConfirmRoleChangeUid] = useState<string | null>(null);
+  const [selectedDestinationRole, setSelectedDestinationRole] = useState<MembershipDestinationRole | null>(null);
+  const [roleChangePendingUid, setRoleChangePendingUid] = useState<string | null>(null);
+  const [roleChangeError, setRoleChangeError] = useState<string | null>(null);
+  const [roleChangeConfirmation, setRoleChangeConfirmation] = useState<string | null>(null);
 
   const [invitations, setInvitations] = useState<WorkspaceInvitationItem[]>([]);
   const [invitationsStatus, setInvitationsStatus] = useState<"loading" | "ready" | "error">("loading");
@@ -373,6 +434,31 @@ export default function WorkspaceMembersShell({
     [members, user, authReady, workspaceId, workspaceUpdateToken, loadMembers]
   );
 
+  const handleRoleChange = useCallback(
+    async (member: WorkspaceMemberItem, destinationRole: MembershipDestinationRole) => {
+      setRoleChangePendingUid(member.uid);
+      setRoleChangeError(null);
+      setRoleChangeConfirmation(null);
+      const result = await changeMemberRole({ user, authReady, workspaceId, targetUid: member.uid, role: destinationRole });
+      setRoleChangePendingUid(null);
+      setConfirmRoleChangeUid(null);
+      setSelectedDestinationRole(null);
+      if (result.status === "ok") {
+        if (result.changed) {
+          setRoleChangeConfirmation(`${member.displayName}'s role was changed to ${ROLE_LABEL[destinationRole]}.`);
+          loadMembers();
+        } else {
+          setRoleChangeConfirmation(`${member.displayName} already has that role.`);
+        }
+      } else if (result.status === "denied") {
+        setRoleChangeError(result.message);
+      } else {
+        setRoleChangeError("We couldn't change this member's role. Please try again.");
+      }
+    },
+    [user, authReady, workspaceId, loadMembers]
+  );
+
   // Permanent Team Workspace Collaborator-Seat Limit, Phase 12A.1S.1 — a
   // pure display derivation from data ALREADY loaded above for its own
   // existing purposes, never a new fetch. Mirrors the server's own
@@ -436,6 +522,16 @@ export default function WorkspaceMembersShell({
             {transferError}
           </p>
         )}
+        {roleChangeConfirmation && (
+          <p role="status" className="mb-3 text-sm font-medium text-cp-accent">
+            {roleChangeConfirmation}
+          </p>
+        )}
+        {roleChangeError && (
+          <p role="alert" className="mb-3 text-sm font-medium text-red-400">
+            {roleChangeError}
+          </p>
+        )}
         {membersStatus === "ready" && members.length === 0 && (
           <div className="rounded-xl border border-cp-border bg-cp-raised px-6 py-8 text-center text-sm text-cp-muted shadow-sm">No members found.</div>
         )}
@@ -446,6 +542,9 @@ export default function WorkspaceMembersShell({
               const isRemovePending = removePendingUid === m.uid;
               const eligibleForTransfer = canTransferOwnershipTo(callerIsCanonicalOwner, m.role) && m.uid !== user?.uid;
               const isTransferPending = transferPendingUid === m.uid;
+              const roleChangeOptions = roleChangeOptionsFor(callerRole, m.role);
+              const eligibleForRoleChange = canManageInvitations && !m.isCanonicalOwner && m.uid !== user?.uid && canManageMemberRoleTarget(callerRole, m.role) && roleChangeOptions.length > 0;
+              const isRoleChangePending = roleChangePendingUid === m.uid;
               return (
                 <li key={m.uid} className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
                   <span className="truncate text-sm font-medium text-cp-text">{m.displayName}</span>
@@ -464,6 +563,21 @@ export default function WorkspaceMembersShell({
                         className="rounded-lg border border-cp-border px-3 py-1.5 text-xs font-medium text-cp-text hover:bg-cp-raised focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent disabled:opacity-50"
                       >
                         Transfer ownership
+                      </button>
+                    )}
+                    {eligibleForRoleChange && confirmRoleChangeUid !== m.uid && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRoleChangeError(null);
+                          setRoleChangeConfirmation(null);
+                          setSelectedDestinationRole(roleChangeOptions[0] ?? null);
+                          setConfirmRoleChangeUid(m.uid);
+                        }}
+                        disabled={isRoleChangePending}
+                        className="rounded-lg border border-cp-border px-3 py-1.5 text-xs font-medium text-cp-text hover:bg-cp-raised focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent disabled:opacity-50"
+                      >
+                        Change role
                       </button>
                     )}
                     {eligibleForRemoval && confirmRemoveUid !== m.uid && (
@@ -506,6 +620,56 @@ export default function WorkspaceMembersShell({
                           type="button"
                           onClick={() => setConfirmTransferUid(null)}
                           disabled={isTransferPending}
+                          className="rounded-lg border border-cp-border px-3 py-1.5 text-xs font-medium text-cp-text hover:bg-cp-raised focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent disabled:opacity-50"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  {confirmRoleChangeUid === m.uid && (
+                    <div className="w-full rounded-lg bg-cp-raised px-3 py-3">
+                      <p className="text-sm text-cp-text">
+                        Change <span className="font-medium">{m.displayName}</span>&apos;s role?
+                      </p>
+                      <p className="mt-1 text-xs text-cp-muted">
+                        Current role: <span className="font-medium">{ROLE_LABEL[m.role]}</span>
+                      </p>
+                      <div className="mt-2">
+                        <label htmlFor={`role-change-select-${m.uid}`} className="block text-xs font-medium text-cp-text">
+                          New role
+                        </label>
+                        <select
+                          id={`role-change-select-${m.uid}`}
+                          value={selectedDestinationRole ?? ""}
+                          onChange={(e) => setSelectedDestinationRole(e.target.value as MembershipDestinationRole)}
+                          disabled={isRoleChangePending}
+                          className="mt-1 w-full rounded-lg border border-cp-border bg-cp-bg px-3 py-2 text-sm text-cp-text focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent disabled:opacity-50"
+                        >
+                          {roleChangeOptions.map((r) => (
+                            <option key={r} value={r}>
+                              {ROLE_LABEL[r]}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <p className="mt-2 text-xs text-cp-muted">Their Workspace permissions will change immediately.</p>
+                      <div className="mt-3 flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => selectedDestinationRole && handleRoleChange(m, selectedDestinationRole)}
+                          disabled={isRoleChangePending || !selectedDestinationRole}
+                          className="rounded-lg bg-cp-accent px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent disabled:opacity-50"
+                        >
+                          {isRoleChangePending ? "…" : "Change role"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setConfirmRoleChangeUid(null);
+                            setSelectedDestinationRole(null);
+                          }}
+                          disabled={isRoleChangePending}
                           className="rounded-lg border border-cp-border px-3 py-1.5 text-xs font-medium text-cp-text hover:bg-cp-raised focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent disabled:opacity-50"
                         >
                           Cancel

@@ -396,3 +396,88 @@ describe("listWorkspaceAuditEvents — Phase TEAM-MGMT-12C: workspace_ownership_
     expect(r.items).toHaveLength(0);
   });
 });
+
+describe("listWorkspaceAuditEvents — Phase 12B: workspace_member_role_changed", () => {
+  function roleChangedEvt(id: string, overrides: Partial<Record<string, unknown>> = {}): FakeDoc {
+    return evt(id, { eventType: "workspace_member_role_changed", newRole: "reviewer", ...overrides });
+  }
+
+  it("a workspace_member_role_changed row normalizes correctly into the DTO, including newRole", async () => {
+    eventDocs = [roleChangedEvt("e1", { actorUid: "owner-1", targetUid: "member-1", previousRole: "member", newRole: "admin" })];
+    mockResolveWorkspaceReviewerDisplayNames.mockResolvedValue(new Map([["owner-1", "Olivia Owner"], ["member-1", "Mo Member"]]));
+    const r = await listWorkspaceAuditEvents({ workspaceId: WS_ID, limit: 20 });
+    expect(r.status).toBe("ok");
+    if (r.status !== "ok") return;
+    expect(r.items).toHaveLength(1);
+    expect(r.items[0]).toEqual({
+      eventType: "workspace_member_role_changed",
+      occurredAt: expect.any(String),
+      actor: { displayName: "Olivia Owner" },
+      target: { displayName: "Mo Member" },
+      previousRole: "member",
+      newRole: "admin",
+    });
+  });
+
+  it("normalizes correctly for every valid (previousRole, newRole) combination", async () => {
+    eventDocs = [
+      roleChangedEvt("e-1", { previousRole: "admin", newRole: "member", targetUid: "t-1" }),
+      roleChangedEvt("e-2", { previousRole: "member", newRole: "reviewer", targetUid: "t-2" }),
+      roleChangedEvt("e-3", { previousRole: "reviewer", newRole: "viewer", targetUid: "t-3" }),
+      roleChangedEvt("e-4", { previousRole: "viewer", newRole: "admin", targetUid: "t-4" }),
+    ];
+    const r = await listWorkspaceAuditEvents({ workspaceId: WS_ID, limit: 20 });
+    expect(r.status).toBe("ok");
+    if (r.status !== "ok") return;
+    expect(r.items).toHaveLength(4);
+    expect(r.items.every((i) => i.eventType === "workspace_member_role_changed")).toBe(true);
+    const pairs = r.items.map((i) => (i.eventType === "workspace_member_role_changed" ? `${i.previousRole}->${i.newRole}` : "")).sort();
+    expect(pairs).toEqual(["admin->member", "member->reviewer", "reviewer->viewer", "viewer->admin"]);
+  });
+
+  it("a role-changed row missing newRole is malformed and skipped — the other two event types are unaffected by this requirement", async () => {
+    eventDocs = [roleChangedEvt("bad", { newRole: undefined }), evt("good-removed"), roleChangedEvt("good-changed", { newRole: "viewer" })];
+    const r = await listWorkspaceAuditEvents({ workspaceId: WS_ID, limit: 20 });
+    expect(r.status).toBe("ok");
+    if (r.status !== "ok") return;
+    expect(r.items).toHaveLength(2);
+    expect(r.items.map((i) => i.eventType).sort()).toEqual(["workspace_member_removed", "workspace_member_role_changed"]);
+  });
+
+  it("a role-changed row with newRole: 'owner' is malformed and skipped", async () => {
+    eventDocs = [roleChangedEvt("bad", { newRole: "owner" }), roleChangedEvt("good", { newRole: "member" })];
+    const r = await listWorkspaceAuditEvents({ workspaceId: WS_ID, limit: 20 });
+    expect(r.status).toBe("ok");
+    if (r.status !== "ok") return;
+    expect(r.items).toHaveLength(1);
+    if (r.items[0].eventType !== "workspace_member_role_changed") throw new Error("expected role_changed");
+    expect(r.items[0].newRole).toBe("member");
+  });
+
+  it("a role-changed row with newRole: 123 (non-string) is malformed and skipped", async () => {
+    eventDocs = [roleChangedEvt("bad", { newRole: 123 }), roleChangedEvt("good", { newRole: "member" })];
+    const r = await listWorkspaceAuditEvents({ workspaceId: WS_ID, limit: 20 });
+    expect(r.status).toBe("ok");
+    if (r.status !== "ok") return;
+    expect(r.items).toHaveLength(1);
+  });
+
+  it("a mixed page across all three event types normalizes correctly, newest-first, with actor/target identity batched in one set of calls", async () => {
+    eventDocs = [
+      evt("removed-1", { eventType: "workspace_member_removed", at: new FakeTimestamp(100, 0), actorUid: "actor-a", targetUid: "target-a" }),
+      evt("transferred-1", { eventType: "workspace_ownership_transferred", at: new FakeTimestamp(200, 0), actorUid: "actor-b", targetUid: "target-b" }),
+      roleChangedEvt("changed-1", { at: new FakeTimestamp(300, 0), actorUid: "actor-c", targetUid: "target-c", newRole: "viewer" }),
+    ];
+    mockResolveWorkspaceReviewerDisplayNames.mockImplementation((_ws: string, uids: string[]) => {
+      const m = new Map<string, string>();
+      for (const uid of uids) m.set(uid, `Name(${uid})`);
+      return Promise.resolve(m);
+    });
+    const r = await listWorkspaceAuditEvents({ workspaceId: WS_ID, limit: 20 });
+    expect(r.status).toBe("ok");
+    if (r.status !== "ok") return;
+    expect(r.items).toHaveLength(3);
+    expect(r.items.map((i) => i.eventType)).toEqual(["workspace_member_role_changed", "workspace_ownership_transferred", "workspace_member_removed"]);
+    expect(mockResolveWorkspaceReviewerDisplayNames).toHaveBeenCalledTimes(2);
+  });
+});

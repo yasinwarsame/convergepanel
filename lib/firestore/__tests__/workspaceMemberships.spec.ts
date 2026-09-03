@@ -199,7 +199,7 @@ jest.mock("@/lib/logger", () => ({
 }));
 
 import { computeMembershipId } from "@/lib/workspaces/membershipId";
-import { getWorkspaceMembershipForBinding, createTeamWorkspace, transferTeamWorkspaceOwnership, removeWorkspaceMembership } from "@/lib/firestore/workspaceMemberships";
+import { getWorkspaceMembershipForBinding, createTeamWorkspace, transferTeamWorkspaceOwnership, removeWorkspaceMembership, changeTeamWorkspaceMemberRole } from "@/lib/firestore/workspaceMemberships";
 
 const OWNER_UID = "owner-1";
 const OTHER_UID = "member-1";
@@ -1492,6 +1492,419 @@ describe("removeWorkspaceMembership — Phase 12A", () => {
       const [event] = [...stores.workspaceMembershipEvents.values()];
       // Exact field set expected by lib/workspaces/listWorkspaceAuditEvents.ts's validateRow().
       expect(Object.keys(event.data).sort()).toEqual(["actorUid", "at", "eventType", "previousRole", "targetUid", "workspaceId"].sort());
+    });
+  });
+});
+
+describe("changeTeamWorkspaceMemberRole — Phase 12B", () => {
+  const ADMIN_UID = "admin-1";
+  const MEMBER_UID = "member-2";
+  const REVIEWER_UID = "reviewer-1";
+  const VIEWER_UID = "viewer-1";
+
+  function seedWorkspaceWithRoster(overrides: Record<string, unknown> = {}) {
+    seedTeamWorkspace(overrides);
+    seedMembership(OWNER_UID, "owner");
+    seedMembership(ADMIN_UID, "admin");
+    seedMembership(MEMBER_UID, "member");
+    seedMembership(REVIEWER_UID, "reviewer");
+    seedMembership(VIEWER_UID, "viewer");
+  }
+
+  describe("OWNER role-change matrix", () => {
+    it("N. Owner changes Admin -> Member", async () => {
+      seedWorkspaceWithRoster();
+      const result = await changeTeamWorkspaceMemberRole({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: ADMIN_UID, destinationRole: "member" });
+      expect(result).toEqual({ status: "changed", targetUid: ADMIN_UID, workspaceId: WS_ID, previousRole: "admin", newRole: "member" });
+    });
+
+    it("O. Owner changes Admin -> Reviewer", async () => {
+      seedWorkspaceWithRoster();
+      const result = await changeTeamWorkspaceMemberRole({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: ADMIN_UID, destinationRole: "reviewer" });
+      expect(result.status).toBe("changed");
+    });
+
+    it("P. Owner changes Admin -> Viewer", async () => {
+      seedWorkspaceWithRoster();
+      const result = await changeTeamWorkspaceMemberRole({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: ADMIN_UID, destinationRole: "viewer" });
+      expect(result.status).toBe("changed");
+    });
+
+    it("Q. Owner changes Member -> Admin", async () => {
+      seedWorkspaceWithRoster();
+      const result = await changeTeamWorkspaceMemberRole({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID, destinationRole: "admin" });
+      expect(result.status).toBe("changed");
+    });
+
+    it("R. Owner changes Member -> Reviewer", async () => {
+      seedWorkspaceWithRoster();
+      const result = await changeTeamWorkspaceMemberRole({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID, destinationRole: "reviewer" });
+      expect(result.status).toBe("changed");
+    });
+
+    it("S. Owner changes Member -> Viewer", async () => {
+      seedWorkspaceWithRoster();
+      const result = await changeTeamWorkspaceMemberRole({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID, destinationRole: "viewer" });
+      expect(result.status).toBe("changed");
+    });
+
+    it("T. Owner changes Reviewer -> Admin", async () => {
+      seedWorkspaceWithRoster();
+      const result = await changeTeamWorkspaceMemberRole({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: REVIEWER_UID, destinationRole: "admin" });
+      expect(result.status).toBe("changed");
+    });
+
+    it("U. Owner changes Reviewer -> Member", async () => {
+      seedWorkspaceWithRoster();
+      const result = await changeTeamWorkspaceMemberRole({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: REVIEWER_UID, destinationRole: "member" });
+      expect(result.status).toBe("changed");
+    });
+
+    it("V. Owner changes Reviewer -> Viewer", async () => {
+      seedWorkspaceWithRoster();
+      const result = await changeTeamWorkspaceMemberRole({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: REVIEWER_UID, destinationRole: "viewer" });
+      expect(result.status).toBe("changed");
+    });
+
+    it("W. Owner changes Viewer -> Admin", async () => {
+      seedWorkspaceWithRoster();
+      const result = await changeTeamWorkspaceMemberRole({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: VIEWER_UID, destinationRole: "admin" });
+      expect(result.status).toBe("changed");
+    });
+
+    it("X. Owner changes Viewer -> Member", async () => {
+      seedWorkspaceWithRoster();
+      const result = await changeTeamWorkspaceMemberRole({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: VIEWER_UID, destinationRole: "member" });
+      expect(result.status).toBe("changed");
+    });
+
+    it("Y. Owner changes Viewer -> Reviewer", async () => {
+      seedWorkspaceWithRoster();
+      const result = await changeTeamWorkspaceMemberRole({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: VIEWER_UID, destinationRole: "reviewer" });
+      expect(result.status).toBe("changed");
+    });
+
+    it("Z. Owner targeting canonical Owner (self) -> denied (self_change_rejected, checked before the canonical-Owner branch)", async () => {
+      seedWorkspaceWithRoster();
+      const result = await changeTeamWorkspaceMemberRole({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: OWNER_UID, destinationRole: "admin" });
+      expect(result.status).toBe("self_change_rejected");
+      expect(stores.workspaceMemberships.get(computeMembershipId(WS_ID, OWNER_UID))!.data.role).toBe("owner");
+    });
+  });
+
+  describe("ADMIN role-change matrix", () => {
+    it("AB. Admin changes Member -> Reviewer", async () => {
+      seedWorkspaceWithRoster();
+      const result = await changeTeamWorkspaceMemberRole({ uid: ADMIN_UID, workspaceId: WS_ID, targetUid: MEMBER_UID, destinationRole: "reviewer" });
+      expect(result.status).toBe("changed");
+    });
+
+    it("AC. Admin changes Member -> Viewer", async () => {
+      seedWorkspaceWithRoster();
+      const result = await changeTeamWorkspaceMemberRole({ uid: ADMIN_UID, workspaceId: WS_ID, targetUid: MEMBER_UID, destinationRole: "viewer" });
+      expect(result.status).toBe("changed");
+    });
+
+    it("AD. Admin changes Reviewer -> Member", async () => {
+      seedWorkspaceWithRoster();
+      const result = await changeTeamWorkspaceMemberRole({ uid: ADMIN_UID, workspaceId: WS_ID, targetUid: REVIEWER_UID, destinationRole: "member" });
+      expect(result.status).toBe("changed");
+    });
+
+    it("AE. Admin changes Reviewer -> Viewer", async () => {
+      seedWorkspaceWithRoster();
+      const result = await changeTeamWorkspaceMemberRole({ uid: ADMIN_UID, workspaceId: WS_ID, targetUid: REVIEWER_UID, destinationRole: "viewer" });
+      expect(result.status).toBe("changed");
+    });
+
+    it("AF. Admin changes Viewer -> Member", async () => {
+      seedWorkspaceWithRoster();
+      const result = await changeTeamWorkspaceMemberRole({ uid: ADMIN_UID, workspaceId: WS_ID, targetUid: VIEWER_UID, destinationRole: "member" });
+      expect(result.status).toBe("changed");
+    });
+
+    it("AG. Admin changes Viewer -> Reviewer", async () => {
+      seedWorkspaceWithRoster();
+      const result = await changeTeamWorkspaceMemberRole({ uid: ADMIN_UID, workspaceId: WS_ID, targetUid: VIEWER_UID, destinationRole: "reviewer" });
+      expect(result.status).toBe("changed");
+    });
+
+    it("AH. Admin targets another Admin -> denied (target_role_not_manageable), regardless of destination", async () => {
+      seedWorkspaceWithRoster();
+      const secondAdminUid = "admin-2";
+      seedMembership(secondAdminUid, "admin");
+      const result = await changeTeamWorkspaceMemberRole({ uid: ADMIN_UID, workspaceId: WS_ID, targetUid: secondAdminUid, destinationRole: "member" });
+      expect(result.status).toBe("target_role_not_manageable");
+      expect(stores.workspaceMemberships.get(computeMembershipId(WS_ID, secondAdminUid))!.data.role).toBe("admin");
+    });
+
+    it("AI. Admin destination Admin -> denied (destination_role_not_permitted), even for an otherwise-manageable target", async () => {
+      seedWorkspaceWithRoster();
+      const result = await changeTeamWorkspaceMemberRole({ uid: ADMIN_UID, workspaceId: WS_ID, targetUid: MEMBER_UID, destinationRole: "admin" });
+      expect(result.status).toBe("destination_role_not_permitted");
+      expect(stores.workspaceMemberships.get(computeMembershipId(WS_ID, MEMBER_UID))!.data.role).toBe("member");
+    });
+
+    it("AJ. Admin targets Owner -> denied (target_is_canonical_owner)", async () => {
+      seedWorkspaceWithRoster();
+      const result = await changeTeamWorkspaceMemberRole({ uid: ADMIN_UID, workspaceId: WS_ID, targetUid: OWNER_UID, destinationRole: "member" });
+      expect(result.status).toBe("target_is_canonical_owner");
+      expect(stores.workspaceMemberships.get(computeMembershipId(WS_ID, OWNER_UID))!.data.role).toBe("owner");
+    });
+
+    it("AL. Admin self-change -> denied", async () => {
+      seedWorkspaceWithRoster();
+      const result = await changeTeamWorkspaceMemberRole({ uid: ADMIN_UID, workspaceId: WS_ID, targetUid: ADMIN_UID, destinationRole: "member" });
+      expect(result.status).toBe("self_change_rejected");
+    });
+  });
+
+  describe("LOWER ROLES have no role-management authority", () => {
+    it("AM. Member attempt -> denied (insufficient_capability)", async () => {
+      seedWorkspaceWithRoster();
+      const result = await changeTeamWorkspaceMemberRole({ uid: MEMBER_UID, workspaceId: WS_ID, targetUid: VIEWER_UID, destinationRole: "reviewer" });
+      expect(result).toEqual({ status: "unauthorized", reason: "insufficient_capability" });
+    });
+
+    it("AN. Reviewer attempt -> denied (insufficient_capability)", async () => {
+      seedWorkspaceWithRoster();
+      const result = await changeTeamWorkspaceMemberRole({ uid: REVIEWER_UID, workspaceId: WS_ID, targetUid: VIEWER_UID, destinationRole: "member" });
+      expect(result).toEqual({ status: "unauthorized", reason: "insufficient_capability" });
+    });
+
+    it("AO. Viewer attempt -> denied (insufficient_capability)", async () => {
+      seedWorkspaceWithRoster();
+      const result = await changeTeamWorkspaceMemberRole({ uid: VIEWER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID, destinationRole: "reviewer" });
+      expect(result).toEqual({ status: "unauthorized", reason: "insufficient_capability" });
+    });
+  });
+
+  describe("AUTH / concealment", () => {
+    it("non-member actor -> denied (membership_not_found)", async () => {
+      seedWorkspaceWithRoster();
+      const result = await changeTeamWorkspaceMemberRole({ uid: "stranger-uid", workspaceId: WS_ID, targetUid: MEMBER_UID, destinationRole: "reviewer" });
+      expect(result).toEqual({ status: "unauthorized", reason: "membership_not_found" });
+    });
+
+    it("target uid that only exists in a DIFFERENT Workspace is concealed as target_not_found", async () => {
+      seedWorkspaceWithRoster();
+      const foreignUid = "foreign-member";
+      const foreignId = computeMembershipId("some-other-ws", foreignUid);
+      stores.workspaceMemberships.set(foreignId, {
+        data: { schemaVersion: 1, id: foreignId, workspaceId: "some-other-ws", uid: foreignUid, role: "member", status: "active", createdAt: Timestamp.now(), updatedAt: Timestamp.now(), invitedByUserId: null, removedAt: null, removedByUserId: null },
+        updateTime: nextUpdateTime(),
+      });
+      const result = await changeTeamWorkspaceMemberRole({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: foreignUid, destinationRole: "reviewer" });
+      expect(result.status).toBe("target_not_found");
+    });
+
+    it("Team Workspaces globally disabled and actor not in any canary -> team_workspaces_disabled, zero Firestore access", async () => {
+      seedWorkspaceWithRoster();
+      teamWorkspacesEnabled = false;
+      const result = await changeTeamWorkspaceMemberRole({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID, destinationRole: "reviewer" });
+      expect(result.status).toBe("team_workspaces_disabled");
+      expect(mockAdminDb.runTransaction).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("REMOVED TARGET", () => {
+    it("a role-change attempt against a removed target is denied (target_not_active), never reactivating the membership", async () => {
+      seedWorkspaceWithRoster();
+      const removed = await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID });
+      expect(removed.status).toBe("removed");
+      const result = await changeTeamWorkspaceMemberRole({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID, destinationRole: "reviewer" });
+      expect(result.status).toBe("target_not_active");
+      const after = stores.workspaceMemberships.get(computeMembershipId(WS_ID, MEMBER_UID))!.data;
+      expect(after.status).toBe("removed");
+      expect(after.role).toBe("member"); // never mutated
+    });
+  });
+
+  describe("INTEGRITY", () => {
+    it("a corrupt extra role:\"owner\" membership (not canonical) is denied via ordinary role policy (target_role_not_manageable), never granted Owner protection it doesn't deserve", async () => {
+      seedWorkspaceWithRoster();
+      const corruptUid = "corrupt-owner-uid";
+      seedMembership(corruptUid, "owner");
+      const result = await changeTeamWorkspaceMemberRole({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: corruptUid, destinationRole: "member" });
+      expect(result.status).toBe("target_role_not_manageable");
+      expect(stores.workspaceMemberships.get(computeMembershipId(WS_ID, corruptUid))!.data.role).toBe("owner");
+    });
+
+    it("malformed target membership document fails closed", async () => {
+      seedWorkspaceWithRoster();
+      const targetId = computeMembershipId(WS_ID, MEMBER_UID);
+      stores.workspaceMemberships.set(targetId, {
+        data: { schemaVersion: 1, id: targetId, workspaceId: "wrong-ws", uid: MEMBER_UID, role: "member", status: "active", createdAt: Timestamp.now(), updatedAt: Timestamp.now(), invitedByUserId: null, removedAt: null, removedByUserId: null },
+        updateTime: nextUpdateTime(),
+      });
+      const result = await changeTeamWorkspaceMemberRole({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID, destinationRole: "reviewer" });
+      expect(result.status).toBe("target_malformed");
+    });
+  });
+
+  describe("STATE — write scope and preservation", () => {
+    it("a genuine role change writes only role + updatedAt; status/createdAt/invitedByUserId/removedAt/removedByUserId are untouched", async () => {
+      seedWorkspaceWithRoster();
+      const before = stores.workspaceMemberships.get(computeMembershipId(WS_ID, MEMBER_UID))!.data;
+      const result = await changeTeamWorkspaceMemberRole({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID, destinationRole: "reviewer" });
+      expect(result).toEqual({ status: "changed", targetUid: MEMBER_UID, workspaceId: WS_ID, previousRole: "member", newRole: "reviewer" });
+
+      const after = stores.workspaceMemberships.get(computeMembershipId(WS_ID, MEMBER_UID))!.data;
+      expect(after.role).toBe("reviewer");
+      expect(after.status).toBe("active");
+      expect(after.createdAt).toEqual(before.createdAt);
+      expect(after.invitedByUserId).toEqual(before.invitedByUserId);
+      expect(after.removedAt).toBeNull();
+      expect(after.removedByUserId).toBeNull();
+      expect(after.updatedAt).toBeInstanceOf(Timestamp);
+    });
+
+    it("workspaceId/uid/membership identity fields are never altered by a role change", async () => {
+      seedWorkspaceWithRoster();
+      const before = stores.workspaceMemberships.get(computeMembershipId(WS_ID, MEMBER_UID))!.data;
+      await changeTeamWorkspaceMemberRole({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID, destinationRole: "reviewer" });
+      const after = stores.workspaceMemberships.get(computeMembershipId(WS_ID, MEMBER_UID))!.data;
+      expect(after.workspaceId).toBe(before.workspaceId);
+      expect(after.uid).toBe(before.uid);
+      expect(after.id).toBe(before.id);
+    });
+  });
+
+  describe("SAME-ROLE NO-OP", () => {
+    it("requesting the target's current role returns role_unchanged deterministically: no write, no event, no updatedAt bump", async () => {
+      seedWorkspaceWithRoster();
+      const before = stores.workspaceMemberships.get(computeMembershipId(WS_ID, MEMBER_UID))!.data;
+      const result = await changeTeamWorkspaceMemberRole({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID, destinationRole: "member" });
+      expect(result).toEqual({ status: "role_unchanged", targetUid: MEMBER_UID, workspaceId: WS_ID, role: "member" });
+      const after = stores.workspaceMemberships.get(computeMembershipId(WS_ID, MEMBER_UID))!.data;
+      expect(after.updatedAt).toEqual(before.updatedAt);
+      expect(stores.workspaceMembershipEvents.size).toBe(0);
+    });
+  });
+
+  describe("CAPACITY — a role change never touches seat/capacity accounting", () => {
+    it("controlled mode: capacity document is never read or written by a role change", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryWorkspaceIds = WS_ID;
+      seedWorkspaceWithRoster();
+      stores.teamWorkspaceCanaryCapacity.set(WS_ID, { data: { schemaVersion: 1, workspaceId: WS_ID, reservedCount: 3, revision: 0, updatedAt: Timestamp.now() }, updateTime: nextUpdateTime() });
+      const result = await changeTeamWorkspaceMemberRole({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID, destinationRole: "reviewer" });
+      expect(result.status).toBe("changed");
+      expect(stores.teamWorkspaceCanaryCapacity.get(WS_ID)!.data.reservedCount).toBe(3); // unchanged
+    });
+
+    it("global/uncontrolled mode: no capacity document is ever created by a role change", async () => {
+      seedWorkspaceWithRoster();
+      const result = await changeTeamWorkspaceMemberRole({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID, destinationRole: "reviewer" });
+      expect(result.status).toBe("changed");
+      expect(stores.teamWorkspaceCanaryCapacity.size).toBe(0);
+    });
+  });
+
+  describe("rollout gate", () => {
+    it("succeeds for an actor in a valid uid-canary even when the global flag is off", async () => {
+      teamWorkspacesEnabled = false;
+      teamWorkspacesCanaryUids = OWNER_UID;
+      seedWorkspaceWithRoster();
+      const result = await changeTeamWorkspaceMemberRole({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID, destinationRole: "reviewer" });
+      expect(result.status).toBe("changed");
+    });
+  });
+
+  describe("ATOMICITY — ROLE CHANGE COMMITTED IFF AUDIT EVENT COMMITTED", () => {
+    it("a successful role change writes exactly one canonical role-changed event, in the same transaction as the membership mutation", async () => {
+      seedWorkspaceWithRoster();
+      const result = await changeTeamWorkspaceMemberRole({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: REVIEWER_UID, destinationRole: "admin" });
+      expect(result.status).toBe("changed");
+      expect(stores.workspaceMembershipEvents.size).toBe(1);
+      const [event] = [...stores.workspaceMembershipEvents.values()];
+      expect(event.data).toMatchObject({ eventType: "workspace_member_role_changed", actorUid: OWNER_UID, targetUid: REVIEWER_UID, workspaceId: WS_ID, previousRole: "reviewer", newRole: "admin" });
+    });
+
+    it("an unauthorized attempt writes no event", async () => {
+      seedWorkspaceWithRoster();
+      await changeTeamWorkspaceMemberRole({ uid: MEMBER_UID, workspaceId: WS_ID, targetUid: VIEWER_UID, destinationRole: "reviewer" });
+      expect(stores.workspaceMembershipEvents.size).toBe(0);
+    });
+
+    it("a removed-target attempt writes no event", async () => {
+      seedWorkspaceWithRoster();
+      await removeWorkspaceMembership({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID });
+      await changeTeamWorkspaceMemberRole({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID, destinationRole: "reviewer" });
+      // Exactly one event exists — the removal's own — never a second one from the denied role-change attempt.
+      expect(stores.workspaceMembershipEvents.size).toBe(1);
+      expect([...stores.workspaceMembershipEvents.values()][0].data.eventType).toBe("workspace_member_removed");
+    });
+
+    it("event write failure -> the whole transaction rolls back: role change does not commit, target role unchanged, no partial event", async () => {
+      seedWorkspaceWithRoster();
+      forceSetFailureForCollection = "workspaceMembershipEvents";
+      const result = await changeTeamWorkspaceMemberRole({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID, destinationRole: "reviewer" });
+      expect(result.status).toBe("change_failed");
+      expect(stores.workspaceMemberships.get(computeMembershipId(WS_ID, MEMBER_UID))!.data.role).toBe("member");
+      expect(stores.workspaceMembershipEvents.size).toBe(0);
+    });
+
+    it("membership write failure (target deleted by a concurrent writer between this transaction's read and write) -> event is never even attempted, nothing commits", async () => {
+      seedWorkspaceWithRoster();
+      const targetId = computeMembershipId(WS_ID, MEMBER_UID);
+      let deleted = false;
+      concurrentMutationHook = (ref) => {
+        if (ref.__collection === "workspaceMemberships" && ref.__id === targetId && !deleted) {
+          deleted = true;
+          stores.workspaceMemberships.delete(targetId);
+        }
+      };
+      const result = await changeTeamWorkspaceMemberRole({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID, destinationRole: "reviewer" });
+      expect(result.status).toBe("change_failed");
+      expect(stores.workspaceMembershipEvents.size).toBe(0);
+    });
+
+    it("the event document shape written here is exactly the field set the Audit Log read model validates for workspace_member_role_changed", async () => {
+      seedWorkspaceWithRoster();
+      await changeTeamWorkspaceMemberRole({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID, destinationRole: "reviewer" });
+      const [event] = [...stores.workspaceMembershipEvents.values()];
+      expect(Object.keys(event.data).sort()).toEqual(["actorUid", "at", "eventType", "newRole", "previousRole", "targetUid", "workspaceId"].sort());
+    });
+  });
+
+  describe("OWNERSHIP TRANSFER INTERACTION", () => {
+    it("after an ownership transfer, the new Owner may change the former Owner (now Admin) to a lower role", async () => {
+      seedWorkspaceWithRoster();
+      const wsSnap = stores.workspaces.get(WS_ID)!;
+      const oldOwnerSnap = stores.workspaceMemberships.get(computeMembershipId(WS_ID, OWNER_UID))!;
+      const newOwnerSnap = stores.workspaceMemberships.get(computeMembershipId(WS_ID, MEMBER_UID))!;
+      const transfer = await transferTeamWorkspaceOwnership({
+        workspaceId: WS_ID,
+        callerUid: OWNER_UID,
+        newOwnerUid: MEMBER_UID,
+        expectedWorkspaceUpdateTime: wsSnap.updateTime,
+        expectedOldOwnerMembershipUpdateTime: oldOwnerSnap.updateTime,
+        expectedNewOwnerMembershipUpdateTime: newOwnerSnap.updateTime,
+      });
+      expect(transfer.status).toBe("transferred");
+
+      // MEMBER_UID is now Owner; OWNER_UID is now Admin.
+      const result = await changeTeamWorkspaceMemberRole({ uid: MEMBER_UID, workspaceId: WS_ID, targetUid: OWNER_UID, destinationRole: "viewer" });
+      expect(result).toEqual({ status: "changed", targetUid: OWNER_UID, workspaceId: WS_ID, previousRole: "admin", newRole: "viewer" });
+    });
+
+    it("the former Owner, now Admin, may never role-change the new canonical Owner", async () => {
+      seedWorkspaceWithRoster();
+      const wsSnap = stores.workspaces.get(WS_ID)!;
+      const oldOwnerSnap = stores.workspaceMemberships.get(computeMembershipId(WS_ID, OWNER_UID))!;
+      const newOwnerSnap = stores.workspaceMemberships.get(computeMembershipId(WS_ID, MEMBER_UID))!;
+      await transferTeamWorkspaceOwnership({
+        workspaceId: WS_ID,
+        callerUid: OWNER_UID,
+        newOwnerUid: MEMBER_UID,
+        expectedWorkspaceUpdateTime: wsSnap.updateTime,
+        expectedOldOwnerMembershipUpdateTime: oldOwnerSnap.updateTime,
+        expectedNewOwnerMembershipUpdateTime: newOwnerSnap.updateTime,
+      });
+      // OWNER_UID is now Admin, attempting to act on MEMBER_UID (now canonical Owner).
+      const result = await changeTeamWorkspaceMemberRole({ uid: OWNER_UID, workspaceId: WS_ID, targetUid: MEMBER_UID, destinationRole: "admin" });
+      expect(result.status).toBe("target_is_canonical_owner");
     });
   });
 });

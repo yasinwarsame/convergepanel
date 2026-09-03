@@ -19,7 +19,8 @@ import { computeMembershipId } from "@/lib/workspaces/membershipId";
 import { validateMembershipBinding } from "@/lib/workspaces/membershipBinding";
 import { isCanonicalTeamOwnerMembership } from "@/lib/workspaces/ownerInvariant";
 import { authorizeTeamWorkspaceMutationInTransaction, type TeamMutationAuthorizationDenialReason } from "@/lib/workspaces/authorizeTeamWorkspaceMutationInTransaction";
-import { canManageMembershipTargetRole } from "@/lib/workspaces/membershipTargetAuthority";
+import { canManageMembershipTargetRole, type MembershipTargetRole } from "@/lib/workspaces/membershipTargetAuthority";
+import { canAssignMembershipDestinationRole } from "@/lib/workspaces/membershipRoleAuthority";
 import { releaseTeamWorkspaceCanarySlot } from "@/lib/workspaces/teamWorkspaceCanaryCapacity";
 import { planTeamWorkspaceSeatRelease, commitTeamWorkspaceSeatRelease, type TeamWorkspaceSeatReleasePlan } from "@/lib/workspaces/teamWorkspaceSeatAdmission";
 import { buildWorkspaceMembershipEventDocData } from "@/lib/workspaces/workspaceMembershipEvents";
@@ -591,5 +592,218 @@ export async function removeWorkspaceMembership(args: { uid: string; workspaceId
       return { status: "state_corruption" };
     case "removed":
       return { status: "removed", targetUid: txResult.targetUid, workspaceId: txResult.workspaceId, previousRole: txResult.previousRole };
+  }
+}
+
+export type ChangeTeamWorkspaceMemberRoleResult =
+  | { status: "changed"; targetUid: string; workspaceId: string; previousRole: WorkspaceMembershipRole; newRole: WorkspaceMembershipRole }
+  | { status: "role_unchanged"; targetUid: string; workspaceId: string; role: WorkspaceMembershipRole }
+  | { status: "team_workspaces_disabled" }
+  | { status: "firestore_unavailable" }
+  | { status: "unauthorized"; reason: TeamMutationAuthorizationDenialReason }
+  | { status: "target_not_found" }
+  | { status: "target_malformed" }
+  | { status: "target_not_active" }
+  | { status: "self_change_rejected" }
+  | { status: "target_is_canonical_owner" }
+  | { status: "target_role_not_manageable" }
+  | { status: "destination_role_not_permitted" }
+  | { status: "change_failed" };
+
+/**
+ * Active Team Workspace member role change, Phase 12B — the ONE canonical
+ * ordinary role-mutation transition. Never touches `"owner"`, in either
+ * direction: ownership only ever moves through
+ * `transferTeamWorkspaceOwnership()` (see `ORDINARY_SETTABLE_ROLES` in
+ * `capabilities.ts`), enforced here both by rejecting a canonical-Owner
+ * TARGET and by `destinationRole`'s own type (`MembershipTargetRole`,
+ * `Exclude<WorkspaceMembershipRole, "owner">` — the caller-facing route
+ * validates the request body against this same set before this function
+ * is ever invoked, so an `"owner"` destination can never reach here as a
+ * runtime value in the first place).
+ *
+ * No client-supplied OCC token, deliberately unlike
+ * `transferTeamWorkspaceOwnership()`: this mutation touches exactly ONE
+ * document (the target membership), so Firestore's own transaction
+ * read-set conflict detection already provides everything a precondition
+ * token would add here — a concurrent write to the target between this
+ * transaction's read and its commit forces a retry, and the retried
+ * callback re-reads fresh state and re-evaluates every check below against
+ * it. An intervening change that makes the requested transition illegal
+ * (the target was removed, promoted to Owner via a concurrent transfer, or
+ * had its role already changed by a second concurrent request) is
+ * therefore caught on the retry, not missed — mirrors
+ * `removeWorkspaceMembership()`'s own no-client-token precedent, which
+ * this function otherwise structurally follows throughout.
+ *
+ * Read/validate/write order inside the transaction (frozen, mirrors
+ * `removeWorkspaceMembership()`'s own frozen-order precedent):
+ *   1. `authorizeTeamWorkspaceMutationInTransaction()` — actor
+ *      authenticated, Workspace valid, actor membership active,
+ *      owner-integrity Cases A/B, `members.manage` capability.
+ *   2. Target membership, read fresh in the SAME transaction — never
+ *      trusted from any caller-supplied role/state.
+ *   3. Target must be `status === "active"` — a removed (or otherwise
+ *      non-active) target is denied outright, never reactivated as a side
+ *      effect of a role change.
+ *   4. Self-change: `targetUid === callerUid` -> `self_change_rejected`,
+ *      unconditional, checked before the canonical-Owner check below so a
+ *      caller acting on themself gets one clear, specific reason.
+ *   5. Canonical-Owner protection: `isCanonicalTeamOwnerMembership()` on
+ *      the TARGET (never a bare `role === "owner"` string check) ->
+ *      `target_is_canonical_owner`, unconditionally. A corrupt extra
+ *      `role: "owner"` row that is NOT canonical does not hit this
+ *      branch — it is instead denied by step 6, since `"owner"` is never a
+ *      manageable target role for anyone, canonical or not.
+ *   6. `canManageMembershipTargetRole({callerRole, targetRole})` — may the
+ *      caller act on this target row at ALL.
+ *   7. `canAssignMembershipDestinationRole({callerRole, destinationRole})`
+ *      — may the caller assign THIS specific destination role. Steps 6 and
+ *      7 are deliberately independent checks (see
+ *      `membershipRoleAuthority.ts`'s own doc comment) — both must pass.
+ *   8. Same-role request: `targetMembership.role === args.destinationRole`
+ *      -> `role_unchanged`, a benign no-op — no write, no event, no
+ *      `updatedAt` bump, exactly mirroring `already_removed`'s idempotency
+ *      posture in `removeWorkspaceMembership()`.
+ *   9. Stage the single `tx.update()`: `role: args.destinationRole,
+ *      updatedAt: now`. Every other field — `status`, `createdAt`,
+ *      `invitedByUserId`, `removedAt`/`removedByUserId` — is left
+ *      untouched.
+ *  10. Stage `tx.set()` of the canonical `workspace_member_role_changed`
+ *      event at a freshly-allocated `workspaceMembershipEvents` doc ref, in
+ *      the SAME transaction as step 9 — both commit or neither does.
+ *      `ROLE CHANGE COMMITTED IFF AUDIT EVENT COMMITTED`. `at` reuses the
+ *      exact `now` Timestamp from step 9, not an independent clock read.
+ *
+ * Zero interaction with seat/capacity accounting — a role change never
+ * touches `status`, and capacity is keyed purely on active non-owner
+ * membership COUNT plus `status` transitions, never on `role` alone; this
+ * function calls neither `planTeamWorkspaceSeatRelease()`/
+ * `commitTeamWorkspaceSeatRelease()` nor `releaseTeamWorkspaceCanarySlot()`
+ * (nor any reserve equivalent), by design.
+ *
+ * Rollout admission is checked BEFORE `runTransaction()`, mirroring
+ * `removeWorkspaceMembership()`'s established precedent — zero reads or
+ * writes occur for a uid outside the global/canary rollout.
+ */
+export async function changeTeamWorkspaceMemberRole(args: { uid: string; workspaceId: string; targetUid: string; destinationRole: MembershipTargetRole }): Promise<ChangeTeamWorkspaceMemberRoleResult> {
+  const admission = resolveTeamWorkspaceTargetAdmission({
+    uid: args.uid,
+    workspaceId: args.workspaceId,
+    globalEnabled: TEAM_WORKSPACES_ENABLED,
+    canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS,
+    canaryWorkspaceIdsRaw: TEAM_WORKSPACES_CANARY_WORKSPACE_IDS,
+  });
+  if (!admission.enabled) {
+    return { status: "team_workspaces_disabled" };
+  }
+  if (!adminDb) {
+    return { status: "firestore_unavailable" };
+  }
+
+  const targetMembershipId = computeMembershipId(args.workspaceId, args.targetUid);
+
+  type TxResult =
+    | { kind: "changed"; targetUid: string; workspaceId: string; previousRole: WorkspaceMembershipRole; newRole: WorkspaceMembershipRole }
+    | { kind: "role_unchanged"; targetUid: string; workspaceId: string; role: WorkspaceMembershipRole }
+    | { kind: "unauthorized"; reason: TeamMutationAuthorizationDenialReason }
+    | { kind: "target_not_found" }
+    | { kind: "target_malformed" }
+    | { kind: "target_not_active" }
+    | { kind: "self_change_rejected" }
+    | { kind: "target_is_canonical_owner" }
+    | { kind: "target_role_not_manageable" }
+    | { kind: "destination_role_not_permitted" };
+
+  let txResult: TxResult;
+  try {
+    txResult = await adminDb.runTransaction<TxResult>(async (tx) => {
+      const auth = await authorizeTeamWorkspaceMutationInTransaction(tx, { uid: args.uid, workspaceId: args.workspaceId, requiredCapability: "members.manage" });
+      if (!auth.ok) {
+        return { kind: "unauthorized", reason: auth.reason };
+      }
+
+      const targetRef = adminDb!.collection("workspaceMemberships").doc(targetMembershipId);
+      const targetSnap = await tx.get(targetRef);
+      if (!targetSnap.exists) {
+        return { kind: "target_not_found" };
+      }
+      const targetMembership = validateMembershipBinding(targetSnap.data(), { workspaceId: args.workspaceId, uid: args.targetUid });
+      if (!targetMembership) {
+        return { kind: "target_malformed" };
+      }
+
+      if (targetMembership.status !== "active") {
+        return { kind: "target_not_active" };
+      }
+
+      if (args.targetUid === args.uid) {
+        return { kind: "self_change_rejected" };
+      }
+
+      if (isCanonicalTeamOwnerMembership({ workspace: auth.workspace, membership: targetMembership })) {
+        return { kind: "target_is_canonical_owner" };
+      }
+
+      if (!canManageMembershipTargetRole({ callerRole: auth.membership.role, targetRole: targetMembership.role })) {
+        return { kind: "target_role_not_manageable" };
+      }
+
+      if (!canAssignMembershipDestinationRole({ callerRole: auth.membership.role, destinationRole: args.destinationRole })) {
+        return { kind: "destination_role_not_permitted" };
+      }
+
+      if (targetMembership.role === args.destinationRole) {
+        return { kind: "role_unchanged", targetUid: args.targetUid, workspaceId: args.workspaceId, role: targetMembership.role };
+      }
+
+      const now = Timestamp.now();
+      tx.update(targetRef, { role: args.destinationRole, updatedAt: now });
+
+      const eventRef = adminDb!.collection("workspaceMembershipEvents").doc();
+      tx.set(
+        eventRef,
+        buildWorkspaceMembershipEventDocData({
+          eventType: "workspace_member_role_changed",
+          actorUid: args.uid,
+          targetUid: args.targetUid,
+          workspaceId: args.workspaceId,
+          previousRole: targetMembership.role,
+          newRole: args.destinationRole,
+          at: now,
+        })
+      );
+
+      return { kind: "changed", targetUid: args.targetUid, workspaceId: args.workspaceId, previousRole: targetMembership.role, newRole: args.destinationRole };
+    });
+  } catch (err) {
+    logger.warn("[firestore/workspaceMemberships] Role change transaction failed", {
+      workspaceId: args.workspaceId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return { status: "change_failed" };
+  }
+
+  switch (txResult.kind) {
+    case "unauthorized":
+      return { status: "unauthorized", reason: txResult.reason };
+    case "target_not_found":
+      return { status: "target_not_found" };
+    case "target_malformed":
+      return { status: "target_malformed" };
+    case "target_not_active":
+      return { status: "target_not_active" };
+    case "self_change_rejected":
+      return { status: "self_change_rejected" };
+    case "target_is_canonical_owner":
+      return { status: "target_is_canonical_owner" };
+    case "target_role_not_manageable":
+      return { status: "target_role_not_manageable" };
+    case "destination_role_not_permitted":
+      return { status: "destination_role_not_permitted" };
+    case "role_unchanged":
+      return { status: "role_unchanged", targetUid: txResult.targetUid, workspaceId: txResult.workspaceId, role: txResult.role };
+    case "changed":
+      return { status: "changed", targetUid: txResult.targetUid, workspaceId: txResult.workspaceId, previousRole: txResult.previousRole, newRole: txResult.newRole };
   }
 }
