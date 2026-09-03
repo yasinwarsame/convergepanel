@@ -21,6 +21,15 @@ export default async function WorkspaceOverviewPage({ params }: { params: { work
   }
 
   const access = await resolveWorkspaceAccess({ uid: identity.uid, workspaceId: params.workspaceId });
+  if (!access.granted && access.reason === "lookup_failed") {
+    // Distinct from every concealed-denial case below — a transient
+    // Firestore/infra failure must never be indistinguishable from a
+    // genuine "doesn't exist / not yours". See
+    // `app/workspace/projects/[projectId]/page.tsx`'s own doc comment for
+    // the established precedent this mirrors. Caught by the app's
+    // existing global `app/error.tsx` boundary.
+    throw new Error("Something went wrong while loading this page. Please try again.");
+  }
   if (!access.granted || access.workspaceType !== "team") {
     notFound();
   }
