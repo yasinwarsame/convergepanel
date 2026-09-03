@@ -44,6 +44,7 @@ export default async function TeamProjectsPage({ params }: { params: { workspace
       workspaceId={params.workspaceId}
       workspaceName={access.workspace.name}
       canCreateProject={access.capabilities.includes("projects.create")}
+      canManageProjects={access.capabilities.includes("projects.manage")}
       canReadAudit={access.capabilities.includes("audit.read")}
     />
   );

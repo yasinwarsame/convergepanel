@@ -270,3 +270,27 @@ describe("POST (create)", () => {
     expect(res.status).toBe(201);
   });
 });
+
+describe("GET ?status=archived — Phase PROJECT-UI-AR-I1 positive contract (pre-existing server behavior, previously untested)", () => {
+  it("200s with archived Project DTOs and passes status: 'archived' to listTeamProjects for a caller holding only projects.read", async () => {
+    mockedResolveWorkspaceAccess.mockResolvedValue({ granted: true, workspaceType: "team", workspace: { id: WS_ID, name: "Acme" }, capabilities: ["projects.read"] });
+    mockedListTeamProjects.mockResolvedValue({
+      status: "ok",
+      items: [{ project: { id: "old-1", workspaceId: WS_ID, name: "Old", status: "archived", createdByUserId: UID, createdAt: Timestamp.now(), updatedAt: Timestamp.now() }, documentUpdateTime: new Timestamp(5, 7) }],
+      hasMore: false,
+    });
+    const { res, json } = await callGet("?status=archived");
+    expect(res.status).toBe(200);
+    expect(json.items).toEqual([expect.objectContaining({ id: "old-1", workspaceId: WS_ID, status: "archived", updateTime: { seconds: 5, nanoseconds: 7 } })]);
+    expect(mockedListTeamProjects).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: WS_ID, status: "archived" }));
+  });
+
+  it("omitting ?status still lists active Projects (unchanged default)", async () => {
+    mockedResolveWorkspaceAccess.mockResolvedValue({ granted: true, workspaceType: "team", workspace: { id: WS_ID, name: "Acme" }, capabilities: ["projects.read"] });
+    mockedListTeamProjects.mockResolvedValue({ status: "ok", items: [], hasMore: false });
+    const { res } = await callGet();
+    expect(res.status).toBe(200);
+    expect(mockedListTeamProjects).toHaveBeenCalledWith(expect.objectContaining({ status: "active" }));
+  });
+});
+

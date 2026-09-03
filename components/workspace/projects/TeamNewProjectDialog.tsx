@@ -14,7 +14,7 @@
 
 import { useRef, useState, type RefObject } from "react";
 import { ProjectDialogFrame } from "@/components/projects/ProjectDialogFrame";
-import { projectMutationErrorCopy } from "@/components/projects/projectMutationErrorCopy";
+import { teamProjectMutationErrorCopy } from "@/components/workspace/projects/teamProjectMutationErrorCopy";
 import { isValidProjectNameClientSide, PROJECT_NAME_MAX_LENGTH } from "@/lib/projects/projectNameClient";
 import type { UseTeamProjectLifecycleResult } from "@/hooks/useTeamProjectLifecycle";
 import type { TeamProjectSummary } from "@/hooks/useTeamProjects";
@@ -45,7 +45,7 @@ export function TeamNewProjectDialog({
       requestClose();
       onCreated(result.project);
     } else {
-      setError(projectMutationErrorCopy(result.errorCode));
+      setError(teamProjectMutationErrorCopy(result.errorCode));
     }
   }
 
