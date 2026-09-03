@@ -49,6 +49,15 @@ export default async function TeamResearchDetailPage({
   }
 
   const access = await resolveWorkspaceAccess({ uid: identity.uid, workspaceId: params.workspaceId });
+  if (!access.granted && access.reason === "lookup_failed") {
+    // Distinct from every concealed-denial case below — a transient
+    // Firestore/infra failure must never be indistinguishable from a
+    // genuine "doesn't exist / not yours". See
+    // `app/workspace/projects/[projectId]/page.tsx`'s own doc comment for
+    // the established precedent this mirrors. Caught by the app's
+    // existing global `app/error.tsx` boundary.
+    throw new Error("Something went wrong while loading this page. Please try again.");
+  }
   if (!access.granted || access.workspaceType !== "team") {
     notFound();
   }
@@ -60,6 +69,11 @@ export default async function TeamResearchDetailPage({
   }
 
   const projectResult = await getProject(params.projectId);
+  if (projectResult.status === "firestore_unavailable" || projectResult.status === "read_failed") {
+    // Same transient-vs-genuine distinction as the Workspace access check
+    // above — a `.get()` failure is not evidence the Project doesn't exist.
+    throw new Error("Something went wrong while loading this page. Please try again.");
+  }
   if (projectResult.status !== "found") {
     notFound();
   }
@@ -74,7 +88,12 @@ export default async function TeamResearchDetailPage({
     projectId: params.projectId,
     runId: params.runId,
   });
-  if (run.status === "not_found" || run.status === "firestore_unavailable") {
+  if (run.status === "firestore_unavailable") {
+    // Same transient-vs-genuine distinction as the checks above — a
+    // `.get()` failure is not evidence the run doesn't exist.
+    throw new Error("Something went wrong while loading this page. Please try again.");
+  }
+  if (run.status === "not_found") {
     notFound();
   }
 

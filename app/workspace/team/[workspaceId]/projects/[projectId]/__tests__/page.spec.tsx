@@ -139,6 +139,60 @@ describe("TeamProjectDetailPage — gate (server-authoritative, UX-only re-check
     expect(mockedGetProject).toHaveBeenCalledWith(PROJECT_ID);
   });
 
+  describe("TRANSIENT FAILURE — must throw, never notFound()", () => {
+    async function expectGenericThrow(promise: Promise<unknown>): Promise<void> {
+      await expect(promise).rejects.toThrow("Something went wrong while loading this page. Please try again.");
+    }
+
+    it("resolveWorkspaceAccess returns lookup_failed -> throws generic Error, NOT notFound()", async () => {
+      mockedResolveServerComponentIdentity.mockResolvedValue({ uid: UID });
+      mockedResolveWorkspaceAccess.mockResolvedValue({ granted: false, reason: "lookup_failed" });
+      await expectGenericThrow(callPage());
+      expect(mockedGetProject).not.toHaveBeenCalled();
+    });
+
+    it("getProject returns firestore_unavailable -> throws generic Error, NOT notFound()", async () => {
+      mockedResolveServerComponentIdentity.mockResolvedValue({ uid: UID });
+      mockedResolveWorkspaceAccess.mockResolvedValue(grantedTeamAccess());
+      mockedGetProject.mockResolvedValue({ status: "firestore_unavailable" });
+      await expectGenericThrow(callPage());
+    });
+
+    it("getProject returns read_failed -> throws generic Error, NOT notFound()", async () => {
+      mockedResolveServerComponentIdentity.mockResolvedValue({ uid: UID });
+      mockedResolveWorkspaceAccess.mockResolvedValue(grantedTeamAccess());
+      mockedGetProject.mockResolvedValue({ status: "read_failed" });
+      await expectGenericThrow(callPage());
+    });
+
+    it("thrown error message never leaks projectId, workspaceId, or a Firestore collection name, and is byte-identical across every transient stage", async () => {
+      mockedResolveServerComponentIdentity.mockResolvedValue({ uid: UID });
+
+      mockedResolveWorkspaceAccess.mockResolvedValue({ granted: false, reason: "lookup_failed" });
+      let messageA = "";
+      try {
+        await callPage();
+      } catch (err) {
+        messageA = (err as Error).message;
+      }
+
+      mockedResolveWorkspaceAccess.mockResolvedValue(grantedTeamAccess());
+      mockedGetProject.mockResolvedValue({ status: "firestore_unavailable" });
+      let messageB = "";
+      try {
+        await callPage();
+      } catch (err) {
+        messageB = (err as Error).message;
+      }
+
+      expect(messageA).toBe(messageB);
+      expect(messageA).not.toMatch(new RegExp(PROJECT_ID));
+      expect(messageA).not.toMatch(new RegExp(WS_ID));
+      expect(messageA.toLowerCase()).not.toContain("firestore");
+      expect(messageA.toLowerCase()).not.toContain("project");
+    });
+  });
+
   describe("PHASE 12A.3 — canStartResearch derivation (research.create AND research.organize)", () => {
     async function propsWithCapabilities(capabilities: string[]) {
       mockedResolveServerComponentIdentity.mockResolvedValue({ uid: UID });

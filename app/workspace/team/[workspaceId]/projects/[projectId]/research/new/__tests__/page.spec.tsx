@@ -177,4 +177,31 @@ describe("TeamProjectResearchComposerPage — gate (server-authoritative)", () =
     await callPage(PROJECT_ID);
     expect(mockedGetProject).toHaveBeenCalledWith(PROJECT_ID);
   });
+
+  describe("TRANSIENT FAILURE — must throw, never notFound()", () => {
+    async function expectGenericThrow(promise: Promise<unknown>): Promise<void> {
+      await expect(promise).rejects.toThrow("Something went wrong while loading this page. Please try again.");
+    }
+
+    it("resolveWorkspaceAccess returns lookup_failed -> throws generic Error, NOT notFound()", async () => {
+      mockedResolveServerComponentIdentity.mockResolvedValue({ uid: UID });
+      mockedResolveWorkspaceAccess.mockResolvedValue({ granted: false, reason: "lookup_failed" });
+      await expectGenericThrow(callPage());
+      expect(mockedGetProject).not.toHaveBeenCalled();
+    });
+
+    it("getProject returns firestore_unavailable -> throws generic Error, NOT notFound()", async () => {
+      mockedResolveServerComponentIdentity.mockResolvedValue({ uid: UID });
+      mockedResolveWorkspaceAccess.mockResolvedValue(grantedTeamAccess());
+      mockedGetProject.mockResolvedValue({ status: "firestore_unavailable" });
+      await expectGenericThrow(callPage());
+    });
+
+    it("getProject returns read_failed -> throws generic Error, NOT notFound()", async () => {
+      mockedResolveServerComponentIdentity.mockResolvedValue({ uid: UID });
+      mockedResolveWorkspaceAccess.mockResolvedValue(grantedTeamAccess());
+      mockedGetProject.mockResolvedValue({ status: "read_failed" });
+      await expectGenericThrow(callPage());
+    });
+  });
 });

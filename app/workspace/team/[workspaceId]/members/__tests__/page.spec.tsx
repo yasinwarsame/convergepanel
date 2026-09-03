@@ -1,9 +1,13 @@
 /**
- * Team Workspace Activation Flow, Phase 12A.1 — GET /workspace/team/{workspaceId}
+ * Team Workspace Self-Service Onboarding — GET /workspace/team/{workspaceId}/members
  * server-gate tests. Same technique as
  * `app/workspace/team/[workspaceId]/audit/__tests__/page.spec.tsx`: calls
  * the Server Component function directly and asserts real
  * `next/navigation` `notFound()` behavior (digest `"NEXT_NOT_FOUND"`).
+ *
+ * Added alongside the transient-vs-genuine-denial fix (see
+ * `app/workspace/team/[workspaceId]/members/page.tsx`'s gate): this page
+ * had no dedicated test file before this change.
  */
 
 const mockedResolveServerComponentIdentity = jest.fn();
@@ -16,18 +20,18 @@ jest.mock("@/lib/workspaces/resolveWorkspaceAccess", () => ({
   resolveWorkspaceAccess: (...args: any[]) => mockedResolveWorkspaceAccess(...args),
 }));
 
-jest.mock("@/components/workspace/WorkspaceOverviewShell", () => ({
+jest.mock("@/components/workspace/WorkspaceMembersShell", () => ({
   __esModule: true,
   default: (props: any) => ({ __mockShell: true, props }),
 }));
 
-import WorkspaceOverviewPage from "@/app/workspace/team/[workspaceId]/page";
+import WorkspaceMembersPage from "@/app/workspace/team/[workspaceId]/members/page";
 
 const WS_ID = "ws-1";
 const UID = "uid-owner";
 
 function callPage() {
-  return WorkspaceOverviewPage({ params: { workspaceId: WS_ID } });
+  return WorkspaceMembersPage({ params: { workspaceId: WS_ID } });
 }
 
 async function expectRealNotFound(promise: Promise<unknown>): Promise<void> {
@@ -45,7 +49,7 @@ beforeEach(() => {
   jest.clearAllMocks();
 });
 
-describe("WorkspaceOverviewPage — gate (server-authoritative, UX-only re-check)", () => {
+describe("WorkspaceMembersPage — gate (server-authoritative, UX-only re-check)", () => {
   it("unauthenticated -> notFound", async () => {
     mockedResolveServerComponentIdentity.mockResolvedValue(null);
     await expectRealNotFound(callPage());
@@ -64,37 +68,33 @@ describe("WorkspaceOverviewPage — gate (server-authoritative, UX-only re-check
     await expectRealNotFound(callPage());
   });
 
-  it("any granted Team role (even with the fewest capabilities) renders the shell — Overview has no capability gate of its own, unlike Members/Audit", async () => {
+  it("granted Team role WITHOUT members.read -> notFound, never renders the shell", async () => {
     mockedResolveServerComponentIdentity.mockResolvedValue({ uid: UID });
     mockedResolveWorkspaceAccess.mockResolvedValue({
       granted: true,
       workspaceType: "team",
       workspace: { id: WS_ID, name: "Acme Team" },
-      membership: { role: "viewer" },
-      capabilities: ["workspace.read", "projects.read", "research.read"],
+      membership: { role: "member" },
+      capabilities: ["workspace.read"],
     });
-    const result: any = await callPage();
-    expect(result.props.workspaceId).toBe(WS_ID);
-    expect(result.props.workspaceName).toBe("Acme Team");
-    expect(result.props.canInvite).toBe(false);
-    expect(result.props.canManageInvitations).toBe(false);
-    expect(result.props.canCreateProject).toBe(false);
-    expect(result.props.canReadAudit).toBe(false);
+    await expectRealNotFound(callPage());
   });
 
-  it("Owner (full capabilities) renders the shell with every capability flag true", async () => {
+  it("Owner (members.read present) -> renders WorkspaceMembersShell with the correct workspaceId/workspaceName/callerRole", async () => {
     mockedResolveServerComponentIdentity.mockResolvedValue({ uid: UID });
     mockedResolveWorkspaceAccess.mockResolvedValue({
       granted: true,
       workspaceType: "team",
       workspace: { id: WS_ID, name: "Acme Team" },
       membership: { role: "owner" },
-      capabilities: ["workspace.read", "members.invite", "members.manage", "projects.create", "audit.read"],
+      capabilities: ["members.read", "members.invite", "members.manage", "audit.read"],
     });
     const result: any = await callPage();
+    expect(result.props.workspaceId).toBe(WS_ID);
+    expect(result.props.workspaceName).toBe("Acme Team");
+    expect(result.props.callerRole).toBe("owner");
     expect(result.props.canInvite).toBe(true);
     expect(result.props.canManageInvitations).toBe(true);
-    expect(result.props.canCreateProject).toBe(true);
     expect(result.props.canReadAudit).toBe(true);
   });
 

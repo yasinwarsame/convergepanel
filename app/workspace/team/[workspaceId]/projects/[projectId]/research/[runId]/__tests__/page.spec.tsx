@@ -169,12 +169,12 @@ describe("TeamResearchDetailPage — gate (server-authoritative)", () => {
     expect(mockedGetTeamWorkspaceRun).toHaveBeenCalledWith({ workspaceId: WS_ID, projectId: PROJECT_ID, runId: RUN_ID });
   });
 
-  it("getTeamWorkspaceRun reports firestore_unavailable -> notFound (never crashes, never renders)", async () => {
+  it("getTeamWorkspaceRun reports firestore_unavailable -> throws a generic Error (transient infra failure, never crashes as notFound, never renders) — see the dedicated TRANSIENT FAILURE describe block below for the full assertion", async () => {
     mockedResolveServerComponentIdentity.mockResolvedValue({ uid: UID });
     mockedResolveWorkspaceAccess.mockResolvedValue(grantedTeamAccess());
     mockedGetProject.mockResolvedValue(foundProject());
     mockedGetTeamWorkspaceRun.mockResolvedValue({ status: "firestore_unavailable" });
-    await expectRealNotFound(callPage());
+    await expect(callPage()).rejects.toThrow("Something went wrong while loading this page. Please try again.");
   });
 
   it("NEW CONTAINMENT DIMENSION — run genuinely exists in the SAME Workspace but belongs to a DIFFERENT Project -> notFound, concealed identically to not-found", async () => {
@@ -234,5 +234,80 @@ describe("TeamResearchDetailPage — gate (server-authoritative)", () => {
     mockedGetTeamWorkspaceRun.mockResolvedValue({ status: "complete", runId: RUN_ID, question: "Q", results: [] });
     await callPage();
     expect(mockedGetTeamWorkspaceRun).toHaveBeenCalledWith({ workspaceId: WS_ID, projectId: PROJECT_ID, runId: RUN_ID });
+  });
+
+  describe("TRANSIENT FAILURE — must throw, never notFound()", () => {
+    async function expectGenericThrow(promise: Promise<unknown>): Promise<void> {
+      await expect(promise).rejects.toThrow("Something went wrong while loading this page. Please try again.");
+    }
+
+    it("resolveWorkspaceAccess returns lookup_failed -> throws generic Error, NOT notFound(), getProject/getTeamWorkspaceRun never called", async () => {
+      mockedResolveServerComponentIdentity.mockResolvedValue({ uid: UID });
+      mockedResolveWorkspaceAccess.mockResolvedValue({ granted: false, reason: "lookup_failed" });
+      await expectGenericThrow(callPage());
+      expect(mockedGetProject).not.toHaveBeenCalled();
+      expect(mockedGetTeamWorkspaceRun).not.toHaveBeenCalled();
+    });
+
+    it("getProject returns firestore_unavailable -> throws generic Error, NOT notFound(), getTeamWorkspaceRun never called", async () => {
+      mockedResolveServerComponentIdentity.mockResolvedValue({ uid: UID });
+      mockedResolveWorkspaceAccess.mockResolvedValue(grantedTeamAccess());
+      mockedGetProject.mockResolvedValue({ status: "firestore_unavailable" });
+      await expectGenericThrow(callPage());
+      expect(mockedGetTeamWorkspaceRun).not.toHaveBeenCalled();
+    });
+
+    it("getProject returns read_failed -> throws generic Error, NOT notFound()", async () => {
+      mockedResolveServerComponentIdentity.mockResolvedValue({ uid: UID });
+      mockedResolveWorkspaceAccess.mockResolvedValue(grantedTeamAccess());
+      mockedGetProject.mockResolvedValue({ status: "read_failed" });
+      await expectGenericThrow(callPage());
+    });
+
+    it("getTeamWorkspaceRun returns firestore_unavailable -> throws generic Error, NOT notFound()", async () => {
+      mockedResolveServerComponentIdentity.mockResolvedValue({ uid: UID });
+      mockedResolveWorkspaceAccess.mockResolvedValue(grantedTeamAccess());
+      mockedGetProject.mockResolvedValue(foundProject());
+      mockedGetTeamWorkspaceRun.mockResolvedValue({ status: "firestore_unavailable" });
+      await expectGenericThrow(callPage());
+    });
+
+    it("thrown error message never leaks workspaceId/projectId/runId or a Firestore collection name, and is byte-identical across every transient stage", async () => {
+      mockedResolveServerComponentIdentity.mockResolvedValue({ uid: UID });
+
+      mockedResolveWorkspaceAccess.mockResolvedValue({ granted: false, reason: "lookup_failed" });
+      let messageA = "";
+      try {
+        await callPage();
+      } catch (err) {
+        messageA = (err as Error).message;
+      }
+
+      mockedResolveWorkspaceAccess.mockResolvedValue(grantedTeamAccess());
+      mockedGetProject.mockResolvedValue({ status: "firestore_unavailable" });
+      let messageB = "";
+      try {
+        await callPage();
+      } catch (err) {
+        messageB = (err as Error).message;
+      }
+
+      mockedGetProject.mockResolvedValue(foundProject());
+      mockedGetTeamWorkspaceRun.mockResolvedValue({ status: "firestore_unavailable" });
+      let messageC = "";
+      try {
+        await callPage();
+      } catch (err) {
+        messageC = (err as Error).message;
+      }
+
+      expect(messageA).toBe(messageB);
+      expect(messageB).toBe(messageC);
+      expect(messageA).not.toMatch(new RegExp(WS_ID));
+      expect(messageA).not.toMatch(new RegExp(PROJECT_ID));
+      expect(messageA).not.toMatch(new RegExp(RUN_ID));
+      expect(messageA.toLowerCase()).not.toContain("firestore");
+      expect(messageA.toLowerCase()).not.toContain("run-");
+    });
   });
 });
