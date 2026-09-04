@@ -29,6 +29,7 @@ describe("parseTeamProjectsListPageResponse", () => {
       ok: true,
       body: { ok: true, items: [validItem()], hasMore: false },
       expectedWorkspaceId: WS_ID,
+      expectedStatus: "active",
     });
     expect(result).toEqual({ ok: true, page: { items: [validItem()], hasMore: false, nextCursor: undefined } });
   });
@@ -38,6 +39,7 @@ describe("parseTeamProjectsListPageResponse", () => {
       ok: true,
       body: { ok: true, items: [validItem({ updateTime: null })], hasMore: false },
       expectedWorkspaceId: WS_ID,
+      expectedStatus: "active",
     });
     expect(result.ok).toBe(true);
   });
@@ -47,6 +49,7 @@ describe("parseTeamProjectsListPageResponse", () => {
       ok: true,
       body: { ok: true, items: [validItem({ updateTime: "not-a-token" })], hasMore: false },
       expectedWorkspaceId: WS_ID,
+      expectedStatus: "active",
     });
     expect(result).toEqual({ ok: false, errorCode: "internal_error" });
   });
@@ -56,6 +59,7 @@ describe("parseTeamProjectsListPageResponse", () => {
       ok: true,
       body: { ok: true, items: [validItem(), validItem({ id: "proj-2", workspaceId: "ws-OTHER" })], hasMore: false },
       expectedWorkspaceId: WS_ID,
+      expectedStatus: "active",
     });
     expect(result).toEqual({ ok: false, errorCode: "internal_error" });
   });
@@ -65,6 +69,7 @@ describe("parseTeamProjectsListPageResponse", () => {
       ok: true,
       body: { ok: true, items: [validItem({ status: "archived" })], hasMore: false },
       expectedWorkspaceId: WS_ID,
+      expectedStatus: "active",
     });
     expect(result).toEqual({ ok: false, errorCode: "internal_error" });
   });
@@ -74,6 +79,7 @@ describe("parseTeamProjectsListPageResponse", () => {
       ok: false,
       body: { ok: false, errorCode: "insufficient_capability" },
       expectedWorkspaceId: WS_ID,
+      expectedStatus: "active",
     });
     expect(result).toEqual({ ok: false, errorCode: "insufficient_capability" });
   });
@@ -83,6 +89,7 @@ describe("parseTeamProjectsListPageResponse", () => {
       ok: false,
       body: { ok: false, errorCode: "some_future_code_this_client_has_never_heard_of" },
       expectedWorkspaceId: WS_ID,
+      expectedStatus: "active",
     });
     expect(result).toEqual({ ok: false, errorCode: "internal_error" });
   });
@@ -92,6 +99,7 @@ describe("parseTeamProjectsListPageResponse", () => {
       ok: true,
       body: { ok: true, items: [], hasMore: true, nextCursor: "abc123" },
       expectedWorkspaceId: WS_ID,
+      expectedStatus: "active",
     });
     expect(result).toEqual({ ok: true, page: { items: [], hasMore: true, nextCursor: "abc123" } });
   });
@@ -114,3 +122,29 @@ describe("isDefinitiveEmptyTeamProjectsState", () => {
     expect(isDefinitiveEmptyTeamProjectsState({ status: "ready", items: [validItem()], hasMore: false })).toBe(false);
   });
 });
+
+describe("parseTeamProjectsListPageResponse — requested-status integrity, Phase PROJECT-UI-AR-I1", () => {
+  it("an ARCHIVED request accepts archived rows", () => {
+    const r = parseTeamProjectsListPageResponse({ ok: true, body: { ok: true, items: [validItem({ status: "archived" })], hasMore: false }, expectedWorkspaceId: WS_ID, expectedStatus: "archived" });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.page.items[0].status).toBe("archived");
+  });
+
+  it("an ARCHIVED request rejects an active row — the whole page fails closed as internal_error (validation is per requested status, never 'either')", () => {
+    const r = parseTeamProjectsListPageResponse({ ok: true, body: { ok: true, items: [validItem({ status: "archived" }), validItem({ id: "p2", status: "active" })], hasMore: false }, expectedWorkspaceId: WS_ID, expectedStatus: "archived" });
+    expect(r).toEqual({ ok: false, errorCode: "internal_error" });
+  });
+
+  it("an ACTIVE request still rejects an archived row (unchanged behavior)", () => {
+    const r = parseTeamProjectsListPageResponse({ ok: true, body: { ok: true, items: [validItem({ status: "archived" })], hasMore: false }, expectedWorkspaceId: WS_ID, expectedStatus: "active" });
+    expect(r).toEqual({ ok: false, errorCode: "internal_error" });
+  });
+
+  it("an archived request still enforces workspace binding and updateTime validation", () => {
+    expect(parseTeamProjectsListPageResponse({ ok: true, body: { ok: true, items: [validItem({ status: "archived", workspaceId: "ws-other" })], hasMore: false }, expectedWorkspaceId: WS_ID, expectedStatus: "archived" })).toEqual({ ok: false, errorCode: "internal_error" });
+    expect(parseTeamProjectsListPageResponse({ ok: true, body: { ok: true, items: [validItem({ status: "archived", updateTime: { seconds: "1" } })], hasMore: false }, expectedWorkspaceId: WS_ID, expectedStatus: "archived" })).toEqual({ ok: false, errorCode: "internal_error" });
+    const nullToken = parseTeamProjectsListPageResponse({ ok: true, body: { ok: true, items: [validItem({ status: "archived", updateTime: null })], hasMore: false }, expectedWorkspaceId: WS_ID, expectedStatus: "archived" });
+    expect(nullToken.ok).toBe(true);
+  });
+});
+

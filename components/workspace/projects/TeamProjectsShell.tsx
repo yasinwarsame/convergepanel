@@ -17,13 +17,13 @@
  * validators), `useTeamProjects`, `useTeamProjectLifecycle`.
  */
 
-import { useRef, useState } from "react";
-import Link from "next/link";
+import { useCallback, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTeamProjects, isDefinitiveEmptyTeamProjectsState, type TeamProjectsListErrorCode, type TeamProjectSummary } from "@/hooks/useTeamProjects";
 import { useTeamProjectLifecycle } from "@/hooks/useTeamProjectLifecycle";
 import { SectionEmptyBox, SectionInitialErrorBox, SectionLoadingRow, SectionPagination } from "@/components/projects/SectionState";
 import { TeamNewProjectDialog } from "@/components/workspace/projects/TeamNewProjectDialog";
+import { TeamProjectLifecycleRow } from "@/components/workspace/projects/TeamProjectLifecycleRow";
 import WorkspaceNav from "@/components/workspace/WorkspaceNav";
 
 function initialErrorCopy(code: TeamProjectsListErrorCode): { message: string; retry: boolean } {
@@ -47,17 +47,33 @@ export default function TeamProjectsShell({
   workspaceId,
   workspaceName,
   canCreateProject,
+  canManageProjects,
   canReadAudit,
 }: {
   workspaceId: string;
   workspaceName: string;
   canCreateProject: boolean;
+  /** Server-derived `projects.manage` capability — UX visibility only; the archive/restore API re-authorizes every call. */
+  canManageProjects: boolean;
   canReadAudit: boolean;
 }) {
   const router = useRouter();
-  const result = useTeamProjects({ workspaceId });
+  // Phase PROJECT-UI-AR-I1 — two independent list instances: the active
+  // section (unchanged behavior + New Project) and an Archived Projects
+  // section so archived Team Projects are deliberately discoverable for
+  // Restore. Both refetch from page one after any committed or
+  // stale-detected lifecycle transition (`refreshSections`) — never an
+  // optimistic row move, never a retained old updateTime token.
+  const result = useTeamProjects({ workspaceId, status: "active" });
+  const archived = useTeamProjects({ workspaceId, status: "archived" });
   const lifecycle = useTeamProjectLifecycle({ workspaceId });
   const { items, hasMore, status, initialErrorCode, loadingMore, loadMoreErrorCode, loadMore, retryInitial, resetAndReloadFromStart } = result;
+  const { resetAndReloadFromStart: reloadActiveFromStart } = result;
+  const { resetAndReloadFromStart: reloadArchivedFromStart } = archived;
+  const refreshSections = useCallback(() => {
+    reloadActiveFromStart();
+    reloadArchivedFromStart();
+  }, [reloadActiveFromStart, reloadArchivedFromStart]);
 
   const [newProjectOpen, setNewProjectOpen] = useState(false);
   const newProjectTriggerRef = useRef<HTMLButtonElement>(null);
@@ -124,14 +140,7 @@ export default function TeamProjectsShell({
       {status === "ready" && items.length > 0 && (
         <ul className="mt-4 space-y-2">
           {items.map((item) => (
-            <li key={item.id} className="rounded-xl border-2 border-cp-border bg-cp-raised transition-colors hover:border-cp-accent hover:bg-cp-primary-soft">
-              <Link
-                href={`/workspace/team/${encodeURIComponent(workspaceId)}/projects/${encodeURIComponent(item.id)}`}
-                className="block px-3 py-3 text-sm font-medium text-cp-text"
-              >
-                {item.name}
-              </Link>
-            </li>
+            <TeamProjectLifecycleRow key={item.id} workspaceId={workspaceId} project={item} canManageProjects={canManageProjects} lifecycle={lifecycle} refreshSections={refreshSections} />
           ))}
         </ul>
       )}
@@ -150,6 +159,42 @@ export default function TeamProjectsShell({
             />
           );
         })()}
+      <section className="mt-10" aria-labelledby="team-archived-projects-heading">
+        <h2 id="team-archived-projects-heading" className="text-lg font-semibold text-cp-text">
+          Archived Projects
+        </h2>
+        {archived.status === "loading" && <SectionLoadingRow label="Loading archived Projects…" />}
+        {archived.status === "error" &&
+          archived.initialErrorCode &&
+          (() => {
+            const copy = initialErrorCopy(archived.initialErrorCode);
+            return <SectionInitialErrorBox message={copy.message} retry={copy.retry} onRetry={archived.retryInitial} />;
+          })()}
+        {archived.status === "ready" && isDefinitiveEmptyTeamProjectsState({ status: archived.status, items: archived.items, hasMore: archived.hasMore }) && (
+          <SectionEmptyBox lines={["No archived projects."]} />
+        )}
+        {archived.status === "ready" && archived.items.length > 0 && (
+          <ul className="mt-4 space-y-2">
+            {archived.items.map((item) => (
+              <TeamProjectLifecycleRow key={item.id} workspaceId={workspaceId} project={item} canManageProjects={canManageProjects} lifecycle={lifecycle} refreshSections={refreshSections} />
+            ))}
+          </ul>
+        )}
+        {archived.status === "ready" &&
+          archived.hasMore &&
+          (() => {
+            const copy = archived.loadMoreErrorCode ? loadMoreErrorCopy(archived.loadMoreErrorCode) : null;
+            return (
+              <SectionPagination
+                loadingMore={archived.loadingMore}
+                errorMessage={copy?.message ?? null}
+                errorAction={copy?.action ?? null}
+                onLoadMore={archived.loadMore}
+                onReload={archived.resetAndReloadFromStart}
+              />
+            );
+          })()}
+      </section>
     </main>
   );
 }

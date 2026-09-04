@@ -2,8 +2,16 @@
 
 /**
  * Team Projects UI, Phase 12A.2 — client abstraction for
- * `GET /api/workspaces/{workspaceId}/projects` (active projects only —
- * no archived-status toggle in this phase, see PHASE 12A.2 Section K/L).
+ * `GET /api/workspaces/{workspaceId}/projects`.
+ *
+ * Phase PROJECT-UI-AR-I1 — the hook now takes an explicit
+ * `status: "active" | "archived"` and requests exactly `?status=<status>`;
+ * the parser requires EVERY row to carry the REQUESTED status (an
+ * archived row in an active page, or an active row in an archived page,
+ * fails the whole page closed as `internal_error`). Validation was split
+ * by requested status, never widened to accept either. `TeamProjectsShell`
+ * mounts two independent instances (active + archived) so archived Team
+ * Projects are deliberately discoverable for Restore.
  * Structural mirror of `hooks/useProjects.ts`'s identical
  * `authedFetch` + pure response-parsing + cursor-ref +
  * monotonic-sequence-guard pattern, retargeted at the Team endpoint. A
@@ -23,6 +31,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import { authedFetch } from "@/lib/client/authedFetch";
 import { isValidUpdateTimeTokenShape, type UpdateTimeToken } from "@/lib/projects/updateTimeTokenClient";
+
+export type TeamProjectListStatus = "active" | "archived";
 
 export interface TeamProjectSummary {
   id: string;
@@ -62,8 +72,8 @@ export interface TeamProjectsListPage {
 
 export type ParseTeamProjectsListPageResult = { ok: true; page: TeamProjectsListPage } | { ok: false; errorCode: TeamProjectsListErrorCode };
 
-/** Mirrors `isValidProjectSummaryItem()` — only the fields this UI actually renders/relies on. `updateTime` may be `null` (post-mutation projection-read failure) but never malformed. */
-function isValidTeamProjectSummaryItem(item: unknown, expectedWorkspaceId: string): item is TeamProjectSummary {
+/** Mirrors `isValidProjectSummaryItem()` — only the fields this UI actually renders/relies on. `updateTime` may be `null` (post-mutation projection-read failure) but never malformed. `status` must equal the status this page was REQUESTED with — never merely one of the two valid values. */
+function isValidTeamProjectSummaryItem(item: unknown, expectedWorkspaceId: string, expectedStatus: TeamProjectListStatus): item is TeamProjectSummary {
   if (typeof item !== "object" || item === null) return false;
   const c = item as Record<string, unknown>;
   return (
@@ -71,20 +81,20 @@ function isValidTeamProjectSummaryItem(item: unknown, expectedWorkspaceId: strin
     c.id.length > 0 &&
     c.workspaceId === expectedWorkspaceId &&
     typeof c.name === "string" &&
-    c.status === "active" &&
+    c.status === expectedStatus &&
     (c.updateTime === null || isValidUpdateTimeTokenShape(c.updateTime))
   );
 }
 
-/** Pure: a single item whose `workspaceId` doesn't match the requested Workspace, or whose `status` isn't `"active"`, fails the WHOLE page closed as `internal_error` — mirrors `parseProjectsListPageResponse()`'s identical policy. */
-export function parseTeamProjectsListPageResponse(outcome: { ok: boolean; body: unknown; expectedWorkspaceId: string }): ParseTeamProjectsListPageResult {
+/** Pure: a single item whose `workspaceId` doesn't match the requested Workspace, or whose `status` isn't the REQUESTED status, fails the WHOLE page closed as `internal_error` — mirrors `parseProjectsListPageResponse()`'s identical policy. */
+export function parseTeamProjectsListPageResponse(outcome: { ok: boolean; body: unknown; expectedWorkspaceId: string; expectedStatus: TeamProjectListStatus }): ParseTeamProjectsListPageResult {
   const body = outcome.body as { ok?: unknown; items?: unknown; hasMore?: unknown; nextCursor?: unknown; errorCode?: unknown } | null;
   if (
     outcome.ok &&
     body?.ok === true &&
     Array.isArray(body.items) &&
     typeof body.hasMore === "boolean" &&
-    body.items.every((item) => isValidTeamProjectSummaryItem(item, outcome.expectedWorkspaceId))
+    body.items.every((item) => isValidTeamProjectSummaryItem(item, outcome.expectedWorkspaceId, outcome.expectedStatus))
   ) {
     return {
       ok: true,
@@ -112,12 +122,12 @@ export interface UseTeamProjectsResult {
   loadMoreErrorCode: TeamProjectsListErrorCode | null;
   loadMore: () => void;
   retryInitial: () => void;
-  /** The ONLY path that ever resets an in-progress cursor — called after a successful create so the newly created Project appears. */
+  /** The ONLY path that ever resets an in-progress cursor — called after a successful create, and after any committed (or stale-detected) archive/restore so both sections re-adopt the server's authoritative rows and tokens. */
   resetAndReloadFromStart: () => void;
 }
 
-export function useTeamProjects(args: { workspaceId: string }): UseTeamProjectsResult {
-  const { workspaceId } = args;
+export function useTeamProjects(args: { workspaceId: string; status: TeamProjectListStatus }): UseTeamProjectsResult {
+  const { workspaceId, status: requestedStatus } = args;
   const { user, loading: authLoading, authReady } = useAuth();
 
   const [items, setItems] = useState<TeamProjectSummary[]>([]);
@@ -143,13 +153,13 @@ export function useTeamProjects(args: { workspaceId: string }): UseTeamProjectsR
       }
 
       try {
-        const base = `/api/workspaces/${encodeURIComponent(workspaceId)}/projects?status=active`;
+        const base = `/api/workspaces/${encodeURIComponent(workspaceId)}/projects?status=${requestedStatus}`;
         const url = opts.cursor ? `${base}&cursor=${encodeURIComponent(opts.cursor)}` : base;
         const res = await authedFetch(url, { user: opts.currentUser, authReady: true, method: "GET", cache: "no-store" });
         const body = await res.json().catch(() => null);
         if (seq !== seqRef.current) return;
 
-        const result = parseTeamProjectsListPageResponse({ ok: res.ok, body, expectedWorkspaceId: workspaceId });
+        const result = parseTeamProjectsListPageResponse({ ok: res.ok, body, expectedWorkspaceId: workspaceId, expectedStatus: requestedStatus });
         if (!result.ok) {
           if (opts.isLoadMore) {
             setLoadingMore(false);
@@ -189,7 +199,7 @@ export function useTeamProjects(args: { workspaceId: string }): UseTeamProjectsR
         }
       }
     },
-    [workspaceId, user]
+    [workspaceId, requestedStatus, user]
   );
 
   useEffect(() => {
@@ -214,7 +224,7 @@ export function useTeamProjects(args: { workspaceId: string }): UseTeamProjectsR
     setLoadMoreErrorCode(null);
     void fetchPage({ cursor: undefined, isLoadMore: false, currentUser: user });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authLoading, authReady, user?.uid, workspaceId]);
+  }, [authLoading, authReady, user?.uid, workspaceId, requestedStatus]);
 
   const loadMore = useCallback(() => {
     if (loadingMore || !hasMore || status !== "ready" || !user) return;

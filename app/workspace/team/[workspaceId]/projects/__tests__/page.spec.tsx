@@ -112,3 +112,31 @@ describe("TeamProjectsPage — gate (server-authoritative, UX-only re-check)", (
     await expect(callPage()).rejects.toThrow("Something went wrong while loading this page. Please try again.");
   });
 });
+
+describe("TeamProjectsPage — canManageProjects derivation, Phase PROJECT-UI-AR-I1", () => {
+  function grant(capabilities: string[]) {
+    mockedResolveServerComponentIdentity.mockResolvedValue({ uid: UID });
+    mockedResolveWorkspaceAccess.mockResolvedValue({ granted: true, workspaceType: "team", workspace: { id: WS_ID, name: "Acme" }, membership: { role: "irrelevant" }, capabilities });
+  }
+  async function shellProps() {
+    const el: any = await callPage();
+    return el.props;
+  }
+
+  it("true when the resolved capability set includes projects.manage (Owner/Admin/Member-equivalent)", async () => {
+    grant(["projects.read", "projects.create", "projects.manage"]);
+    expect((await shellProps()).canManageProjects).toBe(true);
+  });
+
+  it("false when projects.manage is absent (Reviewer/Viewer-equivalent), even though the page still renders for projects.read", async () => {
+    grant(["projects.read", "research.read"]);
+    expect((await shellProps()).canManageProjects).toBe(false);
+  });
+
+  it("the page passes only capability booleans and display fields to the shell — no role string, no raw membership data", async () => {
+    grant(["projects.read", "projects.manage"]);
+    const props = await shellProps();
+    expect(Object.keys(props).sort()).toEqual(["canCreateProject", "canManageProjects", "canReadAudit", "workspaceId", "workspaceName"]);
+    expect(JSON.stringify(props)).not.toMatch(/"role"|membership/);
+  });
+});
