@@ -17,13 +17,13 @@
  * validators), `useTeamProjects`, `useTeamProjectLifecycle`.
  */
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTeamProjects, isDefinitiveEmptyTeamProjectsState, type TeamProjectsListErrorCode, type TeamProjectSummary } from "@/hooks/useTeamProjects";
 import { useTeamProjectLifecycle } from "@/hooks/useTeamProjectLifecycle";
 import { SectionEmptyBox, SectionInitialErrorBox, SectionLoadingRow, SectionPagination } from "@/components/projects/SectionState";
 import { TeamNewProjectDialog } from "@/components/workspace/projects/TeamNewProjectDialog";
-import { TeamProjectLifecycleRow } from "@/components/workspace/projects/TeamProjectLifecycleRow";
+import { TeamProjectLifecycleRow, type TeamProjectLifecycleOutcome } from "@/components/workspace/projects/TeamProjectLifecycleRow";
 import WorkspaceNav from "@/components/workspace/WorkspaceNav";
 
 function initialErrorCopy(code: TeamProjectsListErrorCode): { message: string; retry: boolean } {
@@ -75,6 +75,63 @@ export default function TeamProjectsShell({
     reloadArchivedFromStart();
   }, [reloadActiveFromStart, reloadArchivedFromStart]);
 
+  // Phase PROJECT-UI-AR-P3A-I1 — lifecycle feedback and focus are owned
+  // HERE, never by a row or dialog: `refreshSections()` empties both lists
+  // (`items.length > 0` gates), so any row-local message or focused
+  // trigger unmounts in the same commit and is lost. The status region and
+  // the two section headings below are always mounted, so they survive the
+  // refetch and can carry the message / receive focus deterministically.
+  //   committed archive/restore → success notice (role="status"), refetch,
+  //     then focus the section the Project MOVED TO once both lists have
+  //     finished reloading;
+  //   stale/denied/gone (refresh-triggering) outcome → error notice
+  //     (role="alert"), refetch, then focus the notice — never a
+  //     success-style section jump;
+  //   generic/network failure → stays local to the still-mounted row or
+  //     dialog (no refetch happens), so nothing here changes.
+  // `focusTarget` is consumed exactly once by the effect below and cleared,
+  // so an unrelated later render can never refocus a section.
+  const [lifecycleNotice, setLifecycleNotice] = useState<{ tone: "success" | "error"; message: string } | null>(null);
+  const [focusTarget, setFocusTarget] = useState<"active" | "archived" | "notice" | null>(null);
+  const activeHeadingRef = useRef<HTMLHeadingElement>(null);
+  const archivedHeadingRef = useRef<HTMLHeadingElement>(null);
+  const noticeRef = useRef<HTMLDivElement>(null);
+
+  const handleLifecycleAttemptStart = useCallback(() => {
+    setLifecycleNotice(null);
+  }, []);
+
+  const handleLifecycleOutcome = useCallback(
+    (outcome: TeamProjectLifecycleOutcome) => {
+      // ORDER MATTERS: start the canonical refetch FIRST so both lists are
+      // already "loading" by the time the focus intent is set. Otherwise a
+      // synchronous (legacy-mode) render between `setFocusTarget` and
+      // `refreshSections` would see both lists still "ready" and apply focus
+      // before the refetch, defeating the "only after refresh" contract.
+      refreshSections();
+      if (outcome.kind === "committed") {
+        setLifecycleNotice({ tone: "success", message: outcome.operation === "archive" ? `${outcome.projectName} was archived.` : `${outcome.projectName} was restored.` });
+        setFocusTarget(outcome.operation === "archive" ? "archived" : "active");
+      } else {
+        setLifecycleNotice({ tone: "error", message: outcome.message });
+        setFocusTarget("notice");
+      }
+    },
+    [refreshSections]
+  );
+
+  // Focus moves only AFTER the canonical refetch has settled (neither list is
+  // still loading) — the `refreshSections()` call above flips both lists to
+  // "loading" in the same batch as `setFocusTarget`, so this effect waits for
+  // the post-refresh render, then applies the intent exactly once.
+  const listsSettled = result.status !== "loading" && archived.status !== "loading";
+  useEffect(() => {
+    if (!focusTarget || !listsSettled) return;
+    const target = focusTarget === "active" ? activeHeadingRef.current : focusTarget === "archived" ? archivedHeadingRef.current : noticeRef.current;
+    target?.focus();
+    setFocusTarget(null);
+  }, [focusTarget, listsSettled]);
+
   const [newProjectOpen, setNewProjectOpen] = useState(false);
   const newProjectTriggerRef = useRef<HTMLButtonElement>(null);
 
@@ -98,7 +155,9 @@ export default function TeamProjectsShell({
       <WorkspaceNav workspaceId={workspaceId} active="projects" showAudit={canReadAudit} />
 
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-lg font-semibold text-cp-text">Projects</h2>
+        <h2 ref={activeHeadingRef} id="team-active-projects-heading" tabIndex={-1} className="text-lg font-semibold text-cp-text focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent">
+          Projects
+        </h2>
         {canCreateProject && (
           <button
             ref={newProjectTriggerRef}
@@ -110,6 +169,18 @@ export default function TeamProjectsShell({
           </button>
         )}
       </div>
+
+      {lifecycleNotice && (
+        <div
+          ref={noticeRef}
+          tabIndex={-1}
+          role={lifecycleNotice.tone === "error" ? "alert" : "status"}
+          className={`mt-3 break-words rounded-lg border px-3 py-2 text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent ${lifecycleNotice.tone === "error" ? "border-red-200 bg-red-50 text-red-700" : "border-cp-border bg-cp-raised text-cp-text"}`}
+        >
+          {lifecycleNotice.tone === "error" ? "Error: " : "Done: "}
+          {lifecycleNotice.message}
+        </div>
+      )}
 
       {newProjectOpen && (
         <TeamNewProjectDialog
@@ -140,7 +211,7 @@ export default function TeamProjectsShell({
       {status === "ready" && items.length > 0 && (
         <ul className="mt-4 space-y-2">
           {items.map((item) => (
-            <TeamProjectLifecycleRow key={item.id} workspaceId={workspaceId} project={item} canManageProjects={canManageProjects} lifecycle={lifecycle} refreshSections={refreshSections} />
+            <TeamProjectLifecycleRow key={item.id} workspaceId={workspaceId} project={item} canManageProjects={canManageProjects} lifecycle={lifecycle} onLifecycleAttemptStart={handleLifecycleAttemptStart} onLifecycleOutcome={handleLifecycleOutcome} />
           ))}
         </ul>
       )}
@@ -160,7 +231,7 @@ export default function TeamProjectsShell({
           );
         })()}
       <section className="mt-10" aria-labelledby="team-archived-projects-heading">
-        <h2 id="team-archived-projects-heading" className="text-lg font-semibold text-cp-text">
+        <h2 ref={archivedHeadingRef} id="team-archived-projects-heading" tabIndex={-1} className="text-lg font-semibold text-cp-text focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent">
           Archived Projects
         </h2>
         {archived.status === "loading" && <SectionLoadingRow label="Loading archived Projects…" />}
@@ -176,7 +247,7 @@ export default function TeamProjectsShell({
         {archived.status === "ready" && archived.items.length > 0 && (
           <ul className="mt-4 space-y-2">
             {archived.items.map((item) => (
-              <TeamProjectLifecycleRow key={item.id} workspaceId={workspaceId} project={item} canManageProjects={canManageProjects} lifecycle={lifecycle} refreshSections={refreshSections} />
+              <TeamProjectLifecycleRow key={item.id} workspaceId={workspaceId} project={item} canManageProjects={canManageProjects} lifecycle={lifecycle} onLifecycleAttemptStart={handleLifecycleAttemptStart} onLifecycleOutcome={handleLifecycleOutcome} />
             ))}
           </ul>
         )}

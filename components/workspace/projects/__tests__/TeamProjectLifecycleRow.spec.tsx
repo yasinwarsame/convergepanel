@@ -26,10 +26,10 @@ function lifecycle(overrides: Record<string, unknown> = {}) {
   return { isProjectBusy: () => false, getBusyOperation: () => null, archiveProject: jest.fn(), restoreProject: jest.fn(), ...overrides } as any;
 }
 
-async function mount(props: { project: TeamProjectSummary; canManageProjects: boolean; lifecycle: any; refreshSections?: () => void }) {
+async function mount(props: { project: TeamProjectSummary; canManageProjects: boolean; lifecycle: any; onLifecycleAttemptStart?: () => void; onLifecycleOutcome?: (o: unknown) => void }) {
   let renderer!: TestRenderer.ReactTestRenderer;
   await act(async () => {
-    renderer = TestRenderer.create(createElement("ul", null, createElement(TeamProjectLifecycleRow, { workspaceId: "ws-1", refreshSections: jest.fn(), ...props })));
+    renderer = TestRenderer.create(createElement("ul", null, createElement(TeamProjectLifecycleRow, { workspaceId: "ws-1", onLifecycleAttemptStart: jest.fn(), onLifecycleOutcome: jest.fn(), ...props })));
   });
   return renderer;
 }
@@ -75,53 +75,90 @@ it("busy: Archive is disabled; a busy restore shows 'Restoring…' and is disabl
   expect(buttons(b, "Restore")).toHaveLength(0);
 });
 
-it("Restore is immediate (no dialog): one restoreProject call with the exact row, then refreshSections on success", async () => {
+it("Restore is immediate (no dialog): attempt-start is signalled, one restoreProject call with the exact row, then a COMMITTED outcome (with the Project name, no ids) is reported upward — never a row-local message", async () => {
   const restoreProject = jest.fn().mockResolvedValue({ status: "ok", project: { ...ARCHIVED, status: "active" } });
-  const refreshSections = jest.fn();
-  const r = await mount({ project: ARCHIVED, canManageProjects: true, lifecycle: lifecycle({ restoreProject }), refreshSections });
+  const onLifecycleAttemptStart = jest.fn();
+  const onLifecycleOutcome = jest.fn();
+  const r = await mount({ project: ARCHIVED, canManageProjects: true, lifecycle: lifecycle({ restoreProject }), onLifecycleAttemptStart, onLifecycleOutcome });
   await act(async () => {
     await buttons(r, "Restore")[0].props.onClick();
   });
   expect(r.root.findAll((n) => n.props?.role === "dialog")).toHaveLength(0);
+  expect(onLifecycleAttemptStart).toHaveBeenCalledTimes(1);
   expect(restoreProject).toHaveBeenCalledTimes(1);
   expect(restoreProject).toHaveBeenCalledWith(ARCHIVED);
-  expect(refreshSections).toHaveBeenCalledTimes(1);
+  expect(onLifecycleOutcome).toHaveBeenCalledTimes(1);
+  expect(onLifecycleOutcome).toHaveBeenCalledWith({ kind: "committed", operation: "restore", projectName: "Quarterly Diligence" });
+  expect(r.root.findAll((n) => n.props?.role === "alert")).toHaveLength(0);
 });
 
-it("Archive opens a confirmation dialog and sends nothing until confirmed", async () => {
+it("Archive opens a confirmation dialog, signals attempt-start, and sends nothing until confirmed", async () => {
   const archiveProject = jest.fn();
-  const r = await mount({ project: ACTIVE, canManageProjects: true, lifecycle: lifecycle({ archiveProject }) });
+  const onLifecycleAttemptStart = jest.fn();
+  const r = await mount({ project: ACTIVE, canManageProjects: true, lifecycle: lifecycle({ archiveProject }), onLifecycleAttemptStart });
   await act(async () => {
     buttons(r, "Archive")[0].props.onClick();
   });
   expect(r.root.findAll((n) => n.props?.role === "dialog")).toHaveLength(1);
+  expect(onLifecycleAttemptStart).toHaveBeenCalledTimes(1);
   expect(archiveProject).not.toHaveBeenCalled();
 });
 
+it("confirmed archive success reports a COMMITTED archive outcome upward and closes the dialog", async () => {
+  const archiveProject = jest.fn().mockResolvedValue({ status: "ok", project: { ...ACTIVE, status: "archived" } });
+  const onLifecycleOutcome = jest.fn();
+  const r = await mount({ project: ACTIVE, canManageProjects: true, lifecycle: lifecycle({ archiveProject }), onLifecycleOutcome });
+  await act(async () => {
+    buttons(r, "Archive")[0].props.onClick();
+  });
+  await act(async () => {
+    await buttons(r, "Archive").at(-1)!.props.onClick();
+  });
+  expect(onLifecycleOutcome).toHaveBeenCalledWith({ kind: "committed", operation: "archive", projectName: "Quarterly Diligence" });
+  expect(r.root.findAll((n) => n.props?.role === "dialog")).toHaveLength(0);
+});
+
+it("confirmed archive denied with conflict reports a STALE outcome upward (sanitized message, no ids), closes the dialog, and renders no row-local alert", async () => {
+  const archiveProject = jest.fn().mockResolvedValue({ status: "error", errorCode: "conflict" });
+  const onLifecycleOutcome = jest.fn();
+  const r = await mount({ project: ACTIVE, canManageProjects: true, lifecycle: lifecycle({ archiveProject }), onLifecycleOutcome });
+  await act(async () => {
+    buttons(r, "Archive")[0].props.onClick();
+  });
+  await act(async () => {
+    await buttons(r, "Archive").at(-1)!.props.onClick();
+  });
+  expect(onLifecycleOutcome).toHaveBeenCalledWith({ kind: "stale", operation: "archive", message: "This project changed. Refresh and try again." });
+  expect(r.root.findAll((n) => n.props?.role === "dialog")).toHaveLength(0);
+  expect(r.root.findAll((n) => n.props?.role === "alert")).toHaveLength(0);
+});
+
 it.each(["conflict", "invalid_project_status_transition", "project_not_found", "insufficient_capability", "team_workspace_not_found"])(
-  "restore denied with %s: one request, inline role=alert message, refreshSections called, no retry",
+  "restore denied with %s: one request, a STALE outcome reported upward (the shell owns the message), no row-local alert, no retry",
   async (code) => {
     const restoreProject = jest.fn().mockResolvedValue({ status: "error", errorCode: code });
-    const refreshSections = jest.fn();
-    const r = await mount({ project: ARCHIVED, canManageProjects: true, lifecycle: lifecycle({ restoreProject }), refreshSections });
+    const onLifecycleOutcome = jest.fn();
+    const r = await mount({ project: ARCHIVED, canManageProjects: true, lifecycle: lifecycle({ restoreProject }), onLifecycleOutcome });
     await act(async () => {
       await buttons(r, "Restore")[0].props.onClick();
     });
     expect(restoreProject).toHaveBeenCalledTimes(1);
-    expect(r.root.findAll((n) => n.props?.role === "alert")).toHaveLength(1);
-    expect(refreshSections).toHaveBeenCalledTimes(1);
+    expect(onLifecycleOutcome).toHaveBeenCalledTimes(1);
+    expect(onLifecycleOutcome.mock.calls[0][0]).toMatchObject({ kind: "stale", operation: "restore" });
+    expect(onLifecycleOutcome.mock.calls[0][0].message).not.toMatch(/ws-1|p2/);
+    expect(r.root.findAll((n) => n.props?.role === "alert")).toHaveLength(0);
   }
 );
 
-it("restore generic failure: inline error, NO refresh, control still rendered for a manual retry", async () => {
+it("restore generic failure stays ROW-LOCAL (the row is not unmounted): inline role=alert, NO outcome reported, control still rendered for a manual retry", async () => {
   const restoreProject = jest.fn().mockResolvedValue({ status: "error", errorCode: "internal_error" });
-  const refreshSections = jest.fn();
-  const r = await mount({ project: ARCHIVED, canManageProjects: true, lifecycle: lifecycle({ restoreProject }), refreshSections });
+  const onLifecycleOutcome = jest.fn();
+  const r = await mount({ project: ARCHIVED, canManageProjects: true, lifecycle: lifecycle({ restoreProject }), onLifecycleOutcome });
   await act(async () => {
     await buttons(r, "Restore")[0].props.onClick();
   });
   expect(r.root.findAll((n) => n.props?.role === "alert")[0].props.children).toBe("Something went wrong. Please try again.");
-  expect(refreshSections).not.toHaveBeenCalled();
+  expect(onLifecycleOutcome).not.toHaveBeenCalled();
   expect(buttons(r, "Restore")).toHaveLength(1);
 });
 
