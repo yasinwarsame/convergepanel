@@ -29,7 +29,8 @@
     "workspaces:provision-existing": "node --conditions=react-server -r ./scripts/workspaces/register-path-alias.js node_modules/.bin/ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/workspaces/provision-existing-personal-workspaces.ts",
     "projects:dry-run-normalization": "node --conditions=react-server -r ./scripts/workspaces/register-path-alias.js node_modules/.bin/ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/projects/dry-run-project-normalization.ts",
     "projects:execute-normalization": "node --conditions=react-server -r ./scripts/workspaces/register-path-alias.js node_modules/.bin/ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/projects/execute-project-normalization.ts",
-    "verify:project-run-invariant": "node --conditions=react-server -r ./scripts/workspaces/register-path-alias.js node_modules/.bin/ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/projects/check-project-run-invariant.ts"
+    "verify:project-run-invariant": "node --conditions=react-server -r ./scripts/workspaces/register-path-alias.js node_modules/.bin/ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/projects/check-project-run-invariant.ts",
+    "billing:verify-prices": "node scripts/billing/verify-stripe-price-cadence.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.20.0",

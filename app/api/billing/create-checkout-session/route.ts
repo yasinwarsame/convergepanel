@@ -8,7 +8,9 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { stripe } from "@/lib/stripe/client";
-import { getStripePriceId, PlanId, BillingInterval } from "@/lib/plans";
+import type { BillingInterval } from "@/lib/plans";
+import { resolveApprovedPriceId } from "@/lib/billing/approvedPrice";
+import { verifyStripePriceCadence } from "@/lib/billing/stripePriceCadence";
 import { adminDb } from "@/lib/firebase/admin";
 import { resolveRequestIdentity } from "@/lib/auth/resolveRequestIdentity";
 import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelemetry";
@@ -66,31 +68,46 @@ export async function POST(req: NextRequest) {
 
     // Get Stripe price ID for this plan and interval
     // Use a helper function that provides better error messages
-    let priceId: string | undefined;
-    try {
-      priceId = getStripePriceId(planId as PlanId, interval as BillingInterval);
-    } catch (err: any) {
-      console.error("[create-checkout-session] Price ID lookup error:", err);
+    // Phase BILLING-ANNUAL-C1 — the client supplies ONLY a canonical plan key
+    // and cadence (validated above). The approved Price ID is resolved
+    // server-side from configuration; any client-supplied priceId/amount/
+    // currency field in the body is ignored by construction.
+    const approved = resolveApprovedPriceId(planId, interval as BillingInterval);
+    if (!approved.ok) {
+      logger.error("[create-checkout-session] Approved price resolution failed", { planId, interval, reason: approved.reason });
       return NextResponse.json(
-        { 
-          error: err.message || `Stripe price ID not configured for ${planId} plan (${interval} billing). Check your .env.local: STRIPE_PRICE_3_MODELS, STRIPE_PRICE_5_MODELS, STRIPE_3_MODELS_ANNUAL, STRIPE_5_MODELS_ANNUAL.` 
+        {
+          error: approved.reason === "not_configured"
+            ? `Stripe price ID not configured for ${planId} plan (${interval} billing). Check your .env.local: STRIPE_PRICE_3_MODELS, STRIPE_PRICE_5_MODELS, STRIPE_3_MODELS_ANNUAL, STRIPE_5_MODELS_ANNUAL.`
+            : "Billing configuration error. This plan cannot be purchased right now. Please contact support.",
         },
         { status: 500 }
       );
     }
-
-    if (!priceId) {
-      return NextResponse.json(
-        { 
-          error: `Stripe price ID not configured for ${planId} plan (${interval} billing). Check your .env.local: STRIPE_PRICE_3_MODELS, STRIPE_PRICE_5_MODELS, STRIPE_3_MODELS_ANNUAL, STRIPE_5_MODELS_ANNUAL.` 
-        },
-        { status: 500 }
-      );
-    }
+    const priceId = approved.priceId;
 
     if (!stripe) {
       return NextResponse.json(
         { error: "Stripe is not configured." },
+        { status: 500 }
+      );
+    }
+
+    // Phase BILLING-ANNUAL-C1 — FAIL CLOSED before ANY Stripe write: the
+    // configured Price must really bill on the cadence the user selected.
+    // A "$X / year" plan whose Price recurs monthly (the incident that
+    // motivated this guard) is refused here instead of being sold.
+    const cadence = await verifyStripePriceCadence(stripe, priceId, interval as BillingInterval);
+    if (!cadence.ok) {
+      logger.error("[create-checkout-session] REFUSED — configured Stripe Price cadence does not match the selected billing interval", {
+        planId,
+        interval,
+        reason: cadence.reason,
+        actualInterval: cadence.actualInterval ?? null,
+        actualIntervalCount: cadence.actualIntervalCount ?? null,
+      });
+      return NextResponse.json(
+        { error: "Billing configuration error. This plan cannot be purchased right now. Please contact support." },
         { status: 500 }
       );
     }
