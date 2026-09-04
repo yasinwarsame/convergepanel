@@ -4,7 +4,8 @@
  * Single source of truth for calculating effective user entitlements.
  * Priority order:
  * 1. Admin override (if active and not expired)
- * 2. Stripe subscription (if active)
+ * 2. Stripe subscription (if active or trialing — see
+ *    lib/billing/subscriptionStatus.ts for the canonical status contract)
  * 3. Free plan (default)
  */
 
@@ -12,6 +13,7 @@ import "server-only";
 import { adminDb } from "@/lib/firebase/admin";
 import { Timestamp } from "firebase-admin/firestore";
 import { STRIPE_PRICE_3_MODELS, STRIPE_3_MODELS_ANNUAL, STRIPE_PRICE_5_MODELS, STRIPE_5_MODELS_ANNUAL } from "@/lib/env";
+import { isEntitlementBearingSubscriptionStatus } from "@/lib/billing/subscriptionStatus";
 
 /**
  * Plan identifier for entitlements
@@ -81,7 +83,8 @@ interface UserDocument {
  * 
  * Priority order:
  * 1. Override (if active and not expired)
- * 2. Stripe subscription (if active)
+ * 2. Stripe subscription (if active or trialing — see
+ *    lib/billing/subscriptionStatus.ts for the canonical status contract)
  * 3. Free plan (default)
  */
 export function calculateEffectiveEntitlement(userDoc: UserDocument | null | undefined): EffectiveEntitlement {
@@ -132,11 +135,30 @@ export function calculateEffectiveEntitlement(userDoc: UserDocument | null | und
     }
   }
 
-  // Check Stripe subscription (second priority)
+  // Check Stripe subscription (second priority).
+  //
+  // STATUS (Phase MIG-B1): the eligible set is the canonical
+  // `isEntitlementBearingSubscriptionStatus()` — "active" OR "trialing" —
+  // not a literal `=== "active"` comparison. The corrective migration for
+  // the legacy annual subscription attaches a compensating trial covering
+  // the year the customer already paid for; without "trialing" here that
+  // repair would strip a paying customer down to free limits.
+  //
+  // PLAN SOURCE (Phase MIG-B1): `planFromStripe` is written ONLY by the
+  // admin sync path (lib/admin/stripeSync.ts). The canonical subscription
+  // synchronization path — the Stripe webhook, via
+  // `updateUserPlanInFirestore()` — writes `plan` and never `planFromStripe`,
+  // so resolving entitlement from `planFromStripe` alone made a paid
+  // decision depend on a field the canonical writer does not set. `plan` is
+  // read as a fallback only when `planFromStripe` is absent, and both are
+  // gated by the same status predicate. Neither field is client-writable.
   const stripeStatus = userDoc.subscriptionStatusFromStripe || userDoc.subscriptionStatus;
-  const stripePlan = userDoc.planFromStripe;
-  
-  if (stripeStatus === "active" && stripePlan && stripePlan !== "free") {
+  const stripePlan: EntitlementPlan | null =
+    userDoc.planFromStripe && userDoc.planFromStripe !== "free"
+      ? userDoc.planFromStripe
+      : normalizePlanId(userDoc.plan);
+
+  if (isEntitlementBearingSubscriptionStatus(stripeStatus) && stripePlan && stripePlan !== "free") {
     return {
       plan: stripePlan,
       runLimitMonthly: PLAN_LIMITS[stripePlan].runsPerMonth,
