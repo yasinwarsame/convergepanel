@@ -10,6 +10,7 @@
 
 import { BillingPlanId, PLAN_CONFIG, getPlanConfigById, getPlanIdFromPriceId } from "./planConfig";
 import { readLegacyPlanMetadata } from "./legacyPlanMetadata";
+import { selectPlanBearingItem } from "./subscriptionBillingState";
 import { isPlanBearingSubscriptionStatus } from "./subscriptionStatus";
 import Stripe from "stripe";
 
@@ -36,7 +37,21 @@ export function mapSubscriptionToPlan(
   subscription: Stripe.Subscription
 ): SubscriptionPlanMapping {
   const status = subscription.status;
-  const priceId = subscription.items.data[0]?.price.id;
+  // Phase WEBHOOK-B1: the plan-bearing item is SELECTED, not assumed to be
+  // `items.data[0]`. A subscription whose items disagree about the plan fails
+  // closed here (priceId stays undefined) rather than silently resolving to
+  // whichever item sorts first — see lib/billing/subscriptionBillingState.ts.
+  const selectedItem = selectPlanBearingItem(subscription);
+  if (!selectedItem.ok) {
+    // Ambiguous / malformed / empty item set. Fail closed BEFORE the legacy
+    // metadata fallback below: a subscription we cannot attribute to a single
+    // plan-bearing item must never be rescued into a paid plan by a metadata
+    // marker, which would be exactly the "grant the higher plan on ambiguity"
+    // failure this selection exists to prevent.
+    const freeConfig = PLAN_CONFIG.free;
+    return { planId: "free", monthlyLimit: freeConfig.monthlyLimit, maxModelsPerRun: freeConfig.maxModels, isActive: false };
+  }
+  const priceId = selectedItem.item.price?.id;
 
   // Canonical status contract — see lib/billing/subscriptionStatus.ts. This
   // is the plan-bearing set (which still includes "past_due"), deliberately

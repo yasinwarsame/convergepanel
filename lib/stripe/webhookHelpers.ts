@@ -9,9 +9,8 @@ import "server-only";
 import { adminDb, firebaseAdmin } from "@/lib/firebase/admin";
 import { getPlanConfigById } from "@/lib/billing/planConfig";
 import { SubscriptionPlanMapping } from "@/lib/billing/subscriptionMapper";
-import { getCurrentMonthString } from "@/lib/stripe/usage";
 import { BillingInterval } from "@/lib/plans";
-import { resetUsageForNewPlan } from "@/lib/stripe/usage";
+import type { SubscriptionBillingState } from "@/lib/billing/subscriptionBillingState";
 
 /**
  * Update user plan in Firestore from Stripe subscription
@@ -28,24 +27,38 @@ export async function updateUserPlanInFirestore(args: {
   planMapping: SubscriptionPlanMapping;
   status: string;
   billingInterval?: BillingInterval;
-  currentPeriodStart?: number; // Stripe subscription current_period_start (Unix timestamp)
+  /**
+   * Canonical billing state from `resolveSubscriptionBillingState()`. When
+   * present its ITEM-LEVEL period is persisted — see Phase WEBHOOK-B1 note
+   * below. Omitted only by callers that have no subscription object.
+   */
+  billingState?: SubscriptionBillingState | null;
 }): Promise<void> {
   if (!adminDb) {
     throw new Error("Firestore is not available");
   }
 
-  const { uid, customerId, subscriptionId, planMapping, status, billingInterval, currentPeriodStart } = args;
+  const { uid, customerId, subscriptionId, planMapping, status, billingInterval, billingState } = args;
   const userRef = adminDb.collection("users").doc(uid);
-  const currentMonth = getCurrentMonthString();
 
   // Get plan label from PLAN_CONFIG for display
   const planConfigFromNew = getPlanConfigById(planMapping.planId);
-  
-  // Use Stripe's current_period_start if provided, otherwise use current time
-  // This ensures token tracking uses the actual subscription billing period
-  const billingCycleStartDate = currentPeriodStart 
-    ? new Date(currentPeriodStart * 1000) // Convert Unix timestamp to Date
-    : new Date();
+
+  // Phase WEBHOOK-B1 — BILLING PERIOD.
+  //
+  // The period comes from the canonical resolver, which reads the PLAN-BEARING
+  // ITEM. In Stripe's `flexible` billing mode the subscription-level
+  // `current_period_start` can lag an interval change: the incident
+  // subscription reported an item period starting 2026-08-02 (the annual term
+  // actually paid for) while the subscription-level start still read
+  // 2026-09-02. Persisting the latter records the annual term a month late.
+  //
+  // There is deliberately NO `new Date()` fallback. Manufacturing a billing
+  // period from "now" is what made every reconciliation pass rewrite the
+  // customer's cycle start to the moment the sync happened; when Stripe
+  // reports no period, the stored value is left untouched instead.
+  const billingCycleStartDate = billingState?.periodStart ?? null;
+  const billingCycleEndDate = billingState?.periodEnd ?? null;
   
   // CRITICAL: Update Firestore with all subscription data
   // This ensures /api/user/usage can read the correct plan and limits
@@ -59,9 +72,12 @@ export async function updateUserPlanInFirestore(args: {
     maxModelsPerRun: planMapping.maxModelsPerRun, // CRITICAL: Must be stored for /api/user/usage
     subscriptionStatus: status,
     billingInterval: billingInterval || null,
-    billingCycleStart: firebaseAdmin.firestore.Timestamp.fromDate(billingCycleStartDate), // Use actual Stripe period start
-    usageMonth: currentMonth, // Update to current month
     planUpdatedAt: firebaseAdmin.firestore.Timestamp.now(),
+    // Canonical period. Written ONLY when Stripe reported one, so a
+    // subscription without period data leaves the stored value untouched
+    // rather than having it overwritten with "now".
+    ...(billingCycleStartDate ? { billingCycleStart: firebaseAdmin.firestore.Timestamp.fromDate(billingCycleStartDate) } : {}),
+    ...(billingCycleEndDate ? { currentPeriodEnd: firebaseAdmin.firestore.Timestamp.fromDate(billingCycleEndDate) } : {}),
     updatedAt: firebaseAdmin.firestore.Timestamp.now(), // General updatedAt timestamp
   };
 
@@ -79,7 +95,8 @@ export async function updateUserPlanInFirestore(args: {
     subscriptionStatus: status,
     subscriptionId,
     customerId,
-    usageMonth: currentMonth,
+    billingInterval: billingInterval || null,
+    periodSource: billingState?.periodSource ?? "none",
   });
   
   try {
@@ -93,8 +110,15 @@ export async function updateUserPlanInFirestore(args: {
     throw firestoreError; // Re-throw to trigger error handling
   }
 
-  // Reset usage counters for new plan
-  await resetUsageForNewPlan(uid, planMapping.planId, billingInterval);
+  // Phase WEBHOOK-B1 — USAGE IS NOT TOUCHED HERE. This function used to call
+  // `resetUsageForNewPlan()`, which zeroed `runsThisMonth` and rewrote
+  // `usageMonth` on EVERY synchronization. Because Stripe retries deliveries
+  // and re-sends events, that made an ordinary duplicate
+  // `customer.subscription.updated` — or any reconciliation pass — hand the
+  // customer a fresh month of quota. Calendar-month rollover is owned by the
+  // run-quota gate (`lib/stripe/usageCheck.ts`), which compares the stored
+  // `usageMonth` against the current month on each request; leaving both
+  // fields alone here keeps that the single rollover authority.
 
   console.log(`[webhookHelpers] ✅ Successfully updated user ${uid} to plan ${planMapping.planId}`, {
     monthlyLimit: planMapping.monthlyLimit,

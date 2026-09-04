@@ -13,6 +13,7 @@ import { stripe } from "./client";
 import { adminDb } from "@/lib/firebase/admin";
 import { mapSubscriptionToPlan } from "@/lib/billing/subscriptionMapper";
 import { updateUserPlanInFirestore } from "./webhookHelpers";
+import { resolveSubscriptionBillingState } from "@/lib/billing/subscriptionBillingState";
 import { BillingInterval } from "@/lib/plans";
 import { isOverrideActive } from "@/lib/admin/entitlements";
 
@@ -95,9 +96,19 @@ export async function validateUserSubscription(
       const expectedPlan = planMapping?.planId;
       
       // If Firestore plan doesn't match Stripe, update it
+      // Phase WEBHOOK-B1: the cadence is part of "does local state match
+      // Stripe". It was previously excluded, so a subscription whose plan,
+      // id and status all matched but whose stored `billingInterval` was
+      // stale — exactly the state left behind when a Price's cadence is
+      // corrected — could never be repaired by this path.
+      const canonicalState = resolveSubscriptionBillingState(activeSubscription as never);
+      const firestoreBillingInterval = userData?.billingInterval;
+      const intervalMismatch = canonicalState.ok && firestoreBillingInterval !== canonicalState.state.billingInterval;
+
       if (currentPlan !== expectedPlan || 
           firestoreSubscriptionId !== activeSubscription.id ||
-          firestoreStatus !== activeSubscription.status) {
+          firestoreStatus !== activeSubscription.status ||
+          intervalMismatch) {
         console.log("[subscriptionValidation] Plan mismatch detected, syncing from Stripe:", {
           uid,
           firestorePlan: currentPlan,
@@ -109,8 +120,15 @@ export async function validateUserSubscription(
         });
 
         // Update Firestore to match Stripe
-        const billingInterval: BillingInterval = 
-          activeSubscription.items.data[0]?.price.recurring?.interval === "year" ? "year" : "month";
+        // Phase WEBHOOK-B1: same canonical resolver the webhook uses. If the
+        // subscription cannot be resolved, this path writes nothing derived
+        // from it rather than manufacturing a period from the current time.
+        const billingStateResult = canonicalState;
+        if (!billingStateResult.ok) {
+          console.warn("[subscriptionValidation] Could not resolve canonical billing state; skipping reconciliation write");
+          return true;
+        }
+        const billingInterval: BillingInterval = billingStateResult.state.billingInterval;
         
         await updateUserPlanInFirestore({
           uid,
@@ -119,7 +137,7 @@ export async function validateUserSubscription(
           planMapping: planMapping!,
           status: activeSubscription.status,
           billingInterval,
-          currentPeriodStart: (activeSubscription as any).current_period_start, // Use Stripe's actual billing period start (type assertion needed for TypeScript)
+          billingState: billingStateResult.state,
         });
 
         return true;

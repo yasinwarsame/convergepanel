@@ -52,6 +52,7 @@ import { resetUsageForNewPlan } from "@/lib/stripe/usage";
 import { getPlanFromPriceId, getFreePlanConfig, PlanConfig } from "@/lib/billing/planMapping";
 import { PLAN_CONFIG, getPlanIdFromPriceId, getPlanConfigById, BillingPlanId, STRIPE_PRICE_TO_PLAN } from "@/lib/billing/planConfig";
 import { mapSubscriptionToPlan, getCurrentMonthString, SubscriptionPlanMapping } from "@/lib/billing/subscriptionMapper";
+import { resolveSubscriptionBillingState } from "@/lib/billing/subscriptionBillingState";
 import { PlanId, BillingInterval } from "@/lib/plans";
 import { updateUserPlanInFirestore } from "@/lib/stripe/webhookHelpers";
 import { getPostHogClient } from "@/lib/posthog-server";
@@ -447,9 +448,20 @@ export async function handleSubscriptionChange(subscription: Stripe.Subscription
     });
   }
 
-  // Determine billing interval from subscription
-  const isAnnual = subscription.items.data[0]?.price.recurring?.interval === "year";
-  const billingInterval: BillingInterval = isAnnual ? "year" : "month";
+  // Phase WEBHOOK-B1: cadence and billing period both come from the canonical
+  // resolver, which reads the PLAN-BEARING ITEM rather than `items.data[0]`
+  // and prefers the item-level period over the subscription-level one (which
+  // can be stale in flexible billing mode after an interval change).
+  const billingStateResult = resolveSubscriptionBillingState(subscription as never);
+  if (!billingStateResult.ok) {
+    logger.error("[webhook] Could not resolve canonical billing state — refusing to persist derived billing fields", {
+      subscriptionId,
+      reason: billingStateResult.reason,
+    });
+    return;
+  }
+  const billingState = billingStateResult.state;
+  const billingInterval: BillingInterval = billingState.billingInterval;
 
   // Log for debugging
   console.log("[webhook] Processing subscription change:", {
@@ -475,7 +487,7 @@ export async function handleSubscriptionChange(subscription: Stripe.Subscription
       planMapping,
       status: subscriptionStatus,
       billingInterval,
-      currentPeriodStart: (subscription as any).current_period_start, // Pass Stripe's actual billing period start
+      billingState,
     });
     console.log(`[webhook] ✅ Successfully processed subscription change for user ${firebaseUid}`);
 
