@@ -19,10 +19,17 @@
  *     with a "Restoring…" pending label. Controls are disabled while this
  *     Project is busy; the hook's per-Project lock is the real duplicate
  *     guard.
- *   - After a committed transition, `refreshSections()` refetches BOTH
- *     lists from the server (never an optimistic move). After a stale /
- *     gone / denied outcome the message is shown inline (role="alert"),
- *     `refreshSections()` runs, and nothing is retried.
+ *   - Phase PROJECT-UI-AR-P3A-I1 — outcomes that trigger a canonical refetch
+ *     (committed archive/restore, or a stale / gone / denied denial) are
+ *     REPORTED UPWARD via `onLifecycleOutcome()` instead of being shown
+ *     here: the shell's refetch empties both lists and unmounts this row in
+ *     the same commit, so a row-local message would never paint and a
+ *     focused trigger would be removed from the DOM. The shell owns the
+ *     status region, the refetch, and post-refresh focus. Only
+ *     NON-refreshing failures (network / internal) stay row-local, because
+ *     this row remains mounted and the token is still valid for a manual
+ *     retry. `onLifecycleAttemptStart()` lets the shell clear a previous
+ *     notice the moment a new attempt begins. Nothing is ever retried.
  */
 
 import { useRef, useState } from "react";
@@ -32,6 +39,11 @@ import { teamProjectMutationErrorCopy, shouldRefreshAfterTeamProjectMutationErro
 import type { TeamProjectSummary } from "@/hooks/useTeamProjects";
 import type { UseTeamProjectLifecycleResult } from "@/hooks/useTeamProjectLifecycle";
 
+/** Reported to the shell for every outcome that requires a canonical refetch. Never carries ids — only the name the user already sees and the already-sanitized message. */
+export type TeamProjectLifecycleOutcome =
+  | { kind: "committed"; operation: "archive" | "restore"; projectName: string }
+  | { kind: "stale"; operation: "archive" | "restore"; message: string };
+
 const buttonClass =
   "rounded-lg border border-cp-border px-3 py-1.5 text-xs font-medium text-cp-text transition-colors hover:bg-cp-surface disabled:cursor-not-allowed disabled:opacity-50";
 
@@ -40,13 +52,17 @@ export function TeamProjectLifecycleRow({
   project,
   canManageProjects,
   lifecycle,
-  refreshSections,
+  onLifecycleAttemptStart,
+  onLifecycleOutcome,
 }: {
   workspaceId: string;
   project: TeamProjectSummary;
   canManageProjects: boolean;
   lifecycle: Pick<UseTeamProjectLifecycleResult, "isProjectBusy" | "getBusyOperation" | "archiveProject" | "restoreProject">;
-  refreshSections: () => void;
+  /** Called synchronously when the user starts a new attempt (opens the Archive dialog or clicks Restore) so the shell can clear a stale notice. */
+  onLifecycleAttemptStart: () => void;
+  /** Called exactly once per refetch-triggering outcome; the shell refetches both sections, shows the message, and manages focus. */
+  onLifecycleOutcome: (outcome: TeamProjectLifecycleOutcome) => void;
 }) {
   const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
   const [rowError, setRowError] = useState<string | null>(null);
@@ -61,15 +77,18 @@ export function TeamProjectLifecycleRow({
   async function handleRestore() {
     if (busy) return;
     setRowError(null);
+    onLifecycleAttemptStart();
     const result = await lifecycle.restoreProject(project);
     if (result.status === "ok") {
-      refreshSections();
+      onLifecycleOutcome({ kind: "committed", operation: "restore", projectName: project.name });
       return;
     }
-    setRowError(teamProjectMutationErrorCopy(result.errorCode));
+    const message = teamProjectMutationErrorCopy(result.errorCode);
     if (shouldRefreshAfterTeamProjectMutationError(result.errorCode)) {
-      refreshSections();
+      onLifecycleOutcome({ kind: "stale", operation: "restore", message });
+      return;
     }
+    setRowError(message);
   }
 
   return (
@@ -90,6 +109,7 @@ export function TeamProjectLifecycleRow({
                 disabled={busy}
                 onClick={() => {
                   setRowError(null);
+                  onLifecycleAttemptStart();
                   setArchiveDialogOpen(true);
                 }}
                 className={buttonClass}
@@ -118,12 +138,11 @@ export function TeamProjectLifecycleRow({
           lifecycle={lifecycle}
           onArchived={() => {
             setArchiveDialogOpen(false);
-            refreshSections();
+            onLifecycleOutcome({ kind: "committed", operation: "archive", projectName: project.name });
           }}
           onStaleOrGone={(message) => {
             setArchiveDialogOpen(false);
-            setRowError(message);
-            refreshSections();
+            onLifecycleOutcome({ kind: "stale", operation: "archive", message });
           }}
         />
       )}

@@ -71,6 +71,15 @@ function item(overrides: Partial<any> = {}) {
 function buttons(renderer: TestRenderer.ReactTestRenderer, label: string) {
   return renderer.root.findAllByType("button").filter((b) => b.props.children === label);
 }
+const textOf = (n: TestRenderer.ReactTestInstance) => (Array.isArray(n.props.children) ? n.props.children.join("") : String(n.props.children));
+/** Text of the SHELL-owned lifecycle notice(s) only — the programmatic-focus anchor (tabIndex -1) with the given role. Excludes SectionLoadingRow's own role=status and any dialog/row-local alert. */
+function liveTexts(renderer: TestRenderer.ReactTestRenderer, role: "alert" | "status") {
+  return renderer.root.findAll((n) => n.props?.role === role && n.props?.tabIndex === -1).map(textOf);
+}
+/** Text of EVERY role=alert node (shell notice and dialog/row-local alerts alike). */
+function allAlertTexts(renderer: TestRenderer.ReactTestRenderer) {
+  return renderer.root.findAll((n) => n.props?.role === "alert").map(textOf);
+}
 
 async function mount(props: { canCreateProject: boolean; canManageProjects?: boolean; canReadAudit?: boolean }) {
   let renderer!: TestRenderer.ReactTestRenderer;
@@ -351,8 +360,8 @@ describe("TeamProjectsShell — archive/restore flows (success, stale, denied, f
     await openArchiveDialogAndConfirm(renderer);
     expect(archiveProject).toHaveBeenCalledTimes(1);
     expect(renderer.root.findAll((n) => n.props?.role === "dialog")).toHaveLength(0);
-    const alerts = renderer.root.findAll((n) => n.props?.role === "alert");
-    expect(alerts.map((a) => a.props.children)).toContain(copy);
+    // The message now lives in the SHELL-owned region (role=alert), outside any row.
+    expect(liveTexts(renderer, "alert")).toEqual([`Error: ${copy}`]);
     expect(active.resetAndReloadFromStart).toHaveBeenCalledTimes(1);
     expect(archived.resetAndReloadFromStart).toHaveBeenCalledTimes(1);
   });
@@ -368,7 +377,7 @@ describe("TeamProjectsShell — archive/restore flows (success, stale, denied, f
       await buttons(renderer, "Restore")[0].props.onClick();
     });
     expect(restoreProject).toHaveBeenCalledTimes(1);
-    expect(renderer.root.findAll((n) => n.props?.role === "alert").map((a) => a.props.children)).toContain("This project changed. Refresh and try again.");
+    expect(liveTexts(renderer, "alert")).toEqual(["Error: This project changed. Refresh and try again."]);
     expect(active.resetAndReloadFromStart).toHaveBeenCalledTimes(1);
     expect(archived.resetAndReloadFromStart).toHaveBeenCalledTimes(1);
   });
@@ -383,7 +392,8 @@ describe("TeamProjectsShell — archive/restore flows (success, stale, denied, f
     await openArchiveDialogAndConfirm(renderer);
     expect(archiveProject).toHaveBeenCalledTimes(1);
     expect(renderer.root.findAll((n) => n.props?.role === "dialog")).toHaveLength(1);
-    expect(renderer.root.findAll((n) => n.props?.role === "alert").map((a) => a.props.children)).toContain("Something went wrong. Please try again.");
+    expect(allAlertTexts(renderer)).toEqual(["Something went wrong. Please try again."]); // dialog-local only
+    expect(liveTexts(renderer, "alert")).toEqual([]); // no shell notice
     expect(active.resetAndReloadFromStart).not.toHaveBeenCalled();
     expect(archived.resetAndReloadFromStart).not.toHaveBeenCalled();
     // Manual retry is still possible: the confirm button is present and enabled.
@@ -425,3 +435,289 @@ describe("TeamProjectsShell — archive/restore flows (success, stale, denied, f
   });
 });
 
+describe("TeamProjectsShell — shell-owned lifecycle status region + stable focus, Phase PROJECT-UI-AR-P3A-I1", () => {
+  /**
+   * Stateful list mocks: `resetAndReloadFromStart` flips the instance to
+   * "loading" (exactly what the real hook does synchronously), and
+   * `settle()` re-renders with both instances "ready" again — so the tests
+   * can observe that focus is applied only AFTER the canonical refetch has
+   * settled, and exactly once.
+   */
+  type ListState = Omit<ReturnType<typeof projectsResult>, "items" | "status"> & { items: any[]; status: "loading" | "ready" | "error" };
+  function statefulLists(activeItems: any[], archivedItems: any[]) {
+    const active = projectsResult({ items: activeItems, status: "ready" }) as ListState;
+    const archived = projectsResult({ items: archivedItems, status: "ready" }) as ListState;
+    active.resetAndReloadFromStart = jest.fn(() => {
+      active.status = "loading";
+      active.items = [];
+    });
+    archived.resetAndReloadFromStart = jest.fn(() => {
+      archived.status = "loading";
+      archived.items = [];
+    });
+    mockedUseTeamProjects.mockImplementation((args: { status: "active" | "archived" }) => (args.status === "archived" ? { ...archived } : { ...active }));
+    return { active, archived };
+  }
+  /** Only the shell's STABLE anchors are recorded: the two section headings (by id) and the notice region (by role). ProjectDialogFrame's own initial-focus / return-to-trigger calls on buttons are deliberately not logged — they are not the post-refresh focus target under test. */
+  const focusCalls: string[] = [];
+  function mountWithFocus(props: { canCreateProject: boolean; canManageProjects?: boolean }) {
+    focusCalls.length = 0;
+    const makeElement = () => createElement(TeamProjectsShell, { workspaceId: "ws-1", workspaceName: "Acme Team", canReadAudit: true, canManageProjects: true, ...props });
+    let renderer!: TestRenderer.ReactTestRenderer;
+    return {
+      async mount() {
+        await act(async () => {
+          renderer = TestRenderer.create(makeElement(), {
+            createNodeMock: (el: any) => {
+              const isAnchor = el.type === "h2" && typeof el.props?.id === "string";
+              const isNotice = el.type === "div" && el.props?.tabIndex === -1 && (el.props?.role === "status" || el.props?.role === "alert");
+              if (isAnchor) return { focus: () => focusCalls.push(el.props.id) };
+              if (isNotice) return { focus: () => focusCalls.push(`notice:${el.props.role}`) };
+              return { focus: () => {} };
+            },
+          });
+        });
+        return renderer;
+      },
+      async settle(lists: { active: ListState; archived: ListState }, next: { activeItems?: any[]; archivedItems?: any[] } = {}) {
+        lists.active.status = "ready";
+        lists.archived.status = "ready";
+        if (next.activeItems) lists.active.items = next.activeItems;
+        if (next.archivedItems) lists.archived.items = next.archivedItems;
+        await act(async () => {
+          renderer.update(makeElement());
+        });
+      },
+      async rerender() {
+        await act(async () => {
+          renderer.update(makeElement());
+        });
+      },
+    };
+  }
+  async function confirmArchive(renderer: TestRenderer.ReactTestRenderer) {
+    await act(async () => {
+      buttons(renderer, "Archive")[0].props.onClick();
+    });
+    await act(async () => {
+      await buttons(renderer, "Archive").at(-1)!.props.onClick();
+    });
+  }
+
+  it("A. archive success renders a shell-owned role=status message naming the Project, outside any row", async () => {
+    const lists = statefulLists([item({ name: "Quarterly Diligence" })], []);
+    mockedUseTeamProjectLifecycle.mockReturnValue(lifecycleResult({ archiveProject: jest.fn().mockResolvedValue({ status: "ok", project: item({ status: "archived" }) }) }));
+    const h = mountWithFocus({ canCreateProject: true });
+    const renderer = await h.mount();
+    await confirmArchive(renderer);
+    expect(liveTexts(renderer, "status")).toEqual(["Done: Quarterly Diligence was archived."]);
+    expect(renderer.root.findAllByType("li")).toHaveLength(0); // rows are gone (lists loading) but the message is still here
+  });
+
+  it("B. restore success renders a shell-owned role=status restored message", async () => {
+    const lists = statefulLists([], [item({ id: "old-1", name: "Old Project", status: "archived" })]);
+    mockedUseTeamProjectLifecycle.mockReturnValue(lifecycleResult({ restoreProject: jest.fn().mockResolvedValue({ status: "ok", project: item({ id: "old-1", status: "active" }) }) }));
+    const h = mountWithFocus({ canCreateProject: true });
+    const renderer = await h.mount();
+    await act(async () => {
+      await buttons(renderer, "Restore")[0].props.onClick();
+    });
+    expect(liveTexts(renderer, "status")).toEqual(["Done: Old Project was restored."]);
+    void lists;
+  });
+
+  it("C. the status message survives the row's removal AND the refetched rows returning — it is not owned by any row", async () => {
+    const lists = statefulLists([item({ name: "Quarterly Diligence" })], []);
+    mockedUseTeamProjectLifecycle.mockReturnValue(lifecycleResult({ archiveProject: jest.fn().mockResolvedValue({ status: "ok", project: item({ status: "archived" }) }) }));
+    const h = mountWithFocus({ canCreateProject: true });
+    const renderer = await h.mount();
+    await confirmArchive(renderer);
+    expect(renderer.root.findAllByType("li")).toHaveLength(0);
+    await h.settle(lists, { activeItems: [], archivedItems: [item({ name: "Quarterly Diligence", status: "archived" })] });
+    expect(renderer.root.findAllByType("li")).toHaveLength(1);
+    expect(liveTexts(renderer, "status")).toEqual(["Done: Quarterly Diligence was archived."]);
+  });
+
+  it("D/F. archive success: focus is NOT moved while the lists are still reloading; once both settle, the Archived Projects heading receives focus (not the old trigger, not body)", async () => {
+    const lists = statefulLists([item()], []);
+    mockedUseTeamProjectLifecycle.mockReturnValue(lifecycleResult({ archiveProject: jest.fn().mockResolvedValue({ status: "ok", project: item({ status: "archived" }) }) }));
+    const h = mountWithFocus({ canCreateProject: true });
+    const renderer = await h.mount();
+    await confirmArchive(renderer);
+    expect(focusCalls).toEqual([]); // lists are loading → no focus yet
+    await h.settle(lists, { archivedItems: [item({ status: "archived" })] });
+    expect(focusCalls).toEqual(["team-archived-projects-heading"]);
+  });
+
+  it("E. restore success: after the lists settle, the Projects (active) heading receives focus", async () => {
+    const lists = statefulLists([], [item({ id: "old-1", status: "archived" })]);
+    mockedUseTeamProjectLifecycle.mockReturnValue(lifecycleResult({ restoreProject: jest.fn().mockResolvedValue({ status: "ok", project: item({ id: "old-1", status: "active" }) }) }));
+    const h = mountWithFocus({ canCreateProject: true });
+    const renderer = await h.mount();
+    await act(async () => {
+      await buttons(renderer, "Restore")[0].props.onClick();
+    });
+    expect(focusCalls).toEqual([]);
+    await h.settle(lists, { activeItems: [item({ id: "old-1" })] });
+    expect(focusCalls).toEqual(["team-active-projects-heading"]);
+  });
+
+  it("G/H/I. stale archive (409) and stale restore: the error is represented in the shell region (role=alert), and focus goes to that region — never a success-style section jump", async () => {
+    const lists = statefulLists([item()], [item({ id: "old-1", status: "archived" })]);
+    mockedUseTeamProjectLifecycle.mockReturnValue(
+      lifecycleResult({
+        archiveProject: jest.fn().mockResolvedValue({ status: "error", errorCode: "conflict" }),
+        restoreProject: jest.fn().mockResolvedValue({ status: "error", errorCode: "invalid_project_status_transition" }),
+      })
+    );
+    const h = mountWithFocus({ canCreateProject: true });
+    const renderer = await h.mount();
+    await confirmArchive(renderer);
+    expect(liveTexts(renderer, "alert")).toEqual(["Error: This project changed. Refresh and try again."]);
+    expect(liveTexts(renderer, "status")).toEqual([]);
+    await h.settle(lists, { activeItems: [item()], archivedItems: [item({ id: "old-1", status: "archived" })] });
+    expect(focusCalls).toEqual(["notice:alert"]);
+    focusCalls.length = 0;
+    await act(async () => {
+      await buttons(renderer, "Restore")[0].props.onClick();
+    });
+    expect(liveTexts(renderer, "alert")).toEqual(["Error: This project's status has already changed."]);
+    await h.settle(lists, { activeItems: [item()], archivedItems: [item({ id: "old-1", status: "archived" })] });
+    expect(focusCalls).toEqual(["notice:alert"]);
+  });
+
+  it("H'. a generic (non-refreshing) archive failure moves NO focus, shows NO shell notice, and keeps the dialog open", async () => {
+    const lists = statefulLists([item()], []);
+    mockedUseTeamProjectLifecycle.mockReturnValue(lifecycleResult({ archiveProject: jest.fn().mockResolvedValue({ status: "error", errorCode: "internal_error" }) }));
+    const h = mountWithFocus({ canCreateProject: true });
+    const renderer = await h.mount();
+    await confirmArchive(renderer);
+    await h.rerender();
+    expect(focusCalls).toEqual([]);
+    expect(liveTexts(renderer, "status")).toEqual([]);
+    expect(renderer.root.findAll((n) => n.props?.role === "dialog")).toHaveLength(1);
+    expect(lists.active.resetAndReloadFromStart).not.toHaveBeenCalled();
+  });
+
+  it("J. a pending request triggers no focus and no notice", async () => {
+    const lists = statefulLists([], [item({ id: "old-1", status: "archived" })]);
+    let resolve!: (v: unknown) => void;
+    const restoreProject = jest.fn(() => new Promise((r) => (resolve = r)));
+    mockedUseTeamProjectLifecycle.mockReturnValue(lifecycleResult({ restoreProject }));
+    const h = mountWithFocus({ canCreateProject: true });
+    const renderer = await h.mount();
+    await act(async () => {
+      void buttons(renderer, "Restore")[0].props.onClick();
+      await Promise.resolve();
+    });
+    expect(focusCalls).toEqual([]);
+    expect(liveTexts(renderer, "status")).toEqual([]);
+    await act(async () => {
+      resolve({ status: "ok", project: item({ id: "old-1", status: "active" }) });
+    });
+    await h.settle(lists, { activeItems: [item({ id: "old-1" })] });
+    expect(focusCalls).toEqual(["team-active-projects-heading"]);
+  });
+
+  it("K/L. focus intent is consumed once: later unrelated re-renders do not refocus, and a second lifecycle action refocuses its own target", async () => {
+    const lists = statefulLists([item({ name: "A" })], []);
+    const archiveProject = jest.fn().mockResolvedValue({ status: "ok", project: item({ status: "archived" }) });
+    const restoreProject = jest.fn().mockResolvedValue({ status: "ok", project: item({ status: "active" }) });
+    mockedUseTeamProjectLifecycle.mockReturnValue(lifecycleResult({ archiveProject, restoreProject }));
+    const h = mountWithFocus({ canCreateProject: true });
+    const renderer = await h.mount();
+    await confirmArchive(renderer);
+    await h.settle(lists, { activeItems: [], archivedItems: [item({ name: "A", status: "archived" })] });
+    expect(focusCalls).toEqual(["team-archived-projects-heading"]);
+    await h.rerender();
+    await h.rerender();
+    expect(focusCalls).toEqual(["team-archived-projects-heading"]); // no refocus on unrelated renders
+    // An UNRELATED later reload cycle (e.g. retry / pagination / another tab's data) must not replay the consumed intent.
+    lists.active.status = "loading";
+    await h.rerender();
+    await h.settle(lists);
+    expect(focusCalls).toEqual(["team-archived-projects-heading"]);
+    await act(async () => {
+      await buttons(renderer, "Restore")[0].props.onClick();
+    });
+    expect(liveTexts(renderer, "status")).toEqual(["Done: A was restored."]); // previous notice replaced, never two
+    await h.settle(lists, { activeItems: [item({ name: "A" })], archivedItems: [] });
+    expect(focusCalls).toEqual(["team-archived-projects-heading", "team-active-projects-heading"]);
+  });
+
+  it("M/N. archiving the LAST active Project and restoring the LAST archived Project: both headings stay mounted through the empty state and still receive focus", async () => {
+    const lists = statefulLists([item({ name: "Only" })], []);
+    mockedUseTeamProjectLifecycle.mockReturnValue(
+      lifecycleResult({
+        archiveProject: jest.fn().mockResolvedValue({ status: "ok", project: item({ status: "archived" }) }),
+        restoreProject: jest.fn().mockResolvedValue({ status: "ok", project: item({ status: "active" }) }),
+      })
+    );
+    const h = mountWithFocus({ canCreateProject: true });
+    const renderer = await h.mount();
+    await confirmArchive(renderer);
+    await h.settle(lists, { activeItems: [], archivedItems: [item({ name: "Only", status: "archived" })] });
+    expect(JSON.stringify(renderer.toJSON())).toContain("No projects yet");
+    expect(focusCalls).toEqual(["team-archived-projects-heading"]);
+    await act(async () => {
+      await buttons(renderer, "Restore")[0].props.onClick();
+    });
+    await h.settle(lists, { activeItems: [item({ name: "Only" })], archivedItems: [] });
+    expect(JSON.stringify(renderer.toJSON())).toContain("No archived projects.");
+    expect(focusCalls).toEqual(["team-archived-projects-heading", "team-active-projects-heading"]);
+  });
+
+  it("attempt-start clears a previous notice before the new request resolves", async () => {
+    const lists = statefulLists([item({ name: "A" })], [item({ id: "old-1", name: "B", status: "archived" })]);
+    let resolve!: (v: unknown) => void;
+    mockedUseTeamProjectLifecycle.mockReturnValue(
+      lifecycleResult({
+        archiveProject: jest.fn().mockResolvedValue({ status: "ok", project: item({ status: "archived" }) }),
+        restoreProject: jest.fn(() => new Promise((r) => (resolve = r))),
+      })
+    );
+    const h = mountWithFocus({ canCreateProject: true });
+    const renderer = await h.mount();
+    await confirmArchive(renderer);
+    expect(liveTexts(renderer, "status")).toHaveLength(1);
+    await h.settle(lists, { activeItems: [], archivedItems: [item({ id: "old-1", name: "B", status: "archived" }), item({ name: "A", status: "archived" })] });
+    await act(async () => {
+      void buttons(renderer, "Restore")[0].props.onClick();
+      await Promise.resolve();
+    });
+    expect(liveTexts(renderer, "status")).toEqual([]); // cleared at attempt start
+    await act(async () => {
+      resolve({ status: "ok", project: item({ id: "old-1", status: "active" }) });
+    });
+  });
+
+  describe("accessibility contract (O–U)", () => {
+    it("O/P/Q/R/S. success uses role=status, error uses role=alert; both are the same programmatic-focus anchor with tabIndex -1; headings use tabIndex -1; no positive tabindex anywhere in the shell", async () => {
+      statefulLists([item()], []);
+      mockedUseTeamProjectLifecycle.mockReturnValue(lifecycleResult({ archiveProject: jest.fn().mockResolvedValue({ status: "ok", project: item({ status: "archived" }) }) }));
+      const h = mountWithFocus({ canCreateProject: true });
+      const renderer = await h.mount();
+      const headings = renderer.root.findAllByType("h2");
+      const anchors = headings.filter((n) => n.props.id === "team-active-projects-heading" || n.props.id === "team-archived-projects-heading");
+      expect(anchors).toHaveLength(2);
+      for (const a of anchors) expect(a.props.tabIndex).toBe(-1);
+      await confirmArchive(renderer);
+      const status = renderer.root.findAll((n) => n.props?.role === "status" && n.props?.tabIndex === -1);
+      expect(status).toHaveLength(1);
+      const positive = renderer.root.findAll((n) => typeof n.props?.tabIndex === "number" && n.props.tabIndex > 0);
+      expect(positive).toHaveLength(0);
+    });
+
+    it("T/U. the Project name is rendered as text (never markup), and success vs error is distinguished by role and a textual prefix, not color alone", async () => {
+      statefulLists([item({ name: "<b>Injected</b> & Sons" })], []);
+      mockedUseTeamProjectLifecycle.mockReturnValue(lifecycleResult({ archiveProject: jest.fn().mockResolvedValue({ status: "ok", project: item({ status: "archived" }) }) }));
+      const h = mountWithFocus({ canCreateProject: true });
+      const renderer = await h.mount();
+      await confirmArchive(renderer);
+      const status = renderer.root.findAll((n) => n.props?.role === "status")[0];
+      expect(status.props.children).toEqual(["Done: ", "<b>Injected</b> & Sons was archived."]); // plain text children, no dangerouslySetInnerHTML
+      expect(status.props.dangerouslySetInnerHTML).toBeUndefined();
+      expect(liveTexts(renderer, "status")[0].startsWith("Done: ")).toBe(true);
+    });
+  });
+});
