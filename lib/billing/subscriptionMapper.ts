@@ -9,6 +9,8 @@
  */
 
 import { BillingPlanId, PLAN_CONFIG, getPlanConfigById, getPlanIdFromPriceId } from "./planConfig";
+import { readLegacyPlanMetadata } from "./legacyPlanMetadata";
+import { isPlanBearingSubscriptionStatus } from "./subscriptionStatus";
 import Stripe from "stripe";
 
 export interface SubscriptionPlanMapping {
@@ -24,7 +26,8 @@ export interface SubscriptionPlanMapping {
  * Determines the plan based on:
  * 1. Subscription status (must be "active" or "trialing" for paid plans)
  * 2. Price ID matching (primary method)
- * 3. Metadata targetPlan (fallback for test scenarios)
+ * 3. Validated, server-originated metadata.targetPlan (legacy fallback for
+ *    subscriptions whose Price has since been retired from the checkout map)
  * 
  * @param subscription - Stripe subscription object
  * @returns Plan mapping with plan ID, limits, and active status
@@ -34,11 +37,11 @@ export function mapSubscriptionToPlan(
 ): SubscriptionPlanMapping {
   const status = subscription.status;
   const priceId = subscription.items.data[0]?.price.id;
-  const metadata = subscription.metadata || {};
-  const targetPlan = metadata.targetPlan as string | undefined;
 
-  // If subscription is not active or trialing, return free plan
-  const isActiveStatus = status === "active" || status === "trialing" || status === "past_due";
+  // Canonical status contract — see lib/billing/subscriptionStatus.ts. This
+  // is the plan-bearing set (which still includes "past_due"), deliberately
+  // wider than the entitlement-bearing set used by the run-quota gate.
+  const isActiveStatus = isPlanBearingSubscriptionStatus(status);
   
   if (!isActiveStatus) {
     const freeConfig = PLAN_CONFIG.free;
@@ -64,23 +67,20 @@ export function mapSubscriptionToPlan(
     }
   }
 
-  // Method 2: Check metadata.targetPlan (fallback for test scenarios)
-  if (targetPlan === "full") {
-    const fullConfig = PLAN_CONFIG.full;
+  // Method 2: legacy fallback — a subscription whose Price is no longer in
+  // the CURRENT checkout price map (a retired Price, e.g. the defective
+  // monthly-cadence "Full Annual" Price this incident retired) is still a
+  // genuinely paying subscription. `readLegacyPlanMetadata()` accepts only
+  // the exact server-written "lite"/"full" markers and fails closed on
+  // everything else; it is reached ONLY when the Price above matched
+  // nothing, so it can never override a recognized current Price.
+  const legacyPlan = readLegacyPlanMetadata(subscription);
+  if (legacyPlan) {
+    const legacyConfig = PLAN_CONFIG[legacyPlan];
     return {
-      planId: "full",
-      monthlyLimit: fullConfig.monthlyLimit,
-      maxModelsPerRun: fullConfig.maxModels,
-      isActive: true,
-    };
-  }
-
-  if (targetPlan === "lite") {
-    const liteConfig = PLAN_CONFIG.lite;
-    return {
-      planId: "lite",
-      monthlyLimit: liteConfig.monthlyLimit,
-      maxModelsPerRun: liteConfig.maxModels,
+      planId: legacyPlan,
+      monthlyLimit: legacyConfig.monthlyLimit,
+      maxModelsPerRun: legacyConfig.maxModels,
       isActive: true,
     };
   }
