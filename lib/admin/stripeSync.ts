@@ -11,6 +11,7 @@ import Stripe from "stripe";
 import { getUserEffectiveEntitlement, entitlementPlanToPlanId, normalizePlanId, PLAN_LIMITS } from "./entitlements";
 import { mapSubscriptionToPlan } from "@/lib/billing/subscriptionMapper";
 import { isEntitlementBearingSubscriptionStatus } from "@/lib/billing/subscriptionStatus";
+import { resolveSubscriptionBillingState } from "@/lib/billing/subscriptionBillingState";
 import { getPlanConfig } from "@/lib/plans";
 
 /**
@@ -74,9 +75,15 @@ export async function syncSubscriptionToFirestore(
   const status = subscription.status;
   const planMapping = mapSubscriptionToPlan(subscription);
   const planFromStripe = planMapping.isActive ? normalizePlanId(planMapping.planId) : null;
-  const currentPeriodEnd = (subscription as any).current_period_end
-    ? Timestamp.fromDate(new Date((subscription as any).current_period_end * 1000))
-    : null;
+
+  // Phase WEBHOOK-B1: the period and the cadence come from the canonical
+  // resolver (plan-bearing item, item-level period preferred). This path
+  // previously read the subscription-level `current_period_end` directly and
+  // never persisted `billingInterval` at all, which is why an admin sync of
+  // the corrected annual subscription still left a stale monthly label.
+  const billingStateResult = resolveSubscriptionBillingState(subscription as never);
+  const billingState = billingStateResult.ok ? billingStateResult.state : null;
+  const currentPeriodEnd = billingState?.periodEnd ? Timestamp.fromDate(billingState.periodEnd) : null;
 
   // Get user document to check for override
   const userDoc = await userDocRef.get();
@@ -88,6 +95,10 @@ export async function syncSubscriptionToFirestore(
     subscriptionStatusFromStripe: status,
     currentPeriodEnd,
     stripeSubscriptionId: subscription.id,
+    // Persisted here too, so the three synchronization paths agree. Written
+    // only when the canonical resolver succeeded; never guessed.
+    ...(billingState ? { billingInterval: billingState.billingInterval } : {}),
+    ...(billingState?.periodStart ? { billingCycleStart: Timestamp.fromDate(billingState.periodStart) } : {}),
   };
 
   // Only update entitlements if override is not active

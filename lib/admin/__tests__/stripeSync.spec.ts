@@ -35,13 +35,23 @@ import { syncSubscriptionToFirestore } from "../stripeSync";
 
 const LEGACY_RETIRED_PRICE = "price_retired_full_annual_bad";
 
-function subscription(args: { status: string; priceId: string; metadata?: Record<string, string> }): Stripe.Subscription {
+const AUG_2_2026 = Math.floor(Date.UTC(2026, 7, 2, 2, 33, 35) / 1000);
+const SEP_2_2026 = Math.floor(Date.UTC(2026, 8, 2, 2, 33, 35) / 1000);
+const AUG_2_2027 = Math.floor(Date.UTC(2027, 7, 2, 2, 33, 35) / 1000);
+
+function subscription(args: { status: string; priceId: string; metadata?: Record<string, string>; interval?: "month" | "year"; itemPeriod?: boolean }): Stripe.Subscription {
   return {
     id: "sub_test",
     status: args.status,
     metadata: args.metadata ?? {},
-    current_period_end: 1_800_000_000,
-    items: { data: [{ id: "si_test", price: { id: args.priceId, recurring: { interval: "month" } } }] },
+    current_period_start: SEP_2_2026,
+    current_period_end: AUG_2_2027,
+    items: { data: [{
+      id: "si_test",
+      quantity: 1,
+      price: { id: args.priceId, recurring: { interval: args.interval ?? "month", interval_count: 1 } },
+      ...(args.itemPeriod === false ? {} : { current_period_start: AUG_2_2026, current_period_end: AUG_2_2027 }),
+    }] },
   } as unknown as Stripe.Subscription;
 }
 
@@ -93,5 +103,50 @@ describe("syncSubscriptionToFirestore — fail-closed", () => {
     expect(w).toMatchObject({ planFromStripe: "5_models" });
     expect(w).not.toHaveProperty("plan");
     expect(w).not.toHaveProperty("entitlements");
+  });
+});
+
+
+describe("syncSubscriptionToFirestore — Phase WEBHOOK-B1 canonical billing state", () => {
+  it("REGRESSION: persists billingInterval, which this path previously never wrote", async () => {
+    await syncSubscriptionToFirestore("uid1", subscription({ status: "active", priceId: "price_full_y", interval: "year" }));
+    expect(written()).toMatchObject({ billingInterval: "year", plan: "full" });
+  });
+
+  it("REGRESSION: uses the ITEM-level period, not the stale subscription-level one", async () => {
+    await syncSubscriptionToFirestore("uid1", subscription({ status: "active", priceId: "price_full_y", interval: "year" }));
+    const w = written();
+    expect(w.billingCycleStart).toBe(`TS_${new Date(AUG_2_2026 * 1000).toISOString()}`);
+    expect(w.billingCycleStart).not.toBe(`TS_${new Date(SEP_2_2026 * 1000).toISOString()}`);
+    expect(w.currentPeriodEnd).toBe(`TS_${new Date(AUG_2_2027 * 1000).toISOString()}`);
+  });
+
+  it("never writes usage counters", async () => {
+    await syncSubscriptionToFirestore("uid1", subscription({ status: "active", priceId: "price_full_y", interval: "year" }));
+    const w = written();
+    for (const k of ["runsThisMonth", "usageMonth", "videoRunsThisMonth", "tokensUsedCurrentPeriod", "totalRuns"]) {
+      expect(w).not.toHaveProperty(k);
+    }
+  });
+
+  it("running twice produces an identical write set", async () => {
+    await syncSubscriptionToFirestore("uid1", subscription({ status: "active", priceId: "price_full_y", interval: "year" }));
+    const first = updateMock.mock.calls[0][0];
+    updateMock.mockClear();
+    await syncSubscriptionToFirestore("uid1", subscription({ status: "active", priceId: "price_full_y", interval: "year" }));
+    const second = updateMock.mock.calls[0][0];
+    expect(second).toEqual(first);
+  });
+
+  it("an ambiguous multi-item subscription syncs to free rather than guessing a plan", async () => {
+    const ambiguous = {
+      id: "sub_test", status: "active", metadata: {},
+      items: { data: [
+        { id: "si_a", quantity: 1, price: { id: "price_lite_m", recurring: { interval: "month", interval_count: 1 } } },
+        { id: "si_b", quantity: 1, price: { id: "price_full_y", recurring: { interval: "year", interval_count: 1 } } },
+      ] },
+    } as unknown as Stripe.Subscription;
+    await syncSubscriptionToFirestore("uid1", ambiguous);
+    expect(written()).toMatchObject({ planFromStripe: null, plan: "free" });
   });
 });

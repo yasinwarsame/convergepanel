@@ -1,10 +1,32 @@
 /**
- * Manual Plan Sync Endpoint
- * 
- * This endpoint allows manually syncing a user's plan from their Stripe subscription.
- * Useful for debugging or fixing cases where the webhook didn't fire or failed.
- * 
- * Requires authentication and admin privileges (or the user can sync their own plan).
+ * Self-Serve Plan Sync Endpoint
+ *
+ * Lets a signed-in user re-derive their own plan from Stripe. The billing page
+ * invokes it automatically on the post-checkout redirect, so despite the
+ * "manual" name it is one of the application's THREE automatic billing-authority
+ * writers, alongside the Stripe webhook and request-time reconciliation.
+ *
+ * Phase WEBHOOK-B1-C7 — TWO DEFECTS, ONE HANDLER.
+ *
+ * AUTHORITY. This route carried the old selection rule: list ten subscriptions,
+ * ignore `has_more`, sort by `created`, take the newest. So a customer set the
+ * webhook and request-time reconciliation had both explicitly REFUSED to
+ * resolve was resolved here on the very next page load, and a paying customer
+ * whose authoritative subscription sat behind ten newer throwaway ones was
+ * downgraded to free. Authority now comes from
+ * `resolveCustomerSubscriptionAuthority()` — the same resolver, the same
+ * exhaustive enumeration, the same refusal — so all three automatic writers
+ * answer the same question the same way.
+ *
+ * USAGE (BILLING-USAGE-Q1). This route also called the plan-change usage reset
+ * unconditionally, which zeroed `runsThisMonth`. Because any authenticated user
+ * may sync their own account, that made "re-check my plan" a self-serve quota
+ * reset: run out of runs, press sync, run again. The reset is gone.
+ *
+ * THE OWNERSHIP RULE. Billing synchronization owns Stripe customer identity,
+ * subscription identity, status, plan, cadence and billing-cycle facts. It does
+ * NOT own run usage. Only the canonical calendar-month quota transition in
+ * `lib/stripe/usage.ts` may reset a usage counter.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -12,10 +34,18 @@ import { stripe } from "@/lib/stripe/client";
 import { adminDb, firebaseAdmin } from "@/lib/firebase/admin";
 import { resolveRequestIdentity } from "@/lib/auth/resolveRequestIdentity";
 import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelemetry";
-import { getPlanIdFromPriceId, getPlanConfigById, BillingPlanId, STRIPE_PRICE_TO_PLAN } from "@/lib/billing/planConfig";
-import { BillingInterval } from "@/lib/plans";
-import { resetUsageForNewPlan } from "@/lib/stripe/usage";
-import Stripe from "stripe";
+import { PLAN_CONFIG, getPlanConfigById } from "@/lib/billing/planConfig";
+import { mapSubscriptionToPlan } from "@/lib/billing/subscriptionMapper";
+import { resolveSubscriptionBillingState } from "@/lib/billing/subscriptionBillingState";
+import {
+  reportIncompleteAuthorityEnumeration,
+  reportMultipleEntitlementSubscriptions,
+  resolveCustomerSubscriptionAuthority,
+} from "@/lib/billing/customerSubscriptionAuthority";
+import { isTransientDependencyError } from "@/lib/billing/reconciliationOutcome";
+import { updateUserPlanInFirestore } from "@/lib/stripe/webhookHelpers";
+import { isOverrideActive } from "@/lib/admin/entitlements";
+import { logger } from "@/lib/logger";
 
 // Ensure Node.js runtime (Firebase Admin requires Node.js, not Edge)
 export const runtime = "nodejs";
@@ -107,68 +137,115 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Get customer from Stripe
-    const customer = await stripe.customers.retrieve(stripeCustomerId);
-    if (customer.deleted || typeof customer === "string") {
-      return NextResponse.json(
-        { error: "Stripe customer not found or deleted" },
-        { status: 404 }
-      );
+    // THE AUTHORITY DECISION — one shared resolver for all three automatic
+    // writers. It enumerates the customer's subscriptions to exhaustion, uses
+    // the canonical plan-bearing predicate, and reports more than one candidate
+    // as an unsupported state rather than picking one. The customer id comes
+    // from the stored binding on the user's own document and from nowhere else:
+    // the request body cannot steer whose subscriptions are read.
+    //
+    // This also replaces a separate `customers.retrieve()` round trip. A
+    // definitively missing customer now surfaces as its own outcome from the
+    // one enumeration, so the route makes fewer Stripe calls than before.
+    let authority;
+    try {
+      authority = await resolveCustomerSubscriptionAuthority({ stripe, verifiedCustomerId: stripeCustomerId });
+    } catch (dependencyError) {
+      if (isTransientDependencyError(dependencyError)) {
+        // Could not establish state. That is never authority to change a plan,
+        // and it is certainly not "this customer has no subscriptions".
+        logger.warn("[sync-plan] Could not establish the customer's subscription set; leaving billing state untouched", {
+          dependency: dependencyError.dependency,
+          operation: dependencyError.operation,
+        });
+        return NextResponse.json(
+          { error: "Could not reach Stripe to check your subscription. Please try again in a moment." },
+          { status: 503 }
+        );
+      }
+      throw dependencyError;
     }
 
-    // Get active subscriptions for this customer
-    console.log("[sync-plan] Fetching subscriptions for customer:", stripeCustomerId);
-    const subscriptions = await stripe.subscriptions.list({
-      customer: stripeCustomerId,
-      status: "all", // Get all subscriptions to find active ones
-      limit: 10,
-    });
-
-    console.log("[sync-plan] Found subscriptions:", {
-      count: subscriptions.data.length,
-      subscriptions: subscriptions.data.map(sub => ({
-        id: sub.id,
-        status: sub.status,
-        priceId: sub.items.data[0]?.price.id,
-      })),
-    });
-
-    // Find the most recent active subscription
-    // Sort by created date (most recent first) and find active one
-    const sortedSubscriptions = subscriptions.data.sort((a, b) => b.created - a.created);
-    const activeSubscription = sortedSubscriptions.find(
-      (sub) => sub.status === "active" || sub.status === "trialing" || sub.status === "past_due"
-    );
-    
-    if (activeSubscription) {
-      console.log("[sync-plan] Found active subscription:", {
-        id: activeSubscription.id,
-        status: activeSubscription.status,
-        priceId: activeSubscription.items.data[0]?.price.id,
-        created: new Date(activeSubscription.created * 1000).toISOString(),
+    if (authority.kind === "enumeration_incomplete") {
+      // Phase WEBHOOK-B1-C8: never report success, and never downgrade, on a
+      // set we did not finish reading.
+      reportIncompleteAuthorityEnumeration({
+        path: "self_serve_plan_sync",
+        stripeCustomerId,
+        uid: targetUserId,
+        storedSubscriptionId: (userData?.stripeSubscriptionId as string | undefined) ?? null,
+        reason: authority.reason,
+        pagesFetched: authority.pagesFetched,
       });
+      return NextResponse.json(
+        {
+          error: "We couldn't finish checking your subscriptions, so we've left your plan unchanged. Please contact support.",
+          code: "authority_enumeration_incomplete",
+        },
+        { status: 409 }
+      );
     }
 
-    if (!activeSubscription) {
-      // No active subscription - set to free plan
-      const freeConfig = getPlanConfigById("free");
-      await adminDb.collection("users").doc(targetUserId).set(
-        {
-          plan: "free",
-          planLabel: freeConfig.label,
-          maxModels: freeConfig.maxModels,
-          monthlyLimit: freeConfig.monthlyLimit,
-          maxModelsPerRun: freeConfig.maxModels,
-          subscriptionStatus: "none",
-          stripeSubscriptionId: firebaseAdmin.firestore.FieldValue.delete(),
-          billingInterval: null,
-          planUpdatedAt: firebaseAdmin.firestore.Timestamp.now(),
-        },
-        { merge: true }
+    if (authority.kind === "unverified_customer" || authority.kind === "customer_missing") {
+      // An absent lookup is not proof that the user holds no entitlement — the
+      // stored binding may be stale — so nothing is written.
+      logger.error("[sync-plan] Stripe customer could not be verified; refusing to derive entitlement from an absent lookup");
+      return NextResponse.json(
+        { error: "Your Stripe customer record could not be verified. Please contact support." },
+        { status: 409 }
       );
+    }
 
-      await resetUsageForNewPlan(targetUserId, "free");
+    if (authority.kind === "multiple_entitlements") {
+      // Unsupported under the one-subscription product contract, and the
+      // repository defines no rule for choosing between two. The webhook and
+      // request-time reconciliation both refuse this state; if this route
+      // resolved it, their refusal would mean nothing. Change nothing, surface
+      // it, and do not tell the user a plan was selected.
+      reportMultipleEntitlementSubscriptions({
+        path: "self_serve_plan_sync",
+        stripeCustomerId,
+        uid: targetUserId,
+        storedSubscriptionId: (userData?.stripeSubscriptionId as string | undefined) ?? null,
+        candidateSubscriptionIds: authority.subscriptionIds,
+        candidateCount: authority.count,
+      });
+      return NextResponse.json(
+        {
+          error: "Your account has more than one active subscription, so we can't safely choose between them. Please contact support.",
+          code: "multiple_entitlement_subscriptions",
+        },
+        { status: 409 }
+      );
+    }
 
+    if (authority.kind === "no_entitlement") {
+      // Proven, after exhausting the listing: no current billing relationship.
+      // An admin override deliberately holds a plan open, so it is honoured
+      // here exactly as it is on the request-time path.
+      if (isOverrideActive(userData)) {
+        logger.info("[sync-plan] Skipping downgrade - admin override is active");
+        return NextResponse.json({
+          success: true,
+          message: "No active subscription found, but an account override is in effect.",
+          plan: userData?.plan ?? "free",
+        });
+      }
+
+      await updateUserPlanInFirestore({
+        uid: targetUserId,
+        customerId: stripeCustomerId,
+        subscriptionId: (userData?.stripeSubscriptionId as string | undefined) || "",
+        planMapping: {
+          planId: "free",
+          monthlyLimit: PLAN_CONFIG.free.monthlyLimit,
+          maxModelsPerRun: PLAN_CONFIG.free.maxModels,
+          isActive: false,
+        },
+        status: "canceled",
+      });
+
+      // NOTE: no usage reset. See the ownership rule at the top of this file.
       return NextResponse.json({
         success: true,
         message: "No active subscription found. User set to free plan.",
@@ -176,99 +253,46 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Get price ID from subscription
-    const priceId = activeSubscription.items.data[0]?.price.id;
-    if (!priceId) {
-      return NextResponse.json(
-        { error: "Subscription has no price ID" },
-        { status: 400 }
-      );
-    }
+    // Exactly one plan-bearing subscription: that one is authoritative.
+    const authoritative = authority.subscription;
 
-    // Map price ID to plan ID
-    const planId = getPlanIdFromPriceId(priceId);
-    if (!planId) {
-      return NextResponse.json(
-        {
-          error: "Could not map price ID to plan",
-          priceId,
-          availableMappings: Object.keys(STRIPE_PRICE_TO_PLAN),
-          configuredMappings: STRIPE_PRICE_TO_PLAN,
-        },
-        { status: 400 }
-      );
-    }
-
-    // Get plan configuration
-    const planConfig = getPlanConfigById(planId);
-
-    // Determine billing interval
-    const isAnnual = activeSubscription.items.data[0]?.price.recurring?.interval === "year";
-    const billingInterval: BillingInterval = isAnnual ? "year" : "month";
-
-    // Update Firestore
-    const currentMonth = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
-    const updateData = {
-      plan: planId,
-      planLabel: planConfig.label,
-      maxModels: planConfig.maxModels,
-      monthlyLimit: planConfig.monthlyLimit,
-      maxModelsPerRun: planConfig.maxModels,
-      subscriptionStatus: activeSubscription.status,
-      stripeSubscriptionId: activeSubscription.id,
-      billingInterval: billingInterval,
-      billingCycleStart: new Date().toISOString(),
-      usageMonth: currentMonth,
-      planUpdatedAt: firebaseAdmin.firestore.Timestamp.now(),
-      updatedAt: firebaseAdmin.firestore.Timestamp.now(),
-    };
-    
-    console.log("[sync-plan] Updating Firestore for user:", targetUserId, {
-      ...updateData,
-      planUpdatedAt: "[Timestamp]",
-      updatedAt: "[Timestamp]",
-    });
-    
-    try {
-      await adminDb.collection("users").doc(targetUserId).set(updateData, { merge: true });
-      console.log("[sync-plan] ✅ Firestore update successful");
-      
-      // Verify the update
-      const userDocAfter = await adminDb.collection("users").doc(targetUserId).get();
-      if (userDocAfter.exists) {
-        const userDataAfter = userDocAfter.data();
-        console.log("[sync-plan] ✅ Verified Firestore update:", {
-          plan: userDataAfter?.plan,
-          monthlyLimit: userDataAfter?.monthlyLimit,
-          maxModelsPerRun: userDataAfter?.maxModelsPerRun,
-          stripeSubscriptionId: userDataAfter?.stripeSubscriptionId,
-          subscriptionStatus: userDataAfter?.subscriptionStatus,
-        });
-      }
-    } catch (firestoreError: any) {
-      console.error("[sync-plan] ❌ Firestore update failed:", {
-        message: firestoreError?.message,
-        stack: firestoreError?.stack,
-        code: firestoreError?.code,
+    // Canonical mapping only — the plan comes from the shared mapper (current
+    // Price first, then the validated server-written marker), and the cadence
+    // and period come from the plan-bearing ITEM, never from `items.data[0]`,
+    // an independent interval heuristic, or the current time.
+    const planMapping = mapSubscriptionToPlan(authoritative);
+    const billingStateResult = resolveSubscriptionBillingState(authoritative as never);
+    if (!billingStateResult.ok) {
+      logger.error("[sync-plan] Could not resolve canonical billing state; refusing to persist derived billing fields", {
+        reason: billingStateResult.reason,
       });
       return NextResponse.json(
-        { error: `Failed to update Firestore: ${firestoreError.message}` },
-        { status: 500 }
+        { error: "Could not resolve this subscription's billing period.", code: billingStateResult.reason },
+        { status: 409 }
       );
     }
+    const billingState = billingStateResult.state;
 
-    // Reset usage counters
-    await resetUsageForNewPlan(targetUserId, planId, billingInterval);
+    await updateUserPlanInFirestore({
+      uid: targetUserId,
+      customerId: stripeCustomerId,
+      subscriptionId: authoritative.id,
+      planMapping,
+      status: authoritative.status,
+      billingInterval: billingState.billingInterval,
+      billingState,
+    });
 
+    // NOTE: no usage reset. See the ownership rule at the top of this file.
     return NextResponse.json({
       success: true,
       message: "Plan synced successfully",
-      plan: planId,
-      planLabel: planConfig.label,
-      monthlyLimit: planConfig.monthlyLimit,
-      maxModels: planConfig.maxModels,
-      subscriptionStatus: activeSubscription.status,
-      subscriptionId: activeSubscription.id,
+      plan: planMapping.planId,
+      planLabel: getPlanConfigById(planMapping.planId).label,
+      monthlyLimit: planMapping.monthlyLimit,
+      maxModels: planMapping.maxModelsPerRun,
+      subscriptionStatus: authoritative.status,
+      subscriptionId: authoritative.id,
     });
   } catch (error: any) {
     // Comprehensive error logging with full context
