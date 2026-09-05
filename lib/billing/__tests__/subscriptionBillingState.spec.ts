@@ -100,9 +100,30 @@ describe("resolveSubscriptionBillingState — fail closed", () => {
     expect(r).toEqual({ ok: false, reason: "ambiguous_plan_items" });
   });
 
-  it("two items mapping to the SAME plan are not ambiguous", () => {
-    const r = resolveSubscriptionBillingState(sub([item({ id: "si_a", priceId: "price_full_y" }), item({ id: "si_b", priceId: "price_full_m", interval: "month" })]));
-    expect(r.ok).toBe(true);
+  it("REGRESSION: same-plan items that DISAGREE on cadence are ambiguous — array order must not decide the interval", () => {
+    const a = item({ id: "si_a", priceId: "price_full_y", interval: "year" });
+    const b = item({ id: "si_b", priceId: "price_full_m", interval: "month" });
+    expect(resolveSubscriptionBillingState(sub([a, b]))).toEqual({ ok: false, reason: "ambiguous_plan_items" });
+    expect(resolveSubscriptionBillingState(sub([b, a]))).toEqual({ ok: false, reason: "ambiguous_plan_items" });
+  });
+
+  it("REGRESSION: same-plan, same-price items that disagree on PERIOD are ambiguous", () => {
+    const a = item({ id: "si_a", priceId: "price_full_y", start: AUG_2_2026, end: AUG_2_2027 });
+    const b = item({ id: "si_b", priceId: "price_full_y", start: SEP_2_2026, end: AUG_2_2027 });
+    expect(resolveSubscriptionBillingState(sub([a, b]))).toEqual({ ok: false, reason: "ambiguous_plan_items" });
+    expect(resolveSubscriptionBillingState(sub([b, a]))).toEqual({ ok: false, reason: "ambiguous_plan_items" });
+  });
+
+  it("truly equivalent duplicate items resolve deterministically regardless of order", () => {
+    const a = item({ id: "si_a", priceId: "price_full_y", start: AUG_2_2026, end: AUG_2_2027 });
+    const b = item({ id: "si_b", priceId: "price_full_y", start: AUG_2_2026, end: AUG_2_2027 });
+    const fwd = resolveSubscriptionBillingState(sub([a, b]));
+    const rev = resolveSubscriptionBillingState(sub([b, a]));
+    expect(fwd.ok).toBe(true);
+    expect(rev.ok).toBe(true);
+    if (!fwd.ok || !rev.ok) return;
+    const billing = (x: typeof fwd.state) => ({ price: x.priceId, interval: x.billingInterval, start: x.periodStart?.toISOString(), end: x.periodEnd?.toISOString(), qty: x.quantity });
+    expect(billing(fwd.state)).toEqual(billing(rev.state));
   });
 
   it("a mapped item wins over an unrelated unmapped add-on item", () => {

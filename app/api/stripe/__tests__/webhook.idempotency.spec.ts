@@ -98,6 +98,11 @@ function incidentSubscription(overrides: Partial<{ status: string; priceId: stri
 }
 
 async function deliver(type: string, object: unknown) {
+  // Phase WEBHOOK-B1-C1: the route re-reads authoritative state; unless a test
+  // overrides it, that read returns the same object the event carried.
+  if (type.startsWith("customer.subscription.") && (object as { id?: string })?.id) {
+    subscriptionsRetrieve.mockResolvedValue(object);
+  }
   constructEvent.mockReturnValue({ id: "evt_" + Math.random().toString(36).slice(2), type, data: { object } });
   const req = { text: async () => "{}", headers: { get: (k: string) => (k === "stripe-signature" ? "sig" : null) } } as unknown as NextRequest;
   const res = await POST(req);
@@ -113,7 +118,7 @@ const usageOf = (d: Record<string, unknown>) => ({
 
 beforeEach(() => {
   writes.length = 0;
-  storedDoc = { email: "customer@example.test", stripeCustomerId: "cus_incident", override: { active: true, plan: "5_models", runLimitMonthly: 150 }, ...USAGE };
+  storedDoc = { email: "customer@example.test", stripeCustomerId: "cus_incident", stripeSubscriptionId: "sub_incident", override: { active: true, plan: "5_models", runLimitMonthly: 150 }, ...USAGE };
   constructEvent.mockReset();
   subscriptionsRetrieve.mockReset();
   subscriptionsRetrieve.mockResolvedValue(incidentSubscription());

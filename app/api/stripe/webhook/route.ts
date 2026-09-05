@@ -53,6 +53,7 @@ import { getPlanFromPriceId, getFreePlanConfig, PlanConfig } from "@/lib/billing
 import { PLAN_CONFIG, getPlanIdFromPriceId, getPlanConfigById, BillingPlanId, STRIPE_PRICE_TO_PLAN } from "@/lib/billing/planConfig";
 import { mapSubscriptionToPlan, getCurrentMonthString, SubscriptionPlanMapping } from "@/lib/billing/subscriptionMapper";
 import { resolveSubscriptionBillingState } from "@/lib/billing/subscriptionBillingState";
+import { decideSubscriptionAuthority, mayDeletionDowngrade } from "@/lib/billing/subscriptionAuthority";
 import { PlanId, BillingInterval } from "@/lib/plans";
 import { updateUserPlanInFirestore } from "@/lib/stripe/webhookHelpers";
 import { getPostHogClient } from "@/lib/posthog-server";
@@ -423,9 +424,58 @@ export async function handleSubscriptionChange(subscription: Stripe.Subscription
     }
   }
 
+  // Phase WEBHOOK-B1-C1 — FRESHNESS. Webhook delivery is unordered, so the
+  // event payload may describe OLDER state than what is already persisted.
+  // Re-read the subscription from Stripe and reconcile against THAT, exactly
+  // as the invoice path already did. A replayed old event then converges on
+  // current state instead of regressing plan, cadence or period.
+  let authoritative: Stripe.Subscription = subscription;
+  if (stripe) {
+    try {
+      authoritative = await stripe.subscriptions.retrieve(subscriptionId);
+    } catch (retrieveErr) {
+      logger.error("[webhook] Could not re-read subscription; refusing to persist a possibly stale snapshot", {
+        subscriptionId,
+        error: retrieveErr instanceof Error ? retrieveErr.message : "unknown",
+      });
+      return;
+    }
+  }
+
+  // Phase WEBHOOK-B1-C1 — IDENTITY. An event about subscription A must never
+  // write over a user whose current subscription is B. See
+  // lib/billing/subscriptionAuthority.ts for the replacement rule.
+  let storedSubscriptionId: string | null = null;
+  try {
+    const existing = await adminDb.collection("users").doc(firebaseUid).get();
+    storedSubscriptionId = (existing.data()?.stripeSubscriptionId as string | undefined) ?? null;
+  } catch {
+    storedSubscriptionId = null;
+  }
+  let storedSubscriptionStatus: string | null = null;
+  if (storedSubscriptionId && storedSubscriptionId !== subscriptionId && stripe) {
+    try {
+      storedSubscriptionStatus = (await stripe.subscriptions.retrieve(storedSubscriptionId)).status;
+    } catch {
+      storedSubscriptionStatus = null;
+    }
+  }
+  const authority = decideSubscriptionAuthority({
+    eventSubscriptionId: subscriptionId,
+    storedSubscriptionId,
+    storedSubscriptionStatus,
+    incomingSubscriptionStatus: authoritative.status,
+  });
+  if (!authority.allowed) {
+    logger.warn("[webhook] Ignoring event for a subscription that is not authoritative for this user", {
+      reason: authority.reason,
+    });
+    return;
+  }
+
   // Map subscription to plan using the new mapper
   // This handles both price ID matching and metadata.targetPlan fallback
-  const planMapping = mapSubscriptionToPlan(subscription);
+  const planMapping = mapSubscriptionToPlan(authoritative);
   
   console.log("[webhook] Mapped subscription to plan:", {
     subscriptionId,
@@ -452,7 +502,7 @@ export async function handleSubscriptionChange(subscription: Stripe.Subscription
   // resolver, which reads the PLAN-BEARING ITEM rather than `items.data[0]`
   // and prefers the item-level period over the subscription-level one (which
   // can be stale in flexible billing mode after an interval change).
-  const billingStateResult = resolveSubscriptionBillingState(subscription as never);
+  const billingStateResult = resolveSubscriptionBillingState(authoritative as never);
   if (!billingStateResult.ok) {
     logger.error("[webhook] Could not resolve canonical billing state — refusing to persist derived billing fields", {
       subscriptionId,
@@ -485,7 +535,7 @@ export async function handleSubscriptionChange(subscription: Stripe.Subscription
       customerId,
       subscriptionId,
       planMapping,
-      status: subscriptionStatus,
+      status: authoritative.status,
       billingInterval,
       billingState,
     });
@@ -609,6 +659,30 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
     customerId,
     firebaseUid,
   });
+
+  // Phase WEBHOOK-B1-C1 — DELETION IDENTITY GUARD.
+  //
+  // A cancellation may only ever clear the subscription it is actually
+  // about. Before this guard the handler downgraded whichever user it
+  // resolved, so a delayed `deleted` for a former subscription A wiped a
+  // paying customer whose current subscription is B — proven by execution in
+  // the exact-head review. A deletion never grants authority, only removes
+  // it, so there is no replacement branch here: anything other than the
+  // stored subscription is ignored.
+  let storedSubscriptionIdForDeletion: string | null = null;
+  try {
+    const existing = await adminDb.collection("users").doc(firebaseUid).get();
+    storedSubscriptionIdForDeletion = (existing.data()?.stripeSubscriptionId as string | undefined) ?? null;
+  } catch {
+    storedSubscriptionIdForDeletion = null;
+  }
+  if (!mayDeletionDowngrade({ deletedSubscriptionId: subscriptionId, storedSubscriptionId: storedSubscriptionIdForDeletion })) {
+    logger.warn("[webhook] Ignoring deletion for a subscription that is not the user's current one", {
+      hasStoredSubscription: Boolean(storedSubscriptionIdForDeletion),
+      matchesStored: false,
+    });
+    return;
+  }
 
   // Downgrade to free plan
   const freeMapping: SubscriptionPlanMapping = {

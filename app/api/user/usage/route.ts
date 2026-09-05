@@ -324,7 +324,7 @@ export async function GET(req: NextRequest) {
         runsThisMonth: 0,
         videoRunsThisMonth: 0,
         usageMonth: currentMonth,
-        billingCycleStart: now.toISOString(),
+        // Phase WEBHOOK-B1-C1: quota rollover does not own `billingCycleStart`.
       }).catch((err) => {
         logger.error("[user/usage] Failed to reset usage for new month", { error: err?.message });
       });

@@ -217,7 +217,11 @@ export async function POST(req: NextRequest) {
       subscriptionStatus: activeSubscription.status,
       stripeSubscriptionId: activeSubscription.id,
       billingInterval: billingInterval,
-      billingCycleStart: new Date().toISOString(),
+      // Phase WEBHOOK-B1-C1: `billingCycleStart` is a Stripe billing-cycle
+      // fact owned by the reconciliation paths; this route must not fabricate
+      // it from the current time. (The self-serve usage reset in this same
+      // route is tracked separately as BILLING-USAGE-Q1 and is NOT changed
+      // here.)
       usageMonth: currentMonth,
       planUpdatedAt: firebaseAdmin.firestore.Timestamp.now(),
       updatedAt: firebaseAdmin.firestore.Timestamp.now(),

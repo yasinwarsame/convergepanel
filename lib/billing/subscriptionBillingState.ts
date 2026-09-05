@@ -84,6 +84,15 @@ export function selectPlanBearingItem(subscription: Pick<Stripe.Subscription, "i
   if (mapped.length > 0) {
     const distinctPlans = new Set(mapped.map((i) => getPlanIdFromPriceId(i.price.id)));
     if (distinctPlans.size > 1) return { ok: false, reason: "ambiguous_plan_items" };
+    // Phase WEBHOOK-B1-C1: candidates that agree on the PLAN can still
+    // disagree on cadence, price identity or period. Returning `mapped[0]`
+    // then let array order decide the persisted interval and billing period —
+    // the exact arbitrariness this selector exists to remove, and a mutation
+    // swapping the index survived the previous suite. Equivalence is now
+    // explicit: every billing-relevant field must match, or fail closed.
+    if (mapped.length > 1 && !allBillingRelevantFieldsEqual(mapped)) {
+      return { ok: false, reason: "ambiguous_plan_items" };
+    }
     return { ok: true, item: mapped[0] };
   }
 
@@ -91,6 +100,26 @@ export function selectPlanBearingItem(subscription: Pick<Stripe.Subscription, "i
   const only = items[0];
   if (!only?.price?.id) return { ok: false, reason: "malformed_item" };
   return { ok: true, item: only };
+}
+
+/**
+ * Pure. `true` only when every field ConvergePanel derives billing state from
+ * is identical across all candidates, so which one is returned cannot change
+ * any persisted value. Price id is included deliberately: two different
+ * Prices can share a cadence and period and still differ in amount.
+ */
+function allBillingRelevantFieldsEqual(items: AnyItem[]): boolean {
+  const key = (i: AnyItem) =>
+    [
+      i.price?.id,
+      i.price?.recurring?.interval,
+      i.price?.recurring?.interval_count,
+      i.current_period_start ?? null,
+      i.current_period_end ?? null,
+      typeof i.quantity === "number" ? i.quantity : 1,
+    ].join("|");
+  const first = key(items[0]);
+  return items.every((i) => key(i) === first);
 }
 
 function toDate(seconds: number | null | undefined): Date | null {

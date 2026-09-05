@@ -8,7 +8,8 @@
  * - plan: "free" | "lite" | "full" (PlanId)
  * - runsThisMonth: number (panel runs used this month)
  * - usageMonth: string (YYYY-MM format, e.g., "2025-01")
- * - billingCycleStart: string (ISO timestamp, optional)
+ * - billingCycleStart: Stripe billing-cycle fact, written ONLY by the billing
+ *   reconciliation paths — never by quota rollover (Phase WEBHOOK-B1-C1)
  * - totalRuns: number (lifetime total of panel runs, never resets)
  * 
  * This function reads and writes these exact field names from Firestore.
@@ -276,7 +277,12 @@ export async function checkAndIncrementUsageForRun(
           runsThisMonth: 1,
           videoRunsThisMonth: 0,
           usageMonth: currentMonth,
-          billingCycleStart: now.toISOString(),
+          // Phase WEBHOOK-B1-C1: calendar-month quota rollover no longer
+          // writes `billingCycleStart`. That field is a STRIPE billing-cycle
+          // fact owned by the reconciliation paths; the quota system owns
+          // `usageMonth`. Rewriting it here clobbered the canonical
+          // item-level period within a month of it being persisted, and
+          // changed its stored type from Timestamp to string.
           totalRuns: FieldValue.increment(1),
         });
       } else {
