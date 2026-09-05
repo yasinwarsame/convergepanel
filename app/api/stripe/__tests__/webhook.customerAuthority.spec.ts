@@ -323,3 +323,48 @@ describe("definitively-missing subscription reconciles against the customer set"
     expect(storedDoc).toEqual(before);
   });
 });
+
+describe("dependency failure during user-id resolution is not papered over by a later lookup", () => {
+  it("REGRESSION: a Stripe outage resolving the user fails the delivery even though a Firestore lookup COULD have found them", async () => {
+    // Without the typed contract the failure became `firebaseUid = null`, the
+    // handler fell through to the next resolution strategy, found the user and
+    // answered 200 — masking the outage and persisting a decision made on
+    // incomplete information.
+    storedDoc = { email: "c@example.test", stripeCustomerId: MINE, stripeSubscriptionId: C, plan: "free" };
+    const noUid = sub({ id: C, uid: null });
+    setLive(noUid);
+    customerRetrieveFails = true;
+    queryEmpty = false; // the fallback lookup WOULD succeed
+
+    const status = await deliver("customer.subscription.updated", noUid);
+
+    expect(status).toBeGreaterThanOrEqual(500);
+    expect(writes).toHaveLength(0);
+  });
+});
+
+describe("deletion never adopts a customer id from the event", () => {
+  it("REGRESSION: a deletion whose event carries no customer still uses the stored binding, never null", async () => {
+    storedDoc = { email: "c@example.test", stripeCustomerId: MINE, stripeSubscriptionId: A, plan: "full" };
+    const noCustomer = { ...(sub({ id: A, status: "canceled" }) as unknown as Record<string, unknown>), customer: null };
+    setLive(noCustomer as never);
+
+    expect(await deliver("customer.subscription.deleted", noCustomer)).toBe(200);
+
+    expect(storedDoc.plan).toBe("free");
+    expect(storedDoc.stripeCustomerId).toBe(MINE);
+    for (const w of writes) expect(w.stripeCustomerId).toBe(MINE);
+  });
+
+  it("REGRESSION: the replacement search is scoped to the stored customer, not the event's", async () => {
+    storedDoc = { email: "c@example.test", stripeCustomerId: MINE, plan: "full" };
+    const mismatched = { ...(sub({ id: A, status: "canceled" }) as unknown as Record<string, unknown>), customer: null };
+    setLive(mismatched as never);
+
+    await deliver("customer.subscription.deleted", mismatched);
+
+    for (const call of subscriptionsList.mock.calls) {
+      expect((call[0] as { customer?: string })?.customer).toBe(MINE);
+    }
+  });
+});
