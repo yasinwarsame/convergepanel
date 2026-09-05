@@ -347,9 +347,16 @@ describe("C7 — self-sync dependency failures never fall back destructively", (
 
   it("REGRESSION: a definitively missing customer is not authority to downgrade", async () => {
     customerMissing = true;
-    await syncPlan();
+    const { status } = await syncPlan();
     expect(writes).toHaveLength(0);
     expect(storedDoc.plan).toBe("full");
+    // The refusal must be DELIBERATE. Falling through to a crash that happens
+    // to write nothing protects the customer only until someone adds a guard
+    // clause above it, so the outcome is pinned, not just the side effect.
+    expect(status).toBe(409);
+    const refusals = (logger.error as jest.Mock).mock.calls
+      .filter((c) => String(c[0]).includes("refusing to derive entitlement from an absent lookup"));
+    expect(refusals).toHaveLength(1);
   });
 
   it("a healthy retry after an outage converges", async () => {
