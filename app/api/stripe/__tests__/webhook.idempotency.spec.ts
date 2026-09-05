@@ -31,7 +31,9 @@ const constructEvent = jest.fn();
 const customersRetrieve = jest.fn(async () => ({ deleted: false, metadata: {} }));
 const subscriptionsUpdate = jest.fn(async () => ({}));
 const subscriptionsRetrieve = jest.fn();
-const subscriptionsList = jest.fn(async () => ({ data: [incidentSubscription()], has_more: false }));
+/** Phase C4: authority comes from the customer's set, so the list echoes whatever subscription the test delivered. */
+let listSubscriptions: unknown[] = [];
+const subscriptionsList = jest.fn(async () => ({ data: listSubscriptions, has_more: false }));
 jest.mock("@/lib/stripe/client", () => ({
   stripe: {
     webhooks: { constructEvent: (...a: unknown[]) => constructEvent(...a) },
@@ -100,8 +102,9 @@ function incidentSubscription(overrides: Partial<{ status: string; priceId: stri
 async function deliver(type: string, object: unknown) {
   // Phase WEBHOOK-B1-C1: the route re-reads authoritative state; unless a test
   // overrides it, that read returns the same object the event carried.
-  if (type.startsWith("customer.subscription.") && (object as { id?: string })?.id) {
+  if ((object as { id?: string })?.id && (object as { items?: unknown })?.items) {
     subscriptionsRetrieve.mockResolvedValue(object);
+    listSubscriptions = [object];
   }
   constructEvent.mockReturnValue({ id: "evt_" + Math.random().toString(36).slice(2), type, data: { object } });
   const req = { text: async () => "{}", headers: { get: (k: string) => (k === "stripe-signature" ? "sig" : null) } } as unknown as NextRequest;
@@ -122,6 +125,7 @@ beforeEach(() => {
   constructEvent.mockReset();
   subscriptionsRetrieve.mockReset();
   subscriptionsRetrieve.mockResolvedValue(incidentSubscription());
+  listSubscriptions = [incidentSubscription()];
   subscriptionsUpdate.mockClear();
 });
 

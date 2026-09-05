@@ -388,3 +388,105 @@ describe("a failing Firestore user lookup is not papered over either", () => {
     expect(writes).toHaveLength(0);
   });
 });
+
+describe("C4 — ambiguity must be detected even when the stored subscription is still active", () => {
+  /** The customer holds BOTH B and C, and B is the one already stored. */
+  function storedActiveWithSecondCandidate(stored: string) {
+    storedDoc = {
+      email: "c@example.test", stripeCustomerId: MINE, stripeSubscriptionId: stored,
+      plan: stored === B ? "lite" : "full", billingInterval: stored === B ? "month" : "year",
+      subscriptionStatus: "active", monthlyLimit: 80, maxModelsPerRun: 3,
+      usageMonth: "2026-09", runsThisMonth: 21,
+    };
+    setLive(subB());
+    setLive(subC());
+  }
+
+  it("REGRESSION: stored B still active + C also active + event for B — the second candidate is discovered", async () => {
+    storedActiveWithSecondCandidate(B);
+    const before = { ...storedDoc };
+
+    expect(await deliver("customer.subscription.updated", subB())).toBe(200);
+
+    expect(subscriptionsList).toHaveBeenCalled();
+    expect(writes).toHaveLength(0);
+    expect(storedDoc).toEqual(before);
+  });
+
+  it("stored B still active + event for C — same result", async () => {
+    storedActiveWithSecondCandidate(B);
+    const before = { ...storedDoc };
+    expect(await deliver("customer.subscription.updated", subC())).toBe(200);
+    expect(storedDoc).toEqual(before);
+  });
+
+  it("stored C still active + events for either — same result", async () => {
+    storedActiveWithSecondCandidate(C);
+    const before = { ...storedDoc };
+    expect(await deliver("customer.subscription.updated", subB())).toBe(200);
+    expect(await deliver("customer.subscription.updated", subC())).toBe(200);
+    expect(storedDoc).toEqual(before);
+  });
+
+  it("the full eight-case matrix is invariant to which subscription is stored and which event arrives", async () => {
+    const outcomes: string[] = [];
+    for (const stored of [B, C, A, null]) {
+      for (const evt of [subB(), subC()]) {
+        reset();
+        storedDoc = { email: "c@example.test", stripeCustomerId: MINE, plan: "free", ...(stored ? { stripeSubscriptionId: stored } : {}) };
+        if (stored === A) setLive(sub({ id: A, status: "canceled" }));
+        setLive(subB());
+        setLive(subC());
+        await deliver("customer.subscription.updated", evt);
+        outcomes.push(JSON.stringify(billingOf(storedDoc)));
+      }
+    }
+    // Every run must leave the document in the state it started in: ambiguous.
+    expect(new Set(outcomes.map((o) => JSON.parse(o).plan)).size).toBe(1);
+    expect(JSON.parse(outcomes[0]).plan).toBe("free");
+  });
+
+  it("candidates that happen to match on plan and cadence are still two subscriptions", async () => {
+    storedDoc = { email: "c@example.test", stripeCustomerId: MINE, stripeSubscriptionId: B, plan: "full", billingInterval: "year" };
+    setLive(sub({ id: B, priceId: "price_full_y", interval: "year" }));
+    setLive(sub({ id: C, priceId: "price_full_y", interval: "year" }));
+    const before = { ...storedDoc };
+
+    expect(await deliver("customer.subscription.updated", sub({ id: B, priceId: "price_full_y", interval: "year" }))).toBe(200);
+
+    expect(writes).toHaveLength(0);
+    expect(storedDoc).toEqual(before);
+  });
+
+  it("a deletion while two candidates are live does not downgrade", async () => {
+    storedDoc = { email: "c@example.test", stripeCustomerId: MINE, stripeSubscriptionId: A, plan: "full" };
+    setLive(sub({ id: A, status: "canceled" }));
+    setLive(subB());
+    setLive(subC());
+    const before = { ...storedDoc };
+
+    expect(await deliver("customer.subscription.deleted", sub({ id: A, status: "canceled" }))).toBe(200);
+
+    expect(storedDoc).toEqual(before);
+  });
+
+  it("a second entitlement-bearing subscription on a LATER page is still detected", async () => {
+    storedDoc = { email: "c@example.test", stripeCustomerId: MINE, stripeSubscriptionId: B, plan: "lite", billingInterval: "month" };
+    setLive(subB());
+    setLive(subC());
+    // Page 1 returns only B and says there is more; page 2 returns C.
+    let call = 0;
+    subscriptionsList.mockImplementation(async () => {
+      call += 1;
+      return call === 1
+        ? { data: [subB() as unknown as Record<string, unknown>], has_more: true }
+        : { data: [subC() as unknown as Record<string, unknown>], has_more: false };
+    });
+    const before = { ...storedDoc };
+
+    expect(await deliver("customer.subscription.updated", subB())).toBe(200);
+
+    expect(call).toBeGreaterThan(1);
+    expect(storedDoc).toEqual(before);
+  });
+});

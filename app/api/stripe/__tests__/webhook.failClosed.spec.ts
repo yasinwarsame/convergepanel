@@ -205,8 +205,11 @@ describe("P0 — a transient dependency failure must never look like absent stat
 });
 
 describe("P1 — transient failures must be retryable, not acknowledged", () => {
-  it("a Stripe retrieve failure on subscription.updated returns 5xx", async () => {
-    retrieveImpl = async () => { throw Object.assign(new Error("ETIMEDOUT"), { type: "StripeConnectionError" }); };
+  it("a transient Stripe failure while establishing the customer's set on subscription.updated returns 5xx", async () => {
+    // Phase C4: the change path no longer re-reads the event's own
+    // subscription — authority comes from the customer's set — so the Stripe
+    // dependency that must stay retryable is that enumeration.
+    listImpl = async () => { throw Object.assign(new Error("ETIMEDOUT"), { type: "StripeConnectionError" }); };
     expect(await deliver("customer.subscription.updated", sub({ id: SUB_B }))).toBeGreaterThanOrEqual(500);
     expect(writes).toHaveLength(0);
   });

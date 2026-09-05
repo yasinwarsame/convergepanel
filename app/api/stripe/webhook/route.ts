@@ -457,24 +457,6 @@ export async function handleSubscriptionChange(subscription: Stripe.Subscription
     return;
   }
 
-  // FAST PATH. When the event names the user's OWN stored subscription and
-  // Stripe still reports it as entitlement-bearing, that subscription is
-  // unambiguously authoritative: there is nothing for the customer set to
-  // arbitrate, and re-reading it is already order-independent because the
-  // fresh Stripe state — not the event snapshot — is what gets persisted.
-  // This also avoids a `subscriptions.list` call on every ordinary delivery.
-  if (storedSubscriptionId && storedSubscriptionId === subscriptionId && stripe) {
-    const fresh = await stripeLookup("subscriptions.retrieve", () => stripe!.subscriptions.retrieve(subscriptionId));
-    if (fresh.kind === "found" && isEntitlementBearingSubscriptionStatus(fresh.value.status)) {
-      await reconcileAuthoritativeSubscription({
-        uid: firebaseUid,
-        verifiedCustomerId: identity.verifiedCustomerId,
-        authoritative: fresh.value,
-      });
-      return;
-    }
-  }
-
   // THE AUTHORITY DECISION. Ask what this customer's subscription set says,
   // not whether this particular event outranks what we stored. That question
   // has the same answer regardless of delivery order, which is precisely what
@@ -489,9 +471,20 @@ export async function handleSubscriptionChange(subscription: Stripe.Subscription
   if (customerAuthority.kind === "multiple_entitlements") {
     // Unsupported under the one-subscription product contract, and the
     // repository defines no rule for choosing. Change nothing and surface it.
-    logger.error("[webhook] Customer has multiple entitlement-bearing subscriptions — unsupported state, no billing change applied", {
-      subscriptionId,
-      entitledCount: customerAuthority.count,
+    // Terminal domain ambiguity: retrying the same Stripe state cannot resolve
+    // it, so the delivery is acknowledged rather than retried forever. That
+    // makes this log the ONLY signal an operator gets, so it carries enough
+    // structure to find the customer and both subscriptions — and no secrets,
+    // no raw payload, no payment data.
+    logger.error("[webhook] multiple_entitlement_subscriptions", {
+      code: "multiple_entitlement_subscriptions",
+      stripeCustomerId: identity.verifiedCustomerId,
+      uid: firebaseUid,
+      eventSubscriptionId: subscriptionId,
+      storedSubscriptionId,
+      candidateSubscriptionIds: customerAuthority.subscriptionIds,
+      candidateCount: customerAuthority.count,
+      resolution: "no_billing_change_applied",
     });
     return;
   }
@@ -783,14 +776,20 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
   }
   const verifiedDeletionCustomerId = deletionIdentity.verifiedCustomerId;
 
-  if (storedSubscriptionIdForDeletion) {
-    // A stored reference exists, so identity alone settles it: a deletion may
-    // only ever clear the subscription it is actually about.
-    if (!mayDeletionDowngrade({ deletedSubscriptionId: subscriptionId, storedSubscriptionId: storedSubscriptionIdForDeletion })) {
-      logger.warn("[webhook] Ignoring deletion for a subscription that is not the user's current one", { subscriptionId });
-      return;
-    }
-  } else {
+  // Identity first: a deletion may only ever clear the subscription it is
+  // actually about.
+  if (storedSubscriptionIdForDeletion && !mayDeletionDowngrade({ deletedSubscriptionId: subscriptionId, storedSubscriptionId: storedSubscriptionIdForDeletion })) {
+    logger.warn("[webhook] Ignoring deletion for a subscription that is not the user's current one", { subscriptionId });
+    return;
+  }
+
+  // Phase WEBHOOK-B1-C4: then the customer set — ALWAYS, not only when no
+  // reference is stored. Deleting the stored subscription is not proof that
+  // the customer has no entitlement: they may hold a replacement, or two, and
+  // downgrading on the strength of one deleted object would destroy a live
+  // entitlement exactly as the removed fast path assumed uniqueness it had
+  // never established.
+  {
     // Phase WEBHOOK-B1-C2 — NO STORED REFERENCE.
     //
     // C1 downgraded here on the reasoning that there was "nothing to protect".
@@ -805,19 +804,21 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
       logger.error("[webhook] Cannot verify replacement subscriptions without a Stripe client; refusing to downgrade", { subscriptionId });
       return;
     }
-    const candidates = await stripeLookup("subscriptions.list", () => stripe!.subscriptions.list({ customer: verifiedDeletionCustomerId, status: "all", limit: 100 }));
-    if (candidates.kind === "absent") {
-      logger.error("[webhook] Customer not found while checking for replacement subscriptions; refusing to downgrade", { subscriptionId });
+    const replacementAuthority = await resolveCustomerSubscriptionAuthority({ stripe, verifiedCustomerId: verifiedDeletionCustomerId });
+    if (replacementAuthority.kind === "multiple_entitlements") {
+      logger.error("[webhook] multiple_entitlement_subscriptions", {
+        code: "multiple_entitlement_subscriptions",
+        stripeCustomerId: verifiedDeletionCustomerId,
+        uid: firebaseUid,
+        eventSubscriptionId: subscriptionId,
+        candidateSubscriptionIds: replacementAuthority.subscriptionIds,
+        candidateCount: replacementAuthority.count,
+        resolution: "no_downgrade_applied",
+      });
       return;
     }
-    const entitled = candidates.value.data.filter(
-      (candidate) => candidate.id !== subscriptionId && isEntitlementBearingSubscriptionStatus(candidate.status)
-    );
-    if (entitled.length > 0) {
-      logger.warn("[webhook] Refusing downgrade: the customer still has an entitlement-bearing subscription", {
-        subscriptionId,
-        entitledCount: entitled.length,
-      });
+    if (replacementAuthority.kind !== "no_entitlement") {
+      logger.warn("[webhook] Refusing downgrade: the customer still has an entitlement-bearing subscription", { subscriptionId });
       return;
     }
   }

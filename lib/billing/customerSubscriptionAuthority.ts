@@ -43,7 +43,7 @@ export type CustomerSubscriptionAuthority =
   /** Exactly one supported entitlement-bearing subscription. Reconcile THIS one. */
   | { kind: "exactly_one"; subscription: Stripe.Subscription }
   /** More than one. Unsupported under the one-subscription contract; caller must not choose. */
-  | { kind: "multiple_entitlements"; count: number }
+  | { kind: "multiple_entitlements"; count: number; subscriptionIds: string[] }
   /** The set could not be established because the customer identity is not trusted. */
   | { kind: "unverified_customer" };
 
@@ -95,7 +95,12 @@ export async function resolveCustomerSubscriptionAuthority(args: {
   }
 
   if (entitled.length === 0) return { kind: "no_entitlement" };
-  if (entitled.length > 1) return { kind: "multiple_entitlements", count: entitled.length };
+  if (entitled.length > 1) {
+    // The ids travel with the outcome so the caller can log something an
+    // operator can actually act on: this state is terminal, so the log is the
+    // only signal that repair is needed.
+    return { kind: "multiple_entitlements", count: entitled.length, subscriptionIds: entitled.map((s) => s.id) };
+  }
   return { kind: "exactly_one", subscription: entitled[0] };
 }
 
