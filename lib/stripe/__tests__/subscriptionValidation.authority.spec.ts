@@ -454,3 +454,40 @@ describe("C6 — request-time reconciliation never touches usage", () => {
     expect(usageOf(storedDoc)).toEqual(USAGE);
   });
 });
+
+describe("C6 — the cost of exhaustive authority on the hot path", () => {
+  /**
+   * Exhaustive enumeration must not mean "more Stripe calls". The old rule
+   * already made one `subscriptions.list` call per paid request; the page size
+   * moved from 10 to Stripe's maximum of 100, so a customer with any realistic
+   * number of subscriptions is still answered in a single round trip. Extra
+   * calls appear only past 100 subscriptions, where the previous behaviour was
+   * not cheaper but simply wrong.
+   */
+  it("an ordinary paid request costs exactly one Stripe call", async () => {
+    storedDoc = { plan: "full", stripeCustomerId: MINE, stripeSubscriptionId: C, subscriptionStatus: "active", billingInterval: "year" };
+    live = [sub({ id: A, status: "canceled" }), subC()];
+    await validateUserSubscription(UID);
+    expect(subscriptionsList).toHaveBeenCalledTimes(1);
+  });
+
+  it("a customer with a hundred subscriptions is still one call", async () => {
+    storedDoc = { plan: "full", stripeCustomerId: MINE, stripeSubscriptionId: C, subscriptionStatus: "active", billingInterval: "year" };
+    live = [...Array.from({ length: 99 }, (_, i) => sub({ id: `sub_noise_${i}`, status: "canceled" })), subC()];
+    await validateUserSubscription(UID);
+    expect(subscriptionsList).toHaveBeenCalledTimes(1);
+  });
+
+  it("a free user costs no Stripe call at all", async () => {
+    storedDoc = { plan: "free", stripeCustomerId: MINE };
+    live = [subC()];
+    await validateUserSubscription(UID);
+    expect(subscriptionsList).not.toHaveBeenCalled();
+  });
+
+  it("a paid user with no verified customer binding costs no Stripe call", async () => {
+    storedDoc = { plan: "full", subscriptionStatus: "active" };
+    await validateUserSubscription(UID);
+    expect(subscriptionsList).not.toHaveBeenCalled();
+  });
+});
