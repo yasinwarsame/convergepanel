@@ -213,9 +213,12 @@ describe("P0 — an admin CLIENT is still not a server writer", () => {
   it("DENIED: an admin's browser cannot disable an account", async () => {
     await assertFails(updateDoc(doc(asAdminClient(), "users", ME), { isDisabled: true }));
   });
-  it("ALLOWED: an admin may still list users, which the admin UI needs", async () => {
+  it("DENIED: even an admin's browser cannot LIST users", async () => {
+    // Phase P0.1-R2: the admin UI is served by /api/admin/* through the Admin
+    // SDK, which bypasses these rules. A client list grant was dead weight and
+    // strictly broader than the cross-user `get` denied above.
     const { query, collection, getDocs } = await import("firebase/firestore");
-    await assertSucceeds(getDocs(query(collection(asAdminClient(), "users"))));
+    await assertFails(getDocs(query(collection(asAdminClient(), "users"))));
   });
 });
 
@@ -273,5 +276,156 @@ describe("other collections", () => {
     await assertFails(setDoc(doc(asMe(), "runs", "run_1"), { uid: ME }));
     await assertFails(setDoc(doc(asMe(), "workspaces", "ws_1"), { ownerUid: ME }));
     await assertFails(getDoc(doc(asMe(), "appConfig", "anything")));
+  });
+});
+
+describe("R2 — the identity pin, not key absence, is the control", () => {
+  /** What the five server bootstrap paths actually write: no uid, no email. */
+  const BOOTSTRAPPED = { plan: "free", runsThisMonth: 0, usageMonth: "2026-09", totalRuns: 0 };
+
+  async function seed(doc_: Record<string, unknown>) {
+    await env.clearFirestore();
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "users", ME), doc_);
+    });
+  }
+
+  // ---------- availability: the R1 lockout, in every shape ----------
+
+  it("REGRESSION: sign-in writes uid+email onto a server-bootstrapped document", async () => {
+    await seed(BOOTSTRAPPED);
+    await assertSucceeds(setDoc(myDoc(), { uid: ME, email: MY_EMAIL, lastLoginAt: serverTimestamp() }, { merge: true }));
+  });
+
+  it("REGRESSION: a document missing only uid accepts the correct uid", async () => {
+    await seed({ ...BOOTSTRAPPED, email: MY_EMAIL });
+    await assertSucceeds(setDoc(myDoc(), { uid: ME, email: MY_EMAIL, lastLoginAt: serverTimestamp() }, { merge: true }));
+  });
+
+  it("REGRESSION: a document missing only email accepts the caller's own email", async () => {
+    await seed({ ...BOOTSTRAPPED, uid: ME });
+    await assertSucceeds(setDoc(myDoc(), { uid: ME, email: MY_EMAIL, lastLoginAt: serverTimestamp() }, { merge: true }));
+  });
+
+  it("REGRESSION: the team-membership bootstrap shape also accepts sign-in", async () => {
+    await seed({ teamId: "team_1", teamRole: "member" });
+    await assertSucceeds(setDoc(myDoc(), { uid: ME, email: MY_EMAIL, lastLoginAt: serverTimestamp() }, { merge: true }));
+  });
+
+  it("an already-correct document still accepts the ordinary repeated sign-in", async () => {
+    await seed({ ...SERVER_STATE });
+    await assertSucceeds(setDoc(myDoc(), { uid: ME, email: MY_EMAIL, lastLoginAt: serverTimestamp() }, { merge: true }));
+  });
+
+  it("a profile edit carrying uid and email alongside it still succeeds", async () => {
+    await seed({ ...SERVER_STATE });
+    await assertSucceeds(setDoc(myDoc(), { uid: ME, email: MY_EMAIL, name: "Renamed", updatedAt: serverTimestamp() }, { merge: true }));
+  });
+
+  it("the stale mirror can self-heal to the caller's current verified address", async () => {
+    await seed({ ...SERVER_STATE, email: "old-address@example.test" });
+    await assertSucceeds(setDoc(myDoc(), { email: MY_EMAIL, lastLoginAt: serverTimestamp() }, { merge: true }));
+  });
+
+  it("signup's full create payload still works on a bootstrapped document", async () => {
+    await seed(BOOTSTRAPPED);
+    await assertSucceeds(setDoc(myDoc(), {
+      uid: ME, email: MY_EMAIL, name: "Me", onboardingCompleted: false,
+      createdAt: serverTimestamp(), updatedAt: serverTimestamp(), lastLoginAt: serverTimestamp(),
+    }, { merge: true }));
+  });
+
+  // ---------- the pin still refuses every forgery ----------
+
+  it("REGRESSION: a foreign uid is refused even though the key is now allowed", async () => {
+    await seed(BOOTSTRAPPED);
+    await assertFails(setDoc(myDoc(), { uid: OTHER, lastLoginAt: serverTimestamp() }, { merge: true }));
+  });
+
+  it("REGRESSION: an arbitrary forged uid is refused", async () => {
+    await seed({ ...SERVER_STATE });
+    await assertFails(updateDoc(myDoc(), { uid: "uid_totally_made_up" }));
+  });
+
+  it("REGRESSION: another user's email is refused", async () => {
+    await seed(BOOTSTRAPPED);
+    await assertFails(setDoc(myDoc(), { email: "other@example.test", lastLoginAt: serverTimestamp() }, { merge: true }));
+  });
+
+  it("REGRESSION: an allowlisted admin address is refused", async () => {
+    await seed(BOOTSTRAPPED);
+    await assertFails(setDoc(myDoc(), { email: ADMIN_EMAIL, lastLoginAt: serverTimestamp() }, { merge: true }));
+  });
+
+  it("REGRESSION: nulling either identity field is refused", async () => {
+    await seed({ ...SERVER_STATE });
+    await assertFails(updateDoc(myDoc(), { uid: null }));
+    await assertFails(updateDoc(myDoc(), { email: null }));
+  });
+
+  it("REGRESSION: DELETING a correct identity field is refused — absence must not evade the pin", async () => {
+    await seed({ ...SERVER_STATE });
+    await assertFails(updateDoc(myDoc(), { uid: deleteField() }));
+    await assertFails(updateDoc(myDoc(), { email: deleteField() }));
+  });
+
+  it("REGRESSION: a wrong type is refused", async () => {
+    await seed({ ...SERVER_STATE });
+    await assertFails(updateDoc(myDoc(), { uid: 12345 }));
+    await assertFails(updateDoc(myDoc(), { email: 12345 }));
+  });
+
+  it("REGRESSION: a legitimate profile edit smuggling a forged identity is refused whole", async () => {
+    await seed({ ...SERVER_STATE });
+    await assertFails(updateDoc(myDoc(), { name: "Legit", email: ADMIN_EMAIL }));
+    await assertFails(updateDoc(myDoc(), { name: "Legit", uid: OTHER }));
+  });
+
+  it("REGRESSION: admitting the identity keys did not admit any authority field", async () => {
+    // Seeded with a NON-ZERO counter deliberately: `affectedKeys()` excludes
+    // same-value writes, so attempting `runsThisMonth: 0` against a document
+    // that already holds 0 proves nothing. The attack is a real decrease.
+    await seed({ ...BOOTSTRAPPED, runsThisMonth: 7 });
+    await assertFails(setDoc(myDoc(), { uid: ME, email: MY_EMAIL, plan: "full" }, { merge: true }));
+    await assertFails(setDoc(myDoc(), { uid: ME, email: MY_EMAIL, role: "admin" }, { merge: true }));
+    await assertFails(setDoc(myDoc(), { uid: ME, email: MY_EMAIL, override: { active: true, plan: "5_models" } }, { merge: true }));
+    await assertFails(setDoc(myDoc(), { uid: ME, email: MY_EMAIL, runsThisMonth: 0 }, { merge: true }));
+    await assertFails(setDoc(myDoc(), { uid: ME, email: MY_EMAIL, usageMonth: "2099-01" }, { merge: true }));
+  });
+
+  it("REGRESSION: another user cannot write identity onto my bootstrapped document", async () => {
+    await seed(BOOTSTRAPPED);
+    await assertFails(setDoc(doc(asOther(), "users", ME), { uid: ME, email: MY_EMAIL }, { merge: true }));
+  });
+});
+
+describe("R2 — client list/query is closed to every principal", () => {
+  it("REGRESSION: an ordinary authenticated user cannot enumerate users", async () => {
+    const { query, collection, getDocs, where, limit, orderBy } = await import("firebase/firestore");
+    await assertFails(getDocs(query(collection(asMe(), "users"))));
+    await assertFails(getDocs(query(collection(asMe(), "users"), limit(1))));
+    await assertFails(getDocs(query(collection(asMe(), "users"), orderBy("plan"))));
+  });
+
+  it("REGRESSION: a query narrowed to the caller's OWN document is still refused", async () => {
+    // Even a self-scoped query is a list operation. `get` remains the only
+    // supported client read, so there is no partial list surface to reason about.
+    const { query, collection, getDocs, where } = await import("firebase/firestore");
+    await assertFails(getDocs(query(collection(asMe(), "users"), where("uid", "==", ME))));
+  });
+
+  it("REGRESSION: a query that would expose another user is refused", async () => {
+    const { query, collection, getDocs, where } = await import("firebase/firestore");
+    await assertFails(getDocs(query(collection(asMe(), "users"), where("email", "==", "other@example.test"))));
+    await assertFails(getDocs(query(collection(asMe(), "users"), where("plan", "==", "full"))));
+  });
+
+  it("REGRESSION: an unauthenticated principal cannot enumerate users", async () => {
+    const { query, collection, getDocs } = await import("firebase/firestore");
+    await assertFails(getDocs(query(collection(anon(), "users"))));
+  });
+
+  it("the owner's single-document get still works — the supported read is unchanged", async () => {
+    await assertSucceeds(getDoc(myDoc()));
   });
 });

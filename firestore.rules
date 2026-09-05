@@ -66,17 +66,27 @@ service cloud.firestore {
         ];
       }
 
-      // `uid` and `email` are deliberately absent from the UPDATE set: they may
-      // be established once, at creation, and never changed afterwards.
+      // Phase P0.1-R2 — `uid`, `email` and `createdAt` ARE in the update set.
       //
-      // `email` matters more than it looks. Governance role resolution falls
-      // back to `isAdminEmail(userData.email)`, so a writable email field is an
-      // admin-escalation path, not a contact detail. Firestore's
-      // `affectedKeys()` reports only keys whose value actually changed, so the
-      // ordinary sign-in write that re-sends an unchanged `uid`/`email` still
-      // passes; only an attempt to CHANGE them is refused.
+      // Excluding them was wrong, and it broke sign-in. Sign-in re-sends
+      // `{uid, email, lastLoginAt}` on every login, and FIVE server paths
+      // create this document with neither `uid` nor `email`
+      // (lib/stripe/usageCheck.ts, lib/userUsage.ts, lib/stripe/usage.ts,
+      // app/api/user/usage/route.ts, app/api/teams/members/route.ts). Against
+      // such a document those keys are genuine additions, `affectedKeys()`
+      // reports them, and the write was denied — leaving the user
+      // authenticated in Firebase Auth but stuck on a permissions error,
+      // because the login handler's catch returns without redirecting.
+      //
+      // ADMITTING THE KEY IS NOT ADMITTING THE VALUE. The security control is
+      // `identityPinned()` below, not this list: the key may appear, but its
+      // value can only ever be the caller's own authenticated identity. That is
+      // strictly stronger than the previous arrangement, which relied on the
+      // key being absent — and it lets a stale mirror self-heal to the current
+      // verified address instead of being frozen wrong forever.
       function updateFields() {
         return [
+          'uid', 'email', 'createdAt',
           'name', 'phone', 'address',
           'onboardingRole', 'primaryUseCase', 'expectedUsage', 'referralSource',
           'onboardingCompleted',
@@ -84,21 +94,55 @@ service cloud.firestore {
         ];
       }
 
+      /**
+       * THE IDENTITY PIN — the same control on create and on update.
+       *
+       * `uid`, if written, must equal the document path. `email`, if written,
+       * must equal the address on the caller's own verified Firebase token.
+       * A missing key is permitted (the schema does not require either), but a
+       * WRONG one is refused, so no caller can forge identity metadata whether
+       * the document is new, legacy, or already correct.
+       *
+       * Nulling is refused for free: `null == uid` is false.
+       */
+      function identityPinned() {
+        return (!('uid' in request.resource.data) || request.resource.data.uid == uid)
+               && (!('email' in request.resource.data) || request.resource.data.email == request.auth.token.email);
+      }
+
+      /**
+       * Identity is write-once and cannot be removed. Without this, a client
+       * could DELETE a correct `uid`/`email` — the pin above is vacuously true
+       * for an absent key — and evade the binding rather than break it.
+       */
+      function identityNotRemoved() {
+        return (!('uid' in resource.data) || 'uid' in request.resource.data)
+               && (!('email' in resource.data) || 'email' in request.resource.data);
+      }
+
       allow get: if isOwner(uid);
-      allow list: if isAdminClaim();
+
+      // Phase P0.1-R2 — NO CLIENT LIST, INCLUDING FOR ADMINS.
+      //
+      // Firestore rules govern an externally callable API. That no first-party
+      // browser code issues a list is a reason removal is cheap, NOT evidence
+      // the grant was safe: any authenticated principal can construct a query
+      // directly against the project with the public web config. The grant was
+      // also strictly broader than the cross-user `get` this file deliberately
+      // denies — it returned every user's Stripe ids, override state and
+      // contact details in one query, with none of the audit logging the
+      // /api/admin/* routes provide. Admin listing is served by those routes
+      // through the Admin SDK, which does not consult these rules.
+      allow list: if false;
 
       allow create: if isOwner(uid)
                     && request.resource.data.keys().hasOnly(createFields())
-                    // The document's own identity must be the caller's, so a
-                    // seeded `uid` cannot disagree with the path.
-                    && (!('uid' in request.resource.data) || request.resource.data.uid == uid)
-                    // And the seeded email must be the one the caller actually
-                    // authenticated with, so an admin address cannot be planted
-                    // at signup to win the governance-role fallback.
-                    && (!('email' in request.resource.data) || request.resource.data.email == request.auth.token.email);
+                    && identityPinned();
 
       allow update: if isOwner(uid)
-                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(updateFields());
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(updateFields())
+                    && identityPinned()
+                    && identityNotRemoved();
 
       // The authoritative billing record is not the browser's to remove.
       // Deleting it would strip a paying customer's Stripe linkage and usage
