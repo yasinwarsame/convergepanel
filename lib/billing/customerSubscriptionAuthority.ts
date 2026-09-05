@@ -34,6 +34,7 @@
 
 import "server-only";
 import type Stripe from "stripe";
+import { logger } from "@/lib/logger";
 import { isPlanBearingSubscriptionStatus } from "./subscriptionStatus";
 import { stripeLookup } from "./reconciliationOutcome";
 
@@ -149,4 +150,52 @@ export function verifyCustomerIdentity(args: {
   if (args.destructive) return { ok: false, reason: "no_verified_customer" };
   if (incoming) return { ok: true, verifiedCustomerId: incoming };
   return { ok: false, reason: "no_verified_customer" };
+}
+
+/**
+ * Phase WEBHOOK-B1-C6 — the ambiguity record, in ONE place.
+ *
+ * `multiple_entitlements` is terminal on every path: nothing is written and
+ * nothing will retry, so this log is the only signal an operator gets that a
+ * customer needs manual repair. It was previously written out by hand at each
+ * call site, which is how a third call site (request-time reconciliation)
+ * managed to have no record at all while quietly resolving the ambiguity the
+ * other two refused. One emitter means the classification, the field set and
+ * the "changed nothing" promise cannot drift apart again.
+ *
+ * Deliberately carries no secret, no raw event payload and no payment detail —
+ * only the identifiers needed to find the customer and both subscriptions.
+ */
+export const MULTIPLE_ENTITLEMENTS_CODE = "multiple_entitlement_subscriptions";
+
+/** Which writer refused. All three resolve authority the same way. */
+export type AuthorityPath =
+  | "webhook_subscription_change"
+  | "webhook_subscription_deleted"
+  | "request_time_reconciliation";
+
+export function reportMultipleEntitlementSubscriptions(args: {
+  path: AuthorityPath;
+  eventId?: string;
+  eventType?: string;
+  stripeCustomerId: string;
+  uid: string;
+  eventSubscriptionId?: string | null;
+  storedSubscriptionId: string | null;
+  candidateSubscriptionIds: string[];
+  candidateCount: number;
+}): void {
+  logger.error("[billing] multiple_entitlement_subscriptions", {
+    code: MULTIPLE_ENTITLEMENTS_CODE,
+    path: args.path,
+    eventId: args.eventId,
+    eventType: args.eventType,
+    stripeCustomerId: args.stripeCustomerId,
+    uid: args.uid,
+    eventSubscriptionId: args.eventSubscriptionId ?? null,
+    storedSubscriptionId: args.storedSubscriptionId,
+    candidateSubscriptionIds: args.candidateSubscriptionIds,
+    candidateCount: args.candidateCount,
+    resolution: "no_mutation_ambiguous_subscription_set",
+  });
 }

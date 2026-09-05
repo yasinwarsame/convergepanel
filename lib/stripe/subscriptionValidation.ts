@@ -1,33 +1,65 @@
 /**
- * Subscription Validation
- * 
- * Validates Stripe subscription status for users with paid plans.
- * This ensures Firestore stays in sync with Stripe even if webhooks fail.
- * 
- * IMPORTANT: All validation functions are defensive and never throw.
- * If validation fails, we log the issue but don't block the user.
+ * Subscription Validation — REQUEST-TIME RECONCILIATION.
+ *
+ * This is the self-healing path that runs on ordinary paid requests
+ * (`/api/run-panel`, `/api/verify-claim`, the workspace run and verification
+ * routes, `/api/user/usage` and `/api/billing/validate-subscription`). It
+ * exists because a webhook may not have arrived.
+ *
+ * Phase WEBHOOK-B1-C6 — IT NOW ANSWERS TO THE SAME AUTHORITY CONTRACT AS THE
+ * WEBHOOK.
+ *
+ * The C5-R1 exact-head review proved that the webhook's safety guarantee did
+ * not survive contact with normal operation, because this path had its own,
+ * weaker selection rule:
+ *
+ *   - it listed only the first 10 subscriptions and ignored `has_more`, so ten
+ *     newer throwaway subscriptions could hide the authoritative one and a
+ *     paying customer was downgraded to free;
+ *   - it sorted by `created` and took the newest plan-bearing subscription, so
+ *     an ambiguity the webhook had explicitly REFUSED to resolve was resolved
+ *     here on the very next request — and with equal creation timestamps the
+ *     winner flipped with Stripe's array order, reintroducing exactly the
+ *     order-dependence the webhook correction removed.
+ *
+ * Authority now comes from `resolveCustomerSubscriptionAuthority()`, the same
+ * resolver the webhook uses: the customer's whole subscription set, paginated
+ * to exhaustion, classified by the same plan-bearing predicate. There is no
+ * second implementation and no second ranking rule.
+ *
+ * IMPORTANT: this function is defensive and never throws. It returns `false`
+ * when it could not establish state; callers treat that as "not validated",
+ * never as "no subscription". A state it cannot establish is never a reason to
+ * write.
  */
 
 import "server-only";
 import { stripe } from "./client";
 import { adminDb } from "@/lib/firebase/admin";
+import { logger } from "@/lib/logger";
 import { mapSubscriptionToPlan } from "@/lib/billing/subscriptionMapper";
 import { updateUserPlanInFirestore } from "./webhookHelpers";
 import { resolveSubscriptionBillingState } from "@/lib/billing/subscriptionBillingState";
+import {
+  reportMultipleEntitlementSubscriptions,
+  resolveCustomerSubscriptionAuthority,
+  verifyCustomerIdentity,
+} from "@/lib/billing/customerSubscriptionAuthority";
+import { isTransientDependencyError } from "@/lib/billing/reconciliationOutcome";
 import { BillingInterval } from "@/lib/plans";
+import { PLAN_CONFIG } from "@/lib/billing/planConfig";
 import { isOverrideActive } from "@/lib/admin/entitlements";
 
 /**
- * Validate and sync subscription status for a user
- * 
- * This function:
- * 1. Checks if user has a paid plan in Firestore
- * 2. If yes, validates subscription status with Stripe
- * 3. Updates Firestore if subscription status has changed
- * 
+ * Validate and reconcile a user's plan against their authoritative Stripe
+ * subscription state.
+ *
  * @param uid - Firebase user ID
- * @param stripeCustomerId - Stripe customer ID (optional, will be looked up if not provided)
- * @returns true if validation succeeded (or not needed), false if validation failed
+ * @param stripeCustomerId - optional caller-supplied customer id. It is a
+ *   HINT, not authority: the stored binding always wins, and a value that
+ *   conflicts with it is refused rather than followed.
+ * @returns `true` when validation succeeded or was not needed, `false` when it
+ *   could not be completed. `false` never implies absence of a subscription.
  */
 export async function validateUserSubscription(
   uid: string,
@@ -35,12 +67,12 @@ export async function validateUserSubscription(
 ): Promise<boolean> {
   try {
     if (!stripe) {
-      console.warn("[subscriptionValidation] Stripe not configured, skipping validation");
+      logger.warn("[subscriptionValidation] Stripe not configured, skipping validation");
       return true; // Not an error - just skip validation
     }
 
     if (!adminDb) {
-      console.warn("[subscriptionValidation] Firestore not available, skipping validation");
+      logger.warn("[subscriptionValidation] Firestore not available, skipping validation");
       return true; // Not an error - just skip validation
     }
 
@@ -53,140 +85,161 @@ export async function validateUserSubscription(
 
     const userData = userDoc.data();
     const currentPlan = userData?.plan;
-    const currentStripeCustomerId = stripeCustomerId || userData?.stripeCustomerId;
 
-    // Only validate paid plans (free plan doesn't have Stripe subscription)
+    // Only validate paid plans. A free user has nothing this path could
+    // correct downwards, and upgrades are the webhook's job — reconciling
+    // every free request would also put a Stripe call on the hot path of the
+    // largest population of users for no billing benefit.
     if (currentPlan === "free" || !currentPlan) {
       return true; // No validation needed for free plan
     }
 
-    // If no Stripe customer ID, can't validate
-    if (!currentStripeCustomerId) {
-      console.warn("[subscriptionValidation] User has paid plan but no stripeCustomerId:", {
-        uid,
-        plan: currentPlan,
-      });
-      return true; // Not blocking - user might be in transition
+    // ASSOCIATION, on the same rule as the webhook. This path can DOWNGRADE, so
+    // it is treated as destructive: a caller-supplied customer id may never
+    // bootstrap a binding that does not already exist, and may never override
+    // one that does. Without this, a caller passing a foreign customer id could
+    // have that customer's (empty) subscription set decide this user's plan.
+    const identity = verifyCustomerIdentity({
+      storedCustomerId: (userData?.stripeCustomerId as string | undefined) ?? null,
+      eventCustomerId: stripeCustomerId ?? null,
+      destructive: true,
+    });
+    if (!identity.ok) {
+      if (identity.reason === "association_conflict") {
+        logger.error("[subscriptionValidation] Refusing reconciliation: caller-supplied customer id conflicts with the stored binding", { reason: identity.reason });
+        return false;
+      }
+      // A paid plan with no stored customer binding cannot be reconciled from
+      // Stripe at all, and must certainly not be downgraded on the strength of
+      // a customer we never bound. Leave it alone; this is not a failure.
+      logger.warn("[subscriptionValidation] User has a paid plan but no verified Stripe customer binding; skipping reconciliation");
+      return true;
+    }
+    const verifiedCustomerId = identity.verifiedCustomerId;
+
+    // THE AUTHORITY DECISION — the customer's whole subscription set, resolved
+    // by the SAME function the webhook uses. Paginated to exhaustion: a
+    // truncated first page is not proof of absence.
+    let authority;
+    try {
+      authority = await resolveCustomerSubscriptionAuthority({ stripe, verifiedCustomerId });
+    } catch (dependencyError) {
+      if (isTransientDependencyError(dependencyError)) {
+        // State could not be determined. That is never authority to downgrade.
+        logger.warn("[subscriptionValidation] Could not establish the customer's subscription set; leaving billing state untouched", {
+          dependency: dependencyError.dependency,
+          operation: dependencyError.operation,
+        });
+        return false;
+      }
+      throw dependencyError;
     }
 
-    // Fetch subscriptions from Stripe
-    const subscriptions = await stripe.subscriptions.list({
-      customer: currentStripeCustomerId,
-      status: "all",
-      limit: 10,
-    });
+    if (authority.kind === "unverified_customer") {
+      logger.error("[subscriptionValidation] Cannot establish the customer's subscription set without a verified customer");
+      return false;
+    }
 
-    // Find the most recent active subscription
-    const sortedSubscriptions = subscriptions.data.sort((a, b) => b.created - a.created);
-    const activeSubscription = sortedSubscriptions.find(
-      (sub) => sub.status === "active" || sub.status === "trialing" || sub.status === "past_due"
-    );
+    if (authority.kind === "customer_missing") {
+      // Stripe says the customer itself is gone. An absent lookup is not
+      // positive authority to strip a paid plan — the binding may be stale, or
+      // a migration may be in flight.
+      logger.error("[subscriptionValidation] Stripe customer not found; refusing to derive entitlement from an absent lookup");
+      return false;
+    }
 
-    // Map subscription to plan
-    const planMapping = activeSubscription
-      ? mapSubscriptionToPlan(activeSubscription)
-      : null;
+    if (authority.kind === "multiple_entitlements") {
+      // Unsupported under the one-subscription product contract, and there is
+      // no documented rule for choosing. The webhook refuses this state; an
+      // ordinary request must refuse it identically, or the refusal is
+      // meaningless. Preserve existing state and surface it.
+      reportMultipleEntitlementSubscriptions({
+        path: "request_time_reconciliation",
+        stripeCustomerId: verifiedCustomerId,
+        uid,
+        storedSubscriptionId: (userData?.stripeSubscriptionId as string | undefined) ?? null,
+        candidateSubscriptionIds: authority.subscriptionIds,
+        candidateCount: authority.count,
+      });
+      return false;
+    }
 
-    // Check if Firestore plan matches Stripe subscription
     const firestoreSubscriptionId = userData?.stripeSubscriptionId;
     const firestoreStatus = userData?.subscriptionStatus;
 
-    if (activeSubscription) {
-      // User has active subscription in Stripe
-      const expectedPlan = planMapping?.planId;
-      
-      // If Firestore plan doesn't match Stripe, update it
-      // Phase WEBHOOK-B1: the cadence is part of "does local state match
-      // Stripe". It was previously excluded, so a subscription whose plan,
-      // id and status all matched but whose stored `billingInterval` was
-      // stale — exactly the state left behind when a Price's cadence is
-      // corrected — could never be repaired by this path.
-      const canonicalState = resolveSubscriptionBillingState(activeSubscription as never);
-      const firestoreBillingInterval = userData?.billingInterval;
-      const intervalMismatch = canonicalState.ok && firestoreBillingInterval !== canonicalState.state.billingInterval;
-
-      if (currentPlan !== expectedPlan || 
-          firestoreSubscriptionId !== activeSubscription.id ||
-          firestoreStatus !== activeSubscription.status ||
-          intervalMismatch) {
-        console.log("[subscriptionValidation] Plan mismatch detected, syncing from Stripe:", {
-          uid,
-          firestorePlan: currentPlan,
-          stripePlan: expectedPlan,
-          firestoreSubscriptionId,
-          stripeSubscriptionId: activeSubscription.id,
-          firestoreStatus,
-          stripeStatus: activeSubscription.status,
-        });
-
-        // Update Firestore to match Stripe
-        // Phase WEBHOOK-B1: same canonical resolver the webhook uses. If the
-        // subscription cannot be resolved, this path writes nothing derived
-        // from it rather than manufacturing a period from the current time.
-        const billingStateResult = canonicalState;
-        if (!billingStateResult.ok) {
-          console.warn("[subscriptionValidation] Could not resolve canonical billing state; skipping reconciliation write");
-          return true;
-        }
-        const billingInterval: BillingInterval = billingStateResult.state.billingInterval;
-        
-        await updateUserPlanInFirestore({
-          uid,
-          customerId: currentStripeCustomerId,
-          subscriptionId: activeSubscription.id,
-          planMapping: planMapping!,
-          status: activeSubscription.status,
-          billingInterval,
-          billingState: billingStateResult.state,
-        });
-
+    if (authority.kind === "no_entitlement") {
+      // Proven, after exhausting the listing: this customer holds no
+      // plan-bearing subscription. Correct the paid plan — unless an admin
+      // override is deliberately holding it open.
+      if (isOverrideActive(userData)) {
+        logger.info("[subscriptionValidation] Skipping downgrade - admin override is active");
         return true;
       }
 
-      // Plans match - validation successful
-      return true;
-    } else {
-      // No active subscription in Stripe, but user has paid plan in Firestore
-      // This could mean subscription was canceled
-      // BUT: Do NOT downgrade if admin override is active
-      if (currentPlan !== "free" && !isOverrideActive(userData)) {
-        console.log("[subscriptionValidation] No active subscription found, downgrading to free:", {
-          uid,
-          currentPlan,
-          firestoreSubscriptionId,
-        });
-
-        // Downgrade to free plan (only if no active override)
-        await updateUserPlanInFirestore({
-          uid,
-          customerId: currentStripeCustomerId,
-          subscriptionId: firestoreSubscriptionId || "",
-          planMapping: {
-            planId: "free",
-            monthlyLimit: 8,
-            maxModelsPerRun: 3,
-            isActive: false,
-          },
-          status: "canceled",
-        });
-
-        return true;
-      } else if (isOverrideActive(userData)) {
-        console.log("[subscriptionValidation] Skipping downgrade - admin override is active:", {
-          uid,
-          currentPlan,
-        });
-      }
-
+      await updateUserPlanInFirestore({
+        uid,
+        customerId: verifiedCustomerId,
+        subscriptionId: firestoreSubscriptionId || "",
+        planMapping: {
+          planId: "free",
+          // Phase WEBHOOK-B1-C6: from the plan configuration, not hard-coded.
+          // This path used to write `maxModelsPerRun: 3` while the webhook
+          // wrote the configured 2, so which writer downgraded a customer
+          // decided how many models they kept.
+          monthlyLimit: PLAN_CONFIG.free.monthlyLimit,
+          maxModelsPerRun: PLAN_CONFIG.free.maxModels,
+          isActive: false,
+        },
+        status: "canceled",
+      });
       return true;
     }
+
+    // Exactly one plan-bearing subscription: that one is authoritative.
+    const authoritative = authority.subscription;
+    const planMapping = mapSubscriptionToPlan(authoritative);
+
+    // Phase WEBHOOK-B1: the cadence is part of "does local state match
+    // Stripe". It was previously excluded, so a subscription whose plan, id
+    // and status all matched but whose stored `billingInterval` was stale —
+    // exactly the state left behind when a Price's cadence is corrected —
+    // could never be repaired by this path.
+    const canonicalState = resolveSubscriptionBillingState(authoritative as never);
+    const intervalMismatch = canonicalState.ok && userData?.billingInterval !== canonicalState.state.billingInterval;
+
+    const matches =
+      currentPlan === planMapping.planId &&
+      firestoreSubscriptionId === authoritative.id &&
+      firestoreStatus === authoritative.status &&
+      !intervalMismatch;
+
+    if (matches) return true;
+
+    // Phase WEBHOOK-B1: same canonical resolver the webhook uses. If the
+    // subscription cannot be resolved, this path writes nothing derived from
+    // it rather than manufacturing a period from the current time.
+    if (!canonicalState.ok) {
+      logger.warn("[subscriptionValidation] Could not resolve canonical billing state; skipping reconciliation write", {
+        reason: canonicalState.reason,
+      });
+      return true;
+    }
+    const billingInterval: BillingInterval = canonicalState.state.billingInterval;
+
+    await updateUserPlanInFirestore({
+      uid,
+      customerId: verifiedCustomerId,
+      subscriptionId: authoritative.id,
+      planMapping,
+      status: authoritative.status,
+      billingInterval,
+      billingState: canonicalState.state,
+    });
+
+    return true;
   } catch (error: any) {
     // Defensive: log error but don't block user
-    console.error("[subscriptionValidation] Error validating subscription:", {
-      uid,
-      error: error?.message,
-      stack: error?.stack,
-    });
+    logger.error("[subscriptionValidation] Error validating subscription", { error: error?.message });
     return false; // Return false to indicate validation failed, but don't throw
   }
 }

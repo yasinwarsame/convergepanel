@@ -52,7 +52,7 @@ import { PLAN_CONFIG, getPlanConfigById, BillingPlanId, STRIPE_PRICE_TO_PLAN } f
 import { mapSubscriptionToPlan, SubscriptionPlanMapping } from "@/lib/billing/subscriptionMapper";
 import { resolveSubscriptionBillingState } from "@/lib/billing/subscriptionBillingState";
 import { mayDeletionDowngrade } from "@/lib/billing/subscriptionAuthority";
-import { resolveCustomerSubscriptionAuthority, verifyCustomerIdentity } from "@/lib/billing/customerSubscriptionAuthority";
+import { reportMultipleEntitlementSubscriptions, resolveCustomerSubscriptionAuthority, verifyCustomerIdentity } from "@/lib/billing/customerSubscriptionAuthority";
 import { TransientDependencyError, firestoreRead } from "@/lib/billing/reconciliationOutcome";
 import { PlanId, BillingInterval } from "@/lib/plans";
 import { updateUserPlanInFirestore } from "@/lib/stripe/webhookHelpers";
@@ -140,27 +140,22 @@ export async function POST(req: NextRequest) {
               metadata: subscription.metadata,
             });
             
-            // Ensure subscription has firebaseUid in metadata (from session if not in subscription)
-            // Check both firebaseUid and firebase_uid for backward compatibility
-            const sessionUid = session.metadata?.firebaseUid || session.metadata?.firebase_uid;
-            const subUid = subscription.metadata?.firebaseUid || subscription.metadata?.firebase_uid;
+            // Phase WEBHOOK-B1-C6 — THE SESSION UID IS A RESOLUTION HINT, NOT A
+            // LICENCE TO MUTATE STRIPE.
+            //
+            // This site used to write `firebaseUid` onto the subscription right
+            // here, before ANY of the checks that establish the right to act on
+            // it. The C5-R1 review proved by execution that a stale historical
+            // subscription and a FOREIGN customer's subscription carrying a
+            // copied uid were both mutated: Firestore correctly refused the
+            // event afterwards, but Stripe had already been written to.
+            //
+            // The uid now travels as an in-process hint and the Stripe write
+            // happens once, later, against the subscription that has been
+            // positively established as authoritative.
+            const sessionUid = session.metadata?.firebaseUid || session.metadata?.firebase_uid || null;
             
-            if (!subUid && sessionUid) {
-              console.log("[webhook] Updating subscription metadata with firebaseUid from session");
-              // Update subscription metadata with firebaseUid from session
-              await stripe.subscriptions.update(subscription.id, {
-                metadata: {
-                  ...subscription.metadata,
-                  firebaseUid: sessionUid,
-                },
-              });
-              subscription.metadata = {
-                ...subscription.metadata,
-                firebaseUid: sessionUid,
-              };
-            }
-            
-            await handleSubscriptionChange(subscription, { id: event.id, type: event.type });
+            await handleSubscriptionChange(subscription, { id: event.id, type: event.type }, sessionUid);
           } catch (subError: any) {
             // Phase WEBHOOK-B1-C2: do NOT swallow. Reconciliation failures here
             // used to be acknowledged with a 200, so Stripe never retried and a
@@ -284,7 +279,13 @@ export async function POST(req: NextRequest) {
 export async function handleSubscriptionChange(
   subscription: Stripe.Subscription,
   /** Event context, carried so the terminal ambiguity record is actionable. */
-  eventContext?: { id?: string; type?: string }
+  eventContext?: { id?: string; type?: string },
+  /**
+   * Phase WEBHOOK-B1-C6: a uid carried by the checkout session that created
+   * this subscription. Used ONLY to resolve which application user the event
+   * concerns; it confers no authority and triggers no Stripe write on its own.
+   */
+  uidHint?: string | null
 ) {
   const eventId = eventContext?.id;
   const eventType = eventContext?.type;
@@ -310,8 +311,9 @@ export async function handleSubscriptionChange(
   // Support both firebaseUid and firebase_uid for backward compatibility
   let firebaseUid: string | null = null;
 
-  // Priority 1: subscription metadata (firebaseUid or firebase_uid)
-  firebaseUid = subscription.metadata?.firebaseUid || subscription.metadata?.firebase_uid || null;
+  // Priority 1: subscription metadata (firebaseUid or firebase_uid), then the
+  // originating checkout session's uid hint.
+  firebaseUid = subscription.metadata?.firebaseUid || subscription.metadata?.firebase_uid || uidHint || null;
 
   // Priority 2: customer metadata (fallback)
   if (!firebaseUid && stripe) {
@@ -347,22 +349,11 @@ export async function handleSubscriptionChange(
       if (!usersSnapshot.empty) {
         firebaseUid = usersSnapshot.docs[0].id;
         console.log("[webhook] ✅ Found user by stripeCustomerId:", firebaseUid);
-        
-        // Also update the subscription metadata with firebaseUid for future lookups
-        if (stripe) {
-          try {
-            await stripe.subscriptions.update(subscriptionId, {
-              metadata: {
-                ...subscription.metadata,
-                firebaseUid: firebaseUid,
-              },
-            });
-            console.log("[webhook] Updated subscription metadata with firebaseUid");
-          } catch (metaErr) {
-            console.warn("[webhook] Failed to update subscription metadata:", metaErr);
-            // Non-critical, continue processing
-          }
-        }
+        // Phase WEBHOOK-B1-C6: the metadata backfill that used to happen here
+        // ran before association and authority were established, so an event
+        // for a stale, foreign or ambiguous subscription still mutated Stripe.
+        // It is now performed once, after authority, in
+        // `reconcileAuthoritativeSubscription()`.
       }
     } catch (err) {
       throw new TransientDependencyError("firestore", "users.where(stripeCustomerId)", err);
@@ -479,8 +470,8 @@ export async function handleSubscriptionChange(
     // makes this log the ONLY signal an operator gets, so it carries enough
     // structure to find the customer and both subscriptions — and no secrets,
     // no raw payload, no payment data.
-    logger.error("[webhook] multiple_entitlement_subscriptions", {
-      code: "multiple_entitlement_subscriptions",
+    reportMultipleEntitlementSubscriptions({
+      path: "webhook_subscription_change",
       eventId,
       eventType,
       stripeCustomerId: identity.verifiedCustomerId,
@@ -489,7 +480,6 @@ export async function handleSubscriptionChange(
       storedSubscriptionId,
       candidateSubscriptionIds: customerAuthority.subscriptionIds,
       candidateCount: customerAuthority.count,
-      resolution: "no_mutation_ambiguous_subscription_set",
     });
     return;
   }
@@ -614,6 +604,14 @@ async function reconcileAuthoritativeSubscription(args: {
     billingInterval,
   });
 
+  // Phase WEBHOOK-B1-C6 — THE ONLY PLACE APPLICATION IDENTITY IS WRITTEN TO
+  // STRIPE. Everything above has now been positively established: the user was
+  // resolved, the customer association was verified, the customer's whole
+  // subscription set was enumerated to exhaustion, ambiguity was ruled out, and
+  // THIS subscription is the single authoritative one. Only now is it a legal
+  // target for an external mutation.
+  await backfillSubscriptionUidMetadata({ uid: firebaseUid, authoritative });
+
   // Update user plan in Firestore
   try {
     console.log(`[webhook] About to update Firestore for user ${firebaseUid} with plan ${planMapping.planId}`);
@@ -669,6 +667,44 @@ async function reconcileAuthoritativeSubscription(args: {
     // the reconciliation permanently.
     console.error(`[webhook] ❌ CRITICAL: Failed to update user plan:`, updateError?.message);
     throw updateError;
+  }
+}
+
+/**
+ * Phase WEBHOOK-B1-C6 — write the application's uid onto the AUTHORITATIVE
+ * subscription, and only there.
+ *
+ * WHY IT IS RETAINED. `subscription.metadata.firebaseUid` is the first and
+ * cheapest user-resolution key on both webhook paths, and it is the ONLY one
+ * that still works when the local `stripeCustomerId` binding is missing or
+ * stale — the recovery case the Priority-3 Firestore lookup cannot serve. The
+ * admin sync endpoint reads the same key as its fallback. It is load-bearing,
+ * so it is kept rather than deleted; what changes is WHEN it may be written.
+ *
+ * FAILURE POLICY. The metadata is an optimisation for FUTURE lookups, not a
+ * billing fact: every current decision is made from the customer's live Stripe
+ * set, never from this field. A failure here must therefore not block the
+ * billing reconciliation, which is the part a customer feels. It is logged and
+ * execution continues.
+ *
+ * IDEMPOTENCE. The value written is the uid, so a duplicate or retried
+ * delivery writes the identical value; a subscription that already carries it
+ * (under either the current or the legacy snake_case key) is not written at
+ * all.
+ */
+async function backfillSubscriptionUidMetadata(args: { uid: string; authoritative: Stripe.Subscription }): Promise<void> {
+  if (!stripe) return;
+  const metadata = (args.authoritative.metadata ?? {}) as Record<string, string>;
+  if (metadata.firebaseUid === args.uid || metadata.firebase_uid === args.uid) return;
+
+  try {
+    await stripe.subscriptions.update(args.authoritative.id, {
+      metadata: { ...metadata, firebaseUid: args.uid },
+    });
+  } catch {
+    logger.warn("[webhook] Could not write uid metadata to the authoritative subscription (non-critical)", {
+      subscriptionId: args.authoritative.id,
+    });
   }
 }
 
@@ -835,8 +871,8 @@ async function handleSubscriptionDeleted(
       return;
     }
     if (replacementAuthority.kind === "multiple_entitlements") {
-      logger.error("[webhook] multiple_entitlement_subscriptions", {
-        code: "multiple_entitlement_subscriptions",
+      reportMultipleEntitlementSubscriptions({
+        path: "webhook_subscription_deleted",
         eventId,
         eventType,
         stripeCustomerId: verifiedDeletionCustomerId,
@@ -845,7 +881,6 @@ async function handleSubscriptionDeleted(
         storedSubscriptionId: storedSubscriptionIdForDeletion,
         candidateSubscriptionIds: replacementAuthority.subscriptionIds,
         candidateCount: replacementAuthority.count,
-        resolution: "no_mutation_ambiguous_subscription_set",
       });
       return;
     }
