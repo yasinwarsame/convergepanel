@@ -73,6 +73,8 @@ jest.mock("@/lib/stripe/client", () => ({
 let storedDoc: Record<string, unknown> = {};
 const writes: Record<string, unknown>[] = [];
 let queryEmpty = true;
+/** When set, the first Firestore user query throws and later ones succeed. */
+let queryThrowsOnce = false;
 const docHandle = {
   get: async () => ({ exists: true, data: () => storedDoc }),
   set: async (d: Record<string, unknown>) => { writes.push(d); storedDoc = { ...storedDoc, ...d }; },
@@ -82,7 +84,10 @@ jest.mock("@/lib/firebase/admin", () => ({
   adminDb: {
     collection: () => ({
       doc: () => docHandle,
-      where: () => ({ limit: () => ({ get: async () => ({ empty: queryEmpty, docs: [] }) }) }),
+      where: () => ({ limit: () => ({ get: async () => {
+        if (queryThrowsOnce) { queryThrowsOnce = false; throw Object.assign(new Error("UNAVAILABLE"), { code: 14 }); }
+        return { empty: queryEmpty, docs: queryEmpty ? [] : [{ id: UID }] };
+      } }) }),
     }),
   },
   firebaseAdmin: {
@@ -135,7 +140,7 @@ const billingOf = (d: Record<string, unknown>) => ({ plan: d.plan, billingInterv
 
 function reset() {
   live.clear(); writes.length = 0; constructEvent.mockReset(); subscriptionsUpdate.mockClear(); subscriptionsList.mockClear();
-  retrieveFails = null; listFails = false; customerRetrieveFails = false; queryEmpty = true;
+  retrieveFails = null; listFails = false; customerRetrieveFails = false; queryEmpty = true; queryThrowsOnce = false;
 }
 beforeEach(reset);
 
@@ -366,5 +371,20 @@ describe("deletion never adopts a customer id from the event", () => {
     for (const call of subscriptionsList.mock.calls) {
       expect((call[0] as { customer?: string })?.customer).toBe(MINE);
     }
+  });
+});
+
+describe("a failing Firestore user lookup is not papered over either", () => {
+  it("REGRESSION: the delivery fails even though a later resolution strategy would have found the user", async () => {
+    storedDoc = { email: "c@example.test", stripeCustomerId: MINE, stripeSubscriptionId: C, plan: "free" };
+    const noUid = sub({ id: C, uid: null });
+    setLive(noUid);
+    queryThrowsOnce = true; // the customer-id lookup fails; the email lookup would succeed
+    queryEmpty = false;
+
+    const status = await deliver("customer.subscription.updated", noUid);
+
+    expect(status).toBeGreaterThanOrEqual(500);
+    expect(writes).toHaveLength(0);
   });
 });
