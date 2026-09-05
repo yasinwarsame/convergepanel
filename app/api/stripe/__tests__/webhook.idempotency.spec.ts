@@ -222,3 +222,20 @@ describe("webhook fail-closed paths", () => {
     expect(writes).toHaveLength(0);
   });
 });
+
+describe("no fabricated billing dates", () => {
+  it("REGRESSION: when Stripe reports NO period, billingCycleStart is left untouched — never set to now", async () => {
+    const noPeriod = {
+      id: "sub_incident", customer: "cus_incident", status: "active",
+      metadata: { firebaseUid: UID, targetPlan: "full" },
+      items: { data: [{ id: "si_incident", quantity: 1, price: { id: "price_full_y", recurring: { interval: "year", interval_count: 1 } } }] },
+    } as unknown as Stripe.Subscription;
+    storedDoc = { ...storedDoc, billingCycleStart: "PRESERVED_CANONICAL_VALUE" };
+
+    expect(await deliver("customer.subscription.updated", noPeriod)).toBe(200);
+
+    expect(storedDoc.billingCycleStart).toBe("PRESERVED_CANONICAL_VALUE");
+    for (const w of writes) expect(w).not.toHaveProperty("billingCycleStart");
+    expect(storedDoc.plan).toBe("full");
+  });
+});

@@ -129,6 +129,18 @@ describe("cross-subscription events — a former subscription must never touch t
     expect(storedDoc).toEqual(before);
   });
 
+  it("REGRESSION: an event for a DIFFERENT still-active subscription cannot take over from the stored active one", async () => {
+    // Both A and B are active at Stripe. B is the user's current subscription;
+    // A must not be adopted just because its own status looks entitled.
+    setLive(sub({ id: SUB_A, status: "active", priceId: "price_lite_m", interval: "month" }));
+    const before = { ...storedDoc };
+    expect(await deliver("customer.subscription.updated", sub({ id: SUB_A, status: "active", priceId: "price_lite_m", interval: "month" }))).toBe(200);
+    expect(storedDoc.stripeSubscriptionId).toBe(SUB_B);
+    expect(storedDoc.plan).toBe("full");
+    expect(storedDoc.billingInterval).toBe("year");
+    expect(storedDoc).toEqual(before);
+  });
+
   it("a delayed invoice.payment_succeeded for former subscription A leaves B untouched", async () => {
     const before = { ...storedDoc };
     expect(await deliver("invoice.payment_succeeded", { id: "in_old", subscription: SUB_A })).toBe(200);
