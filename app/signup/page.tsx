@@ -272,10 +272,27 @@ export default function SignupPage() {
       // copied to forge a plan. Firestore rules now reject them.
       //
       // Nothing is lost by dropping them: every one has a safe default when
-      // absent, and the server writes the real values the first time it needs
-      // them — `/api/user/usage` and the quota gate both initialise plan and
-      // usage on a document that lacks them, and `role` is granted only by the
-      // admin endpoint or derived from the verified email allowlist.
+      // absent, and `role` is granted only by the admin endpoint or derived
+      // from the verified email allowlist. `/api/user/usage` and the quota gate
+      // initialise plan and usage when the document does not yet EXIST (both
+      // branch on `!userDoc.exists`), and repair `totalRuns` and
+      // `tokensUsedCurrentPeriod` on a document that is missing them.
+      //
+      // Phase P0.1-R4 — MERGE, NOT REPLACE.
+      //
+      // This was a bare `setDoc(ref, payload)`, which REPLACES the whole
+      // document. A server bootstrap can create `users/{uid}` before this line
+      // runs — `/api/user/usage` is fetched by TopNav's `useUserPlan` as soon
+      // as auth is ready, which races the write below — and against such a
+      // document a replace DELETES `plan`, `runsThisMonth`, `usageMonth` and
+      // `totalRuns`. Removals enter `affectedKeys()`, those keys are not
+      // client-writable, and the whole write is correctly denied: the account
+      // exists in Firebase Auth but signup fails and does not redirect.
+      //
+      // Merge is also the honest description of what signup does. It completes
+      // the profile fields it owns; it has never owned the server-written
+      // remainder of the document, and the fix belongs here rather than in a
+      // rules exception that would permit destructive replacement.
       await setDoc(doc(db, "users", user.uid), stripUndefined({
         uid: user.uid,
         email: user.email,
@@ -284,7 +301,7 @@ export default function SignupPage() {
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
         lastLoginAt: serverTimestamp(),
-      }));
+      }), { merge: true });
 
       // Session-cookie creation/verification now happens reactively in
       // AuthProvider's onIdTokenChanged listener — see the pending-sync

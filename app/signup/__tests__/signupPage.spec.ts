@@ -43,6 +43,35 @@ describe("Signup page — source-level wiring guarantees", () => {
     expect(source).toMatch(/10000/);
   });
 
+  describe("Phase P0.1-R4 — the profile write must MERGE, never replace", () => {
+    /**
+     * The Firestore rules deny a destructive replace of `users/{uid}`, because
+     * removing server-owned keys puts them in `affectedKeys()`. A server
+     * bootstrap can create that document before signup's own write lands, so a
+     * bare `setDoc` strands the user: the Auth account exists, the profile
+     * write is refused, and the handler does not redirect.
+     *
+     * This assertion lives here, in the ordinary unit suite, because it is the
+     * one guard that runs WITHOUT the Firestore emulator. The rules spec models
+     * this call, and a model can only stay honest if something checks it
+     * against the real source.
+     */
+    it("passes { merge: true } to the users/{uid} setDoc", () => {
+      const setDocIndex = source.indexOf('setDoc(doc(db, "users", user.uid)');
+      expect(setDocIndex).toBeGreaterThan(-1);
+      const call = source.slice(setDocIndex, setDocIndex + 600);
+      expect(call).toMatch(/\}\)\s*,\s*\{\s*merge:\s*true\s*\}\s*\)/);
+    });
+
+    it("REGRESSION: the write is not a bare two-argument setDoc", () => {
+      // `setDoc(ref, payload)` with no options is the pre-R4 shape that a
+      // server-bootstrapped document refuses.
+      const setDocIndex = source.indexOf('setDoc(doc(db, "users", user.uid)');
+      const call = source.slice(setDocIndex, setDocIndex + 600);
+      expect(call).not.toMatch(/\}\)\s*\)\s*;/);
+    });
+  });
+
   describe("Phase 3 — Personal Workspace provisioning trigger on signup", () => {
     it("calls POST /api/user/workspace via authedFetch", () => {
       expect(source).toMatch(/authedFetch\(\s*["']\/api\/user\/workspace["']/);

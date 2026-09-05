@@ -68,6 +68,31 @@ const asOther = () => env.authenticatedContext(OTHER, { email: "other@example.te
 const anon = () => env.unauthenticatedContext().firestore();
 const myDoc = (db = asMe()) => doc(db, "users", ME);
 
+/**
+ * Phase P0.1-R4 — THE PRODUCTION SIGNUP WRITE, IN ONE PLACE.
+ *
+ * R3 found these fixtures asserting `{ merge: true }` while production issued
+ * a bare `setDoc` — a full REPLACE — so the suite proved nothing about the
+ * shape the app actually sends, and a real signup failure hid behind green
+ * tests. Both the payload AND the options argument now live here, once, and
+ * every signup case goes through `productionSignupWrite()`. A change to the
+ * persistence mode has to come through this helper, so the fixture cannot
+ * silently drift from `app/signup/page.tsx` again.
+ */
+const SIGNUP_PAYLOAD = () => ({
+  uid: ME,
+  email: MY_EMAIL,
+  name: "Me",
+  onboardingCompleted: false,
+  createdAt: serverTimestamp(),
+  updatedAt: serverTimestamp(),
+  lastLoginAt: serverTimestamp(),
+});
+/** Mirrors app/signup/page.tsx: setDoc(ref, payload, { merge: true }). */
+const productionSignupWrite = (db = asMe()) => setDoc(doc(db, "users", ME), SIGNUP_PAYLOAD(), { merge: true });
+/** The pre-R4 behaviour, retained as a negative control: a destructive replace. */
+const legacyReplacingSignupWrite = (db = asMe()) => setDoc(doc(db, "users", ME), SIGNUP_PAYLOAD());
+
 describe("P0 — a browser cannot forge entitlement", () => {
   /** Every field a server authorization or quota decision reads. */
   const FORGERIES: Array<[string, Record<string, unknown>]> = [
@@ -248,10 +273,7 @@ describe("legitimate client behaviour still works", () => {
 
   it("ALLOWED: signup creates the document with client-owned fields only", async () => {
     await env.clearFirestore();
-    await assertSucceeds(setDoc(doc(asMe(), "users", ME), {
-      uid: ME, email: MY_EMAIL, name: "Me", onboardingCompleted: false,
-      createdAt: serverTimestamp(), updatedAt: serverTimestamp(), lastLoginAt: serverTimestamp(),
-    }));
+    await assertSucceeds(productionSignupWrite());
   });
 
   it("ALLOWED: the profile page creates a minimal document when one is missing", async () => {
@@ -327,12 +349,9 @@ describe("R2 — the identity pin, not key absence, is the control", () => {
     await assertSucceeds(setDoc(myDoc(), { email: MY_EMAIL, lastLoginAt: serverTimestamp() }, { merge: true }));
   });
 
-  it("signup's full create payload still works on a bootstrapped document", async () => {
+  it("signup's full payload still works on a bootstrapped document", async () => {
     await seed(BOOTSTRAPPED);
-    await assertSucceeds(setDoc(myDoc(), {
-      uid: ME, email: MY_EMAIL, name: "Me", onboardingCompleted: false,
-      createdAt: serverTimestamp(), updatedAt: serverTimestamp(), lastLoginAt: serverTimestamp(),
-    }, { merge: true }));
+    await assertSucceeds(productionSignupWrite());
   });
 
   // ---------- the pin still refuses every forgery ----------
@@ -427,5 +446,88 @@ describe("R2 — client list/query is closed to every principal", () => {
 
   it("the owner's single-document get still works — the supported read is unchanged", async () => {
     await assertSucceeds(getDoc(myDoc()));
+  });
+});
+
+describe("R4 — signup uses the real production persistence shape", () => {
+  const BOOTSTRAPPED_R4 = { plan: "free", runsThisMonth: 3, usageMonth: "2026-09", totalRuns: 11 };
+
+  async function seedDoc(d: Record<string, unknown>) {
+    await env.clearFirestore();
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "users", ME), d);
+    });
+  }
+  const stored = async (): Promise<Record<string, unknown>> => {
+    let out: Record<string, unknown> = {};
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      out = ((await getDoc(doc(ctx.firestore(), "users", ME))).data() ?? {}) as Record<string, unknown>;
+    });
+    return out;
+  };
+
+  it("REGRESSION: signup succeeds when a server bootstrap won the race", async () => {
+    await seedDoc(BOOTSTRAPPED_R4);
+    await assertSucceeds(productionSignupWrite());
+  });
+
+  it("REGRESSION: every server-owned field survives signup untouched", async () => {
+    await seedDoc({
+      ...BOOTSTRAPPED_R4, plan: "full",
+      tokensUsedCurrentPeriod: 4242, isDisabled: true, role: "reviewer",
+      override: { active: true, plan: "5_models" },
+    });
+    await assertSucceeds(productionSignupWrite());
+    const after = await stored();
+    expect(after.plan).toBe("full");
+    expect(after.runsThisMonth).toBe(3);
+    expect(after.usageMonth).toBe("2026-09");
+    expect(after.totalRuns).toBe(11);
+    expect(after.tokensUsedCurrentPeriod).toBe(4242);
+    expect(after.isDisabled).toBe(true);
+    expect(after.role).toBe("reviewer");
+    expect(after.override).toEqual({ active: true, plan: "5_models" });
+  });
+
+  it("the client-owned signup fields are actually written", async () => {
+    await seedDoc(BOOTSTRAPPED_R4);
+    await assertSucceeds(productionSignupWrite());
+    const after = await stored();
+    expect(after.uid).toBe(ME);
+    expect(after.email).toBe(MY_EMAIL);
+    expect(after.name).toBe("Me");
+    expect(after.onboardingCompleted).toBe(false);
+  });
+
+  it("signup on a genuinely absent document still creates it", async () => {
+    await env.clearFirestore();
+    await assertSucceeds(productionSignupWrite());
+    const after = await stored();
+    expect(after.uid).toBe(ME);
+    expect(after.email).toBe(MY_EMAIL);
+  });
+
+  it("NEGATIVE CONTROL: the pre-R4 destructive replace is still denied — the rules did not change", async () => {
+    // What production used to send. It removes plan/runsThisMonth/usageMonth/
+    // totalRuns; those removals enter affectedKeys() and the rules refuse them.
+    // Proof that R4 changed the APPLICATION, not the security boundary.
+    await seedDoc(BOOTSTRAPPED_R4);
+    await assertFails(legacyReplacingSignupWrite());
+    const after = await stored();
+    expect(after.plan).toBe("free");
+    expect(after.runsThisMonth).toBe(3);
+  });
+
+  it("NEGATIVE CONTROL: merge is not a licence to write authority fields", async () => {
+    await seedDoc(BOOTSTRAPPED_R4);
+    await assertFails(setDoc(myDoc(), { ...SIGNUP_PAYLOAD(), plan: "full" }, { merge: true }));
+    await assertFails(setDoc(myDoc(), { ...SIGNUP_PAYLOAD(), role: "admin" }, { merge: true }));
+    await assertFails(setDoc(myDoc(), { ...SIGNUP_PAYLOAD(), runsThisMonth: 0 }, { merge: true }));
+  });
+
+  it("NEGATIVE CONTROL: merge does not relax the identity pin", async () => {
+    await seedDoc(BOOTSTRAPPED_R4);
+    await assertFails(setDoc(myDoc(), { ...SIGNUP_PAYLOAD(), uid: OTHER }, { merge: true }));
+    await assertFails(setDoc(myDoc(), { ...SIGNUP_PAYLOAD(), email: ADMIN_EMAIL }, { merge: true }));
   });
 });
