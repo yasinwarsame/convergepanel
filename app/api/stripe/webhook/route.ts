@@ -165,29 +165,45 @@ export async function POST(req: NextRequest) {
             console.error("[webhook] Error processing subscription from checkout session:", subError?.message);
             throw subError;
           }
+        } else if (session.mode && session.mode !== "subscription") {
+          // Conclusively nothing to reconcile: this checkout did not create a
+          // subscription. A deliberate 2xx, not a swallowed failure.
+          console.log("[webhook] checkout.session.completed for a non-subscription mode; nothing to reconcile", {
+            sessionId: session.id,
+            mode: session.mode,
+          });
         } else {
           console.warn("[webhook] checkout.session.completed but no subscription found", {
             sessionId: session.id,
             customerId: session.customer,
           });
           
-          // Try to find subscription by customer ID as fallback
+          // Phase WEBHOOK-B1-C7 — THIS BRANCH MUST NOT SWALLOW.
+          //
+          // C2 stopped the primary checkout branch from converting a
+          // dependency failure into `{ received: true }`; this sibling branch
+          // was missed. A Stripe timeout here was reported to Stripe as a
+          // successful delivery, so it was never retried and a brand-new
+          // customer's ONLY checkout event was lost for good — request-time
+          // reconciliation cannot repair them, because it returns early for a
+          // free plan. Transient failure is not successful delivery.
           if (session.customer && typeof session.customer === "string") {
-            try {
-              console.log("[webhook] Attempting to find subscription by customer ID:", session.customer);
-              const subscriptions = await stripe.subscriptions.list({
-                customer: session.customer,
-                status: "all",
-                limit: 1,
-              });
-              
-              if (subscriptions.data.length > 0) {
-                const subscription = subscriptions.data[0];
-                console.log("[webhook] Found subscription by customer ID:", subscription.id);
-                await handleSubscriptionChange(subscription, { id: event.id, type: event.type });
-              }
-            } catch (fallbackError: any) {
-              console.error("[webhook] Fallback subscription lookup failed:", fallbackError);
+            console.log("[webhook] Attempting to find subscription by customer ID:", session.customer);
+            const subscriptions = await stripe.subscriptions.list({
+              customer: session.customer,
+              status: "all",
+              limit: 1,
+            });
+            
+            if (subscriptions.data.length > 0) {
+              // A SEED, NOT AUTHORITY. This object exists only to give the
+              // handler something to resolve the user from; the handler then
+              // verifies the association and derives authority from the
+              // customer's whole subscription set, so which subscription this
+              // lookup happens to return cannot decide the outcome.
+              const subscription = subscriptions.data[0];
+              console.log("[webhook] Found subscription by customer ID:", subscription.id);
+              await handleSubscriptionChange(subscription, { id: event.id, type: event.type });
             }
           }
         }

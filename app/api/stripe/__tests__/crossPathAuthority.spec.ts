@@ -78,11 +78,16 @@ jest.mock("@/lib/firebase/admin", () => ({
 }));
 jest.mock("@/lib/posthog-server", () => ({ getPostHogClient: () => ({ capture: jest.fn(), flush: jest.fn(async () => undefined) }) }));
 jest.mock("@/lib/logger", () => ({ logger: { warn: jest.fn(), info: jest.fn(), error: jest.fn(), debug: jest.fn() } }));
+jest.mock("@/lib/auth/resolveRequestIdentity", () => ({
+  resolveRequestIdentity: async () => ({ status: "authenticated", uid: "uid_customer", source: "bearer" }),
+}));
+jest.mock("@/lib/auth/identityResolutionTelemetry", () => ({ logIdentityResolutionFailure: jest.fn() }));
 
 import type Stripe from "stripe";
 import type { NextRequest } from "next/server";
 import { POST } from "../webhook/route";
 import { validateUserSubscription } from "@/lib/stripe/subscriptionValidation";
+import { POST as SYNC_PLAN } from "@/app/api/billing/sync-plan/route";
 
 const UID = "uid_customer";
 const MINE = "cus_mine";
@@ -111,6 +116,12 @@ async function deliver(type: string, object: unknown) {
   constructEvent.mockReturnValue({ id: "evt_" + Math.random().toString(36).slice(2), type, data: { object } });
   const req = { text: async () => "{}", headers: { get: (k: string) => (k === "stripe-signature" ? "sig" : null) } } as unknown as NextRequest;
   return (await POST(req)).status;
+}
+
+/** The self-serve plan sync, as the billing page invokes it after checkout. */
+async function selfSync() {
+  const req = { json: async () => ({}), headers: { get: () => null } } as unknown as NextRequest;
+  return (await SYNC_PLAN(req)).status;
 }
 
 /** The billing facts a customer's plan is made of — everything a bill depends on. */
@@ -205,8 +216,17 @@ describe("C6 — the two automatic writers must not disagree", () => {
       const afterRequest = billingOf(storedDoc);
       const requestWrote = writes.length > 0;
 
+      storedDoc = { email: "c@example.test", ...scenario.stored };
+      live = scenario.stripe();
+      writes.length = 0;
+      await selfSync();
+      const afterSelfSync = billingOf(storedDoc);
+      const selfSyncWrote = writes.length > 0;
+
       expect(afterRequest).toEqual(afterWebhook);
+      expect(afterSelfSync).toEqual(afterWebhook);
       expect(requestWrote).toBe(webhookWrote);
+      expect(selfSyncWrote).toBe(webhookWrote);
     });
   }
 });
@@ -250,5 +270,87 @@ describe("C6 — the acceptance case: refusal must survive the next ordinary req
     const forward = await run([sub({ id: A, status: "canceled" }), subB(), subC()]);
     const reversed = await run([subC(), subB(), sub({ id: A, status: "canceled" })]);
     expect(reversed).toEqual(forward);
+  });
+});
+
+describe("C7 — the acceptance case: three automatic writers, one refusal, one usage counter", () => {
+  const USAGE = { usageMonth: "2026-09", runsThisMonth: 7, videoRunsThisMonth: 4, tokensUsedCurrentPeriod: 120_000, totalRuns: 210 };
+  const usageOf = (d: Record<string, unknown>) => ({
+    usageMonth: d.usageMonth, runsThisMonth: d.runsThisMonth, videoRunsThisMonth: d.videoRunsThisMonth,
+    tokensUsedCurrentPeriod: d.tokensUsedCurrentPeriod, totalRuns: d.totalRuns,
+  });
+
+  const ambiguous = () => {
+    storedDoc = {
+      email: "c@example.test", plan: "full", stripeCustomerId: MINE, stripeSubscriptionId: A,
+      subscriptionStatus: "active", billingInterval: "year", ...USAGE,
+    };
+    live = [sub({ id: A, status: "canceled" }), subB(), subC()];
+  };
+
+  /** Every automatic writer, in every order they could actually interleave. */
+  const WRITERS: Array<[string, () => Promise<unknown>]> = [
+    ["webhook.updated", () => deliver("customer.subscription.updated", subB())],
+    ["webhook.invoice", () => deliver("invoice.payment_succeeded", { id: "in_1", subscription: C })],
+    ["request-time", () => validateUserSubscription(UID)],
+    ["self-sync", () => selfSync()],
+    ["post-checkout", () => deliver("checkout.session.completed", { id: "cs_1", mode: "subscription", subscription: C, customer: MINE, metadata: { firebaseUid: UID, targetPlan: "full" } }).then(() => selfSync())],
+  ];
+
+  it("REGRESSION: usage stays at 7 and authority stays ambiguous, whatever the order", async () => {
+    const orders = [
+      [0, 1, 2, 3, 4],
+      [4, 3, 2, 1, 0],
+      [3, 0, 4, 2, 1],
+      [2, 4, 0, 3, 1],
+    ];
+    for (const order of orders) {
+      ambiguous();
+      writes.length = 0;
+      for (const i of order) await WRITERS[i][1]();
+
+      expect(usageOf(storedDoc)).toEqual(USAGE);
+      expect(storedDoc.runsThisMonth).toBe(7);
+      expect(storedDoc.stripeSubscriptionId).toBe(A);
+      expect(storedDoc.plan).toBe("full");
+      expect(writes).toHaveLength(0);
+    }
+  });
+
+  it("REGRESSION: running every writer twice over still changes nothing", async () => {
+    ambiguous();
+    const before = { ...storedDoc };
+    for (let pass = 0; pass < 2; pass++) for (const [, run] of WRITERS) await run();
+    expect(storedDoc).toEqual(before);
+  });
+
+  it("CONTRAST: with exactly one subscription the same sequence upgrades, and usage still stays at 7", async () => {
+    storedDoc = {
+      email: "c@example.test", plan: "lite", stripeCustomerId: MINE, stripeSubscriptionId: A,
+      subscriptionStatus: "active", billingInterval: "month", ...USAGE,
+    };
+    live = [sub({ id: A, status: "canceled" }), subC()];
+
+    for (const [, run] of WRITERS) await run();
+
+    expect(storedDoc.plan).toBe("full");
+    expect(storedDoc.billingInterval).toBe("year");
+    expect(storedDoc.stripeSubscriptionId).toBe(C);
+    expect(usageOf(storedDoc)).toEqual(USAGE);
+  });
+
+  it("REGRESSION: usage is monotonic across a mixed synchronization sequence", async () => {
+    storedDoc = {
+      email: "c@example.test", plan: "lite", stripeCustomerId: MINE, stripeSubscriptionId: A,
+      subscriptionStatus: "active", billingInterval: "month", ...USAGE,
+    };
+    live = [sub({ id: A, status: "canceled" }), subC()];
+
+    for (const [, run] of WRITERS) {
+      const before = storedDoc.runsThisMonth as number;
+      await run();
+      expect(storedDoc.runsThisMonth as number).toBeGreaterThanOrEqual(before);
+    }
+    expect(storedDoc.runsThisMonth).toBe(7);
   });
 });

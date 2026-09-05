@@ -168,11 +168,12 @@ export function verifyCustomerIdentity(args: {
  */
 export const MULTIPLE_ENTITLEMENTS_CODE = "multiple_entitlement_subscriptions";
 
-/** Which writer refused. All three resolve authority the same way. */
+/** Which writer refused. All three automatic writers resolve authority the same way. */
 export type AuthorityPath =
   | "webhook_subscription_change"
   | "webhook_subscription_deleted"
-  | "request_time_reconciliation";
+  | "request_time_reconciliation"
+  | "self_serve_plan_sync";
 
 export function reportMultipleEntitlementSubscriptions(args: {
   path: AuthorityPath;
