@@ -206,7 +206,12 @@ export async function incrementUserTokenUsage(
     updateData = {
       tokensUsedCurrentPeriod: safeTokens,
       updatedAt: FieldValue.serverTimestamp(),
-      ...(billingCycleStart ? {} : { billingCycleStart: Timestamp.fromDate(periodStart) }),
+      // Phase WEBHOOK-B1-C2: token bookkeeping does NOT own `billingCycleStart`.
+      // This branch used to stamp a `Date.now()`-derived value for any user
+      // who lacked one — fabricating a Stripe billing fact from token-counting
+      // time. It was the sixth such writer, overlooked when the other five
+      // were removed. The field is written only by the reconciliation paths,
+      // from the plan-bearing subscription item; token accounting reads it.
     };
     
     if (isDebugMode) {

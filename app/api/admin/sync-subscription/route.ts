@@ -133,7 +133,7 @@ export async function POST(req: NextRequest) {
               stripeCustomerId: customerIdFromSub,
               stripeSubscriptionId: subscription.id,
               billingInterval: billingInterval,
-              billingCycleStart: new Date().toISOString(),
+              // Phase WEBHOOK-B1-C1: not this path's field to write.
               planUpdatedAt: firebaseAdmin.firestore.Timestamp.now(),
             },
             { merge: true }
@@ -178,7 +178,7 @@ export async function POST(req: NextRequest) {
         subscriptionStatus: subscription.status,
         stripeSubscriptionId: subscription.id,
         billingInterval: billingInterval,
-        billingCycleStart: new Date().toISOString(),
+        // Phase WEBHOOK-B1-C1: not this path's field to write.
         planUpdatedAt: firebaseAdmin.firestore.Timestamp.now(),
       },
       { merge: true }

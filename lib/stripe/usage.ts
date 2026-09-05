@@ -191,7 +191,9 @@ export async function resetUsageForNewPlan(
     plan: newPlan,
     runsThisMonth: 0,
     usageMonth: currentMonth,
-    billingCycleStart: now.toISOString(),
+    // Phase WEBHOOK-B1-C1: `billingCycleStart` is a Stripe billing-cycle
+    // fact owned by the reconciliation paths. A plan/usage reset must not
+    // fabricate it from the current time.
     ...(billingInterval && { billingInterval }),
   });
 }

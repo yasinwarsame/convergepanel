@@ -24,8 +24,7 @@
  * - stripeCustomerId: Stripe customer ID
  * - stripeSubscriptionId: Stripe subscription ID
  * - billingInterval: "month" | "year"
- * - billingCycleStart: ISO timestamp
- * - runsThisMonth: Reset to 0 (via resetUsageForNewPlan)
+ * - billingCycleStart: Stripe billing-cycle Timestamp (canonical resolver only)
  * - usageMonth: Current month (YYYY-MM)
  * 
  * When subscription is deleted, updates:
@@ -48,10 +47,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { stripe } from "@/lib/stripe/client";
 import { STRIPE_WEBHOOK_SECRET } from "@/lib/env";
 import { adminDb } from "@/lib/firebase/admin";
-import { resetUsageForNewPlan } from "@/lib/stripe/usage";
-import { getPlanFromPriceId, getFreePlanConfig, PlanConfig } from "@/lib/billing/planMapping";
-import { PLAN_CONFIG, getPlanIdFromPriceId, getPlanConfigById, BillingPlanId, STRIPE_PRICE_TO_PLAN } from "@/lib/billing/planConfig";
-import { mapSubscriptionToPlan, getCurrentMonthString, SubscriptionPlanMapping } from "@/lib/billing/subscriptionMapper";
+import { getPlanFromPriceId, PlanConfig } from "@/lib/billing/planMapping";
+import { PLAN_CONFIG, getPlanConfigById, BillingPlanId, STRIPE_PRICE_TO_PLAN } from "@/lib/billing/planConfig";
+import { mapSubscriptionToPlan, SubscriptionPlanMapping } from "@/lib/billing/subscriptionMapper";
+import { resolveSubscriptionBillingState } from "@/lib/billing/subscriptionBillingState";
+import { mayDeletionDowngrade } from "@/lib/billing/subscriptionAuthority";
+import { reportIncompleteAuthorityEnumeration, reportMultipleEntitlementSubscriptions, resolveCustomerSubscriptionAuthority, verifyCustomerIdentity } from "@/lib/billing/customerSubscriptionAuthority";
+import { TransientDependencyError, firestoreRead } from "@/lib/billing/reconciliationOutcome";
+import { resolveInvoiceSubscription } from "@/lib/billing/invoiceSubscription";
 import { PlanId, BillingInterval } from "@/lib/plans";
 import { updateUserPlanInFirestore } from "@/lib/stripe/webhookHelpers";
 import { getPostHogClient } from "@/lib/posthog-server";
@@ -138,54 +141,70 @@ export async function POST(req: NextRequest) {
               metadata: subscription.metadata,
             });
             
-            // Ensure subscription has firebaseUid in metadata (from session if not in subscription)
-            // Check both firebaseUid and firebase_uid for backward compatibility
-            const sessionUid = session.metadata?.firebaseUid || session.metadata?.firebase_uid;
-            const subUid = subscription.metadata?.firebaseUid || subscription.metadata?.firebase_uid;
+            // Phase WEBHOOK-B1-C6 — THE SESSION UID IS A RESOLUTION HINT, NOT A
+            // LICENCE TO MUTATE STRIPE.
+            //
+            // This site used to write `firebaseUid` onto the subscription right
+            // here, before ANY of the checks that establish the right to act on
+            // it. The C5-R1 review proved by execution that a stale historical
+            // subscription and a FOREIGN customer's subscription carrying a
+            // copied uid were both mutated: Firestore correctly refused the
+            // event afterwards, but Stripe had already been written to.
+            //
+            // The uid now travels as an in-process hint and the Stripe write
+            // happens once, later, against the subscription that has been
+            // positively established as authoritative.
+            const sessionUid = session.metadata?.firebaseUid || session.metadata?.firebase_uid || null;
             
-            if (!subUid && sessionUid) {
-              console.log("[webhook] Updating subscription metadata with firebaseUid from session");
-              // Update subscription metadata with firebaseUid from session
-              await stripe.subscriptions.update(subscription.id, {
-                metadata: {
-                  ...subscription.metadata,
-                  firebaseUid: sessionUid,
-                },
-              });
-              subscription.metadata = {
-                ...subscription.metadata,
-                firebaseUid: sessionUid,
-              };
-            }
-            
-            await handleSubscriptionChange(subscription);
+            await handleSubscriptionChange(subscription, { id: event.id, type: event.type }, sessionUid);
           } catch (subError: any) {
-            console.error("[webhook] Error processing subscription from checkout session:", subError);
-            // Don't return error - log and continue
+            // Phase WEBHOOK-B1-C2: do NOT swallow. Reconciliation failures here
+            // used to be acknowledged with a 200, so Stripe never retried and a
+            // brand-new customer's only checkout event was lost for good — the
+            // request-time fallback cannot repair them, because it returns
+            // early for a free plan with no stored customer id.
+            console.error("[webhook] Error processing subscription from checkout session:", subError?.message);
+            throw subError;
           }
+        } else if (session.mode && session.mode !== "subscription") {
+          // Conclusively nothing to reconcile: this checkout did not create a
+          // subscription. A deliberate 2xx, not a swallowed failure.
+          console.log("[webhook] checkout.session.completed for a non-subscription mode; nothing to reconcile", {
+            sessionId: session.id,
+            mode: session.mode,
+          });
         } else {
           console.warn("[webhook] checkout.session.completed but no subscription found", {
             sessionId: session.id,
             customerId: session.customer,
           });
           
-          // Try to find subscription by customer ID as fallback
+          // Phase WEBHOOK-B1-C7 — THIS BRANCH MUST NOT SWALLOW.
+          //
+          // C2 stopped the primary checkout branch from converting a
+          // dependency failure into `{ received: true }`; this sibling branch
+          // was missed. A Stripe timeout here was reported to Stripe as a
+          // successful delivery, so it was never retried and a brand-new
+          // customer's ONLY checkout event was lost for good — request-time
+          // reconciliation cannot repair them, because it returns early for a
+          // free plan. Transient failure is not successful delivery.
           if (session.customer && typeof session.customer === "string") {
-            try {
-              console.log("[webhook] Attempting to find subscription by customer ID:", session.customer);
-              const subscriptions = await stripe.subscriptions.list({
-                customer: session.customer,
-                status: "all",
-                limit: 1,
-              });
-              
-              if (subscriptions.data.length > 0) {
-                const subscription = subscriptions.data[0];
-                console.log("[webhook] Found subscription by customer ID:", subscription.id);
-                await handleSubscriptionChange(subscription);
-              }
-            } catch (fallbackError: any) {
-              console.error("[webhook] Fallback subscription lookup failed:", fallbackError);
+            console.log("[webhook] Attempting to find subscription by customer ID:", session.customer);
+            const subscriptions = await stripe.subscriptions.list({
+              customer: session.customer,
+              status: "all",
+              limit: 1,
+            });
+            
+            if (subscriptions.data.length > 0) {
+              // A SEED, NOT AUTHORITY. This object exists only to give the
+              // handler something to resolve the user from; the handler then
+              // verifies the association and derives authority from the
+              // customer's whole subscription set, so which subscription this
+              // lookup happens to return cannot decide the outcome.
+              const subscription = subscriptions.data[0];
+              console.log("[webhook] Found subscription by customer ID:", subscription.id);
+              await handleSubscriptionChange(subscription, { id: event.id, type: event.type });
             }
           }
         }
@@ -203,39 +222,47 @@ export async function POST(req: NextRequest) {
           priceId: subscription.items.data[0]?.price.id,
           metadata: subscription.metadata,
         });
-        await handleSubscriptionChange(subscription);
+        await handleSubscriptionChange(subscription, { id: event.id, type: event.type });
         break;
       }
 
       case "customer.subscription.deleted": {
         const subscription = event.data.object as Stripe.Subscription;
-        await handleSubscriptionDeleted(subscription);
+        await handleSubscriptionDeleted(subscription, { id: event.id, type: event.type });
         break;
       }
 
       case "invoice.payment_succeeded": {
         const invoice = event.data.object as Stripe.Invoice;
-        // Payment succeeded - subscription is active
-        // invoice.subscription can be a string (subscription ID) or a Stripe.Subscription object
-        // Use type assertion to access subscription property safely
-        const invoiceWithSubscription = invoice as Stripe.Invoice & { subscription?: string | Stripe.Subscription | null };
-        const subscriptionId = typeof invoiceWithSubscription.subscription === "string" 
-          ? invoiceWithSubscription.subscription 
-          : invoiceWithSubscription.subscription?.id;
-        if (subscriptionId) {
-          const subscription = await stripe.subscriptions.retrieve(subscriptionId);
-          await handleSubscriptionChange(subscription);
+        // Phase C8.1: `invoice.subscription` does not exist on the pinned API
+        // version. Reading it through a cast made this handler silently dead —
+        // it reconciled nothing for every renewal. The typed resolver reads
+        // `parent.subscription_details` instead.
+        const resolved = resolveInvoiceSubscription(invoice);
+        if (resolved.kind === "subscription") {
+          const subscription = await stripe.subscriptions.retrieve(resolved.subscriptionId);
+          await handleSubscriptionChange(subscription, { id: event.id, type: event.type });
+        } else if (resolved.kind === "malformed") {
+          // Claims subscription parentage but carries no usable reference.
+          // Guessing a subscription from an invoice is exactly the kind of
+          // inference this PR removes everywhere else. Terminal: retrying the
+          // same payload cannot make it resolvable.
+          logger.error("[webhook] invoice claims subscription parentage but carries no resolvable subscription", {
+            invoiceId: invoice.id,
+            eventId: event.id,
+            resolution: "no_mutation_unresolvable_invoice_subscription",
+          });
         }
         break;
       }
 
       case "invoice.payment_failed": {
         const invoice = event.data.object as Stripe.Invoice;
-        const invoiceWithSubscription = invoice as Stripe.Invoice & { subscription?: string | Stripe.Subscription | null };
-        const subscriptionId = typeof invoiceWithSubscription.subscription === "string" 
-          ? invoiceWithSubscription.subscription 
-          : invoiceWithSubscription.subscription?.id;
-        console.warn("[webhook] Payment failed for subscription:", subscriptionId);
+        // Observability only — this handler deliberately writes no customer
+        // state. It used the same removed field, so it logged `undefined` for
+        // every payment failure.
+        const resolved = resolveInvoiceSubscription(invoice);
+        console.warn("[webhook] Payment failed for subscription:", resolved.kind === "subscription" ? resolved.subscriptionId : null);
         // Optionally: send notification to user, mark account as past_due, etc.
         break;
       }
@@ -274,7 +301,19 @@ export async function POST(req: NextRequest) {
  * 
  * EXPORTED for use in test endpoints
  */
-export async function handleSubscriptionChange(subscription: Stripe.Subscription) {
+export async function handleSubscriptionChange(
+  subscription: Stripe.Subscription,
+  /** Event context, carried so the terminal ambiguity record is actionable. */
+  eventContext?: { id?: string; type?: string },
+  /**
+   * Phase WEBHOOK-B1-C6: a uid carried by the checkout session that created
+   * this subscription. Used ONLY to resolve which application user the event
+   * concerns; it confers no authority and triggers no Stripe write on its own.
+   */
+  uidHint?: string | null
+) {
+  const eventId = eventContext?.id;
+  const eventType = eventContext?.type;
   if (!adminDb) {
     console.error("[webhook] Firestore not available");
     return;
@@ -297,8 +336,9 @@ export async function handleSubscriptionChange(subscription: Stripe.Subscription
   // Support both firebaseUid and firebase_uid for backward compatibility
   let firebaseUid: string | null = null;
 
-  // Priority 1: subscription metadata (firebaseUid or firebase_uid)
-  firebaseUid = subscription.metadata?.firebaseUid || subscription.metadata?.firebase_uid || null;
+  // Priority 1: subscription metadata (firebaseUid or firebase_uid), then the
+  // originating checkout session's uid hint.
+  firebaseUid = subscription.metadata?.firebaseUid || subscription.metadata?.firebase_uid || uidHint || null;
 
   // Priority 2: customer metadata (fallback)
   if (!firebaseUid && stripe) {
@@ -313,7 +353,11 @@ export async function handleSubscriptionChange(subscription: Stripe.Subscription
         firebaseUid = customerMetadata?.firebaseUid || customerMetadata?.firebase_uid || null;
       }
     } catch (err) {
-      console.error("[webhook] Failed to retrieve customer:", err);
+      // Phase WEBHOOK-B1-C3: a dependency failure while RESOLVING THE USER is
+      // not evidence that no user exists. Swallowing it here returned 200 and
+      // Stripe never retried, losing the reconciliation — the C2 invariant
+      // applied only after this stage. It now propagates as a retryable 5xx.
+      throw new TransientDependencyError("stripe", "customers.retrieve", err);
     }
   }
 
@@ -330,25 +374,14 @@ export async function handleSubscriptionChange(subscription: Stripe.Subscription
       if (!usersSnapshot.empty) {
         firebaseUid = usersSnapshot.docs[0].id;
         console.log("[webhook] ✅ Found user by stripeCustomerId:", firebaseUid);
-        
-        // Also update the subscription metadata with firebaseUid for future lookups
-        if (stripe) {
-          try {
-            await stripe.subscriptions.update(subscriptionId, {
-              metadata: {
-                ...subscription.metadata,
-                firebaseUid: firebaseUid,
-              },
-            });
-            console.log("[webhook] Updated subscription metadata with firebaseUid");
-          } catch (metaErr) {
-            console.warn("[webhook] Failed to update subscription metadata:", metaErr);
-            // Non-critical, continue processing
-          }
-        }
+        // Phase WEBHOOK-B1-C6: the metadata backfill that used to happen here
+        // ran before association and authority were established, so an event
+        // for a stale, foreign or ambiguous subscription still mutated Stripe.
+        // It is now performed once, after authority, in
+        // `reconcileAuthoritativeSubscription()`.
       }
     } catch (err) {
-      console.error("[webhook] Failed to lookup user by stripeCustomerId:", err);
+      throw new TransientDependencyError("firestore", "users.where(stripeCustomerId)", err);
     }
   }
 
@@ -368,7 +401,7 @@ export async function handleSubscriptionChange(subscription: Stripe.Subscription
           console.log("[webhook] Found user by email:", firebaseUid);
         }
       } catch (err) {
-        console.error("[webhook] Failed to lookup user by email:", err);
+        throw new TransientDependencyError("firestore", "users.where(email)", err);
       }
     }
   }
@@ -410,7 +443,7 @@ export async function handleSubscriptionChange(subscription: Stripe.Subscription
         }
       }
     } catch (err) {
-      console.error("[webhook] Final customer lookup failed:", err);
+      throw new TransientDependencyError("stripe", "customers.retrieve(final)", err);
     }
     
     if (!firebaseUid) {
@@ -422,9 +455,148 @@ export async function handleSubscriptionChange(subscription: Stripe.Subscription
     }
   }
 
+  // Phase WEBHOOK-B1-C3 — AUTHORITY COMES FROM THE CUSTOMER'S SET.
+  //
+  // Read the user first: the stored binding is what makes any customer
+  // identity trustworthy, and this read propagates its failures (C2) rather
+  // than coercing them to "no stored subscription".
+  const existingSnap = await firestoreRead("users.get", () => adminDb!.collection("users").doc(firebaseUid!).get());
+  const existingData = existingSnap.data() as Record<string, unknown> | undefined;
+  const storedSubscriptionId = (existingData?.stripeSubscriptionId as string | undefined) ?? null;
+  const storedCustomerId = (existingData?.stripeCustomerId as string | undefined) ?? null;
+
+  // ASSOCIATION. A stored binding always wins; an event naming a different
+  // customer is refused and the stored value is never rewritten from an
+  // inbound event. An unbound user may still be bound by a non-destructive
+  // event, which is what keeps first-time checkout working.
+  const eventCustomerId = typeof subscription.customer === "string" ? subscription.customer : subscription.customer?.id ?? null;
+  const identity = verifyCustomerIdentity({ storedCustomerId, eventCustomerId, destructive: false });
+  if (!identity.ok) {
+    logger.error("[webhook] Refusing event: customer identity is not verified for this user", { subscriptionId, reason: identity.reason });
+    return;
+  }
+
+  // THE AUTHORITY DECISION. Ask what this customer's subscription set says,
+  // not whether this particular event outranks what we stored. That question
+  // has the same answer regardless of delivery order, which is precisely what
+  // the previous pairwise rule could not guarantee: with two live
+  // entitlement-bearing subscriptions, whichever event arrived first won.
+  if (!stripe) {
+    logger.error("[webhook] Stripe client unavailable; cannot establish authority", { subscriptionId });
+    return;
+  }
+  const customerAuthority = await resolveCustomerSubscriptionAuthority({ stripe, verifiedCustomerId: identity.verifiedCustomerId });
+
+  if (customerAuthority.kind === "multiple_entitlements") {
+    // Unsupported under the one-subscription product contract, and the
+    // repository defines no rule for choosing. Change nothing and surface it.
+    // Terminal domain ambiguity: retrying the same Stripe state cannot resolve
+    // it, so the delivery is acknowledged rather than retried forever. That
+    // makes this log the ONLY signal an operator gets, so it carries enough
+    // structure to find the customer and both subscriptions — and no secrets,
+    // no raw payload, no payment data.
+    reportMultipleEntitlementSubscriptions({
+      path: "webhook_subscription_change",
+      eventId,
+      eventType,
+      stripeCustomerId: identity.verifiedCustomerId,
+      uid: firebaseUid,
+      eventSubscriptionId: subscriptionId,
+      storedSubscriptionId,
+      candidateSubscriptionIds: customerAuthority.subscriptionIds,
+      candidateCount: customerAuthority.count,
+    });
+    return;
+  }
+  if (customerAuthority.kind === "enumeration_incomplete") {
+    // Phase WEBHOOK-B1-C8: the customer's set was never fully read, so nothing
+    // about it is known — least of all that they hold no subscription.
+    // Terminal, like ambiguity: retrying identical Stripe state cannot finish
+    // an enumeration a safety bound stopped, so the delivery is acknowledged
+    // and this record is the operator's only signal.
+    reportIncompleteAuthorityEnumeration({
+      path: "webhook_subscription_change",
+      eventId,
+      eventType,
+      stripeCustomerId: identity.verifiedCustomerId,
+      uid: firebaseUid,
+      eventSubscriptionId: subscriptionId,
+      storedSubscriptionId,
+      reason: customerAuthority.reason,
+      pagesFetched: customerAuthority.pagesFetched,
+    });
+    return;
+  }
+  if (customerAuthority.kind === "customer_missing") {
+    // Stripe says the customer is gone. That is not proof this user holds no
+    // entitlement — the local binding may be stale — so nothing is written.
+    logger.error("[webhook] Stripe customer not found; refusing to derive entitlement from an absent lookup", { subscriptionId });
+    return;
+  }
+  if (customerAuthority.kind === "unverified_customer") {
+    logger.error("[webhook] Cannot establish the customer's subscription set", { subscriptionId });
+    return;
+  }
+
+  if (customerAuthority.kind === "no_entitlement") {
+    // The customer holds nothing entitlement-bearing. Only correct a user who
+    // is still recorded against this subscription; never touch someone whose
+    // stored subscription is a different one.
+    if (storedSubscriptionId && storedSubscriptionId !== subscriptionId) {
+      logger.warn("[webhook] Event subscription is not this user's stored subscription and the customer holds no entitlement", { subscriptionId });
+      return;
+    }
+    const freeMapping: SubscriptionPlanMapping = {
+      planId: "free",
+      monthlyLimit: PLAN_CONFIG.free.monthlyLimit,
+      maxModelsPerRun: PLAN_CONFIG.free.maxModels,
+      isActive: false,
+    };
+    await updateUserPlanInFirestore({
+      uid: firebaseUid,
+      customerId: identity.verifiedCustomerId,
+      subscriptionId,
+      planMapping: freeMapping,
+      status: "canceled",
+      billingState: null,
+    });
+    logger.warn("[webhook] Customer holds no entitlement-bearing subscription; local state corrected", { subscriptionId });
+    return;
+  }
+
+  // Exactly one entitlement-bearing subscription: that one is authoritative,
+  // whichever subscription the event happened to name.
+  const authoritative: Stripe.Subscription = customerAuthority.subscription;
+
+  await reconcileAuthoritativeSubscription({
+    uid: firebaseUid,
+    verifiedCustomerId: identity.verifiedCustomerId,
+    authoritative,
+  });
+}
+
+/**
+ * Phase WEBHOOK-B1-C3 — the ONE place a resolved authoritative subscription is
+ * mapped to a plan and persisted. Both the fast path (the user's own stored
+ * subscription) and the customer-set path converge here, so they cannot drift.
+ */
+async function reconcileAuthoritativeSubscription(args: {
+  uid: string;
+  verifiedCustomerId: string;
+  authoritative: Stripe.Subscription;
+}) {
+  const firebaseUid = args.uid;
+  const authoritative = args.authoritative;
+  const subscription = authoritative;
+  const subscriptionId = authoritative.id;
+  const customerId = args.verifiedCustomerId;
+  const subscriptionStatus = authoritative.status;
+  const priceId = authoritative.items?.data?.[0]?.price?.id;
+  const identity = { verifiedCustomerId: args.verifiedCustomerId };
+
   // Map subscription to plan using the new mapper
   // This handles both price ID matching and metadata.targetPlan fallback
-  const planMapping = mapSubscriptionToPlan(subscription);
+  const planMapping = mapSubscriptionToPlan(authoritative);
   
   console.log("[webhook] Mapped subscription to plan:", {
     subscriptionId,
@@ -447,9 +619,20 @@ export async function handleSubscriptionChange(subscription: Stripe.Subscription
     });
   }
 
-  // Determine billing interval from subscription
-  const isAnnual = subscription.items.data[0]?.price.recurring?.interval === "year";
-  const billingInterval: BillingInterval = isAnnual ? "year" : "month";
+  // Phase WEBHOOK-B1: cadence and billing period both come from the canonical
+  // resolver, which reads the PLAN-BEARING ITEM rather than `items.data[0]`
+  // and prefers the item-level period over the subscription-level one (which
+  // can be stale in flexible billing mode after an interval change).
+  const billingStateResult = resolveSubscriptionBillingState(authoritative as never);
+  if (!billingStateResult.ok) {
+    logger.error("[webhook] Could not resolve canonical billing state — refusing to persist derived billing fields", {
+      subscriptionId,
+      reason: billingStateResult.reason,
+    });
+    return;
+  }
+  const billingState = billingStateResult.state;
+  const billingInterval: BillingInterval = billingState.billingInterval;
 
   // Log for debugging
   console.log("[webhook] Processing subscription change:", {
@@ -465,17 +648,27 @@ export async function handleSubscriptionChange(subscription: Stripe.Subscription
     billingInterval,
   });
 
+  // Phase WEBHOOK-B1-C6 — THE ONLY PLACE APPLICATION IDENTITY IS WRITTEN TO
+  // STRIPE. Everything above has now been positively established: the user was
+  // resolved, the customer association was verified, the customer's whole
+  // subscription set was enumerated to exhaustion, ambiguity was ruled out, and
+  // THIS subscription is the single authoritative one. Only now is it a legal
+  // target for an external mutation.
+  await backfillSubscriptionUidMetadata({ uid: firebaseUid, authoritative });
+
   // Update user plan in Firestore
   try {
     console.log(`[webhook] About to update Firestore for user ${firebaseUid} with plan ${planMapping.planId}`);
     await updateUserPlanInFirestore({
       uid: firebaseUid,
-      customerId,
-      subscriptionId,
+      // Verified identity and the AUTHORITATIVE subscription — not whichever
+      // ids the event happened to carry.
+      customerId: identity.verifiedCustomerId,
+      subscriptionId: authoritative.id,
       planMapping,
-      status: subscriptionStatus,
+      status: authoritative.status,
       billingInterval,
-      currentPeriodStart: (subscription as any).current_period_start, // Pass Stripe's actual billing period start
+      billingState,
     });
     console.log(`[webhook] ✅ Successfully processed subscription change for user ${firebaseUid}`);
 
@@ -513,10 +706,49 @@ export async function handleSubscriptionChange(subscription: Stripe.Subscription
       }
     }
   } catch (updateError: any) {
-    console.error(`[webhook] ❌ CRITICAL: Failed to update user plan for ${firebaseUid}:`, updateError);
-    console.error(`[webhook] Error stack:`, updateError.stack);
-    // Don't throw - log error but return success to Stripe (we'll retry via manual sync)
-    // This prevents Stripe from retrying the webhook unnecessarily
+    // Phase WEBHOOK-B1-C2: rethrow so the route answers a retryable 5xx.
+    // Returning 200 here told Stripe the delivery had succeeded and dropped
+    // the reconciliation permanently.
+    console.error(`[webhook] ❌ CRITICAL: Failed to update user plan:`, updateError?.message);
+    throw updateError;
+  }
+}
+
+/**
+ * Phase WEBHOOK-B1-C6 — write the application's uid onto the AUTHORITATIVE
+ * subscription, and only there.
+ *
+ * WHY IT IS RETAINED. `subscription.metadata.firebaseUid` is the first and
+ * cheapest user-resolution key on both webhook paths, and it is the ONLY one
+ * that still works when the local `stripeCustomerId` binding is missing or
+ * stale — the recovery case the Priority-3 Firestore lookup cannot serve. The
+ * admin sync endpoint reads the same key as its fallback. It is load-bearing,
+ * so it is kept rather than deleted; what changes is WHEN it may be written.
+ *
+ * FAILURE POLICY. The metadata is an optimisation for FUTURE lookups, not a
+ * billing fact: every current decision is made from the customer's live Stripe
+ * set, never from this field. A failure here must therefore not block the
+ * billing reconciliation, which is the part a customer feels. It is logged and
+ * execution continues.
+ *
+ * IDEMPOTENCE. The value written is the uid, so a duplicate or retried
+ * delivery writes the identical value; a subscription that already carries it
+ * (under either the current or the legacy snake_case key) is not written at
+ * all.
+ */
+async function backfillSubscriptionUidMetadata(args: { uid: string; authoritative: Stripe.Subscription }): Promise<void> {
+  if (!stripe) return;
+  const metadata = (args.authoritative.metadata ?? {}) as Record<string, string>;
+  if (metadata.firebaseUid === args.uid || metadata.firebase_uid === args.uid) return;
+
+  try {
+    await stripe.subscriptions.update(args.authoritative.id, {
+      metadata: { ...metadata, firebaseUid: args.uid },
+    });
+  } catch {
+    logger.warn("[webhook] Could not write uid metadata to the authoritative subscription (non-critical)", {
+      subscriptionId: args.authoritative.id,
+    });
   }
 }
 
@@ -530,7 +762,12 @@ export async function handleSubscriptionChange(subscription: Stripe.Subscription
  * 2. Updates Firestore to set plan to "free" with free plan limits
  * 3. Clears subscription ID but keeps customer ID for potential future subscriptions
  */
-async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
+async function handleSubscriptionDeleted(
+  subscription: Stripe.Subscription,
+  eventContext?: { id?: string; type?: string }
+) {
+  const eventId = eventContext?.id;
+  const eventType = eventContext?.type;
   if (!adminDb) {
     console.error("[webhook] Firestore not available");
     return;
@@ -559,7 +796,10 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
         firebaseUid = customerMetadata?.firebaseUid || customerMetadata?.firebase_uid || null;
       }
     } catch (err) {
-      console.error("[webhook] Failed to retrieve customer:", err);
+      // Phase WEBHOOK-B1-C5: the deletion path swallowed this too, so a
+      // transient outage answered 200 and the cancellation was lost with no
+      // retry. The change path was fixed in C3; this is the missing half.
+      throw new TransientDependencyError("stripe", "customers.retrieve(deletion)", err);
     }
   }
 
@@ -577,7 +817,7 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
         console.log("[webhook] ✅ Found user by stripeCustomerId:", firebaseUid);
       }
     } catch (err) {
-      console.error("[webhook] Failed to lookup user by stripeCustomerId:", err);
+      throw new TransientDependencyError("firestore", "users.where(stripeCustomerId)(deletion)", err);
     }
   }
 
@@ -598,6 +838,119 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
     firebaseUid,
   });
 
+  // Phase WEBHOOK-B1-C1 — DELETION IDENTITY GUARD.
+  //
+  // A cancellation may only ever clear the subscription it is actually
+  // about. Before this guard the handler downgraded whichever user it
+  // resolved, so a delayed `deleted` for a former subscription A wiped a
+  // paying customer whose current subscription is B — proven by execution in
+  // the exact-head review. A deletion never grants authority, only removes
+  // it, so there is no replacement branch here: anything other than the
+  // stored subscription is ignored.
+  // Phase WEBHOOK-B1-C2: read failures propagate — see the change handler.
+  const existingSnapForDeletion = await firestoreRead("users.get", () => adminDb!.collection("users").doc(firebaseUid!).get());
+  const existingDataForDeletion = existingSnapForDeletion.data() as Record<string, unknown> | undefined;
+  const storedSubscriptionIdForDeletion = (existingDataForDeletion?.stripeSubscriptionId as string | undefined) ?? null;
+  const storedCustomerIdForDeletion = (existingDataForDeletion?.stripeCustomerId as string | undefined) ?? null;
+
+  // Association boundary, as on the change path.
+  // Phase WEBHOOK-B1-C3 — A DELETION MAY REMOVE AUTHORITY, NEVER CREATE IT.
+  //
+  // `destructive: true` means the event's own customer id can never bootstrap
+  // a binding. Without this, a user with an incomplete local binding could be
+  // downgraded — and have a FOREIGN customer id written onto their record — by
+  // an event whose only link to them was metadata, with the replacement search
+  // that authorised the downgrade run against that foreign customer.
+  const deletionIdentity = verifyCustomerIdentity({
+    storedCustomerId: storedCustomerIdForDeletion,
+    eventCustomerId: customerId,
+    destructive: true,
+  });
+  if (!deletionIdentity.ok) {
+    logger.error("[webhook] Refusing deletion: no verified customer binding for this user", {
+      subscriptionId,
+      reason: deletionIdentity.reason,
+    });
+    return;
+  }
+  const verifiedDeletionCustomerId = deletionIdentity.verifiedCustomerId;
+
+  // Identity first: a deletion may only ever clear the subscription it is
+  // actually about.
+  if (storedSubscriptionIdForDeletion && !mayDeletionDowngrade({ deletedSubscriptionId: subscriptionId, storedSubscriptionId: storedSubscriptionIdForDeletion })) {
+    logger.warn("[webhook] Ignoring deletion for a subscription that is not the user's current one", { subscriptionId });
+    return;
+  }
+
+  // Phase WEBHOOK-B1-C4: then the customer set — ALWAYS, not only when no
+  // reference is stored. Deleting the stored subscription is not proof that
+  // the customer has no entitlement: they may hold a replacement, or two, and
+  // downgrading on the strength of one deleted object would destroy a live
+  // entitlement exactly as the removed fast path assumed uniqueness it had
+  // never established.
+  {
+    // Phase WEBHOOK-B1-C2 — NO STORED REFERENCE.
+    //
+    // C1 downgraded here on the reasoning that there was "nothing to protect".
+    // The review disproved it: the paid `plan` field IS the thing destroyed,
+    // and only Stripe can say whether a replacement subscription exists. A
+    // customer whose reference was cleared but who holds a live subscription
+    // was downgraded by a delayed cancellation of an old one.
+    //
+    // Absence must be proven, so ask Stripe. A transient failure propagates; a
+    // live replacement, or several, blocks the downgrade rather than guessing.
+    if (!stripe) {
+      logger.error("[webhook] Cannot verify replacement subscriptions without a Stripe client; refusing to downgrade", { subscriptionId });
+      return;
+    }
+    const replacementAuthority = await resolveCustomerSubscriptionAuthority({
+      stripe,
+      verifiedCustomerId: verifiedDeletionCustomerId,
+      // The subscription being deleted can never be evidence that entitlement
+      // still exists.
+      excludeSubscriptionId: subscriptionId,
+    });
+    if (replacementAuthority.kind === "customer_missing") {
+      logger.error("[webhook] Stripe customer not found; refusing to downgrade on an absent lookup", { subscriptionId });
+      return;
+    }
+    if (replacementAuthority.kind === "enumeration_incomplete") {
+      // Phase WEBHOOK-B1-C8: a downgrade needs PROOF that no replacement
+      // exists. A partial listing is not proof, and this is the most
+      // destructive path in the file.
+      reportIncompleteAuthorityEnumeration({
+        path: "webhook_subscription_deleted",
+        eventId,
+        eventType,
+        stripeCustomerId: verifiedDeletionCustomerId,
+        uid: firebaseUid,
+        eventSubscriptionId: subscriptionId,
+        storedSubscriptionId: storedSubscriptionIdForDeletion,
+        reason: replacementAuthority.reason,
+        pagesFetched: replacementAuthority.pagesFetched,
+      });
+      return;
+    }
+    if (replacementAuthority.kind === "multiple_entitlements") {
+      reportMultipleEntitlementSubscriptions({
+        path: "webhook_subscription_deleted",
+        eventId,
+        eventType,
+        stripeCustomerId: verifiedDeletionCustomerId,
+        uid: firebaseUid,
+        eventSubscriptionId: subscriptionId,
+        storedSubscriptionId: storedSubscriptionIdForDeletion,
+        candidateSubscriptionIds: replacementAuthority.subscriptionIds,
+        candidateCount: replacementAuthority.count,
+      });
+      return;
+    }
+    if (replacementAuthority.kind !== "no_entitlement") {
+      logger.warn("[webhook] Refusing downgrade: the customer still has an entitlement-bearing subscription", { subscriptionId });
+      return;
+    }
+  }
+
   // Downgrade to free plan
   const freeMapping: SubscriptionPlanMapping = {
     planId: "free",
@@ -609,7 +962,7 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
   try {
     await updateUserPlanInFirestore({
       uid: firebaseUid,
-      customerId,
+      customerId: verifiedDeletionCustomerId,
       subscriptionId,
       planMapping: freeMapping,
       status: "canceled",
@@ -628,7 +981,9 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
       logger.warn("[webhook] PostHog capture failed (non-critical)", { error: phErr });
     }
   } catch (updateError: any) {
-    console.error(`[webhook] ❌ CRITICAL: Failed to downgrade user ${firebaseUid}:`, updateError);
+    // Phase WEBHOOK-B1-C2: rethrow so the delivery stays retryable.
+    console.error(`[webhook] ❌ CRITICAL: Failed to downgrade user:`, updateError?.message);
+    throw updateError;
   }
 }
 
