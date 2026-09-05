@@ -262,24 +262,28 @@ export default function SignupPage() {
       // 
       // We set onboardingCompleted: false so the app will redirect them to /onboarding
       // where they can provide role, use case, usage frequency, and referral source.
-      const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM format
-      // Use stripUndefined to remove undefined values before writing to Firestore.
-      // Firestore does not accept undefined field values.
+      // Phase FIRESTORE-AUTHZ-P0.1 — CLIENT-OWNED FIELDS ONLY.
+      //
+      // This write used to seed `role`, `plan`, `runsThisMonth`, `usageMonth`,
+      // `tokensUsedCurrentPeriod`, `totalRuns` and `isDisabled` from the
+      // browser. Those are the very fields the entitlement resolver, the quota
+      // gate and governance role resolution read, so the write was both the
+      // reason the rules had to stay permissive AND the shape an attacker
+      // copied to forge a plan. Firestore rules now reject them.
+      //
+      // Nothing is lost by dropping them: every one has a safe default when
+      // absent, and the server writes the real values the first time it needs
+      // them — `/api/user/usage` and the quota gate both initialise plan and
+      // usage on a document that lacks them, and `role` is granted only by the
+      // admin endpoint or derived from the verified email allowlist.
       await setDoc(doc(db, "users", user.uid), stripUndefined({
         uid: user.uid,
         email: user.email,
         name: name.trim() || undefined, // Will be stripped if empty
-        role: "user", // User role (not onboarding role)
-        plan: "free", // Default plan for all new users
-        runsThisMonth: 0, // Start with zero runs
-        usageMonth: currentMonth, // Track which month the counter applies to
-        tokensUsedCurrentPeriod: 0, // Initialize token counter for current billing period
-        totalRuns: 0, // Initialize lifetime run counter
         onboardingCompleted: false, // User must complete onboarding before using the app
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
         lastLoginAt: serverTimestamp(),
-        isDisabled: false,
       }));
 
       // Session-cookie creation/verification now happens reactively in

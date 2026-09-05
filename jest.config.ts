@@ -18,7 +18,7 @@ const config: Config = {
     "^.+\\.tsx?$": ["ts-jest", { tsconfig: { module: "commonjs", jsx: "react-jsx" } }],
   },
   testMatch: ["**/__tests__/**/*.spec.ts", "**/__tests__/**/*.test.ts", "**/__tests__/**/*.spec.tsx", "**/synthesis/**/*.test.ts"],
-  testPathIgnorePatterns: ["lib/__tests__/agreementMap.test.ts"],
+  testPathIgnorePatterns: ["lib/__tests__/agreementMap.test.ts", "<rootDir>/firestore-rules-tests/"],
 };
 
 export default config;

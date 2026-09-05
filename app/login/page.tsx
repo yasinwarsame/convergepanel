@@ -135,32 +135,25 @@ export default function LoginPage() {
       const { doc, setDoc, getDoc, serverTimestamp } = await import("firebase/firestore");
       const { db } = await import("@/lib/firebase/client");
       
-      // Get user's role from token
-      const tokenResult = await user.getIdTokenResult();
-      const role = tokenResult.claims.admin ? "admin" : "user";
-      
-      // Check if user doc exists, initialize plan/usage if not
+      // Phase FIRESTORE-AUTHZ-P0.1 — CLIENT-OWNED FIELDS ONLY.
+      //
+      // This write used to set `role` on every sign-in, and to seed `plan` and
+      // the usage counters when they were missing. All of those are read by
+      // server-side authorization or quota decisions, so a browser that could
+      // write them could grant itself a plan, a role, or a fresh month of
+      // quota. Firestore rules now reject them.
+      //
+      // `role` is not lost: it is granted server-side by the admin endpoint,
+      // and governance role resolution independently falls back to the
+      // verified admin email allowlist. Plan and usage are initialised
+      // server-side on first use, and every consumer already defaults safely
+      // when they are absent.
       const userDocRef = doc(db, "users", user.uid);
-      const userDoc = await getDoc(userDocRef);
-      const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM format
-      
-      const updateData: any = {
+      await setDoc(userDocRef, {
         uid: user.uid,
         email: user.email,
-        role,
         lastLoginAt: serverTimestamp(),
-      };
-      
-      // Initialize plan and usage if user doc doesn't exist or missing fields
-      if (!userDoc.exists() || !userDoc.data()?.plan) {
-        updateData.plan = "free";
-        updateData.runsThisMonth = 0;
-        updateData.usageMonth = currentMonth;
-        updateData.tokensUsedCurrentPeriod = 0; // Initialize token counter
-        updateData.totalRuns = 0; // Initialize lifetime run counter
-      }
-      
-      await setDoc(userDocRef, updateData, { merge: true });
+      }, { merge: true });
 
       // Session-cookie creation/verification is no longer done here — it now
       // happens reactively in AuthProvider's onIdTokenChanged listener
