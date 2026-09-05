@@ -41,6 +41,7 @@ import { mapSubscriptionToPlan } from "@/lib/billing/subscriptionMapper";
 import { updateUserPlanInFirestore } from "./webhookHelpers";
 import { resolveSubscriptionBillingState } from "@/lib/billing/subscriptionBillingState";
 import {
+  reportIncompleteAuthorityEnumeration,
   reportMultipleEntitlementSubscriptions,
   resolveCustomerSubscriptionAuthority,
   verifyCustomerIdentity,
@@ -137,6 +138,22 @@ export async function validateUserSubscription(
 
     if (authority.kind === "unverified_customer") {
       logger.error("[subscriptionValidation] Cannot establish the customer's subscription set without a verified customer");
+      return false;
+    }
+
+    if (authority.kind === "enumeration_incomplete") {
+      // Phase WEBHOOK-B1-C8: this path DOWNGRADES on `no_entitlement`, so a
+      // partial listing reaching that branch is exactly how a paying customer
+      // with a subscription beyond the bound lost their plan. Not validated,
+      // nothing written.
+      reportIncompleteAuthorityEnumeration({
+        path: "request_time_reconciliation",
+        stripeCustomerId: verifiedCustomerId,
+        uid,
+        storedSubscriptionId: (userData?.stripeSubscriptionId as string | undefined) ?? null,
+        reason: authority.reason,
+        pagesFetched: authority.pagesFetched,
+      });
       return false;
     }
 

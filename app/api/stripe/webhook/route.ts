@@ -52,7 +52,7 @@ import { PLAN_CONFIG, getPlanConfigById, BillingPlanId, STRIPE_PRICE_TO_PLAN } f
 import { mapSubscriptionToPlan, SubscriptionPlanMapping } from "@/lib/billing/subscriptionMapper";
 import { resolveSubscriptionBillingState } from "@/lib/billing/subscriptionBillingState";
 import { mayDeletionDowngrade } from "@/lib/billing/subscriptionAuthority";
-import { reportMultipleEntitlementSubscriptions, resolveCustomerSubscriptionAuthority, verifyCustomerIdentity } from "@/lib/billing/customerSubscriptionAuthority";
+import { reportIncompleteAuthorityEnumeration, reportMultipleEntitlementSubscriptions, resolveCustomerSubscriptionAuthority, verifyCustomerIdentity } from "@/lib/billing/customerSubscriptionAuthority";
 import { TransientDependencyError, firestoreRead } from "@/lib/billing/reconciliationOutcome";
 import { PlanId, BillingInterval } from "@/lib/plans";
 import { updateUserPlanInFirestore } from "@/lib/stripe/webhookHelpers";
@@ -499,6 +499,25 @@ export async function handleSubscriptionChange(
     });
     return;
   }
+  if (customerAuthority.kind === "enumeration_incomplete") {
+    // Phase WEBHOOK-B1-C8: the customer's set was never fully read, so nothing
+    // about it is known — least of all that they hold no subscription.
+    // Terminal, like ambiguity: retrying identical Stripe state cannot finish
+    // an enumeration a safety bound stopped, so the delivery is acknowledged
+    // and this record is the operator's only signal.
+    reportIncompleteAuthorityEnumeration({
+      path: "webhook_subscription_change",
+      eventId,
+      eventType,
+      stripeCustomerId: identity.verifiedCustomerId,
+      uid: firebaseUid,
+      eventSubscriptionId: subscriptionId,
+      storedSubscriptionId,
+      reason: customerAuthority.reason,
+      pagesFetched: customerAuthority.pagesFetched,
+    });
+    return;
+  }
   if (customerAuthority.kind === "customer_missing") {
     // Stripe says the customer is gone. That is not proof this user holds no
     // entitlement — the local binding may be stale — so nothing is written.
@@ -884,6 +903,23 @@ async function handleSubscriptionDeleted(
     });
     if (replacementAuthority.kind === "customer_missing") {
       logger.error("[webhook] Stripe customer not found; refusing to downgrade on an absent lookup", { subscriptionId });
+      return;
+    }
+    if (replacementAuthority.kind === "enumeration_incomplete") {
+      // Phase WEBHOOK-B1-C8: a downgrade needs PROOF that no replacement
+      // exists. A partial listing is not proof, and this is the most
+      // destructive path in the file.
+      reportIncompleteAuthorityEnumeration({
+        path: "webhook_subscription_deleted",
+        eventId,
+        eventType,
+        stripeCustomerId: verifiedDeletionCustomerId,
+        uid: firebaseUid,
+        eventSubscriptionId: subscriptionId,
+        storedSubscriptionId: storedSubscriptionIdForDeletion,
+        reason: replacementAuthority.reason,
+        pagesFetched: replacementAuthority.pagesFetched,
+      });
       return;
     }
     if (replacementAuthority.kind === "multiple_entitlements") {

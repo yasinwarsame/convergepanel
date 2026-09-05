@@ -52,9 +52,11 @@ describe("BILLING-USAGE-Q1 — billing synchronization does not own run usage", 
     it(`${file} writes no usage field`, () => {
       const code = codeOf(file);
       for (const field of USAGE_FIELDS) {
-        expect(code).not.toMatch(new RegExp(`${field}\\s*:`));
+        // Phase C8: the key may be quoted — `{ "runsThisMonth": 0 }` slipped
+        // past the original pattern because the quote sits before the colon.
+        expect(code).not.toMatch(new RegExp(`["']?${field}["']?\\s*:`));
       }
-      expect(code).not.toMatch(/usageMonth\s*:/);
+      expect(code).not.toMatch(/["']?usageMonth["']?\s*:/);
     });
   }
 

@@ -48,7 +48,15 @@ export type CustomerSubscriptionAuthority =
   /** The set could not be established because the customer identity is not trusted. */
   | { kind: "unverified_customer" }
   /** Stripe says the customer itself no longer exists. An absent remote lookup is NOT positive authority to strip entitlement. */
-  | { kind: "customer_missing" };
+  | { kind: "customer_missing" }
+  /**
+   * Phase WEBHOOK-B1-C8 — WE STOPPED LOOKING; THAT IS NOT "NONE EXISTS".
+   *
+   * Enumeration ended while Stripe still had more to give. The set is
+   * PARTIAL, so it proves nothing at all: not absence, not uniqueness, not
+   * ambiguity. No caller may write on the strength of it.
+   */
+  | { kind: "enumeration_incomplete"; reason: "page_limit_reached" | "cursor_not_advancing"; pagesFetched: number };
 
 /**
  * Enumerates the customer's subscriptions and classifies the result. Never
@@ -79,9 +87,24 @@ export async function resolveCustomerSubscriptionAuthority(args: {
 
   const entitled: Stripe.Subscription[] = [];
   let startingAfter: string | undefined;
+  let pagesFetched = 0;
+  /** Cursors already followed, so a non-advancing cursor cannot spin forever. */
+  const seenCursors = new Set<string>();
 
-  // Bounded loop: Stripe caps `limit` at 100, and a customer with more than
-  // 1,000 subscriptions is already far outside any supported shape.
+  // A FINITE BOUND, AND AN HONEST ONE.
+  //
+  // The bound stays: an unbounded loop against a pagination cursor that never
+  // advances is its own outage, and Stripe caps `limit` at 100 so 10 pages is
+  // 1,000 subscriptions — already far outside this product's one-subscription
+  // contract. What changed in C8 is what the bound MEANS. It is a limit on how
+  // long we are willing to look; it is not evidence about the customer.
+  //
+  // Raising the number would only move the cliff. The defect was that exiting
+  // on the counter fell through to the same classification as a genuinely
+  // exhausted listing, so an empty PARTIAL set became `no_entitlement` and a
+  // paying customer with a live subscription beyond the bound was downgraded
+  // and had their subscription reference deleted. Stopping early is now its
+  // own outcome that no caller can read as absence.
   for (let page = 0; page < 10; page++) {
     const result = await stripeLookup("subscriptions.list", () =>
       args.stripe.subscriptions.list({
@@ -98,6 +121,7 @@ export async function resolveCustomerSubscriptionAuthority(args: {
     if (result.kind === "absent") return { kind: "customer_missing" };
 
     const page_ = result.value;
+    pagesFetched += 1;
     for (const candidate of page_.data) {
       if (args.excludeSubscriptionId && candidate.id === args.excludeSubscriptionId) continue;
       // PLAN-BEARING, not entitlement-bearing. `past_due` is still the
@@ -109,11 +133,30 @@ export async function resolveCustomerSubscriptionAuthority(args: {
       // subscription at all and clear their reference.
       if (isPlanBearingSubscriptionStatus(candidate.status)) entitled.push(candidate);
     }
-    if (!page_.has_more || page_.data.length === 0) break;
-    startingAfter = page_.data[page_.data.length - 1]?.id;
-    if (!startingAfter) break;
+    // EXHAUSTED. Only here is the set complete, and only a complete set may be
+    // classified below.
+    if (!page_.has_more || page_.data.length === 0) return classifyCompleteSet(entitled);
+
+    const nextCursor = page_.data[page_.data.length - 1]?.id;
+    // `has_more` is true but we cannot advance: either the page carried no
+    // usable id, or Stripe handed back a cursor we have already followed. Both
+    // mean the remainder is unreachable, which is uncertainty — never absence.
+    if (!nextCursor || seenCursors.has(nextCursor)) {
+      return { kind: "enumeration_incomplete", reason: "cursor_not_advancing", pagesFetched };
+    }
+    seenCursors.add(nextCursor);
+    startingAfter = nextCursor;
   }
 
+  // Fell out of the loop on the page counter while Stripe still had more.
+  return { kind: "enumeration_incomplete", reason: "page_limit_reached", pagesFetched };
+}
+
+/**
+ * Classify a set that Stripe has confirmed is COMPLETE. Deliberately separate
+ * from the enumeration above so that a partial set has no path into it.
+ */
+function classifyCompleteSet(entitled: Stripe.Subscription[]): CustomerSubscriptionAuthority {
   if (entitled.length === 0) return { kind: "no_entitlement" };
   if (entitled.length > 1) {
     // The ids travel with the outcome so the caller can log something an
@@ -198,5 +241,42 @@ export function reportMultipleEntitlementSubscriptions(args: {
     candidateSubscriptionIds: args.candidateSubscriptionIds,
     candidateCount: args.candidateCount,
     resolution: "no_mutation_ambiguous_subscription_set",
+  });
+}
+
+/**
+ * Phase WEBHOOK-B1-C8 — the incomplete-enumeration record.
+ *
+ * Like ambiguity, this is a persistent customer-domain condition: retrying the
+ * same Stripe state cannot finish an enumeration that a safety bound stopped.
+ * Nothing is written and nothing will retry its way out of it, so this log is
+ * the only signal an operator gets that a customer needs manual attention.
+ * Same privacy discipline as every other record here — identifiers only.
+ */
+export const AUTHORITY_ENUMERATION_INCOMPLETE_CODE = "authority_enumeration_incomplete";
+
+export function reportIncompleteAuthorityEnumeration(args: {
+  path: AuthorityPath;
+  eventId?: string;
+  eventType?: string;
+  stripeCustomerId: string;
+  uid: string;
+  eventSubscriptionId?: string | null;
+  storedSubscriptionId: string | null;
+  reason: "page_limit_reached" | "cursor_not_advancing";
+  pagesFetched: number;
+}): void {
+  logger.error("[billing] authority_enumeration_incomplete", {
+    code: AUTHORITY_ENUMERATION_INCOMPLETE_CODE,
+    path: args.path,
+    eventId: args.eventId,
+    eventType: args.eventType,
+    stripeCustomerId: args.stripeCustomerId,
+    uid: args.uid,
+    eventSubscriptionId: args.eventSubscriptionId ?? null,
+    storedSubscriptionId: args.storedSubscriptionId,
+    reason: args.reason,
+    pagesFetched: args.pagesFetched,
+    resolution: "no_mutation_authority_not_proven",
   });
 }

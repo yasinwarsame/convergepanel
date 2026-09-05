@@ -38,6 +38,7 @@ import { PLAN_CONFIG, getPlanConfigById } from "@/lib/billing/planConfig";
 import { mapSubscriptionToPlan } from "@/lib/billing/subscriptionMapper";
 import { resolveSubscriptionBillingState } from "@/lib/billing/subscriptionBillingState";
 import {
+  reportIncompleteAuthorityEnumeration,
   reportMultipleEntitlementSubscriptions,
   resolveCustomerSubscriptionAuthority,
 } from "@/lib/billing/customerSubscriptionAuthority";
@@ -163,6 +164,26 @@ export async function POST(req: NextRequest) {
         );
       }
       throw dependencyError;
+    }
+
+    if (authority.kind === "enumeration_incomplete") {
+      // Phase WEBHOOK-B1-C8: never report success, and never downgrade, on a
+      // set we did not finish reading.
+      reportIncompleteAuthorityEnumeration({
+        path: "self_serve_plan_sync",
+        stripeCustomerId,
+        uid: targetUserId,
+        storedSubscriptionId: (userData?.stripeSubscriptionId as string | undefined) ?? null,
+        reason: authority.reason,
+        pagesFetched: authority.pagesFetched,
+      });
+      return NextResponse.json(
+        {
+          error: "We couldn't finish checking your subscriptions, so we've left your plan unchanged. Please contact support.",
+          code: "authority_enumeration_incomplete",
+        },
+        { status: 409 }
+      );
     }
 
     if (authority.kind === "unverified_customer" || authority.kind === "customer_missing") {
