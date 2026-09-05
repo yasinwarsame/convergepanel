@@ -193,6 +193,27 @@ const SCENARIOS: Scenario[] = [
     stripe: () => [subC()],
     eventSubject: () => subC(),
   },
+  {
+    name: "9. active B alongside past_due C",
+    stored: { plan: "full", stripeCustomerId: MINE, stripeSubscriptionId: A, subscriptionStatus: "active", billingInterval: "year" },
+    stripe: () => [subB(), { ...subC(), status: "past_due" } as Sub],
+    eventSubject: () => subB(),
+  },
+  {
+    name: "10. two past_due subscriptions",
+    stored: { plan: "full", stripeCustomerId: MINE, stripeSubscriptionId: A, subscriptionStatus: "active", billingInterval: "year" },
+    stripe: () => [{ ...subB(), status: "past_due" } as Sub, { ...subC(), status: "past_due" } as Sub],
+    eventSubject: () => ({ ...subB(), status: "past_due" } as Sub),
+  },
+  {
+    name: "11. the only candidate sits beyond the first Stripe page",
+    stored: { plan: "lite", stripeCustomerId: MINE, stripeSubscriptionId: A, subscriptionStatus: "active", billingInterval: "month" },
+    stripe: () => [
+      ...Array.from({ length: 100 }, (_, i) => sub({ id: `sub_noise_${i}`, status: "canceled", created: 1000 + i })),
+      subC(),
+    ],
+    eventSubject: () => subC(),
+  },
 ];
 
 beforeEach(() => {

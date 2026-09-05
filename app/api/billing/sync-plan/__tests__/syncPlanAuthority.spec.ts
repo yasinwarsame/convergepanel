@@ -482,3 +482,28 @@ describe("C7 — the admin override survives self-sync", () => {
     expect(storedDoc.plan).toBe("full");
   });
 });
+
+describe("C7 — the cost of the post-checkout sync", () => {
+  /**
+   * The old route made TWO Stripe calls: a `customers.retrieve` to check the
+   * customer existed, then a truncated `subscriptions.list`. The shared
+   * resolver reports a definitively missing customer as its own outcome from
+   * the listing itself, so the existence check is redundant and gone. Exhaustive
+   * enumeration therefore made this route cheaper, not more expensive: one call
+   * for any customer with up to a hundred subscriptions.
+   */
+  it("a post-checkout sync costs exactly one Stripe call", async () => {
+    storedDoc = { plan: "free", stripeCustomerId: MINE, ...USAGE };
+    live = [subC()];
+    await syncPlan();
+    expect(subscriptionsList).toHaveBeenCalledTimes(1);
+    expect(customersRetrieve).not.toHaveBeenCalled();
+  });
+
+  it("a customer with a hundred subscriptions is still one call", async () => {
+    live = [...Array.from({ length: 99 }, (_, i) => sub({ id: `sub_noise_${i}`, status: "canceled" })), subC()];
+    storedDoc = { ...storedDoc, plan: "lite", billingInterval: "month" };
+    await syncPlan();
+    expect(subscriptionsList).toHaveBeenCalledTimes(1);
+  });
+});
