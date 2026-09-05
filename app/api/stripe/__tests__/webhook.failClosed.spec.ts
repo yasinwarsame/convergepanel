@@ -42,8 +42,12 @@ let retrieveImpl: (id: string) => Promise<unknown> = async (id) => {
   return s;
 };
 const subscriptionsRetrieve = jest.fn((id: string) => retrieveImpl(id));
-let listImpl: () => Promise<{ data: unknown[] }> = async () => ({ data: [] });
-const subscriptionsList = jest.fn(() => listImpl());
+/** Phase C3: authority comes from the customer's set, so the default list mirrors live Stripe state. */
+let listImpl: (args?: { customer?: string }) => Promise<{ data: unknown[]; has_more?: boolean }> = async (args) => ({
+  data: [...liveSubscriptions.values()].filter((s) => (s as { customer?: string }).customer === args?.customer),
+  has_more: false,
+});
+const subscriptionsList = jest.fn((args: { customer?: string }) => listImpl(args));
 jest.mock("@/lib/stripe/client", () => ({
   stripe: {
     webhooks: { constructEvent: (...a: unknown[]) => constructEvent(...a) },
@@ -51,7 +55,7 @@ jest.mock("@/lib/stripe/client", () => ({
     subscriptions: {
       update: (...a: unknown[]) => subscriptionsUpdate(...(a as [])),
       retrieve: (...a: unknown[]) => subscriptionsRetrieve(...(a as [string])),
-      list: (...a: unknown[]) => subscriptionsList(...(a as [])),
+      list: (...a: unknown[]) => subscriptionsList(...(a as [{ customer?: string }])),
     },
   },
 }));
@@ -138,7 +142,10 @@ beforeEach(() => {
     if (!s) throw Object.assign(new Error("No such subscription"), { code: "resource_missing" });
     return s;
   };
-  listImpl = async () => ({ data: [] });
+  listImpl = async (args) => ({
+    data: [...liveSubscriptions.values()].filter((s) => (s as { customer?: string }).customer === args?.customer),
+    has_more: false,
+  });
   storedDoc = { ...PAID_ON_B };
 });
 
@@ -167,15 +174,12 @@ describe("P0 — a transient dependency failure must never look like absent stat
     expect(writes).toHaveLength(0);
   });
 
-  it("CASE 3: failing to read the STORED subscription must not hand authority to the incoming one", async () => {
-    // B is genuinely active, but Stripe cannot be reached for it.
+  it("CASE 3: failing to establish the customer's subscription set must not hand authority to the incoming one", async () => {
+    // Phase C3: authority now comes from the customer's set rather than a
+    // pairwise stored-vs-incoming comparison, so the dependency that must not
+    // fail open is the set lookup itself.
     setLive(sub({ id: SUB_A, status: "active", priceId: "price_lite_m", interval: "month" }));
-    retrieveImpl = async (id) => {
-      if (id === SUB_B) throw Object.assign(new Error("ETIMEDOUT"), { type: "StripeConnectionError" });
-      const s = liveSubscriptions.get(id);
-      if (!s) throw Object.assign(new Error("No such subscription"), { code: "resource_missing" });
-      return s;
-    };
+    listImpl = async () => { throw Object.assign(new Error("ETIMEDOUT"), { type: "StripeConnectionError" }); };
     const before = { ...storedDoc };
 
     const status = await deliver("customer.subscription.updated", sub({ id: SUB_A, status: "active", priceId: "price_lite_m", interval: "month" }));

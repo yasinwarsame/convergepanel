@@ -39,6 +39,8 @@ const constructEvent = jest.fn();
 const customersRetrieve = jest.fn(async () => ({ deleted: false, metadata: {} }));
 const subscriptionsUpdate = jest.fn(async () => ({}));
 const subscriptionsRetrieve = jest.fn();
+/** Phase C3: the route now resolves authority from the customer's set. */
+const subscriptionsList = jest.fn(async () => ({ data: [] as unknown[], has_more: false }));
 jest.mock("@/lib/stripe/client", () => ({
   stripe: {
     webhooks: { constructEvent: (...a: unknown[]) => constructEvent(...a) },
@@ -46,6 +48,7 @@ jest.mock("@/lib/stripe/client", () => ({
     subscriptions: {
       update: (...a: unknown[]) => subscriptionsUpdate(...(a as [])),
       retrieve: (...a: unknown[]) => subscriptionsRetrieve(...(a as [])),
+      list: (...a: unknown[]) => subscriptionsList(...(a as [])),
     },
   },
 }));
@@ -108,6 +111,7 @@ async function deliverSubscriptionUpdated(sub: Stripe.Subscription) {
   // Phase WEBHOOK-B1-C1: the route now re-reads authoritative state before
   // persisting, so the mock must answer that read.
   subscriptionsRetrieve.mockResolvedValue(sub);
+  subscriptionsList.mockResolvedValue({ data: [sub], has_more: false });
   constructEvent.mockReturnValue({ id: "evt_test", type: "customer.subscription.updated", data: { object: sub } });
   const req = {
     text: async () => "{}",
@@ -123,6 +127,8 @@ beforeEach(() => {
   storedDoc = { email: "legacy@example.test", stripeCustomerId: "cus_test", stripeSubscriptionId: "sub_test" };
   constructEvent.mockReset();
   subscriptionsRetrieve.mockReset();
+  subscriptionsList.mockReset();
+  subscriptionsList.mockResolvedValue({ data: [], has_more: false });
   customersRetrieve.mockClear();
   subscriptionsUpdate.mockClear();
 });

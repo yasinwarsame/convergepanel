@@ -31,7 +31,7 @@ const constructEvent = jest.fn();
 const customersRetrieve = jest.fn(async () => ({ deleted: false, metadata: {} }));
 const subscriptionsUpdate = jest.fn(async () => ({}));
 const subscriptionsRetrieve = jest.fn();
-const subscriptionsList = jest.fn(async () => ({ data: [] }));
+const subscriptionsList = jest.fn(async () => ({ data: [incidentSubscription()], has_more: false }));
 jest.mock("@/lib/stripe/client", () => ({
   stripe: {
     webhooks: { constructEvent: (...a: unknown[]) => constructEvent(...a) },

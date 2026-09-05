@@ -30,7 +30,11 @@ jest.mock("@/lib/env", () => ({
 const constructEvent = jest.fn();
 const customersRetrieve = jest.fn(async () => ({ deleted: false, metadata: {} }));
 const subscriptionsUpdate = jest.fn(async () => ({}));
-const subscriptionsList = jest.fn(async () => ({ data: [] }));
+/** Phase C3: authority is resolved from the customer's set, so the list must reflect authoritative Stripe state. */
+const subscriptionsList = jest.fn(async (args: { customer?: string }) => ({
+  data: [...liveSubscriptions.values()].filter((s) => (s as { customer?: string }).customer === args?.customer),
+  has_more: false,
+}));
 /** Authoritative Stripe state, keyed by subscription id. */
 const liveSubscriptions = new Map<string, unknown>();
 const subscriptionsRetrieve = jest.fn(async (id: string) => {
@@ -45,7 +49,7 @@ jest.mock("@/lib/stripe/client", () => ({
     subscriptions: {
       update: (...a: unknown[]) => subscriptionsUpdate(...(a as [])),
       retrieve: (...a: unknown[]) => subscriptionsRetrieve(...(a as [string])),
-      list: (...a: unknown[]) => subscriptionsList(...(a as [])),
+      list: (...a: unknown[]) => subscriptionsList(...(a as [{ customer?: string }])),
     },
   },
 }));
@@ -108,6 +112,17 @@ beforeEach(() => {
 });
 
 describe("cross-subscription events — a former subscription must never touch the current one", () => {
+  // Phase WEBHOOK-B1-C3: authority now comes from the customer's subscription
+  // SET, so an event naming a former subscription no longer does nothing — it
+  // reconciles the customer's genuinely current subscription. What must never
+  // change is the BILLING OUTCOME: the user stays on B's plan and cadence, and
+  // is never moved onto the former subscription.
+  const billingOf = (d: Record<string, unknown>) => ({
+    plan: d.plan, billingInterval: d.billingInterval,
+    stripeSubscriptionId: d.stripeSubscriptionId, stripeCustomerId: d.stripeCustomerId,
+    monthlyLimit: d.monthlyLimit, maxModelsPerRun: d.maxModelsPerRun,
+  });
+
   beforeEach(() => {
     // The customer is currently on B (Full, annual). A is their old, canceled one.
     storedDoc = { ...storedDoc, stripeSubscriptionId: SUB_B, plan: "full", billingInterval: "year", subscriptionStatus: "active", monthlyLimit: 150, maxModelsPerRun: 5 };
@@ -126,7 +141,7 @@ describe("cross-subscription events — a former subscription must never touch t
   it("a delayed updated for former subscription A leaves B untouched", async () => {
     const before = { ...storedDoc };
     expect(await deliver("customer.subscription.updated", sub({ id: SUB_A, status: "active", priceId: "price_lite_m", interval: "month" }))).toBe(200);
-    expect(storedDoc).toEqual(before);
+    expect(billingOf(storedDoc)).toEqual(billingOf(before));
   });
 
   it("REGRESSION: an event for a DIFFERENT still-active subscription cannot take over from the stored active one", async () => {
@@ -144,7 +159,7 @@ describe("cross-subscription events — a former subscription must never touch t
   it("a delayed invoice.payment_succeeded for former subscription A leaves B untouched", async () => {
     const before = { ...storedDoc };
     expect(await deliver("invoice.payment_succeeded", { id: "in_old", subscription: SUB_A })).toBe(200);
-    expect(storedDoc).toEqual(before);
+    expect(billingOf(storedDoc)).toEqual(billingOf(before));
   });
 
   it("a delayed checkout.session.completed for former subscription A leaves B untouched", async () => {
@@ -152,7 +167,7 @@ describe("cross-subscription events — a former subscription must never touch t
     expect(await deliver("checkout.session.completed", { id: "cs_old", mode: "subscription", subscription: SUB_A, customer: "cus_customer", metadata: { firebaseUid: UID, targetPlan: "full" } })).toBe(200);
     expect(storedDoc.plan).toBe("full");
     expect(storedDoc.stripeSubscriptionId).toBe(SUB_B);
-    expect(storedDoc).toEqual(before);
+    expect(billingOf(storedDoc)).toEqual(billingOf(before));
   });
 });
 
@@ -243,10 +258,12 @@ describe("stale events and an active admin override", () => {
     expect(storedDoc).toEqual(before);
   });
 
-  it("a stale update for a former subscription does not disturb the override or current state", async () => {
+  it("a stale update for a former subscription does not disturb the override or the billing outcome", async () => {
     const before = { ...storedDoc };
     await deliver("customer.subscription.updated", sub({ id: SUB_A, status: "active", priceId: "price_lite_m", interval: "month" }));
-    expect(storedDoc).toEqual(before);
+    expect(storedDoc.override).toEqual(before.override);
+    expect(storedDoc.plan).toEqual(before.plan);
+    expect(storedDoc.stripeSubscriptionId).toEqual(before.stripeSubscriptionId);
   });
 
   it("cancelling the CURRENT subscription records the downgrade but leaves the override intact", async () => {
