@@ -24,8 +24,7 @@
  * - stripeCustomerId: Stripe customer ID
  * - stripeSubscriptionId: Stripe subscription ID
  * - billingInterval: "month" | "year"
- * - billingCycleStart: ISO timestamp
- * - runsThisMonth: Reset to 0 (via resetUsageForNewPlan)
+ * - billingCycleStart: Stripe billing-cycle Timestamp (canonical resolver only)
  * - usageMonth: Current month (YYYY-MM)
  * 
  * When subscription is deleted, updates:
@@ -48,15 +47,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { stripe } from "@/lib/stripe/client";
 import { STRIPE_WEBHOOK_SECRET } from "@/lib/env";
 import { adminDb } from "@/lib/firebase/admin";
-import { resetUsageForNewPlan } from "@/lib/stripe/usage";
-import { getPlanFromPriceId, getFreePlanConfig, PlanConfig } from "@/lib/billing/planMapping";
-import { PLAN_CONFIG, getPlanIdFromPriceId, getPlanConfigById, BillingPlanId, STRIPE_PRICE_TO_PLAN } from "@/lib/billing/planConfig";
-import { mapSubscriptionToPlan, getCurrentMonthString, SubscriptionPlanMapping } from "@/lib/billing/subscriptionMapper";
+import { getPlanFromPriceId, PlanConfig } from "@/lib/billing/planMapping";
+import { PLAN_CONFIG, getPlanConfigById, BillingPlanId, STRIPE_PRICE_TO_PLAN } from "@/lib/billing/planConfig";
+import { mapSubscriptionToPlan, SubscriptionPlanMapping } from "@/lib/billing/subscriptionMapper";
 import { resolveSubscriptionBillingState } from "@/lib/billing/subscriptionBillingState";
 import { mayDeletionDowngrade } from "@/lib/billing/subscriptionAuthority";
 import { resolveCustomerSubscriptionAuthority, verifyCustomerIdentity } from "@/lib/billing/customerSubscriptionAuthority";
-import { TransientDependencyError, firestoreRead, stripeLookup } from "@/lib/billing/reconciliationOutcome";
-import { isEntitlementBearingSubscriptionStatus } from "@/lib/billing/subscriptionStatus";
+import { TransientDependencyError, firestoreRead } from "@/lib/billing/reconciliationOutcome";
 import { PlanId, BillingInterval } from "@/lib/plans";
 import { updateUserPlanInFirestore } from "@/lib/stripe/webhookHelpers";
 import { getPostHogClient } from "@/lib/posthog-server";
@@ -163,7 +160,7 @@ export async function POST(req: NextRequest) {
               };
             }
             
-            await handleSubscriptionChange(subscription);
+            await handleSubscriptionChange(subscription, { id: event.id, type: event.type });
           } catch (subError: any) {
             // Phase WEBHOOK-B1-C2: do NOT swallow. Reconciliation failures here
             // used to be acknowledged with a 200, so Stripe never retried and a
@@ -192,7 +189,7 @@ export async function POST(req: NextRequest) {
               if (subscriptions.data.length > 0) {
                 const subscription = subscriptions.data[0];
                 console.log("[webhook] Found subscription by customer ID:", subscription.id);
-                await handleSubscriptionChange(subscription);
+                await handleSubscriptionChange(subscription, { id: event.id, type: event.type });
               }
             } catch (fallbackError: any) {
               console.error("[webhook] Fallback subscription lookup failed:", fallbackError);
@@ -213,13 +210,13 @@ export async function POST(req: NextRequest) {
           priceId: subscription.items.data[0]?.price.id,
           metadata: subscription.metadata,
         });
-        await handleSubscriptionChange(subscription);
+        await handleSubscriptionChange(subscription, { id: event.id, type: event.type });
         break;
       }
 
       case "customer.subscription.deleted": {
         const subscription = event.data.object as Stripe.Subscription;
-        await handleSubscriptionDeleted(subscription);
+        await handleSubscriptionDeleted(subscription, { id: event.id, type: event.type });
         break;
       }
 
@@ -234,7 +231,7 @@ export async function POST(req: NextRequest) {
           : invoiceWithSubscription.subscription?.id;
         if (subscriptionId) {
           const subscription = await stripe.subscriptions.retrieve(subscriptionId);
-          await handleSubscriptionChange(subscription);
+          await handleSubscriptionChange(subscription, { id: event.id, type: event.type });
         }
         break;
       }
@@ -284,7 +281,13 @@ export async function POST(req: NextRequest) {
  * 
  * EXPORTED for use in test endpoints
  */
-export async function handleSubscriptionChange(subscription: Stripe.Subscription) {
+export async function handleSubscriptionChange(
+  subscription: Stripe.Subscription,
+  /** Event context, carried so the terminal ambiguity record is actionable. */
+  eventContext?: { id?: string; type?: string }
+) {
+  const eventId = eventContext?.id;
+  const eventType = eventContext?.type;
   if (!adminDb) {
     console.error("[webhook] Firestore not available");
     return;
@@ -478,14 +481,22 @@ export async function handleSubscriptionChange(subscription: Stripe.Subscription
     // no raw payload, no payment data.
     logger.error("[webhook] multiple_entitlement_subscriptions", {
       code: "multiple_entitlement_subscriptions",
+      eventId,
+      eventType,
       stripeCustomerId: identity.verifiedCustomerId,
       uid: firebaseUid,
       eventSubscriptionId: subscriptionId,
       storedSubscriptionId,
       candidateSubscriptionIds: customerAuthority.subscriptionIds,
       candidateCount: customerAuthority.count,
-      resolution: "no_billing_change_applied",
+      resolution: "no_mutation_ambiguous_subscription_set",
     });
+    return;
+  }
+  if (customerAuthority.kind === "customer_missing") {
+    // Stripe says the customer is gone. That is not proof this user holds no
+    // entitlement — the local binding may be stale — so nothing is written.
+    logger.error("[webhook] Stripe customer not found; refusing to derive entitlement from an absent lookup", { subscriptionId });
     return;
   }
   if (customerAuthority.kind === "unverified_customer") {
@@ -671,7 +682,12 @@ async function reconcileAuthoritativeSubscription(args: {
  * 2. Updates Firestore to set plan to "free" with free plan limits
  * 3. Clears subscription ID but keeps customer ID for potential future subscriptions
  */
-async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
+async function handleSubscriptionDeleted(
+  subscription: Stripe.Subscription,
+  eventContext?: { id?: string; type?: string }
+) {
+  const eventId = eventContext?.id;
+  const eventType = eventContext?.type;
   if (!adminDb) {
     console.error("[webhook] Firestore not available");
     return;
@@ -700,7 +716,10 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
         firebaseUid = customerMetadata?.firebaseUid || customerMetadata?.firebase_uid || null;
       }
     } catch (err) {
-      console.error("[webhook] Failed to retrieve customer:", err);
+      // Phase WEBHOOK-B1-C5: the deletion path swallowed this too, so a
+      // transient outage answered 200 and the cancellation was lost with no
+      // retry. The change path was fixed in C3; this is the missing half.
+      throw new TransientDependencyError("stripe", "customers.retrieve(deletion)", err);
     }
   }
 
@@ -718,7 +737,7 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
         console.log("[webhook] ✅ Found user by stripeCustomerId:", firebaseUid);
       }
     } catch (err) {
-      console.error("[webhook] Failed to lookup user by stripeCustomerId:", err);
+      throw new TransientDependencyError("firestore", "users.where(stripeCustomerId)(deletion)", err);
     }
   }
 
@@ -804,16 +823,29 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
       logger.error("[webhook] Cannot verify replacement subscriptions without a Stripe client; refusing to downgrade", { subscriptionId });
       return;
     }
-    const replacementAuthority = await resolveCustomerSubscriptionAuthority({ stripe, verifiedCustomerId: verifiedDeletionCustomerId });
+    const replacementAuthority = await resolveCustomerSubscriptionAuthority({
+      stripe,
+      verifiedCustomerId: verifiedDeletionCustomerId,
+      // The subscription being deleted can never be evidence that entitlement
+      // still exists.
+      excludeSubscriptionId: subscriptionId,
+    });
+    if (replacementAuthority.kind === "customer_missing") {
+      logger.error("[webhook] Stripe customer not found; refusing to downgrade on an absent lookup", { subscriptionId });
+      return;
+    }
     if (replacementAuthority.kind === "multiple_entitlements") {
       logger.error("[webhook] multiple_entitlement_subscriptions", {
         code: "multiple_entitlement_subscriptions",
+        eventId,
+        eventType,
         stripeCustomerId: verifiedDeletionCustomerId,
         uid: firebaseUid,
         eventSubscriptionId: subscriptionId,
+        storedSubscriptionId: storedSubscriptionIdForDeletion,
         candidateSubscriptionIds: replacementAuthority.subscriptionIds,
         candidateCount: replacementAuthority.count,
-        resolution: "no_downgrade_applied",
+        resolution: "no_mutation_ambiguous_subscription_set",
       });
       return;
     }

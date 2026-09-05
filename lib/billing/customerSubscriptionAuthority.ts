@@ -34,7 +34,7 @@
 
 import "server-only";
 import type Stripe from "stripe";
-import { isEntitlementBearingSubscriptionStatus } from "./subscriptionStatus";
+import { isPlanBearingSubscriptionStatus } from "./subscriptionStatus";
 import { stripeLookup } from "./reconciliationOutcome";
 
 export type CustomerSubscriptionAuthority =
@@ -45,7 +45,9 @@ export type CustomerSubscriptionAuthority =
   /** More than one. Unsupported under the one-subscription contract; caller must not choose. */
   | { kind: "multiple_entitlements"; count: number; subscriptionIds: string[] }
   /** The set could not be established because the customer identity is not trusted. */
-  | { kind: "unverified_customer" };
+  | { kind: "unverified_customer" }
+  /** Stripe says the customer itself no longer exists. An absent remote lookup is NOT positive authority to strip entitlement. */
+  | { kind: "customer_missing" };
 
 /**
  * Enumerates the customer's subscriptions and classifies the result. Never
@@ -65,6 +67,12 @@ export type CustomerSubscriptionAuthority =
 export async function resolveCustomerSubscriptionAuthority(args: {
   stripe: Stripe;
   verifiedCustomerId: string | null;
+  /**
+   * A subscription to leave out of the candidate set — the deletion target.
+   * Stripe's list can still report a just-deleted subscription, and letting it
+   * count as its own replacement would suppress the downgrade forever.
+   */
+  excludeSubscriptionId?: string | null;
 }): Promise<CustomerSubscriptionAuthority> {
   if (!args.verifiedCustomerId) return { kind: "unverified_customer" };
 
@@ -82,12 +90,23 @@ export async function resolveCustomerSubscriptionAuthority(args: {
         ...(startingAfter ? { starting_after: startingAfter } : {}),
       })
     );
-    // A definitively missing customer means an empty set, not a failure.
-    if (result.kind === "absent") return { kind: "no_entitlement" };
+    // A definitively missing customer is reported as its own outcome. It is
+    // NOT the same as "this customer has no entitlement": the local binding
+    // could be stale or a migration could be in flight, and a destructive
+    // downgrade needs positive authority, not an absent lookup.
+    if (result.kind === "absent") return { kind: "customer_missing" };
 
     const page_ = result.value;
     for (const candidate of page_.data) {
-      if (isEntitlementBearingSubscriptionStatus(candidate.status)) entitled.push(candidate);
+      if (args.excludeSubscriptionId && candidate.id === args.excludeSubscriptionId) continue;
+      // PLAN-BEARING, not entitlement-bearing. `past_due` is still the
+      // customer's subscription under this product's existing contract
+      // (lib/stripe/subscriptionValidation.ts, app/api/billing/sync-plan);
+      // whether it grants access is decided separately by the effective
+      // entitlement resolver, which withholds it. Selecting candidates by
+      // entitlement would make a past_due customer look like they had no
+      // subscription at all and clear their reference.
+      if (isPlanBearingSubscriptionStatus(candidate.status)) entitled.push(candidate);
     }
     if (!page_.has_more || page_.data.length === 0) break;
     startingAfter = page_.data[page_.data.length - 1]?.id;

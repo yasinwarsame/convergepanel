@@ -23,78 +23,16 @@
  *   authoritative subscription; it is never permission for an arbitrary
  *   snapshot to overwrite newer application state.
  *
- * Two independent guards implement it:
- *
- *   1. IDENTITY (this module). An event about subscription A may only write
- *      when A is the subscription currently authoritative for that user, or
- *      when the user has none, or when A may legitimately REPLACE the stored
- *      one — and replacement requires proof that the stored subscription is
- *      no longer entitlement-bearing, never merely that a newer event showed
- *      up.
- *
- *   2. FRESHNESS (the caller). Having established identity, the caller
- *      re-reads the subscription from Stripe and persists THAT, so a stale
- *      snapshot cannot regress state even when it passes the identity check.
- *      `invoice.payment_succeeded` already worked this way; the subscription
- *      handlers now do too.
+ * Phase WEBHOOK-B1-C5: the general pairwise decision this module used to
+ * export was superseded by `customerSubscriptionAuthority.ts`, which resolves
+ * authority from the customer's whole subscription set rather than comparing
+ * the stored id against one incoming id. That pairwise rule was removed here
+ * once it had no callers; what remains is the deletion rule, which is a
+ * different question — not "who is authoritative" but "may THIS cancellation
+ * clear THIS reference".
  */
 
 import "server-only";
-import { isEntitlementBearingSubscriptionStatus } from "./subscriptionStatus";
-
-export type SubscriptionAuthorityDecision =
-  /** The event's subscription is the user's current one, or the user has none. Proceed. */
-  | { allowed: true; reason: "current_subscription" | "no_stored_subscription" | "legitimate_replacement" }
-  /** The event concerns a subscription that is not authoritative for this user. Persist nothing. */
-  | { allowed: false; reason: "stale_historical_subscription" | "stored_subscription_still_active" };
-
-export interface SubscriptionAuthorityInput {
-  /** Subscription id the incoming event is about. */
-  eventSubscriptionId: string;
-  /** Subscription id currently stored on the user document, if any. */
-  storedSubscriptionId: string | null | undefined;
-  /**
-   * Status of the STORED subscription, read back from Stripe by the caller.
-   * `null` means the stored subscription could not be retrieved (deleted at
-   * Stripe, or a read failure). Only consulted when the ids differ.
-   */
-  storedSubscriptionStatus?: string | null;
-  /** Status of the incoming event's subscription, from authoritative Stripe state. */
-  incomingSubscriptionStatus?: string | null;
-}
-
-/**
- * Pure, zero I/O.
- *
- * REPLACEMENT RULE (derived from this product's actual flows, not invented):
- * checkout always creates a subscription for a user who may still carry a
- * cancelled one on their document, and the in-place upgrade path reuses the
- * SAME subscription id rather than creating a new one. So the only legitimate
- * `A -> B` transition is one where the stored subscription has stopped being
- * entitlement-bearing and the incoming one is. Both halves are required:
- *
- *   - if the stored subscription is still entitlement-bearing, an event for a
- *     different subscription is historical noise and must not write. This is
- *     what protects a paying customer on B from a delayed deletion of A.
- *   - if the incoming subscription is NOT entitlement-bearing, there is
- *     nothing to adopt; writing would let a stale cancellation of an
- *     abandoned subscription clear a user who has no live subscription
- *     stored either. Fail closed and leave the document alone.
- */
-export function decideSubscriptionAuthority(input: SubscriptionAuthorityInput): SubscriptionAuthorityDecision {
-  const stored = input.storedSubscriptionId;
-  if (!stored) return { allowed: true, reason: "no_stored_subscription" };
-  if (stored === input.eventSubscriptionId) return { allowed: true, reason: "current_subscription" };
-
-  // Ids differ: the event is about some other subscription.
-  if (isEntitlementBearingSubscriptionStatus(input.storedSubscriptionStatus)) {
-    return { allowed: false, reason: "stored_subscription_still_active" };
-  }
-  if (!isEntitlementBearingSubscriptionStatus(input.incomingSubscriptionStatus)) {
-    return { allowed: false, reason: "stale_historical_subscription" };
-  }
-  return { allowed: true, reason: "legitimate_replacement" };
-}
 
 /**
  * Pure, zero I/O. The deletion rule, deliberately stricter than the general
