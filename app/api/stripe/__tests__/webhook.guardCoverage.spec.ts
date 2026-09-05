@@ -206,21 +206,21 @@ describe("C8 Part K — a failed invoice reconciliation is retried, never acknow
 
   it("REGRESSION: a Stripe outage retrieving the invoice's subscription returns a retryable 5xx", async () => {
     retrieveFails = B;
-    expect(await deliver("invoice.payment_succeeded", { id: "in_1", subscription: B })).toBeGreaterThanOrEqual(500);
+    expect(await deliver("invoice.payment_succeeded", { id: "in_1", parent: { type: "subscription_details", subscription_details: { subscription: B } } })).toBeGreaterThanOrEqual(500);
     expect(writes).toHaveLength(0);
   });
 
   it("REGRESSION: a Firestore write failure during invoice reconciliation returns a retryable 5xx", async () => {
     docWriteFails = true;
-    expect(await deliver("invoice.payment_succeeded", { id: "in_1", subscription: B })).toBeGreaterThanOrEqual(500);
+    expect(await deliver("invoice.payment_succeeded", { id: "in_1", parent: { type: "subscription_details", subscription_details: { subscription: B } } })).toBeGreaterThanOrEqual(500);
   });
 
   it("the healthy retry converges on the renewed plan", async () => {
     retrieveFails = B;
-    expect(await deliver("invoice.payment_succeeded", { id: "in_1", subscription: B })).toBeGreaterThanOrEqual(500);
+    expect(await deliver("invoice.payment_succeeded", { id: "in_1", parent: { type: "subscription_details", subscription_details: { subscription: B } } })).toBeGreaterThanOrEqual(500);
 
     retrieveFails = null;
-    expect(await deliver("invoice.payment_succeeded", { id: "in_1", subscription: B })).toBe(200);
+    expect(await deliver("invoice.payment_succeeded", { id: "in_1", parent: { type: "subscription_details", subscription_details: { subscription: B } } })).toBe(200);
     expect(storedDoc.plan).toBe("full");
     expect(storedDoc.billingInterval).toBe("year");
   });
@@ -228,5 +228,63 @@ describe("C8 Part K — a failed invoice reconciliation is retried, never acknow
   it("an invoice with no subscription is a deliberate 200 no-op", async () => {
     expect(await deliver("invoice.payment_succeeded", { id: "in_1" })).toBe(200);
     expect(writes).toHaveLength(0);
+  });
+});
+
+describe("C8.1 — the invoice handlers read the shape the pinned API version actually sends", () => {
+  beforeEach(() => {
+    storedDoc = {
+      email: "c@example.test", plan: "lite", stripeCustomerId: MINE, stripeSubscriptionId: B,
+      subscriptionStatus: "active", billingInterval: "month",
+    };
+    setLive(sub({ id: B }));
+  });
+
+  it("REGRESSION: a modern subscription invoice reconciles — this handler was silently dead", async () => {
+    expect(await deliver("invoice.payment_succeeded", {
+      id: "in_1", parent: { type: "subscription_details", subscription_details: { subscription: B } },
+    })).toBe(200);
+    expect(storedDoc.plan).toBe("full");
+    expect(storedDoc.billingInterval).toBe("year");
+  });
+
+  it("an EXPANDED subscription object on the invoice also reconciles", async () => {
+    expect(await deliver("invoice.payment_succeeded", {
+      id: "in_1", parent: { type: "subscription_details", subscription_details: { subscription: { id: B, status: "active" } } },
+    })).toBe(200);
+    expect(storedDoc.plan).toBe("full");
+  });
+
+  it("REGRESSION: the REMOVED legacy top-level field must not be honoured", async () => {
+    // If this ever reconciles again, the obsolete cast has come back.
+    expect(await deliver("invoice.payment_succeeded", { id: "in_1", subscription: B })).toBe(200);
+    expect(writes).toHaveLength(0);
+    expect(storedDoc.plan).toBe("lite");
+  });
+
+  it("a genuinely non-subscription invoice mutates nothing", async () => {
+    expect(await deliver("invoice.payment_succeeded", {
+      id: "in_1", parent: { type: "quote_details", quote_details: { quote: "qt_1" } },
+    })).toBe(200);
+    expect(writes).toHaveLength(0);
+  });
+
+  it("REGRESSION: an invoice claiming subscription parentage with no usable reference fails safely and is observable", async () => {
+    expect(await deliver("invoice.payment_succeeded", {
+      id: "in_1", parent: { type: "subscription_details", subscription_details: null },
+    })).toBe(200);
+    expect(writes).toHaveLength(0);
+    const records = (logger.error as jest.Mock).mock.calls
+      .filter((c) => String(c[1]?.resolution).includes("unresolvable_invoice_subscription"));
+    expect(records).toHaveLength(1);
+  });
+
+  it("invoice.payment_failed stays observability-only under the modern shape", async () => {
+    const before = { ...storedDoc };
+    expect(await deliver("invoice.payment_failed", {
+      id: "in_1", parent: { type: "subscription_details", subscription_details: { subscription: B } },
+    })).toBe(200);
+    expect(writes).toHaveLength(0);
+    expect(storedDoc).toEqual(before);
   });
 });

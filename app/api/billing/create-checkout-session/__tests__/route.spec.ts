@@ -26,10 +26,20 @@ jest.mock("@/lib/env", () => ({
 /** Stripe-side "truth" the mocked client returns for prices.retrieve — the test controls whether it matches the sold cadence. */
 let priceCatalog: Record<string, { active: boolean; recurring: { interval: string; interval_count: number } | null }>;
 let userDoc: Record<string, unknown>;
+/** The customer's live Stripe subscriptions, as `subscriptions.list` would return them. */
+let liveSubscriptions: Array<Record<string, unknown>>;
 const stripeMock = {
   prices: { retrieve: jest.fn(async (id: string) => { const p = priceCatalog[id]; if (!p) throw new Error("No such price"); return { id, ...p }; }) },
   customers: { create: jest.fn(async () => ({ id: "cus_new" })), retrieve: jest.fn(async () => ({ id: "cus_1", deleted: false, metadata: { firebaseUid: "uid-1", email: "u@example.com" } })), update: jest.fn() },
-  subscriptions: { retrieve: jest.fn(), update: jest.fn(async () => ({ id: "sub_1", status: "active", items: { data: [{ price: { id: "price_full_y" } }] } })) },
+  // Phase C8.1: the route no longer trusts Firestore's `stripeSubscriptionId`.
+  // It enumerates the customer's live Stripe set, so the mock must offer
+  // `list` exactly as the real client does. `liveSubscriptions` is the
+  // fixture each test populates.
+  subscriptions: {
+    retrieve: jest.fn(),
+    list: jest.fn(async () => ({ data: liveSubscriptions, has_more: false })),
+    update: jest.fn(async () => ({ id: "sub_1", status: "active", items: { data: [{ price: { id: "price_full_y" } }] } })),
+  },
   checkout: { sessions: { create: jest.fn(async () => ({ id: "cs_1", url: "https://checkout.example/cs_1" })) } },
 };
 jest.mock("@/lib/stripe/client", () => ({ stripe: stripeMock }));
@@ -53,6 +63,7 @@ function noStripeWrites() {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  liveSubscriptions = [];
   mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: "uid-1", source: "session_cookie" });
   userDoc = { email: "u@example.com", stripeCustomerId: "cus_1" };
   priceCatalog = {
@@ -122,7 +133,7 @@ describe("REGRESSION — $1,631.90 / year must never create a monthly subscripti
 
   it("the guard also protects the in-place UPGRADE path (lite -> full annual) — no subscriptions.update on a cadence mismatch", async () => {
     userDoc = { email: "u@example.com", stripeCustomerId: "cus_1", stripeSubscriptionId: "sub_1" };
-    stripeMock.subscriptions.retrieve.mockResolvedValue({ id: "sub_1", status: "active", metadata: {}, items: { data: [{ id: "si_1", price: { id: "price_lite_m" } }] } });
+    liveSubscriptions = [{ id: "sub_1", customer: "cus_1", status: "active", metadata: {}, items: { data: [{ id: "si_1", quantity: 1, price: { id: "price_lite_m", recurring: { interval: "month", interval_count: 1 } } }] } }];
     priceCatalog.price_full_y = { active: true, recurring: { interval: "month", interval_count: 1 } };
     const { status } = await call({ planId: "full", interval: "year" });
     expect(status).toBe(500);
@@ -132,7 +143,7 @@ describe("REGRESSION — $1,631.90 / year must never create a monthly subscripti
 
   it("with a correctly yearly Price, the lite -> full annual upgrade updates the existing subscription item to the annual Price", async () => {
     userDoc = { email: "u@example.com", stripeCustomerId: "cus_1", stripeSubscriptionId: "sub_1" };
-    stripeMock.subscriptions.retrieve.mockResolvedValue({ id: "sub_1", status: "active", metadata: {}, items: { data: [{ id: "si_1", price: { id: "price_lite_m" } }] } });
+    liveSubscriptions = [{ id: "sub_1", customer: "cus_1", status: "active", metadata: {}, items: { data: [{ id: "si_1", quantity: 1, price: { id: "price_lite_m", recurring: { interval: "month", interval_count: 1 } } }] } }];
     const { status, json } = await call({ planId: "full", interval: "year" });
     expect(status).toBe(200);
     expect(json.upgraded).toBe(true);

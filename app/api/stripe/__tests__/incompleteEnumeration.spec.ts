@@ -214,7 +214,7 @@ describe("C8 P1 — no automatic writer may downgrade on an unfinished enumerati
     await validateUserSubscription(UID);
     await selfSync();
     await deliver("customer.subscription.updated", sub({ id: LIVE }));
-    await deliver("invoice.payment_succeeded", { id: "in_1", subscription: LIVE });
+    await deliver("invoice.payment_succeeded", { id: "in_1", parent: { type: "subscription_details", subscription_details: { subscription: LIVE } } });
     await deliver("customer.subscription.deleted", sub({ id: LIVE, status: "canceled" }));
     expect(usageOf(storedDoc)).toEqual(USAGE);
   });
@@ -253,7 +253,7 @@ describe("C8 P1 — no automatic writer may downgrade on an unfinished enumerati
     // exactly as for an ambiguous subscription set.
     expect(await deliver("customer.subscription.updated", sub({ id: LIVE }))).toBe(200);
     expect(await deliver("customer.subscription.created", sub({ id: LIVE }))).toBe(200);
-    expect(await deliver("invoice.payment_succeeded", { id: "in_1", subscription: LIVE })).toBe(200);
+    expect(await deliver("invoice.payment_succeeded", { id: "in_1", parent: { type: "subscription_details", subscription_details: { subscription: LIVE } } })).toBe(200);
     expect(writes).toHaveLength(0);
   });
 });

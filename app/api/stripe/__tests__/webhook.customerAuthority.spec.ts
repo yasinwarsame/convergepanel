@@ -201,7 +201,7 @@ describe("P0 — delivery order must not decide which subscription is authoritat
   it("an invoice event for B while B and C both exist adopts neither", async () => {
     twoLiveCandidates();
     const before = { ...storedDoc };
-    expect(await deliver("invoice.payment_succeeded", { id: "in_1", subscription: B })).toBe(200);
+    expect(await deliver("invoice.payment_succeeded", { id: "in_1", parent: { type: "subscription_details", subscription_details: { subscription: B } } })).toBe(200);
     expect(storedDoc).toEqual(before);
   });
 

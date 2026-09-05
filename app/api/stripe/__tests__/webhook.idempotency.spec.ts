@@ -146,7 +146,8 @@ describe("webhook duplicate delivery — usage must never reset", () => {
   });
 
   it("REGRESSION: invoice.payment_succeeded delivered twice does not reset usage", async () => {
-    const invoice = { id: "in_1", subscription: "sub_incident" };
+    // Phase C8.1: the shape Stripe actually sends on the pinned API version.
+    const invoice = { id: "in_1", parent: { type: "subscription_details", subscription_details: { subscription: "sub_incident" } } };
     expect(await deliver("invoice.payment_succeeded", invoice)).toBe(200);
     await deliver("invoice.payment_succeeded", invoice);
     expect(usageOf(storedDoc)).toEqual(USAGE);

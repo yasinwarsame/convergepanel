@@ -216,7 +216,9 @@ export type AuthorityPath =
   | "webhook_subscription_change"
   | "webhook_subscription_deleted"
   | "request_time_reconciliation"
-  | "self_serve_plan_sync";
+  | "self_serve_plan_sync"
+  /** The purchase path itself, refusing to sell into an unsafe subscription set. */
+  | "checkout_session_create";
 
 export function reportMultipleEntitlementSubscriptions(args: {
   path: AuthorityPath;

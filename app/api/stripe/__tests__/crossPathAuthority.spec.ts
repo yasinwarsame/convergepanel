@@ -96,6 +96,14 @@ const B = "sub_B_lite_monthly";
 const C = "sub_C_full_annual";
 const AUG_2_2026 = Math.floor(Date.UTC(2026, 7, 2, 2, 33, 35) / 1000);
 const AUG_2_2027 = Math.floor(Date.UTC(2027, 7, 2, 2, 33, 35) / 1000);
+/**
+ * Phase C8.1 — the STALE subscription-level start, deliberately different from
+ * the item-level one. These fixtures previously set both to AUG_2_2026, so the
+ * assertion that the item wins only ever disproved `Date.now()`. This is the
+ * incident's real shape: the subscription level lagged a month behind the
+ * annual term actually paid for.
+ */
+const SEP_2_2026 = Math.floor(Date.UTC(2026, 8, 2, 2, 33, 35) / 1000);
 
 function sub(args: { id: string; status?: string; priceId?: string; interval?: "month" | "year"; created?: number }): Sub {
   return {
@@ -104,7 +112,7 @@ function sub(args: { id: string; status?: string; priceId?: string; interval?: "
     status: args.status ?? "active",
     created: args.created ?? 1,
     metadata: { firebaseUid: UID, targetPlan: "full" },
-    current_period_start: AUG_2_2026,
+    current_period_start: SEP_2_2026,
     current_period_end: AUG_2_2027,
     items: { data: [{ id: "si_" + args.id, quantity: 1, price: { id: args.priceId ?? "price_full_y", recurring: { interval: args.interval ?? "year", interval_count: 1 } }, current_period_start: AUG_2_2026, current_period_end: AUG_2_2027 }] },
   } as unknown as Sub;
@@ -312,7 +320,7 @@ describe("C7 — the acceptance case: three automatic writers, one refusal, one 
   /** Every automatic writer, in every order they could actually interleave. */
   const WRITERS: Array<[string, () => Promise<unknown>]> = [
     ["webhook.updated", () => deliver("customer.subscription.updated", subB())],
-    ["webhook.invoice", () => deliver("invoice.payment_succeeded", { id: "in_1", subscription: C })],
+    ["webhook.invoice", () => deliver("invoice.payment_succeeded", { id: "in_1", parent: { type: "subscription_details", subscription_details: { subscription: C } } })],
     ["request-time", () => validateUserSubscription(UID)],
     ["self-sync", () => selfSync()],
     ["post-checkout", () => deliver("checkout.session.completed", { id: "cs_1", mode: "subscription", subscription: C, customer: MINE, metadata: { firebaseUid: UID, targetPlan: "full" } }).then(() => selfSync())],

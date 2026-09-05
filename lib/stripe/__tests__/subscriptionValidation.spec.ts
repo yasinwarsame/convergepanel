@@ -103,7 +103,13 @@ describe("validateUserSubscription — Phase WEBHOOK-B1", () => {
   it("writes nothing when local state already matches Stripe", async () => {
     storedDoc = { ...storedDoc, billingInterval: "year" };
     writes.length = 0;
+    const before = { ...storedDoc };
     await validateUserSubscription("uid1");
+    // Phase C8.1: this test was named for an invariant it never asserted — it
+    // checked only the usage counters, so an implementation that rewrote every
+    // billing field on every request would have passed it.
+    expect(writes).toHaveLength(0);
+    expect(storedDoc).toEqual(before);
     expect(usageOf(storedDoc)).toEqual(USAGE);
   });
 

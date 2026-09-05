@@ -98,6 +98,14 @@ const B = "sub_B_lite_monthly";
 const C = "sub_C_full_annual";
 const AUG_2_2026 = Math.floor(Date.UTC(2026, 7, 2, 2, 33, 35) / 1000);
 const AUG_2_2027 = Math.floor(Date.UTC(2027, 7, 2, 2, 33, 35) / 1000);
+/**
+ * Phase C8.1 — the STALE subscription-level start, deliberately different from
+ * the item-level one. These fixtures previously set both to AUG_2_2026, so the
+ * assertion that the item wins only ever disproved `Date.now()`. This is the
+ * incident's real shape: the subscription level lagged a month behind the
+ * annual term actually paid for.
+ */
+const SEP_2_2026 = Math.floor(Date.UTC(2026, 8, 2, 2, 33, 35) / 1000);
 
 function sub(args: { id: string; status?: string; priceId?: string; interval?: "month" | "year"; customer?: string; created?: number }): Sub {
   return {
@@ -106,7 +114,7 @@ function sub(args: { id: string; status?: string; priceId?: string; interval?: "
     status: args.status ?? "active",
     created: args.created ?? 1,
     metadata: { firebaseUid: UID },
-    current_period_start: AUG_2_2026,
+    current_period_start: SEP_2_2026,
     current_period_end: AUG_2_2027,
     items: { data: [{ id: "si_" + args.id, quantity: 1, price: { id: args.priceId ?? "price_full_y", recurring: { interval: args.interval ?? "year", interval_count: 1 } }, current_period_start: AUG_2_2026, current_period_end: AUG_2_2027 }] },
   } as unknown as Sub;
@@ -400,11 +408,14 @@ describe("C7 — the legitimate post-checkout flow still works", () => {
     expect(usageOf(storedDoc)).toEqual(USAGE);
   });
 
-  it("REGRESSION: the canonical item-level period is used, never the current time", async () => {
+  it("REGRESSION: the canonical ITEM period wins over the stale subscription-level one", async () => {
     storedDoc = { plan: "free", stripeCustomerId: MINE, ...USAGE };
     live = [subC()];
     await syncPlan();
     expect(storedDoc.billingCycleStart).toBe(`TS_${new Date(AUG_2_2026 * 1000).toISOString()}`);
+    // The competing value the incident actually carried. Asserted explicitly,
+    // because a fixture where both are equal proves only "not Date.now()".
+    expect(storedDoc.billingCycleStart).not.toBe(`TS_${new Date(SEP_2_2026 * 1000).toISOString()}`);
   });
 
   it("a lone past_due subscription keeps its billing identity", async () => {

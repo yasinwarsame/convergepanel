@@ -54,6 +54,7 @@ import { resolveSubscriptionBillingState } from "@/lib/billing/subscriptionBilli
 import { mayDeletionDowngrade } from "@/lib/billing/subscriptionAuthority";
 import { reportIncompleteAuthorityEnumeration, reportMultipleEntitlementSubscriptions, resolveCustomerSubscriptionAuthority, verifyCustomerIdentity } from "@/lib/billing/customerSubscriptionAuthority";
 import { TransientDependencyError, firestoreRead } from "@/lib/billing/reconciliationOutcome";
+import { resolveInvoiceSubscription } from "@/lib/billing/invoiceSubscription";
 import { PlanId, BillingInterval } from "@/lib/plans";
 import { updateUserPlanInFirestore } from "@/lib/stripe/webhookHelpers";
 import { getPostHogClient } from "@/lib/posthog-server";
@@ -233,27 +234,35 @@ export async function POST(req: NextRequest) {
 
       case "invoice.payment_succeeded": {
         const invoice = event.data.object as Stripe.Invoice;
-        // Payment succeeded - subscription is active
-        // invoice.subscription can be a string (subscription ID) or a Stripe.Subscription object
-        // Use type assertion to access subscription property safely
-        const invoiceWithSubscription = invoice as Stripe.Invoice & { subscription?: string | Stripe.Subscription | null };
-        const subscriptionId = typeof invoiceWithSubscription.subscription === "string" 
-          ? invoiceWithSubscription.subscription 
-          : invoiceWithSubscription.subscription?.id;
-        if (subscriptionId) {
-          const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+        // Phase C8.1: `invoice.subscription` does not exist on the pinned API
+        // version. Reading it through a cast made this handler silently dead —
+        // it reconciled nothing for every renewal. The typed resolver reads
+        // `parent.subscription_details` instead.
+        const resolved = resolveInvoiceSubscription(invoice);
+        if (resolved.kind === "subscription") {
+          const subscription = await stripe.subscriptions.retrieve(resolved.subscriptionId);
           await handleSubscriptionChange(subscription, { id: event.id, type: event.type });
+        } else if (resolved.kind === "malformed") {
+          // Claims subscription parentage but carries no usable reference.
+          // Guessing a subscription from an invoice is exactly the kind of
+          // inference this PR removes everywhere else. Terminal: retrying the
+          // same payload cannot make it resolvable.
+          logger.error("[webhook] invoice claims subscription parentage but carries no resolvable subscription", {
+            invoiceId: invoice.id,
+            eventId: event.id,
+            resolution: "no_mutation_unresolvable_invoice_subscription",
+          });
         }
         break;
       }
 
       case "invoice.payment_failed": {
         const invoice = event.data.object as Stripe.Invoice;
-        const invoiceWithSubscription = invoice as Stripe.Invoice & { subscription?: string | Stripe.Subscription | null };
-        const subscriptionId = typeof invoiceWithSubscription.subscription === "string" 
-          ? invoiceWithSubscription.subscription 
-          : invoiceWithSubscription.subscription?.id;
-        console.warn("[webhook] Payment failed for subscription:", subscriptionId);
+        // Observability only — this handler deliberately writes no customer
+        // state. It used the same removed field, so it logged `undefined` for
+        // every payment failure.
+        const resolved = resolveInvoiceSubscription(invoice);
+        console.warn("[webhook] Payment failed for subscription:", resolved.kind === "subscription" ? resolved.subscriptionId : null);
         // Optionally: send notification to user, mark account as past_due, etc.
         break;
       }
