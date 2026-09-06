@@ -76,9 +76,24 @@ import { GET } from "@/app/api/user/usage/route";
 
 const UID = "viewer-1";
 
-async function call() {
+/**
+ * The route's catch-all fallback returns `{ ok: true, plan: "free", role:
+ * "member", governancePolicyEditable: false, monthlyLimit: 8 }` — which is
+ * INDISTINGUISHABLE from a legitimate free-plan member on exactly the fields
+ * these tests assert. A mutation that made the admin logic throw therefore
+ * passed the whole suite.
+ *
+ * `maxModelsPerRun` is emitted on every real path and on NO fallback path, so
+ * it is the discriminator: asserting it proves the assertions below describe a
+ * real decision rather than a degraded default.
+ */
+async function call(opts: { allowDegraded?: boolean } = {}) {
   const res = await GET(new NextRequest("http://localhost/api/user/usage"));
-  return res.json();
+  const body = await res.json();
+  if (!opts.allowDegraded) {
+    expect(body).toHaveProperty("maxModelsPerRun");
+  }
+  return body;
 }
 
 beforeEach(() => {
@@ -142,6 +157,8 @@ describe("email-derived admin presentation", () => {
     expect(body.governancePolicyEditable).toBe(false);
     expect(body.plan).toBe("free");
     expect(body.monthlyLimit).toBe(8);
+    // Not the degraded fallback: the request genuinely succeeded.
+    expect(body.maxModelsPerRun).toBe(2);
   });
 
   it("new-user branch applies the same rule", async () => {
