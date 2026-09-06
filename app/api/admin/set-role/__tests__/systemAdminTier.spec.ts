@@ -12,6 +12,23 @@
  * privilege write — not which helper the module happens to import.
  */
 
+/**
+ * Phase FIRST-ADMIN-C2 test hygiene: jest workers reuse a single `process.env`
+ * across the test FILES they run, so a suite that sets a privileged allowlist
+ * and never restores it leaks that value into every later file in the same
+ * worker. Snapshot BEFORE this file's own assignments; restore afterwards.
+ */
+const __PRIVILEGED_ENV_SNAPSHOT = {
+  ADMIN_EMAILS: process.env.ADMIN_EMAILS,
+  GOVERNANCE_ADMIN_EMAILS: process.env.GOVERNANCE_ADMIN_EMAILS,
+};
+afterAll(() => {
+  for (const [key, value] of Object.entries(__PRIVILEGED_ENV_SNAPSHOT)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+});
+
 const PORTAL_ONLY = "portal-only@test-invented.example";
 const GOV_ONLY = "governance-only@test-invented.example";
 

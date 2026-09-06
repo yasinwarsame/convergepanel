@@ -9,6 +9,23 @@
  * Exercises the real resolvers. Only Firebase Admin and entitlements are doubled.
  */
 
+/**
+ * Phase FIRST-ADMIN-C2 test hygiene: jest workers reuse a single `process.env`
+ * across the test FILES they run, so a suite that sets a privileged allowlist
+ * and never restores it leaks that value into every later file in the same
+ * worker. Snapshot BEFORE this file's own assignments; restore afterwards.
+ */
+const __PRIVILEGED_ENV_SNAPSHOT = {
+  ADMIN_EMAILS: process.env.ADMIN_EMAILS,
+  GOVERNANCE_ADMIN_EMAILS: process.env.GOVERNANCE_ADMIN_EMAILS,
+};
+afterAll(() => {
+  for (const [key, value] of Object.entries(__PRIVILEGED_ENV_SNAPSHOT)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+});
+
 // Phase FIRST-ADMIN-C1: governance authority now reads GOVERNANCE_ADMIN_EMAILS
 // ONLY. Both fixture addresses live there; ADMIN_EMAILS is deliberately empty
 // so any accidental re-blending of the lists fails this suite.

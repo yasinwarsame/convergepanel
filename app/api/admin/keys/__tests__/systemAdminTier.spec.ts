@@ -10,7 +10,25 @@
  * write of the credential document.
  */
 
+/**
+ * Phase FIRST-ADMIN-C2 test hygiene: jest workers reuse a single `process.env`
+ * across the test FILES they run, so a suite that sets a privileged allowlist
+ * and never restores it leaks that value into every later file in the same
+ * worker. Snapshot BEFORE this file's own assignments; restore afterwards.
+ */
+const __PRIVILEGED_ENV_SNAPSHOT = {
+  ADMIN_EMAILS: process.env.ADMIN_EMAILS,
+  GOVERNANCE_ADMIN_EMAILS: process.env.GOVERNANCE_ADMIN_EMAILS,
+};
+afterAll(() => {
+  for (const [key, value] of Object.entries(__PRIVILEGED_ENV_SNAPSHOT)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+});
+
 const PORTAL_ONLY = "portal-only@test-invented.example";
+const GOV_ONLY = "governance-only@test-invented.example";
 
 let decoded: Record<string, unknown> | null = null;
 let authRecord: Record<string, unknown> = {};
@@ -53,7 +71,11 @@ const post = () =>
   });
 
 beforeEach(() => {
+  // Both lists are set explicitly. Jest workers reuse one `process.env`
+  // across the test FILES they run, so a fixture that leaves a list unset is
+  // reading whatever the previous file happened to leave behind.
   process.env.ADMIN_EMAILS = PORTAL_ONLY;
+  process.env.GOVERNANCE_ADMIN_EMAILS = GOV_ONLY;
   decoded = null;
   authRecord = {};
   keysGet.mockClear();
