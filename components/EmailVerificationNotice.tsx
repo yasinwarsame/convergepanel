@@ -1,94 +1,169 @@
 "use client";
 
 /**
- * Phase P0.2-VEMAIL-C1 — the user-visible half of the verification recovery.
+ * Phase P0.2-VEMAIL-C1/C2 — the user-visible half of verification recovery.
  *
- * Before this, a failed verification send was invisible: the user was told
- * nothing, saw nothing, and had no way to try again. Since a verified email is
- * now a prerequisite for email-allowlisted administrator authority, that left
- * no working path to becoming verified at all.
+ * A failed verification send used to be invisible: no message, no retry. Since
+ * a verified email is a prerequisite for email-allowlisted administrator
+ * authority, that left no working path to becoming verified at all.
  *
- * WORDING RULE. This component never claims an email was delivered or
- * received. `send_accepted` means Firebase accepted the request; the copy says
- * "check your email", not "we sent it and it arrived".
+ * C2 corrections, all from the independent review:
  *
- * It renders nothing for a verified user, and never sends automatically — no
+ *  - THE REASON TO RENDER IS THE LIVE IDENTITY, NOT STORAGE. Stored state only
+ *    selects WHICH message to show. If storage is cleared, disabled, or the tab
+ *    closed, an unverified user still gets the neutral notice and a working
+ *    resend. Browser storage is never verification authority.
+ *  - Stored state is UID-SCOPED, so one account's failure is never shown to
+ *    another in the same browser.
+ *  - Telemetry is BOUNDED and its outcome never gates the control. A stalled
+ *    diagnostic used to leave this button at "Sending…" forever with `inFlight`
+ *    stuck true — disabling the single control this feature exists to add.
+ *  - The cooldown applies after EVERY completed attempt. A failure is often
+ *    `auth/too-many-requests`, and inviting an immediate retry was misleading.
+ *  - `user.reload()` refreshes cached verification, so someone who verified in
+ *    another tab is not told they are unverified and offered a redundant send.
+ *
+ * WORDING RULE, unchanged: nothing here claims an email was delivered or
+ * received. `send_accepted` means Firebase accepted the request, no more.
+ *
+ * It renders nothing for a verified user and never sends automatically — no
  * effect triggers a send, so a re-render cannot mail anyone.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { reload } from "firebase/auth";
 import { useAuth } from "@/components/AuthProvider";
 import {
   reportEmailVerificationSendOutcome,
   requestEmailVerification,
 } from "@/lib/client/emailVerificationSend";
+import {
+  clearEmailVerificationSendState,
+  readEmailVerificationSendState,
+  writeEmailVerificationSendState,
+} from "@/lib/client/emailVerificationState";
 
-const COOLDOWN_MS = 60_000;
+export const COOLDOWN_MS = 60_000;
 
 type Status = "idle" | "sending" | "accepted" | "failed";
 
 export default function EmailVerificationNotice() {
   const { user } = useAuth();
+  const uid = user?.uid ?? "";
   const [status, setStatus] = useState<Status>("idle");
   const [errorCode, setErrorCode] = useState<string | null>(null);
   const [cooldownUntil, setCooldownUntil] = useState(0);
   const [now, setNow] = useState(() => Date.now());
   const inFlight = useRef(false);
-  const [initialSendFailed, setInitialSendFailed] = useState(false);
+  const [storedState, setStoredState] = useState<"send_failed" | "send_accepted" | null>(null);
+  // Set once a reload has confirmed the cached flag, so a stale unverified
+  // client does not keep offering a send to an already-verified identity.
+  const [verifiedByReload, setVerifiedByReload] = useState(false);
 
   useEffect(() => {
-    try {
-      setInitialSendFailed(sessionStorage.getItem("cp_verification_send_failed") === "1");
-    } catch {
-      /* storage unavailable — fall back to the neutral "not verified yet" copy */
-    }
-  }, []);
+    setStoredState(uid ? readEmailVerificationSendState(uid) : null);
+  }, [uid]);
 
+  // Refresh the cached verification flag. If reload fails we deliberately do
+  // NOT claim the user is verified — we leave the notice up, which is the
+  // recoverable direction.
+  useEffect(() => {
+    let cancelled = false;
+    if (!user || user.emailVerified) return;
+    (async () => {
+      try {
+        await reload(user);
+        if (!cancelled && user.emailVerified) {
+          setVerifiedByReload(true);
+          clearEmailVerificationSendState(user.uid);
+        }
+      } catch {
+        /* keep showing the notice; never assert verification we cannot confirm */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
+
+  // Ticks only while a cooldown is actually running, and stops at expiry rather
+  // than re-rendering the page at 1 Hz forever.
   useEffect(() => {
     if (cooldownUntil <= Date.now()) return;
-    const t = setInterval(() => setNow(Date.now()), 1000);
+    const t = setInterval(() => {
+      if (Date.now() >= cooldownUntil) {
+        setNow(Date.now());
+        clearInterval(t);
+        return;
+      }
+      setNow(Date.now());
+    }, 1000);
     return () => clearInterval(t);
   }, [cooldownUntil]);
 
   const onResend = useCallback(async () => {
-    // Guarded against double-submit: a second click while a request is in
-    // flight must not produce a second email.
-    if (inFlight.current || !user || user.emailVerified) return;
+    if (inFlight.current || !user) return;
     if (Date.now() < cooldownUntil) return;
     inFlight.current = true;
     setStatus("sending");
     setErrorCode(null);
-    const outcome = await requestEmailVerification(user);
-    await reportEmailVerificationSendOutcome(user, outcome, "resend");
-    if (outcome.outcome === "send_accepted") {
-      setStatus("accepted");
-      setInitialSendFailed(false);
+    try {
+      // Fresh-enough verification check, so the already-verified guard below is
+      // load-bearing rather than trusting a possibly stale cached flag.
       try {
-        sessionStorage.removeItem("cp_verification_send_failed");
+        await reload(user);
       } catch {
-        /* ignore */
+        /* proceed on the cached value; failing closed here would block recovery */
       }
-      setCooldownUntil(Date.now() + COOLDOWN_MS);
-    } else if (outcome.outcome === "send_failed") {
-      setStatus("failed");
-      setErrorCode(outcome.errorCode);
-    } else {
-      setStatus("idle");
+      if (user.emailVerified) {
+        setVerifiedByReload(true);
+        clearEmailVerificationSendState(user.uid);
+        setStatus("idle");
+        return;
+      }
+
+      const outcome = await requestEmailVerification(user);
+
+      // Bounded and best-effort: its result never decides what the user sees.
+      await reportEmailVerificationSendOutcome(user, outcome, "resend");
+
+      if (outcome.outcome === "send_accepted") {
+        setStatus("accepted");
+        setStoredState("send_accepted");
+        writeEmailVerificationSendState(user.uid, "send_accepted");
+      } else if (outcome.outcome === "send_failed") {
+        setStatus("failed");
+        setErrorCode(outcome.errorCode);
+        setStoredState("send_failed");
+        writeEmailVerificationSendState(user.uid, "send_failed");
+      } else {
+        setStatus("idle");
+      }
+      // Cooldown after ANY completed attempt — a failure is frequently
+      // Firebase throttling, and an immediately clickable retry is misleading.
+      if (outcome.outcome !== "already_verified") {
+        setCooldownUntil(Date.now() + COOLDOWN_MS);
+        setNow(Date.now());
+      }
+    } finally {
+      // Released regardless of telemetry: a diagnostic outage may never leave
+      // the control stuck.
+      inFlight.current = false;
     }
-    inFlight.current = false;
   }, [user, cooldownUntil]);
 
-  // Nothing to say to a verified identity, and no control to offer it.
-  if (!user || user.emailVerified) return null;
+  if (!user || user.emailVerified || verifiedByReload) return null;
 
   const cooling = now < cooldownUntil;
   const secondsLeft = cooling ? Math.ceil((cooldownUntil - now) / 1000) : 0;
 
   let message: string;
-  if (status === "accepted") {
+  if (status === "accepted" || (status === "idle" && storedState === "send_accepted")) {
     message = "Verification email requested. Check your inbox, and your spam folder.";
-  } else if (status === "failed" || initialSendFailed) {
-    message = "We couldn't send the verification email. You can try again.";
+  } else if (status === "failed" || storedState === "send_failed") {
+    message = cooling
+      ? "We couldn't send the verification email. You can try again shortly."
+      : "We couldn't send the verification email. You can try again.";
   } else {
     message = "Your email address is not verified yet.";
   }

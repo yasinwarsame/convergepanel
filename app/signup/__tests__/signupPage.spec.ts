@@ -149,9 +149,16 @@ describe("Signup page — source-level wiring guarantees", () => {
       expect(reportIdx).toBeGreaterThan(sendIdx);
     });
 
-    it("a send failure is carried into the authenticated UI, never silently dropped", () => {
-      expect(source).toMatch(/send_failed/);
-      expect(source).toMatch(/cp_verification_send_failed/);
+    it("THE FIX: the failure is carried through the SHARED, UID-SCOPED helper", () => {
+      // The old assertion grepped a bare literal that appeared twice, so
+      // deleting the write that actually carries the failure left it passing.
+      // This pins the real call, with the uid, on the failure branch.
+      expect(source).toMatch(
+        /import \{[\s\S]*writeEmailVerificationSendState[\s\S]*\} from "@\/lib\/client\/emailVerificationState"/
+      );
+      expect(source).toMatch(/writeEmailVerificationSendState\(user\.uid, "send_failed"\)/);
+      // The old global, unscoped key is gone.
+      expect(source).not.toMatch(/sessionStorage\.setItem\(\s*"cp_verification_send_failed"/);
     });
 
     it("REGRESSION: a send failure does not fail signup or tear down the account", () => {

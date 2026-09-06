@@ -11,11 +11,7 @@ jest.mock("firebase/auth", () => ({
   sendEmailVerification: (...a: unknown[]) => sendEmailVerification(...(a as [])),
 }));
 
-import {
-  requestEmailVerification,
-  safeFirebaseErrorCode,
-  reportEmailVerificationSendOutcome,
-} from "../emailVerificationSend";
+import { requestEmailVerification, safeFirebaseErrorCode } from "../emailVerificationSend";
 
 const unverified = { emailVerified: false } as never;
 const verified = { emailVerified: true } as never;
@@ -80,20 +76,70 @@ describe("safeFirebaseErrorCode — sensitive material must not propagate", () =
   });
 });
 
-describe("reportEmailVerificationSendOutcome", () => {
+/**
+ * These reset the module registry per case. `reportEmailVerificationSendOutcome`
+ * resolves `authedFetch` through a DYNAMIC import, so a `jest.doMock` after the
+ * module has already been loaded is silently ignored and the assertion passes
+ * for the wrong reason. Isolating forces each case to exercise its own double.
+ */
+describe("reportEmailVerificationSendOutcome — bounded and best-effort", () => {
+  const load = async (authedFetch: unknown) => {
+    jest.resetModules();
+    jest.doMock("@/lib/client/authedFetch", () => ({ authedFetch }));
+    jest.doMock("firebase/auth", () => ({
+      sendEmailVerification: (...a: unknown[]) => sendEmailVerification(...(a as [])),
+    }));
+    return import("../emailVerificationSend");
+  };
+
+  afterEach(() => { jest.useRealTimers(); jest.resetModules(); });
+
   it("does not report for an already-verified identity", async () => {
     const spy = jest.fn();
-    jest.doMock("@/lib/client/authedFetch", () => ({ authedFetch: spy }));
-    await reportEmailVerificationSendOutcome({} as never, { outcome: "already_verified" }, "resend");
+    const m = await load(spy);
+    await expect(
+      m.reportEmailVerificationSendOutcome({} as never, { outcome: "already_verified" }, "resend")
+    ).resolves.toBe("skipped");
     expect(spy).not.toHaveBeenCalled();
   });
 
-  it("is best-effort: a telemetry failure never throws into signup or resend", async () => {
-    jest.doMock("@/lib/client/authedFetch", () => ({
-      authedFetch: () => Promise.reject(new Error("network down")),
-    }));
+  it("a telemetry failure never throws into signup or resend", async () => {
+    const m = await load(() => Promise.reject(new Error("network down")));
     await expect(
-      reportEmailVerificationSendOutcome({} as never, { outcome: "send_accepted" }, "signup")
-    ).resolves.toBeUndefined();
+      m.reportEmailVerificationSendOutcome({} as never, { outcome: "send_accepted" }, "signup")
+    ).resolves.toBe("failed");
+  });
+
+  it("passes a live AbortSignal so the request can be cancelled cleanly", async () => {
+    let opts: { signal?: AbortSignal } | undefined;
+    const m = await load((_u: string, o: { signal?: AbortSignal }) => { opts = o; return Promise.resolve(); });
+    await m.reportEmailVerificationSendOutcome({} as never, { outcome: "send_accepted" }, "signup");
+    expect(opts?.signal).toBeDefined();
+    expect(opts?.signal?.aborted).toBe(false);
+  });
+
+  it("THE FIX: a request that never resolves is ABORTED and returns timed_out", async () => {
+    let seenSignal: AbortSignal | undefined;
+    const m = await load((_u: string, o: { signal?: AbortSignal }) =>
+      new Promise((_res, rej) => {
+        seenSignal = o.signal;
+        o.signal?.addEventListener("abort", () => rej(new Error("aborted")));
+      })
+    );
+    jest.useFakeTimers();
+    const p = m.reportEmailVerificationSendOutcome({} as never, { outcome: "send_accepted" }, "resend");
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    jest.advanceTimersByTime(m.TELEMETRY_TIMEOUT_MS + 10);
+    await expect(p).resolves.toBe("timed_out");
+    // Genuinely aborted — not merely raced, leaving the request running.
+    expect(seenSignal?.aborted).toBe(true);
+  });
+
+  it("the bound is short enough not to stall a user flow", async () => {
+    const m = await load(() => Promise.resolve());
+    expect(m.TELEMETRY_TIMEOUT_MS).toBeGreaterThan(0);
+    expect(m.TELEMETRY_TIMEOUT_MS).toBeLessThanOrEqual(5000);
   });
 });

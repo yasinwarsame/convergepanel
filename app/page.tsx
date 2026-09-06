@@ -28,6 +28,7 @@ import Image from "next/image";
 import dynamic from "next/dynamic";
 import { BookOpen, Film } from "lucide-react";
 import { useAuth } from "@/components/AuthProvider";
+import EmailVerificationNotice from "@/components/EmailVerificationNotice";
 import { ModelId, ModelResult, ModelStatus, SynthesizedReport, RunPanelApiResponse, ConnectorStatus } from "@/lib/types";
 import { coerceStatus } from "@/lib/panel/normalize";
 import { isUsableResult } from "@/lib/panel/publicize";
@@ -2352,6 +2353,15 @@ export default function Home() {
 
   return (
     <main className="max-w-6xl mx-auto px-4 py-10">
+      {/* Phase P0.2-VEMAIL-C2 — the recovery notice lives on the page the user
+          ACTUALLY lands on. The post-signup journey is /signup -> /onboarding ->
+          here, and the notice was previously only on /profile, behind the avatar
+          menu — so a user whose verification email failed could complete signup,
+          use the product, and never be told. Renders nothing for a verified
+          identity, and never sends automatically. */}
+      <div className="mb-4">
+        <EmailVerificationNotice />
+      </div>
       <section>
         {/* Header + tabs share the left column with the composer; Panel setup (right column) is
             aligned via items-start so its top matches the header and its bottom lands near the

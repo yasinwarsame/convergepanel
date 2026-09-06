@@ -71,21 +71,41 @@ export async function requestEmailVerification(
 }
 
 /**
+ * How long we are willing to wait for the operator diagnostic. The review found
+ * the resend control could hang at "Sending…" forever because this call was
+ * awaited with no timeout: the helper swallows *errors*, but a stalled request
+ * is not an error. Telemetry is a diagnostic and must never become a UI
+ * availability dependency, so it is bounded and the request is genuinely
+ * ABORTED on timeout rather than left running behind a race.
+ */
+export const TELEMETRY_TIMEOUT_MS = 3000;
+
+export type TelemetryReportOutcome = "reported" | "skipped" | "failed" | "timed_out";
+
+/**
  * Reports the outcome to the server so an operator can see it without PostHog.
  *
- * DELIBERATELY BEST-EFFORT. Telemetry is a diagnostic, never a precondition:
- * if this call fails, the signup or resend it describes has already happened
- * and must not be reported to the user as broken. It swallows its own errors
- * for that reason, and only for that reason — the outcome it reports is itself
- * no longer silent, which is the defect this phase closes.
+ * BEST-EFFORT AND BOUNDED. It never throws and never waits longer than
+ * {@link TELEMETRY_TIMEOUT_MS}: the signup or resend it describes has already
+ * happened, and must not be reported as broken — nor left pending — because a
+ * diagnostic was slow. The returned value exists so tests can assert the
+ * bounding actually happened; callers may ignore it.
  */
 export async function reportEmailVerificationSendOutcome(
   user: User | null,
   outcome: EmailVerificationSendOutcome,
   source: "signup" | "resend"
-): Promise<void> {
-  if (!user) return;
-  if (outcome.outcome === "already_verified") return;
+): Promise<TelemetryReportOutcome> {
+  if (!user) return "skipped";
+  if (outcome.outcome === "already_verified") return "skipped";
+
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, TELEMETRY_TIMEOUT_MS);
+
   try {
     const { authedFetch } = await import("@/lib/client/authedFetch");
     await authedFetch("/api/user/email-verification-telemetry", {
@@ -93,6 +113,7 @@ export async function reportEmailVerificationSendOutcome(
       authReady: true,
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
       body: JSON.stringify({
         event:
           outcome.outcome === "send_accepted"
@@ -102,7 +123,12 @@ export async function reportEmailVerificationSendOutcome(
         errorCode: outcome.outcome === "send_failed" ? outcome.errorCode : null,
       }),
     });
+    return "reported";
   } catch {
-    /* diagnostic only — never surfaces to the user, never fails the caller */
+    // Abort, network failure, auth failure — all identical from here: the
+    // diagnostic did not land, and nothing user-facing depends on it.
+    return timedOut ? "timed_out" : "failed";
+  } finally {
+    clearTimeout(timer);
   }
 }

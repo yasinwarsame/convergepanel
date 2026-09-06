@@ -19,6 +19,10 @@ import {
   reportEmailVerificationSendOutcome,
   requestEmailVerification,
 } from "@/lib/client/emailVerificationSend";
+import {
+  clearEmailVerificationSendState,
+  writeEmailVerificationSendState,
+} from "@/lib/client/emailVerificationState";
 
 /**
  * Strips keys with undefined values from an object.
@@ -346,20 +350,17 @@ export default function SignupPage() {
       // never touches our logs.
       const verificationOutcome = await requestEmailVerification(user);
       await reportEmailVerificationSendOutcome(user, verificationOutcome, "signup");
+      // Carried to the authenticated UI through the SHARED, UID-SCOPED helper —
+      // the same module the notice reads, so writer and reader cannot drift, and
+      // one account's state can never be shown to another in this browser. The
+      // stored value only selects which message to show; the reason the notice
+      // renders at all is that the live identity is unverified.
       if (verificationOutcome.outcome === "send_failed") {
-        // Carried to the authenticated UI so the user is never left believing a
-        // message was sent. Non-sensitive: an outcome discriminant only.
-        try {
-          sessionStorage.setItem("cp_verification_send_failed", "1");
-        } catch {
-          /* storage unavailable — the profile page still detects "unverified" */
-        }
+        writeEmailVerificationSendState(user.uid, "send_failed");
+      } else if (verificationOutcome.outcome === "send_accepted") {
+        writeEmailVerificationSendState(user.uid, "send_accepted");
       } else {
-        try {
-          sessionStorage.removeItem("cp_verification_send_failed");
-        } catch {
-          /* ignore */
-        }
+        clearEmailVerificationSendState(user.uid);
       }
       // Product analytics only, and best-effort: PostHog is not configured in
       // Production, so it is NOT the diagnostic channel for this flow. The
