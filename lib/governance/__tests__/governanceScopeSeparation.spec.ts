@@ -50,6 +50,7 @@ import { resolveVerifiedAdminScopes } from "@/lib/admin/verifiedAdminIdentity";
 import {
   resolveGovernanceVisibleUserIds,
   resolveGovernanceVisibleUserIdsCached,
+  runOwnerVisibleInGovernance,
 } from "@/lib/governance/governanceVisibleUserIds";
 
 beforeEach(() => {
@@ -62,12 +63,34 @@ beforeEach(() => {
 
 const scope = (v: unknown) => v as { ok: boolean; visibleUserIds: string[] | null; queueScope: string };
 
+/**
+ * Phase FIRST-ADMIN-C3 — assert the OWNER FILTER, not the label.
+ *
+ * The previous form here was `expect(v.visibleUserIds ?? undefined).not.toBeNull()`,
+ * which can never fail: `??` fires on `null`, so the exact value meaning "the
+ * owner filter is gone" became `undefined` before the assertion. An escape
+ * returning `{ok:true, visibleUserIds:null, queueScope:"assigners"}` — every
+ * user's records, under a non-global label — passed the whole suite.
+ *
+ * `runOwnerVisibleInGovernance(null, anyUid)` is `true` for EVERY uid; that is
+ * the property under test.
+ */
+const expectOwnerFilterActive = (v: unknown) => {
+  const vis = v as { ok: boolean; visibleUserIds?: string[] | null; queueScope?: string; kind?: string };
+  expect(vis.queueScope).not.toBe("admin_global");
+  if (vis.ok) {
+    expect(vis.visibleUserIds).not.toBeNull();
+    expect(runOwnerVisibleInGovernance(vis.visibleUserIds as string[], "stranger-uid")).toBe(false);
+  } else {
+    expect(vis).toEqual({ ok: false, kind: expect.stringMatching(/^(plan_required|no_db)$/) });
+  }
+};
+
 describe("M4b — governance-global cannot be reached from ADMIN_EMAILS", () => {
   it("USER A: verified, ADMIN_EMAILS only -> NO admin_global", async () => {
     authRecord = { email: APP_ONLY, emailVerified: true };
     const vis = await resolveGovernanceVisibleUserIds("uid-A");
-    expect(scope(vis).queueScope).not.toBe("admin_global");
-    expect(scope(vis).visibleUserIds ?? undefined).not.toBeNull();
+    expectOwnerFilterActive(vis);
   });
 
   it("USER A: the cached entry point also refuses admin_global", async () => {

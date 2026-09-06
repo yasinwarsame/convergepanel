@@ -53,7 +53,10 @@ jest.mock("@/lib/admin/entitlements", () => ({
 jest.mock("@/lib/governance/reviewerFields", () => ({ parseGovernanceReviewerFor: () => [] }));
 
 import { checkAdminOnly } from "@/lib/governance/authCheck";
-import { resolveGovernanceVisibleUserIds } from "@/lib/governance/governanceVisibleUserIds";
+import {
+  resolveGovernanceVisibleUserIds,
+  runOwnerVisibleInGovernance,
+} from "@/lib/governance/governanceVisibleUserIds";
 
 beforeEach(() => {
   process.env.ADMIN_EMAILS = APP_ONLY;
@@ -85,26 +88,37 @@ describe("checkAdminOnly — the custom claim confers no governance authority", 
 });
 
 describe("global governance scope — the custom claim never confers it", () => {
-  // Same idiom as governanceScopeSeparation.spec.ts: the granted branch is
-  // `queueScope: "admin_global"` WITH `visibleUserIds: null` (no owner filter).
-  // Asserting only `!== "admin_global"` would pass vacuously on the `ok: false`
-  // branch, where the field is absent — so the denial is asserted positively as
-  // "did not receive the null, unfiltered owner set".
+  // Phase FIRST-ADMIN-C3. The previous comment here claimed this asserted the
+  // denial "positively as 'did not receive the null, unfiltered owner set'".
+  // It did not: `expect(v.visibleUserIds ?? undefined).not.toBeNull()` can never
+  // fail, because `??` fires on `null` and `expect(undefined).not.toBeNull()`
+  // always passes. An escape returning `visibleUserIds: null` under a
+  // non-global label therefore survived the entire suite.
+  //
+  // The property that actually matters is the owner filter:
+  // `runOwnerVisibleInGovernance(null, anyUid)` is `true` for EVERY uid.
   const scope = (v: unknown) =>
     v as { ok: boolean; visibleUserIds?: string[] | null; queueScope?: string };
 
+  const expectOwnerFilterActive = (v: unknown) => {
+    const vis = scope(v);
+    expect(vis.queueScope).not.toBe("admin_global");
+    if (vis.ok) {
+      expect(vis.visibleUserIds).not.toBeNull();
+      expect(runOwnerVisibleInGovernance(vis.visibleUserIds as string[], "stranger-uid")).toBe(false);
+    } else {
+      expect(vis).toEqual({ ok: false, kind: expect.stringMatching(/^(plan_required|no_db)$/) });
+    }
+  };
+
   it("THE CORE PROOF: a SYSTEM_ADMIN claim holder off the governance list gets no global scope", async () => {
     authRecord = { email: OUTSIDER, emailVerified: true, customClaims: { admin: true } };
-    const vis = scope(await resolveGovernanceVisibleUserIds("sys"));
-    expect(vis.queueScope).not.toBe("admin_global");
-    expect(vis.visibleUserIds ?? undefined).not.toBeNull();
+    expectOwnerFilterActive(await resolveGovernanceVisibleUserIds("sys"));
   });
 
   it("an ADMIN_EMAILS member holding the claim also gets no global scope", async () => {
     authRecord = { email: APP_ONLY, emailVerified: true, customClaims: { admin: true } };
-    const vis = scope(await resolveGovernanceVisibleUserIds("app"));
-    expect(vis.queueScope).not.toBe("admin_global");
-    expect(vis.visibleUserIds ?? undefined).not.toBeNull();
+    expectOwnerFilterActive(await resolveGovernanceVisibleUserIds("app"));
   });
 
   it("a verified GOVERNANCE_ADMIN_EMAILS member does get global scope", async () => {
