@@ -127,44 +127,58 @@ describe("Signup page — source-level wiring guarantees", () => {
     });
   });
 
-  describe("Phase FIRESTORE-AUTHZ-P0.2 — mailbox ownership proof", () => {
+  describe("Phase P0.2-VEMAIL-C1 — verification send is recoverable and observable", () => {
     /**
-     * Signup previously created accounts and never sent a verification email,
-     * and the app has no OAuth provider — so every account was permanently
-     * `emailVerified: false`. That was the enabling condition for the P0.2
-     * vulnerability, and once verification became REQUIRED for allowlist-derived
-     * authority it would also have left a legitimate administrator with no
-     * product path to ever become verified.
+     * A real Production signup created the account, wrote the profile,
+     * provisioned the workspace and completed onboarding — and no verification
+     * email arrived, with no signal anywhere. These pin the recovery.
      */
-    it("requests a Firebase verification email after account creation", () => {
-      expect(source).toMatch(/import \{[^}]*sendEmailVerification[^}]*\} from "firebase\/auth"/);
-      expect(source).toMatch(/await sendEmailVerification\(user\)/);
-      const createIndex = source.indexOf("createUserWithEmailAndPassword(");
-      const sendIndex = source.indexOf("sendEmailVerification(user)");
-      expect(sendIndex).toBeGreaterThan(createIndex);
+    it("requests verification through the centralized helper, not a bare SDK call", () => {
+      expect(source).toMatch(/requestEmailVerification\(user\)/);
+      expect(source).toMatch(/from "@\/lib\/client\/emailVerificationSend"/);
+      // The unguarded SDK import is gone; the helper owns the already-verified check.
+      expect(source).not.toMatch(/import \{[^}]*sendEmailVerification[^}]*\} from "firebase\/auth"/);
     });
 
-    it("does not resend when the identity is already verified", () => {
-      const sendIndex = source.indexOf("sendEmailVerification(user)");
-      const before = source.slice(Math.max(0, sendIndex - 300), sendIndex);
-      expect(before).toMatch(/if \(!user\.emailVerified\)/);
+    it("THE FIX: the outcome is reported to the SERVER, not only to PostHog", () => {
+      expect(source).toMatch(/reportEmailVerificationSendOutcome\(user, verificationOutcome, "signup"\)/);
+      // Compare CALL SITES, not the import block at the top of the file.
+      const sendIdx = source.indexOf("requestEmailVerification(user)");
+      const reportIdx = source.indexOf('reportEmailVerificationSendOutcome(user, verificationOutcome, "signup")');
+      expect(sendIdx).toBeGreaterThan(-1);
+      expect(reportIdx).toBeGreaterThan(sendIdx);
     });
 
-    it("delivery failure is caught and never converts a created account into a signup failure", () => {
-      const sendIndex = source.indexOf("sendEmailVerification(user)");
-      const region = source.slice(Math.max(0, sendIndex - 300), sendIndex + 300);
-      expect(region).toMatch(/try\s*\{/);
-      expect(region).toMatch(/catch/);
-      // No error surfaced, no redirect blocked, no rollback of the account.
+    it("THE FIX: the failure is carried through the SHARED, UID-SCOPED helper", () => {
+      // The old assertion grepped a bare literal that appeared twice, so
+      // deleting the write that actually carries the failure left it passing.
+      // This pins the real call, with the uid, on the failure branch.
+      expect(source).toMatch(
+        /import \{[\s\S]*writeEmailVerificationSendState[\s\S]*\} from "@\/lib\/client\/emailVerificationState"/
+      );
+      expect(source).toMatch(/writeEmailVerificationSendState\(user\.uid, "send_failed"\)/);
+      // The old global, unscoped key is gone.
+      expect(source).not.toMatch(/sessionStorage\.setItem\(\s*"cp_verification_send_failed"/);
+    });
+
+    it("REGRESSION: a send failure does not fail signup or tear down the account", () => {
+      const sendIdx = source.indexOf("requestEmailVerification(user)");
+      const region = source.slice(sendIdx, sendIdx + 1400);
       expect(region).not.toMatch(/setError\(/);
-      expect(region).not.toMatch(/return;/);
       expect(region).not.toMatch(/deleteUser/);
       expect(region).not.toMatch(/signOut/);
+      expect(region).not.toMatch(/\breturn;/);
+    });
+
+    it("the workspace provisioning step still runs after the verification attempt", () => {
+      const sendIdx = source.indexOf("requestEmailVerification(user)");
+      const wsIdx = source.indexOf('authedFetch("/api/user/workspace"');
+      expect(wsIdx).toBeGreaterThan(sendIdx);
     });
 
     it("does not log the verification link or any credential material", () => {
-      const sendIndex = source.indexOf("sendEmailVerification(user)");
-      const region = source.slice(Math.max(0, sendIndex - 300), sendIndex + 300);
+      const sendIdx = source.indexOf("requestEmailVerification(user)");
+      const region = source.slice(sendIdx, sendIdx + 1400);
       expect(region).not.toMatch(/console\.(log|warn|error)/);
     });
 
@@ -172,6 +186,11 @@ describe("Signup page — source-level wiring guarantees", () => {
       const setDocIndex = source.indexOf('setDoc(doc(db, "users", user.uid)');
       const call = source.slice(setDocIndex, setDocIndex + 600);
       expect(call).toMatch(/\}\)\s*,\s*\{\s*merge:\s*true\s*\}\s*\)/);
+    });
+
+    it("no longer claims PostHog makes delivery health observable", () => {
+      expect(source).not.toMatch(/tracked so delivery health is observable/);
+      expect(source).toMatch(/NOT proof of delivery|never that a message\n?\s*\/\/ was delivered|not configured in Production/);
     });
   });
 });

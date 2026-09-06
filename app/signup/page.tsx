@@ -6,7 +6,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
-import { createUserWithEmailAndPassword, sendEmailVerification, signOut } from "firebase/auth";
+import { createUserWithEmailAndPassword, signOut } from "firebase/auth";
 import { auth, db } from "@/lib/firebase/client";
 import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -15,6 +15,14 @@ import { safeRedirect } from "@/lib/utils/safeRedirect";
 import { useAuth } from "@/components/AuthProvider";
 import { clearServerSession } from "@/lib/client/sessionSync";
 import posthog from "posthog-js";
+import {
+  reportEmailVerificationSendOutcome,
+  requestEmailVerification,
+} from "@/lib/client/emailVerificationSend";
+import {
+  clearEmailVerificationSendState,
+  writeEmailVerificationSendState,
+} from "@/lib/client/emailVerificationState";
 
 /**
  * Strips keys with undefined values from an object.
@@ -319,21 +327,49 @@ export default function SignupPage() {
       // to ever become verified.
       //
       // DELIBERATELY NON-FATAL. The account already exists in Firebase Auth and
-      // the profile is already written. Delivery failure is a mail-transport
-      // problem, not a signup failure: reporting it as one would be false, and
-      // deleting a successfully created account to "clean up" would be far
-      // worse than an unverified account, which is the normal state anyway
-      // (verification is not required for ordinary product access). The outcome
-      // is tracked so delivery health is observable; the link itself is handled
-      // entirely by Firebase and never touches our logs.
-      if (!user.emailVerified) {
-        try {
-          await sendEmailVerification(user);
-          posthog.capture("signup_verification_email_sent");
-        } catch {
-          posthog.capture("signup_verification_email_failed");
-        }
+      // the profile is already written. A failed mail request is not a signup
+      // failure: reporting it as one would be false, and deleting a
+      // successfully created account to "clean up" would be far worse than an
+      // unverified account, which is the normal state anyway (verification is
+      // not required for ordinary product access).
+      //
+      // Phase VEMAIL-C1 — WHAT "SUCCESS" HERE DOES AND DOES NOT MEAN. An
+      // earlier version of this comment claimed the outcome was "tracked so
+      // delivery health is observable". That was false: the only signal was a
+      // PostHog event, and PostHog is not configured in Production, so the
+      // provider never initializes and the capture is a no-op. A real signup
+      // then failed to deliver a verification email with no signal to the user,
+      // to operators, or to logs.
+      //
+      // The operator-visible signal is now the SERVER log emitted by
+      // `reportEmailVerificationSendOutcome`. Even so, `send_accepted` means
+      // only that Firebase's client SDK call RESOLVED — never that a message
+      // was delivered or received. Delivery is proven by a mailbox; ownership
+      // only when the human clicks the genuine link and Firebase then reports
+      // `emailVerified === true`. The link is handled entirely by Firebase and
+      // never touches our logs.
+      const verificationOutcome = await requestEmailVerification(user);
+      await reportEmailVerificationSendOutcome(user, verificationOutcome, "signup");
+      // Carried to the authenticated UI through the SHARED, UID-SCOPED helper —
+      // the same module the notice reads, so writer and reader cannot drift, and
+      // one account's state can never be shown to another in this browser. The
+      // stored value only selects which message to show; the reason the notice
+      // renders at all is that the live identity is unverified.
+      if (verificationOutcome.outcome === "send_failed") {
+        writeEmailVerificationSendState(user.uid, "send_failed");
+      } else if (verificationOutcome.outcome === "send_accepted") {
+        writeEmailVerificationSendState(user.uid, "send_accepted");
+      } else {
+        clearEmailVerificationSendState(user.uid);
       }
+      // Product analytics only, and best-effort: PostHog is not configured in
+      // Production, so it is NOT the diagnostic channel for this flow. The
+      // operator-visible signal is the server log emitted above.
+      posthog.capture(
+        verificationOutcome.outcome === "send_accepted"
+          ? "signup_verification_email_send_accepted"
+          : "signup_verification_email_send_failed"
+      );
 
       posthog.identify(user.uid, { email: user.email ?? undefined, name: name.trim() || undefined });
       posthog.capture("user_signed_up", { method: "email" });
