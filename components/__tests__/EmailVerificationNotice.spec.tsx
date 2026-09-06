@@ -20,6 +20,32 @@ jest.mock("@/lib/client/emailVerificationSend", () => ({
 
 import EmailVerificationNotice from "../EmailVerificationNotice";
 
+/**
+ * `sessionStorage` is NOT a stable global across Node versions — it exists on
+ * newer Node and not in CI's environment, so a test relying on the ambient
+ * object passes locally and fails in CI (exactly what happened). Every case
+ * below installs its own controlled store, and one case removes it entirely to
+ * prove the component degrades gracefully where storage is unavailable.
+ */
+type Store = { getItem: jest.Mock; setItem: jest.Mock; removeItem: jest.Mock; clear: jest.Mock };
+const installStorage = (initial: Record<string, string> = {}): Store => {
+  const data = { ...initial };
+  const store: Store = {
+    getItem: jest.fn((k: string) => (k in data ? data[k] : null)),
+    setItem: jest.fn((k: string, v: string) => { data[k] = v; }),
+    removeItem: jest.fn((k: string) => { delete data[k]; }),
+    clear: jest.fn(() => { for (const k of Object.keys(data)) delete data[k]; }),
+  };
+  Object.defineProperty(globalThis, "sessionStorage", { value: store, configurable: true, writable: true });
+  return store;
+};
+const removeStorage = () => {
+  Object.defineProperty(globalThis, "sessionStorage", {
+    get() { throw new Error("SecurityError: storage is unavailable"); },
+    configurable: true,
+  });
+};
+
 // Every renderer is unmounted in afterEach: the cooldown timer is a live
 // setInterval, and leaving one mounted keeps the Jest worker alive forever.
 const mounted: TestRenderer.ReactTestRenderer[] = [];
@@ -36,7 +62,7 @@ beforeEach(() => {
   currentUser = { emailVerified: false };
   requestEmailVerification.mockReset().mockResolvedValue({ outcome: "send_accepted" });
   reportEmailVerificationSendOutcome.mockReset().mockResolvedValue(undefined);
-  try { sessionStorage.clear(); } catch { /* ignore */ }
+  installStorage();
 });
 
 afterEach(() => {
@@ -133,8 +159,33 @@ describe("resend", () => {
 
 describe("initial-send failure carried from signup", () => {
   it("shows the recoverable failure message when signup recorded a failed send", () => {
-    try { sessionStorage.setItem("cp_verification_send_failed", "1"); } catch { /* ignore */ }
+    installStorage({ cp_verification_send_failed: "1" });
     const r = render();
     expect(text(r)).toMatch(/couldn't send the verification email/i);
+  });
+
+  it("shows the neutral message when signup recorded no failure", () => {
+    installStorage();
+    const r = render();
+    expect(text(r)).toMatch(/not verified yet/i);
+  });
+
+  it("DEGRADES GRACEFULLY where storage is unavailable: still renders, still offers resend", () => {
+    // Private browsing, disabled site data, or a runtime with no sessionStorage
+    // at all — the component must not crash and must stay recoverable.
+    removeStorage();
+    const r = render();
+    expect(r.toJSON()).not.toBeNull();
+    expect(text(r)).toMatch(/not verified yet/i);
+    expect(button(r).props.children).toMatch(/Resend verification email/);
+    expect(button(r).props.disabled).toBe(false);
+  });
+
+  it("a successful resend clears the carried failure state", async () => {
+    const store = installStorage({ cp_verification_send_failed: "1" });
+    const r = render();
+    await act(async () => { await button(r).props.onClick(); });
+    expect(store.removeItem).toHaveBeenCalledWith("cp_verification_send_failed");
+    expect(text(r)).toMatch(/Verification email requested/i);
   });
 });
