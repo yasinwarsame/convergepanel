@@ -30,7 +30,10 @@
 
 import "server-only";
 import { adminAuth } from "@/lib/firebase/admin";
-import { isVerifiedAdminEmail } from "./config";
+import {
+  isVerifiedApplicationAdminEmail,
+  isVerifiedGovernanceAdminEmail,
+} from "./config";
 
 export type LiveAuthIdentity =
   | { status: "resolved"; email: string; emailVerified: boolean }
@@ -57,16 +60,35 @@ export async function resolveLiveAuthIdentity(uid: string): Promise<LiveAuthIden
 }
 
 /**
- * THE single authoritative email-allowlist admin decision. `true` only when the
- * live Auth record carries a verified, allowlisted address.
+ * THE authoritative email-allowlist decisions — one per SCOPE.
  *
- * This deliberately does NOT consider the `admin` custom claim: that is an
- * independent, server-issued authority which callers honour explicitly where it
- * applies, and which must not be silently widened into paths (governance) that
- * do not grant it today.
+ * Phase FIRST-ADMIN-C1 replaced a single blended resolver. Previously either
+ * allowlist granted application-admin APIs *and* governance-global scope, so
+ * the operator could not enrol a governance administrator without also handing
+ * over the admin API surface, or vice versa.
+ *
+ * Both take a uid ONLY and resolve their own live evidence, so no caller can
+ * hand in a forged email or verification flag. Both fail closed on lookup
+ * failure, and both require `emailVerified === true` on the record they read.
+ *
+ * Neither considers the `admin` custom claim: that is a separate, server-issued
+ * authority honoured explicitly by the application-admin guard, and it must not
+ * leak into governance.
  */
-export async function hasVerifiedAllowlistAdminAuthority(uid: string): Promise<boolean> {
+export async function hasVerifiedApplicationAdminAuthority(uid: string): Promise<boolean> {
   const identity = await resolveLiveAuthIdentity(uid);
   if (identity.status !== "resolved") return false;
-  return isVerifiedAdminEmail({ email: identity.email, emailVerified: identity.emailVerified });
+  return isVerifiedApplicationAdminEmail({
+    email: identity.email,
+    emailVerified: identity.emailVerified,
+  });
+}
+
+export async function hasVerifiedGovernanceAdminAuthority(uid: string): Promise<boolean> {
+  const identity = await resolveLiveAuthIdentity(uid);
+  if (identity.status !== "resolved") return false;
+  return isVerifiedGovernanceAdminEmail({
+    email: identity.email,
+    emailVerified: identity.emailVerified,
+  });
 }

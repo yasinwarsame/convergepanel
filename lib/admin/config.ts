@@ -1,110 +1,118 @@
 /**
- * Admin / governance allowlists (optional env fallbacks when Firestore role is not set).
+ * Phase FIRST-ADMIN-C1 — PRIVILEGED EMAIL CANONICALIZATION.
+ *
+ * The previous matcher applied NFKC and stripped zero-width characters on BOTH
+ * sides. Because NFKC performs compatibility folding, a non-ASCII identity could
+ * canonicalize onto an ASCII allowlist entry — a fullwidth character or an
+ * embedded zero-width in either the local part or the domain collapses away.
+ * The live-record requirement from P0.2 does not help: the holder verified
+ * THEIR mailbox, which is a different mailbox from the one on the allowlist.
+ *
+ * The boundary is therefore stated positively and narrowly:
+ *
+ *   EMAIL-DERIVED PRIVILEGED AUTHORITY IS AVAILABLE ONLY TO ASCII IDENTITIES.
+ *
+ * A non-ASCII address is ineligible, full stop. It is not folded, not repaired,
+ * not compared — it is rejected before any normalization can erase the evidence
+ * that it was non-ASCII. Canonicalization here is deliberately minimal: outer
+ * ASCII whitespace and ASCII case only.
  */
-
-/** Trim, lowercase, NFKC, strip zero-width / BOM so token emails match the allowlist. */
-function normalizeEmailForMatch(raw: string): string {
-  return raw
-    .normalize("NFKC")
-    .replace(/[\u200B-\u200D\uFEFF]/g, "")
-    .trim()
-    .toLowerCase();
+export function canonicalizePrivilegedEmail(raw: string | null | undefined): string | null {
+  if (typeof raw !== "string") return null;
+  // Reject BEFORE trimming/lowercasing so nothing can launder a non-ASCII
+  // identity into an ASCII one.
+  // eslint-disable-next-line no-control-regex
+  if (/[^\x00-\x7F]/.test(raw)) return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  // Control characters are not part of any legitimate address.
+  // eslint-disable-next-line no-control-regex
+  if (/[\x00-\x1F\x7F]/.test(trimmed)) return null;
+  return trimmed.toLowerCase();
 }
 
-function parseEmailList(raw: string | undefined): string[] {
+/**
+ * Parses one privileged allowlist. Entries that are not ASCII, or are otherwise
+ * malformed, are DROPPED rather than folded — a misconfigured privileged entry
+ * must never be silently converted into a working administrator identity.
+ */
+function parsePrivilegedList(raw: string | undefined): string[] {
   if (!raw?.trim()) return [];
-  return raw
-    .split(",")
-    .map((s) => normalizeEmailForMatch(s))
-    .filter(Boolean);
+  const out: string[] = [];
+  for (const part of raw.split(",")) {
+    const c = canonicalizePrivilegedEmail(part);
+    if (c) out.push(c);
+  }
+  return out;
+}
+
+/** Number of entries dropped as invalid — for diagnostics, never their values. */
+export function invalidPrivilegedEntryCount(raw: string | undefined): number {
+  if (!raw?.trim()) return 0;
+  return raw.split(",").filter((p) => p.trim() !== "" && !canonicalizePrivilegedEmail(p)).length;
 }
 
 /**
- * Admin emails sourced from the ADMIN_EMAILS environment variable (comma-separated).
- * Set ADMIN_EMAILS=email1@example.com,email2@example.com in your environment.
- * Env `GOVERNANCE_ADMIN_EMAILS` is also merged in {@link isAdminEmail}.
+ * SCOPE-SPECIFIC MEMBERSHIP. These are the only allowlist predicates, and each
+ * reads exactly one list.
+ *
+ * The previous `isAdminEmail()` ORed both lists into a single predicate, so an
+ * address in EITHER list received application-admin APIs AND governance-global
+ * scope AND policy write. Least privilege was unachievable by configuration and
+ * the variable names actively misled the operator. There is deliberately no
+ * blended predicate any more — not even a private one — so the shortcut cannot
+ * be reintroduced by reuse.
+ *
+ * Membership is NOT authorization: see `lib/admin/verifiedAdminIdentity.ts`,
+ * which is where a live Firebase Auth record and `emailVerified === true` are
+ * required before either of these can grant anything.
  */
-export const ADMIN_EMAILS: readonly string[] = parseEmailList(process.env.ADMIN_EMAILS);
-
-if (
-  typeof window === "undefined" &&
-  ADMIN_EMAILS.length === 0 &&
-  !process.env.GOVERNANCE_ADMIN_EMAILS?.trim()
-) {
-  console.warn(
-    "[config] No admin emails configured. Set ADMIN_EMAILS=email1,email2 in your environment."
-  );
+export function isApplicationAdminEmail(email: string | null | undefined): boolean {
+  const c = canonicalizePrivilegedEmail(email);
+  if (!c) return false;
+  return parsePrivilegedList(process.env.ADMIN_EMAILS).includes(c);
 }
 
-/** Effective allowlist for logs (built-in + env), lowercased, deduped. */
-export function governanceAdminEmailsForLog(): string {
-  const fromEnv = parseEmailList(process.env.GOVERNANCE_ADMIN_EMAILS);
-  const builtIn = ADMIN_EMAILS.map((e) => normalizeEmailForMatch(e));
-  return [...new Set([...builtIn, ...fromEnv])].join(",");
-}
-
-/**
- * MEMBERSHIP TEST ONLY — "is this string on an admin allowlist".
- *
- * Phase FIRESTORE-AUTHZ-P0.2: this is NOT an authorization decision and must
- * never be used as one. An allowlist entry says which address is trusted; it
- * says nothing about whether the calling identity actually owns that mailbox.
- * Authoritative server guards use {@link isVerifiedAdminEmail} against a LIVE
- * Firebase Auth user record instead — see
- * `lib/admin/verifiedAdminIdentity.ts`.
- *
- * Remaining legitimate uses are non-authoritative only (diagnostics/logging).
- */
-export function isAdminEmail(email: string | null | undefined): boolean {
-  if (!email) return false;
-  const normalized = normalizeEmailForMatch(String(email));
-  if (!normalized) return false;
-  if (ADMIN_EMAILS.some((admin) => normalizeEmailForMatch(admin) === normalized)) return true;
-  return parseEmailList(process.env.GOVERNANCE_ADMIN_EMAILS).includes(normalized);
+export function isGovernanceAdminEmail(email: string | null | undefined): boolean {
+  const c = canonicalizePrivilegedEmail(email);
+  if (!c) return false;
+  return parsePrivilegedList(process.env.GOVERNANCE_ADMIN_EMAILS).includes(c);
 }
 
 /**
- * Phase FIRESTORE-AUTHZ-P0.2 — THE CANONICAL EMAIL-ALLOWLIST AUTHORITY PREDICATE.
- *
- * An email allowlist confers authority only when the authenticated identity has
- * PROVEN it owns the address. Treating {@link isAdminEmail} as an authorization
- * decision was a P0: Firebase proves nothing at sign-up —
- * `createUserWithEmailAndPassword` succeeds for any address, the project has no
- * blocking functions, and until this phase the product never even sent a
- * verification email — so anyone able to register an unclaimed allowlisted
- * address received administrator authority AND the global governance queue.
- *
- * FAIL CLOSED, DELIBERATELY. `emailVerified` must be exactly boolean `true`.
- * Absent, `undefined`, `null`, `false`, `"true"`, `"false"`, `0` and `1` all
- * deny: callers historically read this out of three different shapes (an ID
- * token's `email_verified`, a session cookie claim, a `UserRecord.emailVerified`)
- * and a claim that is missing or of the wrong type must never read as a passing
- * one. `=== true` is the whole guard, and it is load-bearing.
- *
- * THIS IS A PURE PREDICATE OVER EVIDENCE, NOT AN AUTHORITY ENTRY POINT. It
- * cannot verify the provenance of what it is handed, so it must only ever be
- * given both fields from the SAME live Firebase Auth user record — a token
- * email paired with a record's verification flag (or the reverse) would
- * reintroduce precisely the identity-binding failure this closes.
- *
- * That is guaranteed structurally rather than by convention, but the guarantee
- * lives one level up, in the AUTHORITY ENTRY POINTS: every function that
- * actually grants something establishes its own evidence by calling
- * `resolveLiveAuthIdentity()`, which returns the two fields together out of one
- * `getUser()` result. Phase P0.2-C1 closed the last exception — the governance
- * visibility resolvers used to take `(uid, email, emailVerified)` from their
- * callers, so a direct call could manufacture verified evidence and obtain
- * global scope with no Auth read at all. They now take only a uid. No exported
- * function that grants admin or governance authority accepts caller-supplied
- * verification evidence.
- *
- * The Firebase `admin` custom claim is a SEPARATE, independently trusted,
- * server-issued authority and is intentionally NOT folded into this predicate.
+ * Scope-specific verified predicates. `emailVerified` must be exactly `true`;
+ * absent, `null`, `false`, `"true"`, `0` and `1` all deny. Callers MUST supply
+ * both fields from the same live Firebase Auth record — that pairing is made
+ * structural by `resolveLiveAuthIdentity()`, and every exported authority
+ * entry point takes a uid and resolves its own evidence.
  */
-export function isVerifiedAdminEmail(identity: {
+export function isVerifiedApplicationAdminEmail(identity: {
   email: string | null | undefined;
   emailVerified: boolean | null | undefined;
 }): boolean {
   if (identity.emailVerified !== true) return false;
-  return isAdminEmail(identity.email);
+  return isApplicationAdminEmail(identity.email);
+}
+
+export function isVerifiedGovernanceAdminEmail(identity: {
+  email: string | null | undefined;
+  emailVerified: boolean | null | undefined;
+}): boolean {
+  if (identity.emailVerified !== true) return false;
+  return isGovernanceAdminEmail(identity.email);
+}
+
+/** Effective GOVERNANCE allowlist for diagnostics only. Never authority. */
+export function governanceAdminEmailsForLog(): string {
+  return parsePrivilegedList(process.env.GOVERNANCE_ADMIN_EMAILS).join(",");
+}
+
+if (
+  typeof window === "undefined" &&
+  !process.env.ADMIN_EMAILS?.trim() &&
+  !process.env.GOVERNANCE_ADMIN_EMAILS?.trim()
+) {
+  console.warn(
+    "[config] No admin emails configured. Set ADMIN_EMAILS (application admin) and/or GOVERNANCE_ADMIN_EMAILS (governance admin)."
+  );
 }

@@ -10,7 +10,10 @@
  * Uses the REAL `@/lib/admin/config` and `@/lib/admin/verifiedAdminIdentity`.
  */
 
+// Phase FIRST-ADMIN-C1: presentation is split. This address holds BOTH scopes
+// so the pre-existing role/eligibility expectations remain meaningful.
 process.env.ADMIN_EMAILS = "admin@test-invented.example";
+process.env.GOVERNANCE_ADMIN_EMAILS = "admin@test-invented.example";
 
 const ADMIN = "admin@test-invented.example";
 const OUTSIDER = "nobody@test-invented.example";

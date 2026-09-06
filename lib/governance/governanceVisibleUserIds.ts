@@ -4,7 +4,7 @@
 
 import "server-only";
 import { NextResponse } from "next/server";
-import { isVerifiedAdminEmail } from "@/lib/admin/config";
+import { isVerifiedGovernanceAdminEmail } from "@/lib/admin/config";
 import { getEffectiveEntitlements } from "@/lib/admin/entitlements";
 import { resolveLiveAuthIdentity } from "@/lib/admin/verifiedAdminIdentity";
 import { adminDb } from "@/lib/firebase/admin";
@@ -95,7 +95,11 @@ async function resolveVisibilityForTrustedIdentity(
   // This branch returns `visibleUserIds: null` — no owner filter at all. The
   // evidence reaching it was read from the live Firebase Auth record by this
   // module, not supplied by a caller.
-  if (isVerifiedAdminEmail({ email, emailVerified })) {
+  //
+  // Phase FIRST-ADMIN-C1: gated on `GOVERNANCE_ADMIN_EMAILS` ONLY. An
+  // application administrator (`ADMIN_EMAILS`) no longer receives global
+  // visibility over every user's runs simply by being an admin.
+  if (isVerifiedGovernanceAdminEmail({ email, emailVerified })) {
     console.log(`[governance/queue] Admin: global access (visibleUserIds = null)`);
     return { ok: true, visibleUserIds: null, isSupportAdmin: true, queueScope: "admin_global" };
   }

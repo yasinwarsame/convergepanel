@@ -9,8 +9,11 @@
  * Exercises the real resolvers. Only Firebase Admin and entitlements are doubled.
  */
 
-process.env.ADMIN_EMAILS = "admin@test-invented.example";
-process.env.GOVERNANCE_ADMIN_EMAILS = "gov@test-invented.example";
+// Phase FIRST-ADMIN-C1: governance authority now reads GOVERNANCE_ADMIN_EMAILS
+// ONLY. Both fixture addresses live there; ADMIN_EMAILS is deliberately empty
+// so any accidental re-blending of the lists fails this suite.
+process.env.GOVERNANCE_ADMIN_EMAILS = "admin@test-invented.example,gov@test-invented.example";
+process.env.ADMIN_EMAILS = "";
 
 const ADMIN = "admin@test-invented.example";
 const GOV = "gov@test-invented.example";
