@@ -6,7 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/firebase/auth-helpers";
+import { requireSystemAdminAccess } from "@/lib/firebase/auth-helpers";
 import { adminDb } from "@/lib/firebase/admin";
 import { getUserEffectiveEntitlement } from "@/lib/admin/entitlements";
 
@@ -14,7 +14,7 @@ import { getUserEffectiveEntitlement } from "@/lib/admin/entitlements";
 export const runtime = "nodejs";
 
 export async function GET(request: NextRequest) {
-  const auth = await requireAdmin(request);
+  const auth = await requireSystemAdminAccess(request);
   if (!auth) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }

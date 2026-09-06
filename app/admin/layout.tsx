@@ -17,7 +17,7 @@ export default function AdminLayout({
   children: React.ReactNode;
 }) {
   const { loading } = useAuth();
-  const { canAccess, gateReady, user } = useAdminPortalAccess();
+  const { canAccess, isSystemAdmin, gateReady, user } = useAdminPortalAccess();
   const router = useRouter();
 
   useEffect(() => {
@@ -78,18 +78,30 @@ export default function AdminLayout({
               >
                 Overview
               </Link>
-              <Link
-                href="/admin/keys"
-                className="block px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
-              >
-                API Keys
-              </Link>
-              <Link
-                href="/admin/users"
-                className="block px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
-              >
-                Users
-              </Link>
+              {/*
+                Phase FIRST-ADMIN-C3: both destinations gate on the `admin`
+                custom claim and render nothing without it, so an
+                ADMIN_PORTAL-only administrator following these links got a
+                sidebar and a silently blank pane — no message, no redirect.
+                The pages remain the authoritative gate; these links simply stop
+                advertising destinations the caller cannot use.
+              */}
+              {isSystemAdmin && (
+                <>
+                  <Link
+                    href="/admin/keys"
+                    className="block px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+                  >
+                    API Keys
+                  </Link>
+                  <Link
+                    href="/admin/users"
+                    className="block px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+                  >
+                    Users
+                  </Link>
+                </>
+              )}
             </nav>
           </div>
         </aside>

@@ -13,6 +13,7 @@
 const mockedRequireAdminApiAccess = jest.fn();
 jest.mock("@/lib/firebase/auth-helpers", () => ({
   requireAdminApiAccess: (...args: any[]) => mockedRequireAdminApiAccess(...args),
+  requireAdminPortalAccess: (...args: any[]) => mockedRequireAdminApiAccess(...args),
 }));
 
 type FakeRun = { id: string; data: Record<string, unknown> };

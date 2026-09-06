@@ -13,7 +13,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { getRequestUser } from "@/lib/firebase/adminAuth";
+import { requireSystemAdminBearer } from "@/lib/firebase/adminAuth";
 import { adminAuth, adminDb, firebaseAdmin } from "@/lib/firebase/admin";
 
 // Ensure Node.js runtime (Firebase Admin requires Node.js, not Edge)
@@ -31,12 +31,11 @@ export const runtime = "nodejs";
  */
 export async function POST(request: NextRequest) {
   // Verify admin authentication using the same logic as /api/admin/users
-  const decoded = await getRequestUser(request);
-  if (!decoded || !decoded.admin) {
+  const systemAdmin = await requireSystemAdminBearer(request);
+  if (!systemAdmin) {
     console.error("[admin/set-role] Unauthorized access attempt", {
-      hasToken: !!decoded,
-      isAdmin: decoded?.admin,
-      uid: decoded?.uid,
+      hasToken: !!systemAdmin,
+      isAdmin: false,
     });
     return NextResponse.json(
       { error: "Unauthorized" },
@@ -44,7 +43,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  console.log("[admin/set-role] Admin request from uid:", decoded.uid);
+  console.log("[admin/set-role] Admin request from uid:", systemAdmin.uid);
 
   try {
     const body = await request.json();
@@ -66,14 +65,14 @@ export async function POST(request: NextRequest) {
     }
 
     // Prevent admins from removing their own admin status
-    if (decoded.uid === uid && role === "user") {
+    if (systemAdmin.uid === uid && role === "user") {
       return NextResponse.json(
         { error: "You cannot remove your own admin status" },
         { status: 400 }
       );
     }
 
-    console.log(`[admin/set-role] Updating role for uid=${uid} to role=${role} by admin=${decoded.uid}`);
+    console.log(`[admin/set-role] Updating role for uid=${uid} to role=${role} by admin=${systemAdmin.uid}`);
 
     // Update Firebase Auth custom claims
     // Get existing claims first to merge with new admin claim

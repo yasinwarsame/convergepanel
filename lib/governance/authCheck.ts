@@ -17,7 +17,7 @@
 import "server-only";
 import type { NextRequest } from "next/server";
 import {
-  hasVerifiedAllowlistAdminAuthority,
+  hasVerifiedGovernanceAdminAuthority,
   resolveLiveAuthIdentity,
 } from "@/lib/admin/verifiedAdminIdentity";
 import { resolveRequestIdentity } from "@/lib/auth/resolveRequestIdentity";
@@ -31,9 +31,12 @@ import { adminAuth } from "@/lib/firebase/admin";
  * than trusting a caller-supplied address, so there is no signature through
  * which an unverified or mismatched email can reach this decision. A Firestore
  * org "admin" role still does not grant policy edits.
+ *
+ * Phase FIRST-ADMIN-C1: this reads `GOVERNANCE_ADMIN_EMAILS` ONLY. Membership
+ * of `ADMIN_EMAILS` no longer grants governance policy authority.
  */
 export async function checkAdminOnly(uid: string): Promise<boolean> {
-  return hasVerifiedAllowlistAdminAuthority(uid);
+  return hasVerifiedGovernanceAdminAuthority(uid);
 }
 
 /**

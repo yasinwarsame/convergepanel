@@ -10,8 +10,27 @@
  * ownership — and anyone can register any unclaimed address.
  */
 
-process.env.ADMIN_EMAILS = "admin@test-invented.example";
-process.env.GOVERNANCE_ADMIN_EMAILS = "gov@test-invented.example";
+/**
+ * Phase FIRST-ADMIN-C2 test hygiene: jest workers reuse a single `process.env`
+ * across the test FILES they run, so a suite that sets a privileged allowlist
+ * and never restores it leaks that value into every later file in the same
+ * worker. Snapshot BEFORE this file's own assignments; restore afterwards.
+ */
+const __PRIVILEGED_ENV_SNAPSHOT = {
+  ADMIN_EMAILS: process.env.ADMIN_EMAILS,
+  GOVERNANCE_ADMIN_EMAILS: process.env.GOVERNANCE_ADMIN_EMAILS,
+};
+afterAll(() => {
+  for (const [key, value] of Object.entries(__PRIVILEGED_ENV_SNAPSHOT)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+});
+
+// Phase FIRST-ADMIN-C1: this suite covers the APPLICATION-admin scope, so the
+// fixtures are application-list members. Governance scope has its own suite.
+process.env.ADMIN_EMAILS = "admin@test-invented.example,gov@test-invented.example";
+delete process.env.GOVERNANCE_ADMIN_EMAILS;
 
 const ADMIN = "admin@test-invented.example";
 const GOV = "gov@test-invented.example";
@@ -36,9 +55,9 @@ jest.mock("@/lib/firebase/admin", () => ({
   adminDb: {},
 }));
 
-import { isAdminEmail, isVerifiedAdminEmail } from "@/lib/admin/config";
+import { isApplicationAdminEmail } from "@/lib/admin/config";
 import {
-  hasVerifiedAllowlistAdminAuthority,
+  hasVerifiedApplicationAdminAuthority,
   resolveLiveAuthIdentity,
 } from "@/lib/admin/verifiedAdminIdentity";
 import { requireAdminApiAccess } from "@/lib/firebase/auth-helpers";
@@ -57,7 +76,21 @@ beforeEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-describe("pure predicate — fail closed on every non-`true` verification value", () => {
+describe("fail closed on every non-`true` verification value", () => {
+  /**
+   * Phase FIRST-ADMIN-C3 — these fourteen cases were EMPTY BODIES.
+   *
+   * When C1 made the evidence-taking predicate `isVerifiedAdminEmail` private,
+   * its assertions were deleted and the `it()` shells were left behind. They
+   * reported green in CI, were counted in every reported total, and carried
+   * names asserting the P0.2 fail-closed contract they no longer tested — the
+   * exact false-green failure this workstream exists to eliminate.
+   *
+   * They are re-pointed at the public uid-only resolver rather than restored
+   * against the private predicate. That is strictly stronger: it exercises the
+   * live Firebase Auth read, the provenance pairing and the allowlist lookup
+   * together, which is the path production authority actually takes.
+   */
   it.each([
     ["undefined", undefined],
     ["null", null],
@@ -68,38 +101,39 @@ describe("pure predicate — fail closed on every non-`true` verification value"
     ["number 1", 1],
     ["empty string", ""],
     ["object", {}],
-  ])("emailVerified %s -> denied", (_label, value) => {
-    expect(isVerifiedAdminEmail({ email: ADMIN, emailVerified: value as never })).toBe(false);
+  ])("emailVerified %s -> denied", async (_label, value) => {
+    authRecord = { email: ADMIN, emailVerified: value };
+    await expect(hasVerifiedApplicationAdminAuthority("uid-1")).resolves.toBe(false);
   });
 
-  it("emailVerified exactly true + allowlisted -> granted", () => {
-    expect(isVerifiedAdminEmail({ email: ADMIN, emailVerified: true })).toBe(true);
-    expect(isVerifiedAdminEmail({ email: GOV, emailVerified: true })).toBe(true);
+  it("emailVerified exactly true + allowlisted -> granted", async () => {
+    authRecord = { email: ADMIN, emailVerified: true };
+    await expect(hasVerifiedApplicationAdminAuthority("uid-1")).resolves.toBe(true);
   });
 
-  it("verified but NOT allowlisted -> denied", () => {
-    expect(isVerifiedAdminEmail({ email: OUTSIDER, emailVerified: true })).toBe(false);
+  it("verified but NOT allowlisted -> denied", async () => {
+    authRecord = { email: OUTSIDER, emailVerified: true };
+    await expect(hasVerifiedApplicationAdminAuthority("uid-1")).resolves.toBe(false);
   });
 
-  it.each([["missing", undefined], ["null", null], ["empty", ""]])(
-    "email %s -> denied even when verified",
-    (_l, email) => {
-      expect(isVerifiedAdminEmail({ email: email as never, emailVerified: true })).toBe(false);
+  it.each([
+    ["missing", undefined],
+    ["null", null],
+    ["empty", ""],
+  ])("email %s -> denied even when verified", async (_l, email) => {
+    authRecord = { email, emailVerified: true };
+    await expect(hasVerifiedApplicationAdminAuthority("uid-1")).resolves.toBe(false);
+  });
+
+  it("ASCII case and outer whitespace canonicalize; non-ASCII is INELIGIBLE", () => {
+    // Phase FIRST-ADMIN-C1 replaced NFKC + zero-width stripping. Compatibility
+    // folding could turn a non-ASCII identity into an ASCII privileged match, so
+    // non-ASCII is now rejected outright rather than normalized.
+    for (const variant of ["  ADMIN@test-invented.example  ", "Admin@Test-Invented.Example"]) {
+      expect(isApplicationAdminEmail(variant)).toBe(true);
     }
-  );
-
-  it("canonical normalization is reused, not reimplemented", () => {
-    for (const variant of [
-      "  ADMIN@test-invented.example  ",
-      "Admin@Test-Invented.Example",
-      "​admin@test-invented.example﻿",
-      "admin@test-invented.example‍",
-    ]) {
-      expect(isAdminEmail(variant)).toBe(true);
-      expect(isVerifiedAdminEmail({ email: variant, emailVerified: true })).toBe(true);
-      // The same variant still grants nothing while unverified.
-      expect(isVerifiedAdminEmail({ email: variant, emailVerified: false })).toBe(false);
-    }
+    // Fullwidth 'a' would previously have folded onto the allowlisted address.
+    expect(isApplicationAdminEmail("\uFF41dmin@test-invented.example")).toBe(false);
   });
 });
 
@@ -121,7 +155,7 @@ describe("live Auth evidence", () => {
   it("FAIL CLOSED: lookup throws -> lookup_failed -> no authority", async () => {
     getUserThrows = true;
     await expect(resolveLiveAuthIdentity("u1")).resolves.toEqual({ status: "lookup_failed" });
-    await expect(hasVerifiedAllowlistAdminAuthority("u1")).resolves.toBe(false);
+    await expect(hasVerifiedApplicationAdminAuthority("u1")).resolves.toBe(false);
   });
 
   it("FAIL CLOSED: empty uid never reaches Auth", async () => {
@@ -131,9 +165,9 @@ describe("live Auth evidence", () => {
 
   it("verified allowlisted -> authority; unverified allowlisted -> none", async () => {
     authRecord = { email: ADMIN, emailVerified: true };
-    await expect(hasVerifiedAllowlistAdminAuthority("u1")).resolves.toBe(true);
+    await expect(hasVerifiedApplicationAdminAuthority("u1")).resolves.toBe(true);
     authRecord = { email: ADMIN, emailVerified: false };
-    await expect(hasVerifiedAllowlistAdminAuthority("u1")).resolves.toBe(false);
+    await expect(hasVerifiedApplicationAdminAuthority("u1")).resolves.toBe(false);
   });
 });
 

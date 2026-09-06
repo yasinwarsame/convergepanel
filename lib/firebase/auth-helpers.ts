@@ -10,8 +10,10 @@
 import "server-only";
 import type { DecodedIdToken } from "firebase-admin/auth";
 import { NextRequest } from "next/server";
-import { isVerifiedAdminEmail } from "@/lib/admin/config";
-import { resolveLiveAuthIdentity } from "@/lib/admin/verifiedAdminIdentity";
+import {
+  resolveLiveAuthIdentity,
+  resolveVerifiedAdminScopes,
+} from "@/lib/admin/verifiedAdminIdentity";
 import { adminAuth } from "./admin";
 
 /**
@@ -126,7 +128,11 @@ export async function verifySessionCookieValue(
 
     return {
       uid: decodedClaims.uid,
-      isAdmin: !!decodedClaims.admin,
+      // Phase FIRST-ADMIN-C3: strict, like every other claim read in the tier
+      // model. `!!` returned true for `"false"`, `{}` and `[]`. No consumer
+      // reads this field today, so this is inert now and correct for the next
+      // caller.
+      isAdmin: decodedClaims.admin === true,
     };
   } catch (error: any) {
     // Re-throw auth errors so they can be caught and handled as 401 in API routes
@@ -160,6 +166,17 @@ export async function verifySessionCookie(
 }
 
 /**
+ * SYSTEM_ADMIN — the stronger application-administration tier.
+ *
+ * Source: the Firebase custom claim `admin === true` ONLY. It is never
+ * email-derived, so an `ADMIN_EMAILS` member can never reach the capabilities
+ * behind it: provider-credential access, admin-claim minting, bulk purge, and
+ * destructive account and billing mutation. Widening any of those to the
+ * allowlist would make the allowlist self-escalating.
+ *
+ * SYSTEM_ADMIN inherently satisfies ADMIN_PORTAL, because the same claim also
+ * satisfies `requireAdminPortalAccess`.
+ *
  * Require admin authentication for a route
  * 
  * This is a convenience function that verifies the token AND ensures the user is an admin.
@@ -174,7 +191,7 @@ export async function verifySessionCookie(
  *     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
  *   }
  */
-export async function requireAdmin(
+export async function requireSystemAdminAccess(
   request: NextRequest
 ): Promise<{ uid: string; isAdmin: boolean } | null> {
   const auth = await verifyAdminToken(request);
@@ -188,8 +205,14 @@ export async function requireAdmin(
 }
 
 /**
- * Admin portal / support APIs: Firebase `admin` custom claim OR a VERIFIED
- * allowlisted email.
+ * ADMIN_PORTAL — the portal/support capability family.
+ *
+ * Source: the Firebase `admin` custom claim (which is SYSTEM_ADMIN, and
+ * therefore also satisfies this) OR a VERIFIED `ADMIN_EMAILS` member.
+ *
+ * This is deliberately NOT "full application admin": it grants only the routes
+ * intentionally guarded by this function. The stronger tier is SYSTEM_ADMIN
+ * (`requireSystemAdminAccess`), which is claim-only.
  *
  * Phase FIRESTORE-AUTHZ-P0.2. This guard previously granted admin authority on
  * `isAdminEmail(email)` where `email` came from the ID token — or, when the
@@ -204,14 +227,19 @@ export async function requireAdmin(
  *      trusted, UNCHANGED. It deliberately does not require a verified email:
  *      it carries its own proof, and a custom-claim admin may legitimately hold
  *      an address that is on no allowlist.
- *   2. the email allowlist — now requires a LIVE Auth record whose email is
- *      allowlisted AND whose `emailVerified` is true. The token's email never
- *      grants anything, so there is no path by which a token address and a
- *      record's verification flag can be combined.
+ *   2. the APPLICATION-ADMIN allowlist (`ADMIN_EMAILS`) — requires a LIVE Auth
+ *      record whose email is on that list AND whose `emailVerified` is true.
+ *      The token's email never grants anything, so a token address and a
+ *      record's verification flag can never be combined.
+ *
+ * Phase FIRST-ADMIN-C1: this reads `ADMIN_EMAILS` ONLY. It previously used a
+ * blended predicate, so a governance administrator silently received this
+ * entire admin API surface. Governance membership alone now grants nothing
+ * here.
  *
  * Auth lookup failure denies.
  */
-export async function requireAdminApiAccess(
+export async function requireAdminPortalAccess(
   request: NextRequest
 ): Promise<{ uid: string; email: string } | null> {
   if (!adminAuth) return null;
@@ -233,13 +261,12 @@ export async function requireAdminApiAccess(
       return { uid: decoded.uid, email };
     }
 
-    // (2) Email allowlist — LIVE record only, both fields from the same object.
-    const live = await resolveLiveAuthIdentity(decoded.uid);
-    if (live.status !== "resolved") return null;
-    if (!isVerifiedAdminEmail({ email: live.email, emailVerified: live.emailVerified })) {
-      return null;
-    }
-    return { uid: decoded.uid, email: live.email };
+    // (2) ADMIN_PORTAL via the ADMIN_EMAILS allowlist — resolved by a uid-only
+    // authority function that performs its own live Auth read. Nothing here can
+    // hand it an email or a verification flag.
+    const scopes = await resolveVerifiedAdminScopes(decoded.uid);
+    if (!scopes.adminPortal) return null;
+    return { uid: decoded.uid, email: scopes.email };
   };
 
   try {
@@ -300,3 +327,14 @@ export async function checkIsAdminFromToken(token: string): Promise<boolean> {
   }
 }
 
+
+/**
+ * @deprecated Ambiguous name. Use `requireAdminPortalAccess` (ADMIN_PORTAL) or
+ * `requireSystemAdminAccess` (SYSTEM_ADMIN) so the tier is explicit at the call
+ * site. Kept only so an unmigrated caller fails loudly in review rather than
+ * silently choosing the wrong tier.
+ */
+export const requireAdminApiAccess = requireAdminPortalAccess;
+
+/** @deprecated Ambiguous name. Use `requireSystemAdminAccess`. */
+export const requireAdmin = requireSystemAdminAccess;

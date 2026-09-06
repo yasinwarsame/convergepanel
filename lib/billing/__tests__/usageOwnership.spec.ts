@@ -64,7 +64,7 @@ describe("BILLING-USAGE-Q1 — billing synchronization does not own run usage", 
     const admin = read("app/api/admin/sync-subscription/route.ts");
     expect(admin).toMatch(/resetUsageForNewPlan/);
     // ...and that endpoint is privileged, so it is not a self-service reset.
-    expect(admin).toMatch(/requireAdminApiAccess/);
+    expect(admin).toMatch(/requireAdminPortalAccess/);
   });
 
   it("the canonical calendar-month transition still owns the reset", () => {

@@ -14,7 +14,7 @@ type AdminTab = "users" | "runs";
 
 export default function AdminDashboard() {
   const { user, loading: authLoading, authReady } = useAuth();
-  const { canAccess, gateReady } = useAdminPortalAccess();
+  const { canAccess, isSystemAdmin, gateReady } = useAdminPortalAccess();
   const [tab, setTab] = useState<AdminTab>("users");
   const [stats, setStats] = useState({
     totalUsers: 0,
@@ -77,12 +77,14 @@ export default function AdminDashboard() {
         const disabled = total - active;
 
         // Get keys with authentication
-        const keysRes = await authedFetch("/api/admin/keys", {
+        // SYSTEM_ADMIN only. A portal-only administrator must not be shown a
+        // credential panel that will 401, nor have the request attempted.
+        const keysRes = !isSystemAdmin ? null : await authedFetch("/api/admin/keys", {
           user,
           authReady,
         });
         let modelsConfigured = 0;
-        if (keysRes.ok) {
+        if (keysRes !== null && keysRes.ok) {
           const { status } = await keysRes.json();
           modelsConfigured = Object.values(status).filter(
             (s: any) => s.configured
@@ -105,7 +107,7 @@ export default function AdminDashboard() {
     };
 
     fetchStats();
-  }, [canAccess, gateReady, authLoading, authReady, user]);
+  }, [canAccess, isSystemAdmin, gateReady, authLoading, authReady, user]);
 
   if (authLoading || !gateReady) {
     return <div className="text-gray-600">Checking admin access…</div>;
@@ -146,12 +148,17 @@ export default function AdminDashboard() {
 
       {tab === "users" && (
         <>
-          <p className="mb-6 text-sm text-gray-600">
-            <Link href="/admin/users" className="font-medium text-sky-700 hover:underline">
-              Open user directory
-            </Link>{" "}
-            for account management, roles, and billing tools.
-          </p>
+          {/* Phase FIRST-ADMIN-C3: /admin/users is SYSTEM_ADMIN-gated and renders
+              nothing without the claim, so this link is offered only to callers
+              who can actually open it. */}
+          {isSystemAdmin && (
+            <p className="mb-6 text-sm text-gray-600">
+              <Link href="/admin/users" className="font-medium text-sky-700 hover:underline">
+                Open user directory
+              </Link>{" "}
+              for account management, roles, and billing tools.
+            </p>
+          )}
 
           {loading ? (
             <div className="text-gray-600">Loading stats...</div>
@@ -172,17 +179,39 @@ export default function AdminDashboard() {
                 <p className="text-3xl font-bold text-red-600">{stats.disabledUsers}</p>
               </div>
 
-              <div className="bg-white rounded-lg shadow p-6">
-                <h3 className="text-sm font-medium text-gray-500 mb-2">Models Configured</h3>
-                <p className="text-3xl font-bold text-primary-600">{stats.modelsConfigured}/4</p>
-              </div>
+              {/*
+                Phase FIRST-ADMIN-C3: the keys fetch above is SYSTEM_ADMIN-only,
+                so for an ADMIN_PORTAL-only caller this tile always displayed a
+                hard "0/4" that looked like a configuration fault rather than an
+                absent capability.
+              */}
+              {isSystemAdmin && (
+                <div className="bg-white rounded-lg shadow p-6">
+                  <h3 className="text-sm font-medium text-gray-500 mb-2">Models Configured</h3>
+                  <p className="text-3xl font-bold text-primary-600">{stats.modelsConfigured}/4</p>
+                </div>
+              )}
             </div>
           )}
 
-          <div className="mt-12">
-            <h2 className="text-2xl font-bold text-gray-900 mb-4">Data retention cleanup</h2>
-            <PurgeRunsSection />
-          </div>
+          {/*
+            Phase FIRST-ADMIN-C3: bulk purge is SYSTEM_ADMIN only
+            (`/api/admin/purge-runs` -> requireSystemAdminAccess). R2 found this
+            section rendering for every ADMIN_PORTAL caller, so an
+            ADMIN_EMAILS-only administrator was shown a bulk-delete form —
+            mode, date range, dry-run and a DELETE confirmation box — that the
+            server then refused with 401. That is the exact "shown a control
+            that 401s" defect this workstream removes elsewhere.
+
+            The server guard remains authoritative; this only stops offering an
+            action the caller cannot perform.
+          */}
+          {isSystemAdmin && (
+            <div className="mt-12">
+              <h2 className="text-2xl font-bold text-gray-900 mb-4">Data retention cleanup</h2>
+              <PurgeRunsSection />
+            </div>
+          )}
         </>
       )}
 

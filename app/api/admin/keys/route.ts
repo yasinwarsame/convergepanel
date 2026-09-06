@@ -5,7 +5,9 @@
  * Keys are stored in Firestore and used by the panel runner.
  * 
  * Security:
- * - Only admins can access (verified via requireAdmin())
+ * - SYSTEM_ADMIN only, via requireSystemAdminBearer(): the Firebase `admin`
+ *   custom claim. NEVER email-derived — an ADMIN_EMAILS member must not be
+ *   able to reach provider credentials or mint admin claims.
  * - Keys are always masked in responses (never exposed in full)
  * - Keys are stored server-side only (never sent to client)
  * 
@@ -15,7 +17,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { getRequestUser } from "@/lib/firebase/adminAuth";
+import { requireSystemAdminBearer } from "@/lib/firebase/adminAuth";
 import { adminDb } from "@/lib/firebase/admin";
 
 // Ensure Node.js runtime (Firebase Admin requires Node.js, not Edge)
@@ -38,17 +40,16 @@ const MODEL_KEYS_DOC_ID = "modelKeys";
  */
 export async function GET(request: NextRequest) {
   // Verify admin authentication using ID token
-  const decoded = await getRequestUser(request);
-  if (!decoded || !decoded.admin) {
+  const systemAdmin = await requireSystemAdminBearer(request);
+  if (!systemAdmin) {
     console.error("[admin/keys] Unauthorized access attempt", {
-      hasToken: !!decoded,
-      isAdmin: decoded?.admin,
-      uid: decoded?.uid,
+      hasToken: !!systemAdmin,
+      isAdmin: false,
     });
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  console.log("[admin/keys] Admin request from uid:", decoded.uid);
+  console.log("[admin/keys] Admin request from uid:", systemAdmin.uid);
 
   try {
     if (!adminDb) {
@@ -155,17 +156,16 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   // Verify admin authentication using ID token
-  const decoded = await getRequestUser(request);
-  if (!decoded || !decoded.admin) {
+  const systemAdmin = await requireSystemAdminBearer(request);
+  if (!systemAdmin) {
     console.error("[admin/keys] Unauthorized access attempt", {
-      hasToken: !!decoded,
-      isAdmin: decoded?.admin,
-      uid: decoded?.uid,
+      hasToken: !!systemAdmin,
+      isAdmin: false,
     });
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  console.log("[admin/keys] Admin update request from uid:", decoded.uid);
+  console.log("[admin/keys] Admin update request from uid:", systemAdmin.uid);
 
   try {
     const body = await request.json();

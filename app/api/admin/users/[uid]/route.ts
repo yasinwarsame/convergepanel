@@ -6,7 +6,7 @@
  * - Delete user accounts
  *
  * Security:
- * - Only admins can access (verified via requireAdmin())
+ * - Only admins can access (verified via requireSystemAdminAccess())
  * - Updates both Firebase Auth and Firestore for consistency
  *
  * Routes:
@@ -39,7 +39,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/firebase/auth-helpers";
+import { requireSystemAdminAccess } from "@/lib/firebase/auth-helpers";
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import { checkTeamWorkspaceOwnershipForUid } from "@/lib/workspaces/teamOwnerGuard";
 
@@ -61,7 +61,7 @@ export async function PATCH(
   { params }: { params: { uid: string } }
 ) {
   // Verify admin authentication
-  const auth = await requireAdmin(request);
+  const auth = await requireSystemAdminAccess(request);
   if (!auth) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -165,7 +165,7 @@ export async function DELETE(
   { params }: { params: { uid: string } }
 ) {
   // Verify admin authentication
-  const auth = await requireAdmin(request);
+  const auth = await requireSystemAdminAccess(request);
   if (!auth) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

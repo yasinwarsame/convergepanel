@@ -15,8 +15,7 @@ import { validateUserSubscription } from "@/lib/stripe/subscriptionValidation";
 import { getEffectiveEntitlements } from "@/lib/admin/entitlements";
 import { logger } from "@/lib/logger";
 import { planHasTeamGovernance } from "@/lib/plans";
-import { isVerifiedAdminEmail } from "@/lib/admin/config";
-import { resolveLiveAuthIdentity } from "@/lib/admin/verifiedAdminIdentity";
+import { resolveVerifiedAdminScopes } from "@/lib/admin/verifiedAdminIdentity";
 import { parseGovernanceReviewerFor } from "@/lib/governance/reviewerFields";
 import { getVideoLimit } from "@/lib/billing/planConfig";
 import { resolvePersonalWorkspaceUiMode } from "@/lib/workspaces/workspaceUiRollout";
@@ -161,9 +160,12 @@ async function workspaceReviewsUiEnabledFor(uid: string): Promise<boolean> {
  */
 function clientGovernanceRole(
   userData: Partial<UserProfile> | undefined,
-  isVerifiedAllowlistAdmin: boolean
+  scopes: PrivilegedScopes
 ): string {
-  if (isVerifiedAllowlistAdmin) return "admin";
+  // Either privileged scope presents as "admin" in this legacy field, which is
+  // the pre-existing contract; the two scopes are distinguished by the
+  // dedicated booleans below rather than by widening this string.
+  if (scopes.applicationAdmin || scopes.governanceAdmin) return "admin";
   const r = userData?.role;
   if (r === "admin" || r === "reviewer") return r;
   return "member";
@@ -171,12 +173,14 @@ function clientGovernanceRole(
 
 function computeGovernanceDashboardAccess(params: {
   planId: PlanId;
-  isVerifiedAllowlistAdmin: boolean;
+  scopes: PrivilegedScopes;
 }): {
   governanceDashboardEligible: boolean;
   governanceDenyReason: "wrong_plan" | "wrong_role" | null;
 } {
-  if (params.isVerifiedAllowlistAdmin) {
+  // Governance eligibility follows the GOVERNANCE scope only. An application
+  // administrator is no longer handed the governance dashboard.
+  if (params.scopes.governanceAdmin) {
     return { governanceDashboardEligible: true, governanceDenyReason: null };
   }
   if (params.planId !== "full") {
@@ -185,16 +189,24 @@ function computeGovernanceDashboardAccess(params: {
   return { governanceDashboardEligible: true, governanceDenyReason: null };
 }
 
+type PrivilegedScopes = { applicationAdmin: boolean; governanceAdmin: boolean };
+
 /**
- * Live Auth record, same evidence the authoritative guards use. FAILS CLOSED to
- * ordinary presentation: an Auth lookup failure must never present a user as an
- * admin, and equally must never fail the whole usage request — the rest of this
- * payload (plan, quota, limits) is unrelated to admin status.
+ * Live Auth record, same evidence the authoritative guards use, resolved ONCE
+ * and evaluated against each scope independently.
+ *
+ * Phase FIRST-ADMIN-C1: presentation used to be a single blended boolean, so a
+ * governance administrator appeared to hold admin-portal authority and an
+ * application administrator appeared to hold governance authority — in both
+ * cases the server would then refuse. FAILS CLOSED: an Auth lookup failure
+ * yields neither scope and must never fail the whole usage request, which is
+ * unrelated to admin status.
  */
-async function resolveVerifiedAllowlistAdmin(uid: string): Promise<boolean> {
-  const live = await resolveLiveAuthIdentity(uid);
-  if (live.status !== "resolved") return false;
-  return isVerifiedAdminEmail({ email: live.email, emailVerified: live.emailVerified });
+async function resolvePrivilegedScopes(uid: string): Promise<PrivilegedScopes> {
+  const scopes = await resolveVerifiedAdminScopes(uid);
+  // Fails closed: a lookup failure yields neither scope and must never fail the
+  // whole usage request, which is unrelated to admin status.
+  return { applicationAdmin: scopes.adminPortal, governanceAdmin: scopes.governanceAdmin };
 }
 
 // Ensure Node.js runtime (Firebase Admin requires Node.js, not Edge)
@@ -242,7 +254,7 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const isVerifiedAllowlistAdmin = await resolveVerifiedAllowlistAdmin(uid);
+    const privilegedScopes = await resolvePrivilegedScopes(uid);
 
     // Get current month for calendar-based tracking
     const now = new Date();
@@ -263,8 +275,8 @@ export async function GET(req: NextRequest) {
       );
       
       const config = getPlanConfig("free");
-      const newUserRole = clientGovernanceRole(undefined, isVerifiedAllowlistAdmin);
-      const govNew = computeGovernanceDashboardAccess({ planId: "free", isVerifiedAllowlistAdmin });
+      const newUserRole = clientGovernanceRole(undefined, privilegedScopes);
+      const govNew = computeGovernanceDashboardAccess({ planId: "free", scopes: privilegedScopes });
       return NextResponse.json(
         {
           ok: true,
@@ -281,7 +293,7 @@ export async function GET(req: NextRequest) {
           role: newUserRole,
           governanceDashboardEligible: govNew.governanceDashboardEligible,
           governanceDenyReason: govNew.governanceDenyReason,
-          governancePolicyEditable: isVerifiedAllowlistAdmin,
+          governancePolicyEditable: privilegedScopes.governanceAdmin,
           governanceReviewerFor: [] as string[],
           governanceReviewerEnabled: false,
           governanceAssignedReviewerEmail: null as string | null,
@@ -362,7 +374,7 @@ export async function GET(req: NextRequest) {
       entitlementSource: entitlements.source,
     });
 
-    const role = clientGovernanceRole(userData, isVerifiedAllowlistAdmin);
+    const role = clientGovernanceRole(userData, privilegedScopes);
     const governanceReviewerFor = parseGovernanceReviewerFor(userData as Record<string, unknown>);
     const governanceReviewerEnabled = userData?.governanceReviewerEnabled === true;
     const assignedEmail =
@@ -370,7 +382,7 @@ export async function GET(req: NextRequest) {
         ? userData.governanceReviewerEmail.trim()
         : null;
 
-    const govDash = computeGovernanceDashboardAccess({ planId: plan, isVerifiedAllowlistAdmin });
+    const govDash = computeGovernanceDashboardAccess({ planId: plan, scopes: privilegedScopes });
     const videoLimit = getVideoLimit(plan);
 
     return NextResponse.json(
@@ -390,7 +402,7 @@ export async function GET(req: NextRequest) {
         role,
         governanceDashboardEligible: govDash.governanceDashboardEligible,
         governanceDenyReason: govDash.governanceDenyReason,
-        governancePolicyEditable: isVerifiedAllowlistAdmin,
+        governancePolicyEditable: privilegedScopes.governanceAdmin,
         governanceReviewerFor,
         governanceReviewerEnabled,
         governanceAssignedReviewerEmail: assignedEmail,

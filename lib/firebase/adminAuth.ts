@@ -50,3 +50,24 @@ export async function getRequestUser(request: NextRequest) {
     return null;
   }
 }
+
+/**
+ * SYSTEM_ADMIN via a bearer token, named explicitly.
+ *
+ * `getRequestUser` returns a decoded token and says nothing about authority, so
+ * routes were making the tier decision inline with `!decoded.admin`. That is how
+ * `/api/admin/keys` (provider credentials) and `/api/admin/set-role` (mints
+ * `admin: true`) ended up on a third, unnamed mechanism whose own comments
+ * claimed a different guard.
+ *
+ * SYSTEM_ADMIN is claim-only here exactly as in `requireSystemAdminAccess`; the
+ * only difference is that this path accepts a bearer header and not a session
+ * cookie. It must never consult an email allowlist.
+ */
+export async function requireSystemAdminBearer(
+  request: Parameters<typeof getRequestUser>[0]
+): Promise<{ uid: string } | null> {
+  const decoded = await getRequestUser(request);
+  if (!decoded || decoded.admin !== true) return null;
+  return { uid: decoded.uid };
+}

@@ -4,7 +4,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import type { QuerySnapshot } from "firebase-admin/firestore";
-import { requireAdminApiAccess } from "@/lib/firebase/auth-helpers";
+import { requireAdminPortalAccess } from "@/lib/firebase/auth-helpers";
 import { adminDb } from "@/lib/firebase/admin";
 import { createRunWorkspaceIntegrityBatch } from "@/lib/workspaces/runWorkspaceIntegrityBatch";
 import { logger } from "@/lib/logger";
@@ -171,7 +171,7 @@ async function fetchVideoSnapshot(perCol: number): Promise<QuerySnapshot> {
 }
 
 export async function GET(request: NextRequest) {
-  const auth = await requireAdminApiAccess(request);
+  const auth = await requireAdminPortalAccess(request);
   if (!auth) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }

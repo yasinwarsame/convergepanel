@@ -30,7 +30,7 @@
 
 import "server-only";
 import { adminAuth } from "@/lib/firebase/admin";
-import { isVerifiedAdminEmail } from "./config";
+import { isApplicationAdminEmail, isGovernanceAdminEmail } from "./config";
 
 export type LiveAuthIdentity =
   | { status: "resolved"; email: string; emailVerified: boolean }
@@ -57,16 +57,77 @@ export async function resolveLiveAuthIdentity(uid: string): Promise<LiveAuthIden
 }
 
 /**
- * THE single authoritative email-allowlist admin decision. `true` only when the
- * live Auth record carries a verified, allowlisted address.
+ * PRIVATE verified predicates. They take evidence, so they are deliberately not
+ * exported: the review found that exported evidence-taking predicates are a
+ * standing invitation to pass a session cookie's stale `email_verified`, which
+ * would reopen the P0.2 provenance defect while type-checking cleanly. The only
+ * public way to an authority answer is a uid-only resolver below.
  *
- * This deliberately does NOT consider the `admin` custom claim: that is an
- * independent, server-issued authority which callers honour explicitly where it
- * applies, and which must not be silently widened into paths (governance) that
- * do not grant it today.
+ * `emailVerified` must be exactly `true`; absent, `null`, `false`, `"true"`, `0`
+ * and `1` all deny.
  */
-export async function hasVerifiedAllowlistAdminAuthority(uid: string): Promise<boolean> {
+type Evidence = { email: string; emailVerified: boolean };
+function verifiedApplicationScope(e: Evidence): boolean {
+  return e.emailVerified === true && isApplicationAdminEmail(e.email);
+}
+function verifiedGovernanceScope(e: Evidence): boolean {
+  return e.emailVerified === true && isGovernanceAdminEmail(e.email);
+}
+
+/**
+ * THE ADMINISTRATOR TIER CONTRACT — resolved from ONE live Auth record.
+ *
+ *   ADMIN_PORTAL      verified `ADMIN_EMAILS` member, OR the `admin` custom
+ *                     claim (the claim is applied by the API guard, not here).
+ *   GOVERNANCE_ADMIN  verified `GOVERNANCE_ADMIN_EMAILS` member.
+ *
+ * These are INDEPENDENT. `ADMIN_EMAILS` never confers governance authority and
+ * `GOVERNANCE_ADMIN_EMAILS` never confers portal authority — the two lists fed
+ * one predicate before this work, which made least privilege unachievable.
+ *
+ * SYSTEM_ADMIN is deliberately absent here: it derives ONLY from the custom
+ * claim, is never email-derived, and so is resolved from the verified token
+ * rather than from any allowlist. An `ADMIN_EMAILS` member must never be able to
+ * reach credential access, role minting, bulk purge or destructive account and
+ * billing mutation.
+ *
+ * `email`/`emailVerified` are returned for display, audit and cache-key use.
+ * They are outputs of the trusted read, never inputs a caller may supply.
+ */
+export type VerifiedAdminScopes = {
+  lookupStatus: "resolved" | "lookup_failed";
+  adminPortal: boolean;
+  governanceAdmin: boolean;
+  email: string;
+  emailVerified: boolean;
+};
+
+export async function resolveVerifiedAdminScopes(uid: string): Promise<VerifiedAdminScopes> {
   const identity = await resolveLiveAuthIdentity(uid);
-  if (identity.status !== "resolved") return false;
-  return isVerifiedAdminEmail({ email: identity.email, emailVerified: identity.emailVerified });
+  if (identity.status !== "resolved") {
+    return {
+      lookupStatus: "lookup_failed",
+      adminPortal: false,
+      governanceAdmin: false,
+      email: "",
+      emailVerified: false,
+    };
+  }
+  const evidence = { email: identity.email, emailVerified: identity.emailVerified };
+  return {
+    lookupStatus: "resolved",
+    adminPortal: verifiedApplicationScope(evidence),
+    governanceAdmin: verifiedGovernanceScope(evidence),
+    email: identity.email,
+    emailVerified: identity.emailVerified,
+  };
+}
+
+/** Convenience wrappers. Both take a uid only and fail closed. */
+export async function hasVerifiedApplicationAdminAuthority(uid: string): Promise<boolean> {
+  return (await resolveVerifiedAdminScopes(uid)).adminPortal;
+}
+
+export async function hasVerifiedGovernanceAdminAuthority(uid: string): Promise<boolean> {
+  return (await resolveVerifiedAdminScopes(uid)).governanceAdmin;
 }
