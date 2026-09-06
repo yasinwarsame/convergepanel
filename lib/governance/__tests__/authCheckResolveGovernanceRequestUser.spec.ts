@@ -91,18 +91,33 @@ describe("resolveGovernanceRequestUser", () => {
   });
 
   /**
-   * Phase FIRESTORE-AUTHZ-P0.2-C1 — VERIFICATION PROVENANCE.
+   * Phase FIRESTORE-AUTHZ-P0.2 — VERIFICATION PROVENANCE (DATA CONTRACT).
    *
-   * `resolveGovernanceRequestUser` is the single point at which `emailVerified`
-   * enters the governance chain. Before C1 the fixture pinned the Auth record to
-   * `emailVerified: true` in `beforeEach` and never varied it, and every
-   * assertion expected `true` — so the assertions were tautological with respect
-   * to provenance. The independent review proved it: replacing
-   * `emailVerified: live.emailVerified` with a hard-coded `true` reopened the P0
-   * and the entire 10,835-test suite still passed.
+   * WHAT THESE CASES PROVE, PRECISELY: that
+   * `resolveGovernanceRequestUser()` faithfully propagates Firebase Auth's
+   * verification state out of the live user record it reads, and never
+   * manufactures it. Hard-coding that value would violate the resolver's
+   * provenance contract — `emailVerified` in its return type asserts "this is
+   * what Firebase reports about this identity", and a constant would make the
+   * field a lie to every present and future consumer.
    *
-   * These cases vary the value returned by the mocked Auth record, so the
-   * resolver must actually propagate it.
+   * WHAT THEY DO NOT PROVE, AND MUST NOT BE READ AS PROVING: administrator
+   * escalation, in either direction. As of Phase C1 the governance authority
+   * decision does NOT flow through this return value. `checkAdminOnly(uid)` and
+   * the UID-only `resolveGovernanceVisibleUserIds(uid)` each establish their own
+   * live Auth evidence inside their own trust boundary, and that is where the
+   * escalation proof lives (see `verifiedGovernanceAuthority.spec.ts`). At this
+   * head the only consumer of this field is a diagnostic log line in
+   * `app/api/governance/queue/route.ts`.
+   *
+   * These cases exist anyway, and are worth keeping, because this is the
+   * documented provenance point: a future caller may legitimately consume the
+   * field, and it must be true when they do.
+   *
+   * They were added because the original fixture pinned the Auth record to
+   * `emailVerified: true` in `beforeEach` and never varied it, so every
+   * assertion was tautological with respect to provenance. These vary the
+   * record, so the resolver must actually propagate what it read.
    */
   describe("emailVerified provenance — read from the live Auth record, never manufactured", () => {
     it("record verified -> resolver reports verified", async () => {

@@ -73,7 +73,6 @@ describe("global governance visibility — evidence is read, not accepted", () =
     liveRecord(GOV, false);
     const vis = await resolveGovernanceVisibleUserIds("attacker");
     expect(globalScope(vis).queueScope).not.toBe("admin_global");
-    expect(globalScope(vis).visibleUserIds ?? "absent").not.toBeNull();
   });
 
   it("verified allowlisted identity gets global scope", async () => {
@@ -187,13 +186,55 @@ describe("STRUCTURAL: governance-global authority cannot be handed forged eviden
     expect(globalScope(vis).queueScope).toBe("admin_global");
   });
 
-  it("the module exports no helper that accepts identity evidence", async () => {
+  /**
+   * PUBLIC SURFACE LOCK.
+   *
+   * The security property: no exported function from this module may expose a
+   * callable authority path that accepts caller-manufactured email or
+   * verification evidence.
+   *
+   * The previous version of this guard filtered exports by the name prefix
+   * "resolveGovernanceVisibleUserIds", so a future export of a
+   * trusted-evidence helper under ANY other name would have slipped straight
+   * past it — the exact bypass it was meant to prevent. This asserts the
+   * COMPLETE runtime export set instead, so adding, renaming or re-exporting
+   * anything fails here and forces a deliberate decision.
+   *
+   * If this test fails because you added an export, that is the guard working.
+   * Add it below ONLY after confirming it cannot be handed manufactured
+   * identity evidence.
+   */
+  it("the module's complete public surface is locked — no unreviewed export can appear", async () => {
     const mod = await import("@/lib/governance/governanceVisibleUserIds");
-    for (const [name, value] of Object.entries(mod)) {
-      if (typeof value !== "function") continue;
-      if (!name.startsWith("resolveGovernanceVisibleUserIds")) continue;
-      expect(value.length).toBe(1);
-    }
+    const exportedFunctions = Object.entries(mod)
+      .filter(([, v]) => typeof v === "function")
+      .map(([name]) => name)
+      .sort();
+
+    expect(exportedFunctions).toEqual([
+      "getAssignerUids",
+      "governanceQueueNotReviewerResponse",
+      "governanceQueuePlanForbiddenResponse",
+      "resolveGovernanceVisibleUserIds",
+      "resolveGovernanceVisibleUserIdsCached",
+      "runOwnerVisibleInGovernance",
+    ]);
+  });
+
+  it("the private trusted-evidence helpers are not reachable through the module", async () => {
+    const mod = (await import("@/lib/governance/governanceVisibleUserIds")) as Record<string, unknown>;
+    // Named explicitly: these consume an already-resolved identity, so exporting
+    // either one would reintroduce the forgeable boundary.
+    expect(mod.resolveTrustedGovernanceIdentity).toBeUndefined();
+    expect(mod.resolveVisibilityForTrustedIdentity).toBeUndefined();
+  });
+
+  it("both authority entry points take the uid and nothing else", async () => {
+    const mod = await import("@/lib/governance/governanceVisibleUserIds");
+    // Behavioural proof lives in the cases above; this pins the shape so a
+    // widened signature is caught at the boundary rather than by inference.
+    expect(mod.resolveGovernanceVisibleUserIds.length).toBe(1);
+    expect(mod.resolveGovernanceVisibleUserIdsCached.length).toBe(1);
   });
 });
 
