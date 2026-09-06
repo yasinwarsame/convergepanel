@@ -1231,8 +1231,12 @@ export async function GET(request: NextRequest) {
   }
 
   const email = resolved.email;
+  // Diagnostic only — NOT the access decision. Phase FIRESTORE-AUTHZ-P0.2:
+  // reports allowlist MEMBERSHIP alongside the verification state that governs
+  // whether that membership actually grants anything, so a log line can no
+  // longer read as though an unverified allowlisted address were admitted.
   console.log(
-    `[governance] isAdminEmail check: email="${email ?? ""}", result=${isAdminEmail(email)}, adminList=${governanceAdminEmailsForLog()}`
+    `[governance] allowlist membership="${isAdminEmail(email)}", emailVerified=${resolved.emailVerified}, grantsAuthority=${isAdminEmail(email) && resolved.emailVerified}, adminList=${governanceAdminEmailsForLog()}`
   );
 
   const { searchParams } = request.nextUrl;
@@ -1242,7 +1246,7 @@ export async function GET(request: NextRequest) {
   const offsetEarly = Number.isFinite(offsetRawEarly) && offsetRawEarly >= 0 ? offsetRawEarly : 0;
 
   const tVis0 = Date.now();
-  const vis = await resolveGovernanceVisibleUserIdsCached(resolved.uid, resolved.email);
+  const vis = await resolveGovernanceVisibleUserIdsCached(resolved.uid);
   console.log(`[governance/queue] Visibility: ${Date.now() - tVis0}ms`);
   if (!vis.ok) {
     if (vis.kind === "plan_required") {

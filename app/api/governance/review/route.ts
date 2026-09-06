@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const vis = await resolveGovernanceVisibleUserIds(resolved.uid, resolved.email);
+  const vis = await resolveGovernanceVisibleUserIds(resolved.uid);
   if (!vis.ok) {
     if (vis.kind === "plan_required") {
       return governanceQueuePlanForbiddenResponse();

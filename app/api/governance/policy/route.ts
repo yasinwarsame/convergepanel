@@ -144,7 +144,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const isAdmin = await checkAdminOnly(resolved.uid, resolved.email);
+  const isAdmin = await checkAdminOnly(resolved.uid);
   if (!isAdmin) {
     return NextResponse.json(
       {

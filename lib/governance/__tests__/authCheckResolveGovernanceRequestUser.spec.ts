@@ -43,7 +43,9 @@ beforeEach(() => {
   mockVerifySessionCookie.mockReset();
   mockVerifyIdToken.mockReset();
   mockGetUser.mockReset();
-  mockGetUser.mockResolvedValue({ email: "user@example.com" });
+  // Phase FIRESTORE-AUTHZ-P0.2: `emailVerified` now travels out of this same
+  // record read, so the fixture must supply it like the real Auth record does.
+  mockGetUser.mockResolvedValue({ email: "user@example.com", emailVerified: true });
 });
 
 describe("resolveGovernanceRequestUser", () => {
@@ -56,14 +58,14 @@ describe("resolveGovernanceRequestUser", () => {
   it("valid cookie only -> ok with cookie uid and email from adminAuth", async () => {
     mockVerifySessionCookie.mockResolvedValue({ uid: "user-a", isAdmin: false });
     const result = await resolveGovernanceRequestUser(buildRequest({ cookie: "__session=valid" }));
-    expect(result).toEqual({ ok: true, uid: "user-a", email: "user@example.com" });
+    expect(result).toEqual({ ok: true, uid: "user-a", email: "user@example.com", emailVerified: true });
   });
 
   it("valid bearer only -> ok with bearer uid", async () => {
     mockVerifySessionCookie.mockResolvedValue(null);
     mockVerifyIdToken.mockResolvedValue({ uid: "user-b" });
     const result = await resolveGovernanceRequestUser(buildRequest({ authHeader: "Bearer valid-token" }));
-    expect(result).toEqual({ ok: true, uid: "user-b", email: "user@example.com" });
+    expect(result).toEqual({ ok: true, uid: "user-b", email: "user@example.com", emailVerified: true });
   });
 
   it("REGRESSION (root cause): mismatched valid cookie + bearer -> fails closed, does not use either identity", async () => {
@@ -86,5 +88,83 @@ describe("resolveGovernanceRequestUser", () => {
     const result = await resolveGovernanceRequestUser(buildRequest({ cookie: "__session=valid", authHeader: "Bearer expired" }));
     expect(result).toEqual({ ok: false, status: 401 });
     expect(mockGetUser).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Phase FIRESTORE-AUTHZ-P0.2 — VERIFICATION PROVENANCE (DATA CONTRACT).
+   *
+   * WHAT THESE CASES PROVE, PRECISELY: that
+   * `resolveGovernanceRequestUser()` faithfully propagates Firebase Auth's
+   * verification state out of the live user record it reads, and never
+   * manufactures it. Hard-coding that value would violate the resolver's
+   * provenance contract — `emailVerified` in its return type asserts "this is
+   * what Firebase reports about this identity", and a constant would make the
+   * field a lie to every present and future consumer.
+   *
+   * WHAT THEY DO NOT PROVE, AND MUST NOT BE READ AS PROVING: administrator
+   * escalation, in either direction. As of Phase C1 the governance authority
+   * decision does NOT flow through this return value. `checkAdminOnly(uid)` and
+   * the UID-only `resolveGovernanceVisibleUserIds(uid)` each establish their own
+   * live Auth evidence inside their own trust boundary, and that is where the
+   * escalation proof lives (see `verifiedGovernanceAuthority.spec.ts`). At this
+   * head the only consumer of this field is a diagnostic log line in
+   * `app/api/governance/queue/route.ts`.
+   *
+   * These cases exist anyway, and are worth keeping, because this is the
+   * documented provenance point: a future caller may legitimately consume the
+   * field, and it must be true when they do.
+   *
+   * They were added because the original fixture pinned the Auth record to
+   * `emailVerified: true` in `beforeEach` and never varied it, so every
+   * assertion was tautological with respect to provenance. These vary the
+   * record, so the resolver must actually propagate what it read.
+   */
+  describe("emailVerified provenance — read from the live Auth record, never manufactured", () => {
+    it("record verified -> resolver reports verified", async () => {
+      mockGetUser.mockResolvedValue({ email: "user@example.com", emailVerified: true });
+      mockVerifySessionCookie.mockResolvedValue({ uid: "user-a", isAdmin: false });
+      const r = await resolveGovernanceRequestUser(buildRequest({ cookie: "__session=valid" }));
+      expect(r).toEqual({ ok: true, uid: "user-a", email: "user@example.com", emailVerified: true });
+    });
+
+    it("THE LOAD-BEARING CASE: record UNVERIFIED -> resolver reports emailVerified false", async () => {
+      mockGetUser.mockResolvedValue({ email: "user@example.com", emailVerified: false });
+      mockVerifySessionCookie.mockResolvedValue({ uid: "user-a", isAdmin: false });
+      const r = await resolveGovernanceRequestUser(buildRequest({ cookie: "__session=valid" }));
+      expect(r).toEqual({ ok: true, uid: "user-a", email: "user@example.com", emailVerified: false });
+    });
+
+    it.each([
+      ["absent", {}],
+      ["undefined", { emailVerified: undefined }],
+      ["null", { emailVerified: null }],
+      ['string "true"', { emailVerified: "true" }],
+      ["number 1", { emailVerified: 1 }],
+    ])("non-boolean verification (%s) is reported as false, never true", async (_label, extra) => {
+      mockGetUser.mockResolvedValue({ email: "user@example.com", ...(extra as object) });
+      mockVerifySessionCookie.mockResolvedValue({ uid: "user-a", isAdmin: false });
+      const r = await resolveGovernanceRequestUser(buildRequest({ cookie: "__session=valid" }));
+      expect(r).toEqual({ ok: true, uid: "user-a", email: "user@example.com", emailVerified: false });
+    });
+
+    it("email and verification come from the SAME record read", async () => {
+      mockGetUser.mockResolvedValue({ email: "other@example.com", emailVerified: false });
+      mockVerifySessionCookie.mockResolvedValue({ uid: "user-a", isAdmin: false });
+      const r = await resolveGovernanceRequestUser(buildRequest({ cookie: "__session=valid" }));
+      // Both fields track the record together — one getUser call, one identity.
+      expect(r).toEqual({ ok: true, uid: "user-a", email: "other@example.com", emailVerified: false });
+      expect(mockGetUser).toHaveBeenCalledTimes(1);
+      expect(mockGetUser).toHaveBeenCalledWith("user-a");
+    });
+
+    it("the resolver reports both possible values across calls (not a constant)", async () => {
+      mockVerifySessionCookie.mockResolvedValue({ uid: "user-a", isAdmin: false });
+      mockGetUser.mockResolvedValue({ email: "u@example.com", emailVerified: true });
+      const verified = await resolveGovernanceRequestUser(buildRequest({ cookie: "__session=valid" }));
+      mockGetUser.mockResolvedValue({ email: "u@example.com", emailVerified: false });
+      const unverified = await resolveGovernanceRequestUser(buildRequest({ cookie: "__session=valid" }));
+      expect((verified as { emailVerified: boolean }).emailVerified).toBe(true);
+      expect((unverified as { emailVerified: boolean }).emailVerified).toBe(false);
+    });
   });
 });

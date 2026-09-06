@@ -45,7 +45,12 @@ jest.mock("@/lib/admin/entitlements", () => ({
   }),
 }));
 jest.mock("@/lib/stripe/subscriptionValidation", () => ({ validateUserSubscription: jest.fn().mockResolvedValue(undefined) }));
-jest.mock("@/lib/admin/config", () => ({ isAdminEmail: () => false }));
+// Phase FIRESTORE-AUTHZ-P0.2: the real `@/lib/admin/config` is used here on
+// purpose. Stubbing it made these tests blind to the admin predicate the route
+// actually calls. With no ADMIN_EMAILS configured in the test environment the
+// real predicate returns false, so every expectation below is unchanged — but
+// now for the real reason. Dedicated allowlist cases live in
+// usageVerifiedAdminPresentation.spec.ts.
 jest.mock("@/lib/governance/reviewerFields", () => ({ parseGovernanceReviewerFor: () => [] }));
 jest.mock("@/lib/billing/planConfig", () => ({ getVideoLimit: () => 0 }));
 

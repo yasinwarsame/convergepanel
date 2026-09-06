@@ -15,7 +15,8 @@ import { validateUserSubscription } from "@/lib/stripe/subscriptionValidation";
 import { getEffectiveEntitlements } from "@/lib/admin/entitlements";
 import { logger } from "@/lib/logger";
 import { planHasTeamGovernance } from "@/lib/plans";
-import { isAdminEmail } from "@/lib/admin/config";
+import { isVerifiedAdminEmail } from "@/lib/admin/config";
+import { resolveLiveAuthIdentity } from "@/lib/admin/verifiedAdminIdentity";
 import { parseGovernanceReviewerFor } from "@/lib/governance/reviewerFields";
 import { getVideoLimit } from "@/lib/billing/planConfig";
 import { resolvePersonalWorkspaceUiMode } from "@/lib/workspaces/workspaceUiRollout";
@@ -142,23 +143,40 @@ async function workspaceReviewsUiEnabledFor(uid: string): Promise<boolean> {
   return canaryMemberships.status === "ok" && canaryMemberships.workspaceIds.length > 0;
 }
 
+/**
+ * Phase FIRESTORE-AUTHZ-P0.2 — PRESENTATION MUST AGREE WITH THE SERVER.
+ *
+ * This payload is presentation only; `/api/governance/*` and `/api/admin/*`
+ * enforce their own guards. But it previously derived an email-admin role from
+ * TWO unverified sources — the Auth-record address with no verification check,
+ * and, worse, the mirrored Firestore `users/{uid}.email`. It now asks exactly
+ * the question the authoritative governance path asks, so the UI can neither
+ * offer admin affordances the server will refuse nor hide them from a real
+ * admin.
+ *
+ * `userData.role` is retained: it is a SERVER-written field (see
+ * `/api/admin/set-role`, `/api/admin/set-admin`) and, since P0.1, is not
+ * client-writable. The dropped Firestore `email` fallback is the only removed
+ * source, and it was never proof of anything.
+ */
 function clientGovernanceRole(
   userData: Partial<UserProfile> | undefined,
-  authEmail: string
+  isVerifiedAllowlistAdmin: boolean
 ): string {
-  if (authEmail && isAdminEmail(authEmail)) return "admin";
+  if (isVerifiedAllowlistAdmin) return "admin";
   const r = userData?.role;
   if (r === "admin" || r === "reviewer") return r;
-  const email = typeof userData?.email === "string" ? userData.email : "";
-  if (email && isAdminEmail(email)) return "admin";
   return "member";
 }
 
-function computeGovernanceDashboardAccess(params: { planId: PlanId; authEmail: string }): {
+function computeGovernanceDashboardAccess(params: {
+  planId: PlanId;
+  isVerifiedAllowlistAdmin: boolean;
+}): {
   governanceDashboardEligible: boolean;
   governanceDenyReason: "wrong_plan" | "wrong_role" | null;
 } {
-  if (params.authEmail && isAdminEmail(params.authEmail)) {
+  if (params.isVerifiedAllowlistAdmin) {
     return { governanceDashboardEligible: true, governanceDenyReason: null };
   }
   if (params.planId !== "full") {
@@ -167,14 +185,16 @@ function computeGovernanceDashboardAccess(params: { planId: PlanId; authEmail: s
   return { governanceDashboardEligible: true, governanceDenyReason: null };
 }
 
-async function authUserEmail(uid: string): Promise<string> {
-  if (!adminAuth) return "";
-  try {
-    const rec = await adminAuth.getUser(uid);
-    return rec.email ?? "";
-  } catch {
-    return "";
-  }
+/**
+ * Live Auth record, same evidence the authoritative guards use. FAILS CLOSED to
+ * ordinary presentation: an Auth lookup failure must never present a user as an
+ * admin, and equally must never fail the whole usage request — the rest of this
+ * payload (plan, quota, limits) is unrelated to admin status.
+ */
+async function resolveVerifiedAllowlistAdmin(uid: string): Promise<boolean> {
+  const live = await resolveLiveAuthIdentity(uid);
+  if (live.status !== "resolved") return false;
+  return isVerifiedAdminEmail({ email: live.email, emailVerified: live.emailVerified });
 }
 
 // Ensure Node.js runtime (Firebase Admin requires Node.js, not Edge)
@@ -222,7 +242,7 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const authEmail = await authUserEmail(uid);
+    const isVerifiedAllowlistAdmin = await resolveVerifiedAllowlistAdmin(uid);
 
     // Get current month for calendar-based tracking
     const now = new Date();
@@ -243,8 +263,8 @@ export async function GET(req: NextRequest) {
       );
       
       const config = getPlanConfig("free");
-      const newUserRole = clientGovernanceRole(undefined, authEmail);
-      const govNew = computeGovernanceDashboardAccess({ planId: "free", authEmail });
+      const newUserRole = clientGovernanceRole(undefined, isVerifiedAllowlistAdmin);
+      const govNew = computeGovernanceDashboardAccess({ planId: "free", isVerifiedAllowlistAdmin });
       return NextResponse.json(
         {
           ok: true,
@@ -261,7 +281,7 @@ export async function GET(req: NextRequest) {
           role: newUserRole,
           governanceDashboardEligible: govNew.governanceDashboardEligible,
           governanceDenyReason: govNew.governanceDenyReason,
-          governancePolicyEditable: !!(authEmail && isAdminEmail(authEmail)),
+          governancePolicyEditable: isVerifiedAllowlistAdmin,
           governanceReviewerFor: [] as string[],
           governanceReviewerEnabled: false,
           governanceAssignedReviewerEmail: null as string | null,
@@ -342,7 +362,7 @@ export async function GET(req: NextRequest) {
       entitlementSource: entitlements.source,
     });
 
-    const role = clientGovernanceRole(userData, authEmail);
+    const role = clientGovernanceRole(userData, isVerifiedAllowlistAdmin);
     const governanceReviewerFor = parseGovernanceReviewerFor(userData as Record<string, unknown>);
     const governanceReviewerEnabled = userData?.governanceReviewerEnabled === true;
     const assignedEmail =
@@ -350,7 +370,7 @@ export async function GET(req: NextRequest) {
         ? userData.governanceReviewerEmail.trim()
         : null;
 
-    const govDash = computeGovernanceDashboardAccess({ planId: plan, authEmail });
+    const govDash = computeGovernanceDashboardAccess({ planId: plan, isVerifiedAllowlistAdmin });
     const videoLimit = getVideoLimit(plan);
 
     return NextResponse.json(
@@ -370,7 +390,7 @@ export async function GET(req: NextRequest) {
         role,
         governanceDashboardEligible: govDash.governanceDashboardEligible,
         governanceDenyReason: govDash.governanceDenyReason,
-        governancePolicyEditable: !!(authEmail && isAdminEmail(authEmail)),
+        governancePolicyEditable: isVerifiedAllowlistAdmin,
         governanceReviewerFor,
         governanceReviewerEnabled,
         governanceAssignedReviewerEmail: assignedEmail,

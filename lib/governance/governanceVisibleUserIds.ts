@@ -4,8 +4,9 @@
 
 import "server-only";
 import { NextResponse } from "next/server";
-import { isAdminEmail } from "@/lib/admin/config";
+import { isVerifiedAdminEmail } from "@/lib/admin/config";
 import { getEffectiveEntitlements } from "@/lib/admin/entitlements";
+import { resolveLiveAuthIdentity } from "@/lib/admin/verifiedAdminIdentity";
 import { adminDb } from "@/lib/firebase/admin";
 import { parseGovernanceReviewerFor } from "@/lib/governance/reviewerFields";
 
@@ -23,18 +24,78 @@ export type GovernanceVisibility =
   | { ok: false; kind: "no_db" | "plan_required" };
 
 /**
+ * Phase FIRESTORE-AUTHZ-P0.2-C1 — TRUSTED IDENTITY EVIDENCE, ESTABLISHED HERE.
+ *
+ * This module produces `visibleUserIds: null` / `admin_global`, which removes
+ * the run-owner filter entirely: every user's runs, decisions and review
+ * records. It is the highest-impact authority in the product.
+ *
+ * The P0.2 review found that the exported resolvers took `(uid, email,
+ * emailVerified)` as loose primitives. Every caller passed honest values from
+ * the live Auth resolver, so there was no live exploit — but the boundary was
+ * enforced by caller discipline, and a direct call such as
+ *
+ *     resolveGovernanceVisibleUserIds("never-authenticated", "admin@…", true)
+ *
+ * returned global scope with ZERO Firebase Auth reads. A future caller reaching
+ * for a session cookie's five-day-stale `email_verified` claim would have
+ * reopened the exact P0 this phase closed, and it would have type-checked and
+ * read correctly in review.
+ *
+ * The exported entry points now take ONLY the authenticated uid and establish
+ * their own evidence. There is no exported governance-global function that can
+ * be handed manufactured verification, and the private helper below cannot be
+ * reached from outside this module.
+ *
  * Resolves Firestore `userId` values the caller may load in governance queue / audit / review.
  * - Support admins: `visibleUserIds: null` (global queue).
  * - Full plan + assigners: assigner UIDs only (from `governanceReviewerFor` + reverse lookup), never the viewer's uid.
  * - Full plan, no assigners: empty array (queue empty; policies/audit still allowed).
  * - Free / lite: plan_required.
  */
-export async function resolveGovernanceVisibleUserIds(uid: string, email: string): Promise<GovernanceVisibility> {
+export async function resolveGovernanceVisibleUserIds(uid: string): Promise<GovernanceVisibility> {
+  if (!adminDb) {
+    return { ok: false, kind: "no_db" };
+  }
+  const identity = await resolveTrustedGovernanceIdentity(uid);
+  return resolveVisibilityForTrustedIdentity(uid, identity);
+}
+
+/**
+ * The caller's own live Auth evidence. A failed lookup is NOT an error here: it
+ * yields unverified, empty-email evidence, which denies `admin_global` (fail
+ * closed on the authority) while leaving the reviewer-scoped and plan-gated
+ * paths below to resolve normally (no availability regression for ordinary
+ * reviewers, who never needed an email at all).
+ */
+async function resolveTrustedGovernanceIdentity(
+  uid: string
+): Promise<{ email: string; emailVerified: boolean }> {
+  const live = await resolveLiveAuthIdentity(uid);
+  if (live.status !== "resolved") return { email: "", emailVerified: false };
+  return { email: live.email, emailVerified: live.emailVerified };
+}
+
+/**
+ * PRIVATE — never exported, never re-exported. It may take the resolved
+ * identity because it is unreachable from outside this module; the exported
+ * wrappers above are the only way in, and they always establish the evidence
+ * themselves.
+ */
+async function resolveVisibilityForTrustedIdentity(
+  uid: string,
+  identity: { email: string; emailVerified: boolean }
+): Promise<GovernanceVisibility> {
   if (!adminDb) {
     return { ok: false, kind: "no_db" };
   }
 
-  if (isAdminEmail(email)) {
+  const { email, emailVerified } = identity;
+
+  // This branch returns `visibleUserIds: null` — no owner filter at all. The
+  // evidence reaching it was read from the live Firebase Auth record by this
+  // module, not supplied by a caller.
+  if (isVerifiedAdminEmail({ email, emailVerified })) {
     console.log(`[governance/queue] Admin: global access (visibleUserIds = null)`);
     return { ok: true, visibleUserIds: null, isSupportAdmin: true, queueScope: "admin_global" };
   }
@@ -83,20 +144,38 @@ const GOVERNANCE_VISIBILITY_CACHE_TTL_MS = 120_000;
 const governanceVisibilityCache = new Map<string, { entry: GovernanceVisibility; expiresAt: number }>();
 
 /**
- * Same as {@link resolveGovernanceVisibleUserIds} but caches the result per (uid, email) for 2 minutes.
- * Use for read-heavy list endpoints; prefer the uncached resolver when correctness must be immediate (e.g. review).
+ * Same as {@link resolveGovernanceVisibleUserIds}, but caches the resolved
+ * visibility for 2 minutes. Use for read-heavy list endpoints; prefer the
+ * uncached resolver when correctness must be immediate (e.g. review).
+ *
+ * Phase FIRESTORE-AUTHZ-P0.2-C1 — TRUSTED CACHE IDENTITY.
+ *
+ * This entry point takes ONLY the authenticated uid, exactly like the uncached
+ * one. The live Auth lookup happens on EVERY call and BEFORE the cache is
+ * consulted, so the cache key is built from evidence this module read rather
+ * than from anything a caller supplied. The lookup is deliberately not cached:
+ * it is the security boundary, and the expensive part being saved here is the
+ * Firestore work below it (entitlements, the user document, and the reverse
+ * assigner query), which is what the cache actually exists for.
+ *
+ * The key still carries uid + canonical email + verification state, so a
+ * verified grant cannot outlive the proof it rested on: revoking verification
+ * or changing the address produces a different key and forces a recompute.
+ * Caching by uid alone would be wrong for exactly that reason.
  */
-export async function resolveGovernanceVisibleUserIdsCached(
-  uid: string,
-  email: string
-): Promise<GovernanceVisibility> {
-  const key = `${uid}::${email.trim().toLowerCase()}`;
+export async function resolveGovernanceVisibleUserIdsCached(uid: string): Promise<GovernanceVisibility> {
+  if (!adminDb) {
+    return { ok: false, kind: "no_db" };
+  }
+
+  const identity = await resolveTrustedGovernanceIdentity(uid);
+  const key = `${uid}::${identity.email.trim().toLowerCase()}::${identity.emailVerified === true ? "verified" : "unverified"}`;
   const now = Date.now();
   const hit = governanceVisibilityCache.get(key);
   if (hit && hit.expiresAt > now) {
     return hit.entry;
   }
-  const entry = await resolveGovernanceVisibleUserIds(uid, email);
+  const entry = await resolveVisibilityForTrustedIdentity(uid, identity);
   governanceVisibilityCache.set(key, { entry, expiresAt: now + GOVERNANCE_VISIBILITY_CACHE_TTL_MS });
   return entry;
 }

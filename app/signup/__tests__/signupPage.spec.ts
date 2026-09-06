@@ -126,4 +126,52 @@ describe("Signup page — source-level wiring guarantees", () => {
       expect(catchBody).not.toMatch(/personalWorkspaceReady\s*=\s*false/);
     });
   });
+
+  describe("Phase FIRESTORE-AUTHZ-P0.2 — mailbox ownership proof", () => {
+    /**
+     * Signup previously created accounts and never sent a verification email,
+     * and the app has no OAuth provider — so every account was permanently
+     * `emailVerified: false`. That was the enabling condition for the P0.2
+     * vulnerability, and once verification became REQUIRED for allowlist-derived
+     * authority it would also have left a legitimate administrator with no
+     * product path to ever become verified.
+     */
+    it("requests a Firebase verification email after account creation", () => {
+      expect(source).toMatch(/import \{[^}]*sendEmailVerification[^}]*\} from "firebase\/auth"/);
+      expect(source).toMatch(/await sendEmailVerification\(user\)/);
+      const createIndex = source.indexOf("createUserWithEmailAndPassword(");
+      const sendIndex = source.indexOf("sendEmailVerification(user)");
+      expect(sendIndex).toBeGreaterThan(createIndex);
+    });
+
+    it("does not resend when the identity is already verified", () => {
+      const sendIndex = source.indexOf("sendEmailVerification(user)");
+      const before = source.slice(Math.max(0, sendIndex - 300), sendIndex);
+      expect(before).toMatch(/if \(!user\.emailVerified\)/);
+    });
+
+    it("delivery failure is caught and never converts a created account into a signup failure", () => {
+      const sendIndex = source.indexOf("sendEmailVerification(user)");
+      const region = source.slice(Math.max(0, sendIndex - 300), sendIndex + 300);
+      expect(region).toMatch(/try\s*\{/);
+      expect(region).toMatch(/catch/);
+      // No error surfaced, no redirect blocked, no rollback of the account.
+      expect(region).not.toMatch(/setError\(/);
+      expect(region).not.toMatch(/return;/);
+      expect(region).not.toMatch(/deleteUser/);
+      expect(region).not.toMatch(/signOut/);
+    });
+
+    it("does not log the verification link or any credential material", () => {
+      const sendIndex = source.indexOf("sendEmailVerification(user)");
+      const region = source.slice(Math.max(0, sendIndex - 300), sendIndex + 300);
+      expect(region).not.toMatch(/console\.(log|warn|error)/);
+    });
+
+    it("REGRESSION: the P0.1 merge semantics of the profile write are untouched", () => {
+      const setDocIndex = source.indexOf('setDoc(doc(db, "users", user.uid)');
+      const call = source.slice(setDocIndex, setDocIndex + 600);
+      expect(call).toMatch(/\}\)\s*,\s*\{\s*merge:\s*true\s*\}\s*\)/);
+    });
+  });
 });

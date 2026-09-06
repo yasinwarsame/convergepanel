@@ -6,7 +6,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
-import { createUserWithEmailAndPassword, signOut } from "firebase/auth";
+import { createUserWithEmailAndPassword, sendEmailVerification, signOut } from "firebase/auth";
 import { auth, db } from "@/lib/firebase/client";
 import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -306,6 +306,34 @@ export default function SignupPage() {
       // Session-cookie creation/verification now happens reactively in
       // AuthProvider's onIdTokenChanged listener — see the pending-sync
       // effect above, which waits for it before redirecting.
+
+      // Phase FIRESTORE-AUTHZ-P0.2 — MAILBOX OWNERSHIP PROOF.
+      //
+      // Until this phase, email/password signup created accounts and never sent
+      // a verification email, and the app has no OAuth provider — so every
+      // account was permanently `emailVerified: false`. That was the enabling
+      // condition for the P0.2 vulnerability (an unverified registration on an
+      // allowlisted address received administrator authority) and, once P0.2
+      // began REQUIRING verification for allowlist-derived authority, it would
+      // also have left a legitimate future administrator with no product path
+      // to ever become verified.
+      //
+      // DELIBERATELY NON-FATAL. The account already exists in Firebase Auth and
+      // the profile is already written. Delivery failure is a mail-transport
+      // problem, not a signup failure: reporting it as one would be false, and
+      // deleting a successfully created account to "clean up" would be far
+      // worse than an unverified account, which is the normal state anyway
+      // (verification is not required for ordinary product access). The outcome
+      // is tracked so delivery health is observable; the link itself is handled
+      // entirely by Firebase and never touches our logs.
+      if (!user.emailVerified) {
+        try {
+          await sendEmailVerification(user);
+          posthog.capture("signup_verification_email_sent");
+        } catch {
+          posthog.capture("signup_verification_email_failed");
+        }
+      }
 
       posthog.identify(user.uid, { email: user.email ?? undefined, name: name.trim() || undefined });
       posthog.capture("user_signed_up", { method: "email" });

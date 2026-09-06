@@ -1,116 +1,39 @@
 /**
- * Governance API access: 5-model plan or support email (policy read, etc.).
+ * Governance API access.
+ *
+ * Phase FIRESTORE-AUTHZ-P0.2: the email-allowlist grants here are the highest
+ * authority in the product — `checkAdminOnly()` gates governance POLICY WRITES
+ * and audit backfill, and the sibling `resolveGovernanceVisibleUserIds()`
+ * returns global scope over every user's runs. They now require a VERIFIED
+ * allowlisted address taken from the live Firebase Auth user record.
+ *
+ * Governance has never honoured the `admin` custom claim, and this phase does
+ * not change that: widening it here would silently hand every application-admin
+ * the global governance queue.
+ *
  * Run-level scoping uses resolveGovernanceVisibleUserIds (queue / audit drilldown / review).
  */
 
 import "server-only";
 import type { NextRequest } from "next/server";
-import { NextResponse } from "next/server";
-import { isAdminEmail } from "@/lib/admin/config";
-import { getEffectiveEntitlements } from "@/lib/admin/entitlements";
+import {
+  hasVerifiedAllowlistAdminAuthority,
+  resolveLiveAuthIdentity,
+} from "@/lib/admin/verifiedAdminIdentity";
 import { resolveRequestIdentity } from "@/lib/auth/resolveRequestIdentity";
 import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelemetry";
-import { adminAuth, adminDb } from "@/lib/firebase/admin";
-import { parseGovernanceReviewerFor } from "@/lib/governance/reviewerFields";
+import { adminAuth } from "@/lib/firebase/admin";
 
-export type GovernanceAccessDenyReason = "wrong_plan" | "wrong_role" | "unauthorized";
-
-export type GovernanceAccessResult = {
-  allowed: boolean;
-  role: "admin" | "reviewer" | null;
-  plan: "free" | "lite" | "full";
-  denyReason?: GovernanceAccessDenyReason;
-  /** True when email is on support allowlist. */
-  isSupportAdmin: boolean;
-  /** Assigners who assigned this user as reviewer (metadata; queue uses resolveGovernanceVisibleUserIds). */
-  reviewerAssignerUserIds: string[];
-};
-
-export async function checkGovernanceAccess(uid: string, email: string): Promise<GovernanceAccessResult> {
-  const baseDeny = (
-    plan: "free" | "lite" | "full",
-    denyReason: GovernanceAccessDenyReason
-  ): GovernanceAccessResult => ({
-    allowed: false,
-    role: null,
-    plan,
-    denyReason,
-    isSupportAdmin: false,
-    reviewerAssignerUserIds: [],
-  });
-
-  if (isAdminEmail(email)) {
-    return {
-      allowed: true,
-      role: "admin",
-      plan: "full",
-      isSupportAdmin: true,
-      reviewerAssignerUserIds: [],
-    };
-  }
-
-  if (!adminDb) {
-    return baseDeny("free", "unauthorized");
-  }
-
-  const entitlements = await getEffectiveEntitlements(uid);
-  const plan = entitlements.planId;
-
-  if (plan !== "full") {
-    return baseDeny(plan, "wrong_plan");
-  }
-
-  const userDoc = await adminDb.collection("users").doc(uid).get();
-  const userData = userDoc.data() as Record<string, unknown> | undefined;
-  const reviewerFor = parseGovernanceReviewerFor(userData);
-
-  return {
-    allowed: true,
-    role: reviewerFor.length > 0 ? "reviewer" : null,
-    plan,
-    isSupportAdmin: false,
-    reviewerAssignerUserIds: reviewerFor,
-  };
-}
-
-/** App support only — Firestore org "admin" does not grant policy edits. */
-export async function checkAdminOnly(_uid: string, email: string): Promise<boolean> {
-  void _uid;
-  return isAdminEmail(email);
-}
-
-export function governanceAccessForbiddenResponse(access: GovernanceAccessResult): NextResponse {
-  if (access.denyReason === "wrong_plan") {
-    return NextResponse.json(
-      {
-        ok: false,
-        error: {
-          code: "plan_required",
-          message: "Governance features are available on the 5-Model plan.",
-          requiredPlan: "full",
-        },
-      },
-      { status: 403 }
-    );
-  }
-  if (access.denyReason === "wrong_role") {
-    return NextResponse.json(
-      {
-        ok: false,
-        error: {
-          code: "role_required",
-          message:
-            "The governance dashboard is for reviewers. Ask a colleague on the 5-Model plan to assign you as their reviewer in Profile, or enable reviewer availability so others can assign you.",
-          requiredRole: "reviewer",
-        },
-      },
-      { status: 403 }
-    );
-  }
-  return NextResponse.json(
-    { ok: false, error: { code: "forbidden", message: "Access denied." } },
-    { status: 403 }
-  );
+/**
+ * Governance support admin — grants governance POLICY WRITE and audit backfill.
+ *
+ * Phase FIRESTORE-AUTHZ-P0.2: resolves the caller's own live Auth record rather
+ * than trusting a caller-supplied address, so there is no signature through
+ * which an unverified or mismatched email can reach this decision. A Firestore
+ * org "admin" role still does not grant policy edits.
+ */
+export async function checkAdminOnly(uid: string): Promise<boolean> {
+  return hasVerifiedAllowlistAdminAuthority(uid);
 }
 
 /**
@@ -128,7 +51,7 @@ export function governanceAccessForbiddenResponse(access: GovernanceAccessResult
  */
 export async function resolveGovernanceRequestUser(
   request: NextRequest
-): Promise<{ ok: true; uid: string; email: string } | { ok: false; status: 401 }> {
+): Promise<{ ok: true; uid: string; email: string; emailVerified: boolean } | { ok: false; status: 401 }> {
   if (!adminAuth) {
     return { ok: false, status: 401 };
   }
@@ -139,10 +62,12 @@ export async function resolveGovernanceRequestUser(
     return { ok: false, status: 401 };
   }
 
-  try {
-    const u = await adminAuth.getUser(identity.uid);
-    return { ok: true, uid: identity.uid, email: u.email ?? "" };
-  } catch {
+  // Phase FIRESTORE-AUTHZ-P0.2: `emailVerified` travels WITH the email, out of
+  // the same live record read, so no downstream gate can honour an allowlisted
+  // address without the proof of ownership that belongs to it.
+  const live = await resolveLiveAuthIdentity(identity.uid);
+  if (live.status !== "resolved") {
     return { ok: false, status: 401 };
   }
+  return { ok: true, uid: identity.uid, email: live.email, emailVerified: live.emailVerified };
 }
