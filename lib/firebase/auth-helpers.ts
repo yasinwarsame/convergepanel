@@ -128,7 +128,11 @@ export async function verifySessionCookieValue(
 
     return {
       uid: decodedClaims.uid,
-      isAdmin: !!decodedClaims.admin,
+      // Phase FIRST-ADMIN-C3: strict, like every other claim read in the tier
+      // model. `!!` returned true for `"false"`, `{}` and `[]`. No consumer
+      // reads this field today, so this is inert now and correct for the next
+      // caller.
+      isAdmin: decodedClaims.admin === true,
     };
   } catch (error: any) {
     // Re-throw auth errors so they can be caught and handled as 401 in API routes

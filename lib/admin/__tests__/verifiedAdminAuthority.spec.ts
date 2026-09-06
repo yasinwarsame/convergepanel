@@ -76,7 +76,21 @@ beforeEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-describe("pure predicate — fail closed on every non-`true` verification value", () => {
+describe("fail closed on every non-`true` verification value", () => {
+  /**
+   * Phase FIRST-ADMIN-C3 — these fourteen cases were EMPTY BODIES.
+   *
+   * When C1 made the evidence-taking predicate `isVerifiedAdminEmail` private,
+   * its assertions were deleted and the `it()` shells were left behind. They
+   * reported green in CI, were counted in every reported total, and carried
+   * names asserting the P0.2 fail-closed contract they no longer tested — the
+   * exact false-green failure this workstream exists to eliminate.
+   *
+   * They are re-pointed at the public uid-only resolver rather than restored
+   * against the private predicate. That is strictly stronger: it exercises the
+   * live Firebase Auth read, the provenance pairing and the allowlist lookup
+   * together, which is the path production authority actually takes.
+   */
   it.each([
     ["undefined", undefined],
     ["null", null],
@@ -87,20 +101,29 @@ describe("pure predicate — fail closed on every non-`true` verification value"
     ["number 1", 1],
     ["empty string", ""],
     ["object", {}],
-  ])("emailVerified %s -> denied", (_label, value) => {
+  ])("emailVerified %s -> denied", async (_label, value) => {
+    authRecord = { email: ADMIN, emailVerified: value };
+    await expect(hasVerifiedApplicationAdminAuthority("uid-1")).resolves.toBe(false);
   });
 
-  it("emailVerified exactly true + allowlisted -> granted", () => {
+  it("emailVerified exactly true + allowlisted -> granted", async () => {
+    authRecord = { email: ADMIN, emailVerified: true };
+    await expect(hasVerifiedApplicationAdminAuthority("uid-1")).resolves.toBe(true);
   });
 
-  it("verified but NOT allowlisted -> denied", () => {
+  it("verified but NOT allowlisted -> denied", async () => {
+    authRecord = { email: OUTSIDER, emailVerified: true };
+    await expect(hasVerifiedApplicationAdminAuthority("uid-1")).resolves.toBe(false);
   });
 
-  it.each([["missing", undefined], ["null", null], ["empty", ""]])(
-    "email %s -> denied even when verified",
-    (_l, email) => {
-    }
-  );
+  it.each([
+    ["missing", undefined],
+    ["null", null],
+    ["empty", ""],
+  ])("email %s -> denied even when verified", async (_l, email) => {
+    authRecord = { email, emailVerified: true };
+    await expect(hasVerifiedApplicationAdminAuthority("uid-1")).resolves.toBe(false);
+  });
 
   it("ASCII case and outer whitespace canonicalize; non-ASCII is INELIGIBLE", () => {
     // Phase FIRST-ADMIN-C1 replaced NFKC + zero-width stripping. Compatibility

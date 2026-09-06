@@ -39,8 +39,29 @@ export function useAdminPortalAccess(): {
   const [serverSystemAdmin, setServerSystemAdmin] = useState(false);
 
   useEffect(() => {
+    /**
+     * Phase FIRST-ADMIN-C3 — FAIL CLOSED DURING UNCERTAINTY.
+     *
+     * R2 proved that server-derived SYSTEM_ADMIN state survived an identity
+     * change: this effect reset `emailAllowlistOk` but never
+     * `serverSystemAdmin`, and reset neither before awaiting the replacement
+     * `/api/admin/access` response. So after a claim revocation or a switch to
+     * a different user, the hook reported `gateReady === true` AND
+     * `isSystemAdmin === true` for a caller who no longer held the claim, until
+     * the fetch settled — showing credential, role-minting and purge controls
+     * in that window.
+     *
+     * Both are now cleared on every dependency change, before any await. The
+     * updater form returns the identical value when nothing changed, so React
+     * bails out of the re-render and an unstable `user` identity cannot loop.
+     */
+    const clearDerivedAuthority = () => {
+      setEmailAllowlistOk((prev) => (prev === null ? prev : null));
+      setServerSystemAdmin((prev) => (prev === false ? prev : false));
+    };
+
     if (!authReady || !adminResolved || !user) {
-      setEmailAllowlistOk(null);
+      clearDerivedAuthority();
       return;
     }
     if (isAdmin) {
@@ -49,6 +70,10 @@ export function useAdminPortalAccess(): {
       setServerSystemAdmin(true);
       return;
     }
+    // The identity changed and is not claim-backed: drop any privilege derived
+    // from the PREVIOUS identity before asking the server about this one.
+    clearDerivedAuthority();
+
     let cancelled = false;
     (async () => {
       try {
@@ -82,12 +107,23 @@ export function useAdminPortalAccess(): {
     };
   }, [user, authReady, adminResolved, isAdmin]);
 
-  const gateReady = !loading && authReady && adminResolved && (!user || isAdmin || emailAllowlistOk !== null);
-  const canAccess = !!user && (isAdmin || emailAllowlistOk === true);
+  /**
+   * Phase FIRST-ADMIN-C3: no capability is published before the identity and
+   * the custom claim have resolved. Clearing `serverSystemAdmin` alone was not
+   * enough — `isAdmin` is a separate live signal from AuthProvider, so while
+   * `adminResolved` was false the hook still reported SYSTEM_ADMIN from a claim
+   * value that was itself not yet trustworthy. Both tiers now require
+   * resolution, which is the fail-closed direction for any consumer that reads
+   * a capability without also honouring `gateReady`.
+   */
+  const identityResolved = !loading && authReady && adminResolved;
+
+  const gateReady = identityResolved && (!user || isAdmin || emailAllowlistOk !== null);
+  const canAccess = !!user && identityResolved && (isAdmin || emailAllowlistOk === true);
 
   // Fails closed: SYSTEM_ADMIN requires the claim or an explicit server-side
   // `systemAdmin: true`, never mere portal access.
-  const isSystemAdmin = !!user && (isAdmin || serverSystemAdmin);
+  const isSystemAdmin = !!user && identityResolved && (isAdmin || serverSystemAdmin);
 
   return { canAccess, isSystemAdmin, gateReady, authReady, user };
 }

@@ -107,7 +107,18 @@ async function resolveVisibilityForTrustedIdentity(
   //
   // Phase FIRST-ADMIN-C1: gated on `GOVERNANCE_ADMIN_EMAILS` ONLY. An
   // application administrator (`ADMIN_EMAILS`) no longer receives global
-  // visibility over every user's runs simply by being an admin.
+  // visibility over every user's runs THROUGH THE GOVERNANCE QUEUE / AUDIT /
+  // REVIEW PATH simply by being an admin.
+  //
+  // Phase FIRST-ADMIN-C3 — SCOPE OF THAT CLAIM, precisely. It is true of this
+  // path only. `/api/admin/runs` (GET, ADMIN_PORTAL) still returns every user's
+  // runs, and `/api/admin/runs/[runId]` exposes GET/PATCH/DELETE at the same
+  // tier — including a governance-status write. Do not read this comment as
+  // "ADMIN_EMAILS cannot see or affect other users' runs". Those two route
+  // tiers are a deliberate open question tracked in
+  // `docs/operations/admin-authority-tiers.md` under
+  // FIRST_ADMIN_ENROLLMENT_BLOCKER_DECISION, and must be decided before the
+  // first address is added to ADMIN_EMAILS.
   if (identity.governanceAdmin) {
     console.log(`[governance/queue] Admin: global access (visibleUserIds = null)`);
     return { ok: true, visibleUserIds: null, isSupportAdmin: true, queueScope: "admin_global" };
