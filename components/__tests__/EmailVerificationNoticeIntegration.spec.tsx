@@ -118,6 +118,41 @@ describe("real bounded helper — no layer can lock the resend control", () => {
     expect(authedFetch).not.toHaveBeenCalled();   // and no send diagnostic emitted
   });
 
+  it("THE FIX: a stalled Firebase SEND releases the control and is not called a failure", async () => {
+    const r = await renderAsync();
+    sendEmailVerification.mockImplementation(() => new Promise(() => {}));
+    jest.useFakeTimers();
+    let click: Promise<unknown>;
+    await act(async () => { click = button(r).props.onClick(); await flush(); });
+    await act(async () => { jest.advanceTimersByTime(MAX_RESEND_PENDING_MS + 100); await flush(); });
+    await act(async () => { await click!; });
+    const t = JSON.stringify(r.toJSON());
+    expect(button(r).props.children).not.toMatch(/Sending/);
+    expect(t).toMatch(/couldn't confirm that the verification email was sent/i);
+    expect(t).not.toMatch(/couldn't send the verification email/i);
+    // Operator sees a distinct event, never accepted and never failed.
+    const body = JSON.parse((authedFetch.mock.calls[0][1] as { body: string }).body);
+    expect(body.event).toBe("verification_email_send_timed_out");
+  });
+
+  it("LATE COMPLETION: the Firebase send finishing after timeout does not flip the UI to success", async () => {
+    let release: (v?: unknown) => void = () => {};
+    const r = await renderAsync();
+    sendEmailVerification.mockImplementation(() => new Promise((res) => { release = res; }));
+    jest.useFakeTimers();
+    let click: Promise<unknown>;
+    await act(async () => { click = button(r).props.onClick(); await flush(); });
+    await act(async () => { jest.advanceTimersByTime(MAX_RESEND_PENDING_MS + 100); await flush(); });
+    await act(async () => { await click!; });
+    const before = JSON.stringify(r.toJSON());
+    await act(async () => { release(); await flush(); });
+    expect(JSON.stringify(r.toJSON())).toBe(before);
+    expect(JSON.stringify(r.toJSON())).not.toMatch(/Verification email requested/i);
+    // and no late accepted diagnostic
+    const events = authedFetch.mock.calls.map((c) => JSON.parse((c[1] as { body: string }).body).event);
+    expect(events).not.toContain("verification_email_send_accepted");
+  });
+
   it("the happy path still works end to end through the real helper", async () => {
     const r = await renderAsync();
     await act(async () => { await button(r).props.onClick(); });

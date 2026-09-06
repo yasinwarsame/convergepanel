@@ -19,9 +19,11 @@
  *    diagnostic outcome gates the control. A stalled telemetry call used to
  *    leave this button at "Sending…" forever with `inFlight` stuck true, and a
  *    later unbounded reload() added a second way to do it. The verification
- *    refresh and the telemetry report are bounded SEPARATELY, so the worst case
- *    for this control is their sum (`MAX_RESEND_PENDING_MS`), not one timeout.
- *    Neither bounds Firebase's actual mail delivery.
+ *    refresh, the Firebase send and the telemetry report are bounded
+ *    SEPARATELY, so the worst case for this control is their SUM
+ *    (`MAX_RESEND_PENDING_MS`), not one timeout. An audit caught that the send
+ *    itself had been left unbounded while the constant was still called a
+ *    maximum. None of these bounds Firebase's actual mail delivery.
  *  - The cooldown applies after EVERY completed attempt. A failure is often
  *    `auth/too-many-requests`, and inviting an immediate retry was misleading.
  *  - `user.reload()` refreshes cached verification, so someone who verified in
@@ -49,7 +51,7 @@ import {
 
 export const COOLDOWN_MS = 60_000;
 
-type Status = "idle" | "sending" | "accepted" | "failed" | "check_failed";
+type Status = "idle" | "sending" | "accepted" | "failed" | "check_failed" | "send_unknown";
 
 export default function EmailVerificationNotice() {
   const { user } = useAuth();
@@ -148,6 +150,12 @@ export default function EmailVerificationNotice() {
         setErrorCode(outcome.errorCode);
         setStoredState("send_failed");
         writeEmailVerificationSendState(user.uid, "send_failed");
+      } else if (outcome.outcome === "send_timed_out") {
+        // We stopped waiting before Firebase answered. It may have accepted the
+        // request. Saying "we couldn't send it" would be a false claim, so the
+        // copy states the actual epistemic position. No stored state is written:
+        // neither "failed" nor "accepted" is known to be true.
+        setStatus("send_unknown");
       } else {
         setStatus("idle");
       }
@@ -172,6 +180,9 @@ export default function EmailVerificationNotice() {
   let message: string;
   if (status === "check_failed") {
     message = "We couldn't check your verification status. Please try again.";
+  } else if (status === "send_unknown") {
+    message =
+      "We couldn't confirm that the verification email was sent. Please wait a moment, check your inbox, and try again if it doesn't arrive.";
   } else if (status === "accepted" || (status === "idle" && storedState === "send_accepted")) {
     message = "Verification email requested. Check your inbox, and your spam folder.";
   } else if (status === "failed" || storedState === "send_failed") {

@@ -71,6 +71,15 @@ describe("closed schema", () => {
     expect(warn).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ errorCode: "auth/too-many-requests" }));
   });
 
+  it("C3A: accepts the timed-out event, logged as UNKNOWN — not a rejection", async () => {
+    const res = await post({ event: "verification_email_send_timed_out", source: "resend" });
+    expect(res.status).toBe(200);
+    const [msg] = warn.mock.calls[0];
+    expect(msg).toMatch(/STOPPED WAITING/i);
+    expect(msg).toMatch(/outcome unknown/i);
+    expect(msg).not.toMatch(/rejected|failed to send/i);
+  });
+
   it.each([
     ["unknown event", { event: "arbitrary_event", source: "signup" }],
     ["missing event", { source: "signup" }],

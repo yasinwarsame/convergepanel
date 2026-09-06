@@ -23,6 +23,14 @@ import { logger } from "@/lib/logger";
 export const EMAIL_VERIFICATION_SEND_EVENTS = [
   "verification_email_send_accepted",
   "verification_email_send_failed",
+  /**
+   * Phase C3A — MINIMAL, DELIBERATE EXTENSION. The application stopped waiting
+   * for the Firebase SDK before it answered. This is NOT a rejection: Firebase
+   * may have accepted the request, or may accept it after we stopped waiting.
+   * It exists so a timeout is operator-visible without being misreported as
+   * either outcome, which would assert something we do not know.
+   */
+  "verification_email_send_timed_out",
 ] as const;
 export type EmailVerificationSendEvent = (typeof EMAIL_VERIFICATION_SEND_EVENTS)[number];
 
@@ -40,6 +48,13 @@ export type EmailVerificationSendTelemetry = {
 
 export function logEmailVerificationSendOutcome(t: EmailVerificationSendTelemetry): void {
   const base = { operation: t.event, source: t.source, uid: t.uid };
+  if (t.event === "verification_email_send_timed_out") {
+    logger.warn(
+      "[email-verification] client STOPPED WAITING for the SDK before it answered (outcome unknown; NOT a rejection and NOT a delivery result)",
+      base
+    );
+    return;
+  }
   if (t.event === "verification_email_send_failed") {
     logger.warn(
       "[email-verification] client SDK send call FAILED (no message was requested; this is not a delivery result)",

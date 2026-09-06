@@ -47,6 +47,73 @@ describe("requestEmailVerification", () => {
   });
 });
 
+describe("THE FIX: the Firebase send itself is bounded", () => {
+  const loadWithSend = async (send: unknown) => {
+    jest.resetModules();
+    jest.doMock("firebase/auth", () => ({ sendEmailVerification: send, reload: jest.fn() }));
+    return import("../emailVerificationSend");
+  };
+  afterEach(() => { jest.useRealTimers(); jest.resetModules(); });
+
+  it("a stalled sendEmailVerification times out instead of pending forever", async () => {
+    const m = await loadWithSend(() => new Promise(() => {}));
+    jest.useFakeTimers();
+    const p = m.requestEmailVerification({ emailVerified: false } as never);
+    jest.advanceTimersByTime(m.SEND_TIMEOUT_MS + 10);
+    await expect(p).resolves.toEqual({ outcome: "send_timed_out" });
+  });
+
+  it("a timeout is NOT reported as send_failed — that would assert a rejection we do not know", async () => {
+    const m = await loadWithSend(() => new Promise(() => {}));
+    jest.useFakeTimers();
+    const p = m.requestEmailVerification({ emailVerified: false } as never);
+    jest.advanceTimersByTime(m.SEND_TIMEOUT_MS + 10);
+    const r = await p;
+    expect(r.outcome).not.toBe("send_failed");
+    expect(r.outcome).not.toBe("send_accepted");
+  });
+
+  it("LATE COMPLETION: a send resolving after the deadline cannot change the outcome", async () => {
+    let release: (v?: unknown) => void = () => {};
+    const m = await loadWithSend(() => new Promise((res) => { release = res; }));
+    jest.useFakeTimers();
+    const p = m.requestEmailVerification({ emailVerified: false } as never);
+    jest.advanceTimersByTime(m.SEND_TIMEOUT_MS + 10);
+    await expect(p).resolves.toEqual({ outcome: "send_timed_out" });
+    release();                       // Firebase finishes in the background
+    await Promise.resolve();
+    expect(await p).toEqual({ outcome: "send_timed_out" });
+  });
+
+  it("LATE REJECTION after the deadline does not surface as an unhandled rejection", async () => {
+    let fail: (e?: unknown) => void = () => {};
+    const m = await loadWithSend(() => new Promise((_r, rej) => { fail = rej; }));
+    jest.useFakeTimers();
+    const p = m.requestEmailVerification({ emailVerified: false } as never);
+    jest.advanceTimersByTime(m.SEND_TIMEOUT_MS + 10);
+    await expect(p).resolves.toEqual({ outcome: "send_timed_out" });
+    expect(() => fail(new Error("late"))).not.toThrow();
+    await Promise.resolve();
+  });
+
+  it("a send that resolves before the deadline is still accepted", async () => {
+    const m = await loadWithSend(() => Promise.resolve());
+    await expect(m.requestEmailVerification({ emailVerified: false } as never))
+      .resolves.toEqual({ outcome: "send_accepted" });
+  });
+
+  it("MAX_RESEND_PENDING_MS counts every awaited operation, send included", async () => {
+    const m = await loadWithSend(() => Promise.resolve());
+    expect(m.MAX_RESEND_PENDING_MS).toBe(
+      m.VERIFICATION_REFRESH_TIMEOUT_MS + m.SEND_TIMEOUT_MS + m.TELEMETRY_TIMEOUT_MS
+    );
+    // Would be the old, false value if the send bound were dropped.
+    expect(m.MAX_RESEND_PENDING_MS).toBeGreaterThan(
+      m.VERIFICATION_REFRESH_TIMEOUT_MS + m.TELEMETRY_TIMEOUT_MS
+    );
+  });
+});
+
 describe("safeFirebaseErrorCode — sensitive material must not propagate", () => {
   it("passes a well-formed Firebase code", () => {
     expect(safeFirebaseErrorCode({ code: "auth/invalid-email" })).toBe("auth/invalid-email");
@@ -164,11 +231,16 @@ describe("reportEmailVerificationSendOutcome — bounded END TO END", () => {
     expect(sawAbortedAtCall).toBe(false);
   });
 
-  it("documents separate bounds, and their sum", async () => {
+  it("documents separate bounds, and a sum covering EVERY awaited operation", async () => {
+    // This assertion previously encoded refresh + telemetry only, which was the
+    // false 6s claim: it omitted the Firebase send sitting between them.
     const m = await load(() => Promise.resolve());
     expect(m.TELEMETRY_TIMEOUT_MS).toBeLessThanOrEqual(5000);
     expect(m.VERIFICATION_REFRESH_TIMEOUT_MS).toBeLessThanOrEqual(5000);
-    expect(m.MAX_RESEND_PENDING_MS).toBe(m.VERIFICATION_REFRESH_TIMEOUT_MS + m.TELEMETRY_TIMEOUT_MS);
+    expect(m.SEND_TIMEOUT_MS).toBeLessThanOrEqual(10000);
+    expect(m.MAX_RESEND_PENDING_MS).toBe(
+      m.VERIFICATION_REFRESH_TIMEOUT_MS + m.SEND_TIMEOUT_MS + m.TELEMETRY_TIMEOUT_MS
+    );
   });
 });
 
@@ -216,6 +288,15 @@ describe("telemetry request BODY reflects the real Firebase outcome", () => {
     const { m, captured } = await loadCapturing();
     await m.reportEmailVerificationSendOutcome({} as never, { outcome: "send_failed", errorCode: null }, "signup");
     expect(captured.body?.event).toBe("verification_email_send_failed");
+    expect(captured.body?.errorCode).toBeNull();
+  });
+
+  it("THE FIX: send_timed_out emits its own event, never accepted and never failed", async () => {
+    const { m, captured } = await loadCapturing();
+    await m.reportEmailVerificationSendOutcome({} as never, { outcome: "send_timed_out" }, "resend");
+    expect(captured.body?.event).toBe("verification_email_send_timed_out");
+    expect(captured.body?.event).not.toBe("verification_email_send_accepted");
+    expect(captured.body?.event).not.toBe("verification_email_send_failed");
     expect(captured.body?.errorCode).toBeNull();
   });
 

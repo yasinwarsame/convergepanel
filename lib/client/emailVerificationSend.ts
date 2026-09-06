@@ -35,7 +35,17 @@ import { reload, sendEmailVerification, type User } from "firebase/auth";
 export type EmailVerificationSendOutcome =
   | { outcome: "already_verified" }
   | { outcome: "send_accepted" }
-  | { outcome: "send_failed"; errorCode: string | null };
+  | { outcome: "send_failed"; errorCode: string | null }
+  /**
+   * The application stopped waiting before Firebase gave a definitive answer.
+   *
+   * This is deliberately NOT `send_failed`. A timeout is not proof of
+   * rejection: Firebase may already have accepted the request, or may accept it
+   * after we stopped waiting. Reporting it as a failure — to the user or to
+   * operators — would assert something we do not know, which is the exact class
+   * of false claim this workstream exists to remove.
+   */
+  | { outcome: "send_timed_out" };
 
 /**
  * Firebase error codes look like `auth/too-many-requests`. Only that shape is
@@ -59,14 +69,44 @@ export function safeFirebaseErrorCode(error: unknown): string | null {
  * exists must not be torn down because a mail request failed.
  */
 export async function requestEmailVerification(
-  user: Pick<User, "emailVerified"> & { emailVerified: boolean }
+  user: Pick<User, "emailVerified"> & { emailVerified: boolean },
+  timeoutMs: number = SEND_TIMEOUT_MS
 ): Promise<EmailVerificationSendOutcome> {
   if (user.emailVerified) return { outcome: "already_verified" };
+
+  // The Firebase SDK exposes no cancellation for this call, so the deadline
+  // makes the APPLICATION stop waiting; the underlying request may still
+  // complete in the background. The `settled` latch makes that background
+  // completion inert: it cannot produce a second outcome, and the caller's
+  // answer is final once returned.
+  let settled = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  const deadline = new Promise<EmailVerificationSendOutcome>((resolve) => {
+    timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      resolve({ outcome: "send_timed_out" });
+    }, timeoutMs);
+  });
+
+  const work = sendEmailVerification(user as User).then(
+    (): EmailVerificationSendOutcome => ({ outcome: "send_accepted" }),
+    (error): EmailVerificationSendOutcome => ({
+      outcome: "send_failed",
+      errorCode: safeFirebaseErrorCode(error),
+    })
+  );
+  // The orphaned promise must never surface as an unhandled rejection if it
+  // settles after we have stopped waiting.
+  work.catch(() => {});
+
   try {
-    await sendEmailVerification(user as User);
-    return { outcome: "send_accepted" };
-  } catch (error) {
-    return { outcome: "send_failed", errorCode: safeFirebaseErrorCode(error) };
+    const result = await Promise.race([work, deadline]);
+    settled = true;
+    return result;
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 
@@ -89,9 +129,26 @@ export async function requestEmailVerification(
  */
 export const TELEMETRY_TIMEOUT_MS = 3000;
 export const VERIFICATION_REFRESH_TIMEOUT_MS = 3000;
+/**
+ * The Firebase client send is a network call with no SDK-level cancellation and
+ * no application bound until now. An audit caught that `MAX_RESEND_PENDING_MS`
+ * summed only the refresh and the report, so the advertised maximum excluded
+ * the very operation most likely to be slow — the same shape of unverified
+ * claim this workstream keeps having to remove.
+ */
+export const SEND_TIMEOUT_MS = 5000;
 
-/** Worst case the resend control can stay pending: refresh, then report. */
-export const MAX_RESEND_PENDING_MS = VERIFICATION_REFRESH_TIMEOUT_MS + TELEMETRY_TIMEOUT_MS;
+/**
+ * TRUE worst case for the resend control: refresh, THEN send, THEN report —
+ * three sequential bounded awaits. Every await in the pending path is counted
+ * here; if one were unbounded this constant would be a lie and must not be
+ * called a maximum.
+ *
+ * It bounds how long the UI waits. It does NOT bound Firebase's mail delivery,
+ * which is not ours to bound.
+ */
+export const MAX_RESEND_PENDING_MS =
+  VERIFICATION_REFRESH_TIMEOUT_MS + SEND_TIMEOUT_MS + TELEMETRY_TIMEOUT_MS;
 
 export type TelemetryReportOutcome = "reported" | "skipped" | "failed" | "timed_out";
 
@@ -113,7 +170,9 @@ export function buildEmailVerificationTelemetryBody(
     event:
       outcome.outcome === "send_accepted"
         ? "verification_email_send_accepted"
-        : "verification_email_send_failed",
+        : outcome.outcome === "send_timed_out"
+          ? "verification_email_send_timed_out"
+          : "verification_email_send_failed",
     source,
     errorCode: outcome.outcome === "send_failed" ? outcome.errorCode : null,
   };
