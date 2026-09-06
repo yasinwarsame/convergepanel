@@ -28,6 +28,7 @@ import { signOut } from "firebase/auth";
 import { auth } from "@/lib/firebase/client";
 import Link from "next/link";
 import { useUserPlan } from "@/hooks/useUserPlan";
+import EmailVerificationNotice from "@/components/EmailVerificationNotice";
 import { formatPlanNameWithInterval, getPlanConfig } from "@/lib/plans";
 import {
   GovernancePlanTeaser,
@@ -311,6 +312,12 @@ export default function ProfilePage() {
           </span>
           <span>Back to panel</span>
         </button>
+
+        {/* Phase P0.2-VEMAIL-C1 — verification state + resend. Renders nothing
+            for a verified identity, and never sends automatically. */}
+        <div className="mb-4">
+          <EmailVerificationNotice />
+        </div>
 
         {/* Profile card */}
         <div className="rounded-[14px] bg-cp-surface p-6 shadow-sm border border-cp-border">
