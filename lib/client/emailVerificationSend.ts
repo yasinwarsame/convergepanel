@@ -30,7 +30,7 @@
  * here may be described as either.
  */
 
-import { sendEmailVerification, type User } from "firebase/auth";
+import { reload, sendEmailVerification, type User } from "firebase/auth";
 
 export type EmailVerificationSendOutcome =
   | { outcome: "already_verified" }
@@ -71,25 +71,63 @@ export async function requestEmailVerification(
 }
 
 /**
- * How long we are willing to wait for the operator diagnostic. The review found
- * the resend control could hang at "Sending…" forever because this call was
- * awaited with no timeout: the helper swallows *errors*, but a stalled request
- * is not an error. Telemetry is a diagnostic and must never become a UI
- * availability dependency, so it is bounded and the request is genuinely
- * ABORTED on timeout rather than left running behind a race.
+ * BOUNDS — stated precisely, because the previous version's comments were not.
+ *
+ * The earlier implementation attached an AbortSignal to the fetch and claimed
+ * the call "never waits longer than" the timeout. That was false: the dynamic
+ * `import()` and `user.getIdToken(true)` both run BEFORE the fetch, and an
+ * AbortSignal cannot cancel either. If one stalled, `abort()` fired into
+ * nothing and the promise never settled — leaving the resend button at
+ * "Sending…" for as long as Firebase's own ~30-60s API timeout and webpack's
+ * 120s chunk timeout allowed, against a documented 3s.
+ *
+ * Each of these bounds ONE operation. They do not compose into a single
+ * total: a resend performs a bounded refresh and then a bounded report, so the
+ * worst case for the control is their SUM. See `MAX_RESEND_PENDING_MS`.
+ *
+ * Neither bounds Firebase's actual mail delivery, which is not ours to bound.
  */
 export const TELEMETRY_TIMEOUT_MS = 3000;
+export const VERIFICATION_REFRESH_TIMEOUT_MS = 3000;
+
+/** Worst case the resend control can stay pending: refresh, then report. */
+export const MAX_RESEND_PENDING_MS = VERIFICATION_REFRESH_TIMEOUT_MS + TELEMETRY_TIMEOUT_MS;
 
 export type TelemetryReportOutcome = "reported" | "skipped" | "failed" | "timed_out";
 
 /**
+ * The diagnostic payload, derived from the ACTUAL Firebase outcome.
+ *
+ * Extracted so the mapping exists in exactly one place. The review found a
+ * mutation that hard-coded `verification_email_send_accepted` here and passed
+ * the entire suite, because no test inspected the outgoing body — which would
+ * have reported a FAILED send to operators as resolved, the precise
+ * silent-failure class this work exists to remove. Tests now parse the body
+ * actually handed to the request layer.
+ */
+export function buildEmailVerificationTelemetryBody(
+  outcome: EmailVerificationSendOutcome,
+  source: "signup" | "resend"
+): { event: string; source: string; errorCode: string | null } {
+  return {
+    event:
+      outcome.outcome === "send_accepted"
+        ? "verification_email_send_accepted"
+        : "verification_email_send_failed",
+    source,
+    errorCode: outcome.outcome === "send_failed" ? outcome.errorCode : null,
+  };
+}
+
+/**
  * Reports the outcome to the server so an operator can see it without PostHog.
  *
- * BEST-EFFORT AND BOUNDED. It never throws and never waits longer than
- * {@link TELEMETRY_TIMEOUT_MS}: the signup or resend it describes has already
- * happened, and must not be reported as broken — nor left pending — because a
- * diagnostic was slow. The returned value exists so tests can assert the
- * bounding actually happened; callers may ignore it.
+ * BEST-EFFORT AND BOUNDED END TO END. The deadline covers module preparation,
+ * token acquisition, request construction and the network call — not merely the
+ * fetch. The AbortController is retained so a request that has already started
+ * is genuinely cancelled rather than abandoned, and a `settled` latch ensures
+ * work completing after the deadline can neither emit a late diagnostic nor
+ * change the value already returned.
  */
 export async function reportEmailVerificationSendOutcome(
   user: User | null,
@@ -100,35 +138,86 @@ export async function reportEmailVerificationSendOutcome(
   if (outcome.outcome === "already_verified") return "skipped";
 
   const controller = new AbortController();
-  let timedOut = false;
-  const timer = setTimeout(() => {
-    timedOut = true;
-    controller.abort();
-  }, TELEMETRY_TIMEOUT_MS);
+  let settled = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  const deadline = new Promise<TelemetryReportOutcome>((resolve) => {
+    timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      // Cancels an in-flight fetch, AND poisons the signal so work that was
+      // still stalled in import/token acquisition cannot start a late request.
+      controller.abort();
+      resolve("timed_out");
+    }, TELEMETRY_TIMEOUT_MS);
+  });
+
+  const work = (async (): Promise<TelemetryReportOutcome> => {
+    try {
+      const { authedFetch } = await import("@/lib/client/authedFetch");
+      // The import itself may have outlived the deadline.
+      if (controller.signal.aborted) return "timed_out";
+      await authedFetch("/api/user/email-verification-telemetry", {
+        user,
+        authReady: true,
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
+        body: JSON.stringify(buildEmailVerificationTelemetryBody(outcome, source)),
+      });
+      return "reported";
+    } catch {
+      return controller.signal.aborted ? "timed_out" : "failed";
+    }
+  })();
 
   try {
-    const { authedFetch } = await import("@/lib/client/authedFetch");
-    await authedFetch("/api/user/email-verification-telemetry", {
-      user,
-      authReady: true,
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      signal: controller.signal,
-      body: JSON.stringify({
-        event:
-          outcome.outcome === "send_accepted"
-            ? "verification_email_send_accepted"
-            : "verification_email_send_failed",
-        source,
-        errorCode: outcome.outcome === "send_failed" ? outcome.errorCode : null,
-      }),
-    });
-    return "reported";
-  } catch {
-    // Abort, network failure, auth failure — all identical from here: the
-    // diagnostic did not land, and nothing user-facing depends on it.
-    return timedOut ? "timed_out" : "failed";
+    const result = await Promise.race([work, deadline]);
+    settled = true;
+    return result;
   } finally {
-    clearTimeout(timer);
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/**
+ * A BOUNDED refresh of the cached verification flag.
+ *
+ * `user.reload()` is a network call. The review found it had been added inside
+ * the resend's in-flight window with no bound, so a stalled reload could hold
+ * the control pending indefinitely — a `finally` cannot release a lock whose
+ * `await` never settles.
+ *
+ * The outcomes are deliberately distinct from send outcomes: a refresh that
+ * fails or times out is NOT a verification-email send failure, and must never
+ * be reported to operators as one, because no send was attempted.
+ */
+export type VerificationRefreshOutcome =
+  | "verified"
+  | "still_unverified"
+  | "check_failed"
+  | "check_timed_out";
+
+export async function refreshVerificationStatus(
+  user: (User & { emailVerified: boolean }) | null,
+  timeoutMs: number = VERIFICATION_REFRESH_TIMEOUT_MS
+): Promise<VerificationRefreshOutcome> {
+  if (!user) return "check_failed";
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<VerificationRefreshOutcome>((resolve) => {
+    timer = setTimeout(() => resolve("check_timed_out"), timeoutMs);
+  });
+  const work = (async (): Promise<VerificationRefreshOutcome> => {
+    try {
+      await reload(user);
+      return user.emailVerified ? "verified" : "still_unverified";
+    } catch {
+      return "check_failed";
+    }
+  })();
+  try {
+    return await Promise.race([work, deadline]);
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }

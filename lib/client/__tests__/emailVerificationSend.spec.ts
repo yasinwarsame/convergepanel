@@ -82,16 +82,16 @@ describe("safeFirebaseErrorCode — sensitive material must not propagate", () =
  * module has already been loaded is silently ignored and the assertion passes
  * for the wrong reason. Isolating forces each case to exercise its own double.
  */
-describe("reportEmailVerificationSendOutcome — bounded and best-effort", () => {
+describe("reportEmailVerificationSendOutcome — bounded END TO END", () => {
   const load = async (authedFetch: unknown) => {
     jest.resetModules();
     jest.doMock("@/lib/client/authedFetch", () => ({ authedFetch }));
     jest.doMock("firebase/auth", () => ({
       sendEmailVerification: (...a: unknown[]) => sendEmailVerification(...(a as [])),
+      reload: jest.fn(),
     }));
     return import("../emailVerificationSend");
   };
-
   afterEach(() => { jest.useRealTimers(); jest.resetModules(); });
 
   it("does not report for an already-verified identity", async () => {
@@ -110,7 +110,7 @@ describe("reportEmailVerificationSendOutcome — bounded and best-effort", () =>
     ).resolves.toBe("failed");
   });
 
-  it("passes a live AbortSignal so the request can be cancelled cleanly", async () => {
+  it("passes a live AbortSignal so a started request is genuinely cancelled", async () => {
     let opts: { signal?: AbortSignal } | undefined;
     const m = await load((_u: string, o: { signal?: AbortSignal }) => { opts = o; return Promise.resolve(); });
     await m.reportEmailVerificationSendOutcome({} as never, { outcome: "send_accepted" }, "signup");
@@ -118,28 +118,165 @@ describe("reportEmailVerificationSendOutcome — bounded and best-effort", () =>
     expect(opts?.signal?.aborted).toBe(false);
   });
 
-  it("THE FIX: a request that never resolves is ABORTED and returns timed_out", async () => {
+  it("THE FIX: a stalled FETCH is aborted and returns timed_out", async () => {
     let seenSignal: AbortSignal | undefined;
     const m = await load((_u: string, o: { signal?: AbortSignal }) =>
-      new Promise((_res, rej) => {
-        seenSignal = o.signal;
-        o.signal?.addEventListener("abort", () => rej(new Error("aborted")));
-      })
+      new Promise((_r, rej) => { seenSignal = o.signal; o.signal?.addEventListener("abort", () => rej(new Error("aborted"))); })
     );
     jest.useFakeTimers();
     const p = m.reportEmailVerificationSendOutcome({} as never, { outcome: "send_accepted" }, "resend");
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
     jest.advanceTimersByTime(m.TELEMETRY_TIMEOUT_MS + 10);
     await expect(p).resolves.toBe("timed_out");
-    // Genuinely aborted — not merely raced, leaving the request running.
     expect(seenSignal?.aborted).toBe(true);
   });
 
-  it("the bound is short enough not to stall a user flow", async () => {
+  it("THE FIX: a stall BEFORE the fetch (token acquisition) still returns timed_out", async () => {
+    // authedFetch awaits user.getIdToken() before fetch; the AbortSignal cannot
+    // cancel that, which is exactly how the control used to hang.
+    const m = await load(() => new Promise(() => { /* never settles at all */ }));
+    jest.useFakeTimers();
+    const p = m.reportEmailVerificationSendOutcome({} as never, { outcome: "send_accepted" }, "resend");
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    jest.advanceTimersByTime(m.TELEMETRY_TIMEOUT_MS + 10);
+    await expect(p).resolves.toBe("timed_out");
+  });
+
+  it("THE FIX: late completion after the deadline emits NO diagnostic and cannot change the outcome", async () => {
+    let release: (v: unknown) => void = () => {};
+    let calls = 0;
+    let sawAbortedAtCall: boolean | undefined;
+    const m = await load((_u: string, o: { signal?: AbortSignal }) => {
+      calls += 1;
+      sawAbortedAtCall = o.signal?.aborted;
+      return new Promise((res) => { release = res; });
+    });
+    jest.useFakeTimers();
+    const p = m.reportEmailVerificationSendOutcome({} as never, { outcome: "send_accepted" }, "resend");
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    jest.advanceTimersByTime(m.TELEMETRY_TIMEOUT_MS + 10);
+    await expect(p).resolves.toBe("timed_out");
+    // The stalled work finishes afterwards; the caller already has its answer.
+    release(undefined);
+    await Promise.resolve();
+    expect(await p).toBe("timed_out");   // unchanged by late completion
+    expect(calls).toBe(1);               // no second, late request
+    expect(sawAbortedAtCall).toBe(false);
+  });
+
+  it("documents separate bounds, and their sum", async () => {
     const m = await load(() => Promise.resolve());
-    expect(m.TELEMETRY_TIMEOUT_MS).toBeGreaterThan(0);
     expect(m.TELEMETRY_TIMEOUT_MS).toBeLessThanOrEqual(5000);
+    expect(m.VERIFICATION_REFRESH_TIMEOUT_MS).toBeLessThanOrEqual(5000);
+    expect(m.MAX_RESEND_PENDING_MS).toBe(m.VERIFICATION_REFRESH_TIMEOUT_MS + m.TELEMETRY_TIMEOUT_MS);
+  });
+});
+
+/**
+ * THE R2 SURVIVOR. A mutation hard-coding `verification_email_send_accepted`
+ * passed the whole suite because nothing inspected what the client actually
+ * sent — so a FAILED send would have been logged to operators as resolved.
+ * These parse the real body handed to the request layer.
+ */
+describe("telemetry request BODY reflects the real Firebase outcome", () => {
+  const loadCapturing = async () => {
+    jest.resetModules();
+    const captured: { url?: string; body?: Record<string, unknown> } = {};
+    jest.doMock("@/lib/client/authedFetch", () => ({
+      authedFetch: (url: string, o: { body?: string }) => {
+        captured.url = url;
+        captured.body = JSON.parse(o.body ?? "{}");
+        return Promise.resolve();
+      },
+    }));
+    jest.doMock("firebase/auth", () => ({ sendEmailVerification: jest.fn(), reload: jest.fn() }));
+    const m = await import("../emailVerificationSend");
+    return { m, captured };
+  };
+  afterEach(() => jest.resetModules());
+
+  it("send_accepted -> event verification_email_send_accepted", async () => {
+    const { m, captured } = await loadCapturing();
+    await m.reportEmailVerificationSendOutcome({} as never, { outcome: "send_accepted" }, "resend");
+    expect(captured.body?.event).toBe("verification_email_send_accepted");
+    expect(captured.body?.errorCode).toBeNull();
+  });
+
+  it("THE FIX: send_failed -> event verification_email_send_failed, never accepted", async () => {
+    const { m, captured } = await loadCapturing();
+    await m.reportEmailVerificationSendOutcome(
+      {} as never, { outcome: "send_failed", errorCode: "auth/too-many-requests" }, "resend"
+    );
+    expect(captured.body?.event).toBe("verification_email_send_failed");
+    expect(captured.body?.event).not.toBe("verification_email_send_accepted");
+    expect(captured.body?.errorCode).toBe("auth/too-many-requests");
+  });
+
+  it("a failed send with no safe code sends errorCode null, not a fabricated one", async () => {
+    const { m, captured } = await loadCapturing();
+    await m.reportEmailVerificationSendOutcome({} as never, { outcome: "send_failed", errorCode: null }, "signup");
+    expect(captured.body?.event).toBe("verification_email_send_failed");
+    expect(captured.body?.errorCode).toBeNull();
+  });
+
+  it("source is the caller's, for signup and for resend", async () => {
+    const a = await loadCapturing();
+    await a.m.reportEmailVerificationSendOutcome({} as never, { outcome: "send_accepted" }, "signup");
+    expect(a.captured.body?.source).toBe("signup");
+    const b = await loadCapturing();
+    await b.m.reportEmailVerificationSendOutcome({} as never, { outcome: "send_accepted" }, "resend");
+    expect(b.captured.body?.source).toBe("resend");
+  });
+
+  it("posts to the diagnostic endpoint and carries no sensitive material", async () => {
+    const { m, captured } = await loadCapturing();
+    await m.reportEmailVerificationSendOutcome(
+      {} as never, { outcome: "send_failed", errorCode: "auth/network-request-failed" }, "resend"
+    );
+    expect(captured.url).toBe("/api/user/email-verification-telemetry");
+    expect(Object.keys(captured.body ?? {}).sort()).toEqual(["errorCode", "event", "source"]);
+    expect(JSON.stringify(captured.body)).not.toMatch(/@|oobCode|token|password|https?:/i);
+  });
+});
+
+/**
+ * BOUNDED verification refresh. An unbounded reload() inside the resend window
+ * was a second way to hang the control.
+ */
+describe("refreshVerificationStatus", () => {
+  const loadWithReload = async (reload: unknown) => {
+    jest.resetModules();
+    jest.doMock("firebase/auth", () => ({ sendEmailVerification: jest.fn(), reload }));
+    return import("../emailVerificationSend");
+  };
+  afterEach(() => { jest.useRealTimers(); jest.resetModules(); });
+
+  it("verified after reload", async () => {
+    const u = { emailVerified: false };
+    const m = await loadWithReload(async () => { u.emailVerified = true; });
+    await expect(m.refreshVerificationStatus(u as never)).resolves.toBe("verified");
+  });
+
+  it("still unverified after reload", async () => {
+    const m = await loadWithReload(async () => {});
+    await expect(m.refreshVerificationStatus({ emailVerified: false } as never)).resolves.toBe("still_unverified");
+  });
+
+  it("a fast failure is check_failed, NOT a send failure", async () => {
+    const m = await loadWithReload(async () => { throw new Error("network"); });
+    await expect(m.refreshVerificationStatus({ emailVerified: false } as never)).resolves.toBe("check_failed");
+  });
+
+  it("THE FIX: a hanging reload times out instead of pending forever", async () => {
+    const m = await loadWithReload(() => new Promise(() => {}));
+    jest.useFakeTimers();
+    const p = m.refreshVerificationStatus({ emailVerified: false } as never);
+    jest.advanceTimersByTime(m.VERIFICATION_REFRESH_TIMEOUT_MS + 10);
+    await expect(p).resolves.toBe("check_timed_out");
+  });
+
+  it("a null user is check_failed and never throws", async () => {
+    const m = await loadWithReload(async () => {});
+    await expect(m.refreshVerificationStatus(null)).resolves.toBe("check_failed");
   });
 });

@@ -11,8 +11,8 @@ import TestRenderer, { act } from "react-test-renderer";
 let currentUser: { emailVerified: boolean; uid: string } | null = { emailVerified: false, uid: "uid-A" };
 jest.mock("@/components/AuthProvider", () => ({ useAuth: () => ({ user: currentUser }) }));
 
-const reload = jest.fn().mockResolvedValue(undefined);
-jest.mock("firebase/auth", () => ({ reload: (...a: unknown[]) => reload(...(a as [])) }));
+const refreshVerificationStatus = jest.fn();
+jest.mock("firebase/auth", () => ({ reload: jest.fn(), sendEmailVerification: jest.fn() }));
 
 // Ordered trace so sequencing can be asserted, not assumed.
 let trace: string[] = [];
@@ -21,6 +21,7 @@ const reportEmailVerificationSendOutcome = jest.fn();
 jest.mock("@/lib/client/emailVerificationSend", () => ({
   requestEmailVerification: (...a: unknown[]) => requestEmailVerification(...(a as [])),
   reportEmailVerificationSendOutcome: (...a: unknown[]) => reportEmailVerificationSendOutcome(...(a as [])),
+  refreshVerificationStatus: (...a: unknown[]) => refreshVerificationStatus(...(a as [])),
 }));
 
 // REAL shared state module — the writer/reader contract under test.
@@ -66,7 +67,10 @@ beforeEach(() => {
   jest.useRealTimers();
   trace = [];
   currentUser = { emailVerified: false, uid: "uid-A" };
-  reload.mockReset().mockImplementation(async () => { trace.push("reload"); });
+  refreshVerificationStatus.mockReset().mockImplementation(async () => {
+    trace.push("refresh");
+    return currentUser?.emailVerified ? "verified" : "still_unverified";
+  });
   requestEmailVerification.mockReset().mockImplementation(async () => {
     trace.push("firebase:start");
     trace.push("firebase:resolve");
@@ -238,15 +242,15 @@ describe("cooldown timer lifecycle", () => {
 
 describe("stale verification is refreshed", () => {
   it("THE FIX: verified in another tab -> notice disappears after reload", async () => {
-    reload.mockImplementation(async () => { currentUser!.emailVerified = true; });
+    refreshVerificationStatus.mockImplementation(async () => { currentUser!.emailVerified = true; return "verified"; });
     const r = await renderAsync();
-    expect(reload).toHaveBeenCalled();
+    expect(refreshVerificationStatus).toHaveBeenCalled();
     expect(r.toJSON()).toBeNull();
   });
 
   it("THE FIX: the pre-send guard is load-bearing — a reload-verified user sends NOTHING", async () => {
     const r = await renderAsync();          // still unverified at mount
-    reload.mockImplementation(async () => { currentUser!.emailVerified = true; });
+    refreshVerificationStatus.mockImplementation(async () => { currentUser!.emailVerified = true; return "verified"; });
     await act(async () => { await button(r).props.onClick(); });
     expect(requestEmailVerification).not.toHaveBeenCalled();
     expect(reportEmailVerificationSendOutcome).not.toHaveBeenCalled();
@@ -254,10 +258,42 @@ describe("stale verification is refreshed", () => {
   });
 
   it("a failing reload does not claim verification and keeps recovery available", async () => {
-    reload.mockRejectedValue(new Error("network"));
+    refreshVerificationStatus.mockResolvedValue("check_failed");
     const r = await renderAsync();
     expect(r.toJSON()).not.toBeNull();
     expect(text(r)).toMatch(/not verified yet/i);
+    await act(async () => { await button(r).props.onClick(); });
+    expect(requestEmailVerification).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("bounded verification check", () => {
+  it("THE FIX: a timed-out check does NOT send, and does NOT emit a send diagnostic", async () => {
+    const r = await renderAsync();
+    refreshVerificationStatus.mockResolvedValue("check_timed_out");
+    await act(async () => { await button(r).props.onClick(); });
+    expect(requestEmailVerification).not.toHaveBeenCalled();
+    expect(reportEmailVerificationSendOutcome).not.toHaveBeenCalled();
+    expect(text(r)).toMatch(/couldn't check your verification status/i);
+  });
+
+  it("a timed-out check is not labelled a send failure", async () => {
+    const r = await renderAsync();
+    refreshVerificationStatus.mockResolvedValue("check_timed_out");
+    await act(async () => { await button(r).props.onClick(); });
+    expect(text(r)).not.toMatch(/couldn't send the verification email/i);
+  });
+
+  it("a timed-out check still releases the control (cooldown, not stuck)", async () => {
+    const r = await renderAsync();
+    refreshVerificationStatus.mockResolvedValue("check_timed_out");
+    await act(async () => { await button(r).props.onClick(); });
+    expect(button(r).props.children).not.toMatch(/Sending/);
+  });
+
+  it("a fast check failure still proceeds to send (recovery is not blocked)", async () => {
+    const r = await renderAsync();
+    refreshVerificationStatus.mockResolvedValue("check_failed");
     await act(async () => { await button(r).props.onClick(); });
     expect(requestEmailVerification).toHaveBeenCalledTimes(1);
   });

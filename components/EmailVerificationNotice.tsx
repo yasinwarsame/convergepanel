@@ -15,9 +15,13 @@
  *    resend. Browser storage is never verification authority.
  *  - Stored state is UID-SCOPED, so one account's failure is never shown to
  *    another in the same browser.
- *  - Telemetry is BOUNDED and its outcome never gates the control. A stalled
- *    diagnostic used to leave this button at "Sending…" forever with `inFlight`
- *    stuck true — disabling the single control this feature exists to add.
+ *  - EVERY network await inside the pending window is BOUNDED, and no
+ *    diagnostic outcome gates the control. A stalled telemetry call used to
+ *    leave this button at "Sending…" forever with `inFlight` stuck true, and a
+ *    later unbounded reload() added a second way to do it. The verification
+ *    refresh and the telemetry report are bounded SEPARATELY, so the worst case
+ *    for this control is their sum (`MAX_RESEND_PENDING_MS`), not one timeout.
+ *    Neither bounds Firebase's actual mail delivery.
  *  - The cooldown applies after EVERY completed attempt. A failure is often
  *    `auth/too-many-requests`, and inviting an immediate retry was misleading.
  *  - `user.reload()` refreshes cached verification, so someone who verified in
@@ -31,9 +35,9 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { reload } from "firebase/auth";
 import { useAuth } from "@/components/AuthProvider";
 import {
+  refreshVerificationStatus,
   reportEmailVerificationSendOutcome,
   requestEmailVerification,
 } from "@/lib/client/emailVerificationSend";
@@ -45,7 +49,7 @@ import {
 
 export const COOLDOWN_MS = 60_000;
 
-type Status = "idle" | "sending" | "accepted" | "failed";
+type Status = "idle" | "sending" | "accepted" | "failed" | "check_failed";
 
 export default function EmailVerificationNotice() {
   const { user } = useAuth();
@@ -64,21 +68,17 @@ export default function EmailVerificationNotice() {
     setStoredState(uid ? readEmailVerificationSendState(uid) : null);
   }, [uid]);
 
-  // Refresh the cached verification flag. If reload fails we deliberately do
-  // NOT claim the user is verified — we leave the notice up, which is the
+  // Refresh the cached verification flag, BOUNDED. A failed or timed-out check
+  // deliberately asserts nothing: we leave the notice up, which is the
   // recoverable direction.
   useEffect(() => {
     let cancelled = false;
     if (!user || user.emailVerified) return;
     (async () => {
-      try {
-        await reload(user);
-        if (!cancelled && user.emailVerified) {
-          setVerifiedByReload(true);
-          clearEmailVerificationSendState(user.uid);
-        }
-      } catch {
-        /* keep showing the notice; never assert verification we cannot confirm */
+      const result = await refreshVerificationStatus(user);
+      if (!cancelled && result === "verified") {
+        setVerifiedByReload(true);
+        clearEmailVerificationSendState(user.uid);
       }
     })();
     return () => {
@@ -108,20 +108,32 @@ export default function EmailVerificationNotice() {
     setStatus("sending");
     setErrorCode(null);
     try {
-      // Fresh-enough verification check, so the already-verified guard below is
-      // load-bearing rather than trusting a possibly stale cached flag.
-      try {
-        await reload(user);
-      } catch {
-        /* proceed on the cached value; failing closed here would block recovery */
-      }
-      if (user.emailVerified) {
+      // Fresh-enough verification check, BOUNDED. Previously an unbounded
+      // reload() sat here inside the in-flight window, so a stalled network
+      // call could hold this control pending indefinitely — a `finally` cannot
+      // release a lock whose `await` never settles.
+      const refresh = await refreshVerificationStatus(user);
+
+      if (refresh === "verified") {
         setVerifiedByReload(true);
         clearEmailVerificationSendState(user.uid);
         setStatus("idle");
         return;
       }
 
+      if (refresh === "check_timed_out") {
+        // We could not confirm whether this identity is already verified, so we
+        // do NOT mail them — they may have verified elsewhere. This is a CHECK
+        // failure, not a send failure: no send was attempted, so no
+        // verification_email_send_* diagnostic may be emitted for it.
+        setStatus("check_failed");
+        setCooldownUntil(Date.now() + COOLDOWN_MS);
+        setNow(Date.now());
+        return;
+      }
+
+      // "check_failed" (a fast error) preserves the previous safe behaviour:
+      // proceed on the cached value rather than blocking recovery.
       const outcome = await requestEmailVerification(user);
 
       // Bounded and best-effort: its result never decides what the user sees.
@@ -146,8 +158,8 @@ export default function EmailVerificationNotice() {
         setNow(Date.now());
       }
     } finally {
-      // Released regardless of telemetry: a diagnostic outage may never leave
-      // the control stuck.
+      // Released on every path. Combined with the bounds above, no
+      // asynchronous branch can leave this control pending indefinitely.
       inFlight.current = false;
     }
   }, [user, cooldownUntil]);
@@ -158,7 +170,9 @@ export default function EmailVerificationNotice() {
   const secondsLeft = cooling ? Math.ceil((cooldownUntil - now) / 1000) : 0;
 
   let message: string;
-  if (status === "accepted" || (status === "idle" && storedState === "send_accepted")) {
+  if (status === "check_failed") {
+    message = "We couldn't check your verification status. Please try again.";
+  } else if (status === "accepted" || (status === "idle" && storedState === "send_accepted")) {
     message = "Verification email requested. Check your inbox, and your spam folder.";
   } else if (status === "failed" || storedState === "send_failed") {
     message = cooling
