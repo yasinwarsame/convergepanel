@@ -151,7 +151,16 @@ export function calculateEffectiveEntitlement(userDoc: UserDocument | null | und
   // so resolving entitlement from `planFromStripe` alone made a paid
   // decision depend on a field the canonical writer does not set. `plan` is
   // read as a fallback only when `planFromStripe` is absent, and both are
-  // gated by the same status predicate. Neither field is client-writable.
+  // gated by the same status predicate.
+  //
+  // Phase FIRESTORE-AUTHZ-P0.1: this comment previously asserted "Neither
+  // field is client-writable" while `firestore.rules` granted
+  // `allow write: if request.auth.uid == uid` on the whole document — so both
+  // fields, and `override` below, WERE writable from any signed-in browser.
+  // The claim is now true and enforced: `firestore.rules` restricts client
+  // writes on `/users/{uid}` to an explicit allowlist of profile fields, and
+  // every field this resolver reads is outside it. Server writers reach these
+  // fields through the Admin SDK, which bypasses rules entirely.
   const stripeStatus = userDoc.subscriptionStatusFromStripe || userDoc.subscriptionStatus;
   const stripePlan: EntitlementPlan | null =
     userDoc.planFromStripe && userDoc.planFromStripe !== "free"

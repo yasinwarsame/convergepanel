@@ -30,7 +30,8 @@
     "projects:dry-run-normalization": "node --conditions=react-server -r ./scripts/workspaces/register-path-alias.js node_modules/.bin/ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/projects/dry-run-project-normalization.ts",
     "projects:execute-normalization": "node --conditions=react-server -r ./scripts/workspaces/register-path-alias.js node_modules/.bin/ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/projects/execute-project-normalization.ts",
     "verify:project-run-invariant": "node --conditions=react-server -r ./scripts/workspaces/register-path-alias.js node_modules/.bin/ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/projects/check-project-run-invariant.ts",
-    "billing:verify-prices": "node scripts/billing/verify-stripe-price-cadence.mjs"
+    "billing:verify-prices": "node scripts/billing/verify-stripe-price-cadence.mjs",
+    "test:rules": "firebase emulators:exec --only firestore --project convergepanel-rules-test \"npx jest --config jest.rules.config.js\""
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.20.0",
@@ -60,6 +61,7 @@
     "zod": "^4.2.1"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.2",
     "@types/jest": "^30.0.0",
     "@types/jszip": "3.4.0",
     "@types/node": "^20.11.0",
@@ -71,6 +73,7 @@
     "esbuild": "^0.27.4",
     "eslint": "^8.57.0",
     "eslint-config-next": "^14.2.35",
+    "firebase-tools": "^13.35.1",
     "jest": "^30.4.2",
     "jszip": "3.10.1",
     "playwright": "^1.60.0",

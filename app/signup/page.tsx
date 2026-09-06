@@ -262,25 +262,46 @@ export default function SignupPage() {
       // 
       // We set onboardingCompleted: false so the app will redirect them to /onboarding
       // where they can provide role, use case, usage frequency, and referral source.
-      const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM format
-      // Use stripUndefined to remove undefined values before writing to Firestore.
-      // Firestore does not accept undefined field values.
+      // Phase FIRESTORE-AUTHZ-P0.1 — CLIENT-OWNED FIELDS ONLY.
+      //
+      // This write used to seed `role`, `plan`, `runsThisMonth`, `usageMonth`,
+      // `tokensUsedCurrentPeriod`, `totalRuns` and `isDisabled` from the
+      // browser. Those are the very fields the entitlement resolver, the quota
+      // gate and governance role resolution read, so the write was both the
+      // reason the rules had to stay permissive AND the shape an attacker
+      // copied to forge a plan. Firestore rules now reject them.
+      //
+      // Nothing is lost by dropping them: every one has a safe default when
+      // absent, and `role` is granted only by the admin endpoint or derived
+      // from the verified email allowlist. `/api/user/usage` and the quota gate
+      // initialise plan and usage when the document does not yet EXIST (both
+      // branch on `!userDoc.exists`), and repair `totalRuns` and
+      // `tokensUsedCurrentPeriod` on a document that is missing them.
+      //
+      // Phase P0.1-R4 — MERGE, NOT REPLACE.
+      //
+      // This was a bare `setDoc(ref, payload)`, which REPLACES the whole
+      // document. A server bootstrap can create `users/{uid}` before this line
+      // runs — `/api/user/usage` is fetched by TopNav's `useUserPlan` as soon
+      // as auth is ready, which races the write below — and against such a
+      // document a replace DELETES `plan`, `runsThisMonth`, `usageMonth` and
+      // `totalRuns`. Removals enter `affectedKeys()`, those keys are not
+      // client-writable, and the whole write is correctly denied: the account
+      // exists in Firebase Auth but signup fails and does not redirect.
+      //
+      // Merge is also the honest description of what signup does. It completes
+      // the profile fields it owns; it has never owned the server-written
+      // remainder of the document, and the fix belongs here rather than in a
+      // rules exception that would permit destructive replacement.
       await setDoc(doc(db, "users", user.uid), stripUndefined({
         uid: user.uid,
         email: user.email,
         name: name.trim() || undefined, // Will be stripped if empty
-        role: "user", // User role (not onboarding role)
-        plan: "free", // Default plan for all new users
-        runsThisMonth: 0, // Start with zero runs
-        usageMonth: currentMonth, // Track which month the counter applies to
-        tokensUsedCurrentPeriod: 0, // Initialize token counter for current billing period
-        totalRuns: 0, // Initialize lifetime run counter
         onboardingCompleted: false, // User must complete onboarding before using the app
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
         lastLoginAt: serverTimestamp(),
-        isDisabled: false,
-      }));
+      }), { merge: true });
 
       // Session-cookie creation/verification now happens reactively in
       // AuthProvider's onIdTokenChanged listener — see the pending-sync

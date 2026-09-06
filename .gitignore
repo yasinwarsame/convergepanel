@@ -58,3 +58,7 @@ posthog-setup-report.md
 
 # Workspace provisioning result artifacts (contain real user ids)
 workspace-provisioning-*.json
+
+# Firestore emulator artefacts (rules tests)
+firestore-debug.log
+firebase-debug.log
