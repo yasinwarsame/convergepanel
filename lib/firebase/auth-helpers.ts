@@ -10,7 +10,8 @@
 import "server-only";
 import type { DecodedIdToken } from "firebase-admin/auth";
 import { NextRequest } from "next/server";
-import { isAdminEmail } from "@/lib/admin/config";
+import { isVerifiedAdminEmail } from "@/lib/admin/config";
+import { resolveLiveAuthIdentity } from "@/lib/admin/verifiedAdminIdentity";
 import { adminAuth } from "./admin";
 
 /**
@@ -187,7 +188,28 @@ export async function requireAdmin(
 }
 
 /**
- * Admin portal / support APIs: Firebase `admin` custom claim OR email on {@link isAdminEmail} allowlist.
+ * Admin portal / support APIs: Firebase `admin` custom claim OR a VERIFIED
+ * allowlisted email.
+ *
+ * Phase FIRESTORE-AUTHZ-P0.2. This guard previously granted admin authority on
+ * `isAdminEmail(email)` where `email` came from the ID token — or, when the
+ * token carried none, from the Auth record — with no proof that the identity
+ * owned the address. Since any registration claims any unclaimed address, that
+ * handed an attacker `/api/admin/users`, `/api/admin/runs`,
+ * `/api/admin/sync-subscription` and the rest of this surface.
+ *
+ * The two authorities are now explicitly separate:
+ *
+ *   1. `decoded.admin === true` — server-issued custom claim, independently
+ *      trusted, UNCHANGED. It deliberately does not require a verified email:
+ *      it carries its own proof, and a custom-claim admin may legitimately hold
+ *      an address that is on no allowlist.
+ *   2. the email allowlist — now requires a LIVE Auth record whose email is
+ *      allowlisted AND whose `emailVerified` is true. The token's email never
+ *      grants anything, so there is no path by which a token address and a
+ *      record's verification flag can be combined.
+ *
+ * Auth lookup failure denies.
  */
 export async function requireAdminApiAccess(
   request: NextRequest
@@ -199,19 +221,25 @@ export async function requireAdminApiAccess(
   if (!raw) return null;
 
   const allow = async (decoded: DecodedIdToken): Promise<{ uid: string; email: string } | null> => {
-    let email = typeof decoded.email === "string" ? decoded.email : "";
-    if (!email && decoded.uid) {
-      try {
-        const rec = await adminAuth!.getUser(decoded.uid);
-        email = rec.email ?? "";
-      } catch {
-        /* ignore */
+    // (1) Server-issued custom claim — independently sufficient, as before. The
+    // returned email is descriptive only; it is not what granted access, so
+    // falling back to the record for a display value cannot widen authority.
+    if (decoded.admin === true) {
+      let email = typeof decoded.email === "string" ? decoded.email : "";
+      if (!email) {
+        const live = await resolveLiveAuthIdentity(decoded.uid);
+        if (live.status === "resolved") email = live.email;
       }
-    }
-    if (decoded.admin === true || isAdminEmail(email)) {
       return { uid: decoded.uid, email };
     }
-    return null;
+
+    // (2) Email allowlist — LIVE record only, both fields from the same object.
+    const live = await resolveLiveAuthIdentity(decoded.uid);
+    if (live.status !== "resolved") return null;
+    if (!isVerifiedAdminEmail({ email: live.email, emailVerified: live.emailVerified })) {
+      return null;
+    }
+    return { uid: decoded.uid, email: live.email };
   };
 
   try {

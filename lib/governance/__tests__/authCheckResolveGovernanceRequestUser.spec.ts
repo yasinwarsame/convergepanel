@@ -43,7 +43,9 @@ beforeEach(() => {
   mockVerifySessionCookie.mockReset();
   mockVerifyIdToken.mockReset();
   mockGetUser.mockReset();
-  mockGetUser.mockResolvedValue({ email: "user@example.com" });
+  // Phase FIRESTORE-AUTHZ-P0.2: `emailVerified` now travels out of this same
+  // record read, so the fixture must supply it like the real Auth record does.
+  mockGetUser.mockResolvedValue({ email: "user@example.com", emailVerified: true });
 });
 
 describe("resolveGovernanceRequestUser", () => {
@@ -56,14 +58,14 @@ describe("resolveGovernanceRequestUser", () => {
   it("valid cookie only -> ok with cookie uid and email from adminAuth", async () => {
     mockVerifySessionCookie.mockResolvedValue({ uid: "user-a", isAdmin: false });
     const result = await resolveGovernanceRequestUser(buildRequest({ cookie: "__session=valid" }));
-    expect(result).toEqual({ ok: true, uid: "user-a", email: "user@example.com" });
+    expect(result).toEqual({ ok: true, uid: "user-a", email: "user@example.com", emailVerified: true });
   });
 
   it("valid bearer only -> ok with bearer uid", async () => {
     mockVerifySessionCookie.mockResolvedValue(null);
     mockVerifyIdToken.mockResolvedValue({ uid: "user-b" });
     const result = await resolveGovernanceRequestUser(buildRequest({ authHeader: "Bearer valid-token" }));
-    expect(result).toEqual({ ok: true, uid: "user-b", email: "user@example.com" });
+    expect(result).toEqual({ ok: true, uid: "user-b", email: "user@example.com", emailVerified: true });
   });
 
   it("REGRESSION (root cause): mismatched valid cookie + bearer -> fails closed, does not use either identity", async () => {

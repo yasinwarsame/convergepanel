@@ -4,7 +4,7 @@
 
 import "server-only";
 import { NextResponse } from "next/server";
-import { isAdminEmail } from "@/lib/admin/config";
+import { isVerifiedAdminEmail } from "@/lib/admin/config";
 import { getEffectiveEntitlements } from "@/lib/admin/entitlements";
 import { adminDb } from "@/lib/firebase/admin";
 import { parseGovernanceReviewerFor } from "@/lib/governance/reviewerFields";
@@ -29,12 +29,21 @@ export type GovernanceVisibility =
  * - Full plan, no assigners: empty array (queue empty; policies/audit still allowed).
  * - Free / lite: plan_required.
  */
-export async function resolveGovernanceVisibleUserIds(uid: string, email: string): Promise<GovernanceVisibility> {
+export async function resolveGovernanceVisibleUserIds(
+  uid: string,
+  email: string,
+  emailVerified: boolean
+): Promise<GovernanceVisibility> {
   if (!adminDb) {
     return { ok: false, kind: "no_db" };
   }
 
-  if (isAdminEmail(email)) {
+  // Phase FIRESTORE-AUTHZ-P0.2: this branch returns `visibleUserIds: null` —
+  // no owner filter at all, i.e. every user's runs, decisions and review
+  // records. An allowlisted address that the identity has not PROVEN it owns
+  // must never reach it. Callers supply both fields from one live Auth record
+  // (`resolveGovernanceRequestUser`), never from a token claim.
+  if (isVerifiedAdminEmail({ email, emailVerified })) {
     console.log(`[governance/queue] Admin: global access (visibleUserIds = null)`);
     return { ok: true, visibleUserIds: null, isSupportAdmin: true, queueScope: "admin_global" };
   }
@@ -83,20 +92,29 @@ const GOVERNANCE_VISIBILITY_CACHE_TTL_MS = 120_000;
 const governanceVisibilityCache = new Map<string, { entry: GovernanceVisibility; expiresAt: number }>();
 
 /**
- * Same as {@link resolveGovernanceVisibleUserIds} but caches the result per (uid, email) for 2 minutes.
- * Use for read-heavy list endpoints; prefer the uncached resolver when correctness must be immediate (e.g. review).
+ * Same as {@link resolveGovernanceVisibleUserIds} but caches the result per
+ * (uid, canonical email, verified state) for 2 minutes.
+ *
+ * Phase FIRESTORE-AUTHZ-P0.2 — THE VERIFICATION STATE IS PART OF THE KEY, and
+ * that is a security requirement, not a tidiness one. The identity evidence is
+ * re-read live on every request; keying only on (uid, email) would let a global
+ * admin grant computed while an identity was verified continue to be served for
+ * up to the TTL after verification was revoked, and would let a changed email
+ * reuse a decision made for the previous address. A cached authority must never
+ * outlive the proof it rested on, and TTL alone is not that proof.
  */
 export async function resolveGovernanceVisibleUserIdsCached(
   uid: string,
-  email: string
+  email: string,
+  emailVerified: boolean
 ): Promise<GovernanceVisibility> {
-  const key = `${uid}::${email.trim().toLowerCase()}`;
+  const key = `${uid}::${email.trim().toLowerCase()}::${emailVerified === true ? "verified" : "unverified"}`;
   const now = Date.now();
   const hit = governanceVisibilityCache.get(key);
   if (hit && hit.expiresAt > now) {
     return hit.entry;
   }
-  const entry = await resolveGovernanceVisibleUserIds(uid, email);
+  const entry = await resolveGovernanceVisibleUserIds(uid, email, emailVerified);
   governanceVisibilityCache.set(key, { entry, expiresAt: now + GOVERNANCE_VISIBILITY_CACHE_TTL_MS });
   return entry;
 }

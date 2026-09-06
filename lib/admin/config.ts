@@ -43,7 +43,18 @@ export function governanceAdminEmailsForLog(): string {
   return [...new Set([...builtIn, ...fromEnv])].join(",");
 }
 
-/** Built-in list + comma-separated `GOVERNANCE_ADMIN_EMAILS` — admin for governance APIs. */
+/**
+ * MEMBERSHIP TEST ONLY — "is this string on an admin allowlist".
+ *
+ * Phase FIRESTORE-AUTHZ-P0.2: this is NOT an authorization decision and must
+ * never be used as one. An allowlist entry says which address is trusted; it
+ * says nothing about whether the calling identity actually owns that mailbox.
+ * Authoritative server guards use {@link isVerifiedAdminEmail} against a LIVE
+ * Firebase Auth user record instead — see
+ * `lib/admin/verifiedAdminIdentity.ts`.
+ *
+ * Remaining legitimate uses are non-authoritative only (diagnostics/logging).
+ */
 export function isAdminEmail(email: string | null | undefined): boolean {
   if (!email) return false;
   const normalized = normalizeEmailForMatch(String(email));
@@ -52,8 +63,37 @@ export function isAdminEmail(email: string | null | undefined): boolean {
   return parseEmailList(process.env.GOVERNANCE_ADMIN_EMAILS).includes(normalized);
 }
 
-/** Comma-separated emails in GOVERNANCE_REVIEWER_EMAILS — reviewer role via env. */
-export function isReviewerEmail(email: string | null | undefined): boolean {
-  if (!email) return false;
-  return parseEmailList(process.env.GOVERNANCE_REVIEWER_EMAILS).includes(normalizeEmailForMatch(String(email)));
+/**
+ * Phase FIRESTORE-AUTHZ-P0.2 — THE CANONICAL EMAIL-ALLOWLIST AUTHORITY PREDICATE.
+ *
+ * An email allowlist confers authority only when the authenticated identity has
+ * PROVEN it owns the address. Treating {@link isAdminEmail} as an authorization
+ * decision was a P0: Firebase proves nothing at sign-up —
+ * `createUserWithEmailAndPassword` succeeds for any address, the project has no
+ * blocking functions, and until this phase the product never even sent a
+ * verification email — so anyone able to register an unclaimed allowlisted
+ * address received administrator authority AND the global governance queue.
+ *
+ * FAIL CLOSED, DELIBERATELY. `emailVerified` must be exactly boolean `true`.
+ * Absent, `undefined`, `null`, `false`, `"true"`, `"false"`, `0` and `1` all
+ * deny: callers historically read this out of three different shapes (an ID
+ * token's `email_verified`, a session cookie claim, a `UserRecord.emailVerified`)
+ * and a claim that is missing or of the wrong type must never read as a passing
+ * one. `=== true` is the whole guard, and it is load-bearing.
+ *
+ * CALLERS MUST SUPPLY BOTH FIELDS FROM THE SAME LIVE FIREBASE AUTH USER RECORD.
+ * A token email paired with a record's verification flag (or the reverse) would
+ * reintroduce precisely the identity-binding failure this closes. The pairing is
+ * enforced structurally by `resolveLiveAuthIdentity()`, which returns the two
+ * fields together out of one `getUser()` result — not by convention here.
+ *
+ * The Firebase `admin` custom claim is a SEPARATE, independently trusted,
+ * server-issued authority and is intentionally NOT folded into this predicate.
+ */
+export function isVerifiedAdminEmail(identity: {
+  email: string | null | undefined;
+  emailVerified: boolean | null | undefined;
+}): boolean {
+  if (identity.emailVerified !== true) return false;
+  return isAdminEmail(identity.email);
 }

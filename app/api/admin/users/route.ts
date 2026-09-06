@@ -4,7 +4,9 @@
  * Allows admins to list all users in the system.
  * 
  * Security:
- * - Only admins can access (verified via requireAdmin())
+ * - Only admins can access, via requireAdminApiAccess(): the Firebase `admin`
+ *   custom claim OR a VERIFIED allowlisted email (Phase FIRESTORE-AUTHZ-P0.2).
+ *   NOT requireAdmin(), which this comment previously and incorrectly named.
  * - Returns user data from Firestore (email, role, etc.)
  * 
  * Route: GET /api/admin/users
