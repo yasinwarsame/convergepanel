@@ -302,7 +302,7 @@ export async function GET(request: NextRequest) {
   }
 
   const tVis0 = Date.now();
-  const vis = await resolveGovernanceVisibleUserIdsCached(resolved.uid, resolved.email, resolved.emailVerified);
+  const vis = await resolveGovernanceVisibleUserIdsCached(resolved.uid);
   console.log(`[governance/audit] visibleUserIds: ${Date.now() - tVis0}ms`);
   if (!vis.ok) {
     if (vis.kind === "plan_required") {

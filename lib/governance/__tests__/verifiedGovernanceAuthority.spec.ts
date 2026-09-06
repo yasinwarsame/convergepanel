@@ -53,6 +53,11 @@ import {
 const globalScope = (v: unknown) =>
   (v as { ok: boolean; visibleUserIds: string[] | null; queueScope: string });
 
+/** Set the LIVE Auth record the resolvers will read for themselves. */
+const liveRecord = (email: string, emailVerified: unknown) => {
+  authRecord = { email, emailVerified };
+};
+
 beforeEach(() => {
   authRecord = {};
   getUserThrows = false;
@@ -63,23 +68,26 @@ beforeEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-describe("global governance visibility", () => {
+describe("global governance visibility — evidence is read, not accepted", () => {
   it("THE FIX: unverified allowlisted identity gets NO global scope", async () => {
-    const vis = await resolveGovernanceVisibleUserIds("attacker", GOV, false);
-    expect(globalScope(vis).visibleUserIds).not.toBeNull();
+    liveRecord(GOV, false);
+    const vis = await resolveGovernanceVisibleUserIds("attacker");
     expect(globalScope(vis).queueScope).not.toBe("admin_global");
+    expect(globalScope(vis).visibleUserIds ?? "absent").not.toBeNull();
   });
 
   it("verified allowlisted identity gets global scope", async () => {
-    const vis = await resolveGovernanceVisibleUserIds("real", GOV, true);
+    liveRecord(GOV, true);
+    const vis = await resolveGovernanceVisibleUserIds("real");
     expect(globalScope(vis).ok).toBe(true);
     expect(globalScope(vis).visibleUserIds).toBeNull();
     expect(globalScope(vis).queueScope).toBe("admin_global");
   });
 
   it("verified but not allowlisted gets no global scope", async () => {
-    const vis = await resolveGovernanceVisibleUserIds("u", OUTSIDER, true);
-    expect(globalScope(vis).visibleUserIds).not.toBeNull();
+    liveRecord(OUTSIDER, true);
+    const vis = await resolveGovernanceVisibleUserIds("u");
+    expect(globalScope(vis).queueScope).not.toBe("admin_global");
   });
 
   it.each([
@@ -87,16 +95,18 @@ describe("global governance visibility", () => {
     ["null", null],
     ['string "true"', "true"],
     ["number 1", 1],
-  ])("non-boolean verification %s never yields global scope", async (_l, value) => {
-    const vis = await resolveGovernanceVisibleUserIds("attacker", GOV, value as never);
-    expect(globalScope(vis).visibleUserIds).not.toBeNull();
+  ])("non-boolean verification %s on the record never yields global scope", async (_l, value) => {
+    liveRecord(GOV, value);
+    const vis = await resolveGovernanceVisibleUserIds("attacker");
+    expect(globalScope(vis).queueScope).not.toBe("admin_global");
   });
 
   it("reviewer-scoped ordinary access is unchanged by verification state", async () => {
     plan = "full";
     userDocData = { governanceReviewerFor: ["owner-1"] };
     for (const verified of [true, false]) {
-      const vis = await resolveGovernanceVisibleUserIds("reviewer", OUTSIDER, verified);
+      liveRecord(OUTSIDER, verified);
+      const vis = await resolveGovernanceVisibleUserIds("reviewer");
       expect(globalScope(vis).ok).toBe(true);
       expect(globalScope(vis).visibleUserIds).toEqual(["owner-1"]);
       expect(globalScope(vis).queueScope).toBe("assigners");
@@ -104,8 +114,86 @@ describe("global governance visibility", () => {
   });
 
   it("a non-admin free-plan user is still plan-gated", async () => {
-    const vis = await resolveGovernanceVisibleUserIds("u", OUTSIDER, true);
+    liveRecord(OUTSIDER, true);
+    const vis = await resolveGovernanceVisibleUserIds("u");
     expect(vis).toEqual({ ok: false, kind: "plan_required" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+/**
+ * Phase FIRESTORE-AUTHZ-P0.2-C1 — STRUCTURAL TRUST BOUNDARY.
+ *
+ * The independent review proved the previous exported shape could be called
+ * directly to manufacture authority:
+ *
+ *   resolveGovernanceVisibleUserIds("never-authenticated", "admin@…", true)
+ *     -> { visibleUserIds: null, queueScope: "admin_global" }, 0 getUser calls
+ *
+ * The public entry points now take ONLY a uid and establish their own evidence,
+ * so that call shape no longer exists. These tests prove it behaviourally; the
+ * arity assertions are an extra guard, never the proof on their own.
+ */
+describe("STRUCTURAL: governance-global authority cannot be handed forged evidence", () => {
+  it("both public entry points accept a uid and nothing else", () => {
+    expect(resolveGovernanceVisibleUserIds.length).toBe(1);
+    expect(resolveGovernanceVisibleUserIdsCached.length).toBe(1);
+  });
+
+  it("the resolver performs the live Auth lookup ITSELF", async () => {
+    liveRecord(GOV, true);
+    getUser.mockClear();
+    await resolveGovernanceVisibleUserIds("real");
+    expect(getUser).toHaveBeenCalledTimes(1);
+    expect(getUser).toHaveBeenCalledWith("real");
+  });
+
+  it("R1 EXPLOIT SHAPE: a uid whose record is unverified gets no global scope, whatever a caller might believe", async () => {
+    // The old call passed an allowlisted address and `true` alongside this uid.
+    liveRecord(GOV, false);
+    const vis = await resolveGovernanceVisibleUserIds("uid-that-never-authenticated");
+    expect(globalScope(vis).queueScope).not.toBe("admin_global");
+    expect(getUser).toHaveBeenCalledWith("uid-that-never-authenticated");
+  });
+
+  it("a uid with no Auth record at all gets no global scope", async () => {
+    getUserThrows = true;
+    const vis = await resolveGovernanceVisibleUserIds("ghost");
+    expect(globalScope(vis).queueScope).not.toBe("admin_global");
+  });
+
+  it("FAIL CLOSED: Auth lookup failure denies global scope but still resolves reviewer scope", async () => {
+    plan = "full";
+    userDocData = { governanceReviewerFor: ["owner-2"] };
+    getUserThrows = true;
+    const vis = await resolveGovernanceVisibleUserIds("reviewer");
+    expect(globalScope(vis).ok).toBe(true);
+    expect(globalScope(vis).queueScope).toBe("assigners");
+    expect(globalScope(vis).visibleUserIds).toEqual(["owner-2"]);
+  });
+
+  it("the cached entry point is equally unforgeable and also looks up live", async () => {
+    liveRecord(GOV, false);
+    getUser.mockClear();
+    const vis = await resolveGovernanceVisibleUserIdsCached("uid-that-never-authenticated");
+    expect(globalScope(vis).queueScope).not.toBe("admin_global");
+    expect(getUser).toHaveBeenCalledWith("uid-that-never-authenticated");
+  });
+
+  it("the cached entry point grants global scope only on a verified allowlisted record", async () => {
+    liveRecord(GOV, true);
+    const vis = await resolveGovernanceVisibleUserIdsCached("real-cached");
+    expect(globalScope(vis).visibleUserIds).toBeNull();
+    expect(globalScope(vis).queueScope).toBe("admin_global");
+  });
+
+  it("the module exports no helper that accepts identity evidence", async () => {
+    const mod = await import("@/lib/governance/governanceVisibleUserIds");
+    for (const [name, value] of Object.entries(mod)) {
+      if (typeof value !== "function") continue;
+      if (!name.startsWith("resolveGovernanceVisibleUserIds")) continue;
+      expect(value.length).toBe(1);
+    }
   });
 });
 
@@ -143,34 +231,50 @@ describe("policy write / audit backfill (checkAdminOnly)", () => {
 // ---------------------------------------------------------------------------
 describe("visibility cache cannot outlive its proof", () => {
   it("a verified global grant is NOT served after verification becomes false", async () => {
-    const first = await resolveGovernanceVisibleUserIdsCached("u1", GOV, true);
+    liveRecord(GOV, true);
+    const first = await resolveGovernanceVisibleUserIdsCached("u1");
     expect(globalScope(first).visibleUserIds).toBeNull();
 
     // Same uid, same address, verification revoked — within the TTL.
-    const second = await resolveGovernanceVisibleUserIdsCached("u1", GOV, false);
-    expect(globalScope(second).visibleUserIds).not.toBeNull();
+    liveRecord(GOV, false);
+    const second = await resolveGovernanceVisibleUserIdsCached("u1");
     expect(globalScope(second).queueScope).not.toBe("admin_global");
   });
 
   it("an unverified denial is not sticky once verification arrives", async () => {
-    const first = await resolveGovernanceVisibleUserIdsCached("u2", GOV, false);
-    expect(globalScope(first).visibleUserIds).not.toBeNull();
-    const second = await resolveGovernanceVisibleUserIdsCached("u2", GOV, true);
+    liveRecord(GOV, false);
+    const first = await resolveGovernanceVisibleUserIdsCached("u2");
+    expect(globalScope(first).queueScope).not.toBe("admin_global");
+    liveRecord(GOV, true);
+    const second = await resolveGovernanceVisibleUserIdsCached("u2");
     expect(globalScope(second).visibleUserIds).toBeNull();
   });
 
-  it("a changed email cannot reuse the previous allowlisted decision", async () => {
-    const admin = await resolveGovernanceVisibleUserIdsCached("u3", GOV, true);
+  it("a changed Auth email cannot reuse the previous allowlisted decision", async () => {
+    liveRecord(GOV, true);
+    const admin = await resolveGovernanceVisibleUserIdsCached("u3");
     expect(globalScope(admin).visibleUserIds).toBeNull();
-    const changed = await resolveGovernanceVisibleUserIdsCached("u3", OUTSIDER, true);
-    expect(globalScope(changed).visibleUserIds).not.toBeNull();
+    liveRecord(OUTSIDER, true);
+    const changed = await resolveGovernanceVisibleUserIdsCached("u3");
+    expect(globalScope(changed).queueScope).not.toBe("admin_global");
   });
 
-  it("the cache still caches: identical evidence does not recompute", async () => {
+  it("the cache still caches: identical trusted evidence does not recompute", async () => {
     plan = "full";
     userDocData = { governanceReviewerFor: ["owner-9"] };
-    const a = await resolveGovernanceVisibleUserIdsCached("u4", OUTSIDER, true);
-    const b = await resolveGovernanceVisibleUserIdsCached("u4", OUTSIDER, true);
+    liveRecord(OUTSIDER, true);
+    const a = await resolveGovernanceVisibleUserIdsCached("u4");
+    const b = await resolveGovernanceVisibleUserIdsCached("u4");
     expect(b).toBe(a); // same object identity => served from cache
+  });
+
+  it("the live lookup is NOT cached — it runs on every call, ahead of the cache", async () => {
+    plan = "full";
+    userDocData = { governanceReviewerFor: ["owner-9"] };
+    liveRecord(OUTSIDER, true);
+    await resolveGovernanceVisibleUserIdsCached("u5");
+    getUser.mockClear();
+    await resolveGovernanceVisibleUserIdsCached("u5");
+    expect(getUser).toHaveBeenCalledTimes(1);
   });
 });

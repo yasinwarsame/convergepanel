@@ -81,11 +81,22 @@ export function isAdminEmail(email: string | null | undefined): boolean {
  * and a claim that is missing or of the wrong type must never read as a passing
  * one. `=== true` is the whole guard, and it is load-bearing.
  *
- * CALLERS MUST SUPPLY BOTH FIELDS FROM THE SAME LIVE FIREBASE AUTH USER RECORD.
- * A token email paired with a record's verification flag (or the reverse) would
- * reintroduce precisely the identity-binding failure this closes. The pairing is
- * enforced structurally by `resolveLiveAuthIdentity()`, which returns the two
- * fields together out of one `getUser()` result — not by convention here.
+ * THIS IS A PURE PREDICATE OVER EVIDENCE, NOT AN AUTHORITY ENTRY POINT. It
+ * cannot verify the provenance of what it is handed, so it must only ever be
+ * given both fields from the SAME live Firebase Auth user record — a token
+ * email paired with a record's verification flag (or the reverse) would
+ * reintroduce precisely the identity-binding failure this closes.
+ *
+ * That is guaranteed structurally rather than by convention, but the guarantee
+ * lives one level up, in the AUTHORITY ENTRY POINTS: every function that
+ * actually grants something establishes its own evidence by calling
+ * `resolveLiveAuthIdentity()`, which returns the two fields together out of one
+ * `getUser()` result. Phase P0.2-C1 closed the last exception — the governance
+ * visibility resolvers used to take `(uid, email, emailVerified)` from their
+ * callers, so a direct call could manufacture verified evidence and obtain
+ * global scope with no Auth read at all. They now take only a uid. No exported
+ * function that grants admin or governance authority accepts caller-supplied
+ * verification evidence.
  *
  * The Firebase `admin` custom claim is a SEPARATE, independently trusted,
  * server-issued authority and is intentionally NOT folded into this predicate.

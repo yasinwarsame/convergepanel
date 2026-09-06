@@ -89,4 +89,67 @@ describe("resolveGovernanceRequestUser", () => {
     expect(result).toEqual({ ok: false, status: 401 });
     expect(mockGetUser).not.toHaveBeenCalled();
   });
+
+  /**
+   * Phase FIRESTORE-AUTHZ-P0.2-C1 — VERIFICATION PROVENANCE.
+   *
+   * `resolveGovernanceRequestUser` is the single point at which `emailVerified`
+   * enters the governance chain. Before C1 the fixture pinned the Auth record to
+   * `emailVerified: true` in `beforeEach` and never varied it, and every
+   * assertion expected `true` — so the assertions were tautological with respect
+   * to provenance. The independent review proved it: replacing
+   * `emailVerified: live.emailVerified` with a hard-coded `true` reopened the P0
+   * and the entire 10,835-test suite still passed.
+   *
+   * These cases vary the value returned by the mocked Auth record, so the
+   * resolver must actually propagate it.
+   */
+  describe("emailVerified provenance — read from the live Auth record, never manufactured", () => {
+    it("record verified -> resolver reports verified", async () => {
+      mockGetUser.mockResolvedValue({ email: "user@example.com", emailVerified: true });
+      mockVerifySessionCookie.mockResolvedValue({ uid: "user-a", isAdmin: false });
+      const r = await resolveGovernanceRequestUser(buildRequest({ cookie: "__session=valid" }));
+      expect(r).toEqual({ ok: true, uid: "user-a", email: "user@example.com", emailVerified: true });
+    });
+
+    it("THE LOAD-BEARING CASE: record UNVERIFIED -> resolver reports emailVerified false", async () => {
+      mockGetUser.mockResolvedValue({ email: "user@example.com", emailVerified: false });
+      mockVerifySessionCookie.mockResolvedValue({ uid: "user-a", isAdmin: false });
+      const r = await resolveGovernanceRequestUser(buildRequest({ cookie: "__session=valid" }));
+      expect(r).toEqual({ ok: true, uid: "user-a", email: "user@example.com", emailVerified: false });
+    });
+
+    it.each([
+      ["absent", {}],
+      ["undefined", { emailVerified: undefined }],
+      ["null", { emailVerified: null }],
+      ['string "true"', { emailVerified: "true" }],
+      ["number 1", { emailVerified: 1 }],
+    ])("non-boolean verification (%s) is reported as false, never true", async (_label, extra) => {
+      mockGetUser.mockResolvedValue({ email: "user@example.com", ...(extra as object) });
+      mockVerifySessionCookie.mockResolvedValue({ uid: "user-a", isAdmin: false });
+      const r = await resolveGovernanceRequestUser(buildRequest({ cookie: "__session=valid" }));
+      expect(r).toEqual({ ok: true, uid: "user-a", email: "user@example.com", emailVerified: false });
+    });
+
+    it("email and verification come from the SAME record read", async () => {
+      mockGetUser.mockResolvedValue({ email: "other@example.com", emailVerified: false });
+      mockVerifySessionCookie.mockResolvedValue({ uid: "user-a", isAdmin: false });
+      const r = await resolveGovernanceRequestUser(buildRequest({ cookie: "__session=valid" }));
+      // Both fields track the record together — one getUser call, one identity.
+      expect(r).toEqual({ ok: true, uid: "user-a", email: "other@example.com", emailVerified: false });
+      expect(mockGetUser).toHaveBeenCalledTimes(1);
+      expect(mockGetUser).toHaveBeenCalledWith("user-a");
+    });
+
+    it("the resolver reports both possible values across calls (not a constant)", async () => {
+      mockVerifySessionCookie.mockResolvedValue({ uid: "user-a", isAdmin: false });
+      mockGetUser.mockResolvedValue({ email: "u@example.com", emailVerified: true });
+      const verified = await resolveGovernanceRequestUser(buildRequest({ cookie: "__session=valid" }));
+      mockGetUser.mockResolvedValue({ email: "u@example.com", emailVerified: false });
+      const unverified = await resolveGovernanceRequestUser(buildRequest({ cookie: "__session=valid" }));
+      expect((verified as { emailVerified: boolean }).emailVerified).toBe(true);
+      expect((unverified as { emailVerified: boolean }).emailVerified).toBe(false);
+    });
+  });
 });

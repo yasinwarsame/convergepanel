@@ -1246,7 +1246,7 @@ export async function GET(request: NextRequest) {
   const offsetEarly = Number.isFinite(offsetRawEarly) && offsetRawEarly >= 0 ? offsetRawEarly : 0;
 
   const tVis0 = Date.now();
-  const vis = await resolveGovernanceVisibleUserIdsCached(resolved.uid, resolved.email, resolved.emailVerified);
+  const vis = await resolveGovernanceVisibleUserIdsCached(resolved.uid);
   console.log(`[governance/queue] Visibility: ${Date.now() - tVis0}ms`);
   if (!vis.ok) {
     if (vis.kind === "plan_required") {
