@@ -10,7 +10,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { stripe } from "@/lib/stripe/client";
 import { adminDb, firebaseAdmin } from "@/lib/firebase/admin";
-import { requireAdminApiAccess } from "@/lib/firebase/auth-helpers";
+import { requireAdminPortalAccess } from "@/lib/firebase/auth-helpers";
 import { getPlanIdFromPriceId, getPlanConfigById } from "@/lib/billing/planConfig";
 import { BillingInterval } from "@/lib/plans";
 import { resetUsageForNewPlan } from "@/lib/stripe/usage";
@@ -22,7 +22,7 @@ export const runtime = "nodejs";
 export async function POST(req: NextRequest) {
   try {
     // Verify admin authentication — session cookie alone is not sufficient
-    const auth = await requireAdminApiAccess(req);
+    const auth = await requireAdminPortalAccess(req);
     if (!auth) {
       return NextResponse.json(
         { error: "Unauthorized. Admin access required." },

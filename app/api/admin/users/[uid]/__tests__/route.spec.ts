@@ -8,8 +8,13 @@
  * proceeding as if ownership were clear.
  */
 
+// Phase FIRST-ADMIN-C2: the route now names its tier explicitly
+// (`requireSystemAdminAccess`). Both are provided by the same mock so the
+// legacy alias and the canonical name behave identically here.
+const mockedRequireSystemAdmin = jest.fn();
 jest.mock("@/lib/firebase/auth-helpers", () => ({
-  requireAdmin: jest.fn(),
+  requireAdmin: (...a: unknown[]) => mockedRequireSystemAdmin(...(a as [])),
+  requireSystemAdminAccess: (...a: unknown[]) => mockedRequireSystemAdmin(...(a as [])),
 }));
 
 const mockUpdateUser = jest.fn();
@@ -37,7 +42,6 @@ jest.mock("@/lib/workspaces/teamOwnerGuard", () => ({
   checkTeamWorkspaceOwnershipForUid: (...args: unknown[]) => mockCheckTeamWorkspaceOwnershipForUid(...args),
 }));
 
-import { requireAdmin } from "@/lib/firebase/auth-helpers";
 import { NextRequest } from "next/server";
 import { PATCH, DELETE } from "@/app/api/admin/users/[uid]/route";
 
@@ -49,7 +53,7 @@ function makeRequest(body: unknown) {
 
 beforeEach(() => {
   jest.clearAllMocks();
-  (requireAdmin as jest.Mock).mockResolvedValue({ uid: "admin-uid" });
+  mockedRequireSystemAdmin.mockResolvedValue({ uid: "admin-uid" });
   mockCheckTeamWorkspaceOwnershipForUid.mockResolvedValue({ kind: "clear" });
 });
 

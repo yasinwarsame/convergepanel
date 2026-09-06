@@ -4,9 +4,9 @@
 
 import "server-only";
 import { NextResponse } from "next/server";
-import { isVerifiedGovernanceAdminEmail } from "@/lib/admin/config";
+
 import { getEffectiveEntitlements } from "@/lib/admin/entitlements";
-import { resolveLiveAuthIdentity } from "@/lib/admin/verifiedAdminIdentity";
+import { resolveVerifiedAdminScopes } from "@/lib/admin/verifiedAdminIdentity";
 import { adminDb } from "@/lib/firebase/admin";
 import { parseGovernanceReviewerFor } from "@/lib/governance/reviewerFields";
 
@@ -70,10 +70,19 @@ export async function resolveGovernanceVisibleUserIds(uid: string): Promise<Gove
  */
 async function resolveTrustedGovernanceIdentity(
   uid: string
-): Promise<{ email: string; emailVerified: boolean }> {
-  const live = await resolveLiveAuthIdentity(uid);
-  if (live.status !== "resolved") return { email: "", emailVerified: false };
-  return { email: live.email, emailVerified: live.emailVerified };
+): Promise<{ email: string; emailVerified: boolean; governanceAdmin: boolean }> {
+  const scopes = await resolveVerifiedAdminScopes(uid);
+  if (scopes.lookupStatus !== "resolved") {
+    return { email: "", emailVerified: false, governanceAdmin: false };
+  }
+  // The GOVERNANCE decision is taken by the uid-only authority resolver, which
+  // reads ADMIN_EMAILS and GOVERNANCE_ADMIN_EMAILS independently. This module
+  // never sees a blended answer and cannot re-blend one.
+  return {
+    email: scopes.email,
+    emailVerified: scopes.emailVerified,
+    governanceAdmin: scopes.governanceAdmin,
+  };
 }
 
 /**
@@ -84,7 +93,7 @@ async function resolveTrustedGovernanceIdentity(
  */
 async function resolveVisibilityForTrustedIdentity(
   uid: string,
-  identity: { email: string; emailVerified: boolean }
+  identity: { email: string; emailVerified: boolean; governanceAdmin: boolean }
 ): Promise<GovernanceVisibility> {
   if (!adminDb) {
     return { ok: false, kind: "no_db" };
@@ -99,7 +108,7 @@ async function resolveVisibilityForTrustedIdentity(
   // Phase FIRST-ADMIN-C1: gated on `GOVERNANCE_ADMIN_EMAILS` ONLY. An
   // application administrator (`ADMIN_EMAILS`) no longer receives global
   // visibility over every user's runs simply by being an admin.
-  if (isVerifiedGovernanceAdminEmail({ email, emailVerified })) {
+  if (identity.governanceAdmin) {
     console.log(`[governance/queue] Admin: global access (visibleUserIds = null)`);
     return { ok: true, visibleUserIds: null, isSupportAdmin: true, queueScope: "admin_global" };
   }

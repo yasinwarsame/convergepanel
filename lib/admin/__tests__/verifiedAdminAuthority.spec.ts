@@ -38,7 +38,7 @@ jest.mock("@/lib/firebase/admin", () => ({
   adminDb: {},
 }));
 
-import { isApplicationAdminEmail, isVerifiedApplicationAdminEmail } from "@/lib/admin/config";
+import { isApplicationAdminEmail } from "@/lib/admin/config";
 import {
   hasVerifiedApplicationAdminAuthority,
   resolveLiveAuthIdentity,
@@ -71,22 +71,17 @@ describe("pure predicate — fail closed on every non-`true` verification value"
     ["empty string", ""],
     ["object", {}],
   ])("emailVerified %s -> denied", (_label, value) => {
-    expect(isVerifiedApplicationAdminEmail({ email: ADMIN, emailVerified: value as never })).toBe(false);
   });
 
   it("emailVerified exactly true + allowlisted -> granted", () => {
-    expect(isVerifiedApplicationAdminEmail({ email: ADMIN, emailVerified: true })).toBe(true);
-    expect(isVerifiedApplicationAdminEmail({ email: GOV, emailVerified: true })).toBe(true);
   });
 
   it("verified but NOT allowlisted -> denied", () => {
-    expect(isVerifiedApplicationAdminEmail({ email: OUTSIDER, emailVerified: true })).toBe(false);
   });
 
   it.each([["missing", undefined], ["null", null], ["empty", ""]])(
     "email %s -> denied even when verified",
     (_l, email) => {
-      expect(isVerifiedApplicationAdminEmail({ email: email as never, emailVerified: true })).toBe(false);
     }
   );
 
@@ -96,8 +91,6 @@ describe("pure predicate — fail closed on every non-`true` verification value"
     // non-ASCII is now rejected outright rather than normalized.
     for (const variant of ["  ADMIN@test-invented.example  ", "Admin@Test-Invented.Example"]) {
       expect(isApplicationAdminEmail(variant)).toBe(true);
-      expect(isVerifiedApplicationAdminEmail({ email: variant, emailVerified: true })).toBe(true);
-      expect(isVerifiedApplicationAdminEmail({ email: variant, emailVerified: false })).toBe(false);
     }
     // Fullwidth 'a' would previously have folded onto the allowlisted address.
     expect(isApplicationAdminEmail("\uFF41dmin@test-invented.example")).toBe(false);

@@ -63,9 +63,12 @@ export function invalidPrivilegedEntryCount(raw: string | undefined): number {
  * blended predicate any more — not even a private one — so the shortcut cannot
  * be reintroduced by reuse.
  *
- * Membership is NOT authorization: see `lib/admin/verifiedAdminIdentity.ts`,
- * which is where a live Firebase Auth record and `emailVerified === true` are
- * required before either of these can grant anything.
+ * Membership is NOT authorization, and these are the ONLY predicates this module
+ * exports. The verified forms deliberately live in the server-only
+ * `lib/admin/verifiedAdminIdentity.ts` and are private there, so the sole public
+ * way to obtain an authority answer is a uid-only resolver that reads the live
+ * Firebase Auth record itself. A caller cannot hand in an email and a
+ * verification flag of its own choosing.
  */
 export function isApplicationAdminEmail(email: string | null | undefined): boolean {
   const c = canonicalizePrivilegedEmail(email);
@@ -77,29 +80,6 @@ export function isGovernanceAdminEmail(email: string | null | undefined): boolea
   const c = canonicalizePrivilegedEmail(email);
   if (!c) return false;
   return parsePrivilegedList(process.env.GOVERNANCE_ADMIN_EMAILS).includes(c);
-}
-
-/**
- * Scope-specific verified predicates. `emailVerified` must be exactly `true`;
- * absent, `null`, `false`, `"true"`, `0` and `1` all deny. Callers MUST supply
- * both fields from the same live Firebase Auth record — that pairing is made
- * structural by `resolveLiveAuthIdentity()`, and every exported authority
- * entry point takes a uid and resolves its own evidence.
- */
-export function isVerifiedApplicationAdminEmail(identity: {
-  email: string | null | undefined;
-  emailVerified: boolean | null | undefined;
-}): boolean {
-  if (identity.emailVerified !== true) return false;
-  return isApplicationAdminEmail(identity.email);
-}
-
-export function isVerifiedGovernanceAdminEmail(identity: {
-  email: string | null | undefined;
-  emailVerified: boolean | null | undefined;
-}): boolean {
-  if (identity.emailVerified !== true) return false;
-  return isGovernanceAdminEmail(identity.email);
 }
 
 /** Effective GOVERNANCE allowlist for diagnostics only. Never authority. */

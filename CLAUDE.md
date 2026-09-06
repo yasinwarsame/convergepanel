@@ -43,7 +43,11 @@ Two paths accepted in every API route:
 1. Session cookie `__session` → `verifySessionCookie()` from `lib/firebase/auth-helpers.ts`
 2. `Authorization: Bearer <token>` fallback → `verifyIdToken()` from `lib/firebase/auth.ts`
 
-Middleware (`middleware.ts`) only checks cookie *presence* to gate `/admin/*` — real auth (token validity + custom claims) happens inside each API route. Admin status is a Firebase custom claim `admin: true`, not a database field. Admin email list is driven by the `ADMIN_EMAILS` env var.
+Middleware (`middleware.ts`) only checks cookie *presence* to gate `/admin/*` — real auth (token validity + custom claims) happens inside each API route. Administrator authority has THREE tiers — see `docs/operations/admin-authority-tiers.md`.
+`ADMIN_PORTAL` (verified `ADMIN_EMAILS` member or the `admin` claim), `SYSTEM_ADMIN`
+(the `admin` custom claim ONLY — credentials, claim minting, purge, destructive user/billing
+mutation), and `GOVERNANCE_ADMIN` (verified `GOVERNANCE_ADMIN_EMAILS` member only).
+`ADMIN_EMAILS` does NOT grant SYSTEM_ADMIN or governance authority.
 
 ### Connectors
 

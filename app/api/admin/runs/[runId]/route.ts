@@ -4,7 +4,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import type { DocumentData } from "firebase-admin/firestore";
-import { requireAdminApiAccess } from "@/lib/firebase/auth-helpers";
+import { requireAdminPortalAccess } from "@/lib/firebase/auth-helpers";
 import { adminDb } from "@/lib/firebase/admin";
 import { writeAuditEvent } from "@/lib/governance/auditLog";
 import { sanitizeForFirestore } from "@/lib/firestore/sanitizeForFirestore";
@@ -47,7 +47,7 @@ export async function GET(
   request: NextRequest,
   { params }: { params: { runId: string } }
 ) {
-  const auth = await requireAdminApiAccess(request);
+  const auth = await requireAdminPortalAccess(request);
   if (!auth) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   if (!adminDb) return NextResponse.json({ ok: false, error: "Database unavailable" }, { status: 500 });
 
@@ -93,7 +93,7 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: { runId: string } }
 ) {
-  const auth = await requireAdminApiAccess(request);
+  const auth = await requireAdminPortalAccess(request);
   if (!auth) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   if (!adminDb) return NextResponse.json({ ok: false, error: "Database unavailable" }, { status: 500 });
 
@@ -168,7 +168,7 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: { runId: string } }
 ) {
-  const auth = await requireAdminApiAccess(request);
+  const auth = await requireAdminPortalAccess(request);
   if (!auth) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   if (!adminDb) return NextResponse.json({ ok: false, error: "Database unavailable" }, { status: 500 });
 

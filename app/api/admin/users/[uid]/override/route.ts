@@ -8,7 +8,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/firebase/auth-helpers";
+import { requireSystemAdminAccess } from "@/lib/firebase/auth-helpers";
 import { adminDb } from "@/lib/firebase/admin";
 import { Timestamp } from "firebase-admin/firestore";
 import { writeAuditLog, createUserSnapshot, generateRequestId, getUserEmail } from "@/lib/admin/auditLog";
@@ -25,7 +25,7 @@ export async function POST(
   request: NextRequest,
   { params }: { params: { uid: string } }
 ) {
-  const auth = await requireAdmin(request);
+  const auth = await requireSystemAdminAccess(request);
   if (!auth) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
@@ -150,7 +150,7 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: { uid: string } }
 ) {
-  const auth = await requireAdmin(request);
+  const auth = await requireSystemAdminAccess(request);
   if (!auth) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }

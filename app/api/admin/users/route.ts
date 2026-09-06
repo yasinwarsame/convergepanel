@@ -4,7 +4,7 @@
  * Allows admins to list all users in the system.
  * 
  * Security:
- * - Only admins can access, via requireAdminApiAccess(): the Firebase `admin`
+ * - Only admins can access, via requireAdminPortalAccess(): the Firebase `admin`
  *   custom claim OR a VERIFIED allowlisted email (Phase FIRESTORE-AUTHZ-P0.2).
  *   NOT requireAdmin(), which this comment previously and incorrectly named.
  * - Returns user data from Firestore (email, role, etc.)
@@ -13,7 +13,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdminApiAccess } from "@/lib/firebase/auth-helpers";
+import { requireAdminPortalAccess } from "@/lib/firebase/auth-helpers";
 import { adminDb } from "@/lib/firebase/admin";
 import { logger } from "@/lib/logger";
 
@@ -32,7 +32,7 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(request: NextRequest) {
   // Verify admin authentication
-  const auth = await requireAdminApiAccess(request);
+  const auth = await requireAdminPortalAccess(request);
   if (!auth) {
     logger.error("[admin/users] Unauthorized access attempt");
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

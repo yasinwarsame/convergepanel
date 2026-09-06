@@ -14,7 +14,7 @@ type AdminTab = "users" | "runs";
 
 export default function AdminDashboard() {
   const { user, loading: authLoading, authReady } = useAuth();
-  const { canAccess, gateReady } = useAdminPortalAccess();
+  const { canAccess, isSystemAdmin, gateReady } = useAdminPortalAccess();
   const [tab, setTab] = useState<AdminTab>("users");
   const [stats, setStats] = useState({
     totalUsers: 0,
@@ -77,12 +77,14 @@ export default function AdminDashboard() {
         const disabled = total - active;
 
         // Get keys with authentication
-        const keysRes = await authedFetch("/api/admin/keys", {
+        // SYSTEM_ADMIN only. A portal-only administrator must not be shown a
+        // credential panel that will 401, nor have the request attempted.
+        const keysRes = !isSystemAdmin ? null : await authedFetch("/api/admin/keys", {
           user,
           authReady,
         });
         let modelsConfigured = 0;
-        if (keysRes.ok) {
+        if (keysRes !== null && keysRes.ok) {
           const { status } = await keysRes.json();
           modelsConfigured = Object.values(status).filter(
             (s: any) => s.configured
@@ -105,7 +107,7 @@ export default function AdminDashboard() {
     };
 
     fetchStats();
-  }, [canAccess, gateReady, authLoading, authReady, user]);
+  }, [canAccess, isSystemAdmin, gateReady, authLoading, authReady, user]);
 
   if (authLoading || !gateReady) {
     return <div className="text-gray-600">Checking admin access…</div>;

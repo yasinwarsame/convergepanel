@@ -46,13 +46,24 @@ import {
   invalidPrivilegedEntryCount,
   isApplicationAdminEmail,
   isGovernanceAdminEmail,
-  isVerifiedApplicationAdminEmail,
-  isVerifiedGovernanceAdminEmail,
 } from "../config";
 import {
   hasVerifiedApplicationAdminAuthority,
   hasVerifiedGovernanceAdminAuthority,
 } from "../verifiedAdminIdentity";
+
+/**
+ * Phase C2: the verified predicates are module-private now, so the scope tests
+ * drive the REAL uid-only authority resolvers against a mocked live Auth
+ * record. That is strictly stronger — it exercises the live-lookup path too.
+ */
+const asIdentity = async (email: string, emailVerified: unknown) => {
+  authRecord = { email, emailVerified };
+  return {
+    application: await hasVerifiedApplicationAdminAuthority("probe"),
+    governance: await hasVerifiedGovernanceAdminAuthority("probe"),
+  };
+};
 import { requireAdminApiAccess } from "@/lib/firebase/auth-helpers";
 
 const req = (h: string | null = "Bearer t") =>
@@ -69,43 +80,34 @@ beforeEach(() => {
 });
 
 describe("scope separation — the lists no longer collapse into one predicate", () => {
-  const verified = (email: string) => ({ email, emailVerified: true });
-
-  it("1. ADMIN_EMAILS only -> application YES, governance NO", () => {
-    expect(isVerifiedApplicationAdminEmail(verified(APP))).toBe(true);
-    expect(isVerifiedGovernanceAdminEmail(verified(APP))).toBe(false);
+  it("1. ADMIN_EMAILS only -> application YES, governance NO", async () => {
+    expect(await asIdentity(APP, true)).toEqual({ application: true, governance: false });
   });
 
-  it("2. GOVERNANCE_ADMIN_EMAILS only -> application NO, governance YES", () => {
-    expect(isVerifiedApplicationAdminEmail(verified(GOV))).toBe(false);
-    expect(isVerifiedGovernanceAdminEmail(verified(GOV))).toBe(true);
+  it("2. GOVERNANCE_ADMIN_EMAILS only -> application NO, governance YES", async () => {
+    expect(await asIdentity(GOV, true)).toEqual({ application: false, governance: true });
   });
 
-  it("3. present in BOTH lists -> both scopes, independently satisfied", () => {
-    expect(isVerifiedApplicationAdminEmail(verified(BOTH))).toBe(true);
-    expect(isVerifiedGovernanceAdminEmail(verified(BOTH))).toBe(true);
+  it("3. present in BOTH lists -> both scopes, independently satisfied", async () => {
+    expect(await asIdentity(BOTH, true)).toEqual({ application: true, governance: true });
   });
 
-  it("5. an ordinary verified account gets neither", () => {
-    expect(isVerifiedApplicationAdminEmail(verified(OUTSIDER))).toBe(false);
-    expect(isVerifiedGovernanceAdminEmail(verified(OUTSIDER))).toBe(false);
+  it("5. an ordinary verified account gets neither", async () => {
+    expect(await asIdentity(OUTSIDER, true)).toEqual({ application: false, governance: false });
   });
 
-  it("6. UNVERIFIED application-list member gets neither", () => {
-    expect(isVerifiedApplicationAdminEmail({ email: APP, emailVerified: false })).toBe(false);
-    expect(isVerifiedGovernanceAdminEmail({ email: APP, emailVerified: false })).toBe(false);
+  it("6. UNVERIFIED application-list member gets neither", async () => {
+    expect(await asIdentity(APP, false)).toEqual({ application: false, governance: false });
   });
 
-  it("7. UNVERIFIED governance-list member gets neither", () => {
-    expect(isVerifiedGovernanceAdminEmail({ email: GOV, emailVerified: false })).toBe(false);
-    expect(isVerifiedApplicationAdminEmail({ email: GOV, emailVerified: false })).toBe(false);
+  it("7. UNVERIFIED governance-list member gets neither", async () => {
+    expect(await asIdentity(GOV, false)).toEqual({ application: false, governance: false });
   });
 
   it.each([
     ["undefined", undefined], ["null", null], ['"true"', "true"], ["1", 1], ["0", 0],
-  ])("non-boolean verification %s denies both scopes", (_l, v) => {
-    expect(isVerifiedApplicationAdminEmail({ email: BOTH, emailVerified: v as never })).toBe(false);
-    expect(isVerifiedGovernanceAdminEmail({ email: BOTH, emailVerified: v as never })).toBe(false);
+  ])("non-boolean verification %s denies both scopes", async (_l, v) => {
+    expect(await asIdentity(BOTH, v)).toEqual({ application: false, governance: false });
   });
 });
 

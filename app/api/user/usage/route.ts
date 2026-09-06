@@ -15,11 +15,7 @@ import { validateUserSubscription } from "@/lib/stripe/subscriptionValidation";
 import { getEffectiveEntitlements } from "@/lib/admin/entitlements";
 import { logger } from "@/lib/logger";
 import { planHasTeamGovernance } from "@/lib/plans";
-import {
-  isVerifiedApplicationAdminEmail,
-  isVerifiedGovernanceAdminEmail,
-} from "@/lib/admin/config";
-import { resolveLiveAuthIdentity } from "@/lib/admin/verifiedAdminIdentity";
+import { resolveVerifiedAdminScopes } from "@/lib/admin/verifiedAdminIdentity";
 import { parseGovernanceReviewerFor } from "@/lib/governance/reviewerFields";
 import { getVideoLimit } from "@/lib/billing/planConfig";
 import { resolvePersonalWorkspaceUiMode } from "@/lib/workspaces/workspaceUiRollout";
@@ -207,13 +203,10 @@ type PrivilegedScopes = { applicationAdmin: boolean; governanceAdmin: boolean };
  * unrelated to admin status.
  */
 async function resolvePrivilegedScopes(uid: string): Promise<PrivilegedScopes> {
-  const live = await resolveLiveAuthIdentity(uid);
-  if (live.status !== "resolved") return { applicationAdmin: false, governanceAdmin: false };
-  const identity = { email: live.email, emailVerified: live.emailVerified };
-  return {
-    applicationAdmin: isVerifiedApplicationAdminEmail(identity),
-    governanceAdmin: isVerifiedGovernanceAdminEmail(identity),
-  };
+  const scopes = await resolveVerifiedAdminScopes(uid);
+  // Fails closed: a lookup failure yields neither scope and must never fail the
+  // whole usage request, which is unrelated to admin status.
+  return { applicationAdmin: scopes.adminPortal, governanceAdmin: scopes.governanceAdmin };
 }
 
 // Ensure Node.js runtime (Firebase Admin requires Node.js, not Edge)

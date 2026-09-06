@@ -5,7 +5,7 @@
  * Supports dry-run mode for preview before deletion.
  * 
  * Security:
- * - Admin-only access (verified via requireAdmin())
+ * - Admin-only access (verified via requireSystemAdminAccess())
  * - Batch deletes with hard caps (max 2000 docs per request)
  * - Input validation and bounds checking
  * 
@@ -13,7 +13,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/firebase/auth-helpers";
+import { requireSystemAdminAccess } from "@/lib/firebase/auth-helpers";
 import { adminDb } from "@/lib/firebase/admin";
 import { logger } from "@/lib/logger";
 import { Timestamp } from "firebase-admin/firestore";
@@ -188,7 +188,7 @@ async function deleteDocuments(
 export async function POST(req: NextRequest) {
   try {
     // Verify admin authentication
-    const auth = await requireAdmin(req);
+    const auth = await requireSystemAdminAccess(req);
     if (!auth) {
       logger.error("[admin/purge-runs] Unauthorized access attempt");
       return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
