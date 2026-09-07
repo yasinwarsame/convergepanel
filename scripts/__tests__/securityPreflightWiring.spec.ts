@@ -109,7 +109,12 @@ describe("the scanner's CLI contract — a printed warning is not a gate", () =>
     cpSync(SCRIPT, join(dir, SCRIPT));
     writeFileSync(
       join(dir, "scripts/__fixtures__/known-vacuous-shapes.txt"),
-      "# EXPECT-SHAPE: no-such-detector\n    expect(x ?? undefined).not.toBeNull();\n"
+      // The example line is deliberately BENIGN: this case tests the
+      // unknown-detector-id path, which fails before any matching happens. An
+      // actual vacuous shape here would be scanned as real source by `--all`
+      // and flagged — the scanner matches string literals too, a known and
+      // documented limitation.
+      "# EXPECT-SHAPE: no-such-detector\n    const placeholder = 1;\n"
     );
     const res = spawnSync("node", [join(dir, SCRIPT), "--self-test"], { cwd: dir, encoding: "utf8" });
     expect(res.status).not.toBe(0);
