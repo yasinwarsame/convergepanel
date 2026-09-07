@@ -154,8 +154,9 @@ jest.mock("@/lib/governance/governanceVisibleUserIds", () => {
     resolveGovernanceVisibleUserIdsCached: async () => visibility,
   };
 });
+let callerEmail = "reviewer@test-invented.example";
 jest.mock("@/lib/governance/authCheck", () => ({
-  resolveGovernanceRequestUser: async () => ({ ok: true, uid: "reviewer", email: "reviewer@test-invented.example", emailVerified: true }),
+  resolveGovernanceRequestUser: async () => ({ ok: true, uid: VIEWER_UID, email: callerEmail, emailVerified: true }),
   checkAdminOnly: async () => false,
 }));
 jest.mock("@/lib/governance/auditLog", () => ({ writeAuditEvent: (...a: unknown[]) => auditWrite(...(a as [])) }));
@@ -173,6 +174,7 @@ beforeEach(() => {
   process.env.GOVERNANCE_ADMIN_EMAILS = "governance-only@test-invented.example";
   visibility = { ...SCOPED };
   docOwner = OWNER_A;
+  callerEmail = "reviewer@test-invented.example";
   auditWrite.mockClear();
   reviewUpdate.mockClear();
   whereCalls.length = 0;
@@ -355,6 +357,9 @@ describe("the governance queue route emits no privileged address", () => {
 
   it("THE CORE PROOF: no captured log line contains the allowlist in any form", async () => {
     process.env.GOVERNANCE_ADMIN_EMAILS = `  ${CANARY.toUpperCase()}  ,second-canary@${CANARY_DOMAIN}`;
+    // The CALLER is a privileged address too — its own address must not be
+    // logged either, which a caller-echo mutation would otherwise slip past.
+    callerEmail = CANARY;
     const captured: string[] = [];
     const spies = (["log", "warn", "error", "info", "debug"] as const).map((m) =>
       jest.spyOn(console, m).mockImplementation((...args: unknown[]) => {
