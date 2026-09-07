@@ -197,6 +197,18 @@ describe.each(COLLECTIONS)("REVIEW WRITE — collection=%s", (collection) => {
 
     // 2. the audit event
     expect(auditWrites).toHaveLength(1);
+    // AUDIT FIDELITY: the record must attribute the run to the owner named by
+    // the DOCUMENT and the action to the authenticated caller. A mutation that
+    // sourced either from the request body corrupts the audit trail without
+    // changing a status code, and every other assertion here would still pass.
+    expect(auditWrites[0]).toMatchObject({
+      runId: "run-a",
+      collection,
+      byUid: REVIEWER,
+      runOwnerUid: OWNER_A,
+      action: "approved",
+    });
+    expect(auditWrites[0].runOwnerUid).not.toBe(OWNER_B);
     expect(auditWrites[0]).toMatchObject({ byUid: REVIEWER });
 
     // 3. the governanceEvents sub-collection write
