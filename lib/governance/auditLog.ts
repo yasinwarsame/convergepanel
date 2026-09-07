@@ -20,7 +20,24 @@ export type GovernanceAuditLogAction =
 export async function writeAuditEvent(event: Record<string, any>): Promise<void> {
   if (!adminDb) return;
   try {
-    console.log("[governance/audit] Writing audit event:", event.action, event.runId);
+    /**
+     * Phase FIRST-ADMIN-C8 — SHAPE, NOT IDENTITY.
+     *
+     * This line read `..., event.action, event.runId)`. Phase C7 removed the
+     * run id from `/api/governance/review`'s own override log on the grounds
+     * that the identified record belongs in the access-controlled audit
+     * collection instead — and then called THIS function on the same request,
+     * which wrote the same cross-tenant run id straight back into plaintext
+     * runtime logs, on every governance review. The C7 redaction test could not
+     * see it because it stubbed this module out.
+     *
+     * The operational question a log answers here is "is the audit writer
+     * running, and for what kind of decision". The action is a closed enum
+     * (GovernanceAuditLogAction) and carries no tenant data. Everything that
+     * identifies WHICH record — runId, owner uid/email, actor uid/email,
+     * question, comment, reasons — goes only into `admin_audit_logs`.
+     */
+    console.log("[governance/audit] Writing audit event:", event.action);
     const q =
       typeof event.question === "string" ? event.question.trim().substring(0, 200) : event.question;
     const ref = await adminDb.collection("admin_audit_logs").add(
@@ -30,9 +47,24 @@ export async function writeAuditEvent(event: Record<string, any>): Promise<void>
         at: new Date().toISOString(),
       }) as DocumentData
     );
+    // `ref.id` is the audit row's own random Firestore id — a handle INTO the
+    // access-controlled collection, not an identifier of any tenant record.
     console.log("[governance/audit] Event written to admin_audit_logs:", ref.id);
   } catch (err) {
-    console.error("[governance/audit] FAILED to write audit event:", err);
+    /**
+     * Phase FIRST-ADMIN-C8: the raw error is not logged. A Firestore error
+     * echoes the document path it failed on, which puts the collection and
+     * document id — the same cross-tenant identifier redacted above — into the
+     * log by a route no grep for `event.runId` would ever find. Code and name
+     * are what an operator acts on; the identified record is in the audit
+     * collection, or the write is the thing that failed.
+     */
+    const code = (err as { code?: unknown } | null)?.code;
+    console.error("[governance/audit] FAILED to write audit event", {
+      action: event.action,
+      errorName: err instanceof Error ? err.name : typeof err,
+      errorCode: typeof code === "string" || typeof code === "number" ? code : undefined,
+    });
   }
 }
 

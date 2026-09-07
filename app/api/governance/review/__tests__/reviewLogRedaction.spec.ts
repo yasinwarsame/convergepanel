@@ -76,6 +76,8 @@ let integrityClassification: "valid" | "invalid" = "valid";
 let existingDocs: Record<string, { userId: string }> = {};
 
 /** Everything any console method received, in order, deeply serialized. */
+/** Rows the REAL `writeAuditEvent` persisted, so we can prove it executed. */
+let auditRows: Array<Record<string, unknown>> = [];
 let captured: string[] = [];
 const CONSOLE_METHODS = ["log", "warn", "error", "debug", "info"] as const;
 const originals: Partial<Record<(typeof CONSOLE_METHODS)[number], (...a: unknown[]) => void>> = {};
@@ -124,7 +126,19 @@ function collectionHandle(name: string) {
   const q: Record<string, unknown> = {};
   for (const m of ["where", "orderBy", "limit", "select"]) q[m] = () => q;
   q.get = async () => ({ docs: [], empty: true, size: 0 });
-  return Object.assign(q, { doc: (id: string) => docHandle(name, id) });
+  return Object.assign(q, {
+    doc: (id: string) => docHandle(name, id),
+    /**
+     * Phase FIRST-ADMIN-C8. `writeAuditEvent` is NO LONGER MOCKED, so the real
+     * writer runs against this double and its own logging is captured. The C7
+     * suite stubbed `@/lib/governance/auditLog` — the module holding the actual
+     * leak — so the proof examined everything except the thing that leaked.
+     */
+    add: async (patch: Record<string, unknown>) => {
+      auditRows.push(patch);
+      return { id: "audit-row-id" };
+    },
+  });
 }
 
 jest.mock("@/lib/firebase/admin", () => ({
@@ -138,7 +152,6 @@ jest.mock("@/lib/firebase/admin", () => ({
 }));
 jest.mock("@/lib/admin/entitlements", () => ({ getEffectiveEntitlements: async () => ({ planId }) }));
 jest.mock("@/lib/governance/reviewerFields", () => ({ parseGovernanceReviewerFor: () => reviewerFor }));
-jest.mock("@/lib/governance/auditLog", () => ({ writeAuditEvent: async () => {} }));
 jest.mock("@/lib/workspaces/runWorkspaceIntegrity", () => ({
   validateRunWorkspaceAssociation: async () => ({
     classification: integrityClassification,
@@ -172,6 +185,7 @@ beforeEach(() => {
     existingDocs[`${c}/other-run`] = { userId: C.ownerBUid };
   }
   captured = [];
+  auditRows = [];
 });
 
 describe("ANCHOR 1 — the capture reproduces what the sink actually received", () => {
@@ -214,6 +228,15 @@ describe.each(COLLECTIONS)("GOVERNANCE HOT PATH — collection=%s", (collection)
     // And the visibility resolver's line ran too, with its counts.
     expect(logs).toContain("[governance/queue] User:");
     expect(logs).toContain("plan: full");
+    // THE REAL AUDIT WRITER EXECUTED on this request — not a stub. Both its
+    // log lines are present, and it persisted exactly one identified row.
+    expect(logs).toContain("[governance/audit] Writing audit event:");
+    expect(logs).toContain("[governance/audit] Event written to admin_audit_logs:");
+    expect(auditRows).toHaveLength(1);
+    // The identified data lives in the ROW, which is the whole argument for
+    // keeping it out of the log. If this stopped being true, redacting the log
+    // would be destroying evidence rather than relocating it.
+    expect(auditRows[0]).toMatchObject({ runId: C.runId, byUid: C.reviewerUid, runOwnerUid: C.ownerAUid });
   });
 
   it.each([
@@ -309,5 +332,150 @@ describe("DELIBERATE DIVERGENCE — the integrity-failure path keeps its run id"
     // Still no caller identity or tenant content on that path.
     expect(logs).not.toContain(C.callerEmail);
     expect(logs).not.toContain(C.question);
+  });
+});
+
+describe.each(COLLECTIONS)("OWNER_B IS REACHABLE — cross-tenant denial, collection=%s", (collection) => {
+  /**
+   * Phase FIRST-ADMIN-C8 (R4 P2-1). The C7 canary list asserted OWNER_B's uid
+   * never appears in the logs — on a request where no production variable
+   * could ever hold it. `other-run` was seeded and never posted to, so the row
+   * was unfalsifiable: a maximal leak of the whole document and the whole
+   * resolved identity failed eight of the nine canary rows and left that one
+   * green.
+   *
+   * The fix is not a stronger assertion, it is a request that actually reaches
+   * the branch: posting to a run OWNED BY OWNER_B, which the reviewer's scope
+   * excludes. Now `ownerUid` genuinely holds OWNER_B at the 403.
+   */
+  it("SELF-VALIDATION: the target exists and belongs to OWNER_B, not to the reviewer's owner", async () => {
+    // Derived from the fixture the route will actually read.
+    expect(existingDocs[`${collection}/other-run`]).toEqual({ userId: C.ownerBUid });
+    expect(C.ownerBUid).not.toBe(C.ownerAUid);
+    expect(reviewerFor).toEqual([C.ownerAUid]);
+    const snap = await collectionHandle(collection).doc("other-run").get();
+    expect(snap.exists).toBe(true);
+    expect((snap.data() as { userId: string }).userId).toBe(C.ownerBUid);
+  });
+
+  it("the branch is genuinely reached: a foreign run is denied 403 and never written", async () => {
+    const res = await post(collection, "other-run");
+    expect(res.status).toBe(403);
+    expect(auditRows).toEqual([]);
+  });
+
+  it("ANCHOR: approved shape logging still occurs on the denial path", async () => {
+    await post(collection, "other-run");
+    // Without this the absence assertion below is satisfied by a silent request.
+    expect(output()).toContain("[governance/queue] User:");
+    expect(output()).toContain("plan: full");
+  });
+
+  it.each([
+    ["the foreign tenant's uid", () => C.ownerBUid],
+    ["the foreign run's id", () => "other-run"],
+    ["the reviewer's uid", () => C.reviewerUid],
+    ["the caller's email", () => C.callerEmail],
+  ])("does not write %s to the log sink on the denial path", async (_label, canary) => {
+    await post(collection, "other-run");
+    expect(output()).not.toContain(canary());
+  });
+});
+
+describe("admin_global BRANCH — the one that first executes at enrollment", () => {
+  /**
+   * Phase FIRST-ADMIN-C8 (R4 P2-2). C7 proved redaction on the `assigners`
+   * branch only, then generalised to "the governance hot path". Four sibling
+   * branches of the same edited function accepted arbitrary leaks with the
+   * whole suite green — including this one, which does not execute AT ALL
+   * until a GOVERNANCE_ADMIN is enrolled. Covering it after enrollment would
+   * be covering it after the risk.
+   *
+   * The identity is constructed from a test-local env value and the mocked
+   * Auth record. Production allowlists are untouched, and the snapshot at the
+   * top of this file restores the variable.
+   */
+  const asGovernanceAdmin = () => {
+    process.env.GOVERNANCE_ADMIN_EMAILS = C.allowlistEmail;
+    tokenClaims = { uid: C.reviewerUid, email: C.allowlistEmail, email_verified: true };
+    liveRecord = { email: C.allowlistEmail, emailVerified: true, disabled: false };
+  };
+
+  it("SELF-VALIDATION: this identity really takes the admin_global branch", async () => {
+    asGovernanceAdmin();
+    const { resolveGovernanceVisibleUserIds } = await import("@/lib/governance/governanceVisibleUserIds");
+    const vis = await resolveGovernanceVisibleUserIds(C.reviewerUid);
+    // Not merely "authorized" — the specific branch, by its own contract:
+    // a null visible set removes the owner filter entirely.
+    expect(vis).toMatchObject({ ok: true, visibleUserIds: null, queueScope: "admin_global" });
+  });
+
+  it("ANCHOR: the branch logs its approved scope decision", async () => {
+    asGovernanceAdmin();
+    captured = [];
+    await post("runs", "other-run");
+    expect(output()).toContain("[governance/queue] Admin: global access");
+  });
+
+  it("a governance admin may review a run owned by any tenant", async () => {
+    asGovernanceAdmin();
+    // Proves the branch is load-bearing: OWNER_B's run is now reviewable,
+    // which is exactly why its logging matters.
+    const res = await post("runs", "other-run");
+    expect(res.status).toBe(200);
+    expect(auditRows).toHaveLength(1);
+  });
+
+  it.each([
+    ["the governance admin's own uid", () => C.reviewerUid],
+    ["the privileged allowlist address", () => C.allowlistEmail],
+    ["the privileged allowlist domain", () => "canary-allowlist-domain-294fb4.example"],
+    ["the cross-tenant run id", () => "other-run"],
+    ["the cross-tenant owner uid", () => C.ownerBUid],
+    ["the run owner's email", () => C.ownerEmail],
+    ["the run's question text", () => C.question],
+  ])("does not write %s to the log sink", async (_label, canary) => {
+    asGovernanceAdmin();
+    captured = [];
+    await post("runs", "other-run");
+    expect(output()).not.toContain(canary());
+  });
+});
+
+describe("SIBLING SCOPE BRANCHES — every remaining logging branch of the resolver", () => {
+  /**
+   * Phase FIRST-ADMIN-C8 (R4 P2-2, "branch-shaped vacuity"). Enumerated from
+   * lib/governance/governanceVisibleUserIds.ts: admin_global (above),
+   * plan_required, no_assigners, the >30 truncation warning, and the assigners
+   * decision (covered by the main suite). Each is exercised here with an
+   * anchor proving the branch ran, then checked for identifiers.
+   */
+  const CANARIES = [C.reviewerUid, C.ownerAUid, C.ownerBUid, C.callerEmail, C.callerDomain, C.question];
+
+  it("plan_required: logs the decision without the caller's identity", async () => {
+    planId = "lite";
+    const res = await post("runs", C.runId);
+    expect(res.status).toBe(403);
+    expect(output()).toContain("Scoping decision: plan_required");   // ANCHOR
+    for (const c of CANARIES) expect(output()).not.toContain(c);
+  });
+
+  it("no_assigners: logs the empty scope without the caller's identity", async () => {
+    reviewerFor = [];
+    const res = await post("runs", C.runId);
+    expect(res.status).toBe(403);
+    expect(output()).toContain("no assigners (empty queue scope)");  // ANCHOR
+    for (const c of CANARIES) expect(output()).not.toContain(c);
+  });
+
+  it("truncation: warns with a count and never the owner list", async () => {
+    // 31 assigners forces the >30 branch; OWNER_B is among them, so a leak of
+    // the list would be visible.
+    reviewerFor = [C.ownerBUid, ...Array.from({ length: 30 }, (_, i) => `assigner-${i}`)];
+    await post("runs", "other-run");
+    expect(output()).toContain("Truncated visible owner set to 30");  // ANCHOR
+    expect(output()).toContain("owner(s)");
+    for (const c of CANARIES) expect(output()).not.toContain(c);
+    expect(output()).not.toContain("assigner-0");
   });
 });

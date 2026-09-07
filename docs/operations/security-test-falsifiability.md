@@ -43,6 +43,51 @@ For every security assertion, answer these before claiming the test is evidence:
 - For "control hidden": the same test family must show it **renders** for the
   tier that should see it.
 
-`scripts/security-test-preflight.mjs` mechanically flags the shapes above across
-specs changed on the branch. It is a lint, not a proof — it catches known
-variants, not the next one. Steps 1–6 are the part that does the work.
+### What the pre-flight actually covers
+
+`scripts/security-test-preflight.mjs` runs in the required Quality Gate over
+**every tracked spec** (`--all`; the changed-files mode is for local use and
+cannot resolve `origin/main` on a CI runner).
+
+It does **not** flag "the shapes above". That claim was wrong when it was
+written and the C7-R4 review called it out: the table above lists nine shapes,
+and the scanner implements seven detectors, only some of which correspond to
+table rows. Exactly what is mechanical, and what is not:
+
+| Shape from the table | Detector? |
+|---|---|
+| `??`-masking before a null assertion | ✅ `nullish-mask` |
+| wrong response key (`|| []` over an absent key) | ✅ `default-mask` |
+| `some` where all are required | ✅ `some-effects` |
+| label instead of data | ❌ human review only |
+| positive satisfied by a 4xx | ❌ human review only |
+| denial with no positive control | ❌ human review only |
+| assertion on a self-composed string | ❌ human review only |
+| all-negative with no anchor | ❌ human review only |
+| stub hiding the subject | ❌ human review only |
+
+Plus three detectors with no row above: `truthy-authority`, `empty-body` and
+`multiline-empty-body`, and `skipped-test`.
+
+**Six of the nine documented shapes have no detector at all.** A green gate says
+nothing about them. That matters because the single most damaging defect found
+in this workstream — C7 proving log redaction while stubbing out the module that
+did the leaking — is "stub hiding the subject", an unmechanised row.
+
+Known blind spots even within the implemented detectors, all confirmed by
+review rather than assumed: matching is line-based and literal, so
+`|| []`/`?? []` closed with `toHaveLength(0)` instead of `toEqual([])`, an
+`expect(...)` wrapped across lines, `.some(` written on anything but a literal
+`effects()`, and an authority assertion whose subject does not contain
+`admin`/`authority`/`scope`/`visible` all pass unflagged. The multi-line empty
+body IS now detected; deeper structural variants are not.
+
+It is a lint, not a proof — it catches known variants, not the next one, and a
+deliberately vacuous test is easy to write past it. Steps 1–6 are the part that
+does the work.
+
+The scanner's own integrity is anchored by `--self-test`, which runs first in
+CI: `scripts/__fixtures__/known-vacuous-shapes.txt` declares the required
+detector ids independently of the implementation, and the two must agree in
+both directions, so neither breaking a detector nor deleting one can pass
+silently.

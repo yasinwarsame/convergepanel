@@ -57,6 +57,24 @@ const SHAPES = [
   { id: "empty-body",
     re: /\b(it|test)\s*\(\s*["'`][^\n]*=>\s*\{\s*\}\s*\)/,
     why: "test body is empty — passes while asserting nothing." },
+  // Phase FIRST-ADMIN-C8 (R4): the same defect as `empty-body`, in the shape an
+  // editor actually writes it. A line-based scanner could not see it, so the
+  // canonical historical defect had an uncovered natural form. Two-line
+  // lookahead only — deliberately not a parser.
+  { id: "multiline-empty-body",
+    at: (lines, i) => {
+      if (!/\b(it|test)\s*\(\s*["'`][^\n]*=>\s*\{\s*$/.test(lines[i])) return false;
+      for (let j = i + 1; j < lines.length && j <= i + 3; j++) {
+        const next = lines[j].trim();
+        if (next === "") continue;
+        return /^\}\s*\)\s*;?$/.test(next);
+      }
+      return false;
+    },
+    why: "test body is empty across lines — passes while asserting nothing." },
+  { id: "skipped-test",
+    re: /\b(it|test|describe)\s*\.\s*(skip|todo)\s*\(|\bxit\s*\(|\bxdescribe\s*\(/,
+    why: "a skipped or todo security test is green and proves nothing." },
 ];
 
 const argv = process.argv.slice(2);
@@ -65,12 +83,13 @@ const explicit = argv.filter((a) => !a.startsWith("--"));
 const gitLines = (cmd) => execSync(cmd, { encoding: "utf8" }).split("\n").filter(Boolean);
 
 const selfTest = argv.includes("--self-test");
+const SELF_TEST_FIXTURE = "scripts/__fixtures__/known-vacuous-shapes.txt";
 
 let scope;
 let files;
 if (selfTest) {
   scope = "self-test fixture";
-  files = ["scripts/__fixtures__/known-vacuous-shapes.txt"];
+  files = [SELF_TEST_FIXTURE];
 } else if (explicit.length) {
   scope = "explicitly listed";
   files = explicit;
@@ -110,20 +129,49 @@ for (const f of files) {
   src.split("\n").forEach((line, i) => {
     if (line.trim().startsWith("*") || line.trim().startsWith("//")) return; // prose about the shapes
     for (const s of SHAPES) {
-      if (s.re.test(line)) { hits++; fired.add(s.id); console.log(`${f}:${i + 1}  [${s.id}] ${s.why}\n    ${line.trim()}`); }
+      const matched = s.re ? s.re.test(line) : s.at(src.split("\n"), i);
+      if (matched) { hits++; fired.add(s.id); console.log(`${f}:${i + 1}  [${s.id}] ${s.why}\n    ${line.trim()}`); }
     }
   });
 }
 if (selfTest) {
-  // THE POSITIVE ANCHOR. Every shape must prove it still detects its own
-  // historical defect. A shape that fires on nothing is indistinguishable from
-  // a shape that is switched off, and both report "clean".
-  const dead = SHAPES.map((s) => s.id).filter((id) => !fired.has(id));
+  /**
+   * THE POSITIVE ANCHOR — expectation and implementation from DIFFERENT files.
+   *
+   * Phase FIRST-ADMIN-C8. This previously computed what it expected from
+   * `SHAPES`, so deleting a detector deleted its own expectation and the
+   * self-test passed with a smaller count. The fixture now DECLARES the
+   * detectors it requires, and the two must agree in both directions.
+   */
+  const declared = [...readFileSync(SELF_TEST_FIXTURE, "utf8")
+    .matchAll(/^#\s*EXPECT-SHAPE:\s*([a-z0-9-]+)\s*$/gm)].map((m) => m[1]);
+  const registered = SHAPES.map((s) => s.id);
+
+  if (declared.length === 0) {
+    console.error("\nSELF-TEST FAILED — the fixture declares no shapes at all.");
+    process.exit(1);
+  }
+  // A declared shape with no detector: either a detector was DELETED, or the
+  // fixture names one that never existed. Both are failures.
+  const undetected = declared.filter((id) => !registered.includes(id));
+  if (undetected.length) {
+    console.error(`\nSELF-TEST FAILED — fixture declares shape(s) with no registered detector: ${undetected.join(", ")}`);
+    process.exit(1);
+  }
+  // A detector with no declared shape is untested: it could be broken and the
+  // self-test would never notice.
+  const uncovered = registered.filter((id) => !declared.includes(id));
+  if (uncovered.length) {
+    console.error(`\nSELF-TEST FAILED — detector(s) have no fixture coverage: ${uncovered.join(", ")}`);
+    process.exit(1);
+  }
+  // And each declared shape must actually fire on its own recorded defect.
+  const dead = declared.filter((id) => !fired.has(id));
   if (dead.length) {
     console.error(`\nSELF-TEST FAILED — shape(s) no longer detect their known defect: ${dead.join(", ")}`);
     process.exit(1);
   }
-  console.log(`\nself-test: all ${SHAPES.length} shapes fired on their known-vacuous fixture`);
+  console.log(`\nself-test: all ${declared.length} fixture-declared shapes fired, and every detector is covered`);
   process.exit(0);
 }
 

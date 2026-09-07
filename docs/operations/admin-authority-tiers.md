@@ -91,6 +91,35 @@ Whether it is *currently* empty in Production is an environment fact, not a
 source fact — verify it against the live environment rather than trusting this
 sentence (`vercel env ls production`; a value of length 0 fails closed).
 
+### Using BOOTSTRAP_SECRET to mint the first SYSTEM_ADMIN
+
+`ADMIN_SECRET` is a bootstrap mechanism, not a standing human credential. It
+authenticates no identity: possession alone mints `admin: true` on any uid, with
+no audit record and no success log. Treating it as a durable operator credential
+means holding, indefinitely, a value that silently grants the highest tier in the
+system to anyone who obtains it.
+
+Two ways to enroll the first SYSTEM_ADMIN. Choose ONE deliberately:
+
+**Option 1 — out-of-band service-account script (preferred).** Call
+`setCustomUserClaims(uid, { admin: true })` directly from a script authenticated
+by the Firebase service account. `ADMIN_SECRET` never needs to hold a live value
+for enrollment, so the bootstrap route is not part of the enrollment story at
+all, and there is no post-enrollment rotation to remember.
+
+**Option 2 — the bootstrap route.** If `/api/admin/set-admin` is used instead:
+
+1. Set `ADMIN_SECRET` to a freshly generated value and deploy it.
+2. Use it once, for the single intended uid, inside a defined bootstrap window.
+3. Verify the claim landed on that uid and on no other.
+4. Immediately rotate or remove `ADMIN_SECRET`, and **deploy that change** — an
+   env edit alone leaves the old value live in the running deployment.
+5. Verify the old value is dead: `POST /api/admin/set-admin` with it must return
+   401. The window is not closed until this is observed.
+
+Neither procedure is performed by any phase that documents it; enrollment is a
+separate, explicitly authorized action.
+
 ### Password admin session — ORPHANED / NON-AUTHORITATIVE
 `ADMIN_PASSWORD` and the `admin_session` cookie (`/api/admin/login`,
 `/api/admin/logout`) gate **no** `/api/admin/**` route at this head. Retained
@@ -203,37 +232,81 @@ operator does; they are not automated.
    should report `adminPortal: false, systemAdmin: false`, and a governance route
    should refuse.
 6. **Review the evidence — and know what does not exist.** Application audit
-   coverage is partial, and an earlier version of this runbook overstated it.
-   Verified against every production call site:
+   coverage is partial. C7 corrected an earlier claim that `writeAuditEvent`
+   covered the SYSTEM_ADMIN mutation handlers generally; the C7-R4 review then
+   found C7's own replacement table incomplete — it omitted
+   `/api/admin/set-admin`, the second claim-minting path, while carrying a
+   heading that asserted completeness. The table below is now enumerated from
+   the filesystem and **held complete by a test**
+   (`docs/__tests__/adminAuthorityEvidenceTable.spec.ts`): every route file
+   under `app/api/admin/**` and `app/api/governance/**` must appear here, so a
+   new privileged route cannot be added without either appearing in this table
+   or failing CI.
 
-   | Privileged operation | Route | Application audit record? |
-   |---|---|---|
-   | Run governance-status override | `/api/admin/runs/[runId]` PATCH | ✅ `writeAuditEvent` |
-   | Run deletion (cross-user) | `/api/admin/runs/[runId]` DELETE | ✅ `writeAuditEvent` |
-   | Plan override set/clear | `/api/admin/users/[uid]/override` | ✅ `writeAuditLog` |
-   | Stripe cancel / reactivate / sync | `/api/admin/users/[uid]/stripe/*` | ✅ `writeAuditLog` |
-   | Governance review decision | `/api/governance/review` | ✅ `writeAuditEvent` |
-   | Governance policy change | `/api/governance/policy` | ✅ `writeAuditEvent` |
-   | **Admin-claim minting** | `/api/admin/set-role` | ❌ **NONE** |
-   | **Provider credential read/write** | `/api/admin/keys` | ❌ **NONE** |
-   | **Bulk run purge (≤2000 docs)** | `/api/admin/purge-runs` | ❌ **NONE** |
-   | **Billing subscription sync** | `/api/admin/sync-subscription` | ❌ **NONE** |
-   | **Webhook replay** | `/api/admin/test-webhook` | ❌ **NONE** |
-   | **Account disable / delete** | `/api/admin/users/[uid]` PATCH/DELETE | ❌ **NONE** |
-   | **Bulk user read** | `/api/admin/users` GET | ❌ **NONE** |
-   | **Cross-user run read** | `/api/admin/runs` GET, `/api/admin/runs/[runId]` GET | ❌ **NONE** |
-   | **Governance queue / audit reads** | `/api/governance/queue`, `/api/governance/audit` | ❌ **NONE** |
+   Three columns, because they fail differently. **Audit** is a durable record
+   in an access-controlled collection. **Success log** is a runtime log line on
+   the success path — subject to the platform's retention window, and readable
+   by anyone with log access. **Other** is evidence outside this application.
 
-   **Consequence for an incident.** For any operation in the ❌ rows there is no
-   application record of who did it or what was touched. Do not tell a
-   stakeholder that activity "was reviewed and nothing was found" on the basis
-   of the audit collection — for those operations the collection is silent by
-   construction, not because nothing happened. Runtime logs (subject to their
-   retention window) and Stripe's own event history are the only evidence, and
-   the governance hot-path logs deliberately carry counts rather than record
-   contents, so they will not tell you WHICH records were read.
+   | Route (method) | Authority | Audit | Success log | Other evidence |
+   |---|---|---|---|---|
+   | `/api/admin/runs/[runId]` PATCH | SYSTEM_ADMIN | ✅ `writeAuditEvent` | ✅ | — |
+   | `/api/admin/runs/[runId]` DELETE | SYSTEM_ADMIN | ✅ `writeAuditEvent` | ✅ | — |
+   | `/api/admin/runs/[runId]` GET | ADMIN_PORTAL | ❌ | ✅ | — |
+   | `/api/admin/runs` GET | ADMIN_PORTAL | ❌ | ✅ | — |
+   | `/api/admin/users/[uid]/override` POST, DELETE | SYSTEM_ADMIN | ✅ `writeAuditLog` | ❌ | — |
+   | `/api/admin/users/[uid]/stripe/cancel` POST | SYSTEM_ADMIN | ✅ `writeAuditLog` | ❌ | Stripe events |
+   | `/api/admin/users/[uid]/stripe/reactivate` POST | SYSTEM_ADMIN | ✅ `writeAuditLog` | ❌ | Stripe events |
+   | `/api/admin/users/[uid]/stripe/sync` POST | SYSTEM_ADMIN | ✅ `writeAuditLog` | ❌ | Stripe events |
+   | `/api/governance/review` POST | GOVERNANCE_ADMIN / reviewer | ✅ `writeAuditEvent` | ✅ shape only | run's `governanceEvents` |
+   | `/api/governance/policy` POST | GOVERNANCE_ADMIN | ✅ `writeAuditEvent` | ✅ | — |
+   | `/api/governance/policy` GET | GOVERNANCE_ADMIN | ❌ | ✅ | — |
+   | **`/api/admin/set-admin` POST** | **BOOTSTRAP_SECRET only** | ❌ **NONE** | ❌ **NONE** | **none — see §B.4** |
+   | **`/api/admin/set-role` POST** | SYSTEM_ADMIN | ❌ **NONE** | ✅ | — |
+   | **`/api/admin/keys` GET, POST** | SYSTEM_ADMIN | ❌ **NONE** | ✅ | — |
+   | **`/api/admin/purge-runs` POST** | SYSTEM_ADMIN | ❌ **NONE** | ✅ | — |
+   | **`/api/admin/sync-subscription` POST** | SYSTEM_ADMIN | ❌ **NONE** | ❌ **NONE** | Stripe events |
+   | **`/api/admin/test-webhook` POST** | SYSTEM_ADMIN | ❌ **NONE** | ✅ | Stripe events |
+   | **`/api/admin/users/[uid]` PATCH, DELETE** | SYSTEM_ADMIN | ❌ **NONE** | ❌ **NONE** | **none** |
+   | `/api/admin/users` GET | ADMIN_PORTAL | ❌ | ✅ | — |
+   | `/api/admin/users/search` GET | ADMIN_PORTAL | ❌ | ❌ | none |
+   | `/api/admin/users/[uid]/details` GET | ADMIN_PORTAL | ❌ | ✅ | — |
+   | `/api/admin/access` GET | ADMIN_PORTAL probe | ❌ | ❌ | none |
+   | `/api/admin/login` POST, `/api/admin/logout` POST | orphaned password session (§ above) | ❌ | ❌ | none |
+   | `/api/governance/audit/backfill` POST | GOVERNANCE_ADMIN | ❌ **NONE** | ✅ | — |
+   | `/api/governance/audit` GET | GOVERNANCE_ADMIN | ❌ | ✅ | — |
+   | `/api/governance/queue` GET | GOVERNANCE_ADMIN / reviewer | ❌ | ✅ shape only | — |
+   | `/api/governance/reviewer` GET, POST | plan-gated self-service | ❌ | ❌ | — |
 
-   Closing this gap is a separate piece of work; C7 corrected the description
+   **`/api/governance/audit/backfill` deserves separate notice:** it is a
+   privileged WRITE into `admin_audit_logs` itself (up to 400 documents), with
+   no record of who ran it. When assessing whether the audit collection can be
+   trusted, that route is part of the question.
+
+   **What an absent record does and does not mean.** For every ❌ Audit row
+   there is no durable application record of who acted or what was touched. For
+   the rows that are ❌ in **both** columns — `set-admin`, `sync-subscription`,
+   `users/[uid]` PATCH/DELETE (account disable and permanent deletion),
+   `users/search`, `access`, `login`/`logout` — the application produces **no
+   evidence of any kind on success**. An earlier version of this section told
+   responders to fall back on runtime logs; for those rows there is nothing to
+   fall back to, and following that advice would reproduce exactly the false
+   inference this paragraph exists to prevent.
+
+   So: **absence of a record is not evidence that the operation did not
+   happen.** Do not tell a stakeholder that activity "was reviewed and nothing
+   was found" on the basis of the audit collection, or of the logs, for any row
+   above that is ❌ for the column you consulted. Where "Other evidence" names
+   Stripe, that provider's own event history is authoritative and independent of
+   this application. Where it says "none", state plainly in the incident record
+   that the question cannot be answered from available evidence.
+
+   Note also that a ✅ means the handler *attempts* the write:
+   `writeAuditEvent` and `writeAuditLog` both return silently when Firestore is
+   unavailable and swallow their own errors, and the mutation proceeds
+   regardless. A ✅ row with no matching record is possible.
+
+   Closing these gaps is separate work. C7 and C8 corrected the description
    only, and deliberately added no audit infrastructure.
 
 ### B. SYSTEM_ADMIN (claim-derived) — disabling is NOT sufficient
@@ -258,10 +331,39 @@ operator does; they are not automated.
    revocation check, so the cookie's own five-day life can begin AFTER the
    revocation. Treat the effective ADMIN_PORTAL window as up to one hour plus the
    cookie lifetime unless you also invalidate the session.
-6. Verify denial against Production. For the evidence review, consult the
-   coverage table in §A.6 first — claim minting, credential access and bulk
-   purge, the three operations a compromised SYSTEM_ADMIN is most likely to have
-   used, produce **no** application audit record.
+6. **Contain the BOOTSTRAP path, or containment is not complete.** Steps 1-2
+   remove the claim from one account. They do nothing about `ADMIN_SECRET`,
+   which mints `admin: true` on **any uid** through `/api/admin/set-admin`
+   (§ "BOOTSTRAP_SECRET — not a human role"), authenticates no identity, and
+   leaves no audit record and no success log. Anyone still holding that value
+   re-creates the claim immediately and invisibly, including on a fresh account
+   you are not watching.
+
+   If there is ANY possibility the secret was exposed — a compromised admin
+   machine, a leaked deployment env, a shared password store, an unknown
+   exfiltration scope, or simply an inability to rule it out — then:
+
+   a. Rotate `ADMIN_SECRET` to a new value, or remove it entirely if no
+      bootstrap is pending. The route fails closed on an empty or unset value,
+      so removal is a valid containment state.
+   b. **Deploy deliberately.** An environment variable change does not affect
+      running Production until a deployment picks it up. Until then the old
+      secret is still live.
+   c. **Prove the old value no longer works** — a `POST /api/admin/set-admin`
+      with the old secret must return 401. Do not record containment as complete
+      on the basis of the env change alone.
+   d. Re-enumerate custom claims across accounts afterwards: if the secret was
+      used before rotation, the resulting claim sits on an account nobody
+      enrolled and no record names.
+
+7. Verify denial against Production. For the evidence review, consult the
+   coverage table in §A.6 first — and note what it says about the operations a
+   compromised SYSTEM_ADMIN is most likely to have used: claim minting via
+   `set-role` and `set-admin`, provider credential access, and bulk purge
+   produce no audit record, and `set-admin` produces no evidence at all.
+
+**Containment is not complete while a reusable bootstrap credential can
+re-create the claim you just removed.**
 
 ### What this procedure does NOT give you
 
