@@ -78,6 +78,8 @@ let existingDocs: Record<string, { userId: string }> = {};
 /** Everything any console method received, in order, deeply serialized. */
 /** Rows the REAL `writeAuditEvent` persisted, so we can prove it executed. */
 let auditRows: Array<Record<string, unknown>> = [];
+/** When true the audit `.add()` throws a realistic path-bearing Firestore error. */
+let auditWriteFails = false;
 let captured: string[] = [];
 const CONSOLE_METHODS = ["log", "warn", "error", "debug", "info"] as const;
 const originals: Partial<Record<(typeof CONSOLE_METHODS)[number], (...a: unknown[]) => void>> = {};
@@ -135,6 +137,16 @@ function collectionHandle(name: string) {
      * leak — so the proof examined everything except the thing that leaked.
      */
     add: async (patch: Record<string, unknown>) => {
+      if (auditWriteFails) {
+        // Firestore errors carry the document path they failed on, which is how
+        // a cross-tenant identifier reaches the log by a route no grep for
+        // `event.runId` would find. Shaped like the real thing.
+        const err = Object.assign(
+          new Error(`5 NOT_FOUND: no entity to update: app: projects/p/databases/(default)/documents/admin_audit_logs/${C.runId}`),
+          { code: 5 }
+        );
+        throw err;
+      }
       auditRows.push(patch);
       return { id: "audit-row-id" };
     },
@@ -186,6 +198,7 @@ beforeEach(() => {
   }
   captured = [];
   auditRows = [];
+  auditWriteFails = false;
 });
 
 describe("ANCHOR 1 — the capture reproduces what the sink actually received", () => {
@@ -477,5 +490,41 @@ describe("SIBLING SCOPE BRANCHES — every remaining logging branch of the resol
     expect(output()).toContain("owner(s)");
     for (const c of CANARIES) expect(output()).not.toContain(c);
     expect(output()).not.toContain("assigner-0");
+  });
+});
+
+describe("the audit writer's FAILURE path does not leak the record it failed on", () => {
+  /**
+   * Phase FIRST-ADMIN-C8. `writeAuditEvent` swallows its own errors and logged
+   * the raw one. A Firestore error carries the document path it failed on, so
+   * the same cross-tenant identifier redacted from the success path reached the
+   * log through the catch block — by a route no grep for `event.runId` finds.
+   *
+   * This branch never fires in ordinary tests (the double always succeeds), so
+   * a mutation restoring the raw error survived the entire suite until this
+   * existed. The failure is injected deliberately.
+   */
+  it("SELF-VALIDATION: the injected error really carries the run id in its message", () => {
+    auditWriteFails = true;
+    const err = new Error(`5 NOT_FOUND: ... /admin_audit_logs/${C.runId}`);
+    // If the fixture stopped embedding the identifier, the absence assertion
+    // below would pass for the wrong reason.
+    expect(err.message).toContain(C.runId);
+  });
+
+  it("logs the failure as shape, never the raw error", async () => {
+    auditWriteFails = true;
+    const res = await post("runs", C.runId);
+    // ANCHOR: the request still succeeded (the writer swallows its error), and
+    // the failure branch genuinely executed.
+    expect(res.status).toBe(200);
+    expect(output()).toContain("[governance/audit] FAILED to write audit event");
+    // ANCHOR: useful operational content survived.
+    expect(output()).toContain("errorCode");
+    expect(auditRows).toEqual([]);
+    // And the identifiers the error dragged along are absent.
+    expect(output()).not.toContain(C.runId);
+    expect(output()).not.toContain("admin_audit_logs/");
+    expect(output()).not.toContain("NOT_FOUND: no entity");
   });
 });
