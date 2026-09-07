@@ -54,7 +54,14 @@ Two credential paths are accepted by every API route:
 
 **Middleware** (`middleware.ts`) only checks for cookie *presence* to gate `/admin/*` routes. Full token validation and custom claim checks happen inside each API route.
 
-**Admin access** is a Firebase custom claim `admin: true` — not a database field. The `ADMIN_EMAILS` env var controls which accounts can be granted admin status.
+**Administrator authority has three human tiers plus one bootstrap mechanism** — see `docs/operations/admin-authority-tiers.md` for the full contract.
+
+- **ADMIN_PORTAL** — a verified, enabled Firebase Auth email on `ADMIN_EMAILS`, **or** the `admin: true` custom claim. A broad READ/monitoring tier over customer runs and user records. `ADMIN_EMAILS` membership grants this **by itself**; it does not merely make an account eligible for the claim.
+- **SYSTEM_ADMIN** — the Firebase custom claim `admin === true` **only**, never email-derived. Gates provider credentials, admin-claim minting, bulk purge, destructive user/billing mutation, and (since Phase C4) run deletion, governance-status override, `sync-subscription` and `test-webhook`.
+- **GOVERNANCE_ADMIN** — a verified, enabled Firebase Auth email on `GOVERNANCE_ADMIN_EMAILS` **only**. Governance policy writes, audit backfill, and global run visibility. Neither `ADMIN_EMAILS` nor the `admin` claim confers it.
+- **BOOTSTRAP_SECRET** — `ADMIN_SECRET` on `/api/admin/set-admin`, an exceptional mechanism that authenticates no identity. Not a human role; fails closed when unset.
+
+A **disabled** Firebase Auth account obtains no email-derived privilege in any tier.
 
 **Admin routes** (`app/api/admin/*`) must use `requireAdminApiAccess()` from `lib/firebase/auth-helpers.ts`, which verifies both token validity and the `admin: true` custom claim. Using `verifySessionCookie()` alone on admin routes is a privilege escalation vulnerability — it only confirms a valid session, not admin status.
 
@@ -1022,7 +1029,8 @@ Firebase Admin tries credentials in the order listed above.
 
 | Variable | Used for |
 |----------|---------|
-| `ADMIN_EMAILS` | Comma-separated emails that can be granted `admin: true` custom claim |
+| `ADMIN_EMAILS` | Comma-separated emails granted the ADMIN_PORTAL tier directly (verified + enabled live Auth record required). Does **not** grant `admin: true` or governance authority |
+| `GOVERNANCE_ADMIN_EMAILS` | Comma-separated emails granted the GOVERNANCE_ADMIN tier only (verified + enabled). Does **not** grant portal or system authority |
 
 **Workspaces** (see Workspaces section above; production values as of 2026-08-14 noted):
 

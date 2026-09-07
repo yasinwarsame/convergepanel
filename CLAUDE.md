@@ -52,6 +52,9 @@ does NOT grant SYSTEM_ADMIN or governance authority.
 Separately, `BOOTSTRAP_SECRET` (`ADMIN_SECRET` on `/api/admin/set-admin`) can mint the
 first `admin` claim. It authenticates no identity at all — it is a deployment-time
 bootstrap, not a role, and it fails closed when the variable is empty or unset.
+A **disabled** Firebase Auth account obtains no email-derived privilege in any tier.
+ADMIN_PORTAL is a read/monitoring tier: run DELETE and PATCH, `/api/admin/sync-subscription`
+and `/api/admin/test-webhook` all require SYSTEM_ADMIN.
 
 ### Connectors
 

@@ -9,13 +9,19 @@ Never write "application admin" without saying which tier is meant.
 ## Tiers
 
 ### ADMIN_PORTAL
-**Source:** a verified live Firebase Auth email on `ADMIN_EMAILS`, **or** the
-Firebase custom claim `admin === true`.
+**Source:** a verified, **enabled** live Firebase Auth email on `ADMIN_EMAILS`,
+**or** the Firebase custom claim `admin === true`.
 **Guard:** `requireAdminPortalAccess`.
-**Grants:** `/api/admin/access`, `/api/admin/users` (GET), `/api/admin/runs`,
-`/api/admin/runs/[runId]` (GET/PATCH/DELETE), `/api/admin/sync-subscription`,
-`/api/admin/test-webhook`.
-This is **not** full application administration.
+**Grants:** `/api/admin/access`, `/api/admin/users` (GET), `/api/admin/runs`
+(GET), `/api/admin/runs/[runId]` (**GET only**).
+
+**What that actually reaches (stated plainly, because an earlier version of this
+document understated it):** `/api/admin/users` GET returns **every** user
+document, and `/api/admin/runs` returns **every** user's runs, verifications and
+video verifications including owner email and question text. ADMIN_PORTAL is a
+broad READ tier over customer data. It is a read/monitoring tier — not full
+application administration, and since Phase C4 not a route to any destructive,
+governance-changing or billing-changing action.
 
 ### SYSTEM_ADMIN
 **Source:** the custom claim `admin === true` **only**. Never email-derived.
@@ -36,11 +42,28 @@ SYSTEM_ADMIN also satisfies ADMIN_PORTAL, because the same claim satisfies that
 guard.
 
 ### GOVERNANCE_ADMIN
-**Source:** a verified live Firebase Auth email on `GOVERNANCE_ADMIN_EMAILS`
-**only**.
+**Source:** a verified, **enabled** live Firebase Auth email on
+`GOVERNANCE_ADMIN_EMAILS` **only**.
 **Guards:** `checkAdminOnly`, `resolveGovernanceVisibleUserIds`.
 **Grants:** governance-global visibility (every user's runs), governance policy
 write, audit backfill, and the governance dashboard/policy presentation.
+
+### Disabled accounts hold no email-derived authority (Phase C4)
+
+Both email-derived scopes require ALL of: the live `getUser(uid)` lookup
+succeeds; `disabled === false`; `emailVerified === true`; the address passes the
+ASCII privileged boundary; and the canonical address is on that scope's list.
+All of it comes from ONE live Auth record.
+
+`getUser()` returns a record for a disabled account without throwing, so before
+C4 disabling a compromised administrator did not remove their allowlist-derived
+authority. The requirement is written `disabled === false`, not `!disabled`, so
+a missing or non-boolean value denies. A failed lookup reports `disabled: true`
+and grants nothing.
+
+This does **not** change SYSTEM_ADMIN token/session semantics, which remain as
+reviewed: session cookies are verified with revocation checking, ID tokens rely
+on their short lifetime.
 
 ### BOOTSTRAP_SECRET — not a human role
 `ADMIN_SECRET` gates `/api/admin/set-admin`, which mints the first `admin: true`
@@ -99,49 +122,35 @@ import-cached.
 
 ---
 
-## FIRST_ADMIN_ENROLLMENT_BLOCKER_DECISION — OPEN, blocks first enrollment
+## FIRST_ADMIN_ENROLLMENT_BLOCKER_DECISION — **RESOLVED 2026-09-07**
 
-**Status: UNDECIDED. This must be settled before the first address is added to
-`ADMIN_EMAILS`.** It is deliberately NOT resolved in phase C3, because it is a
-product/security decision about what ADMIN_PORTAL is *for*, not a defect to
-patch.
+**Decision: all four surfaces below require SYSTEM_ADMIN.** Implemented in Phase
+FIRST-ADMIN-C4.
 
-Two capabilities currently sit at ADMIN_PORTAL and are reachable by any verified
-`ADMIN_EMAILS` member holding no custom claim:
+| Route | Method | Was | Now | Why |
+|---|---|---|---|---|
+| `/api/admin/runs/[runId]` | `DELETE` | ADMIN_PORTAL | **SYSTEM_ADMIN** | Permanently deletes another user's run / verification / video-verification document. Destructive cross-user mutation. |
+| `/api/admin/runs/[runId]` | `PATCH` | ADMIN_PORTAL | **SYSTEM_ADMIN** | Writes `set_governance_status` on another user's run. A governance mutation, not a read/monitoring capability. |
+| `/api/admin/sync-subscription` | `POST` | ADMIN_PORTAL | **SYSTEM_ADMIN** | Mutates billing/subscription state. |
+| `/api/admin/test-webhook` | `POST` | ADMIN_PORTAL | **SYSTEM_ADMIN** | Re-runs `handleSubscriptionChange`, exercising billing mutation for an arbitrary subscription. |
 
-| Route | Method | Effect |
-|---|---|---|
-| `/api/admin/runs/[runId]` | `DELETE` | Permanently deletes **another user's** run / verification / video-verification document. |
-| `/api/admin/runs/[runId]` | `PATCH` | Writes `set_governance_status` (`approved` / `needs_review` / `blocked`) on **another user's** run, audited as "Admin governance override". |
+**Rationale.** ADMIN_PORTAL is the lower operational/read tier. It must not be a
+route to destructive, governance-changing or billing-changing actions. Leaving
+these at ADMIN_PORTAL would also have contradicted this document's own rule that
+`ADMIN_EMAILS` confers no governance authority, since the `PATCH` handler writes
+governance status.
 
-Two things make this a decision rather than a preference:
+**Deliberately NOT retiered:** `GET /api/admin/runs`, `GET /api/admin/users`,
+`GET /api/admin/access`, and `GET /api/admin/runs/[runId]`. These are the
+portal's read/monitoring purpose. Their reach is documented honestly under
+ADMIN_PORTAL above rather than moved for symmetry.
 
-1. **It contradicts this document.** The tier contract above states that
-   `ADMIN_EMAILS` confers no governance authority. The PATCH route lets an
-   `ADMIN_EMAILS`-only administrator overwrite governance verdicts. Both
-   statements cannot stand.
-2. **Risk-line inversion.** The destructive single-document DELETE sits at
-   ADMIN_PORTAL, while the strictly read-only `/api/admin/users/search` and the
-   bulk `/api/admin/purge-runs` both require SYSTEM_ADMIN. An `ADMIN_EMAILS`
-   administrator can delete other users' records one at a time but may not
-   preview a user list.
+**Correction of record.** The earlier version of this note argued the inversion
+by claiming an `ADMIN_EMAILS` administrator "may not preview a user list". That
+was **false**: `/api/admin/users` GET is portal-tier and returns every user
+document. The real inversion was narrower and is now moot — the destructive and
+billing surfaces have moved, while `/api/admin/users/search` remains
+SYSTEM_ADMIN, which is merely conservative rather than inconsistent.
 
-Both are **pre-existing**: phases C1–C3 renamed the guards and did not move any
-route between tiers. They are latent only because `ADMIN_EMAILS` is empty. **The
-moment the first address is enrolled, they become live.**
-
-### The decision to make
-
-For each route, choose ONE and record it here with a date and a decider:
-
-- **Keep at ADMIN_PORTAL** — accepting that an `ADMIN_EMAILS` administrator can
-  delete any user's run and override governance status. If chosen, the
-  "`ADMIN_EMAILS` confers no governance authority" claim in this document must
-  be narrowed to "no governance *queue/policy/audit* authority", and the
-  operational meaning of an ADMIN_EMAILS enrollment must be documented as
-  including cross-tenant deletion.
-- **Move to SYSTEM_ADMIN** — making ADMIN_PORTAL a genuinely read-mostly support
-  tier. If chosen, it is its own PR with its own review, not a test-hardening
-  phase, because it changes who can perform live operations.
-
-Until one is recorded, first-admin enrollment is blocked.
+**This item no longer blocks first-admin enrollment** once C4 is independently
+reviewed and deployed.

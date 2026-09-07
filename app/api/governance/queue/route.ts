@@ -17,7 +17,7 @@ import {
 } from "@/lib/governance/governanceInputFromDocs";
 import { getModelDisplayName } from "@/lib/modelInfo";
 import { buildAgreementDisagreementDigest } from "@/lib/verification/agreementDigest";
-import { governanceAdminEmailsForLog, isGovernanceAdminEmail } from "@/lib/admin/config";
+import { governanceAdminListShapeForLog, isGovernanceAdminEmail } from "@/lib/admin/config";
 import {
   governanceQueuePlanForbiddenResponse,
   resolveGovernanceVisibleUserIdsCached,
@@ -1236,7 +1236,9 @@ export async function GET(request: NextRequest) {
   // whether that membership actually grants anything, so a log line can no
   // longer read as though an unverified allowlisted address were admitted.
   console.log(
-    `[governance] governance-allowlist membership="${isGovernanceAdminEmail(email)}", emailVerified=${resolved.emailVerified}, grantsAuthority=${isGovernanceAdminEmail(email) && resolved.emailVerified}, governanceList=${governanceAdminEmailsForLog()}`
+    // Phase FIRST-ADMIN-C4: the allowlist CONTENTS are never logged — only its
+    // shape, plus this caller's own membership. See governanceAdminListShapeForLog.
+    `[governance] governance-allowlist membership="${isGovernanceAdminEmail(email)}", emailVerified=${resolved.emailVerified}, grantsAuthority=${isGovernanceAdminEmail(email) && resolved.emailVerified}, governanceList=${governanceAdminListShapeForLog()}`
   );
 
   const { searchParams } = request.nextUrl;

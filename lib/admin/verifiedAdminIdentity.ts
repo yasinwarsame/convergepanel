@@ -33,7 +33,7 @@ import { adminAuth } from "@/lib/firebase/admin";
 import { isApplicationAdminEmail, isGovernanceAdminEmail } from "./config";
 
 export type LiveAuthIdentity =
-  | { status: "resolved"; email: string; emailVerified: boolean }
+  | { status: "resolved"; email: string; emailVerified: boolean; disabled: boolean }
   | { status: "lookup_failed" };
 
 /**
@@ -48,6 +48,16 @@ export async function resolveLiveAuthIdentity(uid: string): Promise<LiveAuthIden
       status: "resolved",
       email: record.email ?? "",
       emailVerified: record.emailVerified === true,
+      // Phase FIRST-ADMIN-C4. `getUser()` returns a record for a DISABLED
+      // account without throwing, and this module previously read only the
+      // address and the verification flag — so disabling a compromised
+      // administrator did not remove their email-derived authority. Since the
+      // whole point of reading the live record is that it is stronger evidence
+      // than a token claim, the account's enabled state has to come out of the
+      // same read. Absent or non-boolean is treated as ENABLED here and denied
+      // by the predicates below only when explicitly `true`; see the strict
+      // `disabled === false` requirement there.
+      disabled: record.disabled === true,
     };
   } catch {
     // Deleted user, disabled lookup, transient Auth outage — none of these are
@@ -66,12 +76,20 @@ export async function resolveLiveAuthIdentity(uid: string): Promise<LiveAuthIden
  * `emailVerified` must be exactly `true`; absent, `null`, `false`, `"true"`, `0`
  * and `1` all deny.
  */
-type Evidence = { email: string; emailVerified: boolean };
+type Evidence = { email: string; emailVerified: boolean; disabled: boolean };
+
+/**
+ * Phase FIRST-ADMIN-C4 — `disabled === false` is required for BOTH scopes.
+ *
+ * Written as `=== false` rather than `!disabled` so that a missing, undefined
+ * or non-boolean value denies rather than grants: the only accepted proof that
+ * an account is usable is an explicit `false` derived from the live record.
+ */
 function verifiedApplicationScope(e: Evidence): boolean {
-  return e.emailVerified === true && isApplicationAdminEmail(e.email);
+  return e.disabled === false && e.emailVerified === true && isApplicationAdminEmail(e.email);
 }
 function verifiedGovernanceScope(e: Evidence): boolean {
-  return e.emailVerified === true && isGovernanceAdminEmail(e.email);
+  return e.disabled === false && e.emailVerified === true && isGovernanceAdminEmail(e.email);
 }
 
 /**
@@ -100,6 +118,7 @@ export type VerifiedAdminScopes = {
   governanceAdmin: boolean;
   email: string;
   emailVerified: boolean;
+  disabled: boolean;
 };
 
 export async function resolveVerifiedAdminScopes(uid: string): Promise<VerifiedAdminScopes> {
@@ -111,15 +130,23 @@ export async function resolveVerifiedAdminScopes(uid: string): Promise<VerifiedA
       governanceAdmin: false,
       email: "",
       emailVerified: false,
+      // A lookup we could not perform is not evidence that the account is
+      // usable. Reported as disabled so every consumer fails closed.
+      disabled: true,
     };
   }
-  const evidence = { email: identity.email, emailVerified: identity.emailVerified };
+  const evidence = {
+    email: identity.email,
+    emailVerified: identity.emailVerified,
+    disabled: identity.disabled,
+  };
   return {
     lookupStatus: "resolved",
     adminPortal: verifiedApplicationScope(evidence),
     governanceAdmin: verifiedGovernanceScope(evidence),
     email: identity.email,
     emailVerified: identity.emailVerified,
+    disabled: identity.disabled,
   };
 }
 

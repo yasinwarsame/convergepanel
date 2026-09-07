@@ -59,7 +59,7 @@ function govBadgeClass(status: string | null): string {
 
 export default function AdminRunsTab() {
   const { user, authReady } = useAuth();
-  const { canAccess, gateReady } = useAdminPortalAccess();
+  const { canAccess, isSystemAdmin, gateReady } = useAdminPortalAccess();
 
   const [type, setType] = useState<RunTypeFilter>("all");
   const [status, setStatus] = useState<string>("all");
@@ -407,29 +407,43 @@ export default function AdminRunsTab() {
                             >
                               {open ? "Hide" : "View"}
                             </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setOverrideRow(r);
-                                setOverrideStatus(
-                                  (r.governanceStatus === "blocked"
-                                    ? "needs_review"
-                                    : r.governanceStatus === "approved"
-                                      ? "approved"
-                                      : "needs_review") as typeof overrideStatus
-                                );
-                              }}
-                              className="text-amber-800 hover:underline text-xs font-medium"
-                            >
-                              Override
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setDeleteRow(r)}
-                              className="text-red-700 hover:underline text-xs font-medium"
-                            >
-                              Delete
-                            </button>
+                            {/*
+                              Phase FIRST-ADMIN-C4: Override (PATCH) and Delete
+                              (DELETE) on /api/admin/runs/[runId] are now
+                              SYSTEM_ADMIN — a governance-status write and a
+                              permanent cross-user deletion respectively. View
+                              (GET) stays ADMIN_PORTAL, so a portal operator
+                              keeps the read/monitoring capability and is simply
+                              not offered the two mutations the server will
+                              refuse. The server guards remain authoritative.
+                            */}
+                            {isSystemAdmin && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setOverrideRow(r);
+                                    setOverrideStatus(
+                                      (r.governanceStatus === "blocked"
+                                        ? "needs_review"
+                                        : r.governanceStatus === "approved"
+                                          ? "approved"
+                                          : "needs_review") as typeof overrideStatus
+                                    );
+                                  }}
+                                  className="text-amber-800 hover:underline text-xs font-medium"
+                                >
+                                  Override
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setDeleteRow(r)}
+                                  className="text-red-700 hover:underline text-xs font-medium"
+                                >
+                                  Delete
+                                </button>
+                              </>
+                            )}
                           </div>
                         </td>
                       </tr>

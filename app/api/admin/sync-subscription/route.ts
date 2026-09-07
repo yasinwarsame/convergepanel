@@ -1,4 +1,18 @@
 /**
+ * Phase FIRST-ADMIN-C4 — SYSTEM_ADMIN required.
+ *
+ * Resolved on 2026-09-07 by the FIRST_ADMIN_ENROLLMENT_BLOCKER_DECISION:
+ * ADMIN_PORTAL is the lower operational/read tier and is not a route to
+ * destructive, governance-changing or billing-changing actions. See
+ * docs/operations/admin-authority-tiers.md.
+ *
+ * TRANSPORT NOTE: the SYSTEM_ADMIN guards are bearer-only in practice
+ * (`verifyAdminToken` passes the `__session` value to `verifyIdToken`, which
+ * always rejects a Firebase session cookie). The portal guard this replaces
+ * accepted either, so this route is now bearer-only. The admin UI calls it via
+ * `authedFetch`, which always sends an `Authorization: Bearer` header.
+ */
+/**
  * Admin Endpoint: Sync Subscription from Stripe
  * 
  * This endpoint manually processes a Stripe subscription and updates Firestore.
@@ -10,7 +24,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { stripe } from "@/lib/stripe/client";
 import { adminDb, firebaseAdmin } from "@/lib/firebase/admin";
-import { requireAdminPortalAccess } from "@/lib/firebase/auth-helpers";
+import { requireSystemAdminAccess } from "@/lib/firebase/auth-helpers";
 import { getPlanIdFromPriceId, getPlanConfigById } from "@/lib/billing/planConfig";
 import { BillingInterval } from "@/lib/plans";
 import { resetUsageForNewPlan } from "@/lib/stripe/usage";
@@ -22,7 +36,8 @@ export const runtime = "nodejs";
 export async function POST(req: NextRequest) {
   try {
     // Verify admin authentication — session cookie alone is not sufficient
-    const auth = await requireAdminPortalAccess(req);
+    // Phase FIRST-ADMIN-C4: mutates billing/subscription state.
+    const auth = await requireSystemAdminAccess(req);
     if (!auth) {
       return NextResponse.json(
         { error: "Unauthorized. Admin access required." },
