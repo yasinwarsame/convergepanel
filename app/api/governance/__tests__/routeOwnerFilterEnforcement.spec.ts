@@ -58,6 +58,17 @@ const reviewUpdate = jest.fn(async () => undefined);
 /** Owner constraints actually issued, tagged with their collection. */
 const whereCalls: Array<{ collection: string; field: string; op: string; value: unknown }> = [];
 const queriedCollections: string[] = [];
+/**
+ * Phase FIRST-ADMIN-C6 — every audit doc the double actually SUPPLIED.
+ *
+ * The audit-global exclusion assertions below are all-negative ("the other
+ * tenant's row is absent"). C5-R2 proved that deleting the foreign row from this
+ * fixture left the suite green WHILE the production narrowing was removed and
+ * the route leaked every tenant's audit rows. A negative assertion is only worth
+ * anything if the excluded value was demonstrably present to begin with, so the
+ * suite now validates its own evidence source.
+ */
+const suppliedAuditIds: string[] = [];
 
 /** One document per owner, in every collection, all queue-eligible. */
 const seedDoc = (coll: Coll, owner: string) => ({
@@ -111,6 +122,7 @@ function makeQuery(collection: string) {
   q.get = async () => {
     queriedCollections.push(collection);
     if (collection === "admin_audit_logs") {
+      suppliedAuditIds.push("ev-mine", "ev-theirs");
       // Two audit rows: one performed BY the viewer, one by someone else about
       // an out-of-scope owner. The global list must not disclose the latter.
       return {
@@ -179,6 +191,7 @@ beforeEach(() => {
   reviewUpdate.mockClear();
   whereCalls.length = 0;
   queriedCollections.length = 0;
+  suppliedAuditIds.length = 0;
 });
 
 // ------------------------------------------------------------------ AUDIT --
@@ -321,10 +334,18 @@ describe("governance AUDIT global list (no runId) narrows to the viewer's own ac
     return GET(new NextRequest("http://localhost/api/governance/audit", { headers: { authorization: "Bearer t" } }));
   };
 
+  it("FIXTURE SELF-VALIDATION: the double really supplies BOTH tenants' rows", async () => {
+    await call();
+    // If this fails, every exclusion assertion below is meaningless.
+    expect(suppliedAuditIds).toEqual(["ev-mine", "ev-theirs"]);
+  });
+
   it("THE CORE PROOF: another actor's audit rows are not disclosed", async () => {
     const res = await call();
     expect(res.status).toBe(200);
     const raw = JSON.stringify(await res.json());
+    // Anchor first: the foreign row WAS offered to the narrowing.
+    expect(suppliedAuditIds).toContain("ev-theirs");
     // The row performed by the viewer is present; the other tenant's is not,
     // in any field — actor, owner uid, owner email, or question text.
     expect(raw).toContain("ev-mine");
@@ -379,5 +400,37 @@ describe("the governance queue route emits no privileged address", () => {
     }
     // The useful diagnostic survives.
     expect(all).toContain("configured=2");
+  });
+});
+
+// ------------------------------------------- AUDIT SUBJECT-SPOOF (Section G) --
+/**
+ * Phase FIRST-ADMIN-C6. C5-R2 showed the narrowing SUBJECT was unpinned: sourcing
+ * it from `searchParams.get("viewer") ?? resolved.uid` survived the whole suite.
+ * The viewer identity must originate exclusively from the authenticated request
+ * identity — never a query param, body, route param or the target's owner uid.
+ */
+describe("audit narrowing binds to the AUTHENTICATED uid, not request input", () => {
+  const callWith = async (qs: string) => {
+    const { GET } = await import("@/app/api/governance/audit/route");
+    return GET(new NextRequest(`http://localhost/api/governance/audit${qs}`, {
+      headers: { authorization: "Bearer t" },
+    }));
+  };
+
+  it.each([
+    ["a more privileged reviewer", "?viewer=someone-else"],
+    ["a different tenant owner", `?viewer=${OWNER_B}`],
+    ["uid parameter", "?uid=someone-else"],
+    ["userId parameter", "?userId=someone-else"],
+    ["viewerUid parameter", "?viewerUid=someone-else"],
+    ["several at once", `?viewer=someone-else&uid=${OWNER_B}&userId=someone-else&viewerUid=someone-else`],
+  ])("spoofing %s does not change whose rows are returned", async (_label, qs) => {
+    const raw = JSON.stringify(await (await callWith(qs)).json());
+    // Still narrowed to the authenticated viewer, regardless of the parameters.
+    expect(suppliedAuditIds).toContain("ev-theirs");
+    expect(raw).toContain("ev-mine");
+    expect(raw).not.toContain("ev-theirs");
+    expect(raw).not.toContain("SECRET-OTHER-TENANT-QUESTION");
   });
 });
