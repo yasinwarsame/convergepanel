@@ -131,9 +131,21 @@ const postHostile = async (collection: Coll, runId: string, extra: Record<string
   }));
 };
 
-const HOSTILE_BODY = {
-  ownerUid: OWNER_A,          // claim the target belongs to an owner we CAN review
-  userId: OWNER_A,
+/**
+ * The claimed owner is a PARAMETER, because the right hostile claim differs by
+ * test and getting it wrong makes the test vacuous. A first version of this
+ * suite hard-coded `ownerUid: OWNER_A` for every case — which happened to equal
+ * the document's real owner on the audit-fidelity path, so the body-trusting
+ * mutation injected exactly the value the assertion expected and survived. That
+ * is masking-into-an-equal-expectation, inside the test written to catch it.
+ *
+ * So: claim an owner we CAN review when attacking AUTHORIZATION on a run we
+ * cannot, and claim an owner we CANNOT review when attacking the ATTRIBUTION of
+ * a run we can.
+ */
+const hostileBody = (claimedOwner: string) => ({
+  ownerUid: claimedOwner,
+  userId: claimedOwner,
   uid: "attacker-uid",        // claim a different caller
   by: "attacker-uid",
   email: "attacker@test-invented.example",
@@ -142,7 +154,7 @@ const HOSTILE_BODY = {
   emailVerified: true,
   disabled: false,
   admin: true,
-} as const;
+});
 
 const primaryWrites = (c: Coll, id: string) => writes.filter((w) => w.kind !== "add" && w.collection === c && w.id === id);
 const eventWrites = () => writes.filter((w) => w.kind === "add");
@@ -293,20 +305,24 @@ describe.each(COLLECTIONS)("HOSTILE REQUEST BODY — collection=%s", (collection
    * Every field in HOSTILE_BODY names something the route must take from the
    * verified credential or the stored document.
    */
-  it("FIXTURE SELF-VALIDATION: the hostile body names the fields under test", () => {
+  it("FIXTURE SELF-VALIDATION: the hostile body names the fields under test, and its claims are false", () => {
     // Derived from the body actually sent, so this cannot drift from it.
-    expect(Object.keys(HOSTILE_BODY)).toEqual(
+    expect(Object.keys(hostileBody(OWNER_A))).toEqual(
       expect.arrayContaining(["ownerUid", "userId", "uid", "by", "email", "visibleUserIds"])
     );
-    // And the claims are hostile: a different caller, a wider scope.
-    expect(HOSTILE_BODY.uid).not.toBe(REVIEWER);
-    expect(HOSTILE_BODY.visibleUserIds).toContain(OWNER_B);
+    // A different caller, and a wider scope than the reviewer holds.
+    expect(hostileBody(OWNER_A).uid).not.toBe(REVIEWER);
+    expect(hostileBody(OWNER_A).visibleUserIds).toContain(OWNER_B);
+    // THE CLAIM MUST CONTRADICT REALITY, or a body-trusting route passes by
+    // coincidence: on the attribution path the claimed owner is NOT run-a's.
+    expect(hostileBody(OWNER_B).ownerUid).not.toBe(existingDocs[`${collection}/run-a`].userId);
   });
 
   it("a body-claimed owner cannot make a foreign run reviewable", async () => {
     // run-b belongs to OWNER_B, who is NOT in this reviewer's scope. The body
     // claims otherwise, in every field a body-trusting implementation might read.
-    const res = await postHostile(collection, "run-b", HOSTILE_BODY);
+    // Claim an owner this reviewer CAN review, for a run they cannot.
+    const res = await postHostile(collection, "run-b", hostileBody(OWNER_A));
     expect(res.status).toBe(403);
     expect(writes).toEqual([]);
     expect(auditWrites).toEqual([]);
@@ -314,14 +330,16 @@ describe.each(COLLECTIONS)("HOSTILE REQUEST BODY — collection=%s", (collection
 
   it("a body-claimed scope cannot widen the reviewer's visibility", async () => {
     reviewerFor = []; // no assigners: this reviewer may review nothing
-    const res = await postHostile(collection, "run-a", HOSTILE_BODY);
+    const res = await postHostile(collection, "run-a", hostileBody(OWNER_A));
     expect(res.status).toBe(403);
     expect(writes).toEqual([]);
     expect(auditWrites).toEqual([]);
   });
 
   it("on the AUTHORIZED path, identity still comes from the credential and the document", async () => {
-    const res = await postHostile(collection, "run-a", HOSTILE_BODY);
+    // Claim run-a belongs to OWNER_B — a value that DIFFERS from the document's
+    // real owner, so trusting the body changes the recorded attribution.
+    const res = await postHostile(collection, "run-a", hostileBody(OWNER_B));
     // POSITIVE ANCHOR: the request really did succeed, so the assertions below
     // are about a write that happened rather than one the body suppressed.
     expect(res.status).toBe(200);
@@ -329,10 +347,11 @@ describe.each(COLLECTIONS)("HOSTILE REQUEST BODY — collection=%s", (collection
     expect(primary).toHaveLength(1);
     // The reviewer is the TOKEN's uid, never the body's.
     expect(primary[0].patch).toMatchObject({ governanceReviewedBy: REVIEWER });
-    expect(primary[0].patch?.governanceReviewedBy).not.toBe(HOSTILE_BODY.uid);
+    expect(primary[0].patch?.governanceReviewedBy).not.toBe("attacker-uid");
     // The audit owner is the DOCUMENT's owner, never the body's.
     expect(auditWrites).toHaveLength(1);
     expect(auditWrites[0]).toMatchObject({ byUid: REVIEWER, runOwnerUid: OWNER_A });
-    expect(auditWrites[0].byUid).not.toBe(HOSTILE_BODY.uid);
+    expect(auditWrites[0].runOwnerUid).not.toBe(OWNER_B);
+    expect(auditWrites[0].byUid).not.toBe("attacker-uid");
   });
 });
