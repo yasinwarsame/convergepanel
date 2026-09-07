@@ -377,6 +377,23 @@ describe.each(COLLECTIONS)("OWNER_B IS REACHABLE — cross-tenant denial, collec
     expect(auditRows).toEqual([]);
   });
 
+  it("the 403 RESPONSE discloses nothing about the tenant it refused", async () => {
+    /**
+     * Found by C8's own mutation battery: echoing `ownerUid` into the denial
+     * body survived every test. A log leak is read by an operator; this one is
+     * read by the caller who was just refused, so a foreign owner's uid would
+     * be handed straight to the party that has no right to it.
+     */
+    const res = await post(collection, "other-run");
+    const body = JSON.stringify(await res.json());
+    // ANCHOR: this is the real denial payload, not an empty object.
+    expect(body).toContain("forbidden");
+    expect(body).toContain("permission");
+    for (const canary of [C.ownerBUid, C.ownerAUid, C.reviewerUid, C.ownerEmail, C.question, "other-run"]) {
+      expect(body).not.toContain(canary);
+    }
+  });
+
   it("ANCHOR: approved shape logging still occurs on the denial path", async () => {
     await post(collection, "other-run");
     // Without this the absence assertion below is satisfied by a silent request.
