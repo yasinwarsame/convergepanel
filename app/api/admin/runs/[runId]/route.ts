@@ -29,6 +29,15 @@ import { resolveLiveAuthIdentity } from "@/lib/admin/verifiedAdminIdentity";
  * still wants a human-readable actor, so it is read from the live Auth record
  * here — descriptive only, never an input to the authorization decision, and
  * empty when the lookup fails rather than blocking the operation.
+ *
+ * Phase FIRST-ADMIN-C5 — ATTRIBUTION IS NEVER LOST. `byUid` is written from the
+ * verified claim on every audit record and is the authoritative actor
+ * identifier; this address is a human-readable convenience beside it. A
+ * transient Auth outage therefore degrades the audit record's readability, not
+ * its attribution. It is deliberately NOT sourced from the token: the
+ * SYSTEM_ADMIN guard returns no email, and plumbing one through a shared guard
+ * to populate a descriptive field would put an unverified address into an audit
+ * trail.
  */
 async function auditActorEmail(uid: string): Promise<string> {
   const live = await resolveLiveAuthIdentity(uid);

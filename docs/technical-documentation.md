@@ -63,7 +63,7 @@ Two credential paths are accepted by every API route:
 
 A **disabled** Firebase Auth account obtains no email-derived privilege in any tier.
 
-**Admin routes** (`app/api/admin/*`) must use `requireAdminApiAccess()` from `lib/firebase/auth-helpers.ts`, which verifies both token validity and the `admin: true` custom claim. Using `verifySessionCookie()` alone on admin routes is a privilege escalation vulnerability — it only confirms a valid session, not admin status.
+**Admin routes** (`app/api/admin/*`) must use a scope-explicit guard from `lib/firebase/auth-helpers.ts`: `requireAdminPortalAccess()` for the ADMIN_PORTAL read/monitoring tier, or `requireSystemAdminAccess()` / `requireSystemAdminBearer()` for SYSTEM_ADMIN. `requireAdminApiAccess()` and `requireAdmin()` are **deprecated aliases** kept only for compatibility — do not use them in new code, and note that `requireAdminApiAccess` is the PORTAL guard, which a verified, enabled `ADMIN_EMAILS` member satisfies **with no custom claim at all**. Using `verifySessionCookie()` alone on an admin route is a privilege-escalation vulnerability — it only confirms a valid session, not any administrator tier.
 
 ### Auth Lifecycle Hardening (Step 6) — client/server session synchronization, now LIVE
 
@@ -971,7 +971,7 @@ At runtime, `lib/env.ts` is the single source of truth for all server-side envir
 | `/api/teams/adaptive-runs/[runId]/review-panel/finalize` | POST | Finalize via majority aggregation |
 | `/api/teams/adaptive-runs/[runId]/review-panel/override` | POST | Owner-only override, breaks a deadlock (ungated) |
 | `/api/teams/adaptive-runs/[runId]/votes` | POST | Submit a reviewer's vote |
-| `/api/admin/*` | Various | Admin management (requires `admin: true` custom claim) |
+| `/api/admin/*` | Various | Admin management. Tier varies per route — ADMIN_PORTAL (`ADMIN_EMAILS` **or** the claim) for reads; SYSTEM_ADMIN (claim only) for credentials, role minting, purge, destructive user/billing mutation, run delete/governance override, `sync-subscription` and `test-webhook`. See `docs/operations/admin-authority-tiers.md` |
 | `/api/user/*` | Various | User profile read/update |
 | `/api/user/workspace` | POST | Ensure the authenticated user's Personal Workspace exists (idempotent); called by `/login` and `/signup`, awaited before redirect |
 | `/api/workspaces/[workspaceId]/*` | Various | Team Workspace routes — creation, members, invitations, projects, runs, review-queue/panel, ownership transfer. See Team Workspaces section above and the linked architecture docs for the full catalog |

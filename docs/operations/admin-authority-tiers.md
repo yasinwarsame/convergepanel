@@ -62,8 +62,19 @@ a missing or non-boolean value denies. A failed lookup reports `disabled: true`
 and grants nothing.
 
 This does **not** change SYSTEM_ADMIN token/session semantics, which remain as
-reviewed: session cookies are verified with revocation checking, ID tokens rely
-on their short lifetime.
+reviewed: the ADMIN_PORTAL cookie path verifies with revocation checking, while
+every SYSTEM_ADMIN guard is bearer-only and relies on the ID token's short
+lifetime.
+
+**Consequence to know before enrolling anyone (Phase C5):** disabling an account
+revokes EMAIL-derived authority immediately, because every such decision re-reads
+the live record. It does **not** immediately revoke CLAIM-derived authority:
+`verifyIdToken` is called without `checkRevoked`, so a disabled or de-claimed
+SYSTEM_ADMIN keeps SYSTEM_ADMIN — including run deletion, governance-status
+override and both billing-mutation routes — until their ID token expires
+(≤1 hour). **For a SYSTEM_ADMIN the lever is claim revocation plus
+`revokeRefreshTokens(uid)`, not disablement alone.** Put both in the incident
+runbook.
 
 ### BOOTSTRAP_SECRET — not a human role
 `ADMIN_SECRET` gates `/api/admin/set-admin`, which mints the first `admin: true`
@@ -84,6 +95,7 @@ untouched; do not treat it as authority.
 ## The rules that matter
 
 - `ADMIN_EMAILS` does **NOT** create SYSTEM_ADMIN.
+- `ADMIN_EMAILS` does **NOT** create GOVERNANCE_ADMIN.
 - `GOVERNANCE_ADMIN_EMAILS` does **NOT** create ADMIN_PORTAL or SYSTEM_ADMIN.
 - `admin: true` creates SYSTEM_ADMIN and therefore ADMIN_PORTAL, but does **NOT**
   create GOVERNANCE_ADMIN.

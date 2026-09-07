@@ -219,6 +219,12 @@ POST /api/billing/sync-plan
 ```
 
 ### Sync by Subscription/Customer ID
+> **Authorization (Phase FIRST-ADMIN-C4):** this endpoint requires **SYSTEM_ADMIN**
+> — the Firebase `admin: true` custom claim — sent as `Authorization: Bearer <ID token>`.
+> A `__session` browser cookie will **not** work: the SYSTEM_ADMIN guards verify with
+> `verifyIdToken`, which always rejects a Firebase session cookie. An `ADMIN_EMAILS`
+> allowlist membership is **not** sufficient. See `docs/operations/admin-authority-tiers.md`.
+
 ```bash
 POST /api/admin/sync-subscription
 {

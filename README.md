@@ -303,7 +303,7 @@ ConvergePanel uses Firebase Authentication with role-based access control.
 ### User Roles
 
 - **User**: Default role for all accounts. Can use the panel and view their profile.
-- **Admin**: Users with `admin: true` custom claim. Can access admin dashboard, manage API keys, and manage users.
+- **Admin**: three tiers, not one. **ADMIN_PORTAL** — a verified, enabled `ADMIN_EMAILS` address **or** the `admin: true` custom claim; a broad read/monitoring tier over runs and user records. **SYSTEM_ADMIN** — the `admin: true` claim only; API keys, role minting, purge, destructive user/billing mutation. **GOVERNANCE_ADMIN** — a verified, enabled `GOVERNANCE_ADMIN_EMAILS` address only. See `docs/operations/admin-authority-tiers.md`.
 
 ### Setting Up the First Admin
 
@@ -340,7 +340,7 @@ ConvergePanel includes an admin-only dashboard for managing API keys and users.
 - **API Key Management**: View and update API keys stored in Firestore
 - **User Management**: List users, disable/enable accounts, delete users
 - **Secure Storage**: Keys stored in Firestore, only accessible to admins
-- **Role-Based Access**: All admin routes protected by Firebase custom claims
+- **Role-Based Access**: admin routes are protected by scope-explicit guards — the `admin: true` custom claim for SYSTEM_ADMIN routes, and the claim or a verified, enabled `ADMIN_EMAILS` address for the ADMIN_PORTAL read tier
 
 ### Key Storage
 

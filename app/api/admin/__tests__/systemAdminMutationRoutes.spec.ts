@@ -36,6 +36,7 @@ const OUTSIDER = "nobody@test-invented.example";
 
 let decoded: Record<string, unknown> = {};
 let authRecord: Record<string, unknown> = {};
+let authRecordThrows = false;
 
 /** Every privileged side effect this suite guards. */
 const docDelete = jest.fn(async () => undefined);
@@ -47,6 +48,16 @@ const writeAuditEvent = jest.fn(async () => undefined);
 const handleSubscriptionChange = jest.fn(async () => undefined);
 const stripeRetrieve = jest.fn(async () => ({ id: "sub_x", status: "active", customer: "cus_x", items: { data: [{ price: { id: "price_x", recurring: { interval: "month" } } }] }, metadata: {} }));
 const resetUsageForNewPlan = jest.fn(async () => undefined);
+
+/** One page of deletable docs, then an empty page so pagination terminates. */
+let purgePagesServed = 0;
+const purgeDocs = () => (purgePagesServed++ === 0 ? [{ id: "old-1", ref: { id: "old-1" } }, { id: "old-2", ref: { id: "old-2" } }] : []);
+const purgeQuery = () => {
+  const q: Record<string, unknown> = {};
+  for (const m of ["where", "orderBy", "limit", "startAfter", "select"]) q[m] = () => q;
+  q.get = async () => { const d = purgeDocs(); return { empty: d.length === 0, docs: d, size: d.length }; };
+  return q;
+};
 
 const runDoc = {
   exists: true,
@@ -64,15 +75,21 @@ jest.mock("@/lib/firebase/admin", () => ({
   adminAuth: {
     verifyIdToken: async () => decoded,
     verifySessionCookie: async () => decoded,
-    getUser: async () => authRecord,
+    getUser: async () => {
+      if (authRecordThrows) throw new Error("auth unavailable");
+      return authRecord;
+    },
   },
   adminDb: {
     collection: () => ({
       doc: () => docHandle,
-      where: () => ({ limit: () => ({ get: async () => ({ empty: true, docs: [] }) }), get: async () => ({ empty: true, docs: [] }) }),
-      limit: () => ({ get: async () => ({ docs: [] }) }),
-      orderBy: () => ({ limit: () => ({ get: async () => ({ docs: [] }) }) }),
-      get: async () => ({ docs: [] }),
+      // A non-empty page, so the purge path actually reaches its batch delete.
+      // With an empty page `batchDelete`/`batchCommit` never fired for ANY
+      // tier, which made the denial assertions unfalsifiable.
+      where: () => purgeQuery(),
+      limit: () => purgeQuery(),
+      orderBy: () => purgeQuery(),
+      get: async () => ({ empty: false, docs: purgeDocs(), size: purgeDocs().length }),
     }),
     batch: () => ({ delete: (...a: unknown[]) => batchDelete(...(a as [])), commit: () => batchCommit() }),
   },
@@ -110,7 +127,11 @@ const ctx = { params: Promise.resolve({ runId: "run-1" }) } as never;
 const ROUTES = [
   {
     name: "DELETE /api/admin/runs/[runId]",
-    call: () => RUNS_DELETE(bearer("http://localhost/api/admin/runs/run-1", { collection: "runs", confirm: true }, "DELETE"), ctx),
+    // `collection` is read from the query string (parseCollection reads
+    // request.nextUrl.searchParams). Passing it in the body made the handler
+    // 400 before reaching the guard's protected work, which left every
+    // side-effect assertion here unfalsifiable.
+    call: () => RUNS_DELETE(bearer("http://localhost/api/admin/runs/run-1?collection=runs", { confirm: true }, "DELETE"), ctx),
     effects: () => [docDelete, writeAuditEvent],
   },
   {
@@ -138,6 +159,8 @@ const ROUTES = [
 beforeEach(() => {
   process.env.ADMIN_EMAILS = PORTAL_ONLY;
   process.env.GOVERNANCE_ADMIN_EMAILS = GOV_ONLY;
+  purgePagesServed = 0;
+  authRecordThrows = false;
   for (const f of [docDelete, docUpdate, docSet, batchDelete, batchCommit, writeAuditEvent, handleSubscriptionChange, stripeRetrieve, resetUsageForNewPlan]) f.mockClear();
   decoded = {};
   authRecord = {};
@@ -165,10 +188,14 @@ describe.each(ROUTES)("$name — SYSTEM_ADMIN only", ({ call, effects }) => {
     for (const fn of effects()) expect(fn).not.toHaveBeenCalled();
   });
 
-  it("a SYSTEM_ADMIN claim holder reaches the handler (not a 401)", async () => {
+  it("a SYSTEM_ADMIN claim holder reaches the handler AND the guarded effect fires", async () => {
     AS.system();
     const res = await call();
     expect(res.status).not.toBe(401);
+    // Without this, a 400 (bad fixture) satisfies `not.toBe(401)` and the
+    // denial assertions above become unfalsifiable — nothing would ever have
+    // called the effect for any tier.
+    expect(effects().some((fn) => fn.mock.calls.length > 0)).toBe(true);
   });
 
   it.each([
@@ -189,6 +216,34 @@ describe.each(ROUTES)("$name — SYSTEM_ADMIN only", ({ call, effects }) => {
     const res = await call();
     expect(res.status).toBe(401);
     for (const fn of effects()) expect(fn).not.toHaveBeenCalled();
+  });
+});
+
+describe("audit attribution on the SYSTEM_ADMIN run handlers", () => {
+  /**
+   * C4-R1: nothing asserted the audit actor at all, so `auditActorEmail()`
+   * returning "" unconditionally survived the whole suite. `byUid` is the
+   * authoritative identifier and must always be present; the address is a
+   * convenience that degrades to empty if the live lookup fails.
+   */
+  const patch = () =>
+    RUNS_PATCH(bearer("http://localhost/api/admin/runs/run-1", { collection: "runs", action: "set_governance_status", status: "blocked" }, "PATCH"), ctx);
+
+  it("records BOTH the acting uid and the actor address from the live record", async () => {
+    AS.system();
+    await patch();
+    expect(writeAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ byUid: "s", byEmail: OUTSIDER })
+    );
+  });
+
+  it("a failed live lookup still records the acting uid — attribution is never lost", async () => {
+    AS.system();
+    authRecordThrows = true;
+    await patch();
+    expect(writeAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ byUid: "s", byEmail: "" })
+    );
   });
 });
 
