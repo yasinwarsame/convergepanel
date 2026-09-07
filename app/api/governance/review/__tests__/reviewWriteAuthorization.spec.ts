@@ -117,6 +117,33 @@ const post = async (collection: Coll, runId: string) => {
   }));
 };
 
+/**
+ * Posts with ATTACKER-CONTROLLED EXTRA FIELDS in the body. Every field here
+ * names something the route must take from the credential or the stored
+ * document instead.
+ */
+const postHostile = async (collection: Coll, runId: string, extra: Record<string, unknown>) => {
+  const { POST } = await import("@/app/api/governance/review/route");
+  return POST(new NextRequest("http://localhost/api/governance/review", {
+    method: "POST",
+    headers: { authorization: "Bearer t", "content-type": "application/json" },
+    body: JSON.stringify({ runId, collection, action: "approved", comment: "reviewed", ...extra }),
+  }));
+};
+
+const HOSTILE_BODY = {
+  ownerUid: OWNER_A,          // claim the target belongs to an owner we CAN review
+  userId: OWNER_A,
+  uid: "attacker-uid",        // claim a different caller
+  by: "attacker-uid",
+  email: "attacker@test-invented.example",
+  visibleUserIds: [OWNER_A, OWNER_B], // claim a wider scope
+  governanceStatus: "approved",
+  emailVerified: true,
+  disabled: false,
+  admin: true,
+} as const;
+
 const primaryWrites = (c: Coll, id: string) => writes.filter((w) => w.kind !== "add" && w.collection === c && w.id === id);
 const eventWrites = () => writes.filter((w) => w.kind === "add");
 
@@ -251,5 +278,61 @@ describe.each(COLLECTIONS)("REVIEW WRITE — collection=%s", (collection) => {
     const res = await post(collection, "run-a");
     expect(res.status).toBe(404);
     expect(writes).toEqual([]);
+  });
+});
+
+describe.each(COLLECTIONS)("HOSTILE REQUEST BODY — collection=%s", (collection) => {
+  /**
+   * Three mutations survived the whole suite before these existed: sourcing the
+   * authorization owner, the recorded reviewer identity, or the audit record's
+   * run owner from the request body. Each was an EQUIVALENT MUTANT only because
+   * no test ever sent the field — the route was correct, but a regression to
+   * body-trust would have been invisible, which is the same blind spot as an
+   * assertion that cannot fail.
+   *
+   * Every field in HOSTILE_BODY names something the route must take from the
+   * verified credential or the stored document.
+   */
+  it("FIXTURE SELF-VALIDATION: the hostile body names the fields under test", () => {
+    // Derived from the body actually sent, so this cannot drift from it.
+    expect(Object.keys(HOSTILE_BODY)).toEqual(
+      expect.arrayContaining(["ownerUid", "userId", "uid", "by", "email", "visibleUserIds"])
+    );
+    // And the claims are hostile: a different caller, a wider scope.
+    expect(HOSTILE_BODY.uid).not.toBe(REVIEWER);
+    expect(HOSTILE_BODY.visibleUserIds).toContain(OWNER_B);
+  });
+
+  it("a body-claimed owner cannot make a foreign run reviewable", async () => {
+    // run-b belongs to OWNER_B, who is NOT in this reviewer's scope. The body
+    // claims otherwise, in every field a body-trusting implementation might read.
+    const res = await postHostile(collection, "run-b", HOSTILE_BODY);
+    expect(res.status).toBe(403);
+    expect(writes).toEqual([]);
+    expect(auditWrites).toEqual([]);
+  });
+
+  it("a body-claimed scope cannot widen the reviewer's visibility", async () => {
+    reviewerFor = []; // no assigners: this reviewer may review nothing
+    const res = await postHostile(collection, "run-a", HOSTILE_BODY);
+    expect(res.status).toBe(403);
+    expect(writes).toEqual([]);
+    expect(auditWrites).toEqual([]);
+  });
+
+  it("on the AUTHORIZED path, identity still comes from the credential and the document", async () => {
+    const res = await postHostile(collection, "run-a", HOSTILE_BODY);
+    // POSITIVE ANCHOR: the request really did succeed, so the assertions below
+    // are about a write that happened rather than one the body suppressed.
+    expect(res.status).toBe(200);
+    const primary = primaryWrites(collection, "run-a");
+    expect(primary).toHaveLength(1);
+    // The reviewer is the TOKEN's uid, never the body's.
+    expect(primary[0].patch).toMatchObject({ governanceReviewedBy: REVIEWER });
+    expect(primary[0].patch?.governanceReviewedBy).not.toBe(HOSTILE_BODY.uid);
+    // The audit owner is the DOCUMENT's owner, never the body's.
+    expect(auditWrites).toHaveLength(1);
+    expect(auditWrites[0]).toMatchObject({ byUid: REVIEWER, runOwnerUid: OWNER_A });
+    expect(auditWrites[0].byUid).not.toBe(HOSTILE_BODY.uid);
   });
 });
