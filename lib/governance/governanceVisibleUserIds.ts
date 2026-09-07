@@ -135,8 +135,12 @@ async function resolveVisibilityForTrustedIdentity(
   const reviewerFor = parseGovernanceReviewerFor(userData);
   const assignersByReviewerField = await getAssignerUids(uid);
 
+  // Phase FIRST-ADMIN-C7 — C6 replaced the owner-UID LISTS here with counts but
+  // left the caller's own raw UID on this line, so every governance queue load
+  // still wrote a stable per-user correlation identifier into the logs. The
+  // plan and the two counts are the operational content; the uid was not.
   console.log(
-    `[governance/queue] User: ${uid}, isAdmin: false, plan: ${userPlan}, reviewerFor: ${reviewerFor.length} users, assignersByReviewerUidField: ${assignersByReviewerField.length}`
+    `[governance/queue] User: isAdmin: false, plan: ${userPlan}, reviewerFor: ${reviewerFor.length} users, assignersByReviewerUidField: ${assignersByReviewerField.length}`
   );
 
   if (userPlan !== "full") {

@@ -194,7 +194,14 @@ export async function POST(request: NextRequest) {
   }
 
   if (prevStatus === "blocked" && reviewAction === "approved") {
-    console.log(`[governance/review] Override: ${resolved.uid} approving previously blocked run ${docId}`);
+    // Phase FIRST-ADMIN-C7 — shape, not identity. This wrote the reviewer's raw
+    // UID and a run id belonging to ANOTHER tenant into plaintext runtime logs
+    // on every blocked-run override. The identified record of exactly this
+    // event — actor uid and email, run id, run owner uid and email, both
+    // statuses — is written below by `writeAuditEvent` into an access-
+    // controlled collection, which is where identified data belongs. The log
+    // line answers "did an override happen", and it still does.
+    console.log(`[governance/review] Override: a blocked run was approved (prevStatus=${prevStatus})`);
   }
 
   const reviewableStatuses = new Set(["needs_review", "blocked"]);
