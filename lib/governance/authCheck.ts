@@ -72,5 +72,22 @@ export async function resolveGovernanceRequestUser(
   if (live.status !== "resolved") {
     return { ok: false, status: 401 };
   }
+
+  // Phase FIRST-ADMIN-C6 — A DISABLED ACCOUNT REACHES NO GOVERNANCE ROUTE.
+  //
+  // C4 made `disabled` part of the live-record evidence and C5 added it to the
+  // visibility cache key, but THIS function — which gates every governance
+  // route — read the same record and ignored the field. Because ID tokens are
+  // verified without `checkRevoked`, a disabled reviewer holding a pre-disable
+  // token kept queue, audit AND the `/api/governance/review` cross-tenant WRITE
+  // for the remainder of the token's life.
+  //
+  // The rule applies to EVERY governance identity, not just allowlisted admins:
+  // an ordinary assigned reviewer is equally revoked by disabling the account.
+  if (live.disabled === true) {
+    logIdentityResolutionFailure({ route: "resolveGovernanceRequestUser", failureCategory: "account_disabled" });
+    return { ok: false, status: 401 };
+  }
+
   return { ok: true, uid: identity.uid, email: live.email, emailVerified: live.emailVerified };
 }

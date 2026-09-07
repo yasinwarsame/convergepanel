@@ -157,11 +157,16 @@ async function resolveVisibilityForTrustedIdentity(
   let visibleUserIds = allAssigners;
   if (visibleUserIds.length > 30) {
     visibleUserIds = visibleUserIds.slice(0, 30);
-    console.warn(`[governance/queue] Truncated visibleUserIds to 30 for user ${uid}`);
+    console.warn(`[governance/queue] Truncated visible owner set to 30 (requesting uid retained in request context)`);
   }
   visibleUserIds = visibleUserIds.filter((id) => id.trim() !== self);
 
-  console.log(`[governance/queue] Scoping decision: visibleUserIds = [${visibleUserIds.join(", ")}]`);
+  // Phase FIRST-ADMIN-C6 — governance diagnostics carry SHAPE, not tenant data.
+// These lines ran on every governance queue load and wrote other users' owner
+// UIDs, run ids, consensus scores and governance status into Production logs.
+// Counts and scope type answer the same operational questions without putting
+// one tenant's records in front of whoever can read the logs.
+  console.log(`[governance/queue] Scoping decision: assigners scope, ${visibleUserIds.length} owner(s)`);
 
   return { ok: true, visibleUserIds, isSupportAdmin: false, queueScope: "assigners" };
 }
