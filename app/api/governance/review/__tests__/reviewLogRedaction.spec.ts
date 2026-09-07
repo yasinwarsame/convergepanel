@@ -234,6 +234,46 @@ beforeEach(() => {
   auditWriteFails = false;
 });
 
+describe("ANCHOR 0 — every canary is REACHABLE in the data the route reads", () => {
+  /**
+   * Phase FIRST-ADMIN-C9. A vacuity attack proved this necessary: emptying
+   * `governanceReasons` in the fixture left every "does not log the reason
+   * text" assertion green on every branch, because the value no longer existed
+   * anywhere for the route to leak. An absence assertion about a value the
+   * system never holds cannot fail.
+   *
+   * This pins that each canary is genuinely present in the state the route
+   * reads, so the deny-set assertions are about values that could actually
+   * escape.
+   */
+  it("the reviewed run carries the owner, reason, question and owner email", async () => {
+    const data = (await collectionHandle("runs").doc(C.runId).get()).data() as Record<string, unknown>;
+    expect(data.userId).toBe(C.ownerAUid);
+    expect(data.governanceReasons).toContain(C.reason);
+    expect(data.question).toBe(C.question);
+    expect(data.userEmail).toBe(C.ownerEmail);
+  });
+
+  it("the cross-tenant run carries OWNER_B and its own reason text", async () => {
+    const data = (await collectionHandle("runs").doc("other-run").get()).data() as Record<string, unknown>;
+    expect(data.userId).toBe(C.ownerBUid);
+    expect(data.governanceReasons).toContain(C.reason);
+  });
+
+  it("the caller identity carries the reviewer uid, email and domain", () => {
+    expect(tokenClaims.uid).toBe(C.reviewerUid);
+    expect(tokenClaims.email).toBe(C.callerEmail);
+    expect(C.callerEmail).toContain(C.callerDomain);
+    expect(C.allowlistEmail).toContain("canary-allowlist-domain-294fb4.example");
+  });
+
+  it("every value in the shared deny-set is a distinct, non-empty canary", () => {
+    const values = SENSITIVE_LOG_CANARIES.map(([, v]) => v());
+    expect(values).toHaveLength(new Set(values).size);
+    for (const v of values) expect(v.length).toBeGreaterThan(8);
+  });
+});
+
 describe("ANCHOR 1 — the capture reproduces what the sink actually received", () => {
   /**
    * Without this, every absence assertion below is satisfied by a capture that
