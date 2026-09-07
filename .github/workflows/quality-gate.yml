@@ -54,5 +54,20 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Security-test falsifiability pre-flight
+        # Phase FIRST-ADMIN-C7: the scanner existed since C6 but ran only when
+        # someone remembered to invoke it, so it never gated a PR. It is a LINT,
+        # not a proof — it flags known-vacuous assertion shapes and cannot
+        # establish semantic falsifiability. Human/mutation review stays required.
+        # --all, NOT the default changed-files mode: `actions/checkout` does a
+        # shallow single-commit fetch, so `origin/main` does not resolve here and
+        # a change-scoped scan would examine nothing and call it clean.
+        run: |
+          # The scanner's own positive anchor first: prove each shape still
+          # detects the historical defect it was written for. A scan that
+          # reports "clean" with dead regexes is worse than no scan.
+          npm run security:preflight -- --self-test
+          npm run security:preflight -- --all
+
       - name: Test
         run: npx jest --runInBand

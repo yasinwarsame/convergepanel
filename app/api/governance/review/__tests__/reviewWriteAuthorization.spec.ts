@@ -145,6 +145,35 @@ describe("the route's supported collections are derived from source, not hand-li
   });
 });
 
+describe("DOUBLE FIDELITY — the recorder cannot alias document identity", () => {
+  /**
+   * The security assertions below read the recorded `{collection, id}` of every
+   * write. If the double mislabelled a write — recording an OWNER_B mutation as
+   * OWNER_A, or one collection as another — a mis-targeted write would look
+   * correct. The denial cases assert ZERO writes and so are immune, but the
+   * POSITIVE case reads identity, so the recorder itself is pinned here.
+   */
+  it.each(COLLECTIONS)("%s: a write records the exact id it was addressed to", async (collection) => {
+    writes = [];
+    await collectionHandle(collection).doc("run-b").set({ marker: "b" });
+    await collectionHandle(collection).doc("run-a").set({ marker: "a" });
+    expect(writes.map((w) => `${w.collection}/${w.id}`)).toEqual([`${collection}/run-b`, `${collection}/run-a`]);
+    expect(writes.map((w) => (w.patch as { marker?: string } | undefined)?.marker)).toEqual(["b", "a"]);
+  });
+
+  it("separate collections do not alias one another", async () => {
+    writes = [];
+    for (const c of COLLECTIONS) await collectionHandle(c).doc("run-a").set({ c });
+    expect(writes.map((w) => w.collection)).toEqual([...COLLECTIONS]);
+  });
+
+  it("a sub-collection write records its full path", async () => {
+    writes = [];
+    await collectionHandle("runs").doc("run-a").collection("governanceEvents").add({ x: 1 });
+    expect(writes[0].collection).toBe("runs/run-a/governanceEvents");
+  });
+});
+
 describe.each(COLLECTIONS)("REVIEW WRITE — collection=%s", (collection) => {
   it("FIXTURE SELF-VALIDATION: both tenants' target documents genuinely exist", async () => {
     // Derived from the double's own state, not a hand-written anchor list.

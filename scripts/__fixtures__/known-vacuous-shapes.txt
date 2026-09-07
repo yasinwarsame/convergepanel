@@ -1,0 +1,29 @@
+# Phase FIRST-ADMIN-C7 — the pre-flight scanner's POSITIVE ANCHOR.
+#
+# Every line below is a REAL assertion shape that shipped in this repository's
+# security tests and was proven vacuous by a human reviewer, one per shape id.
+# `--self-test` requires the scanner to flag EVERY shape here.
+#
+# Without this, a typo in a regex, or a "tightening" like the C7 one, silently
+# turns a shape off and the gate keeps reporting "clean" — the exact failure the
+# scanner exists to detect, one level up. A scanner is only as trustworthy as
+# its last proven detection.
+#
+# NOT a test file: `.txt` so no runner collects it. Deliberately unreachable by
+# the --all glob; the self-test passes it explicitly.
+
+# [nullish-mask] C3: `null ?? undefined` is `undefined`, so this never failed.
+    expect(vis.visibleUserIds ?? undefined).not.toBeNull();
+
+# [default-mask] C5: the queue route emits `runs`; `items` never existed, so the
+# absent key defaulted to [] and the denial assertion passed against nothing.
+    expect(body.items || []).toEqual([]);
+
+# [truthy-authority] truthiness on an authority value accepts any non-boolean.
+    expect(resolved.isSupportAdmin).toBeTruthy();
+
+# [some-effects] C4: every listed effect was mandatory; `some` let a skipped one survive.
+    expect(effects().some((e) => e.called)).toBe(true);
+
+# [empty-body] C2: fourteen declared-but-unimplemented authority tests, all green.
+    it("denies a disabled reviewer", async () => {});

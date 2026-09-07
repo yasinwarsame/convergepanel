@@ -202,11 +202,39 @@ operator does; they are not automated.
 5. Verify denial against Production: the tier probe `GET /api/admin/access`
    should report `adminPortal: false, systemAdmin: false`, and a governance route
    should refuse.
-6. Review the audit trail. **Note the gap:** `writeAuditEvent` covers the
-   SYSTEM_ADMIN mutation handlers. ADMIN_PORTAL **reads** — `/api/admin/users`,
-   `/api/admin/runs`, `/api/admin/runs/[runId]` GET — write no audit event, so
-   there is no record of what a portal identity read. Treat log retention as the
-   only evidence for that period.
+6. **Review the evidence — and know what does not exist.** Application audit
+   coverage is partial, and an earlier version of this runbook overstated it.
+   Verified against every production call site:
+
+   | Privileged operation | Route | Application audit record? |
+   |---|---|---|
+   | Run governance-status override | `/api/admin/runs/[runId]` PATCH | ✅ `writeAuditEvent` |
+   | Run deletion (cross-user) | `/api/admin/runs/[runId]` DELETE | ✅ `writeAuditEvent` |
+   | Plan override set/clear | `/api/admin/users/[uid]/override` | ✅ `writeAuditLog` |
+   | Stripe cancel / reactivate / sync | `/api/admin/users/[uid]/stripe/*` | ✅ `writeAuditLog` |
+   | Governance review decision | `/api/governance/review` | ✅ `writeAuditEvent` |
+   | Governance policy change | `/api/governance/policy` | ✅ `writeAuditEvent` |
+   | **Admin-claim minting** | `/api/admin/set-role` | ❌ **NONE** |
+   | **Provider credential read/write** | `/api/admin/keys` | ❌ **NONE** |
+   | **Bulk run purge (≤2000 docs)** | `/api/admin/purge-runs` | ❌ **NONE** |
+   | **Billing subscription sync** | `/api/admin/sync-subscription` | ❌ **NONE** |
+   | **Webhook replay** | `/api/admin/test-webhook` | ❌ **NONE** |
+   | **Account disable / delete** | `/api/admin/users/[uid]` PATCH/DELETE | ❌ **NONE** |
+   | **Bulk user read** | `/api/admin/users` GET | ❌ **NONE** |
+   | **Cross-user run read** | `/api/admin/runs` GET, `/api/admin/runs/[runId]` GET | ❌ **NONE** |
+   | **Governance queue / audit reads** | `/api/governance/queue`, `/api/governance/audit` | ❌ **NONE** |
+
+   **Consequence for an incident.** For any operation in the ❌ rows there is no
+   application record of who did it or what was touched. Do not tell a
+   stakeholder that activity "was reviewed and nothing was found" on the basis
+   of the audit collection — for those operations the collection is silent by
+   construction, not because nothing happened. Runtime logs (subject to their
+   retention window) and Stripe's own event history are the only evidence, and
+   the governance hot-path logs deliberately carry counts rather than record
+   contents, so they will not tell you WHICH records were read.
+
+   Closing this gap is a separate piece of work; C7 corrected the description
+   only, and deliberately added no audit infrastructure.
 
 ### B. SYSTEM_ADMIN (claim-derived) — disabling is NOT sufficient
 
@@ -230,7 +258,10 @@ operator does; they are not automated.
    revocation check, so the cookie's own five-day life can begin AFTER the
    revocation. Treat the effective ADMIN_PORTAL window as up to one hour plus the
    cookie lifetime unless you also invalidate the session.
-6. Verify denial against Production and review the audit trail.
+6. Verify denial against Production. For the evidence review, consult the
+   coverage table in §A.6 first — claim minting, credential access and bulk
+   purge, the three operations a compromised SYSTEM_ADMIN is most likely to have
+   used, produce **no** application audit record.
 
 ### What this procedure does NOT give you
 
