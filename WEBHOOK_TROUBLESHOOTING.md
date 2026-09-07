@@ -94,7 +94,11 @@ For a specific subscription:
 > allowlist membership is **not** sufficient. See `docs/operations/admin-authority-tiers.md`.
 
 ```bash
-POST /api/admin/test-webhook
+# SYSTEM_ADMIN only. A __session cookie will NOT work.
+curl -X POST https://convergepanel.com/api/admin/test-webhook \
+  -H "Authorization: Bearer $ADMIN_ID_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d
 {
   "subscriptionId": "sub_xxx"
   // OR

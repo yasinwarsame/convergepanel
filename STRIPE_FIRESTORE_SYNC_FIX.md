@@ -226,7 +226,11 @@ POST /api/billing/sync-plan
 > allowlist membership is **not** sufficient. See `docs/operations/admin-authority-tiers.md`.
 
 ```bash
-POST /api/admin/sync-subscription
+# SYSTEM_ADMIN only. A __session cookie will NOT work.
+curl -X POST https://convergepanel.com/api/admin/sync-subscription \
+  -H "Authorization: Bearer $ADMIN_ID_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d
 {
   "subscriptionId": "sub_xxx"
   // OR

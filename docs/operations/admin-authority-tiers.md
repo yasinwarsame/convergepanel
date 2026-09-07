@@ -36,7 +36,11 @@ no SYSTEM_ADMIN route is reachable by cookie. This fails closed, and the earlier
 "(cookie or bearer)" wording here overstated the accepted credential.
 **Grants:** `/api/admin/keys` (provider credentials), `/api/admin/set-role`
 (mints `admin: true`), `/api/admin/purge-runs` (bulk delete),
-`/api/admin/users/search`, `/api/admin/users/[uid]` (PATCH/DELETE),
+`/api/admin/runs/[runId]` (**PATCH** governance-status override and **DELETE**
+cross-user deletion — moved here by the C4 decision below),
+`/api/admin/sync-subscription` and `/api/admin/test-webhook` (billing mutation —
+also moved by that decision), `/api/admin/users/search`,
+`/api/admin/users/[uid]` (PATCH/DELETE),
 `.../details`, `.../override`, `.../stripe/{cancel,reactivate,sync}`.
 SYSTEM_ADMIN also satisfies ADMIN_PORTAL, because the same claim satisfies that
 guard.
@@ -166,3 +170,71 @@ SYSTEM_ADMIN, which is merely conservative rather than inconsistent.
 
 **This item no longer blocks first-admin enrollment** once C4 is independently
 reviewed and deployed.
+
+---
+
+## Incident procedure: a compromised or departing privileged identity
+
+Revocation is **not symmetric across the tiers**, and the difference decides what
+you must do. Email-derived authority is re-derived from the live Firebase Auth
+record on every request, so it stops the moment the record changes.
+Claim-derived authority rides in the caller's ID token, which is verified
+WITHOUT `checkRevoked`, so it persists until that token expires.
+
+**This repository performs no runtime revocation call.** `revokeRefreshTokens`
+is not invoked anywhere in application code, deliberately: it belongs in an
+operator procedure, not on a hot request path. The steps below are what an
+operator does; they are not automated.
+
+### A. ADMIN_PORTAL or GOVERNANCE_ADMIN (email-derived)
+
+1. **Disable the Firebase Auth user.** This is the fastest lever: every
+   email-derived decision re-reads the live record and `disabled === true` denies
+   immediately — application admin, governance admin, and the ordinary governance
+   reviewer path alike. The governance visibility cache keys on enabled-state, so
+   a cached grant is not reused either.
+2. Remove the address from `ADMIN_EMAILS` / `GOVERNANCE_ADMIN_EMAILS`.
+3. **Redeploy Production deliberately** and prove which deployment consumed the
+   new configuration.
+4. Revoke refresh tokens for the uid if the account is to remain usable but
+   unprivileged (`adminAuth.revokeRefreshTokens(uid)` via a service-account
+   context — an operator action, run out of band).
+5. Verify denial against Production: the tier probe `GET /api/admin/access`
+   should report `adminPortal: false, systemAdmin: false`, and a governance route
+   should refuse.
+6. Review the audit trail. **Note the gap:** `writeAuditEvent` covers the
+   SYSTEM_ADMIN mutation handlers. ADMIN_PORTAL **reads** — `/api/admin/users`,
+   `/api/admin/runs`, `/api/admin/runs/[runId]` GET — write no audit event, so
+   there is no record of what a portal identity read. Treat log retention as the
+   only evidence for that period.
+
+### B. SYSTEM_ADMIN (claim-derived) — disabling is NOT sufficient
+
+1. **Remove the claim**: `setCustomUserClaims(uid, { admin: false })` (or drop the
+   key). `/api/admin/set-role` does this, but it itself requires SYSTEM_ADMIN, so
+   during an incident use a service-account script rather than the route.
+2. **Revoke refresh tokens** — `adminAuth.revokeRefreshTokens(uid)`. Without this
+   the already-issued ID token keeps working.
+3. **Understand the residual window.** Every SYSTEM_ADMIN guard verifies with
+   `verifyIdToken`, which does not consult revocation. Until the outstanding ID
+   token expires (Firebase default one hour), a de-claimed or disabled
+   SYSTEM_ADMIN retains SYSTEM_ADMIN — including run deletion, governance-status
+   override and both billing-mutation routes. Disabling the account does **not**
+   shorten this window on the bearer path.
+4. Session cookies are a separate artifact and are verified with
+   `verifySessionCookie(cookie, true)`, so revocation and disablement DO take
+   effect there immediately. But no SYSTEM_ADMIN route accepts a cookie, so this
+   helps only the ADMIN_PORTAL surface.
+5. **A revoked-but-unexpired ID token can still be exchanged for a fresh session
+   cookie.** `POST /api/auth/session` mints with `verifyIdToken` and no
+   revocation check, so the cookie's own five-day life can begin AFTER the
+   revocation. Treat the effective ADMIN_PORTAL window as up to one hour plus the
+   cookie lifetime unless you also invalidate the session.
+6. Verify denial against Production and review the audit trail.
+
+### What this procedure does NOT give you
+
+Immediate, guaranteed cutoff for a claim-derived SYSTEM_ADMIN. If that matters
+for a given incident, the options are to wait out the token lifetime, or to add
+`checkRevoked` to the SYSTEM_ADMIN verification path — a deliberate change with
+a latency and quota cost, not made here.
