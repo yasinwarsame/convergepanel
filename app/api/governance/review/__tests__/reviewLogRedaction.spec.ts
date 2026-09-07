@@ -31,6 +31,7 @@
  */
 
 import { inspect } from "node:util";
+import { readFileSync } from "node:fs";
 
 const __PRIVILEGED_ENV_SNAPSHOT = {
   ADMIN_EMAILS: process.env.ADMIN_EMAILS,
@@ -248,17 +249,42 @@ describe.each(COLLECTIONS)("GOVERNANCE HOT PATH — collection=%s", (collection)
 });
 
 describe("the privileged allowlist is logged as shape, never as membership", () => {
-  it("does not write a configured allowlist address to the log sink", async () => {
+  /**
+   * VACUITY NOTE (self-composed string). A first version of this test built the
+   * log line itself — `console.log(\`...${governanceAdminListShapeForLog()}\`)` —
+   * and then asserted about its own output. That proves nothing about the
+   * route: had the route been changed to log the raw list, the test would still
+   * have passed, because the test was never reading the route.
+   *
+   * So the assertions below are on the VALUE THAT REACHES THE LOG — the
+   * function's actual return — and a separate check derives from the route's
+   * own source that this value is the only thing it interpolates. The second
+   * check is a source check and is worth exactly what a source check is worth;
+   * it is here because driving the full queue route is out of C7's scope, and
+   * it is labelled rather than dressed up as behavioural proof.
+   */
+  const QUEUE_SRC = readFileSync("app/api/governance/queue/route.ts", "utf8");
+
+  it("the value that reaches the log carries counts, never addresses", async () => {
     process.env.GOVERNANCE_ADMIN_EMAILS = C.allowlistEmail;
     jest.resetModules();
     const { governanceAdminListShapeForLog } = await import("@/lib/admin/config");
-    captured = [];
-    console.log(`[governance] governance-config ${governanceAdminListShapeForLog()}`);
-    const logs = output();
-    // ANCHOR: the shape really was emitted, and reflects the configured list.
-    expect(logs).toContain("configured=1");
-    expect(logs).not.toContain(C.allowlistEmail);
-    expect(logs).not.toContain("canary-allowlist-domain-294fb4.example");
+    const shape = governanceAdminListShapeForLog();
+    // ANCHOR: the list really was parsed — a function returning "" would pass
+    // every absence assertion below.
+    expect(shape).toContain("configured=1");
+    expect(shape).toContain("valid=");
+    expect(shape).not.toContain(C.allowlistEmail);
+    expect(shape).not.toContain("canary-allowlist-domain-294fb4.example");
+    expect(shape).not.toContain("@");
+  });
+
+  it("SOURCE CHECK: the queue route's governance-config line interpolates only that shape", () => {
+    const line = QUEUE_SRC.split("\n").find((l) => l.includes("[governance] governance-config"));
+    expect(line).toBeDefined();
+    // Exactly one interpolation, and it is the shape function.
+    expect([...line!.matchAll(/\$\{([^}]*)\}/g)].map((m) => m[1].trim()))
+      .toEqual(["governanceAdminListShapeForLog()"]);
   });
 });
 
