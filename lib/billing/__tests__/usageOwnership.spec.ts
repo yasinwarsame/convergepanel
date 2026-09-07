@@ -64,7 +64,13 @@ describe("BILLING-USAGE-Q1 — billing synchronization does not own run usage", 
     const admin = read("app/api/admin/sync-subscription/route.ts");
     expect(admin).toMatch(/resetUsageForNewPlan/);
     // ...and that endpoint is privileged, so it is not a self-service reset.
-    expect(admin).toMatch(/requireAdminPortalAccess/);
+    // Phase FIRST-ADMIN-C4 raised it from ADMIN_PORTAL to SYSTEM_ADMIN, because
+    // it mutates billing state; the invariant this test protects is unchanged
+    // and now holds more strongly. Behavioural coverage of the tier itself
+    // lives in app/api/admin/__tests__/systemAdminMutationRoutes.spec.ts — this
+    // source-text check only pins that SOME privileged guard is present.
+    expect(admin).toMatch(/requireSystemAdminAccess/);
+    expect(admin).not.toMatch(/requireAdminPortalAccess/);
   });
 
   it("the canonical calendar-month transition still owns the reset", () => {

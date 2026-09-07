@@ -99,8 +99,7 @@ describe("the queue route's log line composes only redacted parts", () => {
   });
 
   it("REGRESSION: the removed helper that joined the list must not come back", () => {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const config = require("@/lib/admin/config") as Record<string, unknown>;
+    const config = jest.requireActual("@/lib/admin/config") as Record<string, unknown>;
     expect(config.governanceAdminEmailsForLog).toBeUndefined();
     for (const [name, value] of Object.entries(config)) {
       if (typeof value !== "function" || value.length !== 0) continue;
