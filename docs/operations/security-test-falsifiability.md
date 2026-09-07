@@ -66,8 +66,9 @@ table rows. Exactly what is mechanical, and what is not:
 | all-negative with no anchor | ❌ human review only |
 | stub hiding the subject | ❌ human review only |
 
-Plus three detectors with no row above: `truthy-authority`, `empty-body` and
-`multiline-empty-body`, and `skipped-test`.
+Plus four detectors with no row above: `truthy-authority`, `empty-body`,
+`multiline-empty-body` and `skipped-test`. Three mapped + four unmapped = the
+seven detectors the scanner registers.
 
 **Six of the nine documented shapes have no detector at all.** A green gate says
 nothing about them. That matters because the single most damaging defect found
@@ -86,8 +87,30 @@ It is a lint, not a proof — it catches known variants, not the next one, and a
 deliberately vacuous test is easy to write past it. Steps 1–6 are the part that
 does the work.
 
-The scanner's own integrity is anchored by `--self-test`, which runs first in
-CI: `scripts/__fixtures__/known-vacuous-shapes.txt` declares the required
-detector ids independently of the implementation, and the two must agree in
-both directions, so neither breaking a detector nor deleting one can pass
-silently.
+### What `--self-test` does and does not guarantee
+
+`--self-test` runs first in CI, and
+`scripts/__fixtures__/known-vacuous-shapes.txt` declares the required detector
+ids independently of the implementation. Stated precisely — an earlier version
+of this paragraph claimed an absolute that a review falsified in one
+experiment:
+
+- **Breaking a detector is caught.** If a registered detector stops firing on
+  its own recorded defect, the liveness check fails.
+- **One-sided detector removal is caught.** Delete a detector while its
+  `EXPECT-SHAPE` tag remains and the fixture declares an id with no
+  implementation — failure. (`--all` still reports clean in that state, which is
+  exactly why the self-test exists.)
+- **One-sided fixture removal is caught.** Delete a tag while the detector
+  remains and a detector has no coverage — failure.
+- **A coordinated edit to BOTH files is NOT mechanically prevented.** Removing a
+  detector *and* its fixture tag in the same change passes green. That is a
+  two-file edit visible in review, not an impossibility, and it is not claimed
+  to be one. Adding a third source to chase an absolute would just move the
+  same problem.
+
+The scanner's CLI contract — a violation exits nonzero, a clean scan exits
+zero, and a scan that examined zero files fails rather than reporting clean —
+is pinned by `scripts/__tests__/securityPreflightWiring.spec.ts`. Before that,
+changing the final line to `process.exit(0)` left CI printing "1 flagged
+construct(s)" and passing.

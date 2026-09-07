@@ -89,7 +89,9 @@ is the first conjunct of the comparison, evaluated before any `timingSafeEqual`.
 
 Whether it is *currently* empty in Production is an environment fact, not a
 source fact — verify it against the live environment rather than trusting this
-sentence (`vercel env ls production`; a value of length 0 fails closed).
+sentence (`vercel env ls production` (which lists variable NAMES and environments, not
+values — it can show a variable is absent, but cannot show a present one is
+empty; for runtime proof use the uid-less 401 probe in §B.6.c); a value of length 0 fails closed).
 
 ### Using BOOTSTRAP_SECRET to mint the first SYSTEM_ADMIN
 
@@ -238,35 +240,60 @@ operator does; they are not automated.
    `/api/admin/set-admin`, the second claim-minting path, while carrying a
    heading that asserted completeness. The table below is now enumerated from
    the filesystem and **held complete by a test**
-   (`docs/__tests__/adminAuthorityEvidenceTable.spec.ts`): every route file
-   under `app/api/admin/**` and `app/api/governance/**` must appear here, so a
-   new privileged route cannot be added without either appearing in this table
-   or failing CI.
+   (`docs/__tests__/adminAuthorityEvidenceTable.spec.ts`). Stated precisely,
+   because C8 claimed more than it enforced: the test walks
+   `app/api/admin/**/route.ts` and `app/api/governance/**/route.ts` and requires
+   every such file to appear here, **with every HTTP method it exports**. A
+   privileged route added under either tree in a `route.ts` therefore cannot be
+   omitted, and neither can one of its methods. It does NOT cover a `route.tsx`,
+   nor any privileged handler placed outside those two trees — those remain a
+   review responsibility, not a mechanical one.
 
    Three columns, because they fail differently. **Audit** is a durable record
    in an access-controlled collection. **Success log** is a runtime log line on
-   the success path — subject to the platform's retention window, and readable
-   by anyone with log access. **Other** is evidence outside this application.
+   the SUCCESS path — subject to the platform's retention window, and readable
+   by anyone with log access. **Other** is durable evidence outside this
+   application.
+
+   The classification rules, stated because C8 got five cells wrong by not
+   having them. The C8-R5 review found the errors; all five were in the
+   dangerous direction — claiming evidence that does not exist:
+
+   - **Error-only logging is not a success log.** A `console.error` in a catch
+     block, or a `logger.warn` on a path that returns 404, tells you nothing
+     about a successful privileged action. `/api/admin/runs` GET and
+     `/api/admin/runs/[runId]` GET were marked ✅ on exactly that basis; their
+     success returns are silent, and they are the two broadest cross-user read
+     routes in the product.
+   - **Calling a provider API is not external evidence.** A `retrieve` or a
+     `list` is a read: it changes nothing at the provider and leaves no event in
+     the provider's own history. Only a write (`create`, `update`, `cancel`)
+     does. `sync-subscription`, `test-webhook` and `stripe/sync` were credited
+     with "Stripe events" and perform reads only; `stripe/cancel` and
+     `stripe/reactivate` genuinely call `cancel`/`update` and keep the credit.
+   - **Evidence must be something actually emitted or persisted**, verified by
+     reading the handler's success path — never inferred from the route's name
+     or purpose, and never from a count of logging calls in the file.
 
    | Route (method) | Authority | Audit | Success log | Other evidence |
    |---|---|---|---|---|
    | `/api/admin/runs/[runId]` PATCH | SYSTEM_ADMIN | ✅ `writeAuditEvent` | ✅ | — |
    | `/api/admin/runs/[runId]` DELETE | SYSTEM_ADMIN | ✅ `writeAuditEvent` | ✅ | — |
-   | `/api/admin/runs/[runId]` GET | ADMIN_PORTAL | ❌ | ✅ | — |
-   | `/api/admin/runs` GET | ADMIN_PORTAL | ❌ | ✅ | — |
+   | `/api/admin/runs/[runId]` GET | ADMIN_PORTAL | ❌ | ❌ **NONE** | none |
+   | `/api/admin/runs` GET | ADMIN_PORTAL | ❌ | ❌ **NONE** | none |
    | `/api/admin/users/[uid]/override` POST, DELETE | SYSTEM_ADMIN | ✅ `writeAuditLog` | ❌ | — |
    | `/api/admin/users/[uid]/stripe/cancel` POST | SYSTEM_ADMIN | ✅ `writeAuditLog` | ❌ | Stripe events |
    | `/api/admin/users/[uid]/stripe/reactivate` POST | SYSTEM_ADMIN | ✅ `writeAuditLog` | ❌ | Stripe events |
-   | `/api/admin/users/[uid]/stripe/sync` POST | SYSTEM_ADMIN | ✅ `writeAuditLog` | ❌ | Stripe events |
+   | `/api/admin/users/[uid]/stripe/sync` POST | SYSTEM_ADMIN | ✅ `writeAuditLog` | ❌ | **none** (reads Stripe only) |
    | `/api/governance/review` POST | GOVERNANCE_ADMIN / reviewer | ✅ `writeAuditEvent` | ✅ shape only | run's `governanceEvents` |
    | `/api/governance/policy` POST | GOVERNANCE_ADMIN | ✅ `writeAuditEvent` | ✅ | — |
    | `/api/governance/policy` GET | GOVERNANCE_ADMIN | ❌ | ✅ | — |
-   | **`/api/admin/set-admin` POST** | **BOOTSTRAP_SECRET only** | ❌ **NONE** | ❌ **NONE** | **none — see §B.4** |
+   | **`/api/admin/set-admin` POST** | **BOOTSTRAP_SECRET only** | ❌ **NONE** | ❌ **NONE** | **none — see §B.6** |
    | **`/api/admin/set-role` POST** | SYSTEM_ADMIN | ❌ **NONE** | ✅ | — |
    | **`/api/admin/keys` GET, POST** | SYSTEM_ADMIN | ❌ **NONE** | ✅ | — |
    | **`/api/admin/purge-runs` POST** | SYSTEM_ADMIN | ❌ **NONE** | ✅ | — |
-   | **`/api/admin/sync-subscription` POST** | SYSTEM_ADMIN | ❌ **NONE** | ❌ **NONE** | Stripe events |
-   | **`/api/admin/test-webhook` POST** | SYSTEM_ADMIN | ❌ **NONE** | ✅ | Stripe events |
+   | **`/api/admin/sync-subscription` POST** | SYSTEM_ADMIN | ❌ **NONE** | ❌ **NONE** | **none** (reads Stripe only) |
+   | **`/api/admin/test-webhook` POST** | SYSTEM_ADMIN | ❌ **NONE** | ✅ | **none** (reads Stripe only) |
    | **`/api/admin/users/[uid]` PATCH, DELETE** | SYSTEM_ADMIN | ❌ **NONE** | ❌ **NONE** | **none** |
    | `/api/admin/users` GET | ADMIN_PORTAL | ❌ | ✅ | — |
    | `/api/admin/users/search` GET | ADMIN_PORTAL | ❌ | ❌ | none |
@@ -292,6 +319,12 @@ operator does; they are not automated.
    responders to fall back on runtime logs; for those rows there is nothing to
    fall back to, and following that advice would reproduce exactly the false
    inference this paragraph exists to prevent.
+
+   **A ✅ in any column is a claim about this codebase that can be wrong, and
+   five of them were.** If you consult a ✅ cell and find nothing, do not
+   conclude the operation did not occur — re-read the handler's success path
+   first, then treat the row as ❌ until proven otherwise. The warning below
+   applies to every row, not only the ones currently marked ❌.
 
    So: **absence of a record is not evidence that the operation did not
    happen.** Do not tell a stakeholder that activity "was reviewed and nothing
@@ -349,9 +382,33 @@ operator does; they are not automated.
    b. **Deploy deliberately.** An environment variable change does not affect
       running Production until a deployment picks it up. Until then the old
       secret is still live.
-   c. **Prove the old value no longer works** — a `POST /api/admin/set-admin`
-      with the old secret must return 401. Do not record containment as complete
-      on the basis of the env change alone.
+   c. **Prove the old value no longer works — with a probe that cannot mint a
+      claim.** C8 said to POST `{uid, secret}` with the old secret. That is
+      unsafe: if the rotated configuration has NOT actually deployed, the probe
+      **succeeds and re-mints `admin: true`** on the uid you used, with no audit
+      record and no log to notice it. The verification step would itself be the
+      breach.
+
+      The route validates the secret BEFORE the uid, so **omit the uid**:
+
+          POST /api/admin/set-admin
+          {"secret": "<OLD_SECRET>"}          <- no uid, ever
+
+      Read the response exactly as follows:
+
+      | Response | Meaning |
+      |---|---|
+      | **401** | The old secret is rejected. **The only proof of containment.** |
+      | 400 | The old secret was ACCEPTED — execution reached uid validation. **Containment has FAILED**; the rotation has not taken effect. |
+      | 429 | INCONCLUSIVE. Rate limiting (3 per 5 minutes per IP) runs *before* secret validation, and also denies when Firestore is unavailable. A correct secret and a wrong one both return 429. |
+      | 5xx / network error | INCONCLUSIVE. |
+
+      Only an authentication rejection of the OLD secret itself counts. Any
+      other response — 429 included — means containment is **unproven**, not
+      achieved. Do not treat "some non-2xx came back" as success, and do not
+      attempt to bypass the rate limiter: wait for the window and repeat the
+      probe through the normal operator process. These semantics are pinned by
+      `app/api/admin/set-admin/__tests__/setAdminFailClosed.spec.ts`.
    d. Re-enumerate custom claims across accounts afterwards: if the secret was
       used before rotation, the resulting claim sits on an account nobody
       enrolled and no record names.

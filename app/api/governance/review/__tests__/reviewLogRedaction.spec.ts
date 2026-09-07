@@ -65,6 +65,37 @@ const C = {
   allowlistEmail: "canary-allowlisted-admin@canary-allowlist-domain-294fb4.example",
 } as const;
 
+/**
+ * Phase FIRST-ADMIN-C9 (R5 F1) — ONE SHARED DENY-SET.
+ *
+ * C8 made every logging branch execute, then gave each its own canary list:
+ * 9 canaries on the main path, 7 on `admin_global` (missing the reason text),
+ * 4 on the 403 denial, 2 on the integrity exception. So the branches ran, but
+ * each sibling accepted leaks the main path rejected — the same branch-shaped
+ * vacuity C8 existed to close, one level in. Six mutations proved it: a
+ * governance reason logged in `admin_global`, an owner email on the denial
+ * path, the reviewer uid on the integrity path, all green.
+ *
+ * Every ordinary governance branch now asserts against THIS list. A branch may
+ * add canaries; none may quietly assert a weaker subset. The one documented
+ * exception is the workspace-integrity path, which is allowed the run id and
+ * nothing else — see its own describe block.
+ */
+const SENSITIVE_LOG_CANARIES: Array<[string, () => string]> = [
+  ["the reviewer's uid", () => C.reviewerUid],
+  ["the run owner's uid", () => C.ownerAUid],
+  ["a foreign tenant's uid", () => C.ownerBUid],
+  ["the reviewed run's id", () => C.runId],
+  ["a foreign run's id", () => "other-run"],
+  ["the run's governance reason text", () => C.reason],
+  ["the run's question text", () => C.question],
+  ["the caller's email address", () => C.callerEmail],
+  ["the caller's email domain", () => C.callerDomain],
+  ["the run owner's email address", () => C.ownerEmail],
+  ["the privileged allowlist address", () => C.allowlistEmail],
+  ["the privileged allowlist domain", () => "canary-allowlist-domain-294fb4.example"],
+];
+
 const NOW = Date.now();
 let tokenClaims: Record<string, unknown> = {};
 let liveRecord: Record<string, unknown> = {};
@@ -111,6 +142,8 @@ function docHandle(collection: string, id: string) {
         userEmail: C.ownerEmail,
         question: C.question,
         governanceStatus: prevStatus,
+        // Present on EVERY fixture document, including the cross-tenant one, so
+        // a reason-text leak is reachable on every branch that reads a run.
         governanceReasons: [C.reason],
         createdAt: { toMillis: () => NOW },
       } : undefined),
@@ -252,19 +285,9 @@ describe.each(COLLECTIONS)("GOVERNANCE HOT PATH — collection=%s", (collection)
     expect(auditRows[0]).toMatchObject({ runId: C.runId, byUid: C.reviewerUid, runOwnerUid: C.ownerAUid });
   });
 
-  it.each([
-    ["the reviewer's own uid", C.reviewerUid],
-    ["the run owner's uid", C.ownerAUid],
-    ["a foreign tenant's uid", C.ownerBUid],
-    ["the reviewed run's id", C.runId],
-    ["the run's governance reason text", C.reason],
-    ["the run's question text", C.question],
-    ["the caller's email address", C.callerEmail],
-    ["the caller's email domain", C.callerDomain],
-    ["the run owner's email address", C.ownerEmail],
-  ])("never writes %s to the log sink", async (_label, canary) => {
+  it.each(SENSITIVE_LOG_CANARIES)("never writes %s to the log sink", async (_label, canary) => {
     const logs = await run();
-    expect(logs).not.toContain(canary);
+    expect(logs).not.toContain(canary());
   });
 
   it("a governance status may appear only on a line carrying no identifier", async () => {
@@ -342,9 +365,18 @@ describe("DELIBERATE DIVERGENCE — the integrity-failure path keeps its run id"
     const logs = output();
     expect(logs).toContain("workspace_run_integrity_failed");
     expect(logs).toContain(C.runId);
-    // Still no caller identity or tenant content on that path.
-    expect(logs).not.toContain(C.callerEmail);
-    expect(logs).not.toContain(C.question);
+
+    /**
+     * NARROW ALLOWLIST, not a weak subset. C8 checked two canaries here and
+     * three leak mutations survived — reviewer uid, owner uid and reason text
+     * could all be added to this log with the suite green. That is the branch
+     * where scope creep is most likely precisely BECAUSE it is already licensed
+     * to carry one identifier. Everything except the run id is still forbidden.
+     */
+    for (const [, canary] of SENSITIVE_LOG_CANARIES) {
+      if (canary() === C.runId) continue; // the one justified exception
+      expect(logs).not.toContain(canary());
+    }
   });
 });
 
@@ -401,12 +433,7 @@ describe.each(COLLECTIONS)("OWNER_B IS REACHABLE — cross-tenant denial, collec
     expect(output()).toContain("plan: full");
   });
 
-  it.each([
-    ["the foreign tenant's uid", () => C.ownerBUid],
-    ["the foreign run's id", () => "other-run"],
-    ["the reviewer's uid", () => C.reviewerUid],
-    ["the caller's email", () => C.callerEmail],
-  ])("does not write %s to the log sink on the denial path", async (_label, canary) => {
+  it.each(SENSITIVE_LOG_CANARIES)("does not write %s to the log sink on the denial path", async (_label, canary) => {
     await post(collection, "other-run");
     expect(output()).not.toContain(canary());
   });
@@ -456,15 +483,7 @@ describe("admin_global BRANCH — the one that first executes at enrollment", ()
     expect(auditRows).toHaveLength(1);
   });
 
-  it.each([
-    ["the governance admin's own uid", () => C.reviewerUid],
-    ["the privileged allowlist address", () => C.allowlistEmail],
-    ["the privileged allowlist domain", () => "canary-allowlist-domain-294fb4.example"],
-    ["the cross-tenant run id", () => "other-run"],
-    ["the cross-tenant owner uid", () => C.ownerBUid],
-    ["the run owner's email", () => C.ownerEmail],
-    ["the run's question text", () => C.question],
-  ])("does not write %s to the log sink", async (_label, canary) => {
+  it.each(SENSITIVE_LOG_CANARIES)("does not write %s to the log sink", async (_label, canary) => {
     asGovernanceAdmin();
     captured = [];
     await post("runs", "other-run");
@@ -480,7 +499,7 @@ describe("SIBLING SCOPE BRANCHES — every remaining logging branch of the resol
    * decision (covered by the main suite). Each is exercised here with an
    * anchor proving the branch ran, then checked for identifiers.
    */
-  const CANARIES = [C.reviewerUid, C.ownerAUid, C.ownerBUid, C.callerEmail, C.callerDomain, C.question];
+  const CANARIES = SENSITIVE_LOG_CANARIES.map(([, v]) => v());
 
   it("plan_required: logs the decision without the caller's identity", async () => {
     planId = "lite";
