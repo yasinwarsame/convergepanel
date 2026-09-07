@@ -68,14 +68,15 @@ import { checkAdminOnly } from "@/lib/governance/authCheck";
 import {
   resolveGovernanceVisibleUserIds,
   resolveGovernanceVisibleUserIdsCached,
+  runOwnerVisibleInGovernance,
 } from "@/lib/governance/governanceVisibleUserIds";
 
 const globalScope = (v: unknown) =>
   (v as { ok: boolean; visibleUserIds: string[] | null; queueScope: string });
 
 /** Set the LIVE Auth record the resolvers will read for themselves. */
-const liveRecord = (email: string, emailVerified: unknown) => {
-  authRecord = { email, emailVerified };
+const liveRecord = (email: string, emailVerified: unknown, disabled: unknown = false) => {
+  authRecord = { email, emailVerified, disabled };
 };
 
 beforeEach(() => {
@@ -300,6 +301,37 @@ describe("visibility cache cannot outlive its proof", () => {
     liveRecord(GOV, false);
     const second = await resolveGovernanceVisibleUserIdsCached("u1");
     expect(globalScope(second).queueScope).not.toBe("admin_global");
+  });
+
+  it("THE C5 REGRESSION: a global grant is NOT served after the account is DISABLED", async () => {
+    // C4 made `disabled` part of the authority evidence but left it out of this
+    // key, so a disabled governance administrator kept a cached
+    // `visibleUserIds: null` — every user's records — for the rest of the TTL.
+    // The uid, the address and the verification flag are all unchanged by a
+    // disable, which is exactly why the old key could not notice it.
+    liveRecord(GOV, true, false);
+    const first = await resolveGovernanceVisibleUserIdsCached("u-disabled");
+    expect(globalScope(first).visibleUserIds).toBeNull();
+
+    liveRecord(GOV, true, true); // same uid, same email, same verification
+    const second = await resolveGovernanceVisibleUserIdsCached("u-disabled");
+    const after = second as { ok: boolean; visibleUserIds?: string[] | null; queueScope?: string };
+    expect(after.queueScope).not.toBe("admin_global");
+    if (after.ok) {
+      expect(after.visibleUserIds).not.toBeNull();
+      expect(runOwnerVisibleInGovernance(after.visibleUserIds as string[], "some-stranger")).toBe(false);
+    } else {
+      expect(after).toEqual({ ok: false, kind: expect.stringMatching(/^(plan_required|no_db)$/) });
+    }
+  });
+
+  it("a disabled denial is not sticky once the account is re-enabled", async () => {
+    liveRecord(GOV, true, true);
+    const first = await resolveGovernanceVisibleUserIdsCached("u-reenable");
+    expect(globalScope(first).queueScope).not.toBe("admin_global");
+    liveRecord(GOV, true, false);
+    const second = await resolveGovernanceVisibleUserIdsCached("u-reenable");
+    expect(globalScope(second).visibleUserIds).toBeNull();
   });
 
   it("an unverified denial is not sticky once verification arrives", async () => {

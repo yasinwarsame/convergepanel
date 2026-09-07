@@ -61,7 +61,27 @@ import {
 } from "@/lib/admin/verifiedAdminIdentity";
 import { requireAdminPortalAccess } from "@/lib/firebase/auth-helpers";
 import { checkAdminOnly } from "@/lib/governance/authCheck";
-import { resolveGovernanceVisibleUserIds } from "@/lib/governance/governanceVisibleUserIds";
+import {
+  resolveGovernanceVisibleUserIds,
+  runOwnerVisibleInGovernance,
+} from "@/lib/governance/governanceVisibleUserIds";
+
+/**
+ * Branch-complete denial assertion. A refused result (`ok:false`) grants
+ * nothing; a granted result must carry a FINITE owner set that excludes a
+ * stranger. Writing it this way avoids both traps seen in this workstream:
+ * masking `null` with `??`, and calling the predicate with `undefined`.
+ */
+const expectNoGlobalVisibility = (vis: unknown) => {
+  const v = vis as { ok: boolean; visibleUserIds?: string[] | null; queueScope?: string };
+  expect(v.queueScope).not.toBe("admin_global");
+  if (v.ok) {
+    expect(v.visibleUserIds).not.toBeNull();
+    expect(runOwnerVisibleInGovernance(v.visibleUserIds as string[], "some-stranger")).toBe(false);
+  } else {
+    expect(v).toEqual({ ok: false, kind: expect.stringMatching(/^(plan_required|no_db)$/) });
+  }
+};
 
 const req = () =>
   ({
@@ -128,8 +148,9 @@ describe("GOVERNANCE_ADMIN_EMAILS — the disabled matrix", () => {
     const vis = (await resolveGovernanceVisibleUserIds("g1")) as {
       ok: boolean; visibleUserIds?: string[] | null; queueScope?: string;
     };
-    expect(vis.queueScope).not.toBe("admin_global");
-    expect(vis.visibleUserIds ?? "absent").not.toBeNull();
+    // C5: the previous form was `expect(vis.visibleUserIds ?? "absent").not.toBeNull()`,
+    // which cannot fail for ANY value — the banned `??`-masking pattern.
+    expectNoGlobalVisibility(vis);
   });
 });
 

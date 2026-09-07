@@ -70,10 +70,11 @@ export async function resolveGovernanceVisibleUserIds(uid: string): Promise<Gove
  */
 async function resolveTrustedGovernanceIdentity(
   uid: string
-): Promise<{ email: string; emailVerified: boolean; governanceAdmin: boolean }> {
+): Promise<{ email: string; emailVerified: boolean; governanceAdmin: boolean; disabled: boolean }> {
   const scopes = await resolveVerifiedAdminScopes(uid);
   if (scopes.lookupStatus !== "resolved") {
-    return { email: "", emailVerified: false, governanceAdmin: false };
+    // A lookup we could not perform is not evidence the account is usable.
+    return { email: "", emailVerified: false, governanceAdmin: false, disabled: true };
   }
   // The GOVERNANCE decision is taken by the uid-only authority resolver, which
   // reads ADMIN_EMAILS and GOVERNANCE_ADMIN_EMAILS independently. This module
@@ -82,6 +83,7 @@ async function resolveTrustedGovernanceIdentity(
     email: scopes.email,
     emailVerified: scopes.emailVerified,
     governanceAdmin: scopes.governanceAdmin,
+    disabled: scopes.disabled,
   };
 }
 
@@ -182,10 +184,18 @@ const governanceVisibilityCache = new Map<string, { entry: GovernanceVisibility;
  * Firestore work below it (entitlements, the user document, and the reverse
  * assigner query), which is what the cache actually exists for.
  *
- * The key still carries uid + canonical email + verification state, so a
- * verified grant cannot outlive the proof it rested on: revoking verification
- * or changing the address produces a different key and forces a recompute.
- * Caching by uid alone would be wrong for exactly that reason.
+ * The key carries uid + canonical email + verification state + ACCOUNT-ENABLED
+ * state, so a verified grant cannot outlive the proof it rested on: revoking
+ * verification, changing the address, or DISABLING THE ACCOUNT each produce a
+ * different key and force a recompute. Caching by uid alone would be wrong for
+ * exactly that reason.
+ *
+ * Phase FIRST-ADMIN-C5 — `disabled` was the lever this key was missing. C4 made
+ * a disabled account lose its email-derived authority everywhere else, but the
+ * key was unchanged, so a disabled governance administrator kept a cached
+ * `visibleUserIds: null` — every user's runs, decisions and review records —
+ * for the remainder of the TTL. Any future addition to the authority evidence
+ * must be added here in the same commit.
  */
 export async function resolveGovernanceVisibleUserIdsCached(uid: string): Promise<GovernanceVisibility> {
   if (!adminDb) {
@@ -193,7 +203,12 @@ export async function resolveGovernanceVisibleUserIdsCached(uid: string): Promis
   }
 
   const identity = await resolveTrustedGovernanceIdentity(uid);
-  const key = `${uid}::${identity.email.trim().toLowerCase()}::${identity.emailVerified === true ? "verified" : "unverified"}`;
+  const key = [
+    uid,
+    identity.email.trim().toLowerCase(),
+    identity.emailVerified === true ? "verified" : "unverified",
+    identity.disabled === true ? "disabled" : "enabled",
+  ].join("::");
   const now = Date.now();
   const hit = governanceVisibilityCache.get(key);
   if (hit && hit.expiresAt > now) {
