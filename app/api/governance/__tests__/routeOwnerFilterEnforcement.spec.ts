@@ -1,20 +1,33 @@
 /**
- * Phase FIRST-ADMIN-C4 — THE ROUTES MUST ENFORCE THE FINITE OWNER SET.
+ * Phase FIRST-ADMIN-C5 — THE ROUTES MUST ENFORCE THE FINITE OWNER SET,
+ * ON EVERY COLLECTION AND EVERY QUERY MODE.
  *
- * The R3 review's P1: the governance resolver and its own suite were hardened to
- * a high standard, and the tests stopped exactly where enforcement begins.
- * Neutering the gate in the audit route, the review route, or the queue's query
- * scoping passed all 11,126 tests. The `review` case was the sharpest — that
- * gate is the SOLE check on a WRITE path, so removing it would let any
- * full-plan reviewer approve or block any user's run, undetected.
+ * C4 added route-level coverage and closed the three regressions R3 named. The
+ * C4-R1 review then found the coverage had three holes, each of which let the
+ * SAME class of defect straight back through:
  *
- * These tests drive the real route handlers with a NON-GLOBAL identity whose
- * visibility is a finite set, and assert the full chain:
+ *   1. The queue "empty set" test asserted `body.items ?? []` — the route emits
+ *      `runs`, never `items`, so the key was always `undefined` and the
+ *      assertion could not fail. Converting the empty set to `null` (a full
+ *      global queue over every user's records) passed 2685/2685.
+ *   2. The audit and review gates were only ever exercised with
+ *      `collection=runs`. Scoping either gate to `runs` — leaving
+ *      `verifications` and `videoVerifications` ungated — survived. On the
+ *      REVIEW route that is an unauthorised cross-tenant WRITE.
+ *   3. The queue was only exercised with `runType=all`. Each single-type branch
+ *      sits beside a near-identical GLOBAL loader that applies no owner filter;
+ *      swapping any one survived, and is a complete cross-tenant read.
  *
- *   request identity -> resolver -> finite visibleUserIds -> data selection -> response
+ * Two structural changes make those classes detectable rather than relying on
+ * remembering to add cases:
  *
- * A finite owner set must never become global at the route layer, and an EMPTY
- * finite set must mean "nothing", never "everything".
+ *   - Every audit/review case is PARAMETRISED over all three collections.
+ *   - The Firestore double implements REAL QUERY SEMANTICS: it returns the
+ *     documents matching the `where("userId", …)` constraints a query actually
+ *     carries, and returns EVERY seeded document when a query carries none.
+ *     So an unscoped query really does yield the other owner's rows, and the
+ *     assertion is "owner-b never appears in the response" — a leaked ROW,
+ *     not merely a missing constraint.
  */
 
 const __PRIVILEGED_ENV_SNAPSHOT = {
@@ -28,27 +41,46 @@ afterAll(() => {
   }
 });
 
+const NOW = Date.now();
 const OWNER_A = "owner-a";
 const OWNER_B = "owner-b";
+/** The three owner-scoped collections. Every gate must cover all of them. */
+const COLLECTIONS = ["runs", "verifications", "videoVerifications"] as const;
+type Coll = (typeof COLLECTIONS)[number];
 
-/** What the resolver hands the route under test. */
 let visibility: Record<string, unknown> = {};
-/** Which owner the doc being addressed belongs to. */
-let docOwner = OWNER_A;
+/** Owner of the single document addressed by the audit/review routes. */
+let docOwner: string = OWNER_A;
 
 const auditWrite = jest.fn(async () => undefined);
 const reviewUpdate = jest.fn(async () => undefined);
-/**
- * Every `where()` the route builds, TAGGED WITH THE COLLECTION it was built on.
- * The collection tag matters: an earlier version of this test only checked that
- * the constraints it saw named the right owner, so dropping the constraint from
- * ONE collection while the others kept theirs slipped through.
- */
-const whereCalls: Array<[string, string, string, unknown]> = [];
-/** Collections the route actually queried (doc() reads excluded). */
+/** Owner constraints actually issued, tagged with their collection. */
+const whereCalls: Array<{ collection: string; field: string; op: string; value: unknown }> = [];
 const queriedCollections: string[] = [];
 
-const runDoc = () => ({
+/** One document per owner, in every collection, all queue-eligible. */
+const seedDoc = (coll: Coll, owner: string) => ({
+  id: `${coll}-${owner}`,
+  data: () => ({
+    userId: owner,
+    uid: owner,
+    userEmail: `${owner}@test-invented.example`,
+    question: `question owned by ${owner}`,
+    claim: `claim owned by ${owner}`,
+    fileName: `${owner}.mp4`,
+    type: coll === "videoVerifications" ? "video_verification" : "claim_verification",
+    governanceStatus: "needs_review",
+    consensusScore: 50,
+    // Recent: the queue drops anything older than its cutoff, so a stale
+    // timestamp would make every row assertion below vacuous.
+    createdAt: { toMillis: () => NOW },
+    timestamp: { toMillis: () => NOW },
+    verifiedAt: { toMillis: () => NOW },
+  }),
+});
+
+/** The document the audit/review routes address, owned by `docOwner`. */
+const addressedDoc = () => ({
   exists: true,
   id: "run-1",
   data: () => ({
@@ -57,53 +89,54 @@ const runDoc = () => ({
     userEmail: `${docOwner}@test-invented.example`,
     question: "q",
     governanceStatus: "needs_review",
-    createdAt: { toDate: () => new Date("2026-09-01T00:00:00Z") },
+    createdAt: { toMillis: () => NOW },
   }),
 });
 
 /**
- * A fully chainable query builder: every Firestore builder method returns the
- * same object, so the route can compose where/orderBy/limit/select in any order
- * without the double falling over. `where` is RECORDED, which is what lets the
- * queue tests assert the owner constraint the route actually issued rather than
- * inferring scoping from a response body.
+ * A chainable query that REMEMBERS its owner constraints and resolves them the
+ * way Firestore would: constrained -> only matching owners; unconstrained ->
+ * the whole collection.
  */
-const makeQuery = (name = "?"): Record<string, unknown> => {
+function makeQuery(collection: string) {
+  const constraints: Array<{ field: string; op: string; value: unknown }> = [];
   const q: Record<string, unknown> = {};
   for (const m of ["orderBy", "limit", "select", "startAfter", "endBefore", "offset"]) q[m] = () => q;
-  q.where = (field: string, op: string, value: unknown) => { whereCalls.push([name, field, op, value]); return q; };
-  q.get = async () => { if (name !== "?") queriedCollections.push(name); return { docs: [], empty: true, size: 0 }; };
-  // Sub-collection writes on the review path (governanceEvents).
-  q.add = (...a: unknown[]) => reviewUpdate(...(a as []));
-  q.doc = () => q;
+  q.where = (field: string, op: string, value: unknown) => {
+    constraints.push({ field, op, value });
+    whereCalls.push({ collection, field, op, value });
+    return q;
+  };
+  q.get = async () => {
+    queriedCollections.push(collection);
+    const owners = COLLECTIONS.includes(collection as Coll) ? [OWNER_A, OWNER_B] : [];
+    const ownerConstraint = constraints.find((c) => c.field === "userId" || c.field === "uid");
+    const allowed = ownerConstraint
+      ? owners.filter((o) => (Array.isArray(ownerConstraint.value) ? ownerConstraint.value.includes(o) : ownerConstraint.value === o))
+      : owners; // NO owner constraint => the whole collection, exactly like Firestore
+    return { docs: allowed.map((o) => seedDoc(collection as Coll, o)), empty: allowed.length === 0, size: allowed.length };
+  };
   q.count = () => ({ get: async () => ({ data: () => ({ count: 0 }) }) });
+  q.add = (...a: unknown[]) => reviewUpdate(...(a as []));
+  q.doc = () => ({
+    get: async () => addressedDoc(),
+    update: (...a: unknown[]) => reviewUpdate(...(a as [])),
+    set: (...a: unknown[]) => reviewUpdate(...(a as [])),
+    collection: (n: string) => makeQuery(n),
+  });
   return q;
-};
+}
 
 jest.mock("@/lib/firebase/admin", () => ({
   adminAuth: { getUser: async () => ({ email: "reviewer@test-invented.example", emailVerified: true, disabled: false }) },
-  adminDb: {
-    collection: (name: string) => {
-      const q = makeQuery(name);
-      return Object.assign(q, {
-        doc: () => ({
-          get: async () => runDoc(),
-          update: (...a: unknown[]) => reviewUpdate(...(a as [])),
-          set: (...a: unknown[]) => reviewUpdate(...(a as [])),
-          collection: (n: string) => makeQuery(n),
-        }),
-      });
-    },
-  },
+  adminDb: { collection: (name: string) => makeQuery(name) },
   firebaseAdmin: { firestore: { Timestamp: { now: () => "TS", fromDate: () => "TS" }, FieldValue: { serverTimestamp: () => "TS" } } },
 }));
-
 jest.mock("@/lib/governance/governanceVisibleUserIds", () => {
   const actual = jest.requireActual("@/lib/governance/governanceVisibleUserIds");
   return {
     ...actual,
-    // Only the resolvers are doubled — `runOwnerVisibleInGovernance`, the
-    // predicate under test, stays REAL.
+    // Only the resolvers are doubled; `runOwnerVisibleInGovernance` stays REAL.
     resolveGovernanceVisibleUserIds: async () => visibility,
     resolveGovernanceVisibleUserIdsCached: async () => visibility,
   };
@@ -120,6 +153,8 @@ const SCOPED = { ok: true, visibleUserIds: [OWNER_A], isSupportAdmin: false, que
 const EMPTY = { ok: true, visibleUserIds: [] as string[], isSupportAdmin: false, queueScope: "no_assigners" };
 const GLOBAL = { ok: true, visibleUserIds: null, isSupportAdmin: true, queueScope: "admin_global" };
 
+const ownerConstraints = () => whereCalls.filter((c) => c.field === "userId" || c.field === "uid");
+
 beforeEach(() => {
   process.env.ADMIN_EMAILS = "";
   process.env.GOVERNANCE_ADMIN_EMAILS = "governance-only@test-invented.example";
@@ -131,11 +166,11 @@ beforeEach(() => {
   queriedCollections.length = 0;
 });
 
-// ---------------------------------------------------------------- Q. AUDIT --
-describe("governance AUDIT route enforces the finite owner set", () => {
+// ------------------------------------------------------------------ AUDIT --
+describe.each(COLLECTIONS)("governance AUDIT route — collection=%s", (collection) => {
   const call = async () => {
     const { GET } = await import("@/app/api/governance/audit/route");
-    return GET(new NextRequest("http://localhost/api/governance/audit?runId=run-1&collection=runs", {
+    return GET(new NextRequest(`http://localhost/api/governance/audit?runId=run-1&collection=${collection}`, {
       headers: { authorization: "Bearer t" },
     }));
   };
@@ -158,21 +193,21 @@ describe("governance AUDIT route enforces the finite owner set", () => {
     expect((await call()).status).toBe(403);
   });
 
-  it("only a genuine governance admin (null owner set) reaches any owner", async () => {
+  it("only a genuine governance admin reaches an out-of-scope owner", async () => {
     visibility = { ...GLOBAL };
     docOwner = OWNER_B;
     expect((await call()).status).not.toBe(403);
   });
 });
 
-// --------------------------------------------------------------- R. REVIEW --
-describe("governance REVIEW route (a WRITE path) enforces the finite owner set", () => {
+// ----------------------------------------------------------------- REVIEW --
+describe.each(COLLECTIONS)("governance REVIEW route (WRITE) — collection=%s", (collection) => {
   const call = async () => {
     const { POST } = await import("@/app/api/governance/review/route");
     return POST(new NextRequest("http://localhost/api/governance/review", {
       method: "POST",
       headers: { authorization: "Bearer t", "content-type": "application/json" },
-      body: JSON.stringify({ runId: "run-1", collection: "runs", action: "approved", comment: "ok" }),
+      body: JSON.stringify({ runId: "run-1", collection, action: "approved", comment: "ok" }),
     }));
   };
 
@@ -197,65 +232,62 @@ describe("governance REVIEW route (a WRITE path) enforces the finite owner set",
   });
 });
 
-// ---------------------------------------------------------------- S. QUEUE --
-describe("governance QUEUE route scopes to the finite owner set", () => {
+// ------------------------------------------------------------------ QUEUE --
+describe.each(["all", "research", "verification", "video"])("governance QUEUE route — runType=%s", (runType) => {
   const call = async () => {
     const { GET } = await import("@/app/api/governance/queue/route");
-    return GET(new NextRequest("http://localhost/api/governance/queue", { headers: { authorization: "Bearer t" } }));
+    return GET(new NextRequest(`http://localhost/api/governance/queue?runType=${runType}&status=all`, {
+      headers: { authorization: "Bearer t" },
+    }));
   };
-  /** Every owner-identity constraint the route issued, per collection. */
-  const ownerConstraints = () => whereCalls.filter(([, f]) => f === "userId" || f === "uid");
-  /** The run/verification collections a scoped reviewer must never read unscoped. */
-  const SCOPED_COLLECTIONS = ["runs", "verifications", "videoVerifications"];
-  const constrainedCollections = () => new Set(ownerConstraints().map(([c]) => c));
+  const rowsOf = (body: unknown) => ((body as { runs?: Array<{ userId?: string }> }).runs ?? []);
 
-  it("THE CORE PROOF: EVERY queried owner-scoped collection carries the owner constraint", async () => {
+  it("THE CORE PROOF: no row belonging to an out-of-scope owner is ever returned", async () => {
     const res = await call();
     expect(res.status).toBe(200);
-    const cs = ownerConstraints();
-    expect(cs.length).toBeGreaterThan(0);
-    for (const [, , op, value] of cs) {
-      const named = Array.isArray(value) ? value : [value];
-      expect(named).toEqual([OWNER_A]);
-      expect(["==", "in"]).toContain(op);
-    }
-    // Binding collection -> constraint is what stops a single collection being
-    // silently unscoped while its siblings stay correct.
-    const constrained = constrainedCollections();
-    for (const c of SCOPED_COLLECTIONS) {
-      if (queriedCollections.includes(c)) expect(constrained).toContain(c);
-    }
-    expect(constrained).toContain("runs");
-    const body = (await res.json()) as { ok: boolean; queueScope?: string };
-    expect(body.queueScope).not.toBe("admin_global");
+    const body = await res.json();
+    // `runs` is the key this route emits. Asserting a key it never emits would
+    // make this vacuous — that was the C4 defect.
+    expect(body).toHaveProperty("runs");
+    const rows = rowsOf(body);
+    // The in-scope owner's rows MUST come back. Without this, "no owner-b rows"
+    // would pass trivially on an empty response — which is exactly how this
+    // assertion was vacuous before the seed timestamps were made recent.
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.every((r) => r.userId === OWNER_A)).toBe(true);
+    expect(rows.filter((r) => r.userId === OWNER_B)).toEqual([]);
   });
 
-  it("an owner OUTSIDE the set is never named in any query constraint", async () => {
+  it("every owner-scoped collection it queried carried an owner constraint", async () => {
     await call();
-    for (const [, , , value] of ownerConstraints()) {
-      const named = Array.isArray(value) ? value : [value];
-      expect(named).not.toContain(OWNER_B);
+    const constrained = new Set(ownerConstraints().map((c) => c.collection));
+    const queriedScoped = queriedCollections.filter((c) => (COLLECTIONS as readonly string[]).includes(c));
+    expect(queriedScoped.length).toBeGreaterThan(0);
+    for (const c of new Set(queriedScoped)) expect(constrained).toContain(c);
+    for (const c of ownerConstraints()) {
+      const named = Array.isArray(c.value) ? c.value : [c.value];
+      expect(named).toEqual([OWNER_A]);
     }
   });
 
-  it("an EMPTY finite set issues NO unscoped owner query and is not global", async () => {
+  it("an EMPTY finite set returns nothing and queries no owner-scoped collection", async () => {
     visibility = { ...EMPTY };
     const res = await call();
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { items?: unknown[]; queueScope?: string };
-    expect(body.queueScope).not.toBe("admin_global");
-    expect(body.items ?? []).toEqual([]);
-    // The critical property: an empty set must not degrade into "no filter".
-    for (const [, , , value] of ownerConstraints()) {
-      const named = Array.isArray(value) ? value : [value];
-      expect(named.length).toBeGreaterThan(0);
-    }
+    const body = await res.json();
+    expect(body).toHaveProperty("runs");
+    expect(rowsOf(body)).toEqual([]);
+    // Exact label, not merely "not admin_global" — a decorative string cannot
+    // carry the property, so it is pinned precisely.
+    expect((body as { queueScope?: string }).queueScope).toBe("no_assigners");
+    // The degradation this catches: `[]` becoming "no filter".
+    expect(queriedCollections.filter((c) => (COLLECTIONS as readonly string[]).includes(c))).toEqual([]);
   });
 
-  it("only a genuine governance admin receives admin_global", async () => {
+  it("only a genuine governance admin sees another owner's rows", async () => {
     visibility = { ...GLOBAL };
     const res = await call();
-    const body = (await res.json()) as { queueScope?: string };
-    expect(body.queueScope).toBe("admin_global");
+    const body = await res.json();
+    expect(rowsOf(body).some((r) => r.userId === OWNER_B)).toBe(true);
   });
 });
