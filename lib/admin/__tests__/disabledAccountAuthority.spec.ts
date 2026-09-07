@@ -164,6 +164,23 @@ describe("the enabled flag must be an explicit false", () => {
     await expect(hasVerifiedApplicationAdminAuthority("u1")).resolves.toBe(!expected);
   });
 
+  it("the reported `disabled` field mirrors the record independently of verification", async () => {
+    // Guards against coupling `disabled` to `emailVerified` during
+    // normalisation: that leaves authority correct (unverified denies anyway)
+    // while making the reported field lie for a disabled, unverified account.
+    authRecord = { email: APP_ONLY, emailVerified: false, disabled: true };
+    await expect(resolveLiveAuthIdentity("u1")).resolves.toEqual({
+      status: "resolved", email: APP_ONLY, emailVerified: false, disabled: true,
+    });
+    expect((await resolveVerifiedAdminScopes("u1")).disabled).toBe(true);
+
+    authRecord = { email: APP_ONLY, emailVerified: true, disabled: true };
+    expect((await resolveVerifiedAdminScopes("u1")).disabled).toBe(true);
+
+    authRecord = { email: APP_ONLY, emailVerified: false, disabled: false };
+    expect((await resolveVerifiedAdminScopes("u1")).disabled).toBe(false);
+  });
+
   it("LOOKUP FAILURE grants neither scope and reports disabled, so consumers fail closed", async () => {
     lookupThrows = true;
     const s = await resolveVerifiedAdminScopes("u1");
