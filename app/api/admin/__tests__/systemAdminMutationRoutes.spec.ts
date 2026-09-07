@@ -19,6 +19,13 @@
  * alone does not establish.
  */
 
+// Phase FIRST-ADMIN-C6 — the price map is built from env at module load. Without
+// this, `getPlanIdFromPriceId` returns null and the sync-subscription positive
+// case 400s BEFORE the billing write, leaving its side-effect assertions
+// unfalsifiable (nothing called them for any tier).
+process.env.STRIPE_PRICE_3_MODELS = "price_lite_m";
+jest.mock("@/lib/env", () => ({ ...jest.requireActual("@/lib/env"), STRIPE_PRICE_3_MODELS: "price_lite_m" }));
+
 const __PRIVILEGED_ENV_SNAPSHOT = {
   ADMIN_EMAILS: process.env.ADMIN_EMAILS,
   GOVERNANCE_ADMIN_EMAILS: process.env.GOVERNANCE_ADMIN_EMAILS,
@@ -46,7 +53,7 @@ const batchDelete = jest.fn();
 const batchCommit = jest.fn(async () => undefined);
 const writeAuditEvent = jest.fn(async () => undefined);
 const handleSubscriptionChange = jest.fn(async () => undefined);
-const stripeRetrieve = jest.fn(async () => ({ id: "sub_x", status: "active", customer: "cus_x", items: { data: [{ price: { id: "price_x", recurring: { interval: "month" } } }] }, metadata: {} }));
+const stripeRetrieve = jest.fn(async () => ({ id: "sub_x", status: "active", customer: "cus_x", items: { data: [{ price: { id: "price_lite_m", recurring: { interval: "month" } } }] }, metadata: {} }));
 const resetUsageForNewPlan = jest.fn(async () => undefined);
 
 /** One page of deletable docs, then an empty page so pagination terminates. */
@@ -137,7 +144,9 @@ const ROUTES = [
   {
     name: "PATCH /api/admin/runs/[runId]",
     call: () => RUNS_PATCH(bearer("http://localhost/api/admin/runs/run-1", { collection: "runs", action: "set_governance_status", status: "blocked" }, "PATCH"), ctx),
-    effects: () => [docUpdate, docSet, writeAuditEvent],
+    // `docUpdate` was a decoy — this handler writes with `.set()`, never
+    // `.update()` — so asserting its absence proved nothing.
+    effects: () => [docSet, writeAuditEvent],
   },
   {
     name: "POST /api/admin/sync-subscription",
@@ -192,10 +201,16 @@ describe.each(ROUTES)("$name — SYSTEM_ADMIN only", ({ call, effects }) => {
     AS.system();
     const res = await call();
     expect(res.status).not.toBe(401);
-    // Without this, a 400 (bad fixture) satisfies `not.toBe(401)` and the
-    // denial assertions above become unfalsifiable — nothing would ever have
-    // called the effect for any tier.
-    expect(effects().some((fn) => fn.mock.calls.length > 0)).toBe(true);
+    // Phase FIRST-ADMIN-C6 — EVERY listed effect must fire, not merely one.
+    //
+    // With `some()`, commenting out the actual `ref.delete()` still passed: the
+    // route returned 200 and wrote an audit record claiming a deletion that
+    // never happened. Each effect in this route's list is one the successful
+    // path is REQUIRED to perform, so each is asserted by name.
+    const notCalled = effects().filter((fn) => fn.mock.calls.length === 0);
+    expect({ status: res.status, uncalledEffects: notCalled.length }).toEqual({ status: res.status, uncalledEffects: 0 });
+    // A 4xx can satisfy `not.toBe(401)`; a successful privileged path must not 4xx.
+    expect(res.status).toBeLessThan(400);
   });
 
   it.each([
@@ -248,10 +263,48 @@ describe("audit attribution on the SYSTEM_ADMIN run handlers", () => {
 });
 
 describe("GET /api/admin/runs/[runId] deliberately REMAINS ADMIN_PORTAL", () => {
-  it("a verified ADMIN_EMAILS member can still read a run", async () => {
+  /**
+   * Phase FIRST-ADMIN-C6. This block previously had a single positive
+   * assertion and NO denial control, so removing the GET guard entirely — any
+   * caller reading any user's run — passed the whole suite. The tier is now
+   * pinned in BOTH directions: portal and claim succeed, everyone else is
+   * refused.
+   */
+  const get = async () => {
     const { GET } = await import("@/app/api/admin/runs/[runId]/route");
+    return GET(bearer("http://localhost/api/admin/runs/run-1?collection=runs", undefined, "GET"), ctx);
+  };
+
+  it("ADMIN_PORTAL-only succeeds — the read capability is retained", async () => {
     AS.portal();
-    const res = await GET(bearer("http://localhost/api/admin/runs/run-1", undefined, "GET"), ctx);
-    expect(res.status).not.toBe(401);
+    const res = await get();
+    expect(res.status).toBe(200);
+  });
+
+  it("SYSTEM_ADMIN succeeds through inherited portal authority", async () => {
+    AS.system();
+    expect((await get()).status).toBe(200);
+  });
+
+  it("GOVERNANCE_ADMIN-only is DENIED — governance confers no portal read", async () => {
+    AS.governance();
+    expect((await get()).status).toBe(401);
+  });
+
+  it("an ordinary verified user is DENIED", async () => {
+    AS.ordinary();
+    expect((await get()).status).toBe(401);
+  });
+
+  it("an unauthenticated caller is DENIED", async () => {
+    decoded = {};
+    authRecord = {};
+    expect((await get()).status).toBe(401);
+  });
+
+  it("a DISABLED allowlisted portal account is DENIED", async () => {
+    decoded = { uid: "p", email: PORTAL_ONLY };
+    authRecord = { email: PORTAL_ONLY, emailVerified: true, disabled: true };
+    expect((await get()).status).toBe(401);
   });
 });

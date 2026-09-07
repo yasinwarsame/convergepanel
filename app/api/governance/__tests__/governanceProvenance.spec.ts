@@ -153,6 +153,37 @@ describe("TOKEN vs LIVE RECORD — authority follows the live record only", () =
   });
 });
 
+describe("the route never re-derives scope — it consumes the resolver's answer", () => {
+  /**
+   * Section E's invariant stated directly: whatever the uid-only resolver
+   * decides is what the route serves. Any route-level recomputation — from an
+   * email, a claim, a header — makes these two disagree for some identity.
+   */
+  it.each([
+    ["ordinary, verified, enabled", { email: ORDINARY, emailVerified: true, disabled: false }],
+    ["allowlisted, verified, enabled", { email: GOV_ADDR, emailVerified: true, disabled: false }],
+    ["allowlisted but UNVERIFIED", { email: GOV_ADDR, emailVerified: false, disabled: false }],
+    ["allowlisted, verified, but on a free plan", { email: GOV_ADDR, emailVerified: true, disabled: false }],
+  ])("%s: the queue's scope equals the resolver's scope", async (label, record) => {
+    liveRecord = record;
+    if (label.includes("free plan")) planId = "free";
+    const resolverScope = (await resolveGovernanceVisibleUserIds(UID)) as {
+      ok: boolean; visibleUserIds?: string[] | null; queueScope?: string;
+    };
+    const res = await queue();
+    if (!resolverScope.ok) {
+      // A refused resolver must not be upgraded into a served queue.
+      expect(res.status).not.toBe(200);
+      return;
+    }
+    const body = await res.json();
+    expect((body as { queueScope?: string }).queueScope).toBe(resolverScope.queueScope);
+    // And global reach is exactly the resolver's null owner set, never more.
+    const sawForeign = rowsOf(body).some((r) => r.userId === OWNER_B);
+    expect(sawForeign).toBe(resolverScope.visibleUserIds === null);
+  });
+});
+
 describe("DISABLED accounts reach no governance route at all", () => {
   it("THE CORE PROOF: a disabled governance admin is refused outright", async () => {
     liveRecord = { email: GOV_ADDR, emailVerified: true, disabled: true };
