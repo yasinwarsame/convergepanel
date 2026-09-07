@@ -42,6 +42,7 @@ afterAll(() => {
 });
 
 const NOW = Date.now();
+const VIEWER_UID = "reviewer";
 const OWNER_A = "owner-a";
 const OWNER_B = "owner-b";
 /** The three owner-scoped collections. Every gate must cover all of them. */
@@ -109,6 +110,18 @@ function makeQuery(collection: string) {
   };
   q.get = async () => {
     queriedCollections.push(collection);
+    if (collection === "admin_audit_logs") {
+      // Two audit rows: one performed BY the viewer, one by someone else about
+      // an out-of-scope owner. The global list must not disclose the latter.
+      return {
+        docs: [
+          { id: "ev-mine", data: () => ({ at: { toMillis: () => NOW }, byUid: VIEWER_UID, byEmail: "reviewer@test-invented.example", action: "approved", runId: "run-1", collection: "runs", runOwnerUid: OWNER_A, runOwnerEmail: `${OWNER_A}@test-invented.example`, question: "mine" }) },
+          { id: "ev-theirs", data: () => ({ at: { toMillis: () => NOW }, byUid: "someone-else", byEmail: "other@test-invented.example", action: "blocked", runId: "run-2", collection: "runs", runOwnerUid: OWNER_B, runOwnerEmail: `${OWNER_B}@test-invented.example`, question: "SECRET-OTHER-TENANT-QUESTION" }) },
+        ],
+        empty: false,
+        size: 2,
+      };
+    }
     const owners = COLLECTIONS.includes(collection as Coll) ? [OWNER_A, OWNER_B] : [];
     const ownerConstraint = constraints.find((c) => c.field === "userId" || c.field === "uid");
     const allowed = ownerConstraint
@@ -289,5 +302,77 @@ describe.each(["all", "research", "verification", "video"])("governance QUEUE ro
     const res = await call();
     const body = await res.json();
     expect(rowsOf(body).some((r) => r.userId === OWNER_B)).toBe(true);
+  });
+});
+
+// ------------------------------------------- AUDIT GLOBAL LIST (no runId) --
+/**
+ * Phase FIRST-ADMIN-C5. The C4-R1 review found this path had ZERO enforcement
+ * coverage: `vis.visibleUserIds` is resolved and then never consulted, and the
+ * only narrowing is `filterEventsToViewerActions`. Deleting that one line
+ * returned every user's governance audit rows — owner email, question text,
+ * consensus score — to any full-plan reviewer, and passed the whole suite.
+ */
+describe("governance AUDIT global list (no runId) narrows to the viewer's own actions", () => {
+  const call = async () => {
+    const { GET } = await import("@/app/api/governance/audit/route");
+    return GET(new NextRequest("http://localhost/api/governance/audit", { headers: { authorization: "Bearer t" } }));
+  };
+
+  it("THE CORE PROOF: another actor's audit rows are not disclosed", async () => {
+    const res = await call();
+    expect(res.status).toBe(200);
+    const raw = JSON.stringify(await res.json());
+    // The row performed by the viewer is present; the other tenant's is not,
+    // in any field — actor, owner uid, owner email, or question text.
+    expect(raw).toContain("ev-mine");
+    expect(raw).not.toContain("ev-theirs");
+    expect(raw).not.toContain("SECRET-OTHER-TENANT-QUESTION");
+    expect(raw).not.toContain("someone-else");
+    expect(raw).not.toContain(`${OWNER_B}@test-invented.example`);
+  });
+
+  it("a scoped reviewer sees only their own actions even with a finite owner set", async () => {
+    visibility = { ...SCOPED };
+    const raw = JSON.stringify(await (await call()).json());
+    expect(raw).toContain("ev-mine");
+    expect(raw).not.toContain("ev-theirs");
+  });
+});
+
+// ------------------------------------------------------ LOG REDACTION (call site) --
+/**
+ * Phase FIRST-ADMIN-C5. C4 redacted the allowlist at the HELPER and tested the
+ * helper plus a hand-copied reproduction of the log line — so re-adding
+ * `raw=${process.env.GOVERNANCE_ADMIN_EMAILS}` at the real call site passed all
+ * 11,209 tests. This drives the real handler and inspects what it ACTUALLY
+ * emitted.
+ */
+describe("the governance queue route emits no privileged address", () => {
+  const CANARY_LOCAL = "c5-callsite-canary";
+  const CANARY_DOMAIN = "leak-detector-invented.example";
+  const CANARY = `${CANARY_LOCAL}@${CANARY_DOMAIN}`;
+
+  it("THE CORE PROOF: no captured log line contains the allowlist in any form", async () => {
+    process.env.GOVERNANCE_ADMIN_EMAILS = `  ${CANARY.toUpperCase()}  ,second-canary@${CANARY_DOMAIN}`;
+    const captured: string[] = [];
+    const spies = (["log", "warn", "error", "info", "debug"] as const).map((m) =>
+      jest.spyOn(console, m).mockImplementation((...args: unknown[]) => {
+        captured.push(args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" "));
+      })
+    );
+    try {
+      const { GET } = await import("@/app/api/governance/queue/route");
+      await GET(new NextRequest("http://localhost/api/governance/queue?status=all", { headers: { authorization: "Bearer t" } }));
+    } finally {
+      for (const sp of spies) sp.mockRestore();
+    }
+    const all = captured.join("\n");
+    expect(captured.length).toBeGreaterThan(0); // the route really did log
+    for (const forbidden of [CANARY, CANARY.toUpperCase(), CANARY_LOCAL, CANARY_LOCAL.toUpperCase(), CANARY_DOMAIN, CANARY_DOMAIN.toUpperCase(), "second-canary"]) {
+      expect(all).not.toContain(forbidden);
+    }
+    // The useful diagnostic survives.
+    expect(all).toContain("configured=2");
   });
 });
