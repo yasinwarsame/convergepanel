@@ -168,3 +168,54 @@ today; each is a way a future regression passes review the way the last two did.
   containment proof meaningful is the bound two-phase transition at the
   canonical Production origin — accepted before the rotation, rejected after —
   not the header.
+
+---
+
+## Phase FIRST-ADMIN-C14 — evidence table
+
+R10 falsified two C13 claims outright. Both are retired here, and each row below
+names the mutation that must fail for the row to be worth anything.
+
+| Property | Positive anchor | Negative assertion | Breaking mutation | Result |
+|---|---|---|---|---|
+| Production origin cannot be overridden | wrapper reaches `https://convergepanel.com/api/admin/set-admin` | requested URL never contains a foreign host, with the C13 env vars set | give `runProductionTwoPhase` an `origin` parameter | KILLED |
+| The loopback seam is not a canonical seam | canonical origin still reachable with both flags on | foreign https origin refused `ERR_NOT_CANONICAL_PRODUCTION_ORIGIN`, 0 requests | canonical clause honours `allowInsecureLoopback` for every host | KILLED |
+| Test seams are not production seams | tests drive `createContainmentProof` directly | shipped CLI source contains neither env var and never calls the low-level API | CLI restores env-driven origin | KILLED |
+| Loopback predicate is exact | genuine loopback reachable | `localhost.`, `localhost.attacker.example`, `127.0.0.1.evil.test` refused | `===` → `.includes()` | KILLED |
+| PRE precedes mint/rotate/deploy | every `BOOTSTRAP_*` step present once | step indices are strictly ordered | swap `BOOTSTRAP_PRECHECK` with `BOOTSTRAP_ROTATE_SECRET` | KILLED |
+| Incident sequence starts the probe first | `CONTAINMENT_PROBE_OLD_SECRET` is step a | probe index < rotate index < deploy index | restore rotate-first ordering | KILLED |
+| Sequence steps are all MUST | every row ends `\| MUST \|` | no `MAY`/`SHOULD`/`OPTIONAL` row | `BOOTSTRAP_PRECHECK` → MAY | KILLED |
+| POST 429 remains armed | later rejection still proves | state stays `POST_PENDING`, never `ABORTED` | any non-rejected post-check aborts (the C13 behaviour) | KILLED |
+| POST 5xx / transport / redirect remain armed | same | same | classify transport failure as `REJECTED` | KILLED |
+| POST accepted is retryable, not proof | retry after propagation proves | outcome `NOT_YET_CONTAINED`, still armed | accepted POST destroys the armed state | KILLED |
+| A 429 is never a verdict | rejection proves | 429 is neither `PROVEN` nor exit 2 | classify 429 as `REJECTED` | KILLED |
+| Exact old secret reused across retries | proof succeeds on retry | one distinct URL and one distinct body across all attempts | re-read secret/origin at POST | KILLED |
+| URL refusal issues zero requests | genuine loopback reachable | exact code + 0 fetch calls + 0 server hits + secret absent | remove plain-http / canonical / all guards | KILLED |
+| `.doc()` throw is caught | ordinary identifiers still allowed | `allowed:false`, no partial write, no throw to caller | hoist `.doc()` outside `try` | KILLED |
+| `mock.calls` rewrite cannot hide a leak | clean transcript passes | assertion throws with the R10 six-line attack applied | rewrite `mock.calls` inside the capture | KILLED |
+| Object mutation after logging cannot hide a leak | clean transcript passes | assertion throws | store references instead of snapshots | KILLED |
+| Spy implementation replacement is detected | integrity passes untouched | integrity throws after a swap | — (asserted directly) | n/a |
+| Nested canary detection has no serialize seam | clean transcript passes | nested value, object key, Error `code`, array element all detected | drop recursive descent; equality instead of substring | KILLED |
+
+### Residuals added in C14
+
+- **The proof is memory-bound, by design.** If the process exits between a
+  successful PRE and a successful POST, that PRE evidence is gone and the
+  same-process proof cannot be completed. C14 makes *transient POST observations*
+  survivable inside a live process; it does not add crash recovery, and it
+  deliberately does not tell an operator to restore the old secret to rebuild a
+  pre-check. That would re-open the hole the rotation just closed.
+- **`--observe --non-production-target <origin>`** still contacts an arbitrary
+  https host and sends the old secret there. It is a non-production diagnostic:
+  it warns on every run, names the origin it contacted, and can never print
+  `PRODUCTION_CONTAINMENT_PROVEN`. Production mode shares none of this path.
+- **An equivalent mutant is documented, not hidden.** Relaxing
+  `requireCanonical`/`allowInsecureLoopback` *inside* `runProductionTwoPhase`
+  changes nothing observable, because the origin there is a constant —
+  `resolveEndpoint` returns a byte-identical result either way. The regression it
+  would enable (reintroducing an origin parameter) is caught by a separate
+  mutation that does fail.
+- **`redactionExemption` remains a test-controlled escape hatch.** A test that
+  declares `capture-fidelity` skips the automatic canary scan. Capture-integrity
+  is now asserted on every test regardless, but the content scan is still
+  opt-outable by a test that edits itself.

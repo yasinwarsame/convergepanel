@@ -69,9 +69,27 @@ export const OBSERVATIONS = {
 export const STATES = {
   INITIAL: "INITIAL",
   PRECHECK_ACCEPTED: "PRECHECK_ACCEPTED",
-  WAITING_FOR_OPERATOR: "WAITING_FOR_OPERATOR",
+  /**
+   * ARMED. Phase FIRST-ADMIN-C14 (R10 P0-2): the PRE evidence lives here and is
+   * NOT destroyed by a post-check that fails to prove containment. C13 aborted
+   * on any non-REJECTED observation, so a 429 — which says nothing about the
+   * credential — permanently voided the proof: `postcheck` runs only from the
+   * armed state, and a restart cannot rebuild PRE once the rotation has
+   * deployed. One rate-limited request made the mandated artifact unobtainable.
+   * Only a REJECTED observation leaves this state.
+   */
+  POST_PENDING: "POST_PENDING",
   PROVEN: "PRODUCTION_CONTAINMENT_PROVEN",
   ABORTED: "ABORTED",
+};
+
+/** What the most recent post-check observation means for the operator. */
+export const POST_OUTCOMES = {
+  PROVEN: "PROVEN",
+  /** The old credential is STILL LIVE. Conclusive, but retryable: the rotation may not have propagated. */
+  NOT_YET_CONTAINED: "NOT_YET_CONTAINED",
+  /** No verdict at all (429 / 5xx / transport / redirect refusal / unattributed 401). */
+  INCONCLUSIVE: "INCONCLUSIVE",
 };
 
 /** The only body this tool can construct. Deliberately not parameterised. */
@@ -135,10 +153,15 @@ async function observeOnce({ url, secret, fetchImpl }) {
     };
   }
   const marker = typeof res.headers?.get === "function" ? res.headers.get(PROBE_MARKER_HEADER) : null;
+  // Surfaced only so the operator can wait the limiter out rather than retry
+  // blindly. It is never used to bypass the limit, and never affects the verdict.
+  const retryAfter = typeof res.headers?.get === "function" ? res.headers.get("retry-after") : null;
+  const base = marker ? `HTTP ${res.status}` : `HTTP ${res.status}, no route marker`;
   return {
     observation: classify(res.status, marker),
     status: res.status,
-    detail: marker ? `HTTP ${res.status}` : `HTTP ${res.status}, no route marker`,
+    retryAfter: retryAfter ?? null,
+    detail: res.status === 429 && retryAfter ? `${base}, retry-after ${retryAfter}s` : base,
   };
 }
 
@@ -151,12 +174,17 @@ export function createContainmentProof({ origin, secret, fetchImpl = fetch, requ
   const lockedSecret = secret;
   const resolved = resolveEndpoint(origin, { requireCanonical, allowInsecureLoopback });
   let state = STATES.INITIAL;
+  /** The most recent post-check outcome. Drives the exit code, never the state. */
+  let lastOutcome = null;
+  let postAttempts = 0;
 
   const abort = (detail) => { state = STATES.ABORTED; return { ok: false, state, detail }; };
 
   return {
     get state() { return state; },
     get lockedUrl() { return resolved.ok ? resolved.url : null; },
+    get lastOutcome() { return lastOutcome; },
+    get postAttempts() { return postAttempts; },
 
     async precheck() {
       if (state !== STATES.INITIAL) return abort(`precheck called from ${state}`);
@@ -175,19 +203,45 @@ export function createContainmentProof({ origin, secret, fetchImpl = fetch, requ
 
     armForRotation() {
       if (state !== STATES.PRECHECK_ACCEPTED) return abort(`cannot arm from ${state}`);
-      state = STATES.WAITING_FOR_OPERATOR;
+      state = STATES.POST_PENDING;
       return { ok: true, state };
     },
 
+    /**
+     * ONE post-check attempt. Same locked URL, same locked secret — nothing is
+     * re-read, on this attempt or any later one.
+     *
+     * Phase FIRST-ADMIN-C14: only a REJECTED observation changes the state.
+     * Everything else leaves the proof ARMED so the operator can retry in this
+     * same process, which is what keeps the bound PRE evidence alive across a
+     * rate limit, a cold start, a deploy that has not finished propagating, or
+     * a dropped connection.
+     */
     async postcheck() {
-      if (state !== STATES.WAITING_FOR_OPERATOR) return abort(`postcheck called from ${state}`);
-      // Same locked URL, same locked secret. Nothing is re-read.
+      if (state !== STATES.POST_PENDING) return abort(`postcheck called from ${state}`);
+      postAttempts += 1;
       const r = await observeOnce({ url: resolved.url, secret: lockedSecret, fetchImpl });
-      if (r.observation !== OBSERVATIONS.REJECTED) {
-        return abort(`POSTCHECK_FAILED (${r.observation}, ${r.detail}) — the old credential is still accepted, or the response was not attributable`);
+
+      if (r.observation === OBSERVATIONS.REJECTED) {
+        lastOutcome = POST_OUTCOMES.PROVEN;
+        state = STATES.PROVEN;
+        return { ok: true, state, outcome: lastOutcome, retryable: false, detail: `PRODUCTION_CONTAINMENT_PROVEN at ${resolved.origin}` };
       }
-      state = STATES.PROVEN;
-      return { ok: true, state, detail: `PRODUCTION_CONTAINMENT_PROVEN at ${resolved.origin}` };
+
+      // STATE DELIBERATELY UNCHANGED — still POST_PENDING, still armed.
+      if (r.observation === OBSERVATIONS.ACCEPTED) {
+        lastOutcome = POST_OUTCOMES.NOT_YET_CONTAINED;
+        return {
+          ok: false, state, outcome: lastOutcome, retryable: true,
+          detail: `NOT_YET_CONTAINED (${r.detail}) — the old credential is STILL ACCEPTED at ${resolved.origin}. The rotation has not taken effect here yet; confirm the deployment finished, then retry.`,
+        };
+      }
+
+      lastOutcome = POST_OUTCOMES.INCONCLUSIVE;
+      return {
+        ok: false, state, outcome: lastOutcome, retryable: true,
+        detail: `INCONCLUSIVE (${r.detail}) — this response says NOTHING about the credential. The proof is still armed; retry.`,
+      };
     },
   };
 }
@@ -196,7 +250,7 @@ export function createContainmentProof({ origin, secret, fetchImpl = fetch, requ
  * SINGLE-SHOT DIAGNOSTIC. Reports an observation only. It can never report
  * PRODUCTION_CONTAINMENT_PROVEN, because no state transition was observed.
  */
-export async function observeOldSecret({ origin, secret, fetchImpl = fetch, requireCanonical = false, allowInsecureLoopback = false }) {
+export async function observeOldSecret({ origin, secret, fetchImpl = fetch, requireCanonical = true, allowInsecureLoopback = false }) {
   if (typeof secret !== "string" || secret.length === 0) {
     return { observation: OBSERVATIONS.INCONCLUSIVE, detail: REASONS.NO_SECRET };
   }
@@ -206,3 +260,64 @@ export async function observeOldSecret({ origin, secret, fetchImpl = fetch, requ
 }
 
 export const EXIT = { PROVEN: 0, NOT_CONTAINED: 2, INCONCLUSIVE: 3 };
+
+/**
+ * THE PRODUCTION ENTRY POINT — Phase FIRST-ADMIN-C14 (R10 P0, item 25).
+ *
+ * It takes NO origin, and no canonical/loopback switches. There is nothing here
+ * for an environment variable, a CLI flag or a config file to override, because
+ * the origin is not a parameter of this function at all.
+ *
+ * WHY THIS SHAPE. C13 built the origin in the CLI as
+ * `PROBE_ORIGIN_OVERRIDE ?? CANONICAL_PRODUCTION_ORIGIN` and passed
+ * `requireCanonical: !insecure`, so `PROBE_ALLOW_INSECURE_LOOPBACK=1` — a flag
+ * whose name promises a loopback seam, and which `resolveEndpoint` does not
+ * need in order to reach loopback — turned the canonical binding off for EVERY
+ * https origin. Review reproduced a full `PRODUCTION_CONTAINMENT_PROVEN`, exit
+ * 0, against a foreign host, with the live old `ADMIN_SECRET` transmitted
+ * there. That is an exfiltration primitive as well as a false proof.
+ *
+ * Tests still need loopback servers. They get them by calling
+ * `createContainmentProof()` directly with an injected `fetchImpl` — a
+ * dependency-injection seam reachable from a test module, NOT from the process
+ * environment of the shipped CLI.
+ *
+ * @param prompt - async ({ attempt, lastOutcome }) => boolean. Called before
+ *   every post-check attempt. Returning false ends the run without a proof.
+ *   There is no automatic retry: this tool never hammers the endpoint.
+ */
+export async function runProductionTwoPhase({ secret, fetchImpl = fetch, prompt, log = () => {} }) {
+  const proof = createContainmentProof({
+    origin: CANONICAL_PRODUCTION_ORIGIN,
+    secret,
+    fetchImpl,
+    requireCanonical: true,
+    allowInsecureLoopback: false,
+  });
+
+  const pre = await proof.precheck();
+  log(`[PRE] ${pre.ok ? "OK" : "ABORT"} ${pre.detail ?? ""}`.trim());
+  if (!pre.ok) {
+    log(`[RESULT] NOT PROVEN at ${CANONICAL_PRODUCTION_ORIGIN} — the pre-check did not confirm the old credential is live. Do not rotate on the strength of this run, and do not treat any later rejection as proof.`);
+    return { exit: EXIT.INCONCLUSIVE, proven: false, state: proof.state, origin: CANONICAL_PRODUCTION_ORIGIN, postAttempts: 0 };
+  }
+
+  proof.armForRotation();
+
+  for (;;) {
+    const proceed = await prompt({ attempt: proof.postAttempts + 1, lastOutcome: proof.lastOutcome });
+    if (!proceed) break;
+
+    const post = await proof.postcheck();
+    log(`[POST] ${post.ok ? "OK" : post.outcome} ${post.detail ?? ""}`.trim());
+    if (post.ok) {
+      log(`[RESULT] PRODUCTION_CONTAINMENT_PROVEN at ${CANONICAL_PRODUCTION_ORIGIN} — this exact origin accepted this exact old credential before the rotation and rejected it after the deployment.`);
+      return { exit: EXIT.PROVEN, proven: true, state: proof.state, origin: CANONICAL_PRODUCTION_ORIGIN, postAttempts: proof.postAttempts };
+    }
+    // Still armed. The loop is operator-driven; `prompt` decides whether to retry.
+  }
+
+  const exit = proof.lastOutcome === POST_OUTCOMES.NOT_YET_CONTAINED ? EXIT.NOT_CONTAINED : EXIT.INCONCLUSIVE;
+  log(`[RESULT] NOT PROVEN at ${CANONICAL_PRODUCTION_ORIGIN} — containment is NOT established (last outcome: ${proof.lastOutcome ?? "no post-check attempted"}).`);
+  return { exit, proven: false, state: proof.state, origin: CANONICAL_PRODUCTION_ORIGIN, postAttempts: proof.postAttempts };
+}

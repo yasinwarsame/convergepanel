@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Phase FIRST-ADMIN-C13 — thin, unconditional entrypoint.
+ * Phase FIRST-ADMIN-C14 — thin, unconditional entrypoint.
  *
  * No `import.meta.url` guard, no argv comparison, no branch that can decline to
  * run. C11 had one and it silently no-opped on paths needing percent-encoding
@@ -10,7 +10,16 @@
  *     node scripts/probe-admin-secret.mjs --production-two-phase
  *
  *   Single-shot diagnostic (never proves containment):
- *     node scripts/probe-admin-secret.mjs --observe <origin>
+ *     node scripts/probe-admin-secret.mjs --observe
+ *
+ * THERE IS NO ORIGIN ARGUMENT TO THE PRODUCTION MODE, AND NO ENVIRONMENT
+ * VARIABLE THAT CAN SUPPLY ONE. C13 read `PROBE_ORIGIN_OVERRIDE` here and
+ * passed `requireCanonical: !PROBE_ALLOW_INSECURE_LOOPBACK`, so those two env
+ * vars together ran the full bound transition against a foreign https host,
+ * transmitted the live old `ADMIN_SECRET` to it, and printed
+ * `PRODUCTION_CONTAINMENT_PROVEN`. Both variables are gone from this file.
+ * Loopback testing is done by calling `createContainmentProof()` directly from
+ * a test module, which the shipped CLI cannot be talked into doing.
  *
  * OLD_ADMIN_SECRET is read from an ALREADY-EXPORTED environment variable, once.
  * The runbook must not tell an operator to write `OLD_ADMIN_SECRET=<value> cmd`
@@ -20,74 +29,84 @@
  */
 import { createInterface } from "node:readline";
 import {
-  createContainmentProof,
+  runProductionTwoPhase,
   observeOldSecret,
   CANONICAL_PRODUCTION_ORIGIN,
   OBSERVATIONS,
+  POST_OUTCOMES,
   EXIT,
 } from "./lib/probe-admin-secret.mjs";
 
 const argv = process.argv.slice(2);
 const env = process.env;
-const insecure = env.PROBE_ALLOW_INSECURE_LOOPBACK === "1";
-const originOverride = env.PROBE_ORIGIN_OVERRIDE;
 
-async function waitForOperator(prompt) {
-  process.stdout.write(prompt);
+/** Reads one line. Returns null at EOF so a closed stdin can never look like consent. */
+async function readLine(promptText) {
+  process.stdout.write(promptText);
   const rl = createInterface({ input: process.stdin });
-  for await (const _line of rl) { rl.close(); return; }
+  for await (const line of rl) { rl.close(); return line; }
+  return null;
 }
 
 async function main() {
   if (argv.includes("--production-two-phase")) {
-    const origin = originOverride ?? CANONICAL_PRODUCTION_ORIGIN;
-    const proof = createContainmentProof({
-      origin,
-      secret: env.OLD_ADMIN_SECRET,          // read ONCE, here
-      requireCanonical: !insecure,
-      allowInsecureLoopback: insecure,
-    });
-
-    const pre = await proof.precheck();
-    console.log(`[PRE] ${pre.ok ? "OK" : "ABORT"} ${pre.detail ?? ""}`.trim());
-    if (!pre.ok) {
-      console.log("[RESULT] NOT PROVEN — the pre-check did not confirm the old credential is live at the target origin. Do not rotate on the strength of this run, and do not treat any later rejection as proof.");
+    // The proof is memory-bound and operator-driven. Without an interactive
+    // stdin the readline loop returns instantly, so the tool would print
+    // "perform the rotation and DEPLOY it", wait for nothing, immediately fire
+    // the post-check, and burn rate-limit budget on a guaranteed failure.
+    if (!process.stdin.isTTY) {
+      console.log("[INCONCLUSIVE] --production-two-phase needs an interactive terminal: it must pause while you rotate and deploy. Run it directly in a terminal, not under nohup, CI, or with stdin redirected.");
       return EXIT.INCONCLUSIVE;
     }
 
-    proof.armForRotation();
-    await waitForOperator(
-      "\nThe old credential is confirmed LIVE at the target origin.\n" +
-      "Now perform the authorized rotation/removal of ADMIN_SECRET and DEPLOY it.\n" +
-      "Press Enter when the deployment has finished. This process keeps the same\n" +
-      "origin and the same secret in memory; nothing is re-read.\n> "
-    );
+    const result = await runProductionTwoPhase({
+      secret: env.OLD_ADMIN_SECRET,          // read ONCE, here
+      log: (line) => console.log(line),
+      prompt: async ({ attempt, lastOutcome }) => {
+        if (attempt === 1) {
+          const answer = await readLine(
+            `\nThe old credential is confirmed LIVE at ${CANONICAL_PRODUCTION_ORIGIN}.\n` +
+            "Now perform the authorized rotation/removal of ADMIN_SECRET and DEPLOY it.\n" +
+            "Press Enter when the deployment has finished, or type 'q' to stop. This\n" +
+            "process keeps the same origin and the same secret in memory; nothing is\n" +
+            "re-read, on this attempt or any retry.\n> "
+          );
+          return answer !== null && answer.trim().toLowerCase() !== "q";
+        }
+        const why = lastOutcome === POST_OUTCOMES.NOT_YET_CONTAINED
+          ? "The old credential is STILL ACCEPTED. If the deployment is still propagating, wait and retry."
+          : "That response carried no verdict (rate limit, 5xx, transport or unattributed). The PRE evidence is still armed.";
+        const answer = await readLine(
+          `\n${why}\nPress Enter to retry the post-check, or type 'q' to stop without a proof.\n> `
+        );
+        return answer !== null && answer.trim().toLowerCase() !== "q";
+      },
+    });
+    return result.exit;
+  }
 
-    const post = await proof.postcheck();
-    console.log(`[POST] ${post.ok ? "OK" : "ABORT"} ${post.detail ?? ""}`.trim());
-    if (!post.ok) {
-      console.log("[RESULT] NOT PROVEN — containment is NOT established.");
-      return EXIT.NOT_CONTAINED;
+  // ---- NON-PRODUCTION DIAGNOSTIC ----------------------------------------
+  if (argv.includes("--observe")) {
+    const tIdx = argv.indexOf("--non-production-target");
+    const target = tIdx >= 0 ? argv[tIdx + 1] : null;
+
+    if (target) {
+      console.log("[WARNING] NON-PRODUCTION DIAGNOSTIC. This is not Production mode and cannot");
+      console.log(`[WARNING] produce a containment proof. The old ADMIN_SECRET WILL BE SENT to: ${target}`);
     }
-    console.log("[RESULT] PRODUCTION_CONTAINMENT_PROVEN — the same origin accepted this exact old credential before the rotation and rejected it after the deployment.");
-    return EXIT.PROVEN;
+    const r = await observeOldSecret({
+      origin: target ?? CANONICAL_PRODUCTION_ORIGIN,
+      secret: env.OLD_ADMIN_SECRET,
+      // Canonical unless the operator typed the long, explicit, non-production flag.
+      requireCanonical: !target,
+    });
+    console.log(`[${r.observation}] contacted ${target ?? CANONICAL_PRODUCTION_ORIGIN} — ${r.detail ?? ""}`.trim());
+    console.log("[RESULT] OBSERVATION ONLY — a single response never proves containment. Use --production-two-phase.");
+    return r.observation === OBSERVATIONS.ACCEPTED ? EXIT.NOT_CONTAINED : EXIT.INCONCLUSIVE;
   }
 
-  const idx = argv.indexOf("--observe");
-  const origin = idx >= 0 ? argv[idx + 1] : argv[0];
-  if (!origin) {
-    console.log("[INCONCLUSIVE] usage: node scripts/probe-admin-secret.mjs --production-two-phase   (OLD_ADMIN_SECRET must already be exported)");
-    return EXIT.INCONCLUSIVE;
-  }
-  const r = await observeOldSecret({
-    origin,
-    secret: env.OLD_ADMIN_SECRET,
-    requireCanonical: false,
-    allowInsecureLoopback: insecure,
-  });
-  console.log(`[${r.observation}] ${r.detail ?? ""}`.trim());
-  console.log("[RESULT] OBSERVATION ONLY — a single response never proves containment. Use --production-two-phase.");
-  return r.observation === OBSERVATIONS.ACCEPTED ? EXIT.NOT_CONTAINED : EXIT.INCONCLUSIVE;
+  console.log("[INCONCLUSIVE] usage: node scripts/probe-admin-secret.mjs --production-two-phase   (OLD_ADMIN_SECRET must already be exported)");
+  return EXIT.INCONCLUSIVE;
 }
 
 process.exit(await main());

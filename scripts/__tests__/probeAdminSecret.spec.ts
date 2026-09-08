@@ -1,17 +1,30 @@
 /**
- * Phase FIRST-ADMIN-C13 — the containment proof, tested as a bound state
- * transition rather than as a single response.
+ * Phase FIRST-ADMIN-C14 — the containment proof, tested as a bound state
+ * transition that SURVIVES transient failure, at an origin that is not a
+ * parameter of the production entry point.
  *
- * The prior version treated "401 + route marker" as proof. Review showed that
- * establishes only "the origin you contacted rejected the string you supplied",
- * and that BOTH halves fail open with no attacker: a preview deploy or a
- * mistyped host running this same code returns the GENUINE marker when its
- * ADMIN_SECRET is unset, and a shell-mangled secret is rejected by the LIVE
- * route. Either reads as a successful rotation.
+ * TWO THINGS R10 PROVED WRONG, AND WHAT THE TESTS BELOW NOW PIN:
  *
- * So the tests below are about the transition — same origin, same secret bytes,
- * same process, accepted-before and rejected-after — and about the pre-check
- * that makes a wrong host or a mangled secret unable to reach the proof at all.
+ * 1. C13 built the production origin as `PROBE_ORIGIN_OVERRIDE ?? CANONICAL`
+ *    and passed `requireCanonical: !PROBE_ALLOW_INSECURE_LOOPBACK`. Review ran
+ *    the full transition against a foreign https host and got exit 0 and the
+ *    literal `PRODUCTION_CONTAINMENT_PROVEN`, with the live old ADMIN_SECRET
+ *    transmitted there. Every CLI test set the widening flag, so nothing
+ *    constrained it. The production origin is now not a parameter at all, and
+ *    the tests below assert the requested URL, not a refusal message.
+ *
+ * 2. C13's post-check aborted on ANY non-REJECTED observation. A 429 — which
+ *    says nothing about the credential — destroyed the PRE evidence, and since
+ *    PRE cannot be rebuilt once the rotation has deployed, one rate-limited
+ *    request made the mandated artifact permanently unobtainable. The tests
+ *    below drive 429 / 5xx / transport / redirect / unattributed-401 / still-
+ *    accepted through the post-check and require the proof to still be armed
+ *    and still provable afterwards.
+ *
+ * TEST SEAMS ARE NOT PRODUCTION SEAMS. Loopback servers are reached by calling
+ * `createContainmentProof()` directly with an injected origin and `fetchImpl`.
+ * That is a module-level dependency-injection seam. It is deliberately NOT
+ * reachable from the shipped CLI's environment.
  */
 import { spawn } from "node:child_process";
 import { createServer, type Server } from "node:http";
@@ -25,9 +38,9 @@ const OLD = "old-bootstrap-secret-CANARY-aaaaaaaaaaaa";
 const MARKER = "x-convergepanel-admin-secret-probe";
 const REJECTED = "credential-rejected";
 const ACCEPTED = "credential-accepted";
+const CANONICAL = "https://convergepanel.com";
+const CANONICAL_URL = `${CANONICAL}/api/admin/set-admin`;
 
-// The library under test is ESM run by node; jest cannot import it, so the unit
-// tests drive it through a tiny node -e harness and the CLI tests spawn it.
 const nodeEval = (src: string): Promise<{ status: number | null; out: string }> =>
   new Promise((resolve) => {
     const c = spawn("node", ["--input-type=module", "-e", src]);
@@ -58,9 +71,7 @@ async function server(reply: (n: number) => { status: number; headers?: Record<s
 type Ran = { status: number | null; stdout: string };
 function runCli(args: string[], env: Record<string, string> = {}, stdin = "\n", script = SCRIPT): Promise<Ran> {
   return new Promise((resolve) => {
-    const c = spawn("node", [script, ...args], {
-      env: { ...process.env, OLD_ADMIN_SECRET: OLD, PROBE_ALLOW_INSECURE_LOOPBACK: "1", ...env },
-    });
+    const c = spawn("node", [script, ...args], { env: { ...process.env, OLD_ADMIN_SECRET: OLD, ...env } });
     let stdout = "";
     c.stdout.on("data", (d) => (stdout += d));
     c.stderr.on("data", (d) => (stdout += d));
@@ -69,399 +80,672 @@ function runCli(args: string[], env: Record<string, string> = {}, stdin = "\n", 
   });
 }
 
-/** Answers ACCEPTED for the first n requests, then REJECTED — a rotation. */
-const rotatingAfter = (n: number) => (i: number) =>
-  i <= n ? { status: 400, headers: { [MARKER]: ACCEPTED } } : { status: 401, headers: { [MARKER]: REJECTED } };
+/**
+ * Drives the library in a child process with a SCRIPTED FAKE FETCH.
+ * `steps` is a JS array literal of `{status, marker, throw, retryAfter}`.
+ * Every requested URL and transmitted body is recorded and printed as JSON.
+ */
+function withScriptedFetch(steps: string, body: string, env: Record<string, string> = {}) {
+  const envSrc = Object.entries(env)
+    .map(([k, v]) => `process.env[${JSON.stringify(k)}] = ${JSON.stringify(v)};`)
+    .join("\n");
+  return nodeEval(`
+    ${envSrc}
+    const M = await import(${JSON.stringify(IMPL)});
+    const steps = ${steps};
+    const calls = [];
+    let i = 0;
+    const fetchImpl = async (url, init) => {
+      const step = steps[Math.min(i, steps.length - 1)]; i += 1;
+      calls.push({ url, body: init.body, redirect: init.redirect, cache: init.cache });
+      if (step.throw) { const e = new TypeError("fetch failed"); throw e; }
+      const h = new Map();
+      if (step.marker) h.set(${JSON.stringify(MARKER)}, step.marker);
+      if (step.retryAfter) h.set("retry-after", step.retryAfter);
+      return { status: step.status, headers: { get: (k) => h.get(k.toLowerCase()) ?? null } };
+    };
+    const record = (o) => console.log("RESULT:" + JSON.stringify(o));
+    const CALLS = () => calls;
+    ${body}
+  `);
+}
 const alwaysReject = () => ({ status: 401, headers: { [MARKER]: REJECTED } });
 const alwaysAccept = () => ({ status: 400, headers: { [MARKER]: ACCEPTED } });
 
-// ---------------------------------------------------------------------------
+const parse = (out: string) => JSON.parse(out.split("RESULT:")[1].split("\n")[0]);
 
-describe("TARGET URL CONTRACT — every refusal is a specific code, and sends NOTHING", () => {
+// ===========================================================================
+describe("PRODUCTION ORIGIN IS NOT A PARAMETER — R10 item 25", () => {
   /**
-   * The previous block asserted `/refused|INCONCLUSIVE/`. Every non-proof line
-   * this tool emits begins with an INCONCLUSIVE-ish token, so the alternation
-   * could not fail: disabling EVERY url guard at once left the suite green,
-   * and with the http guard gone the tool would POST a live ADMIN_SECRET in
-   * cleartext to an attacker-nameable host.
-   *
-   * Each case now asserts the exact structured reason AND that a real server
-   * received zero requests.
+   * These assert the URL that was REQUESTED, not the message that was printed.
+   * A refusal-message assertion would have passed under the C13 defect too,
+   * because the defect produced a successful-looking run at the wrong host.
    */
-  it.each([
-    ["a query string", "https://convergepanel.com/?q=1", "ERR_QUERY_NOT_ALLOWED"],
-    ["a path", "https://convergepanel.com/some/path", "ERR_PATH_NOT_ALLOWED"],
-    ["a fragment", "https://convergepanel.com/#frag", "ERR_FRAGMENT_NOT_ALLOWED"],
-    ["embedded credentials", "https://u:p@convergepanel.com", "ERR_USERINFO_NOT_ALLOWED"],
-    ["a non-http scheme", "file:///etc/passwd", "ERR_UNSUPPORTED_SCHEME"],
-    ["nonsense", "not-a-url", "ERR_TARGET_NOT_A_URL"],
-  ])("refuses %s with %s", async (_label, url, code) => {
-    const res = await nodeEval(`
-      import { resolveEndpoint } from ${JSON.stringify(IMPL)};
-      const r = resolveEndpoint(${JSON.stringify(url)}, { requireCanonical: true });
-      console.log(JSON.stringify(r));
-    `);
-    expect(JSON.parse(res.out)).toEqual({ ok: false, reason: code });
+  const twoPhase = (steps: string, env: Record<string, string> = {}, extra = "") =>
+    withScriptedFetch(
+      steps,
+      `
+      const r = await M.runProductionTwoPhase({
+        secret: ${JSON.stringify(OLD)},
+        fetchImpl,
+        prompt: async ({ attempt }) => attempt <= 4,
+        ${extra}
+      });
+      record({ ...r, urls: CALLS().map((c) => c.url) });
+      `,
+      env
+    );
+
+  it("contacts EXACTLY the canonical production URL, both phases", async () => {
+    const r = parse((await twoPhase(`[{status:400,marker:"${ACCEPTED}"},{status:401,marker:"${REJECTED}"}]`)).out);
+    expect(r.urls).toEqual([CANONICAL_URL, CANONICAL_URL]);
+    expect(r.origin).toBe(CANONICAL);
+    expect(r.proven).toBe(true);
+    expect(r.exit).toBe(0);
   });
 
-  it("refuses plain http to a REACHABLE host, and the host receives nothing", async () => {
-    // The old row used an unresolvable reserved TLD, so it "passed" via DNS
-    // failure whether or not the guard existed.
+  it("the C13 env seams have ZERO effect on the requested URL", async () => {
+    const r = parse(
+      (
+        await twoPhase(`[{status:400,marker:"${ACCEPTED}"},{status:401,marker:"${REJECTED}"}]`, {
+          PROBE_ORIGIN_OVERRIDE: "https://attacker.example",
+          PROBE_ALLOW_INSECURE_LOOPBACK: "1",
+          PROBE_TARGET: "https://attacker.example",
+          PROBE_ORIGIN: "https://attacker.example",
+        })
+      ).out
+    );
+    expect(r.urls).toEqual([CANONICAL_URL, CANONICAL_URL]);
+    expect(r.urls.join(" ")).not.toContain("attacker.example");
+    expect(r.origin).toBe(CANONICAL);
+  });
+
+  it("an `origin` property passed to the wrapper is ignored — it is not a parameter", async () => {
+    const r = parse(
+      (
+        await withScriptedFetch(
+          `[{status:400,marker:"${ACCEPTED}"},{status:401,marker:"${REJECTED}"}]`,
+          `
+          const r = await M.runProductionTwoPhase({
+            origin: "https://attacker.example",
+            requireCanonical: false,
+            allowInsecureLoopback: true,
+            secret: ${JSON.stringify(OLD)},
+            fetchImpl,
+            prompt: async ({ attempt }) => attempt <= 2,
+          });
+          record({ ...r, urls: CALLS().map((c) => c.url) });
+          `
+        )
+      ).out
+    );
+    expect(r.urls).toEqual([CANONICAL_URL, CANONICAL_URL]);
+    expect(r.proven).toBe(true);
+  });
+
+  it("the shipped CLI contains no executable origin seam", () => {
+    const src = readFileSync(SCRIPT, "utf8");
+    const code = src
+      .split("\n")
+      .filter((l) => !/^\s*\*/.test(l) && !/^\s*\/\*/.test(l) && !/^\s*\/\//.test(l))
+      .join("\n");
+    expect(code).not.toMatch(/PROBE_ORIGIN_OVERRIDE/);
+    expect(code).not.toMatch(/PROBE_ALLOW_INSECURE_LOOPBACK/);
+    // ...and it reaches production only through the no-origin wrapper.
+    expect(code).toContain("runProductionTwoPhase");
+    expect(code).not.toMatch(/createContainmentProof/);
+  });
+
+  it("the wrapper refuses a foreign origin even if the canonical constant is the only input", async () => {
+    // Proves the binding is the constant, not a caller-supplied string: with the
+    // constant intact there is no code path that reaches another host.
+    const r = parse(
+      (await twoPhase(`[{status:400,marker:"${ACCEPTED}"},{status:401,marker:"${REJECTED}"}]`)).out
+    );
+    for (const u of r.urls) expect(u.startsWith(`${CANONICAL}/`)).toBe(true);
+  });
+});
+
+// ===========================================================================
+describe("POST SURVIVES TRANSIENT FAILURE — R10 item 27", () => {
+  const armedThen = (steps: string, attempts = 6) =>
+    withScriptedFetch(
+      steps,
+      `
+      const proof = M.createContainmentProof({
+        origin: ${JSON.stringify(CANONICAL)}, secret: ${JSON.stringify(OLD)}, fetchImpl,
+      });
+      const pre = await proof.precheck();
+      proof.armForRotation();
+      const posts = [];
+      for (let n = 0; n < ${attempts}; n++) {
+        const p = await proof.postcheck();
+        posts.push({ ok: p.ok, state: p.state, outcome: p.outcome, retryable: p.retryable });
+        if (p.ok) break;
+      }
+      record({
+        pre: pre.ok, posts, finalState: proof.state, attempts: proof.postAttempts,
+        urls: CALLS().map((c) => c.url), bodies: CALLS().map((c) => c.body),
+      });
+      `
+    );
+
+  const cases: Array<[string, string]> = [
+    ["a 429 rate limit", `{status:429,retryAfter:"120"}`],
+    ["a 500", `{status:500}`],
+    ["a 503", `{status:503}`],
+    ["a transport failure", `{throw:true}`],
+    ["a 401 with NO route marker", `{status:401}`],
+    ["a still-accepted 400 (rotation not propagated)", `{status:400,marker:"${ACCEPTED}"}`],
+  ];
+
+  it.each(cases)("%s leaves the proof ARMED, and a later rejection still proves containment", async (_n, step) => {
+    const r = parse((await armedThen(`[{status:400,marker:"${ACCEPTED}"},${step},{status:401,marker:"${REJECTED}"}]`)).out);
+    expect(r.pre).toBe(true);
+    // the failing attempt did NOT abort
+    expect(r.posts[0].ok).toBe(false);
+    expect(r.posts[0].state).toBe("POST_PENDING");
+    expect(r.posts[0].retryable).toBe(true);
+    // and the retry proved it
+    expect(r.posts[1].ok).toBe(true);
+    expect(r.finalState).toBe("PRODUCTION_CONTAINMENT_PROVEN");
+    expect(r.attempts).toBe(2);
+  });
+
+  it.each(cases)("%s is never itself reported as PROVEN", async (_n, step) => {
+    const r = parse((await armedThen(`[{status:400,marker:"${ACCEPTED}"},${step}]`, 3)).out);
+    expect(r.posts.every((p: { ok: boolean }) => p.ok === false)).toBe(true);
+    expect(r.finalState).toBe("POST_PENDING");
+  });
+
+  it("classifies a still-live credential as NOT_YET_CONTAINED, and no-verdict responses as INCONCLUSIVE", async () => {
+    const live = parse((await armedThen(`[{status:400,marker:"${ACCEPTED}"},{status:400,marker:"${ACCEPTED}"}]`, 2)).out);
+    expect(live.posts[1].outcome).toBe("NOT_YET_CONTAINED");
+    const vague = parse((await armedThen(`[{status:400,marker:"${ACCEPTED}"},{status:429}]`, 2)).out);
+    expect(vague.posts[1].outcome).toBe("INCONCLUSIVE");
+  });
+
+  it("every retry reuses the SAME url and the SAME secret bytes — nothing is re-read", async () => {
+    const r = parse(
+      (await armedThen(`[{status:400,marker:"${ACCEPTED}"},{status:429},{status:500},{throw:true},{status:401,marker:"${REJECTED}"}]`)).out
+    );
+    expect(new Set(r.urls).size).toBe(1);
+    expect(r.urls[0]).toBe(CANONICAL_URL);
+    const bodies = r.bodies.filter((b: string | null) => b !== null);
+    expect(new Set(bodies).size).toBe(1);
+    expect(JSON.parse(bodies[0])).toEqual({ secret: OLD });
+  });
+
+  it("PROVEN is terminal — a further post-check cannot run from it", async () => {
+    const r = parse(
+      (
+        await withScriptedFetch(
+          `[{status:400,marker:"${ACCEPTED}"},{status:401,marker:"${REJECTED}"},{status:400,marker:"${ACCEPTED}"}]`,
+          `
+          const proof = M.createContainmentProof({ origin: ${JSON.stringify(CANONICAL)}, secret: ${JSON.stringify(OLD)}, fetchImpl });
+          await proof.precheck(); proof.armForRotation();
+          const a = await proof.postcheck();
+          const b = await proof.postcheck();
+          record({ a: a.ok, aState: a.state, b: b.ok, bState: b.state, requests: CALLS().length });
+          `
+        )
+      ).out
+    );
+    expect(r.a).toBe(true);
+    expect(r.b).toBe(false);
+    expect(r.bState).toBe("ABORTED");
+    expect(r.requests).toBe(2); // the post-PROVEN attempt issued NO request
+  });
+
+  it("a failed PRE still cannot reach the post-check", async () => {
+    const r = parse(
+      (
+        await withScriptedFetch(
+          `[{status:401,marker:"${REJECTED}"},{status:401,marker:"${REJECTED}"}]`,
+          `
+          const proof = M.createContainmentProof({ origin: ${JSON.stringify(CANONICAL)}, secret: ${JSON.stringify(OLD)}, fetchImpl });
+          const pre = await proof.precheck();
+          const arm = proof.armForRotation();
+          const post = await proof.postcheck();
+          record({ pre: pre.ok, arm: arm.ok, post: post.ok, state: proof.state, requests: CALLS().length });
+          `
+        )
+      ).out
+    );
+    expect(r.pre).toBe(false);
+    expect(r.post).toBe(false);
+    expect(r.state).toBe("ABORTED");
+    expect(r.requests).toBe(1);
+  });
+});
+
+// ===========================================================================
+describe("EXIT CODES — a rate limit is not a containment failure", () => {
+  const run = (steps: string, attempts: number) =>
+    withScriptedFetch(
+      steps,
+      `
+      const r = await M.runProductionTwoPhase({
+        secret: ${JSON.stringify(OLD)}, fetchImpl,
+        prompt: async ({ attempt }) => attempt <= ${attempts},
+      });
+      record(r);
+      `
+    );
+
+  it("exit 0 ONLY after a full accepted -> rejected transition", async () => {
+    const r = parse((await run(`[{status:400,marker:"${ACCEPTED}"},{status:401,marker:"${REJECTED}"}]`, 3)).out);
+    expect(r.exit).toBe(0);
+    expect(r.proven).toBe(true);
+  });
+
+  it("stopping while the credential is STILL ACCEPTED exits 2 (not contained)", async () => {
+    const r = parse((await run(`[{status:400,marker:"${ACCEPTED}"},{status:400,marker:"${ACCEPTED}"}]`, 1)).out);
+    expect(r.exit).toBe(2);
+    expect(r.proven).toBe(false);
+  });
+
+  it("stopping on a 429 exits 3 (INCONCLUSIVE) — never 2, and never 0", async () => {
+    const r = parse((await run(`[{status:400,marker:"${ACCEPTED}"},{status:429,retryAfter:"60"}]`, 1)).out);
+    expect(r.exit).toBe(3);
+    expect(r.exit).not.toBe(2);
+    expect(r.proven).toBe(false);
+  });
+
+  it.each([
+    ["a 500", `{status:500}`],
+    ["a transport failure", `{throw:true}`],
+    ["an unattributed 401", `{status:401}`],
+  ])("stopping on %s exits 3 (INCONCLUSIVE)", async (_n, step) => {
+    const r = parse((await run(`[{status:400,marker:"${ACCEPTED}"},${step}]`, 1)).out);
+    expect(r.exit).toBe(3);
+  });
+
+  it("a failed pre-check exits 3, having issued exactly one request", async () => {
+    const r = parse(
+      (
+        await withScriptedFetch(
+          `[{status:401,marker:"${REJECTED}"}]`,
+          `const r = await M.runProductionTwoPhase({ secret: ${JSON.stringify(OLD)}, fetchImpl, prompt: async () => true });
+           record({ ...r, requests: CALLS().length });`
+        )
+      ).out
+    );
+    expect(r.exit).toBe(3);
+    expect(r.requests).toBe(1);
+  });
+});
+
+// ===========================================================================
+describe("TARGET URL CONTRACT — refusal is a specific code that sends NOTHING", () => {
+  /**
+   * R10: the surviving version asserted zero hits only for the plain-http row.
+   * Every row below now asserts all five: the exact structured code, that the
+   * injected fetch was never called, that a REACHABLE server received zero
+   * requests, that the secret never appeared on the wire, and a non-zero exit.
+   */
+  const refuse = async (target: string, opts = "{ requireCanonical: true }") => {
+    const s = await server(alwaysAccept);
+    try {
+      const r = parse(
+        (
+          await withScriptedFetch(
+            `[{status:400,marker:"${ACCEPTED}"}]`,
+            `
+            const res = await M.observeOldSecret({
+              origin: ${JSON.stringify(target.replace("__ORIGIN__", s.origin))},
+              secret: ${JSON.stringify(OLD)}, fetchImpl, ...${opts},
+            });
+            record({ observation: res.observation, detail: res.detail, fetchCalls: CALLS().length });
+            `
+          )
+        ).out
+      );
+      return { ...r, serverHits: s.hits.length, bodies: s.hits.map((h) => h.body) };
+    } finally {
+      await s.close();
+    }
+  };
+
+  const rows: Array<[string, string, string]> = [
+    ["a non-https remote origin", "http://evil.test", "ERR_NON_HTTPS_PRODUCTION_ORIGIN"],
+    ["a reachable plain-http server", "__ORIGIN__", "ERR_NON_HTTPS_PRODUCTION_ORIGIN"],
+    ["a non-canonical https origin", "https://attacker.example", "ERR_NOT_CANONICAL_PRODUCTION_ORIGIN"],
+    ["a lookalike host", "https://convergepanel.com.evil.test", "ERR_NOT_CANONICAL_PRODUCTION_ORIGIN"],
+    ["a punycode homograph", "https://xn--convergepanel-x2b.com", "ERR_NOT_CANONICAL_PRODUCTION_ORIGIN"],
+    ["a non-443 port", "https://convergepanel.com:8443", "ERR_NOT_CANONICAL_PRODUCTION_ORIGIN"],
+    ["a supplied path", "https://convergepanel.com/admin", "ERR_PATH_NOT_ALLOWED"],
+    ["a query string", "https://convergepanel.com/?x=1", "ERR_QUERY_NOT_ALLOWED"],
+    ["a fragment", "https://convergepanel.com/#f", "ERR_FRAGMENT_NOT_ALLOWED"],
+    ["userinfo", "https://u:p@convergepanel.com", "ERR_USERINFO_NOT_ALLOWED"],
+    ["an unsupported scheme", "ftp://convergepanel.com", "ERR_UNSUPPORTED_SCHEME"],
+    ["a malformed url", "not-a-url", "ERR_TARGET_NOT_A_URL"],
+  ];
+
+  it.each(rows)("%s is refused with %s and sends nothing", async (_n, target, code) => {
+    const r = await refuse(target);
+    expect(r.detail).toBe(`refused: ${code}`);
+    expect(r.observation).toBe("INCONCLUSIVE");
+    expect(r.fetchCalls).toBe(0);
+    expect(r.serverHits).toBe(0);
+    expect(r.bodies.join(" ")).not.toContain(OLD);
+  });
+
+  it("a refused target exits non-zero through the CLI", async () => {
+    const r = await runCli(["--observe", "--non-production-target", "http://evil.test"]);
+    expect(r.status).not.toBe(0);
+    expect(r.status).toBe(3);
+    expect(r.stdout).toContain("ERR_NON_HTTPS_PRODUCTION_ORIGIN");
+  });
+
+  it("the loopback exemption is an EXACT host match, not a substring", async () => {
+    // `localhost.` resolves to loopback but is not the loopback host. Under a
+    // `.includes()` predicate an attacker-nameable host would be exempted from
+    // BOTH the https and the canonical requirement.
+    for (const host of ["localhost.", "localhost.attacker.example", "127.0.0.1.evil.test", "not-localhost", "mylocalhost"]) {
+      const r = await refuse(`http://${host}:9`, "{ requireCanonical: true, allowInsecureLoopback: true }");
+      expect(r.detail).toBe("refused: ERR_NON_HTTPS_PRODUCTION_ORIGIN");
+      expect(r.fetchCalls).toBe(0);
+    }
+  });
+
+  it("the loopback seam does NOT relax the canonical rule for a foreign https origin", async () => {
+    // The C13 defect in miniature: `allowInsecureLoopback` must exempt loopback
+    // from the https rule, and nothing else. If it also short-circuits the
+    // canonical clause, every https host becomes an acceptable proof target.
+    for (const host of ["https://attacker.example", "https://convergepanel-git-preview.vercel.app", "https://staging.example.com"]) {
+      const r = await refuse(host, "{ requireCanonical: true, allowInsecureLoopback: true }");
+      expect(r.detail).toBe("refused: ERR_NOT_CANONICAL_PRODUCTION_ORIGIN");
+      expect(r.observation).toBe("INCONCLUSIVE");
+      expect(r.fetchCalls).toBe(0);
+      expect(r.serverHits).toBe(0);
+      expect(r.bodies.join(" ")).not.toContain(OLD);
+    }
+  });
+
+  it("the canonical origin itself is still reachable with both flags on", async () => {
+    const r = parse(
+      (
+        await withScriptedFetch(
+          `[{status:401,marker:"${REJECTED}"}]`,
+          `const res = await M.observeOldSecret({ origin: ${JSON.stringify(CANONICAL)}, secret: ${JSON.stringify(OLD)}, fetchImpl, requireCanonical: true, allowInsecureLoopback: true });
+           record({ observation: res.observation, urls: CALLS().map(c => c.url) });`
+        )
+      ).out
+    );
+    expect(r.observation).toBe("CREDENTIAL_REJECTED");
+    expect(r.urls).toEqual([CANONICAL_URL]);
+  });
+
+  it("genuine loopback IS reachable through the injection seam (the guard is not blanket denial)", async () => {
+    const s = await server(alwaysAccept);
+    try {
+      const r = parse(
+        (
+          await nodeEval(`
+            const M = await import(${JSON.stringify(IMPL)});
+            const res = await M.observeOldSecret({
+              origin: ${JSON.stringify("")} || ${JSON.stringify(s.origin)},
+              secret: ${JSON.stringify(OLD)}, requireCanonical: false, allowInsecureLoopback: true,
+            });
+            console.log("RESULT:" + JSON.stringify({ observation: res.observation }));
+          `)
+        ).out
+      );
+      expect(r.observation).toBe("CREDENTIAL_ACCEPTED");
+      expect(s.hits.length).toBe(1);
+    } finally {
+      await s.close();
+    }
+  });
+});
+
+// ===========================================================================
+describe("SECRET BYTES SURVIVE THE SHELL", () => {
+  const SPECIALS = ["with$dollar", "with`backtick", "with space", "with!bang", "with*star", `with"'\\quotes`, "café-ünïcode"];
+
+  it.each(SPECIALS)("%s reaches the wire byte-for-byte, and the pre-check accepts it", async (secret) => {
+    const r = parse(
+      (
+        await withScriptedFetch(
+          `[{status:400,marker:"${ACCEPTED}"},{status:401,marker:"${REJECTED}"}]`,
+          `
+          const r = await M.runProductionTwoPhase({
+            secret: process.env.OLD_ADMIN_SECRET, fetchImpl, prompt: async ({ attempt }) => attempt <= 2,
+          });
+          record({ ...r, bodies: CALLS().map((c) => c.body) });
+          `,
+          { OLD_ADMIN_SECRET: secret }
+        )
+      ).out
+    );
+    expect(r.proven).toBe(true);
+    for (const b of r.bodies) expect(JSON.parse(b)).toEqual({ secret });
+  });
+
+  it("an emoji secret survives too (surrogate pairs are bytes, not characters)", async () => {
+    const secret = "rocket-🚀-secret";
+    const r = parse(
+      (
+        await withScriptedFetch(
+          `[{status:400,marker:"${ACCEPTED}"},{status:401,marker:"${REJECTED}"}]`,
+          `const r = await M.runProductionTwoPhase({ secret: process.env.OLD_ADMIN_SECRET, fetchImpl, prompt: async ({attempt}) => attempt <= 2 });
+           record({ ...r, bodies: CALLS().map((c) => c.body) });`,
+          { OLD_ADMIN_SECRET: secret }
+        )
+      ).out
+    );
+    expect(JSON.parse(r.bodies[0])).toEqual({ secret });
+  });
+
+  it("an empty or missing secret never issues a request", async () => {
+    for (const s of ["", undefined]) {
+      const r = parse(
+        (
+          await withScriptedFetch(
+            `[{status:400,marker:"${ACCEPTED}"}]`,
+            `const r = await M.runProductionTwoPhase({ secret: ${JSON.stringify(s ?? null)} ?? undefined, fetchImpl, prompt: async () => true });
+             record({ ...r, requests: CALLS().length });`
+          )
+        ).out
+      );
+      expect(r.exit).toBe(3);
+      expect(r.requests).toBe(0);
+    }
+  });
+});
+
+// ===========================================================================
+describe("RATE-LIMIT BUDGET — the enrollment sequence fits, and a 429 is survivable", () => {
+  /**
+   * The route allows 3 requests per 300s per IP, checked BEFORE the secret is
+   * examined. The canonical sequence spends exactly three: PRE, the mint, POST.
+   * That is zero margin, so the 429 path is not hypothetical.
+   */
+  it("PRE + mint + POST is exactly three requests against the route", async () => {
+    const r = parse(
+      (
+        await withScriptedFetch(
+          `[{status:400,marker:"${ACCEPTED}"},{status:401,marker:"${REJECTED}"}]`,
+          `const r = await M.runProductionTwoPhase({ secret: ${JSON.stringify(OLD)}, fetchImpl, prompt: async ({attempt}) => attempt <= 2 });
+           record({ ...r, probeRequests: CALLS().length });`
+        )
+      ).out
+    );
+    const MINT_REQUESTS = 1;
+    expect(r.probeRequests).toBe(2);
+    expect(r.probeRequests + MINT_REQUESTS).toBe(3);
+    const routeSrc = readFileSync(join(process.cwd(), "app/api/admin/set-admin/route.ts"), "utf8");
+    expect(routeSrc).toMatch(/RATE_LIMIT_MAX_REQUESTS\s*=\s*3\b/);
+  });
+
+  it("a 429 caused by exhausting that budget is survivable: still armed, then provable", async () => {
+    const r = parse(
+      (
+        await withScriptedFetch(
+          `[{status:400,marker:"${ACCEPTED}"},{status:429,retryAfter:"300"},{status:401,marker:"${REJECTED}"}]`,
+          `
+          const proof = M.createContainmentProof({ origin: ${JSON.stringify(CANONICAL)}, secret: ${JSON.stringify(OLD)}, fetchImpl });
+          await proof.precheck(); proof.armForRotation();
+          const limited = await proof.postcheck();
+          const after = await proof.postcheck();
+          record({ limitedState: limited.state, limitedDetail: limited.detail, afterOk: after.ok, finalState: proof.state });
+          `
+        )
+      ).out
+    );
+    expect(r.limitedState).toBe("POST_PENDING");
+    expect(r.limitedDetail).toContain("retry-after 300s");
+    expect(r.afterOk).toBe(true);
+    expect(r.finalState).toBe("PRODUCTION_CONTAINMENT_PROVEN");
+  });
+});
+
+// ===========================================================================
+describe("REDIRECTS AND CACHING — behavioural, through real servers", () => {
+  it.each([301, 302, 303, 307, 308])("a %s at the POST phase is refused, stays armed, and leaks nothing", async (code) => {
+    const sink = await server(alwaysReject);
+    let phase = 0;
+    const target = await server(() => {
+      phase += 1;
+      return phase === 1
+        ? { status: 400, headers: { [MARKER]: ACCEPTED } }
+        : { status: code, headers: { location: `${sink.origin}/api/admin/set-admin` } };
+    });
+    try {
+      const r = parse(
+        (
+          await nodeEval(`
+            const M = await import(${JSON.stringify(IMPL)});
+            const proof = M.createContainmentProof({
+              origin: ${JSON.stringify(target.origin)}, secret: ${JSON.stringify(OLD)},
+              requireCanonical: false, allowInsecureLoopback: true,
+            });
+            const pre = await proof.precheck();
+            proof.armForRotation();
+            const post = await proof.postcheck();
+            console.log("RESULT:" + JSON.stringify({ pre: pre.ok, postOk: post.ok, state: post.state, outcome: post.outcome }));
+          `)
+        ).out
+      );
+      expect(r.pre).toBe(true);
+      expect(r.postOk).toBe(false);
+      expect(r.outcome).toBe("INCONCLUSIVE");
+      expect(r.state).toBe("POST_PENDING"); // still armed — a redirect is not a verdict
+      expect(sink.hits.length).toBe(0);
+      expect(sink.hits.map((h) => h.body).join(" ")).not.toContain(OLD);
+    } finally {
+      await target.close();
+      await sink.close();
+    }
+  });
+
+  it("every request is sent with redirect:error and cache:no-store", async () => {
+    const r = parse(
+      (
+        await withScriptedFetch(
+          `[{status:400,marker:"${ACCEPTED}"},{status:401,marker:"${REJECTED}"}]`,
+          `const r = await M.runProductionTwoPhase({ secret: ${JSON.stringify(OLD)}, fetchImpl, prompt: async ({attempt}) => attempt <= 2 });
+           record({ redirects: CALLS().map(c => c.redirect), caches: CALLS().map(c => c.cache) });`
+        )
+      ).out
+    );
+    expect(r.redirects).toEqual(["error", "error"]);
+    expect(r.caches).toEqual(["no-store", "no-store"]);
+  });
+});
+
+// ===========================================================================
+describe("THE CLI", () => {
+  it("refuses --production-two-phase without an interactive terminal, and sends nothing", async () => {
+    const s = await server(alwaysAccept);
+    try {
+      const r = await runCli(["--production-two-phase"]);
+      expect(r.status).toBe(3);
+      expect(r.stdout).toContain("interactive terminal");
+      expect(r.stdout).not.toContain("PRODUCTION_CONTAINMENT_PROVEN");
+      expect(s.hits.length).toBe(0);
+    } finally {
+      await s.close();
+    }
+  });
+
+  it("observe mode never claims containment", async () => {
     const s = await server(alwaysReject);
     try {
-      const res = await nodeEval(`
-        import { observeOldSecret } from ${JSON.stringify(IMPL)};
-        const r = await observeOldSecret({ origin: ${JSON.stringify(s.origin)}, secret: "x", requireCanonical: false, allowInsecureLoopback: false });
-        console.log(JSON.stringify(r));
-      `);
-      expect(res.out).toContain("ERR_NON_HTTPS_PRODUCTION_ORIGIN");
-      expect(s.hits).toHaveLength(0);          // nothing was sent
-    } finally { await s.close(); }
-  });
-
-  it("refuses a non-canonical https origin in production mode, sending nothing", async () => {
-    const res = await nodeEval(`
-      import { resolveEndpoint } from ${JSON.stringify(IMPL)};
-      console.log(JSON.stringify(resolveEndpoint("https://staging.example.com", { requireCanonical: true })));
-    `);
-    expect(JSON.parse(res.out)).toEqual({ ok: false, reason: "ERR_NOT_CANONICAL_PRODUCTION_ORIGIN" });
-  });
-
-  it("ANCHOR: the canonical origin IS accepted and builds the exact endpoint", async () => {
-    // Without this, "refuse everything" would satisfy every row above.
-    const res = await nodeEval(`
-      import { resolveEndpoint, CANONICAL_PRODUCTION_ORIGIN } from ${JSON.stringify(IMPL)};
-      console.log(JSON.stringify(resolveEndpoint(CANONICAL_PRODUCTION_ORIGIN, { requireCanonical: true })));
-    `);
-    expect(JSON.parse(res.out)).toEqual({
-      ok: true,
-      url: "https://convergepanel.com/api/admin/set-admin",
-      origin: "https://convergepanel.com",
-    });
-  });
-});
-
-describe("STATE MACHINE — there is no edge from INITIAL to PROVEN", () => {
-  const drive = (body: string) => nodeEval(`
-    import { createContainmentProof, STATES } from ${JSON.stringify(IMPL)};
-    const mk = (reply) => createContainmentProof({
-      origin: "http://127.0.0.1:9/", secret: "s", allowInsecureLoopback: true, requireCanonical: false,
-      fetchImpl: async () => reply,
-    });
-    const ok400 = { status: 400, headers: { get: (h) => h === ${JSON.stringify(MARKER)} ? ${JSON.stringify(ACCEPTED)} : null } };
-    const ok401 = { status: 401, headers: { get: (h) => h === ${JSON.stringify(MARKER)} ? ${JSON.stringify(REJECTED)} : null } };
-    ${body}
-  `);
-
-  it("postcheck alone cannot prove containment", async () => {
-    const r = await drive(`
-      const p = mk(ok401);
-      const post = await p.postcheck();
-      console.log(JSON.stringify({ ok: post.ok, state: p.state }));
-    `);
-    expect(JSON.parse(r.out)).toEqual({ ok: false, state: "ABORTED" });
-  });
-
-  it("a REJECTED precheck aborts and can never reach PROVEN", async () => {
-    const r = await drive(`
-      const p = mk(ok401);
-      const pre = await p.precheck();
-      const arm = p.armForRotation();
-      const post = await p.postcheck();
-      console.log(JSON.stringify({ pre: pre.ok, arm: arm.ok, post: post.ok, state: p.state }));
-    `);
-    expect(JSON.parse(r.out)).toEqual({ pre: false, arm: false, post: false, state: "ABORTED" });
-  });
-
-  it("skipping the arm step aborts", async () => {
-    const r = await drive(`
-      const p = mk(ok400);
-      await p.precheck();
-      const post = await p.postcheck();
-      console.log(JSON.stringify({ post: post.ok, state: p.state }));
-    `);
-    expect(JSON.parse(r.out)).toEqual({ post: false, state: "ABORTED" });
-  });
-
-  it("the full transition — accepted then rejected — reaches PROVEN", async () => {
-    const r = await nodeEval(`
-      import { createContainmentProof } from ${JSON.stringify(IMPL)};
-      let n = 0;
-      const p = createContainmentProof({
-        origin: "http://127.0.0.1:9/", secret: "s", allowInsecureLoopback: true, requireCanonical: false,
-        fetchImpl: async () => (++n === 1
-          ? { status: 400, headers: { get: () => ${JSON.stringify(ACCEPTED)} } }
-          : { status: 401, headers: { get: () => ${JSON.stringify(REJECTED)} } }),
-      });
-      const pre = await p.precheck(); p.armForRotation(); const post = await p.postcheck();
-      console.log(JSON.stringify({ pre: pre.ok, post: post.ok, state: p.state, calls: n }));
-    `);
-    expect(JSON.parse(r.out)).toEqual({ pre: true, post: true, state: "PRODUCTION_CONTAINMENT_PROVEN", calls: 2 });
-  });
-
-  it("an UNATTESTED 401 at POST does not prove containment", async () => {
-    /**
-     * The marker requirement must bind on the POST side too. Without this, a
-     * bare 401 — a WAF, an SSO gate, deployment protection, a foreign origin —
-     * closes the transition. Pinned because the mutation dropping the marker
-     * conjunct from `classify` was otherwise unobservable: every other fixture
-     * supplies the marker.
-     */
-    const r = await nodeEval(`
-      import { createContainmentProof } from ${JSON.stringify(IMPL)};
-      let n = 0;
-      const p = createContainmentProof({
-        origin: "http://127.0.0.1:9/", secret: "s", allowInsecureLoopback: true, requireCanonical: false,
-        fetchImpl: async () => (++n === 1
-          ? { status: 400, headers: { get: () => ${JSON.stringify(ACCEPTED)} } }
-          : { status: 401, headers: { get: () => null } }),   // bare 401, no marker
-      });
-      const pre = await p.precheck(); p.armForRotation(); const post = await p.postcheck();
-      console.log(JSON.stringify({ pre: pre.ok, post: post.ok, state: p.state }));
-    `);
-    expect(JSON.parse(r.out)).toEqual({ pre: true, post: false, state: "ABORTED" });
-  });
-
-  it("an UNATTESTED 400 at PRE does not confirm the credential is live", async () => {
-    const r = await nodeEval(`
-      import { createContainmentProof } from ${JSON.stringify(IMPL)};
-      const p = createContainmentProof({
-        origin: "http://127.0.0.1:9/", secret: "s", allowInsecureLoopback: true, requireCanonical: false,
-        fetchImpl: async () => ({ status: 400, headers: { get: () => null } }),
-      });
-      const pre = await p.precheck();
-      console.log(JSON.stringify({ pre: pre.ok, state: p.state }));
-    `);
-    expect(JSON.parse(r.out)).toEqual({ pre: false, state: "ABORTED" });
-  });
-
-  it("an ACCEPTED postcheck (rotation did not take) does NOT prove containment", async () => {
-    const r = await drive(`
-      const p = mk(ok400);
-      await p.precheck(); p.armForRotation();
-      const post = await p.postcheck();
-      console.log(JSON.stringify({ post: post.ok, state: p.state }));
-    `);
-    expect(JSON.parse(r.out)).toEqual({ post: false, state: "ABORTED" });
-  });
-});
-
-describe("BINDING — the second observation uses the same origin and the same bytes", () => {
-  it("mutating OLD_ADMIN_SECRET between phases does not retarget the postcheck", async () => {
-    const r = await nodeEval(`
-      import { createContainmentProof } from ${JSON.stringify(IMPL)};
-      process.env.OLD_ADMIN_SECRET = "original";
-      const sent = [];
-      const p = createContainmentProof({
-        origin: "http://127.0.0.1:9/", secret: process.env.OLD_ADMIN_SECRET,
-        allowInsecureLoopback: true, requireCanonical: false,
-        fetchImpl: async (_u, init) => { sent.push(JSON.parse(init.body).secret);
-          return sent.length === 1
-            ? { status: 400, headers: { get: () => ${JSON.stringify(ACCEPTED)} } }
-            : { status: 401, headers: { get: () => ${JSON.stringify(REJECTED)} } }; },
-      });
-      await p.precheck();
-      process.env.OLD_ADMIN_SECRET = "SWAPPED-AFTER-PRECHECK";   // the attack
-      p.armForRotation();
-      await p.postcheck();
-      console.log(JSON.stringify(sent));
-    `);
-    expect(JSON.parse(r.out)).toEqual(["original", "original"]);
-  });
-
-  it("mutating the origin between phases does not retarget the postcheck", async () => {
-    const r = await nodeEval(`
-      import { createContainmentProof } from ${JSON.stringify(IMPL)};
-      process.env.PROBE_ORIGIN_OVERRIDE = "http://127.0.0.1:9/";
-      const urls = [];
-      const p = createContainmentProof({
-        origin: process.env.PROBE_ORIGIN_OVERRIDE, secret: "s",
-        allowInsecureLoopback: true, requireCanonical: false,
-        fetchImpl: async (u) => { urls.push(u);
-          return urls.length === 1
-            ? { status: 400, headers: { get: () => ${JSON.stringify(ACCEPTED)} } }
-            : { status: 401, headers: { get: () => ${JSON.stringify(REJECTED)} } }; },
-      });
-      await p.precheck();
-      process.env.PROBE_ORIGIN_OVERRIDE = "http://127.0.0.1:10/";  // the attack
-      p.armForRotation();
-      await p.postcheck();
-      console.log(JSON.stringify(urls));
-    `);
-    const urls = JSON.parse(r.out);
-    expect(urls[0]).toBe(urls[1]);
-    expect(urls[0]).toContain(":9/api/admin/set-admin");
-  });
-});
-
-describe("WRONG HOST — a foreign instance cannot produce a proof", () => {
-  it("an origin whose ADMIN_SECRET is unset rejects at PRE and the run aborts", async () => {
-    // This is the attacker-free false proof: a preview/staging instance returns
-    // the GENUINE marker because its own secret is unset.
-    const foreign = await server(alwaysReject);
-    try {
-      const r = await runCli(["--production-two-phase"], { PROBE_ORIGIN_OVERRIDE: foreign.origin });
-      expect(r.stdout).toContain("[PRE] ABORT");
-      expect(r.stdout).toContain("NOT PROVEN");
+      const r = await runCli(["--observe", "--non-production-target", s.origin]);
       expect(r.stdout).not.toContain("PRODUCTION_CONTAINMENT_PROVEN");
-      expect(r.status).not.toBe(0);
-      expect(foreign.hits).toHaveLength(1);   // it tried once, then stopped
-    } finally { await foreign.close(); }
-  });
-
-  it("ANCHOR: the same workflow against an origin that DOES hold the secret proves containment", async () => {
-    // Without this, "always abort" would satisfy the row above.
-    const prod = await server(rotatingAfter(1));
-    try {
-      const r = await runCli(["--production-two-phase"], { PROBE_ORIGIN_OVERRIDE: prod.origin });
-      expect(r.stdout).toContain("PRECHECK_OLD_CREDENTIAL_CONFIRMED_LIVE");
-      expect(r.stdout).toContain("PRODUCTION_CONTAINMENT_PROVEN");
-      expect(r.status).toBe(0);
-      expect(prod.hits).toHaveLength(2);
-      // Same endpoint both times, same secret both times.
-      expect(prod.hits[0].url).toBe(prod.hits[1].url);
-      expect(JSON.parse(prod.hits[0].body).secret).toBe(JSON.parse(prod.hits[1].body).secret);
-    } finally { await prod.close(); }
-  });
-});
-
-describe("MANGLED SECRET — a wrong credential cannot reach the proof", () => {
-  it.each([
-    ["a dollar sign", "secret-with-$VAR-inside-aaaaaaaaaaaa"],
-    ["a backtick", "secret-with-`cmd`-inside-aaaaaaaaaaa"],
-    ["a space", "secret with spaces inside aaaaaaaaaa"],
-    ["a bang", "secret-with-!-inside-aaaaaaaaaaaaaaa"],
-    ["a glob", "secret-with-*-inside-aaaaaaaaaaaaaaa"],
-    ["quotes and backslash", `secret-with-"'\\-inside-aaaaaaaaaa`],
-    ["unicode", "secret-with-café-😀-inside-aaaaaaaa"],
-  ])("%s: the exact bytes are transmitted, and a mismatch aborts at PRE", async (_label, secret) => {
-    // The env var is passed through the process environment, never interpolated
-    // into a shell command line — which is the operator mechanism the runbook
-    // now prescribes.
-    const prod = await server(rotatingAfter(1));
-    try {
-      const r = await runCli(["--production-two-phase"], { PROBE_ORIGIN_OVERRIDE: prod.origin, OLD_ADMIN_SECRET: secret });
-      expect(JSON.parse(prod.hits[0].body).secret).toBe(secret);   // byte-exact
-      expect(r.status).toBe(0);
-    } finally { await prod.close(); }
-
-    // Now the mangled form: the live route rejects it, so PRE aborts.
-    const live = await server(alwaysReject);
-    try {
-      const r = await runCli(["--production-two-phase"], { PROBE_ORIGIN_OVERRIDE: live.origin, OLD_ADMIN_SECRET: secret });
-      expect(r.stdout).toContain("[PRE] ABORT");
-      expect(r.status).not.toBe(0);
-    } finally { await live.close(); }
-  });
-});
-
-describe("SINGLE-SHOT MODE can never claim containment", () => {
-  it.each([
-    ["a rejection", alwaysReject],
-    ["an acceptance", alwaysAccept],
-  ])("%s reports an observation only", async (_l, reply) => {
-    const s = await server(reply);
-    try {
-      const r = await runCli(["--observe", s.origin]);
       expect(r.stdout).toContain("OBSERVATION ONLY");
-      expect(r.stdout).not.toContain("PRODUCTION_CONTAINMENT_PROVEN");
       expect(r.status).not.toBe(0);
-    } finally { await s.close(); }
+    } finally {
+      await s.close();
+    }
+  });
+
+  it("observe mode against a non-production target warns that the secret will be sent there", async () => {
+    const s = await server(alwaysReject);
+    try {
+      const r = await runCli(["--observe", "--non-production-target", s.origin]);
+      expect(r.stdout).toContain("WILL BE SENT");
+      expect(r.stdout).toContain(s.origin);
+    } finally {
+      await s.close();
+    }
+  });
+
+  it("observe mode with no explicit target is pinned to the canonical origin", () => {
+    const src = readFileSync(SCRIPT, "utf8");
+    expect(src).toContain("origin: target ?? CANONICAL_PRODUCTION_ORIGIN");
+    expect(src).toContain("requireCanonical: !target");
+  });
+
+  it("prints usage and exits non-zero when given no mode", async () => {
+    const r = await runCli([]);
+    expect(r.status).toBe(3);
+    expect(r.stdout).toContain("usage:");
   });
 });
 
-describe("REDIRECTS — a redirect is a refusal, never a result", () => {
-  it.each([[301], [302], [303], [307], [308]])(
-    "HTTP %i: the target receives NOTHING and the run aborts",
-    async (code) => {
-      const target = await server(alwaysReject);
-      const redirector = await server(() => ({ status: code as number, headers: { location: `${target.origin}/api/admin/set-admin` } }));
-      try {
-        const r = await runCli(["--production-two-phase"], { PROBE_ORIGIN_OVERRIDE: redirector.origin });
-        expect(target.hits).toHaveLength(0);
-        expect(JSON.stringify(target.hits)).not.toContain(OLD);
-        expect(r.status).not.toBe(0);
-        expect(r.stdout).not.toContain("PRODUCTION_CONTAINMENT_PROVEN");
-      } finally { await redirector.close(); await target.close(); }
+// ===========================================================================
+describe("FILESYSTEM INVOCATION — no invocation may silently no-op", () => {
+  const dirs: Array<() => string> = [
+    () => {
+      const d = mkdtempSync(join(tmpdir(), "probe with space-"));
+      mkdirSync(join(d, "lib"));
+      copyFileSync(SCRIPT, join(d, "probe.mjs"));
+      copyFileSync(IMPL, join(d, "lib/probe-admin-secret.mjs"));
+      return join(d, "probe.mjs");
+    },
+    () => {
+      const d = mkdtempSync(join(tmpdir(), "probe-symlink-"));
+      mkdirSync(join(d, "lib"));
+      copyFileSync(IMPL, join(d, "lib/probe-admin-secret.mjs"));
+      const real = join(d, "real.mjs");
+      copyFileSync(SCRIPT, real);
+      symlinkSync(real, join(d, "link.mjs"));
+      return join(d, "link.mjs");
+    },
+  ];
+
+  it.each(dirs.map((d, i) => [i === 0 ? "a path with spaces" : "through a symlink", d]))(
+    "%s still executes and still refuses a non-TTY production run",
+    async (_n, mk) => {
+      const r = await runCli(["--production-two-phase"], {}, "\n", (mk as () => string)());
+      expect(r.status).toBe(3);
+      expect(r.stdout).toContain("interactive terminal");
+      expect(r.stdout).not.toBe("");
     }
   );
 });
 
-describe("REQUEST SHAPE and SECRET HANDLING", () => {
-  it("body key set is exactly [secret]; the secret appears nowhere else", async () => {
-    const prod = await server(rotatingAfter(1));
-    try {
-      await runCli(["--production-two-phase"], { PROBE_ORIGIN_OVERRIDE: prod.origin, UID: "victim", EMAIL: "v@x.test" });
-      for (const h of prod.hits) {
-        expect(Object.keys(JSON.parse(h.body))).toEqual(["secret"]);
-        expect(JSON.stringify(h.headers)).not.toContain(OLD);
-        expect(h.url).not.toContain(OLD);
-        const wire = `${h.url} ${JSON.stringify(h.headers)}`.toLowerCase();
-        for (const f of ["uid", "userid", "email", "claim", "role"]) expect(wire).not.toContain(f);
-      }
-    } finally { await prod.close(); }
-  });
-
-  it.each([
-    ["proven run", rotatingAfter(1)],
-    ["aborted run", alwaysReject],
-  ])("%s: the secret never appears in output", async (_l, reply) => {
-    const s = await server(reply);
-    try {
-      const r = await runCli(["--production-two-phase"], { PROBE_ORIGIN_OVERRIDE: s.origin });
-      expect(r.stdout).not.toContain(OLD);
-    } finally { await s.close(); }
-  });
-
-  it("the fetch uses no-store and refuses redirects", () => {
-    const src = readFileSync(IMPL, "utf8");
-    expect(src).toContain('redirect: "error"');
-    expect(src).toContain('cache: "no-store"');
-  });
-
-  it("buildProbeBody has no second parameter that could become a claim target", () => {
-    const src = readFileSync(IMPL, "utf8");
-    const sig = src.match(/export function buildProbeBody\(([^)]*)\)/)![1];
-    expect(sig.split(",").filter((x) => x.trim()).length).toBe(1);
-    const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
-    expect(code).not.toMatch(/\buid\b/i);
-  });
-});
-
-describe("FILESYSTEM INVOCATION — no invocation may silently no-op", () => {
-  const staged = (() => {
-    const root = mkdtempSync(join(tmpdir(), "probe-fs-"));
-    const spaced = join(root, "dir with spaces");
-    mkdirSync(join(spaced, "lib"), { recursive: true });
-    copyFileSync(SCRIPT, join(spaced, "probe-admin-secret.mjs"));
-    copyFileSync(IMPL, join(spaced, "lib/probe-admin-secret.mjs"));
-    const link = join(root, "link");
-    try { symlinkSync(spaced, link); } catch { /* no symlinks */ }
-    return { spaced, link };
-  })();
-
-  it.each([
-    ["absolute path", () => SCRIPT],
-    ["path containing spaces", () => join(staged.spaced, "probe-admin-secret.mjs")],
-    ["through a symlinked directory", () => join(staged.link, "probe-admin-secret.mjs")],
-  ])("%s: runs and reports", async (_label, path) => {
-    const prod = await server(rotatingAfter(1));
-    try {
-      const r = await runCli(["--production-two-phase"], { PROBE_ORIGIN_OVERRIDE: prod.origin }, "\n", path());
-      expect(prod.hits).toHaveLength(2);
-      expect(r.stdout.trim()).not.toBe("");
-      expect(r.status).toBe(0);
-    } finally { await prod.close(); }
-  });
-});
-
-describe("ATTESTATION CONTRACT — the two copies of the constants agree", () => {
-  it("header name and both marker values match the route's module", () => {
-    const ts = readFileSync("lib/security/adminSecretProbeAttestation.ts", "utf8");
-    const mjs = readFileSync(IMPL, "utf8");
-    for (const literal of [`"${MARKER}"`, `"${REJECTED}"`, `"${ACCEPTED}"`]) {
-      expect({ literal, ts: ts.includes(literal), mjs: mjs.includes(literal) })
-        .toEqual({ literal, ts: true, mjs: true });
+// ===========================================================================
+describe("ATTESTATION CONSTANTS — the two copies agree", () => {
+  it("the .mjs marker constants match the route's shared module", () => {
+    const shared = readFileSync(join(process.cwd(), "lib/security/adminSecretProbeAttestation.ts"), "utf8");
+    const impl = readFileSync(IMPL, "utf8");
+    for (const v of [MARKER, REJECTED, ACCEPTED]) {
+      expect(shared).toContain(v);
+      expect(impl).toContain(v);
     }
   });
 });

@@ -109,33 +109,67 @@ by the Firebase service account. `ADMIN_SECRET` never needs to hold a live value
 for enrollment, so the bootstrap route is not part of the enrollment story at
 all, and there is no post-enrollment rotation to remember.
 
-**Option 2 — the bootstrap route.** If `/api/admin/set-admin` is used instead:
+**Option 2 — the bootstrap route.** If `/api/admin/set-admin` is used instead,
+run the steps in exactly this order. The numbering is the contract: the
+pre-check must be taken while the old secret is STILL LIVE, so it necessarily
+precedes the mint, the rotation and the rotation's deployment.
 
-1. Set `ADMIN_SECRET` to a freshly generated value and deploy it.
-2. Use it once, for the single intended uid, inside a defined bootstrap window.
-3. Verify the claim landed on that uid and on no other.
-4. Immediately rotate or remove `ADMIN_SECRET`, and **deploy that change** — an
-   env edit alone leaves the old value live in the running deployment.
-5. Verify the rotation **with the two-phase containment tool in §B.6.c**, run
-   as ONE process across the rotation: PRE must report the old secret still
-   **accepted** at the canonical Production origin; then rotate and deploy; then
-   resume the same process and require POST **rejected**. Only
-   `PRODUCTION_CONTAINMENT_PROVEN` closes the bootstrap window. A single-shot
-   rejection is not enrollment evidence.
+<!-- BOOTSTRAP-SEQUENCE:CANONICAL — the only ordering. Order is tested by
+     docs/__tests__/bootstrapProbeInvariant.spec.ts. -->
 
-   The superseded instruction, kept only as what NOT to do:
-   Send the credential ONLY:
+| ID | Requirement | Mode |
+|---|---|---|
+| `BOOTSTRAP_SET_SECRET` | Set `ADMIN_SECRET` to a freshly generated value and deploy it | MUST |
+| `BOOTSTRAP_PRECHECK` | Start the two-phase tool and confirm PRE accepts the exact old secret at canonical Production | MUST |
+| `BOOTSTRAP_MINT` | Mint the claim once, for the single intended uid, while the proof stays armed | MUST |
+| `BOOTSTRAP_VERIFY_MINT` | Verify the claim landed on that uid and on no other | MUST |
+| `BOOTSTRAP_ROTATE_SECRET` | Rotate or remove `ADMIN_SECRET` | MUST |
+| `BOOTSTRAP_DEPLOY_ROTATION` | Deploy that change deliberately | MUST |
+| `BOOTSTRAP_POSTCHECK` | Resume the SAME armed process and require POST rejected | MUST |
+| `BOOTSTRAP_REENUMERATE` | Re-enumerate privileged claims across all accounts | MUST |
+| `BOOTSTRAP_VERIFY_AUTHZ` | Verify positive and negative authorization controls | MUST |
 
-       POST /api/admin/set-admin
-       {"secret": "<OLD_SECRET>"}          <- no uid, ever
+1. `[BOOTSTRAP_SET_SECRET][REQUIRED]` Set `ADMIN_SECRET` to a freshly generated
+   value and **deploy it**. An env edit alone does not reach running Production.
+2. `[BOOTSTRAP_PRECHECK][REQUIRED]` **Start the two-phase containment tool now,
+   before anything is minted or rotated**, and wait for `[PRE] OK`:
 
-   `401` = `CREDENTIAL_REJECTED`, and it is the only result that closes the
-   window. `400` = `CREDENTIAL_ACCEPTED`, meaning the rotation has not taken
-   effect. `429` and `5xx` are `INCONCLUSIVE`.
+       export OLD_ADMIN_SECRET        # already exported; never inline on the command line
+       node scripts/probe-admin-secret.mjs --production-two-phase
 
-   **Never send a uid in this probe.** With a uid, a still-live old secret does
-   not report a failure — it mints `admin: true` on that uid, with no audit
-   record and no log. The verification step would be the breach.
+   PRE must report the old secret **accepted** at the canonical Production
+   origin. This is the load-bearing half: it proves you reached an instance that
+   actually holds this secret, and that the exact bytes survived your shell.
+   **Leave this process running.** It holds the proof in memory; there is no
+   on-disk state and a restart cannot rebuild PRE once the rotation has shipped.
+3. `[BOOTSTRAP_MINT][REQUIRED]` With the proof armed and the old secret still
+   live, mint the claim **once**, for the single intended uid.
+4. `[BOOTSTRAP_VERIFY_MINT][REQUIRED]` Verify the claim landed on that uid and
+   on no other.
+5. `[BOOTSTRAP_ROTATE_SECRET][REQUIRED]` Rotate or remove `ADMIN_SECRET`. The
+   route fails closed on an empty or unset value, so removal is a valid state.
+6. `[BOOTSTRAP_DEPLOY_ROTATION][REQUIRED]` **Deploy that change deliberately.**
+   Until a deployment picks it up, the old value is still live.
+7. `[BOOTSTRAP_POSTCHECK][REQUIRED]` Return to the still-running process and let
+   it take POST. Only `PRODUCTION_CONTAINMENT_PROVEN` closes the bootstrap
+   window. A single-shot rejection is **not** enrollment evidence.
+
+   A post-check that does not prove containment does **not** end the run. A 429,
+   a 5xx, a transport failure, a refused redirect, an unattributed 401, or a
+   still-accepted response all leave the proof **armed** and retryable in that
+   same process — so a rate limit or a deployment that has not finished
+   propagating costs you a retry, not the proof.
+8. `[BOOTSTRAP_REENUMERATE][REQUIRED]` Re-enumerate privileged claims across all
+   accounts.
+9. `[BOOTSTRAP_VERIFY_AUTHZ][REQUIRED]` Verify both a positive and a negative
+   authorization control, and record the evidence.
+
+**Never send a uid to `/api/admin/set-admin` as a verification step.** The
+secret is validated BEFORE the uid, so with a uid a still-live old secret does
+not report a failure — it mints `admin: true` on that uid, with no audit record
+and no success log. The verification would be the breach. The two-phase tool
+sends `{"secret": "<OLD_SECRET>"}` and nothing else: `buildProbeBody()` takes one
+parameter and cannot carry a uid.
 
 Neither procedure is performed by any phase that documents it; enrollment is a
 separate, explicitly authorized action.
@@ -417,14 +451,19 @@ table is the contract.
    machine, a leaked deployment env, a shared password store, an unknown
    exfiltration scope, or simply an inability to rule it out — then:
 
-   a. Rotate `ADMIN_SECRET` to a new value, or remove it entirely if no
+   a. `[CONTAINMENT_PROBE_OLD_SECRET][REQUIRED]` **Start the two-phase
+      containment tool FIRST and wait for `[PRE] OK`.** The pre-check must be
+      taken while the exposed secret is still live — that is what binds the
+      later rejection to this credential at this origin. Starting after the
+      rotation makes the proof unobtainable, and re-enabling the old secret to
+      recreate a pre-check would re-open the hole you are closing.
+   b. Rotate `ADMIN_SECRET` to a new value, or remove it entirely if no
       bootstrap is pending. The route fails closed on an empty or unset value,
       so removal is a valid containment state.
-   b. **Deploy deliberately.** An environment variable change does not affect
+   c. **Deploy deliberately.** An environment variable change does not affect
       running Production until a deployment picks it up. Until then the old
       secret is still live.
-   c. `[CONTAINMENT_PROBE_OLD_SECRET][REQUIRED]` **Prove the rotation with the
-      two-phase containment tool.**
+   d. **Return to the still-running process for POST.**
 
       <!-- SAFE-PROBE:CANONICAL — one executable, two bound observations. -->
 
@@ -461,6 +500,49 @@ table is the contract.
       phases, so changing the environment mid-run cannot retarget the second
       observation.
 
+      **The origin is not an input.** `--production-two-phase` takes no origin
+      argument and reads no origin environment variable. It always contacts
+      `https://convergepanel.com/api/admin/set-admin`. An earlier build resolved
+      the origin from `PROBE_ORIGIN_OVERRIDE` and disabled the canonical check
+      whenever `PROBE_ALLOW_INSECURE_LOOPBACK=1` — so those two variables ran the
+      whole proof against a foreign host and printed the proof token while
+      transmitting the live old secret there. Both are gone; loopback testing now
+      happens inside the test suite, not through the shipped executable.
+
+      **A post-check that does not prove containment does not end the run.**
+      Only a rejection leaves the armed state:
+
+      | POST observation | Meaning | Armed after? |
+      |---|---|---|
+      | `401` + `credential-rejected` | **PROVEN** — containment established | no (terminal) |
+      | `400` + `credential-accepted` | `NOT_YET_CONTAINED` — old secret still live | **yes, retry** |
+      | `429` | `INCONCLUSIVE` — limiter answered before the secret was read | **yes, retry** |
+      | `5xx` | `INCONCLUSIVE` | **yes, retry** |
+      | transport failure / refused redirect | `INCONCLUSIVE` | **yes, retry** |
+      | `401` with no route marker | `INCONCLUSIVE` — not attributable | **yes, retry** |
+
+      This matters because the route allows only **3 requests per 300 s per IP**,
+      checked before the secret is examined, and the canonical sequence spends
+      exactly three: the pre-check, the mint, and the post-check. There is no
+      margin, so a 429 at the post-check is an ordinary event. Wait for the
+      window (the tool prints `retry-after` when the route supplies it) and retry
+      in the SAME process — the pre-check evidence is still held. Do not restart:
+      a fresh run's pre-check can no longer be accepted once the rotation has
+      shipped, and re-enabling the old secret to recreate one would re-open the
+      hole. Do not attempt to bypass the limiter.
+
+      **Exit codes.**
+
+      | Exit | Meaning |
+      |---|---|
+      | `0` | `PRODUCTION_CONTAINMENT_PROVEN`. The ONLY code that closes the window. |
+      | `2` | NOT CONTAINED — the last observation was a conclusive `credential-accepted`. |
+      | `3` | INCONCLUSIVE — no verdict was reached (refused target, missing secret, 429, 5xx, transport, unattributed response, or a non-interactive terminal). |
+
+      A `429` is never reported as exit 2: a rate limit says nothing about the
+      credential, and reading it as "containment failed" would start an incident
+      that does not exist.
+
       **What the response header is.** `x-convergepanel-admin-secret-probe` is a
       ROUTE MARKER: evidence that the expected route response contract was
       observed at the contacted origin. It is **not** cryptographic attestation,
@@ -468,7 +550,8 @@ table is the contract.
       containment on its own — it is world-readable in a public repository. The
       proof comes from the bound transition, not from the header.
 
-      A single-shot diagnostic exists (`--observe <origin>`) and reports
+      A single-shot diagnostic exists (`--observe`, canonical by default;
+      `--observe --non-production-target <origin>` for anything else) and reports
       `CREDENTIAL_ACCEPTED` / `CREDENTIAL_REJECTED` / `INCONCLUSIVE` only. It can
       never print `PRODUCTION_CONTAINMENT_PROVEN`, because it observes no
       transition. Do not use it as enrollment or containment evidence.

@@ -174,19 +174,26 @@ describe("the canonical safe probe is defined exactly once and is uid-less", () 
     expect(src.match(/SAFE-PROBE:CANONICAL/g) ?? []).toHaveLength(1);
   });
 
-  it("it prescribes a credential-only body", () => {
+  it("it prescribes a credential-only body, and no uid-bearing body exists anywhere", () => {
     expect(src).toContain('{"secret": "<OLD_SECRET>"}');
-    expect(src.replace(/\s+/g, " ")).toContain('{"secret": "<OLD_SECRET>"} <- no uid, ever');
+    // Phase FIRST-ADMIN-C14 (R10 P2-3): this used to be anchored on a block the
+    // document itself labelled "what NOT to do", so deleting that block — the
+    // correct cleanup — broke CI. The invariant is now stated over the whole
+    // runbook and does not depend on deprecated text existing.
+    expect(uidBearingBodies(src.split("\n"))).toHaveLength(0);
   });
 
-  it("the enrollment procedure defers to it rather than restating a probe", () => {
+  it("the enrollment procedure defers to the canonical tool and states no rival verdict rule", () => {
     const enrollment = src.slice(
       src.indexOf("**Option 2 — the bootstrap route.**"),
       src.indexOf("### Password admin session")
     );
-    expect(enrollment).toContain("§B.6.c");
-    expect(enrollment).toContain("no uid, ever");
+    expect(enrollment).toContain("--production-two-phase");
+    expect(enrollment).toMatch(/Never send a uid/);
     expect(uidBearingBodies(enrollment.split("\n"))).toHaveLength(0);
+    // R10 AA: a second, contradictory verdict rule must not survive beside it.
+    expect(enrollment).not.toMatch(/only result that closes the window/);
+    expect(enrollment).toContain("PRODUCTION_CONTAINMENT_PROVEN");
   });
 });
 
@@ -376,5 +383,82 @@ describe("admin-minting operator scripts are classified — BY CONTENT, not by n
     expect(mintsAuthority(`await setCustomUserClaims(uid, { "admin": true });`)).toBe(true);
     // ...nor on prose about minting.
     expect(mintsAuthority(`// this script does not call setCustomUserClaims with admin: true`)).toBe(false);
+  });
+});
+
+
+// ===========================================================================
+describe("BOOTSTRAP SEQUENCE ORDER — the pre-check precedes every mutation", () => {
+  /**
+   * Phase FIRST-ADMIN-C14 (R10 P0, item 26). Both documented sequences told the
+   * operator to rotate AND DEPLOY before running the tool whose pre-check
+   * requires the old secret to still be accepted. Following the numbering made
+   * the mandated artifact unobtainable, and the natural recovery — putting the
+   * old secret back so PRE passes — re-opens the hole being closed.
+   *
+   * Prose cannot be trusted to hold an order, so the order is now data.
+   */
+  const RUNBOOK = "docs/operations/admin-authority-tiers.md";
+  const src = readFileSync(RUNBOOK, "utf8");
+
+  const STEPS = [
+    "BOOTSTRAP_SET_SECRET",
+    "BOOTSTRAP_PRECHECK",
+    "BOOTSTRAP_MINT",
+    "BOOTSTRAP_VERIFY_MINT",
+    "BOOTSTRAP_ROTATE_SECRET",
+    "BOOTSTRAP_DEPLOY_ROTATION",
+    "BOOTSTRAP_POSTCHECK",
+    "BOOTSTRAP_REENUMERATE",
+    "BOOTSTRAP_VERIFY_AUTHZ",
+  ] as const;
+
+  const stepAt = (id: string) => src.indexOf(`[${id}][REQUIRED]`);
+
+  it("ANCHOR: every step id appears exactly once as a numbered step", () => {
+    for (const id of STEPS) {
+      expect(src.match(new RegExp(`\\[${id}\\]\\[REQUIRED\\]`, "g")) ?? []).toHaveLength(1);
+      expect(stepAt(id)).toBeGreaterThan(-1);
+    }
+  });
+
+  it("every step is declared MUST in the sequence table", () => {
+    for (const id of STEPS) {
+      const row = src.split("\n").find((l) => l.includes(`\`${id}\``) && l.trim().startsWith("|"));
+      expect(row).toBeDefined();
+      expect(row!.trim().endsWith("| MUST |")).toBe(true);
+    }
+    expect(src).not.toMatch(/\| `BOOTSTRAP_[A-Z_]+` \|[^|]*\| (MAY|SHOULD|OPTIONAL) \|/);
+  });
+
+  it("PRECHECK precedes the mint, the rotation, the deployment and the post-check", () => {
+    expect(stepAt("BOOTSTRAP_PRECHECK")).toBeLessThan(stepAt("BOOTSTRAP_MINT"));
+    expect(stepAt("BOOTSTRAP_PRECHECK")).toBeLessThan(stepAt("BOOTSTRAP_ROTATE_SECRET"));
+    expect(stepAt("BOOTSTRAP_PRECHECK")).toBeLessThan(stepAt("BOOTSTRAP_DEPLOY_ROTATION"));
+    expect(stepAt("BOOTSTRAP_PRECHECK")).toBeLessThan(stepAt("BOOTSTRAP_POSTCHECK"));
+    expect(stepAt("BOOTSTRAP_MINT")).toBeLessThan(stepAt("BOOTSTRAP_ROTATE_SECRET"));
+    expect(stepAt("BOOTSTRAP_ROTATE_SECRET")).toBeLessThan(stepAt("BOOTSTRAP_DEPLOY_ROTATION"));
+    expect(stepAt("BOOTSTRAP_DEPLOY_ROTATION")).toBeLessThan(stepAt("BOOTSTRAP_POSTCHECK"));
+  });
+
+  it("the numbered steps appear in exactly the declared order", () => {
+    const positions = STEPS.map(stepAt);
+    expect(positions).toEqual([...positions].sort((a, b) => a - b));
+  });
+
+  it("the incident sequence also starts the probe BEFORE the rotation", () => {
+    const b6 = src.slice(src.indexOf("If there is ANY possibility the secret was exposed"));
+    const probe = b6.indexOf("[CONTAINMENT_PROBE_OLD_SECRET][REQUIRED]");
+    const rotate = b6.indexOf("Rotate `ADMIN_SECRET` to a new value");
+    const deploy = b6.indexOf("**Deploy deliberately.**");
+    expect(probe).toBeGreaterThan(-1);
+    expect(rotate).toBeGreaterThan(-1);
+    expect(probe).toBeLessThan(rotate);
+    expect(probe).toBeLessThan(deploy);
+  });
+
+  it("a post-check that does not prove containment is documented as retryable, not terminal", () => {
+    const flat = src.replace(/\s+/g, " ");
+    expect(flat).toMatch(/leave the proof \*\*armed\*\* and retryable/);
   });
 });

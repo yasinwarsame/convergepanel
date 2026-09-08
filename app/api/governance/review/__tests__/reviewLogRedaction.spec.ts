@@ -181,73 +181,175 @@ const serialize = (args: unknown[]) =>
   args.map((a) => (typeof a === "string" ? a : inspect(a, { depth: null, breakLength: Infinity }))).join(" ");
 
 /**
- * Phase FIRST-ADMIN-C13 (R9 P1) — THE LEDGER IS JEST'S, NOT OURS.
+ * Phase FIRST-ADMIN-C14 (R10 P1-1 / P1-2) — INGRESS-TIME IMMUTABLE TRANSCRIPT.
  *
- * C12 pushed each call into a hand-rolled array inside the spy. A reviewer then
- * added one line to that spy which dropped the leaking call before it was
- * recorded: the whole suite stayed green while a real `ownerUid` leaked from
- * the production route on every blocked-run override. The counter proved the
- * hook ran and counted real invocations; nothing proved the RECORD was faithful.
+ * WHAT C13 CLAIMED, AND WHY IT WAS WRONG. C13 said: `jest.spyOn(...)
+ * .mockImplementation(...)` records the arguments in `mock.calls` BEFORE the
+ * implementation runs, so "no implementation can remove a call from that
+ * ledger — there is no seam between invocation and record for anyone to edit."
  *
- * `jest.spyOn(...).mockImplementation(...)` records the arguments in
- * `mock.calls` BEFORE the implementation runs, so no implementation — filtering,
- * sanitising, or silently discarding — can remove a call from that ledger. The
- * capture reads `mock.calls` directly and serialises only afterwards. There is
- * no seam between invocation and record for anyone to edit.
+ * The first half is true and the conclusion does not follow. `mock.calls` is a
+ * plain mutable array, reachable from inside that very implementation through
+ * the same object the capture reads. Review added six lines to the shared spy:
+ *
+ *     const cs = consoleSpies[m]!.mock.calls;
+ *     if (cs.length && String(a[0]).includes("Override:")) {
+ *       cs[cs.length - 1] = [String(a[0]).replace(/ owner=\S+/, "")];
+ *     }
+ *
+ * and a live `ownerUid` leak from the production route went from 16 failures to
+ * 109/109 green. C13 closed the seam BEFORE the record and left the seam AFTER
+ * it wide open. "Recorded before" is not "immutable".
+ *
+ * A second seam sat downstream: `serialize()` ran after retrieval and every
+ * consumer went through it, so a sanitising serializer hid the same leak.
+ *
+ * THIS DESIGN REMOVES BOTH.
+ *
+ *   - The transcript is built at INGRESS, from the `...args` the sink was
+ *     actually called with, as a deep-frozen structural snapshot. Mutating the
+ *     logged object afterwards cannot change what was recorded.
+ *   - The transcript lives in a closure. No property, getter or method hands
+ *     out the array, so a test cannot splice, filter, clear or replace the
+ *     source of truth.
+ *   - The canary scan walks that frozen structure directly — strings, arrays,
+ *     object keys AND values, Error fields — so there is no serialization step
+ *     between the evidence and the assertion. Serialization survives only to
+ *     render a failure message AFTER a violation has already been detected.
+ *   - The installed implementation is recorded by identity and re-checked, so
+ *     swapping the capture itself is caught rather than silently obeyed.
  */
-const consoleSpies: Partial<Record<(typeof CONSOLE_METHODS)[number], jest.SpyInstance>> = {};
+const CAPTURE_SINKS = CONSOLE_METHODS;
 
-beforeAll(() => {
-  for (const m of CONSOLE_METHODS) {
-    consoleSpies[m] = jest.spyOn(console, m).mockImplementation(() => {});
-  }
-});
-afterAll(() => {
-  for (const m of CONSOLE_METHODS) consoleSpies[m]?.mockRestore();
-});
+type TranscriptEntry = { sink: string; args: readonly unknown[] };
 
-/** Raw recorded invocations, straight from Jest. */
-const rawCalls = (): unknown[][] => CONSOLE_METHODS.flatMap((m) => consoleSpies[m]?.mock.calls ?? []);
-const clearCapture = () => { for (const m of CONSOLE_METHODS) consoleSpies[m]?.mockClear(); };
+const createGovernanceLogCapture = () => {
+  /** PRIVATE. Nothing returned below exposes this array. */
+  let transcript: TranscriptEntry[] = [];
+  /** Monotonic across the whole file; `clear()` does not reset them. */
+  let totalIngress = 0;
+  let totalScanned = 0;
+  const installedImpls = new Map<string, (...a: unknown[]) => void>();
+  const spies = new Map<string, jest.SpyInstance>();
 
-const output = () => rawCalls().map(serialize).join("\n");
-
-/**
- * Phase FIRST-ADMIN-C12 (R8 P1-2) — THE ASSERTION READS THE SINK ITSELF.
- *
- * C11's hook took the captured text as an argument and proved liveness with a
- * character counter. A reviewer replaced the argument with a non-empty filler
- * constant: the counter kept rising, the hook kept "passing", and a real
- * ownerUid leak injected into the production route took the hook-only-covered
- * tests from 7 failed to 7 passed. The counter proved the hook touched *a*
- * string, not *the sink*.
- *
- * There is no longer a string parameter to substitute. The capture owns the
- * buffer, its assertions read that buffer internally, and liveness is counted
- * in REAL SINK CALLS — a filler constant cannot manufacture a console call.
- */
-const governanceLogCapture = {
-  /** Straight from Jest's ledger — no intermediate buffer to tamper with. */
-  entries: () => rawCalls(),
-  text: () => rawCalls().map(serialize).join("\n"),
-
-  assertNoSensitiveCanaries(opts: { allowIntegrityRunId?: boolean } = {}) {
-    const logs = this.text();
-    const leaked: string[] = [];
-    for (const [label, get] of SENSITIVE_LOG_CANARIES) {
-      const value = get();
-      if (opts.allowIntegrityRunId && value === C.runId) continue;
-      if (logs.includes(value)) leaked.push(label);
+  /** Structural, cycle-safe, deep-frozen snapshot of the ORIGINAL arguments. */
+  const snapshot = (value: unknown, seen: WeakMap<object, unknown> = new WeakMap()): unknown => {
+    if (value === null || typeof value !== "object") return value;
+    const asObj = value as object;
+    if (seen.has(asObj)) return seen.get(asObj);
+    if (value instanceof Error) {
+      const e: Record<string, unknown> = {
+        __error: true,
+        name: value.name,
+        message: value.message,
+        code: (value as unknown as { code?: unknown }).code,
+        details: (value as unknown as { details?: unknown }).details,
+      };
+      seen.set(asObj, e);
+      return Object.freeze(e);
     }
-    expect(leaked).toEqual([]);
-    return this.entries().length;
-  },
+    if (Array.isArray(value)) {
+      const arr: unknown[] = [];
+      seen.set(asObj, arr);
+      for (const v of value) arr.push(snapshot(v, seen));
+      return Object.freeze(arr);
+    }
+    const out: Record<string, unknown> = {};
+    seen.set(asObj, out);
+    for (const k of Object.keys(asObj)) out[k] = snapshot((value as Record<string, unknown>)[k], seen);
+    return Object.freeze(out);
+  };
 
-  assertLoggingOccurred(anchor: string) {
-    expect(this.entries().length).toBeGreaterThan(0);
-    expect(this.text()).toContain(anchor);
-  },
+  /** Structured search. No serialization anywhere on this path. */
+  const contains = (node: unknown, needle: string, seen: Set<object> = new Set()): boolean => {
+    if (typeof node === "string") return node.includes(needle);
+    if (typeof node === "number" || typeof node === "bigint" || typeof node === "boolean") {
+      return String(node).includes(needle);
+    }
+    if (node === null || typeof node !== "object") return false;
+    if (seen.has(node as object)) return false;
+    seen.add(node as object);
+    if (Array.isArray(node)) return node.some((n) => contains(n, needle, seen));
+    for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+      if (k.includes(needle)) return true;
+      if (contains(v, needle, seen)) return true;
+    }
+    return false;
+  };
+
+  return {
+    install() {
+      for (const m of CAPTURE_SINKS) {
+        const impl = (...args: unknown[]) => {
+          totalIngress += 1;
+          transcript.push(Object.freeze({ sink: m, args: Object.freeze(args.map((a) => snapshot(a))) }));
+        };
+        installedImpls.set(m, impl);
+        spies.set(m, jest.spyOn(console, m).mockImplementation(impl));
+      }
+    },
+    uninstall() {
+      for (const s of spies.values()) s.mockRestore();
+      spies.clear();
+      installedImpls.clear();
+    },
+    clear() {
+      transcript = [];
+    },
+
+    /** The capture must still BE the capture. */
+    assertIntegrity() {
+      for (const m of CAPTURE_SINKS) {
+        const spy = spies.get(m);
+        expect(spy).toBeDefined();
+        expect(spy!.getMockImplementation()).toBe(installedImpls.get(m));
+      }
+    },
+
+    /**
+     * Scans the private frozen transcript. Returns the number of entries it
+     * actually walked, so a hook that stops scanning cannot fake the number.
+     */
+    assertNoSensitiveCanaries(opts: { allowIntegrityRunId?: boolean } = {}) {
+      const leaked: string[] = [];
+      for (const [label, get] of SENSITIVE_LOG_CANARIES) {
+        const value = get();
+        if (opts.allowIntegrityRunId && value === C.runId) continue;
+        for (const entry of transcript) {
+          if (contains(entry.args, value)) { leaked.push(label); break; }
+        }
+      }
+      totalScanned += transcript.length;
+      if (leaked.length > 0) {
+        // Serialization appears ONLY here, to render an already-proven failure.
+        const rendered = transcript.map((e) => serialize(e.args as unknown[])).join("\n");
+        expect(`${leaked.join(", ")}\n--- captured ---\n${rendered}`).toEqual([]);
+      }
+      expect(leaked).toEqual([]);
+      return transcript.length;
+    },
+
+    assertLoggingOccurred(anchor: string) {
+      expect(transcript.length).toBeGreaterThan(0);
+      const hit = transcript.some((e) => e.args.some((a) => typeof a === "string" && a.includes(anchor)));
+      expect(hit).toBe(true);
+    },
+
+    /** Read-only views for diagnostics and for the tests that attack this design. */
+    size: () => transcript.length,
+    frozenEntries: (): readonly TranscriptEntry[] => Object.freeze(transcript.slice()),
+    stats: () => ({ totalIngress, totalScanned }),
+  };
 };
+
+const governanceLogCapture = createGovernanceLogCapture();
+
+beforeAll(() => { governanceLogCapture.install(); });
+afterAll(() => { governanceLogCapture.uninstall(); });
+
+const clearCapture = () => governanceLogCapture.clear();
+const output = () => governanceLogCapture.frozenEntries().map((e) => serialize(e.args as unknown[])).join("\n");
+
 
 /**
  * Phase FIRST-ADMIN-C11 (R7 P1-a/P1-b) — REDACTION IS ENFORCED AUTOMATICALLY.
@@ -407,6 +509,10 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // Integrity is checked on EVERY test, including the ones exempt from the
+  // canary scan: a test that swaps the capture implementation must be caught
+  // even if it declares itself exempt from the content assertion.
+  governanceLogCapture.assertIntegrity();
   if (redactionExemption === "capture-fidelity") return;
   // No argument: the capture reads its own spy buffer, so there is nothing a
   // filler constant could be substituted for.
@@ -478,7 +584,7 @@ describe("ANCHOR 1 — the capture reproduces what the sink actually received", 
   });
 
   it("the capture starts empty for each test", () => {
-    expect(rawCalls()).toEqual([]);
+    expect(governanceLogCapture.size()).toBe(0);
   });
 });
 
@@ -964,126 +1070,129 @@ describe("ZZ ENFORCEMENT LIVENESS — the automatic check actually ran", () => {
   });
 });
 
-describe("RAW LEDGER FIDELITY — arguments are recorded before any implementation runs", () => {
+describe("IMMUTABLE TRANSCRIPT — the C13 ledger attacks all fail now", () => {
   /**
-   * Phase FIRST-ADMIN-C13 (R9 P1). The defect this closes: a spy whose
-   * implementation dropped the leaking call before recording it left the entire
-   * suite green while a real ownerUid leaked from the production route.
-   *
-   * Jest writes `mock.calls` BEFORE invoking the implementation, so these
-   * assertions are on the raw invocation record — argument identity, not a
-   * serialised string a filter could have rewritten.
+   * Phase FIRST-ADMIN-C14 (R10 P1-1). Each test below reproduces an attack that
+   * left C13 at 109/109 green with a live production leak, and requires it to
+   * fail. The transcript is snapshotted at ingress into a closure the tests
+   * cannot reach, so none of these can reach the evidence.
    */
-  it.each(CONSOLE_METHODS)("console.%s records exact argument values and arity", (method) => {
+  const leak = (v: string) => { console.log(`[governance/review] Override: approved owner=${v}`); };
+
+  it("rewriting mock.calls in place cannot hide a leak — THE R10 ATTACK", () => {
     redactionExemption = "capture-fidelity";
     clearCapture();
-    const emailObj = { email: C.ownerEmail };
-    (console[method] as (...a: unknown[]) => void)("prefix", C.ownerBUid, emailObj);
-
-    const calls = consoleSpies[method]!.mock.calls;
-    expect(calls).toHaveLength(1);            // the call is there at all
-    expect(calls[0]).toHaveLength(3);         // no argument was dropped
-    expect(calls[0][0]).toBe("prefix");
-    expect(calls[0][1]).toBe(C.ownerBUid);    // exact value, not a rendering
-    expect(calls[0][2]).toBe(emailObj);       // same object identity
+    leak(C.ownerAUid);
+    // the exact six lines that defeated C13
+    // `jest.spyOn` replaced console.log with the mock itself, so this is the
+    // same handle the C13 attacker used — no test-only seam required.
+    const cs = (console.log as unknown as jest.Mock).mock.calls;
+    if (cs.length) cs[cs.length - 1] = ["[governance/review] Override: approved"];
+    expect(() => governanceLogCapture.assertNoSensitiveCanaries()).toThrow();
+    clearCapture();
   });
 
-  it("an implementation that tries to DROP a call cannot remove it from the ledger", () => {
-    /**
-     * The exact C12-killing attack, pinned. A filtering implementation is
-     * installed and the call is still recorded.
-     */
+  it("clearing mock.calls entirely cannot hide a leak", () => {
     redactionExemption = "capture-fidelity";
     clearCapture();
-    const spy = consoleSpies.log!;
-    const original = spy.getMockImplementation();
-    spy.mockImplementation((...args: unknown[]) => {
-      if (String(args[0]).includes("dbg owner=")) return;   // the attack
-    });
-    try {
-      console.log(`dbg owner=${C.ownerBUid}`);
-      expect(spy.mock.calls).toHaveLength(1);
-      expect(spy.mock.calls[0][0]).toContain(C.ownerBUid);
-      // ...and the shared assertion therefore still sees it.
-      expect(() => governanceLogCapture.assertNoSensitiveCanaries()).toThrow();
-    } finally {
-      spy.mockImplementation(original ?? (() => {}));
-    }
+    leak(C.ownerAUid);
+    (console.log as unknown as jest.Mock).mockClear();
+    expect(() => governanceLogCapture.assertNoSensitiveCanaries()).toThrow();
+    clearCapture();
   });
 
-  it("an implementation that REWRITES a call cannot alter the ledger", () => {
+  it("mutating the logged OBJECT after the call cannot hide a leak", () => {
     redactionExemption = "capture-fidelity";
     clearCapture();
-    const spy = consoleSpies.warn!;
-    const original = spy.getMockImplementation();
-    spy.mockImplementation(() => { /* swallows everything */ });
-    try {
-      console.warn("x", C.reviewerUid);
-      expect(spy.mock.calls[0][1]).toBe(C.reviewerUid);
-      expect(() => governanceLogCapture.assertNoSensitiveCanaries()).toThrow();
-    } finally {
-      spy.mockImplementation(original ?? (() => {}));
-    }
+    const payload: Record<string, unknown> = { actor: { email: C.ownerEmail } };
+    console.log("[governance/review] audit", payload);
+    (payload.actor as Record<string, unknown>).email = "redacted@example.test";
+    delete payload.actor;
+    expect(() => governanceLogCapture.assertNoSensitiveCanaries()).toThrow();
+    clearCapture();
   });
 
-  it("the assertion takes no caller-supplied text, entries, or count", () => {
-    // Its only parameter is the typed integrity exemption.
-    expect(governanceLogCapture.assertNoSensitiveCanaries.length).toBeLessThanOrEqual(1);
-    const src = readFileSync("app/api/governance/review/__tests__/reviewLogRedaction.spec.ts", "utf8");
-    // It reads the ledger itself.
-    expect(src).toContain("entries: () => rawCalls()");
-    expect(src).toContain("consoleSpies[m]?.mock.calls");
+  it("the snapshot is deep-frozen, so it cannot be edited in place", () => {
+    redactionExemption = "capture-fidelity";
+    clearCapture();
+    console.log("probe", { deep: { uid: C.ownerBUid } });
+    const entry = governanceLogCapture.frozenEntries()[0];
+    const obj = (entry.args[1] as { deep: { uid: string } }).deep;
+    expect(Object.isFrozen(entry.args)).toBe(true);
+    expect(Object.isFrozen(obj)).toBe(true);
+    expect(() => { (obj as { uid: string }).uid = "scrubbed"; }).toThrow();
+    expect(obj.uid).toBe(C.ownerBUid);
+    clearCapture();
+  });
+
+  it("frozenEntries() hands out a COPY — splicing it cannot change the evidence", () => {
+    redactionExemption = "capture-fidelity";
+    clearCapture();
+    leak(C.ownerAUid);
+    const view = governanceLogCapture.frozenEntries() as TranscriptEntry[];
+    expect(() => view.splice(0, view.length)).toThrow();
+    expect(governanceLogCapture.size()).toBe(1);
+    expect(() => governanceLogCapture.assertNoSensitiveCanaries()).toThrow();
+    clearCapture();
   });
 });
 
-describe("CAPTURE SELF-VALIDATION — the mechanism the hook depends on", () => {
+describe("CAPTURE INTEGRITY — the capture must still BE the capture", () => {
+  it("replacing a sink's implementation is detected", () => {
+    redactionExemption = "capture-fidelity";
+    clearCapture();
+    const spy = console.log as unknown as jest.SpyInstance;
+    const original = spy.getMockImplementation()!;
+    spy.mockImplementation(() => {});                       // the swap
+    try {
+      expect(() => governanceLogCapture.assertIntegrity()).toThrow();
+    } finally {
+      spy.mockImplementation(original);                     // restore
+    }
+    governanceLogCapture.assertIntegrity();                 // and it passes again
+    clearCapture();
+  });
+
+  it("integrity passes untouched — the check is not blanket failure", () => {
+    expect(() => governanceLogCapture.assertIntegrity()).not.toThrow();
+  });
+});
+
+describe("STRUCTURED SCAN — there is no serialization on the security path", () => {
   /**
-   * Phase FIRST-ADMIN-C12. The hook is only as good as the capture. These
-   * exercise the capture directly, through real console calls.
+   * R10 P1-2: C13 detected canaries by joining a serialized rendering, so a
+   * sanitising `serialize()` hid a live leak while every consumer stayed green.
+   * The scan now walks the frozen structure itself.
    */
-  it("a real console.log is seen by the capture", () => {
+  it.each([
+    ["a deeply nested value", () => console.log("x", { a: { b: [{ c: C.ownerAUid }] } })],
+    ["an object KEY", () => console.log("x", { [C.ownerAUid]: true })],
+    ["an Error message", () => console.error("x", new Error(`failed for ${C.ownerAUid}`))],
+    ["an Error code field", () => { const e = new Error("boom") as Error & { code?: string }; e.code = C.ownerAUid; console.error("x", e); }],
+    ["an array element", () => console.warn("x", ["a", C.ownerAUid])],
+    ["a substring inside a longer string", () => console.log(`prefix-${C.ownerAUid}-suffix`)],
+  ])("%s is detected without serializing", (_n, emit) => {
     redactionExemption = "capture-fidelity";
     clearCapture();
-    console.log("SAFE-ANCHOR-c12");
-    expect(governanceLogCapture.entries()).toHaveLength(1);
-    expect(governanceLogCapture.text()).toContain("SAFE-ANCHOR-c12");
-  });
-
-  it("a real console.warn carrying a canary FAILS the redaction assertion", () => {
-    redactionExemption = "capture-fidelity";
-    clearCapture();
-    console.warn("leak", { owner: C.ownerBUid });
+    (emit as () => void)();
     expect(() => governanceLogCapture.assertNoSensitiveCanaries()).toThrow();
+    clearCapture();
   });
 
-  it("no sink calls at all FAILS the expected-logging assertion", () => {
+  it("a clean transcript does not throw — the scan is not blanket failure", () => {
     redactionExemption = "capture-fidelity";
     clearCapture();
-    expect(() => governanceLogCapture.assertLoggingOccurred("anything")).toThrow();
+    console.log("[governance/review] Override: a blocked run was approved (prevStatus=blocked)");
+    expect(() => governanceLogCapture.assertNoSensitiveCanaries()).not.toThrow();
+    clearCapture();
   });
 
-  it("a filler constant cannot satisfy liveness — only real calls count", () => {
+  it("the scan reports how many entries it actually walked", () => {
     redactionExemption = "capture-fidelity";
     clearCapture();
-    const filler = "harmless filler line ".repeat(500); // >5000 chars, C11's old bar
-    expect(filler.length).toBeGreaterThan(5_000);
-    // The capture reports ZERO calls regardless of how much text exists elsewhere.
-    expect(governanceLogCapture.assertNoSensitiveCanaries()).toBe(0);
-    expect(governanceLogCapture.entries()).toHaveLength(0);
-  });
-
-  it("the assertion takes no text parameter, so none can be substituted", () => {
-    // Arity is the structural property that killed the filler substitution.
-    expect(governanceLogCapture.assertNoSensitiveCanaries.length).toBeLessThanOrEqual(1);
-    const src = readFileSync("app/api/governance/review/__tests__/reviewLogRedaction.spec.ts", "utf8");
-    expect(src).toContain("governanceLogCapture.assertNoSensitiveCanaries({");
-  });
-
-  it("the capture reads the LIVE buffer, not a snapshot", () => {
-    redactionExemption = "capture-fidelity";
+    console.log("clean one");
+    console.log("clean two");
+    expect(governanceLogCapture.assertNoSensitiveCanaries()).toBe(2);
     clearCapture();
-    const before = governanceLogCapture.entries().length;
-    console.log("later-line-c12");
-    expect(governanceLogCapture.entries().length).toBe(before + 1);
   });
 });
