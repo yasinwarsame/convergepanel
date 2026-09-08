@@ -311,12 +311,21 @@ ConvergePanel uses Firebase Authentication with role-based access control.
 
 2. Get the user's UID from Firebase Console or from the user's profile page
 
-3. Call the admin setter endpoint:
+3. Call the admin setter endpoint. **MINTS-AUTHORITY** — this grants
+   SYSTEM_ADMIN to the named uid:
 ```bash
 curl -X POST http://localhost:3000/api/admin/set-admin \
   -H "Content-Type: application/json" \
   -d '{"uid": "USER_UID_HERE", "secret": "YOUR_ADMIN_SECRET"}'
 ```
+
+> <!-- SAFE-PROBE:PROHIBITION -->
+> **Never reuse this request to check whether an old secret still works.** The
+> secret is validated before the uid, so a still-live old secret does not report
+> a failure here — it mints the claim again, with no audit record and no log. To
+> verify a rotation or removal, use the uid-less probe in
+> `docs/operations/admin-authority-tiers.md` §B.6.c: send `{"secret": "..."}`
+> with **no uid**, and treat only `401` as proof.
 
 4. The user must sign out and sign back in for the admin claim to take effect
 

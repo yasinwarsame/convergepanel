@@ -11,10 +11,19 @@
  * - Requires ADMIN_SECRET environment variable
  * - Only sets custom claims (doesn't expose sensitive data)
  * 
- * Usage:
+ * Usage — MINTS-AUTHORITY. This form GRANTS SYSTEM_ADMIN to the named uid.
+ *
  *   curl -X POST http://localhost:3000/api/admin/set-admin \
  *     -H "Content-Type: application/json" \
  *     -d '{"uid": "USER_UID", "secret": "ADMIN_SECRET"}'
+ *
+ * SAFE-PROBE:PROHIBITION — NEVER use this form to check whether an old
+ * secret is still accepted. The
+ * secret is validated BEFORE the uid, so if the old secret is still live this
+ * request does not report a failure — it silently mints `admin: true` on that
+ * uid, with no audit record and no success log. To verify a rotation, use the
+ * uid-less containment probe in docs/operations/admin-authority-tiers.md §B.6.c:
+ * send `{"secret": "<OLD_SECRET>"}` with no uid, and treat only 401 as proof.
  * 
  * After calling this, the user must sign out and sign back in for
  * the admin claim to take effect (Firebase tokens are cached).

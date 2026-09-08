@@ -116,8 +116,19 @@ all, and there is no post-enrollment rotation to remember.
 3. Verify the claim landed on that uid and on no other.
 4. Immediately rotate or remove `ADMIN_SECRET`, and **deploy that change** — an
    env edit alone leaves the old value live in the running deployment.
-5. Verify the old value is dead: `POST /api/admin/set-admin` with it must return
-   401. The window is not closed until this is observed.
+5. Verify the old value is dead **with the canonical uid-less probe in §B.6.c**.
+   Send the credential ONLY:
+
+       POST /api/admin/set-admin
+       {"secret": "<OLD_SECRET>"}          <- no uid, ever
+
+   `401` = `CREDENTIAL_REJECTED`, and it is the only result that closes the
+   window. `400` = `CREDENTIAL_ACCEPTED`, meaning the rotation has not taken
+   effect. `429` and `5xx` are `INCONCLUSIVE`.
+
+   **Never send a uid in this probe.** With a uid, a still-live old secret does
+   not report a failure — it mints `admin: true` on that uid, with no audit
+   record and no log. The verification step would be the breach.
 
 Neither procedure is performed by any phase that documents it; enrollment is a
 separate, explicitly authorized action.
@@ -396,12 +407,17 @@ operator does; they are not automated.
 
       Read the response exactly as follows:
 
-      | Response | Meaning |
-      |---|---|
-      | **401** | The old secret is rejected. **The only proof of containment.** |
-      | 400 | The old secret was ACCEPTED — execution reached uid validation. **Containment has FAILED**; the rotation has not taken effect. |
-      | 429 | INCONCLUSIVE. Rate limiting (3 per 5 minutes per IP) runs *before* secret validation, and also denies when Firestore is unavailable. A correct secret and a wrong one both return 429. |
-      | 5xx / network error | INCONCLUSIVE. |
+      <!-- SAFE-PROBE:CANONICAL — the one authoritative liveness probe. Every
+           other operational section must reference this block, never restate
+           the request. Machine-checked by docs/__tests__/bootstrapProbeInvariant.spec.ts -->
+
+      | Status | Verdict token | Meaning |
+      |---|---|---|
+      | 401 | `CREDENTIAL_REJECTED` | The old secret is refused. **Containment proven.** |
+      | 400 | `CREDENTIAL_ACCEPTED` | Execution reached uid validation, so the secret still works. **Containment FAILED.** |
+      | 429 | `INCONCLUSIVE` | Rate limiting (3 per 5 min per IP) runs *before* secret validation, and also denies when Firestore is unavailable. A live and a dead credential both return 429. |
+      | 5xx | `INCONCLUSIVE` | The request never reached a verdict. |
+      | any other | `INCONCLUSIVE` | Not a verdict. |
 
       Only an authentication rejection of the OLD secret itself counts. Any
       other response — 429 included — means containment is **unproven**, not
@@ -409,11 +425,32 @@ operator does; they are not automated.
       attempt to bypass the rate limiter: wait for the window and repeat the
       probe through the normal operator process. These semantics are pinned by
       `app/api/admin/set-admin/__tests__/setAdminFailClosed.spec.ts`.
-   d. Re-enumerate custom claims across accounts afterwards: if the secret was
-      used before rotation, the resulting claim sits on an account nobody
-      enrolled and no record names.
+   d. (See step 8 — claim re-enumeration is unconditional, not part of this
+      branch.)
 
-7. Verify denial against Production. For the evidence review, consult the
+7. **Disable the affected Firebase Auth account** when the identity itself is
+   compromised (as opposed to a credential leak on an otherwise trusted
+   account). Be precise about what this buys, per §B.3-B.5:
+
+   - `verifySessionCookie(cookie, true)` performs a revocation/disabled check,
+     so **cookie-borne ADMIN_PORTAL access stops immediately** on disablement or
+     token revocation. That is the mechanism referred to by "invalidate the
+     session" — there is no separate session-invalidation endpoint, and
+     `POST /api/auth/session` will refuse to mint a new cookie for a disabled
+     account or a revoked token.
+   - `verifyIdToken` is called **without** `checkRevoked` on the SYSTEM_ADMIN
+     bearer path, so an already-issued ID token keeps working until it expires
+     (Firebase default one hour). Disabling does **not** shorten that window.
+     Do not record bearer-path cutoff as immediate.
+
+8. **Re-enumerate privileged claims across all accounts — unconditionally.**
+   Not only when secret exposure is suspected: step 1 removed the claim from ONE
+   account, and an attacker (or the compromised identity itself) may have minted
+   others before discovery, through `/api/admin/set-role` or the bootstrap
+   route. Neither leaves an audit record. List every account carrying
+   `admin: true` and confirm each is intended.
+
+9. Verify denial against Production. For the evidence review, consult the
    coverage table in §A.6 first — and note what it says about the operations a
    compromised SYSTEM_ADMIN is most likely to have used: claim minting via
    `set-role` and `set-admin`, provider credential access, and bulk purge
