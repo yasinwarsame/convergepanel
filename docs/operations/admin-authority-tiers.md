@@ -256,7 +256,10 @@ operator does; they are not automated.
    `app/api/admin/**/route.ts` and `app/api/governance/**/route.ts` and requires
    every such file to appear here, **with every HTTP method it exports** —
    GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS, declared either as
-   `export [async] function METHOD` or as `export const|let|var METHOD =`. A
+   `export [async] function METHOD` or as `export const|let|var METHOD =`.
+   A method exported indirectly (`export { handler as DELETE }`) is NOT
+   detected; no route uses that form, and it stays a review responsibility
+   rather than a mechanical one. A
    privileged route added under either tree in a `route.ts` therefore cannot be
    omitted, and neither can one of its methods. It does NOT cover a `route.tsx`,
    nor any privileged handler placed outside those two trees — those remain a
@@ -357,10 +360,10 @@ operator does; they are not automated.
 
 ### B. SYSTEM_ADMIN (claim-derived) — disabling is NOT sufficient
 
-1. **Remove the claim**: `setCustomUserClaims(uid, { admin: false })` (or drop the
+1. `[CONTAINMENT_REMOVE_CLAIM]` **Remove the claim**: `setCustomUserClaims(uid, { admin: false })` (or drop the
    key). `/api/admin/set-role` does this, but it itself requires SYSTEM_ADMIN, so
    during an incident use a service-account script rather than the route.
-2. **Revoke refresh tokens** — `adminAuth.revokeRefreshTokens(uid)`. Without this
+2. `[CONTAINMENT_REVOKE_REFRESH]` **Revoke refresh tokens** — `adminAuth.revokeRefreshTokens(uid)`. Without this
    the already-issued ID token keeps working.
 3. **Understand the residual window.** Every SYSTEM_ADMIN guard verifies with
    `verifyIdToken`, which does not consult revocation. Until the outstanding ID
@@ -377,7 +380,7 @@ operator does; they are not automated.
    revocation check, so the cookie's own five-day life can begin AFTER the
    revocation. Treat the effective ADMIN_PORTAL window as up to one hour plus the
    cookie lifetime unless you also invalidate the session.
-6. **Contain the BOOTSTRAP path, or containment is not complete.** Steps 1-2
+6. `[CONTAINMENT_ROTATE_BOOTSTRAP]` **Contain the BOOTSTRAP path, or containment is not complete.** Steps 1-2
    remove the claim from one account. They do nothing about `ADMIN_SECRET`,
    which mints `admin: true` on **any uid** through `/api/admin/set-admin`
    (§ "BOOTSTRAP_SECRET — not a human role"), authenticates no identity, and
@@ -395,64 +398,82 @@ operator does; they are not automated.
    b. **Deploy deliberately.** An environment variable change does not affect
       running Production until a deployment picks it up. Until then the old
       secret is still live.
-   c. **Prove the old value no longer works — with a probe that cannot mint a
-      claim.** C8 said to POST `{uid, secret}` with the old secret. That is
-      unsafe: if the rotated configuration has NOT actually deployed, the probe
-      **succeeds and re-mints `admin: true`** on the uid you used, with no audit
-      record and no log to notice it. The verification step would itself be the
-      breach.
+   c. `[CONTAINMENT_PROBE_OLD_SECRET]` **Prove the old value no longer works —
+      with the canonical probe, which cannot mint a claim.**
 
-      The route validates the secret BEFORE the uid, so **omit the uid**:
+      <!-- SAFE-PROBE:CANONICAL — the probe is an executable, not a snippet.
+           Do not restate the request anywhere; reference this step. -->
 
-          POST /api/admin/set-admin
-          {"secret": "<OLD_SECRET>"}          <- no uid, ever
+          OLD_ADMIN_SECRET=<old value> node scripts/probe-admin-secret.mjs https://<host>
 
-      Read the response exactly as follows:
+      `scripts/probe-admin-secret.mjs` builds its body from a single literal
+      containing only the secret. It has no uid parameter and no path from
+      caller input to the body, so **it cannot mint authority even if the old
+      secret is still live** — the worst case is a report that containment
+      failed. Earlier revisions told you to POST `{uid, secret}`; if the
+      rotation had not yet deployed, that "verification" re-minted `admin: true`
+      on the uid you used, with no audit record and no log. The verification
+      step was the breach.
 
-      <!-- SAFE-PROBE:CANONICAL — the one authoritative liveness probe. Every
-           other operational section must reference this block, never restate
-           the request. Machine-checked by docs/__tests__/bootstrapProbeInvariant.spec.ts -->
+      The tool's EXIT CODE is the verdict. Do not interpret the status yourself:
 
-      | Status | Verdict token | Meaning |
-      |---|---|---|
-      | 401 | `CREDENTIAL_REJECTED` | The old secret is refused. **Containment proven.** |
-      | 400 | `CREDENTIAL_ACCEPTED` | Execution reached uid validation, so the secret still works. **Containment FAILED.** |
-      | 429 | `INCONCLUSIVE` | Rate limiting (3 per 5 min per IP) runs *before* secret validation, and also denies when Firestore is unavailable. A live and a dead credential both return 429. |
-      | 5xx | `INCONCLUSIVE` | The request never reached a verdict. |
-      | any other | `INCONCLUSIVE` | Not a verdict. |
+      | Exit | Status | Verdict token | Meaning |
+      |---|---|---|---|
+      | 0 | 401 | `CREDENTIAL_REJECTED` | The old secret is refused. **Containment proven.** |
+      | 2 | 400 | `CREDENTIAL_ACCEPTED` | The secret still works. **Containment FAILED.** |
+      | 3 | 429 | `INCONCLUSIVE` | Rate limited before the secret was checked (see below). Not a verdict. |
+      | 3 | 5xx | `INCONCLUSIVE` | Never reached a verdict. |
+      | 3 | other / network | `INCONCLUSIVE` | Not a verdict. |
 
-      Only an authentication rejection of the OLD secret itself counts. Any
-      other response — 429 included — means containment is **unproven**, not
-      achieved. Do not treat "some non-2xx came back" as success, and do not
-      attempt to bypass the rate limiter: wait for the window and repeat the
-      probe through the normal operator process. These semantics are pinned by
-      `app/api/admin/set-admin/__tests__/setAdminFailClosed.spec.ts`.
+      **On rate limiting.** The route applies a per-IP limit of
+      `RATE_LIMIT_MAX_REQUESTS` attempts per `RATE_LIMIT_WINDOW_SECONDS` seconds
+      before the secret is examined, so a 429 tells you nothing about the
+      credential. Treat that limit as **defence-in-depth only** — it is per-IP,
+      so a distributed source weakens it, and until C11 it did not work at all
+      (`windowStart` was stored already expired, so the counter reset on almost
+      every request and nothing was ever throttled). The primary boundary is a
+      high-entropy `ADMIN_SECRET`, used only for a bootstrap window, then
+      rotated or removed.
+
+      **Only exit 0 closes the window.** Anything else means containment is
+      unproven, not achieved. Wait for the rate-limit window and re-run rather
+      than trying to bypass it. Behaviour pinned by
+      `scripts/__tests__/probeAdminSecret.spec.ts`.
+
    d. (See step 8 — claim re-enumeration is unconditional, not part of this
       branch.)
 
-7. **Disable the affected Firebase Auth account** when the identity itself is
+7. `[CONTAINMENT_DISABLE_ACCOUNT]` **Disable the affected Firebase Auth account** when the identity itself is
    compromised (as opposed to a credential leak on an otherwise trusted
    account). Be precise about what this buys, per §B.3-B.5:
 
-   - `verifySessionCookie(cookie, true)` performs a revocation/disabled check,
-     so **cookie-borne ADMIN_PORTAL access stops immediately** on disablement or
-     token revocation. That is the mechanism referred to by "invalidate the
-     session" — there is no separate session-invalidation endpoint, and
-     `POST /api/auth/session` will refuse to mint a new cookie for a disabled
-     account or a revoked token.
+   - **Existing session cookies stop working immediately.** Routes accepting a
+     cookie call `verifySessionCookie(cookie, true)`, and that second argument
+     performs the revocation/disabled check. That is the whole of what
+     "invalidate the session" means here — there is no separate
+     session-invalidation endpoint.
+   - **Minting a NEW cookie is not blocked by this application.**
+     `POST /api/auth/session` calls `adminAuth.verifyIdToken(idToken)` **without
+     `checkRevoked`** (`app/api/auth/session/route.ts:67`) and then
+     `createSessionCookie` (`:76`). A C10 revision of this runbook claimed the
+     route "will refuse to mint a new cookie for a disabled account or a revoked
+     token" — false, and contradicting §B.5 two paragraphs above. Assume a
+     holder of a still-unexpired ID token can obtain a fresh cookie whose
+     lifetime begins AFTER your revocation. Do not record the ADMIN_PORTAL
+     surface as closed until that ID token has expired.
    - `verifyIdToken` is called **without** `checkRevoked` on the SYSTEM_ADMIN
      bearer path, so an already-issued ID token keeps working until it expires
      (Firebase default one hour). Disabling does **not** shorten that window.
      Do not record bearer-path cutoff as immediate.
 
-8. **Re-enumerate privileged claims across all accounts — unconditionally.**
+8. `[CONTAINMENT_REENUMERATE_CLAIMS]` **Re-enumerate privileged claims across all accounts — unconditionally.**
    Not only when secret exposure is suspected: step 1 removed the claim from ONE
    account, and an attacker (or the compromised identity itself) may have minted
    others before discovery, through `/api/admin/set-role` or the bootstrap
    route. Neither leaves an audit record. List every account carrying
    `admin: true` and confirm each is intended.
 
-9. Verify denial against Production. For the evidence review, consult the
+9. `[CONTAINMENT_VERIFY_DENIAL]` **Verify denial against Production.** For the evidence review, consult the
    coverage table in §A.6 first — and note what it says about the operations a
    compromised SYSTEM_ADMIN is most likely to have used: claim minting via
    `set-role` and `set-admin`, provider credential access, and bulk purge

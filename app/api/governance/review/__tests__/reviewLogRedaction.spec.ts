@@ -137,12 +137,21 @@ const AUDIT_EVENT_IDENTITY_FIELDS = {
  * THIS function, so a new branch cannot quietly ship a weaker subset — the only
  * way to weaken one is to pass an explicit `allow`, which is visible in review.
  */
-function assertNoSensitiveGovernanceCanaries(logs: string, opts: { allow?: string[] } = {}) {
-  const allow = new Set(opts.allow ?? []);
+function assertNoSensitiveGovernanceCanaries(
+  logs: string,
+  opts: { allowIntegrityRunId?: boolean } = {}
+) {
+  /**
+   * Phase FIRST-ADMIN-C11 (R7 P2-a). The exception used to be an unbounded
+   * `allow: string[]`, so widening it to six values — including reviewer uid,
+   * owner uid and owner email — passed with the suite green. There is exactly
+   * ONE justified exception in this system, so it is now a named boolean and
+   * nothing else can be excused.
+   */
   const leaked: string[] = [];
   for (const [label, get] of SENSITIVE_LOG_CANARIES) {
     const value = get();
-    if (allow.has(value)) continue;
+    if (opts.allowIntegrityRunId && value === C.runId) continue;
     if (logs.includes(value)) leaked.push(label);
   }
   expect(leaked).toEqual([]);
@@ -183,6 +192,30 @@ afterAll(() => {
 });
 
 const output = () => captured.join("\n");
+
+/**
+ * Phase FIRST-ADMIN-C11 (R7 P1-a/P1-b) — REDACTION IS ENFORCED AUTOMATICALLY.
+ *
+ * C10 required each branch to CALL the shared assertion, and proved compliance
+ * by looking for the call as a substring of the test body. A reviewer defeated
+ * that twice: commenting the call out satisfied the substring check (and the
+ * sibling scan skipped comment lines, so one `//` blinded both), and a
+ * same-named decoy test earlier in the file redirected the per-branch lookup.
+ * A real uid+email leak rode in behind each, green.
+ *
+ * So the assertion is no longer something a test opts INTO. It runs after every
+ * test in this file against whatever reached the log sink. A new branch is
+ * covered the moment it is written, and the only way out is one of the two
+ * declared exemptions below — set in the test body, visible in review, and
+ * itself asserted.
+ */
+type RedactionExemption =
+  | "none"
+  /** The capture-fidelity tests deliberately log a canary to prove the spy works. */
+  | "capture-fidelity"
+  /** The workspace-integrity 404 path may retain the run id, and nothing else. */
+  | "integrity-run-id";
+let redactionExemption: RedactionExemption = "none";
 
 function docHandle(collection: string, id: string) {
   const rec = existingDocs[`${collection}/${id}`];
@@ -299,6 +332,14 @@ beforeEach(() => {
   auditRows = [];
   writes = [];
   auditWriteFails = false;
+  redactionExemption = "none";
+});
+
+afterEach(() => {
+  if (redactionExemption === "capture-fidelity") return;
+  assertNoSensitiveGovernanceCanaries(output(), {
+    allowIntegrityRunId: redactionExemption === "integrity-run-id",
+  });
 });
 
 describe("ANCHOR 0 — every canary is REACHABLE in the data the route reads", () => {
@@ -348,12 +389,14 @@ describe("ANCHOR 1 — the capture reproduces what the sink actually received", 
    * an object argument, because that is how `logger` passes structured data.
    */
   it.each(CONSOLE_METHODS)("console.%s output is recovered verbatim", (method) => {
+    redactionExemption = "capture-fidelity"; // deliberately emits a canary
     captured = [];
     (console[method] as (...a: unknown[]) => void)(`probe-${method}-${C.runId}`);
     expect(output()).toContain(`probe-${method}-${C.runId}`);
   });
 
   it("a canary nested inside an object argument is recovered", () => {
+    redactionExemption = "capture-fidelity"; // deliberately emits a canary
     captured = [];
     console.log("probe", { deep: { nested: [{ value: C.ownerBUid }] } });
     expect(output()).toContain(C.ownerBUid);
@@ -465,6 +508,8 @@ describe("DELIBERATE DIVERGENCE — the integrity-failure path keeps its run id"
    * leave an integrity failure with no way to find the affected run.
    */
   it("logs the run id on workspace integrity failure, because nothing else records it", async () => {
+    // THE ONE justified exemption. Named, not an arbitrary allowlist.
+    redactionExemption = "integrity-run-id";
     integrityClassification = "invalid";
     const res = await post("runs", C.runId);
     expect(res.status).toBe(404);
@@ -490,7 +535,7 @@ describe("DELIBERATE DIVERGENCE — the integrity-failure path keeps its run id"
      * where scope creep is most likely precisely BECAUSE it is already licensed
      * to carry one identifier. Everything except the run id is still forbidden.
      */
-    assertNoSensitiveGovernanceCanaries(logs, { allow: [C.runId] });
+    assertNoSensitiveGovernanceCanaries(logs, { allowIntegrityRunId: true });
   });
 });
 
@@ -699,72 +744,71 @@ describe("the audit writer's FAILURE path does not leak the record it failed on"
   });
 });
 
-describe("STRUCTURAL — the shared redaction contract cannot be bypassed by a branch", () => {
+describe("DENY-SET INTEGRITY — every declared canary is load-bearing", () => {
   /**
-   * Phase FIRST-ADMIN-C10. Two rounds running, the defect was a branch with its
-   * own weaker deny-set rather than a missing branch. Counting assertions is a
-   * source check and worth exactly that — but it is the check that catches the
-   * failure mode we actually keep hitting: a new branch quietly written with a
-   * hand-rolled list.
+   * Phase FIRST-ADMIN-C11.
+   *
+   * The per-branch "does this test call the shared helper?" checks that used to
+   * live here are GONE. They asserted that a call appeared as a substring of a
+   * test body, and a reviewer defeated them twice — by commenting the call out
+   * (which also blinded the sibling scan, since that skipped comment lines) and
+   * by adding a same-named decoy test earlier in the file. A real uid+email
+   * leak rode in behind each, green.
+   *
+   * Enforcement is now the `afterEach` above: it runs against the real captured
+   * sink after every test in this file, so a branch cannot forget it and a
+   * comment cannot silence it. What remains worth testing is the deny-set
+   * itself — R7 found four of its twelve entries could be deleted silently,
+   * and two others were protected only by accident.
    */
-  const SELF = readFileSync("app/api/governance/review/__tests__/reviewLogRedaction.spec.ts", "utf8");
+  const EXPECTED_CANARIES = [
+    "the reviewer's uid",
+    "the run owner's uid",
+    "a foreign tenant's uid",
+    "the reviewed run's id",
+    "a foreign run's id",
+    "the run's governance reason text",
+    "the run's question text",
+    "the caller's email address",
+    "the caller's email domain",
+    "the run owner's email address",
+    "the privileged allowlist address",
+    "the privileged allowlist domain",
+  ];
 
-  it.each([
-    ["GOVERNANCE HOT PATH", "never writes any sensitive canary to the log sink"],
-    ["OWNER_B IS REACHABLE", "writes no sensitive canary to the log sink on the denial path"],
-    ["admin_global BRANCH", "writes no sensitive canary to the log sink"],
-    ["SIBLING SCOPE BRANCHES", "plan_required: logs the decision without the caller's identity"],
-    ["SIBLING SCOPE BRANCHES", "no_assigners: logs the empty scope without the caller's identity"],
-    ["SIBLING SCOPE BRANCHES", "truncation: warns with a count and never the owner list"],
-    ["the audit writer's FAILURE path", "logs the failure as shape, never the raw error"],
-    ["DELIBERATE DIVERGENCE", "logs the run id on workspace integrity failure, because nothing else records it"],
-  ])("%s / %s calls the shared assertion", (_family, testName) => {
-    /**
-     * Per-branch, not a global count: a count is inflated by the helper's own
-     * unit tests, so removing a real branch's call left the total above the
-     * threshold and the removal passed. Each named test must contain the call.
-     */
-    /**
-     * Anchored to the full `it("<name>"` literal. Searching the bare name
-     * matched the wrong test: "…log sink" is a PREFIX of "…log sink on the
-     * denial path", so the admin_global check was inspecting the denial test
-     * and removing admin_global's call went undetected.
-     */
-    const key = `it("${testName}"`;
-    const start = SELF.indexOf(key);
-    expect({ testName, found: start > -1 }).toEqual({ testName, found: true });
-    const body = SELF.slice(start, SELF.indexOf("\n  });", start));
-    expect({ testName, callsShared: body.includes("assertNoSensitiveGovernanceCanaries(") })
-      .toEqual({ testName, callsShared: true });
+  it("the deny-set contains exactly the declared entries — none can be dropped silently", () => {
+    expect(SENSITIVE_LOG_CANARIES.map(([label]) => label)).toEqual(EXPECTED_CANARIES);
   });
 
-  it("no branch asserts a hand-rolled subset of the canaries", () => {
+  it.each(EXPECTED_CANARIES)("%s is a distinct, non-empty, unmistakable value", (label) => {
+    const entry = SENSITIVE_LOG_CANARIES.find(([l]) => l === label);
+    expect(entry).toBeDefined();
+    const value = entry![1]();
+    expect(value.length).toBeGreaterThan(8);
+    expect(SENSITIVE_LOG_CANARIES.filter(([, g]) => g() === value)).toHaveLength(1);
+  });
+
+  it.each(EXPECTED_CANARIES)("a leak of %s fails the shared assertion", (label) => {
     /**
-     * The shape that shipped twice: `expect(output()).not.toContain(<literal>)`
-     * standing in for the deny-set. Only the deliberately-scoped extras are
-     * allowed — the error payload strings and the truncation fixture.
+     * Each entry must be able to FAIL the assertion — R7 found only two were,
+     * and those two only because they happened to be hard-coded into the
+     * helper's own unit test.
      */
-    const ALLOWED = ["admin_audit_logs/", "NOT_FOUND: no entity", "assigner-0"];
-    const adHoc = SELF.split("\n")
-      .map((l, i) => [i + 1, l] as const)
-      .filter(([, l]) => !/^\s*(\*|\/\/)/.test(l))   // prose about the shape, not the shape
-      .filter(([, l]) => /expect\((?:output\(\)|logs)\)\.not\.toContain\(/.test(l))
-      .filter(([, l]) => !ALLOWED.some((a) => l.includes(a)));
-    expect(adHoc.map(([n, l]) => `${n}: ${l.trim()}`)).toEqual([]);
+    redactionExemption = "capture-fidelity"; // asserting on strings, not on a sink
+    const value = SENSITIVE_LOG_CANARIES.find(([l]) => l === label)![1]();
+    expect(() => assertNoSensitiveGovernanceCanaries(`prefix ${value} suffix`)).toThrow();
   });
 
-  it("the shared assertion actually fails when a canary is present", () => {
-    // ANCHOR: without this, a helper that asserted nothing would satisfy every
-    // call site above.
-    expect(() => assertNoSensitiveGovernanceCanaries(`leaked ${C.ownerBUid}`)).toThrow();
-    expect(() => assertNoSensitiveGovernanceCanaries(`leaked ${C.reason}`)).toThrow();
-    expect(() => assertNoSensitiveGovernanceCanaries("nothing sensitive here")).not.toThrow();
+  it("the shared assertion passes on genuinely clean output", () => {
+    redactionExemption = "capture-fidelity";
+    expect(() => assertNoSensitiveGovernanceCanaries("[governance/queue] plan: full, 3 owner(s)")).not.toThrow();
   });
 
-  it("an `allow` entry narrows the assertion by exactly one value", () => {
-    expect(() => assertNoSensitiveGovernanceCanaries(`run ${C.runId}`, { allow: [C.runId] })).not.toThrow();
-    // and does not disable the rest
-    expect(() => assertNoSensitiveGovernanceCanaries(`run ${C.runId} ${C.ownerBUid}`, { allow: [C.runId] })).toThrow();
+  it("every audit-event identity field is covered by the deny-set", () => {
+    const denied = new Set(SENSITIVE_LOG_CANARIES.map(([, v]) => v()));
+    for (const [field, get] of Object.entries(AUDIT_EVENT_IDENTITY_FIELDS)) {
+      expect({ field, covered: denied.has(get()) }).toEqual({ field, covered: true });
+    }
   });
 });
 

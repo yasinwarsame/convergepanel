@@ -1,4 +1,16 @@
 /**
+ * CLASSIFICATION: MINTS-AUTHORITY (service-account bootstrap tool).
+ *
+ * SAFE-PROBE:PROHIBITION — this script GRANTS SYSTEM_ADMIN. It is never a
+ * secret-liveness probe and must not be used to check whether an old
+ * ADMIN_SECRET still works: it does not use ADMIN_SECRET at all, and running it
+ * mints the claim unconditionally. To verify a rotation use
+ * `scripts/probe-admin-secret.mjs`, which cannot mint anything.
+ *
+ * This is the "Option 1" out-of-band path in
+ * docs/operations/admin-authority-tiers.md — preferred over the bootstrap route
+ * precisely because ADMIN_SECRET never needs a live value.
+ *
  * Quick script to set admin custom claims for a user by email or UID
  * 
  * Usage:

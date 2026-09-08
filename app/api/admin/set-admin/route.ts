@@ -37,12 +37,27 @@ import { checkRateLimit } from "@/lib/security/rateLimit";
 // Ensure Node.js runtime (Firebase Admin requires Node.js, not Edge)
 export const runtime = "nodejs";
 
+/**
+ * Phase FIRST-ADMIN-C11 — exported so the runbook's stated limit is checked
+ * against the real configuration instead of being hand-copied. It was hand-
+ * copied before, and the mechanism it described did not work.
+ *
+ * DEFENCE IN DEPTH ONLY: this is per-IP, so a distributed source weakens it.
+ * The primary boundary is a high-entropy ADMIN_SECRET used for a bootstrap
+ * window and then rotated or removed.
+ */
+// NOT exported: a Next.js route module may only export its handlers and a
+// fixed set of config names, so these are module-local and the runbook parity
+// test reads them from source.
+const RATE_LIMIT_MAX_REQUESTS = 3;
+const RATE_LIMIT_WINDOW_SECONDS = 300;
+
 export async function POST(request: NextRequest) {
   try {
     const ip = request.headers.get("x-forwarded-for")?.split(",")[0].trim() ?? "unknown";
     const rl = await checkRateLimit({
-      maxRequests: 3,
-      windowSeconds: 300,
+      maxRequests: RATE_LIMIT_MAX_REQUESTS,
+      windowSeconds: RATE_LIMIT_WINDOW_SECONDS,
       identifier: `set-admin:${ip}`,
     });
     if (!rl.allowed) {

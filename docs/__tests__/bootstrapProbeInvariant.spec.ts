@@ -30,20 +30,36 @@ import { execSync } from "node:child_process";
 
 const ROUTE = "/api/admin/set-admin";
 
-/** Human-facing files: docs, runbooks, READMEs and production source comments. */
-const FILES = execSync("git ls-files -- '*.md' '*.ts' '*.tsx' '*.mjs'", { encoding: "utf8" })
+/**
+ * EVERY tracked text file that mentions the route — not a curated extension
+ * list. C10 globbed `*.md,*.ts,*.tsx,*.mjs` while its header claimed
+ * "repository-wide", and a review landed a dangerous probe in a `.js` operator
+ * script, a `.sh`, a `.txt` and a `.json`, all invisible. Three tracked `.js`
+ * admin-minting scripts already existed in the blind spot.
+ *
+ * Binary and lockfile-ish paths are excluded by extension; everything else that
+ * git tracks and that mentions the route is scanned.
+ */
+const SKIP = /\.(png|jpe?g|gif|svg|ico|woff2?|ttf|eot|pdf|zip|lock)$|^package-lock\.json$/i;
+const FILES = execSync("git ls-files", { encoding: "utf8" })
   .split("\n")
   .filter(Boolean)
   .filter((f) => !f.includes("__tests__") && !f.includes("__fixtures__"))
-  .filter((f) => readFileSync(f, "utf8").includes(ROUTE));
+  .filter((f) => !SKIP.test(f))
+  .filter((f) => {
+    try { return readFileSync(f, "utf8").includes(ROUTE); } catch { return false; }
+  });
 
 /** Words that make a passage an instruction to CHECK a credential's status. */
 const VERIFICATION_CONTEXT =
   /\bverif|\bprove\b|\bproof\b|is dead\b|no longer (works|accepted)|\brotat|containment|liveness|\bprobe\b|still (live|accepted|works)|must return 401/i;
 
 /** A request body naming a claim target. */
-const UID_FIELD = /["']?uid["']?\s*[:=]/;
-const SECRET_FIELD = /["']?secret["']?\s*[:=]/;
+// `\\"` covers the shell form `-d "{\\"uid\\":\\"$U\\",...}"`, which C10's
+// pattern could not match and which is the idiomatic way to write a curl body
+// with variable interpolation.
+const UID_FIELD = /(\\?["'])?uid(\\?["'])?\s*[:=]/;
+const SECRET_FIELD = /(\\?["'])?secret(\\?["'])?\s*[:=]/;
 
 /** Every place a uid and a secret appear together in one request body. */
 function uidBearingBodies(lines: string[]): number[] {
@@ -67,6 +83,10 @@ describe("ANCHORS — the scan is looking at real content", () => {
       "README.md",
       "app/api/admin/set-admin/route.ts",
       "docs/operations/admin-authority-tiers.md",
+      // Files C10's four-extension whitelist could not see.
+      ".env.local.example",
+      "docs/technical-documentation.md",
+      "CLAUDE.md",
     ]));
   });
 
@@ -81,6 +101,8 @@ describe("ANCHORS — the scan is looking at real content", () => {
     expect(uidBearingBodies([`-d '{"uid": "U", "secret": "S"}'`])).toHaveLength(1);
     expect(uidBearingBodies([`{`, `  "uid": "U",`, `  "secret": "S"`, `}`])).toHaveLength(1);
     expect(uidBearingBodies([`{"secret": "S"}`])).toHaveLength(0); // the safe probe
+    // The escaped-quote shell form, which C10 could not see.
+    expect(uidBearingBodies([`-d "{\\"uid\\":\\"$U\\",\\"secret\\":\\"$S\\"}"`])).toHaveLength(1);
   });
 
   it("a labelled escape still has to carry a real prohibition", () => {
@@ -176,14 +198,17 @@ describe("response semantics are pinned by MEANING, not by wording", () => {
    * status MEANS.
    */
   const src = readFileSync("docs/operations/admin-authority-tiers.md", "utf8");
-  const rows = src.split("\n").filter((l) => /^\s*\|\s*(401|400|429|5xx|any other)\s*\|/.test(l));
+  // C11: the canonical probe is an executable, so each row is
+  // `| <exit> | <status> | <token> | <meaning> |`. The EXIT CODE is what the
+  // operator acts on, so it is pinned alongside the meaning.
+  const rows = src.split("\n").filter((l) => /^\s*\|\s*[0-9]\s*\|\s*(401|400|429|5xx|other)/.test(l));
 
   it("ANCHOR: the verdict table was found, with a row per status", () => {
     expect(rows.length).toBeGreaterThanOrEqual(4);
   });
 
   const verdictFor = (status: string) => {
-    const row = rows.find((l) => new RegExp(`^\\s*\\|\\s*${status}\\s*\\|`).test(l));
+    const row = rows.find((l) => new RegExp(`\\|\\s*${status}\\s*\\|`).test(l));
     expect(row).toBeDefined();
     return row!;
   };
@@ -192,6 +217,9 @@ describe("response semantics are pinned by MEANING, not by wording", () => {
     const row = verdictFor("401");
     expect(row).toContain("CREDENTIAL_REJECTED");
     expect(row).toMatch(/[Cc]ontainment proven/);
+    // 401 is the ONLY row that exits 0.
+    expect(row).toMatch(/^\s*\|\s*0\s*\|/);
+    expect(rows.filter((r) => /^\s*\|\s*0\s*\|/.test(r))).toHaveLength(1);
   });
 
   it("400 means the credential was ACCEPTED and containment FAILED", () => {
@@ -246,7 +274,46 @@ describe("containment imperatives are present and unconditional", () => {
     // who judged no exposure never re-enumerated — while step 1 had removed the
     // claim from exactly one account.
     expect(SECTION).toMatch(/Re-enumerate privileged claims across all accounts — unconditionally/);
-    const step8 = SECTION.slice(SECTION.indexOf("8. **Re-enumerate"));
+    const step8 = SECTION.slice(SECTION.indexOf("[CONTAINMENT_REENUMERATE_CLAIMS]"));
     expect(step8).toMatch(/Not only when secret exposure is suspected/);
+  });
+});
+
+describe("admin-minting operator scripts are classified", () => {
+  /**
+   * Phase FIRST-ADMIN-C11 (R7 P2-2). These scripts mint SYSTEM_ADMIN through
+   * the Admin SDK, so they never contain the route path and the probe scan
+   * above cannot see them — they are a different class of hazard: a tool an
+   * operator might reach for during a rotation check.
+   *
+   * Each must declare what it is, and must say plainly that it is not a
+   * liveness probe.
+   */
+  const MINTING_SCRIPTS = execSync("git ls-files -- 'scripts/set-admin*'", { encoding: "utf8" })
+    .split("\n").filter(Boolean);
+
+  it("ANCHOR: the minting scripts were found", () => {
+    expect(MINTING_SCRIPTS.length).toBeGreaterThanOrEqual(2);
+    expect(MINTING_SCRIPTS).toEqual(expect.arrayContaining(["scripts/set-admin-by-uid.js"]));
+  });
+
+  it.each(MINTING_SCRIPTS)("%s declares itself authority-minting", (file) => {
+    const src = readFileSync(file, "utf8");
+    expect(src).toContain("MINTS-AUTHORITY");
+  });
+
+  it.each(MINTING_SCRIPTS)("%s states it is not a secret-liveness probe", (file) => {
+    // Strip JSDoc line markers before collapsing: a surviving `*` splits the
+    // phrase and makes the assertion fail on correctly-classified files.
+    const src = readFileSync(file, "utf8").replace(/^\s*\*\s?/gm, "").replace(/\s+/g, " ");
+    expect(src).toMatch(/never a secret-liveness probe|not a (secret-)?liveness probe/i);
+    // ...and points at the tool that is.
+    expect(src).toContain("probe-admin-secret.mjs");
+  });
+
+  it("the canonical probe is NOT classified as a minting tool", () => {
+    // Guards against the classification being pasted everywhere indiscriminately.
+    const probe = readFileSync("scripts/probe-admin-secret.mjs", "utf8");
+    expect(probe).not.toContain("MINTS-AUTHORITY");
   });
 });

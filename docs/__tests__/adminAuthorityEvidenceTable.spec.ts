@@ -100,7 +100,7 @@ describe("the SYSTEM_ADMIN containment procedure closes the bootstrap path", () 
   });
 
   it("requires proving the old secret is dead, not just changed", () => {
-    expect(SECTION).toMatch(/only proof of containment|Only an authentication rejection/);
+    expect(SECTION.replace(/\s+/g, " ")).toMatch(/Only exit 0 closes the window/);
   });
 
   it("the prove-dead probe OMITS the uid, so it cannot mint a claim", () => {
@@ -109,7 +109,10 @@ describe("the SYSTEM_ADMIN containment procedure closes the bootstrap path", () 
      * deployed, that probe re-mints admin:true on the uid used. The route
      * validates the secret before the uid, so the safe probe carries no uid.
      */
-    expect(SECTION.replace(/\s+/g, " ")).toContain('{"secret": "<OLD_SECRET>"} <- no uid, ever');
+    expect(SECTION).toContain("scripts/probe-admin-secret.mjs");
+    expect(SECTION).toContain("OLD_ADMIN_SECRET=");
+    // The runbook must no longer reconstruct a request body of its own.
+    expect(SECTION).not.toMatch(/["']uid["']\s*:/);
     // The old, dangerous instruction must not survive anywhere in the section.
     expect(SECTION).not.toMatch(/POST\s+\/api\/admin\/set-admin\s+with the old secret must return 401/);
   });
@@ -124,7 +127,7 @@ describe("the SYSTEM_ADMIN containment procedure closes the bootstrap path", () 
 
   it("does not tell the operator to bypass the rate limiter", () => {
     // Whitespace-tolerant: the doc wraps this sentence across lines.
-    expect(SECTION.replace(/\s+/g, " ")).toContain("do not attempt to bypass the rate limiter");
+    expect(SECTION.replace(/\s+/g, " ")).toMatch(/re-run rather than trying to bypass it/);
   });
 
   it("states plainly that containment is incomplete while the secret can re-mint", () => {
@@ -255,5 +258,117 @@ describe("§A.6 table enumerates every HTTP method each route exports", () => {
     expect(rows.length).toBeGreaterThan(0);
     const text = rows.join(" ");
     for (const m of exported(file)) expect(text).toContain(m);
+  });
+});
+
+describe("STRUCTURED CONTAINMENT CONTRACT — steps identified by stable ID", () => {
+  /**
+   * Phase FIRST-ADMIN-C11 (R7 P2-3). Every containment imperative was pinned by
+   * a prose fragment, so four of them could be demoted to optional notes with
+   * CI green — including "Revoke refresh tokens", which this document itself
+   * calls the most important lever, pinned only by a string-presence anchor the
+   * demoted text still satisfied.
+   *
+   * Each MUST step now carries a stable ID. Wording can evolve; the step cannot
+   * silently disappear or drift out of the procedure.
+   */
+  const src = readFileSync("docs/operations/admin-authority-tiers.md", "utf8");
+  const SECTION = src.slice(
+    src.indexOf("### B. SYSTEM_ADMIN (claim-derived)"),
+    src.indexOf("### What this procedure does NOT give you")
+  );
+
+  const REQUIRED = [
+    "CONTAINMENT_REMOVE_CLAIM",
+    "CONTAINMENT_REVOKE_REFRESH",
+    "CONTAINMENT_ROTATE_BOOTSTRAP",
+    "CONTAINMENT_PROBE_OLD_SECRET",
+    "CONTAINMENT_DISABLE_ACCOUNT",
+    "CONTAINMENT_REENUMERATE_CLAIMS",
+    "CONTAINMENT_VERIFY_DENIAL",
+  ];
+
+  it("ANCHOR: the containment section was located and is substantial", () => {
+    expect(SECTION).toContain("revokeRefreshTokens");
+    expect(SECTION.length).toBeGreaterThan(2000);
+  });
+
+  it.each(REQUIRED)("%s appears exactly once, inside the containment section", (id) => {
+    expect(SECTION.match(new RegExp(`\\[${id}\\]`, "g")) ?? []).toHaveLength(1);
+    expect(src.match(new RegExp(`\\[${id}\\]`, "g")) ?? []).toHaveLength(1);
+  });
+
+  it("the section declares no containment ID this contract does not require", () => {
+    // Catches a step being renamed rather than removed.
+    const found = [...SECTION.matchAll(/\[(CONTAINMENT_[A-Z_]+)\]/g)].map((m) => m[1]);
+    expect([...new Set(found)].sort()).toEqual([...REQUIRED].sort());
+  });
+
+  it("each identified step is a numbered MUST step, not an aside", () => {
+    for (const id of REQUIRED) {
+      const line = SECTION.split("\n").find((l) => l.includes(`[${id}]`))!;
+      expect({ id, numbered: /^\s*(\d+\.|[a-z]\.)\s/.test(line) }).toEqual({ id, numbered: true });
+    }
+  });
+});
+
+describe("the session-mint claim matches the code", () => {
+  /**
+   * C10 asserted that POST /api/auth/session refuses to mint for a disabled or
+   * revoked identity. The route calls verifyIdToken WITHOUT checkRevoked, so
+   * that was false — and it contradicted §B.5 of the same document.
+   */
+  const src = readFileSync("docs/operations/admin-authority-tiers.md", "utf8");
+  const ROUTE = readFileSync("app/api/auth/session/route.ts", "utf8");
+
+  it("ANCHOR: the route still mints from verifyIdToken", () => {
+    expect(ROUTE).toContain("verifyIdToken");
+    expect(ROUTE).toContain("createSessionCookie");
+  });
+
+  it("the route does NOT pass checkRevoked — so the doc must not claim it refuses", () => {
+    // If this ever changes, the documentation below should change with it.
+    expect(ROUTE).not.toMatch(/verifyIdToken\([^)]*,\s*true\s*\)/);
+    expect(src).toMatch(/without\s*\n?\s*`checkRevoked`/);
+    expect(src.replace(/\s+/g, " ")).toContain("Minting a NEW cookie is not blocked by this application");
+  });
+
+  it("does not assert an immediate bearer-path cutoff", () => {
+    expect(src.replace(/\s+/g, " ")).toContain("Do not record the ADMIN_PORTAL surface as closed");
+  });
+});
+
+describe("the documented bootstrap rate limit matches the route's constants", () => {
+  /**
+   * Phase FIRST-ADMIN-C11 (R7 F-1). The runbook stated "3 per 5 min per IP" as
+   * fact. The numbers happened to be right; the mechanism was broken and
+   * nothing tied the prose to the code. Both are now derived from the same
+   * exported constants.
+   */
+  const ROUTE = readFileSync("app/api/admin/set-admin/route.ts", "utf8");
+  const DOC = readFileSync("docs/operations/admin-authority-tiers.md", "utf8");
+
+  const constant = (name: string) => {
+    const m = ROUTE.match(new RegExp(`const ${name} = (\\d+);`));
+    expect(m).not.toBeNull();
+    return Number(m![1]);
+  };
+
+  it("ANCHOR: the route exports both constants and uses them in its limiter call", () => {
+    expect(constant("RATE_LIMIT_MAX_REQUESTS")).toBeGreaterThan(0);
+    expect(constant("RATE_LIMIT_WINDOW_SECONDS")).toBeGreaterThan(0);
+    expect(ROUTE).toContain("maxRequests: RATE_LIMIT_MAX_REQUESTS");
+    expect(ROUTE).toContain("windowSeconds: RATE_LIMIT_WINDOW_SECONDS");
+  });
+
+  it("the runbook cites the constants by name rather than hand-copied numbers", () => {
+    expect(DOC).toContain("RATE_LIMIT_MAX_REQUESTS");
+    expect(DOC).toContain("RATE_LIMIT_WINDOW_SECONDS");
+  });
+
+  it("the runbook presents rate limiting as defence-in-depth, not the primary boundary", () => {
+    const flat = DOC.replace(/\s+/g, " ");
+    expect(flat).toContain("defence-in-depth only");
+    expect(flat).toMatch(/primary boundary is a high-entropy `ADMIN_SECRET`/);
   });
 });
