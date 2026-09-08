@@ -710,22 +710,29 @@ describe("STRUCTURAL — the shared redaction contract cannot be bypassed by a b
   const SELF = readFileSync("app/api/governance/review/__tests__/reviewLogRedaction.spec.ts", "utf8");
 
   it.each([
-    ["GOVERNANCE HOT PATH", "never writes any sensitive canary"],
+    ["GOVERNANCE HOT PATH", "never writes any sensitive canary to the log sink"],
     ["OWNER_B IS REACHABLE", "writes no sensitive canary to the log sink on the denial path"],
     ["admin_global BRANCH", "writes no sensitive canary to the log sink"],
-    ["SIBLING SCOPE BRANCHES", "plan_required: logs the decision"],
-    ["SIBLING SCOPE BRANCHES", "no_assigners: logs the empty scope"],
-    ["SIBLING SCOPE BRANCHES", "truncation: warns with a count"],
-    ["the audit writer's FAILURE path", "logs the failure as shape"],
-    ["DELIBERATE DIVERGENCE", "logs the run id on workspace integrity failure"],
+    ["SIBLING SCOPE BRANCHES", "plan_required: logs the decision without the caller's identity"],
+    ["SIBLING SCOPE BRANCHES", "no_assigners: logs the empty scope without the caller's identity"],
+    ["SIBLING SCOPE BRANCHES", "truncation: warns with a count and never the owner list"],
+    ["the audit writer's FAILURE path", "logs the failure as shape, never the raw error"],
+    ["DELIBERATE DIVERGENCE", "logs the run id on workspace integrity failure, because nothing else records it"],
   ])("%s / %s calls the shared assertion", (_family, testName) => {
     /**
      * Per-branch, not a global count: a count is inflated by the helper's own
      * unit tests, so removing a real branch's call left the total above the
      * threshold and the removal passed. Each named test must contain the call.
      */
-    const start = SELF.indexOf(testName);
-    expect(start).toBeGreaterThan(-1);          // ANCHOR: the test still exists
+    /**
+     * Anchored to the full `it("<name>"` literal. Searching the bare name
+     * matched the wrong test: "…log sink" is a PREFIX of "…log sink on the
+     * denial path", so the admin_global check was inspecting the denial test
+     * and removing admin_global's call went undetected.
+     */
+    const key = `it("${testName}"`;
+    const start = SELF.indexOf(key);
+    expect({ testName, found: start > -1 }).toEqual({ testName, found: true });
     const body = SELF.slice(start, SELF.indexOf("\n  });", start));
     expect({ testName, callsShared: body.includes("assertNoSensitiveGovernanceCanaries(") })
       .toEqual({ testName, callsShared: true });
