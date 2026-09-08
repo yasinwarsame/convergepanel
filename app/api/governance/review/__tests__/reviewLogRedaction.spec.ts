@@ -224,6 +224,14 @@ let redactionExemption: RedactionExemption = "none";
  * further in.
  */
 let redactionAssertionsRun = 0;
+/**
+ * Total characters of REAL sink content the hook examined. The run-counter
+ * alone proves only that the hook executed — a mutation asserting on `""`
+ * incremented it happily while inspecting nothing, which is the same "scanned
+ * zero files" vacuity the pre-flight scanner had. This proves it looked at
+ * something.
+ */
+let redactionSinkCharsInspected = 0;
 
 function docHandle(collection: string, id: string) {
   const rec = existingDocs[`${collection}/${id}`];
@@ -345,10 +353,12 @@ beforeEach(() => {
 
 afterEach(() => {
   if (redactionExemption === "capture-fidelity") return;
-  assertNoSensitiveGovernanceCanaries(output(), {
+  const inspected = output();
+  assertNoSensitiveGovernanceCanaries(inspected, {
     allowIntegrityRunId: redactionExemption === "integrity-run-id",
   });
   redactionAssertionsRun += 1;
+  redactionSinkCharsInspected += inspected.length;
 });
 
 describe("ANCHOR 0 — every canary is REACHABLE in the data the route reads", () => {
@@ -889,5 +899,12 @@ describe("ZZ ENFORCEMENT LIVENESS — the automatic check actually ran", () => {
    */
   it("the afterEach performed the shared assertion for the bulk of this suite", () => {
     expect(redactionAssertionsRun).toBeGreaterThan(40);
+  });
+
+  it("and it examined REAL captured output, not an empty string", () => {
+    // Driving these routes produces thousands of characters of log. A hook
+    // asserting on a constant would leave this at zero while still counting
+    // itself as having run.
+    expect(redactionSinkCharsInspected).toBeGreaterThan(5_000);
   });
 });
