@@ -116,7 +116,14 @@ all, and there is no post-enrollment rotation to remember.
 3. Verify the claim landed on that uid and on no other.
 4. Immediately rotate or remove `ADMIN_SECRET`, and **deploy that change** — an
    env edit alone leaves the old value live in the running deployment.
-5. Verify the old value is dead **with the canonical uid-less probe in §B.6.c**.
+5. Verify the rotation **with the two-phase containment tool in §B.6.c**, run
+   as ONE process across the rotation: PRE must report the old secret still
+   **accepted** at the canonical Production origin; then rotate and deploy; then
+   resume the same process and require POST **rejected**. Only
+   `PRODUCTION_CONTAINMENT_PROVEN` closes the bootstrap window. A single-shot
+   rejection is not enrollment evidence.
+
+   The superseded instruction, kept only as what NOT to do:
    Send the credential ONLY:
 
        POST /api/admin/set-admin
@@ -360,6 +367,24 @@ operator does; they are not automated.
 
 ### B. SYSTEM_ADMIN (claim-derived) — disabling is NOT sufficient
 
+**Normative obligations.** The `Mode` column is the machine-checked signal; the
+prose under each step may be reworded freely, and a step whose Mode is `MUST` is
+required regardless of how its paragraph reads. An earlier revision tried to
+enforce obligation by blacklisting hedging phrases ("optional", "if convenient",
+…); that is not mechanically achievable, because any synonym walks past it. The
+table is the contract.
+
+| ID | Requirement | Mode |
+|---|---|---|
+| `CONTAINMENT_REMOVE_CLAIM` | Remove `admin: true` from the affected account | MUST |
+| `CONTAINMENT_REVOKE_REFRESH` | Revoke refresh tokens | MUST |
+| `CONTAINMENT_ROTATE_BOOTSTRAP` | Rotate or remove `ADMIN_SECRET` where exposure is possible | MUST |
+| `CONTAINMENT_PROBE_OLD_SECRET` | Prove the rotation with the two-phase containment tool | MUST |
+| `CONTAINMENT_DISABLE_ACCOUNT` | Disable the affected Firebase Auth account when the identity is compromised | MUST |
+| `CONTAINMENT_REENUMERATE_CLAIMS` | Re-enumerate privileged claims across all accounts | MUST |
+| `CONTAINMENT_VERIFY_DENIAL` | Verify denial against Production | MUST |
+
+
 1. `[CONTAINMENT_REMOVE_CLAIM][REQUIRED]` **Remove the claim**: `setCustomUserClaims(uid, { admin: false })` (or drop the
    key). `/api/admin/set-role` does this, but it itself requires SYSTEM_ADMIN, so
    during an incident use a service-account script rather than the route.
@@ -398,46 +423,68 @@ operator does; they are not automated.
    b. **Deploy deliberately.** An environment variable change does not affect
       running Production until a deployment picks it up. Until then the old
       secret is still live.
-   c. `[CONTAINMENT_PROBE_OLD_SECRET][REQUIRED]` **Prove the old value no longer works —
-      with the canonical probe, which cannot mint a claim.**
+   c. `[CONTAINMENT_PROBE_OLD_SECRET][REQUIRED]` **Prove the rotation with the
+      two-phase containment tool.**
 
-      <!-- SAFE-PROBE:CANONICAL — the probe is an executable, not a snippet.
-           Do not restate the request anywhere; reference this step. -->
+      <!-- SAFE-PROBE:CANONICAL — one executable, two bound observations. -->
 
-          OLD_ADMIN_SECRET=<old value> node scripts/probe-admin-secret.mjs https://<host>
+      A single 401 is NOT proof. It establishes only that *the origin you
+      contacted rejected the string you supplied* — and both halves fail open
+      with nobody attacking you:
 
-      `scripts/probe-admin-secret.mjs` builds its body from a single literal
-      containing only the secret. It has no uid parameter and no path from
-      caller input to the body, so **it cannot mint authority even if the old
-      secret is still live** — the worst case is a report that containment
-      failed. Earlier revisions told you to POST `{uid, secret}`; if the
-      rotation had not yet deployed, that "verification" re-minted `admin: true`
-      on the uid you used, with no audit record and no log. The verification
-      step was the breach.
+      - **Wrong origin.** The route answers 401 + `credential-rejected` whenever
+        the secret does not match, INCLUDING when `ADMIN_SECRET` is unset. A
+        preview deployment, a staging project, a colleague's localhost, or a
+        mistyped host running this same code returns the *genuine* marker.
+      - **Wrong secret.** A high-entropy value containing `$`, a backtick, a
+        space, `!` or `*` is mangled by your shell before the tool sees it. The
+        LIVE route rejects the mangled string, and that reads as a successful
+        rotation.
 
-      The tool's EXIT CODE is the verdict. Do not interpret the status yourself:
+      Proof is a **state transition**, bound to one origin and one credential
+      inside one process:
 
-      | Exit | Status | Verdict token | Meaning |
-      |---|---|---|---|
-      | 0 | 401 | `CREDENTIAL_REJECTED` | The old secret is refused. **Containment proven.** |
-      | 2 | 400 | `CREDENTIAL_ACCEPTED` | The secret still works. **Containment FAILED.** |
-      | 3 | 429 | `INCONCLUSIVE` | Rate limited before the secret was checked (see below). Not a verdict. |
-      | 3 | 5xx | `INCONCLUSIVE` | Never reached a verdict. |
-      | 3 | other / network | `INCONCLUSIVE` | Not a verdict. |
+          export OLD_ADMIN_SECRET        # already exported; never inline on the command line
+          node scripts/probe-admin-secret.mjs --production-two-phase
+
+      1. **PRE** — before you rotate anything, the tool confirms the old
+         credential is **accepted** at `https://convergepanel.com`
+         (400 + `credential-accepted`). If it is not, the run **aborts**, and no
+         later rejection may be treated as proof. This is the load-bearing half:
+         a wrong host or a mangled secret cannot get past it.
+      2. You perform the authorized rotation/removal and **deploy it**.
+      3. **POST** — the same process reuses the same locked origin and the same
+         in-memory secret bytes, and requires 401 + `credential-rejected`.
+
+      Only `PRE accepted -> POST rejected` prints
+      `PRODUCTION_CONTAINMENT_PROVEN` and exits 0. Nothing is re-read between
+      phases, so changing the environment mid-run cannot retarget the second
+      observation.
+
+      **What the response header is.** `x-convergepanel-admin-secret-probe` is a
+      ROUTE MARKER: evidence that the expected route response contract was
+      observed at the contacted origin. It is **not** cryptographic attestation,
+      **not** proof of Production identity on its own, and **not** proof of
+      containment on its own — it is world-readable in a public repository. The
+      proof comes from the bound transition, not from the header.
+
+      A single-shot diagnostic exists (`--observe <origin>`) and reports
+      `CREDENTIAL_ACCEPTED` / `CREDENTIAL_REJECTED` / `INCONCLUSIVE` only. It can
+      never print `PRODUCTION_CONTAINMENT_PROVEN`, because it observes no
+      transition. Do not use it as enrollment or containment evidence.
+
+      Behaviour pinned by `scripts/__tests__/probeAdminSecret.spec.ts`.
 
       **On rate limiting.** The route applies a per-IP limit of **3 attempts
       per 300 seconds (5 minutes)** before the secret is examined, so a 429
-      tells you nothing about the credential. Those numbers are
-      `RATE_LIMIT_MAX_REQUESTS` and `RATE_LIMIT_WINDOW_SECONDS` in
+      tells you nothing about the credential and aborts the run. Those numbers
+      are `RATE_LIMIT_MAX_REQUESTS` and `RATE_LIMIT_WINDOW_SECONDS` in
       `app/api/admin/set-admin/route.ts`, and a test fails if this paragraph and
-      those constants disagree — C11 cited the names without the values, which
-      made the parity check vacuous and left an on-call responder no way to know
-      how long to wait without reading source. Treat that limit as **defence-in-depth only** — it is per-IP,
-      so a distributed source weakens it, and until C11 it did not work at all
-      (`windowStart` was stored already expired, so the counter reset on almost
-      every request and nothing was ever throttled). The primary boundary is a
+      those constants disagree. Treat that limit as **defence-in-depth only** —
+      it is per-IP, so a distributed source weakens it. The primary boundary is a
       high-entropy `ADMIN_SECRET`, used only for a bootstrap window, then
-      rotated or removed.
+      rotated or removed. Wait for the window and re-run rather than trying to
+      bypass it.
 
       **What the per-IP limit depends on.** The key is derived from the
       `x-forwarded-for` header (`app/api/admin/set-admin/route.ts`). The
@@ -449,11 +496,6 @@ operator does; they are not automated.
       trusted proxy is enabled, or if the app is ever run behind a proxy that
       appends rather than replaces, the assumption must be re-validated and the
       key moved to a platform-attested client IP.
-
-      **Only exit 0 closes the window.** Anything else means containment is
-      unproven, not achieved. Wait for the rate-limit window and re-run rather
-      than trying to bypass it. Behaviour pinned by
-      `scripts/__tests__/probeAdminSecret.spec.ts`.
 
    d. (See step 8 — claim re-enumeration is unconditional, not part of this
       branch.)

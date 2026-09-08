@@ -1,40 +1,77 @@
 /**
- * Phase FIRST-ADMIN-C12 — THE CANONICAL BOOTSTRAP-SECRET LIVENESS PROBE.
+ * Phase FIRST-ADMIN-C13 — BOUND TWO-PHASE CONTAINMENT PROOF.
  *
- * `/api/admin/set-admin` mints `admin: true` on any uid from possession of
- * `ADMIN_SECRET` alone, with no audit record and no success log. It validates
- * the secret BEFORE the uid, which is what makes a uid-less probe safe.
+ * `/api/admin/set-admin` mints full SYSTEM_ADMIN on any uid from possession of
+ * `ADMIN_SECRET`, with no audit record and no success log. An operator rotating
+ * that secret must be able to prove the old value is dead.
  *
- * C11 shipped this as one file with three ways to lie, all found by review:
- *   - a `import.meta.url === \`file://${process.argv[1]}\`` entry guard that
- *     silently failed to match on any path needing percent-encoding or
- *     traversing a symlink — the CLI body never ran and Node exited 0, which
- *     the runbook reads as "containment proven";
- *   - no redirect policy, so a 307/308 forwarded the live secret to another
- *     origin and the probe then accepted THAT origin's 401 as proof;
- *   - a verdict derived from a bare HTTP status, so a WAF, an SSO gate, a
- *     preview-deployment wall or a typo'd host all read as proof.
+ * WHAT WENT WRONG BEFORE. C12 treated "HTTP 401 + a route marker" as proof.
+ * Review showed that proves only "the origin you contacted rejected the string
+ * you supplied" — and BOTH halves fail open with no attacker involved:
  *
- * The corrections, in order:
- *   - the implementation lives here and the entrypoint calls it
- *     UNCONDITIONALLY; there is no branch that can decline to run;
- *   - `redirect: "error"` — a redirect is a refusal, never a result;
- *   - the route emits an attestation header, and only a 401 carrying it counts.
+ *   - Wrong origin: the route returns 401 + `credential-rejected` whenever the
+ *     secret does not match, INCLUDING when `ADMIN_SECRET` is unset. So a
+ *     preview deploy, a staging project, a colleague's localhost or a mistyped
+ *     host running this same code emits the GENUINE marker and reports
+ *     "containment proven".
+ *   - Wrong secret: a high-entropy value containing `$`, a backtick, a space,
+ *     `!` or `*` is mangled by the shell before Node sees it. The LIVE
+ *     production route rejects the mangled string, and the operator reads that
+ *     as a successful rotation.
  *
- * Exit 0 is emitted on exactly one condition. Everything else is non-zero.
+ * WHAT PROOF ACTUALLY REQUIRES. Not a response — a STATE TRANSITION, bound to
+ * one origin and one credential inside one process:
+ *
+ *     PRE  (before rotation): this exact secret is ACCEPTED here.
+ *     POST (after rotation + deploy): that same secret is REJECTED here.
+ *
+ * The pre-check is the load-bearing half. It proves the operator reached an
+ * instance that currently holds the expected secret, and that the exact bytes
+ * survived the shell. A wrong host or a mangled secret cannot get past it, so
+ * neither can reach the post-check that produces the proof.
+ *
+ * NO NONCE. A nonce defends against replay and third-party forgery — the least
+ * likely failure here, and it addresses neither case above. The marker stays a
+ * ROUTE MARKER: evidence that the expected route response contract was observed
+ * at the contacted origin. It is not attestation, not proof of Production
+ * identity, and not proof of containment on its own.
  */
 
-/** Emitted ONLY by app/api/admin/set-admin/route.ts. */
 export const PROBE_MARKER_HEADER = "x-convergepanel-admin-secret-probe";
 export const MARKER_REJECTED = "credential-rejected";
 export const MARKER_ACCEPTED = "credential-accepted";
 
 export const ENDPOINT_PATH = "/api/admin/set-admin";
 
-export const VERDICTS = {
-  REJECTED: { token: "CREDENTIAL_REJECTED", exit: 0, proof: true },
-  ACCEPTED: { token: "CREDENTIAL_ACCEPTED", exit: 2, proof: false },
-  INCONCLUSIVE: { token: "INCONCLUSIVE", exit: 3, proof: false },
+/** The only origin at which a PRODUCTION containment proof may be established. */
+export const CANONICAL_PRODUCTION_ORIGIN = "https://convergepanel.com";
+
+/** Structured refusal codes. Tests assert these, never prose. */
+export const REASONS = {
+  NOT_A_URL: "ERR_TARGET_NOT_A_URL",
+  UNSUPPORTED_SCHEME: "ERR_UNSUPPORTED_SCHEME",
+  NON_HTTPS: "ERR_NON_HTTPS_PRODUCTION_ORIGIN",
+  USERINFO: "ERR_USERINFO_NOT_ALLOWED",
+  QUERY: "ERR_QUERY_NOT_ALLOWED",
+  FRAGMENT: "ERR_FRAGMENT_NOT_ALLOWED",
+  PATH: "ERR_PATH_NOT_ALLOWED",
+  NOT_CANONICAL: "ERR_NOT_CANONICAL_PRODUCTION_ORIGIN",
+  NO_SECRET: "ERR_NO_OLD_SECRET",
+};
+
+export const OBSERVATIONS = {
+  ACCEPTED: "CREDENTIAL_ACCEPTED",
+  REJECTED: "CREDENTIAL_REJECTED",
+  INCONCLUSIVE: "INCONCLUSIVE",
+};
+
+/** Explicit states. There is no edge from INITIAL straight to PROVEN. */
+export const STATES = {
+  INITIAL: "INITIAL",
+  PRECHECK_ACCEPTED: "PRECHECK_ACCEPTED",
+  WAITING_FOR_OPERATOR: "WAITING_FOR_OPERATOR",
+  PROVEN: "PRODUCTION_CONTAINMENT_PROVEN",
+  ABORTED: "ABORTED",
 };
 
 /** The only body this tool can construct. Deliberately not parameterised. */
@@ -42,100 +79,130 @@ export function buildProbeBody(secret) {
   return { secret };
 }
 
-/**
- * A verdict needs BOTH the status and the application's own attestation. A
- * bare 401 proves only that something, somewhere, refused something.
- */
+/** Status + marker together. Neither alone is a verdict. */
 export function classify(status, marker) {
-  if (status === 401 && marker === MARKER_REJECTED) return VERDICTS.REJECTED;
-  if (status === 400 && marker === MARKER_ACCEPTED) return VERDICTS.ACCEPTED;
-  return VERDICTS.INCONCLUSIVE;
+  if (status === 401 && marker === MARKER_REJECTED) return OBSERVATIONS.REJECTED;
+  if (status === 400 && marker === MARKER_ACCEPTED) return OBSERVATIONS.ACCEPTED;
+  return OBSERVATIONS.INCONCLUSIVE;
 }
 
 /**
- * The operator names an ORIGIN; this builds the endpoint. An arbitrary path,
- * query or fragment is refused rather than silently posting the credential
- * somewhere unintended.
+ * The operator names an ORIGIN; this builds the endpoint. Every refusal returns
+ * a structured code, and refusal happens BEFORE any request is issued.
  */
-export function resolveEndpoint(rawBaseUrl, { allowInsecure = false } = {}) {
+export function resolveEndpoint(rawBaseUrl, { requireCanonical = true, allowInsecureLoopback = false } = {}) {
   let u;
   try {
     u = new URL(rawBaseUrl);
   } catch {
-    return { ok: false, reason: "target is not a valid URL" };
+    return { ok: false, reason: REASONS.NOT_A_URL };
   }
-  if (u.protocol !== "https:" && u.protocol !== "http:") {
-    return { ok: false, reason: `unsupported scheme ${u.protocol}` };
-  }
+  if (u.protocol !== "https:" && u.protocol !== "http:") return { ok: false, reason: REASONS.UNSUPPORTED_SCHEME };
+  if (u.username || u.password) return { ok: false, reason: REASONS.USERINFO };
+  if (u.search) return { ok: false, reason: REASONS.QUERY };
+  if (u.hash) return { ok: false, reason: REASONS.FRAGMENT };
+  if (u.pathname !== "/" && u.pathname !== "") return { ok: false, reason: REASONS.PATH };
+
   const isLoopback = u.hostname === "127.0.0.1" || u.hostname === "localhost" || u.hostname === "[::1]";
-  if (u.protocol === "http:" && !(allowInsecure && isLoopback)) {
-    return { ok: false, reason: "refusing to send the credential over plain http" };
+  if (u.protocol === "http:" && !(allowInsecureLoopback && isLoopback)) {
+    return { ok: false, reason: REASONS.NON_HTTPS };
   }
-  if (u.username || u.password) return { ok: false, reason: "target must not contain credentials" };
-  if (u.search) return { ok: false, reason: "target must not contain a query string" };
-  if (u.hash) return { ok: false, reason: "target must not contain a fragment" };
-  if (u.pathname !== "/" && u.pathname !== "") {
-    return { ok: false, reason: "target must be an origin, not a path" };
+  if (requireCanonical && u.origin !== CANONICAL_PRODUCTION_ORIGIN && !(allowInsecureLoopback && isLoopback)) {
+    return { ok: false, reason: REASONS.NOT_CANONICAL };
   }
-  return { ok: true, url: `${u.origin}${ENDPOINT_PATH}` };
+  return { ok: true, url: `${u.origin}${ENDPOINT_PATH}`, origin: u.origin };
 }
 
-export async function probeAdminSecret({ baseUrl, secret, fetchImpl = fetch, allowInsecure = false }) {
-  if (typeof secret !== "string" || secret.length === 0) {
-    return { verdict: VERDICTS.INCONCLUSIVE, status: null, message: "OLD_ADMIN_SECRET is not set" };
-  }
-  const target = resolveEndpoint(baseUrl, { allowInsecure });
-  if (!target.ok) {
-    return { verdict: VERDICTS.INCONCLUSIVE, status: null, message: `refused: ${target.reason}` };
-  }
-
+/** One request. Returns an OBSERVATION — never a containment verdict. */
+async function observeOnce({ url, secret, fetchImpl }) {
   let res;
   try {
-    res = await fetchImpl(target.url, {
+    res = await fetchImpl(url, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      // No uid. No path from caller input to this object.
       body: JSON.stringify(buildProbeBody(secret)),
       // A redirect would carry this credential to an origin the operator did
-      // not name, and its response would then be read as a verdict. Refuse.
+      // not name, and its response would then be read as evidence.
       redirect: "error",
+      // A cached rejection is not a present-tense observation.
+      cache: "no-store",
     });
   } catch (err) {
     return {
-      verdict: VERDICTS.INCONCLUSIVE,
+      observation: OBSERVATIONS.INCONCLUSIVE,
       status: null,
-      // Never the secret, never the body, never the message.
-      message: `request failed: ${err instanceof Error ? err.name : "network error"}`,
+      detail: `request failed: ${err instanceof Error ? err.name : "network error"}`,
     };
   }
-
   const marker = typeof res.headers?.get === "function" ? res.headers.get(PROBE_MARKER_HEADER) : null;
-  const verdict = classify(res.status, marker);
-  const message =
-    verdict === VERDICTS.REJECTED
-      ? "OLD SECRET REJECTED — containment proven."
-      : verdict === VERDICTS.ACCEPTED
-        ? "OLD SECRET STILL ACCEPTED — CONTAINMENT FAILED. The rotation has not taken effect."
-        : marker
-          ? `INCONCLUSIVE (HTTP ${res.status}). Not proof of containment.`
-          : `INCONCLUSIVE (HTTP ${res.status}, no application attestation — the response did not come from the bootstrap route). Not proof of containment.`;
-  return { verdict, status: res.status, message };
+  return {
+    observation: classify(res.status, marker),
+    status: res.status,
+    detail: marker ? `HTTP ${res.status}` : `HTTP ${res.status}, no route marker`,
+  };
 }
 
-/** Always returns a line and an exit code. There is no silent path. */
-export async function runCli(argv, env, fetchImpl = fetch) {
-  const baseUrl = argv[0];
-  if (!baseUrl) {
-    return {
-      exitCode: VERDICTS.INCONCLUSIVE.exit,
-      line: `[${VERDICTS.INCONCLUSIVE.token}] usage: OLD_ADMIN_SECRET=… node scripts/probe-admin-secret.mjs <origin>`,
-    };
-  }
-  const { verdict, message } = await probeAdminSecret({
-    baseUrl,
-    secret: env.OLD_ADMIN_SECRET,
-    fetchImpl,
-    allowInsecure: env.PROBE_ALLOW_INSECURE_LOOPBACK === "1",
-  });
-  return { exitCode: verdict.exit, line: `[${verdict.token}] ${message}` };
+/**
+ * Binds ONE origin and ONE secret for the life of the proof. Both are captured
+ * here and never re-read: changing `process.env` between phases cannot retarget
+ * the second observation, which is the whole point of binding them.
+ */
+export function createContainmentProof({ origin, secret, fetchImpl = fetch, requireCanonical = true, allowInsecureLoopback = false }) {
+  const lockedSecret = secret;
+  const resolved = resolveEndpoint(origin, { requireCanonical, allowInsecureLoopback });
+  let state = STATES.INITIAL;
+
+  const abort = (detail) => { state = STATES.ABORTED; return { ok: false, state, detail }; };
+
+  return {
+    get state() { return state; },
+    get lockedUrl() { return resolved.ok ? resolved.url : null; },
+
+    async precheck() {
+      if (state !== STATES.INITIAL) return abort(`precheck called from ${state}`);
+      if (typeof lockedSecret !== "string" || lockedSecret.length === 0) return abort(REASONS.NO_SECRET);
+      if (!resolved.ok) return abort(resolved.reason);
+
+      const r = await observeOnce({ url: resolved.url, secret: lockedSecret, fetchImpl });
+      if (r.observation !== OBSERVATIONS.ACCEPTED) {
+        // Wrong host, wrong/mangled secret, rate limit, outage — all abort here,
+        // which is exactly why neither can reach the proof.
+        return abort(`PRECHECK_FAILED (${r.observation}, ${r.detail}) — the old credential was not confirmed live at ${resolved.origin}`);
+      }
+      state = STATES.PRECHECK_ACCEPTED;
+      return { ok: true, state, detail: `PRECHECK_OLD_CREDENTIAL_CONFIRMED_LIVE at ${resolved.origin}` };
+    },
+
+    armForRotation() {
+      if (state !== STATES.PRECHECK_ACCEPTED) return abort(`cannot arm from ${state}`);
+      state = STATES.WAITING_FOR_OPERATOR;
+      return { ok: true, state };
+    },
+
+    async postcheck() {
+      if (state !== STATES.WAITING_FOR_OPERATOR) return abort(`postcheck called from ${state}`);
+      // Same locked URL, same locked secret. Nothing is re-read.
+      const r = await observeOnce({ url: resolved.url, secret: lockedSecret, fetchImpl });
+      if (r.observation !== OBSERVATIONS.REJECTED) {
+        return abort(`POSTCHECK_FAILED (${r.observation}, ${r.detail}) — the old credential is still accepted, or the response was not attributable`);
+      }
+      state = STATES.PROVEN;
+      return { ok: true, state, detail: `PRODUCTION_CONTAINMENT_PROVEN at ${resolved.origin}` };
+    },
+  };
 }
+
+/**
+ * SINGLE-SHOT DIAGNOSTIC. Reports an observation only. It can never report
+ * PRODUCTION_CONTAINMENT_PROVEN, because no state transition was observed.
+ */
+export async function observeOldSecret({ origin, secret, fetchImpl = fetch, requireCanonical = false, allowInsecureLoopback = false }) {
+  if (typeof secret !== "string" || secret.length === 0) {
+    return { observation: OBSERVATIONS.INCONCLUSIVE, detail: REASONS.NO_SECRET };
+  }
+  const resolved = resolveEndpoint(origin, { requireCanonical, allowInsecureLoopback });
+  if (!resolved.ok) return { observation: OBSERVATIONS.INCONCLUSIVE, detail: `refused: ${resolved.reason}` };
+  return observeOnce({ url: resolved.url, secret, fetchImpl });
+}
+
+export const EXIT = { PROVEN: 0, NOT_CONTAINED: 2, INCONCLUSIVE: 3 };

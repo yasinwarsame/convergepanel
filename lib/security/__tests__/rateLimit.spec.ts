@@ -23,7 +23,22 @@ const docs = new Map<string, Record<string, unknown>>();
 let firestoreAvailable = true;
 let throwOnTransaction = false;
 
-const makeRef = (id: string) => ({ id });
+/**
+ * Phase FIRST-ADMIN-C13 (R9 P1). The previous double was `doc: (id) => ({id})`
+ * — it could not throw, so the block titled "never a throw" never exercised a
+ * throw, and moving `.doc()` back outside the try left the suite green.
+ *
+ * This identifier PASSES `isValidRateLimitIdentifier` (no slash, non-empty,
+ * short) and still makes reference construction fail. That separates two
+ * different properties which must not substitute for each other:
+ *   1. the validator rejects known-unsafe identifiers;
+ *   2. the error boundary catches datastore failures for a LOCALLY VALID one.
+ */
+const DOC_REF_CANARY = "set-admin:203.0.113.99";
+const makeRef = (id: string) => {
+  if (id === DOC_REF_CANARY) throw new Error("DOC_REF_CONSTRUCTION_FAILURE");
+  return { id };
+};
 const transaction = {
   get: async (ref: { id: string }) => ({
     exists: docs.has(ref.id),
@@ -262,5 +277,48 @@ describe("retryAfter and resetAt reach real response headers, so they are pinned
     expect(second.allowed).toBe(true);
     expect(second.resetAt.getTime()).toBe(T0 + 300_000);
     expect(second.retryAfter).toBeUndefined();
+  });
+});
+
+describe("DOCUMENT-REFERENCE BOUNDARY — construction failure is caught, never thrown", () => {
+  /**
+   * `.doc()` must be constructed INSIDE the protected try. Firestore rejects an
+   * even-component path, so a `/`-bearing identifier used to throw straight
+   * past this module's documented never-throws contract — and six of the
+   * fifteen call sites have no try/catch of their own, including on the
+   * unauthenticated route that mints SYSTEM_ADMIN.
+   *
+   * The validator alone cannot prove this: it rejects the slash case before
+   * `.doc()` is reached. This exercises the boundary with an identifier the
+   * validator ACCEPTS.
+   */
+  it("SELF-VALIDATION: the canary identifier passes the validator", () => {
+    // If it did not, the boundary would never be reached and the test below
+    // would pass for the wrong reason.
+    expect(isValidRateLimitIdentifier(DOC_REF_CANARY)).toBe(true);
+  });
+
+  it("SELF-VALIDATION: the double really throws for that identifier", () => {
+    expect(() => makeRef(DOC_REF_CANARY)).toThrow("DOC_REF_CONSTRUCTION_FAILURE");
+    expect(() => makeRef("set-admin:203.0.113.7")).not.toThrow();
+  });
+
+  it("checkRateLimit returns a fail-closed denial rather than throwing", async () => {
+    // If `.doc()` moves outside the try, this rejects and the test fails.
+    const res = await checkRateLimit({ ...CFG, identifier: DOC_REF_CANARY });
+    expect(res.allowed).toBe(false);
+    expect(res.remaining).toBe(0);
+    expect(res.retryAfter).toBeGreaterThan(0);
+  });
+
+  it("no partial state is written when reference construction fails", async () => {
+    await checkRateLimit({ ...CFG, identifier: DOC_REF_CANARY });
+    expect(docs.size).toBe(0);
+  });
+
+  it("ANCHOR: an ordinary identifier still works, so this is not blanket denial", async () => {
+    const res = await checkRateLimit({ ...CFG, identifier: "set-admin:203.0.113.7" });
+    expect(res.allowed).toBe(true);
+    expect(docs.get("set-admin:203.0.113.7")).toMatchObject({ count: 1 });
   });
 });

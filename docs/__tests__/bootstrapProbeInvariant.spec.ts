@@ -190,57 +190,56 @@ describe("the canonical safe probe is defined exactly once and is uid-less", () 
   });
 });
 
-describe("response semantics are pinned by MEANING, not by wording", () => {
+describe("PROOF SEMANTICS — a single response is never containment", () => {
   /**
-   * C9-R6 rewrote the 400 row to "denied. Containment achieved." and every test
-   * stayed green, because only the 429 row and one sentence were pinned. The
-   * table now carries stable verdict tokens, so the assertion is about what a
-   * status MEANS.
+   * Phase FIRST-ADMIN-C13. The exit-code table this replaces described a
+   * one-shot verdict. Review showed a single 401 proves only that the origin
+   * contacted rejected the string supplied — and that both halves fail open
+   * with no attacker: a preview/staging instance with an unset secret returns
+   * the GENUINE marker, and a shell-mangled secret is rejected by the LIVE
+   * route. The documented proof is now a bound state transition.
    */
   const src = readFileSync("docs/operations/admin-authority-tiers.md", "utf8");
-  // C11: the canonical probe is an executable, so each row is
-  // `| <exit> | <status> | <token> | <meaning> |`. The EXIT CODE is what the
-  // operator acts on, so it is pinned alongside the meaning.
-  const rows = src.split("\n").filter((l) => /^\s*\|\s*[0-9]\s*\|\s*(401|400|429|5xx|other)/.test(l));
+  const flat = src.replace(/\s+/g, " ");
 
-  it("ANCHOR: the verdict table was found, with a row per status", () => {
-    expect(rows.length).toBeGreaterThanOrEqual(4);
+  it("ANCHOR: the containment probe section was found", () => {
+    expect(src).toContain("SAFE-PROBE:CANONICAL");
+    expect(src).toContain("production-two-phase");
   });
 
-  const verdictFor = (status: string) => {
-    const row = rows.find((l) => new RegExp(`\\|\\s*${status}\\s*\\|`).test(l));
-    expect(row).toBeDefined();
-    return row!;
-  };
-
-  it("401 means the credential was REJECTED and containment is proven", () => {
-    const row = verdictFor("401");
-    expect(row).toContain("CREDENTIAL_REJECTED");
-    expect(row).toMatch(/[Cc]ontainment proven/);
-    // 401 is the ONLY row that exits 0.
-    expect(row).toMatch(/^\s*\|\s*0\s*\|/);
-    expect(rows.filter((r) => /^\s*\|\s*0\s*\|/.test(r))).toHaveLength(1);
+  it("requires the PRE observation to ACCEPT before any rotation", () => {
+    expect(flat).toMatch(/\*\*PRE\*\* — before you rotate anything/);
+    expect(flat).toContain("400 + `credential-accepted`");
+    expect(flat).toMatch(/the run \*\*aborts\*\*/);
   });
 
-  it("400 means the credential was ACCEPTED and containment FAILED", () => {
-    const row = verdictFor("400");
-    expect(row).toContain("CREDENTIAL_ACCEPTED");
-    expect(row).toMatch(/[Cc]ontainment FAILED/);
-    // The inversion that survived C9: 400 must never be described as success.
-    expect(row).not.toMatch(/containment (proven|achieved|complete|confirmed)/i);
+  it("requires the POST observation to REJECT the SAME secret at the SAME origin", () => {
+    expect(flat).toContain("same locked origin and the same");
+    expect(flat).toContain("401 + `credential-rejected`");
   });
 
-  it.each(["429", "5xx"])("%s is INCONCLUSIVE, never proof", (status) => {
-    const row = verdictFor(status);
-    expect(row).toContain("INCONCLUSIVE");
-    expect(row).not.toMatch(/containment (proven|achieved|complete|confirmed)/i);
+  it("only the transition proves containment", () => {
+    expect(flat).toContain("Only `PRE accepted -> POST rejected` prints `PRODUCTION_CONTAINMENT_PROVEN`");
   });
 
-  it("no status other than 401 is described as proving containment", () => {
-    for (const row of rows) {
-      if (row.includes("CREDENTIAL_REJECTED")) continue;
-      expect(row).not.toMatch(/containment (proven|achieved|complete|confirmed)/i);
-    }
+  it("states plainly that a wrong origin or a mangled secret would otherwise pass", () => {
+    expect(flat).toMatch(/INCLUDING when `ADMIN_SECRET` is unset/);
+    expect(flat).toMatch(/mangled by your shell/);
+  });
+
+  it("the single-shot mode is explicitly NOT containment evidence", () => {
+    expect(flat).toMatch(/can never print `PRODUCTION_CONTAINMENT_PROVEN`/);
+    expect(flat).toMatch(/Do not use it as enrollment or containment evidence/);
+  });
+
+  it("the header is described as a ROUTE MARKER, not attestation", () => {
+    expect(flat).toContain("ROUTE MARKER");
+    expect(flat).toMatch(/\*\*not\*\* cryptographic attestation/);
+    expect(flat).toMatch(/world-readable in a public repository/);
+  });
+
+  it("429 aborts the run rather than counting as anything", () => {
+    expect(flat).toMatch(/a 429 tells you nothing about the credential and aborts the run/);
   });
 });
 
@@ -290,7 +289,14 @@ describe("admin-minting operator scripts are classified — BY CONTENT, not by n
    *
    * That is the same blind-spot-by-naming-convention this file's own header
    * describes for the old four-extension whitelist, recurring one level over.
-   * Authority-minting is now identified by what a script DOES.
+   * Authority-minting is identified by two textual signatures: a
+   * `setCustomUserClaims` call together with an admin-true claim object (in
+   * `admin: true`, `"admin": true` or shorthand `{ admin }` form), or a
+   * reference to the bootstrap route alongside a uid. That covers the forms
+   * this repository uses. It does NOT solve arbitrary program analysis —
+   * wrapper indirection, computed member access, concatenated route paths, and
+   * tools written outside `scripts/` in a non-JS/TS language are accepted
+   * residuals, listed in docs/operations/security-test-falsifiability.md.
    */
   const SCRIPT_FILES = execSync("git ls-files -- 'scripts/*' 'scripts/**'", { encoding: "utf8" })
     .split("\n")
@@ -300,8 +306,18 @@ describe("admin-minting operator scripts are classified — BY CONTENT, not by n
 
   /** A tool mints authority if it sets the admin claim, or posts a uid to the bootstrap route. */
   const mintsAuthority = (src: string) => {
-    const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
-    const setsClaim = /setCustomUserClaims\s*\(/.test(code) && /admin\s*:\s*true/.test(code);
+    /**
+     * Phase FIRST-ADMIN-C13 (R9 P2). The line-comment stripper used to eat
+     * everything from `https://` onward, because it treated the `//` in a URL
+     * scheme as a comment start. Any script written with a full absolute URL
+     * literal was therefore invisible to the route rule. Only strip `//` when
+     * it is not preceded by `:`.
+     */
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+    // `{ admin: true }`, `{ "admin": true }`, and property shorthand `{ admin }`.
+    const setsClaim =
+      /setCustomUserClaims\s*\(/.test(code) &&
+      (/["']?admin["']?\s*:\s*true/.test(code) || /\{[^}]*\badmin\b[^}:]*\}/.test(code));
     // Any uid reference alongside the bootstrap route — shorthand `{ uid, secret }`
     // carries no colon, so matching `uid:` alone missed the obvious form. The
     // canonical probe contains no `uid` identifier at all, so it stays clear.
@@ -353,6 +369,11 @@ describe("admin-minting operator scripts are classified — BY CONTENT, not by n
     expect(mintsAuthority(`fetch("/api/admin/set-admin", { body: JSON.stringify({ uid, secret }) })`)).toBe(true);
     // ...and does not fire on the probe's own shape.
     expect(mintsAuthority(`fetch(url + "/api/admin/set-admin", { body: JSON.stringify({ secret }) })`)).toBe(false);
+    // C13: an absolute URL literal is no longer mistaken for a comment.
+    expect(mintsAuthority(`await fetch("https://x.test/api/admin/set-admin", { body: JSON.stringify({ uid, secret }) });`)).toBe(true);
+    // C13: property shorthand and a quoted key both count as minting.
+    expect(mintsAuthority(`const admin = true; await setCustomUserClaims(uid, { admin });`)).toBe(true);
+    expect(mintsAuthority(`await setCustomUserClaims(uid, { "admin": true });`)).toBe(true);
     // ...nor on prose about minting.
     expect(mintsAuthority(`// this script does not call setCustomUserClaims with admin: true`)).toBe(false);
   });

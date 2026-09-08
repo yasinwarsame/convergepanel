@@ -175,23 +175,42 @@ let writes: Write[] = [];
 let auditRows: Array<Record<string, unknown>> = [];
 /** When true the audit `.add()` throws a realistic path-bearing Firestore error. */
 let auditWriteFails = false;
-let captured: string[] = [];
+/** Every console sink the governance modules and `logger` actually use. */
 const CONSOLE_METHODS = ["log", "warn", "error", "debug", "info"] as const;
-const originals: Partial<Record<(typeof CONSOLE_METHODS)[number], (...a: unknown[]) => void>> = {};
 const serialize = (args: unknown[]) =>
   args.map((a) => (typeof a === "string" ? a : inspect(a, { depth: null, breakLength: Infinity }))).join(" ");
 
+/**
+ * Phase FIRST-ADMIN-C13 (R9 P1) — THE LEDGER IS JEST'S, NOT OURS.
+ *
+ * C12 pushed each call into a hand-rolled array inside the spy. A reviewer then
+ * added one line to that spy which dropped the leaking call before it was
+ * recorded: the whole suite stayed green while a real `ownerUid` leaked from
+ * the production route on every blocked-run override. The counter proved the
+ * hook ran and counted real invocations; nothing proved the RECORD was faithful.
+ *
+ * `jest.spyOn(...).mockImplementation(...)` records the arguments in
+ * `mock.calls` BEFORE the implementation runs, so no implementation — filtering,
+ * sanitising, or silently discarding — can remove a call from that ledger. The
+ * capture reads `mock.calls` directly and serialises only afterwards. There is
+ * no seam between invocation and record for anyone to edit.
+ */
+const consoleSpies: Partial<Record<(typeof CONSOLE_METHODS)[number], jest.SpyInstance>> = {};
+
 beforeAll(() => {
   for (const m of CONSOLE_METHODS) {
-    originals[m] = console[m].bind(console);
-    console[m] = (...args: unknown[]) => { captured.push(serialize(args)); };
+    consoleSpies[m] = jest.spyOn(console, m).mockImplementation(() => {});
   }
 });
 afterAll(() => {
-  for (const m of CONSOLE_METHODS) if (originals[m]) console[m] = originals[m]!;
+  for (const m of CONSOLE_METHODS) consoleSpies[m]?.mockRestore();
 });
 
-const output = () => captured.join("\n");
+/** Raw recorded invocations, straight from Jest. */
+const rawCalls = (): unknown[][] => CONSOLE_METHODS.flatMap((m) => consoleSpies[m]?.mock.calls ?? []);
+const clearCapture = () => { for (const m of CONSOLE_METHODS) consoleSpies[m]?.mockClear(); };
+
+const output = () => rawCalls().map(serialize).join("\n");
 
 /**
  * Phase FIRST-ADMIN-C12 (R8 P1-2) — THE ASSERTION READS THE SINK ITSELF.
@@ -208,9 +227,9 @@ const output = () => captured.join("\n");
  * in REAL SINK CALLS — a filler constant cannot manufacture a console call.
  */
 const governanceLogCapture = {
-  /** Reads the live spy buffer. Not a snapshot, not a caller-supplied value. */
-  entries: () => captured,
-  text: () => captured.join("\n"),
+  /** Straight from Jest's ledger — no intermediate buffer to tamper with. */
+  entries: () => rawCalls(),
+  text: () => rawCalls().map(serialize).join("\n"),
 
   assertNoSensitiveCanaries(opts: { allowIntegrityRunId?: boolean } = {}) {
     const logs = this.text();
@@ -380,7 +399,7 @@ beforeEach(() => {
     existingDocs[`${c}/${C.runId}`] = { userId: C.ownerAUid };
     existingDocs[`${c}/other-run`] = { userId: C.ownerBUid };
   }
-  captured = [];
+  clearCapture();
   auditRows = [];
   writes = [];
   auditWriteFails = false;
@@ -446,20 +465,20 @@ describe("ANCHOR 1 — the capture reproduces what the sink actually received", 
    */
   it.each(CONSOLE_METHODS)("console.%s output is recovered verbatim", (method) => {
     redactionExemption = "capture-fidelity"; // deliberately emits a canary
-    captured = [];
+    clearCapture();
     (console[method] as (...a: unknown[]) => void)(`probe-${method}-${C.runId}`);
     expect(output()).toContain(`probe-${method}-${C.runId}`);
   });
 
   it("a canary nested inside an object argument is recovered", () => {
     redactionExemption = "capture-fidelity"; // deliberately emits a canary
-    captured = [];
+    clearCapture();
     console.log("probe", { deep: { nested: [{ value: C.ownerBUid }] } });
     expect(output()).toContain(C.ownerBUid);
   });
 
   it("the capture starts empty for each test", () => {
-    expect(captured).toEqual([]);
+    expect(rawCalls()).toEqual([]);
   });
 });
 
@@ -684,7 +703,7 @@ describe("admin_global BRANCH — the one that first executes at enrollment", ()
 
   it("ANCHOR: the branch logs its approved scope decision", async () => {
     asGovernanceAdmin();
-    captured = [];
+    clearCapture();
     await post("runs", "other-run");
     expect(output()).toContain("[governance/queue] Admin: global access");
   });
@@ -700,7 +719,7 @@ describe("admin_global BRANCH — the one that first executes at enrollment", ()
 
   it("writes no sensitive canary to the log sink", async () => {
     asGovernanceAdmin();
-    captured = [];
+    clearCapture();
     await post("runs", "other-run");
     assertNoSensitiveGovernanceCanaries(output());
   });
@@ -945,6 +964,78 @@ describe("ZZ ENFORCEMENT LIVENESS — the automatic check actually ran", () => {
   });
 });
 
+describe("RAW LEDGER FIDELITY — arguments are recorded before any implementation runs", () => {
+  /**
+   * Phase FIRST-ADMIN-C13 (R9 P1). The defect this closes: a spy whose
+   * implementation dropped the leaking call before recording it left the entire
+   * suite green while a real ownerUid leaked from the production route.
+   *
+   * Jest writes `mock.calls` BEFORE invoking the implementation, so these
+   * assertions are on the raw invocation record — argument identity, not a
+   * serialised string a filter could have rewritten.
+   */
+  it.each(CONSOLE_METHODS)("console.%s records exact argument values and arity", (method) => {
+    redactionExemption = "capture-fidelity";
+    clearCapture();
+    const emailObj = { email: C.ownerEmail };
+    (console[method] as (...a: unknown[]) => void)("prefix", C.ownerBUid, emailObj);
+
+    const calls = consoleSpies[method]!.mock.calls;
+    expect(calls).toHaveLength(1);            // the call is there at all
+    expect(calls[0]).toHaveLength(3);         // no argument was dropped
+    expect(calls[0][0]).toBe("prefix");
+    expect(calls[0][1]).toBe(C.ownerBUid);    // exact value, not a rendering
+    expect(calls[0][2]).toBe(emailObj);       // same object identity
+  });
+
+  it("an implementation that tries to DROP a call cannot remove it from the ledger", () => {
+    /**
+     * The exact C12-killing attack, pinned. A filtering implementation is
+     * installed and the call is still recorded.
+     */
+    redactionExemption = "capture-fidelity";
+    clearCapture();
+    const spy = consoleSpies.log!;
+    const original = spy.getMockImplementation();
+    spy.mockImplementation((...args: unknown[]) => {
+      if (String(args[0]).includes("dbg owner=")) return;   // the attack
+    });
+    try {
+      console.log(`dbg owner=${C.ownerBUid}`);
+      expect(spy.mock.calls).toHaveLength(1);
+      expect(spy.mock.calls[0][0]).toContain(C.ownerBUid);
+      // ...and the shared assertion therefore still sees it.
+      expect(() => governanceLogCapture.assertNoSensitiveCanaries()).toThrow();
+    } finally {
+      spy.mockImplementation(original ?? (() => {}));
+    }
+  });
+
+  it("an implementation that REWRITES a call cannot alter the ledger", () => {
+    redactionExemption = "capture-fidelity";
+    clearCapture();
+    const spy = consoleSpies.warn!;
+    const original = spy.getMockImplementation();
+    spy.mockImplementation(() => { /* swallows everything */ });
+    try {
+      console.warn("x", C.reviewerUid);
+      expect(spy.mock.calls[0][1]).toBe(C.reviewerUid);
+      expect(() => governanceLogCapture.assertNoSensitiveCanaries()).toThrow();
+    } finally {
+      spy.mockImplementation(original ?? (() => {}));
+    }
+  });
+
+  it("the assertion takes no caller-supplied text, entries, or count", () => {
+    // Its only parameter is the typed integrity exemption.
+    expect(governanceLogCapture.assertNoSensitiveCanaries.length).toBeLessThanOrEqual(1);
+    const src = readFileSync("app/api/governance/review/__tests__/reviewLogRedaction.spec.ts", "utf8");
+    // It reads the ledger itself.
+    expect(src).toContain("entries: () => rawCalls()");
+    expect(src).toContain("consoleSpies[m]?.mock.calls");
+  });
+});
+
 describe("CAPTURE SELF-VALIDATION — the mechanism the hook depends on", () => {
   /**
    * Phase FIRST-ADMIN-C12. The hook is only as good as the capture. These
@@ -952,7 +1043,7 @@ describe("CAPTURE SELF-VALIDATION — the mechanism the hook depends on", () => 
    */
   it("a real console.log is seen by the capture", () => {
     redactionExemption = "capture-fidelity";
-    captured = [];
+    clearCapture();
     console.log("SAFE-ANCHOR-c12");
     expect(governanceLogCapture.entries()).toHaveLength(1);
     expect(governanceLogCapture.text()).toContain("SAFE-ANCHOR-c12");
@@ -960,20 +1051,20 @@ describe("CAPTURE SELF-VALIDATION — the mechanism the hook depends on", () => 
 
   it("a real console.warn carrying a canary FAILS the redaction assertion", () => {
     redactionExemption = "capture-fidelity";
-    captured = [];
+    clearCapture();
     console.warn("leak", { owner: C.ownerBUid });
     expect(() => governanceLogCapture.assertNoSensitiveCanaries()).toThrow();
   });
 
   it("no sink calls at all FAILS the expected-logging assertion", () => {
     redactionExemption = "capture-fidelity";
-    captured = [];
+    clearCapture();
     expect(() => governanceLogCapture.assertLoggingOccurred("anything")).toThrow();
   });
 
   it("a filler constant cannot satisfy liveness — only real calls count", () => {
     redactionExemption = "capture-fidelity";
-    captured = [];
+    clearCapture();
     const filler = "harmless filler line ".repeat(500); // >5000 chars, C11's old bar
     expect(filler.length).toBeGreaterThan(5_000);
     // The capture reports ZERO calls regardless of how much text exists elsewhere.
@@ -990,7 +1081,7 @@ describe("CAPTURE SELF-VALIDATION — the mechanism the hook depends on", () => 
 
   it("the capture reads the LIVE buffer, not a snapshot", () => {
     redactionExemption = "capture-fidelity";
-    captured = [];
+    clearCapture();
     const before = governanceLogCapture.entries().length;
     console.log("later-line-c12");
     expect(governanceLogCapture.entries().length).toBe(before + 1);

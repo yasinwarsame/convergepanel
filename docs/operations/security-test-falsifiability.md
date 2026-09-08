@@ -139,3 +139,32 @@ today; each is a way a future regression passes review the way the last two did.
   the real function receives the whole run document; a log added inside it would
   not be observed. The audit writer was un-stubbed in C8 for exactly this
   reason; this one remains.
+
+### Residuals added in C13 (named, not claimed covered)
+
+- **Deferred logging is outside automatic capture.** The governance redaction
+  hook asserts after the tested route's promise resolves. A log emitted from a
+  `setTimeout`, `setImmediate`, or a floating promise fires later and is not
+  inspected — verified by mutation, and verified that an *awaited* macrotask at
+  the same position IS caught, so this is a timing boundary rather than an
+  unreachable branch. The current governance path defers nothing: `route.ts`
+  awaits `writeAuditEvent`, `auditLog.ts` awaits its write, and there is no
+  `void`, detached `.catch`, timer or microtask anywhere on it. Automatic
+  capture covers logging completed before the route promise resolves; deferred
+  or floating logging is review debt and is **not** claimed covered.
+- **Aliased and computed sinks.** The structural test that asserts governance
+  modules use no uncaptured sink is a literal-substring source scan. It sees
+  `console.dir`; it does not see `const out = process.stdout; out.write(...)`
+  or `console["di" + "r"]`. The claim is "no governance module contains these
+  tokens", not "no uncaptured sink can exist".
+- **Mint-detector limits.** Authority-minting is detected by two textual
+  signatures (a `setCustomUserClaims` call with an admin-true claim object, in
+  `admin: true`, `"admin": true` or shorthand form; or a bootstrap-route
+  reference alongside a uid). Wrapper indirection, computed member access,
+  concatenated route paths, and minting tools written outside `scripts/` or in
+  a non-JS/TS language are **not** detected. Those are review responsibilities.
+- **The probe's route marker is not attestation.** `x-convergepanel-admin-secret-probe`
+  is world-readable in a public repository. Any server can emit it. What makes a
+  containment proof meaningful is the bound two-phase transition at the
+  canonical Production origin — accepted before the rotation, rejected after —
+  not the header.

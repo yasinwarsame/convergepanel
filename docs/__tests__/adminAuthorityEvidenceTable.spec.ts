@@ -100,7 +100,7 @@ describe("the SYSTEM_ADMIN containment procedure closes the bootstrap path", () 
   });
 
   it("requires proving the old secret is dead, not just changed", () => {
-    expect(SECTION.replace(/\s+/g, " ")).toMatch(/Only exit 0 closes the window/);
+    expect(SECTION.replace(/\s+/g, " ")).toMatch(/Only `PRE accepted -> POST rejected` prints/);
   });
 
   it("the prove-dead probe OMITS the uid, so it cannot mint a claim", () => {
@@ -110,7 +110,11 @@ describe("the SYSTEM_ADMIN containment procedure closes the bootstrap path", () 
      * validates the secret before the uid, so the safe probe carries no uid.
      */
     expect(SECTION).toContain("scripts/probe-admin-secret.mjs");
-    expect(SECTION).toContain("OLD_ADMIN_SECRET=");
+    expect(SECTION).toContain("--production-two-phase");
+    // The secret is exported, never inlined on a command line where the shell
+    // would mangle it — that produced a false proof.
+    expect(SECTION).toContain("export OLD_ADMIN_SECRET");
+    expect(SECTION).not.toMatch(/OLD_ADMIN_SECRET=<old value> node/);
     // The runbook must no longer reconstruct a request body of its own.
     expect(SECTION).not.toMatch(/["']uid["']\s*:/);
     // The old, dangerous instruction must not survive anywhere in the section.
@@ -121,13 +125,12 @@ describe("the SYSTEM_ADMIN containment procedure closes the bootstrap path", () 
     // Row shape only; the SEMANTICS of each status are pinned by verdict token
     // in docs/__tests__/bootstrapProbeInvariant.spec.ts, so a reworded row
     // cannot invert the meaning the way it could in C9.
-    expect(SECTION.replace(/\s+/g, " ")).toMatch(/\| 429 \| `?INCONCLUSIVE`? \|/);
-    expect(SECTION).toContain("unproven");
+    expect(SECTION.replace(/\s+/g, " ")).toMatch(/a 429 tells you nothing about the credential/);
   });
 
   it("does not tell the operator to bypass the rate limiter", () => {
     // Whitespace-tolerant: the doc wraps this sentence across lines.
-    expect(SECTION.replace(/\s+/g, " ")).toMatch(/re-run rather than trying to bypass it/);
+    expect(SECTION.replace(/\s+/g, " ")).toMatch(/Wait for the window and re-run rather than trying to bypass it/);
   });
 
   it("states plainly that containment is incomplete while the secret can re-mint", () => {
@@ -298,17 +301,26 @@ describe("STRUCTURED CONTAINMENT CONTRACT — steps identified by stable ID", ()
     expect(src.match(new RegExp(`\\[${id}\\]`, "g")) ?? []).toHaveLength(1);
   });
 
-  it.each(REQUIRED)("%s is marked [REQUIRED] and its step is not hedged as optional", (id) => {
+  it.each(REQUIRED)("%s carries Mode=MUST in the structured obligation table", (id) => {
     /**
-     * Phase FIRST-ADMIN-C12 (R8 P2-1). The ID alone encoded presence and
-     * numbering, not obligation: two steps — refresh-token revocation and the
-     * containment probe — were rewritten as "Optional, only if convenient" and
-     * "Skip this if you are confident" with the whole suite green.
+     * Phase FIRST-ADMIN-C13 (R9 P2). C12 enforced obligation with a six-phrase
+     * blocklist, and a reviewer walked past it with "at your discretion; omit
+     * when time-pressed" while keeping the [REQUIRED] marker. Blacklisting
+     * synonyms is not achievable; the structured Mode column is the contract,
+     * and the prose under each step is free to evolve.
      */
-    expect(SECTION).toContain(`[${id}][REQUIRED]`);
-    const line = SECTION.split("\n").find((l) => l.includes(`[${id}]`))!;
-    expect({ id, hedged: /\b(optional|if convenient|skip this|you may wish|not required|example only)\b/i.test(line) })
-      .toEqual({ id, hedged: false });
+    const row = SECTION.split("\n").filter((l) => l.includes(`\`${id}\``) && l.includes("|"));
+    expect(row).toHaveLength(1);
+    expect(row[0].split("|").map((c) => c.trim())).toContain("MUST");
+  });
+
+  it("the obligation table declares no requirement this contract does not know about", () => {
+    const declared = [...SECTION.matchAll(/\|\s*`(CONTAINMENT_[A-Z_]+)`\s*\|[^|]*\|\s*MUST\s*\|/g)].map((m) => m[1]);
+    expect([...new Set(declared)].sort()).toEqual([...REQUIRED].sort());
+  });
+
+  it("ANCHOR: downgrading a Mode is visible — no row may say MAY or SHOULD", () => {
+    expect(SECTION).not.toMatch(/\|\s*(MAY|SHOULD|OPTIONAL)\s*\|/);
   });
 
   it("the section declares no containment ID this contract does not require", () => {
