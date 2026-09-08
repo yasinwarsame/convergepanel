@@ -52,12 +52,29 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { uid, secret } = body;
 
-    const adminSecret = process.env.ADMIN_SECRET ?? "";
-    const provided = typeof secret === "string" ? secret : "";
+    /**
+     * Phase FIRST-ADMIN-C10 — compare BYTE lengths, not character lengths.
+     *
+     * This previously guarded `timingSafeEqual` with `provided.length ===
+     * adminSecret.length`. String `.length` counts UTF-16 code units while
+     * `Buffer.from()` measures UTF-8 bytes, so inputs of equal character length
+     * and unequal byte length reached `timingSafeEqual`, which throws
+     * ERR_CRYPTO_TIMING_SAFE_EQUAL_LENGTH — surfacing as a 500. Two problems:
+     * an unauthenticated length oracle for `ADMIN_SECRET` (N multibyte
+     * characters return 500 where N±1 return 401), and, worse for the operator,
+     * the containment probe in the runbook returns an INCONCLUSIVE 5xx instead
+     * of a conclusive 401 whenever the old secret is non-ASCII.
+     *
+     * Buffers are built once and their byte lengths compared, so a mismatch is
+     * an ordinary authentication failure. `timingSafeEqual` is retained — it is
+     * the point of this comparison, not an implementation detail.
+     */
+    const adminSecretBuf = Buffer.from(process.env.ADMIN_SECRET ?? "", "utf8");
+    const providedBuf = Buffer.from(typeof secret === "string" ? secret : "", "utf8");
     const secretValid =
-      adminSecret.length > 0 &&
-      provided.length === adminSecret.length &&
-      timingSafeEqual(Buffer.from(provided), Buffer.from(adminSecret));
+      adminSecretBuf.length > 0 &&
+      providedBuf.length === adminSecretBuf.length &&
+      timingSafeEqual(providedBuf, adminSecretBuf);
 
     if (!secretValid) {
       return NextResponse.json(

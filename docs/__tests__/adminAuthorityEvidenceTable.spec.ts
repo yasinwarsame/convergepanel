@@ -20,8 +20,9 @@
  * the handler, and is what review is for. It checks that no route is missing,
  * which is the failure mode that actually occurred, twice.
  */
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, statSync, mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 const DOC = "docs/operations/admin-authority-tiers.md";
 const SRC = readFileSync(DOC, "utf8");
@@ -114,7 +115,10 @@ describe("the SYSTEM_ADMIN containment procedure closes the bootstrap path", () 
   });
 
   it("states that 429 and 5xx are INCONCLUSIVE, not containment", () => {
-    expect(SECTION.replace(/\s+/g, " ")).toMatch(/\| 429 \| INCONCLUSIVE/);
+    // Row shape only; the SEMANTICS of each status are pinned by verdict token
+    // in docs/__tests__/bootstrapProbeInvariant.spec.ts, so a reworded row
+    // cannot invert the meaning the way it could in C9.
+    expect(SECTION.replace(/\s+/g, " ")).toMatch(/\| 429 \| `?INCONCLUSIVE`? \|/);
     expect(SECTION).toContain("unproven");
   });
 
@@ -193,10 +197,24 @@ describe("§A.6 table enumerates every HTTP method each route exports", () => {
    * "PATCH" — dropping permanent account deletion from the incident table —
    * with CI green.
    */
-  const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
+  /**
+   * Phase FIRST-ADMIN-C10 (R6 F-2). The extractor saw only
+   * `export function` / `export async function` among five verbs, so a route
+   * added as `export const DELETE = …`, or exporting OPTIONS/HEAD, could be
+   * listed with that method missing from the incident table and CI stayed
+   * green. No route uses those forms today — this closes the gap before one
+   * does, rather than narrowing the claim a third time.
+   */
+  const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"] as const;
   const exported = (file: string) => {
-    const src = readFileSync(file, "utf8");
-    return METHODS.filter((m) => new RegExp(`export\\s+(async\\s+)?function\\s+${m}\\b`).test(src));
+    const src = readFileSync(file, "utf8")
+      .split("\n")
+      .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))   // a commented-out export is not an export
+      .join("\n");
+    return METHODS.filter((m) =>
+      new RegExp(`export\\s+(async\\s+)?function\\s+${m}\\b`).test(src) ||
+      new RegExp(`export\\s+(const|let|var)\\s+${m}\\s*(:[^=]*)?=`).test(src)
+    );
   };
 
   const ROUTE_FILES = [...routeFiles("app/api/admin"), ...routeFiles("app/api/governance")];
@@ -206,6 +224,29 @@ describe("§A.6 table enumerates every HTTP method each route exports", () => {
     const all = ROUTE_FILES.flatMap(exported);
     expect(all).toEqual(expect.arrayContaining(["GET", "POST", "PATCH", "DELETE"]));
     expect(exported("app/api/admin/users/[uid]/route.ts").sort()).toEqual(["DELETE", "PATCH"]);
+  });
+
+  it("ANCHOR: the extractor recognises every export form and verb it claims to", () => {
+    /**
+     * Written against synthetic sources, because no route in the repository
+     * uses the const form or OPTIONS/HEAD today — which is precisely why the
+     * gap was invisible. Without this the broadened claim would be untested.
+     */
+    const tmp = join(mkdtempSync(join(tmpdir(), "route-extract-")), "route.ts");
+    writeFileSync(tmp, [
+      "export async function GET() {}",
+      "export function POST() {}",
+      "export const DELETE = async () => {};",
+      "export const PATCH: RouteHandler = async () => {};",
+      "export let OPTIONS = () => {};",
+      "export async function HEAD() {}",
+    ].join("\n"));
+    expect(exported(tmp).sort()).toEqual(["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST"].sort());
+
+    const none = join(mkdtempSync(join(tmpdir(), "route-extract-none-")), "route.ts");
+    // Must NOT match a non-export, a comment, or a similarly-named local.
+    writeFileSync(none, "const GET = 1;\n// export function POST() {}\nfunction DELETEX() {}\n");
+    expect(exported(none)).toEqual([]);
   });
 
   it.each(ROUTE_FILES)("%s: every exported method appears in its table row(s)", (file) => {

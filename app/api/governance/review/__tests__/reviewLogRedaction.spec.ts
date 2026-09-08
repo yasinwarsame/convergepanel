@@ -11,11 +11,24 @@
  * shape the grep did not spell.
  *
  * This suite instead runs the REAL route and captures the REAL sink. `logger`
- * delegates to `console.error/warn/log/debug` (lib/logger.ts:119-140), so
- * capturing every console method captures both the direct `console.*` calls and
- * everything routed through `logger` — including whatever `redact()` did or did
- * not do to it. Arguments are serialized deeply, so a canary buried in an
- * object argument is caught exactly like one interpolated into the message.
+ * delegates to `console.error/warn/log/debug` (lib/logger.ts:119-140), and the
+ * governance modules under test use `console.log/warn/error` directly, so the
+ * capture covers every sink THOSE MODULES ACTUALLY USE. Arguments are
+ * serialized deeply, so a canary buried in an object argument is caught exactly
+ * like one interpolated into the message.
+ *
+ * SCOPE OF THAT CLAIM, stated because C9 overstated it as "every console
+ * method": `console.dir`, `console.trace`, `console.table` and direct
+ * `process.stdout.write` are NOT captured. No governance module uses them
+ * today — verified by the structural test below — but a future one would be
+ * invisible here. That is a named residual, not a covered case.
+ *
+ * A second named residual: `logger.redact()` replaces values under the keys
+ * `uid`/`userId`/`firebaseUid` with a truncated 32-bit hash. A leak routed
+ * through `logger.warn(msg, { uid })` therefore does not appear as the raw
+ * canary and is invisible to these assertions — and the hash is itself a stable
+ * per-user correlation identifier. Not fixed here; see
+ * docs/operations/security-test-falsifiability.md.
  *
  * Falsifiability. "No canary appeared in the output" is trivially satisfied by
  * a capture that recorded nothing, by a route that logged nothing, and by a
@@ -96,6 +109,45 @@ const SENSITIVE_LOG_CANARIES: Array<[string, () => string]> = [
   ["the privileged allowlist domain", () => "canary-allowlist-domain-294fb4.example"],
 ];
 
+/**
+ * The audit event object's identity fields, by the names the writer sees. Same
+ * values as above — listed so it is explicit that `byUid`/`byEmail`/
+ * `runOwnerUid`/`runOwnerEmail` are covered by the shared set, which is what
+ * the audit-failure branch leaked.
+ */
+const AUDIT_EVENT_IDENTITY_FIELDS = {
+  byUid: () => C.reviewerUid,
+  byEmail: () => C.callerEmail,
+  runOwnerUid: () => C.ownerAUid,
+  runOwnerEmail: () => C.ownerEmail,
+  runId: () => C.runId,
+  question: () => C.question,
+} as const;
+
+/**
+ * Phase FIRST-ADMIN-C10 (R6 P1-1) — ONE ASSERTION, NOT A LIST PER BRANCH.
+ *
+ * C9 unified the deny-set across five branches and left the sixth — the audit
+ * writer's catch block — on a hand-written three-value list. That block holds
+ * the WHOLE event object, so `byUid`, `byEmail`, `runOwnerUid`,
+ * `runOwnerEmail` and `question` all leaked with the suite green; under
+ * `admin_global` the swallowed event describes another tenant's run.
+ *
+ * A per-branch list is the defect. Every governance logging branch now calls
+ * THIS function, so a new branch cannot quietly ship a weaker subset — the only
+ * way to weaken one is to pass an explicit `allow`, which is visible in review.
+ */
+function assertNoSensitiveGovernanceCanaries(logs: string, opts: { allow?: string[] } = {}) {
+  const allow = new Set(opts.allow ?? []);
+  const leaked: string[] = [];
+  for (const [label, get] of SENSITIVE_LOG_CANARIES) {
+    const value = get();
+    if (allow.has(value)) continue;
+    if (logs.includes(value)) leaked.push(label);
+  }
+  expect(leaked).toEqual([]);
+}
+
 const NOW = Date.now();
 let tokenClaims: Record<string, unknown> = {};
 let liveRecord: Record<string, unknown> = {};
@@ -108,6 +160,9 @@ let existingDocs: Record<string, { userId: string }> = {};
 
 /** Everything any console method received, in order, deeply serialized. */
 /** Rows the REAL `writeAuditEvent` persisted, so we can prove it executed. */
+type Write = { kind: "set" | "update" | "add"; collection: string; id: string; patch?: Record<string, unknown> };
+/** Every Firestore write the handler performed, so a zero-write premise is testable. */
+let writes: Write[] = [];
 let auditRows: Array<Record<string, unknown>> = [];
 /** When true the audit `.add()` throws a realistic path-bearing Firestore error. */
 let auditWriteFails = false;
@@ -148,10 +203,10 @@ function docHandle(collection: string, id: string) {
         createdAt: { toMillis: () => NOW },
       } : undefined),
     }),
-    set: async () => {},
-    update: async () => {},
-    collection: () => ({
-      add: async () => {},
+    set: async (patch: Record<string, unknown>) => { writes.push({ kind: "set", collection, id, patch }); },
+    update: async (patch: Record<string, unknown>) => { writes.push({ kind: "update", collection, id, patch }); },
+    collection: (sub: string) => ({
+      add: async (patch: Record<string, unknown>) => { writes.push({ kind: "add", collection: `${collection}/${id}/${sub}`, id: "auto", patch }); },
       orderBy: () => ({ limit: () => ({ get: async () => ({ docs: [] }) }) }),
       get: async () => ({ docs: [] }),
     }),
@@ -174,11 +229,22 @@ function collectionHandle(name: string) {
         // Firestore errors carry the document path they failed on, which is how
         // a cross-tenant identifier reaches the log by a route no grep for
         // `event.runId` would find. Shaped like the real thing.
-        const err = Object.assign(
-          new Error(`5 NOT_FOUND: no entity to update: app: projects/p/databases/(default)/documents/admin_audit_logs/${C.runId}`),
-          { code: 5 }
-        );
-        throw err;
+        /**
+         * Phase FIRST-ADMIN-C10 (R6 P2). The previous fixture was an `Error`
+         * with only `code` added — and `message`/`name` are NON-enumerable on
+         * Error, so the only own enumerable property was the one the code
+         * already logs deliberately. A mutation spreading the error (`...err`)
+         * therefore leaked nothing and survived. `firebase-admin` throws a
+         * grpc-js ServiceError, whose `details` repeats the document path as an
+         * ENUMERABLE property. Modelled properly, a spread now leaks.
+         */
+        const path = `projects/p/databases/(default)/documents/admin_audit_logs/${C.runId}`;
+        throw Object.assign(new Error(`5 NOT_FOUND: no entity to update: app: ${path}`), {
+          code: 5,
+          details: `no entity to update: app: ${path}`,
+          metadata: { internalRepr: new Map(), options: {} },
+          owner: C.ownerAUid,
+        });
       }
       auditRows.push(patch);
       return { id: "audit-row-id" };
@@ -231,6 +297,7 @@ beforeEach(() => {
   }
   captured = [];
   auditRows = [];
+  writes = [];
   auditWriteFails = false;
 });
 
@@ -325,9 +392,8 @@ describe.each(COLLECTIONS)("GOVERNANCE HOT PATH — collection=%s", (collection)
     expect(auditRows[0]).toMatchObject({ runId: C.runId, byUid: C.reviewerUid, runOwnerUid: C.ownerAUid });
   });
 
-  it.each(SENSITIVE_LOG_CANARIES)("never writes %s to the log sink", async (_label, canary) => {
-    const logs = await run();
-    expect(logs).not.toContain(canary());
+  it("never writes any sensitive canary to the log sink", async () => {
+    assertNoSensitiveGovernanceCanaries(await run());
   });
 
   it("a governance status may appear only on a line carrying no identifier", async () => {
@@ -407,16 +473,24 @@ describe("DELIBERATE DIVERGENCE — the integrity-failure path keeps its run id"
     expect(logs).toContain(C.runId);
 
     /**
+     * THE PREMISE, PINNED (R6 P1-2). The run id is allowed here ONLY because
+     * this path writes nothing — no governance write, no governanceEvents
+     * write, no audit event — so the log line is the sole trace of a malformed
+     * record. C9 asserted the exception and not its justification, so adding a
+     * `writeAuditEvent` to this branch survived 2779 tests. If any of these
+     * becomes non-zero, the licence for the run id is gone.
+     */
+    expect(writes).toEqual([]);
+    expect(auditRows).toEqual([]);
+
+    /**
      * NARROW ALLOWLIST, not a weak subset. C8 checked two canaries here and
      * three leak mutations survived — reviewer uid, owner uid and reason text
      * could all be added to this log with the suite green. That is the branch
      * where scope creep is most likely precisely BECAUSE it is already licensed
      * to carry one identifier. Everything except the run id is still forbidden.
      */
-    for (const [, canary] of SENSITIVE_LOG_CANARIES) {
-      if (canary() === C.runId) continue; // the one justified exception
-      expect(logs).not.toContain(canary());
-    }
+    assertNoSensitiveGovernanceCanaries(logs, { allow: [C.runId] });
   });
 });
 
@@ -473,9 +547,9 @@ describe.each(COLLECTIONS)("OWNER_B IS REACHABLE — cross-tenant denial, collec
     expect(output()).toContain("plan: full");
   });
 
-  it.each(SENSITIVE_LOG_CANARIES)("does not write %s to the log sink on the denial path", async (_label, canary) => {
+  it("writes no sensitive canary to the log sink on the denial path", async () => {
     await post(collection, "other-run");
-    expect(output()).not.toContain(canary());
+    assertNoSensitiveGovernanceCanaries(output());
   });
 });
 
@@ -523,11 +597,11 @@ describe("admin_global BRANCH — the one that first executes at enrollment", ()
     expect(auditRows).toHaveLength(1);
   });
 
-  it.each(SENSITIVE_LOG_CANARIES)("does not write %s to the log sink", async (_label, canary) => {
+  it("writes no sensitive canary to the log sink", async () => {
     asGovernanceAdmin();
     captured = [];
     await post("runs", "other-run");
-    expect(output()).not.toContain(canary());
+    assertNoSensitiveGovernanceCanaries(output());
   });
 });
 
@@ -539,14 +613,14 @@ describe("SIBLING SCOPE BRANCHES — every remaining logging branch of the resol
    * decision (covered by the main suite). Each is exercised here with an
    * anchor proving the branch ran, then checked for identifiers.
    */
-  const CANARIES = SENSITIVE_LOG_CANARIES.map(([, v]) => v());
+
 
   it("plan_required: logs the decision without the caller's identity", async () => {
     planId = "lite";
     const res = await post("runs", C.runId);
     expect(res.status).toBe(403);
     expect(output()).toContain("Scoping decision: plan_required");   // ANCHOR
-    for (const c of CANARIES) expect(output()).not.toContain(c);
+    assertNoSensitiveGovernanceCanaries(output());
   });
 
   it("no_assigners: logs the empty scope without the caller's identity", async () => {
@@ -554,7 +628,7 @@ describe("SIBLING SCOPE BRANCHES — every remaining logging branch of the resol
     const res = await post("runs", C.runId);
     expect(res.status).toBe(403);
     expect(output()).toContain("no assigners (empty queue scope)");  // ANCHOR
-    for (const c of CANARIES) expect(output()).not.toContain(c);
+    assertNoSensitiveGovernanceCanaries(output());
   });
 
   it("truncation: warns with a count and never the owner list", async () => {
@@ -564,7 +638,7 @@ describe("SIBLING SCOPE BRANCHES — every remaining logging branch of the resol
     await post("runs", "other-run");
     expect(output()).toContain("Truncated visible owner set to 30");  // ANCHOR
     expect(output()).toContain("owner(s)");
-    for (const c of CANARIES) expect(output()).not.toContain(c);
+    assertNoSensitiveGovernanceCanaries(output());
     expect(output()).not.toContain("assigner-0");
   });
 });
@@ -580,12 +654,24 @@ describe("the audit writer's FAILURE path does not leak the record it failed on"
    * a mutation restoring the raw error survived the entire suite until this
    * existed. The failure is injected deliberately.
    */
-  it("SELF-VALIDATION: the injected error really carries the run id in its message", () => {
+  it("SELF-VALIDATION: every identity field of the event is covered by the shared deny-set", () => {
+    // Without this, "the shared set covers the event object" is an assumption.
+    const denied = new Set(SENSITIVE_LOG_CANARIES.map(([, v]) => v()));
+    for (const [field, get] of Object.entries(AUDIT_EVENT_IDENTITY_FIELDS)) {
+      expect({ field, covered: denied.has(get()) }).toEqual({ field, covered: true });
+    }
+  });
+
+  it("SELF-VALIDATION: the injected error carries the path in BOTH message and an enumerable field", async () => {
     auditWriteFails = true;
-    const err = new Error(`5 NOT_FOUND: ... /admin_audit_logs/${C.runId}`);
-    // If the fixture stopped embedding the identifier, the absence assertion
-    // below would pass for the wrong reason.
-    expect(err.message).toContain(C.runId);
+    // If the fixture stopped embedding the identifier, or stopped making it
+    // enumerable, the absence assertions would pass for the wrong reason.
+    let thrown: unknown;
+    auditWriteFails = true;
+    try { await collectionHandle("admin_audit_logs").add({}); } catch (e) { thrown = e; }
+    expect((thrown as Error).message).toContain(C.runId);
+    expect(Object.keys(thrown as object)).toEqual(expect.arrayContaining(["code", "details"]));
+    expect(JSON.stringify({ ...(thrown as object) })).toContain(C.runId);
   });
 
   it("logs the failure as shape, never the raw error", async () => {
@@ -598,9 +684,91 @@ describe("the audit writer's FAILURE path does not leak the record it failed on"
     // ANCHOR: useful operational content survived.
     expect(output()).toContain("errorCode");
     expect(auditRows).toEqual([]);
-    // And the identifiers the error dragged along are absent.
-    expect(output()).not.toContain(C.runId);
+
+    /**
+     * R6 P1-1: this branch asserted three hand-picked values while every
+     * neighbour used the shared set — and the catch block holds the WHOLE
+     * event object, so byUid / byEmail / runOwnerUid / runOwnerEmail /
+     * question all leaked with the suite green. Under `admin_global` that
+     * event describes another tenant's run. Same assertion as every branch now.
+     */
+    assertNoSensitiveGovernanceCanaries(output());
+    // Plus the error's own path-bearing payload, which is not a canary value.
     expect(output()).not.toContain("admin_audit_logs/");
     expect(output()).not.toContain("NOT_FOUND: no entity");
+  });
+});
+
+describe("STRUCTURAL — the shared redaction contract cannot be bypassed by a branch", () => {
+  /**
+   * Phase FIRST-ADMIN-C10. Two rounds running, the defect was a branch with its
+   * own weaker deny-set rather than a missing branch. Counting assertions is a
+   * source check and worth exactly that — but it is the check that catches the
+   * failure mode we actually keep hitting: a new branch quietly written with a
+   * hand-rolled list.
+   */
+  const SELF = readFileSync("app/api/governance/review/__tests__/reviewLogRedaction.spec.ts", "utf8");
+
+  it("every governance logging branch family calls the shared assertion", () => {
+    // One call per branch family: hot path, 403 denial, admin_global,
+    // plan_required, no_assigners, truncation, audit-failure, integrity.
+    const calls = SELF.match(/assertNoSensitiveGovernanceCanaries\(/g) ?? [];
+    // 1 definition + 8 branch call sites.
+    expect(calls.length).toBeGreaterThanOrEqual(9);
+  });
+
+  it("no branch asserts a hand-rolled subset of the canaries", () => {
+    /**
+     * The shape that shipped twice: `expect(output()).not.toContain(<literal>)`
+     * standing in for the deny-set. Only the deliberately-scoped extras are
+     * allowed — the error payload strings and the truncation fixture.
+     */
+    const ALLOWED = ["admin_audit_logs/", "NOT_FOUND: no entity", "assigner-0"];
+    const adHoc = SELF.split("\n")
+      .map((l, i) => [i + 1, l] as const)
+      .filter(([, l]) => !/^\s*(\*|\/\/)/.test(l))   // prose about the shape, not the shape
+      .filter(([, l]) => /expect\((?:output\(\)|logs)\)\.not\.toContain\(/.test(l))
+      .filter(([, l]) => !ALLOWED.some((a) => l.includes(a)));
+    expect(adHoc.map(([n, l]) => `${n}: ${l.trim()}`)).toEqual([]);
+  });
+
+  it("the shared assertion actually fails when a canary is present", () => {
+    // ANCHOR: without this, a helper that asserted nothing would satisfy every
+    // call site above.
+    expect(() => assertNoSensitiveGovernanceCanaries(`leaked ${C.ownerBUid}`)).toThrow();
+    expect(() => assertNoSensitiveGovernanceCanaries(`leaked ${C.reason}`)).toThrow();
+    expect(() => assertNoSensitiveGovernanceCanaries("nothing sensitive here")).not.toThrow();
+  });
+
+  it("an `allow` entry narrows the assertion by exactly one value", () => {
+    expect(() => assertNoSensitiveGovernanceCanaries(`run ${C.runId}`, { allow: [C.runId] })).not.toThrow();
+    // and does not disable the rest
+    expect(() => assertNoSensitiveGovernanceCanaries(`run ${C.runId} ${C.ownerBUid}`, { allow: [C.runId] })).toThrow();
+  });
+});
+
+describe("STRUCTURAL — governance modules use only sinks this suite captures", () => {
+  /**
+   * The capture patches console.log/warn/error/debug/info. `console.dir`,
+   * `console.trace`, `console.table` and `process.stdout.write` would bypass
+   * it. Rather than claim universal interception, pin that the modules on this
+   * request path do not use them — so the claim and the reality stay together.
+   */
+  const MODULES = [
+    "app/api/governance/review/route.ts",
+    "lib/governance/governanceVisibleUserIds.ts",
+    "lib/governance/auditLog.ts",
+    "lib/logger.ts",
+  ];
+
+  it("ANCHOR: the modules were read and do log", () => {
+    for (const m of MODULES) expect(readFileSync(m, "utf8")).toMatch(/console\.|logger\./);
+  });
+
+  it.each(MODULES)("%s uses no uncaptured output sink", (mod) => {
+    const src = readFileSync(mod, "utf8");
+    for (const sink of ["console.dir", "console.trace", "console.table", "console.group", "process.stdout.write", "process.stderr.write"]) {
+      expect({ mod, sink, used: src.includes(sink) }).toEqual({ mod, sink, used: false });
+    }
   });
 });

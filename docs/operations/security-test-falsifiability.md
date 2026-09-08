@@ -114,3 +114,28 @@ zero, and a scan that examined zero files fails rather than reporting clean —
 is pinned by `scripts/__tests__/securityPreflightWiring.spec.ts`. Before that,
 changing the final line to `process.exit(0)` left CI printing "1 flagged
 construct(s)" and passing.
+
+### Named residuals in the governance log-redaction suite
+
+These are holes, recorded so they stop being invisible. None is a live leak
+today; each is a way a future regression passes review the way the last two did.
+
+- **`logger.redact()` hashes rather than removes.** `lib/logger.ts` replaces
+  values under the keys `uid`, `userId` and `firebaseUid` with
+  `uid:<8 hex of a truncated 32-bit non-cryptographic hash>`. A leak routed
+  through `logger.warn(msg, { uid })` therefore never appears as the raw canary
+  and is invisible to the redaction assertions. Worse, the hash is stable, so it
+  is itself a per-user correlation identifier — the exact harm cited as the
+  reason for stripping the caller uid from the queue diagnostic. **Hashing is
+  not redaction, and the suite does not cover it.**
+- **Uncaptured sinks.** The capture patches `console.log/warn/error/debug/info`.
+  `console.dir`, `console.trace`, `console.table` and direct
+  `process.stdout.write` bypass it. A structural test asserts the governance
+  modules do not use them, which keeps the claim and the reality together — but
+  it is a source check, not interception.
+- **Substring and encoding forms.** Assertions use exact substring matching, so
+  a truncated identifier (`uid.slice(0, -2)`) or a base64-encoded one passes.
+- **Mocked modules on the request path.** `runWorkspaceIntegrity` is stubbed and
+  the real function receives the whole run document; a log added inside it would
+  not be observed. The audit writer was un-stubbed in C8 for exactly this
+  reason; this one remains.

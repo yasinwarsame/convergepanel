@@ -254,7 +254,9 @@ operator does; they are not automated.
    (`docs/__tests__/adminAuthorityEvidenceTable.spec.ts`). Stated precisely,
    because C8 claimed more than it enforced: the test walks
    `app/api/admin/**/route.ts` and `app/api/governance/**/route.ts` and requires
-   every such file to appear here, **with every HTTP method it exports**. A
+   every such file to appear here, **with every HTTP method it exports** —
+   GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS, declared either as
+   `export [async] function METHOD` or as `export const|let|var METHOD =`. A
    privileged route added under either tree in a `route.ts` therefore cannot be
    omitted, and neither can one of its methods. It does NOT cover a `route.tsx`,
    nor any privileged handler placed outside those two trees — those remain a

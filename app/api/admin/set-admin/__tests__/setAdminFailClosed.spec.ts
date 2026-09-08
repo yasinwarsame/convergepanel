@@ -36,6 +36,7 @@ jest.mock("@/lib/security/rateLimit", () => ({
 }));
 
 import { NextRequest } from "next/server";
+import { readFileSync } from "node:fs";
 
 const VALID_UID = "a-real-looking-firebase-uid-000000000001";
 const REAL_SECRET = "correct-horse-battery-staple-0123456789";
@@ -117,19 +118,83 @@ describe("FAIL CLOSED when ADMIN_SECRET is unset or empty", () => {
   });
 });
 
-describe("LENGTH-MISMATCH SAFETY — the timing-safe compare never throws or admits", () => {
+describe("LENGTH-MISMATCH SAFETY — every invalid secret is a 401, never a 500", () => {
+  /**
+   * Phase FIRST-ADMIN-C10. The previous version of this block was titled "never
+   * throws or admits" while every fixture was ASCII, so the property was never
+   * exercised. `"aaa"` and `"ééé"` have equal `.length` and unequal byte length,
+   * which made `timingSafeEqual` throw and surface as 500 — an unauthenticated
+   * length oracle, and an INCONCLUSIVE result for the containment probe.
+   */
   it.each([
     ["shorter", REAL_SECRET.slice(0, 5)],
     ["longer", REAL_SECRET + "extra"],
     ["empty against a configured secret", ""],
     ["same length but wrong", "X".repeat(REAL_SECRET.length)],
+    ["equal characters but more bytes (2-byte)", "é".repeat(REAL_SECRET.length)],
+    ["equal characters but more bytes (3-byte)", "あ".repeat(REAL_SECRET.length)],
+    ["a 4-byte-per-glyph emoji secret", "😀".repeat(REAL_SECRET.length)],
+    ["non-ASCII of a different character length", "ünïcödé"],
   ])("a %s secret is rejected with 401, not an exception", async (_label, provided) => {
     process.env.ADMIN_SECRET = REAL_SECRET;
     const res = await post({ uid: VALID_UID, secret: provided });
-    // A throw would surface as 500 from the catch — that would still deny, but
-    // it would deny by accident, and a refactor could turn it into a 200.
+    // A throw surfaces as 500 from the catch — that still denies, but it denies
+    // by accident, it leaks the secret's length, and it makes the containment
+    // probe inconclusive. 401 is the only acceptable answer.
     expect(res.status).toBe(401);
     expect(privilegedMutations()).toBe(0);
+  });
+
+  it("SELF-VALIDATION: the equal-character fixtures really do differ in byte length", () => {
+    /**
+     * Without this the new rows could silently become ordinary ASCII
+     * mismatches, and the regression would be untested. Restricted to single
+     * UTF-16 unit characters: `😀` is a surrogate pair, so `.length` is 2 per
+     * glyph and it cannot express "equal character length" — it is covered as
+     * a plain non-ASCII rejection instead.
+     */
+    for (const ch of ["é", "あ"]) {
+      expect(ch.length).toBe(1);
+      const probe = ch.repeat(REAL_SECRET.length);
+      expect(probe.length).toBe(REAL_SECRET.length);            // equal characters
+      expect(Buffer.byteLength(probe, "utf8")).toBeGreaterThan( // unequal bytes
+        Buffer.byteLength(REAL_SECRET, "utf8")
+      );
+    }
+    // And the pre-fix defect is real: this pair is exactly what used to throw.
+    expect("aaa".length).toBe("ééé".length);
+    expect(Buffer.byteLength("aaa")).not.toBe(Buffer.byteLength("ééé"));
+  });
+});
+
+describe("SOURCE CONTRACT — the comparison is timing-safe and byte-length guarded", () => {
+  /**
+   * Constant-time behaviour cannot be demonstrated from jest, so this does not
+   * pretend to. It pins the MECHANISM: buffers built first, byte lengths
+   * compared, then `timingSafeEqual`. A silent downgrade to `===` or to a
+   * character-length guard is what this catches. Labelled as the source check
+   * it is.
+   */
+  const SRC = readFileSync("app/api/admin/set-admin/route.ts", "utf8");
+
+  it("ANCHOR: the guard region was located", () => {
+    expect(SRC).toContain("const secretValid =");
+    expect(SRC).toContain("timingSafeEqual");
+  });
+
+  it("uses timingSafeEqual, not string equality", () => {
+    expect(SRC).toMatch(/timingSafeEqual\(\s*providedBuf\s*,\s*adminSecretBuf\s*\)/);
+    // The downgrade that survived C9's suite.
+    expect(SRC).not.toMatch(/provided\s*===\s*adminSecret\b/);
+  });
+
+  it("compares BUFFER lengths, never string lengths, before calling it", () => {
+    expect(SRC).toContain("providedBuf.length === adminSecretBuf.length");
+    expect(SRC).not.toMatch(/provided\.length\s*===\s*adminSecret\.length/);
+  });
+
+  it("still fails closed on an empty configured secret, by buffer length", () => {
+    expect(SRC).toContain("adminSecretBuf.length > 0");
   });
 });
 
