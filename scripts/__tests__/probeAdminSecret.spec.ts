@@ -10,6 +10,7 @@
 import { spawn } from "node:child_process";
 import { createServer, type Server } from "node:http";
 import { join } from "node:path";
+import { readFileSync } from "node:fs";
 
 const SCRIPT = join(process.cwd(), "scripts/probe-admin-secret.mjs");
 const OLD = "old-bootstrap-secret-aaaaaaaaaaaaaaaaaaaa";
@@ -148,5 +149,38 @@ describe("the secret is never disclosed by the tool's output", () => {
   it("a network error omits the secret", async () => {
     const r = await run("http://127.0.0.1:1");
     expect(r.stdout + r.stderr).not.toContain(OLD);
+  });
+});
+
+describe("the probe has no uid parameter at all", () => {
+  /**
+   * A mutation gave `buildProbeBody` a second `uid` parameter. The wire body was
+   * unchanged (the caller passes one argument, and JSON.stringify drops
+   * `undefined`), so every behavioural test still passed — but the tool had
+   * acquired the ability to carry a claim target, which is the one thing it
+   * must never be able to do. Arity and source are pinned for that reason, on a
+   * ~60-line file that IS the security boundary.
+   */
+  const SRC = readFileSync("scripts/probe-admin-secret.mjs", "utf8");
+
+  it("ANCHOR: the source was read and defines the body builder", () => {
+    expect(SRC).toContain("export function buildProbeBody");
+    expect(SRC.length).toBeGreaterThan(500);
+  });
+
+  it("buildProbeBody takes exactly one parameter", () => {
+    const sig = SRC.match(/export function buildProbeBody\(([^)]*)\)/)![1];
+    expect(sig.split(",").filter((p) => p.trim()).length).toBe(1);
+    expect(sig).not.toMatch(/uid/i);
+  });
+
+  it("no claim-target identifier appears anywhere in the tool", () => {
+    // Comments included: there is no reason for this file to mention a uid
+    // except to say it has none, and that sentence uses "claim target".
+    // Strip block and line comments properly — the file explains at length that
+    // it has no uid, and that prose is not code.
+    const code = SRC.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+    expect(code).not.toMatch(/\buid\b/i);
+    expect(code).not.toMatch(/\bemail\b/i);
   });
 });

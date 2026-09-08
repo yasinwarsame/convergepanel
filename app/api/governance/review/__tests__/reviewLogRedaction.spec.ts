@@ -216,6 +216,14 @@ type RedactionExemption =
   /** The workspace-integrity 404 path may retain the run id, and nothing else. */
   | "integrity-run-id";
 let redactionExemption: RedactionExemption = "none";
+/**
+ * Counts assertions the afterEach actually PERFORMED. Without it the
+ * enforcement hook is itself unguarded: short-circuiting it (`if (true) return`)
+ * silently disables redaction checking for every branch in this file and no
+ * test notices — the same defect as the substring guard it replaced, one level
+ * further in.
+ */
+let redactionAssertionsRun = 0;
 
 function docHandle(collection: string, id: string) {
   const rec = existingDocs[`${collection}/${id}`];
@@ -340,6 +348,7 @@ afterEach(() => {
   assertNoSensitiveGovernanceCanaries(output(), {
     allowIntegrityRunId: redactionExemption === "integrity-run-id",
   });
+  redactionAssertionsRun += 1;
 });
 
 describe("ANCHOR 0 — every canary is REACHABLE in the data the route reads", () => {
@@ -799,6 +808,22 @@ describe("DENY-SET INTEGRITY — every declared canary is load-bearing", () => {
     expect(() => assertNoSensitiveGovernanceCanaries(`prefix ${value} suffix`)).toThrow();
   });
 
+  it.each(EXPECTED_CANARIES)("the integrity exemption does NOT excuse %s", (label) => {
+    /**
+     * The exemption is a named boolean rather than an unbounded allow-list, but
+     * its implementation still decides WHICH value it excuses. Widening that to
+     * a second identity field must fail — R7 widened the old array to six and
+     * shipped a real leak green.
+     */
+    redactionExemption = "capture-fidelity";
+    const value = SENSITIVE_LOG_CANARIES.find(([l]) => l === label)![1]();
+    if (value === C.runId) {
+      expect(() => assertNoSensitiveGovernanceCanaries(`x ${value}`, { allowIntegrityRunId: true })).not.toThrow();
+      return;
+    }
+    expect(() => assertNoSensitiveGovernanceCanaries(`x ${value}`, { allowIntegrityRunId: true })).toThrow();
+  });
+
   it("the shared assertion passes on genuinely clean output", () => {
     redactionExemption = "capture-fidelity";
     expect(() => assertNoSensitiveGovernanceCanaries("[governance/queue] plan: full, 3 owner(s)")).not.toThrow();
@@ -852,5 +877,17 @@ describe("STRUCTURAL — governance modules use only sinks this suite captures",
     for (const sink of ["console.dir", "console.trace", "console.table", "console.group", "process.stdout.write", "process.stderr.write"]) {
       expect({ mod, sink, used: src.includes(sink) }).toEqual({ mod, sink, used: false });
     }
+  });
+});
+
+describe("ZZ ENFORCEMENT LIVENESS — the automatic check actually ran", () => {
+  /**
+   * Runs last. Every preceding test either performed the shared assertion in
+   * afterEach or declared a capture-fidelity exemption. If the hook were
+   * disabled the counter would not have moved, and redaction would be
+   * unenforced across this whole file with every test still green.
+   */
+  it("the afterEach performed the shared assertion for the bulk of this suite", () => {
+    expect(redactionAssertionsRun).toBeGreaterThan(40);
   });
 });
