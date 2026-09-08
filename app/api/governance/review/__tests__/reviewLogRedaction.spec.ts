@@ -709,12 +709,26 @@ describe("STRUCTURAL — the shared redaction contract cannot be bypassed by a b
    */
   const SELF = readFileSync("app/api/governance/review/__tests__/reviewLogRedaction.spec.ts", "utf8");
 
-  it("every governance logging branch family calls the shared assertion", () => {
-    // One call per branch family: hot path, 403 denial, admin_global,
-    // plan_required, no_assigners, truncation, audit-failure, integrity.
-    const calls = SELF.match(/assertNoSensitiveGovernanceCanaries\(/g) ?? [];
-    // 1 definition + 8 branch call sites.
-    expect(calls.length).toBeGreaterThanOrEqual(9);
+  it.each([
+    ["GOVERNANCE HOT PATH", "never writes any sensitive canary"],
+    ["OWNER_B IS REACHABLE", "writes no sensitive canary to the log sink on the denial path"],
+    ["admin_global BRANCH", "writes no sensitive canary to the log sink"],
+    ["SIBLING SCOPE BRANCHES", "plan_required: logs the decision"],
+    ["SIBLING SCOPE BRANCHES", "no_assigners: logs the empty scope"],
+    ["SIBLING SCOPE BRANCHES", "truncation: warns with a count"],
+    ["the audit writer's FAILURE path", "logs the failure as shape"],
+    ["DELIBERATE DIVERGENCE", "logs the run id on workspace integrity failure"],
+  ])("%s / %s calls the shared assertion", (_family, testName) => {
+    /**
+     * Per-branch, not a global count: a count is inflated by the helper's own
+     * unit tests, so removing a real branch's call left the total above the
+     * threshold and the removal passed. Each named test must contain the call.
+     */
+    const start = SELF.indexOf(testName);
+    expect(start).toBeGreaterThan(-1);          // ANCHOR: the test still exists
+    const body = SELF.slice(start, SELF.indexOf("\n  });", start));
+    expect({ testName, callsShared: body.includes("assertNoSensitiveGovernanceCanaries(") })
+      .toEqual({ testName, callsShared: true });
   });
 
   it("no branch asserts a hand-rolled subset of the canaries", () => {
@@ -744,6 +758,23 @@ describe("STRUCTURAL — the shared redaction contract cannot be bypassed by a b
     expect(() => assertNoSensitiveGovernanceCanaries(`run ${C.runId}`, { allow: [C.runId] })).not.toThrow();
     // and does not disable the rest
     expect(() => assertNoSensitiveGovernanceCanaries(`run ${C.runId} ${C.ownerBUid}`, { allow: [C.runId] })).toThrow();
+  });
+});
+
+describe("RECORDER FIDELITY — a zero-write assertion cannot pass on a dead recorder", () => {
+  /**
+   * The integrity exception is licensed by "this path writes nothing", asserted
+   * as `expect(writes).toEqual([])`. Unwire the double's `set` and that passes
+   * for the wrong reason. So the recorder is pinned on a path that DOES write.
+   */
+  it("records the governance write performed by an authorized review", async () => {
+    const res = await post("runs", C.runId);
+    expect(res.status).toBe(200);
+    const primary = writes.filter((w) => w.kind !== "add" && w.collection === "runs" && w.id === C.runId);
+    expect(primary).toHaveLength(1);
+    expect(primary[0].patch).toMatchObject({ governanceStatus: "approved" });
+    // and the sub-collection write, recorded with its full path
+    expect(writes.some((w) => w.collection === `runs/${C.runId}/governanceEvents`)).toBe(true);
   });
 });
 
