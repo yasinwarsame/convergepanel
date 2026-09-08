@@ -199,6 +199,42 @@ describe("STATE MACHINE — there is no edge from INITIAL to PROVEN", () => {
     expect(JSON.parse(r.out)).toEqual({ pre: true, post: true, state: "PRODUCTION_CONTAINMENT_PROVEN", calls: 2 });
   });
 
+  it("an UNATTESTED 401 at POST does not prove containment", async () => {
+    /**
+     * The marker requirement must bind on the POST side too. Without this, a
+     * bare 401 — a WAF, an SSO gate, deployment protection, a foreign origin —
+     * closes the transition. Pinned because the mutation dropping the marker
+     * conjunct from `classify` was otherwise unobservable: every other fixture
+     * supplies the marker.
+     */
+    const r = await nodeEval(`
+      import { createContainmentProof } from ${JSON.stringify(IMPL)};
+      let n = 0;
+      const p = createContainmentProof({
+        origin: "http://127.0.0.1:9/", secret: "s", allowInsecureLoopback: true, requireCanonical: false,
+        fetchImpl: async () => (++n === 1
+          ? { status: 400, headers: { get: () => ${JSON.stringify(ACCEPTED)} } }
+          : { status: 401, headers: { get: () => null } }),   // bare 401, no marker
+      });
+      const pre = await p.precheck(); p.armForRotation(); const post = await p.postcheck();
+      console.log(JSON.stringify({ pre: pre.ok, post: post.ok, state: p.state }));
+    `);
+    expect(JSON.parse(r.out)).toEqual({ pre: true, post: false, state: "ABORTED" });
+  });
+
+  it("an UNATTESTED 400 at PRE does not confirm the credential is live", async () => {
+    const r = await nodeEval(`
+      import { createContainmentProof } from ${JSON.stringify(IMPL)};
+      const p = createContainmentProof({
+        origin: "http://127.0.0.1:9/", secret: "s", allowInsecureLoopback: true, requireCanonical: false,
+        fetchImpl: async () => ({ status: 400, headers: { get: () => null } }),
+      });
+      const pre = await p.precheck();
+      console.log(JSON.stringify({ pre: pre.ok, state: p.state }));
+    `);
+    expect(JSON.parse(r.out)).toEqual({ pre: false, state: "ABORTED" });
+  });
+
   it("an ACCEPTED postcheck (rotation did not take) does NOT prove containment", async () => {
     const r = await drive(`
       const p = mk(ok400);
