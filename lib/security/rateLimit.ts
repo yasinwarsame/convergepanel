@@ -37,6 +37,23 @@ export interface RateLimitResult {
  * @param config - Rate limit configuration
  * @returns Rate limit result with allowed status and remaining quota
  */
+/**
+ * Firestore document-ID constraints that matter here: non-empty, no `/`
+ * (which would silently create a nested path or throw), not `.`/`..`, and
+ * within the 1500-byte UTF-8 limit. Deliberately narrow — ordinary namespaced
+ * keys (`run-panel:<uid>`, `set-admin:<ip>`) are unchanged, so no key
+ * migration occurs.
+ */
+export function isValidRateLimitIdentifier(identifier: unknown): identifier is string {
+  if (typeof identifier !== "string") return false;
+  if (identifier.length === 0) return false;
+  if (identifier.includes("/")) return false;
+  if (identifier === "." || identifier === "..") return false;
+  if (/^__.*__$/.test(identifier)) return false;
+  if (Buffer.byteLength(identifier, "utf8") > 1500) return false;
+  return true;
+}
+
 export async function checkRateLimit(
   config: RateLimitConfig
 ): Promise<RateLimitResult> {
@@ -54,9 +71,33 @@ export async function checkRateLimit(
   const windowStart = now - config.windowSeconds * 1000;
   const resetAt = new Date(now + config.windowSeconds * 1000);
 
-  const rateLimitDocRef = adminDb.collection("rate_limits").doc(config.identifier);
-  
   try {
+    /**
+     * Phase FIRST-ADMIN-C12 — the document reference is built INSIDE the
+     * protected boundary.
+     *
+     * `.doc()` used to be called above this `try`. Firestore rejects a document
+     * path with an even number of components, so an identifier containing `/`
+     * made `.doc()` THROW — past this module's documented never-throws
+     * contract, and past its fail-closed guarantee. Two call sites derive the
+     * identifier from a request header; six others have no try/catch of their
+     * own, so the throw would surface as an unhandled rejection on a protected
+     * route.
+     *
+     * A malformed identifier is now an ordinary fail-closed denial: the caller
+     * is refused, and the protected side effect does not run.
+     */
+    if (!isValidRateLimitIdentifier(config.identifier)) {
+      logger.error("[rateLimit] Rejecting malformed rate-limit identifier; denying request");
+      return {
+        allowed: false,
+        remaining: 0,
+        resetAt,
+        retryAfter: config.windowSeconds,
+      };
+    }
+    const rateLimitDocRef = adminDb.collection("rate_limits").doc(config.identifier);
+
     // Atomic increment transaction
     const result = await adminDb.runTransaction(async (transaction) => {
       const doc = await transaction.get(rateLimitDocRef);

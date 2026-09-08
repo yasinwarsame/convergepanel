@@ -279,41 +279,81 @@ describe("containment imperatives are present and unconditional", () => {
   });
 });
 
-describe("admin-minting operator scripts are classified", () => {
+describe("admin-minting operator scripts are classified — BY CONTENT, not by name", () => {
   /**
-   * Phase FIRST-ADMIN-C11 (R7 P2-2). These scripts mint SYSTEM_ADMIN through
-   * the Admin SDK, so they never contain the route path and the probe scan
-   * above cannot see them — they are a different class of hazard: a tool an
-   * operator might reach for during a rotation check.
+   * Phase FIRST-ADMIN-C12 (R8 P1-3). The previous inventory globbed
+   * `scripts/set-admin*`, so `scripts/setAdmin.ts` — which mints `admin: true`
+   * — was invisible purely because of its camelCase name. A reviewer proved the
+   * gap was structural: a tracked minting script carrying the explicit
+   * instruction "use this to check whether the old ADMIN_SECRET still works"
+   * passed the whole suite.
    *
-   * Each must declare what it is, and must say plainly that it is not a
-   * liveness probe.
+   * That is the same blind-spot-by-naming-convention this file's own header
+   * describes for the old four-extension whitelist, recurring one level over.
+   * Authority-minting is now identified by what a script DOES.
    */
-  const MINTING_SCRIPTS = execSync("git ls-files -- 'scripts/set-admin*'", { encoding: "utf8" })
-    .split("\n").filter(Boolean);
+  const SCRIPT_FILES = execSync("git ls-files -- 'scripts/*' 'scripts/**'", { encoding: "utf8" })
+    .split("\n")
+    .filter(Boolean)
+    .filter((f) => /\.(js|cjs|mjs|ts|tsx)$/.test(f))
+    .filter((f) => !f.includes("__tests__"));
 
-  it("ANCHOR: the minting scripts were found", () => {
-    expect(MINTING_SCRIPTS.length).toBeGreaterThanOrEqual(2);
-    expect(MINTING_SCRIPTS).toEqual(expect.arrayContaining(["scripts/set-admin-by-uid.js"]));
+  /** A tool mints authority if it sets the admin claim, or posts a uid to the bootstrap route. */
+  const mintsAuthority = (src: string) => {
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+    const setsClaim = /setCustomUserClaims\s*\(/.test(code) && /admin\s*:\s*true/.test(code);
+    // Any uid reference alongside the bootstrap route — shorthand `{ uid, secret }`
+    // carries no colon, so matching `uid:` alone missed the obvious form. The
+    // canonical probe contains no `uid` identifier at all, so it stays clear.
+    const postsUidToBootstrap =
+      code.includes("/api/admin/set-admin") && /\buid\b/i.test(code);
+    return setsClaim || postsUidToBootstrap;
+  };
+
+  const MINTING = SCRIPT_FILES.filter((f) => mintsAuthority(readFileSync(f, "utf8")));
+
+  it("ANCHOR: the content scan reads real scripts and finds the known minting tools", () => {
+    expect(SCRIPT_FILES.length).toBeGreaterThan(5);
+    expect(MINTING).toEqual(expect.arrayContaining([
+      "scripts/set-admin-by-uid.js",
+      "scripts/set-admin-claim.js",
+      "scripts/set-admin-simple.js",
+      // The camelCase file the filename glob could not see.
+      "scripts/setAdmin.ts",
+    ]));
   });
 
-  it.each(MINTING_SCRIPTS)("%s declares itself authority-minting", (file) => {
-    const src = readFileSync(file, "utf8");
-    expect(src).toContain("MINTS-AUTHORITY");
+  it("ANCHOR: the predicate is discriminating, not universal", () => {
+    // If it matched everything, "all minting scripts are classified" would be
+    // satisfied by classifying everything.
+    expect(MINTING.length).toBeLessThan(SCRIPT_FILES.length);
+    expect(MINTING).not.toContain("scripts/probe-admin-secret.mjs");
+    expect(MINTING).not.toContain("scripts/lib/probe-admin-secret.mjs");
   });
 
-  it.each(MINTING_SCRIPTS)("%s states it is not a secret-liveness probe", (file) => {
-    // Strip JSDoc line markers before collapsing: a surviving `*` splits the
-    // phrase and makes the assertion fail on correctly-classified files.
+  it.each(MINTING)("%s declares itself authority-minting", (file) => {
+    expect(readFileSync(file, "utf8")).toContain("MINTS-AUTHORITY");
+  });
+
+  it.each(MINTING)("%s states it is not a secret-liveness probe", (file) => {
     const src = readFileSync(file, "utf8").replace(/^\s*\*\s?/gm, "").replace(/\s+/g, " ");
     expect(src).toMatch(/never a secret-liveness probe|not a (secret-)?liveness probe/i);
-    // ...and points at the tool that is.
     expect(src).toContain("probe-admin-secret.mjs");
   });
 
   it("the canonical probe is NOT classified as a minting tool", () => {
-    // Guards against the classification being pasted everywhere indiscriminately.
-    const probe = readFileSync("scripts/probe-admin-secret.mjs", "utf8");
+    const probe = readFileSync("scripts/lib/probe-admin-secret.mjs", "utf8");
     expect(probe).not.toContain("MINTS-AUTHORITY");
+    expect(mintsAuthority(probe)).toBe(false);
+  });
+
+  it("SELF-VALIDATION: the predicate catches a minting script under any name", () => {
+    // The exact evasions a reviewer used: camelCase, and a novel filename.
+    expect(mintsAuthority(`await adminAuth.setCustomUserClaims(uid, { admin: true });`)).toBe(true);
+    expect(mintsAuthority(`fetch("/api/admin/set-admin", { body: JSON.stringify({ uid, secret }) })`)).toBe(true);
+    // ...and does not fire on the probe's own shape.
+    expect(mintsAuthority(`fetch(url + "/api/admin/set-admin", { body: JSON.stringify({ secret }) })`)).toBe(false);
+    // ...nor on prose about minting.
+    expect(mintsAuthority(`// this script does not call setCustomUserClaims with admin: true`)).toBe(false);
   });
 });

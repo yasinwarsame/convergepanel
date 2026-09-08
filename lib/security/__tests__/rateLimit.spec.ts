@@ -51,7 +51,7 @@ jest.mock("firebase-admin/firestore", () => ({
   Timestamp: { fromMillis: (m: number) => ({ m }) },
 }));
 
-import { checkRateLimit } from "../rateLimit";
+import { checkRateLimit, isValidRateLimitIdentifier } from "../rateLimit";
 
 const T0 = 1_700_000_000_000;
 let clock = T0;
@@ -153,7 +153,14 @@ describe("key isolation", () => {
   });
 });
 
-describe("failure behaviour is FAIL-CLOSED", () => {
+describe("failure behaviour", () => {
+  /**
+   * Phase FIRST-ADMIN-C12 (R8 P2-1). This block was titled "FAIL-CLOSED" and
+   * contained a case that grants a FRESH BUDGET. Storage failure is genuinely
+   * fail-closed; malformed server-owned state is a reset, which is a different
+   * thing, and filing it under a fail-closed heading would let a future reader
+   * stop thinking. The behaviour is unchanged; only the claim is corrected.
+   */
   it("denies when Firestore is unavailable", async () => {
     firestoreAvailable = false;
     expect(await at(0)).toMatchObject({ allowed: false, remaining: 0 });
@@ -164,7 +171,7 @@ describe("failure behaviour is FAIL-CLOSED", () => {
     expect(await at(0)).toMatchObject({ allowed: false, remaining: 0 });
   });
 
-  it("treats corrupted stored state as a fresh window rather than crashing", async () => {
+  it("MALFORMED SERVER-OWNED STATE RESETS TO A FRESH WINDOW (this is NOT fail-closed)", async () => {
     docs.set(CFG.identifier, { count: "not-a-number", windowStart: "nonsense" });
     const res = await at(0);
     expect(res.allowed).toBe(true);
@@ -174,5 +181,86 @@ describe("failure behaviour is FAIL-CLOSED", () => {
   it("a stored count at the limit with a live window still denies", async () => {
     docs.set(CFG.identifier, { count: 3, windowStart: T0 });
     expect((await at(1_000)).allowed).toBe(false);
+  });
+});
+
+describe("MALFORMED IDENTIFIER — fail-closed, and never a throw", () => {
+  /**
+   * Phase FIRST-ADMIN-C12 (R8). `.doc()` used to be called outside the try, so
+   * an identifier containing `/` threw past this module's never-throws
+   * contract. Two call sites derive the identifier from a request header and
+   * six have no try/catch of their own, so that throw would have surfaced as an
+   * unhandled rejection on a protected route.
+   */
+  it.each([
+    ["a slash-containing identifier", "set-admin:a/b"],
+    ["a nested path", "set-admin:a/b/c"],
+    ["an empty identifier", ""],
+    ["a dot", "."],
+    ["a double dot", ".."],
+    ["a reserved __name__ form", "__id__"],
+    ["an over-long identifier", "x".repeat(1501)],
+  ])("%s is denied without throwing", async (_label, identifier) => {
+    const res = await checkRateLimit({ ...CFG, identifier });
+    expect(res.allowed).toBe(false);
+    expect(res.remaining).toBe(0);
+    // and nothing was written under an attacker-chosen path
+    expect(docs.size).toBe(0);
+  });
+
+  it("ANCHOR: ordinary namespaced identifiers still work unchanged", async () => {
+    // Without this, "everything is denied" would satisfy the rows above.
+    for (const identifier of ["set-admin:203.0.113.7", "run-panel:abc123", "team-run-create:XYZ-987"]) {
+      docs.clear();
+      const res = await checkRateLimit({ ...CFG, identifier });
+      expect(res.allowed).toBe(true);
+      expect(docs.get(identifier)).toMatchObject({ count: 1 });
+    }
+  });
+
+  it("the validator itself accepts real keys and rejects path-bearing ones", () => {
+    expect(isValidRateLimitIdentifier("set-admin:203.0.113.7")).toBe(true);
+    expect(isValidRateLimitIdentifier("a/b")).toBe(false);
+    expect(isValidRateLimitIdentifier("")).toBe(false);
+    expect(isValidRateLimitIdentifier(undefined)).toBe(false);
+  });
+});
+
+describe("retryAfter and resetAt reach real response headers, so they are pinned", () => {
+  /**
+   * Phase FIRST-ADMIN-C12 (R8 P2-2/P2-3). Both survived mutation: seconds→ms
+   * and a request-relative resetAt. run-panel, synthesize-panel and the team
+   * run route emit these as `Retry-After` (HTTP seconds) and
+   * `X-RateLimit-Reset` (epoch seconds).
+   */
+  const exhaust = async () => { for (const ms of [0, 1, 2]) await at(ms); };
+
+  it("retryAfter is SECONDS remaining in the window, not milliseconds", async () => {
+    await exhaust();
+    const denied = await at(100_000);
+    expect(denied.allowed).toBe(false);
+    // 300s window, 100s elapsed -> 200s left. In ms this would be 200000.
+    expect(denied.retryAfter).toBe(200);
+  });
+
+  it("retryAfter is never zero or negative", async () => {
+    await exhaust();
+    expect((await at(299_999)).retryAfter).toBeGreaterThanOrEqual(1);
+  });
+
+  it("resetAt is the real window end and does NOT slide per denied request", async () => {
+    await exhaust();
+    const a = await at(10_000);
+    const b = await at(200_000);
+    expect(a.resetAt.getTime()).toBe(T0 + 300_000);
+    expect(b.resetAt.getTime()).toBe(T0 + 300_000);   // identical, not request-relative
+  });
+
+  it("an allowed request also reports the true window end", async () => {
+    await at(0);
+    const second = await at(50_000);
+    expect(second.allowed).toBe(true);
+    expect(second.resetAt.getTime()).toBe(T0 + 300_000);
+    expect(second.retryAfter).toBeUndefined();
   });
 });

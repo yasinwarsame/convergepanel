@@ -360,10 +360,10 @@ operator does; they are not automated.
 
 ### B. SYSTEM_ADMIN (claim-derived) — disabling is NOT sufficient
 
-1. `[CONTAINMENT_REMOVE_CLAIM]` **Remove the claim**: `setCustomUserClaims(uid, { admin: false })` (or drop the
+1. `[CONTAINMENT_REMOVE_CLAIM][REQUIRED]` **Remove the claim**: `setCustomUserClaims(uid, { admin: false })` (or drop the
    key). `/api/admin/set-role` does this, but it itself requires SYSTEM_ADMIN, so
    during an incident use a service-account script rather than the route.
-2. `[CONTAINMENT_REVOKE_REFRESH]` **Revoke refresh tokens** — `adminAuth.revokeRefreshTokens(uid)`. Without this
+2. `[CONTAINMENT_REVOKE_REFRESH][REQUIRED]` **Revoke refresh tokens** — `adminAuth.revokeRefreshTokens(uid)`. Without this
    the already-issued ID token keeps working.
 3. **Understand the residual window.** Every SYSTEM_ADMIN guard verifies with
    `verifyIdToken`, which does not consult revocation. Until the outstanding ID
@@ -380,7 +380,7 @@ operator does; they are not automated.
    revocation check, so the cookie's own five-day life can begin AFTER the
    revocation. Treat the effective ADMIN_PORTAL window as up to one hour plus the
    cookie lifetime unless you also invalidate the session.
-6. `[CONTAINMENT_ROTATE_BOOTSTRAP]` **Contain the BOOTSTRAP path, or containment is not complete.** Steps 1-2
+6. `[CONTAINMENT_ROTATE_BOOTSTRAP][REQUIRED]` **Contain the BOOTSTRAP path, or containment is not complete.** Steps 1-2
    remove the claim from one account. They do nothing about `ADMIN_SECRET`,
    which mints `admin: true` on **any uid** through `/api/admin/set-admin`
    (§ "BOOTSTRAP_SECRET — not a human role"), authenticates no identity, and
@@ -398,7 +398,7 @@ operator does; they are not automated.
    b. **Deploy deliberately.** An environment variable change does not affect
       running Production until a deployment picks it up. Until then the old
       secret is still live.
-   c. `[CONTAINMENT_PROBE_OLD_SECRET]` **Prove the old value no longer works —
+   c. `[CONTAINMENT_PROBE_OLD_SECRET][REQUIRED]` **Prove the old value no longer works —
       with the canonical probe, which cannot mint a claim.**
 
       <!-- SAFE-PROBE:CANONICAL — the probe is an executable, not a snippet.
@@ -425,15 +425,30 @@ operator does; they are not automated.
       | 3 | 5xx | `INCONCLUSIVE` | Never reached a verdict. |
       | 3 | other / network | `INCONCLUSIVE` | Not a verdict. |
 
-      **On rate limiting.** The route applies a per-IP limit of
-      `RATE_LIMIT_MAX_REQUESTS` attempts per `RATE_LIMIT_WINDOW_SECONDS` seconds
-      before the secret is examined, so a 429 tells you nothing about the
-      credential. Treat that limit as **defence-in-depth only** — it is per-IP,
+      **On rate limiting.** The route applies a per-IP limit of **3 attempts
+      per 300 seconds (5 minutes)** before the secret is examined, so a 429
+      tells you nothing about the credential. Those numbers are
+      `RATE_LIMIT_MAX_REQUESTS` and `RATE_LIMIT_WINDOW_SECONDS` in
+      `app/api/admin/set-admin/route.ts`, and a test fails if this paragraph and
+      those constants disagree — C11 cited the names without the values, which
+      made the parity check vacuous and left an on-call responder no way to know
+      how long to wait without reading source. Treat that limit as **defence-in-depth only** — it is per-IP,
       so a distributed source weakens it, and until C11 it did not work at all
       (`windowStart` was stored already expired, so the counter reset on almost
       every request and nothing was ever throttled). The primary boundary is a
       high-entropy `ADMIN_SECRET`, used only for a bootstrap window, then
       rotated or removed.
+
+      **What the per-IP limit depends on.** The key is derived from the
+      `x-forwarded-for` header (`app/api/admin/set-admin/route.ts`). The
+      application does **not** independently prevent header spoofing — the
+      control holds because Vercel overwrites that header at the edge and does
+      not forward client-supplied values, except where an Enterprise trusted
+      proxy is configured. That is an operational dependency on the hosting
+      layer, not a property of this code. If the deployment target changes, if a
+      trusted proxy is enabled, or if the app is ever run behind a proxy that
+      appends rather than replaces, the assumption must be re-validated and the
+      key moved to a platform-attested client IP.
 
       **Only exit 0 closes the window.** Anything else means containment is
       unproven, not achieved. Wait for the rate-limit window and re-run rather
@@ -443,7 +458,7 @@ operator does; they are not automated.
    d. (See step 8 — claim re-enumeration is unconditional, not part of this
       branch.)
 
-7. `[CONTAINMENT_DISABLE_ACCOUNT]` **Disable the affected Firebase Auth account** when the identity itself is
+7. `[CONTAINMENT_DISABLE_ACCOUNT][REQUIRED]` **Disable the affected Firebase Auth account** when the identity itself is
    compromised (as opposed to a credential leak on an otherwise trusted
    account). Be precise about what this buys, per §B.3-B.5:
 
@@ -466,14 +481,14 @@ operator does; they are not automated.
      (Firebase default one hour). Disabling does **not** shorten that window.
      Do not record bearer-path cutoff as immediate.
 
-8. `[CONTAINMENT_REENUMERATE_CLAIMS]` **Re-enumerate privileged claims across all accounts — unconditionally.**
+8. `[CONTAINMENT_REENUMERATE_CLAIMS][REQUIRED]` **Re-enumerate privileged claims across all accounts — unconditionally.**
    Not only when secret exposure is suspected: step 1 removed the claim from ONE
    account, and an attacker (or the compromised identity itself) may have minted
    others before discovery, through `/api/admin/set-role` or the bootstrap
    route. Neither leaves an audit record. List every account carrying
    `admin: true` and confirm each is intended.
 
-9. `[CONTAINMENT_VERIFY_DENIAL]` **Verify denial against Production.** For the evidence review, consult the
+9. `[CONTAINMENT_VERIFY_DENIAL][REQUIRED]` **Verify denial against Production.** For the evidence review, consult the
    coverage table in §A.6 first — and note what it says about the operations a
    compromised SYSTEM_ADMIN is most likely to have used: claim minting via
    `set-role` and `set-admin`, provider credential access, and bulk purge

@@ -194,6 +194,43 @@ afterAll(() => {
 const output = () => captured.join("\n");
 
 /**
+ * Phase FIRST-ADMIN-C12 (R8 P1-2) — THE ASSERTION READS THE SINK ITSELF.
+ *
+ * C11's hook took the captured text as an argument and proved liveness with a
+ * character counter. A reviewer replaced the argument with a non-empty filler
+ * constant: the counter kept rising, the hook kept "passing", and a real
+ * ownerUid leak injected into the production route took the hook-only-covered
+ * tests from 7 failed to 7 passed. The counter proved the hook touched *a*
+ * string, not *the sink*.
+ *
+ * There is no longer a string parameter to substitute. The capture owns the
+ * buffer, its assertions read that buffer internally, and liveness is counted
+ * in REAL SINK CALLS — a filler constant cannot manufacture a console call.
+ */
+const governanceLogCapture = {
+  /** Reads the live spy buffer. Not a snapshot, not a caller-supplied value. */
+  entries: () => captured,
+  text: () => captured.join("\n"),
+
+  assertNoSensitiveCanaries(opts: { allowIntegrityRunId?: boolean } = {}) {
+    const logs = this.text();
+    const leaked: string[] = [];
+    for (const [label, get] of SENSITIVE_LOG_CANARIES) {
+      const value = get();
+      if (opts.allowIntegrityRunId && value === C.runId) continue;
+      if (logs.includes(value)) leaked.push(label);
+    }
+    expect(leaked).toEqual([]);
+    return this.entries().length;
+  },
+
+  assertLoggingOccurred(anchor: string) {
+    expect(this.entries().length).toBeGreaterThan(0);
+    expect(this.text()).toContain(anchor);
+  },
+};
+
+/**
  * Phase FIRST-ADMIN-C11 (R7 P1-a/P1-b) — REDACTION IS ENFORCED AUTOMATICALLY.
  *
  * C10 required each branch to CALL the shared assertion, and proved compliance
@@ -225,13 +262,12 @@ let redactionExemption: RedactionExemption = "none";
  */
 let redactionAssertionsRun = 0;
 /**
- * Total characters of REAL sink content the hook examined. The run-counter
- * alone proves only that the hook executed — a mutation asserting on `""`
- * incremented it happily while inspecting nothing, which is the same "scanned
- * zero files" vacuity the pre-flight scanner had. This proves it looked at
- * something.
+ * Total REAL SINK CALLS the hook examined — console invocations recorded by the
+ * spy, not characters of some string. C11 counted characters, which any
+ * non-empty constant satisfies; a call count cannot be manufactured without
+ * actually calling console.
  */
-let redactionSinkCharsInspected = 0;
+let redactionSinkCallsInspected = 0;
 
 function docHandle(collection: string, id: string) {
   const rec = existingDocs[`${collection}/${id}`];
@@ -353,12 +389,13 @@ beforeEach(() => {
 
 afterEach(() => {
   if (redactionExemption === "capture-fidelity") return;
-  const inspected = output();
-  assertNoSensitiveGovernanceCanaries(inspected, {
+  // No argument: the capture reads its own spy buffer, so there is nothing a
+  // filler constant could be substituted for.
+  const sinkCallsInspected = governanceLogCapture.assertNoSensitiveCanaries({
     allowIntegrityRunId: redactionExemption === "integrity-run-id",
   });
   redactionAssertionsRun += 1;
-  redactionSinkCharsInspected += inspected.length;
+  redactionSinkCallsInspected += sinkCallsInspected;
 });
 
 describe("ANCHOR 0 — every canary is REACHABLE in the data the route reads", () => {
@@ -901,10 +938,61 @@ describe("ZZ ENFORCEMENT LIVENESS — the automatic check actually ran", () => {
     expect(redactionAssertionsRun).toBeGreaterThan(40);
   });
 
-  it("and it examined REAL captured output, not an empty string", () => {
-    // Driving these routes produces thousands of characters of log. A hook
-    // asserting on a constant would leave this at zero while still counting
-    // itself as having run.
-    expect(redactionSinkCharsInspected).toBeGreaterThan(5_000);
+  it("and it examined REAL sink calls, which no constant can manufacture", () => {
+    // Driving these routes produces hundreds of console invocations. A hook
+    // pointed at a filler string would leave this at zero.
+    expect(redactionSinkCallsInspected).toBeGreaterThan(100);
+  });
+});
+
+describe("CAPTURE SELF-VALIDATION — the mechanism the hook depends on", () => {
+  /**
+   * Phase FIRST-ADMIN-C12. The hook is only as good as the capture. These
+   * exercise the capture directly, through real console calls.
+   */
+  it("a real console.log is seen by the capture", () => {
+    redactionExemption = "capture-fidelity";
+    captured = [];
+    console.log("SAFE-ANCHOR-c12");
+    expect(governanceLogCapture.entries()).toHaveLength(1);
+    expect(governanceLogCapture.text()).toContain("SAFE-ANCHOR-c12");
+  });
+
+  it("a real console.warn carrying a canary FAILS the redaction assertion", () => {
+    redactionExemption = "capture-fidelity";
+    captured = [];
+    console.warn("leak", { owner: C.ownerBUid });
+    expect(() => governanceLogCapture.assertNoSensitiveCanaries()).toThrow();
+  });
+
+  it("no sink calls at all FAILS the expected-logging assertion", () => {
+    redactionExemption = "capture-fidelity";
+    captured = [];
+    expect(() => governanceLogCapture.assertLoggingOccurred("anything")).toThrow();
+  });
+
+  it("a filler constant cannot satisfy liveness — only real calls count", () => {
+    redactionExemption = "capture-fidelity";
+    captured = [];
+    const filler = "harmless filler line ".repeat(500); // >5000 chars, C11's old bar
+    expect(filler.length).toBeGreaterThan(5_000);
+    // The capture reports ZERO calls regardless of how much text exists elsewhere.
+    expect(governanceLogCapture.assertNoSensitiveCanaries()).toBe(0);
+    expect(governanceLogCapture.entries()).toHaveLength(0);
+  });
+
+  it("the assertion takes no text parameter, so none can be substituted", () => {
+    // Arity is the structural property that killed the filler substitution.
+    expect(governanceLogCapture.assertNoSensitiveCanaries.length).toBeLessThanOrEqual(1);
+    const src = readFileSync("app/api/governance/review/__tests__/reviewLogRedaction.spec.ts", "utf8");
+    expect(src).toContain("governanceLogCapture.assertNoSensitiveCanaries({");
+  });
+
+  it("the capture reads the LIVE buffer, not a snapshot", () => {
+    redactionExemption = "capture-fidelity";
+    captured = [];
+    const before = governanceLogCapture.entries().length;
+    console.log("later-line-c12");
+    expect(governanceLogCapture.entries().length).toBe(before + 1);
   });
 });

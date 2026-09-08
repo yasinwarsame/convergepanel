@@ -319,3 +319,59 @@ describe("STRICT SECRET TYPE — coercion must never authenticate", () => {
     expect(privilegedMutations()).toBe(0);
   });
 });
+
+describe("PROBE ATTESTATION — the route says which side of the check was reached", () => {
+  /**
+   * Phase FIRST-ADMIN-C12. The canonical containment probe used to treat any
+   * 401 as proof a rotated secret was dead — so a WAF, an SSO gate, a
+   * deployment-protection wall or a redirect target could close a rotation
+   * incident while the old secret was still minting SYSTEM_ADMIN. The verdict
+   * now requires this header, which only this route emits.
+   */
+  const MARKER = "x-convergepanel-admin-secret-probe";
+
+  it("uid-less probe with the WRONG secret: 401 + credential-rejected", async () => {
+    process.env.ADMIN_SECRET = REAL_SECRET;
+    const res = await post({ secret: "X".repeat(REAL_SECRET.length) });
+    expect(res.status).toBe(401);
+    expect(res.headers.get(MARKER)).toBe("credential-rejected");
+    expect(privilegedMutations()).toBe(0);
+  });
+
+  it("uid-less probe with the CORRECT secret: 400 + credential-accepted, and mints nothing", async () => {
+    process.env.ADMIN_SECRET = REAL_SECRET;
+    const res = await post({ secret: REAL_SECRET });
+    expect(res.status).toBe(400);
+    expect(res.headers.get(MARKER)).toBe("credential-accepted");
+    expect(privilegedMutations()).toBe(0);
+  });
+
+  it("uid-less probe with ADMIN_SECRET unset: 401 + credential-rejected", async () => {
+    delete process.env.ADMIN_SECRET;
+    const res = await post({ secret: "" });
+    expect(res.status).toBe(401);
+    expect(res.headers.get(MARKER)).toBe("credential-rejected");
+  });
+
+  it("the marker carries no secret, uid, email or tenant data", async () => {
+    process.env.ADMIN_SECRET = REAL_SECRET;
+    const rejected = await post({ secret: "wrong-but-same-length-aaaaaaaaaaaaaaaaa" });
+    const accepted = await post({ secret: REAL_SECRET });
+    for (const res of [rejected, accepted]) {
+      const v = res.headers.get(MARKER)!;
+      expect(["credential-rejected", "credential-accepted"]).toContain(v);
+      expect(v).not.toContain(REAL_SECRET);
+      expect(v).not.toContain(VALID_UID);
+      expect(v).not.toContain("@");
+    }
+  });
+
+  it("ANCHOR: an ordinary MINT still behaves exactly as before", async () => {
+    // The attestation must not have altered the bootstrap contract.
+    process.env.ADMIN_SECRET = REAL_SECRET;
+    const res = await post({ uid: VALID_UID, secret: REAL_SECRET });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    expect(setCustomUserClaims).toHaveBeenCalledWith(VALID_UID, { admin: true });
+  });
+});

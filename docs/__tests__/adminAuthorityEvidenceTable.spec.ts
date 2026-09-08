@@ -298,6 +298,19 @@ describe("STRUCTURED CONTAINMENT CONTRACT — steps identified by stable ID", ()
     expect(src.match(new RegExp(`\\[${id}\\]`, "g")) ?? []).toHaveLength(1);
   });
 
+  it.each(REQUIRED)("%s is marked [REQUIRED] and its step is not hedged as optional", (id) => {
+    /**
+     * Phase FIRST-ADMIN-C12 (R8 P2-1). The ID alone encoded presence and
+     * numbering, not obligation: two steps — refresh-token revocation and the
+     * containment probe — were rewritten as "Optional, only if convenient" and
+     * "Skip this if you are confident" with the whole suite green.
+     */
+    expect(SECTION).toContain(`[${id}][REQUIRED]`);
+    const line = SECTION.split("\n").find((l) => l.includes(`[${id}]`))!;
+    expect({ id, hedged: /\b(optional|if convenient|skip this|you may wish|not required|example only)\b/i.test(line) })
+      .toEqual({ id, hedged: false });
+  });
+
   it("the section declares no containment ID this contract does not require", () => {
     // Catches a step being renamed rather than removed.
     const found = [...SECTION.matchAll(/\[(CONTAINMENT_[A-Z_]+)\]/g)].map((m) => m[1]);
@@ -361,9 +374,26 @@ describe("the documented bootstrap rate limit matches the route's constants", ()
     expect(ROUTE).toContain("windowSeconds: RATE_LIMIT_WINDOW_SECONDS");
   });
 
-  it("the runbook cites the constants by name rather than hand-copied numbers", () => {
+  it("the runbook states the ACTUAL numbers, and they match the runtime constants", () => {
+    /**
+     * C11 cited only the constant NAMES, which made parity vacuous — the window
+     * could be changed from 300 to 5 with every test green, and an on-call
+     * responder had no way to know how long to wait. The numbers are back, and
+     * now they are checked.
+     */
+    const max = constant("RATE_LIMIT_MAX_REQUESTS");
+    const win = constant("RATE_LIMIT_WINDOW_SECONDS");
+    const flat = DOC.replace(/\s+/g, " ");
+    expect(flat).toContain(`${max} attempts per ${win} seconds`);
     expect(DOC).toContain("RATE_LIMIT_MAX_REQUESTS");
     expect(DOC).toContain("RATE_LIMIT_WINDOW_SECONDS");
+  });
+
+  it("documents that the per-IP key depends on the hosting layer, not on this code", () => {
+    const flat = DOC.replace(/\s+/g, " ");
+    expect(flat).toContain("does **not** independently prevent header spoofing");
+    expect(flat).toMatch(/Vercel overwrites that header/);
+    expect(flat).toMatch(/operational dependency on the hosting layer/);
   });
 
   it("the runbook presents rate limiting as defence-in-depth, not the primary boundary", () => {

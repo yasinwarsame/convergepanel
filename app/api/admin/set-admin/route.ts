@@ -33,6 +33,11 @@ import { timingSafeEqual } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { adminAuth } from "@/lib/firebase/admin";
 import { checkRateLimit } from "@/lib/security/rateLimit";
+import {
+  PROBE_MARKER_HEADER,
+  MARKER_REJECTED,
+  MARKER_ACCEPTED,
+} from "@/lib/security/adminSecretProbeAttestation";
 
 // Ensure Node.js runtime (Firebase Admin requires Node.js, not Edge)
 export const runtime = "nodejs";
@@ -94,15 +99,39 @@ export async function POST(request: NextRequest) {
     if (!secretValid) {
       return NextResponse.json(
         { error: "Invalid secret" },
-        { status: 401 }
+        {
+          status: 401,
+          /**
+           * Phase FIRST-ADMIN-C12 — ATTESTATION FOR THE CONTAINMENT PROBE.
+           *
+           * The canonical probe used to treat any 401 as proof that a rotated
+           * `ADMIN_SECRET` was dead. A WAF challenge, an SSO gate, a
+           * deployment-protection wall, a typo'd host or a redirect target all
+           * return 401 for arbitrary paths, so an operator could close a
+           * rotation incident while the old secret was still minting
+           * SYSTEM_ADMIN. This header is emitted ONLY here, so a verdict now
+           * requires the response to have come from this route.
+           *
+           * It carries no secret, no uid, no email and no tenant data — only
+           * which side of the credential check was reached.
+           */
+          headers: { [PROBE_MARKER_HEADER]: MARKER_REJECTED },
+        }
       );
     }
 
-    // Validate UID is provided
+    // Validate UID is provided.
+    //
+    // Reaching this point means the secret was ACCEPTED. For the uid-less
+    // containment probe that is the "containment FAILED" signal, and it is
+    // attested for the same reason as the 401 above.
     if (!uid || typeof uid !== "string") {
       return NextResponse.json(
         { error: "UID is required" },
-        { status: 400 }
+        {
+          status: 400,
+          headers: { [PROBE_MARKER_HEADER]: MARKER_ACCEPTED },
+        }
       );
     }
 
