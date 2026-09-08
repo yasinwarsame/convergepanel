@@ -62,42 +62,56 @@ export async function checkRateLimit(
       const doc = await transaction.get(rateLimitDocRef);
       const data = doc.data();
       
+      /**
+       * Phase FIRST-ADMIN-C11 — the stored value is the window's ACTUAL START.
+       *
+       * This previously wrote `windowStart: lastReset - windowSeconds * 1000`.
+       * On a fresh window `lastReset === now`, so the stored start was already a
+       * full window in the past, and the read below (`stored > now - windowMs`)
+       * failed for every request landing in a later millisecond. Each one took
+       * the "expired" branch, reset the count to 0, and was allowed: the counter
+       * never exceeded 1 against any limit, at all 15 call sites.
+       * `/api/admin/set-admin` — unauthenticated, mints SYSTEM_ADMIN on any uid,
+       * no audit record, no success log — was documented as throttled to 3
+       * attempts per 5 minutes per IP and was not throttled at all.
+       *
+       * Both stored fields are type-checked, so a corrupted document starts a
+       * fresh window rather than throwing.
+       */
       let count = 0;
-      let lastReset = now;
-      
+      let windowStartedAt = now;
+
       if (data) {
-        // Check if we're still in the current window
-        const windowStartTime = data.windowStart || 0;
-        
-        if (windowStartTime >= windowStart) {
-          // Still in current window, use existing count
-          count = data.count || 0;
-          lastReset = windowStartTime + config.windowSeconds * 1000;
-        } else {
-          // Window expired, reset count
-          count = 0;
-          lastReset = now;
+        const storedStart = typeof data.windowStart === "number" ? data.windowStart : 0;
+        if (storedStart > windowStart) {
+          // Inside the live window: carry the count and keep the SAME start, so
+          // a stream of requests cannot slide the window forward indefinitely.
+          count = typeof data.count === "number" ? data.count : 0;
+          windowStartedAt = storedStart;
         }
       }
-      
+
       // Increment count
       count += 1;
-      
-      // Update document with new count and window start
+
       transaction.set(rateLimitDocRef, {
         count,
-        windowStart: lastReset - config.windowSeconds * 1000,
+        windowStart: windowStartedAt,
         updatedAt: FieldValue.serverTimestamp(),
       }, { merge: true });
-      
+
       return {
         count,
+        windowStartedAt,
         allowed: count <= config.maxRequests,
         remaining: Math.max(0, config.maxRequests - count),
       };
     });
     
-    const retryAfter = result.allowed ? undefined : Math.ceil((resetAt.getTime() - now) / 1000);
+    // The window ends relative to when it STARTED, not to this request, so a
+    // denied caller is told how long the real window actually has left.
+    const windowEndsAt = new Date(result.windowStartedAt + config.windowSeconds * 1000);
+    const retryAfter = result.allowed ? undefined : Math.max(1, Math.ceil((windowEndsAt.getTime() - now) / 1000));
 
     // Opportunistic cleanup: run on ~1% of requests, fire-and-forget.
     if (Math.random() < 0.01) {
@@ -107,7 +121,7 @@ export async function checkRateLimit(
     return {
       allowed: result.allowed,
       remaining: result.remaining,
-      resetAt,
+      resetAt: windowEndsAt,
       retryAfter,
     };
   } catch (error: any) {

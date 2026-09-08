@@ -272,3 +272,50 @@ describe("RATE LIMITING RUNS BEFORE SECRET VALIDATION — so 429 proves nothing"
     // 429 as "contained" has proven nothing. The runbook must say so.
   });
 });
+
+describe("STRICT SECRET TYPE — coercion must never authenticate", () => {
+  /**
+   * Phase FIRST-ADMIN-C11 (R7 F-3). The existing "even a non-string secret
+   * cannot authenticate" test lives under the `ADMIN_SECRET unset` describe,
+   * where the non-empty-secret conjunct denies regardless of the type guard —
+   * so removing the guard survived the whole suite. With a CONFIGURED secret
+   * that looks numeric, `String(secret ?? "")` lets a JSON number authenticate
+   * and mint the claim. These rows are the ones that can fail.
+   */
+  const NUMERIC_SECRET = "1234567890123456";
+
+  it("ANCHOR: the string form of the numeric secret DOES authenticate", async () => {
+    // Establishes that the fixture reaches the mint, so the denials below are
+    // caused by the type guard and not by an unrelated rejection.
+    process.env.ADMIN_SECRET = NUMERIC_SECRET;
+    const res = await post({ uid: VALID_UID, secret: NUMERIC_SECRET });
+    expect(res.status).toBe(200);
+    expect(setCustomUserClaims).toHaveBeenCalledWith(VALID_UID, { admin: true });
+  });
+
+  it("SELF-VALIDATION: the numeric literal and the string are the same digits", () => {
+    // If these diverged, the number below would be rejected on length and the
+    // test would pass for the wrong reason.
+    expect(String(1234567890123456)).toBe(NUMERIC_SECRET);
+    expect(NUMERIC_SECRET.length).toBe(16);
+  });
+
+  it("a JSON NUMBER equal to the configured secret is rejected", async () => {
+    process.env.ADMIN_SECRET = NUMERIC_SECRET;
+    const res = await post({ uid: VALID_UID, secret: 1234567890123456 });
+    expect(res.status).toBe(401);
+    expect(privilegedMutations()).toBe(0);
+  });
+
+  it.each([
+    ["a boolean", true],
+    ["an array of the digits", ["1234567890123456"]],
+    ["an object wrapping it", { toString: () => "1234567890123456" }],
+    ["null", null],
+  ])("%s cannot authenticate against a configured secret", async (_label, secret) => {
+    process.env.ADMIN_SECRET = NUMERIC_SECRET;
+    const res = await post({ uid: VALID_UID, secret });
+    expect(res.status).toBe(401);
+    expect(privilegedMutations()).toBe(0);
+  });
+});
