@@ -7,6 +7,7 @@ import { adminDb } from "@/lib/firebase/admin";
 import { Timestamp } from "firebase-admin/firestore";
 import type { AuditBundle } from "@/lib/verification/auditBundle";
 import type { ClaimVerdict } from "@/lib/verification/claimVerdict";
+import type { EvidenceSourceReference } from "@/lib/verification/evidenceSourceExtraction";
 import type { ClaimVerificationOrigin } from "@/lib/verification/claimVerificationOrigin";
 import { sanitizeForFirestore } from "@/lib/firestore/sanitizeForFirestore";
 
@@ -54,6 +55,30 @@ export type ClaimVerificationFirestoreDoc = {
    * existed and on every ordinary (non-origin-linked) verification.
    */
   projectId?: string | null;
+  /**
+   * Phase 11A.6.2 — immutable creation-time snapshot of the normalized source
+   * references carried by the EXACT Deep Research finding this verification was
+   * created from. Derived server-side by `resolveClaimVerificationOrigin()` from
+   * the same `target` its fingerprint check already re-verified, via Phase
+   * 11A.2a's `normalizeEvidenceSourceReferences()`. Never accepted from the
+   * client, never recomputed, never re-fetched.
+   *
+   * Three-valued by presence, deliberately:
+   *   ABSENT            — does not participate in this contract: every ordinary
+   *                       verification, and every artifact created before this
+   *                       field existed.
+   *   PRESENT, `[]`     — origin-linked, but zero references survived
+   *                       normalization. Distinct from ABSENT.
+   *   PRESENT, non-empty — the snapshot itself.
+   *
+   * SOURCE REFERENCES, NOT EVIDENCE CONTENT — a surviving entry proves only
+   * that a model cited this URL for this finding, never what the page said.
+   *
+   * NOT BACKFILLABLE. This is point-in-time provenance over mutable research
+   * data; it cannot be faithfully reconstructed later, which is why artifacts
+   * created between Phase 11A.3 and this one simply lack it.
+   */
+  evidenceSources?: EvidenceSourceReference[];
 };
 
 export async function saveClaimVerification(

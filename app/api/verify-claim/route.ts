@@ -22,6 +22,7 @@ import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelem
 import { checkAndIncrementUsageForRun } from "@/lib/stripe/usageCheck";
 import { validateUserSubscription } from "@/lib/stripe/subscriptionValidation";
 import { runClaimVerificationPanel } from "@/lib/verification/runClaimVerificationPanel";
+import type { EvidenceSourceReference } from "@/lib/verification/evidenceSourceExtraction";
 import type { ModelVerdict } from "@/lib/verification/parseVerificationJson";
 import { computeClaimVerdict } from "@/lib/verification/claimVerdict";
 import { computeConsensusScoring } from "@/lib/verification/consensusScoring";
@@ -124,14 +125,27 @@ function unexpectedFieldForOriginLinkedMode(body: Record<string, unknown>): bool
  * client-supplied claim/origin/project value itself — that decision is
  * fully resolved by the caller before this runs.
  */
+/**
+ * Phase 11A.6.2 — the origin-derived fields travel as ONE discriminated value,
+ * so the two modes cannot drift apart field-by-field. Ordinary mode structurally
+ * cannot supply `evidenceSources`, and origin-linked mode structurally cannot
+ * omit it: there is no shape with an `origin` but a null snapshot, and none with
+ * a snapshot but no origin. Previously these were three independent parameters,
+ * which is how `evidenceSources` came to be derived by the resolver and then
+ * silently dropped by both callers.
+ */
+type PersonalCreationContext =
+  | { origin: null; projectId: null; evidenceSources: null }
+  | { origin: ClaimVerificationOrigin; projectId: string | null; evidenceSources: EvidenceSourceReference[] };
+
 async function executeAndPersistPersonalClaimVerification(args: {
   uid: string;
   claimText: string;
   selectedModels: ModelId[];
-  projectId: string | null;
-  origin: ClaimVerificationOrigin | null;
+  context: PersonalCreationContext;
 }): Promise<NextResponse> {
-  const { uid, claimText, selectedModels, projectId, origin } = args;
+  const { uid, claimText, selectedModels } = args;
+  const { projectId, origin, evidenceSources } = args.context;
 
   try {
     await validateUserSubscription(uid);
@@ -231,6 +245,23 @@ async function executeAndPersistPersonalClaimVerification(args: {
   const verificationId = `vcl-${randomUUID()}`;
 
   let orgGovernanceStatus: "approved" | "needs_review" | "blocked" | undefined;
+  /**
+   * Phase 11A.6.2 — canonical persistence outcome.
+   *
+   * Before this phase a `saveClaimVerification()` rejection was logged and
+   * swallowed, and the handler continued to `applyTeamGovernancePipeline()` and
+   * then returned `200 {ok:true, verificationId}`. Two things were wrong: the
+   * caller was told a durable verification existed when none did (breaking
+   * history, reopen, 11A.5B `sourceResearch` and 11A.6 navigation, all of which
+   * resolve by `verificationId`), and a Team governance projection was written
+   * referencing that nonexistent verification.
+   *
+   * A bare `throw` from the catch would fix the response but skip token
+   * accounting below — and the provider work has already happened, so that usage
+   * must still be recorded. Hence a flag: fail AFTER accounting, BEFORE any
+   * governance projection or success response.
+   */
+  let persistenceFailed = false;
 
   try {
     const verificationDoc: Omit<ClaimVerificationFirestoreDoc, "timestamp"> = {
@@ -250,6 +281,13 @@ async function executeAndPersistPersonalClaimVerification(args: {
       // client-supplied value.
       ...(projectId !== null ? { projectId } : {}),
       ...(origin ? { origin } : {}),
+      // Phase 11A.6.2 — the EXACT resolver-derived snapshot, spread only for an
+      // origin-linked creation. `evidenceSources` is non-null precisely when
+      // `origin` is set (see PersonalCreationContext), so an empty snapshot
+      // persists as `[]` rather than collapsing to absence: `[]` means "this
+      // origin-linked finding had no acceptable references", absence means "this
+      // artifact does not participate in the contract at all".
+      ...(evidenceSources !== null ? { evidenceSources } : {}),
     };
     await saveClaimVerification(
       verificationId,
@@ -300,7 +338,9 @@ async function executeAndPersistPersonalClaimVerification(args: {
       });
     }
   } catch (fsErr: any) {
+    // Message only — never the stack, never Firestore internals in a response.
     logger.error("[verify-claim] Firestore save failed", { error: fsErr?.message });
+    persistenceFailed = true;
   }
 
   let totalTokens = 0;
@@ -311,6 +351,23 @@ async function executeAndPersistPersonalClaimVerification(args: {
     await incrementUserTokenUsage(uid, totalTokens);
   } catch (tokErr: any) {
     logger.warn("[verify-claim] Token increment failed", { error: tokErr?.message });
+  }
+
+  // Phase 11A.6.2 — THE FAILURE BOUNDARY. Deliberately placed after token
+  // accounting (the provider work happened; that usage is real and is recorded
+  // exactly once) and before `applyTeamGovernancePipeline()` and the success
+  // response, so a failed save can never produce governance state pointing at a
+  // verificationId that was never written. Quota is NOT refunded: the run was
+  // genuinely consumed. Applies identically to ordinary and origin-linked mode.
+  if (persistenceFailed) {
+    return NextResponse.json(
+      {
+        ok: false,
+        errorCode: "persistence_failed",
+        message: "We couldn't save this verification. Please try again.",
+      },
+      { status: 500 }
+    );
   }
 
   const usableForBanner = modelEvidence.filter((m) => m.status === "ok");
@@ -492,8 +549,14 @@ export async function POST(req: NextRequest) {
         uid,
         claimText: resolution.claimText,
         selectedModels,
-        projectId: resolution.projectId,
-        origin: resolution.origin,
+        // Phase 11A.6.2 — all three origin-derived values come from the SAME
+        // resolver result, as one unit. Nothing here is recomputed, re-read, or
+        // taken from the request body.
+        context: {
+          origin: resolution.origin,
+          projectId: resolution.projectId,
+          evidenceSources: resolution.evidenceSources,
+        },
       });
     }
 
@@ -534,8 +597,9 @@ export async function POST(req: NextRequest) {
       uid,
       claimText: claimRaw,
       selectedModels,
-      projectId: null,
-      origin: null,
+      // Ordinary mode: the only inhabitable non-origin shape. It cannot carry an
+      // evidence snapshot, by type.
+      context: { origin: null, projectId: null, evidenceSources: null },
     });
   } catch (err: any) {
     logger.error("[verify-claim] Unexpected error", { error: err?.message, stack: err?.stack });

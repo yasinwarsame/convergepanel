@@ -49,7 +49,7 @@ import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelem
 import { ModelId } from "@/lib/types";
 import { OPENAI_API_KEY, ANTHROPIC_API_KEY, XAI_API_KEY, PERPLEXITY_API_KEY, GEMINI_API_KEY, TEAM_WORKSPACES_ENABLED, TEAM_WORKSPACES_CANARY_UIDS, TEAM_WORKSPACES_CANARY_WORKSPACE_IDS } from "@/lib/env";
 import { resolveTeamWorkspaceTargetAdmission } from "@/lib/workspaces/teamWorkspaceTargetAdmission";
-import { authorizeTeamClaimVerificationAdmission, saveTeamClaimVerification, type Gate1Result } from "@/lib/firestore/teamClaimVerifications";
+import { authorizeTeamClaimVerificationAdmission, saveTeamClaimVerification, type Gate1Result, type TeamOriginSnapshot } from "@/lib/firestore/teamClaimVerifications";
 import { validateUserSubscription } from "@/lib/stripe/subscriptionValidation";
 import { checkAndIncrementUsageForRun } from "@/lib/stripe/usageCheck";
 import { runClaimVerificationPanel } from "@/lib/verification/runClaimVerificationPanel";
@@ -71,6 +71,7 @@ import { runProjectAssociationTargetNotFoundResponse, projectArchivedTargetRespo
 import { logger } from "@/lib/logger";
 import type { ModelVerdict } from "@/lib/verification/parseVerificationJson";
 import { resolveClaimVerificationOrigin, type ClaimVerificationOrigin } from "@/lib/verification/claimVerificationOrigin";
+import type { EvidenceSourceReference } from "@/lib/verification/evidenceSourceExtraction";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -207,9 +208,9 @@ async function executeAndPersistTeamClaimVerification(args: {
   claimText: string;
   selectedModels: ModelId[];
   projectId: string | null;
-  origin?: ClaimVerificationOrigin;
+  originSnapshot: TeamOriginSnapshot;
 }): Promise<NextResponse> {
-  const { uid, workspaceId, claimText, selectedModels, projectId, origin } = args;
+  const { uid, workspaceId, claimText, selectedModels, projectId, originSnapshot } = args;
 
   try {
     await validateUserSubscription(uid);
@@ -311,7 +312,12 @@ async function executeAndPersistTeamClaimVerification(args: {
     modelResults: modelEvidence,
     auditBundle,
     selectedModels,
-    ...(origin ? { origin } : {}),
+    // Phase 11A.6.2-C1 — the pair travels INTACT to the canonical writer. It is
+    // never destructured back into independent arguments, which is what let an
+    // origin-linked artifact be written without its snapshot. Never recomputed,
+    // never re-read: Gate 2 reauthorizes from scratch but performs no second
+    // origin resolution and no extra Project read to obtain this.
+    originSnapshot,
   });
 
   try {
@@ -540,7 +546,7 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
         claimText: resolution.claimText,
         selectedModels,
         projectId: resolution.projectId,
-        origin: resolution.origin,
+        originSnapshot: { origin: resolution.origin, evidenceSources: resolution.evidenceSources },
       });
     }
 
@@ -591,6 +597,7 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
       claimText: claimRaw,
       selectedModels,
       projectId: targetProjectId,
+      originSnapshot: null,
     });
   } catch (err: any) {
     logger.error("[POST /api/workspaces/[workspaceId]/verifications] Unexpected error", { error: err?.message, stack: err?.stack });

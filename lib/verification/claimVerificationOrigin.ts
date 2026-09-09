@@ -284,9 +284,14 @@ export function verifyDeepResearchClaimFingerprint(args: {
  * `runId` non-empty, `section` one of the two literals, `index` a safe
  * non-negative integer, and `finding` shaped like `{id: string, summary:
  * string}` are all required. Never substitutes `title` for a missing
- * `summary`, never fabricates an empty string — a caller that can't
- * produce a valid selector for a given finding gets `null` and must not
+ * `summary`, never fabricates an empty string, and (Phase 11A.6.2) actively
+ * REFUSES a blank or whitespace-only canonical `summary` — a caller that
+ * can't produce a valid selector for a given finding gets `null` and must not
  * offer a "Verify this claim" affordance for it at all.
+ *
+ * Two distinct guarantees, previously conflated here: (1) it never substitutes
+ * or invents claim text, and (2) it rejects an unusable blank summary outright.
+ * The earlier wording asserted only the first while reading like the second.
  */
 export function buildDeepResearchClaimId(args: {
   runId: string;
@@ -298,6 +303,14 @@ export function buildDeepResearchClaimId(args: {
   if (args.section !== "findings" && args.section !== "lowConfidenceFindings") return null;
   if (!Number.isSafeInteger(args.index) || args.index < 0) return null;
   if (!isFingerprintableFinding(args.finding)) return null;
+  // Phase 11A.6.2 — defence in depth: never issue a "Verify this claim"
+  // selector for an occurrence whose summary is blank or whitespace-only. The
+  // authoritative guard is in `resolveClaimVerificationOrigin()`; this one only
+  // stops the UI offering an affordance that the server would then deny. Note
+  // `trim()` decides emptiness ONLY — the untrimmed summary is what gets
+  // fingerprinted below, so claim identity is unchanged for every non-blank
+  // finding, including one with surrounding whitespace.
+  if (args.finding.summary.trim().length === 0) return null;
 
   const fingerprint = computeDeepResearchClaimFingerprint({
     runId: args.runId,
@@ -458,6 +471,29 @@ export async function resolveClaimVerificationOrigin(args: {
     // digest, a tampered section/index, or a selector replayed against a
     // different run — denies here. No fuzzy recovery: never scan the run
     // for some other slot that might match instead.
+    return { status: "denied", reason: "claim_not_found" };
+  }
+
+  // Phase 11A.6.2 — AUTHORITATIVE BLANK-CLAIM GUARD.
+  //
+  // Placed AFTER fingerprint re-verification deliberately: a blank summary is
+  // only meaningful once we know this is genuinely the occurrence the selector
+  // named. Ordinary Personal mode has always rejected a blank claim
+  // (`invalid_claim`, see app/api/verify-claim/route.ts), but origin-linked
+  // mode never carried that guard forward, so a Deep Research finding with an
+  // empty or whitespace-only summary resolved to an empty `claimText`, passed
+  // the `> MAX_CLAIM_LEN` check, and reached quota + model execution on both
+  // the Personal and Team routes.
+  //
+  // Denies as `claim_not_found`, the SAME concealed reason an unmatched
+  // fingerprint returns: the run is valid Deep Research and the selector is
+  // structurally sound, but this occurrence cannot function as a claim. Reusing
+  // the existing reason keeps the denial surface uniform — a caller cannot
+  // distinguish "blank occurrence" from "no such occurrence", so this adds no
+  // oracle. `trim()` is used ONLY for the emptiness decision; `claimText` below
+  // is still the exact untrimmed `target.summary`, because trimming here would
+  // silently change claim identity relative to the fingerprint.
+  if (target.summary.trim().length === 0) {
     return { status: "denied", reason: "claim_not_found" };
   }
 

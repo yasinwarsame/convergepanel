@@ -60,6 +60,7 @@ import { roleHasCapability } from "@/lib/workspaces/capabilities";
 import { isWellFormedProjectV1 } from "@/lib/projects/types";
 import { sanitizeForFirestore } from "@/lib/firestore/sanitizeForFirestore";
 import type { ClaimVerificationFirestoreDoc } from "@/lib/firestore/verifications";
+import type { EvidenceSourceReference } from "@/lib/verification/evidenceSourceExtraction";
 import type { ClaimVerificationOrigin } from "@/lib/verification/claimVerificationOrigin";
 
 // ============================================================
@@ -183,6 +184,25 @@ export type Gate2Result =
  * immutable target identifiers. This function independently re-derives
  * authorization from scratch — it never reads or trusts a Gate 1 result.
  */
+/**
+ * Phase 11A.6.2-C1 — origin provenance as ONE coupled value, at the CANONICAL
+ * WRITER boundary.
+ *
+ * 11A.6.2 coupled these in the route and then destructured them back into two
+ * independent optional writer arguments, so this function could still be called
+ * with an `origin` and no `evidenceSources` — exactly the incomplete-provenance
+ * state the phase exists to eliminate. An existing Gate-2 test proved it,
+ * passing `claimArgs({ origin })` through `as any`.
+ *
+ * There is now no inhabitable typed call shape carrying one without the other.
+ * `evidenceSources: []` is a valid snapshot (an origin-linked finding with no
+ * surviving references); ABSENT is only reachable via `null`, which also drops
+ * `origin`.
+ */
+export type TeamOriginSnapshot =
+  | { origin: ClaimVerificationOrigin; evidenceSources: EvidenceSourceReference[] }
+  | null;
+
 export async function saveTeamClaimVerification(args: {
   uid: string;
   workspaceId: string;
@@ -203,7 +223,7 @@ export async function saveTeamClaimVerification(args: {
    * for an ordinary Team verification — never set by this function on its
    * own, never accepted as a pass-through of caller-supplied request data.
    */
-  origin?: ClaimVerificationOrigin;
+  originSnapshot: TeamOriginSnapshot;
 }): Promise<Gate2Result> {
   const admission = resolveTeamWorkspaceTargetAdmission({
     uid: args.uid,
@@ -267,7 +287,7 @@ export async function saveTeamClaimVerification(args: {
       // resolved before this transaction opened) is spread in explicitly,
       // never `undefined`-assigned, matching `ClaimVerificationFirestoreDoc.origin`'s
       // established absent-not-null convention (see lib/firestore/verifications.ts).
-      const canonicalDoc: ClaimVerificationFirestoreDoc & { workspaceId: string; projectId: string | null; origin?: ClaimVerificationOrigin } = {
+      const canonicalDoc: ClaimVerificationFirestoreDoc & { workspaceId: string; projectId: string | null; origin?: ClaimVerificationOrigin; evidenceSources?: EvidenceSourceReference[] } = {
         userId: args.uid,
         claim: args.claim,
         type: "claim_verification",
@@ -285,7 +305,14 @@ export async function saveTeamClaimVerification(args: {
         // treats an absent projectId identically to a malformed one.
         workspaceId: args.workspaceId,
         projectId: args.projectId,
-        ...(args.origin ? { origin: args.origin } : {}),
+        // Phase 11A.6.2-C1 — BOTH OR NEITHER, from one value. Never two
+        // independent truthiness tests: that is what allowed an origin-linked
+        // artifact to be written without its evidence snapshot. `[]` is
+        // preserved (origin-linked, no surviving references); absence means the
+        // artifact does not participate in the contract at all.
+        ...(args.originSnapshot !== null
+          ? { origin: args.originSnapshot.origin, evidenceSources: args.originSnapshot.evidenceSources }
+          : {}),
       };
       const safe = sanitizeForFirestore(canonicalDoc) as typeof canonicalDoc;
       tx.create(verificationRef, safe);
