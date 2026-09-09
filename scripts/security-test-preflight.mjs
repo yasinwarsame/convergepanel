@@ -75,6 +75,21 @@ const SHAPES = [
   { id: "skipped-test",
     re: /\b(it|test|describe)\s*\.\s*(skip|todo)\s*\(|\bxit\s*\(|\bxdescribe\s*\(/,
     why: "a skipped or todo security test is green and proves nothing." },
+  // Phase FIRST-ADMIN-C16 (R12 P1). A "pin" asserted that a coverage-narrowing
+  // comment existed by matching the test file against its own source — and the
+  // regex literal WAS that text, so it matched itself and could never fail.
+  // Deleting the thing it claimed to pin left the suite green. Two-line
+  // lookahead, deliberately not a parser: it catches reading __filename and
+  // asserting a literal over it, which is the shape that recurred.
+  { id: "self-referential-source-assertion",
+    at: (lines, i) => {
+      if (!/readFileSync\s*\(\s*__filename/.test(lines[i])) return false;
+      for (let j = i; j < lines.length && j <= i + 2; j++) {
+        if (/\.\s*(toMatch|toContain)\s*\(\s*[/"'`]/.test(lines[j])) return true;
+      }
+      return false;
+    },
+    why: "asserting a literal against the test file's OWN source: the expected text is present because the assertion itself contains it, so the check cannot fail." },
 ];
 
 const argv = process.argv.slice(2);

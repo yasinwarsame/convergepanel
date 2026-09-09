@@ -472,55 +472,216 @@ describe("BOOTSTRAP SEQUENCE ORDER — the pre-check precedes every mutation", (
 
 
 // ===========================================================================
-describe("REPOSITORY-WIDE OPERATOR CONTRACT — one rule, stated in every place", () => {
+describe("REPOSITORY-WIDE OPERATOR CONTRACT — discovered, classified, contracted", () => {
   /**
-   * Phase FIRST-ADMIN-C15 (R11 P2-3). The runbook was corrected in C14 while
-   * README.md and the route docstring kept the superseded C12 rule — "treat
-   * only 401 as proof" — with no pre-check at all, plus a §B.6.c pointer that
-   * no longer names the probe step. An operator reading either file would have
-   * performed exactly the verification the runbook now forbids.
+   * Phase FIRST-ADMIN-C16 (R12 P1). The previous version of this block was
+   * named REPOSITORY-WIDE and scanned three hardcoded files. A stale one-shot
+   * instruction added to CLAUDE.md — the file that governs agent behaviour for
+   * the whole repo — passed the entire 11,780-test suite. That is the same
+   * overclaim this file documents and fixes 450 lines above, recurring.
    *
-   * This test pins the ACTUAL instruction sites present in the repository. It
-   * does not claim to understand arbitrary English.
+   * The site list is now DISCOVERED from git, not declared. Every tracked
+   * non-test file mentioning an operator token must be classified here; an
+   * unclassified discovery fails, so a new doc cannot silently escape.
    */
-  const SITES = [
-    "README.md",
-    "app/api/admin/set-admin/route.ts",
-    "docs/operations/admin-authority-tiers.md",
-  ] as const;
+  const OPERATOR_TOKENS = [ROUTE, "ADMIN_SECRET", "probe-admin-secret", "PRODUCTION_CONTAINMENT_PROVEN"];
 
-  const read = (f: string) => readFileSync(f, "utf8");
+  const DISCOVERED = execSync("git ls-files", { encoding: "utf8" })
+    .split("\n")
+    .filter(Boolean)
+    .filter((f) => !SKIP.test(f))
+    .filter((f) => !f.includes("__tests__") && !f.includes("__fixtures__"))
+    .filter((f) => {
+      try {
+        const src = readFileSync(f, "utf8");
+        return OPERATOR_TOKENS.some((t) => src.includes(t));
+      } catch {
+        return false;
+      }
+    })
+    .sort();
 
-  it.each(SITES)("%s does not call a standalone 401 a containment proof", (file) => {
-    const flat = read(file).replace(/\s+/g, " ");
-    expect(flat).not.toMatch(/treat only .?401.? as proof/i);
-    expect(flat).not.toMatch(/only .?401.? (is|as) (containment )?proof/i);
+  type Kind = "OPERATOR_INSTRUCTION" | "MINTING_EXAMPLE" | "IMPLEMENTATION" | "CONFIG_EXAMPLE";
+
+  /** Every discovered site, classified. Unclassified discoveries fail below. */
+  const MANIFEST: Record<string, Kind> = {
+    ".env.local.example": "CONFIG_EXAMPLE",
+    "CLAUDE.md": "OPERATOR_INSTRUCTION",
+    "README.md": "OPERATOR_INSTRUCTION",
+    "app/api/admin/set-admin/route.ts": "OPERATOR_INSTRUCTION",
+    "app/api/user/usage/route.ts": "IMPLEMENTATION",
+    "docs/operations/admin-authority-tiers.md": "OPERATOR_INSTRUCTION",
+    "docs/operations/security-test-falsifiability.md": "OPERATOR_INSTRUCTION",
+    "docs/technical-documentation.md": "OPERATOR_INSTRUCTION",
+    "lib/security/adminSecretProbeAttestation.ts": "IMPLEMENTATION",
+    "lib/security/rateLimit.ts": "IMPLEMENTATION",
+    "scripts/lib/probe-admin-secret.mjs": "IMPLEMENTATION",
+    "scripts/probe-admin-secret.mjs": "OPERATOR_INSTRUCTION",
+    "scripts/set-admin-by-uid.js": "MINTING_EXAMPLE",
+    "scripts/set-admin-claim.js": "MINTING_EXAMPLE",
+    "scripts/set-admin-simple.js": "MINTING_EXAMPLE",
+    "scripts/setAdmin.ts": "MINTING_EXAMPLE",
+  };
+
+  const OPERATOR_SITES = Object.entries(MANIFEST)
+    .filter(([, k]) => k === "OPERATOR_INSTRUCTION")
+    .map(([f]) => f);
+
+  it("ANCHOR: discovery actually found the known operator surfaces", () => {
+    expect(DISCOVERED.length).toBeGreaterThan(10);
+    for (const f of ["CLAUDE.md", "README.md", "docs/operations/admin-authority-tiers.md", "scripts/probe-admin-secret.mjs"]) {
+      expect(DISCOVERED).toContain(f);
+    }
   });
 
-  it.each(SITES)("%s carries no stale §B.6.c pointer", (file) => {
-    // 6c is "Deploy deliberately"; the probe is 6a/6d. A stale pointer sends the
-    // operator to the wrong step of a security procedure.
-    expect(read(file)).not.toContain("B.6.c");
+  it("every discovered site is classified — a new one must be triaged, not ignored", () => {
+    expect(DISCOVERED).toEqual(Object.keys(MANIFEST).sort());
   });
 
-  it.each(SITES)("%s never tells the operator to restart or re-run after a POST 429", (file) => {
-    const flat = read(file).replace(/\s+/g, " ");
+  /**
+   * THE CANONICAL RULE, as a structured property rather than a phrase list:
+   * any sentence that mentions 401 together with proof/containment must be a
+   * NEGATIVE statement. "A standalone 401 is NOT containment proof" passes;
+   * "if it returns 401, containment is proven" does not. This does not claim to
+   * understand arbitrary English — it claims that on these sites, asserting
+   * containment from a single response is expressible only in the negative.
+   */
+  const sentencesOf = (text: string) => text.split(/(?<=[.!?])\s+|\n\s*\n/);
+
+  /**
+   * CLAIM SHAPES, not English comprehension. Each pattern below is a way of
+   * asserting that a single 401 establishes containment. We claim exactly this:
+   * these shapes are prohibited on every discovered operator site. We do NOT
+   * claim to detect arbitrary rewordings — the NORMATIVE, machine-checkable
+   * obligation is the structured `BOOTSTRAP_POST_RATE_LIMITED` row and the
+   * ordered `BOOTSTRAP_*` sequence, both asserted elsewhere in this file.
+   */
+  const CLAIM_SHAPES: RegExp[] = [
+    /\btreat\s+only\s+`?401`?\s+as\s+(a\s+)?proof/i,
+    /\bonly\s+`?401`?\s+(is|as|counts as)\s+(a\s+)?(valid\s+)?(containment\s+)?proof/i,
+    /`?401`?[^.]{0,80}\bcontainment\s+is\s+proven\b/i,
+    /\breturns?\s+`?401`?[^.]{0,80}\b(is|are)\s+proven\b/i,
+    /`?401`?[^.]{0,40}\b(proves\s+containment|means\s+contained)\b/i,
+    /\bcontainment\s+is\s+proven\b[^.]{0,80}`?401`?/i,
+  ];
+
+  const claimsProofFrom401 = (sentence: string) => {
+    const negated = /\bnot\b|\bnever\b|n't\b/i.test(sentence);
+    return !negated && CLAIM_SHAPES.some((re) => re.test(sentence));
+  };
+
+  it("SELF-VALIDATION: every claim shape fires, and correct wording does not", () => {
+    // Each stale form must be caught...
+    for (const bad of [
+      "To verify a rotation, send the secret with no uid and treat only `401` as proof.",
+      "Send it once: only 401 is a valid containment proof.",
+      "Run the old secret once; if it returns 401, Production containment is proven.",
+      "A 401 proves containment.",
+      "Containment is proven when the route returns 401.",
+    ]) {
+      expect({ bad, caught: claimsProofFrom401(bad) }).toEqual({ bad, caught: true });
+    }
+    // ...and the correct wording, plus incidental co-mentions, must not be.
+    for (const ok of [
+      "A standalone 401 is NOT Production containment proof.",
+      "Containment requires the two-phase proof; a lone 401 is never sufficient.",
+      "N multibyte characters return 500 where N±1 return 401, and the containment probe then reports INCONCLUSIVE.",
+      "The route answers 401 + credential-rejected whenever the secret does not match.",
+    ]) {
+      expect({ ok, caught: claimsProofFrom401(ok) }).toEqual({ ok, caught: false });
+    }
+  });
+
+  it.each(OPERATOR_SITES)("%s never claims containment from a standalone 401", (file) => {
+    const offending = sentencesOf(readFileSync(file, "utf8")).filter(claimsProofFrom401);
+    expect({ file, offending }).toEqual({ file, offending: [] });
+  });
+
+  it.each(OPERATOR_SITES)("%s carries no stale §B.6.c pointer", (file) => {
+    expect(readFileSync(file, "utf8")).not.toContain("B.6.c");
+  });
+
+  it.each(OPERATOR_SITES)("%s does not tell the operator to restart after a POST 429", (file) => {
+    // Cleanup protection for the two sentences C15 removed. The NORMATIVE rule
+    // is the structured BOOTSTRAP_POST_RATE_LIMITED row asserted below; prose
+    // rewording is explicitly NOT claimed to be mechanically understood.
+    const flat = readFileSync(file, "utf8").replace(/\s+/g, " ");
     expect(flat).not.toMatch(/Wait for the window and re-run/i);
     expect(flat).not.toMatch(/429[^.]{0,80}aborts the run/i);
   });
 
-  it("README and the route docstring both point at the two-phase workflow", () => {
+  it("README and the route docstring point at the two-phase workflow", () => {
     for (const f of ["README.md", "app/api/admin/set-admin/route.ts"]) {
-      const flat = read(f).replace(/\s+/g, " ");
+      const flat = readFileSync(f, "utf8").replace(/\s+/g, " ");
       expect(flat).toMatch(/two-phase/i);
       expect(flat).toMatch(/NOT (Production )?containment proof/i);
     }
   });
+});
 
-  it("ANCHOR: the instruction sites exist and are non-trivial", () => {
-    for (const f of SITES) expect(read(f).length).toBeGreaterThan(500);
-    // and each really does discuss the bootstrap secret, so the negatives above
-    // are asserted over relevant text rather than over unrelated files.
-    for (const f of SITES) expect(read(f)).toContain("ADMIN_SECRET");
+
+// ===========================================================================
+describe("POST-429 OPERATOR RULE — structured, normative, load-bearing", () => {
+  /**
+   * Phase FIRST-ADMIN-C16 (R12 P1). C15 added this row to satisfy the
+   * "machine-readable POST-429 rule" requirement and then never referenced it
+   * from a test. Review flipped it to MUST_RESTART and the full 11,780-test
+   * suite stayed green — so the row existed to be read by humans and checked by
+   * nothing, while a reworded restart instruction walked past the prose guards.
+   *
+   * This row is now the NORMATIVE obligation: prose may vary, the structured
+   * mode may not.
+   */
+  const RUNBOOK = "docs/operations/admin-authority-tiers.md";
+  const src = readFileSync(RUNBOOK, "utf8");
+  const ID = "BOOTSTRAP_POST_RATE_LIMITED";
+
+  /** The canonical bootstrap section — the row must live HERE, not anywhere. */
+  const section = src.slice(
+    src.indexOf("<!-- BOOTSTRAP-SEQUENCE:CANONICAL"),
+    src.indexOf("**Never send a uid to `/api/admin/set-admin`")
+  );
+
+  it("ANCHOR: the canonical bootstrap section was located and is non-trivial", () => {
+    expect(section.length).toBeGreaterThan(500);
+    expect(section).toContain("BOOTSTRAP_PRECHECK");
+    expect(section).toContain("BOOTSTRAP_POSTCHECK");
+  });
+
+  it("the rule exists exactly once, inside the canonical section", () => {
+    expect((src.match(new RegExp(ID, "g")) ?? []).length).toBeGreaterThanOrEqual(1);
+    const rows = section.split("\n").filter((l) => l.includes(`\`${ID}\``) && l.trim().startsWith("|"));
+    expect(rows).toHaveLength(1);
+  });
+
+  it("its structured mode is exactly MUST_PRESERVE_PROCESS", () => {
+    const row = section.split("\n").find((l) => l.includes(`\`${ID}\``) && l.trim().startsWith("|"))!;
+    const mode = row.trim().split("|").filter(Boolean).map((c) => c.trim()).pop();
+    expect(mode).toBe("MUST_PRESERVE_PROCESS");
+    expect(mode).not.toBe("MUST_RESTART");
+  });
+
+  it("the row states the four operative obligations", () => {
+    const row = section.split("\n").find((l) => l.includes(`\`${ID}\``))!;
+    const flat = row.toLowerCase();
+    expect(flat).toContain("same process");
+    expect(flat).toContain("do not restart");
+    expect(flat).toContain("wait");
+    expect(flat).toContain("retry");
+  });
+
+  it("the rate-limiting guidance references the structured id", () => {
+    // Links the human paragraph to the normative row, so the two cannot drift.
+    const guidance = src.slice(src.indexOf("**On rate limiting.**"));
+    expect(guidance.slice(0, 1200)).toContain(`[${ID}]`);
+  });
+
+  it("no bootstrap row carries a restart-flavoured mode", () => {
+    const modes = section
+      .split("\n")
+      .filter((l) => l.trim().startsWith("| `BOOTSTRAP_"))
+      .map((l) => l.trim().split("|").filter(Boolean).map((c) => c.trim()).pop());
+    expect(modes.length).toBeGreaterThan(5);
+    for (const m of modes) expect(["MUST", "MUST_PRESERVE_PROCESS"]).toContain(m);
   });
 });

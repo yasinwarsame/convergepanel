@@ -50,3 +50,9 @@
 # A quarantined security test is green and proves nothing. No tracked spec used
 # these when the shape was added, so it starts with a clean corpus.
     it.skip("rejects a cross-tenant review", async () => { expect(res.status).toBe(403); });
+
+# EXPECT-SHAPE: self-referential-source-assertion
+# C16 (R12 finding): the "pin" for an auditLog coverage narrowing matched its own
+# source line, so deleting the narrowing comment left the suite green.
+    const src = readFileSync(__filename, "utf8");
+    expect(src).toMatch(/does NOT assert that every branch in it is driven/);

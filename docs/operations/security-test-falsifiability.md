@@ -258,40 +258,51 @@ Ordering is reconciled from Jest's own `mock.invocationCallOrder`, not from
 channel B — channel A is never derived from channel B, nor the reverse, and
 neither passes through a shared pre-filtered list.
 
-### Single-local-edit attack matrix (measured)
+### Single-local-edit attack matrix
 
-| Local edit | Channel A | Channel B | Fidelity | Suite result |
-|---|---|---|---|---|
-| production leak only | detects | detects | agree | **16 failed** |
-| leak + ingress sanitiser *(the R11 attack)* | detects | sanitised | diverges | **16 failed** |
-| leak + `mock.calls` rewrite *(the R10 attack)* | sanitised | detects | diverges | **16 failed** |
-| leak + `mock.calls` cleared | emptied | detects | diverges | **33 failed** |
-| ingress drops a call (no leak) | detects call | missing | diverges | **17 failed** |
-| ingress rewrites content (no leak) | original | rewritten | diverges | **17 failed** |
-| ingress drops an argument (no leak) | original arity | short | diverges | **45 failed** |
-| `mock.calls` rewrite (no leak) | rewritten | original | diverges | **16 failed** |
-| spy implementation replaced | — | — | identity fails | **137 failed** |
-| `finalize()` deleted from `afterEach` | — | — | — | **3 failed** (lifecycle backstop) |
-| finalizer returns early | — | — | — | **13 failed** |
-| cross-channel count check removed | — | — | — | **18 failed** |
-| per-call canary fidelity check removed | — | — | — | **1 failed** |
-| raw-ledger deny scan skipped | — | — | — | **16 failed** |
-| snapshot deny scan skipped | — | — | — | **16 failed** |
-| any single traversal leg removed (nested value, object key, `Error.details`, in either walk) | — | — | — | **1–8 failed** |
+Outcome is the contract; failure counts are not. C15 published exact counts and
+R12 could not reproduce five of them — they depend on which unrelated anchors a
+given mutation happens to disturb, so they are diagnostics, not properties.
 
-One measured **equivalent mutant**: an ingress sanitiser whose regex matches
-nothing when no leak is present records byte-identical events, so nothing can
-observe it. It is equivalent, not undetected — the variants above that *do*
-change recorded events are all caught.
+| Single local edit (real production leak present unless noted) | Outcome |
+|---|---|
+| ingress sanitiser *(the R11 attack)* | FAIL |
+| raw `mock.calls` rewrite *(the R10 attack)* | FAIL |
+| raw `mock.calls` cleared | FAIL |
+| ingress drops a call / rewrites content / drops an argument (no leak) | FAIL |
+| `mock.calls` rewrite (no leak) | FAIL |
+| spy implementation replaced | FAIL |
+| **sink removed from Channel A only** | FAIL |
+| **sink removed from Channel B only** | FAIL |
+| **sink removed from BOTH channels** | FAIL (declared-contract parity) |
+| **sink removed from the declared contract only** | FAIL |
+| **`logger.debug` retargeted to an uncaptured sink** | FAIL (source-derived contract) |
+| `finalize()` deleted from `afterEach` / returns early | FAIL |
+| cross-channel fidelity removed | FAIL |
+| either channel's deny scan skipped | FAIL |
+| any single traversal leg removed, in either walk | FAIL |
+| a sensitive canary deleted | FAIL |
+
+One narrowly **equivalent mutant**: an ingress sanitiser whose predicate matches
+no log event actually emitted by the covered paths records byte-identical events
+for that baseline, so nothing can observe it. C15 generalised this to "an
+ingress sanitiser is equivalent", which is wrong — R12 measured a *realistic*
+sanitiser (one whose predicate matches a real event) failing with no leak
+present. Only the never-matching form is equivalent, and that is a tautology
+rather than a result.
 
 ### Residuals added or corrected in C15
 
-- **`lib/governance/auditLog.ts` is NOT branch-covered by this suite.** Five
-  catch-block `console.error` sites log a plaintext `runId`, and every caller
-  mocks the module, so those bodies never execute in these tests. The STRUCTURAL
-  module list asserts only "this file contains no uncaptured sink token"; that
-  narrowing is now stated in the suite and pinned by a test. This is named debt,
-  not coverage.
+- **`lib/governance/auditLog.ts` — corrected in C16.** C15 stated that no test
+  reaches its raw-`runId` error sites and that every caller mocks the module.
+  **Both were false.** Measured with a throw-probe: four of the five sites
+  execute (`writeAdaptiveAdminAuditEvent`, `…Assignment…`, `…PanelFinalization…`,
+  `…PanelOverride…`), driven by four lib-level specs that import the REAL module;
+  only `writeAdaptiveExportAdminAuditEvent` is undriven. It is the route-level
+  callers that mock it. Those four sites are **executed but not
+  redaction-asserted** — partial coverage, carried as debt. The disposition is
+  now enumerated from source and asserted, replacing a C15 "pin" whose regex
+  matched its own source line and therefore could never fail.
 - **`redactionExemption` remains a test-controlled opt-out** from the content
   scan. Spy identity is still checked for exempt tests, but a test can still
   exempt itself from the deny-set assertion.
@@ -306,3 +317,50 @@ change recorded events are all caught.
 - Unchanged carried debt: deferred/aliased/computed logging sinks; mint-detector
   and scanner blind spots; `/api/admin/login` limiter coverage; the shared
   invitation budget.
+
+---
+
+## Phase FIRST-ADMIN-C16 — the sink set, and residuals C15 got wrong
+
+R12 found the remaining single point of failure sitting **upstream** of the two
+evidence channels: both consumed one `CONSOLE_METHODS` array, so deleting one
+token installed no spy at all and a real `ownerUid` leak ran green.
+
+There are now three independently-derived sink concepts — `CHANNEL_A_SINKS`,
+`CHANNEL_B_SINKS`, and a set computed by **reading shipped source at test time**
+(`productionSinks()`, over `lib/logger.ts` and the covered governance modules).
+Spies are installed for the union, so removing a sink from one channel does not
+stop the other from seeing it — it makes them disagree. Editing both channels
+still fails the declared-contract assertion; retargeting `logger.debug` to an
+uncaptured sink still fails the source-derived assertion.
+
+Source fact worth recording: `logger.info` maps to `console.log`, **not**
+`console.info`, and no covered module calls `console.info` today. It is captured
+defensively, and the declared set is asserted to be exactly the source set plus
+that one documented extra.
+
+### Residuals added or corrected in C16
+
+- **No in-suite end-to-end PTY test proves the real CLI path.** C15 claimed this
+  was documented debt; it was not recorded anywhere. Stating it now: every
+  in-suite `--production-two-phase` test asserts only the non-TTY refusal, and
+  the CLI→wrapper→canonical-URL chain is closed **structurally** (no namespace
+  imports, no origin env reads) rather than behaviourally. Independent reviews
+  have exercised the real executable under a PTY with locally intercepted
+  transport and observed only the canonical URL; CI does not.
+- **The child-process-heavy suites are load sensitive.** `probeAdminSecret.spec.ts`
+  spawns dozens of node processes and binds real sockets against Jest's default
+  timeout. Under heavy parallel load (three concurrent reviewers) an independent
+  review saw 1–4 failures in 2 of 5 full runs that did not reproduce unloaded.
+  Exact-head CI is green and isolated reruns are authoritative for mutation
+  claims. This is P3 test-infrastructure debt — it does **not** license
+  dismissing a reproducible failure as flake.
+- **Prose rewording is not mechanically understood.** The operator-instruction
+  guard prohibits a small set of *claim shapes* across every discovered site; it
+  does not claim to detect arbitrary rewordings. The normative, machine-checkable
+  obligations are the structured `BOOTSTRAP_*` sequence order and the
+  `BOOTSTRAP_POST_RATE_LIMITED | MUST_PRESERVE_PROCESS` row, both asserted.
+- **The operator-site list is discovered, not declared.** Any tracked non-test
+  file mentioning an operator token must be classified in the manifest; an
+  unclassified discovery fails, which is what stops a future `CLAUDE.md`-shaped
+  file from escaping.

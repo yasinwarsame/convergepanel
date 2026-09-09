@@ -258,7 +258,54 @@ const serialize = (args: unknown[]) =>
  * lifecycle backstop would still make the suite lie. That is outside the
  * guarantee and is stated plainly rather than papered over.
  */
-const CAPTURE_SINKS = CONSOLE_METHODS;
+/**
+ * Phase FIRST-ADMIN-C16 (R12 P1) — THE SINK SET IS NOT ONE SHARED ARRAY.
+ *
+ * R12 found the single point of failure sitting UPSTREAM of the two channels.
+ * Both `install()`, `assertSpyIdentity()` and `ledgerEntries()` iterated one
+ * `CONSOLE_METHODS` constant, so deleting one token installed no spy at all:
+ * no ledger entry, no transcript entry, nothing for fidelity to disagree
+ * about. Measured — a real `ownerUid` leak through `console.info` went from
+ * 16 failures to a fully green suite on a one-token edit. The channels were
+ * independent of each other and jointly dependent on this.
+ *
+ * There are now THREE independently-derived sink concepts:
+ *
+ *   CHANNEL_A_SINKS  — what the raw Jest ledger reads.
+ *   CHANNEL_B_SINKS  — what the ingress snapshot records.
+ *   productionSinks() — derived by READING PRODUCTION SOURCE at test time.
+ *
+ * Nothing derives one from another. Editing any single one of them breaks a
+ * parity assertion, and editing a channel pair still breaks the source
+ * contract, because that one is computed from the shipped code rather than
+ * declared here.
+ *
+ * NOTE ON `info`: `logger.info` maps to `console.log` (lib/logger.ts), and no
+ * covered module calls `console.info` today. It is captured defensively, so the
+ * declared set is a SUPERSET of the source-derived set — asserted as such.
+ */
+const CHANNEL_A_SINKS = ["log", "warn", "error", "debug", "info"] as const;
+const CHANNEL_B_SINKS = ["log", "warn", "error", "debug", "info"] as const;
+
+/** Every sink the capture installs a spy on — the union, so neither channel can hide one. */
+const ALL_INSTALLED_SINKS = [...new Set<string>([...CHANNEL_A_SINKS, ...CHANNEL_B_SINKS])];
+
+/** Production modules whose logging this suite claims to observe. */
+const COVERED_SOURCE_FILES = [
+  "lib/logger.ts",
+  "app/api/governance/review/route.ts",
+  "lib/governance/governanceVisibleUserIds.ts",
+  "lib/governance/auditLog.ts",
+];
+
+/** Derived from SHIPPED SOURCE, never from a capture constant. */
+const productionSinks = (): string[] => {
+  const found = new Set<string>();
+  for (const f of COVERED_SOURCE_FILES) {
+    for (const m of readFileSync(f, "utf8").matchAll(/console\.([a-zA-Z]+)\s*\(/g)) found.add(m[1]);
+  }
+  return [...found].sort();
+};
 
 type TranscriptEntry = { sink: string; args: readonly unknown[] };
 
@@ -357,7 +404,7 @@ const createGovernanceLogCapture = () => {
    * data — not by consulting channel B, which would make A derived from B.
    */
   const ledgerEntries = (): TranscriptEntry[] =>
-    CAPTURE_SINKS.flatMap((m) => {
+    CHANNEL_A_SINKS.flatMap((m) => {
       const spy = spies.get(m);
       const calls = (spy?.mock.calls ?? []) as unknown[][];
       const order = (spy?.mock.invocationCallOrder ?? []) as number[];
@@ -382,13 +429,16 @@ const createGovernanceLogCapture = () => {
 
   return {
     install() {
-      for (const m of CAPTURE_SINKS) {
+      // Spies are installed for the UNION, so removing a sink from one channel
+      // does not stop the other channel from seeing it — it makes them disagree.
+      for (const m of ALL_INSTALLED_SINKS) {
         const impl = (...args: unknown[]) => {
           totalIngress += 1;
+          if (!(CHANNEL_B_SINKS as readonly string[]).includes(m)) return;
           transcript.push(Object.freeze({ sink: m, args: Object.freeze(args.map((a) => snapshot(a))) }));
         };
         installedImpls.set(m, impl);
-        spies.set(m, jest.spyOn(console, m).mockImplementation(impl));
+        spies.set(m, jest.spyOn(console, m as (typeof CHANNEL_A_SINKS)[number]).mockImplementation(impl));
       }
     },
     uninstall() {
@@ -404,7 +454,7 @@ const createGovernanceLogCapture = () => {
 
     /** The capture must still BE the capture. One loudness layer, not the proof. */
     assertSpyIdentity() {
-      for (const m of CAPTURE_SINKS) {
+      for (const m of ALL_INSTALLED_SINKS) {
         const spy = spies.get(m);
         expect(spy).toBeDefined();
         expect(spy!.getMockImplementation()).toBe(installedImpls.get(m));
@@ -482,6 +532,8 @@ const createGovernanceLogCapture = () => {
       expect(hit).toBe(true);
     },
 
+    channelASinks: (): string[] => [...CHANNEL_A_SINKS],
+    channelBSinks: (): string[] => [...CHANNEL_B_SINKS],
     size: () => transcript.length,
     ledgerSize: () => ledgerEntries().length,
     frozenEntries: (): readonly TranscriptEntry[] => Object.freeze(transcript.slice()),
@@ -1188,14 +1240,14 @@ describe("STRUCTURAL — governance modules use only sinks this suite captures",
    * it. Rather than claim universal interception, pin that the modules on this
    * request path do not use them — so the claim and the reality stay together.
    *
-   * WHAT THIS LIST DOES **NOT** MEAN — Phase FIRST-ADMIN-C15 (R11 P2).
+   * WHAT THIS LIST DOES **NOT** MEAN — Phase FIRST-ADMIN-C16 (R12 P2).
    * Naming a module here asserts ONLY "this file contains no uncaptured sink
-   * token". It does NOT assert that every branch in it is driven by this suite.
-   * Specifically, `lib/governance/auditLog.ts` contains catch-block
-   * `console.error` sites that log a plaintext `runId` and that NO test reaches:
-   * every caller mocks the module wholesale, so those bodies never execute here.
-   * They are named debt in docs/operations/security-test-falsifiability.md, not
-   * covered behaviour, and a reader must not infer coverage from this list.
+   * token". It does NOT assert branch coverage. The accurate disposition of
+   * `lib/governance/auditLog.ts`'s raw-`runId` error sites is enumerated from
+   * source and asserted in AUDIT LOG SITE DISPOSITION below — C15 stated here
+   * that NO test reaches them and that every caller mocks the module. Both were
+   * false: four of the five execute, driven by lib-level specs that import the
+   * real module.
    */
   const MODULES = [
     "app/api/governance/review/route.ts",
@@ -1203,17 +1255,6 @@ describe("STRUCTURAL — governance modules use only sinks this suite captures",
     "lib/governance/auditLog.ts",
     "lib/logger.ts",
   ];
-
-  it("the coverage claim is explicitly narrowed for auditLog's undriven branches", () => {
-    // A comment can be deleted silently; this makes the narrowing a test fact.
-    const src = readFileSync(__filename, "utf8");
-    expect(src).toMatch(/does NOT assert that every branch in it is driven/);
-    const audit = readFileSync("lib/governance/auditLog.ts", "utf8");
-    // If these branches ever become driven, this count changes and the debt
-    // statement must be revisited deliberately rather than drifting.
-    const catchRunIdLogs = (audit.match(/console\.error\([^)]*runId/g) ?? []).length;
-    expect(catchRunIdLogs).toBeGreaterThan(0);
-  });
 
   it("ANCHOR: the modules were read and do log", () => {
     for (const m of MODULES) expect(readFileSync(m, "utf8")).toMatch(/console\.|logger\./);
@@ -1463,10 +1504,17 @@ describe("DUAL-CHANNEL EVIDENCE — one tampered channel is caught by the other"
   it("the two channels use SEPARATE walk implementations", () => {
     // A shared helper would let one edit blind both. This is a structural
     // backstop, not the security proof — the mutation table is that.
+    // Phase FIRST-ADMIN-C16: this searched the WHOLE file, so the assertion's
+    // own line supplied the text it was looking for and the check could not
+    // fail. The C16 vacuity detector `self-referential-source-assertion` caught
+    // it. The search is now scoped to the capture factory, above the first
+    // describe, which contains no assertion text.
     const src = readFileSync(__filename, "utf8");
-    expect(src).toContain("const snapshotContains =");
-    expect(src).toContain("const ledgerContains =");
-    const a = src.slice(src.indexOf("const snapshotContains ="), src.indexOf("const ledgerContains ="));
+    const factory = src.slice(0, src.indexOf('describe("'));
+    expect(factory.length).toBeGreaterThan(1000);
+    expect(factory).toContain("const snapshotContains =");
+    expect(factory).toContain("const ledgerContains =");
+    const a = factory.slice(factory.indexOf("const snapshotContains ="), factory.indexOf("const ledgerContains ="));
     expect(a).not.toContain("ledgerContains(");
   });
 });
@@ -1627,5 +1675,169 @@ describe("STRUCTURED TRAVERSAL — every claimed shape, canary isolated", () => 
     expect(() => governanceLogCapture.assertNoSensitiveCanariesRawLedger()).not.toThrow();
     expect(() => governanceLogCapture.assertNoSensitiveCanariesSnapshotTranscript()).not.toThrow();
     clearCapture();
+  });
+});
+
+
+// ===========================================================================
+describe("SINK CONTRACT — three independent derivations must agree", () => {
+  /**
+   * Phase FIRST-ADMIN-C16 (R12 P1). Closes the one shared dependency that sat
+   * upstream of both channels. Each assertion below is falsified by a DIFFERENT
+   * single edit, so no one edit satisfies all three.
+   */
+  const A = governanceLogCapture.channelASinks();
+  const B = governanceLogCapture.channelBSinks();
+  const fromSource = productionSinks();
+
+  it("ANCHOR: the source derivation actually read production code", () => {
+    // Guards the vacuity where a broken derivation returns [] and every
+    // subset assertion below passes trivially.
+    expect(fromSource.length).toBeGreaterThan(2);
+    expect(fromSource).toEqual(expect.arrayContaining(["log", "warn", "error", "debug"]));
+    for (const f of COVERED_SOURCE_FILES) expect(readFileSync(f, "utf8").length).toBeGreaterThan(200);
+  });
+
+  it("every sink PRODUCTION actually uses is read by Channel A", () => {
+    for (const m of fromSource) expect(A).toContain(m);
+  });
+
+  it("every sink PRODUCTION actually uses is recorded by Channel B", () => {
+    for (const m of fromSource) expect(B).toContain(m);
+  });
+
+  it("the two channels capture exactly the same sink set", () => {
+    expect([...A].sort()).toEqual([...B].sort());
+  });
+
+  it("the captured sink set matches the declared contract", () => {
+    expect([...A].sort()).toEqual(["debug", "error", "info", "log", "warn"]);
+  });
+
+  it("a spy is installed for every sink either channel claims", () => {
+    for (const m of new Set([...A, ...B])) {
+      expect(jest.isMockFunction((console as unknown as Record<string, unknown>)[m])).toBe(true);
+    }
+  });
+
+  it("captured set is a superset of the source set, and the extras are declared", () => {
+    const extras = A.filter((m) => !fromSource.includes(m));
+    // `console.info` is captured defensively: logger.info maps to console.log,
+    // and no covered module calls console.info today.
+    expect(extras).toEqual(["info"]);
+  });
+});
+
+// ===========================================================================
+describe("LOGGER MAPPING — logger.* to console.* is pinned to source", () => {
+  /**
+   * R12: developers are told by CLAUDE.md to always use `logger`, and
+   * `logger.debug` routes to `console.debug`. If that mapping changes to a sink
+   * the capture does not observe, redaction silently stops covering that path.
+   */
+  const loggerSrc = readFileSync("lib/logger.ts", "utf8");
+
+  const consoleFor = (method: string): string | null => {
+    const m = loggerSrc.match(new RegExp(`\\b${method}\\s*\\(message: string[\\s\\S]{0,400}?console\\.([a-zA-Z]+)\\s*\\(`));
+    return m ? m[1] : null;
+  };
+
+  it("ANCHOR: the logger source was read and defines the four levels", () => {
+    for (const lvl of ["error", "warn", "info", "debug"]) {
+      expect(loggerSrc).toMatch(new RegExp(`\\b${lvl}\\s*\\(message: string`));
+    }
+  });
+
+  it.each([
+    ["error", "error"],
+    ["warn", "warn"],
+    ["info", "log"],     // NOT console.info — verified from source
+    ["debug", "debug"],
+  ])("logger.%s writes to console.%s", (level, sink) => {
+    expect(consoleFor(level)).toBe(sink);
+  });
+
+  it("every console sink the logger targets is captured by both channels", () => {
+    for (const lvl of ["error", "warn", "info", "debug"]) {
+      const sink = consoleFor(lvl);
+      expect(sink).not.toBeNull();
+      expect(governanceLogCapture.channelASinks()).toContain(sink!);
+      expect(governanceLogCapture.channelBSinks()).toContain(sink!);
+    }
+  });
+});
+
+
+// ===========================================================================
+describe("AUDIT LOG SITE DISPOSITION — derived from source, not from a comment", () => {
+  /**
+   * Phase FIRST-ADMIN-C16 (R12 P1/P2). C15's "pin" was
+   * `expect(src).toMatch(/does NOT assert that every branch in it is driven/)`
+   * over this file's own text — and the regex literal IS that text, so the
+   * assertion matched itself and could never fail. Deleting the narrowing
+   * comment left the suite green. C15 also stated, wrongly, that no test
+   * reaches these sites and that every caller mocks the module.
+   *
+   * Measured with a throw-probe at each site against lib/governance/__tests__:
+   * four execute, one does not. Four lib-level specs import the real module;
+   * the route-level callers are the ones that mock it.
+   */
+  const AUDIT = "lib/governance/auditLog.ts";
+
+  /** Source-derived: every console.error whose payload carries a raw runId. */
+  const runIdErrorSites = (): string[] => {
+    const lines = readFileSync(AUDIT, "utf8").split("\n");
+    const out: string[] = [];
+    let fn = "(module)";
+    for (let i = 0; i < lines.length; i += 1) {
+      const m = lines[i].match(/export (?:async )?function (\w+)/);
+      if (m) fn = m[1];
+      if (/console\.error\(/.test(lines[i]) && /runId/.test(lines.slice(i, i + 4).join(" "))) out.push(fn);
+    }
+    return out;
+  };
+
+  type Disposition = "EXECUTED_NOT_REDACTION_ASSERTED" | "UNDRIVEN";
+
+  /** The honest table. Changing the source without changing this fails below. */
+  const DISPOSITION: Record<string, Disposition> = {
+    writeAdaptiveAdminAuditEvent: "EXECUTED_NOT_REDACTION_ASSERTED",
+    writeAdaptiveAssignmentAdminAuditEvent: "EXECUTED_NOT_REDACTION_ASSERTED",
+    writeAdaptivePanelFinalizationAdminAuditEvent: "EXECUTED_NOT_REDACTION_ASSERTED",
+    writeAdaptivePanelOverrideAdminAuditEvent: "EXECUTED_NOT_REDACTION_ASSERTED",
+    writeAdaptiveExportAdminAuditEvent: "UNDRIVEN",
+  };
+
+  it("ANCHOR: the source enumeration actually found sites", () => {
+    expect(runIdErrorSites().length).toBeGreaterThan(3);
+    expect(readFileSync(AUDIT, "utf8").length).toBeGreaterThan(1000);
+  });
+
+  it("the source enumeration matches the disposition table exactly", () => {
+    // Adding, removing or renaming a raw-runId error site fails here. Nothing
+    // in this assertion appears in its own expected value, so it cannot match
+    // itself the way the C15 pin did.
+    expect(runIdErrorSites().sort()).toEqual(Object.keys(DISPOSITION).sort());
+  });
+
+  it("the specs that drive the executed sites import the REAL module", () => {
+    const drivers = [
+      "lib/governance/__tests__/adaptiveAdminAuditEvent.spec.ts",
+      "lib/governance/__tests__/adaptiveAssignmentAdminAuditEvent.spec.ts",
+      "lib/governance/__tests__/adaptivePanelFinalizationAdminAuditEvent.spec.ts",
+      "lib/governance/__tests__/adaptivePanelOverrideAdminAuditEvent.spec.ts",
+    ];
+    for (const d of drivers) {
+      const src = readFileSync(d, "utf8");
+      expect(src).not.toMatch(/jest\.mock\(\s*["'][^"']*auditLog/);
+      expect(src).toMatch(/from ["'](\.\.\/auditLog|@\/lib\/governance\/auditLog)["']/);
+    }
+    expect(Object.values(DISPOSITION).filter((d) => d === "EXECUTED_NOT_REDACTION_ASSERTED")).toHaveLength(drivers.length);
+  });
+
+  it("no executed site is claimed to be redaction-asserted by this suite", () => {
+    // These sites run, but nothing asserts their payloads are redacted. That is
+    // PARTIAL coverage and is carried as debt — not silently upgraded.
+    expect(Object.values(DISPOSITION)).not.toContain("REDACTION_ASSERTED");
   });
 });
