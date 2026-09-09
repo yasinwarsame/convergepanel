@@ -131,9 +131,17 @@ export default async function TeamResearchDetailPage({
       />
 
       {/*
+        Phase 11B.3-C1 — page composition is the SAME on all seven Team Workspace
+        surfaces: Breadcrumb -> page heading -> WorkspaceNav -> content.
+      */}
+      <div className="mb-6">
+        <h1 className="text-xl font-semibold text-cp-text break-words">{run.question}</h1>
+      </div>
+
+      {/*
         Phase 11B.2 — the same shared WorkspaceNav the Team research COMPOSER
-        already renders, in the same position (Workspace heading -> nav ->
-        page content), so the two research surfaces navigate identically.
+        already renders, in the same position relative to the page heading, so the
+        two research surfaces navigate identically.
 
         `active="projects"`: research detail sits hierarchically beneath the
         Workspace's Projects area. The individual run is NOT a nav tab.
@@ -153,8 +161,6 @@ export default async function TeamResearchDetailPage({
         active="projects"
         showAudit={access.capabilities.includes("audit.read")}
       />
-
-      <h1 className="mt-4 text-xl font-semibold text-cp-text break-words">{run.question}</h1>
 
       {run.status === "pending" ? (
         <section className="mt-6 rounded-xl border-2 border-cp-border bg-cp-raised p-5 text-sm text-cp-muted">

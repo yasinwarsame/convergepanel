@@ -866,3 +866,94 @@ describe("Phase 11B.3 — Projects breadcrumb", () => {
     expect(nav.findAll((n) => n.props?.["aria-current"] === "page", { deep: true }).map(visibleTextOf)).toEqual(["Projects"]);
   });
 });
+
+/* ------------------------------------------------------------------ *
+ * Phase 11B.3-C1 — RELATIVE DOM ORDER.
+ *
+ * The 11B.3 tests proved the breadcrumb's contents, the h1's contents and
+ * WorkspaceNav's state each independently — and every one of them passed while
+ * four surfaces still rendered WorkspaceNav ABOVE the heading, in violation of
+ * the frozen composition contract. This helper closes that gap by pinning the
+ * one property none of them expressed: document order.
+ *
+ * Positions come from a depth-first walk of the RENDERED tree (`toTree()`), not
+ * from source text, so it measures what a viewer actually gets.
+ * ------------------------------------------------------------------ */
+function documentOrder(r: TestRenderer.ReactTestRenderer): { breadcrumb: number; h1: number; workspaceNav: number } {
+  const flat: { type: string; props: Record<string, unknown> }[] = [];
+  const walk = (node: unknown): void => {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) return node.forEach(walk);
+    const n = node as { type?: unknown; props?: Record<string, unknown>; rendered?: unknown };
+    if (typeof n.type === "string") flat.push({ type: n.type, props: n.props ?? {} });
+    walk(n.rendered);
+  };
+  walk(r.toTree());
+
+  const at = (pred: (e: { type: string; props: Record<string, unknown> }) => boolean) => flat.findIndex(pred);
+  return {
+    breadcrumb: at((e) => e.type === "nav" && e.props["aria-label"] === "Breadcrumb"),
+    h1: at((e) => e.type === "h1"),
+    workspaceNav: at((e) => e.type === "nav" && e.props["aria-label"] === "Workspace"),
+  };
+}
+
+/** Breadcrumb -> page heading -> WorkspaceNav, with all three actually present. */
+function expectFrozenComposition(r: TestRenderer.ReactTestRenderer) {
+  const o = documentOrder(r);
+  expect(o.breadcrumb).toBeGreaterThanOrEqual(0);
+  expect(o.h1).toBeGreaterThanOrEqual(0);
+  expect(o.workspaceNav).toBeGreaterThanOrEqual(0);
+  expect(o.breadcrumb).toBeLessThan(o.h1);
+  expect(o.h1).toBeLessThan(o.workspaceNav);
+}
+
+describe("Phase 11B.3-C1 — Projects page composition order", () => {
+  it("C1-P1 — Breadcrumb -> h1 Projects -> WorkspaceNav -> content, in that document order", async () => {
+    let r!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      r = TestRenderer.create(
+        createElement(TeamProjectsShell, { workspaceId: "ws_123", workspaceName: "Acme Risk Lab", canCreateProject: true, canManageProjects: true, canReadAudit: true })
+      );
+    });
+    expectFrozenComposition(r);
+  });
+
+  it("C1-P2 — the New Project trigger moved WITH the heading: it still precedes WorkspaceNav", async () => {
+    let r!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      r = TestRenderer.create(
+        createElement(TeamProjectsShell, { workspaceId: "ws_123", workspaceName: "Acme Risk Lab", canCreateProject: true, canManageProjects: true, canReadAudit: true })
+      );
+    });
+    const o = documentOrder(r);
+    const flat: { type: string; props: Record<string, unknown> }[] = [];
+    const walk = (node: unknown): void => {
+      if (!node || typeof node !== "object") return;
+      if (Array.isArray(node)) return node.forEach(walk);
+      const n = node as { type?: unknown; props?: Record<string, unknown>; rendered?: unknown };
+      if (typeof n.type === "string") flat.push({ type: n.type, props: n.props ?? {} });
+      walk(n.rendered);
+    };
+    walk(r.toTree());
+    const newProject = flat.findIndex((e) => e.type === "button" && e.props.children === "New Project");
+    expect(newProject).toBeGreaterThan(o.h1);
+    expect(newProject).toBeLessThan(o.workspaceNav);
+  });
+
+  it("C1-P3 — FOCUS ANCHOR SURVIVES THE MOVE: team-active-projects-heading is still the h1 with tabIndex -1, and relocating the node did not change the ref target", async () => {
+    let r!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      r = TestRenderer.create(
+        createElement(TeamProjectsShell, { workspaceId: "ws_123", workspaceName: "Acme Risk Lab", canCreateProject: true, canManageProjects: true, canReadAudit: true })
+      );
+    });
+    const anchors = r.root.findAll((n) => n.props?.id === "team-active-projects-heading", { deep: true });
+    expect(anchors).toHaveLength(1);
+    expect(anchors[0].type).toBe("h1");
+    expect(anchors[0].props.tabIndex).toBe(-1);
+    // and it is now ABOVE the nav
+    const o = documentOrder(r);
+    expect(o.h1).toBeLessThan(o.workspaceNav);
+  });
+});

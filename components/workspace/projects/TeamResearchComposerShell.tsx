@@ -135,9 +135,11 @@ export default function TeamResearchComposerShell({
         mobileParent={{ label: project.name, href: projectHref }}
       />
 
-      <WorkspaceNav workspaceId={workspaceId} active="projects" showAudit={canReadAudit} />
-
-      <div className="mt-2">
+      {/*
+        Phase 11B.3-C1 — page composition is the SAME on all seven Team Workspace
+        surfaces: Breadcrumb -> page heading -> WorkspaceNav -> content.
+      */}
+      <div className="mb-6">
         {/*
           Before/while composing: "Start research" (this is the permanent
           per-Project action's own page — not to be confused with the
@@ -153,6 +155,8 @@ export default function TeamResearchComposerShell({
           {result ? (question.trim().length > 0 ? question : "Research results") : "Start research"}
         </h1>
       </div>
+
+      <WorkspaceNav workspaceId={workspaceId} active="projects" showAudit={canReadAudit} />
 
       {!result && (
         <form onSubmit={handleSubmit} className="mt-6 rounded-xl border border-cp-border bg-cp-surface p-5 shadow-sm">

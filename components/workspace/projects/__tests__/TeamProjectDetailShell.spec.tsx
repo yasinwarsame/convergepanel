@@ -328,3 +328,71 @@ describe("Phase 11B.3 — Project detail breadcrumb", () => {
     expect(nav.findAll((n) => n.props?.["aria-current"] === "page", { deep: true }).map(visibleTextOf)).toEqual(["Projects"]);
   });
 });
+
+/* ------------------------------------------------------------------ *
+ * Phase 11B.3-C1 — RELATIVE DOM ORDER.
+ *
+ * The 11B.3 tests proved the breadcrumb's contents, the h1's contents and
+ * WorkspaceNav's state each independently — and every one of them passed while
+ * four surfaces still rendered WorkspaceNav ABOVE the heading, in violation of
+ * the frozen composition contract. This helper closes that gap by pinning the
+ * one property none of them expressed: document order.
+ *
+ * Positions come from a depth-first walk of the RENDERED tree (`toTree()`), not
+ * from source text, so it measures what a viewer actually gets.
+ * ------------------------------------------------------------------ */
+function documentOrder(r: TestRenderer.ReactTestRenderer): { breadcrumb: number; h1: number; workspaceNav: number } {
+  const flat: { type: string; props: Record<string, unknown> }[] = [];
+  const walk = (node: unknown): void => {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) return node.forEach(walk);
+    const n = node as { type?: unknown; props?: Record<string, unknown>; rendered?: unknown };
+    if (typeof n.type === "string") flat.push({ type: n.type, props: n.props ?? {} });
+    walk(n.rendered);
+  };
+  walk(r.toTree());
+
+  const at = (pred: (e: { type: string; props: Record<string, unknown> }) => boolean) => flat.findIndex(pred);
+  return {
+    breadcrumb: at((e) => e.type === "nav" && e.props["aria-label"] === "Breadcrumb"),
+    h1: at((e) => e.type === "h1"),
+    workspaceNav: at((e) => e.type === "nav" && e.props["aria-label"] === "Workspace"),
+  };
+}
+
+/** Breadcrumb -> page heading -> WorkspaceNav, with all three actually present. */
+function expectFrozenComposition(r: TestRenderer.ReactTestRenderer) {
+  const o = documentOrder(r);
+  expect(o.breadcrumb).toBeGreaterThanOrEqual(0);
+  expect(o.h1).toBeGreaterThanOrEqual(0);
+  expect(o.workspaceNav).toBeGreaterThanOrEqual(0);
+  expect(o.breadcrumb).toBeLessThan(o.h1);
+  expect(o.h1).toBeLessThan(o.workspaceNav);
+}
+
+describe("Phase 11B.3-C1 — Project detail page composition order", () => {
+  it("C1-D1 — Breadcrumb -> h1 Project name -> WorkspaceNav -> research content", async () => {
+    const r = await mount({ project: { id: "proj_456", name: "Election Evidence", status: "active" } } as never);
+    expectFrozenComposition(r);
+  });
+
+  it("C1-D2 — the status badge and Start Research moved WITH the heading row, staying above WorkspaceNav", async () => {
+    const r = await mount({ project: { id: "proj_456", name: "Election Evidence", status: "active" } } as never);
+    const o = documentOrder(r);
+    const flat: { type: string; props: Record<string, unknown> }[] = [];
+    const walk = (node: unknown): void => {
+      if (!node || typeof node !== "object") return;
+      if (Array.isArray(node)) return node.forEach(walk);
+      const n = node as { type?: unknown; props?: Record<string, unknown>; rendered?: unknown };
+      if (typeof n.type === "string") flat.push({ type: n.type, props: n.props ?? {} });
+      walk(n.rendered);
+    };
+    walk(r.toTree());
+    const badge = flat.findIndex((e) => e.type === "span" && e.props.children === "Active");
+    const startResearch = flat.findIndex((e) => e.type === "a" && e.props.children === "Start Research");
+    for (const i of [badge, startResearch]) {
+      expect(i).toBeGreaterThan(o.h1);
+      expect(i).toBeLessThan(o.workspaceNav);
+    }
+  });
+});

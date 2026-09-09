@@ -418,3 +418,62 @@ describe("Phase 11B.3 — Research composer breadcrumb", () => {
     expect(bcMobileParent(r)!.href).toBe("/workspace/team/ws%2Fa%20b/projects/proj%2Fx%20y");
   });
 });
+
+/* ------------------------------------------------------------------ *
+ * Phase 11B.3-C1 — RELATIVE DOM ORDER.
+ *
+ * The 11B.3 tests proved the breadcrumb's contents, the h1's contents and
+ * WorkspaceNav's state each independently — and every one of them passed while
+ * four surfaces still rendered WorkspaceNav ABOVE the heading, in violation of
+ * the frozen composition contract. This helper closes that gap by pinning the
+ * one property none of them expressed: document order.
+ *
+ * Positions come from a depth-first walk of the RENDERED tree (`toTree()`), not
+ * from source text, so it measures what a viewer actually gets.
+ * ------------------------------------------------------------------ */
+function documentOrder(r: TestRenderer.ReactTestRenderer): { breadcrumb: number; h1: number; workspaceNav: number } {
+  const flat: { type: string; props: Record<string, unknown> }[] = [];
+  const walk = (node: unknown): void => {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) return node.forEach(walk);
+    const n = node as { type?: unknown; props?: Record<string, unknown>; rendered?: unknown };
+    if (typeof n.type === "string") flat.push({ type: n.type, props: n.props ?? {} });
+    walk(n.rendered);
+  };
+  walk(r.toTree());
+
+  const at = (pred: (e: { type: string; props: Record<string, unknown> }) => boolean) => flat.findIndex(pred);
+  return {
+    breadcrumb: at((e) => e.type === "nav" && e.props["aria-label"] === "Breadcrumb"),
+    h1: at((e) => e.type === "h1"),
+    workspaceNav: at((e) => e.type === "nav" && e.props["aria-label"] === "Workspace"),
+  };
+}
+
+/** Breadcrumb -> page heading -> WorkspaceNav, with all three actually present. */
+function expectFrozenComposition(r: TestRenderer.ReactTestRenderer) {
+  const o = documentOrder(r);
+  expect(o.breadcrumb).toBeGreaterThanOrEqual(0);
+  expect(o.h1).toBeGreaterThanOrEqual(0);
+  expect(o.workspaceNav).toBeGreaterThanOrEqual(0);
+  expect(o.breadcrumb).toBeLessThan(o.h1);
+  expect(o.h1).toBeLessThan(o.workspaceNav);
+}
+
+describe("Phase 11B.3-C1 — Research composer page composition order", () => {
+  it("C1-C1 — Breadcrumb -> dynamic h1 -> WorkspaceNav -> form, before any submission", async () => {
+    const r = await mount({ workspaceId: "ws_123", workspaceName: "Acme Risk Lab", project: { id: "proj_456", name: "Election Evidence" } });
+    expectFrozenComposition(r);
+    expect(h1Texts(r)).toEqual(["Start research"]);
+  });
+
+  it("C1-C2 — the order still holds AFTER a successful run, when the h1 becomes the submitted question", async () => {
+    const submit = jest.fn().mockResolvedValue({ status: "ok", run: { runId: "run_789", results: [], governanceStatus: null } });
+    mockedUseTeamProjectResearch.mockReturnValue(researchResult({ submit }));
+    const r = await mount({ workspaceId: "ws_123", workspaceName: "Acme Risk Lab", project: { id: "proj_456", name: "Election Evidence" } });
+    await act(async () => { r.root.findByType("textarea").props.onChange({ target: { value: "What changed in the source evidence?" } }); });
+    await act(async () => { await r.root.findByType("form").props.onSubmit({ preventDefault() {} }); });
+    expect(h1Texts(r)).toEqual(["What changed in the source evidence?"]);
+    expectFrozenComposition(r);
+  });
+});

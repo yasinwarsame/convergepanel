@@ -111,15 +111,17 @@ export default function TeamProjectDetailShell({
         mobileParent={{ label: "Projects", href: `/workspace/team/${encodeURIComponent(workspaceId)}/projects` }}
       />
 
-      <WorkspaceNav workspaceId={workspaceId} active="projects" showAudit={canReadAudit} />
-
       {/*
-        Phase 11B.3 — the Project name becomes the page's primary heading
-        (h2 -> h1) now that the Workspace-name h1 is gone. It stays in this row so
-        the status badge and the Start Research action keep their existing
-        placement; only the heading level changes.
+        Phase 11B.3-C1 — page composition is the SAME on all seven Team Workspace
+        surfaces: Breadcrumb -> page heading -> WorkspaceNav -> content.
       */}
-      <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+      {/*
+        The Project name is the page's primary heading (h2 -> h1) now that the
+        Workspace-name h1 is gone. The whole header row moves above WorkspaceNav
+        as one unit, so the status badge and Start Research keep their existing
+        placement relative to the heading.
+      */}
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="text-xl font-semibold text-cp-text break-words">{project.name}</h1>
           <span className="rounded-full border border-cp-border px-2.5 py-0.5 text-xs font-medium text-cp-muted">
@@ -135,6 +137,8 @@ export default function TeamProjectDetailShell({
           </Link>
         )}
       </div>
+
+      <WorkspaceNav workspaceId={workspaceId} active="projects" showAudit={canReadAudit} />
 
       <section className="mt-6">
         {status === "loading" && <SectionLoadingRow label="Loading research…" />}

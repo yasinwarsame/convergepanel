@@ -158,18 +158,19 @@ export default function TeamProjectsShell({
         mobileParent={{ label: workspaceName, href: `/workspace/team/${encodeURIComponent(workspaceId)}` }}
       />
 
-      <WorkspaceNav workspaceId={workspaceId} active="projects" showAudit={canReadAudit} />
-
       {/*
-        Phase 11B.3 — the Workspace-name h1 is gone (the breadcrumb carries it),
-        so this element becomes the page's primary heading and is promoted h2 -> h1.
-        Its `ref`, `id` and `tabIndex` are deliberately untouched and it is
-        deliberately NOT moved above WorkspaceNav: the PROJECT-UI archive/restore
-        flow restores focus to exactly this node, and it is visually paired with
-        the "New Project" trigger beside it. Classes are unchanged so the promotion
-        is purely semantic.
+        Phase 11B.3-C1 — page composition is the SAME on all seven Team Workspace
+        surfaces: Breadcrumb -> page heading -> WorkspaceNav -> content.
       */}
-      <div className="flex items-center justify-between gap-3">
+      {/*
+        The Workspace-name h1 is gone (the breadcrumb carries it), so this element
+        is the page's primary heading, promoted h2 -> h1. It moves above
+        WorkspaceNav as ONE unit with the "New Project" trigger it is paired with.
+        `ref`, `id`, `tabIndex` and classes are unchanged: relocating a node does
+        not change the identity of the ref target, so the PROJECT-UI
+        archive/restore flow still restores focus to exactly this heading.
+      */}
+      <div className="mb-6 flex items-center justify-between gap-3">
         <h1 ref={activeHeadingRef} id="team-active-projects-heading" tabIndex={-1} className="text-lg font-semibold text-cp-text focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent">
           Projects
         </h1>
@@ -184,6 +185,8 @@ export default function TeamProjectsShell({
           </button>
         )}
       </div>
+
+      <WorkspaceNav workspaceId={workspaceId} active="projects" showAudit={canReadAudit} />
 
       {lifecycleNotice && (
         <div
