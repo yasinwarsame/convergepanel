@@ -771,3 +771,89 @@ describe("POST-429 OPERATOR RULE — structured, normative, load-bearing", () =>
     for (const m of modes) expect(["MUST", "MUST_PRESERVE_PROCESS"]).toContain(m);
   });
 });
+
+
+// ===========================================================================
+describe("BOOTSTRAP SECRET STATE MODEL — presence is not configuration", () => {
+  /**
+   * Phase EXISTING_ADMIN_E2. A pre-enrollment review recorded ADMIN_SECRET as
+   * "present and reusable" after testing only that the variable EXISTS — its
+   * value was empty, so the bootstrap path was already fail-closed and the
+   * scheduled retirement could never have completed (PRE cannot produce
+   * `credential-accepted` from an empty secret).
+   *
+   * These assertions are over the RUNBOOK's text, not this file's, so none can
+   * be satisfied by its own source.
+   */
+  const RUNBOOK = "docs/operations/admin-authority-tiers.md";
+  const doc = readFileSync(RUNBOOK, "utf8");
+  const flat = doc.replace(/\s+/g, " ");
+
+  const stateTable = (() => {
+    const start = doc.indexOf("### BOOTSTRAP SECRET STATE MODEL");
+    expect(start).toBeGreaterThan(-1);
+    return doc.slice(start, start + 2500);
+  })();
+
+  it("ANCHOR: the state-model section exists and is non-trivial", () => {
+    expect(stateTable.length).toBeGreaterThan(800);
+    expect(stateTable).toContain("| State | Definition | Bootstrap path | Retirement action |");
+  });
+
+  it.each([
+    ["ABSENT", "fail-closed", "none"],
+    ["EMPTY", "fail-closed", "none required"],
+  ])("%s is documented as %s requiring %s", (state, path, action) => {
+    const row = stateTable.split("\n").find((l) => l.includes(`\`${state}\``) && l.trim().startsWith("|"));
+    expect(row).toBeDefined();
+    expect(row!.toLowerCase()).toContain(path);
+    expect(row!.toLowerCase()).toContain(action);
+  });
+
+  it("CONFIGURED is the only state that requires containment + removal", () => {
+    const row = stateTable.split("\n").find((l) => l.includes("`CONFIGURED`") && l.trim().startsWith("|"));
+    expect(row).toBeDefined();
+    expect(row!.toLowerCase()).toContain("containment");
+    expect(row!).toMatch(/remove|rotate/i);
+    // and the byte-length definition, not mere existence, is what separates it
+    expect(row!).toMatch(/byte length\s*\*\*>\s*0\*\*|byte length .{0,12}> 0/i);
+  });
+
+  it("the runtime effective test is stated, not just described", () => {
+    expect(flat).toMatch(/Buffer\.from\(process\.env\.ADMIN_SECRET \?\? ""/);
+    expect(flat).toMatch(/length > 0/);
+  });
+
+  it("presence alone is explicitly rejected as evidence of configuration", () => {
+    expect(flat).toMatch(/Never infer activation from variable presence/i);
+    // and the reason `vercel env ls` is insufficient is given
+    expect(flat).toMatch(/cannot separate .?EMPTY.? from .?CONFIGURED.?/i);
+  });
+
+  it("the containment precondition gates the two-phase probe", () => {
+    expect(flat).toContain("ADMIN_SECRET_STATE == CONFIGURED");
+    expect(flat).toMatch(/BOOTSTRAP_SECRET_ALREADY_DISABLED|CONTAINMENT_NOT_APPLICABLE/);
+    expect(flat).toMatch(/STOP before any Production request/i);
+  });
+
+  it("the canonical PRE -> POST contract is preserved for a future CONFIGURED state", () => {
+    // E2 corrects only the PRECONDITION; the proof itself must survive intact.
+    expect(flat).toContain("400 + `credential-accepted`");
+    expect(flat).toContain("401 + `credential-rejected`");
+    expect(flat).toMatch(/PRODUCTION_CONTAINMENT_PROVEN/);
+  });
+
+  it("current status says DISABLED BY AN EMPTY VALUE, never 'retired'", () => {
+    expect(flat).toMatch(/effective value is empty/i);
+    expect(flat).toMatch(/No secret retirement is outstanding/i);
+    // the precise distinction: it was never removed or rotated
+    expect(flat).toMatch(/never removed or rotated/i);
+    expect(flat).not.toMatch(/\bADMIN_SECRET was retired\b/i);
+  });
+
+  it("no first-admin enrollment is claimed pending, and 'nobody enrolled' is corrected", () => {
+    expect(flat).toMatch(/no first-admin enrollment is pending/i);
+    expect(flat).toMatch(/two intended SYSTEM_ADMIN accounts/i);
+    expect(flat).toMatch(/was true of the ALLOWLISTS and was never true of the claim/i);
+  });
+});

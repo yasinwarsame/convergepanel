@@ -139,7 +139,11 @@ describe("the SYSTEM_ADMIN containment procedure closes the bootstrap path", () 
   });
 
   it("states plainly that containment is incomplete while the secret can re-mint", () => {
-    expect(SECTION).toMatch(/not complete while a reusable bootstrap credential/);
+    // Phase EXISTING_ADMIN_E2: this claim is now CONDITIONAL on the secret being
+    // CONFIGURED (non-empty), because an EMPTY value is already fail-closed and
+    // no containment is outstanding. The invariant itself is unchanged.
+    expect(SECTION).toMatch(/not complete while\s+(a|that) reusable bootstrap credential/);
+    expect(SECTION).toMatch(/If `ADMIN_SECRET` is `CONFIGURED`/);
   });
 });
 
