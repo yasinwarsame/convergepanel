@@ -1,4 +1,16 @@
 /**
+ * CLASSIFICATION: MINTS-AUTHORITY (service-account bootstrap tool).
+ *
+ * SAFE-PROBE:PROHIBITION — this script GRANTS SYSTEM_ADMIN. It is never a
+ * secret-liveness probe and must not be used to check whether an old
+ * ADMIN_SECRET still works: it does not use ADMIN_SECRET at all, and running it
+ * mints the claim unconditionally. To verify a rotation use
+ * `scripts/probe-admin-secret.mjs`, which cannot mint anything.
+ *
+ * (C12: this file escaped the previous inventory because that inventory matched
+ * the filename pattern `set-admin*` and this name is camelCase. The inventory
+ * is now a content predicate.)
+ *
  * One-off script to promote a specific user to admin.
  * 
  * This script:

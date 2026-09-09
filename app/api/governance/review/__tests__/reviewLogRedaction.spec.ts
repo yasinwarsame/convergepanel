@@ -1,0 +1,1843 @@
+/**
+ * Phase FIRST-ADMIN-C7 — GOVERNANCE HOT-PATH LOG REDACTION, PINNED AT THE
+ * ROUTE/LOGGER BOUNDARY.
+ *
+ * C6 redacted these logs and proved it with a source grep. The C6-R3 review
+ * classified that as a pre-enrollment blocker, correctly: a grep asserts that
+ * today's source does not contain an interpolation, which is a syntax claim
+ * about one file. It cannot see a value that reaches the log through a
+ * variable, through an object argument, through `logger`'s own `redact()`, or
+ * from a callee. Nothing stopped a future edit from reintroducing a leak by a
+ * shape the grep did not spell.
+ *
+ * This suite instead runs the REAL route and captures the REAL sink. `logger`
+ * delegates to `console.error/warn/log/debug` (lib/logger.ts:119-140), and the
+ * governance modules under test use `console.log/warn/error` directly, so the
+ * capture covers every sink THOSE MODULES ACTUALLY USE. Arguments are
+ * serialized deeply, so a canary buried in an object argument is caught exactly
+ * like one interpolated into the message.
+ *
+ * SCOPE OF THAT CLAIM, stated because C9 overstated it as "every console
+ * method": `console.dir`, `console.trace`, `console.table` and direct
+ * `process.stdout.write` are NOT captured. No governance module uses them
+ * today — verified by the structural test below — but a future one would be
+ * invisible here. That is a named residual, not a covered case.
+ *
+ * A second named residual: `logger.redact()` replaces values under the keys
+ * `uid`/`userId`/`firebaseUid` with a truncated 32-bit hash. A leak routed
+ * through `logger.warn(msg, { uid })` therefore does not appear as the raw
+ * canary and is invisible to these assertions — and the hash is itself a stable
+ * per-user correlation identifier. Not fixed here; see
+ * docs/operations/security-test-falsifiability.md.
+ *
+ * Falsifiability. "No canary appeared in the output" is trivially satisfied by
+ * a capture that recorded nothing, by a route that logged nothing, and by a
+ * request that never reached the logging path. All three are excluded by
+ * positive anchors that must hold before any absence assertion is trusted:
+ *
+ *   1. CAPTURE FIDELITY — a canary written straight to console is recovered by
+ *      the capture, for every console method the logger uses.
+ *   2. PATH EXECUTION — the override log line is present, proving the request
+ *      actually reached the code under test.
+ *   3. NON-SENSITIVE CONTENT SURVIVES — the operational content of that line is
+ *      still there, so the test cannot be satisfied by logging nothing at all.
+ */
+
+import { inspect } from "node:util";
+import { readFileSync } from "node:fs";
+
+const __PRIVILEGED_ENV_SNAPSHOT = {
+  ADMIN_EMAILS: process.env.ADMIN_EMAILS,
+  GOVERNANCE_ADMIN_EMAILS: process.env.GOVERNANCE_ADMIN_EMAILS,
+};
+afterAll(() => {
+  for (const [key, value] of Object.entries(__PRIVILEGED_ENV_SNAPSHOT)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+});
+
+const COLLECTIONS = ["runs", "verifications", "videoVerifications"] as const;
+type Coll = (typeof COLLECTIONS)[number];
+
+/**
+ * CANARIES. Each is unique and structurally unmistakable, so a hit is a leak
+ * and never a coincidental substring. They stand in for the real values at the
+ * position the real value occupies.
+ */
+const C = {
+  reviewerUid: "CANARY-REVIEWER-UID-a71f3c",
+  ownerAUid: "CANARY-OWNER-A-UID-b82e4d",
+  ownerBUid: "CANARY-OWNER-B-UID-c93f5e",
+  runId: "CANARY-RUN-ID-d04a6f",
+  reason: "CANARY-REASON-TEXT-e15b70",
+  question: "CANARY-QUESTION-TEXT-f26c81",
+  callerEmail: "canary-reviewer@canary-domain-072d92.example",
+  callerDomain: "canary-domain-072d92.example",
+  ownerEmail: "canary-owner-a@canary-owner-domain-183ea3.example",
+  allowlistEmail: "canary-allowlisted-admin@canary-allowlist-domain-294fb4.example",
+} as const;
+
+/**
+ * Phase FIRST-ADMIN-C9 (R5 F1) — ONE SHARED DENY-SET.
+ *
+ * C8 made every logging branch execute, then gave each its own canary list:
+ * 9 canaries on the main path, 7 on `admin_global` (missing the reason text),
+ * 4 on the 403 denial, 2 on the integrity exception. So the branches ran, but
+ * each sibling accepted leaks the main path rejected — the same branch-shaped
+ * vacuity C8 existed to close, one level in. Six mutations proved it: a
+ * governance reason logged in `admin_global`, an owner email on the denial
+ * path, the reviewer uid on the integrity path, all green.
+ *
+ * Every ordinary governance branch now asserts against THIS list. A branch may
+ * add canaries; none may quietly assert a weaker subset. The one documented
+ * exception is the workspace-integrity path, which is allowed the run id and
+ * nothing else — see its own describe block.
+ */
+const SENSITIVE_LOG_CANARIES: Array<[string, () => string]> = [
+  ["the reviewer's uid", () => C.reviewerUid],
+  ["the run owner's uid", () => C.ownerAUid],
+  ["a foreign tenant's uid", () => C.ownerBUid],
+  ["the reviewed run's id", () => C.runId],
+  ["a foreign run's id", () => "other-run"],
+  ["the run's governance reason text", () => C.reason],
+  ["the run's question text", () => C.question],
+  ["the caller's email address", () => C.callerEmail],
+  ["the caller's email domain", () => C.callerDomain],
+  ["the run owner's email address", () => C.ownerEmail],
+  ["the privileged allowlist address", () => C.allowlistEmail],
+  ["the privileged allowlist domain", () => "canary-allowlist-domain-294fb4.example"],
+];
+
+/**
+ * The audit event object's identity fields, by the names the writer sees. Same
+ * values as above — listed so it is explicit that `byUid`/`byEmail`/
+ * `runOwnerUid`/`runOwnerEmail` are covered by the shared set, which is what
+ * the audit-failure branch leaked.
+ */
+const AUDIT_EVENT_IDENTITY_FIELDS = {
+  byUid: () => C.reviewerUid,
+  byEmail: () => C.callerEmail,
+  runOwnerUid: () => C.ownerAUid,
+  runOwnerEmail: () => C.ownerEmail,
+  runId: () => C.runId,
+  question: () => C.question,
+} as const;
+
+/**
+ * Phase FIRST-ADMIN-C10 (R6 P1-1) — ONE ASSERTION, NOT A LIST PER BRANCH.
+ *
+ * C9 unified the deny-set across five branches and left the sixth — the audit
+ * writer's catch block — on a hand-written three-value list. That block holds
+ * the WHOLE event object, so `byUid`, `byEmail`, `runOwnerUid`,
+ * `runOwnerEmail` and `question` all leaked with the suite green; under
+ * `admin_global` the swallowed event describes another tenant's run.
+ *
+ * A per-branch list is the defect. Every governance logging branch now calls
+ * THIS function, so a new branch cannot quietly ship a weaker subset — the only
+ * way to weaken one is to pass an explicit `allow`, which is visible in review.
+ */
+function assertNoSensitiveGovernanceCanaries(
+  logs: string,
+  opts: { allowIntegrityRunId?: boolean } = {}
+) {
+  /**
+   * Phase FIRST-ADMIN-C11 (R7 P2-a). The exception used to be an unbounded
+   * `allow: string[]`, so widening it to six values — including reviewer uid,
+   * owner uid and owner email — passed with the suite green. There is exactly
+   * ONE justified exception in this system, so it is now a named boolean and
+   * nothing else can be excused.
+   */
+  const leaked: string[] = [];
+  for (const [label, get] of SENSITIVE_LOG_CANARIES) {
+    const value = get();
+    if (opts.allowIntegrityRunId && value === C.runId) continue;
+    if (logs.includes(value)) leaked.push(label);
+  }
+  expect(leaked).toEqual([]);
+}
+
+const NOW = Date.now();
+let tokenClaims: Record<string, unknown> = {};
+let liveRecord: Record<string, unknown> = {};
+let planId = "full";
+let reviewerFor: string[] = [];
+let prevStatus = "blocked";
+let integrityClassification: "valid" | "invalid" = "valid";
+
+let existingDocs: Record<string, { userId: string }> = {};
+
+/** Everything any console method received, in order, deeply serialized. */
+/** Rows the REAL `writeAuditEvent` persisted, so we can prove it executed. */
+type Write = { kind: "set" | "update" | "add"; collection: string; id: string; patch?: Record<string, unknown> };
+/** Every Firestore write the handler performed, so a zero-write premise is testable. */
+let writes: Write[] = [];
+let auditRows: Array<Record<string, unknown>> = [];
+/** When true the audit `.add()` throws a realistic path-bearing Firestore error. */
+let auditWriteFails = false;
+/** Every console sink the governance modules and `logger` actually use. */
+const CONSOLE_METHODS = ["log", "warn", "error", "debug", "info"] as const;
+const serialize = (args: unknown[]) =>
+  args.map((a) => (typeof a === "string" ? a : inspect(a, { depth: null, breakLength: Infinity }))).join(" ");
+
+/**
+ * Phase FIRST-ADMIN-C14 (R10 P1-1 / P1-2) — INGRESS-TIME IMMUTABLE TRANSCRIPT.
+ *
+ * WHAT C13 CLAIMED, AND WHY IT WAS WRONG. C13 said: `jest.spyOn(...)
+ * .mockImplementation(...)` records the arguments in `mock.calls` BEFORE the
+ * implementation runs, so "no implementation can remove a call from that
+ * ledger — there is no seam between invocation and record for anyone to edit."
+ *
+ * The first half is true and the conclusion does not follow. `mock.calls` is a
+ * plain mutable array, reachable from inside that very implementation through
+ * the same object the capture reads. Review added six lines to the shared spy:
+ *
+ *     const cs = consoleSpies[m]!.mock.calls;
+ *     if (cs.length && String(a[0]).includes("Override:")) {
+ *       cs[cs.length - 1] = [String(a[0]).replace(/ owner=\S+/, "")];
+ *     }
+ *
+ * and a live `ownerUid` leak from the production route went from 16 failures to
+ * 109/109 green. C13 closed the seam BEFORE the record and left the seam AFTER
+ * it wide open. "Recorded before" is not "immutable".
+ *
+ * A second seam sat downstream: `serialize()` ran after retrieval and every
+ * consumer went through it, so a sanitising serializer hid the same leak.
+ *
+ * THIS DESIGN REMOVES BOTH.
+ *
+ *   - The transcript is built at INGRESS, from the `...args` the sink was
+ *     actually called with, as a deep-frozen structural snapshot. Mutating the
+ *     logged object afterwards cannot change what was recorded.
+ *   - The transcript lives in a closure. No property, getter or method hands
+ *     out the array, so a test cannot splice, filter, clear or replace the
+ *     source of truth.
+ *   - The canary scan walks that frozen structure directly — strings, arrays,
+ *     object keys AND values, Error fields — so there is no serialization step
+ *     between the evidence and the assertion. Serialization survives only to
+ *     render a failure message AFTER a violation has already been detected.
+ *   - The installed implementation is recorded by identity and re-checked, so
+ *     swapping the capture itself is caught rather than silently obeyed.
+ */
+
+/**
+ * Phase FIRST-ADMIN-C15 (R11 P1) — TWO INDEPENDENT EVIDENCE CHANNELS.
+ *
+ * WHAT KEEPS GOING WRONG. Three phases in a row declared one mutable test
+ * mechanism authoritative and were falsified in the next review:
+ *
+ *   C12: a hand-rolled array inside the spy. One line dropped the leaking call.
+ *   C13: "mock.calls is written before the implementation, so it cannot be
+ *        edited." True and irrelevant — the array is mutable afterwards, and six
+ *        lines rewrote it in place.
+ *   C14: an ingress snapshot, "built from the args the sink was actually called
+ *        with". Also false: the snapshot is built by `impl`, which is ordinary
+ *        editable test code, and three lines inside it sanitised the arguments
+ *        before they were ever recorded. The identity check could not see it,
+ *        because it stores the tampered function as its own expected reference.
+ *
+ * THE CLAIM IS NOW NARROWER, AND IT IS THE ONE THAT IS ACTUALLY DEFENSIBLE.
+ *
+ * We do NOT claim this harness is tamper-proof; application-level tests cannot
+ * be. We claim only this: a real sensitive-log regression cannot be hidden by
+ * ONE localized edit to either evidence channel, because the other channel
+ * still sees the leak and the cross-channel comparison fails loudly.
+ *
+ *   CHANNEL A — the raw Jest ledger, read from `spy.mock.calls` at assertion
+ *     time. Holds LIVE references. Blind to post-log object mutation; immune to
+ *     anything done inside our own ingress function.
+ *   CHANNEL B — the ingress snapshot transcript, deep-frozen at call time.
+ *     Immune to later ledger rewriting; blind to sanitising done at ingress.
+ *
+ * Their weaknesses are complementary by construction. Each runs its OWN deny-set
+ * walk — the two walk functions are deliberately separate implementations, not
+ * one shared helper, so a one-line edit cannot blind both. Neither is derived
+ * from the other, and neither passes through a shared pre-filtered list.
+ *
+ * A coordinated edit to both channels, their walks, the fidelity check and the
+ * lifecycle backstop would still make the suite lie. That is outside the
+ * guarantee and is stated plainly rather than papered over.
+ */
+/**
+ * Phase FIRST-ADMIN-C16 (R12 P1) — THE SINK SET IS NOT ONE SHARED ARRAY.
+ *
+ * R12 found the single point of failure sitting UPSTREAM of the two channels.
+ * Both `install()`, `assertSpyIdentity()` and `ledgerEntries()` iterated one
+ * `CONSOLE_METHODS` constant, so deleting one token installed no spy at all:
+ * no ledger entry, no transcript entry, nothing for fidelity to disagree
+ * about. Measured — a real `ownerUid` leak through `console.info` went from
+ * 16 failures to a fully green suite on a one-token edit. The channels were
+ * independent of each other and jointly dependent on this.
+ *
+ * There are now THREE independently-derived sink concepts:
+ *
+ *   CHANNEL_A_SINKS  — what the raw Jest ledger reads.
+ *   CHANNEL_B_SINKS  — what the ingress snapshot records.
+ *   productionSinks() — derived by READING PRODUCTION SOURCE at test time.
+ *
+ * Nothing derives one from another. Editing any single one of them breaks a
+ * parity assertion, and editing a channel pair still breaks the source
+ * contract, because that one is computed from the shipped code rather than
+ * declared here.
+ *
+ * NOTE ON `info`: `logger.info` maps to `console.log` (lib/logger.ts), and no
+ * covered module calls `console.info` today. It is captured defensively, so the
+ * declared set is a SUPERSET of the source-derived set — asserted as such.
+ */
+const CHANNEL_A_SINKS = ["log", "warn", "error", "debug", "info"] as const;
+const CHANNEL_B_SINKS = ["log", "warn", "error", "debug", "info"] as const;
+
+/** Every sink the capture installs a spy on — the union, so neither channel can hide one. */
+const ALL_INSTALLED_SINKS = [...new Set<string>([...CHANNEL_A_SINKS, ...CHANNEL_B_SINKS])];
+
+/** Production modules whose logging this suite claims to observe. */
+const COVERED_SOURCE_FILES = [
+  "lib/logger.ts",
+  "app/api/governance/review/route.ts",
+  "lib/governance/governanceVisibleUserIds.ts",
+  "lib/governance/auditLog.ts",
+];
+
+/** Derived from SHIPPED SOURCE, never from a capture constant. */
+const productionSinks = (): string[] => {
+  const found = new Set<string>();
+  for (const f of COVERED_SOURCE_FILES) {
+    for (const m of readFileSync(f, "utf8").matchAll(/console\.([a-zA-Z]+)\s*\(/g)) found.add(m[1]);
+  }
+  return [...found].sort();
+};
+
+type TranscriptEntry = { sink: string; args: readonly unknown[] };
+
+const createGovernanceLogCapture = () => {
+  /** CHANNEL B storage. Closure-private. */
+  let transcript: TranscriptEntry[] = [];
+  let totalIngress = 0;
+  let finalizeRuns = 0;
+  let fidelityChecks = 0;
+  const installedImpls = new Map<string, (...a: unknown[]) => void>();
+  const spies = new Map<string, jest.SpyInstance>();
+
+  /** Structural, cycle-safe, deep-frozen snapshot of the ORIGINAL arguments. */
+  const snapshot = (value: unknown, seen: WeakMap<object, unknown> = new WeakMap()): unknown => {
+    if (value === null || typeof value !== "object") return value;
+    const asObj = value as object;
+    if (seen.has(asObj)) return seen.get(asObj);
+    if (value instanceof Error) {
+      const e: Record<string, unknown> = {
+        __error: true,
+        name: value.name,
+        message: value.message,
+        code: (value as unknown as { code?: unknown }).code,
+        details: (value as unknown as { details?: unknown }).details,
+      };
+      seen.set(asObj, e);
+      return Object.freeze(e);
+    }
+    if (Array.isArray(value)) {
+      const arr: unknown[] = [];
+      seen.set(asObj, arr);
+      for (const v of value) arr.push(snapshot(v, seen));
+      return Object.freeze(arr);
+    }
+    const out: Record<string, unknown> = {};
+    seen.set(asObj, out);
+    for (const k of Object.keys(asObj)) out[k] = snapshot((value as Record<string, unknown>)[k], seen);
+    return Object.freeze(out);
+  };
+
+  /**
+   * CHANNEL B's walk. Separate implementation from `ledgerContains` on purpose:
+   * one edit must not be able to blind both channels.
+   */
+  const snapshotContains = (node: unknown, needle: string, seen: Set<object> = new Set()): boolean => {
+    if (typeof node === "string") return node.includes(needle);
+    if (typeof node === "number" || typeof node === "bigint" || typeof node === "boolean") {
+      return String(node).includes(needle);
+    }
+    if (node === null || typeof node !== "object") return false;
+    if (seen.has(node as object)) return false;
+    seen.add(node as object);
+    if (Array.isArray(node)) return node.some((n) => snapshotContains(n, needle, seen));
+    for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+      if (k.includes(needle)) return true;
+      if (snapshotContains(v, needle, seen)) return true;
+    }
+    return false;
+  };
+
+  /** CHANNEL A's walk. Independent of the above, and handles live Errors. */
+  const ledgerContains = (node: unknown, needle: string, seen: Set<object> = new Set()): boolean => {
+    if (node === null || node === undefined) return false;
+    const t = typeof node;
+    if (t === "string") return (node as string).indexOf(needle) !== -1;
+    if (t === "number" || t === "bigint" || t === "boolean") return String(node).indexOf(needle) !== -1;
+    if (t !== "object") return false;
+    if (seen.has(node as object)) return false;
+    seen.add(node as object);
+    if (node instanceof Error) {
+      const err = node as Error & { code?: unknown; details?: unknown };
+      if (typeof err.message === "string" && err.message.indexOf(needle) !== -1) return true;
+      if (typeof err.name === "string" && err.name.indexOf(needle) !== -1) return true;
+      if (ledgerContains(err.code, needle, seen)) return true;
+      if (ledgerContains(err.details, needle, seen)) return true;
+      return false;
+    }
+    if (Array.isArray(node)) {
+      for (const v of node) if (ledgerContains(v, needle, seen)) return true;
+      return false;
+    }
+    for (const k of Object.keys(node as Record<string, unknown>)) {
+      if (k.indexOf(needle) !== -1) return true;
+      if (ledgerContains((node as Record<string, unknown>)[k], needle, seen)) return true;
+    }
+    return false;
+  };
+
+  /**
+   * CHANNEL A reader — straight from Jest, at assertion time.
+   *
+   * `mock.calls` is per-spy, so a naive flatMap would group all `log` calls
+   * before all `warn` calls and disagree with channel B's chronological order
+   * for benign reasons. Jest also records `mock.invocationCallOrder`, a global
+   * monotonic counter per call, so true ordering is recovered from Jest's OWN
+   * data — not by consulting channel B, which would make A derived from B.
+   */
+  const ledgerEntries = (): TranscriptEntry[] =>
+    CHANNEL_A_SINKS.flatMap((m) => {
+      const spy = spies.get(m);
+      const calls = (spy?.mock.calls ?? []) as unknown[][];
+      const order = (spy?.mock.invocationCallOrder ?? []) as number[];
+      return calls.map((args, i) => ({ sink: m, args, seq: order[i] ?? i }));
+    })
+      .sort((x, y) => (x as { seq: number }).seq - (y as { seq: number }).seq)
+      .map(({ sink, args }) => ({ sink, args }));
+
+  const labelsFor = (
+    args: readonly unknown[],
+    walk: (n: unknown, needle: string) => boolean,
+    opts: { allowIntegrityRunId?: boolean }
+  ): string[] => {
+    const found: string[] = [];
+    for (const [label, get] of SENSITIVE_LOG_CANARIES) {
+      const value = get();
+      if (opts.allowIntegrityRunId && value === C.runId) continue;
+      if (walk(args, value)) found.push(label);
+    }
+    return found;
+  };
+
+  return {
+    install() {
+      // Spies are installed for the UNION, so removing a sink from one channel
+      // does not stop the other channel from seeing it — it makes them disagree.
+      for (const m of ALL_INSTALLED_SINKS) {
+        const impl = (...args: unknown[]) => {
+          totalIngress += 1;
+          if (!(CHANNEL_B_SINKS as readonly string[]).includes(m)) return;
+          transcript.push(Object.freeze({ sink: m, args: Object.freeze(args.map((a) => snapshot(a))) }));
+        };
+        installedImpls.set(m, impl);
+        spies.set(m, jest.spyOn(console, m as (typeof CHANNEL_A_SINKS)[number]).mockImplementation(impl));
+      }
+    },
+    uninstall() {
+      for (const s of spies.values()) s.mockRestore();
+      spies.clear();
+      installedImpls.clear();
+    },
+    /** Resets BOTH channels together, so they never drift for benign reasons. */
+    clear() {
+      transcript = [];
+      for (const s of spies.values()) s.mockClear();
+    },
+
+    /** The capture must still BE the capture. One loudness layer, not the proof. */
+    assertSpyIdentity() {
+      for (const m of ALL_INSTALLED_SINKS) {
+        const spy = spies.get(m);
+        expect(spy).toBeDefined();
+        expect(spy!.getMockImplementation()).toBe(installedImpls.get(m));
+      }
+    },
+
+    /**
+     * CROSS-CHANNEL FIDELITY. Compares shape AND security-relevant content:
+     * for every call, both channels must find the SAME set of canaries. An
+     * ingress sanitiser makes B's set smaller than A's; a ledger rewrite makes
+     * A's smaller than B's. Either way this diverges and fails loudly.
+     */
+    assertChannelFidelity(opts: { allowIntegrityRunId?: boolean } = {}) {
+      fidelityChecks += 1;
+      const a = ledgerEntries();
+      const b = transcript;
+      expect({ channel: "A", count: a.length }).toEqual({ channel: "A", count: b.length });
+      for (let i = 0; i < a.length; i += 1) {
+        expect({ i, sink: a[i].sink, arity: a[i].args.length })
+          .toEqual({ i, sink: b[i].sink, arity: b[i].args.length });
+        for (let j = 0; j < a[i].args.length; j += 1) {
+          const av = a[i].args[j];
+          const bv = b[i].args[j];
+          if (av === null || typeof av !== "object") {
+            expect({ i, j, value: av }).toEqual({ i, j, value: bv });
+          }
+        }
+        const la = labelsFor(a[i].args, (n, needle) => ledgerContains(n, needle), opts);
+        const lb = labelsFor(b[i].args, (n, needle) => snapshotContains(n, needle), opts);
+        expect({ i, channel: "A", canaries: la }).toEqual({ i, channel: "A", canaries: lb });
+      }
+    },
+
+    /** CHANNEL A's independent deny-set scan. */
+    assertNoSensitiveCanariesRawLedger(opts: { allowIntegrityRunId?: boolean } = {}) {
+      const leaked = new Set<string>();
+      const entries = ledgerEntries();
+      for (const e of entries) for (const l of labelsFor(e.args, (n, needle) => ledgerContains(n, needle), opts)) leaked.add(l);
+      expect({ channel: "RAW_LEDGER", leaked: [...leaked] }).toEqual({ channel: "RAW_LEDGER", leaked: [] });
+      return entries.length;
+    },
+
+    /** CHANNEL B's independent deny-set scan. */
+    assertNoSensitiveCanariesSnapshotTranscript(opts: { allowIntegrityRunId?: boolean } = {}) {
+      const leaked = new Set<string>();
+      for (const e of transcript) for (const l of labelsFor(e.args, (n, needle) => snapshotContains(n, needle), opts)) leaked.add(l);
+      expect({ channel: "SNAPSHOT", leaked: [...leaked] }).toEqual({ channel: "SNAPSHOT", leaked: [] });
+      return transcript.length;
+    },
+
+    /** Back-compat wrapper: BOTH channels, never one. */
+    assertNoSensitiveCanaries(opts: { allowIntegrityRunId?: boolean } = {}) {
+      const n = this.assertNoSensitiveCanariesSnapshotTranscript(opts);
+      this.assertNoSensitiveCanariesRawLedger(opts);
+      return n;
+    },
+
+    /**
+     * THE ONE MANDATORY FINALIZER. `afterEach` calls this and nothing else, so
+     * there is a single thing to register and a single thing to delete — and a
+     * structural backstop asserts it is registered.
+     */
+    finalize(opts: { allowIntegrityRunId?: boolean; skipContent?: boolean } = {}) {
+      finalizeRuns += 1;
+      this.assertSpyIdentity();
+      if (opts.skipContent) return;
+      this.assertChannelFidelity(opts);
+      this.assertNoSensitiveCanariesRawLedger(opts);
+      this.assertNoSensitiveCanariesSnapshotTranscript(opts);
+    },
+
+    assertLoggingOccurred(anchor: string) {
+      expect(transcript.length).toBeGreaterThan(0);
+      const hit = transcript.some((e) => e.args.some((a) => typeof a === "string" && a.includes(anchor)));
+      expect(hit).toBe(true);
+    },
+
+    channelASinks: (): string[] => [...CHANNEL_A_SINKS],
+    channelBSinks: (): string[] => [...CHANNEL_B_SINKS],
+    size: () => transcript.length,
+    ledgerSize: () => ledgerEntries().length,
+    frozenEntries: (): readonly TranscriptEntry[] => Object.freeze(transcript.slice()),
+    stats: () => ({ totalIngress, finalizeRuns, fidelityChecks }),
+  };
+};
+
+
+const governanceLogCapture = createGovernanceLogCapture();
+
+beforeAll(() => { governanceLogCapture.install(); });
+afterAll(() => { governanceLogCapture.uninstall(); });
+
+const clearCapture = () => governanceLogCapture.clear();
+const output = () => governanceLogCapture.frozenEntries().map((e) => serialize(e.args as unknown[])).join("\n");
+
+
+/**
+ * Phase FIRST-ADMIN-C11 (R7 P1-a/P1-b) — REDACTION IS ENFORCED AUTOMATICALLY.
+ *
+ * C10 required each branch to CALL the shared assertion, and proved compliance
+ * by looking for the call as a substring of the test body. A reviewer defeated
+ * that twice: commenting the call out satisfied the substring check (and the
+ * sibling scan skipped comment lines, so one `//` blinded both), and a
+ * same-named decoy test earlier in the file redirected the per-branch lookup.
+ * A real uid+email leak rode in behind each, green.
+ *
+ * So the assertion is no longer something a test opts INTO. It runs after every
+ * test in this file against whatever reached the log sink. A new branch is
+ * covered the moment it is written, and the only way out is one of the two
+ * declared exemptions below — set in the test body, visible in review, and
+ * itself asserted.
+ */
+type RedactionExemption =
+  | "none"
+  /** The capture-fidelity tests deliberately log a canary to prove the spy works. */
+  | "capture-fidelity"
+  /** The workspace-integrity 404 path may retain the run id, and nothing else. */
+  | "integrity-run-id";
+let redactionExemption: RedactionExemption = "none";
+/**
+ * Counts assertions the afterEach actually PERFORMED. Without it the
+ * enforcement hook is itself unguarded: short-circuiting it (`if (true) return`)
+ * silently disables redaction checking for every branch in this file and no
+ * test notices — the same defect as the substring guard it replaced, one level
+ * further in.
+ */
+let redactionAssertionsRun = 0;
+/**
+ * Total REAL SINK CALLS the hook examined — console invocations recorded by the
+ * spy, not characters of some string. C11 counted characters, which any
+ * non-empty constant satisfies; a call count cannot be manufactured without
+ * actually calling console.
+ */
+let redactionSinkCallsInspected = 0;
+
+function docHandle(collection: string, id: string) {
+  const rec = existingDocs[`${collection}/${id}`];
+  return {
+    id,
+    get: async () => ({
+      exists: Boolean(rec),
+      id,
+      data: () => (rec ? {
+        userId: rec.userId,
+        uid: rec.userId,
+        userEmail: C.ownerEmail,
+        question: C.question,
+        governanceStatus: prevStatus,
+        // Present on EVERY fixture document, including the cross-tenant one, so
+        // a reason-text leak is reachable on every branch that reads a run.
+        governanceReasons: [C.reason],
+        createdAt: { toMillis: () => NOW },
+      } : undefined),
+    }),
+    set: async (patch: Record<string, unknown>) => { writes.push({ kind: "set", collection, id, patch }); },
+    update: async (patch: Record<string, unknown>) => { writes.push({ kind: "update", collection, id, patch }); },
+    collection: (sub: string) => ({
+      add: async (patch: Record<string, unknown>) => { writes.push({ kind: "add", collection: `${collection}/${id}/${sub}`, id: "auto", patch }); },
+      orderBy: () => ({ limit: () => ({ get: async () => ({ docs: [] }) }) }),
+      get: async () => ({ docs: [] }),
+    }),
+  };
+}
+function collectionHandle(name: string) {
+  const q: Record<string, unknown> = {};
+  for (const m of ["where", "orderBy", "limit", "select"]) q[m] = () => q;
+  q.get = async () => ({ docs: [], empty: true, size: 0 });
+  return Object.assign(q, {
+    doc: (id: string) => docHandle(name, id),
+    /**
+     * Phase FIRST-ADMIN-C8. `writeAuditEvent` is NO LONGER MOCKED, so the real
+     * writer runs against this double and its own logging is captured. The C7
+     * suite stubbed `@/lib/governance/auditLog` — the module holding the actual
+     * leak — so the proof examined everything except the thing that leaked.
+     */
+    add: async (patch: Record<string, unknown>) => {
+      if (auditWriteFails) {
+        // Firestore errors carry the document path they failed on, which is how
+        // a cross-tenant identifier reaches the log by a route no grep for
+        // `event.runId` would find. Shaped like the real thing.
+        /**
+         * Phase FIRST-ADMIN-C10 (R6 P2). The previous fixture was an `Error`
+         * with only `code` added — and `message`/`name` are NON-enumerable on
+         * Error, so the only own enumerable property was the one the code
+         * already logs deliberately. A mutation spreading the error (`...err`)
+         * therefore leaked nothing and survived. `firebase-admin` throws a
+         * grpc-js ServiceError, whose `details` repeats the document path as an
+         * ENUMERABLE property. Modelled properly, a spread now leaks.
+         */
+        const path = `projects/p/databases/(default)/documents/admin_audit_logs/${C.runId}`;
+        throw Object.assign(new Error(`5 NOT_FOUND: no entity to update: app: ${path}`), {
+          code: 5,
+          details: `no entity to update: app: ${path}`,
+          metadata: { internalRepr: new Map(), options: {} },
+          owner: C.ownerAUid,
+        });
+      }
+      auditRows.push(patch);
+      return { id: "audit-row-id" };
+    },
+  });
+}
+
+jest.mock("@/lib/firebase/admin", () => ({
+  adminAuth: {
+    verifyIdToken: async () => tokenClaims,
+    verifySessionCookie: async () => tokenClaims,
+    getUser: async () => liveRecord,
+  },
+  adminDb: { collection: (n: string) => collectionHandle(n) },
+  firebaseAdmin: { firestore: { Timestamp: { now: () => "TS", fromDate: () => "TS" }, FieldValue: { serverTimestamp: () => "TS" } } },
+}));
+jest.mock("@/lib/admin/entitlements", () => ({ getEffectiveEntitlements: async () => ({ planId }) }));
+jest.mock("@/lib/governance/reviewerFields", () => ({ parseGovernanceReviewerFor: () => reviewerFor }));
+jest.mock("@/lib/workspaces/runWorkspaceIntegrity", () => ({
+  validateRunWorkspaceAssociation: async () => ({
+    classification: integrityClassification,
+    reason: integrityClassification === "invalid" ? "CANARY-INTEGRITY-REASON" : undefined,
+  }),
+}));
+
+import { NextRequest } from "next/server";
+
+const post = async (collection: Coll, runId: string) => {
+  const { POST } = await import("@/app/api/governance/review/route");
+  return POST(new NextRequest("http://localhost/api/governance/review", {
+    method: "POST",
+    headers: { authorization: "Bearer t", "content-type": "application/json" },
+    body: JSON.stringify({ runId, collection, action: "approved", comment: "reviewed" }),
+  }));
+};
+
+beforeEach(() => {
+  process.env.ADMIN_EMAILS = "";
+  process.env.GOVERNANCE_ADMIN_EMAILS = "";
+  planId = "full";
+  reviewerFor = [C.ownerAUid];
+  prevStatus = "blocked";
+  integrityClassification = "valid";
+  tokenClaims = { uid: C.reviewerUid, email: C.callerEmail, email_verified: true };
+  liveRecord = { email: C.callerEmail, emailVerified: true, disabled: false };
+  existingDocs = {};
+  for (const c of COLLECTIONS) {
+    existingDocs[`${c}/${C.runId}`] = { userId: C.ownerAUid };
+    existingDocs[`${c}/other-run`] = { userId: C.ownerBUid };
+  }
+  clearCapture();
+  auditRows = [];
+  writes = [];
+  auditWriteFails = false;
+  redactionExemption = "none";
+});
+
+/**
+ * Phase FIRST-ADMIN-C15 (R11 P2) — ONE MANDATORY FINALIZER.
+ *
+ * C14 spread enforcement over several optional calls, and R11 showed the
+ * integrity call could simply be deleted from this hook with the suite still
+ * green. There is now exactly one thing registered here and exactly one thing
+ * to delete — and `LIFECYCLE BACKSTOP` below asserts that it IS registered.
+ *
+ * Spy identity is checked even for content-exempt tests: a test that swaps the
+ * capture must be caught whether or not it opted out of the deny-set scan.
+ */
+afterEach(() => {
+  const sizeBefore = governanceLogCapture.size();
+  governanceLogCapture.finalize({
+    allowIntegrityRunId: redactionExemption === "integrity-run-id",
+    skipContent: redactionExemption === "capture-fidelity",
+  });
+  if (redactionExemption === "capture-fidelity") return;
+  redactionAssertionsRun += 1;
+  redactionSinkCallsInspected += sizeBefore;
+});
+
+describe("ANCHOR 0 — every canary is REACHABLE in the data the route reads", () => {
+  /**
+   * Phase FIRST-ADMIN-C9. A vacuity attack proved this necessary: emptying
+   * `governanceReasons` in the fixture left every "does not log the reason
+   * text" assertion green on every branch, because the value no longer existed
+   * anywhere for the route to leak. An absence assertion about a value the
+   * system never holds cannot fail.
+   *
+   * This pins that each canary is genuinely present in the state the route
+   * reads, so the deny-set assertions are about values that could actually
+   * escape.
+   */
+  it("the reviewed run carries the owner, reason, question and owner email", async () => {
+    const data = (await collectionHandle("runs").doc(C.runId).get()).data() as Record<string, unknown>;
+    expect(data.userId).toBe(C.ownerAUid);
+    expect(data.governanceReasons).toContain(C.reason);
+    expect(data.question).toBe(C.question);
+    expect(data.userEmail).toBe(C.ownerEmail);
+  });
+
+  it("the cross-tenant run carries OWNER_B and its own reason text", async () => {
+    const data = (await collectionHandle("runs").doc("other-run").get()).data() as Record<string, unknown>;
+    expect(data.userId).toBe(C.ownerBUid);
+    expect(data.governanceReasons).toContain(C.reason);
+  });
+
+  it("the caller identity carries the reviewer uid, email and domain", () => {
+    expect(tokenClaims.uid).toBe(C.reviewerUid);
+    expect(tokenClaims.email).toBe(C.callerEmail);
+    expect(C.callerEmail).toContain(C.callerDomain);
+    expect(C.allowlistEmail).toContain("canary-allowlist-domain-294fb4.example");
+  });
+
+  it("every value in the shared deny-set is a distinct, non-empty canary", () => {
+    const values = SENSITIVE_LOG_CANARIES.map(([, v]) => v());
+    expect(values).toHaveLength(new Set(values).size);
+    for (const v of values) expect(v.length).toBeGreaterThan(8);
+  });
+});
+
+describe("ANCHOR 1 — the capture reproduces what the sink actually received", () => {
+  /**
+   * Without this, every absence assertion below is satisfied by a capture that
+   * silently records nothing. It covers each console method `logger` uses, and
+   * an object argument, because that is how `logger` passes structured data.
+   */
+  it.each(CONSOLE_METHODS)("console.%s output is recovered verbatim", (method) => {
+    redactionExemption = "capture-fidelity"; // deliberately emits a canary
+    clearCapture();
+    (console[method] as (...a: unknown[]) => void)(`probe-${method}-${C.runId}`);
+    expect(output()).toContain(`probe-${method}-${C.runId}`);
+  });
+
+  it("a canary nested inside an object argument is recovered", () => {
+    redactionExemption = "capture-fidelity"; // deliberately emits a canary
+    clearCapture();
+    console.log("probe", { deep: { nested: [{ value: C.ownerBUid }] } });
+    expect(output()).toContain(C.ownerBUid);
+  });
+
+  it("the capture starts empty for each test", () => {
+    expect(governanceLogCapture.size()).toBe(0);
+  });
+});
+
+describe.each(COLLECTIONS)("GOVERNANCE HOT PATH — collection=%s", (collection) => {
+  /** Runs the authorized blocked→approved override, the most log-heavy path. */
+  const run = async () => {
+    const res = await post(collection, C.runId);
+    expect(res.status).toBe(200); // the path really completed
+    return output();
+  };
+
+  it("ANCHOR 2 — the request reached the logging path, and its content survived", async () => {
+    const logs = await run();
+    // The override line exists: absence assertions below are about a path that ran.
+    expect(logs).toContain("[governance/review] Override:");
+    // Its operational content is intact — this cannot be satisfied by logging nothing.
+    expect(logs).toContain("prevStatus=blocked");
+    // And the visibility resolver's line ran too, with its counts.
+    expect(logs).toContain("[governance/queue] User:");
+    expect(logs).toContain("plan: full");
+    // THE REAL AUDIT WRITER EXECUTED on this request — not a stub. Both its
+    // log lines are present, and it persisted exactly one identified row.
+    expect(logs).toContain("[governance/audit] Writing audit event:");
+    expect(logs).toContain("[governance/audit] Event written to admin_audit_logs:");
+    expect(auditRows).toHaveLength(1);
+    // The identified data lives in the ROW, which is the whole argument for
+    // keeping it out of the log. If this stopped being true, redacting the log
+    // would be destroying evidence rather than relocating it.
+    expect(auditRows[0]).toMatchObject({ runId: C.runId, byUid: C.reviewerUid, runOwnerUid: C.ownerAUid });
+  });
+
+  it("never writes any sensitive canary to the log sink", async () => {
+    assertNoSensitiveGovernanceCanaries(await run());
+  });
+
+  it("a governance status may appear only on a line carrying no identifier", async () => {
+    /**
+     * Status is deliberately NOT redacted: "a blocked run was approved" is the
+     * operational content of the override line. It stops being tenant data
+     * precisely because no identifier accompanies it, so that — not absence —
+     * is the property worth pinning.
+     */
+    const logs = await run();
+    const identifiers = [C.reviewerUid, C.ownerAUid, C.ownerBUid, C.runId, C.callerEmail, C.ownerEmail];
+    const statusLines = logs.split("\n").filter((l) => /blocked|approved|needs_review/.test(l));
+    expect(statusLines.length).toBeGreaterThan(0); // the rule is not vacuous
+    for (const line of statusLines) {
+      for (const id of identifiers) expect(line).not.toContain(id);
+    }
+  });
+});
+
+describe("the privileged allowlist is logged as shape, never as membership", () => {
+  /**
+   * VACUITY NOTE (self-composed string). A first version of this test built the
+   * log line itself — `console.log(\`...${governanceAdminListShapeForLog()}\`)` —
+   * and then asserted about its own output. That proves nothing about the
+   * route: had the route been changed to log the raw list, the test would still
+   * have passed, because the test was never reading the route.
+   *
+   * So the assertions below are on the VALUE THAT REACHES THE LOG — the
+   * function's actual return — and a separate check derives from the route's
+   * own source that this value is the only thing it interpolates. The second
+   * check is a source check and is worth exactly what a source check is worth;
+   * it is here because driving the full queue route is out of C7's scope, and
+   * it is labelled rather than dressed up as behavioural proof.
+   */
+  const QUEUE_SRC = readFileSync("app/api/governance/queue/route.ts", "utf8");
+
+  it("the value that reaches the log carries counts, never addresses", async () => {
+    process.env.GOVERNANCE_ADMIN_EMAILS = C.allowlistEmail;
+    jest.resetModules();
+    const { governanceAdminListShapeForLog } = await import("@/lib/admin/config");
+    const shape = governanceAdminListShapeForLog();
+    // ANCHOR: the list really was parsed — a function returning "" would pass
+    // every absence assertion below.
+    expect(shape).toContain("configured=1");
+    expect(shape).toContain("valid=");
+    expect(shape).not.toContain(C.allowlistEmail);
+    expect(shape).not.toContain("canary-allowlist-domain-294fb4.example");
+    expect(shape).not.toContain("@");
+  });
+
+  it("SOURCE CHECK: the queue route's governance-config line interpolates only that shape", () => {
+    const line = QUEUE_SRC.split("\n").find((l) => l.includes("[governance] governance-config"));
+    expect(line).toBeDefined();
+    // Exactly one interpolation, and it is the shape function.
+    expect([...line!.matchAll(/\$\{([^}]*)\}/g)].map((m) => m[1].trim()))
+      .toEqual(["governanceAdminListShapeForLog()"]);
+  });
+});
+
+describe("DELIBERATE DIVERGENCE — the integrity-failure path keeps its run id", () => {
+  /**
+   * This is not an oversight, and it is pinned so that a future blanket
+   * "redact all run ids" change has to re-make the decision consciously rather
+   * than silently destroying the only trace of a data-integrity defect.
+   *
+   * The override line can drop its run id because `writeAuditEvent` records the
+   * same event, identified, in an access-controlled collection. This path has
+   * no such record: it returns 404 and writes nothing. Redacting here would
+   * leave an integrity failure with no way to find the affected run.
+   */
+  it("logs the run id on workspace integrity failure, because nothing else records it", async () => {
+    // THE ONE justified exemption. Named, not an arbitrary allowlist.
+    redactionExemption = "integrity-run-id";
+    integrityClassification = "invalid";
+    const res = await post("runs", C.runId);
+    expect(res.status).toBe(404);
+    const logs = output();
+    expect(logs).toContain("workspace_run_integrity_failed");
+    expect(logs).toContain(C.runId);
+
+    /**
+     * THE PREMISE, PINNED (R6 P1-2). The run id is allowed here ONLY because
+     * this path writes nothing — no governance write, no governanceEvents
+     * write, no audit event — so the log line is the sole trace of a malformed
+     * record. C9 asserted the exception and not its justification, so adding a
+     * `writeAuditEvent` to this branch survived 2779 tests. If any of these
+     * becomes non-zero, the licence for the run id is gone.
+     */
+    expect(writes).toEqual([]);
+    expect(auditRows).toEqual([]);
+
+    /**
+     * NARROW ALLOWLIST, not a weak subset. C8 checked two canaries here and
+     * three leak mutations survived — reviewer uid, owner uid and reason text
+     * could all be added to this log with the suite green. That is the branch
+     * where scope creep is most likely precisely BECAUSE it is already licensed
+     * to carry one identifier. Everything except the run id is still forbidden.
+     */
+    assertNoSensitiveGovernanceCanaries(logs, { allowIntegrityRunId: true });
+  });
+});
+
+describe.each(COLLECTIONS)("OWNER_B IS REACHABLE — cross-tenant denial, collection=%s", (collection) => {
+  /**
+   * Phase FIRST-ADMIN-C8 (R4 P2-1). The C7 canary list asserted OWNER_B's uid
+   * never appears in the logs — on a request where no production variable
+   * could ever hold it. `other-run` was seeded and never posted to, so the row
+   * was unfalsifiable: a maximal leak of the whole document and the whole
+   * resolved identity failed eight of the nine canary rows and left that one
+   * green.
+   *
+   * The fix is not a stronger assertion, it is a request that actually reaches
+   * the branch: posting to a run OWNED BY OWNER_B, which the reviewer's scope
+   * excludes. Now `ownerUid` genuinely holds OWNER_B at the 403.
+   */
+  it("SELF-VALIDATION: the target exists and belongs to OWNER_B, not to the reviewer's owner", async () => {
+    // Derived from the fixture the route will actually read.
+    expect(existingDocs[`${collection}/other-run`]).toEqual({ userId: C.ownerBUid });
+    expect(C.ownerBUid).not.toBe(C.ownerAUid);
+    expect(reviewerFor).toEqual([C.ownerAUid]);
+    const snap = await collectionHandle(collection).doc("other-run").get();
+    expect(snap.exists).toBe(true);
+    expect((snap.data() as { userId: string }).userId).toBe(C.ownerBUid);
+  });
+
+  it("the branch is genuinely reached: a foreign run is denied 403 and never written", async () => {
+    const res = await post(collection, "other-run");
+    expect(res.status).toBe(403);
+    expect(auditRows).toEqual([]);
+  });
+
+  it("the 403 RESPONSE discloses nothing about the tenant it refused", async () => {
+    /**
+     * Found by C8's own mutation battery: echoing `ownerUid` into the denial
+     * body survived every test. A log leak is read by an operator; this one is
+     * read by the caller who was just refused, so a foreign owner's uid would
+     * be handed straight to the party that has no right to it.
+     */
+    const res = await post(collection, "other-run");
+    const body = JSON.stringify(await res.json());
+    // ANCHOR: this is the real denial payload, not an empty object.
+    expect(body).toContain("forbidden");
+    expect(body).toContain("permission");
+    for (const canary of [C.ownerBUid, C.ownerAUid, C.reviewerUid, C.ownerEmail, C.question, "other-run"]) {
+      expect(body).not.toContain(canary);
+    }
+  });
+
+  it("ANCHOR: approved shape logging still occurs on the denial path", async () => {
+    await post(collection, "other-run");
+    // Without this the absence assertion below is satisfied by a silent request.
+    expect(output()).toContain("[governance/queue] User:");
+    expect(output()).toContain("plan: full");
+  });
+
+  it("writes no sensitive canary to the log sink on the denial path", async () => {
+    await post(collection, "other-run");
+    assertNoSensitiveGovernanceCanaries(output());
+  });
+});
+
+describe("admin_global BRANCH — the one that first executes at enrollment", () => {
+  /**
+   * Phase FIRST-ADMIN-C8 (R4 P2-2). C7 proved redaction on the `assigners`
+   * branch only, then generalised to "the governance hot path". Four sibling
+   * branches of the same edited function accepted arbitrary leaks with the
+   * whole suite green — including this one, which does not execute AT ALL
+   * until a GOVERNANCE_ADMIN is enrolled. Covering it after enrollment would
+   * be covering it after the risk.
+   *
+   * The identity is constructed from a test-local env value and the mocked
+   * Auth record. Production allowlists are untouched, and the snapshot at the
+   * top of this file restores the variable.
+   */
+  const asGovernanceAdmin = () => {
+    process.env.GOVERNANCE_ADMIN_EMAILS = C.allowlistEmail;
+    tokenClaims = { uid: C.reviewerUid, email: C.allowlistEmail, email_verified: true };
+    liveRecord = { email: C.allowlistEmail, emailVerified: true, disabled: false };
+  };
+
+  it("SELF-VALIDATION: this identity really takes the admin_global branch", async () => {
+    asGovernanceAdmin();
+    const { resolveGovernanceVisibleUserIds } = await import("@/lib/governance/governanceVisibleUserIds");
+    const vis = await resolveGovernanceVisibleUserIds(C.reviewerUid);
+    // Not merely "authorized" — the specific branch, by its own contract:
+    // a null visible set removes the owner filter entirely.
+    expect(vis).toMatchObject({ ok: true, visibleUserIds: null, queueScope: "admin_global" });
+  });
+
+  it("ANCHOR: the branch logs its approved scope decision", async () => {
+    asGovernanceAdmin();
+    clearCapture();
+    await post("runs", "other-run");
+    expect(output()).toContain("[governance/queue] Admin: global access");
+  });
+
+  it("a governance admin may review a run owned by any tenant", async () => {
+    asGovernanceAdmin();
+    // Proves the branch is load-bearing: OWNER_B's run is now reviewable,
+    // which is exactly why its logging matters.
+    const res = await post("runs", "other-run");
+    expect(res.status).toBe(200);
+    expect(auditRows).toHaveLength(1);
+  });
+
+  it("writes no sensitive canary to the log sink", async () => {
+    asGovernanceAdmin();
+    clearCapture();
+    await post("runs", "other-run");
+    assertNoSensitiveGovernanceCanaries(output());
+  });
+});
+
+describe("SIBLING SCOPE BRANCHES — every remaining logging branch of the resolver", () => {
+  /**
+   * Phase FIRST-ADMIN-C8 (R4 P2-2, "branch-shaped vacuity"). Enumerated from
+   * lib/governance/governanceVisibleUserIds.ts: admin_global (above),
+   * plan_required, no_assigners, the >30 truncation warning, and the assigners
+   * decision (covered by the main suite). Each is exercised here with an
+   * anchor proving the branch ran, then checked for identifiers.
+   */
+
+
+  it("plan_required: logs the decision without the caller's identity", async () => {
+    planId = "lite";
+    const res = await post("runs", C.runId);
+    expect(res.status).toBe(403);
+    expect(output()).toContain("Scoping decision: plan_required");   // ANCHOR
+    assertNoSensitiveGovernanceCanaries(output());
+  });
+
+  it("no_assigners: logs the empty scope without the caller's identity", async () => {
+    reviewerFor = [];
+    const res = await post("runs", C.runId);
+    expect(res.status).toBe(403);
+    expect(output()).toContain("no assigners (empty queue scope)");  // ANCHOR
+    assertNoSensitiveGovernanceCanaries(output());
+  });
+
+  it("truncation: warns with a count and never the owner list", async () => {
+    // 31 assigners forces the >30 branch; OWNER_B is among them, so a leak of
+    // the list would be visible.
+    reviewerFor = [C.ownerBUid, ...Array.from({ length: 30 }, (_, i) => `assigner-${i}`)];
+    await post("runs", "other-run");
+    expect(output()).toContain("Truncated visible owner set to 30");  // ANCHOR
+    expect(output()).toContain("owner(s)");
+    assertNoSensitiveGovernanceCanaries(output());
+    expect(output()).not.toContain("assigner-0");
+  });
+});
+
+describe("the audit writer's FAILURE path does not leak the record it failed on", () => {
+  /**
+   * Phase FIRST-ADMIN-C8. `writeAuditEvent` swallows its own errors and logged
+   * the raw one. A Firestore error carries the document path it failed on, so
+   * the same cross-tenant identifier redacted from the success path reached the
+   * log through the catch block — by a route no grep for `event.runId` finds.
+   *
+   * This branch never fires in ordinary tests (the double always succeeds), so
+   * a mutation restoring the raw error survived the entire suite until this
+   * existed. The failure is injected deliberately.
+   */
+  it("SELF-VALIDATION: every identity field of the event is covered by the shared deny-set", () => {
+    // Without this, "the shared set covers the event object" is an assumption.
+    const denied = new Set(SENSITIVE_LOG_CANARIES.map(([, v]) => v()));
+    for (const [field, get] of Object.entries(AUDIT_EVENT_IDENTITY_FIELDS)) {
+      expect({ field, covered: denied.has(get()) }).toEqual({ field, covered: true });
+    }
+  });
+
+  it("SELF-VALIDATION: the injected error carries the path in BOTH message and an enumerable field", async () => {
+    auditWriteFails = true;
+    // If the fixture stopped embedding the identifier, or stopped making it
+    // enumerable, the absence assertions would pass for the wrong reason.
+    let thrown: unknown;
+    auditWriteFails = true;
+    try { await collectionHandle("admin_audit_logs").add({}); } catch (e) { thrown = e; }
+    expect((thrown as Error).message).toContain(C.runId);
+    expect(Object.keys(thrown as object)).toEqual(expect.arrayContaining(["code", "details"]));
+    expect(JSON.stringify({ ...(thrown as object) })).toContain(C.runId);
+  });
+
+  it("logs the failure as shape, never the raw error", async () => {
+    auditWriteFails = true;
+    const res = await post("runs", C.runId);
+    // ANCHOR: the request still succeeded (the writer swallows its error), and
+    // the failure branch genuinely executed.
+    expect(res.status).toBe(200);
+    expect(output()).toContain("[governance/audit] FAILED to write audit event");
+    // ANCHOR: useful operational content survived.
+    expect(output()).toContain("errorCode");
+    expect(auditRows).toEqual([]);
+
+    /**
+     * R6 P1-1: this branch asserted three hand-picked values while every
+     * neighbour used the shared set — and the catch block holds the WHOLE
+     * event object, so byUid / byEmail / runOwnerUid / runOwnerEmail /
+     * question all leaked with the suite green. Under `admin_global` that
+     * event describes another tenant's run. Same assertion as every branch now.
+     */
+    assertNoSensitiveGovernanceCanaries(output());
+    // Plus the error's own path-bearing payload, which is not a canary value.
+    expect(output()).not.toContain("admin_audit_logs/");
+    expect(output()).not.toContain("NOT_FOUND: no entity");
+  });
+});
+
+describe("DENY-SET INTEGRITY — every declared canary is load-bearing", () => {
+  /**
+   * Phase FIRST-ADMIN-C11.
+   *
+   * The per-branch "does this test call the shared helper?" checks that used to
+   * live here are GONE. They asserted that a call appeared as a substring of a
+   * test body, and a reviewer defeated them twice — by commenting the call out
+   * (which also blinded the sibling scan, since that skipped comment lines) and
+   * by adding a same-named decoy test earlier in the file. A real uid+email
+   * leak rode in behind each, green.
+   *
+   * Enforcement is now the `afterEach` above: it runs against the real captured
+   * sink after every test in this file, so a branch cannot forget it and a
+   * comment cannot silence it. What remains worth testing is the deny-set
+   * itself — R7 found four of its twelve entries could be deleted silently,
+   * and two others were protected only by accident.
+   */
+  const EXPECTED_CANARIES = [
+    "the reviewer's uid",
+    "the run owner's uid",
+    "a foreign tenant's uid",
+    "the reviewed run's id",
+    "a foreign run's id",
+    "the run's governance reason text",
+    "the run's question text",
+    "the caller's email address",
+    "the caller's email domain",
+    "the run owner's email address",
+    "the privileged allowlist address",
+    "the privileged allowlist domain",
+  ];
+
+  it("the deny-set contains exactly the declared entries — none can be dropped silently", () => {
+    expect(SENSITIVE_LOG_CANARIES.map(([label]) => label)).toEqual(EXPECTED_CANARIES);
+  });
+
+  it.each(EXPECTED_CANARIES)("%s is a distinct, non-empty, unmistakable value", (label) => {
+    const entry = SENSITIVE_LOG_CANARIES.find(([l]) => l === label);
+    expect(entry).toBeDefined();
+    const value = entry![1]();
+    expect(value.length).toBeGreaterThan(8);
+    expect(SENSITIVE_LOG_CANARIES.filter(([, g]) => g() === value)).toHaveLength(1);
+  });
+
+  it.each(EXPECTED_CANARIES)("a leak of %s fails the shared assertion", (label) => {
+    /**
+     * Each entry must be able to FAIL the assertion — R7 found only two were,
+     * and those two only because they happened to be hard-coded into the
+     * helper's own unit test.
+     */
+    redactionExemption = "capture-fidelity"; // asserting on strings, not on a sink
+    const value = SENSITIVE_LOG_CANARIES.find(([l]) => l === label)![1]();
+    expect(() => assertNoSensitiveGovernanceCanaries(`prefix ${value} suffix`)).toThrow();
+  });
+
+  it.each(EXPECTED_CANARIES)("the integrity exemption does NOT excuse %s", (label) => {
+    /**
+     * The exemption is a named boolean rather than an unbounded allow-list, but
+     * its implementation still decides WHICH value it excuses. Widening that to
+     * a second identity field must fail — R7 widened the old array to six and
+     * shipped a real leak green.
+     */
+    redactionExemption = "capture-fidelity";
+    const value = SENSITIVE_LOG_CANARIES.find(([l]) => l === label)![1]();
+    if (value === C.runId) {
+      expect(() => assertNoSensitiveGovernanceCanaries(`x ${value}`, { allowIntegrityRunId: true })).not.toThrow();
+      return;
+    }
+    expect(() => assertNoSensitiveGovernanceCanaries(`x ${value}`, { allowIntegrityRunId: true })).toThrow();
+  });
+
+  it("the shared assertion passes on genuinely clean output", () => {
+    redactionExemption = "capture-fidelity";
+    expect(() => assertNoSensitiveGovernanceCanaries("[governance/queue] plan: full, 3 owner(s)")).not.toThrow();
+  });
+
+  it("every audit-event identity field is covered by the deny-set", () => {
+    const denied = new Set(SENSITIVE_LOG_CANARIES.map(([, v]) => v()));
+    for (const [field, get] of Object.entries(AUDIT_EVENT_IDENTITY_FIELDS)) {
+      expect({ field, covered: denied.has(get()) }).toEqual({ field, covered: true });
+    }
+  });
+});
+
+describe("RECORDER FIDELITY — a zero-write assertion cannot pass on a dead recorder", () => {
+  /**
+   * The integrity exception is licensed by "this path writes nothing", asserted
+   * as `expect(writes).toEqual([])`. Unwire the double's `set` and that passes
+   * for the wrong reason. So the recorder is pinned on a path that DOES write.
+   */
+  it("records the governance write performed by an authorized review", async () => {
+    const res = await post("runs", C.runId);
+    expect(res.status).toBe(200);
+    const primary = writes.filter((w) => w.kind !== "add" && w.collection === "runs" && w.id === C.runId);
+    expect(primary).toHaveLength(1);
+    expect(primary[0].patch).toMatchObject({ governanceStatus: "approved" });
+    // and the sub-collection write, recorded with its full path
+    expect(writes.some((w) => w.collection === `runs/${C.runId}/governanceEvents`)).toBe(true);
+  });
+});
+
+describe("STRUCTURAL — governance modules use only sinks this suite captures", () => {
+  /**
+   * The capture patches console.log/warn/error/debug/info. `console.dir`,
+   * `console.trace`, `console.table` and `process.stdout.write` would bypass
+   * it. Rather than claim universal interception, pin that the modules on this
+   * request path do not use them — so the claim and the reality stay together.
+   *
+   * WHAT THIS LIST DOES **NOT** MEAN — Phase FIRST-ADMIN-C16 (R12 P2).
+   * Naming a module here asserts ONLY "this file contains no uncaptured sink
+   * token". It does NOT assert branch coverage. The accurate disposition of
+   * `lib/governance/auditLog.ts`'s raw-`runId` error sites is enumerated from
+   * source and asserted in AUDIT LOG SITE DISPOSITION below — C15 stated here
+   * that NO test reaches them and that every caller mocks the module. Both were
+   * false: four of the five execute, driven by lib-level specs that import the
+   * real module.
+   */
+  const MODULES = [
+    "app/api/governance/review/route.ts",
+    "lib/governance/governanceVisibleUserIds.ts",
+    "lib/governance/auditLog.ts",
+    "lib/logger.ts",
+  ];
+
+  it("ANCHOR: the modules were read and do log", () => {
+    for (const m of MODULES) expect(readFileSync(m, "utf8")).toMatch(/console\.|logger\./);
+  });
+
+  it.each(MODULES)("%s uses no uncaptured output sink", (mod) => {
+    const src = readFileSync(mod, "utf8");
+    for (const sink of ["console.dir", "console.trace", "console.table", "console.group", "process.stdout.write", "process.stderr.write"]) {
+      expect({ mod, sink, used: src.includes(sink) }).toEqual({ mod, sink, used: false });
+    }
+  });
+});
+
+describe("ZZ ENFORCEMENT LIVENESS — the automatic check actually ran", () => {
+  /**
+   * Runs last. Every preceding test either performed the shared assertion in
+   * afterEach or declared a capture-fidelity exemption. If the hook were
+   * disabled the counter would not have moved, and redaction would be
+   * unenforced across this whole file with every test still green.
+   */
+  it("the afterEach performed the shared assertion for the bulk of this suite", () => {
+    expect(redactionAssertionsRun).toBeGreaterThan(40);
+  });
+
+  it("and it examined REAL sink calls, which no constant can manufacture", () => {
+    // Driving these routes produces hundreds of console invocations. A hook
+    // pointed at a filler string would leave this at zero.
+    expect(redactionSinkCallsInspected).toBeGreaterThan(100);
+  });
+});
+
+describe("IMMUTABLE TRANSCRIPT — the C13 ledger attacks all fail now", () => {
+  /**
+   * Phase FIRST-ADMIN-C14 (R10 P1-1). Each test below reproduces an attack that
+   * left C13 at 109/109 green with a live production leak, and requires it to
+   * fail. The transcript is snapshotted at ingress into a closure the tests
+   * cannot reach, so none of these can reach the evidence.
+   */
+  const leak = (v: string) => { console.log(`[governance/review] Override: approved owner=${v}`); };
+
+  it("rewriting mock.calls in place cannot hide a leak — THE R10 ATTACK", () => {
+    redactionExemption = "capture-fidelity";
+    clearCapture();
+    leak(C.ownerAUid);
+    // the exact six lines that defeated C13
+    // `jest.spyOn` replaced console.log with the mock itself, so this is the
+    // same handle the C13 attacker used — no test-only seam required.
+    const cs = (console.log as unknown as jest.Mock).mock.calls;
+    if (cs.length) cs[cs.length - 1] = ["[governance/review] Override: approved"];
+    expect(() => governanceLogCapture.assertNoSensitiveCanaries()).toThrow();
+    clearCapture();
+  });
+
+  it("clearing mock.calls entirely cannot hide a leak", () => {
+    redactionExemption = "capture-fidelity";
+    clearCapture();
+    leak(C.ownerAUid);
+    (console.log as unknown as jest.Mock).mockClear();
+    expect(() => governanceLogCapture.assertNoSensitiveCanaries()).toThrow();
+    clearCapture();
+  });
+
+  it("mutating the logged OBJECT after the call cannot hide a leak", () => {
+    redactionExemption = "capture-fidelity";
+    clearCapture();
+    const payload: Record<string, unknown> = { actor: { email: C.ownerEmail } };
+    console.log("[governance/review] audit", payload);
+    (payload.actor as Record<string, unknown>).email = "redacted@example.test";
+    delete payload.actor;
+    expect(() => governanceLogCapture.assertNoSensitiveCanaries()).toThrow();
+    clearCapture();
+  });
+
+  it("the snapshot is deep-frozen, so it cannot be edited in place", () => {
+    redactionExemption = "capture-fidelity";
+    clearCapture();
+    console.log("probe", { deep: { uid: C.ownerBUid } });
+    const entry = governanceLogCapture.frozenEntries()[0];
+    const obj = (entry.args[1] as { deep: { uid: string } }).deep;
+    expect(Object.isFrozen(entry.args)).toBe(true);
+    expect(Object.isFrozen(obj)).toBe(true);
+    expect(() => { (obj as { uid: string }).uid = "scrubbed"; }).toThrow();
+    expect(obj.uid).toBe(C.ownerBUid);
+    clearCapture();
+  });
+
+  it("frozenEntries() hands out a COPY — splicing it cannot change the evidence", () => {
+    redactionExemption = "capture-fidelity";
+    clearCapture();
+    leak(C.ownerAUid);
+    const view = governanceLogCapture.frozenEntries() as TranscriptEntry[];
+    expect(() => view.splice(0, view.length)).toThrow();
+    expect(governanceLogCapture.size()).toBe(1);
+    expect(() => governanceLogCapture.assertNoSensitiveCanaries()).toThrow();
+    clearCapture();
+  });
+});
+
+describe("CAPTURE INTEGRITY — the capture must still BE the capture", () => {
+  it("replacing a sink's implementation is detected", () => {
+    redactionExemption = "capture-fidelity";
+    clearCapture();
+    const spy = console.log as unknown as jest.SpyInstance;
+    const original = spy.getMockImplementation()!;
+    spy.mockImplementation(() => {});                       // the swap
+    try {
+      expect(() => governanceLogCapture.assertSpyIdentity()).toThrow();
+    } finally {
+      spy.mockImplementation(original);                     // restore
+    }
+    governanceLogCapture.assertSpyIdentity();                 // and it passes again
+    clearCapture();
+  });
+
+  it("integrity passes untouched — the check is not blanket failure", () => {
+    expect(() => governanceLogCapture.assertSpyIdentity()).not.toThrow();
+  });
+});
+
+describe("STRUCTURED SCAN — there is no serialization on the security path", () => {
+  /**
+   * R10 P1-2: C13 detected canaries by joining a serialized rendering, so a
+   * sanitising `serialize()` hid a live leak while every consumer stayed green.
+   * The scan now walks the frozen structure itself.
+   */
+  it.each([
+    ["a deeply nested value", () => console.log("x", { a: { b: [{ c: C.ownerAUid }] } })],
+    ["an object KEY", () => console.log("x", { [C.ownerAUid]: true })],
+    ["an Error message", () => console.error("x", new Error(`failed for ${C.ownerAUid}`))],
+    ["an Error code field", () => { const e = new Error("boom") as Error & { code?: string }; e.code = C.ownerAUid; console.error("x", e); }],
+    ["an array element", () => console.warn("x", ["a", C.ownerAUid])],
+    ["a substring inside a longer string", () => console.log(`prefix-${C.ownerAUid}-suffix`)],
+  ])("%s is detected without serializing", (_n, emit) => {
+    redactionExemption = "capture-fidelity";
+    clearCapture();
+    (emit as () => void)();
+    expect(() => governanceLogCapture.assertNoSensitiveCanaries()).toThrow();
+    clearCapture();
+  });
+
+  it("a clean transcript does not throw — the scan is not blanket failure", () => {
+    redactionExemption = "capture-fidelity";
+    clearCapture();
+    console.log("[governance/review] Override: a blocked run was approved (prevStatus=blocked)");
+    expect(() => governanceLogCapture.assertNoSensitiveCanaries()).not.toThrow();
+    clearCapture();
+  });
+
+  it("the scan reports how many entries it actually walked", () => {
+    redactionExemption = "capture-fidelity";
+    clearCapture();
+    console.log("clean one");
+    console.log("clean two");
+    expect(governanceLogCapture.assertNoSensitiveCanaries()).toBe(2);
+    clearCapture();
+  });
+});
+
+
+// ===========================================================================
+describe("DUAL-CHANNEL EVIDENCE — one tampered channel is caught by the other", () => {
+  /**
+   * Phase FIRST-ADMIN-C15 (R11 P1). The claim under test is deliberately narrow:
+   * ONE localized edit to either channel cannot turn a real leak green, because
+   * the other channel still sees it and the cross-channel comparison diverges.
+   *
+   * Direction coverage. "Channel A loses a canary that B still holds" is
+   * constructible at runtime (mutate the logged object, or rewrite mock.calls)
+   * and is pinned below. The opposite direction — an ingress sanitiser, where B
+   * loses what A holds — cannot be built at runtime, because `transcript` is
+   * closure-private and only the installed `impl` writes to it. That direction
+   * is proven by source mutation instead (see the C15 mutation table), and the
+   * fidelity comparison is symmetric: it compares the two label arrays with
+   * toEqual, so it fails whichever side is short.
+   */
+  const leakValue = () => C.ownerAUid;
+
+  it("both channels independently detect a plain leak", () => {
+    redactionExemption = "capture-fidelity";
+    clearCapture();
+    console.log(`[governance/review] Override: approved owner=${leakValue()}`);
+    expect(() => governanceLogCapture.assertNoSensitiveCanariesRawLedger()).toThrow();
+    expect(() => governanceLogCapture.assertNoSensitiveCanariesSnapshotTranscript()).toThrow();
+    clearCapture();
+  });
+
+  it("rewriting mock.calls scrubs channel A only — channel B still fails, and fidelity diverges", () => {
+    redactionExemption = "capture-fidelity";
+    clearCapture();
+    console.log(`[governance/review] Override: approved owner=${leakValue()}`);
+    const cs = (console.log as unknown as jest.Mock).mock.calls;
+    cs[cs.length - 1] = ["[governance/review] Override: approved"];   // the R10 attack
+
+    // Channel A has been successfully scrubbed...
+    expect(() => governanceLogCapture.assertNoSensitiveCanariesRawLedger()).not.toThrow();
+    // ...and that is exactly why it is not the only channel.
+    expect(() => governanceLogCapture.assertNoSensitiveCanariesSnapshotTranscript()).toThrow();
+    expect(() => governanceLogCapture.assertChannelFidelity()).toThrow();
+    clearCapture();
+  });
+
+  it("mutating the logged object scrubs channel A only — channel B still fails, and fidelity diverges", () => {
+    redactionExemption = "capture-fidelity";
+    clearCapture();
+    const payload: Record<string, unknown> = { actor: { uid: leakValue() } };
+    console.log("[governance/review] audit", payload);
+    (payload.actor as Record<string, unknown>).uid = "scrubbed";      // A holds a live ref
+
+    expect(() => governanceLogCapture.assertNoSensitiveCanariesRawLedger()).not.toThrow();
+    expect(() => governanceLogCapture.assertNoSensitiveCanariesSnapshotTranscript()).toThrow();
+    expect(() => governanceLogCapture.assertChannelFidelity()).toThrow();
+    clearCapture();
+  });
+
+  it("clearing one channel alone is a fidelity failure", () => {
+    redactionExemption = "capture-fidelity";
+    clearCapture();
+    console.log("[governance/review] benign line");
+    (console.log as unknown as jest.Mock).mockClear();                // channel A only
+    expect(() => governanceLogCapture.assertChannelFidelity()).toThrow();
+    clearCapture();
+  });
+
+  it("dropping an argument from a ledger call is a fidelity failure", () => {
+    redactionExemption = "capture-fidelity";
+    clearCapture();
+    console.log("prefix", { k: 1 }, "suffix");
+    const cs = (console.log as unknown as jest.Mock).mock.calls;
+    cs[cs.length - 1] = ["prefix", { k: 1 }];                          // arity changed
+    expect(() => governanceLogCapture.assertChannelFidelity()).toThrow();
+    clearCapture();
+  });
+
+  it("ANCHOR: clean, untampered logging passes both channels and fidelity", () => {
+    redactionExemption = "capture-fidelity";
+    clearCapture();
+    console.log("[governance/review] Override: a blocked run was approved (prevStatus=blocked)");
+    console.warn("[governance/review] integrity warning", { count: 3 });
+    expect(() => governanceLogCapture.assertChannelFidelity()).not.toThrow();
+    expect(() => governanceLogCapture.assertNoSensitiveCanariesRawLedger()).not.toThrow();
+    expect(() => governanceLogCapture.assertNoSensitiveCanariesSnapshotTranscript()).not.toThrow();
+    expect(governanceLogCapture.size()).toBe(2);
+    expect(governanceLogCapture.ledgerSize()).toBe(2);
+    clearCapture();
+  });
+
+  it("the two channels use SEPARATE walk implementations", () => {
+    // A shared helper would let one edit blind both. This is a structural
+    // backstop, not the security proof — the mutation table is that.
+    // Phase FIRST-ADMIN-C16: this searched the WHOLE file, so the assertion's
+    // own line supplied the text it was looking for and the check could not
+    // fail. The C16 vacuity detector `self-referential-source-assertion` caught
+    // it. The search is now scoped to the capture factory, above the first
+    // describe, which contains no assertion text.
+    const src = readFileSync(__filename, "utf8");
+    const factory = src.slice(0, src.indexOf('describe("'));
+    expect(factory.length).toBeGreaterThan(1000);
+    expect(factory).toContain("const snapshotContains =");
+    expect(factory).toContain("const ledgerContains =");
+    const a = factory.slice(factory.indexOf("const snapshotContains ="), factory.indexOf("const ledgerContains ="));
+    expect(a).not.toContain("ledgerContains(");
+  });
+});
+
+// ===========================================================================
+describe("LIFECYCLE BACKSTOP — the finalizer is actually registered", () => {
+  /**
+   * Phase FIRST-ADMIN-C15 (R11 P2). Deleting the integrity call from `afterEach`
+   * left C14 green. Enforcement is now a single `finalize()` call, and this
+   * block asserts it is registered in a live `afterEach`.
+   *
+   * This is a BACKSTOP. It proves registration, not that redaction ran — the
+   * runtime proof is the leak mutations in the table.
+   */
+  const src = readFileSync(__filename, "utf8");
+  // Strip line and block comments so a commented-out call cannot satisfy this.
+  const code = src
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .split("\n")
+    .filter((l) => !/^\s*\/\//.test(l))
+    .join("\n");
+
+  it("an afterEach hook calls governanceLogCapture.finalize(", () => {
+    const hooks = [...code.matchAll(/afterEach\(\(\) => \{[\s\S]*?\n\}\);/g)].map((m) => m[0]);
+    expect(hooks.length).toBeGreaterThan(0);
+    const withFinalize = hooks.filter((h) => h.includes("governanceLogCapture.finalize("));
+    expect(withFinalize).toHaveLength(1);
+  });
+
+  it("the registered finalizer call survives comment stripping", () => {
+    // The whole file legitimately calls finalize() several more times inside the
+    // FINALIZER SELF-VALIDATION block, so a global count is the wrong invariant.
+    // What matters is that the call inside the hook is live code.
+    const hooks = [...code.matchAll(/afterEach\(\(\) => \{[\s\S]*?\n\}\);/g)].map((m) => m[0]);
+    const hook = hooks.find((h) => h.includes("governanceLogCapture.finalize("));
+    expect(hook).toBeDefined();
+    expect(hook!).toMatch(/^\s*governanceLogCapture\.finalize\(/m);
+  });
+
+  it("SELF-VALIDATION: the comment stripper really removes a commented call", () => {
+    // Deliberately NOT written with the real hook/function names: an earlier
+    // version of this fixture contained a literal `afterEach(() => {` and the
+    // backstop above parsed this test's own string as if it were source.
+    const sample = ["HOOK(() => {", "  // capture.FINALIZER_TOKEN();", "});"].join("\n");
+    const stripped = sample.split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
+    expect(sample).toContain("FINALIZER_TOKEN(");
+    expect(stripped).not.toContain("FINALIZER_TOKEN(");
+  });
+
+  it("the finalizer ran on every non-exempt test so far", () => {
+    expect(governanceLogCapture.stats().finalizeRuns).toBeGreaterThan(40);
+    expect(governanceLogCapture.stats().fidelityChecks).toBeGreaterThan(20);
+  });
+});
+
+// ===========================================================================
+describe("FINALIZER SELF-VALIDATION", () => {
+  it("passes on a clean real log", () => {
+    redactionExemption = "capture-fidelity";
+    clearCapture();
+    console.log("[governance/review] benign");
+    expect(() => governanceLogCapture.finalize()).not.toThrow();
+    clearCapture();
+  });
+
+  it("fails on a sensitive real log", () => {
+    redactionExemption = "capture-fidelity";
+    clearCapture();
+    console.log(`owner=${C.ownerAUid}`);
+    expect(() => governanceLogCapture.finalize()).toThrow();
+    clearCapture();
+  });
+
+  it("fails when the raw ledger is tampered", () => {
+    redactionExemption = "capture-fidelity";
+    clearCapture();
+    console.log("[governance/review] benign");
+    (console.log as unknown as jest.Mock).mock.calls.length = 0;
+    expect(() => governanceLogCapture.finalize()).toThrow();
+    clearCapture();
+  });
+
+  it("fails when the spy implementation is replaced", () => {
+    redactionExemption = "capture-fidelity";
+    clearCapture();
+    const spy = console.log as unknown as jest.SpyInstance;
+    const original = spy.getMockImplementation()!;
+    spy.mockImplementation(() => {});
+    try {
+      expect(() => governanceLogCapture.finalize()).toThrow();
+    } finally {
+      spy.mockImplementation(original);
+    }
+    expect(() => governanceLogCapture.finalize()).not.toThrow();
+    clearCapture();
+  });
+});
+
+
+// ===========================================================================
+describe("STRUCTURED TRAVERSAL — every claimed shape, canary isolated", () => {
+  /**
+   * Phase FIRST-ADMIN-C15 (R11 P2). C14 claimed `Error.details` coverage while
+   * the traversal leg was dead: the only fixture carrying a canary in `.details`
+   * repeated it in `.message`, so deleting the `details` leg stayed green.
+   *
+   * In every case below the canary occurs in EXACTLY ONE place, so deleting that
+   * traversal leg must fail — and BOTH channels must detect it independently,
+   * since the two walks are separate implementations.
+   */
+  const CANARY = () => C.ownerBUid;
+
+  const shapes: Array<[string, () => void]> = [
+    ["a bare string value", () => console.log(CANARY())],
+    ["a substring of a longer string", () => console.log(`run-owner:${CANARY()}:end`)],
+    ["an object VALUE", () => console.log("x", { owner: CANARY() })],
+    ["an object KEY", () => console.log("x", { [CANARY()]: "present" })],
+    ["a nested object value", () => console.log("x", { a: { b: { owner: CANARY() } } })],
+    ["a nested array element", () => console.log("x", { list: [["a", CANARY()]] })],
+    ["Error.message", () => console.error("x", new Error(`denied for ${CANARY()}`))],
+    ["Error.code", () => { const e = new Error("boom") as Error & { code?: string }; e.code = CANARY(); console.error("x", e); }],
+    ["Error.details", () => { const e = new Error("boom") as Error & { details?: string }; e.details = CANARY(); console.error("x", e); }],
+  ];
+
+  it.each(shapes)("%s is detected by BOTH channels", (_name, emit) => {
+    redactionExemption = "capture-fidelity";
+    clearCapture();
+    (emit as () => void)();
+    expect(() => governanceLogCapture.assertNoSensitiveCanariesRawLedger()).toThrow();
+    expect(() => governanceLogCapture.assertNoSensitiveCanariesSnapshotTranscript()).toThrow();
+    // and the channels agree, so neither is doing the work alone by accident
+    expect(() => governanceLogCapture.assertChannelFidelity()).not.toThrow();
+    clearCapture();
+  });
+
+  it("SELF-VALIDATION: each fixture carries the canary exactly once", () => {
+    redactionExemption = "capture-fidelity";
+    for (const [, emit] of shapes) {
+      clearCapture();
+      (emit as () => void)();
+      const rendered = governanceLogCapture
+        .frozenEntries()
+        .map((e) => serialize(e.args as unknown[]))
+        .join("\n");
+      const hits = rendered.split(CANARY()).length - 1;
+      expect(hits).toBe(1);
+    }
+    clearCapture();
+  });
+
+  it("ANCHOR: an equivalent fixture WITHOUT the canary passes both channels", () => {
+    redactionExemption = "capture-fidelity";
+    clearCapture();
+    const e = new Error("boom") as Error & { details?: string; code?: string };
+    e.details = "no-canary-here";
+    e.code = "SAFE";
+    console.error("x", e, { a: { b: { owner: "someone-else" } } });
+    expect(() => governanceLogCapture.assertNoSensitiveCanariesRawLedger()).not.toThrow();
+    expect(() => governanceLogCapture.assertNoSensitiveCanariesSnapshotTranscript()).not.toThrow();
+    clearCapture();
+  });
+});
+
+
+// ===========================================================================
+describe("SINK CONTRACT — three independent derivations must agree", () => {
+  /**
+   * Phase FIRST-ADMIN-C16 (R12 P1). Closes the one shared dependency that sat
+   * upstream of both channels. Each assertion below is falsified by a DIFFERENT
+   * single edit, so no one edit satisfies all three.
+   */
+  const A = governanceLogCapture.channelASinks();
+  const B = governanceLogCapture.channelBSinks();
+  const fromSource = productionSinks();
+
+  it("ANCHOR: the source derivation actually read production code", () => {
+    // Guards the vacuity where a broken derivation returns [] and every
+    // subset assertion below passes trivially.
+    expect(fromSource.length).toBeGreaterThan(2);
+    expect(fromSource).toEqual(expect.arrayContaining(["log", "warn", "error", "debug"]));
+    for (const f of COVERED_SOURCE_FILES) expect(readFileSync(f, "utf8").length).toBeGreaterThan(200);
+  });
+
+  it("every sink PRODUCTION actually uses is read by Channel A", () => {
+    for (const m of fromSource) expect(A).toContain(m);
+  });
+
+  it("every sink PRODUCTION actually uses is recorded by Channel B", () => {
+    for (const m of fromSource) expect(B).toContain(m);
+  });
+
+  it("the two channels capture exactly the same sink set", () => {
+    expect([...A].sort()).toEqual([...B].sort());
+  });
+
+  it("the captured sink set matches the declared contract", () => {
+    expect([...A].sort()).toEqual(["debug", "error", "info", "log", "warn"]);
+  });
+
+  it("a spy is installed for every sink either channel claims", () => {
+    for (const m of new Set([...A, ...B])) {
+      expect(jest.isMockFunction((console as unknown as Record<string, unknown>)[m])).toBe(true);
+    }
+  });
+
+  it("captured set is a superset of the source set, and the extras are declared", () => {
+    const extras = A.filter((m) => !fromSource.includes(m));
+    // `console.info` is captured defensively: logger.info maps to console.log,
+    // and no covered module calls console.info today.
+    expect(extras).toEqual(["info"]);
+  });
+});
+
+// ===========================================================================
+describe("LOGGER MAPPING — logger.* to console.* is pinned to source", () => {
+  /**
+   * R12: developers are told by CLAUDE.md to always use `logger`, and
+   * `logger.debug` routes to `console.debug`. If that mapping changes to a sink
+   * the capture does not observe, redaction silently stops covering that path.
+   */
+  const loggerSrc = readFileSync("lib/logger.ts", "utf8");
+
+  const consoleFor = (method: string): string | null => {
+    const m = loggerSrc.match(new RegExp(`\\b${method}\\s*\\(message: string[\\s\\S]{0,400}?console\\.([a-zA-Z]+)\\s*\\(`));
+    return m ? m[1] : null;
+  };
+
+  it("ANCHOR: the logger source was read and defines the four levels", () => {
+    for (const lvl of ["error", "warn", "info", "debug"]) {
+      expect(loggerSrc).toMatch(new RegExp(`\\b${lvl}\\s*\\(message: string`));
+    }
+  });
+
+  it.each([
+    ["error", "error"],
+    ["warn", "warn"],
+    ["info", "log"],     // NOT console.info — verified from source
+    ["debug", "debug"],
+  ])("logger.%s writes to console.%s", (level, sink) => {
+    expect(consoleFor(level)).toBe(sink);
+  });
+
+  it("every console sink the logger targets is captured by both channels", () => {
+    for (const lvl of ["error", "warn", "info", "debug"]) {
+      const sink = consoleFor(lvl);
+      expect(sink).not.toBeNull();
+      expect(governanceLogCapture.channelASinks()).toContain(sink!);
+      expect(governanceLogCapture.channelBSinks()).toContain(sink!);
+    }
+  });
+});
+
+
+// ===========================================================================
+describe("AUDIT LOG SITE DISPOSITION — derived from source, not from a comment", () => {
+  /**
+   * Phase FIRST-ADMIN-C16 (R12 P1/P2). C15's "pin" was
+   * `expect(src).toMatch(/does NOT assert that every branch in it is driven/)`
+   * over this file's own text — and the regex literal IS that text, so the
+   * assertion matched itself and could never fail. Deleting the narrowing
+   * comment left the suite green. C15 also stated, wrongly, that no test
+   * reaches these sites and that every caller mocks the module.
+   *
+   * Measured with a throw-probe at each site against lib/governance/__tests__:
+   * four execute, one does not. Four lib-level specs import the real module;
+   * the route-level callers are the ones that mock it.
+   */
+  const AUDIT = "lib/governance/auditLog.ts";
+
+  /** Source-derived: every console.error whose payload carries a raw runId. */
+  const runIdErrorSites = (): string[] => {
+    const lines = readFileSync(AUDIT, "utf8").split("\n");
+    const out: string[] = [];
+    let fn = "(module)";
+    for (let i = 0; i < lines.length; i += 1) {
+      const m = lines[i].match(/export (?:async )?function (\w+)/);
+      if (m) fn = m[1];
+      if (/console\.error\(/.test(lines[i]) && /runId/.test(lines.slice(i, i + 4).join(" "))) out.push(fn);
+    }
+    return out;
+  };
+
+  type Disposition = "EXECUTED_NOT_REDACTION_ASSERTED" | "UNDRIVEN";
+
+  /** The honest table. Changing the source without changing this fails below. */
+  const DISPOSITION: Record<string, Disposition> = {
+    writeAdaptiveAdminAuditEvent: "EXECUTED_NOT_REDACTION_ASSERTED",
+    writeAdaptiveAssignmentAdminAuditEvent: "EXECUTED_NOT_REDACTION_ASSERTED",
+    writeAdaptivePanelFinalizationAdminAuditEvent: "EXECUTED_NOT_REDACTION_ASSERTED",
+    writeAdaptivePanelOverrideAdminAuditEvent: "EXECUTED_NOT_REDACTION_ASSERTED",
+    writeAdaptiveExportAdminAuditEvent: "UNDRIVEN",
+  };
+
+  it("ANCHOR: the source enumeration actually found sites", () => {
+    expect(runIdErrorSites().length).toBeGreaterThan(3);
+    expect(readFileSync(AUDIT, "utf8").length).toBeGreaterThan(1000);
+  });
+
+  it("the source enumeration matches the disposition table exactly", () => {
+    // Adding, removing or renaming a raw-runId error site fails here. Nothing
+    // in this assertion appears in its own expected value, so it cannot match
+    // itself the way the C15 pin did.
+    expect(runIdErrorSites().sort()).toEqual(Object.keys(DISPOSITION).sort());
+  });
+
+  it("the specs that drive the executed sites import the REAL module", () => {
+    const drivers = [
+      "lib/governance/__tests__/adaptiveAdminAuditEvent.spec.ts",
+      "lib/governance/__tests__/adaptiveAssignmentAdminAuditEvent.spec.ts",
+      "lib/governance/__tests__/adaptivePanelFinalizationAdminAuditEvent.spec.ts",
+      "lib/governance/__tests__/adaptivePanelOverrideAdminAuditEvent.spec.ts",
+    ];
+    for (const d of drivers) {
+      const src = readFileSync(d, "utf8");
+      expect(src).not.toMatch(/jest\.mock\(\s*["'][^"']*auditLog/);
+      expect(src).toMatch(/from ["'](\.\.\/auditLog|@\/lib\/governance\/auditLog)["']/);
+    }
+    expect(Object.values(DISPOSITION).filter((d) => d === "EXECUTED_NOT_REDACTION_ASSERTED")).toHaveLength(drivers.length);
+  });
+
+  it("no executed site is claimed to be redaction-asserted by this suite", () => {
+    // These sites run, but nothing asserts their payloads are redacted. That is
+    // PARTIAL coverage and is carried as debt — not silently upgraded.
+    expect(Object.values(DISPOSITION)).not.toContain("REDACTION_ASSERTED");
+  });
+});

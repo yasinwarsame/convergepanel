@@ -1,10 +1,48 @@
 /**
+ * Phase FIRST-ADMIN-C4 — SYSTEM_ADMIN required.
+ *
+ * Resolved on 2026-09-07 by the FIRST_ADMIN_ENROLLMENT_BLOCKER_DECISION:
+ * ADMIN_PORTAL is the lower operational/read tier and is not a route to
+ * destructive, governance-changing or billing-changing actions. See
+ * docs/operations/admin-authority-tiers.md.
+ *
+ * TRANSPORT NOTE: the SYSTEM_ADMIN guards are bearer-only in practice
+ * (`verifyAdminToken` passes the `__session` value to `verifyIdToken`, which
+ * always rejects a Firebase session cookie). The portal guard this replaces
+ * accepted either, so this route is now bearer-only. The admin UI calls it via
+ * `authedFetch`, which always sends an `Authorization: Bearer` header.
+ */
+/**
  * Admin run detail, governance override, and delete (research or claim verification).
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import type { DocumentData } from "firebase-admin/firestore";
-import { requireAdminPortalAccess } from "@/lib/firebase/auth-helpers";
+import { requireAdminPortalAccess, requireSystemAdminAccess } from "@/lib/firebase/auth-helpers";
+import { resolveLiveAuthIdentity } from "@/lib/admin/verifiedAdminIdentity";
+
+/**
+ * Phase FIRST-ADMIN-C4 — audit attribution for the SYSTEM_ADMIN handlers.
+ *
+ * `requireSystemAdminAccess` returns `{uid, isAdmin}`: the claim is the
+ * authority, and an address plays no part in granting it. The audit record
+ * still wants a human-readable actor, so it is read from the live Auth record
+ * here — descriptive only, never an input to the authorization decision, and
+ * empty when the lookup fails rather than blocking the operation.
+ *
+ * Phase FIRST-ADMIN-C5 — ATTRIBUTION IS NEVER LOST. `byUid` is written from the
+ * verified claim on every audit record and is the authoritative actor
+ * identifier; this address is a human-readable convenience beside it. A
+ * transient Auth outage therefore degrades the audit record's readability, not
+ * its attribution. It is deliberately NOT sourced from the token: the
+ * SYSTEM_ADMIN guard returns no email, and plumbing one through a shared guard
+ * to populate a descriptive field would put an unverified address into an audit
+ * trail.
+ */
+async function auditActorEmail(uid: string): Promise<string> {
+  const live = await resolveLiveAuthIdentity(uid);
+  return live.status === "resolved" ? live.email : "";
+}
 import { adminDb } from "@/lib/firebase/admin";
 import { writeAuditEvent } from "@/lib/governance/auditLog";
 import { sanitizeForFirestore } from "@/lib/firestore/sanitizeForFirestore";
@@ -93,7 +131,8 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: { runId: string } }
 ) {
-  const auth = await requireAdminPortalAccess(request);
+  // Phase FIRST-ADMIN-C4: governance-status mutation on another user's run.
+  const auth = await requireSystemAdminAccess(request);
   if (!auth) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   if (!adminDb) return NextResponse.json({ ok: false, error: "Database unavailable" }, { status: 500 });
 
@@ -151,7 +190,7 @@ export async function PATCH(
     collection,
     runType: auditRunType(collection),
     byUid: auth.uid,
-    byEmail: auth.email,
+    byEmail: await auditActorEmail(auth.uid),
     comment,
     prevStatus: prevStatus ?? undefined,
     nextStatus: status,
@@ -168,7 +207,8 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: { runId: string } }
 ) {
-  const auth = await requireAdminPortalAccess(request);
+  // Phase FIRST-ADMIN-C4: permanent cross-user deletion.
+  const auth = await requireSystemAdminAccess(request);
   if (!auth) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   if (!adminDb) return NextResponse.json({ ok: false, error: "Database unavailable" }, { status: 500 });
 
@@ -208,7 +248,7 @@ export async function DELETE(
     collection,
     runType: auditRunType(collection),
     byUid: auth.uid,
-    byEmail: auth.email,
+    byEmail: await auditActorEmail(auth.uid),
     runOwnerUid: String(prev.userId ?? prev.uid ?? ""),
     runOwnerEmail: typeof prev.userEmail === "string" ? prev.userEmail : "",
     question,

@@ -70,10 +70,11 @@ export async function resolveGovernanceVisibleUserIds(uid: string): Promise<Gove
  */
 async function resolveTrustedGovernanceIdentity(
   uid: string
-): Promise<{ email: string; emailVerified: boolean; governanceAdmin: boolean }> {
+): Promise<{ email: string; emailVerified: boolean; governanceAdmin: boolean; disabled: boolean }> {
   const scopes = await resolveVerifiedAdminScopes(uid);
   if (scopes.lookupStatus !== "resolved") {
-    return { email: "", emailVerified: false, governanceAdmin: false };
+    // A lookup we could not perform is not evidence the account is usable.
+    return { email: "", emailVerified: false, governanceAdmin: false, disabled: true };
   }
   // The GOVERNANCE decision is taken by the uid-only authority resolver, which
   // reads ADMIN_EMAILS and GOVERNANCE_ADMIN_EMAILS independently. This module
@@ -82,6 +83,7 @@ async function resolveTrustedGovernanceIdentity(
     email: scopes.email,
     emailVerified: scopes.emailVerified,
     governanceAdmin: scopes.governanceAdmin,
+    disabled: scopes.disabled,
   };
 }
 
@@ -110,15 +112,16 @@ async function resolveVisibilityForTrustedIdentity(
   // visibility over every user's runs THROUGH THE GOVERNANCE QUEUE / AUDIT /
   // REVIEW PATH simply by being an admin.
   //
-  // Phase FIRST-ADMIN-C3 — SCOPE OF THAT CLAIM, precisely. It is true of this
-  // path only. `/api/admin/runs` (GET, ADMIN_PORTAL) still returns every user's
-  // runs, and `/api/admin/runs/[runId]` exposes GET/PATCH/DELETE at the same
-  // tier — including a governance-status write. Do not read this comment as
-  // "ADMIN_EMAILS cannot see or affect other users' runs". Those two route
-  // tiers are a deliberate open question tracked in
-  // `docs/operations/admin-authority-tiers.md` under
-  // FIRST_ADMIN_ENROLLMENT_BLOCKER_DECISION, and must be decided before the
-  // first address is added to ADMIN_EMAILS.
+  // Phase FIRST-ADMIN-C3/C5 — SCOPE OF THAT CLAIM, precisely. It is true of
+  // this path only. `/api/admin/runs` (GET) and `/api/admin/runs/[runId]` (GET)
+  // are ADMIN_PORTAL and still return every user's runs. Do not read this
+  // comment as "ADMIN_EMAILS cannot see other users' runs".
+  //
+  // The MUTATIONS on that route no longer sit at this tier: Phase C4 resolved
+  // FIRST_ADMIN_ENROLLMENT_BLOCKER_DECISION (2026-09-07) and moved
+  // `/api/admin/runs/[runId]` PATCH and DELETE — plus
+  // `/api/admin/sync-subscription` and `/api/admin/test-webhook` — to
+  // SYSTEM_ADMIN. See `docs/operations/admin-authority-tiers.md`.
   if (identity.governanceAdmin) {
     console.log(`[governance/queue] Admin: global access (visibleUserIds = null)`);
     return { ok: true, visibleUserIds: null, isSupportAdmin: true, queueScope: "admin_global" };
@@ -132,8 +135,12 @@ async function resolveVisibilityForTrustedIdentity(
   const reviewerFor = parseGovernanceReviewerFor(userData);
   const assignersByReviewerField = await getAssignerUids(uid);
 
+  // Phase FIRST-ADMIN-C7 — C6 replaced the owner-UID LISTS here with counts but
+  // left the caller's own raw UID on this line, so every governance queue load
+  // still wrote a stable per-user correlation identifier into the logs. The
+  // plan and the two counts are the operational content; the uid was not.
   console.log(
-    `[governance/queue] User: ${uid}, isAdmin: false, plan: ${userPlan}, reviewerFor: ${reviewerFor.length} users, assignersByReviewerUidField: ${assignersByReviewerField.length}`
+    `[governance/queue] User: isAdmin: false, plan: ${userPlan}, reviewerFor: ${reviewerFor.length} users, assignersByReviewerUidField: ${assignersByReviewerField.length}`
   );
 
   if (userPlan !== "full") {
@@ -154,11 +161,16 @@ async function resolveVisibilityForTrustedIdentity(
   let visibleUserIds = allAssigners;
   if (visibleUserIds.length > 30) {
     visibleUserIds = visibleUserIds.slice(0, 30);
-    console.warn(`[governance/queue] Truncated visibleUserIds to 30 for user ${uid}`);
+    console.warn(`[governance/queue] Truncated visible owner set to 30 (requesting uid retained in request context)`);
   }
   visibleUserIds = visibleUserIds.filter((id) => id.trim() !== self);
 
-  console.log(`[governance/queue] Scoping decision: visibleUserIds = [${visibleUserIds.join(", ")}]`);
+  // Phase FIRST-ADMIN-C6 — governance diagnostics carry SHAPE, not tenant data.
+// These lines ran on every governance queue load and wrote other users' owner
+// UIDs, run ids, consensus scores and governance status into Production logs.
+// Counts and scope type answer the same operational questions without putting
+// one tenant's records in front of whoever can read the logs.
+  console.log(`[governance/queue] Scoping decision: assigners scope, ${visibleUserIds.length} owner(s)`);
 
   return { ok: true, visibleUserIds, isSupportAdmin: false, queueScope: "assigners" };
 }
@@ -182,10 +194,18 @@ const governanceVisibilityCache = new Map<string, { entry: GovernanceVisibility;
  * Firestore work below it (entitlements, the user document, and the reverse
  * assigner query), which is what the cache actually exists for.
  *
- * The key still carries uid + canonical email + verification state, so a
- * verified grant cannot outlive the proof it rested on: revoking verification
- * or changing the address produces a different key and forces a recompute.
- * Caching by uid alone would be wrong for exactly that reason.
+ * The key carries uid + canonical email + verification state + ACCOUNT-ENABLED
+ * state, so a verified grant cannot outlive the proof it rested on: revoking
+ * verification, changing the address, or DISABLING THE ACCOUNT each produce a
+ * different key and force a recompute. Caching by uid alone would be wrong for
+ * exactly that reason.
+ *
+ * Phase FIRST-ADMIN-C5 — `disabled` was the lever this key was missing. C4 made
+ * a disabled account lose its email-derived authority everywhere else, but the
+ * key was unchanged, so a disabled governance administrator kept a cached
+ * `visibleUserIds: null` — every user's runs, decisions and review records —
+ * for the remainder of the TTL. Any future addition to the authority evidence
+ * must be added here in the same commit.
  */
 export async function resolveGovernanceVisibleUserIdsCached(uid: string): Promise<GovernanceVisibility> {
   if (!adminDb) {
@@ -193,7 +213,12 @@ export async function resolveGovernanceVisibleUserIdsCached(uid: string): Promis
   }
 
   const identity = await resolveTrustedGovernanceIdentity(uid);
-  const key = `${uid}::${identity.email.trim().toLowerCase()}::${identity.emailVerified === true ? "verified" : "unverified"}`;
+  const key = [
+    uid,
+    identity.email.trim().toLowerCase(),
+    identity.emailVerified === true ? "verified" : "unverified",
+    identity.disabled === true ? "disabled" : "enabled",
+  ].join("::");
   const now = Date.now();
   const hit = governanceVisibilityCache.get(key);
   if (hit && hit.expiresAt > now) {

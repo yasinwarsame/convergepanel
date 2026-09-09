@@ -17,7 +17,7 @@ import {
 } from "@/lib/governance/governanceInputFromDocs";
 import { getModelDisplayName } from "@/lib/modelInfo";
 import { buildAgreementDisagreementDigest } from "@/lib/verification/agreementDigest";
-import { governanceAdminEmailsForLog, isGovernanceAdminEmail } from "@/lib/admin/config";
+import { governanceAdminListShapeForLog } from "@/lib/admin/config";
 import {
   governanceQueuePlanForbiddenResponse,
   resolveGovernanceVisibleUserIdsCached,
@@ -585,7 +585,7 @@ function summarizeResearch(id: string, data: Record<string, unknown>, email: str
     const score = researchConsensusScoreFromRunDoc(data);
     if (score != null) {
       console.log(
-        `[governance/queue] Run ${id} has score ${score} but was evaluated without it — needs re-evaluation`
+        `[governance/queue] A run carries a consensus score but was evaluated without it — needs re-evaluation`
       );
     }
   }
@@ -961,13 +961,15 @@ async function loadRunsStagedForQueue(
     const data = doc.data() as Record<string, unknown>;
     {
       const cs = data.consensusSummary as { overallConsensusScore?: unknown } | undefined;
-      console.log("[governance/queue] Run doc fields:", {
-        runId: doc.id,
-        consensusScore: data.consensusScore,
-        "consensusSummary.overallConsensusScore": cs?.overallConsensusScore,
-        governanceStatus: data.governanceStatus,
-        governanceReasons: data.governanceReasons,
-        allTopLevelKeys: Object.keys(data).filter((k) => k.includes("consensus") || k.includes("score")),
+      // Phase FIRST-ADMIN-C6: was a per-document dump of another tenant's runId,
+      // consensus score, governance status and reasons, on every queue load —
+      // including the admin_global branch, which activates at first
+      // GOVERNANCE_ADMIN enrollment. Retained as a debug-level shape signal.
+      logger.debug("[governance/queue] run doc shape", {
+        hasConsensusScore: data.consensusScore !== undefined,
+        hasSummaryScore: cs?.overallConsensusScore !== undefined,
+        hasGovernanceStatus: data.governanceStatus !== undefined,
+        governanceReasonCount: Array.isArray(data.governanceReasons) ? data.governanceReasons.length : 0,
       });
     }
     if (!visibleSet.has(String(data.userId ?? ""))) continue;
@@ -1010,13 +1012,15 @@ async function loadRunsStagedGlobalQueue(
     const data = doc.data() as Record<string, unknown>;
     {
       const cs = data.consensusSummary as { overallConsensusScore?: unknown } | undefined;
-      console.log("[governance/queue] Run doc fields:", {
-        runId: doc.id,
-        consensusScore: data.consensusScore,
-        "consensusSummary.overallConsensusScore": cs?.overallConsensusScore,
-        governanceStatus: data.governanceStatus,
-        governanceReasons: data.governanceReasons,
-        allTopLevelKeys: Object.keys(data).filter((k) => k.includes("consensus") || k.includes("score")),
+      // Phase FIRST-ADMIN-C6: was a per-document dump of another tenant's runId,
+      // consensus score, governance status and reasons, on every queue load —
+      // including the admin_global branch, which activates at first
+      // GOVERNANCE_ADMIN enrollment. Retained as a debug-level shape signal.
+      logger.debug("[governance/queue] run doc shape", {
+        hasConsensusScore: data.consensusScore !== undefined,
+        hasSummaryScore: cs?.overallConsensusScore !== undefined,
+        hasGovernanceStatus: data.governanceStatus !== undefined,
+        governanceReasonCount: Array.isArray(data.governanceReasons) ? data.governanceReasons.length : 0,
       });
     }
     const createdMs = researchCreatedMs(data);
@@ -1230,14 +1234,20 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const email = resolved.email;
-  // Diagnostic only — NOT the access decision. Phase FIRESTORE-AUTHZ-P0.2:
-  // reports allowlist MEMBERSHIP alongside the verification state that governs
-  // whether that membership actually grants anything, so a log line can no
-  // longer read as though an unverified allowlisted address were admitted.
-  console.log(
-    `[governance] governance-allowlist membership="${isGovernanceAdminEmail(email)}", emailVerified=${resolved.emailVerified}, grantsAuthority=${isGovernanceAdminEmail(email) && resolved.emailVerified}, governanceList=${governanceAdminEmailsForLog()}`
-  );
+  // Phase FIRST-ADMIN-C6 — NO EMAIL-DERIVED GOVERNANCE PATH IN THIS ROUTE.
+  //
+  // This route previously computed `isGovernanceAdminEmail(resolved.email)` for
+  // a diagnostic. The membership answer was honest (the address came from the
+  // live record), but keeping the predicate and an address in scope here left a
+  // one-line seam: an adversarial mutation re-deriving
+  // `visibleUserIds = null` from that email survived the entire suite. Governance
+  // authority has exactly one source — the uid-only resolver below — so the
+  // predicate is no longer imported here at all and cannot be reached.
+  //
+  // The caller's effective scope is reported by the authoritative scoping
+  // decision logged further down; only the CONFIG SHAPE is reported here, never
+  // its contents and never an address.
+  console.log(`[governance] governance-config ${governanceAdminListShapeForLog()}`);
 
   const { searchParams } = request.nextUrl;
   const limitRawEarly = parseInt(searchParams.get("limit") ?? "15", 10);
@@ -1264,7 +1274,7 @@ export async function GET(request: NextRequest) {
     const self = resolved.uid.trim();
     visibleUserIds = [...new Set(visibleUserIds.map((id) => id.trim()).filter((id) => id && id !== self))];
     console.log(
-      `[governance/queue] Reviewer ${resolved.uid}: showing runs from [${visibleUserIds.join(", ")}], excluding own runs`
+      `[governance/queue] Reviewer scope resolved: ${visibleUserIds.length} owner(s), excluding own runs`
     );
   }
 
@@ -1283,7 +1293,7 @@ export async function GET(request: NextRequest) {
     console.log("[governance/queue] Admin: global queue (recent runs + verifications + video)");
   } else {
     console.log(
-      `[governance/queue] Querying for userIds: ${visibleUserIds.join(", ")} (${visibleUserIds.length} users)`
+      `[governance/queue] Querying owner-scoped collections for ${visibleUserIds.length} owner(s)`
     );
   }
 
@@ -1495,7 +1505,7 @@ export async function GET(request: NextRequest) {
         `${filteredMerged.length} rows after 7d + status filters ` +
         (visibleUserIds === null
           ? "(global admin; viewer's own runs excluded)"
-          : `for userIds: ${visibleUserIds.join(", ")}`) +
+          : `for ${visibleUserIds.length} scoped owner(s)`) +
         ` (cutoff ${new Date(queueCutoffMs).toISOString()})`
     );
     console.log(`[governance/queue] Total: ${Date.now() - t0}ms`);

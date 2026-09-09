@@ -1,0 +1,58 @@
+# Phase FIRST-ADMIN-C7/C8 — the pre-flight scanner's POSITIVE ANCHOR.
+#
+# Every entry below is a REAL assertion shape that shipped in this repository's
+# security tests and was proven vacuous by a human reviewer, or a form of one
+# that a review found the scanner could not see.
+#
+# Each entry DECLARES the detector it requires, on its own line:
+#
+#     # EXPECT-SHAPE: <shape-id>
+#
+# The C7-R4 review proved why the declaration has to live HERE rather than be
+# read off the implementation. The self-test used to compute what it expected
+# from `SHAPES` itself, so deleting a detector deleted its own expectation:
+# `--self-test` reported "all 4 shapes fired" and passed. Expectation and
+# implementation now come from different files, and `--self-test` requires them
+# to agree in BOTH directions — a declared shape with no detector fails, and a
+# detector with no declared shape fails.
+#
+# NOT a test file: `.txt` so no runner collects it, and outside the `--all`
+# glob. The self-test passes it explicitly.
+
+# EXPECT-SHAPE: nullish-mask
+# C3: `null ?? undefined` is `undefined`, so this never failed.
+    expect(vis.visibleUserIds ?? undefined).not.toBeNull();
+
+# EXPECT-SHAPE: default-mask
+# C5: the queue route emits `runs`; `items` never existed, so the absent key
+# defaulted to [] and the denial assertion passed against nothing.
+    expect(body.items || []).toEqual([]);
+
+# EXPECT-SHAPE: truthy-authority
+# Truthiness on an authority value accepts any non-boolean grant.
+    expect(resolved.isSupportAdmin).toBeTruthy();
+
+# EXPECT-SHAPE: some-effects
+# C4: every listed effect was mandatory; `some` let a skipped one survive.
+    expect(effects().some((e) => e.called)).toBe(true);
+
+# EXPECT-SHAPE: empty-body
+# C2: fourteen declared-but-unimplemented authority tests, all green.
+    it("denies a disabled reviewer", async () => {});
+
+# EXPECT-SHAPE: multiline-empty-body
+# C8 (R4 finding): the SAME C2 defect in its natural formatting. The scanner was
+# line-based, so the form an editor actually produces was invisible to it.
+    it("denies a disabled SYSTEM_ADMIN on the write path", async () => {
+    });
+
+# EXPECT-SHAPE: skipped-test
+# A quarantined security test is green and proves nothing. No tracked spec used
+# these when the shape was added, so it starts with a clean corpus.
+    it.skip("rejects a cross-tenant review", async () => { expect(res.status).toBe(403); });
+
+# EXPECT-SHAPE: self-referential-source-assertion
+# C16 (R12 finding): the "pin" for an auditLog coverage narrowing matched its own
+# source line, so deleting the narrowing comment left the suite green.
+    const src = readFileSync(__filename, "utf8");
+    expect(src).toMatch(/does NOT assert that every branch in it is driven/);

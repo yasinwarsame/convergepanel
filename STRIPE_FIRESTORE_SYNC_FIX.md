@@ -219,8 +219,18 @@ POST /api/billing/sync-plan
 ```
 
 ### Sync by Subscription/Customer ID
+> **Authorization (Phase FIRST-ADMIN-C4):** this endpoint requires **SYSTEM_ADMIN**
+> — the Firebase `admin: true` custom claim — sent as `Authorization: Bearer <ID token>`.
+> A `__session` browser cookie will **not** work: the SYSTEM_ADMIN guards verify with
+> `verifyIdToken`, which always rejects a Firebase session cookie. An `ADMIN_EMAILS`
+> allowlist membership is **not** sufficient. See `docs/operations/admin-authority-tiers.md`.
+
 ```bash
-POST /api/admin/sync-subscription
+# SYSTEM_ADMIN only. A __session cookie will NOT work.
+curl -X POST https://convergepanel.com/api/admin/sync-subscription \
+  -H "Authorization: Bearer $ADMIN_ID_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d
 {
   "subscriptionId": "sub_xxx"
   // OR

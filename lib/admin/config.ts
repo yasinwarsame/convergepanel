@@ -82,9 +82,24 @@ export function isGovernanceAdminEmail(email: string | null | undefined): boolea
   return parsePrivilegedList(process.env.GOVERNANCE_ADMIN_EMAILS).includes(c);
 }
 
-/** Effective GOVERNANCE allowlist for diagnostics only. Never authority. */
-export function governanceAdminEmailsForLog(): string {
-  return parsePrivilegedList(process.env.GOVERNANCE_ADMIN_EMAILS).join(",");
+/**
+ * Phase FIRST-ADMIN-C4 — SIZE, NEVER CONTENTS.
+ *
+ * This function used to return the joined `GOVERNANCE_ADMIN_EMAILS` contents,
+ * and a caller printed it on every governance queue request. That is the
+ * highest-authority identity set in the product, and it would have been written
+ * to log aggregation on a hot path from the moment the first address was
+ * enrolled. It was harmless only because the list was empty.
+ *
+ * Diagnostics get the shape of the configuration, never the addresses: a
+ * configured count, a valid count, and an invalid count. Membership for a
+ * SPECIFIC caller is a separate boolean the caller already computes.
+ */
+export function governanceAdminListShapeForLog(): string {
+  const raw = process.env.GOVERNANCE_ADMIN_EMAILS;
+  const configured = (raw ?? "").split(",").filter((e) => e.trim().length > 0).length;
+  const valid = parsePrivilegedList(raw).length;
+  return `configured=${configured} valid=${valid} invalid=${configured - valid}`;
 }
 
 if (

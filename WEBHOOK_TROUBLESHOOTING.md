@@ -87,8 +87,18 @@ If webhook hasn't fired, manually sync the plan:
 ### Option B: Use Test Webhook Endpoint
 
 For a specific subscription:
+> **Authorization (Phase FIRST-ADMIN-C4):** this endpoint requires **SYSTEM_ADMIN**
+> — the Firebase `admin: true` custom claim — sent as `Authorization: Bearer <ID token>`.
+> A `__session` browser cookie will **not** work: the SYSTEM_ADMIN guards verify with
+> `verifyIdToken`, which always rejects a Firebase session cookie. An `ADMIN_EMAILS`
+> allowlist membership is **not** sufficient. See `docs/operations/admin-authority-tiers.md`.
+
 ```bash
-POST /api/admin/test-webhook
+# SYSTEM_ADMIN only. A __session cookie will NOT work.
+curl -X POST https://convergepanel.com/api/admin/test-webhook \
+  -H "Authorization: Bearer $ADMIN_ID_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d
 {
   "subscriptionId": "sub_xxx"
   // OR
@@ -215,7 +225,7 @@ The billing page automatically syncs when user returns from checkout:
    - Click on failed events to see error details
 
 2. **Test webhook manually**:
-   - Use `/api/admin/test-webhook` endpoint with subscription ID
+   - Use `/api/admin/test-webhook` endpoint with subscription ID (**SYSTEM_ADMIN only** — `admin: true` claim, bearer token; see `docs/operations/admin-authority-tiers.md`)
    - This bypasses webhook signature verification
    - Helps isolate if issue is webhook delivery or processing logic
 

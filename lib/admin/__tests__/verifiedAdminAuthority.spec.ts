@@ -139,17 +139,20 @@ describe("fail closed on every non-`true` verification value", () => {
 
 // ---------------------------------------------------------------------------
 describe("live Auth evidence", () => {
-  it("returns email and verification from ONE record read", async () => {
-    authRecord = { email: ADMIN, emailVerified: true };
+  it("returns email, verification AND enabled-state from ONE record read", async () => {
+    // Phase FIRST-ADMIN-C4: `disabled` joins the same single-read contract, so
+    // no caller can pair one source's address with another source's proof of
+    // either verification OR account standing.
+    authRecord = { email: ADMIN, emailVerified: true, disabled: false };
     const live = await resolveLiveAuthIdentity("u1");
-    expect(live).toEqual({ status: "resolved", email: ADMIN, emailVerified: true });
+    expect(live).toEqual({ status: "resolved", email: ADMIN, emailVerified: true, disabled: false });
     expect(getUser).toHaveBeenCalledTimes(1);
   });
 
   it("coerces a non-boolean record flag to false rather than trusting it", async () => {
     authRecord = { email: ADMIN, emailVerified: "true" };
     const live = await resolveLiveAuthIdentity("u1");
-    expect(live).toEqual({ status: "resolved", email: ADMIN, emailVerified: false });
+    expect(live).toEqual({ status: "resolved", email: ADMIN, emailVerified: false, disabled: false });
   });
 
   it("FAIL CLOSED: lookup throws -> lookup_failed -> no authority", async () => {

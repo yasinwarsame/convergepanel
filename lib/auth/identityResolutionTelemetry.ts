@@ -14,7 +14,14 @@ import "server-only";
 import { logger } from "@/lib/logger";
 import type { RequestIdentityUnauthenticatedReason } from "./resolveRequestIdentity";
 
-export type IdentityResolutionFailureCategory = RequestIdentityUnauthenticatedReason | "unsupported_auth_mode";
+export type IdentityResolutionFailureCategory =
+  | RequestIdentityUnauthenticatedReason
+  | "unsupported_auth_mode"
+  // Phase FIRST-ADMIN-C6: the credential verified, but the live Firebase Auth
+  // record is disabled. Distinct from every "could not authenticate" reason —
+  // this is a REVOKED identity, and operators need to tell the two apart when
+  // responding to a compromised administrator.
+  | "account_disabled";
 
 export type IdentityResolutionTelemetryMetadata = {
   route?: string;
