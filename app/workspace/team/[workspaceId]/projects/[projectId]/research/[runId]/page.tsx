@@ -35,6 +35,7 @@ import { resolveWorkspaceAccess } from "@/lib/workspaces/resolveWorkspaceAccess"
 import { getProject } from "@/lib/firestore/projects";
 import { getTeamWorkspaceRun } from "@/lib/firestore/teamWorkspaceRuns";
 import TeamResearchResultView from "@/components/workspace/projects/TeamResearchResultView";
+import WorkspaceNav from "@/components/workspace/WorkspaceNav";
 
 export const dynamic = "force-dynamic";
 
@@ -104,6 +105,30 @@ export default async function TeamResearchDetailPage({
       <div className="mb-6">
         <h1 className="text-2xl font-semibold text-cp-text">{access.workspace.name}</h1>
       </div>
+
+      {/*
+        Phase 11B.2 — the same shared WorkspaceNav the Team research COMPOSER
+        already renders, in the same position (Workspace heading -> nav ->
+        page content), so the two research surfaces navigate identically.
+
+        `active="projects"`: research detail sits hierarchically beneath the
+        Workspace's Projects area. The individual run is NOT a nav tab.
+
+        `showAudit` is a PRESENTATION HINT derived from the same fresh,
+        server-resolved capability set this page already required above — it is
+        not a second authorization decision. A viewer without `audit.read`
+        simply does not see the Audit Log link; their `research.read` access to
+        this page is unaffected.
+
+        Rendered only after identity, Workspace access, `research.read`,
+        Project containment and run containment have all succeeded, so it
+        cannot appear on a denied, cross-tenant or transient-failure path.
+      */}
+      <WorkspaceNav
+        workspaceId={params.workspaceId}
+        active="projects"
+        showAudit={access.capabilities.includes("audit.read")}
+      />
 
       <Link href={backHref} className="text-sm font-medium text-cp-accent hover:underline">
         &larr; Back to Project

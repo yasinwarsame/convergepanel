@@ -311,3 +311,100 @@ describe("TeamResearchDetailPage — gate (server-authoritative)", () => {
     });
   });
 });
+
+
+// ===========================================================================
+describe("Phase 11B.2 — WorkspaceNav on Team research detail", () => {
+  /**
+   * The Team research COMPOSER already rendered the shared WorkspaceNav; the
+   * research DETAIL page did not, so the two research surfaces navigated
+   * differently. This block pins the completed half.
+   *
+   * The REAL WorkspaceNav is used (not a mock) so these assertions exercise the
+   * shipped component's own item set, active-state and href construction.
+   */
+  const NAV_LABELS = ["Overview", "Projects", "Members"];
+
+  /** Every rendered element carrying aria-current, with its visible text. */
+  function currentItems(renderer: TestRenderer.ReactTestRenderer) {
+    return renderer.root
+      .findAll((n) => typeof n.type === "string" && n.props?.["aria-current"] === "page", { deep: true })
+      .map((n) => JSON.stringify(n.children));
+  }
+  function anchorHrefs(renderer: TestRenderer.ReactTestRenderer): string[] {
+    return renderer.root
+      .findAll((n) => n.type === "a", { deep: true })
+      .map((n) => String(n.props.href ?? ""));
+  }
+  function visibleText(renderer: TestRenderer.ReactTestRenderer): string {
+    return JSON.stringify(renderer.toJSON());
+  }
+
+  async function renderAuthorized(capabilities: string[]) {
+    mockedResolveServerComponentIdentity.mockResolvedValue({ uid: UID });
+    mockedResolveWorkspaceAccess.mockResolvedValue(grantedTeamAccess({ capabilities }));
+    mockedGetProject.mockResolvedValue(foundProject());
+    mockedGetTeamWorkspaceRun.mockResolvedValue({ status: "complete", runId: RUN_ID, question: "Q", results: [] });
+    return renderPage();
+  }
+
+  const WITHOUT_AUDIT = ["workspace.read", "projects.read", "research.read"];
+  const WITH_AUDIT = [...WITHOUT_AUDIT, "audit.read"];
+
+  it("T1 — renders WorkspaceNav with Projects as the current tab", async () => {
+    const r = await renderAuthorized(WITHOUT_AUDIT);
+    const text = visibleText(r);
+    for (const label of NAV_LABELS) expect(text).toContain(label);
+    // exactly one current item, and it is Projects — the run itself is not a tab
+    const current = currentItems(r);
+    expect(current).toHaveLength(1);
+    expect(current[0]).toContain("Projects");
+  });
+
+  it("T2 — a viewer WITH audit.read sees the Audit Log item", async () => {
+    const r = await renderAuthorized(WITH_AUDIT);
+    expect(visibleText(r)).toContain("Audit Log");
+    expect(anchorHrefs(r)).toContain(`/workspace/team/${WS_ID}/audit`);
+  });
+
+  it("T3 — a viewer WITHOUT audit.read sees no Audit Log, and research still renders", async () => {
+    const r = await renderAuthorized(WITHOUT_AUDIT);
+    const text = visibleText(r);
+    expect(text).not.toContain("Audit Log");
+    expect(anchorHrefs(r)).not.toContain(`/workspace/team/${WS_ID}/audit`);
+    // audit.read is a navigation-visibility hint ONLY — research.read still governs the page
+    expect(text).toContain("team-research-result-view");
+  });
+
+  it("T4 — every WorkspaceNav link stays inside the server-validated Workspace", async () => {
+    const r = await renderAuthorized(WITH_AUDIT);
+    const hrefs = anchorHrefs(r);
+    expect(hrefs).toEqual(expect.arrayContaining([
+      `/workspace/team/${WS_ID}`,
+      `/workspace/team/${WS_ID}/members`,
+      `/workspace/team/${WS_ID}/audit`,
+    ]));
+    // no link escapes this Workspace
+    for (const h of hrefs) expect(h.startsWith(`/workspace/team/${WS_ID}`)).toBe(true);
+  });
+
+  it("T5 — the existing Back to Project affordance is preserved (breadcrumbs are 11B.3)", async () => {
+    const r = await renderAuthorized(WITHOUT_AUDIT);
+    expect(visibleText(r)).toContain("Back to Project");
+    expect(anchorHrefs(r)).toContain(`/workspace/team/${WS_ID}/projects/${PROJECT_ID}`);
+    // 11B.2 must not introduce a breadcrumb
+    expect(visibleText(r)).not.toContain("breadcrumb");
+  });
+
+  it("T6 — a PENDING run still renders the nav and the in-progress state", async () => {
+    mockedResolveServerComponentIdentity.mockResolvedValue({ uid: UID });
+    mockedResolveWorkspaceAccess.mockResolvedValue(grantedTeamAccess({ capabilities: WITHOUT_AUDIT }));
+    mockedGetProject.mockResolvedValue(foundProject());
+    mockedGetTeamWorkspaceRun.mockResolvedValue({ status: "pending", runId: RUN_ID, question: "Q?" });
+    const r = await renderPage();
+    const current = currentItems(r);
+    expect(current).toHaveLength(1);
+    expect(current[0]).toContain("Projects");
+    expect(visibleText(r)).toContain("still in progress");
+  });
+});
