@@ -68,9 +68,9 @@ correspond to table rows. Exactly what is mechanical, and what is not:
 
 ### Registered detectors
 
-Phase FIRST-ADMIN-C17 (R13): this document previously stated a detector count of
-**seven** in prose while the scanner registered **eight**, and that eighth
-detector appeared nowhere here at all. Counts in prose drift silently, so the contract is now **set equality
+Phase FIRST-ADMIN-C17 (R13): this document once carried a numeric count in prose
+that had drifted below the number the scanner actually registered, and the
+detector responsible for the gap appeared nowhere here at all. Counts in prose drift silently, so the contract is now **set equality
 over stable IDs**, asserted by `scripts/__tests__/securityPreflightWiring.spec.ts`
 against this table, the scanner's registrations, and the `--self-test` fixture.
 

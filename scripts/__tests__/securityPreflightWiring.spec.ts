@@ -143,19 +143,42 @@ describe("DETECTOR PARITY — registered, documented and self-tested agree", () 
   const DOC = "docs/operations/security-test-falsifiability.md";
   const FIXTURE = "scripts/__fixtures__/known-vacuous-shapes.txt";
 
+  /**
+   * Phase FIRST-ADMIN-C18 (R14). These parsers used `[a-z-]+` while the scanner
+   * itself extracts ids with `[a-z0-9-]+`. A detector registered as `9probe`,
+   * self-tested but undocumented, therefore vanished from all three extractions
+   * and the parity contract passed — the exact "undocumented registered
+   * detector" hole this contract exists to close. One grammar now, shared, and
+   * asserted below to match the scanner's.
+   */
+  const ID = "[a-z0-9-]+";
+
   const registered = (): string[] =>
-    [...readFileSync(SCANNER, "utf8").matchAll(/\{\s*id:\s*"([a-z-]+)"/g)].map((m) => m[1]).sort();
+    [...readFileSync(SCANNER, "utf8").matchAll(new RegExp(`\\{\\s*id:\\s*"(${ID})"`, "g"))].map((m) => m[1]).sort();
 
   const documented = (): string[] => {
     const doc = readFileSync(DOC, "utf8");
     const start = doc.indexOf("### Registered detectors");
     expect(start).toBeGreaterThan(-1);
     const table = doc.slice(start, doc.indexOf("\n\n", doc.indexOf("| Detector ID |", start) + 10) + 1);
-    return [...table.matchAll(/^\|\s*`([a-z-]+)`\s*\|/gm)].map((m) => m[1]).sort();
+    return [...table.matchAll(new RegExp(`^\\|\\s*\`(${ID})\`\\s*\\|`, "gm"))].map((m) => m[1]).sort();
   };
 
   const selfTested = (): string[] =>
-    [...readFileSync(FIXTURE, "utf8").matchAll(/^#\s*EXPECT-SHAPE:\s*([a-z-]+)/gm)].map((m) => m[1]).sort();
+    [...readFileSync(FIXTURE, "utf8").matchAll(new RegExp(`^#\\s*EXPECT-SHAPE:\\s*(${ID})`, "gm"))].map((m) => m[1]).sort();
+
+  /** KNOWN stale numeric-count phrasings. Narrow by design — see the test below. */
+  const STALE_COUNT_FORMS: RegExp[] = [
+    /\b(five|six|seven|eight|nine|ten)\s+(registered\s+)?detectors\b/i,
+    /\bdetector count of\s+(five|six|seven|eight|nine|ten)\b/i,
+  ];
+
+  it("the id grammar matches the scanner's own extractor", () => {
+    // If the scanner widens or narrows its id grammar, these parsers must follow;
+    // a mismatch is how `9probe` escaped all three sets at the previous head.
+    expect(readFileSync(SCANNER, "utf8")).toContain("([a-z0-9-]+)");
+    expect(ID).toBe("[a-z0-9-]+");
+  });
 
   it("ANCHOR: all three sources parsed a non-trivial detector set", () => {
     expect(registered().length).toBeGreaterThan(5);
@@ -183,9 +206,42 @@ describe("DETECTOR PARITY — registered, documented and self-tested agree", () 
     expect(selfTested()).toContain("self-referential-source-assertion");
   });
 
-  it("no prose in the document asserts a hard-coded detector count", () => {
+  it("rejects the known stale hard-coded detector-count phrasings", () => {
+    /**
+     * Phase FIRST-ADMIN-C18 (R14). This was titled "no prose in the document
+     * asserts a hard-coded detector count" while matching exactly two phrasings
+     * — so `The scanner implements seven detectors.`, the literal wording of the
+     * defect it was written for, walked past it. A title broader than its
+     * behaviour is the class this branch spent several rounds removing.
+     *
+     * It is now named for what it does: a narrow list of KNOWN stale forms,
+     * supplementary only. The authoritative completeness contract is the
+     * registered/documented/self-tested ID set equality asserted above; a novel
+     * phrasing is not claimed to be detected.
+     */
     const doc = readFileSync(DOC, "utf8");
-    // A number in prose drifts; the tables above are the contract.
-    expect(doc).not.toMatch(/\b(five|six|seven|eight|nine|ten)\s+detectors\s+(the\s+scanner|are\s+registered)/i);
+    for (const re of STALE_COUNT_FORMS) expect({ form: re.source, doc: re.test(doc) }).toEqual({ form: re.source, doc: false });
+  });
+
+  it("SELF-VALIDATION: every stale count form fires, and the current document is clean", () => {
+    // Each form must be able to fail, including the exact sentence R14 walked
+    // through, and the real document must satisfy all of them today.
+    const samples = [
+      "The scanner implements seven detectors.",
+      "There are seven detectors.",
+      "the seven registered detectors",
+      "Three mapped + four unmapped = the seven detectors the scanner registers.",
+      "Eight detectors are registered.",
+    ];
+    for (const sample of samples) {
+      expect({ sample, caught: STALE_COUNT_FORMS.some((re) => re.test(sample)) }).toEqual({ sample, caught: true });
+    }
+    // ...and wording that carries no count claim is not rejected.
+    for (const ok of [
+      "The registered detector set is enumerated below.",
+      "the detectors the scanner registers are listed by stable id",
+    ]) {
+      expect({ ok, caught: STALE_COUNT_FORMS.some((re) => re.test(ok)) }).toEqual({ ok, caught: false });
+    }
   });
 });
