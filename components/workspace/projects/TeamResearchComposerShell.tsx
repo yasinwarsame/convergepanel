@@ -30,6 +30,7 @@ import { getPlanConfigById, type PlanId } from "@/lib/plans";
 import { getDefaultModelSelection } from "@/lib/utils/normalizeSelectedModels";
 import ModelPicker from "@/components/ModelPicker";
 import WorkspaceNav from "@/components/workspace/WorkspaceNav";
+import { Breadcrumb } from "@/components/shared/Breadcrumb";
 import TeamResearchResultView from "@/components/workspace/projects/TeamResearchResultView";
 import { useTeamProjectResearch, type TeamResearchRunResult } from "@/hooks/useTeamProjectResearch";
 import type { ModelId } from "@/lib/types";
@@ -112,14 +113,33 @@ export default function TeamResearchComposerShell({
 
   return (
     <main className="mx-auto max-w-3xl px-4 py-10 sm:py-14">
+      {/*
+        Phase 11B.3 — the terminal segment is the literal "New research" for the
+        entire `/research/new` route, and never the textarea's contents or the
+        submitted question. Breadcrumb states durable route hierarchy; the h1
+        below states current inline content state. They diverge on purpose after
+        a run completes: the URL is still the creation surface until a durable
+        research-detail URL is opened.
+
+        The Project-name eyebrow that used to sit under the nav is removed — the
+        breadcrumb's Project segment now carries it.
+      */}
+      <Breadcrumb
+        className="mb-3"
+        segments={[
+          { label: workspaceName, href: `/workspace/team/${encodeURIComponent(workspaceId)}` },
+          { label: "Projects", href: `/workspace/team/${encodeURIComponent(workspaceId)}/projects` },
+          { label: project.name, href: projectHref },
+          { label: "New research" },
+        ]}
+        mobileParent={{ label: project.name, href: projectHref }}
+      />
+
+      {/*
+        Phase 11B.3-C1 — page composition is the SAME on all seven Team Workspace
+        surfaces: Breadcrumb -> page heading -> WorkspaceNav -> content.
+      */}
       <div className="mb-6">
-        <h1 className="text-2xl font-semibold text-cp-text">{workspaceName}</h1>
-      </div>
-
-      <WorkspaceNav workspaceId={workspaceId} active="projects" showAudit={canReadAudit} />
-
-      <div className="mt-2">
-        <p className="text-xs font-medium uppercase tracking-wide text-cp-faint">{project.name}</p>
         {/*
           Before/while composing: "Start research" (this is the permanent
           per-Project action's own page — not to be confused with the
@@ -131,10 +151,12 @@ export default function TeamResearchComposerShell({
           back to a generic "Research results" only in the unreachable
           case `question` is somehow empty at that point.
         */}
-        <h2 className="mt-1 text-xl font-semibold text-cp-text break-words">
+        <h1 className="mt-1 text-xl font-semibold text-cp-text break-words">
           {result ? (question.trim().length > 0 ? question : "Research results") : "Start research"}
-        </h2>
+        </h1>
       </div>
+
+      <WorkspaceNav workspaceId={workspaceId} active="projects" showAudit={canReadAudit} />
 
       {!result && (
         <form onSubmit={handleSubmit} className="mt-6 rounded-xl border border-cp-border bg-cp-surface p-5 shadow-sm">

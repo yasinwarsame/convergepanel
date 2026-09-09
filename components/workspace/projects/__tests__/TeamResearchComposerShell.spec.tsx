@@ -63,8 +63,11 @@ beforeEach(() => {
 describe("TeamResearchComposerShell", () => {
   it("renders the Workspace name and the bound Project name — never asking the user to select either", async () => {
     const renderer = await mount();
-    expect(renderer.root.findByType("h1").props.children).toBe("Acme Team");
+    // Phase 11B.3 — the h1 states the current inline content state; the
+    // Workspace and Project names are the breadcrumb's own segments.
+    expect(renderer.root.findByType("h1").props.children).toBe("Start research");
     const text = JSON.stringify(renderer.toJSON());
+    expect(text).toContain("Acme Team");
     expect(text).toContain("ABC Acquisition");
   });
 
@@ -77,7 +80,7 @@ describe("TeamResearchComposerShell", () => {
       expect(String(label)).not.toMatch(/Acme Team|ABC Acquisition|Workspace|Project/i);
     }
     // Workspace/Project names appear as plain, non-interactive text, never inside a select's own options.
-    expect(String(renderer.root.findByType("h1").props.children)).toBe("Acme Team");
+    expect(String(renderer.root.findByType("h1").props.children)).toBe("Start research");
   });
 
   it("passes workspaceId and the route-bound projectId to the research hook exactly", async () => {
@@ -205,7 +208,7 @@ describe("TeamResearchComposerShell", () => {
   describe("result-heading correction — stale 'Start research' must not remain above a completed result", () => {
     it("before any submission, the heading reads 'Start research'", async () => {
       const renderer = await mount();
-      expect(renderer.root.findByType("h2").props.children).toBe("Start research");
+      expect(renderer.root.findByType("h1").props.children).toBe("Start research");
     });
 
     it("while composing (question typed, not yet submitted), the heading still reads 'Start research'", async () => {
@@ -214,7 +217,7 @@ describe("TeamResearchComposerShell", () => {
       await act(async () => {
         textarea.props.onChange({ target: { value: "What is the market size?" } });
       });
-      expect(renderer.root.findByType("h2").props.children).toBe("Start research");
+      expect(renderer.root.findByType("h1").props.children).toBe("Start research");
     });
 
     it("after a successful run, the heading shows the actual submitted question, not 'Start research'", async () => {
@@ -231,7 +234,7 @@ describe("TeamResearchComposerShell", () => {
         await form.props.onSubmit({ preventDefault: () => {} });
       });
 
-      const h2 = renderer.root.findAllByType("h2")[0];
+      const h2 = renderer.root.findByType("h1");
       expect(h2.props.children).toBe("What is the market size for widgets?");
       expect(h2.props.children).not.toBe("Start research");
     });
@@ -249,13 +252,13 @@ describe("TeamResearchComposerShell", () => {
       await act(async () => {
         await form.props.onSubmit({ preventDefault: () => {} });
       });
-      expect(renderer.root.findAllByType("h2")[0].props.children).toBe("Q");
+      expect(renderer.root.findByType("h1").props.children).toBe("Q");
 
       const startAnotherButton = renderer.root.findAllByType("button").find((b) => b.props.children === "Start another research")!;
       await act(async () => {
         startAnotherButton.props.onClick();
       });
-      expect(renderer.root.findByType("h2").props.children).toBe("Start research");
+      expect(renderer.root.findByType("h1").props.children).toBe("Start research");
     });
 
     it("a failed submission leaves the heading as 'Start research' (no result was ever set)", async () => {
@@ -272,7 +275,205 @@ describe("TeamResearchComposerShell", () => {
         await form.props.onSubmit({ preventDefault: () => {} });
       });
 
-      expect(renderer.root.findByType("h2").props.children).toBe("Start research");
+      expect(renderer.root.findByType("h1").props.children).toBe("Start research");
     });
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * Phase 11B.3 — Breadcrumb inspection helpers.
+ *
+ * The REAL `Breadcrumb` is rendered (never mocked), so these read the shipped
+ * component's own markup: its `<nav aria-label="Breadcrumb">` landmark, the
+ * desktop `<ol>` hierarchy, and the separate mobile parent affordance.
+ * `aria-hidden` nodes (the "/" separators and the "←" glyph) are excluded, so a
+ * label assertion can never accidentally pass on decorative text.
+ * ------------------------------------------------------------------ */
+type BcSeg = { label: string; href?: string; current: boolean };
+
+function visibleTextOf(node: TestRenderer.ReactTestInstance): string {
+  const out: string[] = [];
+  const walk = (n: TestRenderer.ReactTestInstance) => {
+    n.children.forEach((c) => {
+      if (typeof c === "string") out.push(c);
+      else if (c.props?.["aria-hidden"] !== "true") walk(c);
+    });
+  };
+  walk(node);
+  return out.join("").replace(/\s+/g, " ").trim();
+}
+
+function breadcrumbNav(r: TestRenderer.ReactTestRenderer) {
+  return r.root.findAll((n) => n.type === "nav" && n.props?.["aria-label"] === "Breadcrumb", { deep: true });
+}
+
+function bcSegments(r: TestRenderer.ReactTestRenderer): BcSeg[] {
+  const navs = breadcrumbNav(r);
+  if (navs.length === 0) return [];
+  const ol = navs[0].findAllByType("ol")[0];
+  return ol.findAllByType("li").map((li) => {
+    const el = li.findAll((n) => (n.type === "a" || n.type === "span") && n.props?.["aria-hidden"] !== "true", { deep: true })[0];
+    return {
+      label: visibleTextOf(el),
+      href: el.type === "a" ? String(el.props.href) : undefined,
+      current: el.props["aria-current"] === "page",
+    };
+  });
+}
+
+function bcMobileParent(r: TestRenderer.ReactTestRenderer): { label: string; href?: string } | null {
+  const navs = breadcrumbNav(r);
+  if (navs.length === 0) return null;
+  const wrap = navs[0].findAll(
+    (n) => n.type === "div" && typeof n.props?.className === "string" && n.props.className.includes("sm:hidden"),
+    { deep: true }
+  );
+  if (wrap.length === 0) return null;
+  const el = wrap[0].findAll((n) => n.type === "a" || n.type === "span", { deep: true })[0];
+  return { label: visibleTextOf(el), href: el.type === "a" ? String(el.props.href) : undefined };
+}
+
+function h1Texts(r: TestRenderer.ReactTestRenderer): string[] {
+  return r.root.findAllByType("h1").map(visibleTextOf);
+}
+
+describe("Phase 11B.3 — Research composer breadcrumb", () => {
+  const WS = "ws_123";
+  const WS_NAME = "Acme Risk Lab";
+  const PID = "proj_456";
+  const PNAME = "Election Evidence";
+  const QUESTION = "What changed in the source evidence?";
+
+  async function mountComposer(workspaceId = WS, projectId = PID) {
+    return mount({ workspaceId, workspaceName: WS_NAME, project: { id: projectId, name: PNAME } });
+  }
+
+  it("AD1 — desktop hierarchy is {Workspace} / Projects / {Project} / New research, terminal non-linking", async () => {
+    expect(bcSegments(await mountComposer())).toEqual([
+      { label: WS_NAME, href: `/workspace/team/${WS}`, current: false },
+      { label: "Projects", href: `/workspace/team/${WS}/projects`, current: false },
+      { label: PNAME, href: `/workspace/team/${WS}/projects/${PID}`, current: false },
+      { label: "New research", href: undefined, current: true },
+    ]);
+  });
+
+  it("AD2 — mobileParent is the Project, the genuine immediate parent", async () => {
+    expect(bcMobileParent(await mountComposer())).toEqual({ label: PNAME, href: `/workspace/team/${WS}/projects/${PID}` });
+  });
+
+  it("AD3 — before submit the h1 reads 'Start research', and the redundant Project eyebrow is gone", async () => {
+    const r = await mountComposer();
+    expect(h1Texts(r)).toEqual(["Start research"]);
+    // the old <p className="text-xs ... uppercase">{project.name}</p> above the heading
+    expect(r.root.findAllByType("p").filter((n) => visibleTextOf(n) === PNAME)).toHaveLength(0);
+    // ...but the Project is still identified, by the breadcrumb
+    expect(bcSegments(r).map((x) => x.label)).toContain(PNAME);
+  });
+
+  it("AD4 — LOAD-BEARING: after a successful run the breadcrumb terminal is STILL 'New research' while the h1 becomes the submitted question", async () => {
+    const submit = jest.fn().mockResolvedValue({ status: "ok", run: { runId: "run_789", results: [], governanceStatus: null } });
+    mockedUseTeamProjectResearch.mockReturnValue(researchResult({ submit }));
+    const r = await mountComposer();
+    const textarea = r.root.findByType("textarea");
+    await act(async () => { textarea.props.onChange({ target: { value: QUESTION } }); });
+    await act(async () => { await r.root.findByType("form").props.onSubmit({ preventDefault() {} }); });
+
+    // heading follows inline content state...
+    expect(h1Texts(r)).toEqual([QUESTION]);
+    // ...breadcrumb follows DURABLE ROUTE hierarchy: the URL is still /research/new
+    const segs = bcSegments(r);
+    expect(segs[segs.length - 1]).toEqual({ label: "New research", href: undefined, current: true });
+    expect(segs.map((x) => x.label)).not.toContain(QUESTION);
+  });
+
+  it("AD5 — both Back to Project controls are RETAINED as actions (only research detail's isolated link is absorbed)", async () => {
+    const before = await mountComposer();
+    expect(before.root.findAllByType("a").filter((el) => el.props.children === "Back to Project")).toHaveLength(1);
+
+    const submit = jest.fn().mockResolvedValue({ status: "ok", run: { runId: "run_789", results: [], governanceStatus: null } });
+    mockedUseTeamProjectResearch.mockReturnValue(researchResult({ submit }));
+    const after = await mountComposer();
+    await act(async () => { after.root.findByType("textarea").props.onChange({ target: { value: QUESTION } }); });
+    await act(async () => { await after.root.findByType("form").props.onSubmit({ preventDefault() {} }); });
+    // Guard against vacuity: prove the POST-RESULT branch is really the one rendered
+    // (otherwise this assertion would just be re-checking the form control again).
+    expect(after.root.findAllByType("button").some((b) => b.props.children === "Start another research")).toBe(true);
+    expect(after.root.findAllByType("form")).toHaveLength(0);
+    expect(after.root.findAllByType("a").filter((el) => el.props.children === "Back to Project")).toHaveLength(1);
+  });
+
+  it("AD6 — NON-VACUITY: neither the workspaceId nor the projectId is ever a visible breadcrumb label", async () => {
+    const labels = bcSegments(await mountComposer()).map((x) => x.label);
+    expect(labels).toEqual([WS_NAME, "Projects", PNAME, "New research"]);
+    expect(labels).not.toContain(WS);
+    expect(labels).not.toContain(PID);
+  });
+
+  it("AD7 — ENCODING: reserved characters in both ids are percent-encoded in every parent href, including the mobile parent", async () => {
+    const r = await mountComposer("ws/a b", "proj/x y");
+    const segs = bcSegments(r);
+    expect(segs[0].href).toBe("/workspace/team/ws%2Fa%20b");
+    expect(segs[1].href).toBe("/workspace/team/ws%2Fa%20b/projects");
+    expect(segs[2].href).toBe("/workspace/team/ws%2Fa%20b/projects/proj%2Fx%20y");
+    expect(bcMobileParent(r)!.href).toBe("/workspace/team/ws%2Fa%20b/projects/proj%2Fx%20y");
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * Phase 11B.3-C1 — RELATIVE DOM ORDER.
+ *
+ * The 11B.3 tests proved the breadcrumb's contents, the h1's contents and
+ * WorkspaceNav's state each independently — and every one of them passed while
+ * four surfaces still rendered WorkspaceNav ABOVE the heading, in violation of
+ * the frozen composition contract. This helper closes that gap by pinning the
+ * one property none of them expressed: document order.
+ *
+ * Positions come from a depth-first walk of the RENDERED tree (`toTree()`), not
+ * from source text, so it measures what a viewer actually gets.
+ * ------------------------------------------------------------------ */
+function documentOrder(r: TestRenderer.ReactTestRenderer): { breadcrumb: number; h1: number; workspaceNav: number } {
+  const flat: { type: string; props: Record<string, unknown> }[] = [];
+  const walk = (node: unknown): void => {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) return node.forEach(walk);
+    const n = node as { type?: unknown; props?: Record<string, unknown>; rendered?: unknown };
+    if (typeof n.type === "string") flat.push({ type: n.type, props: n.props ?? {} });
+    walk(n.rendered);
+  };
+  walk(r.toTree());
+
+  const at = (pred: (e: { type: string; props: Record<string, unknown> }) => boolean) => flat.findIndex(pred);
+  return {
+    breadcrumb: at((e) => e.type === "nav" && e.props["aria-label"] === "Breadcrumb"),
+    h1: at((e) => e.type === "h1"),
+    workspaceNav: at((e) => e.type === "nav" && e.props["aria-label"] === "Workspace"),
+  };
+}
+
+/** Breadcrumb -> page heading -> WorkspaceNav, with all three actually present. */
+function expectFrozenComposition(r: TestRenderer.ReactTestRenderer) {
+  const o = documentOrder(r);
+  expect(o.breadcrumb).toBeGreaterThanOrEqual(0);
+  expect(o.h1).toBeGreaterThanOrEqual(0);
+  expect(o.workspaceNav).toBeGreaterThanOrEqual(0);
+  expect(o.breadcrumb).toBeLessThan(o.h1);
+  expect(o.h1).toBeLessThan(o.workspaceNav);
+}
+
+describe("Phase 11B.3-C1 — Research composer page composition order", () => {
+  it("C1-C1 — Breadcrumb -> dynamic h1 -> WorkspaceNav -> form, before any submission", async () => {
+    const r = await mount({ workspaceId: "ws_123", workspaceName: "Acme Risk Lab", project: { id: "proj_456", name: "Election Evidence" } });
+    expectFrozenComposition(r);
+    expect(h1Texts(r)).toEqual(["Start research"]);
+  });
+
+  it("C1-C2 — the order still holds AFTER a successful run, when the h1 becomes the submitted question", async () => {
+    const submit = jest.fn().mockResolvedValue({ status: "ok", run: { runId: "run_789", results: [], governanceStatus: null } });
+    mockedUseTeamProjectResearch.mockReturnValue(researchResult({ submit }));
+    const r = await mount({ workspaceId: "ws_123", workspaceName: "Acme Risk Lab", project: { id: "proj_456", name: "Election Evidence" } });
+    await act(async () => { r.root.findByType("textarea").props.onChange({ target: { value: "What changed in the source evidence?" } }); });
+    await act(async () => { await r.root.findByType("form").props.onSubmit({ preventDefault() {} }); });
+    expect(h1Texts(r)).toEqual(["What changed in the source evidence?"]);
+    expectFrozenComposition(r);
   });
 });

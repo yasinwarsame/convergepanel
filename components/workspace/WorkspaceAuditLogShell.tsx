@@ -24,6 +24,7 @@ import { useAuth } from "@/components/AuthProvider";
 import { fetchWorkspaceAuditEvents, type WorkspaceAuditEventItem, type WorkspaceAuditPreviousRole } from "@/lib/client/workspaceTeamClient";
 import ReviewErrorState from "@/components/teamGovernance/ReviewErrorState";
 import WorkspaceNav from "@/components/workspace/WorkspaceNav";
+import { Breadcrumb } from "@/components/shared/Breadcrumb";
 
 const ROLE_LABEL: Record<WorkspaceAuditPreviousRole, string> = { admin: "Admin", member: "Member", reviewer: "Reviewer", viewer: "Viewer" };
 
@@ -79,9 +80,22 @@ export default function WorkspaceAuditLogShell({ workspaceId, workspaceName }: {
 
   return (
     <main className="mx-auto max-w-3xl px-4 py-10 sm:py-14">
+      {/*
+        Phase 11B.3 — Workspace identity moves to the breadcrumb; the repeated
+        Workspace-name subtitle is removed. The "Audit Log" h1 is unchanged, as
+        is every audit query/filter/pagination behavior below.
+      */}
+      <Breadcrumb
+        className="mb-3"
+        segments={[
+          { label: workspaceName, href: `/workspace/team/${encodeURIComponent(workspaceId)}` },
+          { label: "Audit Log" },
+        ]}
+        mobileParent={{ label: workspaceName, href: `/workspace/team/${encodeURIComponent(workspaceId)}` }}
+      />
+
       <div className="mb-6">
         <h1 className="text-2xl font-semibold text-cp-text">Audit Log</h1>
-        <p className="mt-1 text-sm text-cp-muted">{workspaceName}</p>
       </div>
 
       <WorkspaceNav workspaceId={workspaceId} active="audit" showAudit />

@@ -8,6 +8,24 @@
 
 import { readFileSync } from "fs";
 import { join } from "path";
+import { createElement } from "react";
+import TestRenderer, { act } from "react-test-renderer";
+
+jest.mock("next/link", () => {
+  const MockLink = ({ href, children, className }: { href: string; children: React.ReactNode; className?: string }) =>
+    require("react").createElement("a", { href, className }, children);
+  return { __esModule: true, default: MockLink };
+});
+
+const mockedUseAuth = jest.fn();
+jest.mock("@/components/AuthProvider", () => ({ useAuth: () => mockedUseAuth() }));
+
+const mockedFetchWorkspaceAuditEvents = jest.fn();
+jest.mock("@/lib/client/workspaceTeamClient", () => ({
+  fetchWorkspaceAuditEvents: (...a: unknown[]) => mockedFetchWorkspaceAuditEvents(...a),
+}));
+
+import WorkspaceAuditLogShell from "@/components/workspace/WorkspaceAuditLogShell";
 
 const source = readFileSync(join(__dirname, "..", "WorkspaceAuditLogShell.tsx"), "utf8");
 
@@ -187,3 +205,121 @@ describe("WorkspaceAuditLogShell — Project lifecycle event cards, Phase PROJEC
   });
 });
 
+
+/* ================================================================== *
+ * Phase 11B.3 — Breadcrumb integration. The tests above are source-level
+ * (this file's original convention); breadcrumb behavior is proven by
+ * rendering the real component tree with the real shared `Breadcrumb`,
+ * because a source-text assertion could pass while nothing rendered.
+ * ================================================================== */
+
+/* ------------------------------------------------------------------ *
+ * Phase 11B.3 — Breadcrumb inspection helpers.
+ *
+ * The REAL `Breadcrumb` is rendered (never mocked), so these read the shipped
+ * component's own markup: its `<nav aria-label="Breadcrumb">` landmark, the
+ * desktop `<ol>` hierarchy, and the separate mobile parent affordance.
+ * `aria-hidden` nodes (the "/" separators and the "←" glyph) are excluded, so a
+ * label assertion can never accidentally pass on decorative text.
+ * ------------------------------------------------------------------ */
+type BcSeg = { label: string; href?: string; current: boolean };
+
+function visibleTextOf(node: TestRenderer.ReactTestInstance): string {
+  const out: string[] = [];
+  const walk = (n: TestRenderer.ReactTestInstance) => {
+    n.children.forEach((c) => {
+      if (typeof c === "string") out.push(c);
+      else if (c.props?.["aria-hidden"] !== "true") walk(c);
+    });
+  };
+  walk(node);
+  return out.join("").replace(/\s+/g, " ").trim();
+}
+
+function breadcrumbNav(r: TestRenderer.ReactTestRenderer) {
+  return r.root.findAll((n) => n.type === "nav" && n.props?.["aria-label"] === "Breadcrumb", { deep: true });
+}
+
+function bcSegments(r: TestRenderer.ReactTestRenderer): BcSeg[] {
+  const navs = breadcrumbNav(r);
+  if (navs.length === 0) return [];
+  const ol = navs[0].findAllByType("ol")[0];
+  return ol.findAllByType("li").map((li) => {
+    const el = li.findAll((n) => (n.type === "a" || n.type === "span") && n.props?.["aria-hidden"] !== "true", { deep: true })[0];
+    return {
+      label: visibleTextOf(el),
+      href: el.type === "a" ? String(el.props.href) : undefined,
+      current: el.props["aria-current"] === "page",
+    };
+  });
+}
+
+function bcMobileParent(r: TestRenderer.ReactTestRenderer): { label: string; href?: string } | null {
+  const navs = breadcrumbNav(r);
+  if (navs.length === 0) return null;
+  const wrap = navs[0].findAll(
+    (n) => n.type === "div" && typeof n.props?.className === "string" && n.props.className.includes("sm:hidden"),
+    { deep: true }
+  );
+  if (wrap.length === 0) return null;
+  const el = wrap[0].findAll((n) => n.type === "a" || n.type === "span", { deep: true })[0];
+  return { label: visibleTextOf(el), href: el.type === "a" ? String(el.props.href) : undefined };
+}
+
+function h1Texts(r: TestRenderer.ReactTestRenderer): string[] {
+  return r.root.findAllByType("h1").map(visibleTextOf);
+}
+
+describe("Phase 11B.3 — Audit Log breadcrumb", () => {
+  const WS = "ws_123";
+  const NAME = "Acme Risk Lab";
+
+  async function mountAudit(workspaceId = WS, workspaceName = NAME) {
+    mockedUseAuth.mockReturnValue({ user: { uid: "u1" }, authReady: true });
+    mockedFetchWorkspaceAuditEvents.mockResolvedValue({ status: "ok", events: [], hasMore: false, nextCursor: undefined });
+    let r!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      r = TestRenderer.create(createElement(WorkspaceAuditLogShell, { workspaceId, workspaceName }));
+    });
+    return r;
+  }
+
+  it("AA1 — desktop hierarchy is exactly {Workspace name} / Audit Log, Audit Log current", async () => {
+    expect(bcSegments(await mountAudit())).toEqual([
+      { label: NAME, href: `/workspace/team/${WS}`, current: false },
+      { label: "Audit Log", href: undefined, current: true },
+    ]);
+  });
+
+  it("AA2 — mobileParent goes UP to the Workspace Overview", async () => {
+    expect(bcMobileParent(await mountAudit())).toEqual({ label: NAME, href: `/workspace/team/${WS}` });
+  });
+
+  it("AA3 — 'Audit Log' remains the h1, and there is exactly one h1", async () => {
+    expect(h1Texts(await mountAudit())).toEqual(["Audit Log"]);
+  });
+
+  it("AA4 — the redundant Workspace-name subtitle is GONE, but the name is still present via the breadcrumb", async () => {
+    const r = await mountAudit();
+    expect(r.root.findAllByType("p").filter((n) => visibleTextOf(n) === NAME)).toHaveLength(0);
+    expect(bcSegments(r).map((x) => x.label)).toContain(NAME);
+  });
+
+  it("AA5 — NON-VACUITY: the raw workspaceId is never a visible breadcrumb label", async () => {
+    const segs = bcSegments(await mountAudit());
+    expect(segs.map((x) => x.label)).not.toContain(WS);
+    expect(segs[0].href).toContain(WS);
+  });
+
+  it("AA6 — ENCODING: reserved characters in workspaceId are percent-encoded", async () => {
+    const r = await mountAudit("ws/a b", NAME);
+    expect(bcSegments(r)[0].href).toBe("/workspace/team/ws%2Fa%20b");
+    expect(bcMobileParent(r)!.href).toBe("/workspace/team/ws%2Fa%20b");
+  });
+
+  it("AA7 — WorkspaceNav still marks Audit Log current, independently of the breadcrumb", async () => {
+    const r = await mountAudit();
+    const nav = r.root.findAll((n) => n.type === "nav" && n.props?.["aria-label"] === "Workspace", { deep: true })[0];
+    expect(nav.findAll((n) => n.props?.["aria-current"] === "page", { deep: true }).map(visibleTextOf)).toEqual(["Audit Log"]);
+  });
+});

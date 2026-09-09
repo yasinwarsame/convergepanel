@@ -84,6 +84,7 @@ import {
 } from "@/lib/client/workspaceTeamClient";
 import ReviewErrorState from "@/components/teamGovernance/ReviewErrorState";
 import WorkspaceNav from "@/components/workspace/WorkspaceNav";
+import { Breadcrumb } from "@/components/shared/Breadcrumb";
 import { TEAM_WORKSPACE_COLLABORATOR_SEAT_LIMIT } from "@/lib/workspaces/teamWorkspaceSeatLimit";
 
 const ROLE_LABEL: Record<WorkspaceMemberRole, string> = { owner: "Owner", admin: "Admin", member: "Member", reviewer: "Reviewer", viewer: "Viewer" };
@@ -484,9 +485,22 @@ export default function WorkspaceMembersShell({
 
   return (
     <main className="mx-auto max-w-3xl px-4 py-10 sm:py-14">
+      {/*
+        Phase 11B.3 — the breadcrumb now supplies the Workspace name, so the
+        subtitle that repeated it directly under the heading is removed. The
+        "Members" h1 itself is unchanged.
+      */}
+      <Breadcrumb
+        className="mb-3"
+        segments={[
+          { label: workspaceName, href: `/workspace/team/${encodeURIComponent(workspaceId)}` },
+          { label: "Members" },
+        ]}
+        mobileParent={{ label: workspaceName, href: `/workspace/team/${encodeURIComponent(workspaceId)}` }}
+      />
+
       <div className="mb-6">
         <h1 className="text-2xl font-semibold text-cp-text">Members</h1>
-        <p className="mt-1 text-sm text-cp-muted">{workspaceName}</p>
       </div>
 
       <WorkspaceNav workspaceId={workspaceId} active="members" showAudit={!!canReadAudit} />
