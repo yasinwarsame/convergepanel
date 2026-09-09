@@ -87,12 +87,48 @@ entire check. It is an exceptional bootstrap mechanism, not an administrator
 tier. It fails closed when the variable is empty or unset: `adminSecret.length > 0`
 is the first conjunct of the comparison, evaluated before any `timingSafeEqual`.
 
-Whether it is *currently* empty in Production is an environment fact, not a
-source fact — verify it against the live environment rather than trusting this
-sentence (`vercel env ls production` (which lists variable NAMES and environments, not
-values — it can show a variable is absent, but cannot show a present one is
-empty; for runtime proof use the two-phase containment tool in §B.6, which is
-the only procedure that establishes containment); a value of length 0 fails closed).
+### BOOTSTRAP SECRET STATE MODEL — presence is not configuration
+
+Phase EXISTING_ADMIN_E2 (2026-09-09). An earlier pre-enrollment review recorded
+`ADMIN_SECRET` as "present and reusable" and scheduled a retirement, having tested
+only that the variable EXISTS. It exists and its value is EMPTY, so the bootstrap
+path was already fail-closed and the retirement was a no-op that could not have
+completed. Three states, and only the third means anything is live:
+
+| State | Definition | Bootstrap path | Retirement action |
+|---|---|---|---|
+| `ABSENT` | variable does not exist | fail-closed | none |
+| `EMPTY` | variable exists, UTF-8 byte length **0** | fail-closed | **none required** |
+| `CONFIGURED` | variable exists, byte length **> 0** | potentially active | containment proof + remove/rotate |
+
+The runtime test is `Buffer.from(process.env.ADMIN_SECRET ?? "", "utf8").length > 0`,
+evaluated before any `timingSafeEqual`. `ABSENT` and `EMPTY` are indistinguishable
+to it — both can never authenticate any request.
+
+**Never infer activation from variable presence.** `vercel env ls` shows names and
+prints `Encrypted` for values, so it cannot separate `EMPTY` from `CONFIGURED`.
+Determine the effective state the way the runtime does — read the value through
+the approved secret-safe mechanism (`vercel env pull` to a temp file), measure only
+absent / empty / non-empty, delete the file, and never print the value or inline it
+on a command line. A control is worth running in the same pass: confirm an
+unrelated secret in the same pull has a plausible non-zero length, which
+distinguishes "genuinely empty" from "the tool redacted everything".
+
+**Containment precondition.** `probe-admin-secret.mjs --production-two-phase`
+requires `ADMIN_SECRET_STATE == CONFIGURED`. Its PRE half demands `400` +
+`credential-accepted`, which an empty secret can never produce. If the state is
+`ABSENT` or `EMPTY`, STOP before any Production request and report
+`BOOTSTRAP_SECRET_ALREADY_DISABLED` / `CONTAINMENT_NOT_APPLICABLE`. Do not spend a
+rate-limit slot discovering this.
+
+**Current observed Production state (2026-09-09):** the `ADMIN_SECRET` variable
+exists and its effective value is empty, so bootstrap-secret authentication is
+disabled and `/api/admin/set-admin` is fail-closed. **No secret retirement is
+outstanding.** Do not restate this as a completed retirement: the credential was
+never removed or rotated; it is disabled by an empty value. Removing the empty
+variable is optional hygiene with no runtime effect, and is deliberately NOT done,
+because it would require a Production configuration change and deployment for no
+security benefit.
 
 ### Using BOOTSTRAP_SECRET to mint the first SYSTEM_ADMIN
 
@@ -102,7 +138,19 @@ no audit record and no success log. Treating it as a durable operator credential
 means holding, indefinitely, a value that silently grants the highest tier in the
 system to anyone who obtains it.
 
-Two ways to enroll the first SYSTEM_ADMIN. Choose ONE deliberately:
+> **CURRENT STATE (2026-09-09): no first-admin enrollment is pending.** Production
+> already has **two intended SYSTEM_ADMIN accounts**, both claim-derived
+> (`admin === true`) and both dispositioned INTENDED_KEEP by the operator. They do
+> not need `ADMIN_EMAILS`, because SYSTEM_ADMIN already implies ADMIN_PORTAL access.
+> `GOVERNANCE_ADMIN_EMAILS` remains absent unless governance authority is separately
+> requested. The procedure below is retained for a genuinely NEW administrator, and
+> its Option 2 applies only when `ADMIN_SECRET` is `CONFIGURED`.
+>
+> Earlier phases of this workstream described the state as "nobody enrolled". That
+> was true of the ALLOWLISTS and was never true of the claim; it was corrected when
+> Production custom claims were first enumerated.
+
+Two ways to enroll a SYSTEM_ADMIN. Choose ONE deliberately:
 
 **Option 1 — out-of-band service-account script (preferred).** Call
 `setCustomUserClaims(uid, { admin: true })` directly from a script authenticated
@@ -626,7 +674,8 @@ table is the contract.
    `set-role` and `set-admin`, provider credential access, and bulk purge
    produce no audit record, and `set-admin` produces no evidence at all.
 
-**Containment is not complete while a reusable bootstrap credential can
+**If `ADMIN_SECRET` is `CONFIGURED` (non-empty), containment is not complete while
+that reusable bootstrap credential can
 re-create the claim you just removed.**
 
 ### What this procedure does NOT give you
