@@ -12,6 +12,7 @@
  * silently succeeding — structural proof of the Team-membership boundary.
  */
 
+import { createHash } from "node:crypto";
 import { readFileSync } from "fs";
 
 type StoredDoc = Record<string, unknown>;
@@ -1240,5 +1241,107 @@ describe("verifyDeepResearchClaimFingerprint — Phase 11A.5B read-time re-verif
     const fnBody = moduleSource.slice(fnStart, fnStart + 800);
     expect(fnBody).not.toContain("adminDb");
     expect(fnBody).not.toContain(".collection(");
+  });
+});
+
+
+// ===========================================================================
+describe("PHASE 11A.6.2 — blank/whitespace claims are refused at both layers", () => {
+  /**
+   * Ordinary Personal mode has always rejected a blank claim (`invalid_claim`).
+   * Origin-linked mode never carried that guard forward, so a Deep Research
+   * finding with an empty or whitespace-only summary resolved to an empty
+   * `claimText`, passed the `> MAX_CLAIM_LEN` check, and reached quota + model
+   * execution on BOTH the Personal and Team routes.
+   */
+  const BLANKS: Array<[string, string]> = [
+    ["empty string", ""],
+    ["spaces", "   "],
+    ["tab + newline", "\t\n"],
+    ["mixed unicode-ish whitespace", " \t \n  "],
+  ];
+
+  describe("issuance — buildDeepResearchClaimId()", () => {
+    it.each(BLANKS)("refuses a %s summary", (_n, summary) => {
+      expect(buildDeepResearchClaimId({ runId: RUN_ID, section: "findings", index: 0, finding: finding({ summary }) })).toBeNull();
+    });
+
+    it("ANCHOR: a non-blank summary still issues a selector", () => {
+      const id = buildDeepResearchClaimId({ runId: RUN_ID, section: "findings", index: 0, finding: finding({ summary: "a real claim" }) });
+      expect(typeof id).toBe("string");
+      expect(id).toMatch(/^v1:findings:0:[A-Za-z0-9_-]{43}$/);
+    });
+
+    it("CLAIM IDENTITY IS UNCHANGED: surrounding whitespace is NOT trimmed before fingerprinting", () => {
+      // The guard uses trim() only to decide emptiness. If it trimmed the value
+      // it fingerprints, every existing selector for a padded summary would
+      // silently stop resolving.
+      const padded = "  a real claim  ";
+      const idPadded = buildDeepResearchClaimId({ runId: RUN_ID, section: "findings", index: 0, finding: finding({ summary: padded }) });
+      const idTrimmed = buildDeepResearchClaimId({ runId: RUN_ID, section: "findings", index: 0, finding: finding({ summary: padded.trim() }) });
+      expect(idPadded).not.toBeNull();
+      expect(idTrimmed).not.toBeNull();
+      expect(idPadded).not.toEqual(idTrimmed);
+    });
+  });
+
+  describe("authoritative resolution — resolveClaimVerificationOrigin()", () => {
+    /**
+     * The selector is built HERE rather than via `buildDeepResearchClaimId()`,
+     * which now refuses blanks. Building it from a non-blank summary and then
+     * blanking the stored finding would deny on FINGERPRINT MISMATCH instead —
+     * proving nothing about this guard. This reproduces the exact digest
+     * contract so the fingerprint genuinely matches and the blank guard is the
+     * only thing that can deny.
+     */
+    function selectorForBlank(runId: string, index: number, f: { id: string; summary: string }): string {
+      const canonical = JSON.stringify(["deep_research_claim:v1", runId, "findings", index, f.id, f.summary]);
+      const fp = createHash("sha256").update(canonical, "utf8").digest("base64url");
+      return `v1:findings:${index}:${fp}`;
+    }
+
+    it.each(BLANKS)("denies a validly-fingerprinted %s occurrence as claim_not_found", async (_n, summary) => {
+      const f = finding({ summary });
+      seedRun({ adaptiveOutput: deepResearchOutput([f]) });
+      const claimId = selectorForBlank(RUN_ID, 0, f as { id: string; summary: string });
+
+      const result = await resolveClaimVerificationOrigin({ runId: RUN_ID, claimId, callerUid: CALLER_UID, expectedWorkspaceId: null });
+
+      expect(result.status).toBe("denied");
+      expect((result as { reason: string }).reason).toBe("claim_not_found");
+      // conceals as the SAME reason an unmatched fingerprint returns — no oracle
+      expect((result as { reason: string }).reason).not.toBe("not_deep_research");
+    });
+
+    it("SELF-VALIDATION: the hand-built selector really does match the fingerprint", async () => {
+      // Without this, the tests above could be passing on a mismatched digest
+      // and denying for the wrong reason entirely.
+      const f = finding({ summary: "a genuinely usable claim" });
+      seedRun({ adaptiveOutput: deepResearchOutput([f]) });
+      const claimId = selectorForBlank(RUN_ID, 0, f as { id: string; summary: string });
+      const result = await resolveClaimVerificationOrigin({ runId: RUN_ID, claimId, callerUid: CALLER_UID, expectedWorkspaceId: null });
+      expect(result.status).toBe("resolved");
+      expect((result as { claimText: string }).claimText).toBe("a genuinely usable claim");
+    });
+
+    it("no fuzzy fallback: a blank occurrence never resolves to a sibling finding", async () => {
+      const blank = finding({ id: "f-blank", summary: "   " });
+      const usable = finding({ id: "f-usable", summary: "a usable neighbour claim" });
+      seedRun({ adaptiveOutput: deepResearchOutput([blank, usable]) });
+      const claimId = selectorForBlank(RUN_ID, 0, blank as { id: string; summary: string });
+      const result = await resolveClaimVerificationOrigin({ runId: RUN_ID, claimId, callerUid: CALLER_UID, expectedWorkspaceId: null });
+      expect(result.status).toBe("denied");
+      expect(JSON.stringify(result)).not.toContain("neighbour");
+    });
+
+    it("ANCHOR: an ordinary non-blank occurrence still resolves unchanged", async () => {
+      const f = finding({ summary: "unchanged behaviour" });
+      seedRun({ adaptiveOutput: deepResearchOutput([f]) });
+      const result = await resolveClaimVerificationOrigin({
+        runId: RUN_ID, claimId: selectorFor(RUN_ID, "findings", 0, f), callerUid: CALLER_UID, expectedWorkspaceId: null,
+      });
+      expect(result.status).toBe("resolved");
+      expect((result as { claimText: string }).claimText).toBe("unchanged behaviour");
+    });
   });
 });

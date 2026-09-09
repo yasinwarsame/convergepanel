@@ -71,6 +71,7 @@ import { runProjectAssociationTargetNotFoundResponse, projectArchivedTargetRespo
 import { logger } from "@/lib/logger";
 import type { ModelVerdict } from "@/lib/verification/parseVerificationJson";
 import { resolveClaimVerificationOrigin, type ClaimVerificationOrigin } from "@/lib/verification/claimVerificationOrigin";
+import type { EvidenceSourceReference } from "@/lib/verification/evidenceSourceExtraction";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -201,15 +202,26 @@ async function checkAdmissionAndGate1(args: { uid: string; workspaceId: string; 
  * and governance are identical regardless of where `claimText`/`projectId`/
  * `origin` came from.
  */
+/**
+ * Phase 11A.6.2 — `origin` and its evidence snapshot travel as ONE value, so an
+ * origin-linked Team artifact cannot be persisted with the origin but without
+ * the snapshot (exactly what happened between 11A.3 and this phase).
+ * `projectId` stays separate: an ORDINARY Team verification legitimately has
+ * one, so it is not part of the origin discriminant.
+ */
+type TeamOriginSnapshot = { origin: ClaimVerificationOrigin; evidenceSources: EvidenceSourceReference[] } | null;
+
 async function executeAndPersistTeamClaimVerification(args: {
   uid: string;
   workspaceId: string;
   claimText: string;
   selectedModels: ModelId[];
   projectId: string | null;
-  origin?: ClaimVerificationOrigin;
+  originSnapshot: TeamOriginSnapshot;
 }): Promise<NextResponse> {
-  const { uid, workspaceId, claimText, selectedModels, projectId, origin } = args;
+  const { uid, workspaceId, claimText, selectedModels, projectId } = args;
+  const origin = args.originSnapshot?.origin;
+  const evidenceSources = args.originSnapshot?.evidenceSources;
 
   try {
     await validateUserSubscription(uid);
@@ -312,6 +324,10 @@ async function executeAndPersistTeamClaimVerification(args: {
     auditBundle,
     selectedModels,
     ...(origin ? { origin } : {}),
+    // Phase 11A.6.2 — the exact resolver-derived snapshot, never recomputed and
+    // never re-read. Gate 2 still reauthorizes from scratch; it does not perform
+    // a second origin resolution or an extra Project read to obtain this.
+    ...(evidenceSources !== undefined ? { evidenceSources } : {}),
   });
 
   try {
@@ -540,7 +556,7 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
         claimText: resolution.claimText,
         selectedModels,
         projectId: resolution.projectId,
-        origin: resolution.origin,
+        originSnapshot: { origin: resolution.origin, evidenceSources: resolution.evidenceSources },
       });
     }
 
@@ -591,6 +607,7 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
       claimText: claimRaw,
       selectedModels,
       projectId: targetProjectId,
+      originSnapshot: null,
     });
   } catch (err: any) {
     logger.error("[POST /api/workspaces/[workspaceId]/verifications] Unexpected error", { error: err?.message, stack: err?.stack });

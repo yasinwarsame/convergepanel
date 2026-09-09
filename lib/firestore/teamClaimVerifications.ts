@@ -60,6 +60,7 @@ import { roleHasCapability } from "@/lib/workspaces/capabilities";
 import { isWellFormedProjectV1 } from "@/lib/projects/types";
 import { sanitizeForFirestore } from "@/lib/firestore/sanitizeForFirestore";
 import type { ClaimVerificationFirestoreDoc } from "@/lib/firestore/verifications";
+import type { EvidenceSourceReference } from "@/lib/verification/evidenceSourceExtraction";
 import type { ClaimVerificationOrigin } from "@/lib/verification/claimVerificationOrigin";
 
 // ============================================================
@@ -204,6 +205,8 @@ export async function saveTeamClaimVerification(args: {
    * own, never accepted as a pass-through of caller-supplied request data.
    */
   origin?: ClaimVerificationOrigin;
+  /** Phase 11A.6.2 — resolver-derived snapshot; present iff `origin` is. */
+  evidenceSources?: EvidenceSourceReference[];
 }): Promise<Gate2Result> {
   const admission = resolveTeamWorkspaceTargetAdmission({
     uid: args.uid,
@@ -267,7 +270,7 @@ export async function saveTeamClaimVerification(args: {
       // resolved before this transaction opened) is spread in explicitly,
       // never `undefined`-assigned, matching `ClaimVerificationFirestoreDoc.origin`'s
       // established absent-not-null convention (see lib/firestore/verifications.ts).
-      const canonicalDoc: ClaimVerificationFirestoreDoc & { workspaceId: string; projectId: string | null; origin?: ClaimVerificationOrigin } = {
+      const canonicalDoc: ClaimVerificationFirestoreDoc & { workspaceId: string; projectId: string | null; origin?: ClaimVerificationOrigin; evidenceSources?: EvidenceSourceReference[] } = {
         userId: args.uid,
         claim: args.claim,
         type: "claim_verification",
@@ -286,6 +289,10 @@ export async function saveTeamClaimVerification(args: {
         workspaceId: args.workspaceId,
         projectId: args.projectId,
         ...(args.origin ? { origin: args.origin } : {}),
+        // Phase 11A.6.2 — `[]` is persisted for an origin-linked artifact with no
+        // surviving references; absence means the artifact predates or does not
+        // participate in the contract.
+        ...(args.evidenceSources !== undefined ? { evidenceSources: args.evidenceSources } : {}),
       };
       const safe = sanitizeForFirestore(canonicalDoc) as typeof canonicalDoc;
       tx.create(verificationRef, safe);

@@ -386,3 +386,47 @@ describe("POST /api/workspaces/[workspaceId]/verifications — ordinary Team ver
     expect(Object.prototype.hasOwnProperty.call(gate2Call, "origin")).toBe(false);
   });
 });
+
+
+// ===========================================================================
+describe("PHASE 11A.6.2 — Team origin evidence snapshot", () => {
+  const SOURCES = [
+    { url: "https://example.com/a", hostname: "example.com" },
+    { url: "https://example.org/b", hostname: "example.org" },
+  ];
+  const gate2Arg = () => mockedSaveGate2.mock.calls[0][0] as Record<string, unknown>;
+
+  it("carries the EXACT resolver-derived snapshot into Gate 2", async () => {
+    mockedResolveClaimVerificationOrigin.mockResolvedValue({
+      status: "resolved", origin: ORIGIN, claimText: "x", projectId: null, evidenceSources: SOURCES,
+    });
+    await post({ runId: ORIGIN.runId, claimId: ORIGIN.claimId });
+    expect(gate2Arg().evidenceSources).toEqual(SOURCES);
+    // Gate 2 must not re-resolve the origin to obtain it.
+    expect(mockedResolveClaimVerificationOrigin).toHaveBeenCalledTimes(1);
+  });
+
+  it("persists [] for an origin-linked artifact with zero surviving references", async () => {
+    mockedResolveClaimVerificationOrigin.mockResolvedValue({
+      status: "resolved", origin: ORIGIN, claimText: "x", projectId: null, evidenceSources: [],
+    });
+    await post({ runId: ORIGIN.runId, claimId: ORIGIN.claimId });
+    expect(gate2Arg().evidenceSources).toEqual([]);
+    expect("evidenceSources" in gate2Arg()).toBe(true);
+  });
+
+  it("an ordinary Team verification carries neither origin nor snapshot", async () => {
+    await post({ claim: "an ordinary team claim" });
+    expect("evidenceSources" in gate2Arg()).toBe(false);
+    expect("origin" in gate2Arg()).toBe(false);
+  });
+
+  it("Gate 1 and the project preflight still run for an origin-linked request", async () => {
+    mockedResolveClaimVerificationOrigin.mockResolvedValue({
+      status: "resolved", origin: ORIGIN, claimText: "x", projectId: null, evidenceSources: SOURCES,
+    });
+    await post({ runId: ORIGIN.runId, claimId: ORIGIN.claimId });
+    expect(mockedAuthorizeGate1).toHaveBeenCalled();
+    expect(mockedSaveGate2).toHaveBeenCalledTimes(1); // Gate 2 remains the sole writer
+  });
+});
