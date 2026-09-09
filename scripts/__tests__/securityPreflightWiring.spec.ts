@@ -121,3 +121,71 @@ describe("the scanner's CLI contract — a printed warning is not a gate", () =>
     expect(res.stderr).toContain("no registered detector");
   });
 });
+
+
+// ===========================================================================
+describe("DETECTOR PARITY — registered, documented and self-tested agree", () => {
+  /**
+   * Phase FIRST-ADMIN-C17 (R13). The falsifiability document stated a detector
+   * count of seven while the scanner registered eight, and the eighth appeared
+   * nowhere in the document — drift introduced by the very commit that added it.
+   * A count in prose cannot be kept honest by hand, so the contract is set
+   * equality over stable IDs across three INDEPENDENT sources:
+   *
+   *   registered  — parsed from the scanner's own `{ id: "..." }` registrations
+   *   documented  — parsed from the "Registered detectors" table in the doc
+   *   self-tested — parsed from the fixture's `# EXPECT-SHAPE:` tags
+   *
+   * None of the three is derived from another, and none is read from THIS file,
+   * so the assertion cannot be satisfied by its own source.
+   */
+  const SCANNER = "scripts/security-test-preflight.mjs";
+  const DOC = "docs/operations/security-test-falsifiability.md";
+  const FIXTURE = "scripts/__fixtures__/known-vacuous-shapes.txt";
+
+  const registered = (): string[] =>
+    [...readFileSync(SCANNER, "utf8").matchAll(/\{\s*id:\s*"([a-z-]+)"/g)].map((m) => m[1]).sort();
+
+  const documented = (): string[] => {
+    const doc = readFileSync(DOC, "utf8");
+    const start = doc.indexOf("### Registered detectors");
+    expect(start).toBeGreaterThan(-1);
+    const table = doc.slice(start, doc.indexOf("\n\n", doc.indexOf("| Detector ID |", start) + 10) + 1);
+    return [...table.matchAll(/^\|\s*`([a-z-]+)`\s*\|/gm)].map((m) => m[1]).sort();
+  };
+
+  const selfTested = (): string[] =>
+    [...readFileSync(FIXTURE, "utf8").matchAll(/^#\s*EXPECT-SHAPE:\s*([a-z-]+)/gm)].map((m) => m[1]).sort();
+
+  it("ANCHOR: all three sources parsed a non-trivial detector set", () => {
+    expect(registered().length).toBeGreaterThan(5);
+    expect(documented().length).toBeGreaterThan(5);
+    expect(selfTested().length).toBeGreaterThan(5);
+  });
+
+  it("every registered detector is documented", () => {
+    expect(documented()).toEqual(registered());
+  });
+
+  it("every registered detector has a self-test fixture", () => {
+    expect(selfTested()).toEqual(registered());
+  });
+
+  it("the documented set has no duplicates padding the count", () => {
+    const d = documented();
+    expect(d).toEqual([...new Set(d)]);
+  });
+
+  it("the self-referential detector is among them", () => {
+    // Named explicitly: it is the one R13 found missing from the document.
+    expect(registered()).toContain("self-referential-source-assertion");
+    expect(documented()).toContain("self-referential-source-assertion");
+    expect(selfTested()).toContain("self-referential-source-assertion");
+  });
+
+  it("no prose in the document asserts a hard-coded detector count", () => {
+    const doc = readFileSync(DOC, "utf8");
+    // A number in prose drifts; the tables above are the contract.
+    expect(doc).not.toMatch(/\b(five|six|seven|eight|nine|ten)\s+detectors\s+(the\s+scanner|are\s+registered)/i);
+  });
+});

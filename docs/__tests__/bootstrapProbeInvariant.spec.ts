@@ -501,7 +501,21 @@ describe("REPOSITORY-WIDE OPERATOR CONTRACT — discovered, classified, contract
     })
     .sort();
 
-  type Kind = "OPERATOR_INSTRUCTION" | "MINTING_EXAMPLE" | "IMPLEMENTATION" | "CONFIG_EXAMPLE";
+  /**
+   * Phase FIRST-ADMIN-C17 (R13). `IMPLEMENTATION_WITH_OPERATOR_GUIDANCE` exists
+   * because `scripts/lib/probe-admin-secret.mjs` is both: ~38 lines of its
+   * header are operator narrative ("WHAT PROOF ACTUALLY REQUIRES… PRE (before
+   * rotation)… the pre-check is the load-bearing half"). R13 showed that
+   * classifying it `IMPLEMENTATION` exempted it, so the guard's own known-bad
+   * string could be inserted there with the suite green. Operator prose does not
+   * stop being operator prose because it lives inside a source file.
+   */
+  type Kind =
+    | "OPERATOR_INSTRUCTION"
+    | "IMPLEMENTATION_WITH_OPERATOR_GUIDANCE"
+    | "MINTING_EXAMPLE"
+    | "IMPLEMENTATION"
+    | "CONFIG_EXAMPLE";
 
   /** Every discovered site, classified. Unclassified discoveries fail below. */
   const MANIFEST: Record<string, Kind> = {
@@ -515,7 +529,7 @@ describe("REPOSITORY-WIDE OPERATOR CONTRACT — discovered, classified, contract
     "docs/technical-documentation.md": "OPERATOR_INSTRUCTION",
     "lib/security/adminSecretProbeAttestation.ts": "IMPLEMENTATION",
     "lib/security/rateLimit.ts": "IMPLEMENTATION",
-    "scripts/lib/probe-admin-secret.mjs": "IMPLEMENTATION",
+    "scripts/lib/probe-admin-secret.mjs": "IMPLEMENTATION_WITH_OPERATOR_GUIDANCE",
     "scripts/probe-admin-secret.mjs": "OPERATOR_INSTRUCTION",
     "scripts/set-admin-by-uid.js": "MINTING_EXAMPLE",
     "scripts/set-admin-claim.js": "MINTING_EXAMPLE",
@@ -523,9 +537,37 @@ describe("REPOSITORY-WIDE OPERATOR CONTRACT — discovered, classified, contract
     "scripts/setAdmin.ts": "MINTING_EXAMPLE",
   };
 
+  /** Both kinds are subject to the canonical operator contract. */
+  const OPERATOR_KINDS: Kind[] = ["OPERATOR_INSTRUCTION", "IMPLEMENTATION_WITH_OPERATOR_GUIDANCE"];
   const OPERATOR_SITES = Object.entries(MANIFEST)
-    .filter(([, k]) => k === "OPERATOR_INSTRUCTION")
+    .filter(([, k]) => OPERATOR_KINDS.includes(k))
     .map(([f]) => f);
+
+  /**
+   * Phase FIRST-ADMIN-C17 (R13). The manifest test compared KEYS only, so
+   * retyping one entry — `"README.md": "IMPLEMENTATION"` — silently dropped
+   * three operator-contract assertions and the suite reported 87/87 green with
+   * ZERO failures. The allowlist had moved from "which files are scanned" to
+   * "which files count". These kinds are now pinned individually.
+   */
+  const EXPECTED_KINDS: Record<string, Kind> = {
+    "CLAUDE.md": "OPERATOR_INSTRUCTION",
+    "README.md": "OPERATOR_INSTRUCTION",
+    "app/api/admin/set-admin/route.ts": "OPERATOR_INSTRUCTION",
+    "docs/operations/admin-authority-tiers.md": "OPERATOR_INSTRUCTION",
+    "docs/operations/security-test-falsifiability.md": "OPERATOR_INSTRUCTION",
+    "docs/technical-documentation.md": "OPERATOR_INSTRUCTION",
+    "scripts/probe-admin-secret.mjs": "OPERATOR_INSTRUCTION",
+    "scripts/lib/probe-admin-secret.mjs": "IMPLEMENTATION_WITH_OPERATOR_GUIDANCE",
+    "app/api/user/usage/route.ts": "IMPLEMENTATION",
+    "lib/security/adminSecretProbeAttestation.ts": "IMPLEMENTATION",
+    "lib/security/rateLimit.ts": "IMPLEMENTATION",
+    "scripts/set-admin-by-uid.js": "MINTING_EXAMPLE",
+    "scripts/set-admin-claim.js": "MINTING_EXAMPLE",
+    "scripts/set-admin-simple.js": "MINTING_EXAMPLE",
+    "scripts/setAdmin.ts": "MINTING_EXAMPLE",
+    ".env.local.example": "CONFIG_EXAMPLE",
+  };
 
   it("ANCHOR: discovery actually found the known operator surfaces", () => {
     expect(DISCOVERED.length).toBeGreaterThan(10);
@@ -538,13 +580,43 @@ describe("REPOSITORY-WIDE OPERATOR CONTRACT — discovered, classified, contract
     expect(DISCOVERED).toEqual(Object.keys(MANIFEST).sort());
   });
 
+  it("every classification KIND is pinned — retyping an entry cannot silently drop assertions", () => {
+    // Compares the whole map, not just its keys. A retype fails here AND the
+    // count check below catches the assertions vanishing rather than failing.
+    expect(MANIFEST).toEqual(EXPECTED_KINDS);
+  });
+
+  it("the operator-contract site count is itself pinned", () => {
+    // R13's escape was that assertions DISAPPEARED (90 passed -> 87 passed, zero
+    // failures). A dropped `it.each` row is invisible unless the row count is
+    // asserted somewhere that does not itself shrink.
+    expect(OPERATOR_SITES.sort()).toEqual([
+      "CLAUDE.md",
+      "README.md",
+      "app/api/admin/set-admin/route.ts",
+      "docs/operations/admin-authority-tiers.md",
+      "docs/operations/security-test-falsifiability.md",
+      "docs/technical-documentation.md",
+      "scripts/lib/probe-admin-secret.mjs",
+      "scripts/probe-admin-secret.mjs",
+    ]);
+  });
+
   /**
-   * THE CANONICAL RULE, as a structured property rather than a phrase list:
-   * any sentence that mentions 401 together with proof/containment must be a
-   * NEGATIVE statement. "A standalone 401 is NOT containment proof" passes;
-   * "if it returns 401, containment is proven" does not. This does not claim to
-   * understand arbitrary English — it claims that on these sites, asserting
-   * containment from a single response is expressible only in the negative.
+   * Phase FIRST-ADMIN-C17 (R13). The comment that stood here claimed "any
+   * sentence that mentions 401 together with proof/containment must be a
+   * NEGATIVE statement". That was FALSE — it described a first draft of this
+   * predicate, not the one that shipped, and review demonstrated the gap with
+   * "A 401 response is sufficient evidence of containment." (mentions 401,
+   * mentions containment, not negated, passed).
+   *
+   * What this guard actually does: it rejects the finite set of stale one-shot
+   * containment claim shapes defined below, on every discovered operator site.
+   * It does NOT attempt general natural-language understanding, and incidental
+   * mentions of 401 or of proof are not forbidden. A paraphrase that names
+   * neither 401 nor the proof token is not detected — the normative,
+   * machine-checkable obligations remain the ordered BOOTSTRAP_* sequence and
+   * the BOOTSTRAP_POST_RATE_LIMITED row.
    */
   const sentencesOf = (text: string) => text.split(/(?<=[.!?])\s+|\n\s*\n/);
 
@@ -563,6 +635,12 @@ describe("REPOSITORY-WIDE OPERATOR CONTRACT — discovered, classified, contract
     /\breturns?\s+`?401`?[^.]{0,80}\b(is|are)\s+proven\b/i,
     /`?401`?[^.]{0,40}\b(proves\s+containment|means\s+contained)\b/i,
     /\bcontainment\s+is\s+proven\b[^.]{0,80}`?401`?/i,
+    // Phase FIRST-ADMIN-C17 — the exact forms R13 walked through.
+    /`?401`?[^.]{0,80}\b(sufficient|enough|adequate)\s+(evidence|proof)\b/i,
+    /\b(sufficient|enough|adequate)\s+(evidence|proof)\b[^.]{0,80}`?401`?/i,
+    /`?401`?[^.]{0,80}\b(establishes|confirms|demonstrates)\b[^.]{0,60}\b(contain|containment|rotation)/i,
+    /`?401`?[^.]{0,80}\brotation\s+window\s+is\s+closed\b/i,
+    /`?401`?[^.]{0,80}\brecord\s+`?PRODUCTION_CONTAINMENT_PROVEN`?/i,
   ];
 
   const claimsProofFrom401 = (sentence: string) => {
@@ -578,6 +656,11 @@ describe("REPOSITORY-WIDE OPERATOR CONTRACT — discovered, classified, contract
       "Run the old secret once; if it returns 401, Production containment is proven.",
       "A 401 proves containment.",
       "Containment is proven when the route returns 401.",
+      // R13's demonstrated bypasses — each must now fire.
+      "A 401 response is sufficient evidence of containment.",
+      "Seeing 401 for the retired secret establishes that Production is contained.",
+      "Once the route answers 401 to the legacy key, the rotation window is closed.",
+      "If the old secret yields 401 you may record PRODUCTION_CONTAINMENT_PROVEN.",
     ]) {
       expect({ bad, caught: claimsProofFrom401(bad) }).toEqual({ bad, caught: true });
     }
@@ -587,6 +670,9 @@ describe("REPOSITORY-WIDE OPERATOR CONTRACT — discovered, classified, contract
       "Containment requires the two-phase proof; a lone 401 is never sufficient.",
       "N multibyte characters return 500 where N±1 return 401, and the containment probe then reports INCONCLUSIVE.",
       "The route answers 401 + credential-rejected whenever the secret does not match.",
+      // The correct statement of the same fact must stay allowed.
+      "A 401 response is only a credential-rejected observation and is not Production containment proof.",
+      "A 401 is not sufficient evidence of containment on its own.",
     ]) {
       expect({ ok, caught: claimsProofFrom401(ok) }).toEqual({ ok, caught: false });
     }

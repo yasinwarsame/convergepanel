@@ -51,26 +51,41 @@ cannot resolve `origin/main` on a CI runner).
 
 It does **not** flag "the shapes above". That claim was wrong when it was
 written and the C7-R4 review called it out: the table above lists nine shapes,
-and the scanner implements seven detectors, only some of which correspond to
-table rows. Exactly what is mechanical, and what is not:
+and the scanner implements the detectors enumerated below, only some of which
+correspond to table rows. Exactly what is mechanical, and what is not:
 
 | Shape from the table | Detector? |
 |---|---|
 | `??`-masking before a null assertion | ✅ `nullish-mask` |
 | wrong response key (`|| []` over an absent key) | ✅ `default-mask` |
 | `some` where all are required | ✅ `some-effects` |
+| assertion on a self-composed string | ✅ `self-referential-source-assertion` |
 | label instead of data | ❌ human review only |
 | positive satisfied by a 4xx | ❌ human review only |
 | denial with no positive control | ❌ human review only |
-| assertion on a self-composed string | ❌ human review only |
 | all-negative with no anchor | ❌ human review only |
 | stub hiding the subject | ❌ human review only |
 
-Plus four detectors with no row above: `truthy-authority`, `empty-body`,
-`multiline-empty-body` and `skipped-test`. Three mapped + four unmapped = the
-seven detectors the scanner registers.
+### Registered detectors
 
-**Six of the nine documented shapes have no detector at all.** A green gate says
+Phase FIRST-ADMIN-C17 (R13): this document previously stated a detector count of
+**seven** in prose while the scanner registered **eight**, and that eighth
+detector appeared nowhere here at all. Counts in prose drift silently, so the contract is now **set equality
+over stable IDs**, asserted by `scripts/__tests__/securityPreflightWiring.spec.ts`
+against this table, the scanner's registrations, and the `--self-test` fixture.
+
+| Detector ID | Vacuity class it detects | Scope / limits |
+|---|---|---|
+| `nullish-mask` | `??` masking a security value before a null/empty assertion | line-based, literal |
+| `default-mask` | `\|\| []` turning an absent key into a passing empty assertion | line-based, literal |
+| `truthy-authority` | truthiness on an authority value | subject must contain `admin`/`authority`/`scope`/`visible` |
+| `some-effects` | `some()` where every listed effect is mandatory | literal `effects()` only |
+| `empty-body` | single-line empty test body | — |
+| `multiline-empty-body` | empty test body across lines | two-line lookahead, not a parser |
+| `skipped-test` | `it.skip` / `todo` / `xit` / `xdescribe` | — |
+| `self-referential-source-assertion` | reading the test's OWN source and asserting a literal over it, so the expected text is present because the assertion contains it | two-line lookahead; **does not** catch the assertion placed 3+ lines below the read, an aliased `const f = __filename`, or the `expect(src.includes("…")).toBe(true)` form — all three demonstrated by review |
+
+**Five of the nine documented shapes have no detector at all.** A green gate says
 nothing about them. That matters because the single most damaging defect found
 in this workstream — C7 proving log redaction while stubbing out the module that
 did the leaking — is "stub hiding the subject", an unmechanised row.
@@ -364,3 +379,34 @@ that one documented extra.
   file mentioning an operator token must be classified in the manifest; an
   unclassified discovery fails, which is what stops a future `CLAUDE.md`-shaped
   file from escaping.
+
+### Residuals carried from R13 (Phase FIRST-ADMIN-C17)
+
+None of these is closed; each is named so a reader does not infer coverage.
+
+- **The self-referential detector has three known evasions**, all demonstrated by
+  review and listed in the detector table above: the assertion placed 3+ lines
+  below the `readFileSync(__filename)`, an aliased `const f = __filename`, and
+  the `expect(src.includes("…")).toBe(true)` form. It is a two-line lookahead,
+  not a parser, and is not being turned into one.
+- **The stale-instruction guard is a finite shape set.** It rejects the shapes
+  listed in `bootstrapProbeInvariant.spec.ts`, each self-validated to fire. A
+  paraphrase naming neither `401` nor the proof token is not detected. The
+  normative obligations remain the ordered `BOOTSTRAP_*` sequence and the
+  `BOOTSTRAP_POST_RATE_LIMITED | MUST_PRESERVE_PROCESS` row.
+- **`EXECUTED` / `UNDRIVEN` in the auditLog disposition table are declared**, not
+  continuously enforced. The *site list* is source-derived and falsifiable; the
+  execution column was established by throw-probe at C16 and re-measured
+  independently at R13, but nothing re-measures it on every run.
+- **`ALL_INSTALLED_SINKS` leaves a two-assertion margin.** Removing a sink from
+  it stays red, but via only the spy-installation check and the verbatim-recovery
+  anchor rather than the content channels.
+- **`productionSinks()` matches a commented-out `console.x(` token**, producing a
+  false alarm. Over-inclusive, never under-inclusive — it cannot hide a leak.
+- **Sink discovery is textual**, so `console["trace"](…)` is invisible to it.
+- **`README.md` restates the observation semantics** rather than deferring to the
+  runbook; currently consistent, but duplicated and able to drift.
+- **`§B.6` has no literal heading** in the runbook; `README.md` and the route
+  docstring point at it as a section name.
+- **The raw-ledger deny scan can be removed from `finalize()`** with no test
+  noticing when no leak is present. With a leak the other channel still fires.
