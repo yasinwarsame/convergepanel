@@ -325,12 +325,23 @@ describe("Phase 11B.2 — WorkspaceNav on Team research detail", () => {
    */
   const NAV_LABELS = ["Overview", "Projects", "Members"];
 
-  /** Every rendered element carrying aria-current, with its visible text. */
-  function currentItems(renderer: TestRenderer.ReactTestRenderer) {
-    return renderer.root
-      .findAll((n) => typeof n.type === "string" && n.props?.["aria-current"] === "page", { deep: true })
-      .map((n) => JSON.stringify(n.children));
+  /**
+   * Elements carrying aria-current INSIDE the WorkspaceNav specifically.
+   *
+   * Phase 11B.3 added a Breadcrumb, which correctly marks its own final segment
+   * `aria-current="page"`. An unscoped query would conflate the two navs, so
+   * each is asserted against its own landmark — and the fact that each carries
+   * exactly one current item is itself part of the accessibility contract.
+   */
+  function currentItemsIn(renderer: TestRenderer.ReactTestRenderer, navLabel: string) {
+    const navs = renderer.root.findAll((n) => n.type === "nav" && n.props?.["aria-label"] === navLabel, { deep: true });
+    return navs.flatMap((nav) =>
+      nav
+        .findAll((n) => typeof n.type === "string" && n.props?.["aria-current"] === "page", { deep: true })
+        .map((n) => JSON.stringify(n.children))
+    );
   }
+  const currentItems = (renderer: TestRenderer.ReactTestRenderer) => currentItemsIn(renderer, "Workspace");
   function anchorHrefs(renderer: TestRenderer.ReactTestRenderer): string[] {
     return renderer.root
       .findAll((n) => n.type === "a", { deep: true })
@@ -388,12 +399,12 @@ describe("Phase 11B.2 — WorkspaceNav on Team research detail", () => {
     for (const h of hrefs) expect(h.startsWith(`/workspace/team/${WS_ID}`)).toBe(true);
   });
 
-  it("T5 — the existing Back to Project affordance is preserved (breadcrumbs are 11B.3)", async () => {
+  it("T5 — Phase 11B.3: the isolated Back to Project link is ABSORBED by the breadcrumb, which now owns parent navigation", async () => {
     const r = await renderAuthorized(WITHOUT_AUDIT);
-    expect(visibleText(r)).toContain("Back to Project");
+    // The one-off link is gone — two equivalent hierarchy affordances would be redundant.
+    expect(visibleText(r)).not.toContain("Back to Project");
+    // ...but the destination is NOT lost: the breadcrumb's Project segment keeps it reachable.
     expect(anchorHrefs(r)).toContain(`/workspace/team/${WS_ID}/projects/${PROJECT_ID}`);
-    // 11B.2 must not introduce a breadcrumb
-    expect(visibleText(r)).not.toContain("breadcrumb");
   });
 
   it("T6 — a PENDING run still renders the nav and the in-progress state", async () => {
@@ -406,5 +417,271 @@ describe("Phase 11B.2 — WorkspaceNav on Team research detail", () => {
     expect(current).toHaveLength(1);
     expect(current[0]).toContain("Projects");
     expect(visibleText(r)).toContain("still in progress");
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * Phase 11B.3 — Breadcrumb inspection helpers.
+ *
+ * The REAL `Breadcrumb` is rendered (never mocked), so these read the shipped
+ * component's own markup: its `<nav aria-label="Breadcrumb">` landmark, the
+ * desktop `<ol>` hierarchy, and the separate mobile parent affordance.
+ * `aria-hidden` nodes (the "/" separators and the "←" glyph) are excluded, so a
+ * label assertion can never accidentally pass on decorative text.
+ * ------------------------------------------------------------------ */
+type BcSeg = { label: string; href?: string; current: boolean };
+
+function visibleTextOf(node: TestRenderer.ReactTestInstance): string {
+  const out: string[] = [];
+  const walk = (n: TestRenderer.ReactTestInstance) => {
+    n.children.forEach((c) => {
+      if (typeof c === "string") out.push(c);
+      else if (c.props?.["aria-hidden"] !== "true") walk(c);
+    });
+  };
+  walk(node);
+  return out.join("").replace(/\s+/g, " ").trim();
+}
+
+function breadcrumbNav(r: TestRenderer.ReactTestRenderer) {
+  return r.root.findAll((n) => n.type === "nav" && n.props?.["aria-label"] === "Breadcrumb", { deep: true });
+}
+
+function bcSegments(r: TestRenderer.ReactTestRenderer): BcSeg[] {
+  const navs = breadcrumbNav(r);
+  if (navs.length === 0) return [];
+  const ol = navs[0].findAllByType("ol")[0];
+  return ol.findAllByType("li").map((li) => {
+    const el = li.findAll((n) => (n.type === "a" || n.type === "span") && n.props?.["aria-hidden"] !== "true", { deep: true })[0];
+    return {
+      label: visibleTextOf(el),
+      href: el.type === "a" ? String(el.props.href) : undefined,
+      current: el.props["aria-current"] === "page",
+    };
+  });
+}
+
+function bcMobileParent(r: TestRenderer.ReactTestRenderer): { label: string; href?: string } | null {
+  const navs = breadcrumbNav(r);
+  if (navs.length === 0) return null;
+  const wrap = navs[0].findAll(
+    (n) => n.type === "div" && typeof n.props?.className === "string" && n.props.className.includes("sm:hidden"),
+    { deep: true }
+  );
+  if (wrap.length === 0) return null;
+  const el = wrap[0].findAll((n) => n.type === "a" || n.type === "span", { deep: true })[0];
+  return { label: visibleTextOf(el), href: el.type === "a" ? String(el.props.href) : undefined };
+}
+
+function h1Texts(r: TestRenderer.ReactTestRenderer): string[] {
+  return r.root.findAllByType("h1").map(visibleTextOf);
+}
+
+describe("Phase 11B.3 — Team research detail breadcrumb", () => {
+  const WS = "ws_123";
+  const WS_NAME = "Acme Risk Lab";
+  const PID = "proj_456";
+  const PNAME = "Election Evidence";
+  const RID = "run_789";
+  const QUESTION = "What changed in the source evidence?";
+
+  /** Every label deliberately differs from its id, so no assertion can pass on an id. */
+  function wire({ workspaceId = WS, projectId = PID, runId = RID } = {}) {
+    mockedResolveServerComponentIdentity.mockResolvedValue({ uid: UID });
+    mockedResolveWorkspaceAccess.mockResolvedValue({
+      granted: true,
+      workspaceType: "team",
+      workspace: { id: workspaceId, name: WS_NAME },
+      membership: { role: "member" },
+      capabilities: ["workspace.read", "projects.read", "research.read"],
+    });
+    mockedGetProject.mockResolvedValue({
+      status: "found",
+      project: { id: projectId, workspaceId, name: PNAME, status: "active" },
+    });
+    mockedGetTeamWorkspaceRun.mockResolvedValue({ status: "complete", runId, question: QUESTION, results: [] });
+    return renderPage({ workspaceId, projectId, runId });
+  }
+
+  it("AE1 — full four-level hierarchy, each parent linked, the question final and non-linking", async () => {
+    expect(bcSegments(await wire())).toEqual([
+      { label: WS_NAME, href: `/workspace/team/${WS}`, current: false },
+      { label: "Projects", href: `/workspace/team/${WS}/projects`, current: false },
+      { label: PNAME, href: `/workspace/team/${WS}/projects/${PID}`, current: false },
+      { label: QUESTION, href: undefined, current: true },
+    ]);
+  });
+
+  it("AE2 — mobileParent is the Project, the genuine immediate parent", async () => {
+    expect(bcMobileParent(await wire())).toEqual({ label: PNAME, href: `/workspace/team/${WS}/projects/${PID}` });
+  });
+
+  it("AE3 — NON-VACUITY: labels are the resolved NAMES and the question — never workspaceId, projectId or runId", async () => {
+    const labels = bcSegments(await wire()).map((x) => x.label);
+    expect(labels).toEqual([WS_NAME, "Projects", PNAME, QUESTION]);
+    for (const id of [WS, PID, RID]) expect(labels).not.toContain(id);
+    // the run id never appears in a breadcrumb href either — no segment points at this page
+    for (const seg of bcSegments(await wire())) expect(seg.href ?? "").not.toContain(RID);
+  });
+
+  it("AE4 — the run question is the page's single h1", async () => {
+    expect(h1Texts(await wire())).toEqual([QUESTION]);
+  });
+
+  it("AE5 — the isolated 'Back to Project' link is ABSENT; the breadcrumb owns parent navigation now", async () => {
+    const r = await wire();
+    expect(JSON.stringify(r.toJSON())).not.toContain("Back to Project");
+    expect(bcSegments(r).map((x) => x.href)).toContain(`/workspace/team/${WS}/projects/${PID}`);
+  });
+
+  it("AE6 — WorkspaceNav is untouched and still marks Projects current; each nav carries exactly one aria-current", async () => {
+    const r = await wire();
+    const currentIn = (label: string) =>
+      r.root
+        .findAll((n) => n.type === "nav" && n.props?.["aria-label"] === label, { deep: true })
+        .flatMap((nav) => nav.findAll((n) => n.props?.["aria-current"] === "page", { deep: true }).map(visibleTextOf));
+    expect(currentIn("Workspace")).toEqual(["Projects"]);
+    expect(currentIn("Breadcrumb")).toEqual([QUESTION]);
+  });
+
+  it("AE7 — a PENDING run still renders the full breadcrumb and the in-progress state", async () => {
+    mockedResolveServerComponentIdentity.mockResolvedValue({ uid: UID });
+    mockedResolveWorkspaceAccess.mockResolvedValue({
+      granted: true, workspaceType: "team", workspace: { id: WS, name: WS_NAME },
+      membership: { role: "member" }, capabilities: ["workspace.read", "projects.read", "research.read"],
+    });
+    mockedGetProject.mockResolvedValue({ status: "found", project: { id: PID, workspaceId: WS, name: PNAME, status: "active" } });
+    mockedGetTeamWorkspaceRun.mockResolvedValue({ status: "pending", runId: RID, question: QUESTION });
+    const r = await renderPage({ workspaceId: WS, projectId: PID, runId: RID });
+    expect(bcSegments(r).map((x) => x.label)).toEqual([WS_NAME, "Projects", PNAME, QUESTION]);
+    expect(JSON.stringify(r.toJSON())).toContain("still in progress");
+  });
+
+  it("AE8 — ENCODING: reserved characters in workspaceId and projectId are percent-encoded in every href", async () => {
+    const r = await wire({ workspaceId: "ws/a b", projectId: "proj/x y" });
+    const segs = bcSegments(r);
+    expect(segs[0].href).toBe("/workspace/team/ws%2Fa%20b");
+    expect(segs[1].href).toBe("/workspace/team/ws%2Fa%20b/projects");
+    expect(segs[2].href).toBe("/workspace/team/ws%2Fa%20b/projects/proj%2Fx%20y");
+    expect(bcMobileParent(r)!.href).toBe("/workspace/team/ws%2Fa%20b/projects/proj%2Fx%20y");
+    for (const seg of segs) expect(seg.href ?? "").not.toContain("ws/a b");
+  });
+});
+
+describe("Phase 11B.3 — NO breadcrumb (and therefore no Workspace/Project name) leaks on any denied, absent or transient path", () => {
+  /**
+   * Each case drives the REAL page boundary. A `notFound()` or a thrown transient
+   * Error means nothing rendered at all, so no label could reach a viewer — these
+   * assert that the page never gets far enough to build a breadcrumb, which is
+   * the property that matters, not the absence of a DOM node.
+   */
+  const CAPS = ["workspace.read", "projects.read", "research.read"];
+  const granted = (over: Record<string, unknown> = {}) => ({
+    granted: true, workspaceType: "team", workspace: { id: WS_ID, name: "Acme Risk Lab" },
+    membership: { role: "member" }, capabilities: CAPS, ...over,
+  });
+  const project = (over: Record<string, unknown> = {}) => ({
+    status: "found", project: { id: PROJECT_ID, workspaceId: WS_ID, name: "Election Evidence", status: "active", ...over },
+  });
+  const okRun = { status: "complete", runId: RUN_ID, question: "What changed in the source evidence?", results: [] };
+
+  async function expectNoRender(kind: "notFound" | "throws") {
+    let caught: unknown;
+    try {
+      await callPage();
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeDefined();
+    if (kind === "notFound") expect((caught as any)?.digest).toBe("NEXT_NOT_FOUND");
+    else expect((caught as any)?.digest).not.toBe("NEXT_NOT_FOUND");
+  }
+
+  it("AF1 — unauthenticated", async () => {
+    mockedResolveServerComponentIdentity.mockResolvedValue(null);
+    await expectNoRender("notFound");
+  });
+
+  it("AF2 — Workspace access denied", async () => {
+    mockedResolveServerComponentIdentity.mockResolvedValue({ uid: UID });
+    mockedResolveWorkspaceAccess.mockResolvedValue({ granted: false, reason: "not_a_member" });
+    await expectNoRender("notFound");
+  });
+
+  it("AF3 — wrong Workspace type (Personal)", async () => {
+    mockedResolveServerComponentIdentity.mockResolvedValue({ uid: UID });
+    mockedResolveWorkspaceAccess.mockResolvedValue(granted({ workspaceType: "personal" }));
+    await expectNoRender("notFound");
+  });
+
+  it("AF4 — missing research.read", async () => {
+    mockedResolveServerComponentIdentity.mockResolvedValue({ uid: UID });
+    mockedResolveWorkspaceAccess.mockResolvedValue(granted({ capabilities: ["workspace.read", "projects.read"] }));
+    await expectNoRender("notFound");
+  });
+
+  it("AF5 — Project not found", async () => {
+    mockedResolveServerComponentIdentity.mockResolvedValue({ uid: UID });
+    mockedResolveWorkspaceAccess.mockResolvedValue(granted());
+    mockedGetProject.mockResolvedValue({ status: "not_found" });
+    await expectNoRender("notFound");
+  });
+
+  it("AF6 — cross-Workspace Project", async () => {
+    mockedResolveServerComponentIdentity.mockResolvedValue({ uid: UID });
+    mockedResolveWorkspaceAccess.mockResolvedValue(granted());
+    mockedGetProject.mockResolvedValue(project({ workspaceId: "some-other-workspace" }));
+    await expectNoRender("notFound");
+  });
+
+  it("AF7 — run not found", async () => {
+    mockedResolveServerComponentIdentity.mockResolvedValue({ uid: UID });
+    mockedResolveWorkspaceAccess.mockResolvedValue(granted());
+    mockedGetProject.mockResolvedValue(project());
+    mockedGetTeamWorkspaceRun.mockResolvedValue({ status: "not_found" });
+    await expectNoRender("notFound");
+  });
+
+  it("AF8 — cross-Project run (the resolver conceals it as not_found)", async () => {
+    mockedResolveServerComponentIdentity.mockResolvedValue({ uid: UID });
+    mockedResolveWorkspaceAccess.mockResolvedValue(granted());
+    mockedGetProject.mockResolvedValue(project());
+    mockedGetTeamWorkspaceRun.mockResolvedValue({ status: "not_found" });
+    await expectNoRender("notFound");
+    expect(mockedGetTeamWorkspaceRun).toHaveBeenCalledWith({ workspaceId: WS_ID, projectId: PROJECT_ID, runId: RUN_ID });
+  });
+
+  it("AF9 — transient Workspace lookup failure throws, and never reaches the Project read", async () => {
+    mockedResolveServerComponentIdentity.mockResolvedValue({ uid: UID });
+    mockedResolveWorkspaceAccess.mockResolvedValue({ granted: false, reason: "lookup_failed" });
+    await expectNoRender("throws");
+    expect(mockedGetProject).not.toHaveBeenCalled();
+  });
+
+  it("AF10 — transient Project failure throws, and never reaches the run read", async () => {
+    mockedResolveServerComponentIdentity.mockResolvedValue({ uid: UID });
+    mockedResolveWorkspaceAccess.mockResolvedValue(granted());
+    mockedGetProject.mockResolvedValue({ status: "firestore_unavailable" });
+    await expectNoRender("throws");
+    expect(mockedGetTeamWorkspaceRun).not.toHaveBeenCalled();
+  });
+
+  it("AF11 — transient run failure throws", async () => {
+    mockedResolveServerComponentIdentity.mockResolvedValue({ uid: UID });
+    mockedResolveWorkspaceAccess.mockResolvedValue(granted());
+    mockedGetProject.mockResolvedValue(project());
+    mockedGetTeamWorkspaceRun.mockResolvedValue({ status: "firestore_unavailable" });
+    await expectNoRender("throws");
+  });
+
+  it("AF12 — CONTROL: the same fixtures on the fully-authorized path DO render the breadcrumb, so AF1-AF11 are not passing on a broken harness", async () => {
+    mockedResolveServerComponentIdentity.mockResolvedValue({ uid: UID });
+    mockedResolveWorkspaceAccess.mockResolvedValue(granted());
+    mockedGetProject.mockResolvedValue(project());
+    mockedGetTeamWorkspaceRun.mockResolvedValue(okRun);
+    const r = await renderPage();
+    expect(bcSegments(r).map((x) => x.label)).toEqual([
+      "Acme Risk Lab", "Projects", "Election Evidence", "What changed in the source evidence?",
+    ]);
   });
 });

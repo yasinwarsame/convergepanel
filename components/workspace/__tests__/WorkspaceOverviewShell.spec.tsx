@@ -100,13 +100,15 @@ async function mount(props: Partial<React.ComponentProps<typeof WorkspaceOvervie
 }
 
 describe("WorkspaceOverviewShell", () => {
-  it("renders the Workspace name and shared nav", async () => {
+  it("renders the page-name heading and shared nav (Phase 11B.3: the Workspace name moved to the breadcrumb)", async () => {
     mockedFetchWorkspaceMembers.mockResolvedValue({ status: "ok", members: [owner()] });
     mockedFetchPendingInvitations.mockResolvedValue({ status: "ok", invitations: [] });
     mockedFetchTeamProjectsExistence.mockResolvedValue({ status: "ok", hasAny: false });
     mockedFetchTeamResearchExistence.mockResolvedValue({ status: "ok", hasAny: false });
     const renderer = await mount();
-    expect(renderer.root.findByType("h1").props.children).toBe("Acme Team");
+    // Phase 11B.3 — the h1 now names the PAGE; the Workspace name is the
+    // breadcrumb's first segment, so it is no longer repeated as a heading.
+    expect(renderer.root.findByType("h1").props.children).toBe("Overview");
   });
 
   it("a brand-new Workspace (Owner only, no invites/projects/research) shows the setup panel with Invite as the active step", async () => {
@@ -260,5 +262,118 @@ describe("WorkspaceOverviewShell", () => {
     mockedUseAuth.mockReturnValue({ user: null, authReady: false });
     await mount();
     expect(mockedFetchWorkspaceMembers).not.toHaveBeenCalled();
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * Phase 11B.3 — Breadcrumb inspection helpers.
+ *
+ * The REAL `Breadcrumb` is rendered (never mocked), so these read the shipped
+ * component's own markup: its `<nav aria-label="Breadcrumb">` landmark, the
+ * desktop `<ol>` hierarchy, and the separate mobile parent affordance.
+ * `aria-hidden` nodes (the "/" separators and the "←" glyph) are excluded, so a
+ * label assertion can never accidentally pass on decorative text.
+ * ------------------------------------------------------------------ */
+type BcSeg = { label: string; href?: string; current: boolean };
+
+function visibleTextOf(node: TestRenderer.ReactTestInstance): string {
+  const out: string[] = [];
+  const walk = (n: TestRenderer.ReactTestInstance) => {
+    n.children.forEach((c) => {
+      if (typeof c === "string") out.push(c);
+      else if (c.props?.["aria-hidden"] !== "true") walk(c);
+    });
+  };
+  walk(node);
+  return out.join("").replace(/\s+/g, " ").trim();
+}
+
+function breadcrumbNav(r: TestRenderer.ReactTestRenderer) {
+  return r.root.findAll((n) => n.type === "nav" && n.props?.["aria-label"] === "Breadcrumb", { deep: true });
+}
+
+function bcSegments(r: TestRenderer.ReactTestRenderer): BcSeg[] {
+  const navs = breadcrumbNav(r);
+  if (navs.length === 0) return [];
+  const ol = navs[0].findAllByType("ol")[0];
+  return ol.findAllByType("li").map((li) => {
+    const el = li.findAll((n) => (n.type === "a" || n.type === "span") && n.props?.["aria-hidden"] !== "true", { deep: true })[0];
+    return {
+      label: visibleTextOf(el),
+      href: el.type === "a" ? String(el.props.href) : undefined,
+      current: el.props["aria-current"] === "page",
+    };
+  });
+}
+
+function bcMobileParent(r: TestRenderer.ReactTestRenderer): { label: string; href?: string } | null {
+  const navs = breadcrumbNav(r);
+  if (navs.length === 0) return null;
+  const wrap = navs[0].findAll(
+    (n) => n.type === "div" && typeof n.props?.className === "string" && n.props.className.includes("sm:hidden"),
+    { deep: true }
+  );
+  if (wrap.length === 0) return null;
+  const el = wrap[0].findAll((n) => n.type === "a" || n.type === "span", { deep: true })[0];
+  return { label: visibleTextOf(el), href: el.type === "a" ? String(el.props.href) : undefined };
+}
+
+function h1Texts(r: TestRenderer.ReactTestRenderer): string[] {
+  return r.root.findAllByType("h1").map(visibleTextOf);
+}
+
+describe("Phase 11B.3 — Overview breadcrumb", () => {
+  const WS = "ws_123";
+  const NAME = "Acme Risk Lab";
+
+  async function mountOverview(workspaceId = WS, workspaceName = NAME) {
+    mockedFetchWorkspaceMembers.mockResolvedValue({ status: "ok", members: [owner()] });
+    mockedFetchPendingInvitations.mockResolvedValue({ status: "ok", invitations: [] });
+    mockedFetchTeamProjectsExistence.mockResolvedValue({ status: "ok", hasAny: true });
+    mockedFetchTeamResearchExistence.mockResolvedValue({ status: "ok", hasAny: true });
+    return mount({ workspaceId, workspaceName });
+  }
+
+  it("Y1 — desktop hierarchy is exactly {Workspace name} / Overview, with Overview current and the Workspace segment linked", async () => {
+    const segs = bcSegments(await mountOverview());
+    expect(segs).toEqual([
+      { label: NAME, href: `/workspace/team/${WS}`, current: false },
+      { label: "Overview", href: undefined, current: true },
+    ]);
+  });
+
+  it("Y2 — exactly ONE breadcrumb segment is aria-current, and it is the final one", async () => {
+    const segs = bcSegments(await mountOverview());
+    expect(segs.filter((x) => x.current)).toHaveLength(1);
+    expect(segs[segs.length - 1].current).toBe(true);
+  });
+
+  it("Y3 — NON-VACUITY: the Workspace label is the NAME, and the raw workspaceId is never visible breadcrumb text", async () => {
+    const segs = bcSegments(await mountOverview());
+    expect(segs.map((x) => x.label)).toEqual([NAME, "Overview"]);
+    expect(segs.map((x) => x.label)).not.toContain(WS);
+    // the id is legitimate INSIDE the href, and nowhere else
+    expect(segs[0].href).toContain(WS);
+  });
+
+  it("Y4 — Overview has NO mobileParent: /workspace/team is gated by resolveTeamWorkspacesMode() while this page is not, so a member outside the rollout would be sent to notFound()", async () => {
+    expect(bcMobileParent(await mountOverview())).toBeNull();
+  });
+
+  it("Y5 — the primary heading is 'Overview' and there is exactly one h1", async () => {
+    expect(h1Texts(await mountOverview())).toEqual(["Overview"]);
+  });
+
+  it("Y6 — WorkspaceNav still marks Overview as the current tab, independently of the breadcrumb", async () => {
+    const r = await mountOverview();
+    const nav = r.root.findAll((n) => n.type === "nav" && n.props?.["aria-label"] === "Workspace", { deep: true })[0];
+    const current = nav.findAll((n) => n.props?.["aria-current"] === "page", { deep: true }).map(visibleTextOf);
+    expect(current).toEqual(["Overview"]);
+  });
+
+  it("Y7 — ENCODING: reserved characters in the workspaceId are percent-encoded in the breadcrumb href", async () => {
+    const segs = bcSegments(await mountOverview("ws/a b", NAME));
+    expect(segs[0].href).toBe("/workspace/team/ws%2Fa%20b");
+    expect(segs[0].href).not.toContain("ws/a b");
   });
 });

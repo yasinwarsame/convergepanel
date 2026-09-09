@@ -25,6 +25,7 @@ import { SectionEmptyBox, SectionInitialErrorBox, SectionLoadingRow, SectionPagi
 import { TeamNewProjectDialog } from "@/components/workspace/projects/TeamNewProjectDialog";
 import { TeamProjectLifecycleRow, type TeamProjectLifecycleOutcome } from "@/components/workspace/projects/TeamProjectLifecycleRow";
 import WorkspaceNav from "@/components/workspace/WorkspaceNav";
+import { Breadcrumb } from "@/components/shared/Breadcrumb";
 
 function initialErrorCopy(code: TeamProjectsListErrorCode): { message: string; retry: boolean } {
   switch (code) {
@@ -148,16 +149,30 @@ export default function TeamProjectsShell({
 
   return (
     <main className="mx-auto max-w-3xl px-4 py-10 sm:py-14">
-      <div className="mb-6">
-        <h1 className="text-2xl font-semibold text-cp-text">{workspaceName}</h1>
-      </div>
+      <Breadcrumb
+        className="mb-3"
+        segments={[
+          { label: workspaceName, href: `/workspace/team/${encodeURIComponent(workspaceId)}` },
+          { label: "Projects" },
+        ]}
+        mobileParent={{ label: workspaceName, href: `/workspace/team/${encodeURIComponent(workspaceId)}` }}
+      />
 
       <WorkspaceNav workspaceId={workspaceId} active="projects" showAudit={canReadAudit} />
 
+      {/*
+        Phase 11B.3 — the Workspace-name h1 is gone (the breadcrumb carries it),
+        so this element becomes the page's primary heading and is promoted h2 -> h1.
+        Its `ref`, `id` and `tabIndex` are deliberately untouched and it is
+        deliberately NOT moved above WorkspaceNav: the PROJECT-UI archive/restore
+        flow restores focus to exactly this node, and it is visually paired with
+        the "New Project" trigger beside it. Classes are unchanged so the promotion
+        is purely semantic.
+      */}
       <div className="flex items-center justify-between gap-3">
-        <h2 ref={activeHeadingRef} id="team-active-projects-heading" tabIndex={-1} className="text-lg font-semibold text-cp-text focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent">
+        <h1 ref={activeHeadingRef} id="team-active-projects-heading" tabIndex={-1} className="text-lg font-semibold text-cp-text focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent">
           Projects
-        </h2>
+        </h1>
         {canCreateProject && (
           <button
             ref={newProjectTriggerRef}

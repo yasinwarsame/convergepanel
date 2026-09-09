@@ -29,6 +29,7 @@ import {
 } from "@/lib/client/workspaceTeamClient";
 import { deriveWorkspaceActivationState, type WorkspaceActivationState } from "@/lib/workspaces/activationState";
 import WorkspaceNav from "@/components/workspace/WorkspaceNav";
+import { Breadcrumb } from "@/components/shared/Breadcrumb";
 import WorkspaceActivationPanel from "@/components/workspace/WorkspaceActivationPanel";
 import ReviewErrorState from "@/components/teamGovernance/ReviewErrorState";
 
@@ -100,8 +101,32 @@ export default function WorkspaceOverviewShell({
 
   return (
     <main className="mx-auto max-w-3xl px-4 py-10 sm:py-14">
+      {/*
+        Phase 11B.3 — the Workspace's identity now lives in the breadcrumb, so
+        the page heading is free to name the page itself ("Overview") instead of
+        repeating the Workspace name the breadcrumb already shows.
+
+        The Workspace segment links to this very route. That is deliberate and
+        frozen: one predictable hierarchy across all seven Team surfaces beats a
+        special case here, and only the final "Overview" segment carries
+        `aria-current="page"`, so exactly one item is announced as current.
+
+        No `mobileParent`: the only candidate parent is `/workspace/team`, which
+        is gated by `resolveTeamWorkspacesMode()` while this page is gated only
+        by `resolveWorkspaceAccess()`. A member outside the rollout can legitimately
+        reach this Workspace but would hit notFound() at the chooser, so shipping
+        that link would ship a predictably broken affordance.
+      */}
+      <Breadcrumb
+        className="mb-3"
+        segments={[
+          { label: workspaceName, href: `/workspace/team/${encodeURIComponent(workspaceId)}` },
+          { label: "Overview" },
+        ]}
+      />
+
       <div className="mb-6">
-        <h1 className="text-2xl font-semibold text-cp-text">{workspaceName}</h1>
+        <h1 className="text-2xl font-semibold text-cp-text">Overview</h1>
       </div>
 
       <WorkspaceNav workspaceId={workspaceId} active="overview" showAudit={canReadAudit} />

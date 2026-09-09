@@ -81,6 +81,24 @@ function allAlertTexts(renderer: TestRenderer.ReactTestRenderer) {
   return renderer.root.findAll((n) => n.props?.role === "alert").map(textOf);
 }
 
+/**
+ * Phase 11B.3 — project ROWS only. The shared `Breadcrumb` renders a semantic
+ * `<ol>/<li>` hierarchy of its own, so a bare `findAllByType("li")` would count
+ * breadcrumb segments as if they were Projects. These assertions were always
+ * about rows; this makes that explicit rather than relying on the page having
+ * no other list.
+ */
+function projectRows(renderer: TestRenderer.ReactTestRenderer) {
+  return renderer.root.findAllByType("li").filter((li) => {
+    let p: TestRenderer.ReactTestInstance | null = li.parent;
+    while (p) {
+      if (p.type === "nav" && p.props?.["aria-label"] === "Breadcrumb") return false;
+      p = p.parent;
+    }
+    return true;
+  });
+}
+
 async function mount(props: { canCreateProject: boolean; canManageProjects?: boolean; canReadAudit?: boolean }) {
   let renderer!: TestRenderer.ReactTestRenderer;
   await act(async () => {
@@ -106,7 +124,9 @@ describe("TeamProjectsShell", () => {
   it("renders the Workspace name and shared nav with Projects active", async () => {
     projectsByStatus(projectsResult());
     const renderer = await mount({ canCreateProject: true });
-    expect(renderer.root.findByType("h1").props.children).toBe("Acme Team");
+    // Phase 11B.3 — "Projects" is promoted h2 -> h1 (the Workspace-name h1 is
+    // gone; the breadcrumb carries Workspace identity now).
+    expect(renderer.root.findByType("h1").props.children).toBe("Projects");
     const text = JSON.stringify(renderer.toJSON());
     expect(text).toContain("Projects");
   });
@@ -469,7 +489,9 @@ describe("TeamProjectsShell — shell-owned lifecycle status region + stable foc
         await act(async () => {
           renderer = TestRenderer.create(makeElement(), {
             createNodeMock: (el: any) => {
-              const isAnchor = el.type === "h2" && typeof el.props?.id === "string";
+              // Phase 11B.3 — the active-Projects heading is now an h1 and the
+              // archived one remains an h2; both are still focus anchors.
+              const isAnchor = (el.type === "h1" || el.type === "h2") && typeof el.props?.id === "string";
               const isNotice = el.type === "div" && el.props?.tabIndex === -1 && (el.props?.role === "status" || el.props?.role === "alert");
               if (isAnchor) return { focus: () => focusCalls.push(el.props.id) };
               if (isNotice) return { focus: () => focusCalls.push(`notice:${el.props.role}`) };
@@ -511,7 +533,7 @@ describe("TeamProjectsShell — shell-owned lifecycle status region + stable foc
     const renderer = await h.mount();
     await confirmArchive(renderer);
     expect(liveTexts(renderer, "status")).toEqual(["Done: Quarterly Diligence was archived."]);
-    expect(renderer.root.findAllByType("li")).toHaveLength(0); // rows are gone (lists loading) but the message is still here
+    expect(projectRows(renderer)).toHaveLength(0); // rows are gone (lists loading) but the message is still here
   });
 
   it("B. restore success renders a shell-owned role=status restored message", async () => {
@@ -532,9 +554,9 @@ describe("TeamProjectsShell — shell-owned lifecycle status region + stable foc
     const h = mountWithFocus({ canCreateProject: true });
     const renderer = await h.mount();
     await confirmArchive(renderer);
-    expect(renderer.root.findAllByType("li")).toHaveLength(0);
+    expect(projectRows(renderer)).toHaveLength(0);
     await h.settle(lists, { activeItems: [], archivedItems: [item({ name: "Quarterly Diligence", status: "archived" })] });
-    expect(renderer.root.findAllByType("li")).toHaveLength(1);
+    expect(projectRows(renderer)).toHaveLength(1);
     expect(liveTexts(renderer, "status")).toEqual(["Done: Quarterly Diligence was archived."]);
   });
 
@@ -697,7 +719,12 @@ describe("TeamProjectsShell — shell-owned lifecycle status region + stable foc
       mockedUseTeamProjectLifecycle.mockReturnValue(lifecycleResult({ archiveProject: jest.fn().mockResolvedValue({ status: "ok", project: item({ status: "archived" }) }) }));
       const h = mountWithFocus({ canCreateProject: true });
       const renderer = await h.mount();
-      const headings = renderer.root.findAllByType("h2");
+      // Phase 11B.3 — addressed by id, not by tag: the active heading was
+      // promoted to h1 while the archived heading stayed an h2, and this
+      // assertion is about the focus/tabIndex contract, not the tag name.
+      const headings = renderer.root.findAll(
+        (n) => (n.type === "h1" || n.type === "h2") && typeof n.props?.id === "string" && String(n.props.id).endsWith("-projects-heading")
+      );
       const anchors = headings.filter((n) => n.props.id === "team-active-projects-heading" || n.props.id === "team-archived-projects-heading");
       expect(anchors).toHaveLength(2);
       for (const a of anchors) expect(a.props.tabIndex).toBe(-1);
@@ -719,5 +746,123 @@ describe("TeamProjectsShell — shell-owned lifecycle status region + stable foc
       expect(status.props.dangerouslySetInnerHTML).toBeUndefined();
       expect(liveTexts(renderer, "status")[0].startsWith("Done: ")).toBe(true);
     });
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * Phase 11B.3 — Breadcrumb inspection helpers.
+ *
+ * The REAL `Breadcrumb` is rendered (never mocked), so these read the shipped
+ * component's own markup: its `<nav aria-label="Breadcrumb">` landmark, the
+ * desktop `<ol>` hierarchy, and the separate mobile parent affordance.
+ * `aria-hidden` nodes (the "/" separators and the "←" glyph) are excluded, so a
+ * label assertion can never accidentally pass on decorative text.
+ * ------------------------------------------------------------------ */
+type BcSeg = { label: string; href?: string; current: boolean };
+
+function visibleTextOf(node: TestRenderer.ReactTestInstance): string {
+  const out: string[] = [];
+  const walk = (n: TestRenderer.ReactTestInstance) => {
+    n.children.forEach((c) => {
+      if (typeof c === "string") out.push(c);
+      else if (c.props?.["aria-hidden"] !== "true") walk(c);
+    });
+  };
+  walk(node);
+  return out.join("").replace(/\s+/g, " ").trim();
+}
+
+function breadcrumbNav(r: TestRenderer.ReactTestRenderer) {
+  return r.root.findAll((n) => n.type === "nav" && n.props?.["aria-label"] === "Breadcrumb", { deep: true });
+}
+
+function bcSegments(r: TestRenderer.ReactTestRenderer): BcSeg[] {
+  const navs = breadcrumbNav(r);
+  if (navs.length === 0) return [];
+  const ol = navs[0].findAllByType("ol")[0];
+  return ol.findAllByType("li").map((li) => {
+    const el = li.findAll((n) => (n.type === "a" || n.type === "span") && n.props?.["aria-hidden"] !== "true", { deep: true })[0];
+    return {
+      label: visibleTextOf(el),
+      href: el.type === "a" ? String(el.props.href) : undefined,
+      current: el.props["aria-current"] === "page",
+    };
+  });
+}
+
+function bcMobileParent(r: TestRenderer.ReactTestRenderer): { label: string; href?: string } | null {
+  const navs = breadcrumbNav(r);
+  if (navs.length === 0) return null;
+  const wrap = navs[0].findAll(
+    (n) => n.type === "div" && typeof n.props?.className === "string" && n.props.className.includes("sm:hidden"),
+    { deep: true }
+  );
+  if (wrap.length === 0) return null;
+  const el = wrap[0].findAll((n) => n.type === "a" || n.type === "span", { deep: true })[0];
+  return { label: visibleTextOf(el), href: el.type === "a" ? String(el.props.href) : undefined };
+}
+
+function h1Texts(r: TestRenderer.ReactTestRenderer): string[] {
+  return r.root.findAllByType("h1").map(visibleTextOf);
+}
+
+describe("Phase 11B.3 — Projects breadcrumb", () => {
+  const WS = "ws_123";
+  const NAME = "Acme Risk Lab";
+
+  async function mountProjects(workspaceId = WS, workspaceName = NAME) {
+    let r!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      r = TestRenderer.create(
+        createElement(TeamProjectsShell, { workspaceId, workspaceName, canCreateProject: true, canManageProjects: true, canReadAudit: true })
+      );
+    });
+    return r;
+  }
+
+  it("AB1 — desktop hierarchy is exactly {Workspace name} / Projects, Projects current and non-linking", async () => {
+    expect(bcSegments(await mountProjects())).toEqual([
+      { label: NAME, href: `/workspace/team/${WS}`, current: false },
+      { label: "Projects", href: undefined, current: true },
+    ]);
+  });
+
+  it("AB2 — mobileParent goes UP to the Workspace Overview", async () => {
+    expect(bcMobileParent(await mountProjects())).toEqual({ label: NAME, href: `/workspace/team/${WS}` });
+  });
+
+  it("AB3 — the page has exactly ONE h1 and it is 'Projects' (promoted from h2)", async () => {
+    expect(h1Texts(await mountProjects())).toEqual(["Projects"]);
+  });
+
+  it("AB4 — FOCUS CONTRACT PRESERVED: the promoted heading keeps its id and tabIndex, and is still the archive/restore focus anchor", async () => {
+    const r = await mountProjects();
+    const active = r.root.findAll((n) => n.props?.id === "team-active-projects-heading", { deep: true });
+    expect(active).toHaveLength(1);
+    expect(active[0].type).toBe("h1");
+    expect(active[0].props.tabIndex).toBe(-1);
+    // the archived heading is untouched and stays an h2 under it — a valid h1 -> h2 order
+    const archived = r.root.findAll((n) => n.props?.id === "team-archived-projects-heading", { deep: true });
+    expect(archived).toHaveLength(1);
+    expect(archived[0].type).toBe("h2");
+    expect(archived[0].props.tabIndex).toBe(-1);
+  });
+
+  it("AB5 — NON-VACUITY: the raw workspaceId is never a visible breadcrumb label", async () => {
+    const segs = bcSegments(await mountProjects());
+    expect(segs.map((x) => x.label)).not.toContain(WS);
+    expect(segs[0].href).toContain(WS);
+  });
+
+  it("AB6 — ENCODING: reserved characters in workspaceId are percent-encoded", async () => {
+    const r = await mountProjects("ws/a b", NAME);
+    expect(bcSegments(r)[0].href).toBe("/workspace/team/ws%2Fa%20b");
+    expect(bcMobileParent(r)!.href).toBe("/workspace/team/ws%2Fa%20b");
+  });
+
+  it("AB7 — WorkspaceNav still marks Projects current, independently of the breadcrumb", async () => {
+    const r = await mountProjects();
+    const nav = r.root.findAll((n) => n.type === "nav" && n.props?.["aria-label"] === "Workspace", { deep: true })[0];
+    expect(nav.findAll((n) => n.props?.["aria-current"] === "page", { deep: true }).map(visibleTextOf)).toEqual(["Projects"]);
   });
 });

@@ -19,6 +19,32 @@
 
 import { readFileSync } from "fs";
 import { join } from "path";
+import { createElement } from "react";
+import TestRenderer, { act } from "react-test-renderer";
+
+jest.mock("next/link", () => {
+  const MockLink = ({ href, children, className }: { href: string; children: React.ReactNode; className?: string }) =>
+    require("react").createElement("a", { href, className }, children);
+  return { __esModule: true, default: MockLink };
+});
+
+const mockedUseAuth = jest.fn();
+jest.mock("@/components/AuthProvider", () => ({ useAuth: () => mockedUseAuth() }));
+
+const mockedFetchWorkspaceMembers = jest.fn();
+const mockedFetchPendingInvitations = jest.fn();
+jest.mock("@/lib/client/workspaceTeamClient", () => ({
+  fetchWorkspaceMembers: (...a: unknown[]) => mockedFetchWorkspaceMembers(...a),
+  fetchPendingInvitations: (...a: unknown[]) => mockedFetchPendingInvitations(...a),
+  createInvitation: jest.fn(),
+  resendInvitation: jest.fn(),
+  revokeInvitation: jest.fn(),
+  removeMember: jest.fn(),
+  transferWorkspaceOwnership: jest.fn(),
+  changeMemberRole: jest.fn(),
+}));
+
+import WorkspaceMembersShell from "@/components/workspace/WorkspaceMembersShell";
 
 const source = readFileSync(join(__dirname, "..", "WorkspaceMembersShell.tsx"), "utf8");
 
@@ -507,3 +533,138 @@ describe("WorkspaceMembersShell — Workspace Audit Log, Phase TEAM-GOV-I1/12A.1
   });
 });
 
+
+/* ================================================================== *
+ * Phase 11B.3 — Breadcrumb integration.
+ *
+ * The tests above this point are source-level (`readFileSync` + regex), the
+ * convention this file was written under. That convention is NOT reused here:
+ * a breadcrumb assertion made against source text could pass while the
+ * component rendered nothing at all. This repo does have `react-test-renderer`
+ * (see `WorkspaceOverviewShell.spec.tsx`), so the block below renders the real
+ * component tree with the real shared `Breadcrumb` inside it.
+ * ================================================================== */
+
+/* ------------------------------------------------------------------ *
+ * Phase 11B.3 — Breadcrumb inspection helpers.
+ *
+ * The REAL `Breadcrumb` is rendered (never mocked), so these read the shipped
+ * component's own markup: its `<nav aria-label="Breadcrumb">` landmark, the
+ * desktop `<ol>` hierarchy, and the separate mobile parent affordance.
+ * `aria-hidden` nodes (the "/" separators and the "←" glyph) are excluded, so a
+ * label assertion can never accidentally pass on decorative text.
+ * ------------------------------------------------------------------ */
+type BcSeg = { label: string; href?: string; current: boolean };
+
+function visibleTextOf(node: TestRenderer.ReactTestInstance): string {
+  const out: string[] = [];
+  const walk = (n: TestRenderer.ReactTestInstance) => {
+    n.children.forEach((c) => {
+      if (typeof c === "string") out.push(c);
+      else if (c.props?.["aria-hidden"] !== "true") walk(c);
+    });
+  };
+  walk(node);
+  return out.join("").replace(/\s+/g, " ").trim();
+}
+
+function breadcrumbNav(r: TestRenderer.ReactTestRenderer) {
+  return r.root.findAll((n) => n.type === "nav" && n.props?.["aria-label"] === "Breadcrumb", { deep: true });
+}
+
+function bcSegments(r: TestRenderer.ReactTestRenderer): BcSeg[] {
+  const navs = breadcrumbNav(r);
+  if (navs.length === 0) return [];
+  const ol = navs[0].findAllByType("ol")[0];
+  return ol.findAllByType("li").map((li) => {
+    const el = li.findAll((n) => (n.type === "a" || n.type === "span") && n.props?.["aria-hidden"] !== "true", { deep: true })[0];
+    return {
+      label: visibleTextOf(el),
+      href: el.type === "a" ? String(el.props.href) : undefined,
+      current: el.props["aria-current"] === "page",
+    };
+  });
+}
+
+function bcMobileParent(r: TestRenderer.ReactTestRenderer): { label: string; href?: string } | null {
+  const navs = breadcrumbNav(r);
+  if (navs.length === 0) return null;
+  const wrap = navs[0].findAll(
+    (n) => n.type === "div" && typeof n.props?.className === "string" && n.props.className.includes("sm:hidden"),
+    { deep: true }
+  );
+  if (wrap.length === 0) return null;
+  const el = wrap[0].findAll((n) => n.type === "a" || n.type === "span", { deep: true })[0];
+  return { label: visibleTextOf(el), href: el.type === "a" ? String(el.props.href) : undefined };
+}
+
+function h1Texts(r: TestRenderer.ReactTestRenderer): string[] {
+  return r.root.findAllByType("h1").map(visibleTextOf);
+}
+
+describe("Phase 11B.3 — Members breadcrumb", () => {
+  const WS = "ws_123";
+  const NAME = "Acme Risk Lab";
+
+  async function mountMembers(workspaceId = WS, workspaceName = NAME) {
+    mockedUseAuth.mockReturnValue({ user: { uid: "u1" }, authReady: true });
+    mockedFetchWorkspaceMembers.mockResolvedValue({ status: "ok", members: [], workspaceUpdateTimeToken: "t" });
+    mockedFetchPendingInvitations.mockResolvedValue({ status: "ok", invitations: [] });
+    let r!: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      r = TestRenderer.create(
+        createElement(WorkspaceMembersShell, {
+          workspaceId,
+          workspaceName,
+          callerRole: "owner" as never,
+          canInvite: true,
+          canManageInvitations: true,
+          canReadAudit: true,
+        })
+      );
+    });
+    return r;
+  }
+
+  it("Z1 — desktop hierarchy is exactly {Workspace name} / Members, Members current", async () => {
+    expect(bcSegments(await mountMembers())).toEqual([
+      { label: NAME, href: `/workspace/team/${WS}`, current: false },
+      { label: "Members", href: undefined, current: true },
+    ]);
+  });
+
+  it("Z2 — mobileParent goes UP to the Workspace Overview, and is a real keyboard-reachable link", async () => {
+    expect(bcMobileParent(await mountMembers())).toEqual({ label: NAME, href: `/workspace/team/${WS}` });
+  });
+
+  it("Z3 — 'Members' remains the h1, and there is exactly one h1", async () => {
+    expect(h1Texts(await mountMembers())).toEqual(["Members"]);
+  });
+
+  it("Z4 — the redundant Workspace-name subtitle under the heading is GONE (the breadcrumb carries it now)", async () => {
+    const r = await mountMembers();
+    // the shell's own <p className="mt-1 text-sm text-cp-muted">{workspaceName}</p>
+    const subtitles = r.root.findAllByType("p").filter((n) => visibleTextOf(n) === NAME);
+    expect(subtitles).toHaveLength(0);
+    // ...and the name is still on the page, via the breadcrumb
+    expect(bcSegments(r).map((x) => x.label)).toContain(NAME);
+  });
+
+  it("Z5 — NON-VACUITY: the raw workspaceId is never a visible breadcrumb label", async () => {
+    const segs = bcSegments(await mountMembers());
+    expect(segs.map((x) => x.label)).not.toContain(WS);
+    expect(segs[0].href).toContain(WS);
+  });
+
+  it("Z6 — ENCODING: reserved characters in workspaceId are percent-encoded in both the segment and the mobile parent href", async () => {
+    const r = await mountMembers("ws/a b", NAME);
+    expect(bcSegments(r)[0].href).toBe("/workspace/team/ws%2Fa%20b");
+    expect(bcMobileParent(r)!.href).toBe("/workspace/team/ws%2Fa%20b");
+  });
+
+  it("Z7 — WorkspaceNav still marks Members current, independently of the breadcrumb", async () => {
+    const r = await mountMembers();
+    const nav = r.root.findAll((n) => n.type === "nav" && n.props?.["aria-label"] === "Workspace", { deep: true })[0];
+    expect(nav.findAll((n) => n.props?.["aria-current"] === "page", { deep: true }).map(visibleTextOf)).toEqual(["Members"]);
+  });
+});

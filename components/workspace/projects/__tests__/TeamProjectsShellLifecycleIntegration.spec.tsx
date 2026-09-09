@@ -29,6 +29,22 @@ jest.mock("@/lib/client/authedFetch", () => ({
 
 import TeamProjectsShell from "@/components/workspace/projects/TeamProjectsShell";
 
+/**
+ * Phase 11B.3 — project ROWS only. The shared `Breadcrumb` renders its own
+ * semantic `<ol>/<li>`, so an unscoped `findAllByType("li")` would count
+ * breadcrumb segments as Projects. This assertion was always about rows.
+ */
+function projectRows(renderer: TestRenderer.ReactTestRenderer) {
+  return renderer.root.findAllByType("li").filter((li) => {
+    let p: TestRenderer.ReactTestInstance | null = li.parent;
+    while (p) {
+      if (p.type === "nav" && p.props?.["aria-label"] === "Breadcrumb") return false;
+      p = p.parent;
+    }
+    return true;
+  });
+}
+
 const flush = () => new Promise((r) => setTimeout(r, 0));
 const noticeTexts = (r: TestRenderer.ReactTestRenderer, role: "alert" | "status") =>
   r.root.findAll((n) => n.props?.role === role && n.props?.tabIndex === -1).map((n) => (Array.isArray(n.props.children) ? n.props.children.join("") : String(n.props.children)));
@@ -60,7 +76,7 @@ it("a 409 on restore leaves the shell-owned error visible after the real refetch
     await flush();
     await flush();
   });
-  expect(renderer.root.findAllByType("li")).toHaveLength(1); // fresh row from the refetch
+  expect(projectRows(renderer)).toHaveLength(1); // fresh row from the refetch
   expect(noticeTexts(renderer, "alert")).toEqual(["Error: This project changed. Refresh and try again."]);
   expect(fetchLog.filter((u) => u.includes("/restore"))).toHaveLength(1);
   expect(renderer.root.findAll((n) => n.props?.role === "dialog")).toHaveLength(0);

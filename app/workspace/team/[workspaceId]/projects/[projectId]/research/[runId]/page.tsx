@@ -29,13 +29,13 @@
  */
 
 import { notFound } from "next/navigation";
-import Link from "next/link";
 import { resolveServerComponentIdentity } from "@/lib/auth/resolveServerComponentIdentity";
 import { resolveWorkspaceAccess } from "@/lib/workspaces/resolveWorkspaceAccess";
 import { getProject } from "@/lib/firestore/projects";
 import { getTeamWorkspaceRun } from "@/lib/firestore/teamWorkspaceRuns";
 import TeamResearchResultView from "@/components/workspace/projects/TeamResearchResultView";
 import WorkspaceNav from "@/components/workspace/WorkspaceNav";
+import { Breadcrumb } from "@/components/shared/Breadcrumb";
 
 export const dynamic = "force-dynamic";
 
@@ -98,13 +98,37 @@ export default async function TeamResearchDetailPage({
     notFound();
   }
 
-  const backHref = `/workspace/team/${encodeURIComponent(params.workspaceId)}/projects/${encodeURIComponent(params.projectId)}`;
+  const workspaceHref = `/workspace/team/${encodeURIComponent(params.workspaceId)}`;
+  const projectHref = `${workspaceHref}/projects/${encodeURIComponent(params.projectId)}`;
 
   return (
     <main className="mx-auto max-w-3xl px-4 py-10 sm:py-14">
-      <div className="mb-6">
-        <h1 className="text-2xl font-semibold text-cp-text">{access.workspace.name}</h1>
-      </div>
+      {/*
+        Phase 11B.3 — every label here comes from a value this page ALREADY
+        resolved and authorized above: the Workspace name from
+        `resolveWorkspaceAccess()`, the Project name from the `getProject()` read
+        that enforced Workspace containment, and the question from the
+        `getTeamWorkspaceRun()` read that enforced Workspace + Project
+        containment. No new read, and nothing derived from a route id.
+
+        Placed after all of those gates, so it cannot render on a denied,
+        cross-tenant, not-found or transient-failure path.
+
+        This breadcrumb REPLACES the isolated "Back to Project" link that used to
+        sit here: its Project segment (desktop) and `mobileParent` (mobile) now
+        own that parent navigation, and two equivalent affordances would be
+        redundant.
+      */}
+      <Breadcrumb
+        className="mb-3"
+        segments={[
+          { label: access.workspace.name, href: workspaceHref },
+          { label: "Projects", href: `${workspaceHref}/projects` },
+          { label: projectResult.project.name, href: projectHref },
+          { label: run.question },
+        ]}
+        mobileParent={{ label: projectResult.project.name, href: projectHref }}
+      />
 
       {/*
         Phase 11B.2 — the same shared WorkspaceNav the Team research COMPOSER
@@ -130,11 +154,7 @@ export default async function TeamResearchDetailPage({
         showAudit={access.capabilities.includes("audit.read")}
       />
 
-      <Link href={backHref} className="text-sm font-medium text-cp-accent hover:underline">
-        &larr; Back to Project
-      </Link>
-
-      <h2 className="mt-4 text-xl font-semibold text-cp-text break-words">{run.question}</h2>
+      <h1 className="mt-4 text-xl font-semibold text-cp-text break-words">{run.question}</h1>
 
       {run.status === "pending" ? (
         <section className="mt-6 rounded-xl border-2 border-cp-border bg-cp-raised p-5 text-sm text-cp-muted">
