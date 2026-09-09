@@ -319,7 +319,7 @@ describe("POST /api/workspaces/[workspaceId]/verifications — origin-linked suc
   it("origin persisted by saveTeamClaimVerification()", async () => {
     mockedResolveClaimVerificationOrigin.mockResolvedValue({ status: "resolved", origin: ORIGIN, claimText: "x", projectId: null, evidenceSources: [] });
     await post({ runId: ORIGIN.runId, claimId: ORIGIN.claimId });
-    expect(mockedSaveGate2).toHaveBeenCalledWith(expect.objectContaining({ origin: ORIGIN }));
+    expect(mockedSaveGate2).toHaveBeenCalledWith(expect.objectContaining({ originSnapshot: { origin: ORIGIN, evidenceSources: [] } }));
   });
 
   it("claim snapshot equals the resolved finding.summary (claimText) exactly", async () => {
@@ -401,7 +401,7 @@ describe("PHASE 11A.6.2 — Team origin evidence snapshot", () => {
       status: "resolved", origin: ORIGIN, claimText: "x", projectId: null, evidenceSources: SOURCES,
     });
     await post({ runId: ORIGIN.runId, claimId: ORIGIN.claimId });
-    expect(gate2Arg().evidenceSources).toEqual(SOURCES);
+    expect(gate2Arg().originSnapshot).toEqual({ origin: ORIGIN, evidenceSources: SOURCES });
     // Gate 2 must not re-resolve the origin to obtain it.
     expect(mockedResolveClaimVerificationOrigin).toHaveBeenCalledTimes(1);
   });
@@ -411,14 +411,15 @@ describe("PHASE 11A.6.2 — Team origin evidence snapshot", () => {
       status: "resolved", origin: ORIGIN, claimText: "x", projectId: null, evidenceSources: [],
     });
     await post({ runId: ORIGIN.runId, claimId: ORIGIN.claimId });
-    expect(gate2Arg().evidenceSources).toEqual([]);
-    expect("evidenceSources" in gate2Arg()).toBe(true);
+    expect(gate2Arg().originSnapshot).toEqual({ origin: ORIGIN, evidenceSources: [] });
   });
 
   it("an ordinary Team verification carries neither origin nor snapshot", async () => {
     await post({ claim: "an ordinary team claim" });
-    expect("evidenceSources" in gate2Arg()).toBe(false);
+    // Phase 11A.6.2-C1 — one coupled value; ordinary Team creation is null.
+    expect(gate2Arg().originSnapshot).toBeNull();
     expect("origin" in gate2Arg()).toBe(false);
+    expect("evidenceSources" in gate2Arg()).toBe(false);
   });
 
   it("Gate 1 and the project preflight still run for an origin-linked request", async () => {

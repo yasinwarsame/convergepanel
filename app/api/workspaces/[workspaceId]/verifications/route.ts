@@ -49,7 +49,7 @@ import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelem
 import { ModelId } from "@/lib/types";
 import { OPENAI_API_KEY, ANTHROPIC_API_KEY, XAI_API_KEY, PERPLEXITY_API_KEY, GEMINI_API_KEY, TEAM_WORKSPACES_ENABLED, TEAM_WORKSPACES_CANARY_UIDS, TEAM_WORKSPACES_CANARY_WORKSPACE_IDS } from "@/lib/env";
 import { resolveTeamWorkspaceTargetAdmission } from "@/lib/workspaces/teamWorkspaceTargetAdmission";
-import { authorizeTeamClaimVerificationAdmission, saveTeamClaimVerification, type Gate1Result } from "@/lib/firestore/teamClaimVerifications";
+import { authorizeTeamClaimVerificationAdmission, saveTeamClaimVerification, type Gate1Result, type TeamOriginSnapshot } from "@/lib/firestore/teamClaimVerifications";
 import { validateUserSubscription } from "@/lib/stripe/subscriptionValidation";
 import { checkAndIncrementUsageForRun } from "@/lib/stripe/usageCheck";
 import { runClaimVerificationPanel } from "@/lib/verification/runClaimVerificationPanel";
@@ -202,15 +202,6 @@ async function checkAdmissionAndGate1(args: { uid: string; workspaceId: string; 
  * and governance are identical regardless of where `claimText`/`projectId`/
  * `origin` came from.
  */
-/**
- * Phase 11A.6.2 — `origin` and its evidence snapshot travel as ONE value, so an
- * origin-linked Team artifact cannot be persisted with the origin but without
- * the snapshot (exactly what happened between 11A.3 and this phase).
- * `projectId` stays separate: an ORDINARY Team verification legitimately has
- * one, so it is not part of the origin discriminant.
- */
-type TeamOriginSnapshot = { origin: ClaimVerificationOrigin; evidenceSources: EvidenceSourceReference[] } | null;
-
 async function executeAndPersistTeamClaimVerification(args: {
   uid: string;
   workspaceId: string;
@@ -219,9 +210,7 @@ async function executeAndPersistTeamClaimVerification(args: {
   projectId: string | null;
   originSnapshot: TeamOriginSnapshot;
 }): Promise<NextResponse> {
-  const { uid, workspaceId, claimText, selectedModels, projectId } = args;
-  const origin = args.originSnapshot?.origin;
-  const evidenceSources = args.originSnapshot?.evidenceSources;
+  const { uid, workspaceId, claimText, selectedModels, projectId, originSnapshot } = args;
 
   try {
     await validateUserSubscription(uid);
@@ -323,11 +312,12 @@ async function executeAndPersistTeamClaimVerification(args: {
     modelResults: modelEvidence,
     auditBundle,
     selectedModels,
-    ...(origin ? { origin } : {}),
-    // Phase 11A.6.2 — the exact resolver-derived snapshot, never recomputed and
-    // never re-read. Gate 2 still reauthorizes from scratch; it does not perform
-    // a second origin resolution or an extra Project read to obtain this.
-    ...(evidenceSources !== undefined ? { evidenceSources } : {}),
+    // Phase 11A.6.2-C1 — the pair travels INTACT to the canonical writer. It is
+    // never destructured back into independent arguments, which is what let an
+    // origin-linked artifact be written without its snapshot. Never recomputed,
+    // never re-read: Gate 2 reauthorizes from scratch but performs no second
+    // origin resolution and no extra Project read to obtain this.
+    originSnapshot,
   });
 
   try {

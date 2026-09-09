@@ -133,7 +133,7 @@ jest.mock("crypto", () => {
 });
 
 import { computeMembershipId } from "@/lib/workspaces/membershipId";
-import { authorizeTeamClaimVerificationAdmission, saveTeamClaimVerification } from "@/lib/firestore/teamClaimVerifications";
+import { authorizeTeamClaimVerificationAdmission, saveTeamClaimVerification, type TeamOriginSnapshot } from "@/lib/firestore/teamClaimVerifications";
 import { validateTeamClaimVerificationRowShape } from "@/lib/workspaces/teamClaimVerificationRowValidation";
 
 const WS_ID = "ws-team-1";
@@ -194,8 +194,21 @@ function claimArgs(overrides: Record<string, unknown> = {}) {
     modelResults: [],
     auditBundle: {},
     selectedModels: ["claude", "chatgpt"],
+    // Phase 11A.6.2-C1 — the canonical writer takes origin provenance as ONE
+    // coupled value. Ordinary Team creation is `null`.
+    originSnapshot: null,
     ...overrides,
   };
+}
+
+/**
+ * Type-checked builder for the coupled Gate-2 argument. Deliberately NOT cast
+ * through `as any`: the defect this phase fixes survived precisely because the
+ * origin test bypassed the writer's type with `as any`, so an `origin` passed
+ * without `evidenceSources` still compiled.
+ */
+function originArgs(snapshot: TeamOriginSnapshot): Parameters<typeof saveTeamClaimVerification>[0] {
+  return { ...claimArgs(), originSnapshot: snapshot } as Parameters<typeof saveTeamClaimVerification>[0];
 }
 
 beforeEach(() => {
@@ -467,13 +480,47 @@ describe("saveTeamClaimVerification — creates a canonical document", () => {
     expect(stored!.data.projectId).toBe(PROJECT_ID);
   });
 
-  it("Phase 11A.3 — origin, when supplied, is persisted verbatim into the canonical document via the REAL (unmocked) saveTeamClaimVerification()", async () => {
-    const origin = { type: "deep_research_claim", runId: "run-1", claimId: "v1:findings:0:" + "a".repeat(43) };
-    const result = await saveTeamClaimVerification(claimArgs({ origin }) as any);
+  it("Phase 11A.6.2-C1 — origin AND its evidence snapshot are persisted together, verbatim, via the REAL (unmocked) writer", async () => {
+    // This test previously called the writer with `origin` ALONE (through
+    // `as any`) and asserted successful creation — encoding the very
+    // incomplete-provenance contract 11A.6.2 exists to eliminate. There is no
+    // longer a typed call shape that can express it.
+    const origin = { type: "deep_research_claim" as const, runId: "run-1", claimId: "v1:findings:0:" + "a".repeat(43) };
+    const evidenceSources = [{ url: "https://example.com/a", hostname: "example.com" }];
+    const result = await saveTeamClaimVerification(originArgs({ origin, evidenceSources }));
     expect(result.status).toBe("created");
     if (result.status !== "created") throw new Error("expected created");
     const stored = stores.verifications.get(result.verificationId);
     expect(stored!.data.origin).toEqual(origin);
+    expect(stored!.data.evidenceSources).toEqual(evidenceSources);
+  });
+
+  it("Phase 11A.6.2-C1 — an origin-linked artifact with zero surviving references stores evidenceSources: [], present not absent", async () => {
+    const origin = { type: "deep_research_claim" as const, runId: "run-2", claimId: "v1:findings:1:" + "b".repeat(43) };
+    const result = await saveTeamClaimVerification(originArgs({ origin, evidenceSources: [] }));
+    expect(result.status).toBe("created");
+    if (result.status !== "created") throw new Error("expected created");
+    const stored = stores.verifications.get(result.verificationId)!;
+    expect(stored.data.origin).toEqual(origin);
+    expect(stored.data.evidenceSources).toEqual([]);
+    // `[]` is a snapshot; absence is non-participation. They are not the same.
+    expect("evidenceSources" in (stored.data as Record<string, unknown>)).toBe(true);
+  });
+
+  it("Phase 11A.6.2-C1 — CANONICAL INVARIANT: origin present iff evidenceSources present", async () => {
+    const origin = { type: "deep_research_claim" as const, runId: "run-3", claimId: "v1:findings:2:" + "c".repeat(43) };
+    const cases: Array<[string, TeamOriginSnapshot]> = [
+      ["origin-linked, with references", { origin, evidenceSources: [{ url: "https://example.com/x", hostname: "example.com" }] }],
+      ["origin-linked, no references", { origin, evidenceSources: [] }],
+      ["ordinary", null],
+    ];
+    for (const [label, snapshot] of cases) {
+      const result = await saveTeamClaimVerification(originArgs(snapshot));
+      if (result.status !== "created") throw new Error(`expected created for ${label}`);
+      const d = stores.verifications.get(result.verificationId)!.data as Record<string, unknown>;
+      expect({ label, originPresent: "origin" in d, snapshotPresent: "evidenceSources" in d })
+        .toEqual({ label, originPresent: snapshot !== null, snapshotPresent: snapshot !== null });
+    }
   });
 
   it("Phase 11A.3 — origin omitted (ordinary Team verification) -> the canonical document never contains an origin key at all", async () => {
