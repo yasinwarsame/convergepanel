@@ -324,8 +324,17 @@ curl -X POST http://localhost:3000/api/admin/set-admin \
 > secret is validated before the uid, so a still-live old secret does not report
 > a failure here — it mints the claim again, with no audit record and no log. To
 > verify a rotation or removal, use the uid-less probe in
-> `docs/operations/admin-authority-tiers.md` §B.6.c: send `{"secret": "..."}`
-> with **no uid**, and treat only `401` as proof.
+> `docs/operations/admin-authority-tiers.md` §B.6 — send `{"secret": "..."}`
+> with **no uid**.
+>
+> **A standalone `401` is NOT Production containment proof.** On its own it says
+> only that the origin you contacted rejected the string you supplied, which is
+> also what a preview deploy with no secret set, or a shell-mangled secret,
+> returns. A single response is an OBSERVATION: `400` + the accepted marker =
+> credential accepted, `401` + the rejected marker = credential rejected,
+> anything else = inconclusive. Containment requires the two-phase proof at the
+> canonical Production origin — pre-check accepted, then rotate and deploy, then
+> the SAME process observing that credential rejected.
 
 4. The user must sign out and sign back in for the admin claim to take effect
 

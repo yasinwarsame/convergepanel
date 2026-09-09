@@ -12,8 +12,11 @@
  *   Single-shot diagnostic (never proves containment):
  *     node scripts/probe-admin-secret.mjs --observe
  *
- * THERE IS NO ORIGIN ARGUMENT TO THE PRODUCTION MODE, AND NO ENVIRONMENT
- * VARIABLE THAT CAN SUPPLY ONE. C13 read `PROBE_ORIGIN_OVERRIDE` here and
+ * THE PRODUCTION MODE TAKES NO ORIGIN ARGUMENT, AND THIS FILE READS NO
+ * ORIGIN ENVIRONMENT VARIABLE. (It is not a claim that no environment variable
+ * whatsoever could retarget the process: `NODE_OPTIONS=--import=...` can replace
+ * `globalThis.fetch`, but that is arbitrary code execution, not a privilege this
+ * tool grants.) C13 read `PROBE_ORIGIN_OVERRIDE` here and
  * passed `requireCanonical: !PROBE_ALLOW_INSECURE_LOOPBACK`, so those two env
  * vars together ran the full bound transition against a foreign https host,
  * transmitted the live old `ADMIN_SECRET` to it, and printed

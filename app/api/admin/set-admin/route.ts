@@ -22,8 +22,13 @@
  * secret is validated BEFORE the uid, so if the old secret is still live this
  * request does not report a failure — it silently mints `admin: true` on that
  * uid, with no audit record and no success log. To verify a rotation, use the
- * uid-less containment probe in docs/operations/admin-authority-tiers.md §B.6.c:
- * send `{"secret": "<OLD_SECRET>"}` with no uid, and treat only 401 as proof.
+ * uid-less two-phase containment tool in docs/operations/admin-authority-tiers.md
+ * §B.6. A standalone 401 is NOT containment proof — it means only that the
+ * origin you contacted rejected the string you supplied, which is equally what
+ * a preview deploy with no ADMIN_SECRET set returns, and what a shell-mangled
+ * secret returns from this very route. Containment requires the bound
+ * transition: the canonical Production origin accepting the exact old secret
+ * BEFORE the rotation, then rejecting it after the rotation deploys.
  * 
  * After calling this, the user must sign out and sign back in for
  * the admin claim to take effect (Firebase tokens are cached).

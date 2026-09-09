@@ -91,7 +91,8 @@ Whether it is *currently* empty in Production is an environment fact, not a
 source fact — verify it against the live environment rather than trusting this
 sentence (`vercel env ls production` (which lists variable NAMES and environments, not
 values — it can show a variable is absent, but cannot show a present one is
-empty; for runtime proof use the uid-less 401 probe in §B.6.c); a value of length 0 fails closed).
+empty; for runtime proof use the two-phase containment tool in §B.6, which is
+the only procedure that establishes containment); a value of length 0 fails closed).
 
 ### Using BOOTSTRAP_SECRET to mint the first SYSTEM_ADMIN
 
@@ -126,6 +127,7 @@ precedes the mint, the rotation and the rotation's deployment.
 | `BOOTSTRAP_ROTATE_SECRET` | Rotate or remove `ADMIN_SECRET` | MUST |
 | `BOOTSTRAP_DEPLOY_ROTATION` | Deploy that change deliberately | MUST |
 | `BOOTSTRAP_POSTCHECK` | Resume the SAME armed process and require POST rejected | MUST |
+| `BOOTSTRAP_POST_RATE_LIMITED` | On a post-check 429: stay in the same process, do not restart, wait for the window, retry the post-check | MUST_PRESERVE_PROCESS |
 | `BOOTSTRAP_REENUMERATE` | Re-enumerate privileged claims across all accounts | MUST |
 | `BOOTSTRAP_VERIFY_AUTHZ` | Verify positive and negative authorization controls | MUST |
 
@@ -524,9 +526,10 @@ table is the contract.
       This matters because the route allows only **3 requests per 300 s per IP**,
       checked before the secret is examined, and the canonical sequence spends
       exactly three: the pre-check, the mint, and the post-check. There is no
-      margin, so a 429 at the post-check is an ordinary event. Wait for the
-      window (the tool prints `retry-after` when the route supplies it) and retry
-      in the SAME process — the pre-check evidence is still held. Do not restart:
+      margin, so a 429 at the post-check is an ordinary event. The route sends
+      no `Retry-After` header, so there is no wait hint to read: allow the fixed
+      300-second window to clear, then retry the post-check in the SAME process —
+      the pre-check evidence is still held. Do not restart:
       a fresh run's pre-check can no longer be accepted once the rotation has
       shipped, and re-enabling the old secret to recreate one would re-open the
       hole. Do not attempt to bypass the limiter.
@@ -560,14 +563,18 @@ table is the contract.
 
       **On rate limiting.** The route applies a per-IP limit of **3 attempts
       per 300 seconds (5 minutes)** before the secret is examined, so a 429
-      tells you nothing about the credential and aborts the run. Those numbers
-      are `RATE_LIMIT_MAX_REQUESTS` and `RATE_LIMIT_WINDOW_SECONDS` in
-      `app/api/admin/set-admin/route.ts`, and a test fails if this paragraph and
-      those constants disagree. Treat that limit as **defence-in-depth only** —
-      it is per-IP, so a distributed source weakens it. The primary boundary is a
-      high-entropy `ADMIN_SECRET`, used only for a bootstrap window, then
-      rotated or removed. Wait for the window and re-run rather than trying to
-      bypass it.
+      tells you nothing about the credential. It is an `INCONCLUSIVE`
+      observation, not a verdict, and it does **not** end the run: the proof
+      stays armed in this same process. `[BOOTSTRAP_POST_RATE_LIMITED]` Remain
+      in the same process, do not restart, wait for the window to clear, then
+      retry the post-check from that same armed proof. A fresh run's pre-check
+      can no longer be accepted once the rotation has shipped. Never try to
+      bypass the limiter. Those numbers are `RATE_LIMIT_MAX_REQUESTS` and
+      `RATE_LIMIT_WINDOW_SECONDS` in `app/api/admin/set-admin/route.ts`, and a
+      test fails if this paragraph and those constants disagree. Treat the limit
+      as **defence-in-depth only** — it is per-IP, so a distributed source
+      weakens it. The primary boundary is a high-entropy `ADMIN_SECRET`, used
+      only for a bootstrap window, then rotated or removed.
 
       **What the per-IP limit depends on.** The key is derived from the
       `x-forwarded-for` header (`app/api/admin/set-admin/route.ts`). The

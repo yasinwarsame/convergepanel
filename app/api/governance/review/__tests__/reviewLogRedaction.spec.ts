@@ -219,16 +219,55 @@ const serialize = (args: unknown[]) =>
  *   - The installed implementation is recorded by identity and re-checked, so
  *     swapping the capture itself is caught rather than silently obeyed.
  */
+
+/**
+ * Phase FIRST-ADMIN-C15 (R11 P1) — TWO INDEPENDENT EVIDENCE CHANNELS.
+ *
+ * WHAT KEEPS GOING WRONG. Three phases in a row declared one mutable test
+ * mechanism authoritative and were falsified in the next review:
+ *
+ *   C12: a hand-rolled array inside the spy. One line dropped the leaking call.
+ *   C13: "mock.calls is written before the implementation, so it cannot be
+ *        edited." True and irrelevant — the array is mutable afterwards, and six
+ *        lines rewrote it in place.
+ *   C14: an ingress snapshot, "built from the args the sink was actually called
+ *        with". Also false: the snapshot is built by `impl`, which is ordinary
+ *        editable test code, and three lines inside it sanitised the arguments
+ *        before they were ever recorded. The identity check could not see it,
+ *        because it stores the tampered function as its own expected reference.
+ *
+ * THE CLAIM IS NOW NARROWER, AND IT IS THE ONE THAT IS ACTUALLY DEFENSIBLE.
+ *
+ * We do NOT claim this harness is tamper-proof; application-level tests cannot
+ * be. We claim only this: a real sensitive-log regression cannot be hidden by
+ * ONE localized edit to either evidence channel, because the other channel
+ * still sees the leak and the cross-channel comparison fails loudly.
+ *
+ *   CHANNEL A — the raw Jest ledger, read from `spy.mock.calls` at assertion
+ *     time. Holds LIVE references. Blind to post-log object mutation; immune to
+ *     anything done inside our own ingress function.
+ *   CHANNEL B — the ingress snapshot transcript, deep-frozen at call time.
+ *     Immune to later ledger rewriting; blind to sanitising done at ingress.
+ *
+ * Their weaknesses are complementary by construction. Each runs its OWN deny-set
+ * walk — the two walk functions are deliberately separate implementations, not
+ * one shared helper, so a one-line edit cannot blind both. Neither is derived
+ * from the other, and neither passes through a shared pre-filtered list.
+ *
+ * A coordinated edit to both channels, their walks, the fidelity check and the
+ * lifecycle backstop would still make the suite lie. That is outside the
+ * guarantee and is stated plainly rather than papered over.
+ */
 const CAPTURE_SINKS = CONSOLE_METHODS;
 
 type TranscriptEntry = { sink: string; args: readonly unknown[] };
 
 const createGovernanceLogCapture = () => {
-  /** PRIVATE. Nothing returned below exposes this array. */
+  /** CHANNEL B storage. Closure-private. */
   let transcript: TranscriptEntry[] = [];
-  /** Monotonic across the whole file; `clear()` does not reset them. */
   let totalIngress = 0;
-  let totalScanned = 0;
+  let finalizeRuns = 0;
+  let fidelityChecks = 0;
   const installedImpls = new Map<string, (...a: unknown[]) => void>();
   const spies = new Map<string, jest.SpyInstance>();
 
@@ -260,8 +299,11 @@ const createGovernanceLogCapture = () => {
     return Object.freeze(out);
   };
 
-  /** Structured search. No serialization anywhere on this path. */
-  const contains = (node: unknown, needle: string, seen: Set<object> = new Set()): boolean => {
+  /**
+   * CHANNEL B's walk. Separate implementation from `ledgerContains` on purpose:
+   * one edit must not be able to blind both channels.
+   */
+  const snapshotContains = (node: unknown, needle: string, seen: Set<object> = new Set()): boolean => {
     if (typeof node === "string") return node.includes(needle);
     if (typeof node === "number" || typeof node === "bigint" || typeof node === "boolean") {
       return String(node).includes(needle);
@@ -269,12 +311,73 @@ const createGovernanceLogCapture = () => {
     if (node === null || typeof node !== "object") return false;
     if (seen.has(node as object)) return false;
     seen.add(node as object);
-    if (Array.isArray(node)) return node.some((n) => contains(n, needle, seen));
+    if (Array.isArray(node)) return node.some((n) => snapshotContains(n, needle, seen));
     for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
       if (k.includes(needle)) return true;
-      if (contains(v, needle, seen)) return true;
+      if (snapshotContains(v, needle, seen)) return true;
     }
     return false;
+  };
+
+  /** CHANNEL A's walk. Independent of the above, and handles live Errors. */
+  const ledgerContains = (node: unknown, needle: string, seen: Set<object> = new Set()): boolean => {
+    if (node === null || node === undefined) return false;
+    const t = typeof node;
+    if (t === "string") return (node as string).indexOf(needle) !== -1;
+    if (t === "number" || t === "bigint" || t === "boolean") return String(node).indexOf(needle) !== -1;
+    if (t !== "object") return false;
+    if (seen.has(node as object)) return false;
+    seen.add(node as object);
+    if (node instanceof Error) {
+      const err = node as Error & { code?: unknown; details?: unknown };
+      if (typeof err.message === "string" && err.message.indexOf(needle) !== -1) return true;
+      if (typeof err.name === "string" && err.name.indexOf(needle) !== -1) return true;
+      if (ledgerContains(err.code, needle, seen)) return true;
+      if (ledgerContains(err.details, needle, seen)) return true;
+      return false;
+    }
+    if (Array.isArray(node)) {
+      for (const v of node) if (ledgerContains(v, needle, seen)) return true;
+      return false;
+    }
+    for (const k of Object.keys(node as Record<string, unknown>)) {
+      if (k.indexOf(needle) !== -1) return true;
+      if (ledgerContains((node as Record<string, unknown>)[k], needle, seen)) return true;
+    }
+    return false;
+  };
+
+  /**
+   * CHANNEL A reader — straight from Jest, at assertion time.
+   *
+   * `mock.calls` is per-spy, so a naive flatMap would group all `log` calls
+   * before all `warn` calls and disagree with channel B's chronological order
+   * for benign reasons. Jest also records `mock.invocationCallOrder`, a global
+   * monotonic counter per call, so true ordering is recovered from Jest's OWN
+   * data — not by consulting channel B, which would make A derived from B.
+   */
+  const ledgerEntries = (): TranscriptEntry[] =>
+    CAPTURE_SINKS.flatMap((m) => {
+      const spy = spies.get(m);
+      const calls = (spy?.mock.calls ?? []) as unknown[][];
+      const order = (spy?.mock.invocationCallOrder ?? []) as number[];
+      return calls.map((args, i) => ({ sink: m, args, seq: order[i] ?? i }));
+    })
+      .sort((x, y) => (x as { seq: number }).seq - (y as { seq: number }).seq)
+      .map(({ sink, args }) => ({ sink, args }));
+
+  const labelsFor = (
+    args: readonly unknown[],
+    walk: (n: unknown, needle: string) => boolean,
+    opts: { allowIntegrityRunId?: boolean }
+  ): string[] => {
+    const found: string[] = [];
+    for (const [label, get] of SENSITIVE_LOG_CANARIES) {
+      const value = get();
+      if (opts.allowIntegrityRunId && value === C.runId) continue;
+      if (walk(args, value)) found.push(label);
+    }
+    return found;
   };
 
   return {
@@ -293,12 +396,14 @@ const createGovernanceLogCapture = () => {
       spies.clear();
       installedImpls.clear();
     },
+    /** Resets BOTH channels together, so they never drift for benign reasons. */
     clear() {
       transcript = [];
+      for (const s of spies.values()) s.mockClear();
     },
 
-    /** The capture must still BE the capture. */
-    assertIntegrity() {
+    /** The capture must still BE the capture. One loudness layer, not the proof. */
+    assertSpyIdentity() {
       for (const m of CAPTURE_SINKS) {
         const spy = spies.get(m);
         expect(spy).toBeDefined();
@@ -307,26 +412,68 @@ const createGovernanceLogCapture = () => {
     },
 
     /**
-     * Scans the private frozen transcript. Returns the number of entries it
-     * actually walked, so a hook that stops scanning cannot fake the number.
+     * CROSS-CHANNEL FIDELITY. Compares shape AND security-relevant content:
+     * for every call, both channels must find the SAME set of canaries. An
+     * ingress sanitiser makes B's set smaller than A's; a ledger rewrite makes
+     * A's smaller than B's. Either way this diverges and fails loudly.
      */
-    assertNoSensitiveCanaries(opts: { allowIntegrityRunId?: boolean } = {}) {
-      const leaked: string[] = [];
-      for (const [label, get] of SENSITIVE_LOG_CANARIES) {
-        const value = get();
-        if (opts.allowIntegrityRunId && value === C.runId) continue;
-        for (const entry of transcript) {
-          if (contains(entry.args, value)) { leaked.push(label); break; }
+    assertChannelFidelity(opts: { allowIntegrityRunId?: boolean } = {}) {
+      fidelityChecks += 1;
+      const a = ledgerEntries();
+      const b = transcript;
+      expect({ channel: "A", count: a.length }).toEqual({ channel: "A", count: b.length });
+      for (let i = 0; i < a.length; i += 1) {
+        expect({ i, sink: a[i].sink, arity: a[i].args.length })
+          .toEqual({ i, sink: b[i].sink, arity: b[i].args.length });
+        for (let j = 0; j < a[i].args.length; j += 1) {
+          const av = a[i].args[j];
+          const bv = b[i].args[j];
+          if (av === null || typeof av !== "object") {
+            expect({ i, j, value: av }).toEqual({ i, j, value: bv });
+          }
         }
+        const la = labelsFor(a[i].args, (n, needle) => ledgerContains(n, needle), opts);
+        const lb = labelsFor(b[i].args, (n, needle) => snapshotContains(n, needle), opts);
+        expect({ i, channel: "A", canaries: la }).toEqual({ i, channel: "A", canaries: lb });
       }
-      totalScanned += transcript.length;
-      if (leaked.length > 0) {
-        // Serialization appears ONLY here, to render an already-proven failure.
-        const rendered = transcript.map((e) => serialize(e.args as unknown[])).join("\n");
-        expect(`${leaked.join(", ")}\n--- captured ---\n${rendered}`).toEqual([]);
-      }
-      expect(leaked).toEqual([]);
+    },
+
+    /** CHANNEL A's independent deny-set scan. */
+    assertNoSensitiveCanariesRawLedger(opts: { allowIntegrityRunId?: boolean } = {}) {
+      const leaked = new Set<string>();
+      const entries = ledgerEntries();
+      for (const e of entries) for (const l of labelsFor(e.args, (n, needle) => ledgerContains(n, needle), opts)) leaked.add(l);
+      expect({ channel: "RAW_LEDGER", leaked: [...leaked] }).toEqual({ channel: "RAW_LEDGER", leaked: [] });
+      return entries.length;
+    },
+
+    /** CHANNEL B's independent deny-set scan. */
+    assertNoSensitiveCanariesSnapshotTranscript(opts: { allowIntegrityRunId?: boolean } = {}) {
+      const leaked = new Set<string>();
+      for (const e of transcript) for (const l of labelsFor(e.args, (n, needle) => snapshotContains(n, needle), opts)) leaked.add(l);
+      expect({ channel: "SNAPSHOT", leaked: [...leaked] }).toEqual({ channel: "SNAPSHOT", leaked: [] });
       return transcript.length;
+    },
+
+    /** Back-compat wrapper: BOTH channels, never one. */
+    assertNoSensitiveCanaries(opts: { allowIntegrityRunId?: boolean } = {}) {
+      const n = this.assertNoSensitiveCanariesSnapshotTranscript(opts);
+      this.assertNoSensitiveCanariesRawLedger(opts);
+      return n;
+    },
+
+    /**
+     * THE ONE MANDATORY FINALIZER. `afterEach` calls this and nothing else, so
+     * there is a single thing to register and a single thing to delete — and a
+     * structural backstop asserts it is registered.
+     */
+    finalize(opts: { allowIntegrityRunId?: boolean; skipContent?: boolean } = {}) {
+      finalizeRuns += 1;
+      this.assertSpyIdentity();
+      if (opts.skipContent) return;
+      this.assertChannelFidelity(opts);
+      this.assertNoSensitiveCanariesRawLedger(opts);
+      this.assertNoSensitiveCanariesSnapshotTranscript(opts);
     },
 
     assertLoggingOccurred(anchor: string) {
@@ -335,12 +482,13 @@ const createGovernanceLogCapture = () => {
       expect(hit).toBe(true);
     },
 
-    /** Read-only views for diagnostics and for the tests that attack this design. */
     size: () => transcript.length,
+    ledgerSize: () => ledgerEntries().length,
     frozenEntries: (): readonly TranscriptEntry[] => Object.freeze(transcript.slice()),
-    stats: () => ({ totalIngress, totalScanned }),
+    stats: () => ({ totalIngress, finalizeRuns, fidelityChecks }),
   };
 };
+
 
 const governanceLogCapture = createGovernanceLogCapture();
 
@@ -508,19 +656,26 @@ beforeEach(() => {
   redactionExemption = "none";
 });
 
+/**
+ * Phase FIRST-ADMIN-C15 (R11 P2) — ONE MANDATORY FINALIZER.
+ *
+ * C14 spread enforcement over several optional calls, and R11 showed the
+ * integrity call could simply be deleted from this hook with the suite still
+ * green. There is now exactly one thing registered here and exactly one thing
+ * to delete — and `LIFECYCLE BACKSTOP` below asserts that it IS registered.
+ *
+ * Spy identity is checked even for content-exempt tests: a test that swaps the
+ * capture must be caught whether or not it opted out of the deny-set scan.
+ */
 afterEach(() => {
-  // Integrity is checked on EVERY test, including the ones exempt from the
-  // canary scan: a test that swaps the capture implementation must be caught
-  // even if it declares itself exempt from the content assertion.
-  governanceLogCapture.assertIntegrity();
-  if (redactionExemption === "capture-fidelity") return;
-  // No argument: the capture reads its own spy buffer, so there is nothing a
-  // filler constant could be substituted for.
-  const sinkCallsInspected = governanceLogCapture.assertNoSensitiveCanaries({
+  const sizeBefore = governanceLogCapture.size();
+  governanceLogCapture.finalize({
     allowIntegrityRunId: redactionExemption === "integrity-run-id",
+    skipContent: redactionExemption === "capture-fidelity",
   });
+  if (redactionExemption === "capture-fidelity") return;
   redactionAssertionsRun += 1;
-  redactionSinkCallsInspected += sinkCallsInspected;
+  redactionSinkCallsInspected += sizeBefore;
 });
 
 describe("ANCHOR 0 — every canary is REACHABLE in the data the route reads", () => {
@@ -1032,6 +1187,15 @@ describe("STRUCTURAL — governance modules use only sinks this suite captures",
    * `console.trace`, `console.table` and `process.stdout.write` would bypass
    * it. Rather than claim universal interception, pin that the modules on this
    * request path do not use them — so the claim and the reality stay together.
+   *
+   * WHAT THIS LIST DOES **NOT** MEAN — Phase FIRST-ADMIN-C15 (R11 P2).
+   * Naming a module here asserts ONLY "this file contains no uncaptured sink
+   * token". It does NOT assert that every branch in it is driven by this suite.
+   * Specifically, `lib/governance/auditLog.ts` contains catch-block
+   * `console.error` sites that log a plaintext `runId` and that NO test reaches:
+   * every caller mocks the module wholesale, so those bodies never execute here.
+   * They are named debt in docs/operations/security-test-falsifiability.md, not
+   * covered behaviour, and a reader must not infer coverage from this list.
    */
   const MODULES = [
     "app/api/governance/review/route.ts",
@@ -1039,6 +1203,17 @@ describe("STRUCTURAL — governance modules use only sinks this suite captures",
     "lib/governance/auditLog.ts",
     "lib/logger.ts",
   ];
+
+  it("the coverage claim is explicitly narrowed for auditLog's undriven branches", () => {
+    // A comment can be deleted silently; this makes the narrowing a test fact.
+    const src = readFileSync(__filename, "utf8");
+    expect(src).toMatch(/does NOT assert that every branch in it is driven/);
+    const audit = readFileSync("lib/governance/auditLog.ts", "utf8");
+    // If these branches ever become driven, this count changes and the debt
+    // statement must be revisited deliberately rather than drifting.
+    const catchRunIdLogs = (audit.match(/console\.error\([^)]*runId/g) ?? []).length;
+    expect(catchRunIdLogs).toBeGreaterThan(0);
+  });
 
   it("ANCHOR: the modules were read and do log", () => {
     for (const m of MODULES) expect(readFileSync(m, "utf8")).toMatch(/console\.|logger\./);
@@ -1145,16 +1320,16 @@ describe("CAPTURE INTEGRITY — the capture must still BE the capture", () => {
     const original = spy.getMockImplementation()!;
     spy.mockImplementation(() => {});                       // the swap
     try {
-      expect(() => governanceLogCapture.assertIntegrity()).toThrow();
+      expect(() => governanceLogCapture.assertSpyIdentity()).toThrow();
     } finally {
       spy.mockImplementation(original);                     // restore
     }
-    governanceLogCapture.assertIntegrity();                 // and it passes again
+    governanceLogCapture.assertSpyIdentity();                 // and it passes again
     clearCapture();
   });
 
   it("integrity passes untouched — the check is not blanket failure", () => {
-    expect(() => governanceLogCapture.assertIntegrity()).not.toThrow();
+    expect(() => governanceLogCapture.assertSpyIdentity()).not.toThrow();
   });
 });
 
@@ -1193,6 +1368,264 @@ describe("STRUCTURED SCAN — there is no serialization on the security path", (
     console.log("clean one");
     console.log("clean two");
     expect(governanceLogCapture.assertNoSensitiveCanaries()).toBe(2);
+    clearCapture();
+  });
+});
+
+
+// ===========================================================================
+describe("DUAL-CHANNEL EVIDENCE — one tampered channel is caught by the other", () => {
+  /**
+   * Phase FIRST-ADMIN-C15 (R11 P1). The claim under test is deliberately narrow:
+   * ONE localized edit to either channel cannot turn a real leak green, because
+   * the other channel still sees it and the cross-channel comparison diverges.
+   *
+   * Direction coverage. "Channel A loses a canary that B still holds" is
+   * constructible at runtime (mutate the logged object, or rewrite mock.calls)
+   * and is pinned below. The opposite direction — an ingress sanitiser, where B
+   * loses what A holds — cannot be built at runtime, because `transcript` is
+   * closure-private and only the installed `impl` writes to it. That direction
+   * is proven by source mutation instead (see the C15 mutation table), and the
+   * fidelity comparison is symmetric: it compares the two label arrays with
+   * toEqual, so it fails whichever side is short.
+   */
+  const leakValue = () => C.ownerAUid;
+
+  it("both channels independently detect a plain leak", () => {
+    redactionExemption = "capture-fidelity";
+    clearCapture();
+    console.log(`[governance/review] Override: approved owner=${leakValue()}`);
+    expect(() => governanceLogCapture.assertNoSensitiveCanariesRawLedger()).toThrow();
+    expect(() => governanceLogCapture.assertNoSensitiveCanariesSnapshotTranscript()).toThrow();
+    clearCapture();
+  });
+
+  it("rewriting mock.calls scrubs channel A only — channel B still fails, and fidelity diverges", () => {
+    redactionExemption = "capture-fidelity";
+    clearCapture();
+    console.log(`[governance/review] Override: approved owner=${leakValue()}`);
+    const cs = (console.log as unknown as jest.Mock).mock.calls;
+    cs[cs.length - 1] = ["[governance/review] Override: approved"];   // the R10 attack
+
+    // Channel A has been successfully scrubbed...
+    expect(() => governanceLogCapture.assertNoSensitiveCanariesRawLedger()).not.toThrow();
+    // ...and that is exactly why it is not the only channel.
+    expect(() => governanceLogCapture.assertNoSensitiveCanariesSnapshotTranscript()).toThrow();
+    expect(() => governanceLogCapture.assertChannelFidelity()).toThrow();
+    clearCapture();
+  });
+
+  it("mutating the logged object scrubs channel A only — channel B still fails, and fidelity diverges", () => {
+    redactionExemption = "capture-fidelity";
+    clearCapture();
+    const payload: Record<string, unknown> = { actor: { uid: leakValue() } };
+    console.log("[governance/review] audit", payload);
+    (payload.actor as Record<string, unknown>).uid = "scrubbed";      // A holds a live ref
+
+    expect(() => governanceLogCapture.assertNoSensitiveCanariesRawLedger()).not.toThrow();
+    expect(() => governanceLogCapture.assertNoSensitiveCanariesSnapshotTranscript()).toThrow();
+    expect(() => governanceLogCapture.assertChannelFidelity()).toThrow();
+    clearCapture();
+  });
+
+  it("clearing one channel alone is a fidelity failure", () => {
+    redactionExemption = "capture-fidelity";
+    clearCapture();
+    console.log("[governance/review] benign line");
+    (console.log as unknown as jest.Mock).mockClear();                // channel A only
+    expect(() => governanceLogCapture.assertChannelFidelity()).toThrow();
+    clearCapture();
+  });
+
+  it("dropping an argument from a ledger call is a fidelity failure", () => {
+    redactionExemption = "capture-fidelity";
+    clearCapture();
+    console.log("prefix", { k: 1 }, "suffix");
+    const cs = (console.log as unknown as jest.Mock).mock.calls;
+    cs[cs.length - 1] = ["prefix", { k: 1 }];                          // arity changed
+    expect(() => governanceLogCapture.assertChannelFidelity()).toThrow();
+    clearCapture();
+  });
+
+  it("ANCHOR: clean, untampered logging passes both channels and fidelity", () => {
+    redactionExemption = "capture-fidelity";
+    clearCapture();
+    console.log("[governance/review] Override: a blocked run was approved (prevStatus=blocked)");
+    console.warn("[governance/review] integrity warning", { count: 3 });
+    expect(() => governanceLogCapture.assertChannelFidelity()).not.toThrow();
+    expect(() => governanceLogCapture.assertNoSensitiveCanariesRawLedger()).not.toThrow();
+    expect(() => governanceLogCapture.assertNoSensitiveCanariesSnapshotTranscript()).not.toThrow();
+    expect(governanceLogCapture.size()).toBe(2);
+    expect(governanceLogCapture.ledgerSize()).toBe(2);
+    clearCapture();
+  });
+
+  it("the two channels use SEPARATE walk implementations", () => {
+    // A shared helper would let one edit blind both. This is a structural
+    // backstop, not the security proof — the mutation table is that.
+    const src = readFileSync(__filename, "utf8");
+    expect(src).toContain("const snapshotContains =");
+    expect(src).toContain("const ledgerContains =");
+    const a = src.slice(src.indexOf("const snapshotContains ="), src.indexOf("const ledgerContains ="));
+    expect(a).not.toContain("ledgerContains(");
+  });
+});
+
+// ===========================================================================
+describe("LIFECYCLE BACKSTOP — the finalizer is actually registered", () => {
+  /**
+   * Phase FIRST-ADMIN-C15 (R11 P2). Deleting the integrity call from `afterEach`
+   * left C14 green. Enforcement is now a single `finalize()` call, and this
+   * block asserts it is registered in a live `afterEach`.
+   *
+   * This is a BACKSTOP. It proves registration, not that redaction ran — the
+   * runtime proof is the leak mutations in the table.
+   */
+  const src = readFileSync(__filename, "utf8");
+  // Strip line and block comments so a commented-out call cannot satisfy this.
+  const code = src
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .split("\n")
+    .filter((l) => !/^\s*\/\//.test(l))
+    .join("\n");
+
+  it("an afterEach hook calls governanceLogCapture.finalize(", () => {
+    const hooks = [...code.matchAll(/afterEach\(\(\) => \{[\s\S]*?\n\}\);/g)].map((m) => m[0]);
+    expect(hooks.length).toBeGreaterThan(0);
+    const withFinalize = hooks.filter((h) => h.includes("governanceLogCapture.finalize("));
+    expect(withFinalize).toHaveLength(1);
+  });
+
+  it("the registered finalizer call survives comment stripping", () => {
+    // The whole file legitimately calls finalize() several more times inside the
+    // FINALIZER SELF-VALIDATION block, so a global count is the wrong invariant.
+    // What matters is that the call inside the hook is live code.
+    const hooks = [...code.matchAll(/afterEach\(\(\) => \{[\s\S]*?\n\}\);/g)].map((m) => m[0]);
+    const hook = hooks.find((h) => h.includes("governanceLogCapture.finalize("));
+    expect(hook).toBeDefined();
+    expect(hook!).toMatch(/^\s*governanceLogCapture\.finalize\(/m);
+  });
+
+  it("SELF-VALIDATION: the comment stripper really removes a commented call", () => {
+    // Deliberately NOT written with the real hook/function names: an earlier
+    // version of this fixture contained a literal `afterEach(() => {` and the
+    // backstop above parsed this test's own string as if it were source.
+    const sample = ["HOOK(() => {", "  // capture.FINALIZER_TOKEN();", "});"].join("\n");
+    const stripped = sample.split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
+    expect(sample).toContain("FINALIZER_TOKEN(");
+    expect(stripped).not.toContain("FINALIZER_TOKEN(");
+  });
+
+  it("the finalizer ran on every non-exempt test so far", () => {
+    expect(governanceLogCapture.stats().finalizeRuns).toBeGreaterThan(40);
+    expect(governanceLogCapture.stats().fidelityChecks).toBeGreaterThan(20);
+  });
+});
+
+// ===========================================================================
+describe("FINALIZER SELF-VALIDATION", () => {
+  it("passes on a clean real log", () => {
+    redactionExemption = "capture-fidelity";
+    clearCapture();
+    console.log("[governance/review] benign");
+    expect(() => governanceLogCapture.finalize()).not.toThrow();
+    clearCapture();
+  });
+
+  it("fails on a sensitive real log", () => {
+    redactionExemption = "capture-fidelity";
+    clearCapture();
+    console.log(`owner=${C.ownerAUid}`);
+    expect(() => governanceLogCapture.finalize()).toThrow();
+    clearCapture();
+  });
+
+  it("fails when the raw ledger is tampered", () => {
+    redactionExemption = "capture-fidelity";
+    clearCapture();
+    console.log("[governance/review] benign");
+    (console.log as unknown as jest.Mock).mock.calls.length = 0;
+    expect(() => governanceLogCapture.finalize()).toThrow();
+    clearCapture();
+  });
+
+  it("fails when the spy implementation is replaced", () => {
+    redactionExemption = "capture-fidelity";
+    clearCapture();
+    const spy = console.log as unknown as jest.SpyInstance;
+    const original = spy.getMockImplementation()!;
+    spy.mockImplementation(() => {});
+    try {
+      expect(() => governanceLogCapture.finalize()).toThrow();
+    } finally {
+      spy.mockImplementation(original);
+    }
+    expect(() => governanceLogCapture.finalize()).not.toThrow();
+    clearCapture();
+  });
+});
+
+
+// ===========================================================================
+describe("STRUCTURED TRAVERSAL — every claimed shape, canary isolated", () => {
+  /**
+   * Phase FIRST-ADMIN-C15 (R11 P2). C14 claimed `Error.details` coverage while
+   * the traversal leg was dead: the only fixture carrying a canary in `.details`
+   * repeated it in `.message`, so deleting the `details` leg stayed green.
+   *
+   * In every case below the canary occurs in EXACTLY ONE place, so deleting that
+   * traversal leg must fail — and BOTH channels must detect it independently,
+   * since the two walks are separate implementations.
+   */
+  const CANARY = () => C.ownerBUid;
+
+  const shapes: Array<[string, () => void]> = [
+    ["a bare string value", () => console.log(CANARY())],
+    ["a substring of a longer string", () => console.log(`run-owner:${CANARY()}:end`)],
+    ["an object VALUE", () => console.log("x", { owner: CANARY() })],
+    ["an object KEY", () => console.log("x", { [CANARY()]: "present" })],
+    ["a nested object value", () => console.log("x", { a: { b: { owner: CANARY() } } })],
+    ["a nested array element", () => console.log("x", { list: [["a", CANARY()]] })],
+    ["Error.message", () => console.error("x", new Error(`denied for ${CANARY()}`))],
+    ["Error.code", () => { const e = new Error("boom") as Error & { code?: string }; e.code = CANARY(); console.error("x", e); }],
+    ["Error.details", () => { const e = new Error("boom") as Error & { details?: string }; e.details = CANARY(); console.error("x", e); }],
+  ];
+
+  it.each(shapes)("%s is detected by BOTH channels", (_name, emit) => {
+    redactionExemption = "capture-fidelity";
+    clearCapture();
+    (emit as () => void)();
+    expect(() => governanceLogCapture.assertNoSensitiveCanariesRawLedger()).toThrow();
+    expect(() => governanceLogCapture.assertNoSensitiveCanariesSnapshotTranscript()).toThrow();
+    // and the channels agree, so neither is doing the work alone by accident
+    expect(() => governanceLogCapture.assertChannelFidelity()).not.toThrow();
+    clearCapture();
+  });
+
+  it("SELF-VALIDATION: each fixture carries the canary exactly once", () => {
+    redactionExemption = "capture-fidelity";
+    for (const [, emit] of shapes) {
+      clearCapture();
+      (emit as () => void)();
+      const rendered = governanceLogCapture
+        .frozenEntries()
+        .map((e) => serialize(e.args as unknown[]))
+        .join("\n");
+      const hits = rendered.split(CANARY()).length - 1;
+      expect(hits).toBe(1);
+    }
+    clearCapture();
+  });
+
+  it("ANCHOR: an equivalent fixture WITHOUT the canary passes both channels", () => {
+    redactionExemption = "capture-fidelity";
+    clearCapture();
+    const e = new Error("boom") as Error & { details?: string; code?: string };
+    e.details = "no-canary-here";
+    e.code = "SAFE";
+    console.error("x", e, { a: { b: { owner: "someone-else" } } });
+    expect(() => governanceLogCapture.assertNoSensitiveCanariesRawLedger()).not.toThrow();
+    expect(() => governanceLogCapture.assertNoSensitiveCanariesSnapshotTranscript()).not.toThrow();
     clearCapture();
   });
 });

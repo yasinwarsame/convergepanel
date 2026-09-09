@@ -196,13 +196,38 @@ describe("PRODUCTION ORIGIN IS NOT A PARAMETER — R10 item 25", () => {
     expect(code).not.toMatch(/createContainmentProof/);
   });
 
-  it("the wrapper refuses a foreign origin even if the canonical constant is the only input", async () => {
-    // Proves the binding is the constant, not a caller-supplied string: with the
-    // constant intact there is no code path that reaches another host.
+  it("every request goes to the canonical origin — asserted over a non-empty set", async () => {
+    // R11 (Reviewer A, F4): this previously looped over `r.urls` with no length
+    // assertion, so it passed vacuously when zero requests were made. A mutation
+    // that made the wrapper issue nothing at all reported "1 passed" here.
     const r = parse(
       (await twoPhase(`[{status:400,marker:"${ACCEPTED}"},{status:401,marker:"${REJECTED}"}]`)).out
     );
+    expect(r.urls.length).toBe(2);
     for (const u of r.urls) expect(u.startsWith(`${CANONICAL}/`)).toBe(true);
+  });
+
+  it("the CLI cannot reach the low-level API, even through computed member access", () => {
+    // R11 (Reviewer A, F2/M5): the substring negative below is defeated by
+    // `M["create" + "ContainmentProof"]`, which needs a NAMESPACE import. Banning
+    // namespace imports closes the indirection class rather than one spelling.
+    const src = readFileSync(SCRIPT, "utf8");
+    const code = src
+      .split("\n")
+      .filter((l) => !/^\s*\*/.test(l) && !/^\s*\/\*/.test(l) && !/^\s*\/\//.test(l))
+      .join("\n");
+    expect(code).not.toMatch(/import\s+\*\s+as/);
+    expect(code).not.toMatch(/await\s+import\s*\(/);
+    expect(code).not.toMatch(/createRequire/);
+    // and the named imports come from the probe library only
+    const imports = [...code.matchAll(/import\s*\{([^}]*)\}\s*from\s*"([^"]+)"/g)];
+    expect(imports.length).toBeGreaterThan(0);
+    for (const [, names, from] of imports) {
+      if (!from.includes("probe-admin-secret")) continue;
+      for (const n of names.split(",").map((x) => x.trim()).filter(Boolean)) {
+        expect(["runProductionTwoPhase", "observeOldSecret", "CANONICAL_PRODUCTION_ORIGIN", "OBSERVATIONS", "POST_OUTCOMES", "EXIT"]).toContain(n);
+      }
+    }
   });
 });
 
@@ -320,6 +345,89 @@ describe("POST SURVIVES TRANSIENT FAILURE — R10 item 27", () => {
 });
 
 // ===========================================================================
+describe("PRE ARMS ONLY ON AN ATTESTED 400 — R11 P2-1", () => {
+  /**
+   * The marker is what makes PRE mean "this route accepted these exact bytes"
+   * rather than "something at this origin returned 400". Without it, an edge or
+   * WAF 400 at the canonical origin would arm the proof for a shell-mangled
+   * secret, and the genuine 401 that follows the rotation would then print
+   * PRODUCTION_CONTAINMENT_PROVEN — the exact "wrong secret" failure the
+   * pre-check exists to stop. R11 found this correct but entirely unpinned.
+   */
+  const pre = (first: string) =>
+    withScriptedFetch(
+      `[${first},{status:401,marker:"${REJECTED}"}]`,
+      `
+      const proof = M.createContainmentProof({ origin: ${JSON.stringify(CANONICAL)}, secret: ${JSON.stringify(OLD)}, fetchImpl });
+      const p = await proof.precheck();
+      const arm = proof.armForRotation();
+      const post = await proof.postcheck();
+      record({ pre: p.ok, state: proof.state, arm: arm.ok, post: post.ok, requests: CALLS().length });
+      `
+    );
+
+  it.each([
+    ["a 400 with NO route marker", `{status:400}`],
+    ["a 400 with the WRONG marker value", `{status:400,marker:"something-else"}`],
+    ["a 400 carrying the REJECTED marker", `{status:400,marker:"${REJECTED}"}`],
+    ["a 200 with the accepted marker", `{status:200,marker:"${ACCEPTED}"}`],
+    ["a 403 with the accepted marker", `{status:403,marker:"${ACCEPTED}"}`],
+  ])("%s does NOT arm the proof, and no post-check can follow", async (_n, first) => {
+    const r = parse((await pre(first)).out);
+    expect(r.pre).toBe(false);
+    expect(r.state).toBe("ABORTED");
+    expect(r.arm).toBe(false);
+    expect(r.post).toBe(false);
+    expect(r.requests).toBe(1);   // the post-check issued nothing
+  });
+
+  it("ANCHOR: the attested 400 DOES arm — this is not blanket refusal", async () => {
+    const r = parse((await pre(`{status:400,marker:"${ACCEPTED}"}`)).out);
+    expect(r.pre).toBe(true);
+    expect(r.post).toBe(true);
+    expect(r.requests).toBe(2);
+  });
+});
+
+describe("THE SECRET IS CAPTURED, NOT RE-READ — R11 P2-2", () => {
+  /**
+   * The C14 evidence table claimed "re-read secret/origin at POST -> KILLED".
+   * Only the origin half was true: the same-secret test never mutated the
+   * environment between phases, so a `process.env.OLD_ADMIN_SECRET ?? locked`
+   * re-read inside postcheck satisfied "one distinct body" trivially and
+   * survived the whole suite. These tests change the environment mid-proof.
+   */
+  const midProof = (mutation: string) =>
+    withScriptedFetch(
+      `[{status:400,marker:"${ACCEPTED}"},{status:429},{status:401,marker:"${REJECTED}"}]`,
+      `
+      process.env.OLD_ADMIN_SECRET = "S1-original-secret";
+      const proof = M.createContainmentProof({
+        origin: ${JSON.stringify(CANONICAL)}, secret: process.env.OLD_ADMIN_SECRET, fetchImpl,
+      });
+      const p = await proof.precheck();
+      proof.armForRotation();
+      ${mutation}                       // <-- the environment changes HERE
+      await proof.postcheck();
+      const post = await proof.postcheck();
+      record({ pre: p.ok, post: post.ok, bodies: CALLS().map((c) => c.body) });
+      `
+    );
+
+  it.each([
+    ["the env var is REPLACED after PRE", `process.env.OLD_ADMIN_SECRET = "S2-attacker-substituted";`],
+    ["the env var is DELETED after PRE", `delete process.env.OLD_ADMIN_SECRET;`],
+    ["the env var is blanked after PRE", `process.env.OLD_ADMIN_SECRET = "";`],
+  ])("%s — every retry still carries the ORIGINAL bytes", async (_n, mutation) => {
+    const r = parse((await midProof(mutation)).out);
+    expect(r.pre).toBe(true);
+    expect(r.post).toBe(true);
+    expect(r.bodies).toHaveLength(3);
+    for (const b of r.bodies) expect(JSON.parse(b)).toEqual({ secret: "S1-original-secret" });
+    expect(r.bodies.join(" ")).not.toContain("S2-attacker-substituted");
+  });
+});
+
 describe("EXIT CODES — a rate limit is not a containment failure", () => {
   const run = (steps: string, attempts: number) =>
     withScriptedFetch(

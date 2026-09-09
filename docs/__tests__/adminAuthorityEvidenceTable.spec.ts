@@ -129,8 +129,13 @@ describe("the SYSTEM_ADMIN containment procedure closes the bootstrap path", () 
   });
 
   it("does not tell the operator to bypass the rate limiter", () => {
-    // Whitespace-tolerant: the doc wraps this sentence across lines.
-    expect(SECTION.replace(/\s+/g, " ")).toMatch(/Wait for the window and re-run rather than trying to bypass it/);
+    // Phase FIRST-ADMIN-C15: this asserted the old "wait and re-run" sentence,
+    // which C14 made wrong — the proof must NOT be restarted. The invariant the
+    // row actually needs is "never bypass", plus the correct retry instruction.
+    const flat = SECTION.replace(/\s+/g, " ");
+    expect(flat).toMatch(/[Nn]ever try to bypass the limiter/);
+    expect(flat).toMatch(/retry the post-check from that same armed proof/);
+    expect(flat).not.toMatch(/re-run rather than trying to bypass/);
   });
 
   it("states plainly that containment is incomplete while the secret can re-mint", () => {

@@ -189,7 +189,7 @@ names the mutation that must fail for the row to be worth anything.
 | POST 5xx / transport / redirect remain armed | same | same | classify transport failure as `REJECTED` | KILLED |
 | POST accepted is retryable, not proof | retry after propagation proves | outcome `NOT_YET_CONTAINED`, still armed | accepted POST destroys the armed state | KILLED |
 | A 429 is never a verdict | rejection proves | 429 is neither `PROVEN` nor exit 2 | classify 429 as `REJECTED` | KILLED |
-| Exact old secret reused across retries | proof succeeds on retry | one distinct URL and one distinct body across all attempts | re-read secret/origin at POST | KILLED |
+| Exact old secret reused across retries | proof succeeds on retry | env var replaced/deleted/blanked mid-proof, wire body unchanged | re-read secret at POST; re-read origin at POST | KILLED (both) — **corrected in C15; the C14 wording claimed this while the test never mutated `process.env`, so the secret half survived** |
 | URL refusal issues zero requests | genuine loopback reachable | exact code + 0 fetch calls + 0 server hits + secret absent | remove plain-http / canonical / all guards | KILLED |
 | `.doc()` throw is caught | ordinary identifiers still allowed | `allowed:false`, no partial write, no throw to caller | hoist `.doc()` outside `try` | KILLED |
 | `mock.calls` rewrite cannot hide a leak | clean transcript passes | assertion throws with the R10 six-line attack applied | rewrite `mock.calls` inside the capture | KILLED |
@@ -219,3 +219,90 @@ names the mutation that must fail for the row to be worth anything.
   declares `capture-fidelity` skips the automatic canary scan. Capture-integrity
   is now asserted on every test regardless, but the content scan is still
   opt-outable by a test that edits itself.
+
+
+---
+
+## Phase FIRST-ADMIN-C15 — two evidence channels, and an honest boundary
+
+R11 falsified C14 the way R10 falsified C13, and for the same underlying reason:
+a single mutable test mechanism was declared authoritative. Three lines inside
+the ingress function sanitised the arguments before they were recorded, and the
+identity check could not see it because it stores the tampered function as its
+own expected reference.
+
+### What is claimed now — and what is not
+
+**Claimed.** A real sensitive-log regression cannot be hidden by **one localized
+edit** to either evidence channel: the other channel still detects the leak, or
+the cross-channel comparison fails loudly.
+
+**Not claimed.** That this harness is tamper-proof. It is not, and no
+application-level test suite is. A coordinated edit that changes the production
+leak, both channels, both deny-set walks, the fidelity comparison and the
+lifecycle backstop together will make the suite lie. That is stated here rather
+than defended against, because defending against it is not achievable and
+pretending otherwise is what produced C12, C13 and C14.
+
+### The two channels
+
+| | Channel A — raw Jest ledger | Channel B — ingress snapshot |
+|---|---|---|
+| Source | `spy.mock.calls`, read at assertion time | deep-frozen copy taken inside the installed sink implementation |
+| Holds | live references | structural snapshots |
+| Blind to | post-log object mutation; later ledger rewriting | anything done *at* ingress |
+| Immune to | edits inside our ingress function | later `mock.calls` rewriting/clearing |
+| Walk | `ledgerContains` | `snapshotContains` (a separate implementation, deliberately not shared) |
+
+Ordering is reconciled from Jest's own `mock.invocationCallOrder`, not from
+channel B — channel A is never derived from channel B, nor the reverse, and
+neither passes through a shared pre-filtered list.
+
+### Single-local-edit attack matrix (measured)
+
+| Local edit | Channel A | Channel B | Fidelity | Suite result |
+|---|---|---|---|---|
+| production leak only | detects | detects | agree | **16 failed** |
+| leak + ingress sanitiser *(the R11 attack)* | detects | sanitised | diverges | **16 failed** |
+| leak + `mock.calls` rewrite *(the R10 attack)* | sanitised | detects | diverges | **16 failed** |
+| leak + `mock.calls` cleared | emptied | detects | diverges | **33 failed** |
+| ingress drops a call (no leak) | detects call | missing | diverges | **17 failed** |
+| ingress rewrites content (no leak) | original | rewritten | diverges | **17 failed** |
+| ingress drops an argument (no leak) | original arity | short | diverges | **45 failed** |
+| `mock.calls` rewrite (no leak) | rewritten | original | diverges | **16 failed** |
+| spy implementation replaced | — | — | identity fails | **137 failed** |
+| `finalize()` deleted from `afterEach` | — | — | — | **3 failed** (lifecycle backstop) |
+| finalizer returns early | — | — | — | **13 failed** |
+| cross-channel count check removed | — | — | — | **18 failed** |
+| per-call canary fidelity check removed | — | — | — | **1 failed** |
+| raw-ledger deny scan skipped | — | — | — | **16 failed** |
+| snapshot deny scan skipped | — | — | — | **16 failed** |
+| any single traversal leg removed (nested value, object key, `Error.details`, in either walk) | — | — | — | **1–8 failed** |
+
+One measured **equivalent mutant**: an ingress sanitiser whose regex matches
+nothing when no leak is present records byte-identical events, so nothing can
+observe it. It is equivalent, not undetected — the variants above that *do*
+change recorded events are all caught.
+
+### Residuals added or corrected in C15
+
+- **`lib/governance/auditLog.ts` is NOT branch-covered by this suite.** Five
+  catch-block `console.error` sites log a plaintext `runId`, and every caller
+  mocks the module, so those bodies never execute in these tests. The STRUCTURAL
+  module list asserts only "this file contains no uncaptured sink token"; that
+  narrowing is now stated in the suite and pinned by a test. This is named debt,
+  not coverage.
+- **`redactionExemption` remains a test-controlled opt-out** from the content
+  scan. Spy identity is still checked for exempt tests, but a test can still
+  exempt itself from the deny-set assertion.
+- **The lifecycle backstop is structural.** It proves `finalize()` is registered
+  in a live `afterEach`; it does not prove redaction ran. The runtime proof is
+  the leak mutations above.
+- **`--observe --non-production-target <origin>`** still sends the old secret to
+  an arbitrary https host: explicit flag, warning on every run, names the origin,
+  cannot print the proof token.
+- **Process death still loses PRE.** C15 adds no crash recovery, and the runbook
+  does not tell an operator to restore the old secret to rebuild a pre-check.
+- Unchanged carried debt: deferred/aliased/computed logging sinks; mint-detector
+  and scanner blind spots; `/api/admin/login` limiter coverage; the shared
+  invitation budget.

@@ -245,8 +245,15 @@ describe("PROOF SEMANTICS — a single response is never containment", () => {
     expect(flat).toMatch(/world-readable in a public repository/);
   });
 
-  it("429 aborts the run rather than counting as anything", () => {
-    expect(flat).toMatch(/a 429 tells you nothing about the credential and aborts the run/);
+  it("a 429 is an inconclusive observation that does NOT end the run", () => {
+    // Phase FIRST-ADMIN-C15 (R11 P1-2). This test previously REQUIRED the
+    // sentence "a 429 ... aborts the run" verbatim, so correcting the runbook to
+    // match C14's actual retryable state machine turned CI red. A test that
+    // mandates superseded prose is worse than no test: it defends the defect.
+    expect(flat).toMatch(/a 429\s+tells you nothing about the credential/);
+    expect(flat).toMatch(/does \*\*not\*\* end the run/);
+    expect(flat).toMatch(/stays armed in this same process/);
+    expect(flat).toMatch(/do not restart/i);
   });
 });
 
@@ -460,5 +467,60 @@ describe("BOOTSTRAP SEQUENCE ORDER — the pre-check precedes every mutation", (
   it("a post-check that does not prove containment is documented as retryable, not terminal", () => {
     const flat = src.replace(/\s+/g, " ");
     expect(flat).toMatch(/leave the proof \*\*armed\*\* and retryable/);
+  });
+});
+
+
+// ===========================================================================
+describe("REPOSITORY-WIDE OPERATOR CONTRACT — one rule, stated in every place", () => {
+  /**
+   * Phase FIRST-ADMIN-C15 (R11 P2-3). The runbook was corrected in C14 while
+   * README.md and the route docstring kept the superseded C12 rule — "treat
+   * only 401 as proof" — with no pre-check at all, plus a §B.6.c pointer that
+   * no longer names the probe step. An operator reading either file would have
+   * performed exactly the verification the runbook now forbids.
+   *
+   * This test pins the ACTUAL instruction sites present in the repository. It
+   * does not claim to understand arbitrary English.
+   */
+  const SITES = [
+    "README.md",
+    "app/api/admin/set-admin/route.ts",
+    "docs/operations/admin-authority-tiers.md",
+  ] as const;
+
+  const read = (f: string) => readFileSync(f, "utf8");
+
+  it.each(SITES)("%s does not call a standalone 401 a containment proof", (file) => {
+    const flat = read(file).replace(/\s+/g, " ");
+    expect(flat).not.toMatch(/treat only .?401.? as proof/i);
+    expect(flat).not.toMatch(/only .?401.? (is|as) (containment )?proof/i);
+  });
+
+  it.each(SITES)("%s carries no stale §B.6.c pointer", (file) => {
+    // 6c is "Deploy deliberately"; the probe is 6a/6d. A stale pointer sends the
+    // operator to the wrong step of a security procedure.
+    expect(read(file)).not.toContain("B.6.c");
+  });
+
+  it.each(SITES)("%s never tells the operator to restart or re-run after a POST 429", (file) => {
+    const flat = read(file).replace(/\s+/g, " ");
+    expect(flat).not.toMatch(/Wait for the window and re-run/i);
+    expect(flat).not.toMatch(/429[^.]{0,80}aborts the run/i);
+  });
+
+  it("README and the route docstring both point at the two-phase workflow", () => {
+    for (const f of ["README.md", "app/api/admin/set-admin/route.ts"]) {
+      const flat = read(f).replace(/\s+/g, " ");
+      expect(flat).toMatch(/two-phase/i);
+      expect(flat).toMatch(/NOT (Production )?containment proof/i);
+    }
+  });
+
+  it("ANCHOR: the instruction sites exist and are non-trivial", () => {
+    for (const f of SITES) expect(read(f).length).toBeGreaterThan(500);
+    // and each really does discuss the bootstrap secret, so the negatives above
+    // are asserted over relevant text rather than over unrelated files.
+    for (const f of SITES) expect(read(f)).toContain("ADMIN_SECRET");
   });
 });
