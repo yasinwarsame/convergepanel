@@ -100,6 +100,19 @@ describe("PersonalResearchDetailPage — boundary", () => {
     expect(CODE).not.toMatch(/workspaceUiEnabled|WORKSPACES_UI_ENABLED|projectsUiEnabled|PROJECTS_UI_ENABLED|resolveProjectsUiEligibility|resolvePersonalWorkspaceUiMode/);
     // ...and is not gated on Team rollout either
     expect(CODE).not.toMatch(/resolveTeamWorkspacesMode|TEAM_WORKSPACES_ENABLED/);
+    // C1: the assertion above was an ENUMERATION of flag identifiers, and the real
+    // env constants (PERSONAL_WORKSPACE_UI_ENABLED, …) were not among the names it
+    // listed — a rollout gate written with the actual flag would have passed it.
+    // Eligibility cannot be read without importing a source of it, or reading the
+    // environment, so pin both instead of guessing at names.
+    const imports = [...CODE.matchAll(/from\s+"([^"]+)"/g)].map((m) => m[1]).sort();
+    expect(imports).toEqual([
+      "@/components/workspace/PersonalResearchDetailShell",
+      "@/lib/auth/resolveServerComponentIdentity",
+      "next/navigation",
+    ]);
+    expect(CODE).not.toMatch(/process\.env/);
+    expect(CODE).not.toMatch(/@\/lib\/env/);
   });
 
   it("§AS — force-dynamic, so an authenticated report is never statically generated or shared across users", () => {
