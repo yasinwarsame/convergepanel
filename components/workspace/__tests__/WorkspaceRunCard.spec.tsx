@@ -67,9 +67,10 @@ describe("WorkspaceRunCard", () => {
     expect(html).toContain(new Date(BASE_ITEM.at).toLocaleString());
   });
 
-  it("links to the existing production-proven deep link, run id percent-encoded", () => {
+  it("links to the canonical durable report address, run id percent-encoded", () => {
     const html = render({ ...BASE_ITEM, id: "run with spaces & stuff" });
-    expect(html).toContain(`href="/?openResearchRun=${encodeURIComponent("run with spaces & stuff")}"`);
+    expect(html).toContain(`href="/workspace/research/${encodeURIComponent("run with spaces & stuff")}"`);
+    expect(html).not.toContain("openResearchRun");
   });
 
   it("the whole row is a single link — no nested buttons, no duplicate 'Open' affordance", () => {
@@ -127,7 +128,7 @@ describe("WorkspaceRunCard — Phase 7E-A: optional `actions` slot (default path
     const html = renderToStaticMarkup(
       createElement("ul", null, createElement(WorkspaceRunCard, { item: BASE_ITEM, actions: createElement("button", { type: "button" }, "Add to project") }))
     );
-    expect(html).toContain(`href="/?openResearchRun=${encodeURIComponent(BASE_ITEM.id)}"`);
+    expect(html).toContain(`href="/workspace/research/${encodeURIComponent(BASE_ITEM.id)}"`);
     expect(html).toContain(BASE_ITEM.question);
   });
 });

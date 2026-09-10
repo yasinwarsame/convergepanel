@@ -46,6 +46,7 @@ import { db } from "@/lib/firebase/client";
 import { UserProfile } from "@/lib/types";
 import { getPlanConfigById } from "@/lib/billing/planConfig";
 import { createGenerationGuard } from "@/lib/client/authGeneration";
+import { personalResearchHref, isCanonicalPersonalRunId } from "@/lib/user/personalResearchHref";
 import { normalizeSelectedModels, getDefaultModelSelection } from "@/lib/utils/normalizeSelectedModels";
 import { perf, trackSlowLoad } from "@/lib/utils/performance";
 import ClaimVerificationResult from "@/components/ClaimVerificationResult";
@@ -296,6 +297,59 @@ export default function Home() {
    * brand-new panel run.
    */
   const researchLoadGuard = useRef(createGenerationGuard()).current;
+
+  /**
+   * PERSONAL-RESEARCH-URL-1 §AG — MOUNT OWNERSHIP.
+   *
+   * Generation arbitration answers "is this still the latest research intent?".
+   * It cannot answer "does the page that started this work still exist?", because
+   * the controls that navigate AWAY from `/` — TopNav, WorkspaceSwitcher, the
+   * browser's own back/forward — have no access to this component's private
+   * guard and cannot advance it.
+   *
+   * That gap was harmless while a late completion merely wrote state into an
+   * unmounted tree (a no-op). It stops being harmless the moment completion can
+   * call `router.replace()`: a run finishing after the user has left would drag
+   * them back to its own report. So a dead `Home` may never navigate.
+   *
+   * This is lifecycle ELIGIBILITY, not a second arbitration system — there is
+   * still exactly one intent sequence, `researchLoadGuard`.
+   */
+  const researchPageMountedRef = useRef(false);
+  useEffect(() => {
+    researchPageMountedRef.current = true;
+    return () => {
+      researchPageMountedRef.current = false;
+      // Leaving the page is itself newer intent: strip authority from any
+      // in-flight research so a late completion can commit nothing either.
+      researchLoadGuard.next();
+    };
+  }, [researchLoadGuard]);
+
+  /**
+   * §AG — explicit newer research intent. Called synchronously BEFORE any
+   * navigation or tab change that leaves the Research surface, so a pending run's
+   * completion can neither commit display state nor redirect the browser.
+   */
+  const invalidateResearchIntent = useCallback(() => {
+    researchLoadGuard.next();
+  }, [researchLoadGuard]);
+
+  /**
+   * §H — the tabs are user navigation. They previously called `setPanelTab`
+   * directly, so a user could leave Research with a run still in flight without
+   * advancing any generation. Routed through here instead.
+   *
+   * Re-selecting the already-active Research tab is not "leaving", so it does not
+   * invalidate a run the user is waiting for.
+   */
+  const selectPanelTab = useCallback(
+    (nextTab: "research" | "verify" | "video" | "history") => {
+      if (nextTab !== "research") invalidateResearchIntent();
+      setPanelTab(nextTab);
+    },
+    [invalidateResearchIntent]
+  );
   const { user, loading: authLoading, authReady } = useAuth();
   
   // Track auth resolution
@@ -784,14 +838,29 @@ export default function Home() {
     }
 
     // Reset state for new panel run
-    // Personal Research navigation/load arbitration (Phase 11A.6.1) —
-    // claimed synchronously, before any await below. This run's own
-    // completion doesn't route through loadResearchRunIntoState and needs
-    // no isCurrent check of its own; the sole purpose here is to strip
-    // authority from whatever load (History click, "View source
-    // research", or a still-in-flight earlier run) came before it, so a
-    // stale completion from any of those can never overwrite this run.
-    researchLoadGuard.next();
+    //
+    // Personal Research navigation/load arbitration (Phase 11A.6.1), REVISED by
+    // PERSONAL-RESEARCH-URL-1 §AG. Claimed synchronously, before any await below.
+    //
+    // The original comment here said this run "needs no isCurrent check of its
+    // own", because its completion only wrote local state and a newer intent had
+    // already stripped authority from everything earlier. That stopped being true
+    // once completion can call `router.replace()` to a canonical report URL: a
+    // stale completion no longer just loses a write race, it can drag the browser
+    // away from whatever the user is now looking at.
+    //
+    // So the token is RETAINED and checked — at every await boundary that can lead
+    // to a display commit, and again immediately before the canonical redirect.
+    const runGeneration = researchLoadGuard.next();
+
+    /**
+     * §C — the single ownership predicate for this execution. Both dimensions are
+     * required: `isCurrent` answers "still the latest research intent?", the mount
+     * ref answers "does the page that started this still exist?". Controls outside
+     * this component can only ever satisfy the second.
+     */
+    const stillOwnsResearchIntent = () =>
+      researchPageMountedRef.current && researchLoadGuard.isCurrent(runGeneration);
     setVerificationPayload(null);
     setOriginLinkedTarget(null); // 11A.4 — a stale "Verify this claim" target from the previous research would no longer refer to anything real once a new run starts
     setFocusClaimId(null); // 11A.6 — a stale source-navigation target is equally meaningless once a new run starts
@@ -829,6 +898,8 @@ export default function Home() {
       // Update status to "thinking" after brief delay
       // This provides visual feedback that requests are being processed
       setTimeout(() => {
+        // §E — an obsolete run's timer must not repaint a newer surface.
+        if (!stillOwnsResearchIntent()) return;
         setModelStatuses((prev) => {
           const updated = { ...prev };
           selectedModels.forEach((id) => {
@@ -879,6 +950,9 @@ export default function Home() {
         if (process.env.NODE_ENV !== "production") {
           console.error("Error when calling /api/run-panel:", fetchError);
         }
+        // §D/§R — a stale execution's FAILURE is as damaging as its success: it
+        // would clear or overwrite whatever the user moved on to. No-op instead.
+        if (!stillOwnsResearchIntent()) return;
         setError("Network error. Please check your connection and try again.");
         setErrorCode(null);
         setRunStatus("error");
@@ -886,11 +960,21 @@ export default function Home() {
         return;
       }
 
+      // §D — THE post-await ownership boundary. Everything below this point
+      // (API-error branches, the success path, model statuses, the canonical
+      // redirect) belongs to this specific execution. Returning here rather than
+      // guarding ~25 individual setters keeps the rule in one reviewable place and
+      // makes every downstream commit unreachable once authority is lost.
+      if (!stillOwnsResearchIntent()) return;
+
       // Read response text once (can only be read once)
       // Then check if it's JSON and parse it
       let responseText: string;
       try {
         responseText = await response.text();
+        // §T — another await was crossed; re-check rather than trusting the
+        // check made before it.
+        if (!stillOwnsResearchIntent()) return;
       } catch (textError: any) {
         // Failed to read response text - don't throw, set error state instead
         console.error("[panel] Failed to read response text:", textError);
@@ -1121,7 +1205,29 @@ export default function Home() {
 
       // Refresh usage data after successful run
       await refreshUsage();
-      
+
+      /**
+       * §F/§T — CANONICAL ADDRESS FOR THE NEW RUN.
+       *
+       * `replace`, not `push`: the composer submission and the report it produced
+       * are one interaction, so Back should return to wherever the user came from
+       * rather than to a stale composer entry that would invite an accidental rerun.
+       *
+       * Placed after the success state and the history/usage bookkeeping above, so a
+       * normal completion is fully settled before the address changes. `refreshUsage`
+       * is an await, so ownership is re-checked HERE rather than trusted from the
+       * boundary before it — "it was current before refreshUsage()" is not evidence
+       * that it still is.
+       *
+       * Only a real persisted server id may become an address:
+       * `isCanonicalPersonalRunId` rejects the optimistic `r-${Date.now()}`
+       * placeholder used for local history, which would otherwise mint a permanent
+       * URL resolving to nothing.
+       */
+      if (isCanonicalPersonalRunId(data.runId) && stillOwnsResearchIntent()) {
+        router.replace(personalResearchHref(data.runId));
+      }
+
       // Track analytics event
       trackEvent("panel_run", {
         models: selectedModels,
@@ -1963,23 +2069,21 @@ export default function Home() {
 
   const openHistoryItem = async (item: HistoryItem) => {
     if (item.type === "research") {
-      setPanelTab("research");
-      setVerificationPayload(null);
-      setVideoVerificationPayload(null);
-      setError(null);
-      setViewingHistoryRunId(null);
-      setFocusClaimId(null);
-      setFocusClaimNotFound(false);
-      setHistoryDetailLoadingId(item.id);
-      if (!authReady || !user) {
-        setHistoryDetailLoadingId(null);
-        setError("Sign in to load saved research results from your account.");
-        setQuestion(item.question);
-        setSelectedModels(item.selectedModels);
-        return;
-      }
-      await loadResearchRunIntoState(item.id, { question: item.question, selectedModels: item.selectedModels });
-      setHistoryDetailLoadingId(null);
+      /**
+       * PERSONAL-RESEARCH-URL-1 §AD/§AE — a saved research run now has a durable
+       * address, so selecting one NAVIGATES rather than loading into this page's
+       * state. `push`, not `replace`: this is an explicit user choice, and Back
+       * should return to the History list they chose it from.
+       *
+       * §G — the generation is invalidated SYNCHRONOUSLY, before navigating. This
+       * is the §AG reproduction: with a run still in flight, selecting B must strip
+       * A's authority so A's late completion can neither commit display state nor
+       * redirect the browser to its own report. `loadResearchRunIntoState` is
+       * deliberately NOT called first — the canonical route owns the authenticated
+       * read, and reading here too would double-fetch.
+       */
+      invalidateResearchIntent();
+      router.push(personalResearchHref(item.id));
       return;
     }
     if (item.type === "video_verification") {
@@ -2085,18 +2189,33 @@ export default function Home() {
     const token = r ? `r:${r}` : v ? `v:${v}` : `vid:${vid!}`;
     if (governanceDeepLinkHandled.current === token) return;
     governanceDeepLinkHandled.current = token;
+    /**
+     * PERSONAL-RESEARCH-URL-1 §J/§AH — LEGACY RESEARCH DEEP LINK.
+     *
+     * `?openResearchRun={id}` previously loaded the run into this page's state and
+     * then called `router.replace("/")`, ERASING the address — a one-shot hand-off,
+     * which is exactly why a saved report had no durable URL. Existing links are in
+     * bookmarks and in Workspace cards rendered before this deploy, so they keep
+     * working: they canonicalize to the durable address instead.
+     *
+     * No read happens here — the canonical route owns the authenticated run read, so
+     * there is no double fetch — and `/api/run-panel` is never touched, so the link
+     * cannot re-execute research.
+     *
+     * §J — the generation advances first: the explicit durable address is now the
+     * active research intent, so a run still in flight cannot redirect over it.
+     *
+     * §AI — `openVerification` / `openVideoVerification` are deliberately untouched
+     * and keep their existing load-then-`replace("/")` behaviour.
+     */
+    if (r) {
+      invalidateResearchIntent();
+      router.replace(personalResearchHref(r), { scroll: false });
+      return;
+    }
     const handle = openHistoryItemRef.current;
     if (!handle) return;
-    if (r) {
-      void handle({
-        type: "research",
-        id: r,
-        title: "",
-        at: new Date().toISOString(),
-        question: "",
-        selectedModels: [] as ModelId[],
-      });
-    } else if (v) {
+    if (v) {
       void handle({
         type: "verification",
         id: v,
@@ -2430,7 +2549,7 @@ export default function Home() {
             type="button"
             role="tab"
             aria-selected={panelTab === "research"}
-            onClick={() => setPanelTab("research")}
+            onClick={() => selectPanelTab("research")}
             className={`inline-flex items-center justify-center gap-2 rounded-[9px] px-4 py-2.5 text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent focus-visible:ring-offset-2 ${
               panelTab === "research"
                 ? "bg-cp-surface text-cp-text shadow-sm"
@@ -2447,7 +2566,7 @@ export default function Home() {
             type="button"
             role="tab"
             aria-selected={panelTab === "verify"}
-            onClick={() => setPanelTab("verify")}
+            onClick={() => selectPanelTab("verify")}
             className={`inline-flex items-center justify-center gap-2 rounded-[9px] px-4 py-2.5 text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent focus-visible:ring-offset-2 ${
               panelTab === "verify"
                 ? "bg-cp-surface text-cp-text shadow-sm"
@@ -2480,7 +2599,7 @@ export default function Home() {
             type="button"
             role="tab"
             aria-selected={panelTab === "video"}
-            onClick={() => setPanelTab("video")}
+            onClick={() => selectPanelTab("video")}
             className={`inline-flex items-center justify-center gap-2 rounded-[9px] px-4 py-2.5 text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent focus-visible:ring-offset-2 ${
               panelTab === "video"
                 ? "bg-cp-surface text-cp-text shadow-sm"
@@ -2497,7 +2616,7 @@ export default function Home() {
             type="button"
             role="tab"
             aria-selected={panelTab === "history"}
-            onClick={() => setPanelTab("history")}
+            onClick={() => selectPanelTab("history")}
             className={`inline-flex items-center justify-center gap-2 rounded-[9px] px-4 py-2.5 text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent focus-visible:ring-offset-2 ${
               panelTab === "history"
                 ? "bg-cp-surface text-cp-text shadow-sm"
@@ -3156,7 +3275,7 @@ export default function Home() {
                   // persisted `origin` field.
                   <button
                     type="button"
-                    onClick={() => setPanelTab("research")}
+                    onClick={() => selectPanelTab("research")}
                     className="rounded-xl border-2 border-cp-border bg-cp-surface px-4 py-2.5 text-sm font-semibold text-cp-muted shadow-sm transition-colors hover:border-violet-300 hover:bg-violet-50/80"
                   >
                     Back to research

@@ -6,7 +6,9 @@
  * is structurally `RunSummaryBase & {projectId}`, a strict superset of
  * `WorkspaceRunSummary`, so passing an Unfiled run item into the exact
  * same card component type-checks and renders identically, including its
- * canonical `/?openResearchRun={id}` report link and governance chip.
+ * canonical report link (PERSONAL-RESEARCH-URL-1: `/workspace/research/{runId}`,
+ * built by `personalResearchHref()`; the old `/?openResearchRun={id}` form was a
+ * transient hand-off, not an address) and governance chip.
  *
  * Phase 7E-A adds exactly one action: "Add to project", rendered via
  * `WorkspaceRunCard`'s optional `actions` slot (never nested inside the

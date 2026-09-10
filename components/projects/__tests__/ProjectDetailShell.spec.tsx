@@ -146,7 +146,8 @@ describe("ProjectDetailShellView — populated list reuses WorkspaceRunCard, no 
 
   it("renders the canonical report link for each run", () => {
     const html = renderStatic(PROJECT, fakeRuns({ items: [RUN_A] }));
-    expect(html).toContain(`href="/?openResearchRun=${encodeURIComponent(RUN_A.id)}"`);
+    expect(html).toContain(`href="/workspace/research/${encodeURIComponent(RUN_A.id)}"`);
+    expect(html).not.toContain("openResearchRun");
   });
 
   it("renders Move and Remove from project controls, never Add to project", () => {

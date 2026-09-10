@@ -69,7 +69,8 @@ describe("WorkspaceShellView — success state (metadata success, runs ready)", 
     const html = render({ status: "success", workspace: { name: "Personal Workspace", type: "personal" } }, fakeRuns({ items: [SAMPLE_ITEM] }));
     expect(html).toContain("Recent research");
     expect(html).toContain("What are the main causes of inflation?");
-    expect(html).toContain('href="/?openResearchRun=run-1"');
+    expect(html).toContain('href="/workspace/research/run-1"');
+    expect(html).not.toContain("openResearchRun");
   });
 
   it("definitive empty state (items=[], hasMore=false) shows the single provenance-safe message, never 'no research yet' style copy", () => {

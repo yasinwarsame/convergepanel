@@ -133,6 +133,16 @@ describe("resolveWorkspaceNavContext", () => {
     expect(resolveWorkspaceNavContext("/workspace/team/%E0%A4%A", ITEMS)).toBeNull();
   });
 
+  it("T26 (PERSONAL-RESEARCH-URL-1) — the canonical Personal research route classifies as PERSONAL through the existing generic /workspace/ rule, with no special case", () => {
+    // This is the reason URL-1 chose `/workspace/research/{id}` over `/research/{id}`:
+    // a top-level route would match no Personal clause and the switcher would vanish
+    // on a Personal report. No entry was added to NEUTRAL_PREFIXES for it.
+    expect(resolveWorkspaceNavContext("/workspace/research/run-7", ITEMS)).toEqual({ kind: "personal", label: "Personal" });
+    expect(resolveWorkspaceNavContext("/workspace/research/run%20with%20spaces", ITEMS)).toEqual({ kind: "personal", label: "Personal" });
+    // and it is still Personal for a caller with zero Team memberships
+    expect(resolveWorkspaceNavContext("/workspace/research/run-7", [])).toEqual({ kind: "personal", label: "Personal" });
+  });
+
   it("null/empty pathname yields no context", () => {
     expect(resolveWorkspaceNavContext(null, ITEMS)).toBeNull();
     expect(resolveWorkspaceNavContext("", ITEMS)).toBeNull();

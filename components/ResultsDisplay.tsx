@@ -673,6 +673,22 @@ interface ResultsDisplayProps {
   onVerifyClaim?: (args: { runId: string; claimId: string }) => void;
   /** Phase 11A.6 — server-issued claimId to scroll to and emphasize in DeepResearchView, if present among this run's findings. */
   focusClaimId?: string | null;
+  /**
+   * PERSONAL-RESEARCH-URL-1 §AO — rendered on the durable READ surface
+   * (`/workspace/research/{runId}`), where the research execution pipeline is
+   * deliberately absent and must not be duplicated.
+   *
+   * Affects exactly one place: the single-successful-model branch, whose
+   * "Re-run Same Panel" / "Add Another Model + Re-run" buttons genuinely execute a
+   * panel. On a read surface those would either do nothing or require copying the
+   * pipeline in, and keeping buttons whose copy promises a re-run they do not
+   * perform is worse than removing them — so they become an honest pointer back to
+   * the composer.
+   *
+   * Optional, defaulted to `false`, so every existing call site — the root composer
+   * included — is byte-identically unaffected.
+   */
+  readOnlyActions?: boolean;
 }
 
 /**
@@ -708,6 +724,7 @@ export default function ResultsDisplay({
   onRunFollowUp,
   onVerifyClaim,
   focusClaimId,
+  readOnlyActions = false,
 }: ResultsDisplayProps) {
   const { user, authReady } = useAuth();
   const results = Array.isArray(resultsProp) ? resultsProp : [];
@@ -1142,20 +1159,36 @@ export default function ResultsDisplay({
             Convergence needs at least two models. Please re-run or add another
             model.
           </p>
-          <div className="flex gap-3">
-            <button
-              onClick={onRerun}
-              className="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 transition-colors"
-            >
-              Re-run Same Panel
-            </button>
-            <button
-              onClick={onAddModel}
-              className="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 transition-colors"
-            >
-              Add Another Model + Re-run
-            </button>
-          </div>
+          {/*
+            PERSONAL-RESEARCH-URL-1 §AO — on a read-only surface these two actions
+            would require the execution pipeline, so they are replaced by an accurate
+            pointer rather than kept with misleading copy. The default
+            (`readOnlyActions === false`) is the unchanged composer behaviour.
+          */}
+          {readOnlyActions ? (
+            <p className="text-yellow-800">
+              To run this question again, open it in{" "}
+              <a href="/" className="font-semibold underline hover:no-underline">
+                Research
+              </a>
+              .
+            </p>
+          ) : (
+            <div className="flex gap-3">
+              <button
+                onClick={onRerun}
+                className="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 transition-colors"
+              >
+                Re-run Same Panel
+              </button>
+              <button
+                onClick={onAddModel}
+                className="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 transition-colors"
+              >
+                Add Another Model + Re-run
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="bg-white rounded-lg border border-gray-200 p-6">
