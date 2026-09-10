@@ -43,7 +43,35 @@ function mount(opts: { items?: MoreNavItem[]; open?: boolean } = {}) {
   return { renderer, onOpenChange, triggerRef, setOpen: (o: boolean) => act(() => { renderer.update(element(o)); }) };
 }
 
+const root = (r: TestRenderer.ReactTestRenderer) =>
+  r.root.findAll((n) => n.type === "div" && n.props?.className === "relative")[0];
 const trigger = (r: TestRenderer.ReactTestRenderer) => r.root.findAllByType("button")[0];
+
+/**
+ * Focus-transition harness. There is no jsdom here, so `relatedTarget` and
+ * `currentTarget.contains` are modelled explicitly: INSIDE_NODES are the elements
+ * that belong to the MoreNav root, and `contains` answers membership. A transition
+ * is driven by calling the root's real `onBlur` with the element that is RECEIVING
+ * focus — which is exactly what the browser reports.
+ */
+const INSIDE_TRIGGER = { id: "inside:trigger" } as unknown as Node;
+const INSIDE_LINK_1 = { id: "inside:approval-queue" } as unknown as Node;
+const INSIDE_LINK_2 = { id: "inside:team-reviews" } as unknown as Node;
+const INSIDE_LINK_3 = { id: "inside:governance" } as unknown as Node;
+const INSIDE_LINK_4 = { id: "inside:team-workspaces" } as unknown as Node;
+const OUTSIDE_AFTER = { id: "outside:account-menu" } as unknown as Node;
+const OUTSIDE_BEFORE = { id: "outside:my-reviews-link" } as unknown as Node;
+const INSIDE = new Set<Node>([INSIDE_TRIGGER, INSIDE_LINK_1, INSIDE_LINK_2, INSIDE_LINK_3, INSIDE_LINK_4]);
+
+/** Move focus to `to`; returns nothing — assert on `onOpenChange`. */
+function moveFocusTo(r: TestRenderer.ReactTestRenderer, to: Node | null) {
+  act(() => {
+    root(r).props.onBlur({
+      relatedTarget: to,
+      currentTarget: { contains: (n: Node | null) => !!n && INSIDE.has(n) },
+    });
+  });
+}
 const panel = (r: TestRenderer.ReactTestRenderer) => r.root.findAll((n) => n.props?.id === "more-nav");
 const links = (r: TestRenderer.ReactTestRenderer) => r.root.findAllByType("a");
 const textOf = (n: TestRenderer.ReactTestInstance): string => {
@@ -155,12 +183,17 @@ describe("MoreNav — interaction", () => {
     expect(focusSpy).toHaveBeenCalled();
   });
 
-  it("Tab closes but NEVER preventDefaults — the browser's own focus order must continue", () => {
+  it("a Tab KEYDOWN does not close the disclosure by itself — the browser owns traversal, and focus-leave decides afterwards", () => {
+    // The first implementation closed here, which removed the panel before a
+    // keyboard user could reach anything past the first link. That bug was
+    // frozen by a test asserting "Tab closes"; this is its replacement.
     const { renderer, onOpenChange } = mount({ open: true });
-    const ev = { key: "Tab", preventDefault: jest.fn(), stopPropagation: jest.fn() };
-    act(() => { panel(renderer)[0].props.onKeyDown(ev); });
-    expect(onOpenChange).toHaveBeenCalledWith(false);
-    expect(ev.preventDefault).not.toHaveBeenCalled();
+    for (const key of ["Tab"]) {
+      const ev = { key, preventDefault: jest.fn(), stopPropagation: jest.fn() };
+      act(() => { panel(renderer)[0].props.onKeyDown(ev); });
+      expect(ev.preventDefault).not.toHaveBeenCalled();
+    }
+    expect(onOpenChange).not.toHaveBeenCalled();
   });
 
   it("Arrow/Home/End are NOT intercepted, consistent with a plain disclosure rather than a menu", () => {
@@ -182,5 +215,76 @@ describe("MoreNav — interaction", () => {
     expect(source).not.toMatch(/addEventListener/);
     expect(source).not.toMatch(/useEffect/);
     expect(source).not.toMatch(/document\./);
+  });
+});
+
+
+describe("MoreNav — keyboard traversal (Phase 11B.6-C1)", () => {
+  it("trigger -> first link keeps the disclosure OPEN, so Enter-then-Tab actually reaches the secondary destinations", () => {
+    const { renderer, onOpenChange } = mount({ open: true });
+    moveFocusTo(renderer, INSIDE_LINK_1);
+    expect(onOpenChange).not.toHaveBeenCalled();
+  });
+
+  it("first -> second link keeps it open", () => {
+    const { renderer, onOpenChange } = mount({ open: true });
+    moveFocusTo(renderer, INSIDE_LINK_2);
+    expect(onOpenChange).not.toHaveBeenCalled();
+  });
+
+  it("middle -> next link keeps it open, so every one of the four destinations is Tab-reachable", () => {
+    const { renderer, onOpenChange } = mount({ open: true });
+    moveFocusTo(renderer, INSIDE_LINK_3);
+    moveFocusTo(renderer, INSIDE_LINK_4);
+    expect(onOpenChange).not.toHaveBeenCalled();
+  });
+
+  it("internal Shift+Tab (later link -> earlier link) keeps it open", () => {
+    const { renderer, onOpenChange } = mount({ open: true });
+    moveFocusTo(renderer, INSIDE_LINK_2);
+    expect(onOpenChange).not.toHaveBeenCalled();
+  });
+
+  it("internal Shift+Tab back onto the trigger keeps it open — the trigger is inside the disclosure root", () => {
+    const { renderer, onOpenChange } = mount({ open: true });
+    moveFocusTo(renderer, INSIDE_TRIGGER);
+    expect(onOpenChange).not.toHaveBeenCalled();
+  });
+
+  it("FORWARD EXIT: last link -> an element after the disclosure closes it", () => {
+    const { renderer, onOpenChange } = mount({ open: true });
+    moveFocusTo(renderer, OUTSIDE_AFTER);
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it("BACKWARD EXIT: trigger -> an element before the disclosure closes it", () => {
+    const { renderer, onOpenChange } = mount({ open: true });
+    moveFocusTo(renderer, OUTSIDE_BEFORE);
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it("focus leaving to nothing at all (null relatedTarget) also closes it", () => {
+    const { renderer, onOpenChange } = mount({ open: true });
+    moveFocusTo(renderer, null);
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it("the close decision is made by containment, not by which element it is: the SAME handler keeps open for an inside node and closes for an outside one", () => {
+    // Guards against a handler that ignores `relatedTarget` and always (or never) closes.
+    const a = mount({ open: true });
+    moveFocusTo(a.renderer, INSIDE_LINK_4);
+    expect(a.onOpenChange).not.toHaveBeenCalled();
+
+    const b = mount({ open: true });
+    moveFocusTo(b.renderer, OUTSIDE_AFTER);
+    expect(b.onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it("the focus-leave handler lives on the disclosure ROOT, which contains both the trigger and the panel", () => {
+    const { renderer } = mount({ open: true });
+    expect(typeof root(renderer).props.onBlur).toBe("function");
+    // trigger and panel are both descendants of that root
+    expect(root(renderer).findAllByType("button").length).toBeGreaterThan(0);
+    expect(root(renderer).findAll((n) => n.props?.id === "more-nav")).toHaveLength(1);
   });
 });

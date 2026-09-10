@@ -16,6 +16,14 @@
  * simpler correct pattern: a button with `aria-expanded` plus a list of links
  * that Tab reaches in document order.
  *
+ * WHICH MAKES NATIVE TAB THE ONLY WAY THROUGH THE LINKS — so closing on a Tab
+ * KEYPRESS breaks the pattern it is meant to implement. The first version of this
+ * component did exactly that: any Tab inside the panel closed it, so a keyboard
+ * user could reach the first destination and then had the rest removed from under
+ * them. The disclosure now closes on FOCUS LEAVING its root instead, which the
+ * browser reports after traversal has already been decided. That handles
+ * Shift+Tab identically and needs no key interception at all.
+ *
  * Open state is OWNED BY TopNav (`open`/`onOpenChange`) so one component
  * arbitrates mutual exclusion across all four disclosures, and this one never
  * registers a competing document listener.
@@ -53,6 +61,12 @@ export default function MoreNav({
     if (returnFocus) triggerRef.current?.focus();
   }
 
+  /**
+   * Escape ONLY. Tab is deliberately not handled: the browser owns traversal, and
+   * `handleFocusLeave` decides afterwards whether focus actually left. Closing on
+   * the Tab keydown itself would remove the panel before the user could reach the
+   * links past the first one.
+   */
   function handlePanelKeyDown(event: React.KeyboardEvent<HTMLElement>) {
     if (event.key === "Escape") {
       event.preventDefault();
@@ -60,17 +74,24 @@ export default function MoreNav({
       // also fire and double-close or double-focus.
       event.stopPropagation();
       close(true);
-      return;
     }
-    if (event.key === "Tab") {
-      // Close, but NEVER preventDefault: leaving the disclosure by Tab must
-      // continue the browser's normal focus order.
-      close(false);
+  }
+
+  /**
+   * Close only when focus actually EXITS the disclosure. `relatedTarget` is the
+   * element receiving focus; a null value (focus leaving the document or moving to
+   * a non-focusable area) also counts as leaving. Movement between the trigger and
+   * the links stays inside `currentTarget`, so internal traversal keeps it open.
+   */
+  function handleFocusLeave(event: React.FocusEvent<HTMLDivElement>) {
+    const nextTarget = event.relatedTarget as Node | null;
+    if (!nextTarget || !event.currentTarget.contains(nextTarget)) {
+      onOpenChange(false);
     }
   }
 
   return (
-    <div className="relative">
+    <div className="relative" onBlur={handleFocusLeave}>
       <button
         ref={triggerRef}
         type="button"
