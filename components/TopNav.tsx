@@ -198,7 +198,23 @@ export default function TopNav() {
 
   return (
     <header className="sticky top-0 z-50 h-[74px] border-b border-cp-border bg-cp-surface/95 backdrop-blur-sm">
-      <div className="mx-auto flex h-full max-w-6xl items-center justify-between px-6">
+      {/*
+        Phase 11B.5-C1 — MEASURED header capacity, not an assumed breakpoint.
+        `max-w-6xl` is 72rem = 1152px and is NOT overridden in tailwind.config.ts,
+        so the content area caps at 1104px however wide the viewport gets. The
+        frozen worst-case authenticated row (11 destinations + account control +
+        logo/wordmark + Workspace switcher) intrinsically needs 1740px, measured
+        against the real compiled CSS — a 636px deficit at the cap. Raising the
+        breakpoint alone therefore fixed nothing, which is what the C1 review
+        caught.
+
+        Mitigation, all of it responsive composition and no destination removed:
+        the cap is lifted to 1840px only AT the desktop cutover, padding is
+        px-4 below sm, and the account name truncates. Measured fits: 320/375/
+        390/430 need 236px; 1024-1440 need 525px (hamburger composition); at the
+        1800px cutover the full row needs 1740px against an 1800px container —
+        60px slack, 100px at 1920px. */}
+      <div className="mx-auto flex h-full max-w-6xl items-center justify-between px-4 sm:px-6 min-[1800px]:max-w-[1840px]">
 
         {/* Logo + Workspace context. Grouped so the outer row keeps exactly the
             three children it had before (left group / desktop nav / hamburger)
@@ -208,7 +224,7 @@ export default function TopNav() {
             inside `#mobile-menu`: the current Workspace must be visible on
             mobile with the hamburger closed. One shared instance serves both
             breakpoints, so there is no second state machine to drift. */}
-        <div className="flex min-w-0 items-center gap-3">
+        <div className="flex min-w-0 items-center gap-2 sm:gap-3">
           <Link href="/" className="flex items-center gap-3 transition-opacity hover:opacity-80">
             <span className="relative flex h-14 w-14 shrink-0 items-center justify-center">
               <Image src="/logo-mark.png" alt="ConvergePanel logo" width={56} height={56} className="h-14 w-14" priority />
@@ -227,8 +243,11 @@ export default function TopNav() {
             </span>
           </Link>
 
+          {/* The switcher is clamped HERE rather than inside WorkspaceSwitcher so
+              that approved component stays byte-identical; its label already
+              truncates, so a narrower wrapper simply shortens it below sm. */}
           {!loading && user && (
-            <div ref={workspaceSwitcherRef}>
+            <div ref={workspaceSwitcherRef} className="min-w-0 max-w-[6.5rem] sm:max-w-none">
               <WorkspaceSwitcher
                 pathname={pathname}
                 items={workspaceItems}
@@ -243,18 +262,14 @@ export default function TopNav() {
           )}
         </div>
 
-        {/* Desktop nav — xl (1280px) as of Phase 11B.5, previously lg (1024px).
-            At 1024px the worst-case authenticated header already carried About,
-            Help, Contact, Pricing, Governance, Team Reviews, Workspace,
-            Projects, Team, Approval Queue, My Reviews and the user menu inside a
-            max-w-6xl row; adding the Workspace context control to that row
-            overflows the page. 11B.5 must not remove or relocate any
-            destination — that is 11B.6 — so the smallest correct mitigation is
-            to use the already-complete hamburger layout between 1024px and
-            1279px instead of overflowing. No link is hidden, nothing is moved to
-            an overflow menu, and the switcher itself stays in the primary header
-            at every width. */}
-        <div className="hidden items-center gap-1 xl:flex">
+        {/* Desktop nav — min-[1800px], the first width at which the frozen
+            worst-case row MEASURABLY fits (1740px required vs an 1800px
+            container). 11B.5 may not remove, hide or relocate any destination —
+            that is 11B.6 — so the already-complete hamburger composition is used
+            across the whole supported range up to 1440px rather than overflowing
+            the page. Correctness beats making the desktop row appear at 1280px;
+            11B.6's de-duplication is what will bring that width back down. */}
+        <div className="hidden items-center gap-1 min-[1800px]:flex">
           {navLinks.map(({ label, href }) => (
             <Link
               key={href}
@@ -380,7 +395,12 @@ export default function TopNav() {
                         {(user.displayName || user.email?.[0] || "U").toUpperCase()}
                       </span>
                     </div>
-                    <span className="text-[15px] font-medium text-cp-text">
+                    {/* Truncated for header capacity; the full value stays in
+                        `title` so it remains available to the user and to AT. */}
+                    <span
+                      className="max-w-[7.5rem] truncate text-[15px] font-medium text-cp-text"
+                      title={user.displayName || user.email?.split("@")[0] || "User"}
+                    >
                       {user.displayName || user.email?.split("@")[0] || "User"}
                     </span>
                     <svg
@@ -442,7 +462,7 @@ export default function TopNav() {
           )}
         </div>
 
-        {/* Mobile/tablet toggle — shown below xl, matching the desktop nav's own xl:flex cutover above */}
+        {/* Mobile/tablet toggle — shown below the desktop cutover, matching the desktop nav's own min-[1800px]:flex above */}
         <button
           ref={mobileMenuButtonRef}
           onClick={() => {
@@ -454,7 +474,7 @@ export default function TopNav() {
               setUserMenuOpen(false);
             }
           }}
-          className="rounded-md p-2 text-cp-muted transition-colors hover:bg-cp-raised hover:text-cp-text xl:hidden"
+          className="rounded-md p-2 text-cp-muted transition-colors hover:bg-cp-raised hover:text-cp-text min-[1800px]:hidden"
           aria-label="Toggle menu"
           aria-expanded={mobileMenuOpen}
           aria-controls="mobile-menu"
@@ -477,9 +497,9 @@ export default function TopNav() {
         </button>
       </div>
 
-      {/* Mobile/tablet menu — below xl, mirrors the desktop nav's own xl:flex cutover */}
+      {/* Mobile/tablet menu — below the desktop cutover, mirrors the desktop nav's own min-[1800px]:flex */}
       {mobileMenuOpen && (
-        <div id="mobile-menu" className="border-t border-cp-border bg-cp-surface px-4 pb-4 pt-3 xl:hidden">
+        <div id="mobile-menu" className="border-t border-cp-border bg-cp-surface px-4 pb-4 pt-3 min-[1800px]:hidden">
           <div className="flex flex-col gap-1">
             {navLinks.map(({ label, href }) => (
               <Link

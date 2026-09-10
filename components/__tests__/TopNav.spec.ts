@@ -71,7 +71,7 @@ describe("TopNav — tablet-width header overflow fix", () => {
   }
 
   const desktopNavBlock = extractBetween(
-    '<div className="hidden items-center gap-1 xl:flex">',
+    '<div className="hidden items-center gap-1 min-[1800px]:flex">',
     "{/* Mobile/tablet toggle"
   );
   const mobileMenuBlock = extractBetween('{mobileMenuOpen && (', "</header>");
@@ -81,18 +81,18 @@ describe("TopNav — tablet-width header overflow fix", () => {
   );
 
   it("cuts the desktop nav over at lg (1024px), not md (768px) — the actual overflow trigger", () => {
-    // Phase 11B.5 — cutover moved lg -> xl. The worst-case authenticated header
-    // gained the Workspace context control while 11B.5 is forbidden from
-    // removing any destination (that is 11B.6), so 1024-1279px now uses the
-    // already-complete hamburger layout instead of overflowing the page.
-    expect(source).toMatch(/hidden items-center gap-1 xl:flex/);
+    // Phase 11B.5-C1 — see the dedicated capacity describe block below. The
+    // cutover alone is NOT the contract: it is only safe together with the
+    // widened header cap, so both are pinned there.
+    expect(source).toMatch(/hidden items-center gap-1 min-\[1800px\]:flex/);
     expect(source).not.toMatch(/hidden items-center gap-1 lg:flex/);
+    expect(source).not.toMatch(/hidden items-center gap-1 xl:flex/);
     expect(source).not.toMatch(/hidden items-center gap-1 md:flex/);
   });
 
   it("shows the mobile/tablet toggle and panel below lg, matching the desktop nav's own cutover exactly", () => {
-    expect(source).toMatch(/text-cp-text xl:hidden"\s*\n\s*aria-label="Toggle menu"/);
-    expect(source).toMatch(/id="mobile-menu" className="border-t border-cp-border bg-cp-surface px-4 pb-4 pt-3 xl:hidden"/);
+    expect(source).toMatch(/text-cp-text min-\[1800px\]:hidden"\s*\n\s*aria-label="Toggle menu"/);
+    expect(source).toMatch(/id="mobile-menu" className="border-t border-cp-border bg-cp-surface px-4 pb-4 pt-3 min-\[1800px\]:hidden"/);
   });
 
   it("never reintroduces an md: breakpoint anywhere in the header (guards against regressing the fix)", () => {
@@ -177,7 +177,7 @@ describe("TopNav — tablet-width header overflow fix", () => {
     expect(source).toMatch(/\{mobileMenuOpen && \(\s*\n\s*<div id="mobile-menu"/);
   });
 
-  it("keeps the desktop nav's own trigger-less collapse (hidden xl:flex) as a pure CSS breakpoint, not a JS-mounted/unmounted panel — so desktop never depends on menu state", () => {
+  it("keeps the desktop nav's own trigger-less collapse (hidden min-[1800px]:flex) as a pure CSS breakpoint, not a JS-mounted/unmounted panel — so desktop never depends on menu state", () => {
     expect(desktopNavBlock).not.toMatch(/mobileMenuOpen/);
   });
 });
@@ -201,7 +201,7 @@ describe("TopNav — Phase 5C Workspace nav-item integration", () => {
     return source.slice(startIndex, endIndex);
   }
   const desktopNavBlock = extractBetween(
-    '<div className="hidden items-center gap-1 xl:flex">',
+    '<div className="hidden items-center gap-1 min-[1800px]:flex">',
     "{/* Mobile/tablet toggle"
   );
   const mobileMenuBlock = extractBetween('{mobileMenuOpen && (', "</header>");
@@ -261,7 +261,7 @@ describe("TopNav — Phase 7B Projects nav-item integration", () => {
     return source.slice(startIndex, endIndex);
   }
   const desktopNavBlock = extractBetween(
-    '<div className="hidden items-center gap-1 xl:flex">',
+    '<div className="hidden items-center gap-1 min-[1800px]:flex">',
     "{/* Mobile/tablet toggle"
   );
   const mobileMenuBlock = extractBetween('{mobileMenuOpen && (', "</header>");
@@ -337,7 +337,7 @@ describe("TopNav — Reviews (Team Workspace) nav entry", () => {
     return source.slice(startIndex, endIndex);
   }
   const desktopNavBlock = extractBetween(
-    '<div className="hidden items-center gap-1 xl:flex">',
+    '<div className="hidden items-center gap-1 min-[1800px]:flex">',
     "{/* Mobile/tablet toggle"
   );
   const mobileMenuBlock = extractBetween('{mobileMenuOpen && (', "</header>");
@@ -484,5 +484,75 @@ describe("TopNav — Phase 11B.5 WorkspaceSwitcher integration wiring", () => {
     expect(source).toMatch(/className="hidden flex-col justify-center leading-tight sm:flex"/);
     expect(source).toMatch(/src="\/logo-mark\.png"/);
     expect(source).toMatch(/<Link href="\/" className="flex items-center gap-3 transition-opacity hover:opacity-80">/);
+  });
+});
+
+
+/**
+ * Phase 11B.5-C1 — HEADER CAPACITY.
+ *
+ * The reviewed 11B.5 head moved the cutover lg -> xl while keeping
+ * `max-w-6xl`. That fixed nothing: `max-w-6xl` is 72rem = 1152px and is not
+ * overridden in `tailwind.config.ts`, so the content area caps at 1104px no
+ * matter how wide the viewport is, against a measured worst-case requirement of
+ * 1740px. A breakpoint assertion alone cannot express capacity, which is why
+ * these tests pin the COMPANION conditions that make the cutover safe — so
+ * restoring any single half of the unsafe combination fails here.
+ */
+describe("TopNav — Phase 11B.5-C1 header capacity strategy", () => {
+  it("the desktop cutover and the widened header cap are BOTH present — neither alone is the contract", () => {
+    expect(source).toMatch(/hidden items-center gap-1 min-\[1800px\]:flex/);
+    expect(source).toMatch(/min-\[1800px\]:max-w-\[1840px\]/);
+  });
+
+  it("REGRESSION: the unsafe composition (desktop row enabled while the header stays capped at max-w-6xl) cannot be restored", () => {
+    const container = source.match(/<div className="(mx-auto flex h-full[^"]*)"/);
+    expect(container).not.toBeNull();
+    const containerClasses = container![1];
+    expect(containerClasses).toContain("max-w-6xl");
+    // ...but it MUST also lift the cap at the very breakpoint the desktop row appears.
+    const desktopCutover = source.match(/hidden items-center gap-1 (min-\[\d+px\]|lg|xl|2xl):flex/);
+    expect(desktopCutover).not.toBeNull();
+    const cutoverVariant = desktopCutover![1];
+    expect(containerClasses).toContain(`${cutoverVariant}:max-w-[`);
+  });
+
+  it("padding narrows below sm and the switcher wrapper is clamped there, which is what makes 320px fit", () => {
+    expect(source).toMatch(/justify-between px-4 sm:px-6/);
+    expect(source).toMatch(/className="min-w-0 max-w-\[6\.5rem\] sm:max-w-none"/);
+    expect(source).toMatch(/flex min-w-0 items-center gap-2 sm:gap-3/);
+  });
+
+  it("the account display name truncates, with the full value preserved in title", () => {
+    const block = source.slice(source.indexOf("max-w-[7.5rem] truncate text-[15px]"));
+    expect(block).toMatch(/max-w-\[7\.5rem\] truncate text-\[15px\] font-medium text-cp-text/);
+    expect(block).toMatch(/title=\{user\.displayName \|\| user\.email\?\.split\("@"\)\[0\] \|\| "User"\}/);
+  });
+
+  it("the hamburger and the mobile panel share the desktop nav's exact cutover, so there is never a width with neither", () => {
+    const cutover = source.match(/hidden items-center gap-1 (min-\[\d+px\]):flex/)![1];
+    const hidden = `${cutover}:hidden`;
+    // the toggle button carries the same cutover...
+    const toggleIdx = source.indexOf('aria-label="Toggle menu"');
+    expect(toggleIdx).toBeGreaterThan(-1);
+    expect(source.slice(toggleIdx - 400, toggleIdx)).toContain(hidden);
+    // ...and so does the panel it controls, so no width has neither nav nor hamburger.
+    const panelIdx = source.indexOf('id="mobile-menu"');
+    expect(panelIdx).toBeGreaterThan(-1);
+    expect(source.slice(panelIdx, panelIdx + 200)).toContain(hidden);
+  });
+
+  it("no destination was removed, hidden, or moved behind an overflow menu by the capacity pass", () => {
+    // the four public links come from the navLinks array; the rest are literal hrefs
+    for (const entry of ['{ label: "About", href: "/about" }', '{ label: "Help", href: "/help" }', '{ label: "Contact", href: "/contact" }', '{ label: "Pricing", href: "/pricing" }']) {
+      expect(source).toContain(entry);
+    }
+    for (const href of ["/governance", "/team/reviews", "/workspace", "/workspace/projects", "/workspace/team", "/workspace/reviews", "/reviews"]) {
+      expect(source).toContain(`href="${href}"`);
+    }
+    expect(source).not.toMatch(/>\s*More\s*</);
+    // and nothing gained a width-conditional hide that would drop it from the desktop row
+    const desktopNav = source.slice(source.indexOf("hidden items-center gap-1 min-["), source.indexOf("{/* Mobile/tablet toggle"));
+    expect(desktopNav).not.toMatch(/\b(sm|md|lg|xl):hidden\b/);
   });
 });
