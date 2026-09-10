@@ -9,10 +9,19 @@ import { auth } from "@/lib/firebase/client";
 import { useAuth } from "./AuthProvider";
 import { useUserPlan } from "@/hooks/useUserPlan";
 import { clearServerSession } from "@/lib/client/sessionSync";
+import WorkspaceSwitcher from "@/components/WorkspaceSwitcher";
+import { useWorkspaceList } from "@/hooks/useWorkspaceList";
 
 export default function TopNav() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  /**
+   * Phase 11B.5 — TopNav owns all three disclosure states so ONE component
+   * arbitrates mutual exclusion, outside-click and Escape. WorkspaceSwitcher is
+   * controlled via `open`/`onOpenChange` rather than adding a second
+   * document-level listener that would race this one.
+   */
+  const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
   const { user, loading, isAdmin, beginLogout } = useAuth();
@@ -28,25 +37,77 @@ export default function TopNav() {
   const userMenuRef = useRef<HTMLDivElement>(null);
   const userMenuButtonRef = useRef<HTMLButtonElement>(null);
   const mobileMenuButtonRef = useRef<HTMLButtonElement>(null);
+  const workspaceSwitcherRef = useRef<HTMLDivElement>(null);
+  const workspaceSwitcherButtonRef = useRef<HTMLButtonElement>(null);
+
+  /**
+   * Membership discovery is keyed on uid inside the hook, NOT on pathname —
+   * TopNav is mounted once by the root layout and persists across client
+   * navigation, so switching routes must not refetch the Workspace list.
+   *
+   * Visibility is deliberately NOT gated on `teamWorkspacesUiEnabled`: that flag
+   * is self-service CREATION admission. Phase 11B.5-P0 established that a
+   * legitimate member can hold an active membership while not being admitted to
+   * self-service, and such a member must still get a switcher.
+   */
+  const { items: workspaceItems, status: workspaceListStatus, retry: retryWorkspaceList } = useWorkspaceList();
+  /**
+   * `/workspace` is itself gated by `resolvePersonalWorkspaceUiMode()`, so
+   * sending a non-admitted caller there would navigate them into a notFound().
+   * `workspaceUiEnabled` is exactly that admission signal, already on hand.
+   */
+  const personalHref = workspaceUiEnabled ? "/workspace" : "/";
 
   const isLogin = pathname === "/login" || pathname === "/signin";
   const isSignup = pathname === "/signup";
 
   const logoutInProgressRef = useRef(false);
 
+  /**
+   * Phase 11B.5 — ONE outside-click effect for both desktop disclosures. Two
+   * independent document `mousedown` listeners would race and could close the
+   * disclosure the user just opened.
+   */
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (userMenuRef.current && !userMenuRef.current.contains(event.target as Node)) {
+      const target = event.target as Node;
+      if (userMenuOpen && userMenuRef.current && !userMenuRef.current.contains(target)) {
         setUserMenuOpen(false);
       }
+      if (workspaceMenuOpen && workspaceSwitcherRef.current && !workspaceSwitcherRef.current.contains(target)) {
+        setWorkspaceMenuOpen(false);
+      }
     };
-    if (userMenuOpen) {
+    if (userMenuOpen || workspaceMenuOpen) {
       document.addEventListener("mousedown", handleClickOutside);
     }
     return () => {
       document.removeEventListener("mousedown", handleClickOutside);
     };
-  }, [userMenuOpen]);
+  }, [userMenuOpen, workspaceMenuOpen]);
+
+  /**
+   * MUTUAL EXCLUSION — at most one disclosure open. Each opener closes the
+   * others, so Escape and outside-click never have to arbitrate between two
+   * simultaneously-open popups.
+   */
+  const openWorkspaceMenu = (next: boolean) => {
+    setWorkspaceMenuOpen(next);
+    if (next) {
+      setUserMenuOpen(false);
+      setMobileMenuOpen(false);
+    }
+  };
+
+  /** A route change closes the switcher: a popup must not outlive its page. */
+  useEffect(() => {
+    setWorkspaceMenuOpen(false);
+  }, [pathname]);
+
+  /** Logout, or any transition to signed-out, closes it too. */
+  useEffect(() => {
+    if (!user) setWorkspaceMenuOpen(false);
+  }, [user]);
 
   /**
    * Header overflow fix, tablet-width responsive pass — Escape closes
@@ -100,6 +161,10 @@ export default function TopNav() {
     logoutInProgressRef.current = true;
     setUserMenuOpen(false);
     setMobileMenuOpen(false);
+    // Phase 11B.5 — close the Workspace switcher too. The hardened sequence
+    // below (beginLogout -> clearServerSession -> signOut -> navigate) is
+    // deliberately untouched; this only dismisses UI before it starts.
+    setWorkspaceMenuOpen(false);
     beginLogout();
     try {
       const cleared = await clearServerSession();
@@ -135,30 +200,61 @@ export default function TopNav() {
     <header className="sticky top-0 z-50 h-[74px] border-b border-cp-border bg-cp-surface/95 backdrop-blur-sm">
       <div className="mx-auto flex h-full max-w-6xl items-center justify-between px-6">
 
-        {/* Logo */}
-        <Link href="/" className="flex items-center gap-3 transition-opacity hover:opacity-80">
-          <span className="relative flex h-14 w-14 shrink-0 items-center justify-center">
-            <Image src="/logo-mark.png" alt="ConvergePanel logo" width={56} height={56} className="h-14 w-14" priority />
-          </span>
-          <span className="flex flex-col justify-center leading-tight">
-            <span className="text-2xl font-normal tracking-tight">
-              <span className="text-cp-text">Converge</span>
-              <span className="text-cp-orange">Panel</span>
-            </span>
-            <span className="text-[11px] font-medium tracking-wider text-cp-muted">
-              RESEARCH • VERIFY • GOVERN
-            </span>
-          </span>
-        </Link>
+        {/* Logo + Workspace context. Grouped so the outer row keeps exactly the
+            three children it had before (left group / desktop nav / hamburger)
+            and `justify-between` distributes them unchanged.
 
-        {/* Desktop nav — lg (1024px), not md (768px): at 768px the logo
-            (56px mark + wordmark + tagline) plus every nav link, the
-            Governance/Team Reviews conditionals, and the auth controls
-            don't fit on one row and force page-level horizontal overflow.
-            The mobile menu below is already complete (same links + auth
-            actions), so moving the cutover to lg is the smallest fix —
-            no links hidden, no text shrunk, no overflow-hidden hacks. */}
-        <div className="hidden items-center gap-1 lg:flex">
+            Phase 11B.5 — the switcher sits HERE, in the primary header, not
+            inside `#mobile-menu`: the current Workspace must be visible on
+            mobile with the hamburger closed. One shared instance serves both
+            breakpoints, so there is no second state machine to drift. */}
+        <div className="flex min-w-0 items-center gap-3">
+          <Link href="/" className="flex items-center gap-3 transition-opacity hover:opacity-80">
+            <span className="relative flex h-14 w-14 shrink-0 items-center justify-center">
+              <Image src="/logo-mark.png" alt="ConvergePanel logo" width={56} height={56} className="h-14 w-14" priority />
+            </span>
+            {/* Below `sm` the wordmark/tagline block is hidden so the mark, the
+                context switcher and the hamburger fit at 320px. The artwork, the
+                link destination and the desktop presentation are unchanged. */}
+            <span className="hidden flex-col justify-center leading-tight sm:flex">
+              <span className="text-2xl font-normal tracking-tight">
+                <span className="text-cp-text">Converge</span>
+                <span className="text-cp-orange">Panel</span>
+              </span>
+              <span className="text-[11px] font-medium tracking-wider text-cp-muted">
+                RESEARCH • VERIFY • GOVERN
+              </span>
+            </span>
+          </Link>
+
+          {!loading && user && (
+            <div ref={workspaceSwitcherRef}>
+              <WorkspaceSwitcher
+                pathname={pathname}
+                items={workspaceItems}
+                status={workspaceListStatus}
+                personalHref={personalHref}
+                open={workspaceMenuOpen}
+                onOpenChange={openWorkspaceMenu}
+                onRetry={retryWorkspaceList}
+                triggerRef={workspaceSwitcherButtonRef}
+              />
+            </div>
+          )}
+        </div>
+
+        {/* Desktop nav — xl (1280px) as of Phase 11B.5, previously lg (1024px).
+            At 1024px the worst-case authenticated header already carried About,
+            Help, Contact, Pricing, Governance, Team Reviews, Workspace,
+            Projects, Team, Approval Queue, My Reviews and the user menu inside a
+            max-w-6xl row; adding the Workspace context control to that row
+            overflows the page. 11B.5 must not remove or relocate any
+            destination — that is 11B.6 — so the smallest correct mitigation is
+            to use the already-complete hamburger layout between 1024px and
+            1279px instead of overflowing. No link is hidden, nothing is moved to
+            an overflow menu, and the switcher itself stays in the primary header
+            at every width. */}
+        <div className="hidden items-center gap-1 xl:flex">
           {navLinks.map(({ label, href }) => (
             <Link
               key={href}
@@ -268,7 +364,12 @@ export default function TopNav() {
                   <button
                     id="user-menu-button"
                     ref={userMenuButtonRef}
-                    onClick={() => setUserMenuOpen(!userMenuOpen)}
+                    onClick={() => {
+                      const next = !userMenuOpen;
+                      setUserMenuOpen(next);
+                      // Mutual exclusion — opening the user menu closes the Workspace switcher.
+                      if (next) setWorkspaceMenuOpen(false);
+                    }}
                     aria-expanded={userMenuOpen}
                     aria-haspopup="true"
                     aria-controls="user-menu"
@@ -341,11 +442,19 @@ export default function TopNav() {
           )}
         </div>
 
-        {/* Mobile/tablet toggle — shown below lg, matching the desktop nav's own lg:flex cutover above */}
+        {/* Mobile/tablet toggle — shown below xl, matching the desktop nav's own xl:flex cutover above */}
         <button
           ref={mobileMenuButtonRef}
-          onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-          className="rounded-md p-2 text-cp-muted transition-colors hover:bg-cp-raised hover:text-cp-text lg:hidden"
+          onClick={() => {
+            const next = !mobileMenuOpen;
+            setMobileMenuOpen(next);
+            // Mutual exclusion: opening the panel closes the other disclosures.
+            if (next) {
+              setWorkspaceMenuOpen(false);
+              setUserMenuOpen(false);
+            }
+          }}
+          className="rounded-md p-2 text-cp-muted transition-colors hover:bg-cp-raised hover:text-cp-text xl:hidden"
           aria-label="Toggle menu"
           aria-expanded={mobileMenuOpen}
           aria-controls="mobile-menu"
@@ -368,9 +477,9 @@ export default function TopNav() {
         </button>
       </div>
 
-      {/* Mobile/tablet menu — below lg, mirrors the desktop nav's own lg:flex cutover */}
+      {/* Mobile/tablet menu — below xl, mirrors the desktop nav's own xl:flex cutover */}
       {mobileMenuOpen && (
-        <div id="mobile-menu" className="border-t border-cp-border bg-cp-surface px-4 pb-4 pt-3 lg:hidden">
+        <div id="mobile-menu" className="border-t border-cp-border bg-cp-surface px-4 pb-4 pt-3 xl:hidden">
           <div className="flex flex-col gap-1">
             {navLinks.map(({ label, href }) => (
               <Link
