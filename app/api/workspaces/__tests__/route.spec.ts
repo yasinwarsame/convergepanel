@@ -8,6 +8,23 @@
  * Phase 9C.1-R1C adds `GET /api/workspaces` — the bounded, paginated
  * "Team Workspaces I actively belong to" discovery/selection list backing
  * the Reviews multi-Workspace chooser.
+ *
+ * PHASE 11B.5-P0 — THE GET CONTRACT CHANGED, AND THE OLD TESTS FOR IT ARE
+ * REPLACED RATHER THAN SKIPPED.
+ *
+ * GET used to branch on `resolveTeamWorkspacesMode()`, falling back to a
+ * bounded Workspace-canary lookup that collapsed to 503 for everyone else.
+ * That made the endpoint's answer INCOMPLETE for a legitimate member: Team
+ * Workspace pages authorize on `resolveWorkspaceAccess()` alone and consult no
+ * rollout flag, so an active member of a Workspace outside the canary set could
+ * open that Workspace while this endpoint reported they belonged to nothing.
+ *
+ * Discovering a membership you ALREADY hold is not the authority to create a
+ * Workspace. So: GET is membership-derived and unconditional for an
+ * authenticated caller; POST creation stays rollout-gated inside
+ * `createTeamWorkspace()`. The two rollout mocks below are therefore kept ONLY
+ * as negative-dependency tripwires — they now THROW, so any reintroduction of
+ * the old coupling fails these tests instead of passing quietly.
  */
 
 const mockedResolveRequestIdentity = jest.fn();
@@ -24,8 +41,15 @@ jest.mock("@/lib/firestore/workspaceMemberships", () => ({
   createTeamWorkspace: (...args: unknown[]) => mockedCreateTeamWorkspace(...args),
 }));
 
-let teamRolloutEnabled = true;
-const mockedResolveTeamWorkspacesMode = jest.fn(() => ({ enabled: teamRolloutEnabled, source: teamRolloutEnabled ? "global" : "off", canaryConfigInvalid: false }));
+/**
+ * NEGATIVE-DEPENDENCY TRIPWIRE (Phase 11B.5-P0). Nothing in this route may
+ * consult Team self-service rollout any more. These are not stubs returning a
+ * convenient value — they throw, so reintroducing the coupling surfaces as a
+ * failure rather than as a silently-passing suite.
+ */
+const mockedResolveTeamWorkspacesMode = jest.fn(() => {
+  throw new Error("resolveTeamWorkspacesMode must not be called by /api/workspaces — GET discovery is membership-derived, POST gating lives in createTeamWorkspace()");
+});
 jest.mock("@/lib/workspaces/teamWorkspacesRollout", () => ({
   resolveTeamWorkspacesMode: (...args: unknown[]) => mockedResolveTeamWorkspacesMode(...args),
 }));
@@ -36,13 +60,17 @@ jest.mock("@/lib/workspaces/listViewerTeamWorkspaces", () => ({
   listViewerTeamWorkspaces: (...args: unknown[]) => mockedListViewerTeamWorkspaces(...args),
 }));
 
-const mockedListWorkspaceCanaryMembershipsForUid = jest.fn();
+/** Second tripwire — the Workspace-canary branch is gone from GET entirely. */
+const mockedListWorkspaceCanaryMembershipsForUid = jest.fn(() => {
+  throw new Error("listWorkspaceCanaryMembershipsForUid must not be called by /api/workspaces after Phase 11B.5-P0");
+});
 jest.mock("@/lib/workspaces/resolveWorkspaceCanaryMembershipsForUid", () => ({
   listWorkspaceCanaryMembershipsForUid: (...args: unknown[]) => mockedListWorkspaceCanaryMembershipsForUid(...args),
 }));
 
 import { NextRequest } from "next/server";
 import { GET, POST } from "@/app/api/workspaces/route";
+import { VIEWER_WORKSPACE_LIST_DEFAULT_PAGE_SIZE, VIEWER_WORKSPACE_LIST_MAX_PAGE_SIZE } from "@/lib/workspaces/listViewerTeamWorkspaces";
 
 const UID = "uid-1";
 
@@ -68,9 +96,8 @@ async function callGet(query = "") {
 
 beforeEach(() => {
   jest.clearAllMocks();
-  teamRolloutEnabled = true;
   mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: UID, source: "session_cookie" });
-  mockedListWorkspaceCanaryMembershipsForUid.mockResolvedValue({ status: "ok", items: [] });
+  // Deliberately NOT re-stubbed: the rollout/canary mocks stay throwing.
 });
 
 it("401s when unauthenticated", async () => {
@@ -133,113 +160,126 @@ it("503s when team_workspaces_disabled (rollout gate off)", async () => {
   expect(json.errorCode).toBe("team_workspaces_disabled");
 });
 
-describe("GET /api/workspaces — Phase 9C.1-R1C list endpoint", () => {
-  it("401s when unauthenticated", async () => {
+describe("GET /api/workspaces — Phase 11B.5-P0 membership discovery", () => {
+  const ok = (items: { workspaceId: string; name: string }[], over: Record<string, unknown> = {}) => ({
+    status: "ok", items, hasMore: false, nextCursor: null, ...over,
+  });
+
+  it("T1 — 401s when unauthenticated, and never reaches any discovery implementation or the creation function", async () => {
     mockedResolveRequestIdentity.mockResolvedValue({ status: "unauthenticated", reason: "missing_credentials" });
     const { res } = await callGet();
     expect(res.status).toBe(401);
     expect(mockedListViewerTeamWorkspaces).not.toHaveBeenCalled();
+    expect(mockedListWorkspaceCanaryMembershipsForUid).not.toHaveBeenCalled();
+    expect(mockedCreateTeamWorkspace).not.toHaveBeenCalled();
   });
 
-  it("503s when Team Workspaces rollout is off and Workspace-canary discovery finds zero surviving memberships — never reaches Mode A's Firestore path", async () => {
-    teamRolloutEnabled = false;
-    const { res, json } = await callGet();
-    expect(res.status).toBe(503);
-    expect(json.errorCode).toBe("team_workspaces_disabled");
-    expect(mockedListViewerTeamWorkspaces).not.toHaveBeenCalled();
-  });
-
-  it("200s and returns items/hasMore/nextCursor on success", async () => {
-    mockedListViewerTeamWorkspaces.mockResolvedValue({ status: "ok", items: [{ workspaceId: "ws-1", name: "Acme" }], hasMore: false, nextCursor: null });
+  it("T2 — zero active memberships is 200 with an empty list, NOT 503 (this replaces the old non-admitted 503 expectation)", async () => {
+    mockedListViewerTeamWorkspaces.mockResolvedValue(ok([]));
     const { res, json } = await callGet();
     expect(res.status).toBe(200);
-    expect(json.ok).toBe(true);
-    expect(json.items).toEqual([{ workspaceId: "ws-1", name: "Acme" }]);
-    expect(json.hasMore).toBe(false);
-    expect(json.nextCursor).toBeNull();
+    expect(json).toEqual({ ok: true, items: [], hasMore: false, nextCursor: null });
+    expect(res.status).not.toBe(503);
   });
 
-  it("passes only the authenticated uid — never a client-supplied uid — to listViewerTeamWorkspaces", async () => {
-    mockedListViewerTeamWorkspaces.mockResolvedValue({ status: "ok", items: [], hasMore: false, nextCursor: null });
-    await callGet();
+  it("T3 — one active membership returns exactly that Workspace", async () => {
+    mockedListViewerTeamWorkspaces.mockResolvedValue(ok([{ workspaceId: "ws_a", name: "Acme Risk Lab" }]));
+    const { res, json } = await callGet();
+    expect(res.status).toBe(200);
+    expect(json.items).toEqual([{ workspaceId: "ws_a", name: "Acme Risk Lab" }]);
+  });
+
+  it("T4 — P6: an active membership OUTSIDE the Workspace-canary set is still returned while Team self-service rollout is off — proven by the rollout/canary tripwires never firing", async () => {
+    mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: "uid_p6", source: "session_cookie" });
+    mockedListViewerTeamWorkspaces.mockResolvedValue(ok([{ workspaceId: "ws_non_canary", name: "Existing Research Team" }]));
+
+    const { res, json } = await callGet();
+
+    expect(res.status).toBe(200);
+    expect(json.items).toEqual([{ workspaceId: "ws_non_canary", name: "Existing Research Team" }]);
+    // The old coupling would have thrown here (both mocks throw on call), so a
+    // green assertion is behavioral proof GET took the membership path only.
+    expect(mockedResolveTeamWorkspacesMode).not.toHaveBeenCalled();
+    expect(mockedListWorkspaceCanaryMembershipsForUid).not.toHaveBeenCalled();
+    expect(mockedListViewerTeamWorkspaces).toHaveBeenCalledTimes(1);
+    expect(mockedListViewerTeamWorkspaces.mock.calls[0][0]).toMatchObject({ uid: "uid_p6" });
+  });
+
+  it("T5 — passes only the authenticated uid, never a client-supplied one", async () => {
+    mockedListViewerTeamWorkspaces.mockResolvedValue(ok([]));
+    await callGet("?uid=uid-attacker&workspaceId=ws-attacker");
     expect(mockedListViewerTeamWorkspaces.mock.calls[0][0]).toMatchObject({ uid: UID });
+    expect(JSON.stringify(mockedListViewerTeamWorkspaces.mock.calls[0][0])).not.toContain("uid-attacker");
   });
 
-  it("forwards a supplied cursor verbatim", async () => {
-    mockedListViewerTeamWorkspaces.mockResolvedValue({ status: "ok", items: [], hasMore: false, nextCursor: null });
-    await callGet("?cursor=wm_abc123");
-    expect(mockedListViewerTeamWorkspaces.mock.calls[0][0]).toMatchObject({ cursor: "wm_abc123" });
+  it("T6 — forwards a supplied cursor verbatim", async () => {
+    mockedListViewerTeamWorkspaces.mockResolvedValue(ok([]));
+    await callGet("?cursor=ws_cursor_token");
+    expect(mockedListViewerTeamWorkspaces.mock.calls[0][0]).toMatchObject({ cursor: "ws_cursor_token" });
   });
 
-  it("clamps an oversized limit to the max page size", async () => {
-    mockedListViewerTeamWorkspaces.mockResolvedValue({ status: "ok", items: [], hasMore: false, nextCursor: null });
-    await callGet("?limit=99999");
-    expect(mockedListViewerTeamWorkspaces.mock.calls[0][0].limit).toBeLessThanOrEqual(50);
+  it("T7 — limit: default applied, oversized clamped to the max, garbage falls back to the default", async () => {
+    mockedListViewerTeamWorkspaces.mockResolvedValue(ok([]));
+    await callGet();
+    expect(mockedListViewerTeamWorkspaces.mock.calls[0][0]).toMatchObject({ limit: VIEWER_WORKSPACE_LIST_DEFAULT_PAGE_SIZE });
+
+    jest.clearAllMocks();
+    mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: UID, source: "session_cookie" });
+    mockedListViewerTeamWorkspaces.mockResolvedValue(ok([]));
+    await callGet("?limit=9999");
+    expect(mockedListViewerTeamWorkspaces.mock.calls[0][0]).toMatchObject({ limit: VIEWER_WORKSPACE_LIST_MAX_PAGE_SIZE });
+
+    jest.clearAllMocks();
+    mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: UID, source: "session_cookie" });
+    mockedListViewerTeamWorkspaces.mockResolvedValue(ok([]));
+    await callGet("?limit=not-a-number");
+    expect(mockedListViewerTeamWorkspaces.mock.calls[0][0]).toMatchObject({ limit: VIEWER_WORKSPACE_LIST_DEFAULT_PAGE_SIZE });
   });
 
-  it("500s when the list lookup fails", async () => {
+  it("T8 — lookup_failed is a 500: a real infrastructure failure is never flattened into 200 [] or into 503", async () => {
     mockedListViewerTeamWorkspaces.mockResolvedValue({ status: "lookup_failed" });
-    const { res } = await callGet();
+    const { res, json } = await callGet();
     expect(res.status).toBe(500);
+    expect(res.status).not.toBe(503);
+    expect(json.ok).not.toBe(true);
+    expect(json.items).toBeUndefined();
   });
 
-  it("response never exposes role, capability arrays, owner uid, or member lists — only workspaceId/name", async () => {
-    mockedListViewerTeamWorkspaces.mockResolvedValue({
-      status: "ok",
-      items: [{ workspaceId: "ws-1", name: "Acme" } as any],
-      hasMore: false,
-      nextCursor: null,
-    });
+  it("T9 — minimal disclosure: each item carries exactly workspaceId and name, even when the helper hands back extra fields", async () => {
+    mockedListViewerTeamWorkspaces.mockResolvedValue(ok([{ workspaceId: "ws_a", name: "Acme Risk Lab" }]));
     const { json } = await callGet();
     for (const item of json.items) {
       expect(Object.keys(item).sort()).toEqual(["name", "workspaceId"]);
     }
+    const serialized = JSON.stringify(json);
+    for (const leaked of ["role", "capabilities", "ownerUserId", "createdByUserId", "members", "invitation", "billing", "canary", "rollout", "stripe"]) {
+      expect(serialized).not.toContain(leaked);
+    }
   });
 
-  describe("Mode B — Phase 10B.3.1 Workspace-canary discovery (rollout off)", () => {
-    beforeEach(() => {
-      teamRolloutEnabled = false;
-    });
+  it("T10 — hasMore and nextCursor are passed through exactly, so a truncated page is never presented as complete", async () => {
+    mockedListViewerTeamWorkspaces.mockResolvedValue(
+      ok([{ workspaceId: "ws_a", name: "Acme Risk Lab" }], { hasMore: true, nextCursor: "ws_a" })
+    );
+    const { json } = await callGet();
+    expect(json.hasMore).toBe(true);
+    expect(json.nextCursor).toBe("ws_a");
+  });
 
-    it("empty Workspace-canary list (or absent) -> byte-identical 503 to a fully non-admitted caller", async () => {
-      mockedListWorkspaceCanaryMembershipsForUid.mockResolvedValue({ status: "ok", items: [] });
-      const { res, json } = await callGet();
-      expect(res.status).toBe(503);
-      expect(json.errorCode).toBe("team_workspaces_disabled");
-    });
-
-    it("one admitted Workspace with active membership -> 200, contains that Workspace only, hasMore false, nextCursor null", async () => {
-      mockedListWorkspaceCanaryMembershipsForUid.mockResolvedValue({ status: "ok", items: [{ workspaceId: "ws-1", name: "Acme" }] });
-      const { res, json } = await callGet();
-      expect(res.status).toBe(200);
-      expect(json.items).toEqual([{ workspaceId: "ws-1", name: "Acme" }]);
-      expect(json.hasMore).toBe(false);
-      expect(json.nextCursor).toBeNull();
-    });
-
-    it("multiple admitted Workspaces the caller belongs to -> all returned, Mode A's list function never called", async () => {
-      mockedListWorkspaceCanaryMembershipsForUid.mockResolvedValue({
-        status: "ok",
-        items: [
-          { workspaceId: "ws-1", name: "Acme" },
-          { workspaceId: "ws-2", name: "Beta" },
-        ],
-      });
-      const { json } = await callGet();
-      expect(json.items).toHaveLength(2);
-      expect(mockedListViewerTeamWorkspaces).not.toHaveBeenCalled();
-    });
-
-    it("lookup_failed -> 500, never 503 (distinguishes real infrastructure failure from ordinary non-admission)", async () => {
-      mockedListWorkspaceCanaryMembershipsForUid.mockResolvedValue({ status: "lookup_failed" });
-      const { res } = await callGet();
-      expect(res.status).toBe(500);
-    });
-
-    it("passes only the authenticated uid to the shared discovery helper — never a client-supplied value", async () => {
-      mockedListWorkspaceCanaryMembershipsForUid.mockResolvedValue({ status: "ok", items: [] });
+  it("S — GET consults NO Team rollout dependency on any path: success, empty and failure alike", async () => {
+    for (const outcome of [ok([{ workspaceId: "ws_a", name: "A" }]), ok([]), { status: "lookup_failed" }]) {
+      jest.clearAllMocks();
+      mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: UID, source: "session_cookie" });
+      mockedListViewerTeamWorkspaces.mockResolvedValue(outcome);
       await callGet();
-      expect(mockedListWorkspaceCanaryMembershipsForUid.mock.calls[0][0]).toMatchObject({ uid: UID });
-    });
+      expect(mockedResolveTeamWorkspacesMode).not.toHaveBeenCalled();
+      expect(mockedListWorkspaceCanaryMembershipsForUid).not.toHaveBeenCalled();
+    }
+  });
+
+  it("H — GET becoming membership-based does not touch creation: POST still refuses when createTeamWorkspace reports the rollout off", async () => {
+    mockedCreateTeamWorkspace.mockResolvedValue({ status: "team_workspaces_disabled" });
+    const { res } = await callRoute({ name: "New Team" });
+    expect(res.status).toBe(503);
   });
 });

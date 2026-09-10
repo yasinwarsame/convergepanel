@@ -24,6 +24,37 @@
  * `listViewerTeamWorkspaces()`) — never a Workspace authorization
  * shortcut; every later read/mutation still authorizes the selected
  * Workspace independently.
+ *
+ * PHASE 11B.5-P0 — THE TWO METHODS ANSWER TO DIFFERENT GATES, ON PURPOSE:
+ *
+ *   GET  /api/workspaces — DISCOVER MY EXISTING ACTIVE TEAM MEMBERSHIPS.
+ *                          Authenticated callers only. NOT conditioned on any
+ *                          Team rollout flag.
+ *   POST /api/workspaces — CREATE A TEAM WORKSPACE, SUBJECT TO SELF-SERVICE
+ *                          ROLLOUT (enforced inside `createTeamWorkspace()`).
+ *
+ * GET previously branched on `resolveTeamWorkspacesMode()`: admitted callers
+ * got their full paginated membership list, everyone else got a bounded
+ * Workspace-canary lookup that collapsed to the same 503 as a wholly
+ * non-admitted caller. That made the endpoint's output INCOMPLETE for a
+ * legitimate member: every `/workspace/team/{id}/**` page authorizes on
+ * `resolveWorkspaceAccess()` alone and consults no rollout flag, so an active
+ * member of a Workspace outside the canary set could load that Workspace and
+ * still be told by this endpoint that they belong to nothing.
+ *
+ * Discovery of a membership the caller ALREADY holds is not the same authority
+ * as creating a new Workspace. Listing it broadens nothing: the rows come from
+ * the same `uid == caller && status == "active"` predicate
+ * `resolveWorkspaceAccess()` itself trusts, and carry only `workspaceId`/`name`.
+ * A rollout flag is not an authorization boundary, and was never the thing
+ * protecting this data.
+ *
+ * This also makes the Approval Queue self-consistent: `/workspace/reviews`
+ * already decides Workspace CARDINALITY via
+ * `resolveViewerTeamWorkspaceSelection()`, which scans every active membership
+ * independent of Team self-service rollout — then hands naming to
+ * `WorkspaceReviewsChooser`, which reads THIS endpoint. Before P0 those two
+ * could disagree about how many Workspaces a caller has.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -32,11 +63,10 @@ import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelem
 import { parseCreateTeamWorkspaceBody } from "@/lib/workspaces/teamWorkspaceMutationBody";
 import { validateTeamWorkspaceName } from "@/lib/workspaces/teamWorkspaceName";
 import { createTeamWorkspace } from "@/lib/firestore/workspaceMemberships";
+// `teamWorkspacesDisabledResponse` is still POST's own rollout refusal — only
+// GET's use of it is removed here.
 import { teamWorkspacesDisabledResponse, invalidRequestBodyResponse, unexpectedFieldResponse, invalidTeamWorkspaceNameResponse, internalErrorResponse } from "@/lib/workspaces/teamWorkspaceErrorResponse";
-import { resolveTeamWorkspacesMode } from "@/lib/workspaces/teamWorkspacesRollout";
 import { listViewerTeamWorkspaces, VIEWER_WORKSPACE_LIST_DEFAULT_PAGE_SIZE, VIEWER_WORKSPACE_LIST_MAX_PAGE_SIZE } from "@/lib/workspaces/listViewerTeamWorkspaces";
-import { listWorkspaceCanaryMembershipsForUid } from "@/lib/workspaces/resolveWorkspaceCanaryMembershipsForUid";
-import { TEAM_WORKSPACES_ENABLED, TEAM_WORKSPACES_CANARY_UIDS, TEAM_WORKSPACES_CANARY_WORKSPACE_IDS } from "@/lib/env";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -56,45 +86,28 @@ export async function GET(req: NextRequest) {
   if (uidOrRes instanceof NextResponse) return uidOrRes;
   const uid = uidOrRes;
 
-  const rollout = resolveTeamWorkspacesMode({ uid, globalEnabled: TEAM_WORKSPACES_ENABLED, canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS });
+  // Phase 11B.5-P0 — ONE path. `listViewerTeamWorkspaces()` is the sole
+  // authority and already constrains discovery to membership rows satisfying
+  // `uid == authenticated caller && status == "active"`, returning only
+  // `workspaceId`/`name`. No rollout flag is consulted: see the route doc above.
+  const { searchParams } = req.nextUrl;
+  const limitRaw = parseInt(searchParams.get("limit") || String(VIEWER_WORKSPACE_LIST_DEFAULT_PAGE_SIZE), 10);
+  const limit = Math.min(VIEWER_WORKSPACE_LIST_MAX_PAGE_SIZE, Math.max(1, Number.isFinite(limitRaw) ? limitRaw : VIEWER_WORKSPACE_LIST_DEFAULT_PAGE_SIZE));
+  const cursor = searchParams.get("cursor");
 
-  if (rollout.enabled) {
-    // MODE A — global/uid-canary admitted. Unchanged existing behavior,
-    // unchanged pagination/cursor semantics — never touched by the
-    // Workspace-canary branch below.
-    const { searchParams } = req.nextUrl;
-    const limitRaw = parseInt(searchParams.get("limit") || String(VIEWER_WORKSPACE_LIST_DEFAULT_PAGE_SIZE), 10);
-    const limit = Math.min(VIEWER_WORKSPACE_LIST_MAX_PAGE_SIZE, Math.max(1, Number.isFinite(limitRaw) ? limitRaw : VIEWER_WORKSPACE_LIST_DEFAULT_PAGE_SIZE));
-    const cursor = searchParams.get("cursor");
-
-    const result = await listViewerTeamWorkspaces({ uid, cursor, limit });
-    if (result.status !== "ok") {
-      const { status, body } = internalErrorResponse();
-      return NextResponse.json(body, { status });
-    }
-
-    return NextResponse.json({ ok: true, items: result.items, nextCursor: result.nextCursor, hasMore: result.hasMore }, { status: 200 });
-  }
-
-  // MODE B — not global/uid-canary admitted. Bounded (≤10) Workspace-canary
-  // discovery: a fully non-admitted caller and a caller who belongs to
-  // zero admitted Workspaces are byte-identically concealed as the SAME
-  // 503 this route has always returned for "not admitted" — a caller can
-  // never distinguish "no Workspace-canary list configured" from "list
-  // configured but I have no active membership in any of it."
-  const canaryResult = await listWorkspaceCanaryMembershipsForUid({ uid, canaryWorkspaceIdsRaw: TEAM_WORKSPACES_CANARY_WORKSPACE_IDS });
-  if (canaryResult.status !== "ok") {
+  const result = await listViewerTeamWorkspaces({ uid, cursor, limit });
+  if (result.status !== "ok") {
+    // A real infrastructure failure is never flattened into an empty list: a
+    // caller must not read "we could not look this up" as "you belong to
+    // nothing", which is what would silently hide a Workspace.
     const { status, body } = internalErrorResponse();
     return NextResponse.json(body, { status });
   }
-  if (canaryResult.items.length === 0) {
-    const { status, body } = teamWorkspacesDisabledResponse();
-    return NextResponse.json(body, { status });
-  }
 
-  // Bounded by construction (≤10 configured ids) — never paginate this
-  // branch, and never mix its cursor semantics with Mode A's.
-  return NextResponse.json({ ok: true, items: canaryResult.items, nextCursor: null, hasMore: false }, { status: 200 });
+  // Zero active memberships is a 200 with an empty list, NOT a 503. It
+  // discloses only the authenticated caller's own membership state, and
+  // "I belong to no Team Workspace" is not a secret from its own subject.
+  return NextResponse.json({ ok: true, items: result.items, nextCursor: result.nextCursor, hasMore: result.hasMore }, { status: 200 });
 }
 
 export async function POST(req: NextRequest) {
