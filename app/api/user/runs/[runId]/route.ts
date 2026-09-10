@@ -27,6 +27,32 @@ import { logger } from "@/lib/logger";
 type TeamAccessDenied = Extract<ResolveTeamRunWorkspaceAccessResult, { granted: false }>;
 
 /**
+ * PERSONAL-RESEARCH-URL-P0 — the one sanitized response for "a read this report
+ * REQUIRES could not be completed", as distinct from "the run is confirmed absent".
+ *
+ * The distinction is load-bearing because this endpoint is about to back a
+ * durable, bookmarkable report URL. Telling someone "Run not found" because
+ * Firestore was briefly unreachable invites them to conclude their research was
+ * deleted; a retryable error tells the truth. Confirmed absence stays a concealed
+ * 404 exactly as before.
+ *
+ * Deliberately LOCAL rather than importing `teamWorkspaceErrorResponse`'s
+ * `internalErrorResponse()`: that module is the Team-Workspace API's error
+ * vocabulary, and this route should not acquire a dependency on it merely to reuse
+ * one generic string. The shape and wording match the repository's established
+ * `internal_error` response, so clients see nothing new.
+ *
+ * Carries no Firestore error, error code, stack, Workspace id, owner uid or
+ * membership detail — a transient failure must not become a disclosure channel.
+ */
+function internalRunReadErrorResponse() {
+  return NextResponse.json(
+    { ok: false, errorCode: "internal_error", message: "Something went wrong. Please try again." },
+    { status: 500 }
+  );
+}
+
+/**
  * Team Shared Run Detail, Phase 8C-B3.1 — public status mapping for a
  * `non_personal_bound` run's Team authorization outcome. Deliberately a
  * LOCAL, route-specific mapping, not a reuse of B2's
@@ -89,14 +115,30 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
   const uid = uidOrRes;
 
   const { runId } = await context.params;
-  if (!runId?.trim() || !adminDb) {
+  // A blank/invalid run id is a confirmed non-existent address: concealed 404, unchanged.
+  if (!runId?.trim()) {
     return NextResponse.json(
       { ok: false, errorCode: "not_found", message: "Run not found." },
       { status: 404 }
     );
   }
+  // Firebase Admin unavailable is an AVAILABILITY failure, not evidence about this
+  // run; it was previously folded into the 404 above. Authentication has already
+  // happened, so an unauthenticated caller still cannot learn this.
+  if (!adminDb) {
+    logger.error("[user/runs/[runId]] run_read_unavailable", { runId, errorCategory: "firebase_admin_unavailable" });
+    return internalRunReadErrorResponse();
+  }
 
-  const snap = await adminDb.collection("runs").doc(runId).get();
+  // Only the REQUIRED run-document read is wrapped. A thrown lookup is not
+  // absence, and the caught error is never forwarded to the client.
+  let snap;
+  try {
+    snap = await adminDb.collection("runs").doc(runId).get();
+  } catch {
+    logger.error("[user/runs/[runId]] run_read_unavailable", { runId, errorCategory: "run_document_lookup_failed" });
+    return internalRunReadErrorResponse();
+  }
   if (!snap.exists) {
     return NextResponse.json(
       { ok: false, errorCode: "not_found", message: "Run not found." },
@@ -213,6 +255,21 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
     const integrity = await validateRunWorkspaceAssociation(data);
     if (integrity.classification === "invalid") {
       logger.warn("[user/runs/[runId]] workspace_run_integrity_failed", { runId, reason: integrity.reason });
+      // PERSONAL-RESEARCH-URL-P0 — `workspace_lookup_failed` is the integrity
+      // checker reporting that it COULD NOT COMPLETE the Personal Workspace
+      // lookup, not that the association is bad. Collapsing it into the concealed
+      // 404 told a bookmarked report it no longer existed.
+      //
+      // Every other reason here is a confirmed integrity failure
+      // (malformed_workspace_id, run_owner_invalid, deterministic_id_mismatch,
+      // workspace_not_found, workspace_malformed, workspace_wrong_type,
+      // workspace_owner_mismatch) or a deliberate policy state
+      // (workspaces_disabled), and each keeps its existing concealed-404 posture.
+      // Ordering is untouched: this still runs BEFORE any owner/reviewer grant, so
+      // an invalid association denies the owner exactly as it denies anyone else.
+      if (integrity.reason === "workspace_lookup_failed") {
+        return internalRunReadErrorResponse();
+      }
       return NextResponse.json(
         { ok: false, errorCode: "not_found", message: "Run not found." },
         { status: 404 }
