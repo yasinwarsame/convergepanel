@@ -256,10 +256,30 @@ describe("GET /api/user/runs/[runId] — Phase 4B: an INVALID bound run denies e
     expect(mockedGetWorkspace).not.toHaveBeenCalled();
   });
 
-  it("Workspace lookup throws -> denies the owner (fail closed on transient failure too)", async () => {
+  /**
+   * PERSONAL-RESEARCH-URL-P0 — this test's INTENT is unchanged and still the point:
+   * a transient Workspace-integrity failure must FAIL CLOSED for the true owner.
+   * It still does — no run data is returned.
+   *
+   * What changed is only the honesty of the status. This case is
+   * `workspace_lookup_failed`: the integrity lookup could not be COMPLETED, which
+   * is not evidence that the association is invalid. Reporting 404 "Run not found"
+   * for it told a durable, bookmarkable report URL that the research no longer
+   * existed. It is now a sanitized, retryable 500, asserted alongside the
+   * fail-closed property so the security intent cannot be lost in the rename.
+   *
+   * Every CONFIRMED integrity failure above still returns 404 — see the
+   * `workspace_not_found` / malformed / mismatch cases in this same suite.
+   */
+  it("Workspace lookup FAILS (could not complete) -> still fails closed for the owner, but as an honest retryable error rather than a false not-found", async () => {
     mockedGetWorkspace.mockResolvedValue({ status: "read_failed" });
     mockedRunGet.mockResolvedValue(runDoc({ workspaceId: BOUND_WORKSPACE_ID }));
-    const { res } = await callRouteAs(OWNER_UID);
-    expect(res.status).toBe(404);
+    const { res, json } = await callRouteAs(OWNER_UID);
+    expect(res.status).toBe(500);
+    expect(json.errorCode).toBe("internal_error");
+    // fail-closed: the owner is granted nothing
+    expect(json.ok).toBe(false);
+    expect(json.results).toBeUndefined();
+    expect(json.question).toBeUndefined();
   });
 });
