@@ -8,6 +8,8 @@
  * the entire reason this file exists.
  */
 
+import { readFileSync } from "fs";
+import { join } from "path";
 import { createElement } from "react";
 import TestRenderer, { act } from "react-test-renderer";
 
@@ -124,6 +126,45 @@ describe("useWorkspaceList — pagination", () => {
     await act(async () => {});
     expect(h.latest().items.map((i) => i.workspaceId)).toEqual(["ws_a", "ws_b", "ws_c"]);
     expect(h.latest().items[0].name).toBe("A"); // first occurrence wins
+  });
+
+  it("NO PAGE CEILING: a membership beyond 50 pages is still reachable — the server read model guarantees reachability through pagination and the client must not reintroduce a cap", async () => {
+    // 60 pages of 20 plus a final short page: 1201 memberships. A 50-page client
+    // bound would make everything past page 50 permanently unselectable, and
+    // retry() restarts at page one so partial_error offers no continuation.
+    const PAGES = 60;
+    for (let p = 0; p < PAGES; p++) {
+      const items = Array.from({ length: 20 }, (_, i) => ({ workspaceId: `ws_${p}_${i}`, name: `Workspace ${p}-${i}` }));
+      mockedFetchWorkspaceList.mockResolvedValueOnce(page(items, { hasMore: true, nextCursor: `c_${p}` }));
+    }
+    mockedFetchWorkspaceList.mockResolvedValueOnce(page([{ workspaceId: "ws_last", name: "The Final Workspace" }]));
+
+    const h = mountHook();
+    await act(async () => {});
+
+    expect(h.latest().status).toBe("ready");
+    expect(mockedFetchWorkspaceList).toHaveBeenCalledTimes(PAGES + 1);
+    expect(h.latest().items).toHaveLength(PAGES * 20 + 1);
+    // the one that a 50-page ceiling would have hidden
+    expect(h.latest().items.map((i) => i.workspaceId)).toContain("ws_last");
+    expect(h.latest().items[h.latest().items.length - 1]).toEqual({ workspaceId: "ws_last", name: "The Final Workspace" });
+  });
+
+  it("STRUCTURAL: the paging loop carries no numeric bound at all — a behavioural test can only prove 'no ceiling below my fixture size', never 'no ceiling'", () => {
+    // Deliberately a source assertion, and deliberately narrow. The test above
+    // proves 61 pages are reachable, but any finite fixture is satisfied by a
+    // ceiling just above it, so the reachability invariant
+    // (`listViewerTeamWorkspaces`: "no fixed cap silently truncates a uid's real
+    // membership set") needs the ABSENCE of a bound stated directly. This fails
+    // if anyone reintroduces one at any magnitude.
+    const source = readFileSync(join(__dirname, "..", "useWorkspaceList.ts"), "utf8");
+    const loop = source.slice(source.indexOf("for (;;)"), source.indexOf("cursor = nextCursor;"));
+    expect(source).toContain("for (;;) {");
+    expect(source).not.toMatch(/for \(let page\b/);
+    expect(source).not.toMatch(/MAX_PAGES/);
+    // no numeric comparison acting as a page bound inside the loop header or body
+    expect(loop).not.toMatch(/page\s*<\s*\d+/);
+    expect(loop).not.toMatch(/\bpage\+\+/);
   });
 
   it("partial failure keeps verified items and reports partial_error — never 'ready'", async () => {

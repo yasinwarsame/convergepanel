@@ -40,15 +40,6 @@ export interface UseWorkspaceListResult {
   retry: () => void;
 }
 
-/**
- * Hard bound on REQUESTS, deliberately not on memberships: it exists only so a
- * server that kept answering `hasMore: true` forever cannot spin the client. At
- * the current page size of 20 this still covers 1000 Workspaces, far beyond the
- * seat model, and exhausting it reports `partial_error` rather than pretending
- * the list is complete.
- */
-export const WORKSPACE_LIST_MAX_PAGES = 50;
-
 export function useWorkspaceList(): UseWorkspaceListResult {
   const { user, authReady } = useAuth();
   const [items, setItems] = useState<WorkspaceListItem[]>([]);
@@ -104,7 +95,23 @@ export function useWorkspaceList(): UseWorkspaceListResult {
       /** Keep what was actually verified; never present a truncated list as complete. */
       const degrade = () => settle(accumulated.length > 0 ? "partial_error" : "error");
 
-      for (let page = 0; page < WORKSPACE_LIST_MAX_PAGES; page++) {
+      /**
+       * NO PAGE CEILING. `listViewerTeamWorkspaces()` documents the invariant this
+       * loop has to preserve — "every Workspace is reachable through pagination,
+       * no fixed cap silently truncates a uid's real membership set" — and a
+       * client-side bound would reintroduce exactly the `.limit()` truncation the
+       * server read model was built to avoid, one order of magnitude higher.
+       *
+       * "N pages is surely enough" is not a reachability argument: a membership
+       * past the bound could never be selected, and `retry()` restarts from page
+       * one, so `partial_error` offers no continuation to it either.
+       *
+       * Termination comes from the cursor contract instead: the query orders by
+       * document id and the cursor strictly advances, so a finite membership set
+       * terminates. The two guards below stop the realistic malformed-pagination
+       * cases — `hasMore` with no cursor, and a cursor already consumed.
+       */
+      for (;;) {
         const result = await fetchWorkspaceList({
           user: userRef.current,
           authReady: true,
@@ -143,8 +150,6 @@ export function useWorkspaceList(): UseWorkspaceListResult {
         consumedCursors.add(nextCursor);
         cursor = nextCursor;
       }
-
-      degrade();
     })();
 
     return () => {

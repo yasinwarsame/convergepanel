@@ -210,10 +210,15 @@ export default function TopNav() {
 
         Mitigation, all of it responsive composition and no destination removed:
         the cap is lifted to 1840px only AT the desktop cutover, padding is
-        px-4 below sm, and the account name truncates. Measured fits: 320/375/
-        390/430 need 236px; 1024-1440 need 525px (hamburger composition); at the
-        1800px cutover the full row needs 1740px against an 1800px container —
-        60px slack, 100px at 1920px. */}
+        px-4 below sm, and the account name truncates.
+
+        Measured against the real compiled CSS, padding included (the container is
+        border-box with 24px each side, so the content area is the box minus 48px):
+          - 320/375/390/430 — hamburger composition, row needs 236px;
+          - 1024-1440       — hamburger composition, row needs 525px;
+          - 1800px container — content area 1752px, children 1687px, slack 65px;
+          - 1840px cap      — content area 1792px, children 1687px, slack 105px.
+        Zero child overlap and no scroll overflow at any of them. */}
       <div className="mx-auto flex h-full max-w-6xl items-center justify-between px-4 sm:px-6 min-[1800px]:max-w-[1840px]">
 
         {/* Logo + Workspace context. Grouped so the outer row keeps exactly the
