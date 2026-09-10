@@ -27,6 +27,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/AuthProvider";
 import { createGenerationGuard } from "@/lib/client/authGeneration";
 import ResultsDisplay from "@/components/ResultsDisplay";
@@ -34,6 +35,10 @@ import {
   adaptPersistedOutputToPanelPayload,
   adaptPersistedLegacyOutputToPanelPayload,
 } from "@/lib/user/adaptivePersistedOutputAdapter";
+import {
+  personalResearchFollowUpHref,
+  personalResearchVerifyClaimHref,
+} from "@/lib/user/personalResearchHref";
 import type { ModelResult, ModelId } from "@/lib/types";
 
 /**
@@ -48,12 +53,31 @@ import type { ModelResult, ModelId } from "@/lib/types";
  */
 const PERSONAL_VIEWER_ROLES = new Set(["owner", "personal_reviewer"]);
 
+/**
+ * The two roles the shared API issues for a TEAM-bound run. These are legitimate
+ * authorizations for a real artifact, so they get the concealed `unavailable`
+ * treatment — a Team report must stay indistinguishable from "no such report" on
+ * the Personal address.
+ *
+ * C1 §B: anything else — absent, null, a non-string, an unrecognised string — is
+ * NOT evidence about the run at all. The successful response contract always
+ * carries exactly one of the four roles, so its absence is a response-contract
+ * failure and is treated as `malformed`. The previous check only rejected a
+ * non-Personal STRING, so a 200 with no role at all rendered as a Personal report.
+ */
+const TEAM_VIEWER_ROLES = new Set(["team_member", "team_reviewer"]);
+
 type DetailState =
   | { kind: "loading" }
   /** 403/404/wrong-artifact — one indistinguishable treatment. */
   | { kind: "unavailable" }
   /** P0 500, or a transport failure: honest and retryable. */
   | { kind: "transient" }
+  /**
+   * C1 §C/§D — the client's token was rejected. NOT `unavailable`: a stale or
+   * revoked session says nothing about whether the report exists.
+   */
+  | { kind: "auth_error" }
   /** A success payload that cannot be represented honestly. */
   | { kind: "malformed" }
   | { kind: "in_progress"; question: string }
@@ -74,6 +98,7 @@ type ReadyPayload = {
 
 export default function PersonalResearchDetailShell({ runId }: { runId: string }) {
   const { user, authReady } = useAuth();
+  const router = useRouter();
   const [state, setState] = useState<DetailState>({ kind: "loading" });
   const [retryTick, setRetryTick] = useState(0);
 
@@ -110,20 +135,50 @@ export default function PersonalResearchDetailShell({ runId }: { runId: string }
     void (async () => {
       try {
         const { authedFetch } = await import("@/lib/client/authedFetch");
-        const res = await authedFetch(`/api/user/runs/${encodeURIComponent(runId)}`, {
-          user,
-          authReady,
-          method: "GET",
-          signal: controller.signal,
-        });
+        /**
+         * C1 §C — `authedFetch` retries token ACQUISITION failures; it does not
+         * retry an HTTP 401 from the server. So a stale or revoked ID token
+         * produced a 401 that this surface read as "unavailable" and reported as
+         * "deleted, or not yours" — a lie about the report's existence caused by
+         * the viewer's own session. One forced refresh, then an honest auth state.
+         */
+        const read = (forceTokenRefresh = false) =>
+          authedFetch(`/api/user/runs/${encodeURIComponent(runId)}`, {
+            user,
+            authReady,
+            method: "GET",
+            signal: controller.signal,
+            ...(forceTokenRefresh ? { forceTokenRefresh: true } : {}),
+          });
+
+        let res = await read();
         if (!owns()) return;
+
+        if (res.status === 401) {
+          if (!user) {
+            setState({ kind: "auth_error" });
+            return;
+          }
+          // Exactly one retry. Never a loop: a server that rejects a freshly
+          // minted token is telling us the session is finished.
+          res = await read(true);
+          // The refresh is an await of its own, so ownership is re-established
+          // here rather than trusted from before it — a retry that became stale
+          // (run A → B, or a uid change) commits nothing.
+          if (!owns()) return;
+          if (res.status === 401) {
+            setState({ kind: "auth_error" });
+            return;
+          }
+        }
 
         if (res.status === 500) {
           setState({ kind: "transient" });
           return;
         }
         if (!res.ok) {
-          // 401/403/404 alike: never distinguish "doesn't exist" from "not yours".
+          // 403/404 alike: never distinguish "doesn't exist" from "not yours".
+          // 401 was separated above and can no longer reach this branch.
           setState({ kind: "unavailable" });
           return;
         }
@@ -135,13 +190,32 @@ export default function PersonalResearchDetailShell({ runId }: { runId: string }
           return;
         }
 
-        // Route containment: a Team viewer role is not welcome on the Personal address.
-        if (typeof data.viewerRole === "string" && !PERSONAL_VIEWER_ROLES.has(data.viewerRole)) {
+        /**
+         * C1 §B — POSITIVE acceptance, not absence of refusal.
+         *
+         * Route containment first: a known Team role is a real artifact on the
+         * wrong address, so it gets the concealed treatment. Everything that is
+         * not one of the two Personal roles then fails CLOSED as malformed —
+         * including a missing or non-string role, which is an internal
+         * response-contract failure and not evidence about the run.
+         */
+        if (typeof data.viewerRole === "string" && TEAM_VIEWER_ROLES.has(data.viewerRole)) {
           setState({ kind: "unavailable" });
           return;
         }
-        // The response must describe the run that was asked for.
-        if (typeof data.runId === "string" && data.runId.length > 0 && data.runId !== runId) {
+        if (typeof data.viewerRole !== "string" || !PERSONAL_VIEWER_ROLES.has(data.viewerRole)) {
+          setState({ kind: "malformed" });
+          return;
+        }
+        /**
+         * C1 §A — the route id chooses WHAT TO REQUEST; the response id proves
+         * WHAT WAS RETURNED. A successful payload must therefore carry the run id
+         * itself, and it must be the one asked for. Previously a 200 with an
+         * absent/blank/non-string id was accepted and the route id was
+         * substituted into the payload — manufacturing response identity from the
+         * request, which is exactly what this check exists to prevent.
+         */
+        if (typeof data.runId !== "string" || data.runId.length === 0 || data.runId !== runId) {
           setState({ kind: "malformed" });
           return;
         }
@@ -197,7 +271,8 @@ export default function PersonalResearchDetailShell({ runId }: { runId: string }
         setState({
           kind: "ready",
           payload: {
-            runId: typeof data.runId === "string" && data.runId ? data.runId : runId,
+            // Proven above to be a nonempty string equal to the requested id.
+            runId: data.runId,
             question,
             results,
             adaptive,
@@ -224,6 +299,46 @@ export default function PersonalResearchDetailShell({ runId }: { runId: string }
     if (state.kind === "loading") return;
     setRetryTick((n) => n + 1);
   }, [state.kind]);
+
+  /**
+   * C1 §J/§N — "VERIFY THIS CLAIM", PRESERVED BY DELEGATION.
+   *
+   * History used to open saved research inside `/`, where this callback existed.
+   * URL-1 moved History to this canonical page — and this page passed no callback,
+   * while `DeepResearchView` rendered the button from `runId` + `claimId` alone.
+   * The affordance was therefore still visible and did nothing: a direct
+   * regression in the Evidence Workspace → Verify This Claim workflow.
+   *
+   * The fix is a hand-off, not a second pipeline. This navigates to the existing
+   * root origin-linked Verify flow with the two canonical selectors and nothing
+   * else; the user still submits the verification themselves, and
+   * `/api/verify-claim` remains the authority that resolves and validates the
+   * saved claim. A malformed pair produces no navigation at all rather than a
+   * partial target.
+   */
+  const handleVerifyClaim = useCallback(
+    (args: { runId: string; claimId: string }) => {
+      const href = personalResearchVerifyClaimHref(args);
+      if (!href) return;
+      router.push(href);
+    },
+    [router]
+  );
+
+  /**
+   * C1 §R — "Run follow-up" parity, by the same delegation. `?tab=research&q=`
+   * pre-fills the root composer and deliberately does not auto-run, so the
+   * follow-up keeps its existing "see it before you spend a run on it" semantics
+   * and this read surface gains no execution path.
+   */
+  const handleRunFollowUp = useCallback(
+    (followUpQuestion: string) => {
+      const href = personalResearchFollowUpHref(followUpQuestion);
+      if (!href) return;
+      router.push(href);
+    },
+    [router]
+  );
 
   return (
     <main className="mx-auto max-w-4xl px-4 py-10 sm:py-14">
@@ -264,6 +379,22 @@ export default function PersonalResearchDetailShell({ runId }: { runId: string }
           >
             Try again
           </button>
+        </section>
+      )}
+
+      {state.kind === "auth_error" && (
+        <section role="alert" className="mt-6 rounded-xl border-2 border-cp-border bg-cp-raised p-6">
+          <h1 className="text-xl font-semibold text-cp-text">We couldn&apos;t verify your session</h1>
+          <p className="mt-2 text-sm text-cp-muted">
+            Your sign-in could not be confirmed, so we didn&apos;t load this report. This says nothing
+            about the report itself — please sign in again and reopen this page.
+          </p>
+          <Link
+            href="/login"
+            className="mt-4 inline-block rounded-lg bg-cp-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent"
+          >
+            Sign in again
+          </Link>
         </section>
       )}
 
@@ -326,6 +457,14 @@ export default function PersonalResearchDetailShell({ runId }: { runId: string }
               readOnlyActions
               onRerun={() => {}}
               onAddModel={() => {}}
+              /*
+                C1 §J/§N/§R — read-only refers to DIRECT research execution. These
+                two actions execute nothing here: they hand off to the established
+                root flows, which is what keeps the durable report from being a
+                weaker version of the saved-research experience.
+              */
+              onVerifyClaim={handleVerifyClaim}
+              onRunFollowUp={handleRunFollowUp}
             />
           </div>
         </>

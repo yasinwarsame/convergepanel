@@ -3,7 +3,12 @@
  * Fully real: no mocks, no transcription.
  */
 
-import { personalResearchHref, isCanonicalPersonalRunId } from "@/lib/user/personalResearchHref";
+import {
+  personalResearchHref,
+  isCanonicalPersonalRunId,
+  personalResearchVerifyClaimHref,
+  personalResearchFollowUpHref,
+} from "@/lib/user/personalResearchHref";
 
 describe("personalResearchHref", () => {
   it("builds the frozen canonical shape", () => {
@@ -58,4 +63,95 @@ describe("isCanonicalPersonalRunId", () => {
       expect(isCanonicalPersonalRunId(bad as unknown)).toBe(false);
     }
   });
+});
+
+/**
+ * PERSONAL-RESEARCH-URL-1-C1 §K/§P — THE ORIGIN-LINKED HAND-OFF CONTRACT.
+ *
+ * A URL is visible, editable and shareable, so what travels in it must be
+ * something the server re-validates from scratch. These builders may carry
+ * SELECTORS only: the run id and the server-issued claim id, nothing else.
+ */
+describe("personalResearchVerifyClaimHref — selectors only (C1 §K)", () => {
+  it("carries exactly tab, originRunId and originClaimId", () => {
+    const href = personalResearchVerifyClaimHref({ runId: "run-A", claimId: "claim-B" });
+    expect(href).toBe("/?tab=verify&originRunId=run-A&originClaimId=claim-B");
+    const params = new URLSearchParams(href!.slice(href!.indexOf("?") + 1));
+    expect([...params.keys()].sort()).toEqual(["originClaimId", "originRunId", "tab"]);
+    expect(params.get("tab")).toBe("verify");
+    expect(params.get("originRunId")).toBe("run-A");
+    expect(params.get("originClaimId")).toBe("claim-B");
+  });
+
+  it("carries NO claim text, project, workspace or uid, whatever is passed alongside", () => {
+    const href = personalResearchVerifyClaimHref({
+      runId: "run-A",
+      claimId: "claim-B",
+      // deliberately passed: extra properties must be structurally impossible to emit
+      ...({ claimText: "Remote work reduces productivity", projectId: "proj-1", workspaceId: "ws-1", uid: "uid-1" } as never),
+    });
+    expect(href).toBe("/?tab=verify&originRunId=run-A&originClaimId=claim-B");
+    for (const leak of ["Remote work", "claimText", "proj-1", "projectId", "ws-1", "workspaceId", "uid-1"]) {
+      expect(href).not.toContain(leak);
+    }
+  });
+
+  it("percent-encodes both selectors so neither can inject another parameter", () => {
+    const href = personalResearchVerifyClaimHref({
+      runId: "run A&tab=research",
+      claimId: "v1:findings:0:a/b+c",
+    });
+    const q = new URLSearchParams(href!.slice(href!.indexOf("?") + 1));
+    expect(q.get("originRunId")).toBe("run A&tab=research");
+    expect(q.get("originClaimId")).toBe("v1:findings:0:a/b+c");
+    // one tab parameter, still "verify": the injected one did not survive encoding
+    expect(q.getAll("tab")).toEqual(["verify"]);
+  });
+
+  it.each([
+    ["both blank", "", ""],
+    ["blank claimId", "run-A", ""],
+    ["whitespace claimId", "run-A", "   "],
+    ["blank runId", "", "claim-B"],
+    ["whitespace runId", "  ", "claim-B"],
+  ])("returns null for %s — half a selector pair is NO target, not a weaker one", (_l, runId, claimId) => {
+    expect(personalResearchVerifyClaimHref({ runId, claimId })).toBeNull();
+  });
+
+  it.each([
+    ["undefined", undefined],
+    ["null", null],
+    ["a number", 7],
+    ["an object", { id: "x" }],
+  ])("returns null when a selector is %s", (_l, bad) => {
+    expect(personalResearchVerifyClaimHref({ runId: bad, claimId: "claim-B" })).toBeNull();
+    expect(personalResearchVerifyClaimHref({ runId: "run-A", claimId: bad })).toBeNull();
+  });
+
+  it("trims the selectors rather than emitting padded ids", () => {
+    expect(personalResearchVerifyClaimHref({ runId: " run-A ", claimId: " claim-B " }))
+      .toBe("/?tab=verify&originRunId=run-A&originClaimId=claim-B");
+  });
+});
+
+describe("personalResearchFollowUpHref — pre-fill only (C1 §R)", () => {
+  it("uses the existing root composer contract", () => {
+    expect(personalResearchFollowUpHref("What did the replication find?"))
+      .toBe("/?tab=research&q=What%20did%20the%20replication%20find%3F");
+  });
+
+  it("encodes a question containing a bare percent, an ampersand and a hash", () => {
+    const href = personalResearchFollowUpHref("50% of cases & #1 driver?")!;
+    const q = new URLSearchParams(href.slice(href.indexOf("?") + 1));
+    expect(q.get("q")).toBe("50% of cases & #1 driver?");
+    expect(q.get("tab")).toBe("research");
+    expect([...q.keys()].sort()).toEqual(["q", "tab"]);
+  });
+
+  it.each([["empty", ""], ["whitespace", "   "], ["null", null], ["a number", 5]])(
+    "returns null for %s",
+    (_l, bad) => {
+      expect(personalResearchFollowUpHref(bad)).toBeNull();
+    }
+  );
 });

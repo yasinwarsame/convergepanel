@@ -42,3 +42,47 @@ export function isCanonicalPersonalRunId(runId: unknown): runId is string {
   if (/^r-\d+$/.test(trimmed)) return false;
   return true;
 }
+
+/**
+ * PERSONAL-RESEARCH-URL-1-C1 §K — THE ORIGIN-LINKED VERIFY-CLAIM HANDOFF.
+ *
+ * The canonical report must keep "Verify this claim", and the canonical report is
+ * a read surface: it may not own a second claim-verification pipeline. So the
+ * affordance hands off to the ESTABLISHED root flow — the same
+ * `originLinkedTarget` state `handleVerifyClaimFromFindingClick` enters, whose
+ * submission `/api/verify-claim` already resolves and authorizes.
+ *
+ * THE QUERY CARRIES SELECTORS, NEVER AUTHORIZATION OR CONTENT. Exactly two
+ * values: the run id and the server-issued claim id. No claim text (the server
+ * owns the authoritative text — a client-supplied one would be a claim the user
+ * could edit into something the finding never said), no Project id, no Workspace
+ * id, no owner uid, no origin object. A URL is visible, shareable and editable, so
+ * anything placed in it must be something the server re-validates from scratch.
+ *
+ * Returns `null` rather than a partial address when either selector is missing:
+ * half a selector pair must never become an origin-linked target.
+ */
+export function personalResearchVerifyClaimHref(args: {
+  runId: unknown;
+  claimId: unknown;
+}): string | null {
+  const runId = typeof args.runId === "string" ? args.runId.trim() : "";
+  const claimId = typeof args.claimId === "string" ? args.claimId.trim() : "";
+  if (runId.length === 0 || claimId.length === 0) return null;
+  return `/?tab=verify&originRunId=${encodeURIComponent(runId)}&originClaimId=${encodeURIComponent(claimId)}`;
+}
+
+/**
+ * §R — the "Run follow-up" handoff.
+ *
+ * The root already supports `?tab=research&q=...`, which PRE-FILLS the composer
+ * and deliberately does not auto-run: the user should see and confirm a question
+ * before spending a run on it. The canonical report reuses that exact contract
+ * instead of gaining any execution ability of its own.
+ */
+export function personalResearchFollowUpHref(question: unknown): string | null {
+  if (typeof question !== "string") return null;
+  const trimmed = question.trim();
+  if (trimmed.length === 0) return null;
+  return `/?tab=research&q=${encodeURIComponent(trimmed)}`;
+}

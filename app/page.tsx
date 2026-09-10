@@ -87,6 +87,25 @@ const ResultsDisplay = dynamic(() => import("@/components/ResultsDisplay"), {
  */
 type RunStatus = "idle" | "running" | "complete" | "error";
 
+/**
+ * PERSONAL-RESEARCH-URL-1-C1 §I — tolerant decode for the `?tab=` extension flow.
+ *
+ * `URLSearchParams.get()` already percent-decodes, and these call sites then
+ * decoded a SECOND time. That was harmless for the values the extension happened
+ * to send, but `decodeURIComponent` THROWS on a bare `%` — so a question like
+ * "50% of x", which the new canonical follow-up hand-off can legitimately produce,
+ * would raise a URIError inside a mount effect. The double decode is kept for
+ * backward compatibility with already-encoded legacy links; it just can no longer
+ * throw, and falls back to the value the URL actually carried.
+ */
+function decodeQueryValueTolerantly(raw: string): string {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
+
 const HISTORY_STORAGE_KEY = "convergePanelHistoryV1";
 const MAX_CLAIM_CHARS = 2000;
 const HISTORY_PAGE_SIZE = 30;
@@ -335,21 +354,6 @@ export default function Home() {
     researchLoadGuard.next();
   }, [researchLoadGuard]);
 
-  /**
-   * §H — the tabs are user navigation. They previously called `setPanelTab`
-   * directly, so a user could leave Research with a run still in flight without
-   * advancing any generation. Routed through here instead.
-   *
-   * Re-selecting the already-active Research tab is not "leaving", so it does not
-   * invalidate a run the user is waiting for.
-   */
-  const selectPanelTab = useCallback(
-    (nextTab: "research" | "verify" | "video" | "history") => {
-      if (nextTab !== "research") invalidateResearchIntent();
-      setPanelTab(nextTab);
-    },
-    [invalidateResearchIntent]
-  );
   const { user, loading: authLoading, authReady } = useAuth();
   
   // Track auth resolution
@@ -505,6 +509,59 @@ export default function Home() {
   const [modelStatuses, setModelStatuses] = useState<
     Record<ModelId, "queued" | "thinking" | ModelStatus>
   >({} as Record<ModelId, "queued" | "thinking" | ModelStatus>);
+
+  /**
+   * PERSONAL-RESEARCH-URL-1-C1 §E — mirrors `runStatus` for SYNCHRONOUS reads.
+   *
+   * The superseding helper below runs inside an event handler and has to decide,
+   * at that instant, whether there is an actively running execution to release.
+   * Reading the state variable through a closure would mean deciding from whatever
+   * value that particular render captured.
+   */
+  const runStatusRef = useRef<RunStatus>("idle");
+  useEffect(() => {
+    runStatusRef.current = runStatus;
+  }, [runStatus]);
+
+  /**
+   * §E — NEWER INTENT, PLUS RELEASE OF THE ABANDONED LOCAL EXECUTION.
+   *
+   * A1 made leaving Research strip a pending run's authority, which correctly
+   * stops a late completion from committing or redirecting. But it left
+   * `runStatus === "running"`, and `panelBusy` is derived directly from that: the
+   * abandoned run was no longer ALLOWED to settle it, so returning to Research
+   * found the composer permanently busy and unable to start anything.
+   *
+   * So the two halves belong together. This releases only the LOCAL presentation
+   * of an actively running execution:
+   *   - a COMPLETE report is never erased — switching tabs is not a reason to lose
+   *     results the user already has;
+   *   - no error is fabricated: nothing failed, the user simply moved on;
+   *   - the server-side run is neither cancelled nor mutated. It finishes and
+   *     persists, and History (now addressable) is how the user finds it.
+   */
+  const supersedeRunningResearch = useCallback(() => {
+    invalidateResearchIntent();
+    if (runStatusRef.current !== "running") return;
+    setRunStatus("idle");
+    setModelStatuses({} as Record<ModelId, "queued" | "thinking" | ModelStatus>);
+  }, [invalidateResearchIntent]);
+
+  /**
+   * §H — the tabs are user navigation. They previously called `setPanelTab`
+   * directly, so a user could leave Research with a run still in flight without
+   * advancing any generation. Routed through here instead.
+   *
+   * Re-selecting the already-active Research tab is not "leaving", so it neither
+   * invalidates nor releases a run the user is waiting for.
+   */
+  const selectPanelTab = useCallback(
+    (nextTab: "research" | "verify" | "video" | "history") => {
+      if (nextTab !== "research") supersedeRunningResearch();
+      setPanelTab(nextTab);
+    },
+    [supersedeRunningResearch]
+  );
   
   // Raw results from each model (after panel completes)
   const [results, setResults] = useState<ModelResult[]>([]);
@@ -1203,38 +1260,13 @@ export default function Home() {
         ].slice(0, MAX_HISTORY_LOCAL_STORAGE)
       );
 
-      // Refresh usage data after successful run
-      await refreshUsage();
-
-      /**
-       * §F/§T — CANONICAL ADDRESS FOR THE NEW RUN.
-       *
-       * `replace`, not `push`: the composer submission and the report it produced
-       * are one interaction, so Back should return to wherever the user came from
-       * rather than to a stale composer entry that would invite an accidental rerun.
-       *
-       * Placed after the success state and the history/usage bookkeeping above, so a
-       * normal completion is fully settled before the address changes. `refreshUsage`
-       * is an await, so ownership is re-checked HERE rather than trusted from the
-       * boundary before it — "it was current before refreshUsage()" is not evidence
-       * that it still is.
-       *
-       * Only a real persisted server id may become an address:
-       * `isCanonicalPersonalRunId` rejects the optimistic `r-${Date.now()}`
-       * placeholder used for local history, which would otherwise mint a permanent
-       * URL resolving to nothing.
-       */
-      if (isCanonicalPersonalRunId(data.runId) && stillOwnsResearchIntent()) {
-        router.replace(personalResearchHref(data.runId));
-      }
-
       // Track analytics event
       trackEvent("panel_run", {
         models: selectedModels,
         plan: plan || "unknown",
         questionLength: question.trim().length,
       });
-      
+
       // AUTO-GENERATE SYNTHESIS: Start synthesis generation in background immediately after panel completes
       // This ensures synthesis is ready when user clicks "Generate Synthesis" button
       // Only auto-generate if we have >=2 successful results and a runId
@@ -1245,11 +1277,47 @@ export default function Home() {
       // claims-matrix synthesis; see docs/governance-decision-receipts-design.md
       // §14.4/§16). The server (/api/synthesize-panel) now also rejects
       // this defensively, independent of this client guard.
+      //
+      // C1 §V — kicked off BEFORE the canonical navigation, because it must start
+      // from this completed run regardless of where the user ends up. It is
+      // fire-and-forget: its own state writes land in whatever tree still exists.
       if (data.runId && successfulCount >= 2 && !(data as any).adaptive) {
         // Trigger synthesis generation in background (non-blocking)
         // Use void to explicitly ignore the promise - we don't want to block or handle errors here
         void generateSynthesisAutomatically(data.runId, question, data.results, synthesizedReport);
       }
+
+      /**
+       * §F/§T — CANONICAL ADDRESS FOR THE NEW RUN.
+       *
+       * `replace`, not `push`: the composer submission and the report it produced
+       * are one interaction, so Back should return to wherever the user came from
+       * rather than to a stale composer entry that would invite an accidental rerun.
+       *
+       * C1 §V — ATOMIC WITH COMPLETION. This used to sit after
+       * `await refreshUsage()`, which yielded control to the browser at the worst
+       * possible moment: the finished report was already interactive, so the user
+       * could express a brand-new intent in that window and then be navigated away
+       * from it by the very run they had just watched finish. Guarding individual
+       * controls would be a game of enumeration; removing the window is not.
+       *
+       * There is therefore NO `await` between this ownership check and the
+       * navigation — the check and the address change are one synchronous step —
+       * and non-navigation bookkeeping (usage) moves below.
+       *
+       * Only a real persisted server id may become an address:
+       * `isCanonicalPersonalRunId` rejects the optimistic `r-${Date.now()}`
+       * placeholder used for local history, which would otherwise mint a permanent
+       * URL resolving to nothing.
+       */
+      if (isCanonicalPersonalRunId(data.runId) && stillOwnsResearchIntent()) {
+        router.replace(personalResearchHref(data.runId));
+      }
+
+      // Refresh usage data after successful run. Deliberately LAST: usage is
+      // bookkeeping, and the address must not wait on it (C1 §V). The call itself
+      // is unchanged, so usage-refresh semantics are preserved.
+      await refreshUsage();
     } catch (err: any) {
       // Handle any unexpected errors during execution
       // This catch block should rarely be hit now since we handle most errors above without throwing
@@ -2082,11 +2150,18 @@ export default function Home() {
        * deliberately NOT called first — the canonical route owns the authenticated
        * read, and reading here too would double-fetch.
        */
-      invalidateResearchIntent();
+      // C1 §E — and the abandoned run is RELEASED as well as invalidated, under
+      // the one rule every newer-intent path now follows.
+      supersedeRunningResearch();
       router.push(personalResearchHref(item.id));
       return;
     }
     if (item.type === "video_verification") {
+      // C1 §G/§H — a video artifact becoming the displayed surface is newer
+      // intent, whichever entry point got here (the History list, or the
+      // `?openVideoVerification=` deep link). Declared here rather than in each
+      // caller so no future caller can forget it.
+      supersedeRunningResearch();
       setPanelTab("video");
       setVerificationPayload(null);
       setViewingHistoryRunId(null);
@@ -2124,6 +2199,8 @@ export default function Home() {
       }
       return;
     }
+    // C1 §G/§H — same for a saved claim verification.
+    supersedeRunningResearch();
     setPanelTab("verify");
     setVideoVerificationPayload(null);
     setViewingHistoryRunId(null);
@@ -2176,6 +2253,33 @@ export default function Home() {
 
   openHistoryItemRef.current = openHistoryItem;
 
+  /**
+   * PERSONAL-RESEARCH-URL-1-C1 §M — THE ONE origin-linked Verify-Claim state
+   * transition, shared by the two entry points that can reach it: a "Verify this
+   * claim" click on a finding rendered in this page, and the canonical report's
+   * `?tab=verify&originRunId=&originClaimId=` hand-off. Two subtly different
+   * copies of this transition is exactly how one entry point ends up carrying a
+   * stale verification payload or a leftover free-text claim.
+   *
+   * It owns the STATE TRANSITION only. It never executes a verification: no
+   * `/api/verify-claim` call, no model run. The user still submits.
+   */
+  const enterOriginLinkedVerifyClaimMode = useCallback(
+    (target: { runId: string; claimId: string }) => {
+      // §G — entering Verify is newer intent than a Research run still in flight.
+      supersedeRunningResearch();
+      setOriginLinkedTarget({ runId: target.runId, claimId: target.claimId });
+      setVerificationPayload(null);
+      setError(null);
+      setErrorCode(null);
+      // Origin-linked mode verifies the SAVED claim the server resolves; a
+      // leftover free-text claim would be a second, contradictory subject.
+      setClaimInput("");
+      setPanelTab("verify");
+    },
+    [supersedeRunningResearch]
+  );
+
   useEffect(() => {
     if (!authReady || !user) return;
     const params = new URLSearchParams(window.location.search);
@@ -2209,7 +2313,9 @@ export default function Home() {
      * and keep their existing load-then-`replace("/")` behaviour.
      */
     if (r) {
-      invalidateResearchIntent();
+      // C1 §G — release as well as invalidate: this navigates away from the
+      // composer, so a run still in flight must not leave it busy forever.
+      supersedeRunningResearch();
       router.replace(personalResearchHref(r), { scroll: false });
       return;
     }
@@ -2231,7 +2337,7 @@ export default function Home() {
       });
     }
     router.replace("/", { scroll: false });
-  }, [authReady, user, router]);
+  }, [authReady, user, router, supersedeRunningResearch]);
 
   // Handle ?tab=verify&claim=... or ?tab=research&q=... from /verify page (extension flow)
   useEffect(() => {
@@ -2239,17 +2345,46 @@ export default function Home() {
     const params = new URLSearchParams(window.location.search);
     const tab = params.get("tab");
     if (tab === "verify") {
+      /**
+       * C1 §L — THE CANONICAL REPORT'S ORIGIN-LINKED HAND-OFF.
+       *
+       * Both selectors, or neither. A partial pair is not a weaker target, it is
+       * no target: constructing one from half the information would verify a
+       * claim nobody selected. The pair is treated as a SELECTOR only —
+       * `/api/verify-claim` still resolves and authorizes the saved claim, and no
+       * claim text, Project or Workspace id travels in the URL.
+       */
+      const originRunId = params.get("originRunId");
+      const originClaimId = params.get("originClaimId");
+      if (originRunId?.trim() && originClaimId?.trim()) {
+        enterOriginLinkedVerifyClaimMode({
+          runId: originRunId.trim(),
+          claimId: originClaimId.trim(),
+        });
+        // The hand-off URL is temporary scaffolding, not an address worth keeping.
+        router.replace("/", { scroll: false });
+        return;
+      }
+      // C1 §G/§I — explicit newer intent: an earlier Research run must not
+      // redirect over the Verify surface the user was just sent to.
+      supersedeRunningResearch();
       setPanelTab("verify");
       const claim = params.get("claim");
-      if (claim) setClaimInput(decodeURIComponent(claim));
+      if (claim) setClaimInput(decodeQueryValueTolerantly(claim));
       router.replace("/", { scroll: false });
     } else if (tab === "research") {
+      /**
+       * C1 §I — a pre-filled composer is a NEW question. The user stays on
+       * Research, so this is not a tab change, but an earlier run's completion
+       * must not overwrite this question or navigate to its own report.
+       */
+      supersedeRunningResearch();
       setPanelTab("research");
       const q = params.get("q");
-      if (q) setQuestion(decodeURIComponent(q));
+      if (q) setQuestion(decodeQueryValueTolerantly(q));
       router.replace("/", { scroll: false });
     }
-  }, [authReady, user, router]);
+  }, [authReady, user, router, enterOriginLinkedVerifyClaimMode, supersedeRunningResearch]);
 
   /**
    * Phase 11A.6 — exact-finding-match detection for the reloaded source
@@ -2285,6 +2420,9 @@ export default function Home() {
    * see and confirm the question before spending a panel run on it.
    */
   const handleRunFollowUp = (followUpQuestion: string) => {
+    // C1 §G — a follow-up question is a newer composer intent: an earlier run's
+    // completion must not navigate away from the question being composed.
+    supersedeRunningResearch();
     setQuestion(followUpQuestion);
     const el = document.getElementById("question");
     el?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -2298,12 +2436,9 @@ export default function Home() {
    * sent to the server (see handleVerifyClaimFromFinding).
    */
   const handleVerifyClaimFromFindingClick = (args: { runId: string; claimId: string }) => {
-    setOriginLinkedTarget({ runId: args.runId, claimId: args.claimId });
-    setVerificationPayload(null);
-    setError(null);
-    setErrorCode(null);
-    setClaimInput("");
-    setPanelTab("verify");
+    // C1 §M — the shared transition owns every piece of this state change; this
+    // entry point adds only its own scroll affordance.
+    enterOriginLinkedVerifyClaimMode({ runId: args.runId, claimId: args.claimId });
     if (typeof window !== "undefined") {
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
