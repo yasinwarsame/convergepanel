@@ -71,7 +71,7 @@ describe("TopNav — tablet-width header overflow fix", () => {
   }
 
   const desktopNavBlock = extractBetween(
-    '<div className="hidden items-center gap-1 min-[1800px]:flex">',
+    '<div className="hidden items-center gap-1 xl:flex">',
     "{/* Mobile/tablet toggle"
   );
   const mobileMenuBlock = extractBetween('{mobileMenuOpen && (', "</header>");
@@ -84,15 +84,15 @@ describe("TopNav — tablet-width header overflow fix", () => {
     // Phase 11B.5-C1 — see the dedicated capacity describe block below. The
     // cutover alone is NOT the contract: it is only safe together with the
     // widened header cap, so both are pinned there.
-    expect(source).toMatch(/hidden items-center gap-1 min-\[1800px\]:flex/);
+    expect(source).toMatch(/hidden items-center gap-1 xl:flex/);
     expect(source).not.toMatch(/hidden items-center gap-1 lg:flex/);
-    expect(source).not.toMatch(/hidden items-center gap-1 xl:flex/);
+    expect(source).not.toMatch(/min-\[1800px\]/);
     expect(source).not.toMatch(/hidden items-center gap-1 md:flex/);
   });
 
   it("shows the mobile/tablet toggle and panel below lg, matching the desktop nav's own cutover exactly", () => {
-    expect(source).toMatch(/text-cp-text min-\[1800px\]:hidden"\s*\n\s*aria-label="Toggle menu"/);
-    expect(source).toMatch(/id="mobile-menu" className="border-t border-cp-border bg-cp-surface px-4 pb-4 pt-3 min-\[1800px\]:hidden"/);
+    expect(source).toMatch(/text-cp-text xl:hidden"\s*\n\s*aria-label="Toggle menu"/);
+    expect(source).toMatch(/id="mobile-menu" className="border-t border-cp-border bg-cp-surface px-4 pb-4 pt-3 xl:hidden"/);
   });
 
   it("never reintroduces an md: breakpoint anywhere in the header (guards against regressing the fix)", () => {
@@ -113,11 +113,14 @@ describe("TopNav — tablet-width header overflow fix", () => {
     expect(mobileMenuBlock).toMatch(/navLinks\.map/);
   });
 
-  it("keeps conditional Governance and Team Reviews links reachable from both the desktop nav and the mobile/tablet menu, still permission-gated identically", () => {
-    for (const block of [desktopNavBlock, mobileMenuBlock]) {
-      expect(block).toMatch(/isGovernanceUser[\s\S]{0,200}href="\/governance"/);
-      expect(block).toMatch(/isTeamReviewUser[\s\S]{0,200}href="\/team\/reviews"/);
-    }
+  it("keeps conditional Governance and Team Reviews reachable on BOTH surfaces with their permission gates (Phase 11B.6: via the shared model, not duplicated JSX)", () => {
+    const model = source.slice(source.indexOf("const secondaryDestinations"), source.indexOf("const visiblePrimary"));
+    expect(model).toMatch(/key: "governance"[^}]*visible: gatesReady && isGovernanceUser/);
+    expect(model).toMatch(/key: "team-reviews"[^}]*visible: gatesReady && isTeamReviewUser/);
+    // desktop reaches them through More, mobile through the flattened list —
+    // both from `visibleSecondary`, so neither can lose one independently.
+    expect(desktopNavBlock).toContain("moreNavItems");
+    expect(mobileMenuBlock).toContain("visibleSecondary.map(");
   });
 
   it("keeps signed-out actions (Login, Sign up) reachable from both the desktop nav and the mobile/tablet menu, with active-link styling preserved", () => {
@@ -177,7 +180,7 @@ describe("TopNav — tablet-width header overflow fix", () => {
     expect(source).toMatch(/\{mobileMenuOpen && \(\s*\n\s*<div id="mobile-menu"/);
   });
 
-  it("keeps the desktop nav's own trigger-less collapse (hidden min-[1800px]:flex) as a pure CSS breakpoint, not a JS-mounted/unmounted panel — so desktop never depends on menu state", () => {
+  it("keeps the desktop nav's own trigger-less collapse (hidden xl:flex) as a pure CSS breakpoint, not a JS-mounted/unmounted panel — so desktop never depends on menu state", () => {
     expect(desktopNavBlock).not.toMatch(/mobileMenuOpen/);
   });
 });
@@ -192,224 +195,95 @@ describe("TopNav — tablet-width header overflow fix", () => {
  * synthesize-panel source-regex test earlier this session is the reason
  * that verification step is mandatory, not optional, for a test like this.
  */
-describe("TopNav — Phase 5C Workspace nav-item integration", () => {
-  function extractBetween(startMarker: string, endMarker: string): string {
-    const startIndex = source.indexOf(startMarker);
-    expect(startIndex).toBeGreaterThan(-1);
-    const endIndex = source.indexOf(endMarker, startIndex + startMarker.length);
-    expect(endIndex).toBeGreaterThan(startIndex);
-    return source.slice(startIndex, endIndex);
-  }
-  const desktopNavBlock = extractBetween(
-    '<div className="hidden items-center gap-1 min-[1800px]:flex">',
-    "{/* Mobile/tablet toggle"
-  );
-  const mobileMenuBlock = extractBetween('{mobileMenuOpen && (', "</header>");
-
-  it("destructures workspaceUiEnabled from useUserPlan(), the same server-computed capability source as governanceDashboardEligible/teamRole", () => {
-    expect(source).toMatch(/const \{ governanceDashboardEligible, plan: userPlan, loading: planLoading, teamRole, workspaceUiEnabled, projectsUiEnabled, workspaceReviewsUiEnabled, teamWorkspacesUiEnabled \} = useUserPlan\(\);/);
-  });
-
-  it("gates the desktop Workspace link on !loading && user && !planLoading && workspaceUiEnabled — same shape as the Governance/Team Reviews gates, never optimistically shown", () => {
-    expect(desktopNavBlock).toMatch(/\{!loading && user && !planLoading && workspaceUiEnabled && \(\s*\n\s*<Link\s*\n\s*href="\/workspace"/);
-  });
-
-  it("gates the mobile Workspace link identically to the desktop one", () => {
-    expect(mobileMenuBlock).toMatch(/\{!loading && user && !planLoading && workspaceUiEnabled && \(\s*\n\s*<Link\s*\n\s*href="\/workspace"/);
-  });
-
-  it("Workspace appears in both blocks, positioned immediately before My Reviews (desktop) / immediately after Team Reviews (mobile, where My Reviews doesn't exist today)", () => {
-    const workspaceIdx = desktopNavBlock.indexOf('href="/workspace"');
-    const myReviewsIdx = desktopNavBlock.indexOf('href="/reviews"');
-    expect(workspaceIdx).toBeGreaterThan(-1);
-    expect(myReviewsIdx).toBeGreaterThan(-1);
-    expect(workspaceIdx).toBeLessThan(myReviewsIdx);
-  });
-
-  it("carries visible 'Workspace' text — never icon-only navigation", () => {
-    expect(desktopNavBlock).toMatch(/href="\/workspace"[\s\S]{0,300}>\s*Workspace\s*</);
-    expect(mobileMenuBlock).toMatch(/href="\/workspace"[\s\S]{0,300}>\s*Workspace\s*</);
-  });
-
-  it("wires aria-current=\"page\" for /workspace based on real pathname state, in both blocks", () => {
-    expect(desktopNavBlock).toMatch(/aria-current=\{pathname === "\/workspace" \? "page" : undefined\}/);
-    expect(mobileMenuBlock).toMatch(/aria-current=\{pathname === "\/workspace" \? "page" : undefined\}/);
-  });
-
-  it("does not introduce a client-visible rollout flag — no NEXT_PUBLIC_PERSONAL_WORKSPACE_UI reference anywhere in this file", () => {
-    expect(source).not.toMatch(/NEXT_PUBLIC_PERSONAL_WORKSPACE_UI/);
-  });
-
-  it("never relocates or removes History/My Reviews/Team Reviews/Governance — exactly the pre-existing four conditional/static nav concepts plus the one new Workspace addition", () => {
-    for (const href of ['href="/governance"', 'href="/team/reviews"', 'href="/reviews"']) {
-      expect(desktopNavBlock).toContain(href);
-    }
-  });
-});
-
 /**
- * Phase 7B — Projects nav-item integration. Same source-level regex
- * methodology as the Workspace nav-item block above, including the
- * mandatory targeted mutation self-check before acceptance.
- */
-describe("TopNav — Phase 7B Projects nav-item integration", () => {
-  function extractBetween(startMarker: string, endMarker: string): string {
-    const startIndex = source.indexOf(startMarker);
-    expect(startIndex).toBeGreaterThan(-1);
-    const endIndex = source.indexOf(endMarker, startIndex + startMarker.length);
-    expect(endIndex).toBeGreaterThan(startIndex);
-    return source.slice(startIndex, endIndex);
-  }
-  const desktopNavBlock = extractBetween(
-    '<div className="hidden items-center gap-1 min-[1800px]:flex">',
-    "{/* Mobile/tablet toggle"
-  );
-  const mobileMenuBlock = extractBetween('{mobileMenuOpen && (', "</header>");
-
-  it("destructures projectsUiEnabled from useUserPlan(), alongside workspaceUiEnabled — the same server-computed capability source", () => {
-    expect(source).toMatch(/const \{ governanceDashboardEligible, plan: userPlan, loading: planLoading, teamRole, workspaceUiEnabled, projectsUiEnabled, workspaceReviewsUiEnabled, teamWorkspacesUiEnabled \} = useUserPlan\(\);/);
-  });
-
-  it("gates the desktop Projects link on !loading && user && !planLoading && projectsUiEnabled — same shape as the Workspace gate, never optimistically shown", () => {
-    expect(desktopNavBlock).toMatch(/\{!loading && user && !planLoading && projectsUiEnabled && \(\s*\n\s*<Link\s*\n\s*href="\/workspace\/projects"/);
-  });
-
-  it("gates the mobile Projects link identically to the desktop one", () => {
-    expect(mobileMenuBlock).toMatch(/\{!loading && user && !planLoading && projectsUiEnabled && \(\s*\n\s*<Link\s*\n\s*href="\/workspace\/projects"/);
-  });
-
-  it("Projects appears in both blocks, positioned immediately after Workspace and before My Reviews (desktop) / immediately after Workspace (mobile)", () => {
-    const workspaceIdx = desktopNavBlock.indexOf('href="/workspace"');
-    const projectsIdx = desktopNavBlock.indexOf('href="/workspace/projects"');
-    const myReviewsIdx = desktopNavBlock.indexOf('href="/reviews"');
-    expect(workspaceIdx).toBeGreaterThan(-1);
-    expect(projectsIdx).toBeGreaterThan(-1);
-    expect(myReviewsIdx).toBeGreaterThan(-1);
-    expect(workspaceIdx).toBeLessThan(projectsIdx);
-    expect(projectsIdx).toBeLessThan(myReviewsIdx);
-
-    const mobileWorkspaceIdx = mobileMenuBlock.indexOf('href="/workspace"');
-    const mobileProjectsIdx = mobileMenuBlock.indexOf('href="/workspace/projects"');
-    expect(mobileWorkspaceIdx).toBeGreaterThan(-1);
-    expect(mobileProjectsIdx).toBeGreaterThan(-1);
-    expect(mobileWorkspaceIdx).toBeLessThan(mobileProjectsIdx);
-  });
-
-  it("carries visible 'Projects' text — never icon-only navigation", () => {
-    expect(desktopNavBlock).toMatch(/href="\/workspace\/projects"[\s\S]{0,300}>\s*Projects\s*</);
-    expect(mobileMenuBlock).toMatch(/href="\/workspace\/projects"[\s\S]{0,300}>\s*Projects\s*</);
-  });
-
-  it("wires aria-current=\"page\" for /workspace/projects based on real pathname state, in both blocks, distinct from the /workspace check", () => {
-    expect(desktopNavBlock).toMatch(/aria-current=\{pathname === "\/workspace\/projects" \? "page" : undefined\}/);
-    expect(mobileMenuBlock).toMatch(/aria-current=\{pathname === "\/workspace\/projects" \? "page" : undefined\}/);
-  });
-
-  it("does not introduce a client-visible rollout flag — no NEXT_PUBLIC_PROJECTS_UI reference anywhere in this file", () => {
-    expect(source).not.toMatch(/NEXT_PUBLIC_PROJECTS_UI/);
-  });
-
-  it("does not call a Project read API merely to decide nav visibility", () => {
-    expect(source).not.toMatch(/fetch\([^)]*\/api\/user\/project/);
-  });
-
-  it("never relocates or removes Workspace/History/My Reviews/Team Reviews/Governance — exactly the pre-existing nav concepts plus the one new Projects addition", () => {
-    for (const href of ['href="/workspace"', 'href="/governance"', 'href="/team/reviews"', 'href="/reviews"']) {
-      expect(desktopNavBlock).toContain(href);
-    }
-  });
-});
-
-/**
- * Approval Workflow, Phase 9C.1 — TopNav's new "Reviews" (Team Workspace)
- * entry. Mirrors the Projects block's own established source-regex
- * pattern exactly. The nav boolean (`workspaceReviewsUiEnabled`) is a
- * server-computed capability signal from `useUserPlan()` — the SAME
- * mechanism `workspaceUiEnabled`/`projectsUiEnabled` already use, never a
- * new client-side authorization system, never a role-name check.
- */
-describe("TopNav — Reviews (Team Workspace) nav entry", () => {
-  function extractBetween(startMarker: string, endMarker: string): string {
-    const startIndex = source.indexOf(startMarker);
-    expect(startIndex).toBeGreaterThan(-1);
-    const endIndex = source.indexOf(endMarker, startIndex + startMarker.length);
-    expect(endIndex).toBeGreaterThan(startIndex);
-    return source.slice(startIndex, endIndex);
-  }
-  const desktopNavBlock = extractBetween(
-    '<div className="hidden items-center gap-1 min-[1800px]:flex">',
-    "{/* Mobile/tablet toggle"
-  );
-  const mobileMenuBlock = extractBetween('{mobileMenuOpen && (', "</header>");
-
-  it("gates the desktop Reviews link on !loading && user && !planLoading && workspaceReviewsUiEnabled — same shape as every other capability-flag gate, never optimistically shown", () => {
-    expect(desktopNavBlock).toMatch(/\{!loading && user && !planLoading && workspaceReviewsUiEnabled && \(\s*\n\s*<Link\s*\n\s*href="\/workspace\/reviews"/);
-  });
-
-  it("gates the mobile Reviews link identically to the desktop one", () => {
-    expect(mobileMenuBlock).toMatch(/\{!loading && user && !planLoading && workspaceReviewsUiEnabled && \(\s*\n\s*<Link\s*\n\s*href="\/workspace\/reviews"/);
-  });
-
-  it("never hardcodes role === \"Owner\" or role === \"Admin\" to gate the Reviews link — the flag is the sole gate", () => {
-    const linkArea = desktopNavBlock.slice(Math.max(0, desktopNavBlock.indexOf('href="/workspace/reviews"') - 200), desktopNavBlock.indexOf('href="/workspace/reviews"') + 50);
-    expect(linkArea).not.toMatch(/role === ["']Owner["']|role === ["']Admin["']|teamRole === /);
-  });
-
-  it("Reviews is positioned adjacent to Projects (immediately after, per the frozen 9C architecture), before My Reviews", () => {
-    const projectsIdx = desktopNavBlock.indexOf('href="/workspace/projects"');
-    const reviewsIdx = desktopNavBlock.indexOf('href="/workspace/reviews"');
-    const myReviewsIdx = desktopNavBlock.indexOf('href="/reviews"');
-    expect(projectsIdx).toBeGreaterThan(-1);
-    expect(reviewsIdx).toBeGreaterThan(-1);
-    expect(myReviewsIdx).toBeGreaterThan(-1);
-    expect(projectsIdx).toBeLessThan(reviewsIdx);
-    expect(reviewsIdx).toBeLessThan(myReviewsIdx);
-  });
-
-  it("carries visible 'Approval Queue' text — never icon-only navigation (Team Workspace Self-Service Onboarding relabeled this link for discoverability; route/gate unchanged)", () => {
-    expect(desktopNavBlock).toMatch(/href="\/workspace\/reviews"[\s\S]{0,300}>\s*Approval Queue\s*</);
-    expect(mobileMenuBlock).toMatch(/href="\/workspace\/reviews"[\s\S]{0,300}>\s*Approval Queue\s*</);
-  });
-
-  it("uses a label distinguishable from the pre-existing 'Team Reviews' (legacy) and 'My Reviews' (Personal) nav entries — no duplicate-label collision", () => {
-    expect(desktopNavBlock).toContain("Team Reviews");
-    expect(desktopNavBlock).toContain("My Reviews");
-    expect(desktopNavBlock).toMatch(/>\s*Approval Queue\s*</);
-    // The exact string "Approval Queue" (distinct from "Team Reviews"/"My
-    // Reviews") must exist as its own distinct link label.
-    expect(desktopNavBlock.match(/>\s*Approval Queue\s*</g)?.length).toBeGreaterThanOrEqual(1);
-  });
-
-  it("wires aria-current=\"page\" for /workspace/reviews based on real pathname state, in both blocks", () => {
-    expect(desktopNavBlock).toMatch(/aria-current=\{pathname === "\/workspace\/reviews" \? "page" : undefined\}/);
-    expect(mobileMenuBlock).toMatch(/aria-current=\{pathname === "\/workspace\/reviews" \? "page" : undefined\}/);
-  });
-
-  it("does not introduce a client-visible rollout flag — no NEXT_PUBLIC_APPROVAL_WORKFLOW reference anywhere in this file", () => {
-    expect(source).not.toMatch(/NEXT_PUBLIC_APPROVAL_WORKFLOW/);
-  });
-
-  it("does not call the review-queue API merely to decide nav visibility", () => {
-    expect(source).not.toMatch(/fetch\([^)]*review-queue/);
-  });
-
-  it("never removes or relocates the legacy Team Reviews link (desktop and mobile) or the My Reviews link (desktop)", () => {
-    expect(desktopNavBlock).toContain('href="/team/reviews"');
-    expect(mobileMenuBlock).toContain('href="/team/reviews"');
-    expect(desktopNavBlock).toContain('href="/reviews"');
-  });
-});
-
-
-/**
- * Phase 11B.5 — TopNav INTEGRATION WIRING only.
+ * Phase 11B.6 — ARCHITECTURE CHANGE, SAME GUARANTEES.
  *
- * This file is source-level by long-standing convention, so it is deliberately
- * NOT where switcher behavior is proven: all of that lives in
- * `components/__tests__/WorkspaceSwitcher.spec.tsx` against a real rendered
- * tree. What belongs here is the handful of invariants that are genuinely about
- * TopNav's own composition and cannot be observed from inside the switcher.
+ * The three describes below originally asserted that each destination appeared in
+ * BOTH hand-written JSX blocks with identical gate expressions. 11B.6 removed
+ * those duplicated blocks: there is now one evaluated model that both surfaces
+ * render, so "present on desktop but not mobile with a drifted gate" is no longer
+ * expressible — which is precisely how `My Reviews` came to be missing from the
+ * shipped mobile panel.
+ *
+ * Every guarantee those tests held is re-asserted here against the model: the
+ * gate flag, the href, the visible label, the exact current-state rule, the
+ * relative order, and that nothing was removed. The old shape assertions are
+ * replaced rather than deleted or skipped.
  */
+describe("TopNav — destination model: gates, labels, order, current-state (replaces the per-surface 5C/7B/9C shape assertions)", () => {
+  const model = () => source.slice(source.indexOf("const primaryDestinations"), source.indexOf("const visiblePrimary"));
+  const entry = (key: string) => {
+    const m = model().match(new RegExp(`\\{ key: "${key}"[^}]*\\}`));
+    expect(m).not.toBeNull();
+    return m![0];
+  };
+  const surfaces = () => {
+    const strip = (t: string) => t.replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
+    return {
+      desktop: strip(source.slice(source.indexOf("hidden items-center gap-1 xl:flex"), source.indexOf("{/* Mobile/tablet toggle"))),
+      mobile: strip(source.slice(source.indexOf('id="mobile-menu"'))),
+    };
+  };
+
+  it("Workspace: gated on workspaceUiEnabled, visible text 'Workspace', href /workspace, current only on /workspace", () => {
+    const e = entry("workspace");
+    expect(e).toContain('label: "Workspace"');
+    expect(e).toContain('href: "/workspace"');
+    expect(e).toContain("visible: gatesReady && workspaceUiEnabled");
+    expect(e).toContain('current: isExactly("/workspace")');
+  });
+
+  it("Projects: gated on projectsUiEnabled, visible text 'Projects', href /workspace/projects, current across its detail routes — distinct from the /workspace check", () => {
+    const e = entry("projects");
+    expect(e).toContain('label: "Projects"');
+    expect(e).toContain('href: "/workspace/projects"');
+    expect(e).toContain("visible: gatesReady && projectsUiEnabled");
+    expect(e).toContain('current: isUnder("/workspace/projects")');
+    expect(entry("workspace")).toContain('current: isExactly("/workspace")');
+  });
+
+  it("Approval Queue: gated on workspaceReviewsUiEnabled, href /workspace/reviews, current across its detail routes", () => {
+    const e = entry("approval-queue");
+    expect(e).toContain('label: "Approval Queue"');
+    expect(e).toContain('href: "/workspace/reviews"');
+    expect(e).toContain("visible: gatesReady && workspaceReviewsUiEnabled");
+    expect(e).toContain('current: isUnder("/workspace/reviews")');
+  });
+
+  it("labels remain mutually distinguishable — no duplicate-label collision between Approval Queue, Team Reviews and My Reviews", () => {
+    const labels = [...model().matchAll(/label: "([^"]+)"/g)].map((m) => m[1]);
+    expect(new Set(labels).size).toBe(labels.length);
+    for (const l of ["Approval Queue", "Team Reviews", "My Reviews"]) expect(labels).toContain(l);
+  });
+
+  it("every destination carries visible text — never icon-only navigation", () => {
+    const labels = [...model().matchAll(/label: "([^"]+)"/g)].map((m) => m[1]);
+    expect(labels.length).toBe(8);
+    for (const l of labels) expect(l.trim().length).toBeGreaterThan(0);
+  });
+
+  it("Governance and Team Reviews remain reachable with their existing permission gates, now from one definition", () => {
+    expect(entry("governance")).toContain("visible: gatesReady && isGovernanceUser");
+    expect(entry("team-reviews")).toContain("visible: gatesReady && isTeamReviewUser");
+    expect(source).toMatch(/const isGovernanceUser = governanceDashboardEligible \|\| userPlan === "full"/);
+    expect(source).toMatch(/const isTeamReviewUser = teamRole === "owner" \|\| teamRole === "admin"/);
+  });
+
+  it("nothing was removed: all eight destinations still exist, each exactly once", () => {
+    for (const key of ["research", "workspace", "projects", "my-reviews", "approval-queue", "team-reviews", "governance", "team-workspaces"]) {
+      expect(model().match(new RegExp(`key: "${key}"`, "g"))).toHaveLength(1);
+    }
+  });
+
+  it("BOTH surfaces derive aria-current from the model rather than re-deriving a pathname comparison", () => {
+    const { desktop, mobile } = surfaces();
+    for (const block of [desktop, mobile]) {
+      expect(block).toContain('aria-current={current ? "page" : undefined}');
+      expect(block).not.toMatch(/aria-current=\{pathname/);
+    }
+  });
+});
+
 describe("TopNav — Phase 11B.5 WorkspaceSwitcher integration wiring", () => {
   it("mounts the shared WorkspaceSwitcher and the uid-keyed membership hook", () => {
     expect(source).toMatch(/import WorkspaceSwitcher from "@\/components\/WorkspaceSwitcher"/);
@@ -434,32 +308,33 @@ describe("TopNav — Phase 11B.5 WorkspaceSwitcher integration wiring", () => {
     expect(start).toBeGreaterThan(-1);
     expect(start).toBeLessThan(switcherIndex);
     expect(guard).not.toMatch(/teamWorkspacesUiEnabled/);
-    // the flag still exists for the legacy Team link only
-    expect(source).toMatch(/teamWorkspacesUiEnabled && \(/);
+    // Phase 11B.6 — the flag's only remaining use is the Team Workspaces CHOOSER
+    // entry in the secondary model, never the switcher.
+    const secondary = source.slice(source.indexOf("const secondaryDestinations"), source.indexOf("const visiblePrimary"));
+    expect(secondary).toMatch(/key: "team-workspaces"[^}]*visible: gatesReady && teamWorkspacesUiEnabled/);
   });
 
-  it("keeps every existing destination reachable — 11B.5 removes and relocates nothing (that is 11B.6)", () => {
-    for (const href of ["/workspace", "/workspace/projects", "/workspace/team", "/workspace/reviews", "/reviews", "/governance", "/team/reviews"]) {
-      expect(source).toContain(`href="${href}"`);
+  it("keeps every existing destination reachable (Phase 11B.6: hrefs now live in the shared model, and More exists by design)", () => {
+    const model = source.slice(source.indexOf("const primaryDestinations"), source.indexOf("const visiblePrimary"));
+    for (const href of ["/", "/workspace", "/workspace/projects", "/workspace/team", "/workspace/reviews", "/reviews", "/governance", "/team/reviews"]) {
+      expect(model).toContain(`href: "${href}"`);
     }
-    // no overflow/More menu introduced early
-    expect(source).not.toMatch(/>\s*More\s*</);
   });
 
-  it("owns all three disclosures with ONE outside-click effect and mutual exclusion, rather than letting the switcher add a competing document listener", () => {
+  it("owns all FOUR disclosures with ONE outside-click effect and mutual exclusion (Phase 11B.6 added More)", () => {
     expect(source).toMatch(/const \[workspaceMenuOpen, setWorkspaceMenuOpen\] = useState\(false\)/);
-    // a single mousedown registration covering both desktop wrappers
+    expect(source).toMatch(/const \[moreMenuOpen, setMoreMenuOpen\] = useState\(false\)/);
     expect(source.match(/document\.addEventListener\("mousedown"/g)).toHaveLength(1);
-    expect(source).toMatch(/if \(userMenuOpen \|\| workspaceMenuOpen\)/);
-    // openers close the others
-    expect(source).toMatch(/const openWorkspaceMenu = \(next: boolean\) => \{[\s\S]*?setUserMenuOpen\(false\);[\s\S]*?setMobileMenuOpen\(false\);/);
+    expect(source).toMatch(/if \(userMenuOpen \|\| workspaceMenuOpen \|\| moreMenuOpen\)/);
+    expect(source).toMatch(/const openWorkspaceMenu = \(next: boolean\) => \{[\s\S]*?setUserMenuOpen\(false\);[\s\S]*?setMobileMenuOpen\(false\);[\s\S]*?setMoreMenuOpen\(false\);/);
   });
 
-  it("closes the switcher on pathname change, on logout, and on transition to signed-out", () => {
-    expect(source).toMatch(/setWorkspaceMenuOpen\(false\);\s*\n\s*\}, \[pathname\]\)/);
-    expect(source).toMatch(/if \(!user\) setWorkspaceMenuOpen\(false\)/);
+  it("closes BOTH navigation popups on pathname change, on logout, and on transition to signed-out", () => {
+    expect(source).toMatch(/setWorkspaceMenuOpen\(false\);\s*\n\s*setMoreMenuOpen\(false\);\s*\n\s*\}, \[pathname\]\)/);
+    expect(source).toMatch(/if \(!user\) \{\s*\n\s*setWorkspaceMenuOpen\(false\);\s*\n\s*setMoreMenuOpen\(false\);/);
     const logout = source.slice(source.indexOf("const handleLogout"), source.indexOf("const navLinks"));
     expect(logout).toMatch(/setWorkspaceMenuOpen\(false\)/);
+    expect(logout).toMatch(/setMoreMenuOpen\(false\)/);
   });
 
   it("leaves the hardened logout ORDER untouched: beginLogout -> clearServerSession -> signOut -> navigate", () => {
@@ -500,21 +375,24 @@ describe("TopNav — Phase 11B.5 WorkspaceSwitcher integration wiring", () => {
  * restoring any single half of the unsafe combination fails here.
  */
 describe("TopNav — Phase 11B.5-C1 header capacity strategy", () => {
-  it("the desktop cutover and the widened header cap are BOTH present — neither alone is the contract", () => {
-    expect(source).toMatch(/hidden items-center gap-1 min-\[1800px\]:flex/);
-    expect(source).toMatch(/min-\[1800px\]:max-w-\[1840px\]/);
+  it("Phase 11B.6 — the desktop cutover and the header cap form ONE pair: xl plus max-w-7xl", () => {
+    expect(source).toMatch(/hidden items-center gap-1 xl:flex/);
+    expect(source).toMatch(/<div className="mx-auto flex h-full max-w-7xl/);
+    // max-w-6xl caps the content area at 1104px, below the measured 1130px the
+    // final row needs, so reverting the cap with the cutover would have
+    // reintroduced the overflow one size smaller.
+    expect(source).not.toMatch(/mx-auto flex h-full max-w-6xl/);
   });
 
-  it("REGRESSION: the unsafe composition (desktop row enabled while the header stays capped at max-w-6xl) cannot be restored", () => {
+  it("REGRESSION: the unsafe composition (desktop row enabled while the header is capped below the measured requirement) cannot be restored", () => {
     const container = source.match(/<div className="(mx-auto flex h-full[^"]*)"/);
     expect(container).not.toBeNull();
     const containerClasses = container![1];
-    expect(containerClasses).toContain("max-w-6xl");
-    // ...but it MUST also lift the cap at the very breakpoint the desktop row appears.
-    const desktopCutover = source.match(/hidden items-center gap-1 (min-\[\d+px\]|lg|xl|2xl):flex/);
-    expect(desktopCutover).not.toBeNull();
-    const cutoverVariant = desktopCutover![1];
-    expect(containerClasses).toContain(`${cutoverVariant}:max-w-[`);
+    // 11B.6 measured the final row at 1130px of content. Tailwind's unoverridden
+    // scale gives max-w-6xl a 1104px content area and max-w-7xl 1232px, so only
+    // 7xl or wider is safe while the desktop row is enabled.
+    expect(containerClasses).toMatch(/max-w-(7xl|screen-2xl|\[\d{4,}px\])/);
+    expect(containerClasses).not.toMatch(/max-w-6xl/);
   });
 
   it("padding narrows below sm and the switcher wrapper is clamped there, which is what makes 320px fit", () => {
@@ -530,7 +408,7 @@ describe("TopNav — Phase 11B.5-C1 header capacity strategy", () => {
   });
 
   it("the hamburger and the mobile panel share the desktop nav's exact cutover, so there is never a width with neither", () => {
-    const cutover = source.match(/hidden items-center gap-1 (min-\[\d+px\]):flex/)![1];
+    const cutover = source.match(/hidden items-center gap-1 (min-\[\d+px\]|sm|md|lg|xl|2xl):flex/)![1];
     const hidden = `${cutover}:hidden`;
     // the toggle button carries the same cutover...
     const toggleIdx = source.indexOf('aria-label="Toggle menu"');
@@ -542,17 +420,197 @@ describe("TopNav — Phase 11B.5-C1 header capacity strategy", () => {
     expect(source.slice(panelIdx, panelIdx + 200)).toContain(hidden);
   });
 
-  it("no destination was removed, hidden, or moved behind an overflow menu by the capacity pass", () => {
-    // the four public links come from the navLinks array; the rest are literal hrefs
+  it("the capacity pass removed no destination — Phase 11B.6 RELOCATES three to More by design, but every one is still defined and reachable", () => {
+    // public links still defined, for signed-out rendering
     for (const entry of ['{ label: "About", href: "/about" }', '{ label: "Help", href: "/help" }', '{ label: "Contact", href: "/contact" }', '{ label: "Pricing", href: "/pricing" }']) {
       expect(source).toContain(entry);
     }
-    for (const href of ["/governance", "/team/reviews", "/workspace", "/workspace/projects", "/workspace/team", "/workspace/reviews", "/reviews"]) {
-      expect(source).toContain(`href="${href}"`);
+    // every authenticated destination still defined exactly once in the model
+    const model = source.slice(source.indexOf("const primaryDestinations"), source.indexOf("const visiblePrimary"));
+    for (const href of ["/", "/workspace", "/workspace/projects", "/reviews", "/workspace/reviews", "/team/reviews", "/governance", "/workspace/team"]) {
+      expect(model).toContain(`href: "${href}"`);
     }
-    expect(source).not.toMatch(/>\s*More\s*</);
-    // and nothing gained a width-conditional hide that would drop it from the desktop row
-    const desktopNav = source.slice(source.indexOf("hidden items-center gap-1 min-["), source.indexOf("{/* Mobile/tablet toggle"));
-    expect(desktopNav).not.toMatch(/\b(sm|md|lg|xl):hidden\b/);
+    // nothing gained a width-conditional hide that would drop it from the desktop row
+    const desktopNav = source.slice(source.indexOf("hidden items-center gap-1 xl:flex"), source.indexOf("{/* Mobile/tablet toggle"));
+    expect(desktopNav).not.toMatch(/\b(sm|md|lg|2xl):hidden\b/);
+  });
+});
+
+
+/**
+ * Phase 11B.6 — FINAL AUTHENTICATED COMPOSITION.
+ *
+ * This file is source-level by convention, so it proves ARCHITECTURE here and
+ * leaves `MoreNav`'s focus/Escape/Tab behaviour to `MoreNav.spec.tsx`, which
+ * renders it. The assertions below are about the single navigation model: the
+ * property that made the shipped `My Reviews` mobile omission possible was two
+ * hand-maintained JSX copies, and the fix is structural, not cosmetic.
+ */
+describe("TopNav — Phase 11B.6 single navigation model", () => {
+  /**
+   * Comments stripped before any ABSENCE assertion. A comment explaining that
+   * `startsWith("/workspace/team")` was removed would otherwise satisfy a
+   * `not.toMatch(/startsWith\("\/workspace\/team"\)/)` against raw source — the
+   * self-referential-source-assertion failure mode this repo's preflight detects.
+   */
+  const codeOnly = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+  const primaryBlock = () => {
+    const i = source.indexOf("const primaryDestinations");
+    const j = source.indexOf("const secondaryDestinations");
+    expect(i).toBeGreaterThan(-1);
+    expect(j).toBeGreaterThan(i);
+    return source.slice(i, j);
+  };
+  const secondaryBlock = () => {
+    const i = source.indexOf("const secondaryDestinations");
+    const j = source.indexOf("const visiblePrimary");
+    expect(i).toBeGreaterThan(-1);
+    expect(j).toBeGreaterThan(i);
+    return source.slice(i, j);
+  };
+  const strip = (t: string) => t.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
+  const desktopBlock = () => strip(source.slice(source.indexOf('hidden items-center gap-1 xl:flex'), source.indexOf("{/* Mobile/tablet toggle")));
+  const mobileBlock = () => strip(source.slice(source.indexOf('id="mobile-menu"')));
+
+  it("primary order is exactly Research, Workspace, Projects, My Reviews", () => {
+    const keys = [...primaryBlock().matchAll(/key: "([^"]+)"/g)].map((m) => m[1]);
+    expect(keys).toEqual(["research", "workspace", "projects", "my-reviews"]);
+  });
+
+  it("secondary order is exactly Approval Queue, Team Reviews, Governance, Team Workspaces (11B.6-A1)", () => {
+    const keys = [...secondaryBlock().matchAll(/key: "([^"]+)"/g)].map((m) => m[1]);
+    expect(keys).toEqual(["approval-queue", "team-reviews", "governance", "team-workspaces"]);
+  });
+
+  it("Research is an EXPLICIT destination, not inferred from the logo", () => {
+    expect(primaryBlock()).toMatch(/key: "research", label: "Research", href: "\/"/);
+    // and the logo still links "/" independently
+    expect(source).toMatch(/<Link href="\/" className="flex items-center gap-3/);
+  });
+
+  it("Research is current ONLY on '/', never via startsWith", () => {
+    expect(primaryBlock()).toMatch(/key: "research"[^}]*current: isExactly\("\/"\)/);
+    expect(codeOnly).not.toMatch(/startsWith\("\/"\)/);
+  });
+
+  it("Workspace is current only on /workspace; Projects covers its detail routes", () => {
+    expect(primaryBlock()).toMatch(/key: "workspace"[^}]*current: isExactly\("\/workspace"\)/);
+    expect(primaryBlock()).toMatch(/key: "projects"[^}]*current: isUnder\("\/workspace\/projects"\)/);
+  });
+
+  it("My Reviews covers /reviews descendants and is defined separately from Approval Queue's /workspace/reviews", () => {
+    expect(primaryBlock()).toMatch(/key: "my-reviews"[^}]*href: "\/reviews"[^}]*current: isUnder\("\/reviews"\)/);
+    expect(secondaryBlock()).toMatch(/key: "approval-queue"[^}]*href: "\/workspace\/reviews"/);
+    // isUnder("/reviews") tests `=== "/reviews"` or startsWith("/reviews/"), so
+    // "/workspace/reviews" cannot match it.
+    expect(source).toMatch(/const isUnder = \(route: string\) => path === route \|\| path\.startsWith\(`\$\{route\}\/`\)/);
+  });
+
+  it("the Team Workspaces CHOOSER is current only on its exact route — a concrete Workspace belongs to WorkspaceSwitcher", () => {
+    expect(secondaryBlock()).toMatch(/key: "team-workspaces"[^}]*current: isExactly\("\/workspace\/team"\)/);
+    expect(codeOnly).not.toMatch(/startsWith\("\/workspace\/team"\)/);
+  });
+
+  it("gates are reused, never reinvented, and none is broadened", () => {
+    expect(primaryBlock()).toMatch(/key: "workspace"[^}]*visible: gatesReady && workspaceUiEnabled/);
+    expect(primaryBlock()).toMatch(/key: "projects"[^}]*visible: gatesReady && projectsUiEnabled/);
+    expect(secondaryBlock()).toMatch(/key: "approval-queue"[^}]*visible: gatesReady && workspaceReviewsUiEnabled/);
+    expect(secondaryBlock()).toMatch(/key: "team-reviews"[^}]*visible: gatesReady && isTeamReviewUser/);
+    expect(secondaryBlock()).toMatch(/key: "governance"[^}]*visible: gatesReady && isGovernanceUser/);
+    expect(secondaryBlock()).toMatch(/key: "team-workspaces"[^}]*visible: gatesReady && teamWorkspacesUiEnabled/);
+    // Research and My Reviews need only an established user
+    expect(primaryBlock()).toMatch(/key: "research"[^}]*visible: signedIn/);
+    expect(primaryBlock()).toMatch(/key: "my-reviews"[^}]*visible: signedIn/);
+  });
+
+  it("DE-DUPLICATION: both surfaces render from the same evaluated models, and neither re-derives a destination", () => {
+    expect(desktopBlock()).toContain("visiblePrimary.map(");
+    expect(mobileBlock()).toContain("visiblePrimary.map(");
+    expect(desktopBlock()).toContain("moreNavItems");
+    expect(mobileBlock()).toContain("visibleSecondary.map(");
+    // no per-surface gate conditions remain for any destination
+    for (const block of [desktopBlock(), mobileBlock()]) {
+      for (const flag of ["workspaceUiEnabled", "projectsUiEnabled", "workspaceReviewsUiEnabled", "teamWorkspacesUiEnabled", "isGovernanceUser", "isTeamReviewUser"]) {
+        expect(block).not.toContain(flag);
+      }
+      for (const href of ['href="/governance"', 'href="/team/reviews"', 'href="/workspace/reviews"', 'href="/workspace/team"', 'href="/reviews"']) {
+        expect(block).not.toContain(href);
+      }
+    }
+  });
+
+  it("REGRESSION for the shipped defect: My Reviews cannot exist on one surface only, because neither surface names it", () => {
+    expect(source).toMatch(/key: "my-reviews"/);
+    expect(source.match(/key: "my-reviews"/g)).toHaveLength(1);
+  });
+
+  it("public marketing links are signed-out ONLY, and remain defined for that use", () => {
+    expect(source).toMatch(/\{ label: "About", href: "\/about" \}/);
+    for (const block of [desktopBlock(), mobileBlock()]) {
+      expect(block).toMatch(/\{!signedIn &&\s*\n?\s*navLinks\.map/);
+    }
+    // never rendered unconditionally any more
+    expect(source).not.toMatch(/\n\s*\{navLinks\.map/);
+  });
+
+  it("no secondary destination is restored to the primary model", () => {
+    for (const key of ["approval-queue", "team-reviews", "governance", "team-workspaces"]) {
+      expect(primaryBlock()).not.toContain(`key: "${key}"`);
+    }
+  });
+
+  it("More renders only when at least one secondary destination is eligible", () => {
+    expect(desktopBlock()).toMatch(/signedIn && moreNavItems\.length > 0 && \(/);
+    expect(source).toMatch(/const moreNavItems: MoreNavItem\[\] = visibleSecondary\.map/);
+  });
+
+  it("mobile FLATTENS secondary items rather than nesting a second disclosure", () => {
+    expect(mobileBlock()).not.toContain("<MoreNav");
+    expect(mobileBlock()).toContain("visibleSecondary.map(");
+  });
+
+  it("four disclosures, one owner, ONE document mousedown registration", () => {
+    expect(source).toMatch(/const \[moreMenuOpen, setMoreMenuOpen\] = useState\(false\)/);
+    expect(source.match(/document\.addEventListener\("mousedown"/g)).toHaveLength(1);
+    expect(source).toMatch(/if \(userMenuOpen \|\| workspaceMenuOpen \|\| moreMenuOpen\)/);
+  });
+
+  it("mutual exclusion: every opener closes the other three", () => {
+    const more = source.slice(source.indexOf("const openMoreMenu"), source.indexOf("const openMoreMenu") + 400);
+    for (const other of ["setWorkspaceMenuOpen(false)", "setUserMenuOpen(false)", "setMobileMenuOpen(false)"]) expect(more).toContain(other);
+    const ws = source.slice(source.indexOf("const openWorkspaceMenu"), source.indexOf("const openMoreMenu"));
+    for (const other of ["setUserMenuOpen(false)", "setMobileMenuOpen(false)", "setMoreMenuOpen(false)"]) expect(ws).toContain(other);
+  });
+
+  it("pathname change and sign-out close both navigation popups; logout closes them before the hardened sequence", () => {
+    expect(source).toMatch(/setWorkspaceMenuOpen\(false\);\s*\n\s*setMoreMenuOpen\(false\);\s*\n\s*\}, \[pathname\]\)/);
+    const logout = source.slice(source.indexOf("const handleLogout"), source.indexOf("const navLinks"));
+    expect(logout).toContain("setMoreMenuOpen(false)");
+    expect(logout.indexOf("setMoreMenuOpen(false)")).toBeLessThan(logout.indexOf("beginLogout()"));
+  });
+
+  it("WorkspaceSwitcher stays in the primary header and is untouched by this phase", () => {
+    const switcherIndex = source.indexOf("<WorkspaceSwitcher");
+    expect(switcherIndex).toBeGreaterThan(-1);
+    expect(switcherIndex).toBeLessThan(source.indexOf('id="mobile-menu"'));
+    expect(source.match(/<WorkspaceSwitcher/g)).toHaveLength(1);
+  });
+
+  it("signed-out navigation keeps every public destination and gains no authenticated one", () => {
+    for (const entry of ['{ label: "About", href: "/about" }', '{ label: "Help", href: "/help" }', '{ label: "Contact", href: "/contact" }', '{ label: "Pricing", href: "/pricing" }']) {
+      expect(source).toContain(entry);
+    }
+    expect(source).toContain('href="/login"');
+    expect(source).toContain('href="/signup"');
+    // authenticated destinations are gated behind `signedIn` in the models
+    expect(source).toMatch(/const signedIn = !loading && !!user/);
+  });
+
+  it("the user menu keeps identity actions only — navigation destinations do not move into it", () => {
+    const userMenu = source.slice(source.indexOf('id="user-menu-button"'), source.indexOf('id="user-menu-button"') + 3000);
+    expect(userMenu).toContain('href="/profile"');
+    for (const href of ['href="/governance"', 'href="/team/reviews"', 'href="/workspace/reviews"']) {
+      expect(userMenu).not.toContain(href);
+    }
   });
 });

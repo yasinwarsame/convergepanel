@@ -11,6 +11,7 @@ import { useUserPlan } from "@/hooks/useUserPlan";
 import { clearServerSession } from "@/lib/client/sessionSync";
 import WorkspaceSwitcher from "@/components/WorkspaceSwitcher";
 import { useWorkspaceList } from "@/hooks/useWorkspaceList";
+import MoreNav, { type MoreNavItem } from "@/components/MoreNav";
 
 export default function TopNav() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -22,6 +23,8 @@ export default function TopNav() {
    * document-level listener that would race this one.
    */
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
+  /** Phase 11B.6 — the fourth disclosure. TopNav owns all four. */
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
   const { user, loading, isAdmin, beginLogout } = useAuth();
@@ -39,6 +42,8 @@ export default function TopNav() {
   const mobileMenuButtonRef = useRef<HTMLButtonElement>(null);
   const workspaceSwitcherRef = useRef<HTMLDivElement>(null);
   const workspaceSwitcherButtonRef = useRef<HTMLButtonElement>(null);
+  const moreNavRef = useRef<HTMLDivElement>(null);
+  const moreNavButtonRef = useRef<HTMLButtonElement>(null);
 
   /**
    * Membership discovery is keyed on uid inside the hook, NOT on pathname —
@@ -77,14 +82,17 @@ export default function TopNav() {
       if (workspaceMenuOpen && workspaceSwitcherRef.current && !workspaceSwitcherRef.current.contains(target)) {
         setWorkspaceMenuOpen(false);
       }
+      if (moreMenuOpen && moreNavRef.current && !moreNavRef.current.contains(target)) {
+        setMoreMenuOpen(false);
+      }
     };
-    if (userMenuOpen || workspaceMenuOpen) {
+    if (userMenuOpen || workspaceMenuOpen || moreMenuOpen) {
       document.addEventListener("mousedown", handleClickOutside);
     }
     return () => {
       document.removeEventListener("mousedown", handleClickOutside);
     };
-  }, [userMenuOpen, workspaceMenuOpen]);
+  }, [userMenuOpen, workspaceMenuOpen, moreMenuOpen]);
 
   /**
    * MUTUAL EXCLUSION — at most one disclosure open. Each opener closes the
@@ -96,17 +104,31 @@ export default function TopNav() {
     if (next) {
       setUserMenuOpen(false);
       setMobileMenuOpen(false);
+      setMoreMenuOpen(false);
     }
   };
 
-  /** A route change closes the switcher: a popup must not outlive its page. */
+  const openMoreMenu = (next: boolean) => {
+    setMoreMenuOpen(next);
+    if (next) {
+      setWorkspaceMenuOpen(false);
+      setUserMenuOpen(false);
+      setMobileMenuOpen(false);
+    }
+  };
+
+  /** A route change closes both navigation popups: they must not outlive their page. */
   useEffect(() => {
     setWorkspaceMenuOpen(false);
+    setMoreMenuOpen(false);
   }, [pathname]);
 
-  /** Logout, or any transition to signed-out, closes it too. */
+  /** Logout, or any transition to signed-out, closes them too. */
   useEffect(() => {
-    if (!user) setWorkspaceMenuOpen(false);
+    if (!user) {
+      setWorkspaceMenuOpen(false);
+      setMoreMenuOpen(false);
+    }
   }, [user]);
 
   /**
@@ -161,10 +183,11 @@ export default function TopNav() {
     logoutInProgressRef.current = true;
     setUserMenuOpen(false);
     setMobileMenuOpen(false);
-    // Phase 11B.5 — close the Workspace switcher too. The hardened sequence
-    // below (beginLogout -> clearServerSession -> signOut -> navigate) is
-    // deliberately untouched; this only dismisses UI before it starts.
+    // Phase 11B.5/11B.6 — dismiss both navigation popups too. The hardened
+    // sequence below (beginLogout -> clearServerSession -> signOut -> navigate)
+    // is deliberately untouched; this only closes UI before it starts.
     setWorkspaceMenuOpen(false);
+    setMoreMenuOpen(false);
     beginLogout();
     try {
       const cleared = await clearServerSession();
@@ -189,6 +212,13 @@ export default function TopNav() {
     }
   };
 
+  /**
+   * Public marketing links. Phase 11B.6 — these are for SIGNED-OUT rendering
+   * only. Authenticated users no longer carry them as primary peers (they cost
+   * ~291px the authenticated row cannot spare, and the global footer in
+   * `app/layout.tsx` already lists About/Help/Pricing/Contact on every page, so
+   * nothing becomes unreachable). Deliberately NOT reused in the signed-in model.
+   */
   const navLinks = [
     { label: "About", href: "/about" },
     { label: "Help", href: "/help" },
@@ -196,30 +226,77 @@ export default function TopNav() {
     { label: "Pricing", href: "/pricing" },
   ];
 
+  /* ------------------------------------------------------------------ *
+   * Phase 11B.6 — ONE EVALUATED NAVIGATION MODEL.
+   *
+   * Desktop and mobile previously each hard-coded their own copy of every
+   * destination's href, gate and current-state. They drifted: `My Reviews`
+   * shipped on desktop and was simply missing from the mobile panel. Markup may
+   * still differ per surface; destination DEFINITIONS may not.
+   *
+   * Current-state rules are exact, and each exists because the looser version is
+   * wrong:
+   *   - Research is `/` ONLY — never `startsWith("/")`, which is every route.
+   *   - Workspace is `/workspace` ONLY — `/workspace/projects`, `/workspace/team`
+   *     and `/workspace/reviews` belong to other destinations.
+   *   - Projects covers its detail routes, which previously had no current state.
+   *   - My Reviews covers `/reviews/**` and must NOT match `/workspace/reviews`,
+   *     a different destination whose path merely ends the same way.
+   *   - Team Workspaces is the CHOOSER, so it is the exact route only: a concrete
+   *     `/workspace/team/{id}/**` is active Team context and belongs to
+   *     WorkspaceSwitcher. The previous `startsWith("/workspace/team")` claimed
+   *     all of them.
+   * ------------------------------------------------------------------ */
+  type NavDestination = { key: string; label: string; href: string; visible: boolean; current: boolean };
+
+  const path = pathname ?? "";
+  const isExactly = (route: string) => path === route;
+  const isUnder = (route: string) => path === route || path.startsWith(`${route}/`);
+  const signedIn = !loading && !!user;
+  /** Rollout/capability-dependent items wait for plan state so nothing flashes. */
+  const gatesReady = signedIn && !planLoading;
+
+  const primaryDestinations: NavDestination[] = [
+    { key: "research", label: "Research", href: "/", visible: signedIn, current: isExactly("/") },
+    { key: "workspace", label: "Workspace", href: "/workspace", visible: gatesReady && workspaceUiEnabled, current: isExactly("/workspace") },
+    { key: "projects", label: "Projects", href: "/workspace/projects", visible: gatesReady && projectsUiEnabled, current: isUnder("/workspace/projects") },
+    { key: "my-reviews", label: "My Reviews", href: "/reviews", visible: signedIn, current: isUnder("/reviews") },
+  ];
+
+  const secondaryDestinations: NavDestination[] = [
+    { key: "approval-queue", label: "Approval Queue", href: "/workspace/reviews", visible: gatesReady && workspaceReviewsUiEnabled, current: isUnder("/workspace/reviews") },
+    { key: "team-reviews", label: "Team Reviews", href: "/team/reviews", visible: gatesReady && isTeamReviewUser, current: isUnder("/team/reviews") },
+    { key: "governance", label: "Governance", href: "/governance", visible: gatesReady && isGovernanceUser, current: isExactly("/governance") },
+    // Phase 11B.6-A1 (approved amendment) — the Team Workspaces CHOOSER keeps its
+    // only application entry point, behind the SAME `teamWorkspacesUiEnabled`
+    // self-service admission it has always used. A P6 member (active membership,
+    // no self-service admission) must not be offered a page concealed from them;
+    // their WorkspaceSwitcher entries stay independent of this flag.
+    { key: "team-workspaces", label: "Team Workspaces", href: "/workspace/team", visible: gatesReady && teamWorkspacesUiEnabled, current: isExactly("/workspace/team") },
+  ];
+
+  const visiblePrimary = primaryDestinations.filter((d) => d.visible);
+  const visibleSecondary = secondaryDestinations.filter((d) => d.visible);
+  const moreNavItems: MoreNavItem[] = visibleSecondary.map(({ key, label, href, current }) => ({ key, label, href, current }));
+
   return (
     <header className="sticky top-0 z-50 h-[74px] border-b border-cp-border bg-cp-surface/95 backdrop-blur-sm">
       {/*
-        Phase 11B.5-C1 — MEASURED header capacity, not an assumed breakpoint.
-        `max-w-6xl` is 72rem = 1152px and is NOT overridden in tailwind.config.ts,
-        so the content area caps at 1104px however wide the viewport gets. The
-        frozen worst-case authenticated row (11 destinations + account control +
-        logo/wordmark + Workspace switcher) intrinsically needs 1740px, measured
-        against the real compiled CSS — a 636px deficit at the cap. Raising the
-        breakpoint alone therefore fixed nothing, which is what the C1 review
-        caught.
+        Phase 11B.6 — MEASURED capacity pair: cutover `xl` (1280px) and header cap
+        `max-w-7xl` (80rem = 1280px). Both halves are load-bearing and neither works
+        alone.
 
-        Mitigation, all of it responsive composition and no destination removed:
-        the cap is lifted to 1840px only AT the desktop cutover, padding is
-        px-4 below sm, and the account name truncates.
+        The 11B.5 row needed 1687px of content because it carried eleven
+        destinations, which is why the cutover sat at a temporary 1800px. The frozen
+        11B.6 composition — four primary destinations plus one `More` trigger, the
+        marketing links gone from the authenticated bar — needs 1123px.
 
-        Measured against the real compiled CSS, padding included (the container is
-        border-box with 24px each side, so the content area is the box minus 48px):
-          - 320/375/390/430 — hamburger composition, row needs 236px;
-          - 1024-1440       — hamburger composition, row needs 525px;
-          - 1800px container — content area 1752px, children 1687px, slack 65px;
-          - 1840px cap      — content area 1792px, children 1687px, slack 105px.
-        Zero child overlap and no scroll overflow at any of them. */}
-      <div className="mx-auto flex h-full max-w-6xl items-center justify-between px-4 sm:px-6 min-[1800px]:max-w-[1840px]">
+        `max-w-6xl` is 72rem = 1152px, so its content area is 1104px: still BELOW
+        the new requirement, at any viewport. Reverting the cap along with the
+        cutover would therefore have reintroduced the overflow one size smaller,
+        so the cap moves to `max-w-7xl` (content area 1232px) and the pair is
+        pinned together in the spec. */}
+      <div className="mx-auto flex h-full max-w-7xl items-center justify-between px-4 sm:px-6">
 
         {/* Logo + Workspace context. Grouped so the outer row keeps exactly the
             three children it had before (left group / desktop nav / hamburger)
@@ -267,89 +344,50 @@ export default function TopNav() {
           )}
         </div>
 
-        {/* Desktop nav — min-[1800px], the first width at which the frozen
-            worst-case row MEASURABLY fits (1740px required vs an 1800px
-            container). 11B.5 may not remove, hide or relocate any destination —
-            that is 11B.6 — so the already-complete hamburger composition is used
-            across the whole supported range up to 1440px rather than overflowing
-            the page. Correctness beats making the desktop row appear at 1280px;
-            11B.6's de-duplication is what will bring that width back down. */}
-        <div className="hidden items-center gap-1 min-[1800px]:flex">
-          {navLinks.map(({ label, href }) => (
+        {/* Desktop nav — `xl` (1280px), recovered from 11B.5's temporary 1800px
+            now that de-duplication has freed the width. Measured below. */}
+        <div className="hidden items-center gap-1 xl:flex">
+          {/* Signed-out: the public marketing links. Signed-in users get the
+              frozen four primary destinations instead; the footer keeps these
+              reachable on every page. */}
+          {!signedIn &&
+            navLinks.map(({ label, href }) => (
+              <Link
+                key={href}
+                href={href}
+                className="rounded-md px-3 py-1.5 text-[15px] font-medium text-cp-muted transition-colors hover:bg-cp-raised hover:text-cp-text"
+              >
+                {label}
+              </Link>
+            ))}
+
+          {/* Signed-in primary — rendered from the SAME evaluated model the
+              mobile panel uses, so a destination cannot exist on one surface
+              and not the other. */}
+          {visiblePrimary.map(({ key, label, href, current }) => (
             <Link
-              key={href}
+              key={key}
               href={href}
-              className="rounded-md px-3 py-1.5 text-[15px] font-medium text-cp-muted transition-colors hover:bg-cp-raised hover:text-cp-text"
+              aria-current={current ? "page" : undefined}
+              className={`rounded-md px-3 py-1.5 text-[15px] font-medium transition-colors hover:bg-cp-raised hover:text-cp-text ${
+                current ? "text-cp-text" : "text-cp-muted"
+              }`}
             >
               {label}
             </Link>
           ))}
 
-          {!loading && user && !planLoading && isGovernanceUser && (
-            <Link
-              href="/governance"
-              className="rounded-md px-3 py-1.5 text-[15px] font-medium text-cp-muted transition-colors hover:bg-cp-raised hover:text-cp-text"
-            >
-              Governance
-            </Link>
-          )}
-
-          {!loading && user && !planLoading && isTeamReviewUser && (
-            <Link
-              href="/team/reviews"
-              className="rounded-md px-3 py-1.5 text-[15px] font-medium text-cp-muted transition-colors hover:bg-cp-raised hover:text-cp-text"
-            >
-              Team Reviews
-            </Link>
-          )}
-
-          {!loading && user && !planLoading && workspaceUiEnabled && (
-            <Link
-              href="/workspace"
-              aria-current={pathname === "/workspace" ? "page" : undefined}
-              className="rounded-md px-3 py-1.5 text-[15px] font-medium text-cp-muted transition-colors hover:bg-cp-raised hover:text-cp-text"
-            >
-              Workspace
-            </Link>
-          )}
-
-          {!loading && user && !planLoading && projectsUiEnabled && (
-            <Link
-              href="/workspace/projects"
-              aria-current={pathname === "/workspace/projects" ? "page" : undefined}
-              className="rounded-md px-3 py-1.5 text-[15px] font-medium text-cp-muted transition-colors hover:bg-cp-raised hover:text-cp-text"
-            >
-              Projects
-            </Link>
-          )}
-
-          {!loading && user && !planLoading && teamWorkspacesUiEnabled && (
-            <Link
-              href="/workspace/team"
-              aria-current={pathname?.startsWith("/workspace/team") ? "page" : undefined}
-              className="rounded-md px-3 py-1.5 text-[15px] font-medium text-cp-muted transition-colors hover:bg-cp-raised hover:text-cp-text"
-            >
-              Team
-            </Link>
-          )}
-
-          {!loading && user && !planLoading && workspaceReviewsUiEnabled && (
-            <Link
-              href="/workspace/reviews"
-              aria-current={pathname === "/workspace/reviews" ? "page" : undefined}
-              className="rounded-md px-3 py-1.5 text-[15px] font-medium text-cp-muted transition-colors hover:bg-cp-raised hover:text-cp-text"
-            >
-              Approval Queue
-            </Link>
-          )}
-
-          {!loading && user && (
-            <Link
-              href="/reviews"
-              className="rounded-md px-3 py-1.5 text-[15px] font-medium text-cp-muted transition-colors hover:bg-cp-raised hover:text-cp-text"
-            >
-              My Reviews
-            </Link>
+          {/* Secondary destinations live behind one disclosure. The trigger is
+              absent entirely when the caller is eligible for none of them. */}
+          {signedIn && moreNavItems.length > 0 && (
+            <div ref={moreNavRef}>
+              <MoreNav
+                items={moreNavItems}
+                open={moreMenuOpen}
+                onOpenChange={openMoreMenu}
+                triggerRef={moreNavButtonRef}
+              />
+            </div>
           )}
 
           {!loading && (
@@ -388,7 +426,10 @@ export default function TopNav() {
                       const next = !userMenuOpen;
                       setUserMenuOpen(next);
                       // Mutual exclusion — opening the user menu closes the Workspace switcher.
-                      if (next) setWorkspaceMenuOpen(false);
+                      if (next) {
+                        setWorkspaceMenuOpen(false);
+                        setMoreMenuOpen(false);
+                      }
                     }}
                     aria-expanded={userMenuOpen}
                     aria-haspopup="true"
@@ -467,7 +508,7 @@ export default function TopNav() {
           )}
         </div>
 
-        {/* Mobile/tablet toggle — shown below the desktop cutover, matching the desktop nav's own min-[1800px]:flex above */}
+        {/* Mobile/tablet toggle — shown below the desktop cutover, matching the desktop nav's own xl:flex above */}
         <button
           ref={mobileMenuButtonRef}
           onClick={() => {
@@ -477,9 +518,10 @@ export default function TopNav() {
             if (next) {
               setWorkspaceMenuOpen(false);
               setUserMenuOpen(false);
+              setMoreMenuOpen(false);
             }
           }}
-          className="rounded-md p-2 text-cp-muted transition-colors hover:bg-cp-raised hover:text-cp-text min-[1800px]:hidden"
+          className="rounded-md p-2 text-cp-muted transition-colors hover:bg-cp-raised hover:text-cp-text xl:hidden"
           aria-label="Toggle menu"
           aria-expanded={mobileMenuOpen}
           aria-controls="mobile-menu"
@@ -502,78 +544,59 @@ export default function TopNav() {
         </button>
       </div>
 
-      {/* Mobile/tablet menu — below the desktop cutover, mirrors the desktop nav's own min-[1800px]:flex */}
+      {/* Mobile/tablet menu — below the desktop cutover, mirrors the desktop nav's own xl:flex */}
       {mobileMenuOpen && (
-        <div id="mobile-menu" className="border-t border-cp-border bg-cp-surface px-4 pb-4 pt-3 min-[1800px]:hidden">
+        <div id="mobile-menu" className="border-t border-cp-border bg-cp-surface px-4 pb-4 pt-3 xl:hidden">
           <div className="flex flex-col gap-1">
-            {navLinks.map(({ label, href }) => (
+            {/* Signed-out: public marketing links, unchanged. */}
+            {!signedIn &&
+              navLinks.map(({ label, href }) => (
+                <Link
+                  key={href}
+                  href={href}
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="rounded-md px-3 py-2 text-sm text-cp-text transition-colors hover:bg-cp-raised hover:text-cp-text"
+                >
+                  {label}
+                </Link>
+              ))}
+
+            {/* Signed-in primary — the SAME evaluated model the desktop row
+                renders. This is what permanently fixes the shipped defect where
+                `My Reviews` existed on desktop and was absent here. */}
+            {visiblePrimary.map(({ key, label, href, current }) => (
               <Link
-                key={href}
+                key={key}
                 href={href}
+                aria-current={current ? "page" : undefined}
                 onClick={() => setMobileMenuOpen(false)}
-                className="rounded-md px-3 py-2 text-sm text-cp-text transition-colors hover:bg-cp-raised hover:text-cp-text"
+                className={`rounded-md px-3 py-2 text-sm transition-colors hover:bg-cp-raised hover:text-cp-text ${
+                  current ? "font-semibold text-cp-text" : "text-cp-text"
+                }`}
               >
                 {label}
               </Link>
             ))}
-            {!loading && user && !planLoading && isGovernanceUser && (
+
+            {/* Secondary destinations are FLATTENED here rather than nested
+                behind a second disclosure: a disclosure inside an already-open
+                panel costs an extra interaction for no gain. Same evaluated
+                list as desktop `More`, so eligibility cannot diverge. */}
+            {visibleSecondary.length > 0 && <div className="my-2 border-t border-cp-border-soft" />}
+            {visibleSecondary.map(({ key, label, href, current }) => (
               <Link
-                href="/governance"
+                key={key}
+                href={href}
+                aria-current={current ? "page" : undefined}
                 onClick={() => setMobileMenuOpen(false)}
-                className="rounded-md px-3 py-2 text-sm text-cp-text transition-colors hover:bg-cp-raised hover:text-cp-text"
+                className={`rounded-md px-3 py-2 text-sm transition-colors hover:bg-cp-raised hover:text-cp-text ${
+                  current ? "font-semibold text-cp-text" : "text-cp-text"
+                }`}
               >
-                Governance
+                {label}
               </Link>
-            )}
-            {!loading && user && !planLoading && isTeamReviewUser && (
-              <Link
-                href="/team/reviews"
-                onClick={() => setMobileMenuOpen(false)}
-                className="rounded-md px-3 py-2 text-sm text-cp-text transition-colors hover:bg-cp-raised hover:text-cp-text"
-              >
-                Team Reviews
-              </Link>
-            )}
-            {!loading && user && !planLoading && workspaceUiEnabled && (
-              <Link
-                href="/workspace"
-                aria-current={pathname === "/workspace" ? "page" : undefined}
-                onClick={() => setMobileMenuOpen(false)}
-                className="rounded-md px-3 py-2 text-sm text-cp-text transition-colors hover:bg-cp-raised hover:text-cp-text"
-              >
-                Workspace
-              </Link>
-            )}
-            {!loading && user && !planLoading && projectsUiEnabled && (
-              <Link
-                href="/workspace/projects"
-                aria-current={pathname === "/workspace/projects" ? "page" : undefined}
-                onClick={() => setMobileMenuOpen(false)}
-                className="rounded-md px-3 py-2 text-sm text-cp-text transition-colors hover:bg-cp-raised hover:text-cp-text"
-              >
-                Projects
-              </Link>
-            )}
-            {!loading && user && !planLoading && teamWorkspacesUiEnabled && (
-              <Link
-                href="/workspace/team"
-                aria-current={pathname?.startsWith("/workspace/team") ? "page" : undefined}
-                onClick={() => setMobileMenuOpen(false)}
-                className="rounded-md px-3 py-2 text-sm text-cp-text transition-colors hover:bg-cp-raised hover:text-cp-text"
-              >
-                Team
-              </Link>
-            )}
-            {!loading && user && !planLoading && workspaceReviewsUiEnabled && (
-              <Link
-                href="/workspace/reviews"
-                aria-current={pathname === "/workspace/reviews" ? "page" : undefined}
-                onClick={() => setMobileMenuOpen(false)}
-                className="rounded-md px-3 py-2 text-sm text-cp-text transition-colors hover:bg-cp-raised hover:text-cp-text"
-              >
-                Approval Queue
-              </Link>
-            )}
+            ))}
+
             <div className="my-2 border-t border-cp-border" />
             {!loading && (
               !user ? (
