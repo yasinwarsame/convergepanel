@@ -103,10 +103,12 @@ describe("ProjectDetailShellView — header", () => {
     expect(renderStatic(ARCHIVED_PROJECT)).toContain("Archived");
   });
 
-  it("Back to Projects links to /workspace/projects", () => {
+  it("Phase 11B.4 — the Projects destination survives, but the one-off 'Back to Projects' wording does not: the breadcrumb owns that navigation now", () => {
     const html = renderStatic();
+    // the destination is preserved...
     expect(html).toContain('href="/workspace/projects"');
-    expect(html).toContain("Back to Projects");
+    // ...while the isolated affordance it used to belong to is gone
+    expect(html).not.toContain("Back to Projects");
   });
 });
 
@@ -244,5 +246,167 @@ describe("ProjectDetailShellView — toast does not crash on unmount mid-timeout
     const runs = fakeRuns({ items: [RUN_A] });
     const renderer = mountInteractive(PROJECT, runs, fakeAssociation());
     expect(() => renderer.unmount()).not.toThrow();
+  });
+});
+
+
+/* ------------------------------------------------------------------ *
+ * Phase 11B.4 — Personal Project breadcrumb.
+ *
+ * The REAL shared `Breadcrumb` is rendered (never mocked), through the spec's
+ * existing `next/link` mock, so these assertions exercise the shipped
+ * component's own markup. `aria-hidden` nodes (the "/" separator and the "←"
+ * glyph) are excluded so no label assertion can pass on decorative text.
+ * ------------------------------------------------------------------ */
+type BcSeg = { label: string; href?: string; current: boolean };
+
+function visibleTextOf(node: TestRenderer.ReactTestInstance): string {
+  const out: string[] = [];
+  const walk = (n: TestRenderer.ReactTestInstance) => {
+    n.children.forEach((c) => {
+      if (typeof c === "string") out.push(c);
+      else if (c.props?.["aria-hidden"] !== "true") walk(c);
+    });
+  };
+  walk(node);
+  return out.join("").replace(/\s+/g, " ").trim();
+}
+
+function breadcrumbNav(r: TestRenderer.ReactTestRenderer) {
+  return r.root.findAll((n) => n.type === "nav" && n.props?.["aria-label"] === "Breadcrumb", { deep: true });
+}
+
+function bcSegments(r: TestRenderer.ReactTestRenderer): BcSeg[] {
+  const navs = breadcrumbNav(r);
+  if (navs.length === 0) return [];
+  const ol = navs[0].findAllByType("ol")[0];
+  return ol.findAllByType("li").map((li) => {
+    const el = li.findAll((n) => (n.type === "a" || n.type === "span") && n.props?.["aria-hidden"] !== "true", { deep: true })[0];
+    return {
+      label: visibleTextOf(el),
+      href: el.type === "a" ? String(el.props.href) : undefined,
+      current: el.props["aria-current"] === "page",
+    };
+  });
+}
+
+function bcMobileParent(r: TestRenderer.ReactTestRenderer): { label: string; href?: string } | null {
+  const navs = breadcrumbNav(r);
+  if (navs.length === 0) return null;
+  const wrap = navs[0].findAll(
+    (n) => n.type === "div" && typeof n.props?.className === "string" && n.props.className.includes("sm:hidden"),
+    { deep: true }
+  );
+  if (wrap.length === 0) return null;
+  const el = wrap[0].findAll((n) => n.type === "a" || n.type === "span", { deep: true })[0];
+  return { label: visibleTextOf(el), href: el.type === "a" ? String(el.props.href) : undefined };
+}
+
+/**
+ * Phase 11B.3's lesson, carried forward: a contract about the RELATIONSHIP
+ * between elements has to be asserted as a relationship. Positions come from a
+ * depth-first walk of the RENDERED tree, never from source text.
+ */
+function documentOrder(r: TestRenderer.ReactTestRenderer): { breadcrumb: number; h1: number } {
+  const flat: { type: string; props: Record<string, unknown> }[] = [];
+  const walk = (node: unknown): void => {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) return node.forEach(walk);
+    const n = node as { type?: unknown; props?: Record<string, unknown>; rendered?: unknown };
+    if (typeof n.type === "string") flat.push({ type: n.type, props: n.props ?? {} });
+    walk(n.rendered);
+  };
+  walk(r.toTree());
+  return {
+    breadcrumb: flat.findIndex((e) => e.type === "nav" && e.props["aria-label"] === "Breadcrumb"),
+    h1: flat.findIndex((e) => e.type === "h1"),
+  };
+}
+
+/** Deliberately id !== name, so nothing can pass on an identifier. */
+const NAMED_PROJECT: ProjectDetailMeta = { id: "proj_456", name: "Election Evidence", status: "active" };
+
+describe("Phase 11B.4 — Personal Project breadcrumb", () => {
+  it("T1 — desktop hierarchy is exactly Projects / {Project name}, Projects linked, Project final and non-linking", () => {
+    expect(bcSegments(mountInteractive(NAMED_PROJECT))).toEqual([
+      { label: "Projects", href: "/workspace/projects", current: false },
+      { label: "Election Evidence", href: undefined, current: true },
+    ]);
+  });
+
+  it("T1b — no extra hierarchy level is introduced: no 'Personal', no 'Workspace', no WorkspaceNav on this page", () => {
+    const r = mountInteractive(NAMED_PROJECT);
+    const labels = bcSegments(r).map((x) => x.label);
+    expect(labels).toHaveLength(2);
+    expect(labels).not.toContain("Personal");
+    expect(labels).not.toContain("Workspace");
+    // 11B.5 owns Workspace context/switching — this Personal page must not gain the Team nav
+    expect(r.root.findAll((n) => n.type === "nav" && n.props?.["aria-label"] === "Workspace", { deep: true })).toHaveLength(0);
+  });
+
+  it("T2 — NON-VACUITY: the visible label is the server-resolved NAME; the Project id is never visible breadcrumb text, nor in any breadcrumb href", () => {
+    const segs = bcSegments(mountInteractive(NAMED_PROJECT));
+    expect(segs.map((x) => x.label)).toEqual(["Projects", "Election Evidence"]);
+    expect(segs.map((x) => x.label)).not.toContain("proj_456");
+    // the current Project is the terminal segment, so it is not linked and no href carries the id
+    for (const seg of segs) expect(seg.href ?? "").not.toContain("proj_456");
+  });
+
+  it("T3 — mobile parent is Projects, pointing at the old Back-to-Projects destination", () => {
+    expect(bcMobileParent(mountInteractive(NAMED_PROJECT))).toEqual({ label: "Projects", href: "/workspace/projects" });
+  });
+
+  it("T4 — the isolated 'Back to Projects' link is ABSORBED: no anchor carries that text, even though the breadcrumb still links to /workspace/projects", () => {
+    const r = mountInteractive(NAMED_PROJECT);
+    const anchors = r.root.findAllByType("a");
+    // asserting the href alone would be meaningless — the breadcrumb keeps it on purpose
+    expect(anchors.filter((a) => visibleTextOf(a).includes("Back to Projects"))).toHaveLength(0);
+    expect(anchors.some((a) => String(a.props.href) === "/workspace/projects")).toBe(true);
+  });
+
+  it("T5 — exactly one h1, and it is still the Project name: the breadcrumb does not replace the document heading", () => {
+    const r = mountInteractive(NAMED_PROJECT);
+    const h1s = r.root.findAllByType("h1");
+    expect(h1s).toHaveLength(1);
+    expect(visibleTextOf(h1s[0])).toBe("Election Evidence");
+  });
+
+  it("T6 — ORDER IS LOAD-BEARING: the Breadcrumb landmark precedes the h1 in the rendered tree", () => {
+    const o = documentOrder(mountInteractive(NAMED_PROJECT));
+    expect(o.breadcrumb).toBeGreaterThanOrEqual(0);
+    expect(o.h1).toBeGreaterThanOrEqual(0);
+    expect(o.breadcrumb).toBeLessThan(o.h1);
+  });
+
+  it("T7 — status badge survives for BOTH states, beside the heading", () => {
+    expect(visibleTextOf(mountInteractive(NAMED_PROJECT).root.findByType("main"))).toContain("Active");
+    const archived = mountInteractive({ id: "proj_456", name: "Election Evidence", status: "archived" });
+    expect(visibleTextOf(archived.root.findByType("main"))).toContain("Archived");
+    // the archived Project still gets the same breadcrumb
+    expect(bcSegments(archived).map((x) => x.label)).toEqual(["Projects", "Election Evidence"]);
+  });
+
+  it("S — ACCESSIBILITY: one Breadcrumb landmark, an ordered-list hierarchy, exactly one current segment, and the mobile parent is a real anchor", () => {
+    const r = mountInteractive(NAMED_PROJECT);
+    const navs = breadcrumbNav(r);
+    expect(navs).toHaveLength(1);
+    expect(navs[0].findAllByType("ol")).toHaveLength(1);
+    const current = navs[0].findAll((n) => n.props?.["aria-current"] === "page", { deep: true });
+    expect(current).toHaveLength(1);
+    expect(visibleTextOf(current[0])).toBe("Election Evidence");
+    const mobileWrap = navs[0].findAll(
+      (n) => n.type === "div" && typeof n.props?.className === "string" && n.props.className.includes("sm:hidden"),
+      { deep: true }
+    );
+    expect(mobileWrap[0].findAllByType("a")).toHaveLength(1);
+  });
+
+  it("O — DEEP LINK: a cold first render needs no prior route state — the same breadcrumb appears from the server-resolved props alone", () => {
+    // `mountInteractive` is a first mount with no navigation history, no storage and no effects having run.
+    const segs = bcSegments(mountInteractive(NAMED_PROJECT));
+    expect(segs).toEqual([
+      { label: "Projects", href: "/workspace/projects", current: false },
+      { label: "Election Evidence", href: undefined, current: true },
+    ]);
   });
 });

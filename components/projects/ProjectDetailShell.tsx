@@ -22,7 +22,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
+import { Breadcrumb } from "@/components/shared/Breadcrumb";
 import { WorkspaceRunCard } from "@/components/workspace/WorkspaceRunCard";
 import { AssignedRunActions } from "@/components/projects/AssignedRunActions";
 import { SectionEmptyBox, SectionInitialErrorBox, SectionLoadingRow, SectionPagination } from "@/components/projects/SectionState";
@@ -96,9 +96,33 @@ export function ProjectDetailShellView({
 
   return (
     <main className="mx-auto max-w-4xl px-4 py-10 sm:py-14">
-      <Link href="/workspace/projects" className="text-sm font-medium text-cp-accent hover:underline">
-        ← Back to Projects
-      </Link>
+      {/*
+        Phase 11B.4 — the shared Breadcrumb replaces the one-off
+        "← Back to Projects" link. Its "Projects" segment keeps that exact
+        destination on desktop and its `mobileParent` keeps it on mobile, so no
+        affordance is lost; two equivalent hierarchy controls would be redundant.
+
+        The frozen Personal hierarchy is exactly `Projects / {Project name}` —
+        no "Personal", no Workspace level, no Project id. Workspace context and
+        switching arrive in 11B.5, and there is deliberately no WorkspaceNav on
+        this Personal page.
+
+        `project.name` is trustworthy as a visible label because the Server
+        Component resolved it through `resolveProjectForOwner(identity.uid, ...)`
+        after identity, Projects-UI eligibility and the canonical Personal
+        Workspace prerequisite all succeeded. It is never derived from the route
+        id, the pathname or any client state, and no new read is performed here.
+
+        Composition is Breadcrumb -> heading/status -> content, the same rule
+        11B.3 normalized across the Team surfaces.
+      */}
+      <Breadcrumb
+        segments={[
+          { label: "Projects", href: "/workspace/projects" },
+          { label: project.name },
+        ]}
+        mobileParent={{ label: "Projects", href: "/workspace/projects" }}
+      />
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
         <h1 className="text-2xl font-semibold text-cp-text break-words">{project.name}</h1>
