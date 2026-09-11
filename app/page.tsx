@@ -87,25 +87,6 @@ const ResultsDisplay = dynamic(() => import("@/components/ResultsDisplay"), {
  */
 type RunStatus = "idle" | "running" | "complete" | "error";
 
-/**
- * PERSONAL-RESEARCH-URL-1-C1 §I — tolerant decode for the `?tab=` extension flow.
- *
- * `URLSearchParams.get()` already percent-decodes, and these call sites then
- * decoded a SECOND time. That was harmless for the values the extension happened
- * to send, but `decodeURIComponent` THROWS on a bare `%` — so a question like
- * "50% of x", which the new canonical follow-up hand-off can legitimately produce,
- * would raise a URIError inside a mount effect. The double decode is kept for
- * backward compatibility with already-encoded legacy links; it just can no longer
- * throw, and falls back to the value the URL actually carried.
- */
-function decodeQueryValueTolerantly(raw: string): string {
-  try {
-    return decodeURIComponent(raw);
-  } catch {
-    return raw;
-  }
-}
-
 const HISTORY_STORAGE_KEY = "convergePanelHistoryV1";
 const MAX_CLAIM_CHARS = 2000;
 const HISTORY_PAGE_SIZE = 30;
@@ -2369,8 +2350,20 @@ export default function Home() {
       // redirect over the Verify surface the user was just sent to.
       supersedeRunningResearch();
       setPanelTab("verify");
+      /**
+       * C2 §B — ONE DECODE, AND `URLSearchParams` ALREADY DID IT.
+       *
+       * `params.get()` returns the percent-DECODED value, so the string here is
+       * already the producer's original. This site used to decode a second time,
+       * which silently rewrote any question that legitimately contains
+       * percent-escape-shaped text: "What does %20 mean in a URL?" arrived as
+       * "What does   mean in a URL?". Every producer in the repo encodes exactly
+       * once (`app/verify/page.tsx`, `personalResearchFollowUpHref`,
+       * `personalResearchVerifyClaimHref`) and no double-encoded protocol exists,
+       * so a second decode has nothing to undo and can only corrupt content.
+       */
       const claim = params.get("claim");
-      if (claim) setClaimInput(decodeQueryValueTolerantly(claim));
+      if (claim) setClaimInput(claim);
       router.replace("/", { scroll: false });
     } else if (tab === "research") {
       /**
@@ -2380,8 +2373,9 @@ export default function Home() {
        */
       supersedeRunningResearch();
       setPanelTab("research");
+      // C2 §B — already decoded by `URLSearchParams`; see the `claim` site above.
       const q = params.get("q");
-      if (q) setQuestion(decodeQueryValueTolerantly(q));
+      if (q) setQuestion(q);
       router.replace("/", { scroll: false });
     }
   }, [authReady, user, router, enterOriginLinkedVerifyClaimMode, supersedeRunningResearch]);
