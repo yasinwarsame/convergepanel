@@ -39,9 +39,34 @@ describe("app/page.tsx — ONE shared research-load arbitration domain (not per-
     expect(matches.length).toBe(1);
   });
 
-  it("researchLoadGuard.next() is called in exactly two places — loadResearchRunIntoState's entry and handleRunPanel's reset block — both sharing the SAME instance", () => {
+  /**
+   * PERSONAL-RESEARCH-URL-1 §V — the invariant is ONE shared arbitration domain,
+   * never per-control counters. The old assertion pinned the NUMBER of
+   * `.next()` sites (2), which was implementation shape: URL-1 legitimately adds
+   * newer-intent writers — the unmount cleanup and `invalidateResearchIntent()`,
+   * used by the History canonical push, the legacy-link canonicalization and the
+   * tab controls. Pinning the count would have forced a choice between failing
+   * this test and leaving the §AG race open.
+   *
+   * What still must hold — and is what this now asserts — is that every claim and
+   * every check goes through the SAME `researchLoadGuard`, with no second counter.
+   */
+  it("every generation claim goes through the ONE shared researchLoadGuard, and no second counter exists", () => {
     const nextCalls = PAGE_SOURCE.match(/researchLoadGuard\.next\(\)/g) ?? [];
-    expect(nextCalls.length).toBe(2);
+    // more than the original two, because explicit navigation is now newer intent
+    expect(nextCalls.length).toBeGreaterThanOrEqual(4);
+    // no bare/parallel generation counter was introduced
+    expect(PAGE_SOURCE).not.toMatch(/createGenerationGuard\(\)[\s\S]{0,80}createGenerationGuard\(\)/);
+    const guardlessNext = PAGE_SOURCE.match(/(?<!researchLoadGuard)\.next\(\)/g) ?? [];
+    expect(guardlessNext).toHaveLength(0);
+  });
+
+  it("§AG — handleRunPanel RETAINS its generation token and verifies ownership before post-await commits and canonical navigation", () => {
+    expect(PAGE_SOURCE).toMatch(/const runGeneration = researchLoadGuard\.next\(\);/);
+    expect(PAGE_SOURCE).toMatch(/const stillOwnsResearchIntent = \(\) =>\s*\n\s*researchPageMountedRef\.current && researchLoadGuard\.isCurrent\(runGeneration\);/);
+    // the obsolete claim that the run needs no check of its own is gone
+    expect(PAGE_SOURCE).not.toContain("needs\n    // no isCurrent check of its own");
+    expect(PAGE_SOURCE).not.toMatch(/needs no isCurrent check of its own/);
   });
 
   it("researchLoadGuard.isCurrent(gen) is checked in exactly two places inside loadResearchRunIntoState — success path and failure path", () => {
@@ -124,11 +149,15 @@ describe("app/page.tsx — loadResearchRunIntoState: generation claimed synchron
 });
 
 describe("app/page.tsx — handleRunPanel invalidates any in-flight research-run load", () => {
-  it("researchLoadGuard.next() is called inside the synchronous 'Reset state for new panel run' block, before the network call", () => {
-    const match = PAGE_SOURCE.match(
-      /\/\/ Reset state for new panel run\s*(?:\/\/[^\n]*\n\s*)*researchLoadGuard\.next\(\);\s*setVerificationPayload\(null\);/
-    );
-    expect(match).not.toBeNull();
+  it("§AG — the run's generation is claimed synchronously in the reset block, BEFORE the network call", () => {
+    const fnStart = PAGE_SOURCE.indexOf("const handleRunPanel = async () => {");
+    expect(fnStart).toBeGreaterThan(-1);
+    const body = PAGE_SOURCE.slice(fnStart);
+    const claimIdx = body.indexOf("const runGeneration = researchLoadGuard.next();");
+    const firstAwaitIdx = body.indexOf('await import("@/lib/client/authedFetch")');
+    expect(claimIdx).toBeGreaterThan(-1);
+    expect(firstAwaitIdx).toBeGreaterThan(-1);
+    expect(claimIdx).toBeLessThan(firstAwaitIdx);
   });
 
   it("handleRunPanel's researchLoadGuard.next() call precedes the function's first `await` (the network call)", () => {

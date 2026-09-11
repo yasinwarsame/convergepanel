@@ -72,10 +72,11 @@ describe("UnfiledResearchSection — loading/error/empty (never fabricates empty
 });
 
 describe("UnfiledResearchSection — reuses WorkspaceRunCard verbatim", () => {
-  it("renders the question text and the canonical /?openResearchRun= report link", () => {
+  it("renders the question text and the canonical /workspace/research/{runId} report link", () => {
     const html = render(fakeResult({ items: [RUN_A] }));
     expect(html).toContain("Question A");
-    expect(html).toContain(`href="/?openResearchRun=${encodeURIComponent(RUN_A.id)}"`);
+    expect(html).toContain(`href="/workspace/research/${encodeURIComponent(RUN_A.id)}"`);
+    expect(html).not.toContain("openResearchRun");
   });
 
   it("renders every item in order", () => {

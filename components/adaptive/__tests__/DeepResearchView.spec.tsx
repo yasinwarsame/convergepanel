@@ -175,6 +175,12 @@ describe("DeepResearchView", () => {
 
   describe("Phase 11A.4 — 'Verify this claim' action", () => {
     const CLAIM_ID = "v1:findings:0:" + "a".repeat(43);
+    /**
+     * PERSONAL-RESEARCH-URL-1-C1 §O — a handler is now part of eligibility, so
+     * every test below supplies one and therefore isolates exactly ONE dimension
+     * (runId, or claimId). The handler's own dimension is tested separately.
+     */
+    const onVerifyClaim = () => {};
 
     async function buildResultWithOneFinding(claimId: string | null | undefined) {
       mockGaps();
@@ -191,36 +197,71 @@ describe("DeepResearchView", () => {
 
     it("an eligible finding (runId present, claimId present) shows 'Verify this claim'", async () => {
       const result = await buildResultWithOneFinding(CLAIM_ID);
-      const html = renderToStaticMarkup(createElement(DeepResearchView, { deepResearch: result, runId: "run-1" }));
+      const html = renderToStaticMarkup(createElement(DeepResearchView, { deepResearch: result, runId: "run-1", onVerifyClaim }));
       expect(html).toContain("Verify this claim");
     });
 
     it("a finding with claimId: null does not show the action", async () => {
       const result = await buildResultWithOneFinding(null);
-      const html = renderToStaticMarkup(createElement(DeepResearchView, { deepResearch: result, runId: "run-1" }));
+      const html = renderToStaticMarkup(createElement(DeepResearchView, { deepResearch: result, runId: "run-1", onVerifyClaim }));
       expect(html).not.toContain("Verify this claim");
     });
 
     it("a finding with claimId absent (undefined) does not show the action — e.g. a non-deep_research or legacy path that never attached one", async () => {
       const result = await buildResultWithOneFinding(undefined);
-      const html = renderToStaticMarkup(createElement(DeepResearchView, { deepResearch: result, runId: "run-1" }));
+      const html = renderToStaticMarkup(createElement(DeepResearchView, { deepResearch: result, runId: "run-1", onVerifyClaim }));
       expect(html).not.toContain("Verify this claim");
     });
 
     it("no runId at all -> the action is withheld even for a finding with a valid claimId", async () => {
       const result = await buildResultWithOneFinding(CLAIM_ID);
-      const html = renderToStaticMarkup(createElement(DeepResearchView, { deepResearch: result, runId: null }));
+      const html = renderToStaticMarkup(createElement(DeepResearchView, { deepResearch: result, runId: null, onVerifyClaim }));
       expect(html).not.toContain("Verify this claim");
     });
 
     it("the button's locator data carries the CANONICAL claimId attached to the finding — never the raw finding.id, never derived from array position", async () => {
       const result = await buildResultWithOneFinding(CLAIM_ID);
-      const html = renderToStaticMarkup(createElement(DeepResearchView, { deepResearch: result, runId: "run-1" }));
+      const html = renderToStaticMarkup(createElement(DeepResearchView, { deepResearch: result, runId: "run-1", onVerifyClaim }));
       expect(html).toContain(`data-claim-id="${CLAIM_ID}"`);
       // The raw finding id ("raw-id-0") must never appear as the locator —
       // proves this isn't silently falling back to finding.id anywhere.
       expect(html).not.toContain('data-claim-id="raw-id-0"');
       expect(html).toContain('data-run-id="run-1"');
+    });
+
+    /**
+     * C1 §O/§Q — THE DEAD-BUTTON REGRESSION.
+     *
+     * `onVerifyClaim` is optional and the click site calls it with `?.`, so a
+     * caller that rendered findings without one produced a visible button that did
+     * nothing at all. The canonical Personal report did exactly that for the whole
+     * of URL-1. Eligibility now includes the handler, so no caller can reintroduce
+     * it by omission.
+     */
+    it("C1 — a caller that supplies NO onVerifyClaim gets no 'Verify this claim' button at all", async () => {
+      const result = await buildResultWithOneFinding(CLAIM_ID);
+      const html = renderToStaticMarkup(createElement(DeepResearchView, { deepResearch: result, runId: "run-1" }));
+      expect(html).not.toContain("Verify this claim");
+      // the finding itself still renders — only the unusable affordance is withheld
+      expect(html).toContain("A finding.");
+    });
+
+    it("C1 — a non-function handler is equally ineligible", async () => {
+      const result = await buildResultWithOneFinding(CLAIM_ID);
+      for (const bad of [null, undefined, "yes", 1, {}]) {
+        const html = renderToStaticMarkup(
+          createElement(DeepResearchView, { deepResearch: result, runId: "run-1", onVerifyClaim: bad as never })
+        );
+        expect(html).not.toContain("Verify this claim");
+      }
+    });
+
+    it("C1 — with a handler, the SAME fixture does render it: the withholding above is caused by the handler alone", async () => {
+      const result = await buildResultWithOneFinding(CLAIM_ID);
+      const html = renderToStaticMarkup(
+        createElement(DeepResearchView, { deepResearch: result, runId: "run-1", onVerifyClaim })
+      );
+      expect(html).toContain("Verify this claim");
     });
   });
 

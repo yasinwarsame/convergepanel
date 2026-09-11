@@ -100,11 +100,34 @@ describe("AdaptivePanelResponse — Phase 11A.4: runId/onVerifyClaim thread thro
         deepResearch: deepResearchFixture(),
         question: "What does the research say?",
         runId: "run-adaptive-1",
+        // PERSONAL-RESEARCH-URL-1-C1 §O — the handler is now part of the
+        // action's eligibility, so this threading test supplies one. That makes
+        // it a test of BOTH threaded props, which is what its name always said.
+        onVerifyClaim: () => {},
       })
     );
     expect(html).toContain("Verify this claim");
     expect(html).toContain('data-run-id="run-adaptive-1"');
     expect(html).toContain(`data-claim-id="${CLAIM_ID}"`);
+  });
+
+  it("C1 §O — with the runId but NO handler threaded through, the action is withheld rather than rendered dead", () => {
+    const schema = SCHEMA_REGISTRY.deep_research;
+    const classification = baseClassification("deep_research");
+    const results = [modelResult("chatgpt", "deep_research", {})];
+    const html = renderToStaticMarkup(
+      createElement(AdaptivePanelResponse, {
+        schema,
+        classification,
+        results,
+        deepResearch: deepResearchFixture(),
+        question: "What does the research say?",
+        runId: "run-adaptive-1",
+      })
+    );
+    expect(html).not.toContain("Verify this claim");
+    // the finding itself still renders: only the unusable affordance is withheld
+    expect(html).toContain("A finding summary.");
   });
 
   it("without a runId prop, the action is withheld even though the finding itself has a claimId", () => {
@@ -118,6 +141,7 @@ describe("AdaptivePanelResponse — Phase 11A.4: runId/onVerifyClaim thread thro
         results,
         deepResearch: deepResearchFixture(),
         question: "What does the research say?",
+        onVerifyClaim: () => {},
       })
     );
     expect(html).not.toContain("Verify this claim");

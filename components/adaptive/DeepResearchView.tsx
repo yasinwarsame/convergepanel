@@ -44,7 +44,18 @@ function FindingRow({
   // derived from finding.id or this row's position in the array — those
   // are exactly the unsound schemes claimId's own design (see
   // lib/verification/claimVerificationOrigin.ts) replaced.
-  const canVerify = Boolean(runId) && typeof finding.claimId === "string" && finding.claimId.length > 0;
+  //
+  // PERSONAL-RESEARCH-URL-1-C1 §O — A HANDLER IS PART OF ELIGIBILITY.
+  // `onVerifyClaim` is optional, and eligibility used to ignore it, so any caller
+  // that rendered findings without one produced a visible "Verify this claim"
+  // button whose click ran `onVerifyClaim?.(...)` — a no-op. The canonical
+  // Personal report did exactly that. An affordance that cannot act must not be
+  // offered, and that rule belongs here so no future caller can reintroduce it.
+  const canVerify =
+    Boolean(runId) &&
+    typeof finding.claimId === "string" &&
+    finding.claimId.length > 0 &&
+    typeof onVerifyClaim === "function";
 
   // Phase 11A.6 — exact-match only: this is never a summary/id/index
   // comparison, only the server-issued claimId itself.

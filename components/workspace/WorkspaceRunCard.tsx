@@ -11,6 +11,7 @@
  */
 
 import Link from "next/link";
+import { personalResearchHref } from "@/lib/user/personalResearchHref";
 import type { ReactNode } from "react";
 import { GovernanceChip } from "@/components/shared/GovernanceChip";
 import type { WorkspaceRunSummary } from "@/hooks/useWorkspaceRuns";
@@ -55,7 +56,15 @@ export function workspaceRunStatusLine(item: Pick<WorkspaceRunSummary, "status" 
 export function WorkspaceRunCard({ item, actions }: { item: WorkspaceRunSummary; actions?: ReactNode }) {
   return (
     <li className="rounded-xl border-2 border-cp-border bg-cp-raised transition-colors hover:border-cp-accent hover:bg-cp-primary-soft">
-      <Link href={`/?openResearchRun=${encodeURIComponent(item.id)}`} className="flex w-full items-start gap-3 px-3 py-3 text-left">
+      {/*
+        PERSONAL-RESEARCH-URL-1 §AB — the durable canonical address. This card
+        previously emitted `/?openResearchRun={id}`, a one-shot hand-off that the
+        root erased with `router.replace("/")`, so a report opened from here had no
+        address to bookmark or share. Row layout, GovernanceChip, the sibling
+        actions, status text and the Project control are untouched, as is the
+        one-anchor / no-nested-button invariant.
+      */}
+      <Link href={personalResearchHref(item.id)} className="flex w-full items-start gap-3 px-3 py-3 text-left">
         <span className="min-w-0 flex-1">
           <span className="flex flex-wrap items-center gap-2">
             <span className="text-xs font-medium text-cp-faint">{new Date(item.at).toLocaleString()}</span>
