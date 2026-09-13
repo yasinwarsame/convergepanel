@@ -32,13 +32,10 @@ import { writeTeamProjectEventSafely } from "@/lib/projects/writeTeamProjectEven
 import { invalidRequestBodyResponse, unexpectedFieldResponse, internalErrorResponse } from "@/lib/workspaces/teamWorkspaceErrorResponse";
 import { teamProjectAuthorizationDeniedResponse, teamProjectNotFoundConcealedResponse } from "@/lib/projects/teamProjectErrorResponse";
 import { projectArchivedTargetResponse } from "@/lib/projects/projectErrorResponse";
-import { buildTeamResearchSnapshotDto, snapshotTooLargeResponse, sourceResearchNotFoundConcealedResponse } from "@/lib/workspaces/teamResearchSnapshotResponse";
+import { TEAM_RESEARCH_SNAPSHOT_RATE_LIMIT, buildTeamResearchSnapshotDto, snapshotTooLargeResponse, sourceResearchNotFoundConcealedResponse } from "@/lib/workspaces/teamResearchSnapshotResponse";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-/** §D8 — 10 snapshot requests per minute per uid; no per-Workspace cap in v1. */
-export const SNAPSHOT_RATE_LIMIT = { maxRequests: 10, windowSeconds: 60 } as const;
 
 async function getUid(req: NextRequest): Promise<string | NextResponse> {
   const identity = await resolveRequestIdentity(req);
@@ -60,8 +57,8 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
   // never let a caller bypass the user-level ceiling. Checked before body
   // parsing so an unparseable flood is still counted.
   const rateLimitResult = await checkRateLimit({
-    maxRequests: SNAPSHOT_RATE_LIMIT.maxRequests,
-    windowSeconds: SNAPSHOT_RATE_LIMIT.windowSeconds,
+    maxRequests: TEAM_RESEARCH_SNAPSHOT_RATE_LIMIT.maxRequests,
+    windowSeconds: TEAM_RESEARCH_SNAPSHOT_RATE_LIMIT.windowSeconds,
     identifier: `team-personal-research-snapshot:${uid}`,
   });
   if (!rateLimitResult.allowed) {

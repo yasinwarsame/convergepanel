@@ -51,7 +51,8 @@ jest.mock("@/lib/logger", () => ({
 import { readFileSync } from "fs";
 import { join } from "path";
 import { NextRequest } from "next/server";
-import { POST, SNAPSHOT_RATE_LIMIT } from "@/app/api/workspaces/[workspaceId]/projects/[projectId]/research/snapshots/route";
+import { POST } from "@/app/api/workspaces/[workspaceId]/projects/[projectId]/research/snapshots/route";
+import { TEAM_RESEARCH_SNAPSHOT_RATE_LIMIT as SNAPSHOT_RATE_LIMIT } from "@/lib/workspaces/teamResearchSnapshotResponse";
 
 const UID = "member-1";
 const WS_ID = "ws-team-1";

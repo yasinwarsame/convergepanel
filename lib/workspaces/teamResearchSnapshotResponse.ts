@@ -9,6 +9,13 @@
 export type TeamResearchSnapshotErrorBody = { ok: false; errorCode: string; message: string };
 
 /**
+ * §D8 — 10 snapshot requests per minute per uid; no per-Workspace cap in
+ * v1. Lives here (not in the route file) because Next.js permits only
+ * handler/config exports from a route module.
+ */
+export const TEAM_RESEARCH_SNAPSHOT_RATE_LIMIT = { maxRequests: 10, windowSeconds: 60 } as const;
+
+/**
  * A source that is missing, not the caller's, Team-bound, invalidly bound,
  * not a run at all, or not complete — ONE concealed response for all of
  * them. Which predicate failed is never revealed.
