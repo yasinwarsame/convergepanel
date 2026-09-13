@@ -3,6 +3,10 @@
 **Status:** read-only audit, no implementation. Audited at `main @ 67802ff2` on 2026-09-13.
 Every claim below was checked against source at that commit; file:line references are to that tree.
 
+**Owner review 2026-09-13: `ADD_TO_TEAM_PROJECT_R0_ACCEPTED_WITH_AMENDMENTS`.** Decisions D1–D8 are
+now decided (§4) and four amendments to the proposed shape are folded into §2, §3 and §6. This
+document remains a design record; **implementation is not authorized by it.**
+
 **What R0 is for.** The Personal research addressability prerequisite closed on 2026-09-11
 (`/workspace/research/[runId]`, PR #160). "Add to Team Project from Personal" was explicitly
 blocked on it and is now unblocked. This document fixes the facts the implementation phase must
@@ -179,10 +183,12 @@ Team destination gets its own Team-owned run id with an independently authorized
 - A native Team adaptive run does get a fresh `governanceRecord` from the execution engine via
   `initializeAdaptiveGovernanceRecord({runId, adaptiveOutput})`
   (`lib/runPanelExecution.ts:823-860`, `lib/adaptiveSchema/governanceInitialization.ts:73`), with
-  `humanReview.status = "unreviewed"`. For parity, a snapshot of an adaptive source should call the
-  same initializer against the **copied** `adaptiveOutput` and the **new** run id, after the create
-  commits (the initializer is a merge write, F1). A snapshot with no adaptive output gets no record,
-  matching a native non-adaptive Team run. See Decision D5.
+  `humanReview.status = "unreviewed"`. For parity, a snapshot of an adaptive source gets the same
+  record, built for the **copied** `adaptiveOutput` and the **new** run id. Because the initializer
+  persists with a merge write (F1) and a second write would be best-effort state (F9), the record
+  must be built **before** the transaction by a pure builder and embedded in the same `tx.create()`
+  (amendment, §6). A snapshot with no adaptive output gets no record, matching a native
+  non-adaptive Team run. See Decision D5.
 - `run.userId` on the copy is the promoter's uid, which is necessarily also the Personal owner's uid
   (F6), so there is no attribution dilemma. It does mean the self-review guard
   (`lib/workspaces/workspaceReviewEligibility.ts:53-63`) bars the promoter from reviewing the copy,
@@ -294,19 +300,27 @@ in `lib/firestore/teamWorkspaceRuns.ts` or a sibling, structured like `createTea
       then `roleHasCapability(membership.role, "research.organize")` from the same membership.
    2. `tx.get(projects/{projectId})` → well-formed, `id` match, `workspaceId === W`,
       `status === "active"` (else `project_not_found` / `project_archived`).
-   3. `tx.get(runs/{sourceRunId})` → exists, `status === "complete"`, shape `legacy|personal`,
-      `userId === uid` (any failure → concealed `source_not_found`; never distinguish "not yours"
-      from "does not exist").
-   4. Build the snapshot payload (below); `estimateDocumentSize` ≤ `MAX_TOTAL_DOC_SIZE` else
-      `snapshot_too_large`.
-   5. Idempotency lock (Decision D3): `tx.create(runSnapshotLocks/{sha256(sourceRunId|W|projectId)},
-      {snapshotRunId: newRunId, ...})`; ALREADY_EXISTS → return the existing `snapshotRunId` as
-      `already_exists` (200, idempotent).
-   6. `tx.create(runs/{newRunId}, payload)`.
-   7. If Decision D6 is "yes": `tx.set(workspaceMembershipEvents/{auto}, ...)` in the same
-      transaction.
-4. After commit, if the source had parseable `adaptiveOutput`: `initializeAdaptiveGovernanceRecord({
-   runId: newRunId, adaptiveOutput })` (Decision D5), then `writeTeamProjectEventSafely`.
+   3. `tx.get(runs/{sourceRunId})` → exists, `status === "complete"`, shape `legacy|personal`
+      **first**, and only then `userId === uid` (any failure → concealed `source_not_found`; never
+      distinguish "not yours" from "does not exist").
+   4. **Idempotency lock, read first** (Decision D3, amended): compute
+      `lockId = sha256(JSON.stringify({version: 1, sourceRunId, workspaceId, projectId}))` — a
+      canonical tuple encoding, never `a|b|c` concatenation — and `tx.get(runSnapshotLocks/{lockId})`
+      while still in the read phase. If it exists: validate its shape, require the stored tuple to
+      equal the request, require a valid `createdBy`, then `tx.get(runs/{lock.snapshotRunId})` and
+      require `workspaceId === W`, `projectId === projectId`, `origin.type === "personal_research"`,
+      `origin.runId === sourceRunId`. Valid → return `already_exists` with no further write of any
+      kind. Malformed lock or missing/mismatched destination → internal integrity failure, fail
+      closed, no repair in v1. Never "create the lock and recover from ALREADY_EXISTS after commit".
+   5. Build the **entire** snapshot payload (below), including `origin` and, for an adaptive source,
+      the fresh `governanceRecord` from the pure builder; `estimateDocumentSize` ≤
+      `MAX_TOTAL_DOC_SIZE` else `snapshot_too_large` with nothing written.
+   6. Writes, all three or none: `tx.create(runs/{newRunId}, payload)`;
+      `tx.create(runSnapshotLocks/{lockId}, {version:1, sourceRunId, workspaceId, projectId,
+      snapshotRunId: newRunId, createdBy: uid, createdAt})`; `tx.set(workspaceMembershipEvents/{auto},
+      workspace_research_snapshot_created)` (Decision D6, decided yes).
+4. After commit only the non-authoritative `writeTeamProjectEventSafely` remains; its failure never
+   makes the committed snapshot look rolled back. No governance write happens after commit.
 
 **Snapshot payload** (every field either copied verbatim from the source or set fresh):
 
@@ -321,8 +335,9 @@ in `lib/firestore/teamWorkspaceRuns.ts` or a sibling, structured like `createTea
 | `tokenUsage`, `totalTokens`, `tokensByModel`, `tokensByProvider` | copied (attribution of past spend, not a new charge) |
 | `adaptiveOutput`, `legacyAdaptiveOutput` | copied if present |
 | `synthesizedStructuredReport` + its six sibling fields | copied if present |
-| `governanceStatus` | Decision D5 |
-| `governanceRecord`, `teamGovernance`, all subcollections, `adaptiveExportCounter` | **never copied** |
+| `governanceStatus` | **absent** (D5: a Personal policy verdict never crosses the Workspace boundary) |
+| `governanceRecord` | **never copied**; for an adaptive source a **fresh** record (`humanReview.status = "unreviewed"`, new run id) from the pure builder, embedded in this same create (D5, §6) |
+| `teamGovernance`, all subcollections, `adaptiveExportCounter` | **never copied** |
 | `origin` | `{ type: "personal_research", runId: sourceRunId, sourceCreatedAt, sourceCompletedAt }` |
 
 `origin` follows the verification precedent: it records the pointer and the point-in-time facts that
@@ -335,8 +350,10 @@ authorization reason, `project_not_found`, `source_not_found` → concealed 404s
 helpers; `project_archived` → 409 `project_archived`; `snapshot_too_large` → 413 (non-retryable);
 `already_exists` → 200 with the existing id; infra → 500/503.
 
-**Client.** A button on `PersonalResearchDetailShell` offered only when `teamWorkspacesUiEnabled`,
-opening a two-step dialog (Workspace via `useWorkspaceList`, then active Projects via
+**Client.** A button on `PersonalResearchDetailShell` offered only when the report is loaded,
+**`viewerRole === "owner"`** and `teamWorkspacesUiEnabled` (a `personal_reviewer` can read the page
+but must never see the action: the server would reject them on source ownership, and a visible
+affordance that always fails is a defect, §6), opening a two-step dialog (Workspace via `useWorkspaceList`, then active Projects via
 `useTeamProjects`), per-run busy lock, success state linking to the Team run page. Copy must say what
 Team members will see (F4, Decision D4). The Personal page itself is unchanged after success.
 
@@ -365,6 +382,16 @@ Team members will see (F4, Decision D4). The Personal page itself is unchanged a
     unchanged, with a positive control showing the native Team creator does change it).
 14. Duplicate submission yields the same snapshot id, not two runs — mutation: remove the lock.
 15. Size guard refuses rather than truncates — mutation: remove the estimate.
+16. The action renders only for `viewerRole === "owner"` — mutation: render it for
+    `personal_reviewer` (the test must first show it renders for the owner on the same fixture).
+17. An existing lock is validated against its destination run before being trusted — mutation:
+    return `lock.snapshotRunId` without reading and checking the destination.
+18. The fresh adaptive `governanceRecord` is inside the same create — mutation: initialize it after
+    commit, then inject a post-commit failure.
+19. The audit event is atomic with the snapshot — mutation: write it post-commit, then inject a
+    post-commit failure; also, an idempotent repeat must not add a second event.
+20. The lock key is a canonical tuple — mutation: hash `sourceRunId + "|" + workspaceId + "|" +
+    projectId` and show two distinct tuples can collide or that the contract test fails.
 
 Test-evidence rules from `docs/operations/security-test-falsifiability.md` apply in full: every
 denial needs a positive control on the same fixture, every mutation is run and recorded KILLED, and
@@ -372,34 +399,39 @@ denial needs a positive control on the same fixture, every mutation is run and r
 
 ---
 
-## 4. Decisions required before implementation (recommendations marked)
+## 4. Decisions — DECIDED by the product owner 2026-09-13
 
-- **D1. Scope of "Personal" source.** Include `legacy` runs (no `workspaceId`, pre-Phase-3) as well
-  as `personal`-bound ones? **Recommend yes** — ownership is `userId` either way and the Personal
-  detail route already serves both.
-- **D2. Source status.** Only `complete`? **Recommend yes**; `running`/`error` runs have nothing
-  worth snapshotting and would need `pending` semantics on the Team side.
-- **D3. Idempotency semantic.** "At most one snapshot per (source, workspace, project)" via a
-  deterministic lock document, returning the existing id on repeat? Or allow unlimited duplicates?
-  **Recommend the lock.** Promoting the same run twice into the same Project is a duplicate in every
-  plausible reading; promoting into two different Projects stays allowed.
-- **D4. Fidelity disclosure.** Team members currently see raw per-model text (F4). Options: ship with
-  honest dialog copy now and widen the Team read surface later; or block this feature until the Team
-  detail page renders adaptive output. **Recommend ship with disclosure**; copying the rich fields
-  now means nothing is lost when the Team surface catches up.
-- **D5. Governance on the copy.** (a) Initialize a fresh `governanceRecord` (`unreviewed`) for
-  adaptive sources, matching a native Team run — **recommend yes**. (b) Copy the `governanceStatus`
-  chip value — **recommend no**: it is a Personal-policy verdict; let it be absent until Team
-  governance evaluates the copy, exactly as a native Team run.
-- **D6. Audit visibility.** Add a `workspace_research_snapshot_created` audit event (four-edit
-  change, in-transaction) or rely only on the reader-less `projectEvents` stream? **Recommend the
-  audit event**; a Team gaining research from outside its boundary is exactly what an audit log is
-  for.
-- **D7. Reverse lookup from the Personal side** ("promoted to Team X / Project Y"). Requires an
-  `origin.runId` query and index, or a source write (forbidden). **Recommend defer**; v1 shows
-  success once and then nothing on the Personal page.
-- **D8. Rate limit and abuse ceiling.** 10/60s per uid, no per-workspace cap? **Recommend 10/60s
-  UID-scoped** matching the project-association precedent, no workspace cap in v1.
+- **D1. Scope of "Personal" source — DECIDED: yes.** `legacy` runs (no `workspaceId`, pre-Phase-3)
+  and `personal`-bound runs both qualify, provided the run is proven Personal-shaped **before** the
+  `userId === uid` check. Ownership is `userId` either way and the Personal detail route already
+  serves both.
+- **D2. Source status — DECIDED: `complete` only.** Running, queued, failed or partial artifacts are
+  never snapshotted.
+- **D3. Idempotency — DECIDED: at most one snapshot per (source, workspace, project) via a
+  deterministic lock, AMENDED:** the lock is **read inside the transaction before any write** and
+  validated together with the destination run it names; the key hashes a canonical tuple encoding
+  (`JSON.stringify({version:1, sourceRunId, workspaceId, projectId})`), never naive concatenation.
+  Promoting into two different Projects stays allowed.
+- **D4. Fidelity disclosure — DECIDED: ship with disclosure.** Copy the rich persisted fields now;
+  tell the owner that Team members may currently see the underlying model responses rather than the
+  full Deep Research layout; widen the Team read surface separately.
+- **D5. Governance on the copy — DECIDED: fresh yes, Personal verdict no, AMENDED:** the fresh
+  adaptive `governanceRecord` is built by a pure builder extracted narrowly from
+  `initializeAdaptiveGovernanceRecord` and embedded in the same `tx.create()`, not merged in after
+  commit; parity tests prove the refactor changes no existing initializer output. `governanceStatus`
+  is never copied.
+- **D6. Audit visibility — DECIDED: yes.** `workspace_research_snapshot_created`, written in the same
+  transaction as the run and the lock. The user-facing audit DTO should not expose the Personal
+  source run id unless explicitly required; provenance lives on the run's `origin`.
+- **D7. Reverse lookup — DECIDED: defer.** Zero writes to the source, no `promotedTo`, nothing.
+- **D8. Rate limit — DECIDED: 10/60s per uid, no per-workspace cap.** The operation uses no models
+  and consumes no inference quota.
+- **Added requirement — owner-only action.** The action requires `viewerRole === "owner"` and the
+  Team offering signal; it is never shown to a `personal_reviewer`.
+
+The full implementation brief (sections A–AF, 40-item security matrix, mutations M16–M26, completion
+report format) was supplied by the owner on 2026-09-13 and is the contract for the implementation
+phase once it is explicitly authorized.
 
 ---
 
@@ -415,7 +447,33 @@ denial needs a positive control on the same fixture, every mutation is run and r
 
 ---
 
-## 6. Source material
+## 6. Amendments after owner review (2026-09-13)
+
+Four changes to the R0 proposal, each strengthening an invariant the audit itself identified:
+
+1. **Lock read before write (D3).** The first draft relied on `tx.create(lock)` failing at commit and
+   recovering the existing id afterwards. That makes "already exists" a commit-time exception path
+   and trusts whatever id the stored lock names. Amended: read the lock in the read phase, validate
+   its tuple and `createdBy`, read the destination run it names and validate that run structurally
+   (workspace, project, `origin.type`, `origin.runId`). A corrupt lock is an internal integrity
+   failure that fails closed; it is not repaired and its stored id is never returned blindly.
+2. **Canonical lock key (D3).** `sha256(a|b|c)` is only safe if none of the three ids can contain
+   the separator. Run and project ids are validated only syntactically (`validateRunIdSyntax` forbids only
+   `/`, control characters and `.`/`..`). Amended: hash a versioned canonical JSON tuple.
+3. **Fresh governance record in the same create (D5).** The first draft called the existing
+   initializer after commit, which is a merge write and therefore best-effort secondary state — the
+   exact pattern F9 and the Phase 4C lesson forbid for anything that must be provably present.
+   Amended: extract the record-building step of `initializeAdaptiveGovernanceRecord` as a pure
+   function, keep the initializer's behaviour for existing callers byte-identical (parity tests), and
+   embed the built record in the snapshot payload before the size estimate and the create.
+4. **Owner-only client action.** `GET /api/user/runs/[runId]` serves the canonical page to a
+   `personal_reviewer` as well as the owner. The server rejects a reviewer on source ownership, but
+   rendering the action for them is a dead affordance of the kind URL-1/C1 already had to remove once.
+   Amended: `viewerRole === "owner"` is a rendering precondition alongside the Team offering signal.
+
+Invariants 16–20 in §3 pin these amendments to mutations.
+
+## 7. Source material
 
 Three parallel source-reading passes (run data model and writers; Team authorization, Project and
 audit model; rules, client surfaces, precedents and test conventions), each cited by file:line at
