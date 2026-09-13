@@ -86,11 +86,20 @@ export type WorkspaceAuditPreviousRole = Exclude<WorkspaceMembershipRole, "owner
 
 export type WorkspaceAuditMemberEventType = "workspace_member_removed" | "workspace_ownership_transferred" | "workspace_member_role_changed";
 export type WorkspaceAuditProjectEventType = "workspace_project_archived" | "workspace_project_restored";
-export type WorkspaceAuditEventType = WorkspaceAuditMemberEventType | WorkspaceAuditProjectEventType;
+/**
+ * ADD-TO-TEAM-PROJECT §P — the first RESEARCH-shaped event: requires
+ * `projectId`/`projectName` (like Project events) PLUS `runId`/`runQuestion`.
+ * The DTO exposes `project.name` and `research.question` only — never
+ * `projectId`, never `runId`, and the Personal source run id is not even
+ * on the stored row.
+ */
+export type WorkspaceAuditResearchEventType = "workspace_research_snapshot_created";
+export type WorkspaceAuditEventType = WorkspaceAuditMemberEventType | WorkspaceAuditProjectEventType | WorkspaceAuditResearchEventType;
 
 const VALID_MEMBER_EVENT_TYPES: ReadonlySet<string> = new Set(["workspace_member_removed", "workspace_ownership_transferred", "workspace_member_role_changed"]);
 const VALID_PROJECT_EVENT_TYPES: ReadonlySet<string> = new Set(["workspace_project_archived", "workspace_project_restored"]);
-const VALID_EVENT_TYPES: ReadonlySet<string> = new Set([...VALID_MEMBER_EVENT_TYPES, ...VALID_PROJECT_EVENT_TYPES]);
+const VALID_RESEARCH_EVENT_TYPES: ReadonlySet<string> = new Set(["workspace_research_snapshot_created"]);
+const VALID_EVENT_TYPES: ReadonlySet<string> = new Set([...VALID_MEMBER_EVENT_TYPES, ...VALID_PROJECT_EVENT_TYPES, ...VALID_RESEARCH_EVENT_TYPES]);
 
 interface WorkspaceAuditEventDtoBase {
   occurredAt: string;
@@ -106,12 +115,19 @@ interface WorkspaceAuditProjectEventDtoBase extends WorkspaceAuditEventDtoBase {
   project: { name: string };
 }
 
+/** Research events expose the Project name snapshot and the run's question snapshot only — never `projectId`, never `runId`. */
+interface WorkspaceAuditResearchEventDtoBase extends WorkspaceAuditEventDtoBase {
+  project: { name: string };
+  research: { question: string };
+}
+
 export type WorkspaceAuditEventDto =
   | (WorkspaceAuditMemberEventDtoBase & { eventType: "workspace_member_removed"; previousRole: WorkspaceAuditPreviousRole })
   | (WorkspaceAuditMemberEventDtoBase & { eventType: "workspace_ownership_transferred"; previousRole: WorkspaceAuditPreviousRole })
   | (WorkspaceAuditMemberEventDtoBase & { eventType: "workspace_member_role_changed"; previousRole: WorkspaceAuditPreviousRole; newRole: WorkspaceAuditPreviousRole })
   | (WorkspaceAuditProjectEventDtoBase & { eventType: "workspace_project_archived" })
-  | (WorkspaceAuditProjectEventDtoBase & { eventType: "workspace_project_restored" });
+  | (WorkspaceAuditProjectEventDtoBase & { eventType: "workspace_project_restored" })
+  | (WorkspaceAuditResearchEventDtoBase & { eventType: "workspace_research_snapshot_created" });
 
 export type ListWorkspaceAuditEventsResult =
   | { status: "ok"; items: WorkspaceAuditEventDto[]; hasMore: boolean; nextCursor?: string }
@@ -123,7 +139,8 @@ type ValidatedRow =
   | { eventType: "workspace_ownership_transferred"; occurredAtIso: string; actorUid: string; targetUid: string; previousRole: WorkspaceAuditPreviousRole }
   | { eventType: "workspace_member_role_changed"; occurredAtIso: string; actorUid: string; targetUid: string; previousRole: WorkspaceAuditPreviousRole; newRole: WorkspaceAuditPreviousRole }
   | { eventType: "workspace_project_archived"; occurredAtIso: string; actorUid: string; projectId: string; projectName: string }
-  | { eventType: "workspace_project_restored"; occurredAtIso: string; actorUid: string; projectId: string; projectName: string };
+  | { eventType: "workspace_project_restored"; occurredAtIso: string; actorUid: string; projectId: string; projectName: string }
+  | { eventType: "workspace_research_snapshot_created"; occurredAtIso: string; actorUid: string; projectId: string; projectName: string; runId: string; runQuestion: string };
 
 /**
  * COMMON checks first (recognized `eventType`, exact `workspaceId`,
@@ -163,6 +180,18 @@ function validateRow(id: string, raw: Record<string, unknown> | undefined, works
     if (typeof projectId !== "string" || projectId.length === 0) return null;
     if (typeof projectName !== "string" || projectName.length === 0) return null;
     return { eventType: eventType as WorkspaceAuditProjectEventType, occurredAtIso, actorUid, projectId, projectName };
+  }
+
+  if (VALID_RESEARCH_EVENT_TYPES.has(eventType)) {
+    const projectId = raw.projectId;
+    const projectName = raw.projectName;
+    const runId = raw.runId;
+    const runQuestion = raw.runQuestion;
+    if (typeof projectId !== "string" || projectId.length === 0) return null;
+    if (typeof projectName !== "string" || projectName.length === 0) return null;
+    if (typeof runId !== "string" || runId.length === 0) return null;
+    if (typeof runQuestion !== "string" || runQuestion.length === 0) return null;
+    return { eventType: "workspace_research_snapshot_created", occurredAtIso, actorUid, projectId, projectName, runId, runQuestion };
   }
 
   const targetUid = raw.targetUid;
@@ -249,6 +278,10 @@ export async function listWorkspaceAuditEvents(args: { workspaceId: string; limi
       if (row.eventType === "workspace_project_archived" || row.eventType === "workspace_project_restored") {
         // Allow-list projection: name snapshot only — `projectId` is never surfaced.
         return { eventType: row.eventType, occurredAt: row.occurredAtIso, actor, project: { name: row.projectName } };
+      }
+      if (row.eventType === "workspace_research_snapshot_created") {
+        // Allow-list projection: name + question snapshots only — neither `projectId` nor `runId` is surfaced.
+        return { eventType: row.eventType, occurredAt: row.occurredAtIso, actor, project: { name: row.projectName }, research: { question: row.runQuestion } };
       }
       const base = {
         occurredAt: row.occurredAtIso,

@@ -1,0 +1,42 @@
+/**
+ * ADD-TO-TEAM-PROJECT §B — body allow-list.
+ */
+
+import { parseResearchSnapshotBody } from "../researchSnapshotBody";
+
+const RUN = "run-1e70e52a-43ad-40bc-b781-cf161763fe23";
+
+describe("parseResearchSnapshotBody", () => {
+  it("accepts exactly { source: { sourceType: 'personal_research', runId } }", () => {
+    expect(parseResearchSnapshotBody({ source: { sourceType: "personal_research", runId: RUN } })).toEqual({ ok: true, sourceRunId: RUN });
+  });
+
+  it("Z13 — there is no way to express a destination or 'Unfiled' in the body: workspaceId / projectId are unknown fields", () => {
+    expect(parseResearchSnapshotBody({ source: { sourceType: "personal_research", runId: RUN }, projectId: null })).toEqual({ ok: false, reason: "unknown_field" });
+    expect(parseResearchSnapshotBody({ source: { sourceType: "personal_research", runId: RUN }, workspaceId: "ws" })).toEqual({ ok: false, reason: "unknown_field" });
+  });
+
+  it("rejects run CONTENT from the browser as unknown fields, at both levels", () => {
+    for (const key of ["question", "results", "adaptiveOutput", "governance", "governanceRecord", "userId", "runDocument", "origin"]) {
+      expect(parseResearchSnapshotBody({ source: { sourceType: "personal_research", runId: RUN }, [key]: "x" })).toEqual({ ok: false, reason: "unknown_field" });
+      expect(parseResearchSnapshotBody({ source: { sourceType: "personal_research", runId: RUN, [key]: "x" } })).toEqual({ ok: false, reason: "unknown_field" });
+    }
+  });
+
+  it("rejects an unsupported sourceType (a verification / Team artifact id can never be smuggled in)", () => {
+    expect(parseResearchSnapshotBody({ source: { sourceType: "team_research", runId: RUN } })).toEqual({ ok: false, reason: "unsupported_source_type" });
+    expect(parseResearchSnapshotBody({ source: { sourceType: "claim_verification", runId: RUN } })).toEqual({ ok: false, reason: "unsupported_source_type" });
+  });
+
+  it("rejects structurally invalid bodies", () => {
+    for (const bad of [null, [], "x", 5, {}, { source: null }, { source: [] }, { source: {} }, { source: { sourceType: "personal_research" } }, { source: { sourceType: 7, runId: RUN } }, { source: { sourceType: "personal_research", runId: 5 } }]) {
+      expect(parseResearchSnapshotBody(bad)).toEqual({ ok: false, reason: "invalid" });
+    }
+  });
+
+  it("a string runId that fails run-id syntax is invalid_run_id (blank, untrimmed, slash, dot, control char)", () => {
+    for (const bad of ["", " run-x", "run-x ", "a/b", ".", "..", "run\u0000x"]) {
+      expect(parseResearchSnapshotBody({ source: { sourceType: "personal_research", runId: bad } })).toEqual({ ok: false, reason: "invalid_run_id" });
+    }
+  });
+});

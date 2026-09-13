@@ -84,12 +84,27 @@ import "server-only";
 import type { Timestamp } from "firebase-admin/firestore";
 import type { WorkspaceMembershipRole } from "./membershipTypes";
 
+/**
+ * ADD-TO-TEAM-PROJECT §P — `"workspace_research_snapshot_created"` added as
+ * the first RESEARCH-shaped Workspace Audit event: a Team Project received
+ * a research artifact copied from a member's Personal workspace. Carries
+ * the destination Project (`projectId` + `projectName` snapshot, exactly
+ * like the Project lifecycle events) plus the DESTINATION run (`runId` +
+ * `runQuestion` snapshot). The Personal SOURCE run id is deliberately NOT
+ * on the event: the authoritative provenance lives on
+ * `runs/{snapshotRunId}.origin`, and the user-facing audit DTO would have
+ * no legitimate use for a Personal identifier. Written ONLY via `tx.set()`
+ * inside `createTeamRunSnapshotFromPersonal()`'s own transaction
+ * (`lib/firestore/teamRunSnapshots.ts`) — SNAPSHOT COMMITTED IFF AUDIT
+ * EVENT COMMITTED.
+ */
 export type WorkspaceMembershipEventType =
   | "workspace_member_removed"
   | "workspace_ownership_transferred"
   | "workspace_member_role_changed"
   | "workspace_project_archived"
-  | "workspace_project_restored";
+  | "workspace_project_restored"
+  | "workspace_research_snapshot_created";
 
 interface WorkspaceMembershipEventIdentity {
   actorUid: string;
@@ -106,19 +121,34 @@ interface WorkspaceProjectEventIdentity {
   projectName: string;
 }
 
+/** Research snapshot events carry the destination Project AND the destination run — never the Personal source run id, never a member target. */
+interface WorkspaceResearchSnapshotEventIdentity {
+  actorUid: string;
+  workspaceId: string;
+  projectId: string;
+  /** Snapshot of the transaction-read Project name at mutation time. */
+  projectName: string;
+  /** The DESTINATION (Team) run id created by the snapshot. */
+  runId: string;
+  /** Snapshot of the destination run's question at creation time — the human-legible run identity. */
+  runQuestion: string;
+}
+
 export type WorkspaceMembershipEventArgs =
   | (WorkspaceMembershipEventIdentity & { eventType: "workspace_member_removed"; previousRole: WorkspaceMembershipRole })
   | (WorkspaceMembershipEventIdentity & { eventType: "workspace_ownership_transferred"; previousRole: WorkspaceMembershipRole })
   | (WorkspaceMembershipEventIdentity & { eventType: "workspace_member_role_changed"; previousRole: WorkspaceMembershipRole; newRole: WorkspaceMembershipRole })
   | (WorkspaceProjectEventIdentity & { eventType: "workspace_project_archived" })
-  | (WorkspaceProjectEventIdentity & { eventType: "workspace_project_restored" });
+  | (WorkspaceProjectEventIdentity & { eventType: "workspace_project_restored" })
+  | (WorkspaceResearchSnapshotEventIdentity & { eventType: "workspace_research_snapshot_created" });
 
 export type WorkspaceMembershipEventDocData =
   | (WorkspaceMembershipEventIdentity & { eventType: "workspace_member_removed"; previousRole: WorkspaceMembershipRole; at: Timestamp })
   | (WorkspaceMembershipEventIdentity & { eventType: "workspace_ownership_transferred"; previousRole: WorkspaceMembershipRole; at: Timestamp })
   | (WorkspaceMembershipEventIdentity & { eventType: "workspace_member_role_changed"; previousRole: WorkspaceMembershipRole; newRole: WorkspaceMembershipRole; at: Timestamp })
   | (WorkspaceProjectEventIdentity & { eventType: "workspace_project_archived"; at: Timestamp })
-  | (WorkspaceProjectEventIdentity & { eventType: "workspace_project_restored"; at: Timestamp });
+  | (WorkspaceProjectEventIdentity & { eventType: "workspace_project_restored"; at: Timestamp })
+  | (WorkspaceResearchSnapshotEventIdentity & { eventType: "workspace_research_snapshot_created"; at: Timestamp });
 
 /**
  * Pure — no I/O, never throws. `at` is caller-supplied (never generated
