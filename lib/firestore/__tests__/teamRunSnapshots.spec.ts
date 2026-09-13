@@ -640,6 +640,18 @@ describe("Z3–Z7 — source authorization (every failure is the SAME concealed 
     await expectConcealedAndClean();
   });
 
+  it("Z4b — a foreign LEGACY source (no workspaceId, owned by someone else) is concealed: for a legacy run the owner check is the ONLY thing standing (mutation M1 survived without this)", async () => {
+    stores.runs.delete(SRC);
+    seedSource(SRC, { userId: OTHER_UID, runDocument: runDocument(SRC, OTHER_UID) }, { legacy: true });
+    await expectConcealedAndClean();
+    // No Personal Workspace document is consulted for a legacy source, so nothing else could have refused it.
+    expect(readLog.some((r) => r.collection === "workspaces" && r.id.startsWith("personal-"))).toBe(false);
+    // Positive control: the same legacy fixture owned by the caller is created.
+    stores.runs.delete(SRC);
+    seedSource(SRC, {}, { legacy: true });
+    expect((await createTeamRunSnapshotFromPersonal(args())).status).toBe("created");
+  });
+
   it("Z5 — a Team-bound source (even one the caller created in this very Workspace) is refused BEFORE any owner comparison", async () => {
     stores.runs.delete(SRC);
     seedSource(SRC, { userId: MEMBER_UID, workspaceId: WS_ID, projectId: PROJECT_ID });
