@@ -47,6 +47,7 @@ import { isWellFormedProjectV1 } from "@/lib/projects/types";
 import type { RunDocument, PanelResultPublic } from "@/lib/panel/schemas";
 import type { PanelHistoryGovernanceStatus } from "@/lib/user/panelHistory";
 import { runDocumentToPublicResults } from "@/lib/user/runDocumentToPublicResults";
+import { publicizePanelResults } from "@/lib/panel/publicize";
 
 export type CreateTeamWorkspaceRunResult =
   | { status: "created"; runId: string; workspaceId: string; projectId: string | null }
@@ -244,6 +245,15 @@ export async function getTeamWorkspaceRun(args: { workspaceId: string; projectId
   }
 
   const runDocument = data.runDocument as RunDocument | undefined;
-  const results = runDocumentToPublicResults(runDocument);
+  let results = runDocumentToPublicResults(runDocument);
+  if (results.length === 0 && Array.isArray(data.results)) {
+    // ADD-TO-TEAM-PROJECT-C1 — legacy read compatibility. A Team run created
+    // as a snapshot of an older Personal run may carry the pre-`runDocument`
+    // top-level `results[]` format (the snapshot writer copies it through
+    // verbatim). `runDocument` stays the primary representation; this is the
+    // SAME fallback `GET /api/user/runs/[runId]` already applies, through the
+    // same shared publicizer — never a second converter.
+    results = publicizePanelResults(data.results as unknown[]) as unknown as typeof results;
+  }
   return { status: "complete", runId: args.runId, question, governanceStatus, results };
 }
