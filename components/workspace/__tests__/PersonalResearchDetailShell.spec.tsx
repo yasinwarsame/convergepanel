@@ -22,6 +22,13 @@ jest.mock("next/link", () => {
 const mockedUseAuth = jest.fn();
 jest.mock("@/components/AuthProvider", () => ({ useAuth: () => mockedUseAuth() }));
 
+/**
+ * ADD-TO-TEAM-PROJECT — the shell now reads the Team offering signal. It is a
+ * controlled boundary here (off): this suite is about load arbitration, and the
+ * owner-only action has its own suite (`PersonalResearchDetailShellAddToTeam.spec.tsx`).
+ */
+jest.mock("@/hooks/useUserPlan", () => ({ useUserPlan: () => ({ teamWorkspacesUiEnabled: false }) }));
+
 const mockedAuthedFetch = jest.fn();
 jest.mock("@/lib/client/authedFetch", () => ({
   authedFetch: (...a: unknown[]) => mockedAuthedFetch(...a),
