@@ -29,6 +29,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/AuthProvider";
+import { useUserPlan } from "@/hooks/useUserPlan";
+import { useTeamResearchSnapshot } from "@/hooks/useTeamResearchSnapshot";
+import { AddToTeamProjectDialog } from "@/components/workspace/AddToTeamProjectDialog";
+import type { TeamResearchSnapshotDto } from "@/lib/workspaces/teamResearchSnapshotResponse";
 import { createGenerationGuard } from "@/lib/client/authGeneration";
 import ResultsDisplay from "@/components/ResultsDisplay";
 import {
@@ -86,6 +90,13 @@ type DetailState =
 
 type ReadyPayload = {
   runId: string;
+  /**
+   * ADD-TO-TEAM-PROJECT §S — kept on the payload because the "Add to Team
+   * Project" action is OWNER-ONLY. A `personal_reviewer` can read this page,
+   * and the server would reject them on source ownership anyway, but a
+   * visible affordance that always fails is a defect, not a safeguard.
+   */
+  viewerRole: "owner" | "personal_reviewer";
   question: string;
   results: ModelResult[];
   adaptive: ReturnType<typeof adaptPersistedOutputToPanelPayload> | null;
@@ -101,6 +112,19 @@ export default function PersonalResearchDetailShell({ runId }: { runId: string }
   const router = useRouter();
   const [state, setState] = useState<DetailState>({ kind: "loading" });
   const [retryTick, setRetryTick] = useState(0);
+
+  /**
+   * ADD-TO-TEAM-PROJECT — the first MUTATING affordance on this read surface.
+   * Offered only when the report is loaded, the viewer is the OWNER, and the
+   * Team offering signal is on (`teamWorkspacesUiEnabled` is never
+   * optimistically true). The dialog and its hook are the only path to the
+   * mutation; nothing here re-executes research or touches the source.
+   */
+  const { teamWorkspacesUiEnabled } = useUserPlan();
+  const snapshot = useTeamResearchSnapshot();
+  const [addToTeamOpen, setAddToTeamOpen] = useState(false);
+  const [teamSnapshot, setTeamSnapshot] = useState<TeamResearchSnapshotDto | null>(null);
+  const addToTeamTriggerRef = useRef<HTMLButtonElement>(null);
 
   const guard = useRef(createGenerationGuard()).current;
   const mountedRef = useRef(false);
@@ -123,6 +147,10 @@ export default function PersonalResearchDetailShell({ runId }: { runId: string }
     // Drop the previous run/identity's report before any await — a report loaded
     // under one identity must never be visible under another.
     setState({ kind: "loading" });
+    // A Team copy confirmation belongs to ONE run and ONE identity — never carried
+    // across a run or uid change.
+    setAddToTeamOpen(false);
+    setTeamSnapshot(null);
 
     if (!authReady || !uid) {
       // The server page already gated access; an unsettled client auth state is
@@ -273,6 +301,8 @@ export default function PersonalResearchDetailShell({ runId }: { runId: string }
           payload: {
             // Proven above to be a nonempty string equal to the requested id.
             runId: data.runId,
+            // Proven above to be exactly one of the two Personal roles.
+            viewerRole: data.viewerRole === "owner" ? "owner" : "personal_reviewer",
             question,
             results,
             adaptive,
@@ -428,6 +458,40 @@ export default function PersonalResearchDetailShell({ runId }: { runId: string }
       {state.kind === "ready" && (
         <>
           <h1 className="mt-4 text-xl font-semibold text-cp-text break-words">{state.payload.question}</h1>
+          {state.payload.viewerRole === "owner" && teamWorkspacesUiEnabled && (
+            <div className="mt-3">
+              <button
+                ref={addToTeamTriggerRef}
+                type="button"
+                disabled={snapshot.isSourceBusy(state.payload.runId)}
+                onClick={() => setAddToTeamOpen(true)}
+                className="rounded-lg border border-cp-border px-3 py-1.5 text-xs font-medium text-cp-text transition-colors hover:bg-cp-surface disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Add to Team Project
+              </button>
+              {addToTeamOpen && (
+                <AddToTeamProjectDialog
+                  sourceRunId={state.payload.runId}
+                  triggerRef={addToTeamTriggerRef}
+                  onClose={() => setAddToTeamOpen(false)}
+                  snapshot={snapshot}
+                  onCreated={(result) => {
+                    setAddToTeamOpen(false);
+                    setTeamSnapshot(result);
+                  }}
+                />
+              )}
+            </div>
+          )}
+          {teamSnapshot && (
+            <p role="status" className="mt-3 rounded-lg border border-cp-border bg-cp-primary-tint px-3 py-2 text-sm text-cp-text">
+              {teamSnapshot.status === "created" ? "A Team copy of this research was created." : "This research is already in that Team Project."}{" "}
+              <Link href={teamSnapshot.href} className="font-medium text-cp-accent hover:underline">
+                Open the Team copy
+              </Link>
+              . Your Personal report is unchanged.
+            </p>
+          )}
           {state.payload.restoreNotice && (
             <p className="mt-3 rounded-lg border border-cp-border bg-cp-raised px-3 py-2 text-sm text-cp-muted">
               {state.payload.restoreNotice}

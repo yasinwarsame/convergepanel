@@ -36,7 +36,7 @@ import { persistGovernanceRecord } from "@/lib/firestore/runs";
 import { parsePersistedAdaptiveOutput, PersistedAdaptiveOutputV1 } from "./persistedOutput";
 import { GovernanceRecordV1 } from "./governanceRecord";
 import { parseGovernanceRecord } from "./governanceRecordParser";
-import { buildAdaptiveDecisionReceipt } from "./decisionReceiptBuilder";
+import { buildAdaptiveGovernanceRecord, isValidGovernanceTimestamp } from "./governanceRecordBuilder";
 
 export type GovernanceInitializationStatus =
   | "created"
@@ -60,9 +60,16 @@ export type GovernanceInitializationResult = {
   reason?: string;
 };
 
-function isValidTimestamp(value: string): boolean {
-  return value.length > 0 && !Number.isNaN(Date.parse(value));
-}
+/**
+ * ADD-TO-TEAM-PROJECT §M — the record construction itself now lives in the
+ * pure sibling `governanceRecordBuilder.ts` (`buildAdaptiveGovernanceRecord`)
+ * so a Team snapshot can embed a fresh record in its own `tx.create()`.
+ * This function's externally observable behavior is unchanged: the same
+ * validation order (run id → timestamp → applicability → existing record),
+ * the same statuses and reasons, the decision receipt built exactly once
+ * and only on the absent-record path, then the same persistence.
+ */
+const isValidTimestamp = isValidGovernanceTimestamp;
 
 /**
  * Never throws. Builds a new `GovernanceRecordV1` and persists it only
@@ -115,19 +122,16 @@ export async function initializeAdaptiveGovernanceRecord(args: {
       return { status: "blocked_reviewed", record: existing.record, reason: status };
     }
 
-    // Absent — build and persist a new record. buildAdaptiveDecisionReceipt
-    // is invoked exactly once, only on this path (Objective #5).
-    const receipt = buildAdaptiveDecisionReceipt(parsedOutput.output);
-    const record: GovernanceRecordV1 = {
-      version: 1,
-      schemaId: parsedOutput.output.schemaId,
-      answerShape: parsedOutput.output.answerShape,
-      adaptiveOutputVersion: parsedOutput.output.version,
-      humanReview: { status: "unreviewed" },
-      decisionReceipt: receipt,
-      createdAt: now,
-      updatedAt: now,
-    };
+    // Absent — build and persist a new record. The pure builder invokes
+    // buildAdaptiveDecisionReceipt exactly once, and it is only reached on
+    // this path (Objective #5). The builder re-runs the same input checks
+    // already passed above, so a failure here is structurally unreachable
+    // and is mapped defensively rather than assumed away.
+    const built = buildAdaptiveGovernanceRecord({ runId, adaptiveOutput, now });
+    if (!built.ok) {
+      return { status: built.status, reason: built.reason };
+    }
+    const record: GovernanceRecordV1 = built.record;
 
     const outcome = await persistGovernanceRecord(runId, record);
     if (outcome.saved) {

@@ -177,6 +177,20 @@ export default function WorkspaceAuditLogShell({ workspaceId, workspaceName }: {
                     <span>{formatOccurredAt(event.occurredAt)}</span>
                   </div>
                 </>
+              ) : event.eventType === "workspace_research_snapshot_created" ? (
+                <>
+                  <p className="text-sm font-medium text-cp-text">Research added from Personal</p>
+                  <p className="mt-1 break-words text-sm text-cp-muted">
+                    <span className="font-medium text-cp-text">{event.research.question}</span> was added to{" "}
+                    <span className="font-medium text-cp-text">{event.project.name}</span> as a copy of Personal research.
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-cp-faint">
+                    <span>
+                      By: <span className="font-medium text-cp-muted">{event.actor.displayName}</span>
+                    </span>
+                    <span>{formatOccurredAt(event.occurredAt)}</span>
+                  </div>
+                </>
               ) : (
                 <>
                   <p className="text-sm font-medium text-cp-text">Role changed</p>
