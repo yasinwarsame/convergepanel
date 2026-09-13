@@ -277,7 +277,7 @@ Team destination gets its own Team-owned run id with an independently authorized
 
 ---
 
-## 2. Proposed shape (recommendation, not frozen)
+## 2. Proposed shape (decided 2026-09-13 with the §6 amendments folded in)
 
 **Endpoint.** `POST /api/workspaces/[workspaceId]/projects/[projectId]/research/snapshots`
 (the target Project is required, F3, so it belongs in the path; `workspaceId`/`projectId` are never
