@@ -317,6 +317,18 @@ describe("D6 no-op vs real change; D5 audit event; atomicity", () => {
     expect(mockedLogger.warn).toHaveBeenCalledWith(expect.stringContaining("Malformed stored assigneeUids"), expect.anything());
     expect(JSON.stringify(mockedLogger.warn.mock.calls)).not.toContain('"x"');
   });
+  it("C4 — an OVER-CAP persisted list (1,000 unique uids) normalizes to []: NOT a no-op for a requested [], the repair write commits, the event's removedUids is EMPTY (bounded), and no uid is logged", async () => {
+    fullTeam();
+    const big = Array.from({ length: 1000 }, (_, i) => uid(i));
+    const t = seedProject({ assigneeUids: big });
+    const r = await call([], t);
+    expect(r.status).toBe("updated");
+    expect(stores.projects.get(PROJECT_ID)!.data.assigneeUids).toEqual([]);
+    expect(events()[0]).toMatchObject({ addedUids: [], removedUids: [] });
+    expect(JSON.stringify(events()[0]).length).toBeLessThan(400);
+    expect(JSON.stringify(mockedLogger.warn.mock.calls)).not.toContain("user-0500");
+    expect(membershipReads()).toHaveLength(0);
+  });
   it("ATOMICITY — event write failure rolls back the assignee write", async () => {
     fullTeam();
     const t = seedProject();

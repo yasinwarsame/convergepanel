@@ -132,19 +132,38 @@ interface WorkspaceAuditResearchEventDtoBase extends WorkspaceAuditEventDtoBase 
   research: { question: string };
 }
 
-/** Assignment events: display names only. `project` is `null` on a research event whose run was Unfiled (or whose Project could not be snapshotted) at mutation time. */
+/**
+ * Assignment events: display names only.
+ *
+ * `repair: true` (PR #164 review C3) marks an INTEGRITY-REPAIR write — the
+ * mutation normalized a malformed persisted value and committed a real
+ * canonical write whose logical before/after are equal (Project: empty
+ * diff on both sides; research: `previousAssignee === assignee`,
+ * including `null === null`). These are real committed writes with real
+ * events, NOT semantic no-ops (D6 no-ops write nothing and emit nothing).
+ *
+ * The research event's `project` (PR #164 review C2) mirrors the writer's
+ * three forms: `{ name }` for a snapshotted Project, `null` for an Unfiled
+ * run, and `{ unavailable: true }` when the run was filed but the Project
+ * could not be snapshotted (missing / malformed / foreign at mutation
+ * time) — the stored `projectId` is NEVER surfaced, and this is
+ * deliberately not presented as "Unfiled".
+ */
 interface WorkspaceAuditProjectAssignmentEventDto extends WorkspaceAuditEventDtoBase {
   eventType: "workspace_project_assignees_changed";
   project: { name: string };
   added: { displayName: string }[];
   removed: { displayName: string }[];
+  repair: boolean;
 }
+export type WorkspaceAuditResearchProjectRef = { name: string } | { unavailable: true } | null;
 interface WorkspaceAuditResearchAssignmentEventDto extends WorkspaceAuditEventDtoBase {
   eventType: "workspace_research_assignee_changed";
-  project: { name: string } | null;
+  project: WorkspaceAuditResearchProjectRef;
   research: { question: string };
   previousAssignee: { displayName: string } | null;
   assignee: { displayName: string } | null;
+  repair: boolean;
 }
 
 export type WorkspaceAuditEventDto =
@@ -229,9 +248,10 @@ function validateRow(id: string, raw: Record<string, unknown> | undefined, works
   }
 
   if (eventType === "workspace_project_assignees_changed") {
-    // ASSIGNMENT-shaped (Project): name snapshot + uid diff. A row whose
-    // diff is empty on both sides never came from the writer (which only
-    // records a change) — skipped as malformed, never rendered.
+    // ASSIGNMENT-shaped (Project): name snapshot + uid diff. An EMPTY diff
+    // on both sides is a legitimate writer shape: an integrity-repair write
+    // (a malformed / over-cap persisted list canonicalized to `[]`) — a
+    // real committed write, projected as `repair: true` (review C3).
     const projectId = raw.projectId;
     const projectName = raw.projectName;
     const addedUids = raw.addedUids;
@@ -239,28 +259,30 @@ function validateRow(id: string, raw: Record<string, unknown> | undefined, works
     if (typeof projectId !== "string" || projectId.length === 0) return null;
     if (typeof projectName !== "string" || projectName.length === 0) return null;
     if (!isNonEmptyStringArray(addedUids) || !isNonEmptyStringArray(removedUids)) return null;
-    if (addedUids.length === 0 && removedUids.length === 0) return null;
     return { eventType, occurredAtIso, actorUid, projectId, projectName, addedUids, removedUids };
   }
 
   if (eventType === "workspace_research_assignee_changed") {
-    // ASSIGNMENT-shaped (research): `projectId`/`projectName` are NULLABLE
-    // together (§2.4) — one null without the other is malformed. The two
-    // assignee fields are each `string | null`, and must differ (the
-    // writer never records a same-value no-op).
+    // ASSIGNMENT-shaped (research). The writer's THREE Project forms are
+    // all accepted (review C2): `null/null` (Unfiled), `string/string`
+    // (snapshotted), `string/null` (filed, Project unavailable at mutation
+    // time). `null/string` is malformed. The two assignee fields are each
+    // `string | null`; EQUAL values are a legitimate integrity-repair
+    // write (review C3), projected as `repair: true`.
     const projectId = raw.projectId;
     const projectName = raw.projectName;
     const runId = raw.runId;
     const runQuestion = raw.runQuestion;
     const previousAssigneeUid = raw.previousAssigneeUid;
     const assigneeUid = raw.assigneeUid;
-    const projectPairValid = (projectId === null && projectName === null) || (typeof projectId === "string" && projectId.length > 0 && typeof projectName === "string" && projectName.length > 0);
-    if (!projectPairValid) return null;
+    const idValid = projectId === null || (typeof projectId === "string" && projectId.length > 0);
+    const nameValid = projectName === null || (typeof projectName === "string" && projectName.length > 0);
+    if (!idValid || !nameValid) return null;
+    if (projectId === null && projectName !== null) return null;
     if (typeof runId !== "string" || runId.length === 0) return null;
     if (typeof runQuestion !== "string" || runQuestion.length === 0) return null;
     const uidOrNull = (v: unknown): v is string | null => v === null || (typeof v === "string" && v.length > 0);
     if (!uidOrNull(previousAssigneeUid) || !uidOrNull(assigneeUid)) return null;
-    if (previousAssigneeUid === assigneeUid) return null;
     return { eventType, occurredAtIso, actorUid, projectId: projectId as string | null, projectName: projectName as string | null, runId, runQuestion, previousAssigneeUid, assigneeUid };
   }
 
@@ -364,19 +386,24 @@ export async function listWorkspaceAuditEvents(args: { workspaceId: string; limi
       if (row.eventType === "workspace_project_assignees_changed") {
         // Allow-list projection: display names only — no `projectId`, no uids.
         const toName = (u: string) => ({ displayName: targetNames.get(u) ?? UNKNOWN_AUDIT_TARGET_LABEL });
-        return { eventType: row.eventType, occurredAt: row.occurredAtIso, actor, project: { name: row.projectName }, added: row.addedUids.map(toName), removed: row.removedUids.map(toName) };
+        const repair = row.addedUids.length === 0 && row.removedUids.length === 0;
+        return { eventType: row.eventType, occurredAt: row.occurredAtIso, actor, project: { name: row.projectName }, added: row.addedUids.map(toName), removed: row.removedUids.map(toName), repair };
       }
       if (row.eventType === "workspace_research_assignee_changed") {
         // Allow-list projection: nullable name snapshot, question snapshot, nullable display names — no `projectId`, no `runId`, no uids.
         const toName = (u: string | null) => (u === null ? null : { displayName: targetNames.get(u) ?? UNKNOWN_AUDIT_TARGET_LABEL });
+        // `projectId` is NEVER surfaced: a filed run whose Project could not
+        // be snapshotted projects as `{ unavailable: true }`, never as Unfiled.
+        const project: WorkspaceAuditResearchProjectRef = row.projectName !== null ? { name: row.projectName } : row.projectId !== null ? { unavailable: true } : null;
         return {
           eventType: row.eventType,
           occurredAt: row.occurredAtIso,
           actor,
-          project: row.projectName === null ? null : { name: row.projectName },
+          project,
           research: { question: row.runQuestion },
           previousAssignee: toName(row.previousAssigneeUid),
           assignee: toName(row.assigneeUid),
+          repair: row.previousAssigneeUid === row.assigneeUid,
         };
       }
       const base = {

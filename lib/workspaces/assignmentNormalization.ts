@@ -63,10 +63,17 @@ export function canonicalizeAssigneeUids(input: unknown): CanonicalizeAssigneeUi
 export type NormalizedAssigneeUids = { uids: string[]; malformed: boolean };
 
 /**
- * Pure. absent/undefined ⇒ `[]`; a valid array of well-shaped strings ⇒ the
- * canonical deduplicated, sorted values (`malformed: false` even if the
- * stored order or duplicates differed — order is not a semantic
- * difference); anything else ⇒ `[]` with `malformed: true`.
+ * Pure. absent/undefined ⇒ `[]`; a valid array of well-shaped strings with
+ * ≤ `MAX_PROJECT_ASSIGNEES` unique entries ⇒ the canonical deduplicated,
+ * sorted values (`malformed: false` even if the stored order or duplicates
+ * differed — order is not a semantic difference); anything else — a
+ * non-array, an invalid entry, OR MORE THAN THE CAP OF UNIQUE UIDS — is an
+ * integrity anomaly under ONE deterministic safe representation: `[]` with
+ * `malformed: true` (PR #164 review C4). An over-cap persisted list is
+ * therefore never passed to presentation/name resolution, and a repair
+ * write diffs against `[]` so its audit payload stays bounded. Callers log
+ * the anomaly WITHOUT the raw value. The authorized repair path is
+ * unchanged: the next write replaces the field with a canonical list.
  */
 export function normalizeStoredAssigneeUids(raw: unknown): NormalizedAssigneeUids {
   if (raw === undefined) return { uids: [], malformed: false };
@@ -75,9 +82,7 @@ export function normalizeStoredAssigneeUids(raw: unknown): NormalizedAssigneeUid
     if (!isValidAssigneeUidShape(entry)) return { uids: [], malformed: true };
   }
   const unique = Array.from(new Set(raw as string[])).sort(compareUids);
-  // A stored list longer than the cap is still returned in full for
-  // display/repair purposes; the cap is enforced on WRITES, and the next
-  // authorized write replaces it with a capped canonical list.
+  if (unique.length > MAX_PROJECT_ASSIGNEES) return { uids: [], malformed: true };
   return { uids: unique, malformed: false };
 }
 

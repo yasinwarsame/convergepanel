@@ -19,6 +19,22 @@ const mockedOverlap = jest.fn();
 jest.mock("@/lib/workspaces/runAssignmentReviewOverlap", () => ({ readRunReviewerUidsForAssignmentWarning: (...a: unknown[]) => mockedOverlap(...a) }));
 const mockedCheckRateLimit = jest.fn();
 jest.mock("@/lib/security/rateLimit", () => ({ checkRateLimit: (...a: unknown[]) => mockedCheckRateLimit(...a) }));
+let assignmentEnabled = true;
+let assignmentCanary: string | undefined = undefined;
+jest.mock("@/lib/env", () => ({
+  get PROJECT_ASSIGNMENT_ENABLED() {
+    return assignmentEnabled;
+  },
+  get PROJECT_ASSIGNMENT_CANARY_UIDS() {
+    return assignmentCanary;
+  },
+  // Approval Workflow is OFF throughout — the picker GET must never depend on it (D8).
+  APPROVAL_WORKFLOW_ENABLED: false,
+  APPROVAL_WORKFLOW_CANARY_UIDS: undefined,
+  TEAM_WORKSPACES_ENABLED: true,
+  TEAM_WORKSPACES_CANARY_UIDS: undefined,
+  TEAM_WORKSPACES_CANARY_WORKSPACE_IDS: undefined,
+}));
 const runDocs = new Map<string, Record<string, unknown>>();
 jest.mock("@/lib/firebase/admin", () => ({
   get adminDb() {
@@ -51,6 +67,8 @@ const ACCESS = { granted: true, workspace: { id: WS_ID, name: "Acme" }, membersh
 beforeEach(() => {
   jest.clearAllMocks();
   runDocs.clear();
+  assignmentEnabled = true;
+  assignmentCanary = undefined;
   mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: UID, source: "session_cookie" });
   mockedCheckRateLimit.mockResolvedValue({ allowed: true });
   mockedAccess.mockResolvedValue(ACCESS);
@@ -121,12 +139,47 @@ describe("PATCH — primitive call and mapping", () => {
   });
 });
 
-describe("GET — read-only presentation for the picker (D8 input)", () => {
-  it("requires research.read; denial mapping comes from the shared run-access responses", async () => {
-    mockedAccess.mockResolvedValue({ ...ACCESS, capabilities: ["workspace.read"] });
-    expect((await get()).status).toBe(403);
+describe("GET — read-only presentation for the picker (D8 input), gated like the editor it serves (review C5)", () => {
+  it("Owner/Admin/Member holding research.organize load the warning data while Approval Workflow is OFF (D8 independence; canary uid admission also works)", async () => {
+    runDocs.set(RUN_ID, { userId: "x", workspaceId: WS_ID, projectId: null, createdAt: Timestamp.now() });
+    for (const role of ["owner", "admin", "member"]) {
+      mockedAccess.mockResolvedValue({ ...ACCESS, membership: { role } });
+      expect((await get()).status).toBe(200);
+    }
+    assignmentEnabled = false;
+    assignmentCanary = UID;
+    const r = await json(await get());
+    expect(r.status).toBe(200);
+    expect(r.body.reviewerUids).toEqual(["member-1"]);
+  });
+  it("Reviewer/Viewer (research.read WITHOUT research.organize) cannot retrieve reviewerUids — 403, and the overlap reader is never called", async () => {
+    runDocs.set(RUN_ID, { userId: "x", workspaceId: WS_ID, projectId: null, createdAt: Timestamp.now() });
+    for (const caps of [["workspace.read", "research.read", "reviews.submit"], ["workspace.read", "research.read"]]) {
+      mockedAccess.mockResolvedValue({ ...ACCESS, capabilities: caps });
+      const r = await json(await get());
+      expect(r.status).toBe(403);
+      expect(JSON.stringify(r.body)).not.toContain("reviewerUids");
+    }
+    expect(mockedOverlap).not.toHaveBeenCalled();
+  });
+  it("Project Assignment non-admission answers the SAME concealed body as a non-member (never a rollout oracle), before any capability signal", async () => {
+    runDocs.set(RUN_ID, { userId: "x", workspaceId: WS_ID, projectId: null, createdAt: Timestamp.now() });
+    mockedAccess.mockResolvedValue({ granted: false, reason: "membership_not_found" });
+    const baseline = await json(await get());
+    expect(baseline.status).toBe(404);
+    mockedAccess.mockResolvedValue(ACCESS);
+    assignmentEnabled = false;
+    expect(await json(await get())).toEqual(baseline);
+    // A NON-ADMITTED Viewer gets the concealed 404 too — not the 403 that would reveal the capability gate exists.
+    mockedAccess.mockResolvedValue({ ...ACCESS, capabilities: ["workspace.read", "research.read"] });
+    expect(await json(await get())).toEqual(baseline);
+    expect(mockedOverlap).not.toHaveBeenCalled();
+  });
+  it("denial mapping comes from the shared run-access responses", async () => {
     mockedAccess.mockResolvedValue({ granted: false, reason: "membership_not_found" });
     expect((await get()).status).toBe(404);
+    mockedAccess.mockResolvedValue({ granted: false, reason: "lookup_failed" });
+    expect((await get()).status).toBe(503);
   });
   it("returns the normalized assignee presentation (RUN rule) + reviewerUids; never writes (setTeamRunAssignee untouched)", async () => {
     runDocs.set(RUN_ID, { userId: "x", workspaceId: WS_ID, projectId: "proj-1", createdAt: Timestamp.now(), assigneeUid: "member-1" });

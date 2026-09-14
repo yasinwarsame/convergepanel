@@ -108,7 +108,7 @@ describe("reader — projection (allow-list, display names only)", () => {
     eventDocs = [projectEvent("e1")];
     const r = await listWorkspaceAuditEvents({ workspaceId: WS_ID, limit: 20 });
     if (r.status !== "ok") throw new Error("expected ok");
-    expect(r.items).toEqual([{ eventType: "workspace_project_assignees_changed", occurredAt: AT_ISO, actor: { displayName: "Amina" }, project: { name: "Due Diligence" }, added: [{ displayName: "Bao" }], removed: [{ displayName: "Chidi" }] }]);
+    expect(r.items).toEqual([{ eventType: "workspace_project_assignees_changed", occurredAt: AT_ISO, actor: { displayName: "Amina" }, project: { name: "Due Diligence" }, added: [{ displayName: "Bao" }], removed: [{ displayName: "Chidi" }], repair: false }]);
     const json = JSON.stringify(r.items);
     for (const leak of ["proj-1", "member-1", "viewer-1", "actor-1", "addedUids"]) expect(json).not.toContain(leak);
   });
@@ -117,7 +117,7 @@ describe("reader — projection (allow-list, display names only)", () => {
     eventDocs = [researchEvent("e1", { previousAssigneeUid: "viewer-1", assigneeUid: "member-1" })];
     const r = await listWorkspaceAuditEvents({ workspaceId: WS_ID, limit: 20 });
     if (r.status !== "ok") throw new Error("expected ok");
-    expect(r.items).toEqual([{ eventType: "workspace_research_assignee_changed", occurredAt: AT_ISO, actor: { displayName: "Amina" }, project: { name: "Due Diligence" }, research: { question: "What is the TAM?" }, previousAssignee: { displayName: "Chidi" }, assignee: { displayName: "Bao" } }]);
+    expect(r.items).toEqual([{ eventType: "workspace_research_assignee_changed", occurredAt: AT_ISO, actor: { displayName: "Amina" }, project: { name: "Due Diligence" }, research: { question: "What is the TAM?" }, previousAssignee: { displayName: "Chidi" }, assignee: { displayName: "Bao" }, repair: false }]);
     const json = JSON.stringify(r.items);
     for (const leak of ["run-1", "proj-1", "member-1", "viewer-1", "actor-1"]) expect(json).not.toContain(leak);
   });
@@ -152,7 +152,6 @@ describe("reader — validation (skip, never repair; positive control: the compl
     ["missing projectName", () => projectEvent("bad", { projectName: "" })],
     ["non-array addedUids", () => projectEvent("bad", { addedUids: "member-1" })],
     ["empty-string uid in removedUids", () => projectEvent("bad", { removedUids: [""] })],
-    ["empty diff on both sides (writer never records a no-op)", () => projectEvent("bad", { addedUids: [], removedUids: [] })],
   ])("Project event with %s is skipped", async (_l, mk) => {
     eventDocs = [projectEvent("ok"), mk()];
     const r = await listWorkspaceAuditEvents({ workspaceId: WS_ID, limit: 20 });
@@ -162,11 +161,10 @@ describe("reader — validation (skip, never repair; positive control: the compl
   });
 
   it.each([
-    ["projectId null but projectName a string (pair must be null together)", () => researchEvent("bad", { projectId: null, projectName: "Stray" })],
-    ["projectId a string but projectName null", () => researchEvent("bad", { projectId: "proj-1", projectName: null })],
+    ["projectId null but projectName a string (never a writer shape)", () => researchEvent("bad", { projectId: null, projectName: "Stray" })],
+    ["non-string projectId", () => researchEvent("bad", { projectId: 42, projectName: null })],
     ["missing runQuestion", () => researchEvent("bad", { runQuestion: "" })],
     ["missing runId", () => researchEvent("bad", { runId: undefined })],
-    ["previous === new (writer never records a same-value write)", () => researchEvent("bad", { previousAssigneeUid: "member-1", assigneeUid: "member-1" })],
     ["non-string assigneeUid", () => researchEvent("bad", { assigneeUid: 42 })],
   ])("research event with %s is skipped", async (_l, mk) => {
     eventDocs = [researchEvent("ok"), mk()];
@@ -187,8 +185,8 @@ describe("reader — validation (skip, never repair; positive control: the compl
 
 describe("client parser", () => {
   const ok = (events: unknown[]) => ({ ok: true, status: 200, json: async () => ({ ok: true, events, hasMore: false }) });
-  const projectItem = { eventType: "workspace_project_assignees_changed", occurredAt: "2026-09-14T00:00:00.000Z", actor: { displayName: "Amina" }, project: { name: "Due Diligence" }, added: [{ displayName: "Bao" }], removed: [] };
-  const researchItem = { eventType: "workspace_research_assignee_changed", occurredAt: "2026-09-14T00:00:00.000Z", actor: { displayName: "Amina" }, project: null, research: { question: "Q?" }, previousAssignee: null, assignee: { displayName: "Bao" } };
+  const projectItem = { eventType: "workspace_project_assignees_changed", occurredAt: "2026-09-14T00:00:00.000Z", actor: { displayName: "Amina" }, project: { name: "Due Diligence" }, added: [{ displayName: "Bao" }], removed: [], repair: false };
+  const researchItem = { eventType: "workspace_research_assignee_changed", occurredAt: "2026-09-14T00:00:00.000Z", actor: { displayName: "Amina" }, project: null, research: { question: "Q?" }, previousAssignee: null, assignee: { displayName: "Bao" }, repair: false };
 
   it("accepts both assignment DTOs, including the nullable slots", async () => {
     mockedAuthedFetch.mockResolvedValue(ok([projectItem, researchItem]));
@@ -204,6 +202,10 @@ describe("client parser", () => {
       { ...researchItem, project: { name: "" } },
       { ...researchItem, assignee: "Bao" },
       { ...researchItem, previousAssignee: undefined },
+      { ...researchItem, repair: undefined },
+      { ...projectItem, repair: "yes" },
+      { ...researchItem, project: { unavailable: true, id: "proj-1" } },
+      { ...researchItem, project: { unavailable: "yes" } },
     ];
     for (const item of bad) {
       mockedAuthedFetch.mockResolvedValue(ok([item]));
@@ -241,8 +243,8 @@ describe("audit UI", () => {
         status: "ok",
         hasMore: false,
         events: [
-          { eventType: "workspace_project_assignees_changed", occurredAt: AT_ISO, actor: { displayName: "Amina" }, project: { name: "Due Diligence" }, added: [{ displayName: "Bao" }], removed: [{ displayName: "Chidi" }] },
-          { eventType: "workspace_research_assignee_changed", occurredAt: AT_ISO, actor: { displayName: "Amina" }, project: null, research: { question: "What is the TAM?" }, previousAssignee: { displayName: "Chidi" }, assignee: null },
+          { eventType: "workspace_project_assignees_changed", occurredAt: AT_ISO, actor: { displayName: "Amina" }, project: { name: "Due Diligence" }, added: [{ displayName: "Bao" }], removed: [{ displayName: "Chidi" }], repair: false },
+          { eventType: "workspace_research_assignee_changed", occurredAt: AT_ISO, actor: { displayName: "Amina" }, project: null, research: { question: "What is the TAM?" }, previousAssignee: { displayName: "Chidi" }, assignee: null, repair: false },
           { eventType: "workspace_member_role_changed", occurredAt: AT_ISO, actor: { displayName: "Amina" }, target: { displayName: "Dev" }, previousRole: "member", newRole: "admin" },
         ],
       }),
@@ -260,7 +262,7 @@ describe("audit UI", () => {
     expect(text).toContain("Chidi");
     expect(text).toContain("Research assignee changed");
     expect(text).toContain("(Unfiled)");
-    expect(text).toContain("is no longer assigned.");
+    expect(text).toContain("no longer assigned.");
     expect(text).toContain("Previously: ");
     // The member event rendered as its OWN card — the new branches did not swallow it.
     expect(text).toContain("Role changed");
