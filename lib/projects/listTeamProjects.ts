@@ -34,7 +34,7 @@ export interface ListedTeamProject {
 
 export type ListTeamProjectsResult = { status: "ok"; items: ListedTeamProject[]; hasMore: boolean; nextCursor?: string } | { status: "invalid_cursor" } | { status: "integrity_violation" } | { status: "lookup_failed" };
 
-export async function listTeamProjects(args: { workspaceId: string; limit: number; cursorRaw?: string | null; status: "active" | "archived" }): Promise<ListTeamProjectsResult> {
+export async function listTeamProjects(args: { workspaceId: string; limit: number; cursorRaw?: string | null; status: "active" | "archived"; assigneeUid?: string }): Promise<ListTeamProjectsResult> {
   let startAfter: { createdAtSeconds: number; createdAtNanoseconds: number; lastDocId: string } | undefined;
   if (args.cursorRaw != null) {
     const decoded = decodeProjectsCursor(args.cursorRaw);
@@ -44,7 +44,7 @@ export async function listTeamProjects(args: { workspaceId: string; limit: numbe
     startAfter = decoded.cursor;
   }
 
-  const rawResult = await listActiveProjectsRaw({ workspaceId: args.workspaceId, limit: args.limit, startAfter, status: args.status });
+  const rawResult = await listActiveProjectsRaw({ workspaceId: args.workspaceId, limit: args.limit, startAfter, status: args.status, assigneeUid: args.assigneeUid });
   if (rawResult.status !== "ok") {
     return { status: "lookup_failed" };
   }

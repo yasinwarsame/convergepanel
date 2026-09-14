@@ -19,7 +19,7 @@ import { TeamProjectLifecycleRow } from "@/components/workspace/projects/TeamPro
 import type { TeamProjectSummary } from "@/hooks/useTeamProjects";
 
 const TOKEN = { seconds: 1723600000, nanoseconds: 5 };
-const ACTIVE: TeamProjectSummary = { id: "p1", workspaceId: "ws-1", name: "Quarterly Diligence", status: "active", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", updateTime: TOKEN };
+const ACTIVE: TeamProjectSummary = { id: "p1", workspaceId: "ws-1", name: "Quarterly Diligence", status: "active", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", updateTime: TOKEN, assignees: [] };
 const ARCHIVED: TeamProjectSummary = { ...ACTIVE, id: "p2", status: "archived" };
 
 function lifecycle(overrides: Record<string, unknown> = {}) {

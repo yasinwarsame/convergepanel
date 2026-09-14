@@ -17,10 +17,15 @@
 import "server-only";
 import { toRunSummaryBase, type RunSummaryBase } from "@/lib/runs/runSummary";
 
+/** Project/Research Assignment — presentation only (membership-evidenced name + current-membership `state` under the D2 run rule). */
+export type TeamRunAssigneeDto = { uid: string; displayName: string; state: "active" | "stale" };
+
 export type TeamRunSummaryDto = RunSummaryBase & {
   userId: string;
   workspaceId: string;
   projectId: string | null;
+  /** `null` for an unassigned run or a malformed stored value (normalized, logged server-side). Always emitted. */
+  assignee: TeamRunAssigneeDto | null;
 };
 
 /**
@@ -32,6 +37,6 @@ export type TeamRunSummaryDto = RunSummaryBase & {
  * caller resolves BEFORE constructing this DTO, never something this
  * function papers over.
  */
-export function toTeamRunSummary(id: string, data: Record<string, unknown>, userId: string, workspaceId: string, projectId: string | null): TeamRunSummaryDto {
-  return { ...toRunSummaryBase(id, data), userId, workspaceId, projectId };
+export function toTeamRunSummary(id: string, data: Record<string, unknown>, userId: string, workspaceId: string, projectId: string | null, assignee: TeamRunAssigneeDto | null = null): TeamRunSummaryDto {
+  return { ...toRunSummaryBase(id, data), userId, workspaceId, projectId, assignee };
 }

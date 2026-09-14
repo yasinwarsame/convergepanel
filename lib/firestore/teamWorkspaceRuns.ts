@@ -48,6 +48,8 @@ import type { RunDocument, PanelResultPublic } from "@/lib/panel/schemas";
 import type { PanelHistoryGovernanceStatus } from "@/lib/user/panelHistory";
 import { runDocumentToPublicResults } from "@/lib/user/runDocumentToPublicResults";
 import { publicizePanelResults } from "@/lib/panel/publicize";
+import { resolveRunAssigneesForPage } from "@/lib/workspaces/teamRunAssigneeEnrichment";
+import type { TeamRunAssigneeDto } from "@/lib/workspaces/teamRunSummary";
 
 export type CreateTeamWorkspaceRunResult =
   | { status: "created"; runId: string; workspaceId: string; projectId: string | null }
@@ -188,8 +190,8 @@ export async function createTeamWorkspaceRun(args: {
 export type TeamWorkspaceRunDetailResult =
   | { status: "not_found" }
   | { status: "firestore_unavailable" }
-  | { status: "complete"; runId: string; question: string; governanceStatus?: PanelHistoryGovernanceStatus; results: PanelResultPublic[] }
-  | { status: "pending"; runId: string; question: string; governanceStatus?: PanelHistoryGovernanceStatus };
+  | { status: "complete"; runId: string; question: string; governanceStatus?: PanelHistoryGovernanceStatus; results: PanelResultPublic[]; assignee: TeamRunAssigneeDto | null }
+  | { status: "pending"; runId: string; question: string; governanceStatus?: PanelHistoryGovernanceStatus; assignee: TeamRunAssigneeDto | null };
 
 /**
  * Team Research Detail, Phase 12A.4 — the single-run read counterpart to
@@ -240,8 +242,13 @@ export async function getTeamWorkspaceRun(args: { workspaceId: string; projectId
   const governanceStatus: PanelHistoryGovernanceStatus | undefined =
     rawGovernanceStatus === "approved" || rawGovernanceStatus === "needs_review" || rawGovernanceStatus === "blocked" ? rawGovernanceStatus : undefined;
 
+  // Project/Research Assignment — presentation only (normalized stored
+  // value, membership-evidenced name, D2 run-rule `state`). Never an
+  // authorization input; the page already resolved access above.
+  const [assignee] = await resolveRunAssigneesForPage(args.workspaceId, [{ docId: args.runId, data }]);
+
   if (data.status !== "complete") {
-    return { status: "pending", runId: args.runId, question, governanceStatus };
+    return { status: "pending", runId: args.runId, question, governanceStatus, assignee };
   }
 
   const runDocument = data.runDocument as RunDocument | undefined;
@@ -255,5 +262,5 @@ export async function getTeamWorkspaceRun(args: { workspaceId: string; projectId
     // same shared publicizer — never a second converter.
     results = publicizePanelResults(data.results as unknown[]) as unknown as typeof results;
   }
-  return { status: "complete", runId: args.runId, question, governanceStatus, results };
+  return { status: "complete", runId: args.runId, question, governanceStatus, results, assignee };
 }

@@ -18,12 +18,15 @@ import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelem
 import { resolveWorkspaceAccess } from "@/lib/workspaces/resolveWorkspaceAccess";
 import { invalidRequestBodyResponse, unexpectedFieldResponse, internalErrorResponse } from "@/lib/workspaces/teamWorkspaceErrorResponse";
 import { invalidProjectNameResponse, invalidProjectListStatusResponse, tooManyProjectsResponse } from "@/lib/projects/projectErrorResponse";
+import { invalidAssigneeFilterResponse } from "@/lib/projects/assignmentErrorResponse";
 import { teamProjectAuthorizationDeniedResponse, teamWorkspaceReadNotFoundResponse } from "@/lib/projects/teamProjectErrorResponse";
 import { parseProjectListStatusQuery } from "@/lib/projects/projectListStatusQuery";
 import { parseCreateProjectBody } from "@/lib/projects/projectMutationBody";
 import { validateProjectName } from "@/lib/projects/projectName";
 import { listTeamProjects } from "@/lib/projects/listTeamProjects";
-import { toTeamProjectSummaryDto } from "@/lib/projects/teamProjectDto";
+import { enrichTeamProjectDtos } from "@/lib/workspaces/teamProjectAssigneeEnrichment";
+import { parseAssigneeFilterQuery } from "@/lib/projects/assigneeFilterQuery";
+import { resolveAssigneeFilterForCaller } from "@/lib/workspaces/assigneeFilterResolution";
 import { createTeamProject } from "@/lib/firestore/teamProjects";
 import { countProjectsInWorkspace } from "@/lib/firestore/projects";
 import { writeTeamProjectEventSafely as writeSafely } from "@/lib/projects/writeTeamProjectEventSafely";
@@ -82,12 +85,26 @@ export async function GET(req: NextRequest, { params }: { params: { workspaceId:
     return NextResponse.json(body, { status: httpStatus });
   }
 
-  const result = await listTeamProjects({ workspaceId, limit, cursorRaw, status: statusResult.status });
+  // Project/Research Assignment — `?assignee=me` only; the uid is the
+  // caller's OWN authenticated identity, never a query-supplied value.
+  const assigneeResult = parseAssigneeFilterQuery(searchParams);
+  if (!assigneeResult.ok) {
+    const { status: httpStatus, body } = invalidAssigneeFilterResponse();
+    return NextResponse.json(body, { status: httpStatus });
+  }
+
+  const assigneeFilter = resolveAssigneeFilterForCaller({ filter: assigneeResult.filter, uid, capabilities: access.capabilities, target: "project" });
+  if (assigneeFilter.kind === "empty") {
+    return NextResponse.json({ ok: true, items: [], hasMore: false });
+  }
+
+  const assigneeUid = assigneeFilter.kind === "uid" ? assigneeFilter.uid : undefined;
+  const result = await listTeamProjects({ workspaceId, limit, cursorRaw, status: statusResult.status, assigneeUid });
   switch (result.status) {
     case "ok":
       return NextResponse.json({
         ok: true,
-        items: result.items.map((item) => toTeamProjectSummaryDto(item.project, item.documentUpdateTime)),
+        items: await enrichTeamProjectDtos(workspaceId, result.items),
         hasMore: result.hasMore,
         ...(result.nextCursor ? { nextCursor: result.nextCursor } : {}),
       });
@@ -151,7 +168,7 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
       // failure must never turn this already-successful response into a
       // failure (Section 9/Mutation P).
       await writeSafely({ eventType: "project_created", actorUid: uid, workspaceId, projectId: createResult.project.id });
-      return NextResponse.json({ ok: true, project: toTeamProjectSummaryDto(createResult.project, createResult.documentUpdateTime) }, { status: 201 });
+      return NextResponse.json({ ok: true, project: (await enrichTeamProjectDtos(workspaceId, [createResult]))[0] }, { status: 201 });
     }
     case "created_projection_unavailable": {
       // The canonical Firestore transaction ALREADY committed — the
@@ -169,7 +186,7 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
       return NextResponse.json(
         {
           ok: true,
-          project: toTeamProjectSummaryDto(createResult.project, null),
+          project: (await enrichTeamProjectDtos(workspaceId, [{ project: createResult.project, documentUpdateTime: null }]))[0],
           projectionUnavailable: true,
           message: "The Project was created, but we couldn't confirm its latest state. Refresh to load the current version before making further changes.",
         },

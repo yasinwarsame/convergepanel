@@ -7,7 +7,7 @@ import TestRenderer, { act } from "react-test-renderer";
 import { TeamArchiveProjectDialog } from "@/components/workspace/projects/TeamArchiveProjectDialog";
 import type { TeamProjectSummary } from "@/hooks/useTeamProjects";
 
-const PROJECT: TeamProjectSummary = { id: "p1", workspaceId: "ws-1", name: "My Project", status: "active", createdAt: "x", updatedAt: "x", updateTime: { seconds: 1, nanoseconds: 0 } };
+const PROJECT: TeamProjectSummary = { id: "p1", workspaceId: "ws-1", name: "My Project", status: "active", createdAt: "x", updatedAt: "x", updateTime: { seconds: 1, nanoseconds: 0 }, assignees: [] };
 
 function setup(lifecycle: any, handlers: { onClose?: jest.Mock; onArchived?: jest.Mock; onStaleOrGone?: jest.Mock } = {}) {
   const onClose = handlers.onClose ?? jest.fn();

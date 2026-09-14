@@ -101,6 +101,8 @@ interface UserUsageData {
    * capability flag here.
    */
   teamWorkspacesUiEnabled?: boolean;
+  /** Project/Research Assignment (D10) — presentation hint for the assignment controls only; never an authorization decision. Absent/falsy must mean hidden. */
+  projectAssignmentUiEnabled?: boolean;
 }
 
 interface UseUserPlanReturn {
@@ -128,6 +130,8 @@ interface UseUserPlanReturn {
   workspaceReviewsUiEnabled: boolean;
   /** Team Workspace Self-Service Onboarding — see `UserUsageData.teamWorkspacesUiEnabled`. Always `false` while `loading`, on error, or when signed out — never optimistically `true`. */
   teamWorkspacesUiEnabled: boolean;
+  /** Project/Research Assignment — see `UserUsageData.projectAssignmentUiEnabled`. Always `false` while `loading`, on error, or when signed out — never optimistically `true`. */
+  projectAssignmentUiEnabled: boolean;
   loading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
@@ -158,6 +162,7 @@ const DEFAULT_USAGE: UserUsageData = {
   projectsUiEnabled: false,
   workspaceReviewsUiEnabled: false,
   teamWorkspacesUiEnabled: false,
+  projectAssignmentUiEnabled: false,
 };
 
 // Never throws — returns DEFAULT_USAGE on any error to prevent infinite loading states.
@@ -260,6 +265,7 @@ async function fetchUsage(user: any): Promise<UserUsageData> {
       projectsUiEnabled: data.projectsUiEnabled === true,
       workspaceReviewsUiEnabled: data.workspaceReviewsUiEnabled === true,
       teamWorkspacesUiEnabled: data.teamWorkspacesUiEnabled === true,
+      projectAssignmentUiEnabled: data.projectAssignmentUiEnabled === true,
     };
   } catch (err) {
     // Any network or unexpected error leads to default usage, no throwing.
@@ -415,6 +421,7 @@ export function useUserPlan(): UseUserPlanReturn {
     projectsUiEnabled: usageData.projectsUiEnabled === true,
     workspaceReviewsUiEnabled: usageData.workspaceReviewsUiEnabled === true,
     teamWorkspacesUiEnabled: usageData.teamWorkspacesUiEnabled === true,
+    projectAssignmentUiEnabled: usageData.projectAssignmentUiEnabled === true,
     loading: authLoading || loading,
     error,
     refresh,

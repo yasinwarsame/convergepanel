@@ -125,7 +125,7 @@ describe("TeamProjectDetailPage — gate (server-authoritative, UX-only re-check
     expect(result.props.workspaceId).toBe(WS_ID);
     expect(result.props.workspaceName).toBe("Acme Team");
     expect(result.props.canReadAudit).toBe(true);
-    expect(result.props.project).toEqual({ id: PROJECT_ID, name: "ABC Acquisition", status: "active" });
+    expect(result.props.project).toEqual({ id: PROJECT_ID, name: "ABC Acquisition", status: "active", assignees: [] });
   });
 
   it("getProject is called with exactly the route's projectId, never workspaceId or any other value", async () => {

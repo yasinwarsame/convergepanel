@@ -49,6 +49,7 @@ function freshDto(overrides: Record<string, unknown> = {}) {
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
     updateTime: { seconds: 1, nanoseconds: 0 },
+    assignees: [],
     ...overrides,
   };
 }
@@ -185,7 +186,7 @@ describe("useTeamProjectLifecycle — createProject request shape", () => {
 
 describe("useTeamProjectLifecycle — archive/restore, Phase PROJECT-UI-AR-I1", () => {
   const TOKEN = { seconds: 1723600000, nanoseconds: 123_456_789 };
-  const ACTIVE = { id: "proj-1", workspaceId: WS_ID, name: "P", status: "active" as const, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", updateTime: TOKEN };
+  const ACTIVE = { id: "proj-1", workspaceId: WS_ID, name: "P", status: "active" as const, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", updateTime: TOKEN, assignees: [] };
   const ARCHIVED = { ...ACTIVE, id: "proj-2", status: "archived" as const };
   const deferredQueueByUrl = new Map<string, Deferred[]>();
   function queuePending(url: string): Deferred {

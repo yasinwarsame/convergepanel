@@ -19,6 +19,9 @@ import { internalErrorResponse } from "@/lib/workspaces/teamWorkspaceErrorRespon
 import { teamProjectNotFoundConcealedResponse } from "@/lib/projects/teamProjectErrorResponse";
 import { getProject } from "@/lib/firestore/projects";
 import { listTeamProjectRuns } from "@/lib/workspaces/listTeamProjectRuns";
+import { parseAssigneeFilterQuery } from "@/lib/projects/assigneeFilterQuery";
+import { resolveAssigneeFilterForCaller } from "@/lib/workspaces/assigneeFilterResolution";
+import { invalidAssigneeFilterResponse } from "@/lib/projects/assignmentErrorResponse";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -78,7 +81,21 @@ export async function GET(req: NextRequest, { params }: { params: { workspaceId:
   const limit = Math.min(MAX_LIMIT, Math.max(1, parseInt(searchParams.get("limit") || String(DEFAULT_LIMIT), 10) || DEFAULT_LIMIT));
   const cursorRaw = searchParams.get("cursor");
 
-  const result = await listTeamProjectRuns({ workspaceId, projectId, limit, cursorRaw });
+  const assigneeResult = parseAssigneeFilterQuery(searchParams);
+  if (!assigneeResult.ok) {
+    const { status, body } = invalidAssigneeFilterResponse();
+    return NextResponse.json(body, { status });
+  }
+
+  // D4 — see `resolveAssigneeFilterForCaller`: a caller who cannot currently
+  // be a run assignee gets a definitively empty "assigned to me" view.
+  const assigneeFilter = resolveAssigneeFilterForCaller({ filter: assigneeResult.filter, uid, capabilities: access.capabilities, target: "run" });
+  if (assigneeFilter.kind === "empty") {
+    return NextResponse.json({ ok: true, items: [], hasMore: false });
+  }
+
+  const assigneeUid = assigneeFilter.kind === "uid" ? assigneeFilter.uid : undefined;
+  const result = await listTeamProjectRuns({ workspaceId, projectId, limit, cursorRaw, assigneeUid });
   switch (result.status) {
     case "ok":
       return NextResponse.json({

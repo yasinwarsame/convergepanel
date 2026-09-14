@@ -35,14 +35,16 @@
 import { useRef, useState } from "react";
 import Link from "next/link";
 import { TeamArchiveProjectDialog } from "@/components/workspace/projects/TeamArchiveProjectDialog";
+import { ProjectAssigneesDialog } from "@/components/workspace/projects/ProjectAssigneesDialog";
+import { AssigneeChips } from "@/components/workspace/projects/AssigneeChips";
 import { teamProjectMutationErrorCopy, shouldRefreshAfterTeamProjectMutationError } from "@/components/workspace/projects/teamProjectMutationErrorCopy";
 import type { TeamProjectSummary } from "@/hooks/useTeamProjects";
 import type { UseTeamProjectLifecycleResult } from "@/hooks/useTeamProjectLifecycle";
 
 /** Reported to the shell for every outcome that requires a canonical refetch. Never carries ids — only the name the user already sees and the already-sanitized message. */
 export type TeamProjectLifecycleOutcome =
-  | { kind: "committed"; operation: "archive" | "restore"; projectName: string }
-  | { kind: "stale"; operation: "archive" | "restore"; message: string };
+  | { kind: "committed"; operation: "archive" | "restore" | "set_assignees"; projectName: string }
+  | { kind: "stale"; operation: "archive" | "restore" | "set_assignees"; message: string };
 
 const buttonClass =
   "rounded-lg border border-cp-border px-3 py-1.5 text-xs font-medium text-cp-text transition-colors hover:bg-cp-surface disabled:cursor-not-allowed disabled:opacity-50";
@@ -51,6 +53,7 @@ export function TeamProjectLifecycleRow({
   workspaceId,
   project,
   canManageProjects,
+  assignmentUiEnabled = false,
   lifecycle,
   onLifecycleAttemptStart,
   onLifecycleOutcome,
@@ -58,14 +61,18 @@ export function TeamProjectLifecycleRow({
   workspaceId: string;
   project: TeamProjectSummary;
   canManageProjects: boolean;
-  lifecycle: Pick<UseTeamProjectLifecycleResult, "isProjectBusy" | "getBusyOperation" | "archiveProject" | "restoreProject">;
+  /** Project/Research Assignment (D10) — server-derived rollout presentation hint; the assignees API re-derives admission itself. Absent ⇒ no assignment control. */
+  assignmentUiEnabled?: boolean;
+  lifecycle: Pick<UseTeamProjectLifecycleResult, "isProjectBusy" | "getBusyOperation" | "archiveProject" | "restoreProject" | "setAssignees">;
   /** Called synchronously when the user starts a new attempt (opens the Archive dialog or clicks Restore) so the shell can clear a stale notice. */
   onLifecycleAttemptStart: () => void;
   /** Called exactly once per refetch-triggering outcome; the shell refetches both sections, shows the message, and manages focus. */
   onLifecycleOutcome: (outcome: TeamProjectLifecycleOutcome) => void;
 }) {
   const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
+  const [assigneesDialogOpen, setAssigneesDialogOpen] = useState(false);
   const [rowError, setRowError] = useState<string | null>(null);
+  const assigneesTriggerRef = useRef<HTMLButtonElement>(null);
   const busy = lifecycle.isProjectBusy(project.id);
   const restoreInFlight = lifecycle.getBusyOperation(project.id) === "restore";
   const archiveTriggerRef = useRef<HTMLButtonElement>(null);
@@ -73,6 +80,11 @@ export function TeamProjectLifecycleRow({
   const canAct = canManageProjects && project.updateTime !== null;
   const showArchive = canAct && project.status === "active";
   const showRestore = canAct && project.status === "archived";
+  // Project/Research Assignment (D9) — the list row is the ONLY Project
+  // assignee editor. Same gate as Archive (manage capability + a live OCC
+  // token + an active Project, since the server refuses an archived one)
+  // plus the rollout presentation hint.
+  const showManageAssignees = canAct && project.status === "active" && assignmentUiEnabled;
 
   async function handleRestore() {
     if (busy) return;
@@ -100,8 +112,23 @@ export function TeamProjectLifecycleRow({
         >
           {project.name}
         </Link>
-        {(showArchive || showRestore) && (
+        {(showArchive || showRestore || showManageAssignees) && (
           <div className="flex shrink-0 flex-wrap gap-2">
+            {showManageAssignees && (
+              <button
+                ref={assigneesTriggerRef}
+                type="button"
+                disabled={busy}
+                onClick={() => {
+                  setRowError(null);
+                  onLifecycleAttemptStart();
+                  setAssigneesDialogOpen(true);
+                }}
+                className={buttonClass}
+              >
+                Manage assignees
+              </button>
+            )}
             {showArchive && (
               <button
                 ref={archiveTriggerRef}
@@ -125,10 +152,32 @@ export function TeamProjectLifecycleRow({
           </div>
         )}
       </div>
+      {project.assignees.length > 0 && (
+        <div className="mt-2">
+          <AssigneeChips assignees={project.assignees} />
+        </div>
+      )}
       {rowError && (
         <p role="alert" className="mt-2 text-xs text-red-700">
           {rowError}
         </p>
+      )}
+      {assigneesDialogOpen && showManageAssignees && (
+        <ProjectAssigneesDialog
+          workspaceId={workspaceId}
+          project={project}
+          triggerRef={assigneesTriggerRef}
+          onClose={() => setAssigneesDialogOpen(false)}
+          lifecycle={lifecycle}
+          onSaved={() => {
+            setAssigneesDialogOpen(false);
+            onLifecycleOutcome({ kind: "committed", operation: "set_assignees", projectName: project.name });
+          }}
+          onStaleOrGone={(message) => {
+            setAssigneesDialogOpen(false);
+            onLifecycleOutcome({ kind: "stale", operation: "set_assignees", message });
+          }}
+        />
       )}
       {archiveDialogOpen && showArchive && (
         <TeamArchiveProjectDialog

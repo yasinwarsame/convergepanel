@@ -21,6 +21,12 @@ export function teamProjectMutationErrorCopy(code: TeamProjectMutationErrorCode)
       return "You don't have permission to do that in this Workspace.";
     case "team_workspace_not_found":
       return "This Workspace could not be found.";
+    case "assignee_not_eligible":
+      return "One or more selected members can no longer be assigned. Refresh the member list and try again.";
+    case "too_many_assignees":
+      return "A Project can have at most 20 assignees.";
+    case "project_archived":
+      return "This Project is archived. Restore it before changing assignees.";
     default:
       return projectMutationErrorCopy(code);
   }
@@ -37,5 +43,5 @@ export function teamProjectMutationErrorCopy(code: TeamProjectMutationErrorCode)
  * same token.
  */
 export function shouldRefreshAfterTeamProjectMutationError(code: TeamProjectMutationErrorCode): boolean {
-  return code === "conflict" || code === "invalid_project_status_transition" || code === "project_not_found" || code === "insufficient_capability" || code === "team_workspace_not_found";
+  return code === "conflict" || code === "invalid_project_status_transition" || code === "project_not_found" || code === "insufficient_capability" || code === "team_workspace_not_found" || code === "project_archived";
 }

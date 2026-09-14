@@ -191,6 +191,61 @@ export default function WorkspaceAuditLogShell({ workspaceId, workspaceName }: {
                     <span>{formatOccurredAt(event.occurredAt)}</span>
                   </div>
                 </>
+              ) : event.eventType === "workspace_project_assignees_changed" ? (
+                <>
+                  <p className="text-sm font-medium text-cp-text">Project assignees changed</p>
+                  <p className="mt-1 break-words text-sm text-cp-muted">
+                    Assignees on <span className="font-medium text-cp-text">{event.project.name}</span> were updated.
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-cp-faint">
+                    {event.added.length > 0 && (
+                      <span>
+                        Added: <span className="font-medium text-cp-muted">{event.added.map((a) => a.displayName).join(", ")}</span>
+                      </span>
+                    )}
+                    {event.removed.length > 0 && (
+                      <span>
+                        Removed: <span className="font-medium text-cp-muted">{event.removed.map((r) => r.displayName).join(", ")}</span>
+                      </span>
+                    )}
+                    <span>
+                      By: <span className="font-medium text-cp-muted">{event.actor.displayName}</span>
+                    </span>
+                    <span>{formatOccurredAt(event.occurredAt)}</span>
+                  </div>
+                </>
+              ) : event.eventType === "workspace_research_assignee_changed" ? (
+                <>
+                  <p className="text-sm font-medium text-cp-text">Research assignee changed</p>
+                  <p className="mt-1 break-words text-sm text-cp-muted">
+                    <span className="font-medium text-cp-text">{event.research.question}</span>
+                    {event.project !== null ? (
+                      <>
+                        {" "}in <span className="font-medium text-cp-text">{event.project.name}</span>
+                      </>
+                    ) : (
+                      <> (Unfiled)</>
+                    )}{" "}
+                    {event.assignee !== null ? (
+                      <>
+                        is now assigned to <span className="font-medium text-cp-text">{event.assignee.displayName}</span>.
+                      </>
+                    ) : (
+                      <>is no longer assigned.</>
+                    )}
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-cp-faint">
+                    {event.previousAssignee !== null && (
+                      <span>
+                        Previously: <span className="font-medium text-cp-muted">{event.previousAssignee.displayName}</span>
+                      </span>
+                    )}
+                    <span>
+                      By: <span className="font-medium text-cp-muted">{event.actor.displayName}</span>
+                    </span>
+                    <span>{formatOccurredAt(event.occurredAt)}</span>
+                  </div>
+                </>
               ) : (
                 <>
                   <p className="text-sm font-medium text-cp-text">Role changed</p>

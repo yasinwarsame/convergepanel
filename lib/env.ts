@@ -417,6 +417,31 @@ export const APPROVAL_WORKFLOW_ENABLED = process.env.APPROVAL_WORKFLOW_ENABLED =
 export const APPROVAL_WORKFLOW_CANARY_UIDS = process.env.APPROVAL_WORKFLOW_CANARY_UIDS;
 
 /**
+ * Project/Research Assignment (D10) — dedicated backend rollout gate for
+ * the Team Project assignee and Team run assignee mutations. A SEPARATE
+ * rollout axis from `TEAM_WORKSPACES_ENABLED` (a caller must pass BOTH
+ * Team target admission and this gate; neither widens or substitutes for
+ * the other) and from `APPROVAL_WORKFLOW_ENABLED` (assignment is
+ * responsibility metadata, not review machinery). Gates ONLY the two
+ * assignment mutations and the offering of their UI controls — never
+ * authorization (capabilities come only from Workspace membership/role)
+ * and never the assignee READ fields, which are data and always emitted.
+ * Non-admission is concealed identically to unauthorized access. Default
+ * OFF; absent env parses identically to `"false"`.
+ */
+export const PROJECT_ASSIGNMENT_ENABLED = process.env.PROJECT_ASSIGNMENT_ENABLED === "true";
+
+/**
+ * Project/Research Assignment account-scoped canary — structural sibling of
+ * `APPROVAL_WORKFLOW_CANARY_UIDS`: an optional, server-only comma-separated
+ * Firebase uid allowlist (max 10) admitting a few named accounts while
+ * `PROJECT_ASSIGNMENT_ENABLED` stays `false`. Raw, unparsed string —
+ * `lib/workspaces/projectAssignmentRollout.ts` owns all parsing. Never
+ * `NEXT_PUBLIC_`.
+ */
+export const PROJECT_ASSIGNMENT_CANARY_UIDS = process.env.PROJECT_ASSIGNMENT_CANARY_UIDS;
+
+/**
  * Projects UI Shell, Phase 7B — a PRESENTATION-only rollout flag,
  * structural sibling of `PERSONAL_WORKSPACE_UI_ENABLED` above. Unrelated
  * to and with no effect on `PROJECTS_ENABLED`/`PROJECTS_CANARY_UIDS`

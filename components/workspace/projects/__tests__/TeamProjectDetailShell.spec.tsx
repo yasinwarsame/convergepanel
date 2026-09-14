@@ -113,7 +113,7 @@ describe("TeamProjectDetailShell", () => {
       mockedUseTeamProjectRuns.mockReturnValue(
         runsResult({
           items: [
-            { id: "run-1", at: "2026-01-01T00:00:00.000Z", question: "What is the market size?", selectedModels: ["chatgpt", "claude"], status: "complete", modelsOk: 2, modelsTotal: 2, projectId: "proj-1" },
+            { id: "run-1", at: "2026-01-01T00:00:00.000Z", question: "What is the market size?", selectedModels: ["chatgpt", "claude"], status: "complete", modelsOk: 2, modelsTotal: 2, projectId: "proj-1", assignee: null },
           ],
         })
       );
@@ -140,7 +140,7 @@ describe("TeamProjectDetailShell", () => {
     mockedUseTeamProjectRuns.mockReturnValue(
       runsResult({
         items: [
-          { id: "run-1", at: "2026-01-01T00:00:00.000Z", question: "What is the market size?", selectedModels: ["chatgpt", "claude"], status: "complete", modelsOk: 2, modelsTotal: 2, projectId: "proj-1" },
+          { id: "run-1", at: "2026-01-01T00:00:00.000Z", question: "What is the market size?", selectedModels: ["chatgpt", "claude"], status: "complete", modelsOk: 2, modelsTotal: 2, projectId: "proj-1", assignee: null },
         ],
       })
     );
@@ -167,7 +167,7 @@ describe("TeamProjectDetailShell", () => {
       mockedUseTeamProjectRuns.mockReturnValue(
         runsResult({
           items: [
-            { id: "run-1", at: "2026-01-01T00:00:00.000Z", question: "What is the market size?", selectedModels: ["chatgpt", "claude"], status: "complete", modelsOk: 2, modelsTotal: 2, projectId: "proj-1" },
+            { id: "run-1", at: "2026-01-01T00:00:00.000Z", question: "What is the market size?", selectedModels: ["chatgpt", "claude"], status: "complete", modelsOk: 2, modelsTotal: 2, projectId: "proj-1", assignee: null },
           ],
         })
       );
@@ -183,8 +183,8 @@ describe("TeamProjectDetailShell", () => {
       mockedUseTeamProjectRuns.mockReturnValue(
         runsResult({
           items: [
-            { id: "run-1", at: "2026-01-01T00:00:00.000Z", question: "First question", selectedModels: ["chatgpt"], status: "complete", modelsOk: 1, modelsTotal: 1, projectId: "proj-1" },
-            { id: "run-2", at: "2026-01-02T00:00:00.000Z", question: "Second question", selectedModels: ["claude"], status: "complete", modelsOk: 1, modelsTotal: 1, projectId: "proj-1" },
+            { id: "run-1", at: "2026-01-01T00:00:00.000Z", question: "First question", selectedModels: ["chatgpt"], status: "complete", modelsOk: 1, modelsTotal: 1, projectId: "proj-1", assignee: null },
+            { id: "run-2", at: "2026-01-02T00:00:00.000Z", question: "Second question", selectedModels: ["claude"], status: "complete", modelsOk: 1, modelsTotal: 1, projectId: "proj-1", assignee: null },
           ],
         })
       );
@@ -197,7 +197,7 @@ describe("TeamProjectDetailShell", () => {
   it("passes workspaceId and projectId through to the runs hook exactly", async () => {
     mockedUseTeamProjectRuns.mockReturnValue(runsResult());
     await mount({ project: { id: "proj-xyz", name: "X", status: "active" } });
-    expect(mockedUseTeamProjectRuns).toHaveBeenCalledWith({ workspaceId: "ws-1", projectId: "proj-xyz" });
+    expect(mockedUseTeamProjectRuns).toHaveBeenCalledWith({ workspaceId: "ws-1", projectId: "proj-xyz", assigneeFilter: null });
   });
 
   it("loading state shows a loading indicator, not the empty state", async () => {

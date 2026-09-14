@@ -45,13 +45,15 @@ import { useAuth } from "@/components/AuthProvider";
 import { authedFetch } from "@/lib/client/authedFetch";
 import { mapMutationErrorCode, type ProjectMutationErrorCode } from "@/lib/projects/projectMutationResponse";
 import { isValidUpdateTimeTokenShape } from "@/lib/projects/updateTimeTokenClient";
-import type { TeamProjectSummary } from "@/hooks/useTeamProjects";
+import { isValidTeamProjectAssignee, type TeamProjectSummary } from "@/hooks/useTeamProjects";
 
-export type TeamProjectMutationErrorCode = ProjectMutationErrorCode | "insufficient_capability" | "team_workspace_not_found";
+/** Project/Research Assignment — the three assignment-only denials the shared mapping has no member for. */
+export type TeamProjectAssignmentErrorCode = "assignee_not_eligible" | "too_many_assignees" | "project_archived";
+export type TeamProjectMutationErrorCode = ProjectMutationErrorCode | "insufficient_capability" | "team_workspace_not_found" | TeamProjectAssignmentErrorCode;
 
 export type TeamProjectMutationResult = { status: "ok"; project: TeamProjectSummary } | { status: "error"; errorCode: TeamProjectMutationErrorCode };
 
-export type TeamProjectLifecycleOperation = "create" | "archive" | "restore";
+export type TeamProjectLifecycleOperation = "create" | "archive" | "restore" | "set_assignees";
 
 export interface UseTeamProjectLifecycleResult {
   isCreating: boolean;
@@ -62,11 +64,14 @@ export interface UseTeamProjectLifecycleResult {
   getBusyOperation: (projectId: string) => TeamProjectLifecycleOperation | null;
   archiveProject: (project: TeamProjectSummary) => Promise<TeamProjectMutationResult>;
   restoreProject: (project: TeamProjectSummary) => Promise<TeamProjectMutationResult>;
+  /** Project/Research Assignment — replaces the Project's full assignee list under the same per-Project lock and the row's own exact OCC token. `assigneeUids` is sent as given; the server canonicalizes. */
+  setAssignees: (project: TeamProjectSummary, assigneeUids: readonly string[]) => Promise<TeamProjectMutationResult>;
 }
 
 /** The only two Team-route error codes `mapMutationErrorCode()` cannot express; everything else defers to the shared mapping (which collapses unknown codes to `internal_error`, never guessing). */
 function mapTeamMutationErrorCode(raw: unknown): TeamProjectMutationErrorCode {
   if (raw === "insufficient_capability" || raw === "team_workspace_not_found") return raw;
+  if (raw === "assignee_not_eligible" || raw === "too_many_assignees" || raw === "project_archived") return raw;
   return mapMutationErrorCode(raw);
 }
 
@@ -99,11 +104,21 @@ function validateTeamProjectDto(raw: unknown, expected: { workspaceId: string; i
     c.status !== expected.status ||
     typeof c.createdAt !== "string" ||
     typeof c.updatedAt !== "string" ||
-    !(c.updateTime === null || isValidUpdateTimeTokenShape(c.updateTime))
+    !(c.updateTime === null || isValidUpdateTimeTokenShape(c.updateTime)) ||
+    !Array.isArray(c.assignees) ||
+    !c.assignees.every(isValidTeamProjectAssignee)
   ) {
     return null;
   }
   return c as unknown as TeamProjectSummary;
+}
+
+/** Pure — exported for request-shape tests. */
+export function buildSetTeamProjectAssigneesRequest(args: { workspaceId: string; projectId: string; assigneeUids: readonly string[]; expectedUpdateTime: unknown }): { url: string; body: string } {
+  return {
+    url: `/api/workspaces/${encodeURIComponent(args.workspaceId)}/projects/${encodeURIComponent(args.projectId)}/assignees`,
+    body: JSON.stringify({ assigneeUids: args.assigneeUids, expectedUpdateTime: args.expectedUpdateTime }),
+  };
 }
 
 export function useTeamProjectLifecycle(args: { workspaceId: string }): UseTeamProjectLifecycleResult {
@@ -188,5 +203,35 @@ export function useTeamProjectLifecycle(args: { workspaceId: string }): UseTeamP
   const archiveProject = useCallback((project: TeamProjectSummary) => runLifecycleTransition(project, "archive"), [runLifecycleTransition]);
   const restoreProject = useCallback((project: TeamProjectSummary) => runLifecycleTransition(project, "restore"), [runLifecycleTransition]);
 
-  return { isCreating, createProject, isProjectBusy, getBusyOperation, archiveProject, restoreProject };
+  const setAssignees = useCallback(
+    async (project: TeamProjectSummary, assigneeUids: readonly string[]): Promise<TeamProjectMutationResult> => {
+      // Same preconditions as archive/restore: no token, no request; one
+      // in-flight mutation per Project.
+      if (project.updateTime === null) {
+        return { status: "error", errorCode: "invalid_update_time" };
+      }
+      if (busyOperationsRef.current.has(project.id)) {
+        return { status: "error", errorCode: "internal_error" };
+      }
+      busyOperationsRef.current.set(project.id, "set_assignees");
+      setBusyOperations(new Map(busyOperationsRef.current));
+      try {
+        const { url, body } = buildSetTeamProjectAssigneesRequest({ workspaceId, projectId: project.id, assigneeUids, expectedUpdateTime: project.updateTime });
+        const res = await authedFetch(url, { user, authReady: true, method: "POST", body });
+        const parsed = await parseMutationResponse(res);
+        if (!parsed.ok) return { status: "error", errorCode: parsed.errorCode };
+        const validated = validateTeamProjectDto(parsed.project, { workspaceId, id: project.id, status: "active" });
+        if (!validated) return { status: "error", errorCode: "internal_error" };
+        return { status: "ok", project: validated };
+      } catch {
+        return { status: "error", errorCode: "network_error" };
+      } finally {
+        busyOperationsRef.current.delete(project.id);
+        setBusyOperations(new Map(busyOperationsRef.current));
+      }
+    },
+    [user, workspaceId]
+  );
+
+  return { isCreating, createProject, isProjectBusy, getBusyOperation, archiveProject, restoreProject, setAssignees };
 }

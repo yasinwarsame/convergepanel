@@ -21,7 +21,7 @@ jest.mock("@/lib/client/authedFetch", () => ({
     fetchLog.push(url);
     if (url.includes("/restore")) return Promise.resolve({ ok: restoreResponse.ok, json: async () => restoreResponse.body });
     if (url.includes("status=archived")) {
-      return Promise.resolve({ ok: true, json: async () => ({ ok: true, items: [{ id: "old-1", workspaceId: "ws-1", name: "Old", status: "archived", createdAt: "x", updatedAt: "x", updateTime: { seconds: 1, nanoseconds: 0 } }], hasMore: false }) });
+      return Promise.resolve({ ok: true, json: async () => ({ ok: true, items: [{ id: "old-1", workspaceId: "ws-1", name: "Old", status: "archived", createdAt: "x", updatedAt: "x", updateTime: { seconds: 1, nanoseconds: 0 }, assignees: [] }], hasMore: false }) });
     }
     return Promise.resolve({ ok: true, json: async () => ({ ok: true, items: [], hasMore: false }) });
   },
@@ -83,7 +83,7 @@ it("a 409 on restore leaves the shell-owned error visible after the real refetch
 });
 
 it("a committed restore leaves the shell-owned success notice visible across the real refetch", async () => {
-  restoreResponse = { ok: true, body: { ok: true, project: { id: "old-1", workspaceId: "ws-1", name: "Old", status: "active", createdAt: "x", updatedAt: "x", updateTime: { seconds: 2, nanoseconds: 0 } } } };
+  restoreResponse = { ok: true, body: { ok: true, project: { id: "old-1", workspaceId: "ws-1", name: "Old", status: "active", createdAt: "x", updatedAt: "x", updateTime: { seconds: 2, nanoseconds: 0 }, assignees: [] } } };
   const renderer = await mountAndSettle();
   const restore = renderer.root.findAllByType("button").find((b) => b.props.children === "Restore")!;
   await act(async () => {

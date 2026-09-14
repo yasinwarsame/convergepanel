@@ -13,6 +13,7 @@ import { notFound } from "next/navigation";
 import { resolveServerComponentIdentity } from "@/lib/auth/resolveServerComponentIdentity";
 import { resolveWorkspaceAccess } from "@/lib/workspaces/resolveWorkspaceAccess";
 import TeamProjectsShell from "@/components/workspace/projects/TeamProjectsShell";
+import { projectAssignmentUiEnabledFor } from "@/lib/workspaces/projectAssignmentUiAdmission";
 
 export const dynamic = "force-dynamic";
 
@@ -46,6 +47,7 @@ export default async function TeamProjectsPage({ params }: { params: { workspace
       canCreateProject={access.capabilities.includes("projects.create")}
       canManageProjects={access.capabilities.includes("projects.manage")}
       canReadAudit={access.capabilities.includes("audit.read")}
+      assignmentUiEnabled={projectAssignmentUiEnabledFor(identity.uid)}
     />
   );
 }
