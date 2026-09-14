@@ -271,25 +271,53 @@ the actor).
 
 - `POST /api/workspaces/{W}/projects/{P}/assignees` — body exactly `{ assigneeUids: string[],
   expectedUpdateTime }`. A fourth `TeamProjectMutation` member `{kind: "set_assignees",
-  assigneeUids}` flowing through `updateTeamProjectFields`' frozen order: `projects.manage` in the
-  transaction → Project read, bound, `status === "active"` (archived Project: 409, same as the
-  lifecycle precedent) → **every** uid validated against a transaction-read membership: exists,
-  bound, `status === "active"`, same Workspace (D2 Project rule; **re-validated on every write,
-  including a repeat of the current list**, D4) → dedupe/sort/cap 20 → semantic no-op check (D6)
-  → early token compare + native precondition → `tx.update({assigneeUids, updatedAt})` →
-  `tx.set(audit event)`. Setting the full list (not add/remove) keeps the mutation idempotent and
-  the OCC token meaningful.
+  assigneeUids}` flowing through `updateTeamProjectFields`' frozen order. **Authoritative order
+  (identical to §6.4):**
+  1. pure request normalization with no Firestore I/O: shape check, then canonical
+     deduplication and sort, then the cap of 20 **unique** uids enforced (`too_many_assignees`)
+     **before any membership read**;
+  2. Team Workspace admission, then Project Assignment rollout admission;
+  3. transaction begins;
+  4. `projects.manage` via `authorizeTeamWorkspaceMutationInTransaction`;
+  5. Project read through `tx`, bound, well-formed, `status === "active"` (archived: 409,
+     lifecycle precedent);
+  6. caller `expectedUpdateTime` compared against the transaction-read Project `updateTime`;
+     **a stale token returns `conflict` immediately** — before any target validation and before
+     any no-op consideration;
+  7. **every** canonical target membership read through `tx` and validated: exists, bound,
+     `status === "active"`, same Workspace (D2 Project rule) — at most 20 reads, performed on
+     **every** write including a repeat of the current list (D4);
+  8. semantic no-op determination: the canonical requested set equals the normalized stored set
+     ⇒ `unchanged` ⇒ 200 `{changed:false}`, no write, no timestamp change, no audit event (D6);
+  9. real change: `tx.update({assigneeUids, updatedAt})` with the same native
+     `{lastUpdateTime: expectedUpdateTime}` precondition;
+  10. `tx.set(audit event)` in the same transaction.
+  Setting the full list (not add/remove) keeps the mutation idempotent and the OCC token
+  meaningful. **A stale token can never receive a successful no-op response.**
 - `PATCH /api/workspaces/{W}/runs/{runId}/assignee` — body exactly `{ assigneeUid: string|null,
-  expectedAssigneeUid: string|null }`. Mirrors `associateTeamRunWithProject`: `research.organize`
-  in the transaction → run read + `validateTeamRunRowShape` (Team-bound only; legacy/Personal
-  conceal as `run_not_found`) → expected-state compare → semantic no-op check (D6) → target
-  membership validated when non-null (D2 run rule: active, same Workspace, holds `research.create`;
-  **re-validated even when the value repeats**, D4) → `tx.update(runRef, {assigneeUid})`, exactly
-  one field, no `updatedAt`, no mirrors → `tx.set(audit event)`.
-- **No-op posture (D6):** when the requested state equals the current state (same sorted list, or
-  same assignee), the transaction writes nothing, bumps no timestamp, emits no event, and the route
-  answers 200 `{ ok: true, changed: false }`. The OCC/expected-state check still runs first, so a
-  stale caller never receives a silent success.
+  expectedAssigneeUid: string|null }`. Mirrors `associateTeamRunWithProject`. **Authoritative
+  order (identical to §6.4):**
+  1. Team Workspace admission, then Project Assignment rollout admission;
+  2. transaction begins;
+  3. `research.organize` via `authorizeTeamWorkspaceMutationInTransaction`;
+  4. canonical Team run read through `tx` and `validateTeamRunRowShape` (legacy/Personal/foreign
+     conceal as `run_not_found`);
+  5. `expectedAssigneeUid` compared with the **normalized** current assignee (§6.6); mismatch ⇒
+     `conflict`;
+  6. when the requested assignee is non-null, that membership is read through `tx` and validated:
+     same Workspace, `status === "active"`, role currently holds `research.create` (D2 run rule).
+     **This step runs even when the requested assignee equals the current assignee** (D4) — the
+     "same reviewer skips re-validation" defect is structurally impossible to copy because
+     validation precedes the no-op decision;
+  7. only after successful validation, semantic no-op determination: requested equals normalized
+     current ⇒ `unchanged` ⇒ 200 `{changed:false}`, zero writes, zero audit events (D6);
+  8. real change: `tx.update(runRef, {assigneeUid})`, exactly one field, no `updatedAt`, no
+     mirrors;
+  9. `tx.set(audit event)` in the same transaction, with the Project metadata obtained per §2.4.
+- **No-op posture (D6):** a no-op is decided only after OCC/expected-state and target validation
+  have both succeeded. It writes nothing, bumps no timestamp, emits no event, and the route answers
+  200 `{ ok: true, changed: false }`. A stale caller always receives `conflict`, never a silent
+  success.
 - Rollout (D10): `PROJECT_ASSIGNMENT_ENABLED` / `PROJECT_ASSIGNMENT_CANARY_UIDS`, a new
   `lib/workspaces/projectAssignmentRollout.ts` structural clone of the existing rollout modules,
   checked inside both primitives after `resolveTeamWorkspaceTargetAdmission` and before any
@@ -302,15 +330,34 @@ the actor).
 Two new `workspaceMembershipEvents` types with a new identity shape carrying both subject and
 members:
 
-- `workspace_project_assignees_changed`: `actorUid, workspaceId, projectId, projectName,
-  addedUids[], removedUids[], at`.
-- `workspace_research_assignee_changed`: `actorUid, workspaceId, projectId, projectName, runId,
-  runQuestion, previousAssigneeUid | null, assigneeUid | null, at`.
+- `workspace_project_assignees_changed`: `actorUid, workspaceId, projectId: string,
+  projectName: string, addedUids[], removedUids[], at` (the Project is the transaction-read,
+  validated subject; both fields are always present).
+- `workspace_research_assignee_changed`: `actorUid, workspaceId, projectId: string | null,
+  projectName: string | null, runId, runQuestion, previousAssigneeUid | null, assigneeUid | null,
+  at`. Canonical Team runs may be Unfiled (`projectId: null`), so both Project fields are nullable
+  — identical to the §6.5 shape.
 
-DTOs expose display names only (actor, added/removed/previous/new), `project.name`,
-`research.question`; never any id. Reader validator gets a fourth branch **before** the member
-fall-through; UI gets branches **before** the final `else`. No new index: the existing
-`{workspaceId, at}` serves the log.
+**How the run event's Project snapshot is obtained (frozen):**
+- If the validated run's `projectId` is `null`, both `projectId` and `projectName` are written as
+  `null`.
+- If `projectId` is non-null and this is a real change, the Project document is read through the
+  **same transaction, before the first write** (all reads still precede all writes), and
+  `projectName` is taken from that transaction-read document. **Never a post-commit lookup** to
+  construct the authoritative audit event.
+- A referenced Project that is missing, malformed, or bound to another Workspace does **not** fail
+  the assignment and is **not** a distinguishable response (assignment must not become a Project
+  existence oracle): the event is written with the run's `projectId` as stored and
+  `projectName: null`, and an integrity warning is logged server-side. Tested explicitly.
+- `runQuestion` comes from the transaction-read run document via the repository's established
+  sanitized, fail-safe string posture (a non-string or empty question yields the fixed fallback
+  label, never a crash); a request-body copy is never trusted.
+- The assignment write and the audit event remain all-or-nothing.
+
+DTOs expose display names only (actor, added/removed/previous/new), `project.name` (or the
+Unfiled label when null), `research.question`; never any id. Reader validator gets a fourth branch
+**before** the member fall-through; UI gets branches **before** the final `else`. No new index:
+the existing `{workspaceId, at}` serves the log.
 
 ### 2.5 Reads and views (D4, D7)
 
@@ -481,6 +528,16 @@ No new collections. No change to `humanReviewAssignment/current`, `humanReviewPa
   `lib/firestore/teamProjects.ts`, executed through `updateTeamProjectFields()`'s frozen order.
   Result union adds `unchanged` (no-op), `assignee_not_eligible` (concealed per-uid reason), and
   `too_many_assignees`. The write `Pick` widens to include `assigneeUids`.
+  **Normalization and transaction bounding (primitive-owned, so it holds for any server caller,
+  not only the HTTP route):** a pure function `canonicalizeAssigneeUids(input)` validates the shape
+  (array of non-empty trimmed strings, each passing the repository's uid-shape check) with no
+  Firestore I/O, deduplicates, sorts canonically, and returns `too_many_assignees` when the
+  **unique** count exceeds 20 — all **before** the transaction opens and therefore before any
+  membership read. The transaction then reads at most 20 membership documents (one `getAll`, or
+  individual `tx.get`s bounded by the canonical set) and revalidates every unique target. An
+  oversized or duplicate-heavy request can never trigger more than 20 target reads. The route may
+  additionally reject an obviously oversized raw array (for example > 200 elements) as 400 before
+  calling the primitive, but correctness never depends on the route.
   Route: `POST /api/workspaces/[workspaceId]/projects/[projectId]/assignees`, body allow-list
   exactly `{assigneeUids, expectedUpdateTime}` (unknown key ⇒ 400 `unexpected_field`;
   `assigneeUids` must be an array of non-empty strings, else 400 `invalid_request_body`).
@@ -497,38 +554,84 @@ No new collections. No change to `humanReviewAssignment/current`, `humanReviewPa
 - Both primitives: `resolveTeamWorkspaceTargetAdmission` then `resolveProjectAssignmentAdmission`
   (D10) before any Firestore access; `adminDb` null ⇒ `firestore_unavailable`.
 
+**HTTP / result mapping (frozen; reuse the existing helpers named):**
+
+| Result | HTTP | `errorCode` / body | Helper |
+|---|---|---|---|
+| unauthenticated (`missing_credentials`) | 401 | `unauthorized` | route `getUid()` pattern |
+| other identity failure | 401 | `auth_error` | route `getUid()` pattern |
+| unparseable JSON / wrong shape / missing required key | 400 | `invalid_request_body` | `invalidRequestBodyResponse()` |
+| unknown body key | 400 | `unexpected_field` | `unexpectedFieldResponse()` |
+| invalid `expectedUpdateTime` token | 400 | `invalid_update_time` | `invalidUpdateTimeResponse()` |
+| rate limited | 429 | `rate_limited` | inline, as the association route |
+| Team Workspace non-admission, Project Assignment non-admission, every non-capability authorization denial | 404 | `team_workspace_not_found` | `teamProjectAuthorizationDeniedResponse(reason)` — one concealed branch, no rollout oracle |
+| `insufficient_capability` | 403 | `insufficient_capability` | `teamProjectAuthorizationDeniedResponse("insufficient_capability")` |
+| Project missing / malformed / foreign Workspace | 404 | `project_not_found` | `teamProjectNotFoundConcealedResponse()` |
+| run missing / not Team-bound / foreign / bad id syntax | 404 | `run_not_found` | `runNotFoundConcealedResponse()` |
+| archived Project | 409 | `project_archived` | `projectArchivedTargetResponse()` |
+| stale Project token (early compare or native precondition) | 409 | `conflict` | `staleUpdateTimeConflictResponse()` |
+| run-assignee expected-state mismatch | 409 | `assignee_conflict` | new helper, never echoes the current value |
+| assignee not eligible (any per-uid reason, either mutation) | 400 | `assignee_not_eligible` | new helper, one shape, reason never surfaced |
+| too many assignees (> 20 unique) | 400 | `too_many_assignees` | new helper |
+| unchanged (semantic no-op) | 200 | `{ok: true, changed: false}` | inline |
+| changed | 200 | `{ok: true, changed: true, ...}` (+ fresh `updateTime` or `null` for Projects) | inline |
+| Firestore unavailable / transaction failed / integrity failure | 500 | `internal_error` | `internalErrorResponse()` |
+
+No response distinguishes a foreign Workspace, a non-admitted rollout cohort, or a specific
+ineligibility reason.
+
 ### 6.3 Authorization and target eligibility (in the transaction)
 
-- Project assignees: `authorizeTeamWorkspaceMutationInTransaction(tx, {requiredCapability:
-  "projects.manage"})`; Project read through `tx`, well-formed, `id`/`workspaceId` match, `status
-  === "active"` (archived ⇒ 409 `project_archived`); for **every** requested uid, `tx.get` the
-  deterministic membership document, `validateMembershipBinding`, `status === "active"`. Any
-  failure ⇒ `assignee_not_eligible` with the per-uid reason never surfaced (400
+- Project assignees, in the order frozen in §2.3 and §6.4:
+  `authorizeTeamWorkspaceMutationInTransaction(tx, {requiredCapability: "projects.manage"})`;
+  Project read through `tx`, well-formed, `id`/`workspaceId` match, `status === "active"`
+  (archived ⇒ 409 `project_archived`); **`expectedUpdateTime` compared before any target read**
+  (stale ⇒ `conflict`); then, for **every** uid of the already canonicalized and capped set (≤ 20),
+  `tx.get` the deterministic membership document, `validateMembershipBinding`, `status ===
+  "active"`. Any failure ⇒ `assignee_not_eligible` with the per-uid reason never surfaced (400
   `assignee_not_eligible`, one shape).
-- Run assignee: `authorizeTeamWorkspaceMutationInTransaction(tx, {requiredCapability:
-  "research.organize"})`; run read through `tx` and `validateTeamRunRowShape(run, W)`
-  (legacy/Personal/foreign ⇒ concealed `run_not_found`); when `assigneeUid !== null`, `tx.get` the
-  membership, bind, `status === "active"`, and `roleHasCapability(role, "research.create")`.
-- Re-validation happens on **every** write, including when the requested value equals the current
-  value; the no-op decision (D6) is taken only after validation succeeds.
+- Run assignee, in the order frozen in §2.3 and §6.4:
+  `authorizeTeamWorkspaceMutationInTransaction(tx, {requiredCapability: "research.organize"})`;
+  run read through `tx` and `validateTeamRunRowShape(run, W)` (legacy/Personal/foreign ⇒ concealed
+  `run_not_found`); `expectedAssigneeUid` compared with the normalized current value (mismatch ⇒
+  `conflict`); then, when `assigneeUid !== null`, `tx.get` the membership, bind, `status ===
+  "active"`, and `roleHasCapability(role, "research.create")` — **even when the requested value
+  equals the current value**.
+- Re-validation happens on **every** write; the no-op decision (D6) is taken only after OCC and
+  validation have both succeeded.
 - Assignment fields are never read by any authorization function, resolver, or capability check.
   A structural test asserts `assigneeUid`/`assigneeUids` do not appear in
   `lib/workspaces/{resolveWorkspaceAccess,authorizeTeamWorkspaceMutationInTransaction,
   capabilities,workspaceReviewEligibility}.ts`.
 
-### 6.4 OCC and no-op
+### 6.4 OCC and no-op — the authoritative orderings
 
-- Project: caller-supplied `expectedUpdateTime` (`validateUpdateTimeToken`), early compare against
-  the transaction-read `updateTime` ⇒ `stale`, and the same token passed as the native
-  `{lastUpdateTime}` precondition on `tx.update`. Stale ⇒ 409 `conflict` via
+**Project assignees:**
+normalization/canonicalization/cap (pure) → Team + Project Assignment admission → transaction →
+`projects.manage` → Project read/binding/well-formed/status → **`expectedUpdateTime` compared
+against the transaction-read `updateTime`; stale ⇒ `conflict` immediately** → validate every
+canonical target membership (≤ 20) → semantic no-op determination → no-op ⇒ `{changed:false}`,
+no write, no timestamp change, no audit event → real change ⇒ `tx.update` with the same native
+`{lastUpdateTime: expectedUpdateTime}` precondition → audit event `tx.set` in the same transaction.
+A stale token can never receive a successful no-op response.
+
+**Run assignee:**
+Team + Project Assignment admission → transaction → `research.organize` → canonical Team run
+read and binding validation → **`expectedAssigneeUid` compared with the normalized current assignee;
+mismatch ⇒ `conflict`** → when the requested assignee is non-null, transaction-read and validate
+that membership (same Workspace, active, role currently holds `research.create`) — **required even
+when the requested assignee equals the current assignee** → only after successful validation,
+semantic no-op determination → no-op ⇒ `{changed:false}`, zero writes, zero audit events → real
+change ⇒ one-field run update → audit event `tx.set` in the same transaction.
+
+- Project OCC: caller-supplied `expectedUpdateTime` (`validateUpdateTimeToken`), early compare,
+  then the same token as the native precondition. Stale ⇒ 409 `conflict` via
   `staleUpdateTimeConflictResponse()`.
-- Run: `expectedAssigneeUid` compared to the current value ⇒ `conflict` (409
-  `assignee_conflict`), never echoing the current value.
-- No-op (D6): after validation, if the canonical requested list equals the stored list (or the
-  requested assignee equals the current one), return `unchanged` ⇒ 200 `{ok: true, changed:
-  false}`; no `tx.update`, no `updatedAt`, no event. Success ⇒ 200 `{ok: true, changed: true,
-  ...}` carrying the fresh `updateTime` token for the Project case (`null` if the post-commit read
-  fails, per the existing `projectionUnavailable` convention).
+- Run OCC: value comparison against the **normalized** current assignee (§6.6) ⇒ 409
+  `assignee_conflict`, never echoing the current value.
+- Success ⇒ 200 `{ok: true, changed: true, ...}` carrying the fresh `updateTime` token for the
+  Project case (`null` if the post-commit read fails, per the existing `projectionUnavailable`
+  convention).
 
 ### 6.5 Audit-event schemas and atomicity (D5)
 
@@ -548,7 +651,12 @@ interface WorkspaceResearchAssignmentEventIdentity {
 
 Event types `workspace_project_assignees_changed` and `workspace_research_assignee_changed`,
 written via `tx.set()` on a locally allocated `workspaceMembershipEvents` reference **inside the
-mutation's transaction**, `at` reusing the mutation's own `now`. Reader (`listWorkspaceAuditEvents.ts`)
+mutation's transaction**, `at` reusing the mutation's own `now`. For the run event, `projectId`
+and `projectName` follow the frozen rule in §2.4: `null`/`null` for an Unfiled run; otherwise the
+Project is read through the same transaction before the first write and `projectName` is taken from
+it; a missing/malformed/foreign referenced Project yields `projectName: null` with the stored
+`projectId`, a server-side integrity warning, and **no** distinguishable response; `runQuestion`
+comes from the transaction-read run with the established sanitized fail-safe posture. Reader (`listWorkspaceAuditEvents.ts`)
 gains a fourth validation branch placed **before** the member fall-through; DTOs expose
 `actor.displayName`, `added[].displayName`, `removed[].displayName`, `previousAssignee?.displayName`,
 `assignee?.displayName`, `project.name`, `research.question`, and **no id of any kind**. Names
@@ -566,6 +674,27 @@ resolve through the existing two batched calls. Client parser `isValidAuditEvent
   `resolveWorkspaceReviewerDisplayNames` (removed members still resolve; a non-evidenced uid gets
   the fixed fallback, never a raw uid).
 - `state` is presentation metadata: no route branches on it for authorization.
+
+**Malformed stored-assignment normalization (frozen; one shared pure module used by every reader
+AND by the mutations' OCC comparisons):**
+
+- Project `assigneeUids`: absent ⇒ `[]`; a valid array of non-empty strings ⇒ the canonical
+  deduplicated, sorted values; any other stored shape (non-array, or containing non-string/empty
+  entries) ⇒ **`[]`**, with a server-side integrity warning that never includes the raw value. A
+  malformed field never crashes a page, never fails a list window, and is never authorization
+  input. `isWellFormedProjectV1` is **not** tightened (shared with Personal).
+- Run `assigneeUid`: absent or `null` ⇒ `null`; a valid non-empty string ⇒ that value; any other
+  stored value ⇒ **`null`**, with a server-side integrity warning. This single deterministic
+  representation is used by every reader **and** by the `expectedAssigneeUid` comparison, so a
+  malformed stored value compares equal to `null`: an authorized caller sending
+  `expectedAssigneeUid: null` with a real assignee repairs the field on the next write, and there
+  is no OCC loop a client cannot escape.
+- Project repair path is the same: a malformed list normalizes to `[]`, the caller's fresh
+  `expectedUpdateTime` still governs, and a real change overwrites the field with a canonical list.
+- Clients only ever receive normalized values; raw malformed data never leaves the server.
+- Tests: reader and mutation specs proving malformed persisted values cannot crash, cannot widen
+  authorization, cannot leak raw malformed data, and cannot create an unrecoverable conflict loop,
+  each with a positive control on the same fixture (a valid value round-trips unchanged).
 
 ### 6.7 UI surfaces (D7, D9)
 
@@ -617,6 +746,26 @@ rendered as them; a D2 test showing a Viewer can be a Project assignee but not a
 same fixture; a D4 test showing a stale assignee is excluded from `?assignee=me` while still
 rendered by name on the row; a D6 test showing a repeat write leaves `updateTime` unchanged and
 writes no event, with a positive control that a real change does both.
+
+Contract-correction tests (added 2026-09-14, each with its positive control and a named killing
+mutation):
+- **Stale token never no-ops:** a stale `expectedUpdateTime` with an already-current list returns
+  `conflict`, not `changed:false` — mutation: move the no-op check ahead of the token compare.
+- **Same-assignee repeat still validates:** a repeat write naming the current assignee whose
+  membership was removed returns `assignee_not_eligible` — mutation: skip validation when the
+  requested value equals the current value (the reviewer defect, reproduced and killed).
+- **Bounded reads:** a request with 1,000 entries (many duplicates, > 20 unique) performs **zero**
+  membership reads and returns `too_many_assignees`; a request with 1,000 entries collapsing to
+  ≤ 20 unique performs at most 20 reads — positive control: a valid ≤ 20 canonical set performs
+  exactly one validation read per unique target — mutation: validate before canonicalizing.
+- **Audit nullability and Project snapshot:** an Unfiled run's event carries `null`/`null`; a filed
+  run's event carries the transaction-read name; a filed run whose Project is missing yields
+  `projectName: null`, the same success response, and a logged warning — mutations: post-commit
+  Project lookup (killed by inspecting the transaction's buffered `set`); distinguishable response
+  on missing Project.
+- **Malformed stored values:** a run with `assigneeUid: 42` reads as `null`, accepts
+  `expectedAssigneeUid: null`, and is repaired by a real write; a Project with `assigneeUids:
+  "x"` lists as `[]` without failing the page — mutations: pass raw values through; fail the page.
 
 ### 6.12 Unit, integration and UI verification
 
