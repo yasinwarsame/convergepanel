@@ -72,17 +72,20 @@ export async function discoverCustomersForUid(args: { stripe: Stripe; uid: strin
 }
 
 export type StoredCustomerValidation =
-  | { kind: "ok"; customer: Stripe.Customer; legacyUnbound: boolean }
+  | { kind: "ok"; customer: Stripe.Customer }
   | { kind: "stored_customer_missing" }
-  | { kind: "stored_customer_mismatch" };
+  | { kind: "stored_customer_mismatch" }
+  | { kind: "stored_customer_unmarked" };
 
 /**
  * A stored `stripeCustomerId` is server-written and therefore trusted as a
  * pointer, but the customer it points at must still belong to the uid under
  * the metadata contract. A customer carrying a DIFFERENT uid is a billing
- * integrity failure. A customer carrying NO uid metadata is a legacy record
- * this application created before the marker existed; it is accepted and
- * reported as `legacyUnbound` so the caller may backfill the marker.
+ * integrity failure. A customer carrying NO uid marker is ALSO refused
+ * (R5-C1): this route has written the marker at every customer creation since
+ * the initial commit and every Firestore-bound customer in Production carries
+ * it, so an unmarked customer cannot come from this application's own history.
+ * In a shared Stripe account it is never auto-claimed; it needs manual repair.
  */
 export async function validateStoredCustomer(args: { stripe: Stripe; uid: string; storedCustomerId: string }): Promise<StoredCustomerValidation> {
   const result = await stripeLookup("customers.retrieve", () => args.stripe.customers.retrieve(args.storedCustomerId));
@@ -90,17 +93,18 @@ export async function validateStoredCustomer(args: { stripe: Stripe; uid: string
   const customer = result.value;
   if ((customer as { deleted?: boolean }).deleted) return { kind: "stored_customer_missing" };
   const marker = (customer as Stripe.Customer).metadata?.[CONVERGEPANEL_CUSTOMER_UID_METADATA_KEY];
-  if (typeof marker === "string" && marker.length > 0 && marker !== args.uid) return { kind: "stored_customer_mismatch" };
-  return { kind: "ok", customer: customer as Stripe.Customer, legacyUnbound: !marker };
+  if (typeof marker !== "string" || marker.length === 0) return { kind: "stored_customer_unmarked" };
+  if (marker !== args.uid) return { kind: "stored_customer_mismatch" };
+  return { kind: "ok", customer: customer as Stripe.Customer };
 }
 
 export type UidCustomerAuthority =
   /** The uid has no ConvergePanel customer anywhere — the ONLY outcome that may create one. */
   | { kind: "no_customer" }
   /** Exactly one usable customer and no plan-bearing subscription anywhere — reuse it. */
-  | { kind: "reuse_customer"; customerId: string; source: "stored" | "discovered"; legacyUnbound: boolean }
+  | { kind: "reuse_customer"; customerId: string; source: "stored" | "discovered" }
   /** One authoritative plan-bearing subscription on the canonical customer — the existing in-place path. */
-  | { kind: "exactly_one"; customerId: string; source: "stored" | "discovered"; subscription: Stripe.Subscription; legacyUnbound: boolean }
+  | { kind: "exactly_one"; customerId: string; source: "stored" | "discovered"; subscription: Stripe.Subscription }
   /** Same-customer ambiguity, exactly as the customer-scoped resolver reports it. */
   | { kind: "multiple_entitlements"; customerId: string; count: number; subscriptionIds: string[] }
   /** Plan-bearing subscriptions on MORE THAN ONE customer of this uid. */
@@ -111,6 +115,7 @@ export type UidCustomerAuthority =
   | { kind: "ambiguous_customers"; customerIds: string[] }
   | { kind: "stored_customer_missing" }
   | { kind: "stored_customer_mismatch" }
+  | { kind: "stored_customer_unmarked" }
   | { kind: "invalid_uid" }
   | { kind: "discovery_incomplete"; pagesFetched: number }
   | { kind: "enumeration_incomplete"; customerId: string; reason: "page_limit_reached" | "cursor_not_advancing"; pagesFetched: number };
@@ -178,15 +183,15 @@ export async function resolveUidCustomerAuthority(args: { stripe: Stripe; uid: s
     const subscription = holder.authority.kind === "exactly_one" ? holder.authority.subscription : null;
     if (!subscription) return { kind: "discovery_incomplete", pagesFetched: discovery.pagesFetched }; // unreachable by construction; fail closed anyway
     if (storedId) {
-      if (holder.customerId === storedId) return { kind: "exactly_one", customerId: storedId, source: "stored", subscription, legacyUnbound: stored?.kind === "ok" ? stored.legacyUnbound : false };
+      if (holder.customerId === storedId) return { kind: "exactly_one", customerId: storedId, source: "stored", subscription };
       return { kind: "customer_authority_conflict", authoritativeCustomerId: holder.customerId, storedCustomerId: storedId, subscriptionIds: [subscription.id] };
     }
-    if (candidateIds.length === 1) return { kind: "exactly_one", customerId: holder.customerId, source: "discovered", subscription, legacyUnbound: false };
+    if (candidateIds.length === 1) return { kind: "exactly_one", customerId: holder.customerId, source: "discovered", subscription };
     return { kind: "customer_authority_conflict", authoritativeCustomerId: holder.customerId, storedCustomerId: null, subscriptionIds: [subscription.id] };
   }
 
   // Nothing plan-bearing anywhere.
-  if (storedId && stored?.kind === "ok") return { kind: "reuse_customer", customerId: storedId, source: "stored", legacyUnbound: stored.legacyUnbound };
-  if (candidateIds.length === 1) return { kind: "reuse_customer", customerId: candidateIds[0], source: "discovered", legacyUnbound: false };
+  if (storedId && stored?.kind === "ok") return { kind: "reuse_customer", customerId: storedId, source: "stored" };
+  if (candidateIds.length === 1) return { kind: "reuse_customer", customerId: candidateIds[0], source: "discovered" };
   return { kind: "ambiguous_customers", customerIds: candidateIds };
 }

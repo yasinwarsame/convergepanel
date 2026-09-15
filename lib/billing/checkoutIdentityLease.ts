@@ -25,8 +25,11 @@ export const CHECKOUT_LEASE_COLLECTION = "billingCheckoutLeases";
 export const CHECKOUT_LEASE_TTL_MS = 60_000;
 
 export type LeaseOutcome<T> = { kind: "held"; result: T } | { kind: "busy" };
+export type CheckoutLease = { uid: string; token: string };
+/** A mutation must not start with less than this much lease time left (R5-C1 lease-expiry edge). */
+export const CHECKOUT_LEASE_MUTATION_MARGIN_MS = 5_000;
 
-export async function withCheckoutIdentityLease<T>(uid: string, run: () => Promise<T>, now: () => number = Date.now): Promise<LeaseOutcome<T>> {
+export async function withCheckoutIdentityLease<T>(uid: string, run: (lease: CheckoutLease) => Promise<T>, now: () => number = Date.now): Promise<LeaseOutcome<T>> {
   if (!adminDb) throw new TransientDependencyError("firestore", "checkout_lease_acquire");
   const ref = adminDb.collection(CHECKOUT_LEASE_COLLECTION).doc(uid);
   const token = randomUUID();
@@ -46,7 +49,7 @@ export async function withCheckoutIdentityLease<T>(uid: string, run: () => Promi
   if (!acquired) return { kind: "busy" };
 
   try {
-    return { kind: "held", result: await run() };
+    return { kind: "held", result: await run({ uid, token }) };
   } finally {
     // Release only our own lease; a later holder (after expiry) must not be evicted.
     try {
@@ -58,6 +61,26 @@ export async function withCheckoutIdentityLease<T>(uid: string, run: () => Promi
     } catch {
       // Expiry is the fallback; a failed release is not a billing mutation.
     }
+  }
+}
+
+/**
+ * R5-C1 — re-verify, immediately before any Stripe mutation, that THIS request
+ * still holds the lease with a safety margin. If a slow request outlived its
+ * lease and another request took over, the slow one must refuse rather than
+ * mutate: the new holder is the only request allowed to act.
+ */
+export async function isCheckoutLeaseStillHeld(lease: CheckoutLease, now: () => number = Date.now): Promise<boolean> {
+  if (!adminDb) throw new TransientDependencyError("firestore", "checkout_lease_verify");
+  const ref = adminDb.collection(CHECKOUT_LEASE_COLLECTION).doc(lease.uid);
+  try {
+    return await adminDb.runTransaction<boolean>(async (tx) => {
+      const snap = await tx.get(ref);
+      const data = snap.exists ? (snap.data() as { token?: string; expiresAtMs?: number } | undefined) : undefined;
+      return !!data && data.token === lease.token && typeof data.expiresAtMs === "number" && data.expiresAtMs - CHECKOUT_LEASE_MUTATION_MARGIN_MS > now();
+    });
+  } catch (err) {
+    throw new TransientDependencyError("firestore", "checkout_lease_verify", err);
   }
 }
 

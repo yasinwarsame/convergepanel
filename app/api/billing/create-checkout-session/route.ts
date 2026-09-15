@@ -20,7 +20,8 @@ import {
 } from "@/lib/billing/customerSubscriptionAuthority";
 import { selectPlanBearingItem } from "@/lib/billing/subscriptionBillingState";
 import { resolveUidCustomerAuthority } from "@/lib/billing/uidCustomerAuthority";
-import { withCheckoutIdentityLease, bindStripeCustomerIfAbsent, type LeaseOutcome } from "@/lib/billing/checkoutIdentityLease";
+import { withCheckoutIdentityLease, bindStripeCustomerIfAbsent, isCheckoutLeaseStillHeld, type LeaseOutcome } from "@/lib/billing/checkoutIdentityLease";
+import { resolvePendingCheckoutAuthority } from "@/lib/billing/pendingCheckoutAuthority";
 import { isTransientDependencyError } from "@/lib/billing/reconciliationOutcome";
 import { getPostHogClient } from "@/lib/posthog-server";
 import { logger } from "@/lib/logger";
@@ -135,7 +136,7 @@ export async function POST(req: NextRequest) {
     // only then create/reuse a customer and perform the existing mutation.
     let leased: LeaseOutcome<NextResponse>;
     try {
-      leased = await withCheckoutIdentityLease(uid, async (): Promise<NextResponse> => {
+      leased = await withCheckoutIdentityLease(uid, async (lease): Promise<NextResponse> => {
         const userSnap = await db.collection("users").doc(uid).get();
         const storedCustomerId = (userSnap.data()?.stripeCustomerId as string | undefined) || null;
 
@@ -151,6 +152,10 @@ export async function POST(req: NextRequest) {
           case "stored_customer_mismatch":
             logger.error("[create-checkout-session] Stored Stripe customer belongs to a different uid; refusing to start checkout", { storedCustomerId });
             return NextResponse.json({ error: "Your billing identity could not be verified. Please contact support.", code: "billing_identity_mismatch" }, { status: 409 });
+          case "stored_customer_unmarked":
+            // R5-C1: never auto-claim an unmarked customer in a shared Stripe account.
+            logger.error("[create-checkout-session] Stored Stripe customer carries no uid ownership marker; refusing to start checkout", { storedCustomerId });
+            return NextResponse.json({ error: "Your billing identity could not be established. Please contact support.", code: "billing_identity_unestablished" }, { status: 409 });
           case "discovery_incomplete":
             logger.error("[create-checkout-session] Could not completely discover this uid's Stripe customers; refusing to start checkout", { pagesFetched: authority.pagesFetched });
             return NextResponse.json({ error: "We couldn't finish checking your billing identity, so we've made no changes. Please contact support.", code: "customer_discovery_incomplete" }, { status: 409 });
@@ -176,7 +181,6 @@ export async function POST(req: NextRequest) {
         }
 
         let customerId: string;
-        let legacyUnbound = false;
         let subscription: Stripe.Subscription | null = null;
         if (authority.kind === "no_customer") {
           if (!userEmail) {
@@ -190,7 +194,6 @@ export async function POST(req: NextRequest) {
           customerId = created.id;
         } else {
           customerId = authority.customerId;
-          legacyUnbound = authority.legacyUnbound;
           if (authority.kind === "exactly_one") subscription = authority.subscription;
         }
 
@@ -199,17 +202,6 @@ export async function POST(req: NextRequest) {
           if (bound.kind === "conflict") {
             logger.error("[create-checkout-session] A different Stripe customer was bound concurrently; refusing to start checkout", { customerId, existingCustomerId: bound.existingCustomerId });
             return NextResponse.json({ error: "Your billing identity changed while we were checking it. We've made no changes. Please try again.", code: "customer_binding_conflict" }, { status: 409 });
-          }
-        }
-
-        if (legacyUnbound) {
-          // Pre-existing behavior, narrowed: only a stored customer that carries NO
-          // uid marker is backfilled. A customer carrying a different uid was
-          // already refused above and is never rewritten.
-          try {
-            await stripeClient.customers.update(customerId, { metadata: { firebaseUid: uid, email: userEmail || "" } });
-          } catch (err) {
-            logger.warn("[create-checkout-session] Failed to backfill customer uid metadata (non-blocking)", { error: err instanceof Error ? err.message : String(err) });
           }
         }
 
@@ -245,6 +237,10 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ url: `${baseUrl}/billing?success=true&upgraded=true`, upgraded: true, unchanged: true });
           }
 
+          if (!(await isCheckoutLeaseStillHeld(lease))) {
+            logger.error("[create-checkout-session] Lease no longer held before the in-place plan change; refusing to mutate", { subscriptionId: current.id });
+            return NextResponse.json({ error: "Another checkout for your account is already in progress. Please wait a moment and try again.", code: "checkout_in_progress" }, { status: 409 });
+          }
           try {
             // The ITEM ID is mandatory. Updating with a bare price ADDS an item
             // rather than replacing the existing one, which would produce a
@@ -305,6 +301,22 @@ export async function POST(req: NextRequest) {
 
         // Create checkout session (for new subscriptions or when upgrade fails)
 
+        // R5-C1 — pending Checkout Session authority: Stripe's own session state
+        // is the durable record of a checkout that can still complete. Reuse an
+        // actionable one; never open a second completable session for this uid.
+        const pending = await resolvePendingCheckoutAuthority({ stripe: stripeClient, uid, customerId });
+        if (pending.kind === "enumeration_incomplete") {
+          logger.error("[create-checkout-session] Could not completely enumerate pending Checkout Sessions; refusing to create another", { customerId, reason: pending.reason, pagesFetched: pending.pagesFetched });
+          return NextResponse.json({ error: "We couldn't finish checking your pending checkout, so we've made no changes. Please try again in a moment.", code: "pending_checkout_enumeration_incomplete" }, { status: 409 });
+        }
+        if (pending.kind === "pending") {
+          logger.info("[create-checkout-session] Reusing the customer's existing actionable Checkout Session instead of creating another", { customerId, sessionId: pending.session.id, actionableCount: pending.count });
+          return NextResponse.json({ url: pending.session.url, pending: true });
+        }
+        if (!(await isCheckoutLeaseStillHeld(lease))) {
+          logger.error("[create-checkout-session] Lease no longer held before Checkout Session creation; refusing to create one", { customerId });
+          return NextResponse.json({ error: "Another checkout for your account is already in progress. Please wait a moment and try again.", code: "checkout_in_progress" }, { status: 409 });
+        }
         const session = await stripeClient.checkout.sessions.create({
           customer: customerId,
           mode: "subscription",
@@ -329,7 +341,7 @@ export async function POST(req: NextRequest) {
               targetPlan: planId,
             },
           },
-        });
+        }, { idempotencyKey: `billing-checkout-session-${uid}-${lease.token}` });
 
         console.log("[create-checkout-session] Created checkout session:", {
           sessionId: session.id,

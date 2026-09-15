@@ -40,7 +40,7 @@ const stripeMock = {
     list: jest.fn(async () => ({ data: liveSubscriptions, has_more: false })),
     update: jest.fn(async () => ({ id: "sub_1", status: "active", items: { data: [{ price: { id: "price_full_y" } }] } })),
   },
-  checkout: { sessions: { create: jest.fn(async () => ({ id: "cs_1", url: "https://checkout.example/cs_1" })) } },
+  checkout: { sessions: { create: jest.fn(async () => ({ id: "cs_1", url: "https://checkout.example/cs_1" })), list: jest.fn(async () => ({ data: [], has_more: false })) } },
 };
 jest.mock("@/lib/stripe/client", () => ({ stripe: stripeMock }));
 // Phase R5: `runTransaction` is required by the checkout lease and the

@@ -76,7 +76,7 @@ jest.mock("@/lib/stripe/client", () => ({
     customers: { retrieve: async () => ({ id: "cus_mine", deleted: false, metadata: { firebaseUid: "uid_customer" }, email: "c@example.test" }), create: jest.fn(), update: jest.fn(async () => ({})), search: jest.fn(async () => ({ data: [{ id: "cus_mine", deleted: false, metadata: { firebaseUid: "uid_customer" } }], has_more: false })) },
     prices: { retrieve: (...a: unknown[]) => pricesRetrieve(...(a as [string])) },
     subscriptions: { list: (...a: unknown[]) => subscriptionsList(...(a as [{ customer?: string }])), update: (...a: unknown[]) => subscriptionsUpdate(...(a as [string, Record<string, unknown>])) },
-    checkout: { sessions: { create: (...a: unknown[]) => sessionsCreate(...(a as [])) } },
+    checkout: { sessions: { create: (...a: unknown[]) => sessionsCreate(...(a as [])), list: jest.fn(async () => ({ data: [], has_more: false })) } },
   },
 }));
 
