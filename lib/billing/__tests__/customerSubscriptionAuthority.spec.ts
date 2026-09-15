@@ -68,3 +68,65 @@ describe("verifyCustomerIdentity", () => {
     expect(verifyCustomerIdentity({ storedCustomerId: null, eventCustomerId: "c2", destructive: false })).toEqual({ ok: true, verifiedCustomerId: "c2" });
   });
 });
+
+/**
+ * Phase BILLING-ENTITLEMENT-R3 — the exact Production topology found by the
+ * R1 audit and repaired in R2: one customer, six subscriptions from a single
+ * repeated-Checkout episode — two canceled the same morning, three later
+ * `past_due` after failed renewals, one `active` (the one Firestore stores).
+ *
+ * The resolver's refusal to pick among the four plan-bearing candidates is
+ * what kept that anomaly out of Firestore for nine months. These tests pin
+ * that refusal to the real shape, and pin the recovery: once the duplicates
+ * are canceled, the lone active subscription is authority with no ceremony.
+ */
+describe("R3 — three past_due duplicates beside one active (the repaired Production topology)", () => {
+  const ACTIVE = "sub_6_active_stored";
+  const DUPLICATES = ["sub_3_past_due", "sub_4_past_due", "sub_5_past_due"];
+  const EARLY_CANCELED = ["sub_1_canceled", "sub_2_canceled"];
+  const beforeRepair = () => [...EARLY_CANCELED.map((id) => sub(id, "canceled")), ...DUPLICATES.map((id) => sub(id, "past_due")), sub(ACTIVE, "active")];
+  const afterRepair = () => [...EARLY_CANCELED.map((id) => sub(id, "canceled")), ...DUPLICATES.map((id) => sub(id, "canceled")), sub(ACTIVE, "active")];
+
+  it("REGRESSION: three past_due plus one active is ambiguity with all FOUR ids — active does not silently win", async () => {
+    const r = await resolveCustomerSubscriptionAuthority({ stripe: stripeWith([{ data: beforeRepair(), has_more: false }]), verifiedCustomerId: "cus_1" });
+    expect(r.kind).toBe("multiple_entitlements");
+    if (r.kind !== "multiple_entitlements") return;
+    expect(r.count).toBe(4);
+    expect([...r.subscriptionIds].sort()).toEqual([ACTIVE, ...DUPLICATES].sort());
+  });
+
+  it("order invariance: the reversed listing yields the same classification and the same candidate set", async () => {
+    const forward = await resolveCustomerSubscriptionAuthority({ stripe: stripeWith([{ data: beforeRepair(), has_more: false }]), verifiedCustomerId: "cus_1" });
+    const reversed = await resolveCustomerSubscriptionAuthority({ stripe: stripeWith([{ data: beforeRepair().reverse(), has_more: false }]), verifiedCustomerId: "cus_1" });
+    expect(forward.kind).toBe("multiple_entitlements");
+    expect(reversed.kind).toBe("multiple_entitlements");
+    if (forward.kind !== "multiple_entitlements" || reversed.kind !== "multiple_entitlements") return;
+    expect(reversed.count).toBe(forward.count);
+    expect([...reversed.subscriptionIds].sort()).toEqual([...forward.subscriptionIds].sort());
+  });
+
+  it("the duplicates spread across two Stripe pages are still all counted", async () => {
+    const all = beforeRepair();
+    const r = await resolveCustomerSubscriptionAuthority({
+      stripe: stripeWith([{ data: all.slice(0, 3), has_more: true }, { data: all.slice(3), has_more: false }]),
+      verifiedCustomerId: "cus_1",
+    });
+    expect(r.kind).toBe("multiple_entitlements");
+    if (r.kind !== "multiple_entitlements") return;
+    expect(r.count).toBe(4);
+  });
+
+  it("REGRESSION: once dunning (or the R2 repair) has canceled the three duplicates, the lone active subscription is the sole authority", async () => {
+    const r = await resolveCustomerSubscriptionAuthority({ stripe: stripeWith([{ data: afterRepair(), has_more: false }]), verifiedCustomerId: "cus_1" });
+    expect(r.kind).toBe("exactly_one");
+    if (r.kind !== "exactly_one") return;
+    expect(r.subscription.id).toBe(ACTIVE);
+  });
+
+  it("canceled subscriptions are never candidates, whatever their position in the listing", async () => {
+    const r = await resolveCustomerSubscriptionAuthority({ stripe: stripeWith([{ data: afterRepair().reverse(), has_more: false }]), verifiedCustomerId: "cus_1" });
+    expect(r.kind).toBe("exactly_one");
+    if (r.kind !== "exactly_one") return;
+    expect(r.subscription.id).toBe(ACTIVE);
+  });
+});

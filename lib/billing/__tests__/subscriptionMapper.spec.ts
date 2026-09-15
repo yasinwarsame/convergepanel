@@ -106,3 +106,31 @@ describe("mapSubscriptionToPlan — fail-closed cases", () => {
     expect(m).toMatchObject({ planId: "full", isActive: true });
   });
 });
+
+/**
+ * Phase BILLING-ENTITLEMENT-R3 — the historical shape the R1 audit found in
+ * Production: a MONTHLY Price that is not one of the configured Production
+ * Price ids (a legacy test product), carried by subscriptions whose only link
+ * to an application plan is the server-written `targetPlan` marker. This is
+ * backward compatibility for historical subscriptions: the marker must keep
+ * resolving the plan, and its absence must keep failing closed.
+ */
+describe("R3 — historical unmapped MONTHLY Price with the legacy marker", () => {
+  /** Deliberately none of the four configured ids above. */
+  const HISTORICAL_TEST_PRICE = "price_historical_monthly_test";
+
+  it("REGRESSION: active on the unmapped monthly Price with targetPlan=full resolves to Full, not free", () => {
+    const m = mapSubscriptionToPlan(subscription({ status: "active", priceId: HISTORICAL_TEST_PRICE, metadata: { targetPlan: "full" } }));
+    expect(m).toEqual({ planId: "full", isActive: true, maxModelsPerRun: 5, monthlyLimit: 150 });
+  });
+
+  it("past_due on that shape stays plan-bearing and still resolves to Full through the marker", () => {
+    const m = mapSubscriptionToPlan(subscription({ status: "past_due", priceId: HISTORICAL_TEST_PRICE, metadata: { targetPlan: "full" } }));
+    expect(m).toMatchObject({ planId: "full", isActive: true, maxModelsPerRun: 5 });
+  });
+
+  it("the same unmapped monthly Price without a valid marker grants nothing", () => {
+    expect(mapSubscriptionToPlan(subscription({ status: "active", priceId: HISTORICAL_TEST_PRICE }))).toMatchObject({ planId: "free", isActive: false });
+    expect(mapSubscriptionToPlan(subscription({ status: "active", priceId: HISTORICAL_TEST_PRICE, metadata: { firebaseUid: "uid_only" } }))).toMatchObject({ planId: "free", isActive: false });
+  });
+});

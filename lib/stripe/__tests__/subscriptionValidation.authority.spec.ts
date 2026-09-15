@@ -491,3 +491,65 @@ describe("C6 — the cost of exhaustive authority on the hot path", () => {
     expect(subscriptionsList).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * Phase BILLING-ENTITLEMENT-R3 — the request-time view of the topology the
+ * R1 audit found in Production: Firestore already stored the ONE active
+ * subscription, yet three `past_due` duplicates from the same historical
+ * Checkout episode were also plan-bearing. The ordinary request must not
+ * "resolve" that by trusting the stored id or by preferring `active`; and
+ * once the duplicates are canceled, a matching Firestore document must be
+ * left alone rather than rewritten.
+ */
+describe("R3 — the repaired Production topology at request time", () => {
+  const ACTIVE = "sub_6_active_stored";
+  const DUPLICATES = ["sub_3_past_due", "sub_4_past_due", "sub_5_past_due"];
+  const monthly = (id: string, status: string, created: number) => sub({ id, status, priceId: "price_full_m", interval: "month", created });
+  const beforeRepair = () => [sub({ id: "sub_1", status: "canceled", created: 1 }), sub({ id: "sub_2", status: "canceled", created: 2 }), monthly(DUPLICATES[0], "past_due", 3), monthly(DUPLICATES[1], "past_due", 4), monthly(DUPLICATES[2], "past_due", 5), monthly(ACTIVE, "active", 6)];
+  const afterRepair = () => [sub({ id: "sub_1", status: "canceled", created: 1 }), sub({ id: "sub_2", status: "canceled", created: 2 }), monthly(DUPLICATES[0], "canceled", 3), monthly(DUPLICATES[1], "canceled", 4), monthly(DUPLICATES[2], "canceled", 5), monthly(ACTIVE, "active", 6)];
+  const storedMatchesActive = () => {
+    storedDoc = { plan: "full", stripeCustomerId: MINE, stripeSubscriptionId: ACTIVE, subscriptionStatus: "active", billingInterval: "month" };
+  };
+
+  it("REGRESSION: the stored ACTIVE subscription is not chosen over three past_due duplicates — nothing is written", async () => {
+    storedMatchesActive();
+    live = beforeRepair();
+    const before = { ...storedDoc };
+    await validateUserSubscription(UID);
+    expect(writes).toHaveLength(0);
+    expect(storedDoc).toEqual(before);
+    const records = ambiguityRecords();
+    expect(records).toHaveLength(1);
+    expect(records[0][1]).toMatchObject({ path: "request_time_reconciliation", storedSubscriptionId: ACTIVE, candidateCount: 4, resolution: "no_mutation_ambiguous_subscription_set" });
+    expect((records[0][1] as { candidateSubscriptionIds: string[] }).candidateSubscriptionIds.sort()).toEqual([ACTIVE, ...DUPLICATES].sort());
+  });
+
+  it("order invariance: the four candidates listed in reverse produce the same refusal", async () => {
+    storedMatchesActive();
+    live = beforeRepair().reverse();
+    const before = { ...storedDoc };
+    await validateUserSubscription(UID);
+    expect(writes).toHaveLength(0);
+    expect(storedDoc).toEqual(before);
+    expect(ambiguityRecords()).toHaveLength(1);
+    expect((ambiguityRecords()[0][1] as { candidateCount: number }).candidateCount).toBe(4);
+  });
+
+  it("REGRESSION: after the duplicates are canceled, a Firestore document that already matches the sole active subscription is NOT rewritten", async () => {
+    storedMatchesActive();
+    live = afterRepair();
+    const before = { ...storedDoc };
+    await validateUserSubscription(UID);
+    expect(ambiguityRecords()).toHaveLength(0);
+    expect(writes).toHaveLength(0);
+    expect(storedDoc).toEqual(before);
+  });
+
+  it("after the duplicates are canceled, a STALE stored reference to one of them is repaired to the sole active subscription", async () => {
+    storedDoc = { plan: "full", stripeCustomerId: MINE, stripeSubscriptionId: DUPLICATES[1], subscriptionStatus: "past_due", billingInterval: "month" };
+    live = afterRepair();
+    await validateUserSubscription(UID);
+    expect(ambiguityRecords()).toHaveLength(0);
+    expect(billingOf(storedDoc)).toEqual({ plan: "full", billingInterval: "month", subscriptionId: ACTIVE, subscriptionStatus: "active" });
+  });
+});
