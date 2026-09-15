@@ -447,24 +447,88 @@ describe("R5-C1 — pending Checkout Session authority (sequential requests)", (
     expect(sessions.filter((x) => x.status === "open")).toHaveLength(1);
   });
 
-  it("A2 an existing actionable session is reused deterministically (earliest first) with no new mutation", async () => {
+  it("A2 exactly ONE actionable matching session is reused with no new mutation", async () => {
     customers = [cust(A)]; userDoc = { email: "c@example.test", stripeCustomerId: A };
-    sessions = [openSession(A, UID, { id: "cs_later", created: 5, url: "https://checkout.stripe.test/later" }), openSession(A, UID, { id: "cs_earlier", created: 2, url: "https://checkout.stripe.test/earlier" })];
+    sessions = [openSession(A, UID, { id: "cs_only", created: 2, url: "https://checkout.stripe.test/only" })];
     const r = await purchase();
     expect(r.status).toBe(200);
-    expect(r.body).toEqual({ url: "https://checkout.stripe.test/earlier", pending: true });
+    expect(r.body).toEqual({ url: "https://checkout.stripe.test/only", pending: true });
     expect(sessionsCreate).not.toHaveBeenCalled();
     expect(subscriptionsUpdate).not.toHaveBeenCalled();
     expect(customersCreate).not.toHaveBeenCalled();
   });
 
-  it("A3 an actionable session for ANOTHER uid on the same customer record does not count for this uid", async () => {
+  it("C2-1 REGRESSION: TWO matching actionable sessions → fail closed, no new session, neither existing session touched", async () => {
+    customers = [cust(A)]; userDoc = { email: "c@example.test", stripeCustomerId: A };
+    sessions = [openSession(A, UID, { id: "cs_x", created: 1 }), openSession(A, UID, { id: "cs_y", created: 2 })];
+    const before = JSON.stringify(sessions);
+    const r = await purchase();
+    expect(r.status).toBe(409);
+    expect(r.body.code).toBe("multiple_pending_checkout_sessions");
+    assertZeroMutation(A);
+    expect(JSON.stringify(sessions)).toBe(before);
+  });
+
+  it("C2-2 REGRESSION: ONE matching + ONE actionable DIFFERENT-uid session on the canonical customer → identity conflict, the matching one is NOT merely reused", async () => {
+    customers = [cust(A)]; userDoc = { email: "c@example.test", stripeCustomerId: A };
+    sessions = [openSession(A, UID, { id: "cs_mine" }), openSession(A, VICTIM, { id: "cs_theirs" })];
+    const before = JSON.stringify(sessions);
+    const r = await purchase();
+    expect(r.status).toBe(409);
+    expect(r.body.code).toBe("pending_checkout_identity_conflict");
+    assertZeroMutation(A);
+    expect(JSON.stringify(sessions)).toBe(before);
+  });
+
+  it("C2-3 REGRESSION: ZERO matching + ONE actionable DIFFERENT-uid session on the canonical customer → fail closed, no new session", async () => {
     customers = [cust(A)]; userDoc = { email: "c@example.test", stripeCustomerId: A };
     sessions = [openSession(A, VICTIM)];
+    const r = await purchase();
+    expect(r.status).toBe(409);
+    expect(r.body.code).toBe("pending_checkout_identity_conflict");
+    assertZeroMutation(A);
+  });
+
+  it("C2-4/5/6 a different-uid session that is completed, expired, or past its expiry timestamp does not block", async () => {
+    customers = [cust(A)]; userDoc = { email: "c@example.test", stripeCustomerId: A };
+    sessions = [openSession(A, VICTIM, { status: "complete" }), openSession(A, VICTIM, { status: "expired" }), openSession(A, VICTIM, { expires_at: Math.floor(Date.now() / 1000) - 1 })];
     const r = await purchase();
     expect(r.status).toBe(200);
     expect(r.body.pending).toBeUndefined();
     expect(sessionsCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("C2-7 an open subscription session with NO uid marker stays unrelated shared-account traffic — ignored, not a conflict", async () => {
+    customers = [cust(A)]; userDoc = { email: "c@example.test", stripeCustomerId: A };
+    sessions = [openSession(A, UID, { metadata: {} }), openSession(A, UID, { metadata: { id: "other-app" } })];
+    const r = await purchase();
+    expect(r.status).toBe(200);
+    expect(sessionsCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("C2-8 a NON-subscription session carrying another uid does not block", async () => {
+    customers = [cust(A)]; userDoc = { email: "c@example.test", stripeCustomerId: A };
+    sessions = [openSession(A, VICTIM, { mode: "payment" })];
+    const r = await purchase();
+    expect(r.status).toBe(200);
+    expect(sessionsCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("C2-9 an open session on a DIFFERENT customer carrying another uid is not this customer's conflict", async () => {
+    customers = [cust(A)]; userDoc = { email: "c@example.test", stripeCustomerId: A };
+    sessions = [openSession("cus_someone_else", VICTIM)];
+    const r = await purchase();
+    expect(r.status).toBe(200);
+    expect(sessionsCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("C2-10 the one matching session without a resumable URL still blocks creation (it can complete) but cannot be reused", async () => {
+    customers = [cust(A)]; userDoc = { email: "c@example.test", stripeCustomerId: A };
+    sessions = [openSession(A, UID, { url: null })];
+    const r = await purchase();
+    expect(r.status).toBe(409);
+    expect(r.body.code).toBe("pending_checkout_not_resumable");
+    assertZeroMutation(A);
   });
 
   it("A4 another application's session (no uid marker / not subscription mode) never blocks ConvergePanel", async () => {
@@ -505,7 +569,7 @@ describe("R5-C1 — pending Checkout Session authority (sequential requests)", (
   it("A8 REGRESSION: multi-page enumeration finds an actionable session on a later page", async () => {
     customers = [cust(A)]; userDoc = { email: "c@example.test", stripeCustomerId: A };
     sessionsPageSize = 1;
-    sessions = [openSession(A, VICTIM, { id: "cs_p1", created: 1 }), openSession(A, UID, { id: "cs_p2", created: 2, url: "https://checkout.stripe.test/p2" })];
+    sessions = [openSession(A, UID, { id: "cs_p1", created: 1, metadata: {} }), openSession(A, UID, { id: "cs_p2", created: 2, url: "https://checkout.stripe.test/p2" })];
     const r = await purchase();
     expect(sessionsList).toHaveBeenCalledTimes(2);
     expect(r.body).toEqual({ url: "https://checkout.stripe.test/p2", pending: true });

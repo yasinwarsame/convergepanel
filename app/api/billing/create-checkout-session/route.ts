@@ -309,8 +309,24 @@ export async function POST(req: NextRequest) {
           logger.error("[create-checkout-session] Could not completely enumerate pending Checkout Sessions; refusing to create another", { customerId, reason: pending.reason, pagesFetched: pending.pagesFetched });
           return NextResponse.json({ error: "We couldn't finish checking your pending checkout, so we've made no changes. Please try again in a moment.", code: "pending_checkout_enumeration_incomplete" }, { status: 409 });
         }
-        if (pending.kind === "pending") {
-          logger.info("[create-checkout-session] Reusing the customer's existing actionable Checkout Session instead of creating another", { customerId, sessionId: pending.session.id, actionableCount: pending.count });
+        if (pending.kind === "identity_conflict") {
+          // R5-C2: an open, completable subscription session on a customer proven to belong to this
+          // uid, but written for a different uid, is contradictory billing state — never ignored.
+          logger.error("[billing] pending_checkout_identity_conflict", { code: "pending_checkout_identity_conflict", path: "checkout_session_create", uid, customerId, conflictingSessionIds: pending.sessionIds, conflictingCount: pending.count, matchingSessionIds: pending.matchingSessionIds, resolution: "no_mutation_contradictory_pending_session_set" });
+          return NextResponse.json({ error: "Your billing records need attention before checkout can start. We've made no changes. Please contact support.", code: "pending_checkout_identity_conflict" }, { status: 409 });
+        }
+        if (pending.kind === "multiple") {
+          // R5-C2: returning one of several open sessions would not neutralize the others.
+          logger.error("[billing] multiple_pending_checkout_sessions", { code: "multiple_pending_checkout_sessions", path: "checkout_session_create", uid, customerId, sessionIds: pending.sessionIds, count: pending.count, resolution: "no_mutation_ambiguous_pending_session_set" });
+          return NextResponse.json({ error: "You already have more than one checkout in progress. Please complete or let those expire, or contact support. We've made no changes.", code: "multiple_pending_checkout_sessions" }, { status: 409 });
+        }
+        if (pending.kind === "exactly_one") {
+          if (!pending.session.url) {
+            // It can still complete, so nothing new may be created; but it cannot be resumed from here either.
+            logger.error("[create-checkout-session] The one pending Checkout Session has no resumable URL; refusing to create another", { customerId, sessionId: pending.session.id });
+            return NextResponse.json({ error: "A checkout for your account is already in progress. Please complete it or wait for it to expire.", code: "pending_checkout_not_resumable" }, { status: 409 });
+          }
+          logger.info("[create-checkout-session] Reusing the customer's existing actionable Checkout Session instead of creating another", { customerId, sessionId: pending.session.id });
           return NextResponse.json({ url: pending.session.url, pending: true });
         }
         if (!(await isCheckoutLeaseStillHeld(lease))) {
