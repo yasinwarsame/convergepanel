@@ -17,9 +17,10 @@ import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelem
 import {
   reportIncompleteAuthorityEnumeration,
   reportMultipleEntitlementSubscriptions,
-  resolveCustomerSubscriptionAuthority,
 } from "@/lib/billing/customerSubscriptionAuthority";
 import { selectPlanBearingItem } from "@/lib/billing/subscriptionBillingState";
+import { resolveUidCustomerAuthority } from "@/lib/billing/uidCustomerAuthority";
+import { withCheckoutIdentityLease, bindStripeCustomerIfAbsent, type LeaseOutcome } from "@/lib/billing/checkoutIdentityLease";
 import { isTransientDependencyError } from "@/lib/billing/reconciliationOutcome";
 import { getPostHogClient } from "@/lib/posthog-server";
 import { logger } from "@/lib/logger";
@@ -119,267 +120,246 @@ export async function POST(req: NextRequest) {
     }
 
     // Get or create Stripe customer
-    let customerId: string | undefined;
-    if (adminDb) {
-      const userDoc = await adminDb.collection("users").doc(uid).get();
-      customerId = userDoc.data()?.stripeCustomerId;
+    if (!adminDb) {
+      logger.error("[create-checkout-session] Firestore unavailable; refusing to start checkout without a billing identity store");
+      return NextResponse.json({ error: "Billing is temporarily unavailable. Please try again in a moment." }, { status: 503 });
     }
+    const db = adminDb;
+    const stripeClient = stripe;
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || req.nextUrl.origin;
 
-    // Get or create Stripe customer
-    let customer: Stripe.Customer;
-    if (!customerId) {
-      if (!userEmail) {
-        return NextResponse.json(
-          { error: "User email not found. Please update your profile." },
-          { status: 400 }
-        );
-      }
+    // Phase BILLING-INTEGRITY-R5 — fail-closed side-effect order:
+    // authenticate → trusted uid → lease → discover EVERY customer of this uid
+    // (even with a stored binding) → validate the stored customer → enumerate
+    // subscriptions → derive cross-customer authority → refuse ambiguity →
+    // only then create/reuse a customer and perform the existing mutation.
+    let leased: LeaseOutcome<NextResponse>;
+    try {
+      leased = await withCheckoutIdentityLease(uid, async (): Promise<NextResponse> => {
+        const userSnap = await db.collection("users").doc(uid).get();
+        const storedCustomerId = (userSnap.data()?.stripeCustomerId as string | undefined) || null;
 
-      // Create new customer with metadata
-      customer = await stripe.customers.create({
-        email: userEmail,
-        metadata: {
-          firebaseUid: uid,
-          email: userEmail,
-        },
-      });
+        const authority = await resolveUidCustomerAuthority({ stripe: stripeClient, uid, storedCustomerId });
 
-      customerId = customer.id;
+        switch (authority.kind) {
+          case "invalid_uid":
+            logger.error("[create-checkout-session] Authenticated uid is not a plausible billing identity; refusing");
+            return NextResponse.json({ error: "Your account could not be verified for billing. Please contact support.", code: "billing_identity_invalid" }, { status: 409 });
+          case "stored_customer_missing":
+            logger.error("[create-checkout-session] Stored Stripe customer is missing or deleted; refusing to start checkout", { storedCustomerId });
+            return NextResponse.json({ error: "Your Stripe customer record could not be verified. Please contact support.", code: "stored_customer_missing" }, { status: 409 });
+          case "stored_customer_mismatch":
+            logger.error("[create-checkout-session] Stored Stripe customer belongs to a different uid; refusing to start checkout", { storedCustomerId });
+            return NextResponse.json({ error: "Your billing identity could not be verified. Please contact support.", code: "billing_identity_mismatch" }, { status: 409 });
+          case "discovery_incomplete":
+            logger.error("[create-checkout-session] Could not completely discover this uid's Stripe customers; refusing to start checkout", { pagesFetched: authority.pagesFetched });
+            return NextResponse.json({ error: "We couldn't finish checking your billing identity, so we've made no changes. Please contact support.", code: "customer_discovery_incomplete" }, { status: 409 });
+          case "enumeration_incomplete":
+            reportIncompleteAuthorityEnumeration({ path: "checkout_session_create", stripeCustomerId: authority.customerId, uid, storedSubscriptionId: null, reason: authority.reason, pagesFetched: authority.pagesFetched });
+            return NextResponse.json({ error: "We couldn't finish checking your subscriptions, so we've made no changes. Please contact support.", code: "authority_enumeration_incomplete" }, { status: 409 });
+          case "multiple_entitlements":
+            reportMultipleEntitlementSubscriptions({ path: "checkout_session_create", stripeCustomerId: authority.customerId, uid, storedSubscriptionId: null, candidateSubscriptionIds: authority.subscriptionIds, candidateCount: authority.count });
+            return NextResponse.json({ error: "Your account has more than one active subscription, so we can't safely change your plan. Please contact support.", code: "multiple_entitlement_subscriptions" }, { status: 409 });
+          case "cross_customer_entitlements":
+            logger.error("[billing] cross_customer_entitlement_subscriptions", { code: "cross_customer_entitlement_subscriptions", path: "checkout_session_create", uid, customerIds: authority.customerIds, candidateSubscriptionIds: authority.subscriptionIds, resolution: "no_mutation_ambiguous_customer_set" });
+            return NextResponse.json({ error: "Your account has more than one active subscription, so we can't safely change your plan. Please contact support.", code: "cross_customer_entitlement_subscriptions" }, { status: 409 });
+          case "customer_authority_conflict":
+            logger.error("[billing] customer_authority_conflict", { code: "customer_authority_conflict", path: "checkout_session_create", uid, authoritativeCustomerId: authority.authoritativeCustomerId, storedCustomerId: authority.storedCustomerId, candidateSubscriptionIds: authority.subscriptionIds, resolution: "no_mutation_binding_repair_required" });
+            return NextResponse.json({ error: "Your billing records need attention before your plan can change. We've made no changes. Please contact support.", code: "customer_authority_conflict" }, { status: 409 });
+          case "ambiguous_customers":
+            logger.error("[billing] ambiguous_billing_identity", { code: "ambiguous_billing_identity", path: "checkout_session_create", uid, customerIds: authority.customerIds, resolution: "no_mutation_no_canonical_customer" });
+            return NextResponse.json({ error: "Your billing records need attention before checkout can start. We've made no changes. Please contact support.", code: "ambiguous_billing_identity" }, { status: 409 });
+          case "no_customer":
+          case "reuse_customer":
+          case "exactly_one":
+            break;
+        }
 
-      // Save customer ID to Firestore
-      if (adminDb) {
-        await adminDb.collection("users").doc(uid).update({
-          stripeCustomerId: customerId,
-        });
-      }
-    } else {
-      // Update existing customer metadata to ensure it has firebaseUid
-      try {
-        const existingCustomer = await stripe.customers.retrieve(customerId);
-        if (existingCustomer && !existingCustomer.deleted && typeof existingCustomer !== "string") {
-          const needsUpdate = !existingCustomer.metadata?.firebaseUid || existingCustomer.metadata?.email !== userEmail;
-          if (needsUpdate) {
-            await stripe.customers.update(customerId, {
-              metadata: {
-                ...existingCustomer.metadata,
-                firebaseUid: uid,
-                email: userEmail || existingCustomer.email || "",
-              },
-            });
+        let customerId: string;
+        let legacyUnbound = false;
+        let subscription: Stripe.Subscription | null = null;
+        if (authority.kind === "no_customer") {
+          if (!userEmail) {
+            return NextResponse.json({ error: "User email not found. Please update your profile." }, { status: 400 });
+          }
+          // Idempotent per uid: a racing or retried create returns the same customer instead of a second one.
+          const created = await stripeClient.customers.create(
+            { email: userEmail, metadata: { firebaseUid: uid, email: userEmail } },
+            { idempotencyKey: `billing-customer-create-${uid}` }
+          );
+          customerId = created.id;
+        } else {
+          customerId = authority.customerId;
+          legacyUnbound = authority.legacyUnbound;
+          if (authority.kind === "exactly_one") subscription = authority.subscription;
+        }
+
+        if (authority.kind === "no_customer" || authority.source === "discovered") {
+          const bound = await bindStripeCustomerIfAbsent(uid, customerId);
+          if (bound.kind === "conflict") {
+            logger.error("[create-checkout-session] A different Stripe customer was bound concurrently; refusing to start checkout", { customerId, existingCustomerId: bound.existingCustomerId });
+            return NextResponse.json({ error: "Your billing identity changed while we were checking it. We've made no changes. Please try again.", code: "customer_binding_conflict" }, { status: 409 });
           }
         }
-      } catch (err) {
-        console.error("[create-checkout-session] Failed to update customer metadata:", err);
-      }
-    }
 
-    // Phase BILLING-PR145-C8.1 — A PURCHASE MUST NEVER CREATE A SECOND
-    // PLAN-BEARING SUBSCRIPTION.
-    //
-    // The old rule updated a subscription in place only when it was `active`
-    // AND the target was `full` AND the current price was a LITE price.
-    // Everything else fell through to `checkout.sessions.create`, and nothing
-    // cancels the previous subscription — so Full Monthly -> Full Annual, the
-    // exact cadence change this incident is about, left the customer with TWO
-    // live subscriptions. Every automatic writer then correctly refuses that
-    // ambiguity, so the plan they just paid for never activated.
-    //
-    // The fix belongs HERE, at the path that CREATES the ambiguity, not in the
-    // reconciliation that refuses it. Authority comes from the same resolver
-    // the webhook, request-time reconciliation and self-serve sync use: the
-    // customer's whole Stripe subscription set, enumerated to exhaustion. That
-    // also closes the drift case, where Firestore had no subscription id and
-    // this route therefore believed a live subscriber was a new customer.
-    let authority;
-    try {
-      authority = await resolveCustomerSubscriptionAuthority({ stripe, verifiedCustomerId: customerId });
+        if (legacyUnbound) {
+          // Pre-existing behavior, narrowed: only a stored customer that carries NO
+          // uid marker is backfilled. A customer carrying a different uid was
+          // already refused above and is never rewritten.
+          try {
+            await stripeClient.customers.update(customerId, { metadata: { firebaseUid: uid, email: userEmail || "" } });
+          } catch (err) {
+            logger.warn("[create-checkout-session] Failed to backfill customer uid metadata (non-blocking)", { error: err instanceof Error ? err.message : String(err) });
+          }
+        }
+
+        if (authority.kind === "exactly_one") {
+          // EXACTLY ONE existing plan-bearing subscription — change it in place.
+          // Terminal subscriptions (canceled, incomplete_expired, unpaid) are not
+          // plan-bearing, so a customer whose only subscription is dead still gets
+          // an ordinary new checkout below. `trialing` and `past_due` ARE
+          // plan-bearing, which is what the old `status === "active"` condition got
+          // wrong: both were sold a second subscription.
+          const current = authority.subscription;
+          const planItem = selectPlanBearingItem(current);
+          if (!planItem.ok) {
+            // Cannot tell which item bills. Never guess, and never sell around it.
+            logger.error("[create-checkout-session] Cannot identify the plan-bearing item on the existing subscription; refusing to change plan", {
+              subscriptionId: current.id,
+              reason: planItem.reason,
+            });
+            return NextResponse.json(
+              { error: "We couldn't safely identify your current plan. Please contact support.", code: planItem.reason },
+              { status: 409 }
+            );
+          }
+
+
+          // Already on the requested Price: nothing to do. No Stripe mutation, no
+          // session, no extra item.
+          if (planItem.item.price?.id === priceId) {
+            console.log("[create-checkout-session] Subscription already on the requested price; no change needed", {
+              subscriptionId: current.id,
+              priceId,
+            });
+            return NextResponse.json({ url: `${baseUrl}/billing?success=true&upgraded=true`, upgraded: true, unchanged: true });
+          }
+
+          try {
+            // The ITEM ID is mandatory. Updating with a bare price ADDS an item
+            // rather than replacing the existing one, which would produce a
+            // two-item subscription — the other shape the resolver fails closed on.
+            // Stripe prorates, and an interval change resets the billing cycle.
+            const updatedSubscription = await stripeClient.subscriptions.update(current.id, {
+              items: [{
+                // The ITEM ID is what makes this a REPLACEMENT. `quantity` is
+                // deliberately omitted: Stripe keeps the item's existing quantity,
+                // so a seat count is preserved rather than silently forced to 1.
+                id: planItem.item.id,
+                price: priceId,
+              }],
+              metadata: {
+                ...current.metadata,
+                firebaseUid: uid,
+                email: userEmail || "",
+                targetPlan: planId,
+              },
+              proration_behavior: "always_invoice",
+            });
+
+            console.log("[create-checkout-session] ✅ Subscription changed in place:", {
+              subscriptionId: updatedSubscription.id,
+              newPriceId: updatedSubscription.items.data[0]?.price.id,
+              status: updatedSubscription.status,
+              interval,
+            });
+
+            try {
+              const ph = getPostHogClient();
+              ph.capture({
+                distinctId: uid,
+                event: "subscription_upgraded",
+                properties: { plan: planId, interval, subscription_id: updatedSubscription.id },
+              });
+              await ph.flush();
+            } catch (phErr) {
+              logger.warn("[create-checkout-session] PostHog capture failed (non-critical)", { error: phErr });
+            }
+
+            // Redirect to billing page - reconciliation will update Firestore
+            return NextResponse.json({ url: `${baseUrl}/billing?success=true&upgraded=true`, upgraded: true });
+          } catch (upgradeError: any) {
+            // DELIBERATELY NO FALL-THROUGH. The old code opened a checkout session
+            // when the in-place update failed, which recreated the duplicate
+            // subscription this phase exists to prevent — from a transient error.
+            logger.error("[create-checkout-session] In-place subscription change failed; refusing to create a second subscription", {
+              subscriptionId: current.id,
+              error: upgradeError?.message,
+            });
+            return NextResponse.json(
+              { error: "We couldn't change your plan just now and have made no changes. Please try again or contact support." },
+              { status: 502 }
+            );
+          }
+        }
+
+        // Create checkout session (for new subscriptions or when upgrade fails)
+
+        const session = await stripeClient.checkout.sessions.create({
+          customer: customerId,
+          mode: "subscription",
+          payment_method_types: ["card"],
+          line_items: [
+            {
+              price: priceId,
+              quantity: 1,
+            },
+          ],
+          success_url: `${baseUrl}/billing?success=true&session_id={CHECKOUT_SESSION_ID}`,
+          cancel_url: `${baseUrl}/billing?canceled=true`,
+          metadata: {
+            firebaseUid: uid,
+            email: userEmail || "",
+            targetPlan: planId,
+          },
+          subscription_data: {
+            metadata: {
+              firebaseUid: uid,
+              email: userEmail || "",
+              targetPlan: planId,
+            },
+          },
+        });
+
+        console.log("[create-checkout-session] Created checkout session:", {
+          sessionId: session.id,
+          planId,
+          interval,
+          priceId,
+        });
+
+        return NextResponse.json({ url: session.url });
+      });
     } catch (dependencyError) {
       if (isTransientDependencyError(dependencyError)) {
-        // We could not establish whether a subscription already exists.
-        // Selling one now is how duplicates are made.
-        logger.warn("[create-checkout-session] Could not establish the customer's subscription set; refusing to start checkout", {
+        logger.warn("[create-checkout-session] Could not establish billing identity or subscription authority; refusing to start checkout", {
           dependency: dependencyError.dependency,
           operation: dependencyError.operation,
         });
         return NextResponse.json(
-          { error: "We couldn't reach Stripe to check your current subscription. Please try again in a moment." },
+          { error: "We couldn't reach our billing systems to verify your account. Please try again in a moment." },
           { status: 503 }
         );
       }
       throw dependencyError;
     }
-
-    if (authority.kind === "multiple_entitlements") {
-      // Already ambiguous before we started. Adding a third is not a fix.
-      reportMultipleEntitlementSubscriptions({
-        path: "checkout_session_create",
-        stripeCustomerId: customerId,
-        uid,
-        storedSubscriptionId: null,
-        candidateSubscriptionIds: authority.subscriptionIds,
-        candidateCount: authority.count,
-      });
+    if (leased.kind === "busy") {
       return NextResponse.json(
-        {
-          error: "Your account has more than one active subscription, so we can't safely change your plan. Please contact support.",
-          code: "multiple_entitlement_subscriptions",
-        },
+        { error: "Another checkout for your account is already in progress. Please wait a moment and try again.", code: "checkout_in_progress" },
         { status: 409 }
       );
     }
-
-    if (authority.kind === "enumeration_incomplete") {
-      // We stopped looking before Stripe ran out. That is not proof the
-      // customer has no subscription, so it cannot authorise selling another.
-      reportIncompleteAuthorityEnumeration({
-        path: "checkout_session_create",
-        stripeCustomerId: customerId,
-        uid,
-        storedSubscriptionId: null,
-        reason: authority.reason,
-        pagesFetched: authority.pagesFetched,
-      });
-      return NextResponse.json(
-        { error: "We couldn't finish checking your subscriptions, so we've made no changes. Please contact support.", code: "authority_enumeration_incomplete" },
-        { status: 409 }
-      );
-    }
-
-    if (authority.kind === "customer_missing" || authority.kind === "unverified_customer") {
-      logger.error("[create-checkout-session] Stripe customer could not be verified; refusing to start checkout");
-      return NextResponse.json(
-        { error: "Your Stripe customer record could not be verified. Please contact support." },
-        { status: 409 }
-      );
-    }
-
-    if (authority.kind === "exactly_one") {
-      // EXACTLY ONE existing plan-bearing subscription — change it in place.
-      // Terminal subscriptions (canceled, incomplete_expired, unpaid) are not
-      // plan-bearing, so a customer whose only subscription is dead still gets
-      // an ordinary new checkout below. `trialing` and `past_due` ARE
-      // plan-bearing, which is what the old `status === "active"` condition got
-      // wrong: both were sold a second subscription.
-      const current = authority.subscription;
-      const planItem = selectPlanBearingItem(current);
-      if (!planItem.ok) {
-        // Cannot tell which item bills. Never guess, and never sell around it.
-        logger.error("[create-checkout-session] Cannot identify the plan-bearing item on the existing subscription; refusing to change plan", {
-          subscriptionId: current.id,
-          reason: planItem.reason,
-        });
-        return NextResponse.json(
-          { error: "We couldn't safely identify your current plan. Please contact support.", code: planItem.reason },
-          { status: 409 }
-        );
-      }
-
-      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || req.nextUrl.origin;
-
-      // Already on the requested Price: nothing to do. No Stripe mutation, no
-      // session, no extra item.
-      if (planItem.item.price?.id === priceId) {
-        console.log("[create-checkout-session] Subscription already on the requested price; no change needed", {
-          subscriptionId: current.id,
-          priceId,
-        });
-        return NextResponse.json({ url: `${baseUrl}/billing?success=true&upgraded=true`, upgraded: true, unchanged: true });
-      }
-
-      try {
-        // The ITEM ID is mandatory. Updating with a bare price ADDS an item
-        // rather than replacing the existing one, which would produce a
-        // two-item subscription — the other shape the resolver fails closed on.
-        // Stripe prorates, and an interval change resets the billing cycle.
-        const updatedSubscription = await stripe.subscriptions.update(current.id, {
-          items: [{
-            // The ITEM ID is what makes this a REPLACEMENT. `quantity` is
-            // deliberately omitted: Stripe keeps the item's existing quantity,
-            // so a seat count is preserved rather than silently forced to 1.
-            id: planItem.item.id,
-            price: priceId,
-          }],
-          metadata: {
-            ...current.metadata,
-            firebaseUid: uid,
-            email: userEmail || "",
-            targetPlan: planId,
-          },
-          proration_behavior: "always_invoice",
-        });
-
-        console.log("[create-checkout-session] ✅ Subscription changed in place:", {
-          subscriptionId: updatedSubscription.id,
-          newPriceId: updatedSubscription.items.data[0]?.price.id,
-          status: updatedSubscription.status,
-          interval,
-        });
-
-        try {
-          const ph = getPostHogClient();
-          ph.capture({
-            distinctId: uid,
-            event: "subscription_upgraded",
-            properties: { plan: planId, interval, subscription_id: updatedSubscription.id },
-          });
-          await ph.flush();
-        } catch (phErr) {
-          logger.warn("[create-checkout-session] PostHog capture failed (non-critical)", { error: phErr });
-        }
-
-        // Redirect to billing page - reconciliation will update Firestore
-        return NextResponse.json({ url: `${baseUrl}/billing?success=true&upgraded=true`, upgraded: true });
-      } catch (upgradeError: any) {
-        // DELIBERATELY NO FALL-THROUGH. The old code opened a checkout session
-        // when the in-place update failed, which recreated the duplicate
-        // subscription this phase exists to prevent — from a transient error.
-        logger.error("[create-checkout-session] In-place subscription change failed; refusing to create a second subscription", {
-          subscriptionId: current.id,
-          error: upgradeError?.message,
-        });
-        return NextResponse.json(
-          { error: "We couldn't change your plan just now and have made no changes. Please try again or contact support." },
-          { status: 502 }
-        );
-      }
-    }
-
-    // Create checkout session (for new subscriptions or when upgrade fails)
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || req.nextUrl.origin;
-    const session = await stripe.checkout.sessions.create({
-      customer: customerId,
-      mode: "subscription",
-      payment_method_types: ["card"],
-      line_items: [
-        {
-          price: priceId,
-          quantity: 1,
-        },
-      ],
-      success_url: `${baseUrl}/billing?success=true&session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${baseUrl}/billing?canceled=true`,
-      metadata: {
-        firebaseUid: uid,
-        email: userEmail || "",
-        targetPlan: planId,
-      },
-      subscription_data: {
-        metadata: {
-          firebaseUid: uid,
-          email: userEmail || "",
-          targetPlan: planId,
-        },
-      },
-    });
-
-    console.log("[create-checkout-session] Created checkout session:", {
-      sessionId: session.id,
-      planId,
-      interval,
-      priceId,
-    });
-
-    return NextResponse.json({ url: session.url });
+    return leased.result;
   } catch (error: any) {
     console.error("[create-checkout-session] Error:", error);
     return NextResponse.json(

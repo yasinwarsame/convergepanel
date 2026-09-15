@@ -30,7 +30,7 @@ let userDoc: Record<string, unknown>;
 let liveSubscriptions: Array<Record<string, unknown>>;
 const stripeMock = {
   prices: { retrieve: jest.fn(async (id: string) => { const p = priceCatalog[id]; if (!p) throw new Error("No such price"); return { id, ...p }; }) },
-  customers: { create: jest.fn(async () => ({ id: "cus_new" })), retrieve: jest.fn(async () => ({ id: "cus_1", deleted: false, metadata: { firebaseUid: "uid-1", email: "u@example.com" } })), update: jest.fn() },
+  customers: { create: jest.fn(async () => ({ id: "cus_new" })), retrieve: jest.fn(async () => ({ id: "cus_1", deleted: false, metadata: { firebaseUid: "uid-1", email: "u@example.com" } })), update: jest.fn(), search: jest.fn(async () => ({ data: [{ id: "cus_1", deleted: false, metadata: { firebaseUid: "uid-1" } }], has_more: false })) },
   // Phase C8.1: the route no longer trusts Firestore's `stripeSubscriptionId`.
   // It enumerates the customer's live Stripe set, so the mock must offer
   // `list` exactly as the real client does. `liveSubscriptions` is the
@@ -43,9 +43,28 @@ const stripeMock = {
   checkout: { sessions: { create: jest.fn(async () => ({ id: "cs_1", url: "https://checkout.example/cs_1" })) } },
 };
 jest.mock("@/lib/stripe/client", () => ({ stripe: stripeMock }));
-jest.mock("@/lib/firebase/admin", () => ({
-  adminDb: { collection: () => ({ doc: () => ({ get: async () => ({ data: () => userDoc }), update: jest.fn(async () => undefined) }) }) },
-}));
+// Phase R5: `runTransaction` is required by the checkout lease and the
+// transactional customer binding; transactions are serialized. The `users`
+// doc is backed by `userDoc` so existing fixtures are unchanged.
+const mockStore: Record<string, Record<string, unknown>> = {};
+let mockTxQueue: Promise<unknown> = Promise.resolve();
+jest.mock("@/lib/firebase/admin", () => {
+  type Doc = Record<string, unknown>;
+  const docRef = (col: string, id: string) => ({
+    path: `${col}/${id}`,
+    get: async () => (col === "users" ? { exists: true, data: () => userDoc } : { exists: mockStore[`${col}/${id}`] !== undefined, data: () => mockStore[`${col}/${id}`] }),
+    update: async (d: Doc) => { if (col === "users") userDoc = { ...userDoc, ...d }; else mockStore[`${col}/${id}`] = { ...(mockStore[`${col}/${id}`] ?? {}), ...d }; },
+    set: async (d: Doc) => { if (col === "users") userDoc = { ...userDoc, ...d }; else mockStore[`${col}/${id}`] = { ...d }; },
+  });
+  type Ref = ReturnType<typeof docRef>;
+  const tx = { get: async (r: Ref) => r.get(), set: (r: Ref, d: Doc) => { void r.set(d); }, update: (r: Ref, d: Doc) => { void r.update(d); }, delete: (r: Ref) => { delete mockStore[r.path]; } };
+  return {
+    adminDb: {
+      collection: (col: string) => ({ doc: (id: string) => docRef(col, id) }),
+      runTransaction: async (fn: (t: typeof tx) => Promise<unknown>) => { const run = mockTxQueue.then(() => fn(tx)); mockTxQueue = run.catch(() => undefined); return run; },
+    },
+  };
+});
 
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/billing/create-checkout-session/route";
