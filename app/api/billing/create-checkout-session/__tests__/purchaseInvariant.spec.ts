@@ -73,17 +73,38 @@ const pricesRetrieve = jest.fn(async (id: string) => ({
 }));
 jest.mock("@/lib/stripe/client", () => ({
   stripe: {
-    customers: { retrieve: async () => ({ id: "cus_mine", deleted: false, metadata: { firebaseUid: "uid_customer" }, email: "c@example.test" }), create: jest.fn(), update: jest.fn(async () => ({})) },
+    customers: { retrieve: async () => ({ id: "cus_mine", deleted: false, metadata: { firebaseUid: "uid_customer" }, email: "c@example.test" }), create: jest.fn(), update: jest.fn(async () => ({})), search: jest.fn(async () => ({ data: [{ id: "cus_mine", deleted: false, metadata: { firebaseUid: "uid_customer" } }], has_more: false })) },
     prices: { retrieve: (...a: unknown[]) => pricesRetrieve(...(a as [string])) },
     subscriptions: { list: (...a: unknown[]) => subscriptionsList(...(a as [{ customer?: string }])), update: (...a: unknown[]) => subscriptionsUpdate(...(a as [string, Record<string, unknown>])) },
-    checkout: { sessions: { create: (...a: unknown[]) => sessionsCreate(...(a as [])) } },
+    checkout: { sessions: { create: (...a: unknown[]) => sessionsCreate(...(a as [])), list: jest.fn(async () => ({ data: [], has_more: false })) } },
   },
 }));
 
 let storedDoc: Record<string, unknown> = {};
-jest.mock("@/lib/firebase/admin", () => ({
-  adminDb: { collection: () => ({ doc: () => ({ get: async () => ({ exists: true, data: () => storedDoc }), update: async () => undefined, set: async () => undefined }) }) },
-}));
+// Phase R5: the route now takes a per-uid checkout lease inside a Firestore
+// transaction and binds the customer transactionally, so the double must
+// offer `runTransaction`. Transactions are serialized, as Firestore contention
+// would serialize them; the `users` doc is backed by `storedDoc` so the
+// existing tests keep their fixture semantics unchanged.
+const mockStore: Record<string, Record<string, unknown>> = {};
+let mockTxQueue: Promise<unknown> = Promise.resolve();
+jest.mock("@/lib/firebase/admin", () => {
+  type Doc = Record<string, unknown>;
+  const docRef = (col: string, id: string) => ({
+    path: `${col}/${id}`,
+    get: async () => (col === "users" ? { exists: true, data: () => storedDoc } : { exists: mockStore[`${col}/${id}`] !== undefined, data: () => mockStore[`${col}/${id}`] }),
+    update: async (d: Doc) => { if (col === "users") storedDoc = { ...storedDoc, ...d }; else mockStore[`${col}/${id}`] = { ...(mockStore[`${col}/${id}`] ?? {}), ...d }; },
+    set: async (d: Doc) => { if (col === "users") storedDoc = { ...storedDoc, ...d }; else mockStore[`${col}/${id}`] = { ...d }; },
+  });
+  type Ref = ReturnType<typeof docRef>;
+  const tx = { get: async (r: Ref) => r.get(), set: (r: Ref, d: Doc) => { void r.set(d); }, update: (r: Ref, d: Doc) => { void r.update(d); }, delete: (r: Ref) => { delete mockStore[r.path]; } };
+  return {
+    adminDb: {
+      collection: (col: string) => ({ doc: (id: string) => docRef(col, id) }),
+      runTransaction: async (fn: (t: typeof tx) => Promise<unknown>) => { const run = mockTxQueue.then(() => fn(tx)); mockTxQueue = run.catch(() => undefined); return run; },
+    },
+  };
+});
 jest.mock("@/lib/auth/resolveRequestIdentity", () => ({
   resolveRequestIdentity: async () => ({ status: "authenticated", uid: "uid_customer", source: "bearer" }),
 }));
