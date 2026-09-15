@@ -94,12 +94,23 @@ export type WorkspaceAuditProjectEventType = "workspace_project_archived" | "wor
  * on the stored row.
  */
 export type WorkspaceAuditResearchEventType = "workspace_research_snapshot_created";
-export type WorkspaceAuditEventType = WorkspaceAuditMemberEventType | WorkspaceAuditProjectEventType | WorkspaceAuditResearchEventType;
+/**
+ * Project/Research Assignment (brief §6.8) — two ASSIGNMENT-shaped events.
+ * `workspace_project_assignees_changed` carries the Project name snapshot
+ * plus the uid diff (resolved to display names only — uids never leave the
+ * server). `workspace_research_assignee_changed` carries the run question
+ * snapshot, a NULLABLE Project name snapshot (Unfiled / missing / malformed
+ * Project at mutation time ⇒ `null`, by contract §2.4), and the previous /
+ * new assignee as nullable display names. No ids of any kind are surfaced.
+ */
+export type WorkspaceAuditAssignmentEventType = "workspace_project_assignees_changed" | "workspace_research_assignee_changed";
+export type WorkspaceAuditEventType = WorkspaceAuditMemberEventType | WorkspaceAuditProjectEventType | WorkspaceAuditResearchEventType | WorkspaceAuditAssignmentEventType;
 
 const VALID_MEMBER_EVENT_TYPES: ReadonlySet<string> = new Set(["workspace_member_removed", "workspace_ownership_transferred", "workspace_member_role_changed"]);
 const VALID_PROJECT_EVENT_TYPES: ReadonlySet<string> = new Set(["workspace_project_archived", "workspace_project_restored"]);
 const VALID_RESEARCH_EVENT_TYPES: ReadonlySet<string> = new Set(["workspace_research_snapshot_created"]);
-const VALID_EVENT_TYPES: ReadonlySet<string> = new Set([...VALID_MEMBER_EVENT_TYPES, ...VALID_PROJECT_EVENT_TYPES, ...VALID_RESEARCH_EVENT_TYPES]);
+const VALID_ASSIGNMENT_EVENT_TYPES: ReadonlySet<string> = new Set(["workspace_project_assignees_changed", "workspace_research_assignee_changed"]);
+const VALID_EVENT_TYPES: ReadonlySet<string> = new Set([...VALID_MEMBER_EVENT_TYPES, ...VALID_PROJECT_EVENT_TYPES, ...VALID_RESEARCH_EVENT_TYPES, ...VALID_ASSIGNMENT_EVENT_TYPES]);
 
 interface WorkspaceAuditEventDtoBase {
   occurredAt: string;
@@ -121,7 +132,43 @@ interface WorkspaceAuditResearchEventDtoBase extends WorkspaceAuditEventDtoBase 
   research: { question: string };
 }
 
+/**
+ * Assignment events: display names only.
+ *
+ * `repair: true` (PR #164 review C3) marks an INTEGRITY-REPAIR write — the
+ * mutation normalized a malformed persisted value and committed a real
+ * canonical write whose logical before/after are equal (Project: empty
+ * diff on both sides; research: `previousAssignee === assignee`,
+ * including `null === null`). These are real committed writes with real
+ * events, NOT semantic no-ops (D6 no-ops write nothing and emit nothing).
+ *
+ * The research event's `project` (PR #164 review C2) mirrors the writer's
+ * three forms: `{ name }` for a snapshotted Project, `null` for an Unfiled
+ * run, and `{ unavailable: true }` when the run was filed but the Project
+ * could not be snapshotted (missing / malformed / foreign at mutation
+ * time) — the stored `projectId` is NEVER surfaced, and this is
+ * deliberately not presented as "Unfiled".
+ */
+interface WorkspaceAuditProjectAssignmentEventDto extends WorkspaceAuditEventDtoBase {
+  eventType: "workspace_project_assignees_changed";
+  project: { name: string };
+  added: { displayName: string }[];
+  removed: { displayName: string }[];
+  repair: boolean;
+}
+export type WorkspaceAuditResearchProjectRef = { name: string } | { unavailable: true } | null;
+interface WorkspaceAuditResearchAssignmentEventDto extends WorkspaceAuditEventDtoBase {
+  eventType: "workspace_research_assignee_changed";
+  project: WorkspaceAuditResearchProjectRef;
+  research: { question: string };
+  previousAssignee: { displayName: string } | null;
+  assignee: { displayName: string } | null;
+  repair: boolean;
+}
+
 export type WorkspaceAuditEventDto =
+  | WorkspaceAuditProjectAssignmentEventDto
+  | WorkspaceAuditResearchAssignmentEventDto
   | (WorkspaceAuditMemberEventDtoBase & { eventType: "workspace_member_removed"; previousRole: WorkspaceAuditPreviousRole })
   | (WorkspaceAuditMemberEventDtoBase & { eventType: "workspace_ownership_transferred"; previousRole: WorkspaceAuditPreviousRole })
   | (WorkspaceAuditMemberEventDtoBase & { eventType: "workspace_member_role_changed"; previousRole: WorkspaceAuditPreviousRole; newRole: WorkspaceAuditPreviousRole })
@@ -140,7 +187,13 @@ type ValidatedRow =
   | { eventType: "workspace_member_role_changed"; occurredAtIso: string; actorUid: string; targetUid: string; previousRole: WorkspaceAuditPreviousRole; newRole: WorkspaceAuditPreviousRole }
   | { eventType: "workspace_project_archived"; occurredAtIso: string; actorUid: string; projectId: string; projectName: string }
   | { eventType: "workspace_project_restored"; occurredAtIso: string; actorUid: string; projectId: string; projectName: string }
-  | { eventType: "workspace_research_snapshot_created"; occurredAtIso: string; actorUid: string; projectId: string; projectName: string; runId: string; runQuestion: string };
+  | { eventType: "workspace_research_snapshot_created"; occurredAtIso: string; actorUid: string; projectId: string; projectName: string; runId: string; runQuestion: string }
+  | { eventType: "workspace_project_assignees_changed"; occurredAtIso: string; actorUid: string; projectId: string; projectName: string; addedUids: string[]; removedUids: string[] }
+  | { eventType: "workspace_research_assignee_changed"; occurredAtIso: string; actorUid: string; projectId: string | null; projectName: string | null; runId: string; runQuestion: string; previousAssigneeUid: string | null; assigneeUid: string | null };
+
+function isNonEmptyStringArray(v: unknown): v is string[] {
+  return Array.isArray(v) && v.every((x) => typeof x === "string" && x.length > 0);
+}
 
 /**
  * COMMON checks first (recognized `eventType`, exact `workspaceId`,
@@ -192,6 +245,45 @@ function validateRow(id: string, raw: Record<string, unknown> | undefined, works
     if (typeof runId !== "string" || runId.length === 0) return null;
     if (typeof runQuestion !== "string" || runQuestion.length === 0) return null;
     return { eventType: "workspace_research_snapshot_created", occurredAtIso, actorUid, projectId, projectName, runId, runQuestion };
+  }
+
+  if (eventType === "workspace_project_assignees_changed") {
+    // ASSIGNMENT-shaped (Project): name snapshot + uid diff. An EMPTY diff
+    // on both sides is a legitimate writer shape: an integrity-repair write
+    // (a malformed / over-cap persisted list canonicalized to `[]`) — a
+    // real committed write, projected as `repair: true` (review C3).
+    const projectId = raw.projectId;
+    const projectName = raw.projectName;
+    const addedUids = raw.addedUids;
+    const removedUids = raw.removedUids;
+    if (typeof projectId !== "string" || projectId.length === 0) return null;
+    if (typeof projectName !== "string" || projectName.length === 0) return null;
+    if (!isNonEmptyStringArray(addedUids) || !isNonEmptyStringArray(removedUids)) return null;
+    return { eventType, occurredAtIso, actorUid, projectId, projectName, addedUids, removedUids };
+  }
+
+  if (eventType === "workspace_research_assignee_changed") {
+    // ASSIGNMENT-shaped (research). The writer's THREE Project forms are
+    // all accepted (review C2): `null/null` (Unfiled), `string/string`
+    // (snapshotted), `string/null` (filed, Project unavailable at mutation
+    // time). `null/string` is malformed. The two assignee fields are each
+    // `string | null`; EQUAL values are a legitimate integrity-repair
+    // write (review C3), projected as `repair: true`.
+    const projectId = raw.projectId;
+    const projectName = raw.projectName;
+    const runId = raw.runId;
+    const runQuestion = raw.runQuestion;
+    const previousAssigneeUid = raw.previousAssigneeUid;
+    const assigneeUid = raw.assigneeUid;
+    const idValid = projectId === null || (typeof projectId === "string" && projectId.length > 0);
+    const nameValid = projectName === null || (typeof projectName === "string" && projectName.length > 0);
+    if (!idValid || !nameValid) return null;
+    if (projectId === null && projectName !== null) return null;
+    if (typeof runId !== "string" || runId.length === 0) return null;
+    if (typeof runQuestion !== "string" || runQuestion.length === 0) return null;
+    const uidOrNull = (v: unknown): v is string | null => v === null || (typeof v === "string" && v.length > 0);
+    if (!uidOrNull(previousAssigneeUid) || !uidOrNull(assigneeUid)) return null;
+    return { eventType, occurredAtIso, actorUid, projectId: projectId as string | null, projectName: projectName as string | null, runId, runQuestion, previousAssigneeUid, assigneeUid };
   }
 
   const targetUid = raw.targetUid;
@@ -260,6 +352,14 @@ export async function listWorkspaceAuditEvents(args: { workspaceId: string; limi
     for (const row of validated) {
       uids.add(row.actorUid);
       if ("targetUid" in row) uids.add(row.targetUid);
+      if (row.eventType === "workspace_project_assignees_changed") {
+        for (const u of row.addedUids) uids.add(u);
+        for (const u of row.removedUids) uids.add(u);
+      }
+      if (row.eventType === "workspace_research_assignee_changed") {
+        if (row.previousAssigneeUid !== null) uids.add(row.previousAssigneeUid);
+        if (row.assigneeUid !== null) uids.add(row.assigneeUid);
+      }
     }
     // Two bounded batch calls (never per-event) — a uid appearing as both
     // an actor (in one event) and a target (in another) is fetched at
@@ -282,6 +382,29 @@ export async function listWorkspaceAuditEvents(args: { workspaceId: string; limi
       if (row.eventType === "workspace_research_snapshot_created") {
         // Allow-list projection: name + question snapshots only — neither `projectId` nor `runId` is surfaced.
         return { eventType: row.eventType, occurredAt: row.occurredAtIso, actor, project: { name: row.projectName }, research: { question: row.runQuestion } };
+      }
+      if (row.eventType === "workspace_project_assignees_changed") {
+        // Allow-list projection: display names only — no `projectId`, no uids.
+        const toName = (u: string) => ({ displayName: targetNames.get(u) ?? UNKNOWN_AUDIT_TARGET_LABEL });
+        const repair = row.addedUids.length === 0 && row.removedUids.length === 0;
+        return { eventType: row.eventType, occurredAt: row.occurredAtIso, actor, project: { name: row.projectName }, added: row.addedUids.map(toName), removed: row.removedUids.map(toName), repair };
+      }
+      if (row.eventType === "workspace_research_assignee_changed") {
+        // Allow-list projection: nullable name snapshot, question snapshot, nullable display names — no `projectId`, no `runId`, no uids.
+        const toName = (u: string | null) => (u === null ? null : { displayName: targetNames.get(u) ?? UNKNOWN_AUDIT_TARGET_LABEL });
+        // `projectId` is NEVER surfaced: a filed run whose Project could not
+        // be snapshotted projects as `{ unavailable: true }`, never as Unfiled.
+        const project: WorkspaceAuditResearchProjectRef = row.projectName !== null ? { name: row.projectName } : row.projectId !== null ? { unavailable: true } : null;
+        return {
+          eventType: row.eventType,
+          occurredAt: row.occurredAtIso,
+          actor,
+          project,
+          research: { question: row.runQuestion },
+          previousAssignee: toName(row.previousAssigneeUid),
+          assignee: toName(row.assigneeUid),
+          repair: row.previousAssigneeUid === row.assigneeUid,
+        };
       }
       const base = {
         occurredAt: row.occurredAtIso,

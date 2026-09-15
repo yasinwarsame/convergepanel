@@ -61,6 +61,8 @@ let approvalCanary: string | undefined = undefined;
 let teamGlobal = true; // Phase 9C.1-R1C — default true so existing "eligible" scenarios need no per-test change; false-path covered by dedicated tests below.
 let teamCanary: string | undefined = undefined;
 let teamCanaryWorkspaceIds: string | undefined = undefined;
+let assignmentGlobal = false;
+let assignmentCanary: string | undefined = undefined;
 jest.mock("@/lib/env", () => ({
   get PERSONAL_WORKSPACE_UI_ENABLED() {
     return uiGlobal;
@@ -82,6 +84,12 @@ jest.mock("@/lib/env", () => ({
   },
   get TEAM_WORKSPACES_CANARY_WORKSPACE_IDS() {
     return teamCanaryWorkspaceIds;
+  },
+  get PROJECT_ASSIGNMENT_ENABLED() {
+    return assignmentGlobal;
+  },
+  get PROJECT_ASSIGNMENT_CANARY_UIDS() {
+    return assignmentCanary;
   },
 }));
 
@@ -134,6 +142,8 @@ beforeEach(() => {
   teamGlobal = true;
   teamCanary = undefined;
   teamCanaryWorkspaceIds = undefined;
+  assignmentGlobal = false;
+  assignmentCanary = undefined;
   jest.clearAllMocks();
   mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: UID });
   mockedGetUser.mockResolvedValue({ email: "user@example.com" });
@@ -404,5 +414,41 @@ describe("GET /api/user/usage — workspaceReviewsUiEnabled", () => {
       expect(JSON.stringify(json)).not.toContain("ws-should-not-leak");
       expect(typeof json.workspaceReviewsUiEnabled).toBe("boolean");
     });
+  });
+});
+
+/**
+ * Project/Research Assignment (D10) — projectAssignmentUiEnabled: a pure,
+ * zero-I/O presentation hint requiring BOTH Team admission and the dedicated
+ * Project Assignment admission. Never the admission source, never a
+ * capability check.
+ */
+describe("GET /api/user/usage — projectAssignmentUiEnabled", () => {
+  it("present and false by default (no assignment flag)", async () => {
+    const json = await (await GET(buildRequest())).json();
+    expect(json).toHaveProperty("projectAssignmentUiEnabled");
+    expect(json.projectAssignmentUiEnabled).toBe(false);
+  });
+  it("true when both Team rollout and Project Assignment are admitted (global or canary uid)", async () => {
+    assignmentGlobal = true;
+    expect((await (await GET(buildRequest())).json()).projectAssignmentUiEnabled).toBe(true);
+    assignmentGlobal = false;
+    assignmentCanary = UID;
+    expect((await (await GET(buildRequest())).json()).projectAssignmentUiEnabled).toBe(true);
+  });
+  it("false when Project Assignment is admitted but Team rollout is off (both pure gates required)", async () => {
+    assignmentGlobal = true;
+    teamGlobal = false;
+    expect((await (await GET(buildRequest())).json()).projectAssignmentUiEnabled).toBe(false);
+  });
+  it("fails closed on the degraded path: false alongside every other flag", async () => {
+    assignmentGlobal = true;
+    userDocs.set(UID, { plan: "free" });
+    const entitlements = require("@/lib/admin/entitlements");
+    entitlements.getEffectiveEntitlements.mockRejectedValueOnce(new Error("boom"));
+    const res = await GET(buildRequest());
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json.projectAssignmentUiEnabled).toBe(false);
   });
 });

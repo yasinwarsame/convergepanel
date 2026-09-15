@@ -66,7 +66,7 @@ function projectsByStatus(active: any, archived: any = projectsResult()) {
   mockedUseTeamProjects.mockImplementation((args: { status: "active" | "archived" }) => (args.status === "archived" ? archived : active));
 }
 function item(overrides: Partial<any> = {}) {
-  return { id: "p1", workspaceId: "ws-1", name: "Project One", status: "active", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", updateTime: { seconds: 1, nanoseconds: 0 }, ...overrides };
+  return { id: "p1", workspaceId: "ws-1", name: "Project One", status: "active", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", updateTime: { seconds: 1, nanoseconds: 0 }, assignees: [], ...overrides };
 }
 function buttons(renderer: TestRenderer.ReactTestRenderer, label: string) {
   return renderer.root.findAllByType("button").filter((b) => b.props.children === label);
@@ -157,8 +157,8 @@ describe("TeamProjectsShell", () => {
     projectsByStatus(
       projectsResult({
         items: [
-          { id: "p1", workspaceId: "ws-1", name: "Project One", status: "active", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", updateTime: { seconds: 1, nanoseconds: 0 } },
-          { id: "p2", workspaceId: "ws-1", name: "Project Two", status: "active", createdAt: "2026-01-02T00:00:00.000Z", updatedAt: "2026-01-02T00:00:00.000Z", updateTime: { seconds: 2, nanoseconds: 0 } },
+          { id: "p1", workspaceId: "ws-1", name: "Project One", status: "active", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", updateTime: { seconds: 1, nanoseconds: 0 }, assignees: [] },
+          { id: "p2", workspaceId: "ws-1", name: "Project Two", status: "active", createdAt: "2026-01-02T00:00:00.000Z", updatedAt: "2026-01-02T00:00:00.000Z", updateTime: { seconds: 2, nanoseconds: 0 }, assignees: [] },
         ],
       })
     );
@@ -172,7 +172,7 @@ describe("TeamProjectsShell", () => {
   it("each Project row links to the correct Workspace-scoped detail route", async () => {
     projectsByStatus(
       projectsResult({
-        items: [{ id: "proj-xyz", workspaceId: "ws-1", name: "ABC Acquisition", status: "active", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", updateTime: null }],
+        items: [{ id: "proj-xyz", workspaceId: "ws-1", name: "ABC Acquisition", status: "active", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", updateTime: null , assignees: [] }],
       })
     );
     const renderer = await mount({ canCreateProject: true });
@@ -197,7 +197,7 @@ describe("TeamProjectsShell", () => {
   });
 
   it("Phase 12A.2 Section M — New Project creates, then navigates DIRECTLY into the new Project using the authoritative response id (mirrors 12A.1's Workspace-creation redirect improvement)", async () => {
-    const createProject = jest.fn().mockResolvedValue({ status: "ok", project: { id: "new-1", workspaceId: "ws-1", name: "New", status: "active", createdAt: "x", updatedAt: "x", updateTime: null } });
+    const createProject = jest.fn().mockResolvedValue({ status: "ok", project: { id: "new-1", workspaceId: "ws-1", name: "New", status: "active", createdAt: "x", updatedAt: "x", updateTime: null , assignees: [] } });
     projectsByStatus(projectsResult());
     mockedUseTeamProjectLifecycle.mockReturnValue(lifecycleResult({ createProject }));
 

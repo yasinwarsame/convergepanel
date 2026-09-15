@@ -147,6 +147,8 @@ export async function listActiveProjectsRaw(args: {
   limit: number;
   startAfter?: { createdAtSeconds: number; createdAtNanoseconds: number; lastDocId: string };
   status?: "active" | "archived";
+  /** Project/Research Assignment — `array-contains` on the stored `assigneeUids` list. Caller substitutes its OWN authenticated uid only. */
+  assigneeUid?: string;
 }): Promise<ListActiveProjectsRawResult> {
   if (!adminDb) {
     return { status: "firestore_unavailable" };
@@ -155,9 +157,11 @@ export async function listActiveProjectsRaw(args: {
     let query = adminDb
       .collection("projects")
       .where("workspaceId", "==", args.workspaceId)
-      .where("status", "==", args.status ?? "active")
-      .orderBy("createdAt", "desc")
-      .orderBy(FieldPath.documentId(), "desc");
+      .where("status", "==", args.status ?? "active");
+    if (args.assigneeUid !== undefined) {
+      query = query.where("assigneeUids", "array-contains", args.assigneeUid);
+    }
+    query = query.orderBy("createdAt", "desc").orderBy(FieldPath.documentId(), "desc");
 
     if (args.startAfter) {
       query = query.startAfter(new Timestamp(args.startAfter.createdAtSeconds, args.startAfter.createdAtNanoseconds), args.startAfter.lastDocId);

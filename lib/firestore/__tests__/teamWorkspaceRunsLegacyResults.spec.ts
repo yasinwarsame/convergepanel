@@ -130,7 +130,7 @@ describe("getTeamWorkspaceRun — completed-run result restoration (C1)", () => 
   it("T5 — neither usable runDocument rows nor legacy results → the existing empty-result behavior, still `complete`", async () => {
     runs.set(RUN_ID, { data: baseRun() });
     let r = await read();
-    expect(r).toEqual({ status: "complete", runId: RUN_ID, question: "What is the capital of Kenya?", governanceStatus: undefined, results: [] });
+    expect(r).toEqual({ status: "complete", runId: RUN_ID, question: "What is the capital of Kenya?", governanceStatus: undefined, results: [], assignee: null });
     // A runDocument with no perModel rows and a non-array `results` is the same.
     runs.set(RUN_ID, { data: baseRun({ runDocument: { ...runDocument(), perModel: [] }, results: "not-an-array" }) });
     r = await read();
@@ -142,7 +142,7 @@ describe("getTeamWorkspaceRun — completed-run result restoration (C1)", () => 
     for (const status of ["running", "error", "queued"]) {
       runs.set(RUN_ID, { data: baseRun({ status, results: legacyResults() }) });
       const r = await read();
-      expect(r).toEqual({ status: "pending", runId: RUN_ID, question: "What is the capital of Kenya?", governanceStatus: undefined });
+      expect(r).toEqual({ status: "pending", runId: RUN_ID, question: "What is the capital of Kenya?", governanceStatus: undefined, assignee: null });
       expect((r as { results?: unknown }).results).toBeUndefined();
     }
   });

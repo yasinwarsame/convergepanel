@@ -33,6 +33,20 @@ export interface TeamProjectRunSummary {
   synthesisConsensusScore?: number;
   governanceStatus?: "approved" | "needs_review" | "blocked";
   projectId: string | null;
+  /** Project/Research Assignment — presentation only; `null` when unassigned. Always present on a Team DTO. */
+  assignee: TeamProjectRunAssignee | null;
+}
+
+export interface TeamProjectRunAssignee {
+  uid: string;
+  displayName: string;
+  state: "active" | "stale";
+}
+
+function isValidTeamProjectRunAssignee(value: unknown): value is TeamProjectRunAssignee {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return typeof v.uid === "string" && v.uid.length > 0 && typeof v.displayName === "string" && (v.state === "active" || v.state === "stale");
 }
 
 export type TeamProjectRunsErrorCode =
@@ -69,7 +83,7 @@ export type ParseTeamProjectRunsPageResult = { ok: true; page: TeamProjectRunsPa
 function isValidTeamProjectRunItem(item: unknown, expectedProjectId: string): item is TeamProjectRunSummary {
   if (typeof item !== "object" || item === null) return false;
   const c = item as Record<string, unknown>;
-  return typeof c.id === "string" && c.id.length > 0 && typeof c.question === "string" && c.projectId === expectedProjectId;
+  return typeof c.id === "string" && c.id.length > 0 && typeof c.question === "string" && c.projectId === expectedProjectId && (c.assignee === null || isValidTeamProjectRunAssignee(c.assignee));
 }
 
 export function parseTeamProjectRunsPageResponse(outcome: { ok: boolean; body: unknown; expectedProjectId: string }): ParseTeamProjectRunsPageResult {
@@ -110,8 +124,21 @@ export interface UseTeamProjectRunsResult {
   resetAndReloadFromStart: () => void;
 }
 
-export function useTeamProjectRuns(args: { workspaceId: string; projectId: string }): UseTeamProjectRunsResult {
+export type TeamProjectRunsAssigneeFilter = "me" | null;
+
+/** Pure — exported for request-shape tests. `?assignee=me` is the ONLY filter value; the server substitutes the caller's own uid. */
+export function buildTeamProjectRunsUrl(args: { workspaceId: string; projectId: string; assigneeFilter: TeamProjectRunsAssigneeFilter; cursor?: string }): string {
+  const base = `/api/workspaces/${encodeURIComponent(args.workspaceId)}/projects/${encodeURIComponent(args.projectId)}/runs`;
+  const params = new URLSearchParams();
+  if (args.assigneeFilter === "me") params.set("assignee", "me");
+  if (args.cursor) params.set("cursor", args.cursor);
+  const qs = params.toString();
+  return qs ? `${base}?${qs}` : base;
+}
+
+export function useTeamProjectRuns(args: { workspaceId: string; projectId: string; assigneeFilter?: TeamProjectRunsAssigneeFilter }): UseTeamProjectRunsResult {
   const { workspaceId, projectId } = args;
+  const assigneeFilter: TeamProjectRunsAssigneeFilter = args.assigneeFilter ?? null;
   const { user, loading: authLoading, authReady } = useAuth();
 
   const [items, setItems] = useState<TeamProjectRunSummary[]>([]);
@@ -137,8 +164,7 @@ export function useTeamProjectRuns(args: { workspaceId: string; projectId: strin
       }
 
       try {
-        const base = `/api/workspaces/${encodeURIComponent(workspaceId)}/projects/${encodeURIComponent(projectId)}/runs`;
-        const url = opts.cursor ? `${base}?cursor=${encodeURIComponent(opts.cursor)}` : base;
+        const url = buildTeamProjectRunsUrl({ workspaceId, projectId, assigneeFilter, cursor: opts.cursor });
         const res = await authedFetch(url, { user: opts.currentUser, authReady: true, method: "GET", cache: "no-store" });
         const body = await res.json().catch(() => null);
         if (seq !== seqRef.current) return;
@@ -183,7 +209,7 @@ export function useTeamProjectRuns(args: { workspaceId: string; projectId: strin
         }
       }
     },
-    [workspaceId, projectId, user]
+    [workspaceId, projectId, assigneeFilter, user]
   );
 
   useEffect(() => {
@@ -208,7 +234,7 @@ export function useTeamProjectRuns(args: { workspaceId: string; projectId: strin
     setLoadMoreErrorCode(null);
     void fetchPage({ cursor: undefined, isLoadMore: false, currentUser: user });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authLoading, authReady, user?.uid, workspaceId, projectId]);
+  }, [authLoading, authReady, user?.uid, workspaceId, projectId, assigneeFilter]);
 
   const loadMore = useCallback(() => {
     if (loadingMore || !hasMore || status !== "ready" || !user) return;

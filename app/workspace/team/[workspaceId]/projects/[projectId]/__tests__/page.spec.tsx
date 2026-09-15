@@ -20,6 +20,12 @@ jest.mock("@/lib/firestore/projects", () => ({
   getProject: (...args: any[]) => mockedGetProject(...args),
 }));
 
+// PR #164 review C1 — the page's own assignee presentation must never crash the page.
+const mockedResolveWorkspaceReviewerDisplayNames = jest.fn();
+jest.mock("@/lib/workspaces/workspaceReviewerIdentity", () => ({
+  REVIEWER_UNAVAILABLE_LABEL: "Unavailable reviewer",
+  resolveWorkspaceReviewerDisplayNames: (...a: unknown[]) => mockedResolveWorkspaceReviewerDisplayNames(...a),
+}));
 jest.mock("@/components/workspace/projects/TeamProjectDetailShell", () => ({
   __esModule: true,
   default: (props: any) => ({ __mockShell: true, props }),
@@ -125,7 +131,7 @@ describe("TeamProjectDetailPage — gate (server-authoritative, UX-only re-check
     expect(result.props.workspaceId).toBe(WS_ID);
     expect(result.props.workspaceName).toBe("Acme Team");
     expect(result.props.canReadAudit).toBe(true);
-    expect(result.props.project).toEqual({ id: PROJECT_ID, name: "ABC Acquisition", status: "active" });
+    expect(result.props.project).toEqual({ id: PROJECT_ID, name: "ABC Acquisition", status: "active", assignees: [] });
   });
 
   it("getProject is called with exactly the route's projectId, never workspaceId or any other value", async () => {
@@ -213,5 +219,19 @@ describe("TeamProjectDetailPage — gate (server-authoritative, UX-only re-check
     it("has neither -> canStartResearch: false", async () => {
       expect(await propsWithCapabilities(["workspace.read", "projects.read"])).toBe(false);
     });
+  });
+});
+
+describe("PR #164 review C1 — assignee presentation failure never crashes the detail page", () => {
+  it("a rejecting name resolver ⇒ the page still renders, assignees degrade to the fallback label + stale (positive control: a healthy resolver names them)", async () => {
+    mockedResolveServerComponentIdentity.mockResolvedValue({ uid: "owner-1" });
+    mockedResolveWorkspaceAccess.mockResolvedValue({ granted: true, workspaceType: "team", workspace: { id: WS_ID, name: "Acme Team" }, membership: { role: "owner" }, capabilities: ["workspace.read", "projects.read", "research.read", "research.organize"] });
+    mockedGetProject.mockResolvedValue({ status: "found", project: { id: PROJECT_ID, workspaceId: WS_ID, name: "ABC Acquisition", status: "active", assigneeUids: ["member-1"] } });
+    mockedResolveWorkspaceReviewerDisplayNames.mockRejectedValueOnce(new Error("UNAVAILABLE"));
+    const degraded: any = await callPage();
+    expect(degraded.props.project.assignees).toEqual([{ uid: "member-1", displayName: "Unavailable reviewer", state: "stale" }]);
+    mockedResolveWorkspaceReviewerDisplayNames.mockResolvedValueOnce(new Map([["member-1", "Bao"]]));
+    const healthy: any = await callPage();
+    expect(healthy.props.project.assignees[0].displayName).toBe("Bao");
   });
 });

@@ -15,7 +15,7 @@ import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelem
 import { parseStatusTransitionBody } from "@/lib/projects/projectMutationBody";
 import { validateUpdateTimeToken } from "@/lib/projects/updateTimeToken";
 import { updateTeamProjectFields } from "@/lib/firestore/teamProjects";
-import { toTeamProjectSummaryDto } from "@/lib/projects/teamProjectDto";
+import { enrichTeamProjectDtos } from "@/lib/workspaces/teamProjectAssigneeEnrichment";
 import { writeTeamProjectEventSafely as writeSafely } from "@/lib/projects/writeTeamProjectEventSafely";
 import { invalidRequestBodyResponse, unexpectedFieldResponse, invalidUpdateTimeResponse, internalErrorResponse } from "@/lib/workspaces/teamWorkspaceErrorResponse";
 import { staleUpdateTimeConflictResponse } from "@/lib/projects/projectErrorResponse";
@@ -71,12 +71,12 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
   switch (updateResult.status) {
     case "updated":
       await writeSafely({ eventType: "project_archived", actorUid: uid, workspaceId, projectId });
-      return NextResponse.json({ ok: true, project: toTeamProjectSummaryDto(updateResult.project, updateResult.documentUpdateTime) });
+      return NextResponse.json({ ok: true, project: (await enrichTeamProjectDtos(workspaceId, [{ project: updateResult.project, documentUpdateTime: updateResult.documentUpdateTime }]))[0] });
     case "updated_projection_unavailable": {
       await writeSafely({ eventType: "project_archived", actorUid: uid, workspaceId, projectId });
       return NextResponse.json({
         ok: true,
-        project: toTeamProjectSummaryDto(updateResult.project, null),
+        project: (await enrichTeamProjectDtos(workspaceId, [{ project: updateResult.project, documentUpdateTime: null }]))[0],
         projectionUnavailable: true,
         message: "The archive was applied, but we couldn't confirm the latest state. Refresh to load the current version before making further changes.",
       });

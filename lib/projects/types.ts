@@ -35,6 +35,15 @@ export interface ProjectV1 {
   createdByUserId: string;
   createdAt: Timestamp;
   updatedAt: Timestamp;
+  /**
+   * Project/Research Assignment (D1/D3) — TEAM Projects only; never written
+   * for a Personal Project. Responsibility metadata, NEVER authorization:
+   * read by no access check. Absent ≡ `[]`; when present, a canonical
+   * (deduplicated, code-unit-sorted) list of ≤ 20 member uids. Deliberately
+   * NOT validated by `isWellFormedProjectV1()` (shared with Personal) —
+   * readers normalize it through `lib/workspaces/assignmentNormalization.ts`.
+   */
+  assigneeUids?: string[];
 }
 
 /**

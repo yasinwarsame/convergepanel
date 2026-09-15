@@ -37,6 +37,9 @@ import { resolveTeamRunWorkspaceAccess } from "@/lib/workspaces/resolveTeamRunWo
 import { teamRunAccessDeniedResponse, teamRunInsufficientCapabilityResponse } from "@/lib/workspaces/teamRunAccessResponse";
 import { internalErrorResponse, invalidRequestBodyResponse, unexpectedFieldResponse } from "@/lib/workspaces/teamWorkspaceErrorResponse";
 import { listTeamWorkspaceRuns, type TeamWorkspaceRunsScope } from "@/lib/workspaces/listTeamWorkspaceRuns";
+import { parseAssigneeFilterQuery } from "@/lib/projects/assigneeFilterQuery";
+import { resolveAssigneeFilterForCaller } from "@/lib/workspaces/assigneeFilterResolution";
+import { invalidAssigneeFilterResponse } from "@/lib/projects/assignmentErrorResponse";
 import { ModelId, RunPanelApiResponse } from "@/lib/types";
 import { splitQuestionAndContext } from "@/lib/questionContext";
 import { ADAPTIVE_SCHEMAS_ENABLED, ADAPTIVE_SCHEMAS_CANARY_UIDS, TEAM_WORKSPACES_ENABLED, TEAM_WORKSPACES_CANARY_UIDS, TEAM_WORKSPACES_CANARY_WORKSPACE_IDS } from "@/lib/env";
@@ -112,7 +115,21 @@ export async function GET(req: NextRequest, { params }: { params: { workspaceId:
   const limit = Math.min(MAX_LIMIT, Math.max(1, parseInt(searchParams.get("limit") || String(DEFAULT_LIMIT), 10) || DEFAULT_LIMIT));
   const cursorRaw = searchParams.get("cursor");
 
-  const result = await listTeamWorkspaceRuns({ workspaceId, scope: scopeResult.scope, limit, cursorRaw });
+  const assigneeResult = parseAssigneeFilterQuery(searchParams);
+  if (!assigneeResult.ok) {
+    const { status, body } = invalidAssigneeFilterResponse();
+    return NextResponse.json(body, { status });
+  }
+
+  // D4 — a caller who cannot currently be a run assignee gets a definitively
+  // empty "assigned to me" view (no query), never their stale rows.
+  const assigneeFilter = resolveAssigneeFilterForCaller({ filter: assigneeResult.filter, uid, capabilities: access.capabilities, target: "run" });
+  if (assigneeFilter.kind === "empty") {
+    return NextResponse.json({ ok: true, items: [], hasMore: false, scope: scopeResult.scope });
+  }
+
+  const assigneeUid = assigneeFilter.kind === "uid" ? assigneeFilter.uid : undefined;
+  const result = await listTeamWorkspaceRuns({ workspaceId, scope: scopeResult.scope, limit, cursorRaw, assigneeUid });
   switch (result.status) {
     case "ok":
       return NextResponse.json({

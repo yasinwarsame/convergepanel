@@ -12,7 +12,7 @@ import { parseRenameProjectBody } from "@/lib/projects/projectMutationBody";
 import { validateProjectName } from "@/lib/projects/projectName";
 import { validateUpdateTimeToken } from "@/lib/projects/updateTimeToken";
 import { updateTeamProjectFields } from "@/lib/firestore/teamProjects";
-import { toTeamProjectSummaryDto } from "@/lib/projects/teamProjectDto";
+import { enrichTeamProjectDtos } from "@/lib/workspaces/teamProjectAssigneeEnrichment";
 import { writeTeamProjectEventSafely as writeSafely } from "@/lib/projects/writeTeamProjectEventSafely";
 import { invalidRequestBodyResponse, unexpectedFieldResponse, invalidUpdateTimeResponse, internalErrorResponse } from "@/lib/workspaces/teamWorkspaceErrorResponse";
 import { invalidProjectNameResponse, staleUpdateTimeConflictResponse } from "@/lib/projects/projectErrorResponse";
@@ -74,7 +74,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { workspaceI
   switch (updateResult.status) {
     case "updated":
       await writeSafely({ eventType: "project_renamed", actorUid: uid, workspaceId, projectId });
-      return NextResponse.json({ ok: true, project: toTeamProjectSummaryDto(updateResult.project, updateResult.documentUpdateTime) });
+      return NextResponse.json({ ok: true, project: (await enrichTeamProjectDtos(workspaceId, [{ project: updateResult.project, documentUpdateTime: updateResult.documentUpdateTime }]))[0] });
     case "updated_projection_unavailable": {
       // Canonical transaction ALREADY committed — the rename genuinely
       // applied. Only the best-effort post-commit projection read
@@ -84,7 +84,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { workspaceI
       await writeSafely({ eventType: "project_renamed", actorUid: uid, workspaceId, projectId });
       return NextResponse.json({
         ok: true,
-        project: toTeamProjectSummaryDto(updateResult.project, null),
+        project: (await enrichTeamProjectDtos(workspaceId, [{ project: updateResult.project, documentUpdateTime: null }]))[0],
         projectionUnavailable: true,
         message: "The rename was applied, but we couldn't confirm the latest state. Refresh to load the current version before making further changes.",
       });

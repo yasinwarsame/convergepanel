@@ -80,10 +80,15 @@ import { Status } from "google-gax";
 import { Timestamp, type DocumentReference } from "firebase-admin/firestore";
 import { adminDb } from "@/lib/firebase/admin";
 import { logger } from "@/lib/logger";
-import { TEAM_WORKSPACES_ENABLED, TEAM_WORKSPACES_CANARY_UIDS, TEAM_WORKSPACES_CANARY_WORKSPACE_IDS } from "@/lib/env";
+import { TEAM_WORKSPACES_ENABLED, TEAM_WORKSPACES_CANARY_UIDS, TEAM_WORKSPACES_CANARY_WORKSPACE_IDS, PROJECT_ASSIGNMENT_ENABLED, PROJECT_ASSIGNMENT_CANARY_UIDS } from "@/lib/env";
 import { resolveTeamWorkspaceTargetAdmission } from "@/lib/workspaces/teamWorkspaceTargetAdmission";
+import { resolveProjectAssignmentAdmission } from "@/lib/workspaces/projectAssignmentRollout";
 import { authorizeTeamWorkspaceMutationInTransaction, type TeamMutationAuthorizationDenialReason } from "@/lib/workspaces/authorizeTeamWorkspaceMutationInTransaction";
 import { buildWorkspaceMembershipEventDocData } from "@/lib/workspaces/workspaceMembershipEvents";
+import { computeMembershipId } from "@/lib/workspaces/membershipId";
+import { validateMembershipBinding } from "@/lib/workspaces/membershipBinding";
+import { isEligibleAssignmentTarget } from "@/lib/workspaces/assignmentTargetEligibility";
+import { canonicalizeAssigneeUids, normalizeStoredAssigneeUids, assigneeUidsEqual, diffAssigneeUids } from "@/lib/workspaces/assignmentNormalization";
 import { isWellFormedProjectV1, type ProjectV1 } from "@/lib/projects/types";
 
 export type CreateTeamProjectResult =
@@ -185,18 +190,33 @@ export async function createTeamProject(args: { uid: string; workspaceId: string
   }
 }
 
-export type TeamProjectMutation = { kind: "rename"; name: string } | { kind: "archive" } | { kind: "restore" };
+/**
+ * Project/Research Assignment (D1) — `set_assignees` carries the RAW
+ * requested list; this primitive canonicalizes it itself (shape → dedupe →
+ * sort → cap 20 unique) with no I/O before the transaction opens, so the
+ * 20-target bound holds for any server caller, not only the HTTP route.
+ */
+export type TeamProjectMutation = { kind: "rename"; name: string } | { kind: "archive" } | { kind: "restore" } | { kind: "set_assignees"; assigneeUids: unknown };
 
 export type UpdateTeamProjectFieldsResult =
   | { status: "updated"; project: ProjectV1; documentUpdateTime: Timestamp }
   // Transaction committed; the post-commit projection read failed. The
   // canonical mutation is NOT invalidated — see module doc comment.
   | { status: "updated_projection_unavailable"; project: ProjectV1 }
+  // Project/Research Assignment (D6) — semantic no-op: nothing written, no
+  // timestamp bump, no audit event. The caller's token was verified equal
+  // to the transaction-read `updateTime`, so it is still the fresh token.
+  | { status: "unchanged"; project: ProjectV1; documentUpdateTime: Timestamp }
   | { status: "team_workspaces_disabled" }
+  | { status: "project_assignment_disabled" }
   | { status: "firestore_unavailable" }
   | { status: "unauthorized"; reason: TeamMutationAuthorizationDenialReason }
   | { status: "project_not_found" }
+  | { status: "project_archived" }
   | { status: "invalid_transition" }
+  | { status: "invalid_assignees" }
+  | { status: "too_many_assignees" }
+  | { status: "assignee_not_eligible" }
   | { status: "precondition_failed" }
   | { status: "update_failed" };
 
@@ -250,6 +270,19 @@ export async function updateTeamProjectFields(args: {
   mutation: TeamProjectMutation;
   expectedUpdateTime: Timestamp;
 }): Promise<UpdateTeamProjectFieldsResult> {
+  // Project/Research Assignment — PURE request canonicalization FIRST (no
+  // I/O): shape → dedupe → canonical sort → cap on the UNIQUE count. This is
+  // what bounds the transaction below to at most 20 membership reads no
+  // matter how large or duplicate-heavy the raw request was.
+  let canonicalAssignees: string[] | null = null;
+  if (args.mutation.kind === "set_assignees") {
+    const canonical = canonicalizeAssigneeUids(args.mutation.assigneeUids);
+    if (!canonical.ok) {
+      return canonical.reason === "too_many_assignees" ? { status: "too_many_assignees" } : { status: "invalid_assignees" };
+    }
+    canonicalAssignees = canonical.uids;
+  }
+
   const admission = resolveTeamWorkspaceTargetAdmission({
     uid: args.uid,
     workspaceId: args.workspaceId,
@@ -260,15 +293,25 @@ export async function updateTeamProjectFields(args: {
   if (!admission.enabled) {
     return { status: "team_workspaces_disabled" };
   }
+  if (args.mutation.kind === "set_assignees") {
+    // D10 — a SEPARATE rollout axis, required in addition to Team admission.
+    const assignmentAdmission = resolveProjectAssignmentAdmission({ uid: args.uid, globalEnabled: PROJECT_ASSIGNMENT_ENABLED, canaryUidsRaw: PROJECT_ASSIGNMENT_CANARY_UIDS });
+    if (!assignmentAdmission.admitted) {
+      return { status: "project_assignment_disabled" };
+    }
+  }
   if (!adminDb) {
     return { status: "firestore_unavailable" };
   }
 
   type TxResult =
     | { kind: "updated"; project: ProjectV1 }
+    | { kind: "unchanged"; project: ProjectV1 }
     | { kind: "unauthorized"; reason: TeamMutationAuthorizationDenialReason }
     | { kind: "project_not_found" }
+    | { kind: "project_archived" }
     | { kind: "invalid_transition" }
+    | { kind: "assignee_not_eligible" }
     | { kind: "stale" };
 
   let txResult: TxResult;
@@ -296,19 +339,56 @@ export async function updateTeamProjectFields(args: {
       if (args.mutation.kind === "restore" && project.status !== "archived") {
         return { kind: "invalid_transition" };
       }
+      if (args.mutation.kind === "set_assignees" && project.status !== "active") {
+        // An archived Project cannot take assignee changes (409, the
+        // lifecycle precedent) — distinguishable, safe: authorization is
+        // already established at this point.
+        return { kind: "project_archived" };
+      }
 
+      // Step 5 — the caller's token is compared BEFORE any target validation
+      // and before any no-op consideration: a stale caller always receives
+      // `stale`, never a successful no-op (brief §6.4).
       const documentUpdateTime = projectSnap.updateTime as Timestamp;
       if (documentUpdateTime.seconds !== args.expectedUpdateTime.seconds || documentUpdateTime.nanoseconds !== args.expectedUpdateTime.nanoseconds) {
         return { kind: "stale" };
       }
 
+      // Project/Research Assignment — target validation on EVERY write
+      // (including a repeat of the current list), bounded to the ≤ 20
+      // canonical uids computed before the transaction opened; then the
+      // semantic no-op decision; then the write.
+      let assigneeDiff: { addedUids: string[]; removedUids: string[] } | null = null;
+      if (args.mutation.kind === "set_assignees") {
+        const targets = canonicalAssignees ?? [];
+        const membershipSnaps = await Promise.all(targets.map((uid) => tx.get(adminDb!.collection("workspaceMemberships").doc(computeMembershipId(args.workspaceId, uid)))));
+        for (let i = 0; i < targets.length; i++) {
+          const snap = membershipSnaps[i];
+          const membership = snap.exists ? validateMembershipBinding(snap.data(), { workspaceId: args.workspaceId, uid: targets[i] }) : null;
+          if (!isEligibleAssignmentTarget("project", membership)) {
+            return { kind: "assignee_not_eligible" };
+          }
+        }
+        const stored = normalizeStoredAssigneeUids(project.assigneeUids);
+        if (stored.malformed) {
+          logger.warn("[firestore/teamProjects] Malformed stored assigneeUids normalized to [] (integrity anomaly)", { workspaceId: args.workspaceId, projectId: args.projectId });
+        }
+        if (!stored.malformed && assigneeUidsEqual(stored.uids, targets)) {
+          // D6 — semantic no-op: no write, no timestamp change, no audit event.
+          return { kind: "unchanged", project };
+        }
+        assigneeDiff = diffAssigneeUids(stored.uids, targets);
+      }
+
       const now = Timestamp.now();
-      const data: Partial<Pick<ProjectV1, "name" | "status" | "updatedAt">> =
+      const data: Partial<Pick<ProjectV1, "name" | "status" | "updatedAt" | "assigneeUids">> =
         args.mutation.kind === "rename"
           ? { name: args.mutation.name, updatedAt: now }
           : args.mutation.kind === "archive"
             ? { status: "archived", updatedAt: now }
-            : { status: "active", updatedAt: now };
+            : args.mutation.kind === "restore"
+              ? { status: "active", updatedAt: now }
+              : { assigneeUids: canonicalAssignees ?? [], updatedAt: now };
 
       tx.update(projectRef as DocumentReference, data, { lastUpdateTime: args.expectedUpdateTime });
 
@@ -332,6 +412,24 @@ export async function updateTeamProjectFields(args: {
           })
         );
       }
+      if (args.mutation.kind === "set_assignees" && assigneeDiff) {
+        // D5 — ASSIGNMENT COMMITTED IFF AUDIT EVENT COMMITTED: same
+        // transaction attempt, same `now`, uids only, bounded change set.
+        const eventRef = adminDb!.collection("workspaceMembershipEvents").doc();
+        tx.set(
+          eventRef,
+          buildWorkspaceMembershipEventDocData({
+            eventType: "workspace_project_assignees_changed",
+            actorUid: auth.membership.uid,
+            workspaceId: project.workspaceId,
+            projectId: project.id,
+            projectName: project.name,
+            addedUids: assigneeDiff.addedUids,
+            removedUids: assigneeDiff.removedUids,
+            at: now,
+          })
+        );
+      }
 
       return { kind: "updated", project: { ...project, ...data } };
     });
@@ -351,10 +449,18 @@ export async function updateTeamProjectFields(args: {
       return { status: "unauthorized", reason: txResult.reason };
     case "project_not_found":
       return { status: "project_not_found" };
+    case "project_archived":
+      return { status: "project_archived" };
     case "invalid_transition":
       return { status: "invalid_transition" };
+    case "assignee_not_eligible":
+      return { status: "assignee_not_eligible" };
     case "stale":
       return { status: "precondition_failed" };
+    case "unchanged":
+      // No write happened, so the caller's verified-equal token is still
+      // the document's fresh `updateTime` — returned as such, never fabricated.
+      return { status: "unchanged", project: txResult.project, documentUpdateTime: args.expectedUpdateTime };
     case "updated": {
       // The transaction has ALREADY committed successfully at this point
       // — the mutation genuinely applied. Everything below is

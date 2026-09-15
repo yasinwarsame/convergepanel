@@ -34,6 +34,13 @@ import { isValidUpdateTimeTokenShape, type UpdateTimeToken } from "@/lib/project
 
 export type TeamProjectListStatus = "active" | "archived";
 
+/** Project/Research Assignment — presentation only (D4): a membership-evidenced display name and a current-membership `state`. Never a raw uid as a label. */
+export interface TeamProjectAssignee {
+  uid: string;
+  displayName: string;
+  state: "active" | "stale";
+}
+
 export interface TeamProjectSummary {
   id: string;
   workspaceId: string;
@@ -42,6 +49,14 @@ export interface TeamProjectSummary {
   createdAt: string;
   updatedAt: string;
   updateTime: UpdateTimeToken | null;
+  /** Always present on a Team DTO (`[]` when unassigned). */
+  assignees: TeamProjectAssignee[];
+}
+
+export function isValidTeamProjectAssignee(value: unknown): value is TeamProjectAssignee {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return typeof v.uid === "string" && v.uid.length > 0 && typeof v.displayName === "string" && (v.state === "active" || v.state === "stale");
 }
 
 export type TeamProjectsListErrorCode =
@@ -82,7 +97,9 @@ function isValidTeamProjectSummaryItem(item: unknown, expectedWorkspaceId: strin
     c.workspaceId === expectedWorkspaceId &&
     typeof c.name === "string" &&
     c.status === expectedStatus &&
-    (c.updateTime === null || isValidUpdateTimeTokenShape(c.updateTime))
+    (c.updateTime === null || isValidUpdateTimeTokenShape(c.updateTime)) &&
+    Array.isArray(c.assignees) &&
+    c.assignees.every(isValidTeamProjectAssignee)
   );
 }
 
@@ -126,8 +143,19 @@ export interface UseTeamProjectsResult {
   resetAndReloadFromStart: () => void;
 }
 
-export function useTeamProjects(args: { workspaceId: string; status: TeamProjectListStatus }): UseTeamProjectsResult {
+export type TeamProjectsAssigneeFilter = "me" | null;
+
+/** Pure — exported for request-shape tests. `?assignee=me` is the ONLY filter value; the server substitutes the caller's own uid. */
+export function buildTeamProjectsListUrl(args: { workspaceId: string; status: TeamProjectListStatus; assigneeFilter: TeamProjectsAssigneeFilter; cursor?: string }): string {
+  let url = `/api/workspaces/${encodeURIComponent(args.workspaceId)}/projects?status=${args.status}`;
+  if (args.assigneeFilter === "me") url += "&assignee=me";
+  if (args.cursor) url += `&cursor=${encodeURIComponent(args.cursor)}`;
+  return url;
+}
+
+export function useTeamProjects(args: { workspaceId: string; status: TeamProjectListStatus; assigneeFilter?: TeamProjectsAssigneeFilter }): UseTeamProjectsResult {
   const { workspaceId, status: requestedStatus } = args;
+  const assigneeFilter: TeamProjectsAssigneeFilter = args.assigneeFilter ?? null;
   const { user, loading: authLoading, authReady } = useAuth();
 
   const [items, setItems] = useState<TeamProjectSummary[]>([]);
@@ -153,8 +181,7 @@ export function useTeamProjects(args: { workspaceId: string; status: TeamProject
       }
 
       try {
-        const base = `/api/workspaces/${encodeURIComponent(workspaceId)}/projects?status=${requestedStatus}`;
-        const url = opts.cursor ? `${base}&cursor=${encodeURIComponent(opts.cursor)}` : base;
+        const url = buildTeamProjectsListUrl({ workspaceId, status: requestedStatus, assigneeFilter, cursor: opts.cursor });
         const res = await authedFetch(url, { user: opts.currentUser, authReady: true, method: "GET", cache: "no-store" });
         const body = await res.json().catch(() => null);
         if (seq !== seqRef.current) return;
@@ -199,7 +226,7 @@ export function useTeamProjects(args: { workspaceId: string; status: TeamProject
         }
       }
     },
-    [workspaceId, requestedStatus, user]
+    [workspaceId, requestedStatus, assigneeFilter, user]
   );
 
   useEffect(() => {
@@ -224,7 +251,7 @@ export function useTeamProjects(args: { workspaceId: string; status: TeamProject
     setLoadMoreErrorCode(null);
     void fetchPage({ cursor: undefined, isLoadMore: false, currentUser: user });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authLoading, authReady, user?.uid, workspaceId, requestedStatus]);
+  }, [authLoading, authReady, user?.uid, workspaceId, requestedStatus, assigneeFilter]);
 
   const loadMore = useCallback(() => {
     if (loadingMore || !hasMore || status !== "ready" || !user) return;

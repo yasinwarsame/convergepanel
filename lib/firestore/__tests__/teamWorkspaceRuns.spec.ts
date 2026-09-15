@@ -561,7 +561,7 @@ describe("getTeamWorkspaceRun — Team Research Detail, Phase 12A.4", () => {
   it("matching Workspace + Project, status running -> pending variant, question/governanceStatus surfaced, no results field", async () => {
     seedRun(RUN_ID_FOR_DETAIL, { status: "running", question: "How big is the TAM?" });
     const result = await getTeamWorkspaceRun({ workspaceId: WS_ID, projectId: PROJECT_ID, runId: RUN_ID_FOR_DETAIL });
-    expect(result).toEqual({ status: "pending", runId: RUN_ID_FOR_DETAIL, question: "How big is the TAM?", governanceStatus: undefined });
+    expect(result).toEqual({ status: "pending", runId: RUN_ID_FOR_DETAIL, question: "How big is the TAM?", governanceStatus: undefined, assignee: null });
     expect((result as any).results).toBeUndefined();
   });
 

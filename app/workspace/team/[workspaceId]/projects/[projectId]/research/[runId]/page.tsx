@@ -136,6 +136,18 @@ export default async function TeamResearchDetailPage({
       */}
       <div className="mb-6">
         <h1 className="text-xl font-semibold text-cp-text break-words">{run.question}</h1>
+        {/*
+          Project/Research Assignment (D9) — READ-ONLY "Assigned to" line.
+          Presentation over the same authorized read above; deliberately NO
+          editor here — assignment is changed from the Project detail
+          research list's sibling "Assign" action only.
+        */}
+        {run.assignee !== null && (
+          <p className="mt-1 text-sm text-cp-muted" data-testid="team-run-assignee">
+            Assigned to <span className="font-medium text-cp-text">{run.assignee.displayName}</span>
+            {run.assignee.state === "stale" ? <span className="ml-2 rounded-full border border-cp-border bg-cp-raised px-2 py-0.5 text-xs text-cp-faint">No longer eligible</span> : null}
+          </p>
+        )}
       </div>
 
       {/*

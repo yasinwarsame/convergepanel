@@ -17,6 +17,7 @@ function validItem(overrides: Partial<any> = {}) {
     modelsOk: 2,
     modelsTotal: 2,
     projectId: PROJECT_ID,
+    assignee: null,
     ...overrides,
   };
 }

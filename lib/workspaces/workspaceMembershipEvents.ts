@@ -98,13 +98,28 @@ import type { WorkspaceMembershipRole } from "./membershipTypes";
  * (`lib/firestore/teamRunSnapshots.ts`) — SNAPSHOT COMMITTED IFF AUDIT
  * EVENT COMMITTED.
  */
+/**
+ * Project/Research Assignment (D5) — `"workspace_project_assignees_changed"`
+ * and `"workspace_research_assignee_changed"` added: the first events that
+ * carry BOTH a Project/run subject AND member targets. Written ONLY via
+ * `tx.set()` inside the assignment mutation's own transaction
+ * (`updateTeamProjectFields()` / `setTeamRunAssignee()`) — ASSIGNMENT
+ * COMMITTED IFF AUDIT EVENT COMMITTED. Never written on a semantic no-op
+ * (D6). Identities are uids only; display names resolve at read time.
+ * The research event's `projectId`/`projectName` are nullable because a
+ * canonical Team run may be Unfiled; when filed, `projectName` is the
+ * transaction-read Project's name snapshot (or `null` if that Project was
+ * missing/malformed/foreign — never a post-commit lookup).
+ */
 export type WorkspaceMembershipEventType =
   | "workspace_member_removed"
   | "workspace_ownership_transferred"
   | "workspace_member_role_changed"
   | "workspace_project_archived"
   | "workspace_project_restored"
-  | "workspace_research_snapshot_created";
+  | "workspace_research_snapshot_created"
+  | "workspace_project_assignees_changed"
+  | "workspace_research_assignee_changed";
 
 interface WorkspaceMembershipEventIdentity {
   actorUid: string;
@@ -134,13 +149,37 @@ interface WorkspaceResearchSnapshotEventIdentity {
   runQuestion: string;
 }
 
+/** Project assignee changes: the transaction-read Project plus the bounded change set (≤ 20 each side; one side may be empty). */
+interface WorkspaceProjectAssignmentEventIdentity {
+  actorUid: string;
+  workspaceId: string;
+  projectId: string;
+  projectName: string;
+  addedUids: string[];
+  removedUids: string[];
+}
+
+/** Run assignee changes: the DESTINATION run, its Project (nullable — Unfiled runs are canonical), and the previous/new assignee (nullable). */
+interface WorkspaceResearchAssignmentEventIdentity {
+  actorUid: string;
+  workspaceId: string;
+  projectId: string | null;
+  projectName: string | null;
+  runId: string;
+  runQuestion: string;
+  previousAssigneeUid: string | null;
+  assigneeUid: string | null;
+}
+
 export type WorkspaceMembershipEventArgs =
   | (WorkspaceMembershipEventIdentity & { eventType: "workspace_member_removed"; previousRole: WorkspaceMembershipRole })
   | (WorkspaceMembershipEventIdentity & { eventType: "workspace_ownership_transferred"; previousRole: WorkspaceMembershipRole })
   | (WorkspaceMembershipEventIdentity & { eventType: "workspace_member_role_changed"; previousRole: WorkspaceMembershipRole; newRole: WorkspaceMembershipRole })
   | (WorkspaceProjectEventIdentity & { eventType: "workspace_project_archived" })
   | (WorkspaceProjectEventIdentity & { eventType: "workspace_project_restored" })
-  | (WorkspaceResearchSnapshotEventIdentity & { eventType: "workspace_research_snapshot_created" });
+  | (WorkspaceResearchSnapshotEventIdentity & { eventType: "workspace_research_snapshot_created" })
+  | (WorkspaceProjectAssignmentEventIdentity & { eventType: "workspace_project_assignees_changed" })
+  | (WorkspaceResearchAssignmentEventIdentity & { eventType: "workspace_research_assignee_changed" });
 
 export type WorkspaceMembershipEventDocData =
   | (WorkspaceMembershipEventIdentity & { eventType: "workspace_member_removed"; previousRole: WorkspaceMembershipRole; at: Timestamp })
@@ -148,7 +187,9 @@ export type WorkspaceMembershipEventDocData =
   | (WorkspaceMembershipEventIdentity & { eventType: "workspace_member_role_changed"; previousRole: WorkspaceMembershipRole; newRole: WorkspaceMembershipRole; at: Timestamp })
   | (WorkspaceProjectEventIdentity & { eventType: "workspace_project_archived"; at: Timestamp })
   | (WorkspaceProjectEventIdentity & { eventType: "workspace_project_restored"; at: Timestamp })
-  | (WorkspaceResearchSnapshotEventIdentity & { eventType: "workspace_research_snapshot_created"; at: Timestamp });
+  | (WorkspaceResearchSnapshotEventIdentity & { eventType: "workspace_research_snapshot_created"; at: Timestamp })
+  | (WorkspaceProjectAssignmentEventIdentity & { eventType: "workspace_project_assignees_changed"; at: Timestamp })
+  | (WorkspaceResearchAssignmentEventIdentity & { eventType: "workspace_research_assignee_changed"; at: Timestamp });
 
 /**
  * Pure — no I/O, never throws. `at` is caller-supplied (never generated

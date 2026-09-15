@@ -20,6 +20,7 @@ import { parseGovernanceReviewerFor } from "@/lib/governance/reviewerFields";
 import { getVideoLimit } from "@/lib/billing/planConfig";
 import { resolvePersonalWorkspaceUiMode } from "@/lib/workspaces/workspaceUiRollout";
 import { resolveProjectsUiEligibility } from "@/lib/projects/projectsUiEligibility";
+import { resolveProjectAssignmentAdmission } from "@/lib/workspaces/projectAssignmentRollout";
 import { resolveApprovalWorkflowAdmission } from "@/lib/workspaces/approvalWorkflowRollout";
 import { resolveTeamWorkspacesMode } from "@/lib/workspaces/teamWorkspacesRollout";
 import { resolveViewerTeamWorkspaceSelection } from "@/lib/workspaces/resolveViewerTeamWorkspaceSelection";
@@ -33,6 +34,8 @@ import {
   PROJECTS_CANARY_UIDS,
   APPROVAL_WORKFLOW_ENABLED,
   APPROVAL_WORKFLOW_CANARY_UIDS,
+  PROJECT_ASSIGNMENT_ENABLED,
+  PROJECT_ASSIGNMENT_CANARY_UIDS,
   TEAM_WORKSPACES_ENABLED,
   TEAM_WORKSPACES_CANARY_UIDS,
   TEAM_WORKSPACES_CANARY_WORKSPACE_IDS,
@@ -126,6 +129,19 @@ function projectsUiEnabledFor(uid: string): boolean {
  */
 function teamWorkspacesUiEnabledFor(uid: string): boolean {
   return resolveTeamWorkspacesMode({ uid, globalEnabled: TEAM_WORKSPACES_ENABLED, canaryUidsRaw: TEAM_WORKSPACES_CANARY_UIDS }).enabled;
+}
+
+/**
+ * Project/Research Assignment (D10) — a pure, zero-I/O ADMISSION-only
+ * presentation hint for the assignment controls. Requires BOTH Team
+ * admission and the dedicated Project Assignment admission; never an
+ * authorization decision (every assignment route re-derives admission
+ * and capability inside its own transaction). A bare boolean — never
+ * the admission source.
+ */
+function projectAssignmentUiEnabledFor(uid: string): boolean {
+  if (!teamWorkspacesUiEnabledFor(uid)) return false;
+  return resolveProjectAssignmentAdmission({ uid, globalEnabled: PROJECT_ASSIGNMENT_ENABLED, canaryUidsRaw: PROJECT_ASSIGNMENT_CANARY_UIDS }).admitted;
 }
 
 async function workspaceReviewsUiEnabledFor(uid: string): Promise<boolean> {
@@ -301,6 +317,7 @@ export async function GET(req: NextRequest) {
           projectsUiEnabled: projectsUiEnabledFor(uid),
           workspaceReviewsUiEnabled: await workspaceReviewsUiEnabledFor(uid),
           teamWorkspacesUiEnabled: teamWorkspacesUiEnabledFor(uid),
+          projectAssignmentUiEnabled: projectAssignmentUiEnabledFor(uid),
         },
         { status: 200 }
       );
@@ -410,6 +427,7 @@ export async function GET(req: NextRequest) {
         projectsUiEnabled: projectsUiEnabledFor(uid),
         workspaceReviewsUiEnabled: await workspaceReviewsUiEnabledFor(uid),
         teamWorkspacesUiEnabled: teamWorkspacesUiEnabledFor(uid),
+        projectAssignmentUiEnabled: projectAssignmentUiEnabledFor(uid),
       },
       { status: 200 }
     );
@@ -446,6 +464,7 @@ export async function GET(req: NextRequest) {
         projectsUiEnabled: false,
         workspaceReviewsUiEnabled: false,
         teamWorkspacesUiEnabled: false,
+        projectAssignmentUiEnabled: false,
       },
       { status: 200 }
     );

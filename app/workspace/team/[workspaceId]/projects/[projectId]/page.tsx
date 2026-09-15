@@ -21,6 +21,9 @@ import { resolveServerComponentIdentity } from "@/lib/auth/resolveServerComponen
 import { resolveWorkspaceAccess } from "@/lib/workspaces/resolveWorkspaceAccess";
 import { getProject } from "@/lib/firestore/projects";
 import TeamProjectDetailShell from "@/components/workspace/projects/TeamProjectDetailShell";
+import { projectAssignmentUiEnabledFor } from "@/lib/workspaces/projectAssignmentUiAdmission";
+import { normalizeStoredAssigneeUids } from "@/lib/workspaces/assignmentNormalization";
+import { resolveAssigneePresentations } from "@/lib/workspaces/assigneePresentation";
 
 export const dynamic = "force-dynamic";
 
@@ -61,13 +64,25 @@ export default async function TeamProjectDetailPage({ params }: { params: { work
     notFound();
   }
 
+  // Project/Research Assignment (D4/D9) — READ-ONLY presentation of the
+  // Project's assignees: normalized stored list (malformed ⇒ `[]`), one
+  // batched membership-evidenced resolve. No token, no editor here.
+  const assigneeUids = normalizeStoredAssigneeUids(result.project.assigneeUids).uids;
+  const presentations = assigneeUids.length > 0 ? await resolveAssigneePresentations(params.workspaceId, "project", assigneeUids) : new Map();
+  const assignees = assigneeUids.flatMap((uid) => {
+    const p = presentations.get(uid);
+    return p ? [{ uid: p.uid, displayName: p.displayName, state: p.state }] : [];
+  });
+
   return (
     <TeamProjectDetailShell
       workspaceId={params.workspaceId}
       workspaceName={access.workspace.name}
       canReadAudit={access.capabilities.includes("audit.read")}
       canStartResearch={access.capabilities.includes("research.create") && access.capabilities.includes("research.organize")}
-      project={{ id: result.project.id, name: result.project.name, status: result.project.status }}
+      canAssignResearch={access.capabilities.includes("research.organize")}
+      assignmentUiEnabled={projectAssignmentUiEnabledFor(identity.uid)}
+      project={{ id: result.project.id, name: result.project.name, status: result.project.status, assignees }}
     />
   );
 }

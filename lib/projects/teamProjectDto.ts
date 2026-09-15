@@ -26,6 +26,13 @@ import { Timestamp } from "firebase-admin/firestore";
 import type { ProjectV1 } from "./types";
 import { serializeUpdateTimeToken, type UpdateTimeToken } from "./updateTimeToken";
 
+/** Project/Research Assignment (D4/D7) — presentation only: a membership-evidenced display name and a `state` derived from CURRENT membership. Never a raw uid as a name; `state` is never authorization input. */
+export interface TeamProjectAssigneeDto {
+  uid: string;
+  displayName: string;
+  state: "active" | "stale";
+}
+
 export interface TeamProjectSummaryDto {
   id: string;
   workspaceId: string;
@@ -35,10 +42,12 @@ export interface TeamProjectSummaryDto {
   createdAt: string;
   updatedAt: string;
   updateTime: UpdateTimeToken | null;
+  /** Ordered like the canonical stored list; `[]` for an unassigned or malformed-stored Project. Always emitted (data, not a control). */
+  assignees: TeamProjectAssigneeDto[];
 }
 
-/** `documentUpdateTime` is the Firestore document's own native `updateTime` at the point of read — supplied by the caller, never derived from `project.updatedAt`. Pass `null` only when no authoritative native `updateTime` is available (post-commit projection read failure) — never a fabricated stand-in. */
-export function toTeamProjectSummaryDto(project: ProjectV1, documentUpdateTime: Timestamp | null): TeamProjectSummaryDto {
+/** `documentUpdateTime` is the Firestore document's own native `updateTime` at the point of read — supplied by the caller, never derived from `project.updatedAt`. Pass `null` only when no authoritative native `updateTime` is available (post-commit projection read failure) — never a fabricated stand-in. `assignees` are resolved by the caller through `enrichTeamProjectDtos()` (one batched pass per page); the raw stored uids are never placed here. */
+export function toTeamProjectSummaryDto(project: ProjectV1, documentUpdateTime: Timestamp | null, assignees: TeamProjectAssigneeDto[] = []): TeamProjectSummaryDto {
   return {
     id: project.id,
     workspaceId: project.workspaceId,
@@ -48,5 +57,6 @@ export function toTeamProjectSummaryDto(project: ProjectV1, documentUpdateTime: 
     createdAt: project.createdAt.toDate().toISOString(),
     updatedAt: project.updatedAt.toDate().toISOString(),
     updateTime: documentUpdateTime ? serializeUpdateTimeToken(documentUpdateTime) : null,
+    assignees,
   };
 }

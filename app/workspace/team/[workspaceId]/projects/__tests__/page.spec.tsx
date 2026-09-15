@@ -136,7 +136,7 @@ describe("TeamProjectsPage — canManageProjects derivation, Phase PROJECT-UI-AR
   it("the page passes only capability booleans and display fields to the shell — no role string, no raw membership data", async () => {
     grant(["projects.read", "projects.manage"]);
     const props = await shellProps();
-    expect(Object.keys(props).sort()).toEqual(["canCreateProject", "canManageProjects", "canReadAudit", "workspaceId", "workspaceName"]);
+    expect(Object.keys(props).sort()).toEqual(["assignmentUiEnabled", "canCreateProject", "canManageProjects", "canReadAudit", "workspaceId", "workspaceName"]);
     expect(JSON.stringify(props)).not.toMatch(/"role"|membership/);
   });
 });

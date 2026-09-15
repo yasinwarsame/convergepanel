@@ -466,7 +466,9 @@ export type WorkspaceAuditMemberEventType = "workspace_member_removed" | "worksp
 export type WorkspaceAuditProjectEventType = "workspace_project_archived" | "workspace_project_restored";
 /** ADD-TO-TEAM-PROJECT §P — RESEARCH-shaped: `actor` + `project.name` + `research.question`. No ids of any kind. */
 export type WorkspaceAuditResearchEventType = "workspace_research_snapshot_created";
-export type WorkspaceAuditEventType = WorkspaceAuditMemberEventType | WorkspaceAuditProjectEventType | WorkspaceAuditResearchEventType;
+/** Project/Research Assignment — ASSIGNMENT-shaped: display names only; the research variant's `project` and both assignee slots are nullable. No ids of any kind. */
+export type WorkspaceAuditAssignmentEventType = "workspace_project_assignees_changed" | "workspace_research_assignee_changed";
+export type WorkspaceAuditEventType = WorkspaceAuditMemberEventType | WorkspaceAuditProjectEventType | WorkspaceAuditResearchEventType | WorkspaceAuditAssignmentEventType;
 
 /**
  * Team Member Management, Phase 12B — `newRole` is required when (and only
@@ -490,13 +492,39 @@ export type WorkspaceAuditEventItem =
   | { eventType: "workspace_member_role_changed"; occurredAt: string; actor: { displayName: string }; target: { displayName: string }; previousRole: WorkspaceAuditPreviousRole; newRole: WorkspaceAuditPreviousRole }
   | { eventType: "workspace_project_archived"; occurredAt: string; actor: { displayName: string }; project: { name: string } }
   | { eventType: "workspace_project_restored"; occurredAt: string; actor: { displayName: string }; project: { name: string } }
-  | { eventType: "workspace_research_snapshot_created"; occurredAt: string; actor: { displayName: string }; project: { name: string }; research: { question: string } };
+  | { eventType: "workspace_research_snapshot_created"; occurredAt: string; actor: { displayName: string }; project: { name: string }; research: { question: string } }
+  | { eventType: "workspace_project_assignees_changed"; occurredAt: string; actor: { displayName: string }; project: { name: string }; added: { displayName: string }[]; removed: { displayName: string }[]; repair: boolean }
+  | {
+      eventType: "workspace_research_assignee_changed";
+      occurredAt: string;
+      actor: { displayName: string };
+      /** `{ name }` snapshotted, `null` Unfiled, `{ unavailable: true }` filed but the Project could not be snapshotted (never an id). */
+      project: { name: string } | { unavailable: true } | null;
+      research: { question: string };
+      previousAssignee: { displayName: string } | null;
+      assignee: { displayName: string } | null;
+      /** An integrity-repair write (equal before/after) — a real committed write, not a no-op. */
+      repair: boolean;
+    };
 
 const VALID_AUDIT_PREVIOUS_ROLES: ReadonlySet<string> = new Set(["admin", "member", "reviewer", "viewer"]);
 const VALID_AUDIT_MEMBER_EVENT_TYPES: ReadonlySet<string> = new Set(["workspace_member_removed", "workspace_ownership_transferred", "workspace_member_role_changed"]);
 const VALID_AUDIT_PROJECT_EVENT_TYPES: ReadonlySet<string> = new Set(["workspace_project_archived", "workspace_project_restored"]);
 const VALID_AUDIT_RESEARCH_EVENT_TYPES: ReadonlySet<string> = new Set(["workspace_research_snapshot_created"]);
-const VALID_AUDIT_EVENT_TYPES: ReadonlySet<string> = new Set([...VALID_AUDIT_MEMBER_EVENT_TYPES, ...VALID_AUDIT_PROJECT_EVENT_TYPES, ...VALID_AUDIT_RESEARCH_EVENT_TYPES]);
+const VALID_AUDIT_ASSIGNMENT_EVENT_TYPES: ReadonlySet<string> = new Set(["workspace_project_assignees_changed", "workspace_research_assignee_changed"]);
+const VALID_AUDIT_EVENT_TYPES: ReadonlySet<string> = new Set([...VALID_AUDIT_MEMBER_EVENT_TYPES, ...VALID_AUDIT_PROJECT_EVENT_TYPES, ...VALID_AUDIT_RESEARCH_EVENT_TYPES, ...VALID_AUDIT_ASSIGNMENT_EVENT_TYPES]);
+
+function isDisplayNameRef(value: unknown): value is { displayName: string } {
+  return typeof value === "object" && value !== null && typeof (value as Record<string, unknown>).displayName === "string";
+}
+function isProjectNameRef(value: unknown): value is { name: string } {
+  if (typeof value !== "object" || value === null) return false;
+  const name = (value as Record<string, unknown>).name;
+  return typeof name === "string" && name.length > 0;
+}
+function isProjectUnavailableRef(value: unknown): value is { unavailable: true } {
+  return typeof value === "object" && value !== null && (value as Record<string, unknown>).unavailable === true && !("name" in (value as Record<string, unknown>)) && !("id" in (value as Record<string, unknown>));
+}
 
 function isValidAuditEvent(value: unknown): value is WorkspaceAuditEventItem {
   if (typeof value !== "object" || value === null) return false;
@@ -505,6 +533,20 @@ function isValidAuditEvent(value: unknown): value is WorkspaceAuditEventItem {
   if (typeof v.occurredAt !== "string" || Number.isNaN(Date.parse(v.occurredAt))) return false;
   const actor = v.actor;
   if (typeof actor !== "object" || actor === null || typeof (actor as Record<string, unknown>).displayName !== "string") return false;
+  if (v.eventType === "workspace_project_assignees_changed") {
+    return isProjectNameRef(v.project) && Array.isArray(v.added) && v.added.every(isDisplayNameRef) && Array.isArray(v.removed) && v.removed.every(isDisplayNameRef) && typeof v.repair === "boolean";
+  }
+  if (v.eventType === "workspace_research_assignee_changed") {
+    const research = v.research;
+    if (typeof research !== "object" || research === null) return false;
+    const question = (research as Record<string, unknown>).question;
+    if (typeof question !== "string" || question.length === 0) return false;
+    if (!(v.project === null || isProjectNameRef(v.project) || isProjectUnavailableRef(v.project))) return false;
+    if (!(v.previousAssignee === null || isDisplayNameRef(v.previousAssignee))) return false;
+    if (!(v.assignee === null || isDisplayNameRef(v.assignee))) return false;
+    if (typeof v.repair !== "boolean") return false;
+    return true;
+  }
   if (VALID_AUDIT_PROJECT_EVENT_TYPES.has(v.eventType) || VALID_AUDIT_RESEARCH_EVENT_TYPES.has(v.eventType)) {
     const project = v.project;
     if (typeof project !== "object" || project === null) return false;

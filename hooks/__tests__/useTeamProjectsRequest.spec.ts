@@ -26,7 +26,7 @@ import { useTeamProjects, type UseTeamProjectsResult, type TeamProjectListStatus
 const WS_ID = "ws-1";
 
 function row(overrides: Record<string, unknown> = {}) {
-  return { id: "p1", workspaceId: WS_ID, name: "P", status: "active", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", updateTime: { seconds: 1, nanoseconds: 0 }, ...overrides };
+  return { id: "p1", workspaceId: WS_ID, name: "P", status: "active", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", updateTime: { seconds: 1, nanoseconds: 0 }, assignees: [], ...overrides };
 }
 
 function HookHost({ status, onResult }: { status: TeamProjectListStatus; onResult: (r: UseTeamProjectsResult) => void }) {

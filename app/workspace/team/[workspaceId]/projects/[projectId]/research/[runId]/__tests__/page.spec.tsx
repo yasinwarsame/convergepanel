@@ -195,7 +195,7 @@ describe("TeamResearchDetailPage — gate (server-authoritative)", () => {
     mockedResolveServerComponentIdentity.mockResolvedValue({ uid: UID });
     mockedResolveWorkspaceAccess.mockResolvedValue(grantedTeamAccess());
     mockedGetProject.mockResolvedValue(foundProject());
-    mockedGetTeamWorkspaceRun.mockResolvedValue({ status: "pending", runId: RUN_ID, question: "What is the market size?" });
+    mockedGetTeamWorkspaceRun.mockResolvedValue({ status: "pending", assignee: null, runId: RUN_ID, question: "What is the market size?" });
     const renderer = await renderPage();
     const text = JSON.stringify(renderer.toJSON());
     expect(text).toContain("still in progress");
@@ -213,6 +213,7 @@ describe("TeamResearchDetailPage — gate (server-authoritative)", () => {
     const results = [{ modelId: "chatgpt", status: "ok", rawTextFull: "Answer text" }];
     mockedGetTeamWorkspaceRun.mockResolvedValue({
       status: "complete",
+      assignee: null,
       runId: RUN_ID,
       question: "What is the market size?",
       governanceStatus: "approved",
@@ -231,7 +232,7 @@ describe("TeamResearchDetailPage — gate (server-authoritative)", () => {
     mockedResolveServerComponentIdentity.mockResolvedValue({ uid: UID });
     mockedResolveWorkspaceAccess.mockResolvedValue(grantedTeamAccess());
     mockedGetProject.mockResolvedValue(foundProject());
-    mockedGetTeamWorkspaceRun.mockResolvedValue({ status: "complete", runId: RUN_ID, question: "Q", results: [] });
+    mockedGetTeamWorkspaceRun.mockResolvedValue({ status: "complete", assignee: null, runId: RUN_ID, question: "Q", results: [] });
     await callPage();
     expect(mockedGetTeamWorkspaceRun).toHaveBeenCalledWith({ workspaceId: WS_ID, projectId: PROJECT_ID, runId: RUN_ID });
   });
@@ -355,7 +356,7 @@ describe("Phase 11B.2 — WorkspaceNav on Team research detail", () => {
     mockedResolveServerComponentIdentity.mockResolvedValue({ uid: UID });
     mockedResolveWorkspaceAccess.mockResolvedValue(grantedTeamAccess({ capabilities }));
     mockedGetProject.mockResolvedValue(foundProject());
-    mockedGetTeamWorkspaceRun.mockResolvedValue({ status: "complete", runId: RUN_ID, question: "Q", results: [] });
+    mockedGetTeamWorkspaceRun.mockResolvedValue({ status: "complete", assignee: null, runId: RUN_ID, question: "Q", results: [] });
     return renderPage();
   }
 
@@ -411,7 +412,7 @@ describe("Phase 11B.2 — WorkspaceNav on Team research detail", () => {
     mockedResolveServerComponentIdentity.mockResolvedValue({ uid: UID });
     mockedResolveWorkspaceAccess.mockResolvedValue(grantedTeamAccess({ capabilities: WITHOUT_AUDIT }));
     mockedGetProject.mockResolvedValue(foundProject());
-    mockedGetTeamWorkspaceRun.mockResolvedValue({ status: "pending", runId: RUN_ID, question: "Q?" });
+    mockedGetTeamWorkspaceRun.mockResolvedValue({ status: "pending", assignee: null, runId: RUN_ID, question: "Q?" });
     const r = await renderPage();
     const current = currentItems(r);
     expect(current).toHaveLength(1);
@@ -499,7 +500,7 @@ describe("Phase 11B.3 — Team research detail breadcrumb", () => {
       status: "found",
       project: { id: projectId, workspaceId, name: PNAME, status: "active" },
     });
-    mockedGetTeamWorkspaceRun.mockResolvedValue({ status: "complete", runId, question: QUESTION, results: [] });
+    mockedGetTeamWorkspaceRun.mockResolvedValue({ status: "complete", assignee: null, runId, question: QUESTION, results: [] });
     return renderPage({ workspaceId, projectId, runId });
   }
 
@@ -551,7 +552,7 @@ describe("Phase 11B.3 — Team research detail breadcrumb", () => {
       membership: { role: "member" }, capabilities: ["workspace.read", "projects.read", "research.read"],
     });
     mockedGetProject.mockResolvedValue({ status: "found", project: { id: PID, workspaceId: WS, name: PNAME, status: "active" } });
-    mockedGetTeamWorkspaceRun.mockResolvedValue({ status: "pending", runId: RID, question: QUESTION });
+    mockedGetTeamWorkspaceRun.mockResolvedValue({ status: "pending", assignee: null, runId: RID, question: QUESTION });
     const r = await renderPage({ workspaceId: WS, projectId: PID, runId: RID });
     expect(bcSegments(r).map((x) => x.label)).toEqual([WS_NAME, "Projects", PNAME, QUESTION]);
     expect(JSON.stringify(r.toJSON())).toContain("still in progress");
@@ -583,7 +584,7 @@ describe("Phase 11B.3 — NO breadcrumb (and therefore no Workspace/Project name
   const project = (over: Record<string, unknown> = {}) => ({
     status: "found", project: { id: PROJECT_ID, workspaceId: WS_ID, name: "Election Evidence", status: "active", ...over },
   });
-  const okRun = { status: "complete", runId: RUN_ID, question: "What changed in the source evidence?", results: [] };
+  const okRun = { status: "complete", assignee: null, runId: RUN_ID, question: "What changed in the source evidence?", results: [] };
 
   async function expectNoRender(kind: "notFound" | "throws") {
     let caught: unknown;
@@ -737,8 +738,8 @@ describe("Phase 11B.3-C1 — Research detail page composition order", () => {
     mockedGetProject.mockResolvedValue({ status: "found", project: { id: PROJECT_ID, workspaceId: WS_ID, name: "Election Evidence", status: "active" } });
     mockedGetTeamWorkspaceRun.mockResolvedValue(
       runStatus === "complete"
-        ? { status: "complete", runId: RUN_ID, question: "What changed in the source evidence?", results: [] }
-        : { status: "pending", runId: RUN_ID, question: "What changed in the source evidence?" }
+        ? { status: "complete", assignee: null, runId: RUN_ID, question: "What changed in the source evidence?", results: [] }
+        : { status: "pending", assignee: null, runId: RUN_ID, question: "What changed in the source evidence?" }
     );
     return renderPage();
   }

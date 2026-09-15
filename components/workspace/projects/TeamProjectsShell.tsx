@@ -50,6 +50,7 @@ export default function TeamProjectsShell({
   canCreateProject,
   canManageProjects,
   canReadAudit,
+  assignmentUiEnabled = false,
 }: {
   workspaceId: string;
   workspaceName: string;
@@ -57,16 +58,22 @@ export default function TeamProjectsShell({
   /** Server-derived `projects.manage` capability — UX visibility only; the archive/restore API re-authorizes every call. */
   canManageProjects: boolean;
   canReadAudit: boolean;
+  /** Project/Research Assignment (D10) — server-derived rollout presentation hint (page-computed, zero I/O). Gates the "Manage assignees" action and the "Assigned to me" filter only; never an authorization decision. */
+  assignmentUiEnabled?: boolean;
 }) {
   const router = useRouter();
+  // Project/Research Assignment — `?assignee=me` is a VIEW filter (the
+  // server substitutes the caller's own uid); both sections honor it.
+  const [assignedToMe, setAssignedToMe] = useState(false);
+  const assigneeFilter = assignmentUiEnabled && assignedToMe ? "me" : null;
   // Phase PROJECT-UI-AR-I1 — two independent list instances: the active
   // section (unchanged behavior + New Project) and an Archived Projects
   // section so archived Team Projects are deliberately discoverable for
   // Restore. Both refetch from page one after any committed or
   // stale-detected lifecycle transition (`refreshSections`) — never an
   // optimistic row move, never a retained old updateTime token.
-  const result = useTeamProjects({ workspaceId, status: "active" });
-  const archived = useTeamProjects({ workspaceId, status: "archived" });
+  const result = useTeamProjects({ workspaceId, status: "active", assigneeFilter });
+  const archived = useTeamProjects({ workspaceId, status: "archived", assigneeFilter });
   const lifecycle = useTeamProjectLifecycle({ workspaceId });
   const { items, hasMore, status, initialErrorCode, loadingMore, loadMoreErrorCode, loadMore, retryInitial, resetAndReloadFromStart } = result;
   const { resetAndReloadFromStart: reloadActiveFromStart } = result;
@@ -111,7 +118,11 @@ export default function TeamProjectsShell({
       // before the refetch, defeating the "only after refresh" contract.
       refreshSections();
       if (outcome.kind === "committed") {
-        setLifecycleNotice({ tone: "success", message: outcome.operation === "archive" ? `${outcome.projectName} was archived.` : `${outcome.projectName} was restored.` });
+        setLifecycleNotice({
+          tone: "success",
+          message:
+            outcome.operation === "archive" ? `${outcome.projectName} was archived.` : outcome.operation === "restore" ? `${outcome.projectName} was restored.` : `Assignees for ${outcome.projectName} were updated.`,
+        });
         setFocusTarget(outcome.operation === "archive" ? "archived" : "active");
       } else {
         setLifecycleNotice({ tone: "error", message: outcome.message });
@@ -188,6 +199,13 @@ export default function TeamProjectsShell({
 
       <WorkspaceNav workspaceId={workspaceId} active="projects" showAudit={canReadAudit} />
 
+      {assignmentUiEnabled && (
+        <label className="mt-4 inline-flex items-center gap-2 text-sm text-cp-muted">
+          <input type="checkbox" checked={assignedToMe} onChange={(e) => setAssignedToMe(e.target.checked)} className="h-4 w-4" />
+          Assigned to me
+        </label>
+      )}
+
       {lifecycleNotice && (
         <div
           ref={noticeRef}
@@ -220,7 +238,9 @@ export default function TeamProjectsShell({
 
       {status === "ready" &&
         isDefinitiveEmptyTeamProjectsState({ status, items, hasMore }) &&
-        (canCreateProject ? (
+        (assigneeFilter === "me" ? (
+          <SectionEmptyBox lines={["No projects are assigned to you."]} />
+        ) : canCreateProject ? (
           <SectionEmptyBox lines={["No projects yet.", "Create a Project to organize your team's research and verification work."]} />
         ) : (
           <SectionEmptyBox lines={["No projects yet."]} />
@@ -229,7 +249,7 @@ export default function TeamProjectsShell({
       {status === "ready" && items.length > 0 && (
         <ul className="mt-4 space-y-2">
           {items.map((item) => (
-            <TeamProjectLifecycleRow key={item.id} workspaceId={workspaceId} project={item} canManageProjects={canManageProjects} lifecycle={lifecycle} onLifecycleAttemptStart={handleLifecycleAttemptStart} onLifecycleOutcome={handleLifecycleOutcome} />
+            <TeamProjectLifecycleRow key={item.id} workspaceId={workspaceId} project={item} canManageProjects={canManageProjects} assignmentUiEnabled={assignmentUiEnabled} lifecycle={lifecycle} onLifecycleAttemptStart={handleLifecycleAttemptStart} onLifecycleOutcome={handleLifecycleOutcome} />
           ))}
         </ul>
       )}
@@ -260,12 +280,12 @@ export default function TeamProjectsShell({
             return <SectionInitialErrorBox message={copy.message} retry={copy.retry} onRetry={archived.retryInitial} />;
           })()}
         {archived.status === "ready" && isDefinitiveEmptyTeamProjectsState({ status: archived.status, items: archived.items, hasMore: archived.hasMore }) && (
-          <SectionEmptyBox lines={["No archived projects."]} />
+          <SectionEmptyBox lines={[assigneeFilter === "me" ? "No archived projects are assigned to you." : "No archived projects."]} />
         )}
         {archived.status === "ready" && archived.items.length > 0 && (
           <ul className="mt-4 space-y-2">
             {archived.items.map((item) => (
-              <TeamProjectLifecycleRow key={item.id} workspaceId={workspaceId} project={item} canManageProjects={canManageProjects} lifecycle={lifecycle} onLifecycleAttemptStart={handleLifecycleAttemptStart} onLifecycleOutcome={handleLifecycleOutcome} />
+              <TeamProjectLifecycleRow key={item.id} workspaceId={workspaceId} project={item} canManageProjects={canManageProjects} assignmentUiEnabled={assignmentUiEnabled} lifecycle={lifecycle} onLifecycleAttemptStart={handleLifecycleAttemptStart} onLifecycleOutcome={handleLifecycleOutcome} />
             ))}
           </ul>
         )}

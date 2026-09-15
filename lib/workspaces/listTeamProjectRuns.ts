@@ -25,6 +25,7 @@ import { decodeWorkspaceRunsCursor, encodeWorkspaceRunsCursor } from "./workspac
 import { firestoreSecondsNanos } from "@/lib/runs/runSummary";
 import { toTeamRunSummary, type TeamRunSummaryDto } from "./teamRunSummary";
 import { validateTeamRunRowShape } from "./teamRunRowValidation";
+import { resolveRunAssigneesForPage } from "./teamRunAssigneeEnrichment";
 
 export type ListTeamProjectRunsResult =
   | { status: "ok"; items: TeamRunSummaryDto[]; hasMore: boolean; nextCursor?: string }
@@ -32,7 +33,7 @@ export type ListTeamProjectRunsResult =
   | { status: "integrity_violation" }
   | { status: "query_failed" };
 
-export async function listTeamProjectRuns(args: { workspaceId: string; projectId: string; limit: number; cursorRaw?: string | null }): Promise<ListTeamProjectRunsResult> {
+export async function listTeamProjectRuns(args: { workspaceId: string; projectId: string; limit: number; cursorRaw?: string | null; assigneeUid?: string }): Promise<ListTeamProjectRunsResult> {
   if (!adminDb) {
     return { status: "query_failed" };
   }
@@ -50,9 +51,13 @@ export async function listTeamProjectRuns(args: { workspaceId: string; projectId
     let query = adminDb
       .collection("runs")
       .where("workspaceId", "==", args.workspaceId)
-      .where("projectId", "==", args.projectId)
-      .orderBy("createdAt", "desc")
-      .orderBy(FieldPath.documentId(), "desc");
+      .where("projectId", "==", args.projectId);
+    if (args.assigneeUid !== undefined) {
+      // Project/Research Assignment — equality on the stored field; the
+      // uid is the caller's own (route-substituted), never query-supplied.
+      query = query.where("assigneeUid", "==", args.assigneeUid);
+    }
+    query = query.orderBy("createdAt", "desc").orderBy(FieldPath.documentId(), "desc");
 
     if (startAfter) {
       query = query.startAfter(new Timestamp(startAfter.createdAtSeconds, startAfter.createdAtNanoseconds), startAfter.lastDocId);
@@ -90,9 +95,11 @@ export async function listTeamProjectRuns(args: { workspaceId: string; projectId
     const pageDocs = allDocs.slice(0, args.limit);
     const pageValidated = validated.slice(0, args.limit);
 
-    const items: TeamRunSummaryDto[] = pageValidated.map((v) => {
+    // Project/Research Assignment — ONE batched presentation resolve per page.
+    const assignees = await resolveRunAssigneesForPage(args.workspaceId, pageValidated.map((v) => ({ docId: v.doc.id, data: v.doc.data() })));
+    const items: TeamRunSummaryDto[] = pageValidated.map((v, i) => {
       const r = v.result as Extract<typeof v.result, { ok: true }>;
-      return toTeamRunSummary(v.doc.id, v.doc.data(), r.userId, r.workspaceId, r.projectId);
+      return toTeamRunSummary(v.doc.id, v.doc.data(), r.userId, r.workspaceId, r.projectId, assignees[i]);
     });
 
     const lastScanned = pageDocs[pageDocs.length - 1];
