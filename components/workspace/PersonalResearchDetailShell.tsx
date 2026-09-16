@@ -34,16 +34,15 @@ import { useTeamResearchSnapshot } from "@/hooks/useTeamResearchSnapshot";
 import { AddToTeamProjectDialog } from "@/components/workspace/AddToTeamProjectDialog";
 import type { TeamResearchSnapshotDto } from "@/lib/workspaces/teamResearchSnapshotResponse";
 import { createGenerationGuard } from "@/lib/client/authGeneration";
-import ResultsDisplay from "@/components/ResultsDisplay";
+import PersistedResearchResultView from "@/components/research/PersistedResearchResultView";
 import {
-  adaptPersistedOutputToPanelPayload,
-  adaptPersistedLegacyOutputToPanelPayload,
-} from "@/lib/user/adaptivePersistedOutputAdapter";
+  interpretPersistedRunReadPayload,
+  type PersistedResearchPresentation,
+} from "@/lib/research/persistedRunPresentation";
 import {
   personalResearchFollowUpHref,
   personalResearchVerifyClaimHref,
 } from "@/lib/user/personalResearchHref";
-import type { ModelResult, ModelId } from "@/lib/types";
 
 /**
  * Viewer roles this CANONICAL PERSONAL surface accepts.
@@ -71,6 +70,15 @@ const PERSONAL_VIEWER_ROLES = new Set(["owner", "personal_reviewer"]);
  */
 const TEAM_VIEWER_ROLES = new Set(["team_member", "team_reviewer"]);
 
+/**
+ * R2-C1 — the PERSONAL destination for the read-only single-model "run this
+ * question again" pointer: the root composer. Owned here, never by the shared
+ * renderer, so a Team report can never inherit it.
+ */
+const PERSONAL_READ_ONLY_EXECUTION_TARGET = { href: "/", label: "Research" } as const;
+
+type PersonalViewerRole = "owner" | "personal_reviewer";
+
 type DetailState =
   | { kind: "loading" }
   /** 403/404/wrong-artifact — one indistinguishable treatment. */
@@ -88,24 +96,19 @@ type DetailState =
   | { kind: "failed"; question: string }
   | { kind: "ready"; payload: ReadyPayload };
 
-type ReadyPayload = {
-  runId: string;
-  /**
-   * ADD-TO-TEAM-PROJECT §S — kept on the payload because the "Add to Team
-   * Project" action is OWNER-ONLY. A `personal_reviewer` can read this page,
-   * and the server would reject them on source ownership anyway, but a
-   * visible affordance that always fails is a defect, not a safeguard.
-   */
-  viewerRole: "owner" | "personal_reviewer";
-  question: string;
-  results: ModelResult[];
-  adaptive: ReturnType<typeof adaptPersistedOutputToPanelPayload> | null;
-  restoreNotice: string | null;
-  synthesisReport: unknown;
-  synthesisConsensusSummary: unknown;
-  orgGovernanceStatus: "approved" | "needs_review" | "blocked" | null;
-  governance: unknown;
-};
+/**
+ * TEAM-RESEARCH-PARITY-R2 — the shared, interpreted presentation, narrowed to
+ * the Personal roles this address renders. ADD-TO-TEAM-PROJECT §S — the role is
+ * kept because "Add to Team Project" is OWNER-ONLY: a `personal_reviewer` can
+ * read this page, and the server would reject them on source ownership anyway,
+ * but a visible affordance that always fails is a defect, not a safeguard.
+ */
+type ReadyPayload = PersistedResearchPresentation & { viewerRole: PersonalViewerRole };
+
+/** The Personal-vs-Team ADDRESS decision stays here (R2 §O); the shared interpreter only validates the four-role enum. */
+function toPersonalViewerRole(role: PersistedResearchPresentation["viewerRole"]): PersonalViewerRole | null {
+  return PERSONAL_VIEWER_ROLES.has(role) ? (role as PersonalViewerRole) : null;
+}
 
 export default function PersonalResearchDetailShell({ runId }: { runId: string }) {
   const { user, authReady } = useAuth();
@@ -219,101 +222,40 @@ export default function PersonalResearchDetailShell({ runId }: { runId: string }
         }
 
         /**
-         * C1 §B — POSITIVE acceptance, not absence of refusal.
-         *
-         * Route containment first: a known Team role is a real artifact on the
-         * wrong address, so it gets the concealed treatment. Everything that is
-         * not one of the two Personal roles then fails CLOSED as malformed —
-         * including a missing or non-string role, which is an internal
-         * response-contract failure and not evidence about the run.
+         * C1 §B — route containment FIRST, on the raw body, and owned HERE: a
+         * known Team role is a real artifact on the wrong address, so it gets
+         * the concealed treatment before any interpretation. Everything else is
+         * then interpreted by the shared, pure `interpretPersistedRunReadPayload`
+         * (R2 §D/§E), which fails CLOSED as malformed on a missing/unknown role,
+         * a missing/mismatched run id, or a completed run with nothing to show.
          */
         if (typeof data.viewerRole === "string" && TEAM_VIEWER_ROLES.has(data.viewerRole)) {
           setState({ kind: "unavailable" });
           return;
         }
-        if (typeof data.viewerRole !== "string" || !PERSONAL_VIEWER_ROLES.has(data.viewerRole)) {
+        const interpreted = interpretPersistedRunReadPayload(data, runId);
+        if (interpreted.kind === "malformed") {
           setState({ kind: "malformed" });
           return;
         }
-        /**
-         * C1 §A — the route id chooses WHAT TO REQUEST; the response id proves
-         * WHAT WAS RETURNED. A successful payload must therefore carry the run id
-         * itself, and it must be the one asked for. Previously a 200 with an
-         * absent/blank/non-string id was accepted and the route id was
-         * substituted into the payload — manufacturing response identity from the
-         * request, which is exactly what this check exists to prevent.
-         */
-        if (typeof data.runId !== "string" || data.runId.length === 0 || data.runId !== runId) {
-          setState({ kind: "malformed" });
+        // Defensive second containment: the interpreter accepts exactly four
+        // roles and the two Team roles were concealed above, so only the two
+        // Personal roles can reach here. Never rendered as a Personal report
+        // otherwise.
+        const viewerRole = toPersonalViewerRole(interpreted.kind === "ready" ? interpreted.presentation.viewerRole : interpreted.viewerRole);
+        if (viewerRole === null) {
+          setState({ kind: "unavailable" });
           return;
         }
-
-        const question = typeof data.question === "string" ? data.question : "";
-        const status = typeof data.status === "string" ? data.status : "";
-        if (status === "queued" || status === "running") {
-          setState({ kind: "in_progress", question });
+        if (interpreted.kind === "in_progress") {
+          setState({ kind: "in_progress", question: interpreted.question });
           return;
         }
-        if (status === "error" || status === "failed") {
-          setState({ kind: "failed", question });
+        if (interpreted.kind === "failed") {
+          setState({ kind: "failed", question: interpreted.question });
           return;
         }
-
-        // Same envelope ORDER the root uses: adaptive, then procedural
-        // legacy-adaptive, then legacy results. `adaptive.status === "absent"` is
-        // NOT proof a run is ordinary legacy research — it is also correct for
-        // every procedural run, which is what previously leaked structured JSON
-        // into prose synthesis.
-        let adaptive: ReadyPayload["adaptive"] = null;
-        let restoreNotice: string | null = null;
-        if (data.adaptive?.status === "valid" && data.adaptive.output) {
-          adaptive = adaptPersistedOutputToPanelPayload(data.adaptive.output, {
-            humanReview: data.adaptive.humanReview,
-            reviewRouting: data.adaptive.reviewRouting,
-          });
-        } else if (data.legacyAdaptive?.status === "valid" && data.legacyAdaptive.output) {
-          adaptive = adaptPersistedLegacyOutputToPanelPayload(data.legacyAdaptive.output);
-        } else if (
-          data.adaptive?.status === "malformed" ||
-          data.legacyAdaptive?.status === "malformed"
-        ) {
-          restoreNotice =
-            "This run's structured result couldn't be restored — showing the raw model responses instead.";
-        } else if (
-          data.adaptive?.status === "unsupported_version" ||
-          data.legacyAdaptive?.status === "unsupported_version"
-        ) {
-          restoreNotice =
-            "This run's structured result was saved by a newer version of ConvergePanel — showing the raw model responses instead.";
-        }
-
-        const results = Array.isArray(data.results) ? (data.results as ModelResult[]) : [];
-        // A completed artifact with neither a structured result nor usable legacy
-        // rows cannot be shown honestly. It is NOT "you haven't run this yet".
-        if (!adaptive && results.length === 0) {
-          setState({ kind: "malformed" });
-          return;
-        }
-
-        const og = data.governanceStatus;
-        setState({
-          kind: "ready",
-          payload: {
-            // Proven above to be a nonempty string equal to the requested id.
-            runId: data.runId,
-            // Proven above to be exactly one of the two Personal roles.
-            viewerRole: data.viewerRole === "owner" ? "owner" : "personal_reviewer",
-            question,
-            results,
-            adaptive,
-            restoreNotice,
-            synthesisReport: data.synthesisCache?.report ?? null,
-            synthesisConsensusSummary: data.synthesisCache?.consensusSummary ?? null,
-            orgGovernanceStatus:
-              og === "approved" || og === "needs_review" || og === "blocked" ? og : null,
-            governance: data.governance ?? undefined,
-          },
-        });
+        setState({ kind: "ready", payload: { ...interpreted.presentation, viewerRole } });
       } catch {
         // An aborted obsolete request must not surface an error of its own.
         if (!owns()) return;
@@ -492,45 +434,21 @@ export default function PersonalResearchDetailShell({ runId }: { runId: string }
               . Your Personal report is unchanged.
             </p>
           )}
-          {state.payload.restoreNotice && (
-            <p className="mt-3 rounded-lg border border-cp-border bg-cp-raised px-3 py-2 text-sm text-cp-muted">
-              {state.payload.restoreNotice}
-            </p>
-          )}
-          <div className="mt-6">
-            <ResultsDisplay
-              results={state.payload.results}
-              synthesizedReport={null}
-              question={state.payload.question}
-              runId={state.payload.runId}
-              adaptive={state.payload.adaptive}
-              synthesisStatus={state.payload.synthesisReport ? "complete" : "idle"}
-              synthesisReport={state.payload.synthesisReport}
-              synthesisConsensusSummary={state.payload.synthesisConsensusSummary as never}
-              orgGovernanceStatus={state.payload.orgGovernanceStatus}
-              teamGovernance={state.payload.governance as never}
-              /*
-                §AO — this is a durable READ surface. `onRerun`/`onAddModel` are
-                required props whose real behaviour is the research execution
-                pipeline, which must not be duplicated here. `readOnlyActions`
-                makes those execution affordances render as an honest pointer back
-                to the composer instead of buttons whose copy promises a re-run
-                they would not perform. The callbacks stay required by the existing
-                prop contract and are never invoked in this mode.
-              */
-              readOnlyActions
-              onRerun={() => {}}
-              onAddModel={() => {}}
-              /*
-                C1 §J/§N/§R — read-only refers to DIRECT research execution. These
-                two actions execute nothing here: they hand off to the established
-                root flows, which is what keeps the durable report from being a
-                weaker version of the saved-research experience.
-              */
-              onVerifyClaim={handleVerifyClaim}
-              onRunFollowUp={handleRunFollowUp}
-            />
-          </div>
+          {/*
+            TEAM-RESEARCH-PARITY-R2 — the report itself (restore notice, read-only
+            ResultsDisplay with synthesis generation DISABLED, adaptive
+            presentation) is the shared persisted-result view. §AO / C1 §J/§N/§R —
+            read-only refers to DIRECT research execution: the two delegated
+            actions execute nothing here, they hand off to the established root
+            flows, which is what keeps the durable report from being a weaker
+            version of the saved-research experience.
+          */}
+          <PersistedResearchResultView
+            presentation={state.payload}
+            onVerifyClaim={handleVerifyClaim}
+            onRunFollowUp={handleRunFollowUp}
+            readOnlyExecutionTarget={PERSONAL_READ_ONLY_EXECUTION_TARGET}
+          />
         </>
       )}
     </main>

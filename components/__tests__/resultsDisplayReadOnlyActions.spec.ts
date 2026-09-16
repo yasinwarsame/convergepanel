@@ -102,9 +102,17 @@ describe("ResultsDisplay — readOnlyActions", () => {
   it("the read-only branch replaces those actions rather than leaving copy that promises a re-run it cannot perform", () => {
     const i = CURRENT.indexOf("{readOnlyActions ? (");
     expect(i).toBeGreaterThan(-1);
-    const readOnlyBranch = CURRENT.slice(i, CURRENT.indexOf(") : (", i));
+    // The branch now nests a second conditional (R2-C1), so slice to the OUTER
+    // `) : (` that opens the composer buttons, i.e. the one followed by "Re-run".
+    const buttonsStart = CURRENT.indexOf("Re-run Same Panel", i);
+    const readOnlyBranch = CURRENT.slice(i, CURRENT.lastIndexOf(") : (", buttonsStart));
     expect(readOnlyBranch).toContain("To run this question again");
-    expect(readOnlyBranch).toContain('href="/"');
+    // TEAM-RESEARCH-PARITY-R2-C1 — the destination is DELEGATED by the caller
+    // (`readOnlyExecutionTarget`); a hard-coded root href would be Personal
+    // navigation baked into a renderer that is now shared with Team.
+    expect(readOnlyBranch).not.toContain('href="/"');
+    expect(readOnlyBranch).toContain("href={readOnlyExecutionTarget.href}");
+    expect(readOnlyBranch).toContain("This saved report is read-only.");
     expect(readOnlyBranch).not.toContain("Re-run Same Panel");
     expect(readOnlyBranch).not.toContain("onRerun");
     expect(readOnlyBranch).not.toContain("onAddModel");
