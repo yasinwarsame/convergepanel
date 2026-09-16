@@ -7,21 +7,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { resolveRequestIdentity } from "@/lib/auth/resolveRequestIdentity";
 import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelemetry";
 import { adminDb } from "@/lib/firebase/admin";
-import type { RunDocument } from "@/lib/panel/schemas";
-import type { ModelId } from "@/lib/types";
-import { runDocumentToPublicResults } from "@/lib/user/runDocumentToPublicResults";
-import { publicizePanelResults } from "@/lib/panel/publicize";
-import { parsePersistedAdaptiveOutput, parsePersistedLegacyAdaptiveOutput } from "@/lib/adaptiveSchema/persistedOutput";
-import { parseGovernanceRecord, isHumanReviewStatusReviewable } from "@/lib/adaptiveSchema/governanceRecordParser";
-import { loadUserAndTeam } from "@/lib/teams/teamApiAuth";
-import { getAdaptiveTeamRunProjection } from "@/lib/firestore/teamRuns";
+import { parseGovernanceRecord } from "@/lib/adaptiveSchema/governanceRecordParser";
 import { getAdaptiveHumanReviewAssignment } from "@/lib/firestore/runs";
 import { resolveAdaptiveRunAccess } from "@/lib/governance/adaptiveRunAccess";
 import { validateRunWorkspaceAssociation } from "@/lib/workspaces/runWorkspaceIntegrity";
 import { classifyRunWorkspaceBindingShape } from "@/lib/workspaces/classifyRunWorkspaceBindingShape";
 import { resolveTeamRunWorkspaceAccess, type ResolveTeamRunWorkspaceAccessResult } from "@/lib/workspaces/resolveTeamRunWorkspaceAccess";
 import { classifyProjectIdFieldState } from "@/lib/projects/runProjectNormalizationEligibility";
-import { attachDeepResearchClaimIds } from "@/lib/verification/attachDeepResearchClaimIds";
+import { deriveTeamRunViewerRole } from "@/lib/workspaces/deriveTeamRunViewerRole";
+import { buildRunReadPayload, type RunReadViewerRole } from "@/lib/runs/runReadPayload";
+import { resolveRunReviewRouting } from "@/lib/runs/resolveRunReviewRouting";
 import { logger } from "@/lib/logger";
 
 type TeamAccessDenied = Extract<ResolveTeamRunWorkspaceAccessResult, { granted: false }>;
@@ -176,7 +171,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
     );
   }
 
-  let viewerRole: "owner" | "personal_reviewer" | "team_member" | "team_reviewer";
+  let viewerRole: RunReadViewerRole;
 
   if (classified.kind === "non_personal_bound") {
     // Team candidate path — entirely separate from the Personal/legacy
@@ -221,27 +216,20 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
 
     // Team reviewer eligibility — a SEPARATE, additional gate on top of
     // the base `research.read` grant above, never a substitute for it and
-    // never itself sufficient alone. Mirrors (never modifies)
-    // `resolveAdaptiveRunAccess()`'s own reviewable-state predicate
-    // (`isHumanReviewStatusReviewable`) rather than duplicating its
-    // logic. ALL of the following must hold for `team_reviewer`:
+    // never itself sufficient alone. Team Research Parity, Phase R1 — the
+    // predicate itself now lives in `deriveTeamRunViewerRole()` (shared
+    // with the Team research detail API) and is unchanged: ALL of
     // `research.read` (already established above), the Workspace
     // `reviews.submit` capability, a canonical per-run assignment naming
-    // this uid, and a currently-reviewable human-review status. A Team
-    // Workspace membership role literally named "reviewer" grants
-    // nothing here on its own — only the capability + assignment +
-    // review-state combination does. Any one condition missing yields
-    // `team_member`, never a partial/intermediate role.
-    const [assignmentResult, preAccessGovernance] = await Promise.all([
-      getAdaptiveHumanReviewAssignment(runId),
-      Promise.resolve(parseGovernanceRecord(data.governanceRecord)),
-    ]);
-    const isAssignedReviewer = assignmentResult.status === "found" && assignmentResult.assignment.assignedReviewerUserId === uid;
-    const hasReviewsSubmit = access.capabilities.includes("reviews.submit");
-    const humanReviewStatus = preAccessGovernance.ok ? preAccessGovernance.record.humanReview.status : null;
-    const isReviewableState = humanReviewStatus !== null && isHumanReviewStatusReviewable(humanReviewStatus);
-
-    viewerRole = isAssignedReviewer && hasReviewsSubmit && isReviewableState ? "team_reviewer" : "team_member";
+    // this uid, and a currently-reviewable human-review status must hold
+    // for `team_reviewer`; any one missing yields `team_member`.
+    const assignmentResult = await getAdaptiveHumanReviewAssignment(runId);
+    viewerRole = deriveTeamRunViewerRole({
+      uid,
+      capabilities: access.capabilities,
+      assignmentResult,
+      governanceRecord: data.governanceRecord,
+    });
   } else {
     // classified.kind === "legacy" | "personal" — the ORIGINAL,
     // byte-unchanged Personal/legacy path. `validateRunWorkspaceAssociation()`
@@ -307,251 +295,22 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
     }
   }
 
-  const runDocument = data.runDocument as RunDocument | undefined;
-  let results = runDocumentToPublicResults(runDocument);
-  if (results.length === 0 && Array.isArray(data.results)) {
-    results = publicizePanelResults(data.results as unknown[]) as unknown as typeof results;
-  }
-
-  const question = String(data.question ?? "");
-  const selectedModels = (Array.isArray(data.selectedModels) ? data.selectedModels : []) as ModelId[];
-  const status = typeof data.status === "string" ? data.status : undefined;
-
-  const synthesisCache =
-    data.synthesizedStructuredReport && data.schemaVersion === 1
-      ? {
-          report: data.synthesizedStructuredReport,
-          schemaVersion: 1 as const,
-          synthesizedBy: (data.synthesizedBy as string) || "cached",
-          consensusSummary: data.synthesisConsensusSummary ?? null,
-        }
-      : null;
-
-  const rawGovStatus = data.governanceStatus;
-  const orgGovernanceStatus =
-    rawGovStatus === "approved" || rawGovStatus === "needs_review" || rawGovStatus === "blocked"
-      ? rawGovStatus
-      : null;
-
-  const g = data.teamGovernance as
-    | {
-        policyFlags?: string[];
-        blocked?: boolean;
-        blockMessage?: string;
-        governanceReviewRequired?: boolean;
-      }
-    | undefined;
-
-  const governance =
-    g &&
-    (g.policyFlags?.length ||
-      g.blocked ||
-      g.governanceReviewRequired ||
-      (g.blockMessage && String(g.blockMessage).length > 0))
-      ? {
-          governanceReviewRequired: !!g.governanceReviewRequired,
-          blockedByPolicy: !!g.blocked,
-          policyBlockMessage: g.blockMessage ? String(g.blockMessage) : undefined,
-          policyFlags: Array.isArray(g.policyFlags) ? g.policyFlags : undefined,
-        }
-      : null;
-
-  // Query-Routing Redesign, Phase 1 — validate the persisted adaptive
-  // envelope (if any) through the real runtime parser, never an unchecked
-  // cast of Firestore data. Never reruns models or reclassifies to recover
-  // from absent/malformed/unsupported-version data — those three states
-  // are all legitimate, non-error outcomes the client renders distinctly.
-  const parsedAdaptive = parsePersistedAdaptiveOutput(data.adaptiveOutput);
-
-  // Adaptive Synthesis Report, Phase 1 (docs/adaptive-synthesis-report-design.md
-  // §4.1) — the top summary bar's "Status" field needs the real human-review
-  // state on reload, not just whether a record exists. Only ever meaningful
-  // when a real adaptiveOutput was persisted (governance is never initialized
-  // otherwise — see governanceInitialization.ts). Compact fields only, same
-  // discipline as humanReviewHistory: never reviewer name or comment text.
-  const parsedGovernance = parsedAdaptive.ok ? parseGovernanceRecord(data.governanceRecord) : { ok: false as const };
-  const humanReview = parsedGovernance.ok
-    ? {
-        status: parsedGovernance.record.humanReview.status,
-        conditions: parsedGovernance.record.humanReview.conditions,
-        decidedVia: parsedGovernance.record.humanReview.decidedVia,
-      }
-    : null;
-
-  // `reviewRouting` distinguishes "still awaiting a reviewer" from "no
-  // review was ever configured for this run" (see reportStatus.ts) — only
-  // resolved when it actually changes the displayed status (still
-  // unreviewed/pending); a decided run's status is unambiguous without it,
-  // so this skips the extra reads for the common case of an already-decided
-  // reload. Checks the SAME persisted teamRuns projection the live run
-  // response's "in_queue" was derived from (getAdaptiveTeamRunProjection),
-  // rather than a discarded/"unknown" placeholder — a team run's queue
-  // membership is real, durable Firestore state, not something only known
-  // at the moment the run completed.
-  //
-  // "not_configured" is returned ONLY when the absence of review routing is
-  // positively confirmed (no team, or a confirmed-missing projection).
-  // Every other outcome — a Firestore read failure
-  // (getAdaptiveTeamRunProjection never throws; "firestore_unavailable"/
-  // "read_failed" come back as ordinary return values, not exceptions, so
-  // they must be checked explicitly here, not just caught), a malformed or
-  // forged projection document (same defensive field-checking
-  // getAdaptiveTeamRunProjection's own doc comment requires of every
-  // caller, mirroring app/api/teams/adaptive-runs/[runId]/route.ts's
-  // authorization check), or an unexpected thrown error — resolves to
-  // "unknown", never "not_configured". reportStatus.ts already renders
-  // "unknown" identically to "in_queue" ("Unreviewed — in queue"), so this
-  // fails closed toward "still needs attention" rather than the false
-  // "no review configured" claim a positive-sounding default would make.
-  // This block is read-only: it never creates or mutates a teamRuns
-  // projection, and never touches governanceRecord.
-  let reviewRouting: "in_queue" | "not_configured" | "unknown" = "unknown";
-  if (humanReview && (humanReview.status === "unreviewed" || humanReview.status === "pending")) {
-    const requestId = req.headers.get("x-vercel-id") ?? req.headers.get("x-request-id") ?? undefined;
-    try {
-      // Always the RUN OWNER's team/assignment context, never the
-      // viewer's — reviewRouting describes the run's own review-routing
-      // state, which is identical no matter who is looking at it. Using
-      // `uid` here would be wrong whenever the viewer is an assigned
-      // personal reviewer (a different account from the owner): it would
-      // resolve the REVIEWER's own team membership instead, which has
-      // nothing to do with this run.
-      const teamCtx = await loadUserAndTeam(owner);
-      if (!teamCtx?.team) {
-        // Reviewer Assignment Propagation — a personal (non-team) run can
-        // still have a real, canonical humanReviewAssignment (see
-        // lib/governance/personalReviewerAssignment.ts). Checked here too,
-        // not just at run-completion time, so a reload never regresses to
-        // the false "no review configured" claim for a run that already
-        // has one. A genuine read failure degrades to "unknown" (fails
-        // closed), never "not_configured" — same discipline as the team
-        // branch below.
-        const assignmentResult = await getAdaptiveHumanReviewAssignment(runId);
-        if (assignmentResult.status === "found" && assignmentResult.assignment.assignedReviewerUserId) {
-          reviewRouting = "in_queue";
-        } else if (assignmentResult.status === "unassigned") {
-          reviewRouting = "not_configured";
-        } else {
-          logger.warn("[user/runs] Personal reviewer-assignment lookup failed during history reload", {
-            runId,
-            errorCategory: assignmentResult.status,
-          });
-          reviewRouting = "unknown";
-        }
-      } else {
-        const projectionResult = await getAdaptiveTeamRunProjection(teamCtx.team.id, runId);
-        if (projectionResult.status === "not_found") {
-          reviewRouting = "not_configured";
-        } else if (projectionResult.status === "found") {
-          const projection = projectionResult.projection;
-          const projectionValid =
-            projection.projectionVersion === 1 &&
-            projection.adaptive === true &&
-            typeof projection.teamId === "string" &&
-            projection.teamId === teamCtx.team.id &&
-            typeof projection.runId === "string" &&
-            projection.runId === runId;
-          if (projectionValid) {
-            reviewRouting = "in_queue";
-          } else {
-            logger.warn("[user/runs] Malformed or forged adaptive team-run projection during history reload", {
-              runId,
-              teamId: teamCtx.team.id,
-              errorCategory: "malformed_projection",
-              requestId,
-            });
-            reviewRouting = "unknown";
-          }
-        } else {
-          // "firestore_unavailable" / "read_failed" — a genuine, unresolved
-          // lookup failure, not a confirmed absence of review config.
-          logger.warn("[user/runs] Adaptive team-run projection lookup failed during history reload", {
-            runId,
-            teamId: teamCtx.team.id,
-            errorCategory: projectionResult.status,
-            requestId,
-          });
-          reviewRouting = "unknown";
-        }
-      }
-    } catch (err: unknown) {
-      logger.warn("[user/runs] reviewRouting resolution threw during history reload", {
-        runId,
-        errorCategory: "unresolved_lookup_error",
-        errorMessage: err instanceof Error ? err.message : "unknown_error",
-        requestId,
-      });
-      reviewRouting = "unknown";
-    }
-  }
-
-  // Phase 11A.4 — response-time only (see attachDeepResearchClaimIds()'s
-  // own doc comment): this route never writes, so there is no persistence
-  // risk here, but the same non-mutating helper is reused for a single
-  // source of the augmentation logic shared with the live run path in
-  // lib/runPanelExecution.ts.
-  const adaptiveOutputForResponse =
-    parsedAdaptive.ok && parsedAdaptive.output.schemaId === "deep_research"
-      ? { ...parsedAdaptive.output, result: attachDeepResearchClaimIds(runId, parsedAdaptive.output.result) }
-      : parsedAdaptive.ok
-        ? parsedAdaptive.output
-        : null;
-  const adaptive = parsedAdaptive.ok
-    ? { status: "valid" as const, output: adaptiveOutputForResponse, humanReview, reviewRouting }
-    : { status: parsedAdaptive.reason, output: null, humanReview: null, reviewRouting: "unknown" as const };
-
-  // Phase 2 pilot history-reload fix, widened in Batch 3 persistence
-  // foundation (2C-1) — validate the SEPARATE `legacyAdaptiveOutput` field
-  // (the 8-member legacy-active schema family; see persistedOutput.ts's
-  // PersistedLegacyAdaptiveOutputV1 doc) through its own real runtime
-  // parser, same discipline as `adaptive` above. Never conflated with
-  // `adaptive.status` — a run can be `adaptive.status === "absent"` (no
-  // Milestone-2 envelope, correctly, since this family never has one) while
-  // `legacyAdaptive.status === "valid"` at the same time; the client uses
-  // `legacyAdaptive` as the true signal that this WAS a schema-routed run,
-  // never `adaptive.status` alone (see app/page.tsx's openHistoryItem). No
-  // change needed here or in the adapter/client — both already read
-  // `schemaId` generically off the parsed output.
-  const parsedLegacyAdaptive = parsePersistedLegacyAdaptiveOutput(data.legacyAdaptiveOutput);
-  const legacyAdaptive = parsedLegacyAdaptive.ok
-    ? { status: "valid" as const, output: parsedLegacyAdaptive.output }
-    : { status: parsedLegacyAdaptive.reason, output: null };
-
-  // Governance Follow-Up Hardening — a personal reviewer needs each
-  // model's answer text to make a review decision, but not per-model
-  // token/latency counts (operational metadata, not review content; found
-  // during the PR #33 production canary). Owner behavior is completely
-  // unchanged. Field-by-field removal, not a schema change: `results`
-  // stays the same shape and length either way, just missing these two
-  // keys for a personal_reviewer response. Team Shared Run Detail, Phase
-  // 8C-B3.1 — `team_reviewer` gets the identical redaction, for the
-  // identical reason (review-integrity, not general privacy); a plain
-  // `team_member` gets the full, owner-equivalent shape, matching
-  // `research.read`'s intent of genuine shared visibility into the
-  // team's own research.
-  const resultsForResponse =
-    viewerRole === "personal_reviewer" || viewerRole === "team_reviewer"
-      ? results.map(({ tokenUsage: _tokenUsage, latencyMs: _latencyMs, ...rest }) => rest)
-      : results;
-
-  return NextResponse.json({
-    ok: true,
+  // Team Research Parity, Phase R1 — the response body is built by the ONE
+  // shared, presentation-only builder (`buildRunReadPayload`), extracted
+  // verbatim from this route so the Team research detail API emits the
+  // identical research payload for the same run document. Authorization
+  // and `viewerRole` were decided above; the builder never authorizes,
+  // writes, regenerates synthesis or executes models. `reviewRouting` I/O
+  // (`resolveRunReviewRouting`, likewise extracted verbatim) is injected
+  // and still runs only for a still-unreviewed/pending human review.
+  const requestId = req.headers.get("x-vercel-id") ?? req.headers.get("x-request-id") ?? undefined;
+  const payload = await buildRunReadPayload({
     runId,
-    // Personal Reviewer Inbox + Action Flow — lets the client distinguish
-    // "this is my own report" from "I am reviewing someone else's report"
-    // so it can hide owner-only controls (export, rerun) and show the
-    // review decision UI instead. The rest of the response is otherwise
-    // identical, except `results[].tokenUsage`/`latencyMs` are omitted for
-    // personal_reviewer/team_reviewer (see resultsForResponse above).
+    data,
     viewerRole,
-    question,
-    selectedModels,
-    status,
-    results: resultsForResponse,
-    synthesisCache,
-    governance,
-    governanceStatus: orgGovernanceStatus,
-    adaptive,
-    legacyAdaptive,
+    requestId,
+    resolveReviewRouting: resolveRunReviewRouting,
   });
+
+  return NextResponse.json(payload);
 }
