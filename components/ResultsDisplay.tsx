@@ -40,6 +40,7 @@ import type { SynthesisConsensusSummaryDetail } from "@/lib/verification/consens
 import ModelChip from "@/components/ModelChip";
 import { sanitizeModelText, truncateForSynthesis, MAX_CHARS_SYNTHESIS_PER_MODEL } from "@/lib/panel/sanitizeText";
 import { classifyClusterType, isAnalysisReady } from "@/lib/synthesis/trustSummary";
+import { shouldAutoTriggerSynthesis } from "@/lib/synthesis/autoSynthesisTrigger";
 import { useAuth } from "@/components/AuthProvider";
 import type {
   AdaptiveGateResult,
@@ -689,6 +690,23 @@ interface ResultsDisplayProps {
    * included — is byte-identically unaffected.
    */
   readOnlyActions?: boolean;
+  /**
+   * TEAM-RESEARCH-PARITY-R2 §L — may this render automatically START structured
+   * synthesis (`POST /api/synthesize-panel`) for the run it shows?
+   *
+   * A SEPARATE contract from `readOnlyActions`, which governs execution
+   * AFFORDANCES (buttons). This governs a SIDE EFFECT: the auto-trigger below
+   * used to fire on any mount with two successful rows, an idle status and no
+   * cached synthesis — including the durable READ page, which therefore
+   * generated and persisted a synthesis merely because a saved report was
+   * opened. Durable persisted-result surfaces pass `false`; when false, nothing
+   * is POSTed, the auto-trigger set is never marked, and only the persisted
+   * synthesis (if any) is shown.
+   *
+   * Optional, defaulted to `true`, so the live composer and every existing call
+   * site keep their automatic synthesis behaviour unchanged.
+   */
+  allowSynthesisGeneration?: boolean;
 }
 
 /**
@@ -725,6 +743,7 @@ export default function ResultsDisplay({
   onVerifyClaim,
   focusClaimId,
   readOnlyActions = false,
+  allowSynthesisGeneration = true,
 }: ResultsDisplayProps) {
   const { user, authReady } = useAuth();
   const results = Array.isArray(resultsProp) ? resultsProp : [];
@@ -967,13 +986,20 @@ export default function ResultsDisplay({
     // 4. We haven't already triggered it for this runId
     const okResults = results.filter(r => (r.status === "ok" || r.status === "substituted") && getModelText(r).trim().length > 0);
     
+    // R2 §L — the pre-existing six conditions plus the synthesis-generation
+    // policy, decided by the one pure helper so a read surface can prove the
+    // effect is inert without mounting this renderer.
     if (
-      okResults.length >= 2 &&
       runId &&
-      !autoTriggeredRunIdsRef.current.has(runId) &&
-      synthesisStatus === "idle" &&
-      !preGeneratedSynthesisReport &&
-      !adaptive
+      shouldAutoTriggerSynthesis({
+        okResultCount: okResults.length,
+        runId,
+        alreadyTriggered: autoTriggeredRunIdsRef.current.has(runId),
+        synthesisStatus,
+        hasPreGeneratedReport: !!preGeneratedSynthesisReport,
+        hasAdaptive: !!adaptive,
+        allowSynthesisGeneration,
+      })
     ) {
       console.log("[ResultsDisplay] Auto-triggering structured synthesis generation", {
         runId,
@@ -1021,7 +1047,7 @@ export default function ResultsDisplay({
           });
       }
     }
-  }, [results, runId, synthesisStatus, preGeneratedSynthesisReport, question, adaptive]);
+  }, [results, runId, synthesisStatus, preGeneratedSynthesisReport, question, adaptive, allowSynthesisGeneration]);
 
   if (results.length === 0) {
     return (

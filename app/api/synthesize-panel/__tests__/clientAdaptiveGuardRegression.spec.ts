@@ -86,9 +86,14 @@ describe("app/page.tsx — client-side adaptive guard regression (source-level)"
 });
 
 describe("components/ResultsDisplay.tsx — pre-existing adaptive guard preserved", () => {
-  it("still guards its own internal auto-synthesis trigger on !adaptive, unmodified by this step", () => {
+  it("still guards its own internal auto-synthesis trigger on the adaptive result — now through the shared policy helper (TEAM-RESEARCH-PARITY-R2 §L), which returns false whenever hasAdaptive is true", () => {
+    // R2 moved the six pre-existing conditions (≥2 ok rows, runId, not already
+    // triggered, idle, no pre-generated report, no adaptive result) into
+    // `shouldAutoTriggerSynthesis()` (lib/synthesis/autoSynthesisTrigger.ts,
+    // unit-tested there) and added the synthesis-generation policy. The
+    // adaptive guard is preserved as the `hasAdaptive: !!adaptive` input.
     const match = RESULTS_DISPLAY_SOURCE.match(
-      /okResults\.length >= 2 &&\s*runId &&\s*!autoTriggeredRunIdsRef\.current\.has\(runId\) &&\s*synthesisStatus === "idle" &&\s*!preGeneratedSynthesisReport &&\s*!adaptive/
+      /runId &&\s*shouldAutoTriggerSynthesis\(\{\s*okResultCount: okResults\.length,\s*runId,\s*alreadyTriggered: autoTriggeredRunIdsRef\.current\.has\(runId\),\s*synthesisStatus,\s*hasPreGeneratedReport: !!preGeneratedSynthesisReport,\s*hasAdaptive: !!adaptive,\s*allowSynthesisGeneration,\s*\}\)/
     );
     expect(match).not.toBeNull();
   });
