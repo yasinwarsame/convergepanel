@@ -41,6 +41,7 @@ import ModelChip from "@/components/ModelChip";
 import { sanitizeModelText, truncateForSynthesis, MAX_CHARS_SYNTHESIS_PER_MODEL } from "@/lib/panel/sanitizeText";
 import { classifyClusterType, isAnalysisReady } from "@/lib/synthesis/trustSummary";
 import { shouldAutoTriggerSynthesis } from "@/lib/synthesis/autoSynthesisTrigger";
+import type { AdaptiveAncillaryPresentation } from "@/components/adaptive/adaptiveAncillaryPresentation";
 import { useAuth } from "@/components/AuthProvider";
 import type {
   AdaptiveGateResult,
@@ -725,6 +726,13 @@ interface ResultsDisplayProps {
    * site keep their automatic synthesis behaviour unchanged.
    */
   allowSynthesisGeneration?: boolean;
+  /**
+   * TEAM-RESEARCH-PARITY-R3-P0 — forwarded unchanged to AdaptivePanelResponse.
+   * Absent → Personal default ancillary presentation (export action, export
+   * history, review & governance mount exactly as before). The live composer
+   * and the Personal durable report pass nothing. Never derived here.
+   */
+  adaptiveAncillaryPresentation?: AdaptiveAncillaryPresentation;
 }
 
 /**
@@ -763,6 +771,7 @@ export default function ResultsDisplay({
   readOnlyActions = false,
   readOnlyExecutionTarget = null,
   allowSynthesisGeneration = true,
+  adaptiveAncillaryPresentation,
 }: ResultsDisplayProps) {
   const { user, authReady } = useAuth();
   const results = Array.isArray(resultsProp) ? resultsProp : [];
@@ -1112,6 +1121,7 @@ export default function ResultsDisplay({
           focusClaimId={focusClaimId}
           onRunFollowUp={onRunFollowUp}
           onVerifyClaim={onVerifyClaim}
+          ancillaryPresentation={adaptiveAncillaryPresentation}
         />
       </div>
     );

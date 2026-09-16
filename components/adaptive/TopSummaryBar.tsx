@@ -43,6 +43,7 @@ import {
 import { BadgeTone, Card, TintBadge } from "./shared";
 import AdaptiveExportButton from "./AdaptiveExportButton";
 import AdaptiveExportHistorySection from "./AdaptiveExportHistorySection";
+import { resolveAdaptiveAncillaryPresentation, type AdaptiveAncillaryPresentation } from "./adaptiveAncillaryPresentation";
 
 type ReportStatusKind = ReturnType<typeof deriveReportStatus>["kind"];
 
@@ -67,6 +68,14 @@ export interface TopSummaryBarProps {
   deepResearch?: DeepResearchResult;
   evidenceReview?: EvidenceReviewResult;
   biasBlindspotAudit?: BiasBlindspotAuditResult;
+  /**
+   * TEAM-RESEARCH-PARITY-R3-P0 — who owns the export position. Absent →
+   * Personal default (the export button in the header row and the export
+   * history below the card, exactly as before). `delegated_read_only` →
+   * NEITHER Personal component mounts; only the caller's `exportSurface`
+   * (if any) renders in the export position.
+   */
+  ancillaryPresentation?: AdaptiveAncillaryPresentation;
 }
 
 /** Dot color for the Status field — not a TintBadge tone, since Status is rendered as a dot + wrapping text, not a pill (see TopSummaryBar's own render for why). */
@@ -143,6 +152,13 @@ export default function TopSummaryBar(props: TopSummaryBarProps) {
 
   const statusLabel = status.isOwnerOverride ? `Owner override — ${REPORT_STATUS_LABELS[status.kind]}` : REPORT_STATUS_LABELS[status.kind];
 
+  // R3-P0 — ONE decision for the whole export surface (action AND history),
+  // so a delegated caller can never receive the button without the history
+  // or vice versa.
+  const ancillary = resolveAdaptiveAncillaryPresentation(props.ancillaryPresentation);
+  const exportControl = ancillary.kind === "delegated_read_only" ? (ancillary.exportSurface ?? null) : <AdaptiveExportButton runId={runId} />;
+  const exportHistory = ancillary.kind === "delegated_read_only" ? null : <AdaptiveExportHistorySection runId={runId} />;
+
   return (
     <>
       <Card className="bg-slate-50/60">
@@ -164,7 +180,7 @@ export default function TopSummaryBar(props: TopSummaryBarProps) {
           </span>
         </SummaryField>
 
-        <AdaptiveExportButton runId={runId} />
+        {exportControl}
       </div>
 
       <div className="mt-3 grid grid-cols-2 gap-3 border-t border-slate-200 pt-3 sm:grid-cols-4">
@@ -188,7 +204,7 @@ export default function TopSummaryBar(props: TopSummaryBarProps) {
       </div>
       </Card>
 
-      <AdaptiveExportHistorySection runId={runId} />
+      {exportHistory}
     </>
   );
 }
