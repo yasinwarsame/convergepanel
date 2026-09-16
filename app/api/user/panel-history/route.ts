@@ -3,6 +3,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { isWorkspaceBoundVerificationArtifact } from "@/lib/verification/verificationArtifactScope";
 import { resolveRequestIdentity } from "@/lib/auth/resolveRequestIdentity";
 import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelemetry";
 import { adminDb } from "@/lib/firebase/admin";
@@ -161,6 +162,9 @@ export async function GET(req: NextRequest) {
 
     for (const d of verSnap.docs) {
       const data = d.data() as Partial<ClaimVerificationFirestoreDoc>;
+      // TEAM-VERIFICATION-PARITY-R1 — a Workspace-bound Claim is never a
+      // Personal history item, even for its own creator (scope, not access).
+      if (isWorkspaceBoundVerificationArtifact(data)) continue;
       if (String(data.userId ?? "") !== uid) continue;
       if (data.type != null && data.type !== "claim_verification") continue;
       const sortKey = firestoreMillis(data.timestamp);
@@ -180,6 +184,8 @@ export async function GET(req: NextRequest) {
 
     for (const d of videoSnap.docs) {
       const data = d.data();
+      // TEAM-VERIFICATION-PARITY-R1 — same structural exclusion for Video.
+      if (isWorkspaceBoundVerificationArtifact(data)) continue;
       if (String(data.userId ?? "") !== uid) continue;
       if (data.type != null && data.type !== "video_verification") continue;
       const sortKey = firestoreMillis(data.timestamp);
