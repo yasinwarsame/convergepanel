@@ -35,6 +35,7 @@ import { RunAssigneeDialog } from "@/components/workspace/projects/RunAssigneeDi
 import { useTeamRunAssignee } from "@/hooks/useTeamRunAssignee";
 import { Breadcrumb } from "@/components/shared/Breadcrumb";
 import { GovernanceChip } from "@/components/shared/GovernanceChip";
+import { teamResearchDetailHref } from "@/lib/workspaces/teamResearchDetailHref";
 import { SectionEmptyBox, SectionInitialErrorBox, SectionLoadingRow, SectionPagination } from "@/components/projects/SectionState";
 import {
   useTeamProjectRuns,
@@ -242,7 +243,7 @@ export default function TeamProjectDetailShell({
             {items.map((item) => (
               <li key={item.id} className="flex items-stretch gap-2">
                 <Link
-                  href={`/workspace/team/${encodeURIComponent(workspaceId)}/projects/${encodeURIComponent(project.id)}/research/${encodeURIComponent(item.id)}`}
+                  href={teamResearchDetailHref({ workspaceId, projectId: project.id, runId: item.id })}
                   className="block min-w-0 flex-1 rounded-xl border-2 border-cp-border bg-cp-raised px-3 py-3 hover:border-cp-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent"
                 >
                   <div className="flex items-start justify-between gap-2">
