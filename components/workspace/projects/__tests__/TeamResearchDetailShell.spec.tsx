@@ -351,6 +351,90 @@ describe("race / stale-response protection (§Y)", () => {
     expect(text(r)).toContain("Seen by B");
     expect((mockedAuthedFetch.mock.calls[1][1] as Record<string, unknown>).user).toBe(USER_B);
   });
+
+  // TEAM-RESEARCH-PARITY-R4-T1 — Project identity is part of request ownership.
+  // SAME Workspace, SAME runId, SAME uid: only the Project changes, so neither the
+  // run, Workspace nor uid guard can be what rejects the stale read. Response
+  // containment alone cannot either: A's late body is valid for A's own address.
+  describe("Project A → Project B (same Workspace, same run, same uid)", () => {
+    const PROJECT_A_PROPS: TeamResearchDetailShellProps = { ...PROJECT_PROPS, project: { id: "proj-a", name: "Project A" } };
+    const PROJECT_B_PROPS: TeamResearchDetailShellProps = { ...PROJECT_PROPS, project: { id: "proj-b", name: "Project B" } };
+    const projectABody = () => body({ question: "Question A" }, { projectId: "proj-a", project: { id: "proj-a", name: "Project A", status: "active" } });
+    const projectBBody = () => body({ question: "Question B" }, { projectId: "proj-b", project: { id: "proj-b", name: "Project B", status: "active" } });
+    const URL_A = `/api/workspaces/${WS}/runs/${RUN}?projectId=proj-a`;
+    const URL_B = `/api/workspaces/${WS}/runs/${RUN}?projectId=proj-b`;
+
+    it("Project A → Project B: a new ?projectId=proj-b read starts, B paints, and A's late response never paints", async () => {
+      const a = deferred<ReturnType<typeof response>>();
+      const b = deferred<ReturnType<typeof response>>();
+      mockedAuthedFetch.mockImplementationOnce(() => a.promise).mockImplementationOnce(() => b.promise);
+
+      const r = await mount(PROJECT_A_PROPS);
+      expect(urls()).toEqual([URL_A]);
+      const signalA = (mockedAuthedFetch.mock.calls[0][1] as { signal: AbortSignal }).signal;
+      expect(signalA.aborted).toBe(false);
+
+      await update(r, PROJECT_B_PROPS);
+      // A is still unresolved; the Project change alone started a NEW read for B and aborted A.
+      expect(urls()).toEqual([URL_A, URL_B]);
+      expect((mockedAuthedFetch.mock.calls[1][1] as Record<string, unknown>).user).toBe(USER_A);
+      expect(signalA.aborted).toBe(true);
+      expect((mockedAuthedFetch.mock.calls[1][1] as { signal: AbortSignal }).signal.aborted).toBe(false);
+      expect(viewProps).toHaveLength(0);
+      expect(text(r)).toContain("Loading this research");
+
+      await act(async () => {
+        b.resolve(response(200, projectBBody()));
+      });
+      await flush();
+      expect(text(r)).toContain("Question B");
+
+      await act(async () => {
+        a.resolve(response(200, projectABody()));
+      });
+      await flush();
+
+      // Only B's presentation ever reached the persisted view — A's never did, before or after.
+      expect(viewProps.map((p) => (p.presentation as { question: string }).question)).toEqual(["Question B"]);
+      expect(viewProps.every((p) => (p.presentation as { runId: string }).runId === RUN)).toBe(true);
+      const final = text(r);
+      expect(final).toContain("Question B");
+      expect(final).toContain("Project B");
+      expect(final).toContain(`/workspace/team/${WS}/projects/proj-b`);
+      expect(final).not.toContain("Question A");
+      expect(final).not.toContain("Project A");
+      expect(final).not.toContain("proj-a");
+      expect(r.root.findAllByProps({ "data-testid": "persisted-result-view" })).toHaveLength(1);
+      expect(mockedAuthedFetch).toHaveBeenCalledTimes(2);
+    });
+
+    it("Project A → Project B: A resolving while B is still in flight paints nothing; B then paints alone", async () => {
+      const a = deferred<ReturnType<typeof response>>();
+      const b = deferred<ReturnType<typeof response>>();
+      mockedAuthedFetch.mockImplementationOnce(() => a.promise).mockImplementationOnce(() => b.promise);
+
+      const r = await mount(PROJECT_A_PROPS);
+      await update(r, PROJECT_B_PROPS);
+      expect(urls()).toEqual([URL_A, URL_B]);
+
+      await act(async () => {
+        a.resolve(response(200, projectABody()));
+      });
+      await flush();
+      expect(viewProps).toHaveLength(0);
+      expect(text(r)).not.toContain("Question A");
+      expect(text(r)).toContain("Loading this research");
+
+      await act(async () => {
+        b.resolve(response(200, projectBBody()));
+      });
+      await flush();
+      expect(viewProps.map((p) => (p.presentation as { question: string }).question)).toEqual(["Question B"]);
+      expect(text(r)).toContain("Question B");
+      expect(text(r)).not.toContain("Question A");
+      expect(text(r)).not.toContain("proj-a");
+    });
+  });
 });
 
 describe("result status (§M)", () => {
