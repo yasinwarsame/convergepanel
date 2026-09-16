@@ -3,6 +3,12 @@
  * `ResultsDisplay` is stubbed (it has its own real-render policy suite); what
  * matters here is exactly WHAT the shared view hands down, that it fetches
  * nothing, and that it accepts Team presentations without Personal assumptions.
+ *
+ * LIMITATION (R2-C1): because the renderer is stubbed, this suite cannot see
+ * what the REAL `ResultsDisplay` paints from those props — in particular the
+ * read-only single-model pointer. The authoritative Team-forward-compatibility
+ * proof of the final DOM is `PersistedResearchResultViewRealRender.spec.tsx`;
+ * here we prove the route-neutral DESTINATION CONTRACT is passed down.
  */
 import { createElement } from "react";
 import TestRenderer, { act } from "react-test-renderer";
@@ -140,6 +146,9 @@ describe("PersistedResearchResultView — Team forward-compatibility (§R) and r
   it.each(["team_member", "team_reviewer"] as const)("accepts a %s presentation without assuming Personal ownership and renders no Personal-only controls", (role) => {
     const r = mount({ presentation: presentation({ viewerRole: role }) });
     expect(last()).toMatchObject({ runId: RUN, readOnlyActions: true, allowSynthesisGeneration: false });
+    // R2-C1 — with no delegated destination the renderer receives an EXPLICIT null: no Personal "/" is defaulted.
+    expect(last().readOnlyExecutionTarget).toBeNull();
+    expect("readOnlyExecutionTarget" in last()).toBe(true);
     const text = JSON.stringify(r.toJSON());
     expect(text).not.toContain("Add to Team Project");
     expect(text).not.toContain("Back to Research");
@@ -154,6 +163,13 @@ describe("PersistedResearchResultView — Team forward-compatibility (§R) and r
       seen.add(JSON.stringify(rest));
     }
     expect(seen.size).toBe(1);
+  });
+
+  it("R2-C1 — a delegated read-only execution target is passed through unchanged; role never selects one", () => {
+    mount({ presentation: presentation({ viewerRole: "team_member" }), readOnlyExecutionTarget: { href: "/workspace/team/ws1/research", label: "Team research" } });
+    expect(last().readOnlyExecutionTarget).toEqual({ href: "/workspace/team/ws1/research", label: "Team research" });
+    mount({ presentation: presentation({ viewerRole: "owner" }) });
+    expect(last().readOnlyExecutionTarget).toBeNull();
   });
 
   it("performs no API read and no fetch of its own", () => {

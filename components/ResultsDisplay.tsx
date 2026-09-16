@@ -647,6 +647,16 @@ export type TeamGovernanceBannerProps = {
   policyFlags?: string[];
 } | null;
 
+/**
+ * TEAM-RESEARCH-PARITY-R2-C1 — where a READ-ONLY surface sends the user to run
+ * the question again, when the single-successful-model branch has no execution
+ * to offer. Supplied by the CALLER (the Personal report page passes the root
+ * composer; a Team page may pass its own destination, or nothing). `null` /
+ * absent → no link is rendered at all: this renderer never chooses a route
+ * and never infers Personal-vs-Team context.
+ */
+export type ReadOnlyExecutionTarget = { href: string; label?: string } | null;
+
 interface ResultsDisplayProps {
   results: ModelResult[];
   synthesizedReport: SynthesizedReport | null;
@@ -690,6 +700,14 @@ interface ResultsDisplayProps {
    * included — is byte-identically unaffected.
    */
   readOnlyActions?: boolean;
+  /**
+   * TEAM-RESEARCH-PARITY-R2-C1 — only meaningful with `readOnlyActions`. The
+   * delegated destination for the read-only "run this question again" pointer;
+   * absent/`null` renders neutral read-only copy with NO navigation link. The
+   * previous hard-coded `/` was Personal/root navigation baked into a renderer
+   * that is now shared with Team, so it moved to the Personal caller.
+   */
+  readOnlyExecutionTarget?: ReadOnlyExecutionTarget;
   /**
    * TEAM-RESEARCH-PARITY-R2 §L — may this render automatically START structured
    * synthesis (`POST /api/synthesize-panel`) for the run it shows?
@@ -743,6 +761,7 @@ export default function ResultsDisplay({
   onVerifyClaim,
   focusClaimId,
   readOnlyActions = false,
+  readOnlyExecutionTarget = null,
   allowSynthesisGeneration = true,
 }: ResultsDisplayProps) {
   const { user, authReady } = useAuth();
@@ -1192,13 +1211,18 @@ export default function ResultsDisplay({
             (`readOnlyActions === false`) is the unchanged composer behaviour.
           */}
           {readOnlyActions ? (
-            <p className="text-yellow-800">
-              To run this question again, open it in{" "}
-              <a href="/" className="font-semibold underline hover:no-underline">
-                Research
-              </a>
-              .
-            </p>
+            readOnlyExecutionTarget ? (
+              <p className="text-yellow-800">
+                To run this question again, open it in{" "}
+                <a href={readOnlyExecutionTarget.href} className="font-semibold underline hover:no-underline">
+                  {readOnlyExecutionTarget.label ?? "Research"}
+                </a>
+                .
+              </p>
+            ) : (
+              /* R2-C1 — no delegated destination: honest read-only copy, no link, no disabled buttons. */
+              <p className="text-yellow-800">This saved report is read-only.</p>
+            )
           ) : (
             <div className="flex gap-3">
               <button

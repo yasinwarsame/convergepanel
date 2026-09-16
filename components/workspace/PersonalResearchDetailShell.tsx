@@ -70,6 +70,13 @@ const PERSONAL_VIEWER_ROLES = new Set(["owner", "personal_reviewer"]);
  */
 const TEAM_VIEWER_ROLES = new Set(["team_member", "team_reviewer"]);
 
+/**
+ * R2-C1 — the PERSONAL destination for the read-only single-model "run this
+ * question again" pointer: the root composer. Owned here, never by the shared
+ * renderer, so a Team report can never inherit it.
+ */
+const PERSONAL_READ_ONLY_EXECUTION_TARGET = { href: "/", label: "Research" } as const;
+
 type PersonalViewerRole = "owner" | "personal_reviewer";
 
 type DetailState =
@@ -440,6 +447,7 @@ export default function PersonalResearchDetailShell({ runId }: { runId: string }
             presentation={state.payload}
             onVerifyClaim={handleVerifyClaim}
             onRunFollowUp={handleRunFollowUp}
+            readOnlyExecutionTarget={PERSONAL_READ_ONLY_EXECUTION_TARGET}
           />
         </>
       )}

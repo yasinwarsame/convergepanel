@@ -75,6 +75,15 @@ describe("PersonalResearchDetailShell — R2 read-only synthesis policy", () => 
   });
 });
 
+describe("PersonalResearchDetailShell — R2-C1 Personal read-only execution destination", () => {
+  it("the Personal page supplies the root composer as the read-only single-model destination (Personal owns the '/' route, not the shared renderer)", async () => {
+    await mountWith(okRun({ results: [{ modelId: "chatgpt", status: "ok", rawText: "only answer" }] }));
+    expect(resultsProps).toHaveLength(1);
+    expect(last().readOnlyExecutionTarget).toEqual({ href: "/", label: "Research" });
+    expect(last()).toMatchObject({ readOnlyActions: true, allowSynthesisGeneration: false });
+  });
+});
+
 describe("PersonalResearchDetailShell — R2 containment stays Personal-owned (§O)", () => {
   it.each(["team_member", "team_reviewer"])("a %s response on the Personal address renders the CONCEALED unavailable state, not a report", async (role) => {
     const r = await mountWith(okRun({ viewerRole: role }));

@@ -19,12 +19,14 @@
  *     auto-POSTs `/api/synthesize-panel` — a durable read must render only the
  *     synthesis that was persisted, never create one by being opened.
  *
- * Actions are delegated, never imported: a caller that passes no
- * `onVerifyClaim` / `onRunFollowUp` gets no fabricated hand-off, which is what
- * lets Team choose different or absent actions later.
+ * Actions and destinations are delegated, never imported: a caller that passes
+ * no `onVerifyClaim` / `onRunFollowUp` / `readOnlyExecutionTarget` gets no
+ * fabricated hand-off and no fabricated link, which is what lets Team choose
+ * different or absent actions later. This module imports no router and no
+ * Personal, Team, Workspace or Project href helper.
  */
 
-import ResultsDisplay from "@/components/ResultsDisplay";
+import ResultsDisplay, { type ReadOnlyExecutionTarget } from "@/components/ResultsDisplay";
 import type { PersistedResearchPresentation } from "@/lib/research/persistedRunPresentation";
 
 export type PersistedResearchResultViewProps = {
@@ -33,12 +35,19 @@ export type PersistedResearchResultViewProps = {
   onVerifyClaim?: (args: { runId: string; claimId: string }) => void;
   /** Delegated "Run follow-up" hand-off. Absent → no navigation is fabricated. */
   onRunFollowUp?: (question: string) => void;
+  /**
+   * R2-C1 — delegated destination for the read-only single-model "run this
+   * question again" pointer. Absent → ROUTE-NEUTRAL: no href is fabricated, no
+   * Personal root link, no Team link; execution buttons stay suppressed and
+   * the saved result stays fully readable. Personal supplies its own.
+   */
+  readOnlyExecutionTarget?: ReadOnlyExecutionTarget;
 };
 
 /** The execution callbacks stay required by `ResultsDisplay`'s prop contract; in read-only mode they are never invoked. */
 const noExecution = () => {};
 
-export default function PersistedResearchResultView({ presentation, onVerifyClaim, onRunFollowUp }: PersistedResearchResultViewProps) {
+export default function PersistedResearchResultView({ presentation, onVerifyClaim, onRunFollowUp, readOnlyExecutionTarget }: PersistedResearchResultViewProps) {
   return (
     <>
       {presentation.restoreNotice && (
@@ -59,6 +68,7 @@ export default function PersistedResearchResultView({ presentation, onVerifyClai
           orgGovernanceStatus={presentation.orgGovernanceStatus}
           teamGovernance={presentation.governance as never}
           readOnlyActions
+          readOnlyExecutionTarget={readOnlyExecutionTarget ?? null}
           allowSynthesisGeneration={false}
           onRerun={noExecution}
           onAddModel={noExecution}
