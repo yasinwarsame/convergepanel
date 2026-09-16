@@ -118,6 +118,44 @@ describe("gates, in order", () => {
     expect(mockedAccess).not.toHaveBeenCalled();
   });
 
+  // TEAM-RESEARCH-PARITY-R4-T1 — a PRESENT but invalid bearer is an authentication
+  // failure (auth_error), never "please sign in" (unauthorized), and it stops the
+  // request at the identity boundary: no Workspace access, no run read, no builder.
+  it("401 invalid bearer token → auth_error (not unauthorized); nothing past identity resolution is consulted", async () => {
+    mockedResolveRequestIdentity.mockResolvedValue({ status: "unauthenticated", reason: "invalid_bearer_token" });
+    const runReads = jest.spyOn(runDocs, "has");
+    const res = await get(RUN_ID, `?projectId=${FIXTURE_PROJECT_ID}`, { authorization: "Bearer not-a-valid-firebase-id-token" });
+    const r = await json(res);
+
+    expect(r).toEqual({ status: 401, body: { ok: false, errorCode: "auth_error", message: "Authentication failed." } });
+    // The route handed the real request (with its bearer) to the shared resolver exactly once.
+    expect(mockedResolveRequestIdentity).toHaveBeenCalledTimes(1);
+    expect((mockedResolveRequestIdentity.mock.calls[0][0] as Request).headers.get("authorization")).toBe("Bearer not-a-valid-firebase-id-token");
+    const { logIdentityResolutionFailure } = jest.requireMock("@/lib/auth/identityResolutionTelemetry") as { logIdentityResolutionFailure: jest.Mock };
+    expect(logIdentityResolutionFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ route: "GET /api/workspaces/[workspaceId]/runs/[runId]", method: "GET", failureCategory: "invalid_bearer_token" })
+    );
+    // Short-circuit: no Team authorization, no Firestore lookup, no enrichment, no write.
+    expect(mockedAccess).not.toHaveBeenCalled();
+    expect(runReads).not.toHaveBeenCalled();
+    expect(mockedGetProject).not.toHaveBeenCalled();
+    expect(mockedAssignees).not.toHaveBeenCalled();
+    expect(mockedGetAssignment).not.toHaveBeenCalled();
+    expect(mockedReviewRouting).not.toHaveBeenCalled();
+    expect(writeAttempts).toEqual([]);
+    runReads.mockRestore();
+  });
+
+  it.each(["invalid_session_cookie", "credential_mismatch", "revoked_session", "expired_session"])(
+    "401 %s → auth_error (never unauthorized), no Workspace access",
+    async (reason) => {
+      mockedResolveRequestIdentity.mockResolvedValue({ status: "unauthenticated", reason });
+      const r = await json(await get());
+      expect(r).toEqual({ status: 401, body: { ok: false, errorCode: "auth_error", message: "Authentication failed." } });
+      expect(mockedAccess).not.toHaveBeenCalled();
+    }
+  );
+
   it.each(["", " run", "a/b", "..", `run${NUL}`])("malformed run id %j → concealed run_not_found before any Workspace lookup", async (bad) => {
     const r = await json(await get(bad));
     expect(r).toEqual(CONCEALED);
