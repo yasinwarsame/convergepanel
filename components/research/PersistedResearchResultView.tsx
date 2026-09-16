@@ -27,6 +27,7 @@
  */
 
 import ResultsDisplay, { type ReadOnlyExecutionTarget } from "@/components/ResultsDisplay";
+import type { AdaptiveAncillaryPresentation } from "@/components/adaptive/adaptiveAncillaryPresentation";
 import type { PersistedResearchPresentation } from "@/lib/research/persistedRunPresentation";
 
 export type PersistedResearchResultViewProps = {
@@ -42,12 +43,20 @@ export type PersistedResearchResultViewProps = {
    * the saved result stays fully readable. Personal supplies its own.
    */
   readOnlyExecutionTarget?: ReadOnlyExecutionTarget;
+  /**
+   * R3-P0 — delegated adaptive ancillary presentation (export action, export
+   * history, review & governance). Absent → Personal default, unchanged. A
+   * caller that must not expose Personal ancillary surfaces selects
+   * `delegated_read_only` and supplies its own surfaces; this view never
+   * derives the mode from the presentation's viewerRole.
+   */
+  adaptiveAncillaryPresentation?: AdaptiveAncillaryPresentation;
 };
 
 /** The execution callbacks stay required by `ResultsDisplay`'s prop contract; in read-only mode they are never invoked. */
 const noExecution = () => {};
 
-export default function PersistedResearchResultView({ presentation, onVerifyClaim, onRunFollowUp, readOnlyExecutionTarget }: PersistedResearchResultViewProps) {
+export default function PersistedResearchResultView({ presentation, onVerifyClaim, onRunFollowUp, readOnlyExecutionTarget, adaptiveAncillaryPresentation }: PersistedResearchResultViewProps) {
   return (
     <>
       {presentation.restoreNotice && (
@@ -74,6 +83,7 @@ export default function PersistedResearchResultView({ presentation, onVerifyClai
           onAddModel={noExecution}
           onVerifyClaim={onVerifyClaim}
           onRunFollowUp={onRunFollowUp}
+          adaptiveAncillaryPresentation={adaptiveAncillaryPresentation}
         />
       </div>
     </>

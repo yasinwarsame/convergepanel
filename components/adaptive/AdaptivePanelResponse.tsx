@@ -43,7 +43,8 @@ import BiasBlindspotAuditView from "./BiasBlindspotAuditView";
 import DecisionSupportView from "./DecisionSupportView";
 import ModelResponsesSection from "./ModelResponsesSection";
 import PanelEvidenceSection from "./PanelEvidenceSection";
-import ReviewGovernanceSection from "./ReviewGovernanceSection";
+import ReviewGovernanceSection, { type ReviewGovernanceSectionProps } from "./ReviewGovernanceSection";
+import { resolveAdaptiveAncillaryPresentation, type AdaptiveAncillaryPresentation } from "./adaptiveAncillaryPresentation";
 import PrimarySynthesisStrip from "./PrimarySynthesisStrip";
 import SchemaKeyFactsStrip from "./SchemaKeyFactsStrip";
 import { Card, SectionLabel } from "./shared";
@@ -121,6 +122,12 @@ export interface AdaptivePanelResponseProps extends AdaptiveRendererProps {
   reviewRouting?: ReportStatusInput["reviewRouting"];
   /** PersistedAdaptiveOutputV1.meta — present for the 9 Milestone-2 schemas only (see reportSummary.ts). */
   meta?: CommonResponseMeta;
+  /**
+   * TEAM-RESEARCH-PARITY-R3-P0 — caller-selected ancillary presentation
+   * (export action, export history, review & governance). Absent → Personal
+   * default, byte-for-byte today's behaviour. See `adaptiveAncillaryPresentation.ts`.
+   */
+  ancillaryPresentation?: AdaptiveAncillaryPresentation;
 }
 
 export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps) {
@@ -172,6 +179,17 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
     return <LimitationNotice limitation={routing.response} />;
   }
 
+  // TEAM-RESEARCH-PARITY-R3-P0 — the SINGLE review & governance placement
+  // decision for every adaptive schema branch below. No branch mounts
+  // ReviewGovernanceSection directly: each passes the exact props it always
+  // passed, and this helper either mounts the Personal default component
+  // with those props unchanged, or (delegated_read_only) renders only the
+  // caller's surface — `undefined`/`null` render nothing and never fall back
+  // to the Personal component, so no governance/history request is made.
+  const ancillary = resolveAdaptiveAncillaryPresentation(props.ancillaryPresentation);
+  const renderReviewGovernance = (personalDefaultProps: ReviewGovernanceSectionProps): React.ReactNode =>
+    ancillary.kind === "delegated_read_only" ? (ancillary.reviewGovernanceSurface ?? null) : <ReviewGovernanceSection {...personalDefaultProps} />;
+
   // Adaptive Synthesis Report, Phase 1 (docs/adaptive-synthesis-report-design.md
   // §4.1/§4.2) — rendered above EVERY schema-specific report below, uniformly,
   // via the shared `withBar()` wrapper rather than duplicated per branch.
@@ -189,6 +207,7 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
       gate={gate}
       trustSummary={trustSummary}
       meta={props.meta}
+      ancillaryPresentation={ancillary}
       comparisonMatrix={comparisonMatrix}
       checklistTaxonomy={checklistTaxonomy}
       decisionSupport={decisionSupport}
@@ -230,12 +249,12 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
           <RankedListView rankedEnumeration={rankedEnumeration} />
           <ModelResponsesSection schema={schema} results={results} />
           <PanelEvidenceSection schemaId={schema.id} rankedEnumeration={rankedEnumeration} modelsUsed={results.map((r) => r.modelId)} />
-          <ReviewGovernanceSection
-            humanReview={props.humanReview}
-            reviewRouting={props.reviewRouting}
-            persistenceStatus={props.persistenceStatus}
-            runId={runId}
-          />
+          {renderReviewGovernance({
+            humanReview: props.humanReview,
+            reviewRouting: props.reviewRouting,
+            persistenceStatus: props.persistenceStatus,
+            runId,
+          })}
         </div>
       );
     }
@@ -258,12 +277,12 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
           <ComparisonMatrixView comparisonMatrix={comparisonMatrix} />
           <ModelResponsesSection schema={schema} results={results} />
           <PanelEvidenceSection schemaId={schema.id} comparisonMatrix={comparisonMatrix} modelsUsed={results.map((r) => r.modelId)} />
-          <ReviewGovernanceSection
-            humanReview={props.humanReview}
-            reviewRouting={props.reviewRouting}
-            persistenceStatus={props.persistenceStatus}
-            runId={runId}
-          />
+          {renderReviewGovernance({
+            humanReview: props.humanReview,
+            reviewRouting: props.reviewRouting,
+            persistenceStatus: props.persistenceStatus,
+            runId,
+          })}
         </div>
       );
     }
@@ -287,12 +306,12 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
           <DefinitionExplanationView definitionExplanation={definitionExplanation} />
           <ModelResponsesSection schema={schema} results={results} />
           <PanelEvidenceSection schemaId={schema.id} definitionExplanation={definitionExplanation} modelsUsed={results.map((r) => r.modelId)} />
-          <ReviewGovernanceSection
-            humanReview={props.humanReview}
-            reviewRouting={props.reviewRouting}
-            persistenceStatus={props.persistenceStatus}
-            runId={runId}
-          />
+          {renderReviewGovernance({
+            humanReview: props.humanReview,
+            reviewRouting: props.reviewRouting,
+            persistenceStatus: props.persistenceStatus,
+            runId,
+          })}
         </div>
       );
     }
@@ -316,12 +335,12 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
           <CausalExplanationView causalExplanation={causalExplanation} riskLevel={classification.riskLevel} />
           <ModelResponsesSection schema={schema} results={results} />
           <PanelEvidenceSection schemaId={schema.id} causalExplanation={causalExplanation} modelsUsed={results.map((r) => r.modelId)} />
-          <ReviewGovernanceSection
-            humanReview={props.humanReview}
-            reviewRouting={props.reviewRouting}
-            persistenceStatus={props.persistenceStatus}
-            runId={runId}
-          />
+          {renderReviewGovernance({
+            humanReview: props.humanReview,
+            reviewRouting: props.reviewRouting,
+            persistenceStatus: props.persistenceStatus,
+            runId,
+          })}
         </div>
       );
     }
@@ -358,12 +377,12 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
           )}
           <ModelResponsesSection schema={schema} results={results} />
           <PanelEvidenceSection schemaId={schema.id} checklistTaxonomy={checklistTaxonomy} modelsUsed={results.map((r) => r.modelId)} />
-          <ReviewGovernanceSection
-            humanReview={props.humanReview}
-            reviewRouting={props.reviewRouting}
-            persistenceStatus={props.persistenceStatus}
-            runId={runId}
-          />
+          {renderReviewGovernance({
+            humanReview: props.humanReview,
+            reviewRouting: props.reviewRouting,
+            persistenceStatus: props.persistenceStatus,
+            runId,
+          })}
         </div>
       );
     }
@@ -385,12 +404,12 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
           <DeepResearchView deepResearch={deepResearch} runId={runId} onVerifyClaim={onVerifyClaim} focusClaimId={focusClaimId} />
           <ModelResponsesSection schema={schema} results={results} />
           <PanelEvidenceSection schemaId={schema.id} deepResearch={deepResearch} modelsUsed={results.map((r) => r.modelId)} />
-          <ReviewGovernanceSection
-            humanReview={props.humanReview}
-            reviewRouting={props.reviewRouting}
-            persistenceStatus={props.persistenceStatus}
-            runId={runId}
-          />
+          {renderReviewGovernance({
+            humanReview: props.humanReview,
+            reviewRouting: props.reviewRouting,
+            persistenceStatus: props.persistenceStatus,
+            runId,
+          })}
         </div>
       );
     }
@@ -412,12 +431,12 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
           <EvidenceReviewView evidenceReview={evidenceReview} riskLevel={classification.riskLevel} />
           <ModelResponsesSection schema={schema} results={results} />
           <PanelEvidenceSection schemaId={schema.id} evidenceReview={evidenceReview} modelsUsed={results.map((r) => r.modelId)} />
-          <ReviewGovernanceSection
-            humanReview={props.humanReview}
-            reviewRouting={props.reviewRouting}
-            persistenceStatus={props.persistenceStatus}
-            runId={runId}
-          />
+          {renderReviewGovernance({
+            humanReview: props.humanReview,
+            reviewRouting: props.reviewRouting,
+            persistenceStatus: props.persistenceStatus,
+            runId,
+          })}
         </div>
       );
     }
@@ -439,12 +458,12 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
           <BiasBlindspotAuditView biasBlindspotAudit={biasBlindspotAudit} onRunFollowUp={onRunFollowUp} />
           <ModelResponsesSection schema={schema} results={results} />
           <PanelEvidenceSection schemaId={schema.id} biasBlindspotAudit={biasBlindspotAudit} modelsUsed={results.map((r) => r.modelId)} />
-          <ReviewGovernanceSection
-            humanReview={props.humanReview}
-            reviewRouting={props.reviewRouting}
-            persistenceStatus={props.persistenceStatus}
-            runId={runId}
-          />
+          {renderReviewGovernance({
+            humanReview: props.humanReview,
+            reviewRouting: props.reviewRouting,
+            persistenceStatus: props.persistenceStatus,
+            runId,
+          })}
         </div>
       );
     }
@@ -465,12 +484,12 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
           <DecisionSupportView decisionSupport={decisionSupport} />
           <ModelResponsesSection schema={schema} results={results} />
           <PanelEvidenceSection schemaId={schema.id} decisionSupport={decisionSupport} modelsUsed={results.map((r) => r.modelId)} />
-          <ReviewGovernanceSection
-            humanReview={props.humanReview}
-            reviewRouting={props.reviewRouting}
-            persistenceStatus={props.persistenceStatus}
-            runId={runId}
-          />
+          {renderReviewGovernance({
+            humanReview: props.humanReview,
+            reviewRouting: props.reviewRouting,
+            persistenceStatus: props.persistenceStatus,
+            runId,
+          })}
         </div>
       );
     }
@@ -531,19 +550,19 @@ export default function AdaptivePanelResponse(props: AdaptivePanelResponseProps)
           modelsUsed={modelIds}
           showClaimMatrix={schema.renderHint === "step_diff"}
         />
-        <ReviewGovernanceSection
-          humanReview={props.humanReview}
-          reviewRouting={props.reviewRouting}
-          persistenceStatus={props.persistenceStatus}
-          runId={runId}
-          gate={gate}
-          synthesisReport={synthesisReport}
-          trustSummary={trustSummary}
-          alignedClaims={alignedClaims}
-          modelsUsed={modelIds}
-          question={question}
-          onRunFollowUp={onRunFollowUp}
-        />
+        {renderReviewGovernance({
+          humanReview: props.humanReview,
+          reviewRouting: props.reviewRouting,
+          persistenceStatus: props.persistenceStatus,
+          runId,
+          gate,
+          synthesisReport,
+          trustSummary,
+          alignedClaims,
+          modelsUsed: modelIds,
+          question,
+          onRunFollowUp,
+        })}
       </div>
     );
   }
