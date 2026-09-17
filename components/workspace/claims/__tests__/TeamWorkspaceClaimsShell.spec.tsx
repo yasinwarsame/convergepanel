@@ -29,6 +29,7 @@ import TeamWorkspaceClaimsShell from "@/components/workspace/claims/TeamWorkspac
 const W = "ws-1";
 const P = "proj-1";
 const PROPS = { workspaceId: W, workspaceName: "Acme Team", showAudit: true };
+const PROPS_CREATE = { ...PROPS, canCreateClaim: true };
 
 function item(over: Record<string, unknown> = {}) {
   return {
@@ -57,10 +58,10 @@ async function flush() {
   }
 }
 
-async function mount() {
+async function mount(props: Record<string, unknown> = PROPS) {
   let r!: TestRenderer.ReactTestRenderer;
   await act(async () => {
-    r = TestRenderer.create(createElement(TeamWorkspaceClaimsShell, PROPS));
+    r = TestRenderer.create(createElement(TeamWorkspaceClaimsShell, props as never));
   });
   await flush();
   return r;
@@ -253,5 +254,35 @@ describe("boundaries", () => {
       expect((call[1] as { method: string }).method).toBe("GET");
       expect((call[1] as { body?: unknown }).body).toBeUndefined();
     }
+  });
+});
+
+describe("R4-I3 create entry point", () => {
+  it("offers New Claim when the viewer holds research.create", async () => {
+    mockedAuthedFetch.mockResolvedValue(response(200, body([])));
+    const r = await mount(PROPS_CREATE);
+    const cta = r.root.findAll((n) => n.type === "a" && n.props?.["data-testid"] === "team-claims-new");
+    expect(cta).toHaveLength(1);
+    expect(cta[0].props.href).toBe("/workspace/team/ws-1/claims/new");
+  });
+
+  it("omits New Claim entirely without research.create", async () => {
+    mockedAuthedFetch.mockResolvedValue(response(200, body([])));
+    const r = await mount(PROPS);
+    expect(r.root.findAll((n) => n.props?.["data-testid"] === "team-claims-new")).toHaveLength(0);
+    expect(text(r)).not.toContain("New Claim");
+  });
+
+  it("defaults to omitting the CTA when the hint is absent", async () => {
+    mockedAuthedFetch.mockResolvedValue(response(200, body([])));
+    const r = await mount({ workspaceId: W, workspaceName: "Acme Team", showAudit: true });
+    expect(r.root.findAll((n) => n.props?.["data-testid"] === "team-claims-new")).toHaveLength(0);
+  });
+
+  it("does not duplicate the CTA in the empty state", async () => {
+    mockedAuthedFetch.mockResolvedValue(response(200, body([])));
+    const r = await mount(PROPS_CREATE);
+    expect(r.root.findAll((n) => n.type === "a" && n.props?.["data-testid"] === "team-claims-new")).toHaveLength(1);
+    expect(text(r)).toContain("No claims in this Workspace yet.");
   });
 });

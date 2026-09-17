@@ -105,9 +105,11 @@ describe("gate", () => {
 });
 
 describe("what crosses to the client", () => {
-  it("passes only the Workspace id, name and the audit.read hint", async () => {
+  it("passes only the Workspace id, name and the narrow capability hints", async () => {
     const props = await shellPropsOf();
-    expect(Object.keys(props).sort()).toEqual(["showAudit", "workspaceId", "workspaceName"]);
+    // R4-I3 added `canCreateClaim`; both hints are single booleans derived
+    // server-side, never the capability set itself.
+    expect(Object.keys(props).sort()).toEqual(["canCreateClaim", "showAudit", "workspaceId", "workspaceName"]);
     expect(props.workspaceId).toBe(WS_ID);
     expect(props.workspaceName).toBe("Acme Team");
   });
@@ -130,5 +132,22 @@ describe("what crosses to the client", () => {
 
   it("requires research.read, the same capability the R3 list endpoints enforce", () => {
     expect(CODE).toContain('access.capabilities.includes("research.read")');
+  });
+});
+
+describe("R4-I3 create hint", () => {
+  it("is true only when the viewer holds research.create", async () => {
+    mockedResolveWorkspaceAccess.mockResolvedValue(granted(["workspace.read", "research.read", "research.create"]));
+    expect((await shellPropsOf()).canCreateClaim).toBe(true);
+
+    mockedResolveWorkspaceAccess.mockResolvedValue(granted(["workspace.read", "research.read"]));
+    expect((await shellPropsOf()).canCreateClaim).toBe(false);
+  });
+
+  it("does not gate the page itself on research.create — reading stays research.read", async () => {
+    mockedResolveWorkspaceAccess.mockResolvedValue(granted(["workspace.read", "research.read"]));
+    const props = await shellPropsOf();
+    expect(props.workspaceId).toBe(WS_ID);
+    expect(props.canCreateClaim).toBe(false);
   });
 });

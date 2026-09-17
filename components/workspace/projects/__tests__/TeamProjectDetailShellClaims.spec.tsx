@@ -263,3 +263,42 @@ describe("research / claims independence", () => {
     expect(claimsResult.retryInitial).not.toHaveBeenCalled();
   });
 });
+
+describe("R4-I3 Project create entry point", () => {
+  const cta = (r: TestRenderer.ReactTestRenderer) => r.root.findAll((n) => n.type === "a" && n.props?.["data-testid"] === "team-project-claims-new");
+
+  it("offers New Claim on an active Project when the viewer can create and organize", async () => {
+    const r = await mount({ canCreateClaim: true });
+    expect(cta(r)).toHaveLength(1);
+    expect(cta(r)[0].props.href).toBe("/workspace/team/ws-1/projects/proj-1/claims/new");
+  });
+
+  it("omits New Claim without the create capability", async () => {
+    const r = await mount({ canCreateClaim: false });
+    expect(cta(r)).toHaveLength(0);
+  });
+
+  it("defaults to omitting the CTA when the hint is absent", async () => {
+    const r = await mount();
+    expect(cta(r)).toHaveLength(0);
+  });
+
+  it("omits New Claim on an ARCHIVED Project even with the capability", async () => {
+    const r = await mount({ canCreateClaim: true, project: { ...PROJECT, status: "archived" }, canStartResearch: false });
+    expect(cta(r)).toHaveLength(0);
+    // The archived Project's existing Claims stay readable.
+    expect(hasSection(r)).toBe(true);
+  });
+
+  it("does not show the CTA when the Claims section itself is unavailable", async () => {
+    const r = await mount({ canCreateClaim: true, canReadClaims: false });
+    expect(cta(r)).toHaveLength(0);
+    expect(hasSection(r)).toBe(false);
+  });
+
+  it("leaves the research controls untouched", async () => {
+    mockedUseTeamProjectRuns.mockReturnValue(listResult({ items: [runItem()] }));
+    const r = await mount({ canCreateClaim: true });
+    expect(text(r)).toContain("RESEARCH QUESTION");
+  });
+});

@@ -83,6 +83,11 @@ export default async function TeamProjectDetailPage({ params }: { params: { work
       // page gate itself still requires only `projects.read`; the R3 Claim list
       // endpoint re-authorizes `research.read` on every request.
       canReadClaims={access.capabilities.includes("research.read")}
+      // R4-I3 — filing a Claim INTO a Project needs `research.create` AND
+      // `research.organize`, exactly what the POST's gates require. Named
+      // independently of `canStartResearch` even though the formula matches
+      // today, so the two can diverge without silently coupling.
+      canCreateClaim={access.capabilities.includes("research.create") && access.capabilities.includes("research.organize")}
       canStartResearch={access.capabilities.includes("research.create") && access.capabilities.includes("research.organize")}
       canAssignResearch={access.capabilities.includes("research.organize")}
       assignmentUiEnabled={projectAssignmentUiEnabledFor(identity.uid)}
