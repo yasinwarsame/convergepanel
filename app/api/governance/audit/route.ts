@@ -4,6 +4,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebase/admin";
+import { isPersonalVerificationArtifact, isWorkspaceBoundVerificationArtifact } from "@/lib/verification/verificationArtifactScope";
 import {
   governanceQueuePlanForbiddenResponse,
   resolveGovernanceVisibleUserIdsCached,
@@ -261,6 +262,67 @@ async function resolveRunOwnerEmailsForAuditEvents(events: AuditEvent[]): Promis
   }
 }
 
+const VERIFICATION_AUDIT_COLLECTIONS = new Set(["verifications", "videoVerifications"]);
+/** Parent reads per getAll() call when classifying global audit events. */
+const AUDIT_PARENT_CLASSIFY_CHUNK = 100;
+
+/**
+ * TEAM-VERIFICATION-PARITY-R1 (C1: fail closed) — global Audit tab containment.
+ *
+ * `admin_audit_logs` rows carry `collection` + `runId` but no Workspace
+ * scope, and a legacy governance review of a Workspace-bound Claim/Video
+ * wrote a DISPLAYABLE row (approved/blocked/changes_requested, with the claim
+ * text or video file name as `question`). A verification/video event is
+ * therefore an ALLOW-LIST decision on its parent document:
+ *
+ *   parent exists, masked data is an object with NO `workspaceId` -> Personal, kept
+ *   parent exists with a `workspaceId` field (any value)          -> suppressed
+ *   parent does not exist                                         -> unclassifiable, suppressed
+ *   parent data unusable / no snapshot returned for the ref       -> unclassifiable, suppressed
+ *   event has no usable runId                                     -> unclassifiable, suppressed
+ *   classification read throws                                    -> propagates, route answers 500
+ *
+ * Only a positively Personal parent may enter the response; an unknown scope
+ * never does. A missing parent is an ordinary outcome, not an error, so one
+ * deleted artifact never takes the page down. Reads are batched `getAll()`
+ * calls over distinct parents with `fieldMask: ["workspaceId"]`, chunked at
+ * AUDIT_PARENT_CLASSIFY_CHUNK and bounded by the events already in hand —
+ * never N+1, never for research runs, no writes. Research-run and policy
+ * events are untouched.
+ */
+async function excludeWorkspaceBoundVerificationAuditEvents(events: AuditEvent[]): Promise<AuditEvent[]> {
+  const db = adminDb;
+  if (!db) throw new Error("no db");
+  const keys = new Map<string, { collection: string; runId: string }>();
+  for (const e of events) {
+    const collection = e.collection ?? "";
+    const runId = (e.runId ?? "").trim();
+    if (!VERIFICATION_AUDIT_COLLECTIONS.has(collection) || !runId) continue;
+    keys.set(`${collection}/${runId}`, { collection, runId });
+  }
+
+  const personalParents = new Set<string>();
+  const entries = [...keys.entries()];
+  for (let i = 0; i < entries.length; i += AUDIT_PARENT_CLASSIFY_CHUNK) {
+    const chunk = entries.slice(i, i + AUDIT_PARENT_CLASSIFY_CHUNK);
+    const refs = chunk.map(([, k]) => db.collection(k.collection).doc(k.runId));
+    const snaps = await db.getAll(...refs, { fieldMask: ["workspaceId"] });
+    chunk.forEach(([key], j) => {
+      const snap = snaps[j];
+      // Firestore guarantees data() is an object for an existing document
+      // (`{}` when the masked field is absent); anything else is not
+      // positively Personal and stays excluded.
+      if (snap && snap.exists === true && isPersonalVerificationArtifact(snap.data())) personalParents.add(key);
+    });
+  }
+
+  return events.filter((e) => {
+    const collection = e.collection ?? "";
+    if (!VERIFICATION_AUDIT_COLLECTIONS.has(collection)) return true;
+    return personalParents.has(`${collection}/${(e.runId ?? "").trim()}`);
+  });
+}
+
 /** Fetch recent docs; prefer orderBy("at"), fall back to plain limit if index/field issues. */
 async function fetchRecentAuditDocs(maxDocs: number) {
   if (!adminDb) return [];
@@ -349,6 +411,18 @@ export async function GET(request: NextRequest) {
         );
       }
       const parentData = parentSnap.data() as Record<string, unknown>;
+
+      // TEAM-VERIFICATION-PARITY-R1 — a Workspace-bound Claim/Video has no
+      // legacy governance audit drilldown for anyone. Concealed exactly like a
+      // missing run, BEFORE legacy visibility, both event queries and email
+      // enrichment.
+      if (collection !== "runs" && isWorkspaceBoundVerificationArtifact(parentData)) {
+        return NextResponse.json(
+          { ok: false, error: { code: "not_found", message: "Run not found." } },
+          { status: 404 }
+        );
+      }
+
       const ownerUid = String(parentData.userId ?? "");
       if (!runOwnerVisibleInGovernance(vis.visibleUserIds, ownerUid)) {
         return NextResponse.json(
@@ -366,8 +440,8 @@ export async function GET(request: NextRequest) {
       // Phase 4B — Mandatory Workspace Integrity, requester-independent.
       // This route's own visibility model (governance reviewer assignment)
       // is an existing Layer-B grant, not an exemption from Layer A.
-      // Scoped to "runs" only — verifications/videoVerifications never
-      // carry a workspaceId.
+      // Scoped to "runs" — Workspace-bound verifications/videoVerifications
+      // were already concealed above (R1).
       if (collection === "runs") {
         const integrity = await validateRunWorkspaceAssociation(parentData);
         if (integrity.classification === "invalid") {
@@ -498,6 +572,7 @@ export async function GET(request: NextRequest) {
     events = filterAuditLogDisplayEvents(events);
     events = filterEventsToViewerActions(events, resolved.uid);
     events = dedupeGovernanceAuditEvents(events);
+    events = await excludeWorkspaceBoundVerificationAuditEvents(events);
     if (fromParam.trim()) {
       events = events.filter((e) => e.at >= fromParam);
     }

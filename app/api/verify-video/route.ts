@@ -21,6 +21,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { isWorkspaceBoundVerificationArtifact } from "@/lib/verification/verificationArtifactScope";
 import { randomUUID } from "crypto";
 import { FieldValue, type DocumentData } from "firebase-admin/firestore";
 
@@ -365,7 +366,13 @@ export async function POST(request: NextRequest) {
       .where("fileName", "==", fileName)
       .get();
 
-    const sortedDocs = recentSnap.docs.sort((a, b) => {
+    // TEAM-VERIFICATION-PARITY-R1 — Workspace-bound rows are removed BEFORE
+    // newest-candidate selection, so a newer Team artifact can neither be
+    // returned as a Personal cached result nor shadow an older valid Personal
+    // duplicate. This route never authorizes Team artifacts; it simply does
+    // not consider them Personal.
+    const personalDocs = recentSnap.docs.filter((doc) => !isWorkspaceBoundVerificationArtifact(doc.data()));
+    const sortedDocs = personalDocs.sort((a, b) => {
       const aTs = a.data().timestamp;
       const bTs = b.data().timestamp;
       const aMs = aTs && typeof aTs.toMillis === "function" ? aTs.toMillis() : 0;

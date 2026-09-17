@@ -1048,3 +1048,97 @@ describe("unknown top-level fields (Personal-only behavior — do not harden)", 
     expect(res.status).toBe(200);
   });
 });
+
+// ============================================================
+// TEAM-VERIFICATION-PARITY-R1 — Personal dedup never considers a
+// Workspace-bound (Team) Video artifact. Workspace-bound rows are removed
+// BEFORE newest-candidate selection; every other dedup rule is unchanged.
+// ============================================================
+describe("TEAM-VERIFICATION-PARITY-R1 — Personal dedup containment", () => {
+  function storedRow(id: string, ageMs: number, extra: Record<string, unknown> = {}) {
+    return {
+      id,
+      data: () => ({
+        userId: UID,
+        fileName: "clip.mp4",
+        timestamp: fakeTimestamp(Date.now() - ageMs),
+        metadata: buildMetadata(),
+        verdict: "authentic_captured",
+        contentType: "camera_footage",
+        consensusScore: 90,
+        ...extra,
+      }),
+    };
+  }
+  const TEAM = { workspaceId: "ws-team-1", projectId: null };
+
+  it("only a Personal recent candidate -> existing dedup hit, unchanged", async () => {
+    mockDedupWhereGet.mockResolvedValueOnce({ docs: [storedRow("vid-personal", 4_000)] });
+    const res = await POST(buildRequest(validBody()));
+    const body = await res.json();
+    expect(body._deduplicated).toBe(true);
+    expect(body.verificationId).toBe("vid-personal");
+    expect(mockCallOpenAIVision).not.toHaveBeenCalled();
+  });
+
+  it("only a Team recent candidate -> NEVER returned; providers run and a new Personal artifact is persisted", async () => {
+    mockDedupWhereGet.mockResolvedValueOnce({ docs: [storedRow("vid-team", 2_000, TEAM)] });
+    const res = await POST(buildRequest(validBody()));
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body._deduplicated).toBeUndefined();
+    expect(body.verificationId).not.toBe("vid-team");
+    expect(mockCallOpenAIVision).toHaveBeenCalledTimes(1);
+    expect(mockVideoDocSet).toHaveBeenCalledTimes(1);
+    const persisted = mockVideoDocSet.mock.calls[0][1] as Record<string, unknown>;
+    expect(Object.prototype.hasOwnProperty.call(persisted, "workspaceId")).toBe(false);
+  });
+
+  it("newest candidate is Team, next is a valid Personal duplicate -> the Personal candidate is used", async () => {
+    mockDedupWhereGet.mockResolvedValueOnce({ docs: [storedRow("vid-personal-older", 8_000), storedRow("vid-team-newest", 1_000, TEAM)] });
+    const res = await POST(buildRequest(validBody()));
+    const body = await res.json();
+    expect(body._deduplicated).toBe(true);
+    expect(body.verificationId).toBe("vid-personal-older");
+    expect(mockCallOpenAIVision).not.toHaveBeenCalled();
+    expect(mockVideoDocSet).not.toHaveBeenCalled();
+  });
+
+  it("Team candidate in window, Personal candidate outside the window -> no dedup", async () => {
+    mockDedupWhereGet.mockResolvedValueOnce({ docs: [storedRow("vid-team", 1_000, TEAM), storedRow("vid-personal-old", 40_000)] });
+    const res = await POST(buildRequest(validBody()));
+    const body = await res.json();
+    expect(body._deduplicated).toBeUndefined();
+    expect(mockCallOpenAIVision).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([["null", null], ["empty string", ""], ["malformed object", { id: "x" }]])(
+    "workspaceId %s candidate is treated as Workspace-bound and ignored",
+    async (_l, value) => {
+      mockDedupWhereGet.mockResolvedValueOnce({ docs: [storedRow("vid-ws-malformed", 1_000, { workspaceId: value })] });
+      const res = await POST(buildRequest(validBody()));
+      const body = await res.json();
+      expect(body._deduplicated).toBeUndefined();
+      expect(body.verificationId).not.toBe("vid-ws-malformed");
+    }
+  );
+
+  it("the older-Personal fallback still honours the existing size and duration rules", async () => {
+    mockDedupWhereGet.mockResolvedValueOnce({
+      docs: [storedRow("vid-personal-size-mismatch", 8_000, { metadata: buildMetadata({ fileSize: 7 }) }), storedRow("vid-team-newest", 1_000, TEAM)],
+    });
+    const res = await POST(buildRequest(validBody()));
+    const body = await res.json();
+    expect(body._deduplicated).toBeUndefined();
+    expect(mockCallOpenAIVision).toHaveBeenCalledTimes(1);
+  });
+
+  it("no Team membership or Workspace lookup is added to the Personal route", async () => {
+    mockDedupWhereGet.mockResolvedValueOnce({ docs: [storedRow("vid-team", 1_000, TEAM)] });
+    const res = await POST(buildRequest(validBody()));
+    expect(res.status).toBe(200);
+    // The fake adminDb throws on any unexpected collection (e.g. workspaces,
+    // workspaceMemberships), so reaching here with a 200 proves none was read.
+    expect(mockUsersDocGet).toHaveBeenCalled();
+  });
+});

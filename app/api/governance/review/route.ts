@@ -5,6 +5,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { DocumentData } from "firebase-admin/firestore";
 import { adminDb } from "@/lib/firebase/admin";
+import { isWorkspaceBoundVerificationArtifact } from "@/lib/verification/verificationArtifactScope";
 import { sanitizeForFirestore } from "@/lib/firestore/sanitizeForFirestore";
 import {
   governanceQueuePlanForbiddenResponse,
@@ -127,6 +128,19 @@ export async function POST(request: NextRequest) {
   }
 
   const data = snap.data() as Record<string, unknown>;
+
+  // TEAM-VERIFICATION-PARITY-R1 — the legacy governance review NEVER mutates
+  // a Workspace-bound Claim/Video artifact. Concealed exactly like a missing
+  // artifact for every caller (creator, legacy reviewer, global admin), BEFORE
+  // legacy visibility, status handling, the write, the audit event and the
+  // governanceEvents append.
+  if (collection !== "runs" && isWorkspaceBoundVerificationArtifact(data)) {
+    return NextResponse.json(
+      { ok: false, error: { code: "not_found", message: "Run not found" } },
+      { status: 404 }
+    );
+  }
+
   const ownerUid = String(data.userId ?? data.uid ?? "").trim();
   if (!runOwnerVisibleInGovernance(vis.visibleUserIds, ownerUid)) {
     return NextResponse.json(
@@ -143,8 +157,8 @@ export async function POST(request: NextRequest) {
 
   // Phase 4B — Mandatory Workspace Integrity, requester-independent, before
   // this decision mutates governance state or its response discloses any
-  // run content. Scoped to "runs" only — verifications/videoVerifications
-  // never carry a workspaceId.
+  // run content. Scoped to "runs" — Workspace-bound verifications/
+  // videoVerifications were already concealed above (R1).
   if (collection === "runs") {
     const integrity = await validateRunWorkspaceAssociation(data);
     if (integrity.classification === "invalid") {

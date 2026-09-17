@@ -6,6 +6,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { resolveRequestIdentity } from "@/lib/auth/resolveRequestIdentity";
 import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelemetry";
 import { adminDb } from "@/lib/firebase/admin";
+import { isWorkspaceBoundVerificationArtifact } from "@/lib/verification/verificationArtifactScope";
 import { validateRunWorkspaceAssociation } from "@/lib/workspaces/runWorkspaceIntegrity";
 import { logger } from "@/lib/logger";
 
@@ -75,6 +76,19 @@ export async function GET(req: NextRequest) {
     }
 
     const data = snap.data() as Record<string, unknown>;
+
+    // TEAM-VERIFICATION-PARITY-R1 — this Personal route never serves a
+    // Workspace-bound Claim/Video artifact, to its creator or anyone else.
+    // Concealed exactly like a missing document, BEFORE the owner comparison
+    // and before any reviewer enrichment. Team governance presentation is a
+    // Team-native concern.
+    if (collection !== "runs" && isWorkspaceBoundVerificationArtifact(data)) {
+      return NextResponse.json(
+        { ok: false, errorCode: "not_found", message: "Document not found." },
+        { status: 404 }
+      );
+    }
+
     const owner =
       (typeof data.userId === "string" && data.userId.trim()) ||
       (typeof data.uid === "string" && data.uid.trim()) ||
@@ -86,11 +100,11 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // Phase 4B — Mandatory Workspace Integrity. This route also serves
-    // `verifications`/`videoVerifications`, which are entirely outside the
-    // Workspace program (never carry a `workspaceId`) — scoped to the
-    // `runs` collection only, requester-independent, before any governance
-    // field is returned.
+    // Phase 4B — Mandatory Workspace Integrity for `runs`, requester-
+    // independent, before any governance field is returned. Workspace-bound
+    // `verifications`/`videoVerifications` rows were already concealed above
+    // (TEAM-VERIFICATION-PARITY-R1); a Personal verification row carries no
+    // Workspace association to validate.
     if (collection === "runs") {
       const integrity = await validateRunWorkspaceAssociation(data);
       if (integrity.classification === "invalid") {

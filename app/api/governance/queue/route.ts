@@ -10,6 +10,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { Query, QueryDocumentSnapshot } from "firebase-admin/firestore";
 import { adminDb } from "@/lib/firebase/admin";
+import { isWorkspaceBoundVerificationArtifact } from "@/lib/verification/verificationArtifactScope";
 import {
   governanceInputFromResearchRun,
   governanceInputFromVerificationDoc,
@@ -84,6 +85,9 @@ const VER_QUEUE_FIELDS = [
   "missingSourcesCount",
   "governanceMeta",
   "modelResults",
+  // TEAM-VERIFICATION-PARITY-R1 — projected so the structural scope rule can
+  // see a Workspace-bound row at all; without it every row looks Personal.
+  "workspaceId",
 ] as const;
 
 const VIDEO_QUEUE_FIELDS = [
@@ -103,6 +107,8 @@ const VIDEO_QUEUE_FIELDS = [
   "governanceMeta",
   "metadata",
   "modelResults",
+  // TEAM-VERIFICATION-PARITY-R1 — see VER_QUEUE_FIELDS.
+  "workspaceId",
 ] as const;
 
 function firestoreMillis(value: unknown): number {
@@ -1070,6 +1076,8 @@ async function loadVerificationsStagedGlobalQueue(
   const staged: StagedQueueRow[] = [];
   for (const doc of verSnap.docs) {
     const data = doc.data() as Record<string, unknown>;
+    // TEAM-VERIFICATION-PARITY-R1 — never stage a Workspace-bound Claim.
+    if (isWorkspaceBoundVerificationArtifact(data)) continue;
     if (!isClaimVerificationRow(data)) continue;
     const rowUid = ownerUidFromVerificationDoc(data);
     if (!rowUid) continue;
@@ -1101,6 +1109,8 @@ async function loadVerificationsStagedForQueue(
   const staged: StagedQueueRow[] = [];
   for (const doc of verDocs) {
     const data = doc.data() as Record<string, unknown>;
+    // TEAM-VERIFICATION-PARITY-R1 — never stage a Workspace-bound Claim.
+    if (isWorkspaceBoundVerificationArtifact(data)) continue;
     if (!isClaimVerificationRow(data)) continue;
     const rowUid = ownerUidFromVerificationDoc(data);
     if (!rowUid || !visibleSet.has(rowUid)) continue;
@@ -1167,6 +1177,8 @@ async function loadVideoStagedGlobalQueue(
   const staged: StagedQueueRow[] = [];
   for (const doc of vidSnap.docs) {
     const data = doc.data() as Record<string, unknown>;
+    // TEAM-VERIFICATION-PARITY-R1 — never stage a Workspace-bound Video.
+    if (isWorkspaceBoundVerificationArtifact(data)) continue;
     if (!isVideoVerificationRow(data)) continue;
     const rowUid = String(data.userId ?? "").trim();
     if (!rowUid) continue;
@@ -1197,6 +1209,8 @@ async function loadVideoStagedForQueue(
   const staged: StagedQueueRow[] = [];
   for (const doc of vidDocs) {
     const data = doc.data() as Record<string, unknown>;
+    // TEAM-VERIFICATION-PARITY-R1 — never stage a Workspace-bound Video.
+    if (isWorkspaceBoundVerificationArtifact(data)) continue;
     if (!isVideoVerificationRow(data)) continue;
     const rowUid = String(data.userId ?? "").trim();
     if (!rowUid || !visibleSet.has(rowUid)) continue;
