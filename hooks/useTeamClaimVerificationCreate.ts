@@ -119,13 +119,23 @@ function isObject(v: unknown): v is Record<string, unknown> {
 
 /**
  * ORDINARY carries the user's own claim text; ORIGIN-LINKED carries only the
- * two locators. A discriminated union makes a mixed body unrepresentable — the
- * server rejects `claim` + `runId` together as `ambiguous_request_mode`, and
- * this type means a call site cannot construct that shape in the first place.
+ * two locators.
+ *
+ * MUTUALLY EXCLUSIVE union. The `?: never` members are load-bearing, not
+ * decoration: without them a value typed `{claim, origin, selectedModels}`
+ * structurally satisfies the ordinary member and is assignable to the union —
+ * object-literal excess-property checking hides that only at direct call sites,
+ * not for a variable passed through. With them, a mixed ordinary/origin payload
+ * is genuinely not representable through the typed API, which is the
+ * compile-time counterpart of the server rejecting `claim` + `runId` together
+ * as `ambiguous_request_mode`.
+ *
+ * Deliberately NOT a literal discriminant (`mode: "ordinary" | "origin"`):
+ * R4-I3's existing `submit({claim, selectedModels})` call shape is preserved.
  */
 export type TeamClaimCreateInput =
-  | { claim: string; selectedModels: ModelId[] }
-  | { origin: TeamClaimOriginTarget; selectedModels: ModelId[] };
+  | { claim: string; origin?: never; selectedModels: ModelId[] }
+  | { origin: TeamClaimOriginTarget; claim?: never; selectedModels: ModelId[] };
 
 function isOriginInput(input: TeamClaimCreateInput): input is { origin: TeamClaimOriginTarget; selectedModels: ModelId[] } {
   return "origin" in input;

@@ -20,9 +20,11 @@ jest.mock("@/lib/client/authedFetch", () => ({ authedFetch: (...a: unknown[]) =>
 import {
   useTeamClaimVerificationCreate,
   type TeamClaimCreateAddress,
+  type TeamClaimCreateInput,
   type TeamClaimCreateOutcome,
   type UseTeamClaimVerificationCreateResult,
 } from "@/hooks/useTeamClaimVerificationCreate";
+import type { TeamClaimOriginTarget } from "@/lib/workspaces/teamClaimOriginHandoff";
 import type { ModelId } from "@/lib/types";
 
 const W = "ws-1";
@@ -432,5 +434,54 @@ describe("R4-I4 origin-linked mode", () => {
       await mount(UNFILED);
       expect(await submitOrigin()).toEqual({ status: "outcome_unknown" });
     });
+  });
+});
+
+/**
+ * TEAM-VERIFICATION-PARITY-R4-I4-C1 — the TYPE contract, not the serialized
+ * body. Without the `?: never` members a value typed `{claim, origin,
+ * selectedModels}` structurally satisfies the ordinary member and IS assignable
+ * to the union; object-literal excess-property checking hides that only at
+ * direct call sites. These are positive type computations rather than bare
+ * `@ts-expect-error`, so they fail compilation if the exclusivity is weakened
+ * in EITHER direction — and they cannot silently pass by being unreachable.
+ */
+describe("R4-I4-C1 create input is mutually exclusive (compile-time)", () => {
+  type OrdinaryInput = { claim: string; selectedModels: ModelId[] };
+  type OriginInput = { origin: TeamClaimOriginTarget; selectedModels: ModelId[] };
+  type MixedInput = { claim: string; origin: TeamClaimOriginTarget; selectedModels: ModelId[] };
+
+  type OrdinaryIsAssignable = OrdinaryInput extends TeamClaimCreateInput ? true : false;
+  type OriginIsAssignable = OriginInput extends TeamClaimCreateInput ? true : false;
+  type MixedIsAssignable = MixedInput extends TeamClaimCreateInput ? true : false;
+
+  // Each annotation is the assertion: a wrong resolution fails `tsc`.
+  const ordinaryInputMustBeAccepted: OrdinaryIsAssignable = true;
+  const originInputMustBeAccepted: OriginIsAssignable = true;
+  const mixedInputMustBeRejected: MixedIsAssignable = false;
+
+  it("accepts the ordinary shape", () => {
+    expect(ordinaryInputMustBeAccepted).toBe(true);
+  });
+
+  it("accepts the origin-linked shape", () => {
+    expect(originInputMustBeAccepted).toBe(true);
+  });
+
+  it("rejects a mixed claim + origin payload", () => {
+    expect(mixedInputMustBeRejected).toBe(false);
+  });
+
+  it("still submits each intended shape through the real hook", async () => {
+    mockedAuthedFetch.mockResolvedValue(response(200, okBody()));
+    await mount(UNFILED);
+    const ordinary: TeamClaimCreateInput = { claim: CLAIM, selectedModels: MODELS };
+    const origin: TeamClaimCreateInput = { origin: { runId: "run-9", claimId: "v1:a:0:x" }, selectedModels: MODELS };
+    await act(async () => {
+      await hook.submit(ordinary);
+      await hook.submit(origin);
+    });
+    expect(Object.keys(bodyOf(0)).sort()).toEqual(["claim", "models"]);
+    expect(Object.keys(bodyOf(1)).sort()).toEqual(["claimId", "models", "runId"]);
   });
 });
