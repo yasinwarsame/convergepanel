@@ -144,6 +144,12 @@ async function clickSource(r: TestRenderer.ReactTestRenderer) {
   await flush();
 }
 
+/** Flattens a rendered node's visible text. */
+function nodeText(n: TestRenderer.ReactTestInstance | string): string {
+  if (typeof n === "string") return n;
+  return n.children.map((c) => nodeText(c as TestRenderer.ReactTestInstance | string)).join("");
+}
+
 /** Reads a testid's rendered text content. */
 function testIdText(r: TestRenderer.ReactTestRenderer, id: string): string {
   const node = r.root.findAll((n) => n.props?.["data-testid"] === id)[0];
@@ -373,11 +379,19 @@ describe("breadcrumb relationships", () => {
 });
 
 describe("error presentation", () => {
-  it("shows the exact concealed copy on 404", async () => {
+  it("shows the exact concealed copy on 404 and announces it to assistive technology", async () => {
     mockedAuthedFetch.mockResolvedValue(response(404));
     const r = await mount(UNFILED_PROPS);
+    // Concealment copy and the safe way back, unchanged.
     expect(text(r)).toContain("Claim not found.");
     expect(text(r)).toContain("/workspace/team/ws-1");
+    // R4-I1-C1: the not-found state appears ASYNCHRONOUSLY after a fetch, so it
+    // must be announced exactly like every other result-state error. Asserting
+    // the alert CONTAINS the not-found copy — not merely that some alert exists
+    // somewhere — is what makes this assertion specific to this container.
+    const alerts = r.root.findAll((n) => n.props?.role === "alert");
+    expect(alerts).toHaveLength(1);
+    expect(nodeText(alerts[0])).toContain("Claim not found.");
   });
 
   it.each([

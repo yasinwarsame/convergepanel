@@ -230,7 +230,7 @@ export default function TeamClaimDetailShell({ workspaceId, workspaceName, verif
       )}
 
       {state.kind === "not_found" && (
-        <section className={STATE_BOX}>
+        <section role="alert" className={STATE_BOX}>
           <h2 className="text-lg font-semibold text-cp-text">Claim not found.</h2>
           <p className="mt-2 text-sm text-cp-muted">We couldn&apos;t open this claim. It may have been removed, moved, or you may not have access to it.</p>
           <Link href={workspaceHref} className="mt-4 inline-block rounded-lg border border-cp-border px-4 py-2 text-sm font-medium text-cp-text hover:bg-cp-raised focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent">
