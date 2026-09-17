@@ -15,10 +15,12 @@
  */
 
 import { useState } from "react";
+import Link from "next/link";
 import { Breadcrumb } from "@/components/shared/Breadcrumb";
 import WorkspaceNav from "@/components/workspace/WorkspaceNav";
 import { SectionEmptyBox, SectionInitialErrorBox, SectionLoadingRow, SectionPagination } from "@/components/projects/SectionState";
 import { TeamClaimListRow } from "@/components/workspace/claims/TeamClaimListRow";
+import { teamClaimCreateHref } from "@/lib/workspaces/teamClaimCreateHref";
 import {
   useTeamClaimVerificationList,
   teamClaimListInitialErrorCopy,
@@ -31,6 +33,8 @@ export type TeamWorkspaceClaimsShellProps = {
   workspaceName: string;
   /** Presentation hint from the server-resolved capability set (`audit.read`) — not authorization. */
   showAudit: boolean;
+  /** R4-I3 — server-derived `research.create`; offers the create entry point only. The POST stays authoritative. */
+  canCreateClaim?: boolean;
 };
 
 type ClaimScope = "all" | "unfiled";
@@ -40,7 +44,7 @@ const FILTERS: { key: ClaimScope; label: string }[] = [
   { key: "unfiled", label: "Unfiled" },
 ];
 
-export default function TeamWorkspaceClaimsShell({ workspaceId, workspaceName, showAudit }: TeamWorkspaceClaimsShellProps) {
+export default function TeamWorkspaceClaimsShell({ workspaceId, workspaceName, showAudit, canCreateClaim = false }: TeamWorkspaceClaimsShellProps) {
   const [scope, setScope] = useState<ClaimScope>("all");
 
   // Changing `scope` changes the hook's address, which drops the cursor, clears
@@ -57,8 +61,17 @@ export default function TeamWorkspaceClaimsShell({ workspaceId, workspaceName, s
         mobileParent={{ label: workspaceName, href: workspaceHref }}
       />
 
-      <div className="mb-6">
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-semibold text-cp-text">Claims</h1>
+        {canCreateClaim && (
+          <Link
+            href={teamClaimCreateHref({ workspaceId, projectId: null })}
+            className="rounded-lg bg-cp-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent"
+            data-testid="team-claims-new"
+          >
+            New Claim
+          </Link>
+        )}
       </div>
 
       <WorkspaceNav workspaceId={workspaceId} active="claims" showAudit={showAudit} />

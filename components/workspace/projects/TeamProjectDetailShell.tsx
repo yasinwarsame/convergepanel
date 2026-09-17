@@ -38,6 +38,7 @@ import { GovernanceChip } from "@/components/shared/GovernanceChip";
 import { teamResearchDetailHref } from "@/lib/workspaces/teamResearchDetailHref";
 import { SectionEmptyBox, SectionInitialErrorBox, SectionLoadingRow, SectionPagination } from "@/components/projects/SectionState";
 import { TeamClaimListRow } from "@/components/workspace/claims/TeamClaimListRow";
+import { teamClaimCreateHref } from "@/lib/workspaces/teamClaimCreateHref";
 import {
   useTeamClaimVerificationList,
   teamClaimListInitialErrorCopy,
@@ -103,6 +104,7 @@ export default function TeamProjectDetailShell({
   canAssignResearch = false,
   assignmentUiEnabled = false,
   canReadClaims = false,
+  canCreateClaim = false,
 }: {
   workspaceId: string;
   workspaceName: string;
@@ -115,6 +117,8 @@ export default function TeamProjectDetailShell({
   assignmentUiEnabled?: boolean;
   /** R4-I2 — server-derived `research.read`; gates only whether the read-only Claims section requests anything. The R3 list endpoint remains authoritative. */
   canReadClaims?: boolean;
+  /** R4-I3 — server-derived `research.create` AND `research.organize`; offers the Project-filed create entry point only. The POST stays authoritative. */
+  canCreateClaim?: boolean;
 }) {
   // Project/Research Assignment — `?assignee=me` VIEW filter on the research list.
   const [assignedToMe, setAssignedToMe] = useState(false);
@@ -316,7 +320,18 @@ export default function TeamProjectDetailShell({
 
       {canReadClaims && (
         <section className="mt-10" data-testid="team-project-claims-section">
-          <h2 className="text-lg font-semibold text-cp-text">Claims</h2>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-lg font-semibold text-cp-text">Claims</h2>
+            {canCreateClaim && project.status === "active" && (
+              <Link
+                href={teamClaimCreateHref({ workspaceId, projectId: project.id })}
+                className="rounded-lg border border-cp-border px-3 py-1.5 text-sm font-medium text-cp-text hover:bg-cp-raised focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent"
+                data-testid="team-project-claims-new"
+              >
+                New Claim
+              </Link>
+            )}
+          </div>
 
           {claims.status === "loading" && <SectionLoadingRow label="Loading claims…" />}
 
