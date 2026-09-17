@@ -26,10 +26,19 @@
  *
  * TRANSPORT (the hardened I1 posture): waits for auth readiness, GET only,
  * `cache: "no-store"`, a monotonic generation guard claimed before the first
- * await, exactly one forced token-refresh retry on HTTP 401 (a second 401 is a
- * finished session, never an empty list), and no commit from a stale or
- * unmounted request. Changing the Workspace, scope, Project or identity
- * invalidates BOTH the initial and the load-more request and drops the cursor.
+ * await, and an AbortController that actually CANCELS the obsolete request.
+ * The two are complementary, not alternatives: the generation guard stops a
+ * stale response from painting, while the abort stops the obsolete request
+ * from continuing to consume network and server work. Changing the Workspace,
+ * scope, Project, identity or `enabled`, and unmounting, both invalidate the
+ * generation and abort the in-flight read; the cursor is dropped with it.
+ *
+ * AUTH: exactly one forced token-refresh retry on HTTP 401, sharing the SAME
+ * signal as the original attempt. A second 401 terminates immediately as
+ * `auth_error` WITHOUT parsing the body — "this is the second 401" is a fact
+ * about request history that the pure response parser cannot know, and a
+ * server body saying `unauthorized` must not downgrade a finished session to a
+ * first-request error code.
  *
  * Read-only: no write, no POST, no provider execution, no quota, no governance
  * call, and never a Personal (`/api/user/...`) route.
@@ -252,12 +261,21 @@ export function useTeamClaimVerificationList(args: { address: TeamClaimListAddre
   const seenIdsRef = useRef<Set<string>>(new Set());
   const seqRef = useRef(0);
   const mountedRef = useRef(false);
+  /** The in-flight read, so an obsolete one can be cancelled rather than merely ignored. */
+  const activeControllerRef = useRef<AbortController | null>(null);
+
+  const abortActiveRequest = useCallback(() => {
+    activeControllerRef.current?.abort();
+    activeControllerRef.current = null;
+  }, []);
 
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
       seqRef.current += 1;
+      activeControllerRef.current?.abort();
+      activeControllerRef.current = null;
     };
   }, []);
 
@@ -273,6 +291,13 @@ export function useTeamClaimVerificationList(args: { address: TeamClaimListAddre
       const seq = ++seqRef.current;
       const owns = () => mountedRef.current && seq === seqRef.current;
 
+      // This request's own controller. Any earlier one is cancelled, and the
+      // ref is only cleared later if it still points at THIS controller — an
+      // older request's finalization must never cancel a newer one.
+      activeControllerRef.current?.abort();
+      const controller = new AbortController();
+      activeControllerRef.current = controller;
+
       if (opts.isLoadMore) {
         setLoadingMore(true);
         setLoadMoreErrorCode(null);
@@ -284,12 +309,15 @@ export function useTeamClaimVerificationList(args: { address: TeamClaimListAddre
       const url = buildTeamClaimListUrl(address, opts.cursor);
 
       try {
+        // Both the first attempt and the forced refresh share this signal, so a
+        // context change during the refresh cancels the refresh too.
         const read = (forceTokenRefresh = false) =>
           authedFetch(url, {
             user: opts.currentUser,
             authReady: true,
             method: "GET",
             cache: "no-store",
+            signal: controller.signal,
             ...(forceTokenRefresh ? { forceTokenRefresh: true } : {}),
           });
 
@@ -297,9 +325,21 @@ export function useTeamClaimVerificationList(args: { address: TeamClaimListAddre
         if (!owns()) return;
 
         if (res.status === 401) {
-          // Exactly one forced refresh. A second 401 is a finished session.
+          // Exactly one forced refresh, then stop. A second 401 is a finished
+          // session: terminate here WITHOUT reading the body, so no server
+          // error vocabulary can rename it. There is never a third request.
           res = await read(true);
           if (!owns()) return;
+          if (res.status === 401) {
+            if (opts.isLoadMore) {
+              setLoadingMore(false);
+              setLoadMoreErrorCode("auth_error");
+            } else {
+              setStatus("error");
+              setInitialErrorCode("auth_error");
+            }
+            return;
+          }
         }
 
         const body = await res.json().catch(() => null);
@@ -335,6 +375,8 @@ export function useTeamClaimVerificationList(args: { address: TeamClaimListAddre
           setInitialErrorCode(null);
         }
       } catch {
+        // An aborted obsolete request fails the ownership check and must not
+        // surface an error of its own.
         if (!owns()) return;
         if (opts.isLoadMore) {
           setLoadingMore(false);
@@ -342,6 +384,10 @@ export function useTeamClaimVerificationList(args: { address: TeamClaimListAddre
         } else {
           setStatus("error");
           setInitialErrorCode("network_error");
+        }
+      } finally {
+        if (activeControllerRef.current === controller) {
+          activeControllerRef.current = null;
         }
       }
     },
@@ -355,6 +401,7 @@ export function useTeamClaimVerificationList(args: { address: TeamClaimListAddre
     // Every address/identity change starts from a clean page-1 state: no stale
     // rows, no stale cursor, no stale dedupe set, and in-flight work orphaned.
     seqRef.current += 1;
+    abortActiveRequest();
     seenIdsRef.current = new Set();
     cursorRef.current = undefined;
     setItems([]);
@@ -380,7 +427,7 @@ export function useTeamClaimVerificationList(args: { address: TeamClaimListAddre
 
     void fetchPage({ cursor: undefined, isLoadMore: false, currentUser: user });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, authReady, uid, workspaceId, scope, projectId]);
+  }, [enabled, authReady, uid, workspaceId, scope, projectId, abortActiveRequest]);
 
   const loadMore = useCallback(() => {
     if (!enabled || loadingMore || !hasMore || status !== "ready" || !user) return;

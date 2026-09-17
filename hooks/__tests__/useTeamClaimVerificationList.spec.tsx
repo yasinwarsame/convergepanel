@@ -166,11 +166,41 @@ describe("auth", () => {
     expect(last().status).toBe("ready");
   });
 
-  it("terminates on a second 401 without looping", async () => {
-    mockedAuthedFetch.mockResolvedValue(response(401, { ok: false, errorCode: "auth_error" }));
+  it.each([
+    ["errorCode auth_error", { ok: false, errorCode: "auth_error" }],
+    ["errorCode unauthorized", { ok: false, errorCode: "unauthorized" }],
+    ["an empty body", {}],
+    ["an unparseable body", "__PARSE_FAILURE__"],
+  ])("a second 401 with %s always terminates as auth_error, in exactly two requests", async (_label, body) => {
+    const res =
+      body === "__PARSE_FAILURE__"
+        ? { ok: false, status: 401, json: async () => { throw new SyntaxError("Unexpected token <"); } }
+        : response(401, body);
+    mockedAuthedFetch.mockResolvedValue(res);
     await mount({ address: ALL });
-    expect(mockedAuthedFetch).toHaveBeenCalledTimes(2);
+    // "This is the second 401" is a fact about request history; no server body
+    // vocabulary may rename a finished session.
     expect(last().initialErrorCode).toBe("auth_error");
+    expect(mockedAuthedFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("a second 401 during load-more preserves the rows already shown", async () => {
+    mockedAuthedFetch
+      .mockResolvedValueOnce(response(200, page([item()], { hasMore: true, nextCursor: "c1" })))
+      .mockResolvedValueOnce(response(401, { ok: false, errorCode: "auth_error" }))
+      .mockResolvedValueOnce(response(401, { ok: false, errorCode: "unauthorized" }));
+
+    await mount({ address: ALL });
+    await act(async () => {
+      last().loadMore();
+    });
+    await flush();
+
+    expect(last().items.map((i) => i.verificationId)).toEqual(["vcl-1"]);
+    expect(last().status).toBe("ready");
+    expect(last().loadingMore).toBe(false);
+    expect(last().loadMoreErrorCode).toBe("auth_error");
+    expect(mockedAuthedFetch).toHaveBeenCalledTimes(3);
   });
 
   it("issues GET only, with no body and no Personal route", async () => {
@@ -571,5 +601,126 @@ describe("parseTeamClaimListPageResponse (pure)", () => {
     expect(parseTeamClaimListPageResponse({ ok: true, status: 200, body: page([filedItem()]), address: UNFILED }).ok).toBe(false);
     expect(parseTeamClaimListPageResponse({ ok: true, status: 200, body: page([item()], {}, "unfiled"), address: UNFILED }).ok).toBe(true);
     expect(parseTeamClaimListPageResponse({ ok: true, status: 200, body: page([item({ workspaceId: "nope" })]), address: ALL }).ok).toBe(false);
+  });
+});
+
+describe("request cancellation", () => {
+  const signalOf = (i: number) => (mockedAuthedFetch.mock.calls[i][1] as { signal?: AbortSignal }).signal;
+
+  it("supplies a live AbortSignal on every read", async () => {
+    mockedAuthedFetch.mockResolvedValue(response(200, page([])));
+    await mount({ address: ALL });
+    const sig = signalOf(0);
+    expect(sig).toBeInstanceOf(AbortSignal);
+    expect(sig!.aborted).toBe(false);
+  });
+
+  it.each([
+    ["scope", UNFILED as TeamClaimListAddress],
+    ["Workspace", { kind: "workspace", workspaceId: "ws-2", scope: "all" } as TeamClaimListAddress],
+  ])("aborts the obsolete request when the %s changes", async (_label, next) => {
+    const slow = deferred<unknown>();
+    mockedAuthedFetch.mockReturnValueOnce(slow.promise).mockResolvedValue(response(200, page([], {}, next.kind === "workspace" ? next.scope : "all")));
+
+    const r = await mount({ address: ALL });
+    const oldSignal = signalOf(0)!;
+    expect(oldSignal.aborted).toBe(false);
+
+    await update(r, { address: next });
+    expect(oldSignal.aborted).toBe(true);
+
+    const newSignal = signalOf(1)!;
+    expect(newSignal).not.toBe(oldSignal);
+    expect(newSignal.aborted).toBe(false);
+
+    await act(async () => {
+      slow.resolve(response(200, page([item({ verificationId: "stale" })])));
+      await slow.promise;
+    });
+    await flush();
+    expect(JSON.stringify(last().items)).not.toContain("stale");
+  });
+
+  it("aborts the obsolete request when the Project changes", async () => {
+    const slow = deferred<unknown>();
+    mockedAuthedFetch.mockReturnValueOnce(slow.promise).mockResolvedValue(response(200, { ok: true, items: [], hasMore: false }));
+    const r = await mount({ address: PROJECT });
+    const oldSignal = signalOf(0)!;
+    await update(r, { address: { kind: "project", workspaceId: W, projectId: "proj-2" } });
+    expect(oldSignal.aborted).toBe(true);
+    expect(signalOf(1)!.aborted).toBe(false);
+  });
+
+  it("aborts the obsolete request when the signed-in identity changes", async () => {
+    const slow = deferred<unknown>();
+    mockedAuthedFetch.mockReturnValueOnce(slow.promise).mockResolvedValue(response(200, page([])));
+    const r = await mount({ address: ALL });
+    const oldSignal = signalOf(0)!;
+    auth = { user: USER_B, authReady: true };
+    await update(r, { address: ALL });
+    expect(oldSignal.aborted).toBe(true);
+  });
+
+  it("aborts the active request on unmount and commits nothing afterwards", async () => {
+    const slow = deferred<unknown>();
+    mockedAuthedFetch.mockReturnValueOnce(slow.promise);
+    const r = await mount({ address: ALL });
+    const sig = signalOf(0)!;
+    const before = results.length;
+
+    await act(async () => {
+      r.unmount();
+    });
+    expect(sig.aborted).toBe(true);
+
+    await act(async () => {
+      slow.resolve(response(200, page([item()])));
+      await slow.promise;
+    });
+    await flush();
+    expect(results.length).toBe(before);
+  });
+
+  it("the forced refresh reuses the SAME signal as the first attempt", async () => {
+    mockedAuthedFetch.mockResolvedValueOnce(response(401, { ok: false, errorCode: "auth_error" })).mockResolvedValueOnce(response(200, page([item()])));
+    await mount({ address: ALL });
+    expect(mockedAuthedFetch).toHaveBeenCalledTimes(2);
+    expect(signalOf(1)).toBe(signalOf(0));
+  });
+
+  it("a context change during the forced refresh aborts it and commits nothing stale", async () => {
+    const slowRefresh = deferred<unknown>();
+    mockedAuthedFetch
+      .mockResolvedValueOnce(response(401, { ok: false, errorCode: "auth_error" }))
+      .mockReturnValueOnce(slowRefresh.promise)
+      .mockResolvedValue(response(200, page([], {}, "unfiled")));
+
+    const r = await mount({ address: ALL });
+    const refreshSignal = signalOf(1)!;
+    expect(refreshSignal).toBe(signalOf(0));
+
+    await update(r, { address: UNFILED });
+    expect(refreshSignal.aborted).toBe(true);
+
+    await act(async () => {
+      slowRefresh.resolve(response(200, page([item({ verificationId: "stale-refresh" })])));
+      await slowRefresh.promise;
+    });
+    await flush();
+
+    expect(JSON.stringify(last().items)).not.toContain("stale-refresh");
+    expect(last().initialErrorCode).toBeNull();
+  });
+
+  it("an aborted obsolete request never surfaces network_error", async () => {
+    const rejecting = new Promise((_, reject) => setTimeout(() => reject(Object.assign(new Error("Aborted"), { name: "AbortError" })), 0));
+    mockedAuthedFetch.mockReturnValueOnce(rejecting).mockResolvedValue(response(200, page([], {}, "unfiled")));
+
+    const r = await mount({ address: ALL });
+    await update(r, { address: UNFILED });
+    await flush();
+
+    expect(last().initialErrorCode).toBeNull();
+    expect(last().status).toBe("ready");
   });
 });
