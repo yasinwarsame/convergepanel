@@ -174,7 +174,7 @@ describe("TeamResearchDetailPage — hands authorized context to the Team detail
     const r = await renderPage();
     expect(r.root.findAllByProps({ "data-testid": "team-research-detail-shell" })).toHaveLength(1);
     expect(shellProps).toHaveLength(1);
-    expect(shellProps[0]).toEqual({ workspaceId: WS_ID, workspaceName: "Acme Team", runId: RUN_ID, project: { id: PROJECT_ID, name: "ABC Acquisition" }, showAudit: true });
+    expect(shellProps[0]).toEqual({ workspaceId: WS_ID, workspaceName: "Acme Team", runId: RUN_ID, project: { id: PROJECT_ID, name: "ABC Acquisition" }, showAudit: true, canVerifyClaim: false });
   });
 
   it("showAudit is false without audit.read, and research.read access is unaffected", async () => {
@@ -259,5 +259,24 @@ describe("NO Workspace/Project name leaks on any denied, absent or transient pat
     await renderPage();
     expect(shellProps).toHaveLength(1);
     expect(createElement).toBeDefined();
+  });
+});
+
+describe("R4-I4 Verify-this-claim presentation hint", () => {
+  const caps = (...extra: string[]) => ["workspace.read", "projects.read", "research.read", ...extra];
+
+  it.each([
+    ["neither creation capability", caps(), false],
+    ["research.create only", caps("research.create"), false],
+    ["research.organize only", caps("research.organize"), false],
+    ["both creation capabilities", caps("research.create", "research.organize"), true],
+  ])("with %s -> canVerifyClaim=%s", async (_l, capabilities, expected) => {
+    // Filing a Claim from a Project-filed run needs BOTH, exactly as the POST
+    // gates require. The page itself stays readable on research.read alone.
+    mockedResolveWorkspaceAccess.mockResolvedValue(grantedTeamAccess({ capabilities: capabilities as string[] }));
+    mockedGetProject.mockResolvedValue(foundProject());
+    await renderPage();
+    expect(shellProps).toHaveLength(1);
+    expect(shellProps[0].canVerifyClaim).toBe(expected);
   });
 });

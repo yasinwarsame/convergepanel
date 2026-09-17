@@ -33,6 +33,7 @@ import { useUserPlan } from "@/hooks/useUserPlan";
 import { getPlanConfigById, type PlanId } from "@/lib/plans";
 import { getDefaultModelSelection } from "@/lib/utils/normalizeSelectedModels";
 import { teamClaimDetailHref } from "@/lib/workspaces/teamClaimDetailHref";
+import type { TeamClaimOriginTarget } from "@/lib/workspaces/teamClaimOriginHandoff";
 import {
   useTeamClaimVerificationCreate,
   type TeamClaimCreateAddress,
@@ -65,6 +66,13 @@ export type TeamClaimComposerShellProps = {
   showAudit: boolean;
   /** Server-resolved, active, Workspace-contained Project; `null` for the Unfiled address. */
   project: { id: string; name: string } | null;
+  /**
+   * R4-I4 — when present, this composer verifies an EXISTING research finding:
+   * only the two locators are known client-side, the claim text is neither
+   * shown nor editable, and the authoritative Project is unknown until the
+   * server answers. Absent/null keeps the exact I3 ordinary behaviour.
+   */
+  originTarget?: TeamClaimOriginTarget | null;
 };
 
 type SubmitState =
@@ -94,6 +102,11 @@ export function teamClaimCreateRejectionCopy(outcome: Extract<TeamClaimCreateOut
       const base = used !== undefined && limit !== undefined ? `You've used all ${limit} runs this month.` : "You've reached your monthly run limit.";
       return outcome.usage?.resetsAt ? `${base} It resets on ${outcome.usage.resetsAt.slice(0, 10)}.` : base;
     }
+    case "origin_not_eligible":
+      return "This research finding is no longer available for verification. Return to the research and choose a current finding.";
+    case "invalid_origin_locator":
+    case "ambiguous_request_mode":
+      return "This verification link is no longer valid. Return to the research and choose the finding again.";
     case "rate_limit_exceeded":
       return "You're verifying claims too quickly. Please wait a moment and try again.";
     case "unauthorized":
@@ -111,7 +124,7 @@ export function teamClaimCreateRejectionCopy(outcome: Extract<TeamClaimCreateOut
   }
 }
 
-export default function TeamClaimComposerShell({ workspaceId, workspaceName, showAudit, project }: TeamClaimComposerShellProps) {
+export default function TeamClaimComposerShell({ workspaceId, workspaceName, showAudit, project, originTarget = null }: TeamClaimComposerShellProps) {
   const router = useRouter();
   const { plan, loading: planLoading } = useUserPlan();
   const normalizedPlan = normalizePlanId((plan as string) || "free");
@@ -135,7 +148,7 @@ export default function TeamClaimComposerShell({ workspaceId, workspaceName, sho
   // Navigation ownership: a late success must not move a viewer who has left
   // this form, or who is now composing against a different route context.
   const mountedRef = useRef(false);
-  const contextKey = `${workspaceId}::${project?.id ?? ""}`;
+  const contextKey = `${workspaceId}::${project?.id ?? ""}::${originTarget ? `${originTarget.runId}::${originTarget.claimId}` : ""}`;
   const contextKeyRef = useRef(contextKey);
   useEffect(() => {
     contextKeyRef.current = contextKey;
@@ -164,14 +177,19 @@ export default function TeamClaimComposerShell({ workspaceId, workspaceName, sho
       e.preventDefault();
       if (isSubmitting) return;
 
-      const trimmed = claim.trim();
-      if (trimmed.length === 0) {
-        fail({ kind: "validation", message: "Enter a claim before verifying." });
-        return;
-      }
-      if (trimmed.length > MAX_CLAIM_CHARS) {
-        fail({ kind: "validation", message: `Claims are limited to ${MAX_CLAIM_CHARS} characters.` });
-        return;
+      // Origin-linked mode holds NO claim text — the server resolves it from
+      // the locators — so the length rules simply do not apply client-side.
+      let trimmed = "";
+      if (originTarget === null) {
+        trimmed = claim.trim();
+        if (trimmed.length === 0) {
+          fail({ kind: "validation", message: "Enter a claim before verifying." });
+          return;
+        }
+        if (trimmed.length > MAX_CLAIM_CHARS) {
+          fail({ kind: "validation", message: `Claims are limited to ${MAX_CLAIM_CHARS} characters.` });
+          return;
+        }
       }
       if (selectedModels.length < MIN_MODELS) {
         fail({ kind: "validation", message: `Select at least ${MIN_MODELS} models.` });
@@ -180,7 +198,7 @@ export default function TeamClaimComposerShell({ workspaceId, workspaceName, sho
 
       setSubmitState({ kind: "idle" });
       const startedContext = contextKeyRef.current;
-      const outcome = await submit({ claim: trimmed, selectedModels });
+      const outcome = await submit(originTarget !== null ? { origin: originTarget, selectedModels } : { claim: trimmed, selectedModels });
 
       // A request that outlived this form, or this route context, must not navigate.
       if (!mountedRef.current || contextKeyRef.current !== startedContext) return;
@@ -201,21 +219,26 @@ export default function TeamClaimComposerShell({ workspaceId, workspaceName, sho
           return;
       }
     },
-    [isSubmitting, claim, selectedModels, submit, router, fail]
+    [isSubmitting, claim, selectedModels, submit, router, fail, originTarget]
   );
 
   const workspaceHref = `/workspace/team/${encodeURIComponent(workspaceId)}`;
   const claimsHref = `${workspaceHref}/claims`;
   const projectHref = project ? `${workspaceHref}/projects/${encodeURIComponent(project.id)}` : null;
   const backHref = project && projectHref ? projectHref : claimsHref;
-  const unknownCheckHref = backHref;
+  // Origin-linked mode has no client Project authority, so an unconfirmed
+  // outcome must point at the Workspace Claims list, which shows BOTH Unfiled
+  // and Project-bound Claims — never a guessed Project.
+  const unknownCheckHref = originTarget !== null ? claimsHref : backHref;
 
   return (
     <main className="mx-auto max-w-3xl px-4 py-10 sm:py-14">
       <Breadcrumb
         className="mb-3"
         segments={
-          project && projectHref
+          originTarget !== null
+            ? [{ label: workspaceName, href: workspaceHref }, { label: "Claims", href: claimsHref }, { label: "Verify research claim" }]
+            : project && projectHref
             ? [
                 { label: workspaceName, href: workspaceHref },
                 { label: "Projects", href: `${workspaceHref}/projects` },
@@ -224,13 +247,15 @@ export default function TeamClaimComposerShell({ workspaceId, workspaceName, sho
               ]
             : [{ label: workspaceName, href: workspaceHref }, { label: "Claims", href: claimsHref }, { label: "New claim" }]
         }
-        mobileParent={project && projectHref ? { label: project.name, href: projectHref } : { label: "Claims", href: claimsHref }}
+        mobileParent={originTarget === null && project && projectHref ? { label: project.name, href: projectHref } : { label: "Claims", href: claimsHref }}
       />
 
       <div className="mb-6">
-        <h1 className="text-xl font-semibold text-cp-text">Verify a claim</h1>
+        <h1 className="text-xl font-semibold text-cp-text">{originTarget !== null ? "Verify a research claim" : "Verify a claim"}</h1>
         <p className="mt-1 text-sm text-cp-muted" data-testid="team-claim-create-scope">
-          {project ? (
+          {originTarget !== null ? (
+            "The claim text will be verified exactly as it appears in the saved research. It can't be edited here. Choose your models, then run the check."
+          ) : project ? (
             <>
               This claim will be filed in <span className="font-medium text-cp-text">{project.name}</span>.
             </>
@@ -241,34 +266,38 @@ export default function TeamClaimComposerShell({ workspaceId, workspaceName, sho
       </div>
 
       {/* A Project Claim is composed beneath its Project; an Unfiled one belongs to the Claims list. */}
-      <WorkspaceNav workspaceId={workspaceId} active={project ? "projects" : "claims"} showAudit={showAudit} />
+      <WorkspaceNav workspaceId={workspaceId} active={originTarget === null && project ? "projects" : "claims"} showAudit={showAudit} />
 
       <form onSubmit={handleSubmit} className="mt-6 rounded-xl border border-cp-border bg-cp-surface p-5 shadow-sm">
-        <label htmlFor="team-claim-text" className="block text-sm font-medium text-cp-text">
-          What claim would you like to verify?
-        </label>
-        <textarea
-          id="team-claim-text"
-          value={claim}
-          onChange={(e) => setClaim(e.target.value)}
-          onKeyDown={(e) => {
-            // Same submit path as the button: validation, single-flight and the
-            // disabled state all still apply.
-            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-              e.preventDefault();
-              (e.currentTarget.form as HTMLFormElement | null)?.requestSubmit();
-            }
-          }}
-          disabled={isSubmitting}
-          rows={5}
-          maxLength={MAX_CLAIM_CHARS}
-          placeholder="Paste or type a single factual claim…"
-          className="mt-2 w-full rounded-lg border border-cp-border bg-cp-bg px-3 py-2 text-sm text-cp-text focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent disabled:opacity-50"
-          data-testid="team-claim-text"
-        />
-        <p className="mt-1 text-right text-xs text-cp-faint" data-testid="team-claim-char-count">
-          {claim.length}/{MAX_CLAIM_CHARS}
-        </p>
+        {originTarget === null && (
+          <>
+            <label htmlFor="team-claim-text" className="block text-sm font-medium text-cp-text">
+              What claim would you like to verify?
+            </label>
+            <textarea
+              id="team-claim-text"
+              value={claim}
+              onChange={(e) => setClaim(e.target.value)}
+              onKeyDown={(e) => {
+                // Same submit path as the button: validation, single-flight and
+                // the disabled state all still apply.
+                if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                  e.preventDefault();
+                  (e.currentTarget.form as HTMLFormElement | null)?.requestSubmit();
+                }
+              }}
+              disabled={isSubmitting}
+              rows={5}
+              maxLength={MAX_CLAIM_CHARS}
+              placeholder="Paste or type a single factual claim…"
+              className="mt-2 w-full rounded-lg border border-cp-border bg-cp-bg px-3 py-2 text-sm text-cp-text focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent disabled:opacity-50"
+              data-testid="team-claim-text"
+            />
+            <p className="mt-1 text-right text-xs text-cp-faint" data-testid="team-claim-char-count">
+              {claim.length}/{MAX_CLAIM_CHARS}
+            </p>
+          </>
+        )}
 
         <div className="mt-5">
           <ModelPicker selectedModels={selectedModels} onSelectionChange={setSelectedModels} plan={normalizedPlan} />
@@ -303,7 +332,7 @@ export default function TeamClaimComposerShell({ workspaceId, workspaceName, sho
             href={backHref}
             className="rounded-lg border border-cp-border px-4 py-2 text-sm font-medium text-cp-text hover:bg-cp-raised focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent"
           >
-            {project ? "Back to Project" : "Back to Claims"}
+            {originTarget === null && project ? "Back to Project" : "Back to Claims"}
           </Link>
         </div>
 

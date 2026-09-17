@@ -297,3 +297,140 @@ describe("definite rejections", () => {
     expect(await submit()).toEqual({ status: "outcome_unknown" });
   });
 });
+
+describe("R4-I4 origin-linked mode", () => {
+  const ORIGIN = { runId: "run-9", claimId: "v1:key_findings:0:abc" };
+  const submitOrigin = async (): Promise<TeamClaimCreateOutcome> => {
+    let outcome!: TeamClaimCreateOutcome;
+    await act(async () => {
+      outcome = await hook.submit({ origin: ORIGIN, selectedModels: MODELS });
+    });
+    return outcome;
+  };
+
+  it("POSTs exactly {runId, claimId, models} to the Team endpoint", async () => {
+    mockedAuthedFetch.mockResolvedValue(response(200, okBody()));
+    await mount(UNFILED);
+    await submitOrigin();
+    expect(urls()).toEqual(["/api/workspaces/ws-1/verifications"]);
+    expect(Object.keys(bodyOf()).sort()).toEqual(["claimId", "models", "runId"]);
+    expect(bodyOf()).toEqual({ runId: ORIGIN.runId, claimId: ORIGIN.claimId, models: MODELS });
+  });
+
+  it("sends no claim text and no projectId", async () => {
+    mockedAuthedFetch.mockResolvedValue(response(200, okBody()));
+    await mount(FILED);
+    await submitOrigin();
+    const raw = (mockedAuthedFetch.mock.calls[0][1] as { body: string }).body;
+    for (const forbidden of ["claim\"", "projectId", "origin\"", "workspaceId", "uid", "creator", "role"]) {
+      expect(raw).not.toContain(forbidden);
+    }
+  });
+
+  it("never posts to the Personal endpoint", async () => {
+    mockedAuthedFetch.mockResolvedValue(response(200, okBody()));
+    await mount(UNFILED);
+    await submitOrigin();
+    for (const u of urls()) {
+      expect(u).not.toContain("/api/verify-claim");
+      expect(u).not.toContain("/api/user/");
+    }
+  });
+
+  it("retries a 401 exactly once with the identical origin body", async () => {
+    mockedAuthedFetch.mockResolvedValueOnce(response(401, { ok: false, errorCode: "auth_error" })).mockResolvedValueOnce(response(200, okBody()));
+    await mount(UNFILED);
+    expect((await submitOrigin()).status).toBe("ok");
+    expect(mockedAuthedFetch).toHaveBeenCalledTimes(2);
+    expect(bodyOf(1)).toEqual(bodyOf(0));
+  });
+
+  it("terminates a second 401 as auth_error with no third request", async () => {
+    mockedAuthedFetch.mockResolvedValue(response(401, { ok: false, errorCode: "unauthorized" }));
+    await mount(UNFILED);
+    expect(await submitOrigin()).toEqual({ status: "rejected", code: "auth_error" });
+    expect(mockedAuthedFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("issues exactly ONE request for two same-tick origin submissions", async () => {
+    const slow = deferred<unknown>();
+    mockedAuthedFetch.mockReturnValueOnce(slow.promise);
+    await mount(UNFILED);
+    let first!: Promise<TeamClaimCreateOutcome>;
+    let second!: TeamClaimCreateOutcome;
+    await act(async () => {
+      first = hook.submit({ origin: ORIGIN, selectedModels: MODELS });
+      second = await hook.submit({ origin: ORIGIN, selectedModels: MODELS });
+    });
+    expect(second).toEqual({ status: "already_submitting" });
+    expect(mockedAuthedFetch).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      slow.resolve(response(200, okBody()));
+      await first;
+    });
+  });
+
+  it.each([
+    ["a transport failure", null],
+    ["HTTP 500", 500],
+    ["HTTP 503", 503],
+  ])("issues exactly one request for %s and reports outcome_unknown", async (_l, status) => {
+    if (status === null) mockedAuthedFetch.mockRejectedValue(new Error("network"));
+    else mockedAuthedFetch.mockResolvedValue(response(status as number, {}));
+    await mount(UNFILED);
+    expect(await submitOrigin()).toEqual({ status: "outcome_unknown" });
+    expect(mockedAuthedFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry a 429", async () => {
+    mockedAuthedFetch.mockResolvedValue(response(429, { ok: false, errorCode: "rate_limit_exceeded" }));
+    await mount(UNFILED);
+    expect(await submitOrigin()).toEqual({ status: "rejected", code: "rate_limit_exceeded" });
+    expect(mockedAuthedFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("maps origin-specific rejections", async () => {
+    for (const code of ["origin_not_eligible", "invalid_origin_locator", "ambiguous_request_mode"]) {
+      mockedAuthedFetch.mockResolvedValue(response(404, { ok: false, errorCode: code }));
+      await mount(UNFILED);
+      const outcome = await submitOrigin();
+      expect(outcome.status).toBe("rejected");
+      expect((outcome as { code: string }).code).toBe(code);
+    }
+  });
+
+  describe("success: the SERVER decides the Project", () => {
+    it("accepts an Unfiled result", async () => {
+      mockedAuthedFetch.mockResolvedValue(response(200, okBody({ projectId: null })));
+      await mount(UNFILED);
+      expect(await submitOrigin()).toEqual({ status: "ok", verificationId: "vcl-1", workspaceId: W, projectId: null });
+    });
+
+    it("accepts any valid Project id, even one the composer never knew", async () => {
+      // The source run may have been reorganized since the handoff link was made.
+      mockedAuthedFetch.mockResolvedValue(response(200, okBody({ projectId: "proj-moved" })));
+      await mount(UNFILED);
+      expect(await submitOrigin()).toEqual({ status: "ok", verificationId: "vcl-1", workspaceId: W, projectId: "proj-moved" });
+    });
+
+    it("accepts a Project id that differs from the composer's own address", async () => {
+      mockedAuthedFetch.mockResolvedValue(response(200, okBody({ projectId: "proj-other" })));
+      await mount(FILED);
+      expect((await submitOrigin()).status).toBe("ok");
+    });
+
+    it.each([
+      ["a foreign Workspace", okBody({ workspaceId: "ws-other" })],
+      ["projectId undefined", { ok: true, verificationId: "vcl-1", workspaceId: W }],
+      ["projectId empty string", okBody({ projectId: "" })],
+      ["projectId a number", okBody({ projectId: 7 })],
+      ["projectId an object", okBody({ projectId: { id: "p" } })],
+      ["a missing verificationId", okBody({ verificationId: "" })],
+      ["ok !== true", { ...okBody(), ok: false }],
+    ])("reports outcome_unknown for %s", async (_l, body) => {
+      mockedAuthedFetch.mockResolvedValue(response(200, body));
+      await mount(UNFILED);
+      expect(await submitOrigin()).toEqual({ status: "outcome_unknown" });
+    });
+  });
+});
