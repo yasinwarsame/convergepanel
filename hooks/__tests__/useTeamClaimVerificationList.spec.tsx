@@ -452,6 +452,44 @@ describe("address changes drop the cursor and clear rows", () => {
     expect(last().items).toEqual([]);
   });
 
+  it("a load-more AFTER a scope switch uses the NEW scope's cursor, never the old one", async () => {
+    // The first request after a switch always passes an explicit undefined
+    // cursor, so a leaked cursor ref only surfaces on the NEXT load-more.
+    mockedAuthedFetch
+      .mockResolvedValueOnce(response(200, page([item()], { hasMore: true, nextCursor: "ALL-CURSOR" })))
+      .mockResolvedValueOnce(response(200, page([item({ verificationId: "vcl-u1" })], { hasMore: true, nextCursor: "UNFILED-CURSOR" }, "unfiled")))
+      .mockResolvedValueOnce(response(200, page([item({ verificationId: "vcl-u2" })], {}, "unfiled")));
+
+    const r = await mount({ address: ALL });
+    await update(r, { address: UNFILED });
+    await act(async () => {
+      last().loadMore();
+    });
+    await flush();
+
+    const lastUrl = urls()[urls().length - 1];
+    expect(lastUrl).toBe("/api/workspaces/ws-1/verifications?scope=unfiled&cursor=UNFILED-CURSOR");
+    expect(lastUrl).not.toContain("ALL-CURSOR");
+  });
+
+  it("a load-more AFTER a Project switch uses the NEW Project's cursor", async () => {
+    mockedAuthedFetch
+      .mockResolvedValueOnce(response(200, { ok: true, items: [filedItem()], hasMore: true, nextCursor: "A-CURSOR" }))
+      .mockResolvedValueOnce(response(200, { ok: true, items: [], hasMore: true, nextCursor: "B-CURSOR" }))
+      .mockResolvedValueOnce(response(200, { ok: true, items: [], hasMore: false }));
+
+    const r = await mount({ address: PROJECT });
+    await update(r, { address: { kind: "project", workspaceId: W, projectId: "proj-2" } });
+    await act(async () => {
+      last().loadMore();
+    });
+    await flush();
+
+    const lastUrl = urls()[urls().length - 1];
+    expect(lastUrl).toBe("/api/workspaces/ws-1/projects/proj-2/verifications?cursor=B-CURSOR");
+    expect(lastUrl).not.toContain("A-CURSOR");
+  });
+
   it("Workspace A -> Workspace B never reuses the previous cursor or rows", async () => {
     mockedAuthedFetch
       .mockResolvedValueOnce(response(200, page([item()], { hasMore: true, nextCursor: "c1" })))
