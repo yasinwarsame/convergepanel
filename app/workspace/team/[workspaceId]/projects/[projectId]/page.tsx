@@ -79,6 +79,10 @@ export default async function TeamProjectDetailPage({ params }: { params: { work
       workspaceId={params.workspaceId}
       workspaceName={access.workspace.name}
       canReadAudit={access.capabilities.includes("audit.read")}
+      // R4-I2 — narrow presentation hint for the read-only Claims section. The
+      // page gate itself still requires only `projects.read`; the R3 Claim list
+      // endpoint re-authorizes `research.read` on every request.
+      canReadClaims={access.capabilities.includes("research.read")}
       canStartResearch={access.capabilities.includes("research.create") && access.capabilities.includes("research.organize")}
       canAssignResearch={access.capabilities.includes("research.organize")}
       assignmentUiEnabled={projectAssignmentUiEnabledFor(identity.uid)}
