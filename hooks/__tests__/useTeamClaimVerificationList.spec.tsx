@@ -681,6 +681,35 @@ describe("request cancellation", () => {
     expect(results.length).toBe(before);
   });
 
+  it("aborts the in-flight request when the list is disabled, even though no new read follows", async () => {
+    // These early-return paths are the ones fetchPage's own entry-abort cannot
+    // cover: no replacement request is issued, so the effect must cancel.
+    const slow = deferred<unknown>();
+    mockedAuthedFetch.mockReturnValueOnce(slow.promise);
+    const r = await mount({ address: ALL, enabled: true });
+    const sig = signalOf(0)!;
+    expect(sig.aborted).toBe(false);
+
+    await update(r, { address: ALL, enabled: false });
+    expect(sig.aborted).toBe(true);
+    expect(mockedAuthedFetch).toHaveBeenCalledTimes(1);
+    expect(last().status).toBe("disabled");
+  });
+
+  it("aborts the in-flight request when the viewer signs out", async () => {
+    const slow = deferred<unknown>();
+    mockedAuthedFetch.mockReturnValueOnce(slow.promise);
+    const r = await mount({ address: ALL });
+    const sig = signalOf(0)!;
+
+    auth = { user: null, authReady: true };
+    await update(r, { address: ALL });
+
+    expect(sig.aborted).toBe(true);
+    expect(mockedAuthedFetch).toHaveBeenCalledTimes(1);
+    expect(last().initialErrorCode).toBe("unauthorized");
+  });
+
   it("the forced refresh reuses the SAME signal as the first attempt", async () => {
     mockedAuthedFetch.mockResolvedValueOnce(response(401, { ok: false, errorCode: "auth_error" })).mockResolvedValueOnce(response(200, page([item()])));
     await mount({ address: ALL });
