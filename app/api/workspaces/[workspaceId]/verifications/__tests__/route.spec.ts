@@ -390,9 +390,19 @@ describe("POST /api/workspaces/[workspaceId]/verifications — Gate 2 (post-exec
   });
 });
 
-describe("GET absence — E1 is create-only", () => {
-  it("no GET export exists on this route module", async () => {
+describe("GET — added by TEAM-VERIFICATION-PARITY-R3 beside an unchanged POST", () => {
+  // E1 shipped this route create-only; R3 adds the durable Team Claim list as
+  // GET (tested in routeGet.spec.ts). POST keeps its own identity helper and
+  // telemetry attribution.
+  it("exports both handlers, and an unauthenticated POST is still attributed to POST, never GET", async () => {
     const routeModule = await import("@/app/api/workspaces/[workspaceId]/verifications/route");
-    expect((routeModule as any).GET).toBeUndefined();
+    expect(typeof (routeModule as any).GET).toBe("function");
+    expect(typeof routeModule.POST).toBe("function");
+    mockedResolveRequestIdentity.mockResolvedValueOnce({ status: "unauthenticated", reason: "missing_credentials" });
+    const res = await routeModule.POST(buildPostRequest("{}"), { params: { workspaceId: WS_ID } });
+    expect(res.status).toBe(401);
+    expect(mockedLogIdentityResolutionFailure).toHaveBeenLastCalledWith(
+      expect.objectContaining({ route: "POST /api/workspaces/[workspaceId]/verifications", method: "POST" })
+    );
   });
 });

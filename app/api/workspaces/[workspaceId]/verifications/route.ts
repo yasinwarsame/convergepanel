@@ -1,8 +1,11 @@
 /**
  * Team Claim Verification Creation, Phase 8C-E.1 —
- * `POST /api/workspaces/{workspaceId}/verifications`. Team Claim only —
- * no GET/list in this slice (deferred, see 8C-E.0 §27). No Video
- * Verification in this file (E3, separate).
+ * `POST /api/workspaces/{workspaceId}/verifications`. Team Claim only.
+ * No Video Verification in this file (E3, separate).
+ *
+ * TEAM-VERIFICATION-PARITY-R3 — `GET` (the durable Team Claim list) is added
+ * at the END of this file with its own identity helper and imports. POST's
+ * code, ordering, telemetry and behavior below are untouched.
  *
  * Frozen order (8C-E.0.1): identity -> rate limit (BEFORE body parsing,
  * matching Personal's own `/api/verify-claim` and Phase D's security
@@ -72,6 +75,9 @@ import { logger } from "@/lib/logger";
 import type { ModelVerdict } from "@/lib/verification/parseVerificationJson";
 import { resolveClaimVerificationOrigin, type ClaimVerificationOrigin } from "@/lib/verification/claimVerificationOrigin";
 import type { EvidenceSourceReference } from "@/lib/verification/evidenceSourceExtraction";
+import { resolveTeamRunWorkspaceAccess } from "@/lib/workspaces/resolveTeamRunWorkspaceAccess";
+import { teamRunAccessDeniedResponse, teamRunInsufficientCapabilityResponse } from "@/lib/workspaces/teamRunAccessResponse";
+import { listTeamClaimVerifications } from "@/lib/workspaces/listTeamClaimVerifications";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -605,5 +611,77 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
       { ok: false, errorCode: "internal_error", message: "Server error. Please try again." },
       { status: 500 }
     );
+  }
+}
+
+// ============================================================================
+// TEAM-VERIFICATION-PARITY-R3 — GET: the durable Team Claim verification list.
+//
+//   GET /api/workspaces/{W}/verifications                 every Team Claim in W
+//   GET /api/workspaces/{W}/verifications?scope=unfiled   only projectId == null
+//
+// identity -> resolveTeamRunWorkspaceAccess -> research.read -> scope/limit ->
+// listTeamClaimVerifications(). Authorization is Workspace membership plus the
+// centralized capability map only: never the creator, `userId`, assignment or
+// a role string. Read-only: no rate-limit bucket, quota, execution, governance
+// or write. Its own identity helper keeps POST's telemetry attribution exact.
+// ============================================================================
+
+const GET_ROUTE = "GET /api/workspaces/[workspaceId]/verifications";
+const LIST_DEFAULT_LIMIT = 20;
+const LIST_MAX_LIMIT = 50;
+
+async function getUidForList(req: NextRequest): Promise<string | NextResponse> {
+  const identity = await resolveRequestIdentity(req);
+  if (identity.status === "authenticated") return identity.uid;
+  logIdentityResolutionFailure({ route: GET_ROUTE, method: "GET", failureCategory: identity.reason });
+  if (identity.reason === "missing_credentials") {
+    return NextResponse.json({ ok: false, errorCode: "unauthorized", message: "Please sign in." }, { status: 401 });
+  }
+  return NextResponse.json({ ok: false, errorCode: "auth_error", message: "Authentication failed." }, { status: 401 });
+}
+
+export async function GET(req: NextRequest, { params }: { params: { workspaceId: string } }) {
+  const uidOrRes = await getUidForList(req);
+  if (uidOrRes instanceof NextResponse) return uidOrRes;
+  const uid = uidOrRes;
+  const workspaceId = params.workspaceId;
+
+  const access = await resolveTeamRunWorkspaceAccess({ uid, workspaceId });
+  if (!access.granted) {
+    const { status, body } = teamRunAccessDeniedResponse(access.reason);
+    return NextResponse.json(body, { status });
+  }
+  if (!access.capabilities.includes("research.read")) {
+    const { status, body } = teamRunInsufficientCapabilityResponse();
+    return NextResponse.json(body, { status });
+  }
+
+  const { searchParams } = req.nextUrl;
+  const rawScope = searchParams.get("scope");
+  if (rawScope !== null && rawScope !== "unfiled") {
+    return NextResponse.json({ ok: false, errorCode: "invalid_scope", message: "Unsupported scope value." }, { status: 400 });
+  }
+  const scope = rawScope === "unfiled" ? "unfiled" : "all";
+  const limit = Math.min(LIST_MAX_LIMIT, Math.max(1, parseInt(searchParams.get("limit") || String(LIST_DEFAULT_LIMIT), 10) || LIST_DEFAULT_LIMIT));
+  const cursorRaw = searchParams.get("cursor");
+
+  const result = await listTeamClaimVerifications({ workspaceId, scope: { kind: scope }, limit, cursorRaw });
+  switch (result.status) {
+    case "ok":
+      return NextResponse.json({
+        ok: true,
+        items: result.items,
+        hasMore: result.hasMore,
+        ...(result.nextCursor ? { nextCursor: result.nextCursor } : {}),
+        scope,
+      });
+    case "invalid_cursor":
+      return NextResponse.json({ ok: false, errorCode: "invalid_cursor", message: "This page link is no longer valid." }, { status: 400 });
+    case "integrity_violation":
+    case "query_failed": {
+      const { status, body } = internalErrorResponse();
+      return NextResponse.json(body, { status });
+    }
   }
 }
