@@ -11,6 +11,14 @@
  * gate already performed — this is a UX hint only, never an
  * authorization decision).
  *
+ * TEAM-VERIFICATION-PARITY-R4-I2 — "Claims" is added as a PERMANENT
+ * destination on exactly the same reasoning as Projects: every one of the five
+ * valid Team roles (owner, admin, member, reviewer, viewer) carries
+ * `research.read`, which is the capability the R3 Claim list endpoints and the
+ * Claims page gate both require — so there is no role for which this link
+ * would lead to a concealed page. It is never conditioned on Claim count,
+ * Project count, activation state or the creator, and it carries no badge.
+ *
  * Phase 12A.2 — "Projects" is added as a PERMANENT destination, always
  * rendered alongside Overview/Members (never conditional on Workspace
  * activation state, Project count, or research existence — every valid
@@ -22,7 +30,7 @@
 
 import Link from "next/link";
 
-export type WorkspaceNavItem = "overview" | "projects" | "members" | "audit";
+export type WorkspaceNavItem = "overview" | "projects" | "claims" | "members" | "audit";
 
 export default function WorkspaceNav({
   workspaceId,
@@ -38,6 +46,7 @@ export default function WorkspaceNav({
   const items: { key: WorkspaceNavItem; label: string; href: string }[] = [
     { key: "overview", label: "Overview", href: base },
     { key: "projects", label: "Projects", href: `${base}/projects` },
+    { key: "claims", label: "Claims", href: `${base}/claims` },
     { key: "members", label: "Members", href: `${base}/members` },
     ...(showAudit ? [{ key: "audit" as const, label: "Audit Log", href: `${base}/audit` }] : []),
   ];

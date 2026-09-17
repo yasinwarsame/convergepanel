@@ -37,6 +37,12 @@ import { Breadcrumb } from "@/components/shared/Breadcrumb";
 import { GovernanceChip } from "@/components/shared/GovernanceChip";
 import { teamResearchDetailHref } from "@/lib/workspaces/teamResearchDetailHref";
 import { SectionEmptyBox, SectionInitialErrorBox, SectionLoadingRow, SectionPagination } from "@/components/projects/SectionState";
+import { TeamClaimListRow } from "@/components/workspace/claims/TeamClaimListRow";
+import {
+  useTeamClaimVerificationList,
+  teamClaimListInitialErrorCopy,
+  teamClaimListLoadMoreErrorCopy,
+} from "@/hooks/useTeamClaimVerificationList";
 import {
   useTeamProjectRuns,
   isDefinitiveEmptyTeamProjectRunsState,
@@ -96,6 +102,7 @@ export default function TeamProjectDetailShell({
   canStartResearch,
   canAssignResearch = false,
   assignmentUiEnabled = false,
+  canReadClaims = false,
 }: {
   workspaceId: string;
   workspaceName: string;
@@ -106,6 +113,8 @@ export default function TeamProjectDetailShell({
   canAssignResearch?: boolean;
   /** Project/Research Assignment (D10) — server-derived rollout presentation hint (page-computed). */
   assignmentUiEnabled?: boolean;
+  /** R4-I2 — server-derived `research.read`; gates only whether the read-only Claims section requests anything. The R3 list endpoint remains authoritative. */
+  canReadClaims?: boolean;
 }) {
   // Project/Research Assignment — `?assignee=me` VIEW filter on the research list.
   const [assignedToMe, setAssignedToMe] = useState(false);
@@ -113,6 +122,14 @@ export default function TeamProjectDetailShell({
   const runs = useTeamProjectRuns({ workspaceId, projectId: project.id, assigneeFilter });
   const { items, hasMore, status, initialErrorCode, loadingMore, loadMoreErrorCode, loadMore, retryInitial, resetAndReloadFromStart } = runs;
   const assignment = useTeamRunAssignee({ workspaceId });
+  /*
+    R4-I2 — the read-only Claims section. Its state is entirely independent of
+    the research list: a Claim error, retry or load-more never resets, refetches
+    or hides research, and a research refetch (e.g. after an assignment) never
+    resets the Claim list. `enabled` keeps it from issuing any request at all
+    when the viewer lacks `research.read`.
+  */
+  const claims = useTeamClaimVerificationList({ address: { kind: "project", workspaceId, projectId: project.id }, enabled: canReadClaims });
   const showAssign = assignmentUiEnabled && canAssignResearch && project.status === "active";
 
   // Assignment feedback + focus are owned here (the refetch unmounts rows).
@@ -296,6 +313,42 @@ export default function TeamProjectDetailShell({
             );
           })()}
       </section>
+
+      {canReadClaims && (
+        <section className="mt-10" data-testid="team-project-claims-section">
+          <h2 className="text-lg font-semibold text-cp-text">Claims</h2>
+
+          {claims.status === "loading" && <SectionLoadingRow label="Loading claims…" />}
+
+          {claims.status === "error" &&
+            claims.initialErrorCode !== null &&
+            (() => {
+              const copy = teamClaimListInitialErrorCopy(claims.initialErrorCode);
+              return <SectionInitialErrorBox message={copy.message} retry={copy.retry} onRetry={claims.retryInitial} />;
+            })()}
+
+          {claims.status === "ready" && claims.items.length === 0 && <SectionEmptyBox lines={["No claims in this project yet."]} />}
+
+          {claims.status === "ready" && claims.items.length > 0 && (
+            <>
+              <ul className="mt-2">
+                {claims.items.map((item) => (
+                  <TeamClaimListRow key={item.verificationId} workspaceId={workspaceId} item={item} showProject={false} />
+                ))}
+              </ul>
+              {(claims.hasMore || claims.loadMoreErrorCode !== null) && (
+                <SectionPagination
+                  loadingMore={claims.loadingMore}
+                  errorMessage={claims.loadMoreErrorCode !== null ? teamClaimListLoadMoreErrorCopy(claims.loadMoreErrorCode).message : null}
+                  errorAction={claims.loadMoreErrorCode !== null ? teamClaimListLoadMoreErrorCopy(claims.loadMoreErrorCode).action : null}
+                  onLoadMore={claims.loadMore}
+                  onReload={claims.resetAndReloadFromStart}
+                />
+              )}
+            </>
+          )}
+        </section>
+      )}
     </main>
   );
 }

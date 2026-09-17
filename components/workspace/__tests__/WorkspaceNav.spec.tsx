@@ -78,3 +78,57 @@ describe("WorkspaceNav", () => {
     });
   });
 });
+
+describe("R4-I2 — Claims is a PERMANENT navigation destination", () => {
+  const ALL_ACTIVE = ["overview", "projects", "claims", "members", "audit"] as const;
+
+  it("always renders a Claims link, regardless of the active item or showAudit", () => {
+    for (const active of ALL_ACTIVE) {
+      for (const showAudit of [true, false]) {
+        const html = renderToStaticMarkup(createElement(WorkspaceNav, { workspaceId: "ws-1", active, showAudit }));
+        expect(html).toContain("Claims");
+        if (active !== "claims") {
+          expect(html).toMatch(/<a[^>]*href="\/workspace\/team\/ws-1\/claims"[^>]*>Claims<\/a>/);
+        }
+      }
+    }
+  });
+
+  it("points at the canonical Workspace Claims route, not Projects", () => {
+    const html = renderToStaticMarkup(createElement(WorkspaceNav, { workspaceId: "ws-1", active: "overview", showAudit: false }));
+    expect(html).toMatch(/<a[^>]*href="\/workspace\/team\/ws-1\/claims"[^>]*>Claims<\/a>/);
+    expect(html).not.toMatch(/<a[^>]*href="\/workspace\/team\/ws-1\/projects"[^>]*>Claims<\/a>/);
+  });
+
+  it("active: 'claims' renders it as the non-interactive current-page item", () => {
+    const html = renderToStaticMarkup(createElement(WorkspaceNav, { workspaceId: "ws-1", active: "claims", showAudit: true }));
+    expect(html).toMatch(/<span[^>]*aria-current="page"[^>]*>Claims<\/span>/);
+    expect(html).not.toMatch(/<a[^>]*href="\/workspace\/team\/ws-1\/claims"[^>]*>Claims<\/a>/);
+  });
+
+  it("every other item remains a real link when Claims is active", () => {
+    const html = renderToStaticMarkup(createElement(WorkspaceNav, { workspaceId: "ws-1", active: "claims", showAudit: true }));
+    expect(html).toMatch(/<a[^>]*href="\/workspace\/team\/ws-1"[^>]*>Overview<\/a>/);
+    expect(html).toMatch(/<a[^>]*href="\/workspace\/team\/ws-1\/projects"[^>]*>Projects<\/a>/);
+    expect(html).toMatch(/<a[^>]*href="\/workspace\/team\/ws-1\/members"[^>]*>Members<\/a>/);
+    expect(html).toMatch(/<a[^>]*href="\/workspace\/team\/ws-1\/audit"[^>]*>Audit Log<\/a>/);
+  });
+
+  it("Claims appears between Projects and Members, matching the frozen product order", () => {
+    const html = renderToStaticMarkup(createElement(WorkspaceNav, { workspaceId: "ws-1", active: "overview", showAudit: true }));
+    const order = ["Overview", "Projects", "Claims", "Members", "Audit Log"].map((l) => html.indexOf(l));
+    expect(order.every((i) => i >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+  });
+
+  it("carries no count, badge or activation condition", () => {
+    const html = renderToStaticMarkup(createElement(WorkspaceNav, { workspaceId: "ws-1", active: "overview", showAudit: true }));
+    expect(html).not.toMatch(/Claims\s*\(/);
+    expect(html).not.toMatch(/Claims<\/a>\s*<span[^>]*>\d/);
+  });
+
+  it("encodes the workspaceId in the Claims href", () => {
+    const html = renderToStaticMarkup(createElement(WorkspaceNav, { workspaceId: "ws with space", active: "overview", showAudit: false }));
+    expect(html).toContain(`href="/workspace/team/${encodeURIComponent("ws with space")}/claims"`);
+  });
+});

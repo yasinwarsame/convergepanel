@@ -20,15 +20,13 @@
  * (`actionsSurface` is deliberately absent — Team export is a later roadmap
  * item, and a local download is not authorization to ship one).
  *
- * NAVIGATION. `WorkspaceNav` has no "claims" item yet — R4-I2 adds it together
- * with the Claim lists. I1 therefore does NOT edit `WorkspaceNav` merely to
- * satisfy an `active` value: a Project address highlights "Projects" and the
- * Unfiled address highlights "Overview", exactly as `TeamResearchDetailShell`
- * does. For the same reason the "Claims" breadcrumb segment is rendered
- * WITHOUT an href until `/workspace/team/{W}/claims` exists in I2 — a crumb
- * pointing at a route this slice does not ship would be broken navigation, and
- * pointing it at the Workspace overview would assert a parent edge that is not
- * the real hierarchy.
+ * NAVIGATION (completed in R4-I2). A Project Claim is addressed beneath its
+ * Project, so "Projects" stays the active nav item and the breadcrumb keeps the
+ * Project hierarchy. An Unfiled Claim's real parent is the Workspace Claims
+ * list `/workspace/team/{W}/claims`, which R4-I2 shipped: the "Claims"
+ * breadcrumb segment now carries that href, the mobile "up one level"
+ * affordance points at it, and "Claims" is the active nav item. In I1 that
+ * segment was deliberately hrefless because the route did not exist yet.
  *
  * SOURCE RESEARCH. `payload.sourceResearch` deliberately carries no Project
  * id, so the source run's canonical Team address cannot be derived from the
@@ -171,6 +169,8 @@ export default function TeamClaimDetailShell({ workspaceId, workspaceName, verif
 
   const workspaceHref = `/workspace/team/${encodeURIComponent(workspaceId)}`;
   const projectHref = project ? `${workspaceHref}/projects/${encodeURIComponent(project.id)}` : null;
+  // R4-I2 shipped the Workspace Claims list, so the Unfiled parent edge is now real.
+  const claimsHref = `${workspaceHref}/claims`;
 
   const claim = state.kind === "ready" ? state.payload.claim : null;
   const team = state.kind === "ready" ? state.team : null;
@@ -194,9 +194,9 @@ export default function TeamClaimDetailShell({ workspaceId, workspaceName, verif
                   { label: project.name, href: projectHref },
                   { label: claim },
                 ]
-              : [{ label: workspaceName, href: workspaceHref }, { label: "Claims" }, { label: claim }]
+              : [{ label: workspaceName, href: workspaceHref }, { label: "Claims", href: claimsHref }, { label: claim }]
           }
-          mobileParent={project && projectHref ? { label: project.name, href: projectHref } : { label: workspaceName, href: workspaceHref }}
+          mobileParent={project && projectHref ? { label: project.name, href: projectHref } : { label: "Claims", href: claimsHref }}
         />
       )}
 
@@ -220,8 +220,11 @@ export default function TeamClaimDetailShell({ workspaceId, workspaceName, verif
         </div>
       )}
 
-      {/* Claim detail sits beneath Projects for a Project address; the Unfiled address belongs to the Workspace overview. R4-I2 introduces the "Claims" item. */}
-      <WorkspaceNav workspaceId={workspaceId} active={project ? "projects" : "overview"} showAudit={showAudit} />
+      {/*
+        A Project Claim keeps the Project hierarchy (Projects stays active); an
+        Unfiled Claim's parent is the Workspace Claims list added in R4-I2.
+      */}
+      <WorkspaceNav workspaceId={workspaceId} active={project ? "projects" : "claims"} showAudit={showAudit} />
 
       {state.kind === "loading" && (
         <div role="status" className="mt-6 rounded-xl border border-cp-border bg-cp-surface px-6 py-10 text-center text-sm text-cp-muted shadow-sm">

@@ -351,13 +351,30 @@ describe("breadcrumb relationships", () => {
   it("links Workspace -> Claims -> Claim on the Unfiled address", async () => {
     mockedAuthedFetch.mockResolvedValue(response(200, body()));
     const r = await mount(UNFILED_PROPS);
+    // R4-I2 shipped /workspace/team/{W}/claims, so the parent edge is now real.
     expect(edges(r)).toEqual([
       ["Acme Team", "/workspace/team/ws-1"],
-      // R4-I2 ships /workspace/team/{W}/claims; until then this crumb carries
-      // no href rather than pointing at a route this slice does not deploy.
-      ["Claims", undefined],
+      ["Claims", "/workspace/team/ws-1/claims"],
       ["The sky is blue.", undefined],
     ]);
+  });
+
+  it("points the Unfiled mobile up-one-level affordance at the Claims list", async () => {
+    mockedAuthedFetch.mockResolvedValue(response(200, body()));
+    const r = await mount(UNFILED_PROPS);
+    const nav = r.root.findAll((n) => n.props?.["aria-label"] === "Breadcrumb")[0];
+    const mobile = nav.findAll((n) => n.props?.className === "flex sm:hidden")[0];
+    const link = mobile.findAll((n) => n.type === "a")[0];
+    expect(link.props.href).toBe("/workspace/team/ws-1/claims");
+    expect(labelOf(link)).toContain("Claims");
+  });
+
+  it("keeps the Project mobile affordance pointing at the Project", async () => {
+    mockedAuthedFetch.mockResolvedValue(response(200, filedBody()));
+    const r = await mount(PROJECT_PROPS);
+    const nav = r.root.findAll((n) => n.props?.["aria-label"] === "Breadcrumb")[0];
+    const mobile = nav.findAll((n) => n.props?.className === "flex sm:hidden")[0];
+    expect(mobile.findAll((n) => n.type === "a")[0].props.href).toBe("/workspace/team/ws-1/projects/proj-1");
   });
 
   it("links Workspace -> Projects -> Project -> Claim on the Project address", async () => {
@@ -375,6 +392,31 @@ describe("breadcrumb relationships", () => {
     mockedAuthedFetch.mockResolvedValue(response(404));
     const r = await mount(UNFILED_PROPS);
     expect(r.root.findAll((n) => n.props?.["aria-label"] === "Breadcrumb")).toHaveLength(0);
+  });
+});
+
+describe("R4-I2 active navigation", () => {
+  function activeNavLabel(r: TestRenderer.ReactTestRenderer): string {
+    const nav = r.root.findAll((n) => n.props?.["aria-label"] === "Workspace")[0];
+    const current = nav.findAll((n) => n.props?.["aria-current"] === "page");
+    const strings: string[] = [];
+    const walk = (n: unknown) => {
+      if (typeof n === "string") strings.push(n);
+      else if (Array.isArray(n)) n.forEach(walk);
+      else if (n && typeof n === "object" && "children" in (n as Record<string, unknown>)) walk((n as { children: unknown }).children);
+    };
+    walk(current[0].children);
+    return strings.join("");
+  }
+
+  it("an Unfiled Claim belongs to the Claims list", async () => {
+    mockedAuthedFetch.mockResolvedValue(response(200, body()));
+    expect(activeNavLabel(await mount(UNFILED_PROPS))).toBe("Claims");
+  });
+
+  it("a Project Claim keeps the Project hierarchy — Projects stays active", async () => {
+    mockedAuthedFetch.mockResolvedValue(response(200, filedBody()));
+    expect(activeNavLabel(await mount(PROJECT_PROPS))).toBe("Projects");
   });
 });
 
