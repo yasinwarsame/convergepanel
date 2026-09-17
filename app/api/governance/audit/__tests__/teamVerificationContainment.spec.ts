@@ -205,11 +205,136 @@ describe("global audit list", () => {
     expect(parentCalls).toHaveLength(0);
   });
 
-  it("a deleted parent carries no Workspace evidence and its historical Personal row is kept", async () => {
-    auditRows = [event("e07", "verifications", "deleted-claim")];
+  it.each([
+    ["verifications", "Claim text of a deleted Team claim"],
+    ["videoVerifications", "Video: deleted-team-clip.mp4 (9s, 640x360)"],
+  ])("%s: a missing parent is unclassifiable and its verification audit event is suppressed (200, never 500)", async (collection, sensitive) => {
+    const personalId = `personal-${collection}`;
+    const teamId = `team-${collection}`;
+    parents.set(`${collection}/${personalId}`, {});
+    parents.set(`${collection}/${teamId}`, { workspaceId: "ws-1", projectId: null });
+    auditRows = [
+      event("e14", collection, "deleted-parent", { question: sensitive }),
+      event("e13", collection, personalId),
+      event("e12", collection, teamId, { question: "Team artifact question" }),
+      event("e11", "runs", "research-run"),
+    ];
     asViewer(VIEWER, [CREATOR]);
     const r = await get("");
-    expect(r.body.events.map((e: any) => e.id)).toEqual(["e07"]);
+    expect(r.status).toBe(200);
+    expect(r.body.events.map((e: any) => e.id)).toEqual(["e13", "e11"]);
+    const json = JSON.stringify(r.body);
+    expect(json).not.toContain(sensitive);
+    expect(json).not.toContain("deleted-parent");
+    expect(json).not.toContain("Team artifact question");
+    const parentCalls = mockedGetAll.mock.calls.filter((c) => c.some((a: any) => a && a.__path && !a.__path.startsWith("users/")));
+    expect(parentCalls).toHaveLength(1);
+    expect(parentCalls[0].filter((a: any) => a && a.__path).map((a: any) => a.__path).sort()).toEqual(
+      [`${collection}/deleted-parent`, `${collection}/${personalId}`, `${collection}/${teamId}`].sort()
+    );
+  });
+
+  it("mixed page: only existing Personal Claim, existing Personal Video and research events survive", async () => {
+    parents.set("verifications/p-claim", { projectId: "proj-personal" });
+    parents.set("verifications/t-claim", { workspaceId: "ws-1", projectId: null });
+    parents.set("videoVerifications/p-video", {});
+    parents.set("videoVerifications/t-video", { workspaceId: "ws-1", projectId: "proj-1" });
+    auditRows = [
+      event("e27", "verifications", "p-claim", { question: "PERSONAL-CLAIM-Q" }),
+      event("e26", "verifications", "t-claim", { question: "TEAM-CLAIM-SECRET" }),
+      event("e25", "verifications", "gone-claim", { question: "MISSING-CLAIM-SECRET" }),
+      event("e24", "videoVerifications", "p-video", { question: "Video: personal.mp4" }),
+      event("e23", "videoVerifications", "t-video", { question: "Video: TEAM-VIDEO-SECRET.mp4" }),
+      event("e22", "videoVerifications", "gone-video", { question: "Video: MISSING-VIDEO-SECRET.mp4" }),
+      event("e21", "runs", "research-run", { question: "Research question" }),
+    ];
+    asViewer(VIEWER, [CREATOR]);
+    const r = await get("?limit=20");
+    expect(r.status).toBe(200);
+    expect(r.body.events.map((e: any) => e.id)).toEqual(["e27", "e24", "e21"]);
+    const json = JSON.stringify(r.body);
+    for (const secret of ["TEAM-CLAIM-SECRET", "MISSING-CLAIM-SECRET", "TEAM-VIDEO-SECRET", "MISSING-VIDEO-SECRET", "t-claim", "gone-claim", "t-video", "gone-video"]) {
+      expect(json).not.toContain(secret);
+    }
+    expect(json).toContain("PERSONAL-CLAIM-Q");
+    expect(json).toContain("Research question");
+  });
+
+  describe("reachable getAll result shapes never classify an unknown scope as Personal", () => {
+    function withSnaps(build: (paths: string[]) => any[]) {
+      mockedGetAll.mockImplementation(async (...args: any[]) => {
+        const refs = args.filter((a: any) => a && a.__path);
+        if (refs.every((r: any) => r.__path.startsWith("users/"))) return refs.map(() => ({ exists: true, data: () => ({ email: "o@example.com" }) }));
+        return build(refs.map((r: any) => r.__path));
+      });
+    }
+
+    it("exists:true with {} -> Personal, kept", async () => {
+      withSnaps((paths) => paths.map(() => ({ exists: true, data: () => ({}) })));
+      auditRows = [event("e31", "verifications", "empty-mask")];
+      asViewer(VIEWER, [CREATOR]);
+      expect((await get("")).body.events.map((e: any) => e.id)).toEqual(["e31"]);
+    });
+
+    it.each([["undefined", undefined], ["null", null], ["a string", "not-an-object"]])("exists:true but data() is %s -> excluded", async (_l, data) => {
+      withSnaps((paths) => paths.map(() => ({ exists: true, data: () => data })));
+      auditRows = [event("e32", "verifications", "unusable-data", { question: "UNUSABLE-SECRET" })];
+      asViewer(VIEWER, [CREATOR]);
+      const r = await get("");
+      expect(r.status).toBe(200);
+      expect(r.body.events).toEqual([]);
+      expect(JSON.stringify(r.body)).not.toContain("UNUSABLE-SECRET");
+    });
+
+    it("exists:false -> excluded even if data() were to return an object", async () => {
+      withSnaps((paths) => paths.map(() => ({ exists: false, data: () => ({}) })));
+      auditRows = [event("e33", "videoVerifications", "ghost")];
+      asViewer(VIEWER, [CREATOR]);
+      expect((await get("")).body.events).toEqual([]);
+    });
+
+    it("getAll returns fewer snapshots than refs -> the unmatched parent is excluded", async () => {
+      withSnaps(() => [{ exists: true, data: () => ({}) }]);
+      parents.clear();
+      auditRows = [event("e35", "verifications", "first"), event("e34", "verifications", "second")];
+      asViewer(VIEWER, [CREATOR]);
+      const ids = (await get("")).body.events.map((e: any) => e.id);
+      expect(ids).toHaveLength(1);
+    });
+
+    it.each([["null", null], ["empty string", ""], ["malformed object", { id: "x" }], ["number", 5]])("existing parent with workspaceId %s -> Team, excluded", async (_l, value) => {
+      parents.set("verifications/ws-shape", { workspaceId: value });
+      auditRows = [event("e36", "verifications", "ws-shape")];
+      asViewer(VIEWER, [CREATOR]);
+      expect((await get("")).body.events).toEqual([]);
+    });
+  });
+
+  it("a verification event with no usable runId is unclassifiable and suppressed, with no parent read", async () => {
+    auditRows = [event("e37", "verifications", "   ", { question: "NO-RUNID-SECRET" }), event("e38", "runs", "research-run")];
+    asViewer(VIEWER, [CREATOR]);
+    const r = await get("");
+    expect(r.status).toBe(200);
+    expect(r.body.events.map((e: any) => e.id)).toEqual(["e38"]);
+    expect(JSON.stringify(r.body)).not.toContain("NO-RUNID-SECRET");
+    const parentCalls = mockedGetAll.mock.calls.filter((c) => c.some((a: any) => a && a.__path && !a.__path.startsWith("users/")));
+    expect(parentCalls).toHaveLength(0);
+  });
+
+  it("chunking: more than 100 distinct parents -> ceil(n/100) batched reads, each <= 100 refs", async () => {
+    auditRows = [];
+    for (let i = 0; i < 230; i++) {
+      const id = `c${String(i).padStart(3, "0")}`;
+      parents.set(`verifications/${id}`, {});
+      auditRows.push({ id: `x${id}`, data: { action: "approved", byUid: VIEWER, at: `2026-09-10T00:${String(Math.floor(i / 60)).padStart(2, "0")}:${String(i % 60).padStart(2, "0")}.000Z`, collection: "verifications", runId: id } });
+    }
+    asViewer(VIEWER, [CREATOR]);
+    const r = await get("?from=2026-01-01&limit=50");
+    expect(r.status).toBe(200);
+    const parentCalls = mockedGetAll.mock.calls.filter((c) => c.some((a: any) => a && a.__path && !a.__path.startsWith("users/")));
+    const sizes = parentCalls.map((c) => c.filter((a: any) => a && a.__path).length);
+    expect(sizes).toEqual([100, 100, 30]);
+    expect(r.body.events).toHaveLength(50);
   });
 
   it("workspaceId:null parent is Workspace-bound and hidden", async () => {

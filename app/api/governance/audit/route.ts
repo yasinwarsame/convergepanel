@@ -4,7 +4,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebase/admin";
-import { isWorkspaceBoundVerificationArtifact } from "@/lib/verification/verificationArtifactScope";
+import { isPersonalVerificationArtifact, isWorkspaceBoundVerificationArtifact } from "@/lib/verification/verificationArtifactScope";
 import {
   governanceQueuePlanForbiddenResponse,
   resolveGovernanceVisibleUserIdsCached,
@@ -267,20 +267,28 @@ const VERIFICATION_AUDIT_COLLECTIONS = new Set(["verifications", "videoVerificat
 const AUDIT_PARENT_CLASSIFY_CHUNK = 100;
 
 /**
- * TEAM-VERIFICATION-PARITY-R1 — global Audit tab containment.
+ * TEAM-VERIFICATION-PARITY-R1 (C1: fail closed) — global Audit tab containment.
  *
  * `admin_audit_logs` rows carry `collection` + `runId` but no Workspace
  * scope, and a legacy governance review of a Workspace-bound Claim/Video
  * wrote a DISPLAYABLE row (approved/blocked/changes_requested, with the claim
- * text or video file name as `question`). Those rows are excluded by reading
- * ONLY the `workspaceId` field of each distinct verification/video parent, in
- * batched `getAll()` calls bounded by the events already in hand (never N+1,
- * never beyond the route's fetch cap). Research-run events are untouched.
+ * text or video file name as `question`). A verification/video event is
+ * therefore an ALLOW-LIST decision on its parent document:
  *
- * A parent that no longer exists is kept: it carries no evidence of Workspace
- * scope, and dropping it would change historical Personal audit rows. A read
- * failure propagates (the route answers 500) rather than serving an
- * unclassified list.
+ *   parent exists, masked data is an object with NO `workspaceId` -> Personal, kept
+ *   parent exists with a `workspaceId` field (any value)          -> suppressed
+ *   parent does not exist                                         -> unclassifiable, suppressed
+ *   parent data unusable / no snapshot returned for the ref       -> unclassifiable, suppressed
+ *   event has no usable runId                                     -> unclassifiable, suppressed
+ *   classification read throws                                    -> propagates, route answers 500
+ *
+ * Only a positively Personal parent may enter the response; an unknown scope
+ * never does. A missing parent is an ordinary outcome, not an error, so one
+ * deleted artifact never takes the page down. Reads are batched `getAll()`
+ * calls over distinct parents with `fieldMask: ["workspaceId"]`, chunked at
+ * AUDIT_PARENT_CLASSIFY_CHUNK and bounded by the events already in hand —
+ * never N+1, never for research runs, no writes. Research-run and policy
+ * events are untouched.
  */
 async function excludeWorkspaceBoundVerificationAuditEvents(events: AuditEvent[]): Promise<AuditEvent[]> {
   const db = adminDb;
@@ -292,20 +300,27 @@ async function excludeWorkspaceBoundVerificationAuditEvents(events: AuditEvent[]
     if (!VERIFICATION_AUDIT_COLLECTIONS.has(collection) || !runId) continue;
     keys.set(`${collection}/${runId}`, { collection, runId });
   }
-  if (keys.size === 0) return events;
 
-  const workspaceBound = new Set<string>();
+  const personalParents = new Set<string>();
   const entries = [...keys.entries()];
   for (let i = 0; i < entries.length; i += AUDIT_PARENT_CLASSIFY_CHUNK) {
     const chunk = entries.slice(i, i + AUDIT_PARENT_CLASSIFY_CHUNK);
     const refs = chunk.map(([, k]) => db.collection(k.collection).doc(k.runId));
     const snaps = await db.getAll(...refs, { fieldMask: ["workspaceId"] });
-    snaps.forEach((snap, j) => {
-      if (snap.exists && isWorkspaceBoundVerificationArtifact(snap.data())) workspaceBound.add(chunk[j][0]);
+    chunk.forEach(([key], j) => {
+      const snap = snaps[j];
+      // Firestore guarantees data() is an object for an existing document
+      // (`{}` when the masked field is absent); anything else is not
+      // positively Personal and stays excluded.
+      if (snap && snap.exists === true && isPersonalVerificationArtifact(snap.data())) personalParents.add(key);
     });
   }
-  if (workspaceBound.size === 0) return events;
-  return events.filter((e) => !workspaceBound.has(`${e.collection ?? ""}/${(e.runId ?? "").trim()}`));
+
+  return events.filter((e) => {
+    const collection = e.collection ?? "";
+    if (!VERIFICATION_AUDIT_COLLECTIONS.has(collection)) return true;
+    return personalParents.has(`${collection}/${(e.runId ?? "").trim()}`);
+  });
 }
 
 /** Fetch recent docs; prefer orderBy("at"), fall back to plain limit if index/field issues. */
