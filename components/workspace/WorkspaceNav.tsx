@@ -26,11 +26,50 @@
  * there is no role for which this link would be misleading). This is the
  * standing product invariant: Projects navigation must never disappear
  * once the first Project exists.
+ *
+ * WORKSPACE-NAV-H1 — narrow-viewport containment. With five permanent
+ * destinations this strip already overflowed the DOCUMENT at ~375px, because a
+ * plain `flex` row widens its parent rather than clipping. That is the wrong
+ * failure: it makes the whole page scroll sideways, shifting unrelated content.
+ *
+ * The fix is an internal horizontal overflow boundary — the nav scrolls, the
+ * page does not:
+ *
+ *   - `max-w-full overflow-x-auto` makes the nav its OWN scroll container, so
+ *     its content can exceed its width without widening the document.
+ *   - `shrink-0 whitespace-nowrap` on every item stops flex from compressing
+ *     "Audit Log" into a wrapped or squashed label to force a fit.
+ *   - `relative` makes the nav the offset parent of its items, so the active
+ *     item's `offsetLeft` is measured in the nav's own scroll coordinates.
+ *
+ * A horizontally scrollable nav is incomplete if the CURRENT destination can
+ * start off-screen, so a layout effect nudges `scrollLeft` — and only
+ * `scrollLeft` — until the active item is inside the visible range. It never
+ * touches page/window scroll, and does nothing when the item is already fully
+ * visible.
+ *
+ * Because `overflow-x` is not `visible`, `overflow-y` computes to `auto`, which
+ * would clip (or spawn a scrollbar for) a focus ring drawn OUTSIDE a link. The
+ * links therefore carry an explicit INSET focus-visible ring: focus stays
+ * clearly visible and is structurally unclippable, with no padding change and
+ * so no shift to the active item's underline or the divider.
+ *
+ * This phase deliberately does NOT add a "Videos" item — that arrives with the
+ * Team Video UI slice. The information architecture here is unchanged.
  */
 
 import Link from "next/link";
+import { useEffect, useLayoutEffect, useRef } from "react";
 
 export type WorkspaceNavItem = "overview" | "projects" | "claims" | "members" | "audit";
+
+/**
+ * `useLayoutEffect` runs before paint, so the scroll correction is never a
+ * visible jump — but it warns when React renders this client component on the
+ * server. There is nothing to measure there, so fall back to `useEffect`
+ * outside the browser.
+ */
+const useIsomorphicLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
 export default function WorkspaceNav({
   workspaceId,
@@ -51,15 +90,54 @@ export default function WorkspaceNav({
     ...(showAudit ? [{ key: "audit" as const, label: "Audit Log", href: `${base}/audit` }] : []),
   ];
 
+  const navRef = useRef<HTMLElement | null>(null);
+  const activeItemRef = useRef<HTMLSpanElement | null>(null);
+
+  // Bring the ACTIVE item into the nav's visible horizontal range. Adjusts
+  // `nav.scrollLeft` ONLY: never `scrollIntoView` (which can also scroll the
+  // page vertically), never window scroll, never a viewport-width check.
+  useIsomorphicLayoutEffect(() => {
+    const nav = navRef.current;
+    const item = activeItemRef.current;
+    if (!nav || !item) return;
+
+    const visibleLeft = nav.scrollLeft;
+    const visibleRight = visibleLeft + nav.clientWidth;
+    const itemLeft = item.offsetLeft;
+    const itemRight = itemLeft + item.offsetWidth;
+
+    if (itemLeft < visibleLeft) {
+      // Starts before the visible range — align its left edge.
+      nav.scrollLeft = itemLeft;
+    } else if (itemRight > visibleRight) {
+      // Ends after the visible range — align its right edge.
+      nav.scrollLeft = itemRight - nav.clientWidth;
+    }
+    // Already fully visible: leave the user's scroll position alone.
+  }, [active]);
+
   return (
-    <nav aria-label="Workspace" className="mb-6 flex gap-4 border-b border-cp-border-soft text-sm">
+    <nav
+      ref={navRef}
+      aria-label="Workspace"
+      className="relative mb-6 flex max-w-full gap-4 overflow-x-auto border-b border-cp-border-soft text-sm"
+    >
       {items.map((item) =>
         item.key === active ? (
-          <span key={item.key} aria-current="page" className="border-b-2 border-cp-accent px-1 pb-2 font-medium text-cp-text">
+          <span
+            key={item.key}
+            ref={activeItemRef}
+            aria-current="page"
+            className="shrink-0 whitespace-nowrap border-b-2 border-cp-accent px-1 pb-2 font-medium text-cp-text"
+          >
             {item.label}
           </span>
         ) : (
-          <Link key={item.key} href={item.href} className="px-1 pb-2 text-cp-muted hover:text-cp-text">
+          <Link
+            key={item.key}
+            href={item.href}
+            className="shrink-0 whitespace-nowrap px-1 pb-2 text-cp-muted hover:text-cp-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cp-accent"
+          >
             {item.label}
           </Link>
         )
