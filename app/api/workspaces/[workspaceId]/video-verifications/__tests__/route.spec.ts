@@ -895,11 +895,25 @@ describe("POST /api/workspaces/[workspaceId]/video-verifications — outer safe 
 });
 
 // ============================================================
-// GET absence — create-only slice
+// Handler surface — E3.3.1 was create-only; R5-I1 added a read
 // ============================================================
-describe("GET absence — E3.3.1 is create-only", () => {
-  it("no GET export exists on this route module", async () => {
+describe("route module handler surface", () => {
+  // Phase 8C-E.3.3.1 pinned "no GET export exists" because the Team Video
+  // list/detail reads were deferred at the time. TEAM-VERIFICATION-PARITY-R5-I1
+  // deliberately supersedes that: it ADDS a read-only GET to this same file so
+  // there is no competing Workspace Video route. The POST contract asserted
+  // throughout the rest of this suite is unchanged, which is the invariant that
+  // actually matters here.
+  it("exports BOTH the unchanged POST and the R5-I1 read-only GET", async () => {
     const routeModule = await import("@/app/api/workspaces/[workspaceId]/video-verifications/route");
-    expect((routeModule as any).GET).toBeUndefined();
+    expect(typeof (routeModule as any).POST).toBe("function");
+    expect(typeof (routeModule as any).GET).toBe("function");
+  });
+
+  it("exports no other HTTP verb", async () => {
+    const routeModule = await import("@/app/api/workspaces/[workspaceId]/video-verifications/route");
+    for (const verb of ["PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]) {
+      expect((routeModule as any)[verb]).toBeUndefined();
+    }
   });
 });
