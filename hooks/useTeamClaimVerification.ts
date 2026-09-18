@@ -11,6 +11,13 @@
  * on `team.workspaceId` / `team.projectId` are ROUTE CONTAINMENT: a response
  * that does not belong to this exact address is never handed to the view.
  *
+ * AUTH STATES (frozen by TEAM-CLAIM-DETAIL-AUTH-H1, matching the
+ * Production-stable Team Video detail contract):
+ *   - `authReady === false`                -> `loading`, zero requests;
+ *   - `authReady === true`, no user        -> `auth_error`, zero requests;
+ *   - `authReady === true`, user present   -> the canonical Team detail GET.
+ * The signed-out case is terminal and is distinct from HTTP 401 handling below.
+ *
  * TRANSPORT (mirrors the hardened Team research detail read in
  * `components/workspace/projects/TeamResearchDetailShell.tsx`):
  *   - waits for auth readiness; one request per (uid, workspaceId, projectId, verificationId);
@@ -149,7 +156,24 @@ export function useTeamClaimVerification({ workspaceId, verificationId, expected
     const controller = new AbortController();
     setState({ kind: "loading" });
 
-    if (!authReady || !uid) {
+    // Auth has not resolved yet: stay on the loading surface. This is the only
+    // non-terminal outcome, and it resolves as soon as the provider settles.
+    if (!authReady) {
+      return () => controller.abort();
+    }
+    // Auth HAS resolved and there is no signed-in user. That is terminal, and
+    // it must say so: the server-rendered page was admitted under a session
+    // that has since resolved signed-out, so leaving the surface on "Loading
+    // this claim…" would hang it indefinitely. `auth_error` is the honest
+    // state — the shell already renders "We couldn't verify your session" with
+    // a sign-in action — and it deliberately says NOTHING about whether the
+    // Claim exists, unlike not_found/forbidden. No request is issued, and no
+    // forced refresh is attempted without a user to refresh.
+    //
+    // Claimed AFTER guard.next() above, so a transition to signed-out also
+    // invalidates any in-flight read for the previous identity.
+    if (!uid || !user) {
+      setState({ kind: "auth_error" });
       return () => controller.abort();
     }
 
