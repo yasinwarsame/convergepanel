@@ -141,6 +141,90 @@ describe("endpoint selection", () => {
     expect(mockedAuthedFetch).not.toHaveBeenCalled();
     expect(last()).toEqual({ kind: "loading" });
   });
+
+  it("stays on loading while auth is unresolved even with a user present", async () => {
+    auth = { user: USER_A, authReady: false };
+    await mount(UNFILED);
+    expect(mockedAuthedFetch).not.toHaveBeenCalled();
+    expect(last()).toEqual({ kind: "loading" });
+  });
+});
+
+/**
+ * TEAM-CLAIM-DETAIL-AUTH-H1. The signed-out case is TERMINAL. A Team Claim
+ * detail page is server-gated, so it can be admitted under a session the client
+ * provider then resolves as signed-out; leaving the surface on "Loading this
+ * claim…" would hang it forever. Each case asserts the resulting STATE —
+ * asserting only that no request was made cannot distinguish a correct terminal
+ * state from an indefinite load. This mirrors the Production-stable Team Video
+ * detail contract exactly.
+ */
+describe("signed-out is a terminal state, not an indefinite load", () => {
+  it("authReady with no user -> auth_error, and zero requests", async () => {
+    auth = { user: null, authReady: true };
+    await mount(UNFILED);
+    expect(last()).toEqual({ kind: "auth_error" });
+    expect(mockedAuthedFetch).not.toHaveBeenCalled();
+  });
+
+  it("never settles on loading once auth has resolved signed-out", async () => {
+    auth = { user: null, authReady: true };
+    await mount(UNFILED);
+    expect(last().kind).not.toBe("loading");
+  });
+
+  it("is a SESSION state, never a statement about the Claim", async () => {
+    auth = { user: null, authReady: true };
+    await mount(UNFILED);
+    for (const forbidden of ["loading", "not_found", "forbidden", "unavailable", "internal", "malformed", "ready"]) {
+      expect(last().kind).not.toBe(forbidden);
+    }
+  });
+
+  it("holds for the Project address too", async () => {
+    auth = { user: null, authReady: true };
+    await mount(FILED);
+    expect(last()).toEqual({ kind: "auth_error" });
+    expect(mockedAuthedFetch).not.toHaveBeenCalled();
+  });
+
+  it("attempts no forced token refresh without a user", async () => {
+    auth = { user: null, authReady: true };
+    await mount(UNFILED);
+    expect(mockedAuthedFetch.mock.calls.filter((c) => (c[1] as Record<string, unknown>)?.forceTokenRefresh)).toHaveLength(0);
+  });
+
+  it("signing OUT mid-flight aborts the request and lands on auth_error", async () => {
+    const a = deferred<unknown>();
+    mockedAuthedFetch.mockReturnValueOnce(a.promise);
+    const r = await mount(UNFILED);
+    const signal = (mockedAuthedFetch.mock.calls[0][1] as { signal: AbortSignal }).signal;
+
+    auth = { user: null, authReady: true };
+    await update(r, UNFILED);
+    expect(signal.aborted).toBe(true);
+    expect(last()).toEqual({ kind: "auth_error" });
+
+    // A late success for the signed-in identity must never restore the page.
+    await act(async () => {
+      a.resolve(response(200, body()));
+      await new Promise((res) => setTimeout(res, 0));
+    });
+    await flush();
+    expect(last()).toEqual({ kind: "auth_error" });
+  });
+
+  it("signing IN afterwards recovers without a reload", async () => {
+    auth = { user: null, authReady: true };
+    const r = await mount(UNFILED);
+    expect(last()).toEqual({ kind: "auth_error" });
+
+    mockedAuthedFetch.mockResolvedValue(response(200, body()));
+    auth = { user: USER_B, authReady: true };
+    await update(r, UNFILED);
+    expect(last().kind).toBe("ready");
+    expect(mockedAuthedFetch.mock.calls.map((c) => c[0])).toEqual([`/api/workspaces/${W}/verifications/${V}`]);
+  });
 });
 
 describe("success", () => {
