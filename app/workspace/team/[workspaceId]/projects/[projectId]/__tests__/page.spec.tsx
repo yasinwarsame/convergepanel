@@ -220,6 +220,39 @@ describe("TeamProjectDetailPage — gate (server-authoritative, UX-only re-check
       expect(await propsWithCapabilities(["workspace.read", "projects.read"])).toBe(false);
     });
   });
+
+  describe("TEAM-VERIFICATION-PARITY-R5-I2 — canReadVideos derivation (research.read ALONE)", () => {
+    async function videoHintFor(capabilities: string[]) {
+      mockedResolveServerComponentIdentity.mockResolvedValue({ uid: UID });
+      mockedResolveWorkspaceAccess.mockResolvedValue(grantedTeamAccess({ capabilities }));
+      mockedGetProject.mockResolvedValue({ status: "found", project: { id: PROJECT_ID, workspaceId: WS_ID, name: "X", status: "active" } });
+      const result: any = await callPage();
+      return result.props.canReadVideos;
+    }
+
+    it("research.read alone is enough to READ the Project's Videos", async () => {
+      expect(await videoHintFor(["workspace.read", "projects.read", "research.read"])).toBe(true);
+    });
+
+    it("research.organize is NOT required — a reader without it still reads Videos", async () => {
+      // The R5-I1 Project list endpoint requires research.read only; requiring
+      // organize here would hide a section the server would happily serve.
+      expect(await videoHintFor(["workspace.read", "projects.read", "research.read"])).toBe(true);
+      expect(await videoHintFor(["workspace.read", "projects.read", "research.read", "research.organize"])).toBe(true);
+    });
+
+    it("without research.read the section is not offered at all", async () => {
+      expect(await videoHintFor(["workspace.read", "projects.read"])).toBe(false);
+    });
+
+    it("matches the Claims read hint exactly — both are research.read", async () => {
+      mockedResolveServerComponentIdentity.mockResolvedValue({ uid: UID });
+      mockedResolveWorkspaceAccess.mockResolvedValue(grantedTeamAccess({ capabilities: ["workspace.read", "projects.read", "research.read"] }));
+      mockedGetProject.mockResolvedValue({ status: "found", project: { id: PROJECT_ID, workspaceId: WS_ID, name: "X", status: "active" } });
+      const result: any = await callPage();
+      expect(result.props.canReadVideos).toBe(result.props.canReadClaims);
+    });
+  });
 });
 
 describe("PR #164 review C1 — assignee presentation failure never crashes the detail page", () => {

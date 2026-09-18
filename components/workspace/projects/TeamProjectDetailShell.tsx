@@ -38,12 +38,18 @@ import { GovernanceChip } from "@/components/shared/GovernanceChip";
 import { teamResearchDetailHref } from "@/lib/workspaces/teamResearchDetailHref";
 import { SectionEmptyBox, SectionInitialErrorBox, SectionLoadingRow, SectionPagination } from "@/components/projects/SectionState";
 import { TeamClaimListRow } from "@/components/workspace/claims/TeamClaimListRow";
+import { TeamVideoListRow } from "@/components/workspace/videos/TeamVideoListRow";
 import { teamClaimCreateHref } from "@/lib/workspaces/teamClaimCreateHref";
 import {
   useTeamClaimVerificationList,
   teamClaimListInitialErrorCopy,
   teamClaimListLoadMoreErrorCopy,
 } from "@/hooks/useTeamClaimVerificationList";
+import {
+  useTeamVideoVerificationList,
+  teamVideoListInitialErrorCopy,
+  teamVideoListLoadMoreErrorCopy,
+} from "@/hooks/useTeamVideoVerificationList";
 import {
   useTeamProjectRuns,
   isDefinitiveEmptyTeamProjectRunsState,
@@ -105,6 +111,7 @@ export default function TeamProjectDetailShell({
   assignmentUiEnabled = false,
   canReadClaims = false,
   canCreateClaim = false,
+  canReadVideos = false,
 }: {
   workspaceId: string;
   workspaceName: string;
@@ -119,6 +126,8 @@ export default function TeamProjectDetailShell({
   canReadClaims?: boolean;
   /** R4-I3 — server-derived `research.create` AND `research.organize`; offers the Project-filed create entry point only. The POST stays authoritative. */
   canCreateClaim?: boolean;
+  /** R5-I2 — server-derived `research.read`; gates only whether the read-only Videos section requests anything. The R5-I1 list endpoint remains authoritative. */
+  canReadVideos?: boolean;
 }) {
   // Project/Research Assignment — `?assignee=me` VIEW filter on the research list.
   const [assignedToMe, setAssignedToMe] = useState(false);
@@ -134,6 +143,14 @@ export default function TeamProjectDetailShell({
     when the viewer lacks `research.read`.
   */
   const claims = useTeamClaimVerificationList({ address: { kind: "project", workspaceId, projectId: project.id }, enabled: canReadClaims });
+  /*
+    R5-I2 — the read-only Videos section. A SEPARATE hook instance, so its state
+    is entirely independent of both the research list and the Claims section: a
+    Video error, retry or load-more never resets, refetches or hides research or
+    Claims, and neither of those ever resets the Video list. `enabled` keeps it
+    from issuing any request at all when the viewer lacks `research.read`.
+  */
+  const videos = useTeamVideoVerificationList({ address: { kind: "project", workspaceId, projectId: project.id }, enabled: canReadVideos });
   const showAssign = assignmentUiEnabled && canAssignResearch && project.status === "active";
 
   // Assignment feedback + focus are owned here (the refetch unmounts rows).
@@ -358,6 +375,51 @@ export default function TeamProjectDetailShell({
                   errorAction={claims.loadMoreErrorCode !== null ? teamClaimListLoadMoreErrorCopy(claims.loadMoreErrorCode).action : null}
                   onLoadMore={claims.loadMore}
                   onReload={claims.resetAndReloadFromStart}
+                />
+              )}
+            </>
+          )}
+        </section>
+      )}
+
+      {/*
+        R5-I2 — the read-only Project Videos section. Read-only in the strongest
+        sense: there is no New Video control for any role, because R5-I3 owns
+        Team Video creation. An ARCHIVED Project keeps this section readable —
+        archiving withdraws the ability to file NEW work, not the ability to
+        read what is already filed.
+      */}
+      {canReadVideos && (
+        <section className="mt-10" data-testid="team-project-videos-section">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-lg font-semibold text-cp-text">Videos</h2>
+          </div>
+
+          {videos.status === "loading" && <SectionLoadingRow label="Loading videos…" />}
+
+          {videos.status === "error" &&
+            videos.initialErrorCode !== null &&
+            (() => {
+              const copy = teamVideoListInitialErrorCopy(videos.initialErrorCode);
+              return <SectionInitialErrorBox message={copy.message} retry={copy.retry} onRetry={videos.retryInitial} />;
+            })()}
+
+          {videos.status === "ready" && videos.items.length === 0 && <SectionEmptyBox lines={["No videos in this project yet."]} />}
+
+          {videos.status === "ready" && videos.items.length > 0 && (
+            <>
+              <ul className="mt-2">
+                {videos.items.map((item) => (
+                  <TeamVideoListRow key={item.verificationId} workspaceId={workspaceId} item={item} showProject={false} />
+                ))}
+              </ul>
+              {(videos.hasMore || videos.loadMoreErrorCode !== null) && (
+                <SectionPagination
+                  loadingMore={videos.loadingMore}
+                  errorMessage={videos.loadMoreErrorCode !== null ? teamVideoListLoadMoreErrorCopy(videos.loadMoreErrorCode).message : null}
+                  errorAction={videos.loadMoreErrorCode !== null ? teamVideoListLoadMoreErrorCopy(videos.loadMoreErrorCode).action : null}
+                  onLoadMore={videos.loadMore}
+                  onReload={videos.resetAndReloadFromStart}
                 />
               )}
             </>

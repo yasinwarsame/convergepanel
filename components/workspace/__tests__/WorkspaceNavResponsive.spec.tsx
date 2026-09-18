@@ -79,7 +79,9 @@ describe("items are never compressed to force a fit", () => {
 
   it("every item refuses to shrink and refuses to wrap", () => {
     const classes = itemClasses(markup("claims", true));
-    expect(classes).toHaveLength(5);
+    // Six since TEAM-VERIFICATION-PARITY-R5-I2 added Videos: the exact count
+    // this containment was hardened for.
+    expect(classes).toHaveLength(6);
     for (const c of classes) {
       expect(c).toContain("shrink-0");
       expect(c).toContain("whitespace-nowrap");
@@ -95,7 +97,7 @@ describe("items are never compressed to force a fit", () => {
 
   it("labels remain the exact product strings", () => {
     const html = markup("overview", true);
-    for (const label of ["Overview", "Projects", "Claims", "Members", "Audit Log"]) {
+    for (const label of ["Overview", "Projects", "Claims", "Videos", "Members", "Audit Log"]) {
       expect(html).toContain(`>${label}<`);
     }
   });

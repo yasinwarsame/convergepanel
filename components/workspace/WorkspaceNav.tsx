@@ -27,6 +27,20 @@
  * standing product invariant: Projects navigation must never disappear
  * once the first Project exists.
  *
+ * TEAM-VERIFICATION-PARITY-R5-I2 — "Videos" is added as a PERMANENT
+ * destination on exactly the same reasoning as Projects and Claims: every one
+ * of the five valid Team roles carries `research.read`, which is the capability
+ * the R5-I1 Team Video read endpoints and the Videos page gate both require —
+ * so there is no role for which this link would lead to a concealed page. It is
+ * never conditioned on Video count, Project count, activation state,
+ * `research.create`, `research.organize` or the uploader, and it carries no
+ * badge. It sits between Claims and Members, keeping the artifact destinations
+ * adjacent.
+ *
+ * This is the sixth item WORKSPACE-NAV-H1 was hardened for, and that hardening
+ * is load-bearing here rather than incidental: with six labels the strip
+ * overflows a 375px document without the containment below.
+ *
  * WORKSPACE-NAV-H1 — narrow-viewport containment. With five permanent
  * destinations this strip already overflowed the DOCUMENT at ~375px, because a
  * plain `flex` row widens its parent rather than clipping. That is the wrong
@@ -54,14 +68,13 @@
  * clearly visible and is structurally unclippable, with no padding change and
  * so no shift to the active item's underline or the divider.
  *
- * This phase deliberately does NOT add a "Videos" item — that arrives with the
- * Team Video UI slice. The information architecture here is unchanged.
+ * (The "Videos" item that comment once deferred arrived in R5-I2, above.)
  */
 
 import Link from "next/link";
 import { useEffect, useLayoutEffect, useRef } from "react";
 
-export type WorkspaceNavItem = "overview" | "projects" | "claims" | "members" | "audit";
+export type WorkspaceNavItem = "overview" | "projects" | "claims" | "videos" | "members" | "audit";
 
 /**
  * `useLayoutEffect` runs before paint, so the scroll correction is never a
@@ -86,6 +99,7 @@ export default function WorkspaceNav({
     { key: "overview", label: "Overview", href: base },
     { key: "projects", label: "Projects", href: `${base}/projects` },
     { key: "claims", label: "Claims", href: `${base}/claims` },
+    { key: "videos", label: "Videos", href: `${base}/videos` },
     { key: "members", label: "Members", href: `${base}/members` },
     ...(showAudit ? [{ key: "audit" as const, label: "Audit Log", href: `${base}/audit` }] : []),
   ];
