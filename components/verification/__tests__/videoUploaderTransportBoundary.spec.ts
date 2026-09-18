@@ -11,6 +11,7 @@
 
 import { readFileSync } from "fs";
 import { join } from "path";
+import * as ts from "typescript";
 
 const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 /** Comments describe what the code must NOT do, so they are stripped first. */
@@ -66,11 +67,151 @@ describe("the shared surface is transport-neutral", () => {
   });
 });
 
+/**
+ * R5-I3-A-C1 — the contract proof, made FALSIFIABLE.
+ *
+ * The original block here was all-negative: six `not.toContain` checks plus a
+ * "types only" check. Truncating `videoUploadClientContract.ts` to zero bytes
+ * left the whole 29-test suite green, because an empty file contains no
+ * forbidden string either. Those assertions could not distinguish the intended
+ * contract from a missing one — and R5-I3-B is going to lean on this boundary
+ * while introducing provider-spending Team transport.
+ *
+ * The negatives are retained verbatim. What is added is a semantic proof over
+ * the TypeScript AST that the intended contract is actually THERE: the required
+ * exports exist, they are type declarations rather than runtime code, and they
+ * carry the intended members. The AST is also what makes the forbidden-token
+ * scan semantic rather than textual — identifiers and string literals are
+ * examined as syntax, so a token appearing in prose cannot satisfy or break it.
+ */
 describe("the prepared-upload contract carries no context", () => {
-  const code = stripComments(read(CONTRACT));
+  const source = read(CONTRACT);
+  const code = stripComments(source);
+  const sf = ts.createSourceFile(CONTRACT, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+
+  const isExported = (n: ts.Node) =>
+    ts.canHaveModifiers(n) && (ts.getModifiers(n) ?? []).some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
+
+  /** Exported TYPE declarations, by name. */
+  const typeExports = new Map<string, ts.TypeAliasDeclaration | ts.InterfaceDeclaration>();
+  /** Anything exported that survives to runtime — the thing this module must never gain. */
+  const runtimeExports: string[] = [];
+  /** Any statement that is not an import or a type declaration. */
+  const runtimeStatements: string[] = [];
+
+  for (const st of sf.statements) {
+    if (ts.isTypeAliasDeclaration(st) || ts.isInterfaceDeclaration(st)) {
+      if (isExported(st)) typeExports.set(st.name.text, st);
+      continue;
+    }
+    if (ts.isImportDeclaration(st)) {
+      // A value import would pull runtime code in behind a type-only facade.
+      if (!st.importClause?.isTypeOnly) runtimeStatements.push(`value import: ${st.moduleSpecifier.getText(sf)}`);
+      continue;
+    }
+    if (ts.isExportDeclaration(st) && st.isTypeOnly) continue;
+    runtimeStatements.push(ts.SyntaxKind[st.kind]);
+    if (isExported(st)) runtimeExports.push(ts.SyntaxKind[st.kind]);
+  }
+
+  const memberNames = (name: string): string[] => {
+    const decl = typeExports.get(name);
+    if (!decl) return [];
+    const node = ts.isInterfaceDeclaration(decl) ? decl : decl.type;
+    const out: string[] = [];
+    const visit = (n: ts.Node) => {
+      if (ts.isPropertySignature(n) && n.name) out.push(n.name.getText(sf));
+      n.forEachChild(visit);
+    };
+    if (ts.isInterfaceDeclaration(node)) node.members.forEach(visit);
+    else visit(node);
+    return out;
+  };
+
+  // ---- POSITIVE CONTROLS: the intended contract must actually exist ----
+
+  it("is a real, non-empty, parseable module", () => {
+    expect(source.trim().length).toBeGreaterThan(0);
+    expect(sf.statements.length).toBeGreaterThan(0);
+    expect(typeExports.size).toBeGreaterThan(0);
+  });
+
+  it.each(["PreparedVideoUpload", "PreparedVideoMetadata", "VideoUploadSubmitOutcome", "SubmitPreparedVideo"])(
+    "exports %s as a type declaration",
+    (name) => {
+      expect([...typeExports.keys()]).toContain(name);
+      const decl = typeExports.get(name)!;
+      expect(ts.isTypeAliasDeclaration(decl) || ts.isInterfaceDeclaration(decl)).toBe(true);
+    }
+  );
+
+  it("PreparedVideoUpload carries exactly the prepared-payload concepts", () => {
+    const members = memberNames("PreparedVideoUpload");
+    for (const required of ["fileName", "frames", "metadata", "warnings"]) {
+      expect(members).toContain(required);
+    }
+  });
+
+  it("PreparedVideoMetadata names the local file it describes", () => {
+    const members = memberNames("PreparedVideoMetadata");
+    for (const required of ["fileName", "fileType", "duration", "fileSize"]) {
+      expect(members).toContain(required);
+    }
+  });
+
+  it("VideoUploadSubmitOutcome declares exactly the three transport-neutral outcomes", () => {
+    const decl = typeExports.get("VideoUploadSubmitOutcome");
+    expect(decl && ts.isTypeAliasDeclaration(decl)).toBe(true);
+    const statuses: string[] = [];
+    const visit = (n: ts.Node) => {
+      if (
+        ts.isPropertySignature(n) &&
+        n.name.getText(sf) === "status" &&
+        n.type &&
+        ts.isLiteralTypeNode(n.type) &&
+        ts.isStringLiteral(n.type.literal)
+      ) {
+        statuses.push(n.type.literal.text);
+      }
+      n.forEachChild(visit);
+    };
+    visit((decl as ts.TypeAliasDeclaration).type);
+    expect(statuses.sort()).toEqual(["ok", "outcome_unknown", "rejected"]);
+  });
+
+  it("SubmitPreparedVideo is a function type from a prepared upload to an outcome", () => {
+    const decl = typeExports.get("SubmitPreparedVideo") as ts.TypeAliasDeclaration;
+    expect(ts.isFunctionTypeNode(decl.type)).toBe(true);
+    const fn = decl.type as ts.FunctionTypeNode;
+    expect(fn.parameters).toHaveLength(1);
+    expect(fn.parameters[0].type!.getText(sf)).toContain("PreparedVideoUpload");
+    expect(fn.type.getText(sf)).toContain("VideoUploadSubmitOutcome");
+  });
+
+  // ---- NEGATIVE BOUNDARIES, now anchored to a contract proven to exist ----
+
+  it("stays type-only: no runtime statement, export or value import", () => {
+    expect(runtimeStatements).toEqual([]);
+    expect(runtimeExports).toEqual([]);
+  });
 
   it.each(["workspaceId", "projectId", "token", "endpoint", "capabilit", "authedFetch"])("declares no %s", (forbidden) => {
     expect(code).not.toContain(forbidden);
+  });
+
+  it("names no transport or identity concept in its SYNTAX", () => {
+    const seen: string[] = [];
+    const visit = (n: ts.Node) => {
+      if (ts.isIdentifier(n) || ts.isStringLiteral(n) || ts.isPropertySignature(n)) {
+        seen.push((ts.isPropertySignature(n) ? n.name : n).getText(sf));
+      }
+      n.forEachChild(visit);
+    };
+    sf.statements.forEach(visit);
+    const blob = seen.join(" ").toLowerCase();
+    for (const forbidden of ["workspaceid", "projectid", "token", "endpoint", "capabilit", "authedfetch", "/api/", "uid"]) {
+      expect(blob).not.toContain(forbidden);
+    }
   });
 
   it("is types only — no React, no network, no storage", () => {
