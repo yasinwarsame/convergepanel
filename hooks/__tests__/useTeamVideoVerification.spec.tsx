@@ -157,16 +157,86 @@ describe("request URL", () => {
     );
   });
 
-  it("waits for auth readiness and for a user", async () => {
+  it("auth not yet resolved: stays on loading with zero requests", async () => {
     auth = { user: USER_A, authReady: false };
     await mount(UNFILED);
     expect(mockedAuthedFetch).not.toHaveBeenCalled();
     expect(last()).toEqual({ kind: "loading" });
+  });
+});
+
+/**
+ * R5-I2-C1. The signed-out case is TERMINAL. A Team Video detail page is
+ * server-gated, so it can be admitted under a session that the client provider
+ * then resolves as signed-out; leaving the surface on "Loading this video…"
+ * would hang it forever. Each case asserts the resulting STATE — asserting only
+ * that no request was made is exactly the hole that let this ship.
+ */
+describe("signed-out is a terminal state, not an indefinite load", () => {
+  it("authReady with no user -> auth_error, and zero requests", async () => {
+    auth = { user: null, authReady: true };
+    await mount(UNFILED);
+    expect(last()).toEqual({ kind: "auth_error" });
+    expect(mockedAuthedFetch).not.toHaveBeenCalled();
+  });
+
+  it("never settles on loading once auth has resolved signed-out", async () => {
+    auth = { user: null, authReady: true };
+    await mount(UNFILED);
+    expect(last().kind).not.toBe("loading");
+  });
+
+  it("says NOTHING about whether the video exists", async () => {
+    auth = { user: null, authReady: true };
+    await mount(UNFILED);
+    for (const forbidden of ["not_found", "forbidden", "unavailable", "malformed", "ready"]) {
+      expect(last().kind).not.toBe(forbidden);
+    }
+  });
+
+  it("holds for the Project address too", async () => {
+    auth = { user: null, authReady: true };
+    await mount(FILED);
+    expect(last()).toEqual({ kind: "auth_error" });
+    expect(mockedAuthedFetch).not.toHaveBeenCalled();
+  });
+
+  it("attempts no forced token refresh without a user", async () => {
+    auth = { user: null, authReady: true };
+    await mount(UNFILED);
+    expect(mockedAuthedFetch.mock.calls.filter((c) => (c[1] as Record<string, unknown>)?.forceTokenRefresh)).toHaveLength(0);
+  });
+
+  it("signing OUT mid-flight aborts the request and lands on auth_error", async () => {
+    const d = deferred<unknown>();
+    mockedAuthedFetch.mockReturnValueOnce(d.promise);
+    const r = await mount(UNFILED);
+    const signal = (mockedAuthedFetch.mock.calls[0][1] as { signal: AbortSignal }).signal;
 
     auth = { user: null, authReady: true };
-    states.length = 0;
-    await mount(UNFILED);
-    expect(mockedAuthedFetch).not.toHaveBeenCalled();
+    await update(r, UNFILED);
+    expect(signal.aborted).toBe(true);
+    expect(last()).toEqual({ kind: "auth_error" });
+
+    // A late success for the signed-in identity must never restore the page.
+    await act(async () => {
+      d.resolve(response(200, body()));
+      await new Promise((res) => setTimeout(res, 0));
+    });
+    await flush();
+    expect(last()).toEqual({ kind: "auth_error" });
+  });
+
+  it("signing IN afterwards leaves auth_error and issues that identity's read", async () => {
+    auth = { user: null, authReady: true };
+    const r = await mount(UNFILED);
+    expect(last()).toEqual({ kind: "auth_error" });
+
+    mockedAuthedFetch.mockResolvedValue(response(200, body()));
+    auth = { user: { uid: "uid-b" }, authReady: true };
+    await update(r, UNFILED);
+    expect(last().kind).toBe("ready");
+    expect(mockedAuthedFetch.mock.calls.map((c) => c[0])).toEqual(["/api/workspaces/ws-1/video-verifications/vid-1"]);
   });
 });
 

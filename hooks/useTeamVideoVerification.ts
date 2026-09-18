@@ -19,6 +19,12 @@
  * over. A 2xx that cannot be rendered honestly becomes `malformed`, never a
  * half-painted result.
  *
+ * AUTH STATES (frozen by R5-I2-C1):
+ *   - `authReady === false`                 -> `loading`, zero requests;
+ *   - `authReady === true`, no user         -> `auth_error`, zero requests;
+ *   - `authReady === true`, user present    -> the canonical Team detail GET.
+ * The signed-out case is terminal and is distinct from HTTP 401 handling below.
+ *
  * TRANSPORT (mirrors the hardened Team Claim detail read):
  *   - waits for auth readiness; one request per (uid, workspaceId, projectId, verificationId);
  *   - a generation guard claimed synchronously before the first await and
@@ -242,7 +248,21 @@ export function useTeamVideoVerification({ workspaceId, verificationId, expected
     const controller = new AbortController();
     setState({ kind: "loading" });
 
-    if (!authReady || !uid) {
+    // Auth has not resolved yet: stay on the loading surface. This is the only
+    // non-terminal outcome, and it resolves as soon as the provider settles.
+    if (!authReady) {
+      return () => controller.abort();
+    }
+    // Auth HAS resolved and there is no signed-in user. That is terminal, and
+    // it must say so: the server-rendered page was admitted under a session
+    // that has since resolved signed-out, so leaving the surface on "Loading
+    // this video…" would hang it indefinitely. `auth_error` is the honest
+    // state — the shell already renders "We couldn't verify your session" with
+    // a sign-in action — and it deliberately says NOTHING about whether the
+    // video exists, unlike not_found/forbidden. No request is issued, and no
+    // forced refresh is attempted without a user to refresh.
+    if (!uid || !user) {
+      setState({ kind: "auth_error" });
       return () => controller.abort();
     }
 
