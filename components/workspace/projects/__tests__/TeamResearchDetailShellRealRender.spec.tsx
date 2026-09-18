@@ -30,6 +30,10 @@ jest.mock("next/link", () => ({
   default: ({ href, children, className }: Record<string, unknown>) => require("react").createElement("a", { href, className }, children as never),
 }));
 const AUTH = { user: { uid: "uid-team" }, authReady: true };
+/** R4-I4 — the shell now uses the app router for the Verify-this-claim handoff. */
+const pushedHrefs: string[] = [];
+jest.mock("next/navigation", () => ({ useRouter: () => ({ push: (h: string) => pushedHrefs.push(h), replace: () => {} }) }));
+
 jest.mock("@/components/AuthProvider", () => ({ useAuth: () => AUTH }));
 const mockedAuthedFetch = jest.fn();
 jest.mock("@/lib/client/authedFetch", () => ({ authedFetch: (...a: unknown[]) => mockedAuthedFetch(...a) }));

@@ -101,7 +101,7 @@ describe("TeamUnfiledResearchDetailPage — renders the shell in Unfiled mode", 
       r = TestRenderer.create(element as never);
     });
     expect(r.root.findAllByProps({ "data-testid": "team-research-detail-shell" })).toHaveLength(1);
-    expect(shellProps[0]).toEqual({ workspaceId: WS_ID, workspaceName: "Acme Team", runId: RUN_ID, project: null, showAudit: true });
+    expect(shellProps[0]).toEqual({ workspaceId: WS_ID, workspaceName: "Acme Team", runId: RUN_ID, project: null, showAudit: true, canVerifyClaim: false });
   });
 
   it("performs no Project lookup and no direct run read, and names no Personal endpoint or address", async () => {
@@ -111,5 +111,29 @@ describe("TeamUnfiledResearchDetailPage — renders the shell in Unfiled mode", 
     expect(mockedGetProject).not.toHaveBeenCalled();
     expect(CODE).not.toMatch(/getProject|getTeamWorkspaceRun|teamWorkspaceRuns/);
     expect(CODE).not.toMatch(/\/api\/user\/runs|\/workspace\/research\/|personalResearchHref/);
+  });
+});
+
+describe("R4-I4 Verify-this-claim presentation hint", () => {
+  it("is false without research.create, while the page stays readable", async () => {
+    mockedResolveWorkspaceAccess.mockResolvedValue(granted(["workspace.read", "research.read"]));
+    await act(async () => {
+      TestRenderer.create((await call()) as never);
+    });
+    expect(shellProps).toHaveLength(1);
+    expect(shellProps[0].canVerifyClaim).toBe(false);
+  });
+
+  it("is true with research.create — research.organize is NOT required on the Unfiled address", async () => {
+    mockedResolveWorkspaceAccess.mockResolvedValue(granted(["workspace.read", "research.read", "research.create"]));
+    await act(async () => {
+      TestRenderer.create((await call()) as never);
+    });
+    expect(shellProps[0].canVerifyClaim).toBe(true);
+  });
+
+  it("never turns the action hint into a view gate", () => {
+    expect(CODE).toContain('access.capabilities.includes("research.read")');
+    expect(CODE).not.toMatch(/if \(!access\.capabilities\.includes\("research\.create"\)\)/);
   });
 });

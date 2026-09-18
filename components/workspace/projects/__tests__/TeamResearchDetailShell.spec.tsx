@@ -21,6 +21,9 @@ const USER_B = { uid: "uid-b" };
 let auth: { user: { uid: string } | null; authReady: boolean } = { user: USER_A, authReady: true };
 jest.mock("@/components/AuthProvider", () => ({ useAuth: () => auth }));
 
+const pushed: string[] = [];
+jest.mock("next/navigation", () => ({ useRouter: () => ({ push: (h: string) => pushed.push(h), replace: () => {} }) }));
+
 const mockedAuthedFetch = jest.fn();
 jest.mock("@/lib/client/authedFetch", () => ({ authedFetch: (...a: unknown[]) => mockedAuthedFetch(...a) }));
 
@@ -115,6 +118,7 @@ const lastView = () => viewProps[viewProps.length - 1];
 
 beforeEach(() => {
   jest.clearAllMocks();
+  pushed.length = 0;
   viewProps.length = 0;
   auth = { user: USER_A, authReady: true };
 });
@@ -460,7 +464,10 @@ describe("shared view delegation (§Q/§R/§S) + explicit P0 ancillary policy (R
     mockedAuthedFetch.mockResolvedValue(response(200, body()));
     await mount(PROJECT_PROPS);
     const props = lastView();
-    expect(Object.keys(props).sort()).toEqual(["adaptiveAncillaryPresentation", "presentation"]);
+    // R4-I4 passes `onVerifyClaim` on every ready render; its VALUE is what
+    // gates the action, and it stays undefined without `canVerifyClaim`, which
+    // is exactly what DeepResearchView's handler-aware eligibility requires.
+    expect(Object.keys(props).sort()).toEqual(["adaptiveAncillaryPresentation", "onVerifyClaim", "presentation"]);
     expect(props.onVerifyClaim).toBeUndefined();
     expect(props.onRunFollowUp).toBeUndefined();
     expect(props.readOnlyExecutionTarget).toBeUndefined();
@@ -627,3 +634,89 @@ describe("Team metadata (§N/§O/§P)", () => {
   research address, is byte-identical to the pre-R3 capture.
 */
 const PRE_R3_COMPLETE_ORDINARY_CHROME = "[{\"type\":\"nav\",\"props\":{\"aria-label\":\"Breadcrumb\",\"className\":\"mb-3\"},\"children\":[{\"type\":\"ol\",\"props\":{\"className\":\"hidden sm:flex sm:items-center sm:gap-1.5\"},\"children\":[{\"type\":\"li\",\"props\":{\"className\":\"flex items-center gap-1.5\"},\"children\":[{\"type\":\"a\",\"props\":{\"href\":\"/workspace/team/ws-1\",\"className\":\"truncate max-w-[12rem] text-cp-muted transition-colors hover:text-cp-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent focus-visible:ring-offset-2 rounded\"},\"children\":[\"Acme Team\"]}]},{\"type\":\"li\",\"props\":{\"className\":\"flex items-center gap-1.5\"},\"children\":[{\"type\":\"span\",\"props\":{\"className\":\"text-cp-faint\",\"aria-hidden\":\"true\"},\"children\":[\"/\"]},{\"type\":\"a\",\"props\":{\"href\":\"/workspace/team/ws-1/projects\",\"className\":\"truncate max-w-[12rem] text-cp-muted transition-colors hover:text-cp-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent focus-visible:ring-offset-2 rounded\"},\"children\":[\"Projects\"]}]},{\"type\":\"li\",\"props\":{\"className\":\"flex items-center gap-1.5\"},\"children\":[{\"type\":\"span\",\"props\":{\"className\":\"text-cp-faint\",\"aria-hidden\":\"true\"},\"children\":[\"/\"]},{\"type\":\"a\",\"props\":{\"href\":\"/workspace/team/ws-1/projects/proj-1\",\"className\":\"truncate max-w-[12rem] text-cp-muted transition-colors hover:text-cp-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent focus-visible:ring-offset-2 rounded\"},\"children\":[\"ABC Acquisition\"]}]},{\"type\":\"li\",\"props\":{\"className\":\"flex items-center gap-1.5\"},\"children\":[{\"type\":\"span\",\"props\":{\"className\":\"text-cp-faint\",\"aria-hidden\":\"true\"},\"children\":[\"/\"]},{\"type\":\"span\",\"props\":{\"className\":\"truncate max-w-[12rem] font-semibold text-cp-text\",\"aria-current\":\"page\",\"title\":\"What changed?\"},\"children\":[\"What changed?\"]}]}]},{\"type\":\"div\",\"props\":{\"className\":\"flex sm:hidden\"},\"children\":[{\"type\":\"a\",\"props\":{\"href\":\"/workspace/team/ws-1/projects/proj-1\",\"className\":\"inline-flex items-center gap-1 text-sm font-medium text-cp-muted transition-colors hover:text-cp-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent focus-visible:ring-offset-2 rounded\"},\"children\":[{\"type\":\"span\",\"props\":{\"aria-hidden\":\"true\"},\"children\":[\"←\"]},\"ABC Acquisition\"]}]}]},{\"type\":\"div\",\"props\":{\"className\":\"mb-6\"},\"children\":[{\"type\":\"h1\",\"props\":{\"className\":\"text-xl font-semibold text-cp-text break-words\"},\"children\":[\"What changed?\"]},{\"type\":\"p\",\"props\":{\"className\":\"mt-1 text-sm text-cp-muted\",\"data-testid\":\"team-run-assignee\"},\"children\":[\"Assigned to \",{\"type\":\"span\",\"props\":{\"className\":\"font-medium text-cp-text\"},\"children\":[\"Bao\"]}]}]},{\"type\":\"nav\",\"props\":{\"aria-label\":\"Workspace\",\"className\":\"mb-6 flex gap-4 border-b border-cp-border-soft text-sm\"},\"children\":[{\"type\":\"a\",\"props\":{\"href\":\"/workspace/team/ws-1\",\"className\":\"px-1 pb-2 text-cp-muted hover:text-cp-text\"},\"children\":[\"Overview\"]},{\"type\":\"span\",\"props\":{\"aria-current\":\"page\",\"className\":\"border-b-2 border-cp-accent px-1 pb-2 font-medium text-cp-text\"},\"children\":[\"Projects\"]},{\"type\":\"a\",\"props\":{\"href\":\"/workspace/team/ws-1/claims\",\"className\":\"px-1 pb-2 text-cp-muted hover:text-cp-text\"},\"children\":[\"Claims\"]},{\"type\":\"a\",\"props\":{\"href\":\"/workspace/team/ws-1/members\",\"className\":\"px-1 pb-2 text-cp-muted hover:text-cp-text\"},\"children\":[\"Members\"]},{\"type\":\"a\",\"props\":{\"href\":\"/workspace/team/ws-1/audit\",\"className\":\"px-1 pb-2 text-cp-muted hover:text-cp-text\"},\"children\":[\"Audit Log\"]}]}]";
+
+describe("R4-I4 Verify this claim handoff", () => {
+  const CLAIM_ID = "v1:key_findings:0:abc";
+  const onVerify = () => lastView().onVerifyClaim as ((a: { runId: string; claimId: string }) => void) | undefined;
+
+  it("delegates no handler when the viewer cannot create claims", async () => {
+    mockedAuthedFetch.mockResolvedValue(response(200, body()));
+    await mount({ ...PROJECT_PROPS, canVerifyClaim: false } as never);
+    // DeepResearchView renders no action at all without a handler.
+    expect(onVerify()).toBeUndefined();
+  });
+
+  it("defaults to no handler when the hint is absent", async () => {
+    mockedAuthedFetch.mockResolvedValue(response(200, body()));
+    await mount(PROJECT_PROPS);
+    expect(onVerify()).toBeUndefined();
+  });
+
+  it("delegates a handler when the viewer can create claims", async () => {
+    mockedAuthedFetch.mockResolvedValue(response(200, body()));
+    await mount({ ...PROJECT_PROPS, canVerifyClaim: true } as never);
+    expect(typeof onVerify()).toBe("function");
+  });
+
+  it("navigates to the Workspace-level handoff carrying only the two locators", async () => {
+    mockedAuthedFetch.mockResolvedValue(response(200, body()));
+    await mount({ ...PROJECT_PROPS, canVerifyClaim: true } as never);
+    await act(async () => { onVerify()!({ runId: RUN, claimId: CLAIM_ID }); });
+    expect(pushed).toHaveLength(1);
+    const href = pushed[0];
+    expect(href.startsWith("/workspace/team/ws-1/claims/new?")).toBe(true);
+    const q = new URLSearchParams(href.split("?")[1]);
+    expect([...q.keys()].sort()).toEqual(["originClaimId", "originRunId"]);
+    expect(q.get("originRunId")).toBe(RUN);
+    expect(q.get("originClaimId")).toBe(CLAIM_ID);
+  });
+
+  it("uses the SAME Workspace route from a Project-filed research page", async () => {
+    mockedAuthedFetch.mockResolvedValue(response(200, body()));
+    await mount({ ...PROJECT_PROPS, canVerifyClaim: true } as never);
+    await act(async () => { onVerify()!({ runId: RUN, claimId: CLAIM_ID }); });
+    // The browser must not assert the Project binding.
+    expect(pushed[0]).not.toContain("/projects/");
+    expect(pushed[0]).not.toContain("projectId");
+  });
+
+  it("uses the same grammar from an Unfiled research page", async () => {
+    mockedAuthedFetch.mockResolvedValue(response(200, unfiledBody()));
+    await mount({ ...UNFILED_PROPS, canVerifyClaim: true } as never);
+    await act(async () => { onVerify()!({ runId: RUN, claimId: CLAIM_ID }); });
+    expect(pushed[0].startsWith("/workspace/team/ws-1/claims/new?")).toBe(true);
+  });
+
+  it("carries no claim text of any kind", async () => {
+    mockedAuthedFetch.mockResolvedValue(response(200, body()));
+    await mount({ ...PROJECT_PROPS, canVerifyClaim: true } as never);
+    await act(async () => { onVerify()!({ runId: RUN, claimId: CLAIM_ID }); });
+    for (const forbidden of ["claim=", "claimText", "summary", "title", "What changed?"]) {
+      expect(pushed[0]).not.toContain(forbidden);
+    }
+  });
+
+  it("ignores a callback for a run this address is not showing", async () => {
+    mockedAuthedFetch.mockResolvedValue(response(200, body()));
+    await mount({ ...PROJECT_PROPS, canVerifyClaim: true } as never);
+    await act(async () => { onVerify()!({ runId: "run-other", claimId: CLAIM_ID }); });
+    expect(pushed).toEqual([]);
+  });
+
+  it("issues no POST from the research shell", async () => {
+    mockedAuthedFetch.mockResolvedValue(response(200, body()));
+    await mount({ ...PROJECT_PROPS, canVerifyClaim: true } as never);
+    await act(async () => { onVerify()!({ runId: RUN, claimId: CLAIM_ID }); });
+    for (const call of mockedAuthedFetch.mock.calls) {
+      expect((call[1] as { method: string }).method).toBe("GET");
+    }
+  });
+
+  it("leaves the read-only ancillary contract unchanged", async () => {
+    mockedAuthedFetch.mockResolvedValue(response(200, body()));
+    await mount({ ...PROJECT_PROPS, canVerifyClaim: true } as never);
+    const ancillary = lastView().adaptiveAncillaryPresentation as { kind: string; exportSurface: unknown };
+    expect(ancillary.kind).toBe("delegated_read_only");
+    expect(ancillary.exportSurface).toBeNull();
+  });
+});

@@ -427,3 +427,130 @@ describe("failure presentation", () => {
     expect(focused.filter((f) => f === "p")).toHaveLength(1);
   });
 });
+
+describe("R4-I4 origin-linked mode", () => {
+  const ORIGIN = { runId: "run-9", claimId: "v1:key_findings:0:abc" };
+  const ORIGIN_PROPS = { ...UNFILED, originTarget: ORIGIN };
+
+  it("renders the research heading and read-only explanation", async () => {
+    const r = await mount(ORIGIN_PROPS as never);
+    expect(text(r)).toContain("Verify a research claim");
+    expect(nodeText(byTestId(r, "team-claim-create-scope")[0])).toContain("exactly as it appears in the saved research");
+  });
+
+  it("breadcrumbs Workspace -> Claims -> Verify research claim, with Claims active", async () => {
+    const r = await mount(ORIGIN_PROPS as never);
+    const bc = r.root.findAll((n) => n.props?.["aria-label"] === "Breadcrumb")[0];
+    const lis = bc.findAll((n) => n.type === "ol")[0].findAll((n) => n.type === "li");
+    expect(lis.map((li) => nodeText(li).replace(/^\//, ""))).toEqual(["Acme Team", "Claims", "Verify research claim"]);
+    const nav = r.root.findAll((n) => n.props?.["aria-label"] === "Workspace")[0];
+    expect(nodeText(nav.findAll((n) => n.props?.["aria-current"] === "page")[0])).toBe("Claims");
+  });
+
+  it("uses the Claims breadcrumb even when mounted with a Project prop", async () => {
+    const r = await mount({ ...FILED, originTarget: ORIGIN } as never);
+    const bc = r.root.findAll((n) => n.props?.["aria-label"] === "Breadcrumb")[0];
+    const lis = bc.findAll((n) => n.type === "ol")[0].findAll((n) => n.type === "li");
+    expect(lis.map((li) => nodeText(li).replace(/^\//, ""))).toEqual(["Acme Team", "Claims", "Verify research claim"]);
+  });
+
+  it("renders NO claim textarea, counter, picker or raw locator ids", async () => {
+    const r = await mount(ORIGIN_PROPS as never);
+    expect(byTestId(r, "team-claim-text")).toHaveLength(0);
+    expect(byTestId(r, "team-claim-char-count")).toHaveLength(0);
+    expect(r.root.findAll((n) => n.type === "textarea")).toHaveLength(0);
+    const rendered = text(r);
+    expect(rendered).not.toContain(ORIGIN.runId);
+    expect(rendered).not.toContain(ORIGIN.claimId);
+  });
+
+  it("still reuses the real ModelPicker and blocks fewer than two models", async () => {
+    const r = await mount(ORIGIN_PROPS as never);
+    expect(byTestId(r, "model-picker")).toHaveLength(1);
+    await selectModels(r, ["chatgpt"]);
+    await submitForm(r);
+    expect(mockedAuthedFetch).not.toHaveBeenCalled();
+    expect(nodeText(byTestId(r, "team-claim-create-error")[0])).toContain("at least 2");
+  });
+
+  it("submits the origin-linked body with no claim text", async () => {
+    mockedAuthedFetch.mockResolvedValue(response(200, okBody()));
+    const r = await mount(ORIGIN_PROPS as never);
+    await submitForm(r);
+    const body = JSON.parse((mockedAuthedFetch.mock.calls[0][1] as { body: string }).body);
+    expect(Object.keys(body).sort()).toEqual(["claimId", "models", "runId"]);
+    expect(body.runId).toBe(ORIGIN.runId);
+  });
+
+  it("navigates to the Unfiled detail when the server resolves no Project", async () => {
+    mockedAuthedFetch.mockResolvedValue(response(200, okBody({ projectId: null })));
+    const r = await mount(ORIGIN_PROPS as never);
+    await submitForm(r);
+    expect(replaced).toEqual(["/workspace/team/ws-1/claims/vcl-1"]);
+    expect(pushed).toEqual([]);
+  });
+
+  it("honours a SERVER-resolved Project the composer never knew about", async () => {
+    mockedAuthedFetch.mockResolvedValue(response(200, okBody({ projectId: "proj-moved" })));
+    const r = await mount(ORIGIN_PROPS as never);
+    await submitForm(r);
+    expect(replaced).toEqual(["/workspace/team/ws-1/projects/proj-moved/claims/vcl-1"]);
+  });
+
+  it("shows the safe origin_not_eligible copy", async () => {
+    mockedAuthedFetch.mockResolvedValue(response(404, { ok: false, errorCode: "origin_not_eligible" }));
+    const r = await mount(ORIGIN_PROPS as never);
+    await submitForm(r);
+    const err = byTestId(r, "team-claim-create-error")[0];
+    expect(err.props.role).toBe("alert");
+    expect(nodeText(err)).toBe("This research finding is no longer available for verification. Return to the research and choose a current finding.");
+  });
+
+  it("points an unconfirmed outcome at the Workspace Claims list, never a guessed Project", async () => {
+    mockedAuthedFetch.mockResolvedValue(response(500, {}));
+    const r = await mount({ ...FILED, originTarget: ORIGIN } as never);
+    await submitForm(r);
+    const box = byTestId(r, "team-claim-create-unknown")[0];
+    expect(nodeText(box)).toContain("Check Claims before trying again");
+    expect(box.findAll((n) => n.type === "a")[0].props.href).toBe("/workspace/team/ws-1/claims");
+  });
+
+  it("does not navigate when the composer unmounted before the response", async () => {
+    const slow = deferred<unknown>();
+    mockedAuthedFetch.mockReturnValueOnce(slow.promise);
+    const r = await mount(ORIGIN_PROPS as never);
+    const form = r.root.findAll((n) => n.type === "form")[0];
+    let pending!: Promise<void>;
+    await act(async () => {
+      pending = (form.props.onSubmit as (e: unknown) => Promise<void>)({ preventDefault: () => {} });
+    });
+    await act(async () => { r.unmount(); });
+    await act(async () => { slow.resolve(response(200, okBody())); await pending; });
+    expect(replaced).toEqual([]);
+  });
+
+  it("does not navigate when the origin target changed mid-flight", async () => {
+    const slow = deferred<unknown>();
+    mockedAuthedFetch.mockReturnValueOnce(slow.promise);
+    const r = await mount(ORIGIN_PROPS as never);
+    const form = r.root.findAll((n) => n.type === "form")[0];
+    let pending!: Promise<void>;
+    await act(async () => {
+      pending = (form.props.onSubmit as (e: unknown) => Promise<void>)({ preventDefault: () => {} });
+    });
+    // Same component instance now composes a DIFFERENT finding.
+    await act(async () => {
+      r.update(createElement(TeamClaimComposerShell, { ...UNFILED, originTarget: { runId: "run-9", claimId: "v1:key_findings:1:zzz" } } as never));
+    });
+    await act(async () => { slow.resolve(response(200, okBody())); await pending; });
+    expect(replaced).toEqual([]);
+  });
+
+  it("leaves ordinary mode untouched when originTarget is null", async () => {
+    mockedAuthedFetch.mockResolvedValue(response(200, okBody()));
+    const r = await mount({ ...UNFILED, originTarget: null } as never);
+    expect(byTestId(r, "team-claim-text")).toHaveLength(1);
+    expect(text(r)).toContain("Verify a claim");
+    expect(text(r)).not.toContain("Verify a research claim");
+  });
+});

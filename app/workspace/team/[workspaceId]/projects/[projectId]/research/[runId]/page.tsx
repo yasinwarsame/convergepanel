@@ -77,6 +77,10 @@ export default async function TeamResearchDetailPage({
       // Presentation hint from the same server-resolved capability set — not a
       // second authorization decision.
       showAudit={access.capabilities.includes("audit.read")}
+      // R4-I4 — verifying a claim from a Project-filed run results in a
+      // Project-filed Claim, which the POST's gates require `research.organize`
+      // for. Presentation only; viewing still needs just `research.read`.
+      canVerifyClaim={access.capabilities.includes("research.create") && access.capabilities.includes("research.organize")}
     />
   );
 }

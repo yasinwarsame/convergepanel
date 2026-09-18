@@ -20,8 +20,9 @@ import Page from "@/app/workspace/team/[workspaceId]/claims/new/page";
 const CODE = readFileSync(join(__dirname, "..", "page.tsx"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
 const WS = "ws-1";
 const UID = "uid-member";
-const call = () => Page({ params: { workspaceId: WS } });
-const propsOf = async () => ((await call()) as unknown as { props: Record<string, unknown> }).props;
+const call = (searchParams?: Record<string, string | string[] | undefined>) => Page({ params: { workspaceId: WS }, searchParams });
+const propsOf = async (searchParams?: Record<string, string | string[] | undefined>) =>
+  ((await call(searchParams)) as unknown as { props: Record<string, unknown> }).props;
 
 async function expectNotFound(p: Promise<unknown>) {
   let caught: unknown;
@@ -79,7 +80,9 @@ describe("gate", () => {
 describe("what crosses to the client", () => {
   it("passes a null project and only the audit hint", async () => {
     const props = await propsOf();
-    expect(Object.keys(props).sort()).toEqual(["project", "showAudit", "workspaceId", "workspaceName"]);
+    // R4-I4 adds `originTarget`, which is null in ordinary mode.
+    expect(Object.keys(props).sort()).toEqual(["originTarget", "project", "showAudit", "workspaceId", "workspaceName"]);
+    expect(props.originTarget).toBeNull();
     expect(props.project).toBeNull();
     expect(props.workspaceName).toBe("Acme Team");
   });
@@ -93,5 +96,50 @@ describe("what crosses to the client", () => {
 
   it("requires research.create, the capability the POST gates enforce", () => {
     expect(CODE).toContain('access.capabilities.includes("research.create")');
+  });
+});
+
+describe("R4-I4 origin handoff query", () => {
+  const RUN = "run-9";
+  const CID = "v1:key_findings:0:abc";
+
+  it("renders ordinary mode when neither locator is present", async () => {
+    expect((await propsOf()).originTarget).toBeNull();
+    expect((await propsOf({ other: "x" })).originTarget).toBeNull();
+  });
+
+  it("passes the locator pair through in origin mode", async () => {
+    expect((await propsOf({ originRunId: RUN, originClaimId: CID })).originTarget).toEqual({ runId: RUN, claimId: CID });
+  });
+
+  it.each([
+    ["runId without claimId", { originRunId: RUN }],
+    ["claimId without runId", { originClaimId: CID }],
+    ["empty runId", { originRunId: "", originClaimId: CID }],
+    ["empty claimId", { originRunId: RUN, originClaimId: "" }],
+    ["repeated runId", { originRunId: [RUN, "other"], originClaimId: CID }],
+    ["repeated claimId", { originRunId: RUN, originClaimId: [CID, "other"] }],
+  ])("conceals %s rather than silently rendering ordinary creation", async (_l, q) => {
+    await expectNotFound(call(q as Record<string, string | string[] | undefined>));
+  });
+
+  it("classifies the handoff BEFORE doing any Workspace access work", async () => {
+    await expectNotFound(call({ originRunId: RUN }));
+    expect(mockedAccess).not.toHaveBeenCalled();
+  });
+
+  it("still requires research.create and still does NOT require research.organize", async () => {
+    mockedAccess.mockResolvedValue(granted(["workspace.read", "research.read"]));
+    await expectNotFound(call({ originRunId: RUN, originClaimId: CID }));
+
+    mockedAccess.mockResolvedValue(granted(CREATE));
+    expect((await propsOf({ originRunId: RUN, originClaimId: CID })).workspaceId).toBe(WS);
+    expect(CODE).not.toContain("research.organize");
+  });
+
+  it("reads no source research on the server — the POST owns resolution", () => {
+    for (const marker of ["getRun", "adminDb", "resolveClaimVerificationOrigin", "firestore"]) {
+      expect(CODE).not.toContain(marker);
+    }
   });
 });

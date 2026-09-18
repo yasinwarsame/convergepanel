@@ -5,10 +5,17 @@
  * Claim creation, against the already-live
  * `POST /api/workspaces/{W}/verifications`.
  *
- * ORDINARY MODE ONLY. The body is `{claim, models}` for an Unfiled Claim and
- * `{claim, models, projectId}` for a Project-bound one. `runId`/`claimId`
- * (origin-linked mode) are never sent — that is R4-I4's contract, and the
- * server rejects a mixed body outright.
+ * TWO MODES, one mutation-safety implementation.
+ *
+ * ORDINARY (R4-I3): `{claim, models}` for an Unfiled Claim, `{claim, models,
+ * projectId}` for a Project-bound one.
+ *
+ * ORIGIN-LINKED (R4-I4): exactly `{runId, claimId, models}`, built by the
+ * shared `buildOriginLinkedVerifyClaimRequestBody()` choke point. The client
+ * sends no claim text and no `projectId`: the server resolves the authoritative
+ * claim, the source run's CURRENT Project and the origin snapshot from the two
+ * locators alone. A mixed body is unrepresentable in the input type, and the
+ * server would reject it as `ambiguous_request_mode` anyway.
  *
  * THE ROUTE IS THE SCOPE. `projectId` comes from the discriminated address the
  * page was mounted at, never from form state, so no client input can refile a
@@ -44,6 +51,8 @@ import { useCallback, useRef, useState } from "react";
 import type { User } from "firebase/auth";
 import { useAuth } from "@/components/AuthProvider";
 import { authedFetch } from "@/lib/client/authedFetch";
+import { buildOriginLinkedVerifyClaimRequestBody } from "@/lib/verification/originLinkedVerifyClaimRequest";
+import type { TeamClaimOriginTarget } from "@/lib/workspaces/teamClaimOriginHandoff";
 import type { ModelId } from "@/lib/types";
 
 export type TeamClaimCreateAddress =
@@ -108,9 +117,33 @@ function isObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
+/**
+ * ORDINARY carries the user's own claim text; ORIGIN-LINKED carries only the
+ * two locators.
+ *
+ * MUTUALLY EXCLUSIVE union. The `?: never` members are load-bearing, not
+ * decoration: without them a value typed `{claim, origin, selectedModels}`
+ * structurally satisfies the ordinary member and is assignable to the union —
+ * object-literal excess-property checking hides that only at direct call sites,
+ * not for a variable passed through. With them, a mixed ordinary/origin payload
+ * is genuinely not representable through the typed API, which is the
+ * compile-time counterpart of the server rejecting `claim` + `runId` together
+ * as `ambiguous_request_mode`.
+ *
+ * Deliberately NOT a literal discriminant (`mode: "ordinary" | "origin"`):
+ * R4-I3's existing `submit({claim, selectedModels})` call shape is preserved.
+ */
+export type TeamClaimCreateInput =
+  | { claim: string; origin?: never; selectedModels: ModelId[] }
+  | { origin: TeamClaimOriginTarget; claim?: never; selectedModels: ModelId[] };
+
+function isOriginInput(input: TeamClaimCreateInput): input is { origin: TeamClaimOriginTarget; selectedModels: ModelId[] } {
+  return "origin" in input;
+}
+
 export interface UseTeamClaimVerificationCreateResult {
   isSubmitting: boolean;
-  submit: (args: { claim: string; selectedModels: ModelId[] }) => Promise<TeamClaimCreateOutcome>;
+  submit: (args: TeamClaimCreateInput) => Promise<TeamClaimCreateOutcome>;
 }
 
 export function useTeamClaimVerificationCreate(args: { address: TeamClaimCreateAddress }): UseTeamClaimVerificationCreateResult {
@@ -121,7 +154,7 @@ export function useTeamClaimVerificationCreate(args: { address: TeamClaimCreateA
   const inFlightRef = useRef(false);
 
   const submit = useCallback(
-    async (payload: { claim: string; selectedModels: ModelId[] }): Promise<TeamClaimCreateOutcome> => {
+    async (payload: TeamClaimCreateInput): Promise<TeamClaimCreateOutcome> => {
       if (inFlightRef.current) return { status: "already_submitting" };
       if (!authReady || !user) return { status: "rejected", code: "unauthorized" };
 
@@ -129,9 +162,12 @@ export function useTeamClaimVerificationCreate(args: { address: TeamClaimCreateA
       setIsSubmitting(true);
 
       const url = `/api/workspaces/${encodeURIComponent(address.workspaceId)}/verifications`;
-      // The route's own scope, never form state. Unfiled OMITS the key.
-      const body =
-        address.kind === "project"
+      // ORIGIN-LINKED: exactly {runId, claimId, models}, built by the shared
+      // auditable choke point so no call site can add `claim` or `projectId`.
+      // ORDINARY: the route's own scope, never form state; Unfiled OMITS the key.
+      const body = isOriginInput(payload)
+        ? buildOriginLinkedVerifyClaimRequestBody({ runId: payload.origin.runId, claimId: payload.origin.claimId, models: payload.selectedModels })
+        : address.kind === "project"
           ? { claim: payload.claim, models: payload.selectedModels, projectId: address.projectId }
           : { claim: payload.claim, models: payload.selectedModels };
       const serialized = JSON.stringify(body);
@@ -185,6 +221,19 @@ export function useTeamClaimVerificationCreate(args: { address: TeamClaimCreateA
         if (!isObject(raw) || raw.ok !== true) return { status: "outcome_unknown" };
         if (typeof raw.verificationId !== "string" || raw.verificationId.length === 0) return { status: "outcome_unknown" };
         if (raw.workspaceId !== address.workspaceId) return { status: "outcome_unknown" };
+
+        if (isOriginInput(payload)) {
+          // The client has NO Project authority in origin-linked mode: the
+          // source run's current Project is resolved server-side and may have
+          // changed since the handoff link was created. So the shape is
+          // validated, never compared to a browser-held Project id.
+          const resolvedProjectId = raw.projectId;
+          if (!(resolvedProjectId === null || (typeof resolvedProjectId === "string" && resolvedProjectId.length > 0))) {
+            return { status: "outcome_unknown" };
+          }
+          return { status: "ok", verificationId: raw.verificationId, workspaceId: raw.workspaceId, projectId: resolvedProjectId };
+        }
+
         const expectedProjectId = address.kind === "project" ? address.projectId : null;
         if (raw.projectId !== expectedProjectId) return { status: "outcome_unknown" };
 

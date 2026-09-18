@@ -23,10 +23,26 @@ import { notFound } from "next/navigation";
 import { resolveServerComponentIdentity } from "@/lib/auth/resolveServerComponentIdentity";
 import { resolveWorkspaceAccess } from "@/lib/workspaces/resolveWorkspaceAccess";
 import TeamClaimComposerShell from "@/components/workspace/claims/TeamClaimComposerShell";
+import { parseTeamClaimOriginQuery } from "@/lib/workspaces/teamClaimOriginHandoff";
 
 export const dynamic = "force-dynamic";
 
-export default async function TeamUnfiledClaimCreatePage({ params }: { params: { workspaceId: string } }) {
+export default async function TeamUnfiledClaimCreatePage({
+  params,
+  searchParams,
+}: {
+  params: { workspaceId: string };
+  searchParams?: Record<string, string | string[] | undefined>;
+}) {
+  // R4-I4 — classify the handoff BEFORE any access work, so a malformed
+  // research link can never be quietly downgraded into an unrelated free-text
+  // claim form. The source run is deliberately NOT read here: the POST owns
+  // resolving the claim, its current Project and the origin snapshot.
+  const origin = parseTeamClaimOriginQuery(searchParams);
+  if (origin.kind === "invalid") {
+    notFound();
+  }
+
   const identity = await resolveServerComponentIdentity();
   if (!identity) {
     notFound();
@@ -49,6 +65,7 @@ export default async function TeamUnfiledClaimCreatePage({ params }: { params: {
       workspaceName={access.workspace.name}
       showAudit={access.capabilities.includes("audit.read")}
       project={null}
+      originTarget={origin.kind === "origin" ? origin.target : null}
     />
   );
 }

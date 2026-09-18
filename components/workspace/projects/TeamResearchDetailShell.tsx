@@ -42,16 +42,22 @@
  * already-authorized `team.review`, with no Workspace review deep link (see
  * that component for why the link is deferred).
  *
- * ACTIONS. No Personal hand-off is passed: "Verify this claim" and "Run
- * follow-up" stay undefined (no Team destination exists yet), and no read-only
- * execution target is delegated, so the single-model branch renders the neutral
- * "This saved report is read-only." copy. Starting research requires
- * capabilities (`research.create` + `research.organize`) that Viewers and
+ * ACTIONS (R4-I4). "Verify this claim" is now delegated — to a TEAM
+ * destination, never the Personal one: an eligible Deep Research finding hands
+ * its `{runId, claimId}` to `/workspace/team/{W}/claims/new`, where the Team
+ * Claim POST re-derives everything authoritative. The handler is supplied only
+ * when `canVerifyClaim` is true, and `DeepResearchView` renders nothing without
+ * a handler, so Reviewers and Viewers simply never see the action.
+ *
+ * "Run follow-up" stays undefined and no read-only execution target is
+ * delegated, so the single-model branch still renders the neutral "This saved
+ * report is read-only." copy — starting research needs capabilities Viewers and
  * Reviewers lack, so a "run this again" pointer would mislead them.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/AuthProvider";
 import { authedFetch } from "@/lib/client/authedFetch";
 import { createGenerationGuard } from "@/lib/client/authGeneration";
@@ -66,6 +72,7 @@ import {
   type TeamRunDetailPresentation,
 } from "@/lib/research/teamRunDetailPresentation";
 import { teamRunDetailApiUrl } from "@/lib/workspaces/teamResearchDetailHref";
+import { teamClaimOriginHandoffHref } from "@/lib/workspaces/teamClaimOriginHandoff";
 
 export type TeamResearchDetailShellProps = {
   workspaceId: string;
@@ -76,6 +83,13 @@ export type TeamResearchDetailShellProps = {
   project: { id: string; name: string } | null;
   /** Presentation hint from the server-resolved capability set (`audit.read`) — not authorization. */
   showAudit: boolean;
+  /**
+   * R4-I4 — server-derived creation capability for THIS address. Presentation
+   * only: the Team Claim POST independently re-resolves the source run and
+   * re-authorizes its current Project before executing anything. Never inferred
+   * from viewerRole, the creator, the assignee or the result body.
+   */
+  canVerifyClaim?: boolean;
 };
 
 type DetailState =
@@ -107,8 +121,9 @@ export function teamResearchAncillaryPresentation(review: TeamRunDetailMeta["rev
   };
 }
 
-export default function TeamResearchDetailShell({ workspaceId, workspaceName, runId, project, showAudit }: TeamResearchDetailShellProps) {
+export default function TeamResearchDetailShell({ workspaceId, workspaceName, runId, project, showAudit, canVerifyClaim = false }: TeamResearchDetailShellProps) {
   const { user, authReady } = useAuth();
+  const router = useRouter();
   const [state, setState] = useState<DetailState>({ kind: "loading" });
   const [retryTick, setRetryTick] = useState(0);
 
@@ -204,6 +219,23 @@ export default function TeamResearchDetailShell({ workspaceId, workspaceName, ru
 
     return () => controller.abort();
   }, [workspaceId, projectId, runId, uid, authReady, user, guard, retryTick]);
+
+  /**
+   * R4-I4 — hand a canonical finding to Team Claim verification. Only the two
+   * LOCATORS travel: never the finding's text, and never a Project id, because
+   * the source run may have been reorganized since this page loaded. The POST
+   * resolves the authoritative claim, the current Project and the origin.
+   *
+   * The runId comparison is a local consistency guard (a callback must be
+   * about the run this address is showing), not an authorization decision.
+   */
+  const handleVerifyClaim = useCallback(
+    (args: { runId: string; claimId: string }) => {
+      if (args.runId !== runId) return;
+      router.push(teamClaimOriginHandoffHref({ workspaceId, runId: args.runId, claimId: args.claimId }));
+    },
+    [runId, workspaceId, router]
+  );
 
   /** Repeats the READ only — never a model panel. */
   const retry = useCallback(() => {
@@ -327,7 +359,13 @@ export default function TeamResearchDetailShell({ workspaceId, workspaceName, ru
       )}
 
       {state.kind === "ready" && (
-        <PersistedResearchResultView presentation={state.presentation} adaptiveAncillaryPresentation={teamResearchAncillaryPresentation(state.meta.review)} />
+        <PersistedResearchResultView
+          presentation={state.presentation}
+          adaptiveAncillaryPresentation={teamResearchAncillaryPresentation(state.meta.review)}
+          // Absent handler => DeepResearchView renders no action at all, which
+          // is exactly what Reviewers and Viewers must see.
+          onVerifyClaim={canVerifyClaim ? handleVerifyClaim : undefined}
+        />
       )}
     </main>
   );

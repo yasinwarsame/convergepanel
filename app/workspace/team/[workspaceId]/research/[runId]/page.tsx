@@ -48,6 +48,11 @@ export default async function TeamUnfiledResearchDetailPage({ params }: { params
       runId={params.runId}
       project={null}
       showAudit={access.capabilities.includes("audit.read")}
+      // R4-I4 — presentation hint for the per-finding "Verify this claim"
+      // action. Viewing research still requires only `research.read`; this
+      // never gates the page. The POST re-resolves and re-authorizes the
+      // source run's own Project before executing anything.
+      canVerifyClaim={access.capabilities.includes("research.create")}
     />
   );
 }
