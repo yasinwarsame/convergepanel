@@ -1,9 +1,14 @@
 /**
  * Team Video Verification Creation, Phase 8C-E.3.3.1 —
- * `POST /api/workspaces/{workspaceId}/video-verifications`. Team Video
- * only — no GET/list in this slice (deferred, matching Team Claim's own
- * §27 precedent). Detail-read support lives in the existing shared
- * `GET /api/user/verifications/[verificationId]?collection=videoVerifications`.
+ * `POST /api/workspaces/{workspaceId}/video-verifications`.
+ *
+ * TEAM-VERIFICATION-PARITY-R5-I1 — `GET` (the durable Team Video list) is
+ * added at the END of this file with its own identity helper, imports and
+ * read-only response vocabulary. POST's code, ordering, telemetry and
+ * behavior below are untouched. The canonical Team Video DETAIL read is the
+ * sibling `GET .../video-verifications/{verificationId}` route; the shared
+ * `GET /api/user/verifications/[verificationId]?collection=videoVerifications`
+ * keeps its existing Team-aware branch unchanged as compatibility only.
  *
  * Frozen architecture (Phase 8C-E.3.3.0 + its .1/.2/.3/.3.2.1 corrections):
  *
@@ -92,6 +97,10 @@ import { invalidRequestBodyResponse, unexpectedFieldResponse, internalErrorRespo
 import { teamProjectAuthorizationDeniedResponse } from "@/lib/projects/teamProjectErrorResponse";
 import { runProjectAssociationTargetNotFoundResponse, projectArchivedTargetResponse } from "@/lib/projects/projectErrorResponse";
 import { mapStoredVideoVerificationToClientPayload } from "@/lib/user/mapStoredVideoVerificationToClientPayload";
+// TEAM-VERIFICATION-PARITY-R5-I1 — imported ONLY by the GET list handler at
+// the end of this file. POST references none of these.
+import { teamRunAccessDeniedResponse, teamRunInsufficientCapabilityResponse } from "@/lib/workspaces/teamRunAccessResponse";
+import { listTeamVideoVerifications } from "@/lib/workspaces/listTeamVideoVerifications";
 import { VIDEO_VERIFICATION_DISCLAIMER } from "@/lib/legal/videoVerificationDisclaimer";
 import { logger } from "@/lib/logger";
 
@@ -682,5 +691,86 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
     logger.error("[POST /api/workspaces/[workspaceId]/video-verifications] Unexpected error", { error: err?.message, stack: err?.stack });
     const { status, body: errBody } = internalErrorResponse();
     return NextResponse.json(errBody, { status });
+  }
+}
+
+// ============================================================================
+// TEAM-VERIFICATION-PARITY-R5-I1 — GET: the durable Team Video verification
+// list. Added at the END of this file with its OWN identity helper, imports
+// and response vocabulary. POST's code, ordering, telemetry and behavior above
+// are untouched, and this handler shares no state with it.
+//
+//   GET /api/workspaces/{W}/video-verifications                 every Team Video in W
+//   GET /api/workspaces/{W}/video-verifications?scope=unfiled   only projectId == null
+//
+// identity -> resolveTeamRunWorkspaceAccess -> research.read -> scope/limit ->
+// listTeamVideoVerifications(). Authorization is Workspace membership plus the
+// centralized capability map only: never the creator, `userId`, the uploader,
+// the dedup requester, an assignment or a role string. All five Team roles
+// hold `research.read`; `research.create`/`research.organize` are irrelevant
+// to reading and are never consulted here.
+//
+// Read-only: unlike POST this handler takes NO rate-limit bucket, reads no
+// body, touches no entitlement/quota/video counter, runs no provider, writes
+// nothing and evaluates no governance. It is a GET added beside a mutation,
+// not a mutation path with a different verb.
+// ============================================================================
+
+const VIDEO_GET_ROUTE = "GET /api/workspaces/[workspaceId]/video-verifications";
+const VIDEO_LIST_DEFAULT_LIMIT = 20;
+const VIDEO_LIST_MAX_LIMIT = 50;
+
+async function getUidForVideoList(req: NextRequest): Promise<string | NextResponse> {
+  const identity = await resolveRequestIdentity(req);
+  if (identity.status === "authenticated") return identity.uid;
+  logIdentityResolutionFailure({ route: VIDEO_GET_ROUTE, method: "GET", failureCategory: identity.reason });
+  if (identity.reason === "missing_credentials") {
+    return NextResponse.json({ ok: false, errorCode: "unauthorized", message: "Please sign in." }, { status: 401 });
+  }
+  return NextResponse.json({ ok: false, errorCode: "auth_error", message: "Authentication failed." }, { status: 401 });
+}
+
+export async function GET(req: NextRequest, { params }: { params: { workspaceId: string } }) {
+  const uidOrRes = await getUidForVideoList(req);
+  if (uidOrRes instanceof NextResponse) return uidOrRes;
+  const uid = uidOrRes;
+  const workspaceId = params.workspaceId;
+
+  const access = await resolveTeamRunWorkspaceAccess({ uid, workspaceId });
+  if (!access.granted) {
+    const { status, body } = teamRunAccessDeniedResponse(access.reason);
+    return NextResponse.json(body, { status });
+  }
+  if (!access.capabilities.includes("research.read")) {
+    const { status, body } = teamRunInsufficientCapabilityResponse();
+    return NextResponse.json(body, { status });
+  }
+
+  const { searchParams } = req.nextUrl;
+  const rawScope = searchParams.get("scope");
+  if (rawScope !== null && rawScope !== "unfiled") {
+    return NextResponse.json({ ok: false, errorCode: "invalid_scope", message: "Unsupported scope value." }, { status: 400 });
+  }
+  const scope = rawScope === "unfiled" ? "unfiled" : "all";
+  const limit = Math.min(VIDEO_LIST_MAX_LIMIT, Math.max(1, parseInt(searchParams.get("limit") || String(VIDEO_LIST_DEFAULT_LIMIT), 10) || VIDEO_LIST_DEFAULT_LIMIT));
+  const cursorRaw = searchParams.get("cursor");
+
+  const result = await listTeamVideoVerifications({ workspaceId, scope: { kind: scope }, limit, cursorRaw });
+  switch (result.status) {
+    case "ok":
+      return NextResponse.json({
+        ok: true,
+        items: result.items,
+        hasMore: result.hasMore,
+        ...(result.nextCursor ? { nextCursor: result.nextCursor } : {}),
+        scope,
+      });
+    case "invalid_cursor":
+      return NextResponse.json({ ok: false, errorCode: "invalid_cursor", message: "This page link is no longer valid." }, { status: 400 });
+    case "integrity_violation":
+    case "query_failed": {
+      const { status, body } = internalErrorResponse();
+      return NextResponse.json(body, { status });
+    }
   }
 }

@@ -38,10 +38,18 @@ export type FakeState = {
   unavailable: boolean;
   throwOnQuery: boolean;
   throwOnDocGetCollections: Set<string>;
+  /**
+   * Opt-in (default false, so existing suites are unaffected): the query
+   * engine RECORDS every `where()` but does not APPLY it. Lets a suite prove
+   * that row-shape validation — not the Firestore predicate — is the security
+   * boundary, which a predicate-honouring fake can never demonstrate because
+   * it filters the malformed row out before validation ever runs.
+   */
+  ignoreQueryFilters: boolean;
 };
 
 export function createFakeState(): FakeState {
-  return { collections: {}, queries: [], docGets: [], getAllCalls: [], writeAttempts: [], unavailable: false, throwOnQuery: false, throwOnDocGetCollections: new Set() };
+  return { collections: {}, queries: [], docGets: [], getAllCalls: [], writeAttempts: [], unavailable: false, throwOnQuery: false, throwOnDocGetCollections: new Set(), ignoreQueryFilters: false };
 }
 
 function orderingKey(doc: FakeDoc, field: string | symbol): [number, number] | string {
@@ -94,7 +102,7 @@ class FakeQuery {
     });
     if (this.state.throwOnQuery) throw new Error("query failed");
     let result = (this.state.collections[this.name] ?? []).filter((d) =>
-      this.filters.every((f) => Object.prototype.hasOwnProperty.call(d.data, f.field) && f.op === "==" && d.data[f.field] === f.value)
+      this.state.ignoreQueryFilters || this.filters.every((f) => Object.prototype.hasOwnProperty.call(d.data, f.field) && f.op === "==" && d.data[f.field] === f.value)
     );
     result = [...result].sort((a, b) => {
       for (const o of this.orders) {
