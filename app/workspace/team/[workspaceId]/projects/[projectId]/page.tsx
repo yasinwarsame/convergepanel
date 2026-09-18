@@ -83,6 +83,10 @@ export default async function TeamProjectDetailPage({ params }: { params: { work
       // page gate itself still requires only `projects.read`; the R3 Claim list
       // endpoint re-authorizes `research.read` on every request.
       canReadClaims={access.capabilities.includes("research.read")}
+      // R5-I2 — narrow presentation hint for the read-only Videos section. The
+      // R5-I1 list endpoint re-derives `research.read` per request; this only
+      // decides whether the section issues a request at all.
+      canReadVideos={access.capabilities.includes("research.read")}
       // R4-I3 — filing a Claim INTO a Project needs `research.create` AND
       // `research.organize`, exactly what the POST's gates require. Named
       // independently of `canStartResearch` even though the formula matches
