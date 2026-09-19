@@ -115,14 +115,16 @@ describe("what crosses to the client", () => {
 
   it("never hands the capability array, role or membership to the client", async () => {
     const props = await shellPropsOf();
-    expect(Object.keys(props).sort()).toEqual(["showAudit", "workspaceId", "workspaceName"]);
+    expect(Object.keys(props).sort()).toEqual(["canCreateVideo", "showAudit", "workspaceId", "workspaceName"]);
     expect(JSON.stringify(props)).not.toContain("research.read");
   });
 
-  it("passes NO create hint — I2 is read-only", async () => {
-    const props = await shellPropsOf();
-    expect(props.canCreateVideo).toBeUndefined();
-    expect(CODE).not.toContain("research.create");
-    expect(CODE).not.toContain("canCreate");
+  it("passes the create hint derived from research.create alone (R5-I3-B)", async () => {
+    // Read access does NOT imply create access: this page admits `research.read`
+    // but must hand the composer entry point only to a holder of
+    // `research.create`.
+    expect((await shellPropsOf()).canCreateVideo).toBe(false);
+    mockedResolveWorkspaceAccess.mockResolvedValue(granted(["workspace.read", "research.read", "research.create"]));
+    expect((await shellPropsOf()).canCreateVideo).toBe(true);
   });
 });

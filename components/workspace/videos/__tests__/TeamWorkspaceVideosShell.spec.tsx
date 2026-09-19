@@ -211,10 +211,13 @@ describe("no creation surface", () => {
     expect(html).not.toContain("videos/new");
   });
 
-  it("accepts no create capability prop at all", async () => {
+  it("offers the create control ONLY when the server-derived hint says so", async () => {
+    // R5-I3-B added the affordance; the default stays off, so a shell mounted
+    // without an explicit hint still renders nothing. The hint's own derivation
+    // is pinned in `teamVideoCreateAffordances.spec.tsx`.
     mockedAuthedFetch.mockResolvedValue(response(200, body([])));
-    // Passing a create hint must not conjure a control — the prop does not exist.
-    const html = text(await mount({ ...PROPS, canCreateVideo: true }));
-    expect(html).not.toContain("New Video");
+    const withHint = text(await mount({ ...PROPS, canCreateVideo: true }));
+    expect(withHint).toContain("New Video");
+    expect(withHint).toContain("/videos/new");
   });
 });
