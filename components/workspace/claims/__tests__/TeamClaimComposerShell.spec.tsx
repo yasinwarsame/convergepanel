@@ -580,20 +580,31 @@ describe("R4-I4 origin-linked mode", () => {
  * from this file and not from the mapper. Trim the list and the server set no
  * longer matches; add a concealing helper and it no longer matches either.
  */
-describe("the Team Claim concealment class renders indistinguishably", () => {
-  /**
-   * Each entry is a denial the server answers without disclosing whether the
-   * resource exists, with the status the route actually returns — the status
-   * matters, because the hook classifies >= 500 as `outcome_unknown` and a
-   * mis-stated status would test a different path than the real one.
-   */
-  const CONCEALED: [code: string, status: number][] = [
-    ["team_workspace_not_found", 404],
-    ["insufficient_capability", 403],
-    ["project_not_found", 404],
-    ["project_archived", 409],
-  ];
+/**
+ * The concealment class, frozen deliberately rather than derived from the
+ * mapper — deriving it would shrink under the very mutation it must catch.
+ *
+ * Declared at MODULE scope on purpose. Block-scoping it inside the first
+ * describe forced the completeness anchor below to re-type the same four
+ * codes, so the anchor validated a DUPLICATE of the class rather than the
+ * class itself: trimming an entry here while giving that code its own leaking
+ * copy restored the original defect with the whole suite green. That is the
+ * combined leak-and-trim hole the Video sibling was written to close.
+ *
+ * Each entry carries the status the route actually returns. The status is
+ * load-bearing twice over: the hook classifies >= 500 as `outcome_unknown`,
+ * so a mis-stated status would exercise a different path than the real one,
+ * and the anchor below compares (code, status) PAIRS against the server, so a
+ * status invented here fails rather than sitting unverified.
+ */
+const CONCEALED: [code: string, status: number][] = [
+  ["team_workspace_not_found", 404],
+  ["insufficient_capability", 403],
+  ["project_not_found", 404],
+  ["project_archived", 409],
+];
 
+describe("the Team Claim concealment class renders indistinguishably", () => {
   async function copyFor(code: string, status: number): Promise<string> {
     mockedAuthedFetch.mockResolvedValue(response(status, { ok: false, errorCode: code }));
     const r = await mount(FILED);
@@ -669,7 +680,8 @@ describe("the Team Claim concealment class matches what the SERVER conceals", ()
    */
   const CONCEALING_MODULES = ["lib/projects/teamProjectErrorResponse.ts", "lib/projects/projectErrorResponse.ts"];
 
-  function serverConcealedCodes(): string[] {
+  /** `code:status` for every denial the route's concealing helpers can emit. */
+  function serverConcealedPairs(): string[] {
     const imports = importMap(routeSrc);
     const out: string[] = [];
     for (const [symbol, module] of imports) {
@@ -678,7 +690,7 @@ describe("the Team Claim concealment class matches what the SERVER conceals", ()
       if (!new RegExp(`\\b${symbol}\\s*\\(`).test(routeSrc)) continue; // imported AND called
       const body = helperBody(symbol, routeSrc);
       expect(body).not.toBeNull();
-      for (const e of emissions(body!)) out.push(e.code);
+      for (const e of emissions(body!)) out.push(`${e.code}:${e.status}`);
     }
     return [...new Set(out)].sort();
   }
@@ -690,12 +702,13 @@ describe("the Team Claim concealment class matches what the SERVER conceals", ()
     expect(imports.get("teamProjectAuthorizationDeniedResponse")).toBe("lib/projects/teamProjectErrorResponse.ts");
     expect(imports.get("runProjectAssociationTargetNotFoundResponse")).toBe("lib/projects/projectErrorResponse.ts");
     expect(imports.get("projectArchivedTargetResponse")).toBe("lib/projects/projectErrorResponse.ts");
-    expect(serverConcealedCodes().length).toBeGreaterThan(3);
+    expect(serverConcealedPairs().length).toBeGreaterThan(3);
   });
 
   it("every code the server conceals is in the class, and nothing else is", () => {
-    expect(serverConcealedCodes()).toEqual(
-      ["team_workspace_not_found", "insufficient_capability", "project_not_found", "project_archived"].sort()
-    );
+    // Compared against the ONE table the behavioural assertions are driven
+    // from — not a re-typed copy of it — so trimming an entry there fails
+    // here, and the two guards genuinely cross-check each other.
+    expect(serverConcealedPairs()).toEqual(CONCEALED.map(([code, status]) => `${code}:${status}`).sort());
   });
 });
