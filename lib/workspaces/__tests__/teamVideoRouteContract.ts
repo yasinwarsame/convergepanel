@@ -111,9 +111,21 @@ export function postBody(src = routeSource()): string {
  * so spelling cannot create an escape; and a binding whose shape this model
  * does NOT recognise is recorded rather than ignored, so the next unmodelled
  * form fails loudly instead of silently.
+ *
+ * A callable carries its own function-like AST NODE, not only its source text.
+ * Text was enough to decide "is this a delegate", but not to walk the
+ * delegate's body: the text stored for a variable-form callable is the
+ * VariableDeclaration (`f = () => {}` — no `const`), which re-parses as an
+ * ExpressionStatement, so a text-reparsing walker found no function at all and
+ * returned no calls. Recognising the delegate while losing its body is the same
+ * escape one level down. Holding the node removes the round-trip entirely, and
+ * with it the declarator ambiguity of `const a = () => {}, b = () => {}` —
+ * each declarator binds its own node.
  */
+type CallableNode = ts.FunctionDeclaration | ts.ArrowFunction | ts.FunctionExpression;
+
 type TopLevelBinding =
-  | { kind: "callable"; text: string }
+  | { kind: "callable"; text: string; node: CallableNode }
   | { kind: "unsupported"; why: string }
   | { kind: "imported"; module: string };
 
@@ -127,7 +139,7 @@ function topLevelBindings(sf: ts.SourceFile): Map<string, TopLevelBinding> {
     }
     // `function f()`, `async function f()`, `export function f()`, `export async function f()`
     if (ts.isFunctionDeclaration(st) && st.name) {
-      map.set(st.name.text, { kind: "callable", text: st.getText(sf) });
+      map.set(st.name.text, { kind: "callable", text: st.getText(sf), node: st });
       continue;
     }
     if (ts.isVariableStatement(st)) {
@@ -136,7 +148,7 @@ function topLevelBindings(sf: ts.SourceFile): Map<string, TopLevelBinding> {
         const init = d.initializer;
         // `const f = () => {}`, `const f = async () => {}`, `const f = function () {}`
         if (init && (ts.isArrowFunction(init) || ts.isFunctionExpression(init))) {
-          map.set(d.name.text, { kind: "callable", text: d.getText(sf) });
+          map.set(d.name.text, { kind: "callable", text: d.getText(sf), node: init });
         } else {
           map.set(d.name.text, {
             kind: "unsupported",
@@ -172,41 +184,32 @@ function directCalls(node: ts.Node, sf: ts.SourceFile): Set<string> {
 }
 
 /**
- * Direct calls made inside one delegate's own body.
+ * Same-module top-level callables POST calls DIRECTLY — its identity helper and
+ * its denial delegates.
  *
- * The delegate text is re-parsed and the traversal STARTS at its function-like
- * node. Starting at the synthetic SourceFile instead would make that very
- * declaration look like a nested function and skip it wholesale — which is how
- * `mapGateDenial`'s two Project helpers briefly stopped being discovered.
+ * `body` is the delegate's own source, used for literal emission scanning;
+ * `node` is the function-like node itself, used to walk the calls it makes.
+ * They are deliberately the same declarator, so neither view can drift from the
+ * other or pick up a sibling declaration's body.
  */
-function callsWithin(declarationText: string): Set<string> {
-  const sf = ts.createSourceFile("delegate.ts", declarationText, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
-  for (const st of sf.statements) {
-    if (ts.isFunctionDeclaration(st) && st.body) return directCalls(st, sf);
-    if (ts.isVariableStatement(st)) {
-      for (const d of st.declarationList.declarations) {
-        const init = d.initializer;
-        if (init && (ts.isArrowFunction(init) || ts.isFunctionExpression(init))) return directCalls(init, sf);
-      }
-    }
+export type PostDelegate = { name: string; body: string; node: CallableNode };
+
+function delegatesFrom(sf: ts.SourceFile): PostDelegate[] {
+  const bindings = topLevelBindings(sf);
+  const out: PostDelegate[] = [];
+  for (const name of directCalls(postDeclaration(sf), sf)) {
+    const b = bindings.get(name);
+    if (b?.kind === "callable") out.push({ name, body: b.text, node: b.node });
   }
-  return new Set<string>();
+  return out.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /**
- * Same-module top-level callables POST calls DIRECTLY — its identity helper and
- * its denial delegates. Derived structurally; declaration spelling and `export`
- * are irrelevant.
+ * Derived structurally; declaration spelling and `export` are irrelevant — to
+ * whether a delegate is FOUND and to whether its own calls are followed.
  */
-export function postDelegates(src = routeSource()): { name: string; body: string }[] {
-  const sf = sourceFile(src);
-  const bindings = topLevelBindings(sf);
-  const out: { name: string; body: string }[] = [];
-  for (const name of directCalls(postDeclaration(sf), sf)) {
-    const b = bindings.get(name);
-    if (b?.kind === "callable") out.push({ name, body: b.text });
-  }
-  return out.sort((a, b) => a.name.localeCompare(b.name));
+export function postDelegates(src = routeSource()): PostDelegate[] {
+  return delegatesFrom(sourceFile(src));
 }
 
 /**
@@ -279,8 +282,8 @@ export function reachedResponseHelpers(src = routeSource()): string[] {
   const bindings = topLevelBindings(sf);
   // Direct calls made by POST, plus those made by each delegate it calls.
   const called = new Set<string>(directCalls(postDeclaration(sf), sf));
-  for (const d of postDelegates(src)) {
-    for (const n of callsWithin(d.body)) called.add(n);
+  for (const d of delegatesFrom(sf)) {
+    for (const n of directCalls(d.node, sf)) called.add(n);
   }
   const reached: string[] = [];
   for (const name of called) {

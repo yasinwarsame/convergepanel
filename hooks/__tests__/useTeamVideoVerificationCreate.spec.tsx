@@ -508,16 +508,29 @@ describe("the rejection vocabulary is derived from the ROUTE, not from itself", 
     // branches. A forward slice from `export async function POST` misses it —
     // which is how a new sub-500 code returned inline from that delegate stayed
     // invisible while the completeness assertion reported success.
-    const delegates = postDelegates(routeSrc).map((d) => d.name).sort();
-    expect(delegates).toContain("mapGateDenial");
-    expect(delegates).toContain("getUid");
-    expect(postScope(routeSrc)).toContain("function mapGateDenial(");
+    const delegates = postDelegates(routeSrc);
+    const names = delegates.map((d) => d.name).sort();
+    expect(names).toContain("mapGateDenial");
+    expect(names).toContain("getUid");
 
-    // And an inline denial in a delegate is genuinely picked up.
-    const withDelegateCode = postScope(routeSrc).replace(
-      "function mapGateDenial(",
-      'function probeDelegate() {\n  return { status: 403, body: { ok: false, errorCode: "probe_delegate_code", message: "x" } };\n}\nfunction mapGateDenial('
+    // The delegate's OWN source — taken from the derived delegate rather than
+    // matched as `"function mapGateDenial("`. That spelling was pinned here
+    // once; it made this assertion fail when the delegate was re-spelled
+    // without changing behaviour, while saying nothing about lost coverage
+    // when a NEW delegate was added in a spelling the model could not follow.
+    const gate = delegates.find((d) => d.name === "mapGateDenial");
+    expect(gate).toBeDefined();
+    expect(gate!.body.length).toBeGreaterThan(200);
+    expect(postScope(routeSrc)).toContain(gate!.body);
+
+    // And an inline denial in a delegate is genuinely picked up. Anchored on
+    // the delegate's own body so the substitution cannot silently no-op.
+    const scope = postScope(routeSrc);
+    const withDelegateCode = scope.replace(
+      gate!.body,
+      'function probeDelegate() {\n  return { status: 403, body: { ok: false, errorCode: "probe_delegate_code", message: "x" } };\n}\n' + gate!.body
     );
+    expect(withDelegateCode).not.toEqual(scope);
     expect(emissions(withDelegateCode).map((e) => e.code)).toContain("probe_delegate_code");
   });
 
