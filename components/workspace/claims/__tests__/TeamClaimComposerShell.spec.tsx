@@ -554,3 +554,148 @@ describe("R4-I4 origin-linked mode", () => {
     expect(text(r)).not.toContain("Verify a research claim");
   });
 });
+
+/**
+ * TEAM-VERIFICATION-PARITY-R5-I4 — the Team Claim concealment invariant.
+ *
+ * THE PROPERTY, and why it needed its own block. The Claim route refuses to
+ * tell an unauthorized caller whether a Workspace or Project exists: no
+ * membership, membership removed, rollout not admitted, capability missing,
+ * Project absent and Project archived all collapse to ONE sentence. The mapper
+ * does collapse them — but nothing asserted that the four branches return the
+ * SAME string, and the mapper ends in `default:`, so unlike the Video mapper
+ * there is not even exhaustiveness to make the branches look covered.
+ *
+ * Proven before this block existed: giving `project_archived`,
+ * `team_workspace_not_found` or `insufficient_capability` its own
+ * existence-revealing sentence broke **zero** of 502 Team Claim tests. Only
+ * `project_not_found` was pinned, by a single end-to-end case. Three of the
+ * four members of a security class were unguarded.
+ *
+ * HOW THIS AVOIDS VALIDATING AGAINST A COPY OF ITSELF. The class below is a
+ * frozen literal, so it cannot shrink under the mutation it must catch. A
+ * frozen list can be hand-trimmed instead, so it is checked in the opposite
+ * direction against what the SERVER conceals — derived from the denial helpers
+ * the Claim route imports from the Project/Team authorization modules, not
+ * from this file and not from the mapper. Trim the list and the server set no
+ * longer matches; add a concealing helper and it no longer matches either.
+ */
+describe("the Team Claim concealment class renders indistinguishably", () => {
+  /**
+   * Each entry is a denial the server answers without disclosing whether the
+   * resource exists, with the status the route actually returns — the status
+   * matters, because the hook classifies >= 500 as `outcome_unknown` and a
+   * mis-stated status would test a different path than the real one.
+   */
+  const CONCEALED: [code: string, status: number][] = [
+    ["team_workspace_not_found", 404],
+    ["insufficient_capability", 403],
+    ["project_not_found", 404],
+    ["project_archived", 409],
+  ];
+
+  async function copyFor(code: string, status: number): Promise<string> {
+    mockedAuthedFetch.mockResolvedValue(response(status, { ok: false, errorCode: code }));
+    const r = await mount(FILED);
+    await typeClaim(r, "The sky is blue.");
+    await submitForm(r);
+    const box = byTestId(r, "team-claim-create-error");
+    expect(box).toHaveLength(1);
+    return nodeText(box[0]);
+  }
+
+  it("every concealed denial produces byte-identical copy", async () => {
+    const rendered: string[] = [];
+    for (const [code, status] of CONCEALED) rendered.push(await copyFor(code, status));
+    // The canonical answer is taken from a member of the class rather than
+    // re-typed here, so a legitimate reword stays green while the moment the
+    // members disagree with each other this fails.
+    const canonical = rendered[0];
+    expect(new Set(rendered).size).toBe(1);
+    for (const [i, copy] of rendered.entries()) {
+      expect(`${CONCEALED[i][0]} => ${copy}`).toBe(`${CONCEALED[i][0]} => ${canonical}`);
+    }
+  });
+
+  it("the canonical answer is a real sentence, not an empty string", async () => {
+    // Positive control: a mapper returning "" for everything would otherwise
+    // satisfy the equality assertion above.
+    const canonical = await copyFor("insufficient_capability", 403);
+    expect(canonical.trim().length).toBeGreaterThan(20);
+    expect(canonical.trim().endsWith(".")).toBe(true);
+  });
+
+  it.each(CONCEALED)("%s discloses no resource state", async (code, status) => {
+    const copy = (await copyFor(code, status)).toLowerCase();
+    // Scoped to the concealment class ONLY — other arms legitimately say
+    // "claim", "plan" or "models", because those are the caller's own.
+    for (const leak of [
+      "archiv",
+      "does not exist",
+      "could not be found",
+      "no longer a member",
+      "removed from",
+      "permission to",
+      "capabilit",
+      "research.create",
+      "research.organize",
+      "not admitted",
+      "rollout",
+    ]) {
+      expect(copy).not.toContain(leak);
+    }
+  });
+});
+
+/**
+ * COMPLETENESS — the other half, derived from the server rather than the table.
+ */
+describe("the Team Claim concealment class matches what the SERVER conceals", () => {
+  const { importMap, helperBody, emissions } =
+    require("@/lib/workspaces/__tests__/teamVideoRouteContract") as typeof import("@/lib/workspaces/__tests__/teamVideoRouteContract");
+  const { readFileSync } = require("fs") as typeof import("fs");
+  const { join } = require("path") as typeof import("path");
+
+  const CLAIM_ROUTE = "app/api/workspaces/[workspaceId]/verifications/route.ts";
+  const routeSrc = readFileSync(join(process.cwd(), CLAIM_ROUTE), "utf8");
+
+  /**
+   * The rule, stated as the route's own posture: a denial helper imported from
+   * the Project / Team-Project authorization modules answers an authorization
+   * question without disclosing existence, so everything it emits belongs to
+   * the concealment class. Helpers from `teamWorkspaceErrorResponse` are NOT
+   * concealed — `invalid_request_body` and `unexpected_field` describe the
+   * caller's own request and are safe to name.
+   */
+  const CONCEALING_MODULES = ["lib/projects/teamProjectErrorResponse.ts", "lib/projects/projectErrorResponse.ts"];
+
+  function serverConcealedCodes(): string[] {
+    const imports = importMap(routeSrc);
+    const out: string[] = [];
+    for (const [symbol, module] of imports) {
+      if (!CONCEALING_MODULES.includes(module)) continue;
+      if (!/Response$/.test(symbol)) continue;
+      if (!new RegExp(`\\b${symbol}\\s*\\(`).test(routeSrc)) continue; // imported AND called
+      const body = helperBody(symbol, routeSrc);
+      expect(body).not.toBeNull();
+      for (const e of emissions(body!)) out.push(e.code);
+    }
+    return [...new Set(out)].sort();
+  }
+
+  it("reads real, route-imported concealing helpers", () => {
+    // Positive control: a failed resolution would make the comparison below
+    // pass against an empty set.
+    const imports = importMap(routeSrc);
+    expect(imports.get("teamProjectAuthorizationDeniedResponse")).toBe("lib/projects/teamProjectErrorResponse.ts");
+    expect(imports.get("runProjectAssociationTargetNotFoundResponse")).toBe("lib/projects/projectErrorResponse.ts");
+    expect(imports.get("projectArchivedTargetResponse")).toBe("lib/projects/projectErrorResponse.ts");
+    expect(serverConcealedCodes().length).toBeGreaterThan(3);
+  });
+
+  it("every code the server conceals is in the class, and nothing else is", () => {
+    expect(serverConcealedCodes()).toEqual(
+      ["team_workspace_not_found", "insufficient_capability", "project_not_found", "project_archived"].sort()
+    );
+  });
+});
