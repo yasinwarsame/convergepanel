@@ -317,13 +317,68 @@ describe("the prepared-upload contract carries no context", () => {
     expect(unknown.optional).toEqual([]);
   });
 
-  it("SubmitPreparedVideo is a function type from a prepared upload to an outcome", () => {
-    const decl = typeExports.get("SubmitPreparedVideo") as ts.TypeAliasDeclaration;
-    expect(ts.isFunctionTypeNode(decl.type)).toBe(true);
-    const fn = decl.type as ts.FunctionTypeNode;
-    expect(fn.parameters).toHaveLength(1);
-    expect(fn.parameters[0].type!.getText(sf)).toContain("PreparedVideoUpload");
-    expect(fn.type.getText(sf)).toContain("VideoUploadSubmitOutcome");
+  /**
+   * C3. Render a type node as a canonical reference string, or the sentinel
+   * `<unmodelled>` for anything that is NOT a plain (possibly generic) type
+   * reference.
+   *
+   * That sentinel is the whole mechanism. An intersection, a union, a type
+   * literal, `any`, `unknown` — none of them are TypeReferenceNodes, so they all
+   * render as `<unmodelled>` and fail an exact string comparison. A wrapper
+   * reference like `Partial<PreparedVideoUpload>` IS a reference, and renders as
+   * exactly that, which is likewise not the expected string. Nothing is skipped
+   * and nothing is approximated: an unreadable shape can only ever fail.
+   */
+  const renderRef = (t: ts.TypeNode | undefined): string => {
+    if (!t) return "<unmodelled>";
+    const u = unwrap(t);
+    if (!ts.isTypeReferenceNode(u)) return "<unmodelled>";
+    const args = u.typeArguments ?? [];
+    const name = u.typeName.getText(sf);
+    return args.length ? `${name}<${args.map(renderRef).join(", ")}>` : name;
+  };
+
+  /** The callable shape of `SubmitPreparedVideo`, or null if it is not one. */
+  const submitSignature = (): { generic: string; params: ts.NodeArray<ts.ParameterDeclaration>; returns: string } | null => {
+    const decl = localTypes.get("SubmitPreparedVideo");
+    if (!decl || !ts.isTypeAliasDeclaration(decl)) return null;
+    const fn = unwrap(decl.type);
+    if (!ts.isFunctionTypeNode(fn)) return null;
+    if (!decl.typeParameters || decl.typeParameters.length !== 1) return null;
+    return { generic: decl.typeParameters[0].name.text, params: fn.parameters, returns: renderRef(fn.type) };
+  };
+
+  /**
+   * C3 — the seam R5-I3-B consumes.
+   *
+   * The previous assertion was `toContain("PreparedVideoUpload")` on the
+   * parameter text, which admitted `PreparedVideoUpload & TeamContext`,
+   * `Partial<PreparedVideoUpload>` and a non-Promise return. This is the one
+   * declaration a Team wrapper has to satisfy, so widening it is exactly how
+   * Workspace context would leak into a surface that is supposed to be
+   * transport-neutral — and it would have leaked through the proof, not around
+   * it.
+   */
+  it("SubmitPreparedVideo takes exactly one required, unwidened prepared upload", () => {
+    const sig = submitSignature();
+    expect(sig).not.toBeNull();
+    expect(sig!.params).toHaveLength(1);
+    const p = sig!.params[0];
+    // Required and singular: no `?`, no rest, no smuggled second argument.
+    expect(p.questionToken).toBeUndefined();
+    expect(p.dotDotDotToken).toBeUndefined();
+    expect(p.initializer).toBeUndefined();
+    // Exact: an intersection or union renders `<unmodelled>`; `Partial<…>`
+    // renders as itself; an ad-hoc literal renders `<unmodelled>`.
+    expect(renderRef(p.type)).toBe("PreparedVideoUpload");
+  });
+
+  it("SubmitPreparedVideo returns the outcome asynchronously, parameterized by its own generic", () => {
+    const sig = submitSignature();
+    expect(sig).not.toBeNull();
+    // Built from the alias's OWN type-parameter name, so renaming the generic is
+    // free while substituting a different one — or `unknown`/`any` — is not.
+    expect(sig!.returns).toBe(`Promise<VideoUploadSubmitOutcome<${sig!.generic}>>`);
   });
 
   // ---- NEGATIVE BOUNDARIES, now anchored to a contract proven to exist ----
