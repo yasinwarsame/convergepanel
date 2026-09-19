@@ -40,6 +40,7 @@ import { SectionEmptyBox, SectionInitialErrorBox, SectionLoadingRow, SectionPagi
 import { TeamClaimListRow } from "@/components/workspace/claims/TeamClaimListRow";
 import { TeamVideoListRow } from "@/components/workspace/videos/TeamVideoListRow";
 import { teamClaimCreateHref } from "@/lib/workspaces/teamClaimCreateHref";
+import { teamVideoCreateHref } from "@/lib/workspaces/teamVideoCreateHref";
 import {
   useTeamClaimVerificationList,
   teamClaimListInitialErrorCopy,
@@ -112,6 +113,7 @@ export default function TeamProjectDetailShell({
   canReadClaims = false,
   canCreateClaim = false,
   canReadVideos = false,
+  canCreateVideo = false,
 }: {
   workspaceId: string;
   workspaceName: string;
@@ -128,6 +130,8 @@ export default function TeamProjectDetailShell({
   canCreateClaim?: boolean;
   /** R5-I2 — server-derived `research.read`; gates only whether the read-only Videos section requests anything. The R5-I1 list endpoint remains authoritative. */
   canReadVideos?: boolean;
+  /** R5-I3-B — server-derived `research.create` AND `research.organize`; offers the Project-filed create entry point only. The POST stays authoritative. */
+  canCreateVideo?: boolean;
 }) {
   // Project/Research Assignment — `?assignee=me` VIEW filter on the research list.
   const [assignedToMe, setAssignedToMe] = useState(false);
@@ -393,6 +397,15 @@ export default function TeamProjectDetailShell({
         <section className="mt-10" data-testid="team-project-videos-section">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-lg font-semibold text-cp-text">Videos</h2>
+            {canCreateVideo && project.status === "active" && (
+              <Link
+                href={teamVideoCreateHref({ workspaceId, projectId: project.id })}
+                className="rounded-lg border border-cp-border px-3 py-1.5 text-sm font-medium text-cp-text hover:bg-cp-raised focus:outline-none focus-visible:ring-2 focus-visible:ring-cp-accent"
+                data-testid="team-project-videos-new"
+              >
+                New Video
+              </Link>
+            )}
           </div>
 
           {videos.status === "loading" && <SectionLoadingRow label="Loading videos…" />}

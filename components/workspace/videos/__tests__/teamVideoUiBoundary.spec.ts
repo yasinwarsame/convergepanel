@@ -27,30 +27,55 @@ const UI_FILES = [
   "app/workspace/team/[workspaceId]/projects/[projectId]/videos/[verificationId]/page.tsx",
 ];
 
-describe("no creation surface exists in R5-I2", () => {
-  it.each(UI_FILES)("%s offers no upload or create affordance", (p) => {
+describe("creation lives ONLY in the R5-I3-B create surfaces", () => {
+  /*
+    R5-I2 froze "no creation surface exists yet". R5-I3-B is the phase that adds
+    one, so the guard is re-pointed rather than dropped: the READ surfaces below
+    must still never upload, extract frames or render a result-producing
+    control. All creation belongs to the two `videos/new` addresses and the
+    composer they mount.
+  */
+  it.each(UI_FILES)("%s still performs no upload or extraction of its own", (p) => {
     const code = stripComments(read(p));
-    for (const forbidden of ["VideoUploader", "videos/new", "New Video", "Upload Video", "Verify Video", "Verify another", "extractFramesInBrowser"]) {
+    for (const forbidden of ["VideoUploader", "Upload Video", "Verify Video", "Verify another", "extractFramesInBrowser"]) {
       expect(code).not.toContain(forbidden);
     }
   });
 
-  it("no create ROUTE was added", () => {
-    expect(existsSync(join(process.cwd(), "app/workspace/team/[workspaceId]/videos/new"))).toBe(false);
-    expect(existsSync(join(process.cwd(), "app/workspace/team/[workspaceId]/projects/[projectId]/videos/new"))).toBe(false);
+  it("the read-only detail and row components link to no create address", () => {
+    for (const p of [
+      "components/workspace/videos/TeamVideoListRow.tsx",
+      "components/workspace/videos/TeamVideoDetailShell.tsx",
+      "app/workspace/team/[workspaceId]/videos/[verificationId]/page.tsx",
+      "app/workspace/team/[workspaceId]/projects/[projectId]/videos/[verificationId]/page.tsx",
+    ]) {
+      const code = stripComments(read(p));
+      expect(code).not.toContain("videos/new");
+      expect(code).not.toContain("New Video");
+      expect(code).not.toContain("teamVideoCreateHref");
+    }
   });
 
-  it("the Workspace Videos shell takes no create capability hint at all", () => {
+  it("exactly the two canonical create routes exist", () => {
+    expect(existsSync(join(process.cwd(), "app/workspace/team/[workspaceId]/videos/new/page.tsx"))).toBe(true);
+    expect(existsSync(join(process.cwd(), "app/workspace/team/[workspaceId]/projects/[projectId]/videos/new/page.tsx"))).toBe(true);
+  });
+
+  it("the Workspace Videos shell takes a create HINT only — never a capability decision", () => {
     const code = stripComments(read("components/workspace/videos/TeamWorkspaceVideosShell.tsx"));
-    expect(code).not.toContain("canCreate");
+    expect(code).toContain("canCreateVideo");
+    // The shell is handed a boolean; it never evaluates a capability itself.
     expect(code).not.toContain("research.create");
+    expect(code).not.toContain("capabilities");
   });
 
-  it("the Project Videos section renders no create control", () => {
+  it("the Project Videos section offers creation only through the shared href builder", () => {
     const shell = read("components/workspace/projects/TeamProjectDetailShell.tsx");
     const section = shell.slice(shell.indexOf('data-testid="team-project-videos-section"'));
-    expect(section).not.toContain("New Video");
-    expect(section).not.toContain("teamVideoCreateHref");
+    expect(section).toContain("teamVideoCreateHref");
+    expect(section).toContain("canCreateVideo");
+    // Still no hand-assembled address anywhere in that section.
+    expect(section).not.toMatch(/"\/workspace\/team\//);
   });
 });
 

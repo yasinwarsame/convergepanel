@@ -92,6 +92,8 @@ export default async function TeamProjectDetailPage({ params }: { params: { work
       // independently of `canStartResearch` even though the formula matches
       // today, so the two can diverge without silently coupling.
       canCreateClaim={access.capabilities.includes("research.create") && access.capabilities.includes("research.organize")}
+      /* R5-I3-B — Project-filed Video creation needs BOTH capabilities, exactly like a Project-filed Claim: `research.create` to create at all, `research.organize` to file it into a Project. Presentation only; the POST re-authorizes. */
+      canCreateVideo={access.capabilities.includes("research.create") && access.capabilities.includes("research.organize")}
       canStartResearch={access.capabilities.includes("research.create") && access.capabilities.includes("research.organize")}
       canAssignResearch={access.capabilities.includes("research.organize")}
       assignmentUiEnabled={projectAssignmentUiEnabledFor(identity.uid)}
