@@ -425,6 +425,9 @@ describe("the rejection vocabulary is derived from the ROUTE, not from itself", 
     reachedResponseHelpers,
     helperBody,
     emissions,
+    scanUnsupported,
+    postBody,
+    postDelegates,
     postEmissions,
     postSubFiveHundredCodes,
   } = require("@/lib/workspaces/__tests__/teamVideoRouteContract") as typeof import("@/lib/workspaces/__tests__/teamVideoRouteContract");
@@ -493,6 +496,57 @@ describe("the rejection vocabulary is derived from the ROUTE, not from itself", 
     expect(getOnly).toContain("invalid_cursor");
     expect(new Set(emissions(postScope(routeSrc)).map((e) => e.code)).has("invalid_cursor")).toBe(false);
     expect([...REJECTION_CODE_SET]).not.toContain("invalid_cursor");
+  });
+
+  it("scans POST's denial DELEGATES, not just its body", () => {
+    // `mapGateDenial` is declared ABOVE the handler and funnels four denial
+    // branches. A forward slice from `export async function POST` misses it —
+    // which is how a new sub-500 code returned inline from that delegate stayed
+    // invisible while the completeness assertion reported success.
+    const delegates = postDelegates(routeSrc).map((d) => d.name).sort();
+    expect(delegates).toContain("mapGateDenial");
+    expect(delegates).toContain("getUid");
+    expect(postScope(routeSrc)).toContain("function mapGateDenial(");
+
+    // And an inline denial in a delegate is genuinely picked up.
+    const withDelegateCode = postScope(routeSrc).replace(
+      "function mapGateDenial(",
+      'function probeDelegate() {\n  return { status: 403, body: { ok: false, errorCode: "probe_delegate_code", message: "x" } };\n}\nfunction mapGateDenial('
+    );
+    expect(emissions(withDelegateCode).map((e) => e.code)).toContain("probe_delegate_code");
+  });
+
+  it("FAILS CLOSED on an error candidate whose code or status it cannot read", () => {
+    // Each of these is unmistakably an error emission, and each defeats the
+    // literal-only model. None may be silently dropped.
+    const ternaryStatus = 'return NextResponse.json({ ok: false, errorCode: "seat_revoked", message: "x" }, { status: free ? 403 : 409 });';
+    const singleQuoted = "return NextResponse.json({ ok: false, errorCode: 'seat_revoked', message: 'x' }, { status: 403 });";
+    const digitInCode = 'return NextResponse.json({ ok: false, errorCode: "seat_revoked_v2", message: "x" }, { status: 403 });';
+    const builtInVariable = 'return NextResponse.json(errBody, { status });';
+
+    for (const shape of [ternaryStatus, singleQuoted, digitInCode]) {
+      expect(emissions(shape)).toEqual([]);
+      expect(scanUnsupported(shape)).toHaveLength(1);
+    }
+    // `{ ok: false }` is absent here, but `errBody`/`status` carry no literal —
+    // this shape is only a candidate when an error marker is present, so it is
+    // correctly ignored rather than reported. The helper it delegates to is
+    // scanned instead.
+    expect(scanUnsupported(builtInVariable)).toEqual([]);
+  });
+
+  it("does NOT manufacture an unresolved finding from an ordinary return", () => {
+    // The guard against fail-closed degenerating into "fail on anything
+    // unfamiliar" — a proof that cries wolf gets weakened to silence it.
+    const successPayload = 'return NextResponse.json({ ok: true, verificationId: id, metadata, frameCount: frames.length });';
+    const dataReturn = "return { status: mapped.status, body: rows.map((r) => r.id) };";
+    const plainValue = "return targetProjectId;";
+    for (const shape of [successPayload, dataReturn, plainValue]) {
+      expect(scanUnsupported(shape)).toEqual([]);
+      expect(emissions(shape)).toEqual([]);
+    }
+    // And the real route produces no unresolved findings today.
+    expect(postEmissions(routeSrc).unresolved).toEqual([]);
   });
 
   it("binds each code to its own return's status, never a neighbour's", () => {
