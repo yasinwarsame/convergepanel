@@ -422,8 +422,6 @@ describe("the rejection vocabulary is derived from the ROUTE, not from itself", 
   const src = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 
   const ROUTE = "app/api/workspaces/[workspaceId]/video-verifications/route.ts";
-  /** The denial helpers POST reaches, directly or through `mapGateDenial`. */
-  const HELPER_FILES = ["lib/projects/teamProjectErrorResponse.ts", "lib/projects/projectErrorResponse.ts"];
 
   /**
    * Pair a code with its status WITHIN ONE `return` statement.
@@ -446,8 +444,23 @@ describe("the rejection vocabulary is derived from the ROUTE, not from itself", 
   }
 
   const routeSrc = src(ROUTE);
-  const postSlice = routeSrc.slice(routeSrc.indexOf("export async function POST"), routeSrc.indexOf("export async function GET"));
-  const helperSrc = HELPER_FILES.map(src).join("\n");
+
+  /**
+   * POST ONLY. The file ends with a GET section that has its OWN identity
+   * helper and its OWN response vocabulary, so a slice running to
+   * `export async function GET` swallows it — that is how `unauthorized` and
+   * `auth_error` were previously being read from GET's helper rather than
+   * POST's. The slice therefore stops at the GET section banner, and POST's own
+   * identity helper (defined ABOVE POST, so outside any forward slice) is
+   * appended explicitly.
+   */
+  const GET_SECTION = "// TEAM-VERIFICATION-PARITY-R5-I1 — GET";
+  const postBody = routeSrc.slice(routeSrc.indexOf("export async function POST"), routeSrc.indexOf(GET_SECTION));
+  const postIdentityHelper = (() => {
+    const at = routeSrc.indexOf("async function getUid(req");
+    return at < 0 ? "" : routeSrc.slice(at, routeSrc.indexOf("\n}", at));
+  })();
+  const postSlice = `${postIdentityHelper}\n${postBody}`;
 
   /** Only the helpers POST actually invokes — not every export of those modules. */
   const REACHED_HELPERS = [
@@ -458,10 +471,31 @@ describe("the rejection vocabulary is derived from the ROUTE, not from itself", 
     "unexpectedFieldResponse",
   ];
 
+  /**
+   * Resolve each helper to the module the ROUTE ACTUALLY IMPORTS IT FROM.
+   *
+   * `invalidRequestBodyResponse` and `unexpectedFieldResponse` exist in BOTH
+   * `lib/workspaces/teamWorkspaceErrorResponse.ts` (what POST imports) and
+   * `lib/projects/projectErrorResponse.ts`, with identical names and identical
+   * codes. A hand-written module list read the wrong one and was correct only
+   * by coincidence — editing the module POST actually uses would not have been
+   * noticed. The import line is the only reliable mapping.
+   */
+  function moduleOf(helper: string): string {
+    for (const m of routeSrc.matchAll(/import\s*\{([^}]+)\}\s*from\s*"@\/([^"]+)"/g)) {
+      const names = m[1].split(",").map((n) => n.trim());
+      if (names.includes(helper)) return `${m[2]}.ts`;
+    }
+    return "";
+  }
+
   function helperBody(name: string): string {
-    const at = helperSrc.indexOf(`export function ${name}`);
+    const mod = moduleOf(name);
+    if (!mod) return "";
+    const modSrc = src(mod);
+    const at = modSrc.indexOf(`export function ${name}`);
     if (at < 0) return "";
-    return helperSrc.slice(at, helperSrc.indexOf("\n}", at));
+    return modSrc.slice(at, modSrc.indexOf("\n}", at));
   }
 
   it("reaches the denial helpers this test claims it does", () => {
@@ -498,12 +532,27 @@ describe("the rejection vocabulary is derived from the ROUTE, not from itself", 
   });
 
   it("claims no code the route cannot emit below 500", () => {
-    const all = [...emissions(routeSrc), ...REACHED_HELPERS.flatMap((h) => emissions(helperBody(h)))];
+    // POST scope, not the whole file: reading the GET section too would accept
+    // GET-only codes (`invalid_cursor`, `invalid_scope`) as evidence that POST
+    // can emit them.
+    const all = [...emissions(postSlice), ...REACHED_HELPERS.flatMap((h) => emissions(helperBody(h)))];
     const subFive = new Set(all.filter((e) => e.status < 500).map((e) => e.code));
-    // `unauthorized` and `auth_error` are this hook's OWN client-side outcomes:
-    // the signed-out precondition and the terminal second 401.
-    const clientOwned = new Set(["unauthorized", "auth_error"]);
-    const phantom = [...REJECTION_CODE_SET].filter((c) => !subFive.has(c) && !clientOwned.has(c));
+    // NB: `unauthorized` and `auth_error` are NOT client-only. POST's own
+    // `getUid` emits both at 401 in Personal's `{error:{code}}` shape, which is
+    // why the identity helper is part of `postSlice` above. The hook also
+    // produces them itself — for the signed-out precondition and the terminal
+    // second 401 — so they are legitimate on both sides.
+    const phantom = [...REJECTION_CODE_SET].filter((c) => !subFive.has(c));
     expect(phantom).toEqual([]);
+  });
+
+  it("does not accept a GET-only code as something POST can emit", () => {
+    // Evidence-integrity control for the scoping above.
+    const getSection = routeSrc.slice(routeSrc.indexOf(GET_SECTION));
+    const getOnly = [...getSection.matchAll(/errorCode:\s*"([a-z_]+)"/g)].map((m) => m[1]);
+    expect(getOnly).toContain("invalid_cursor");
+    const postCodes = new Set(emissions(postSlice).map((e) => e.code));
+    expect(postCodes.has("invalid_cursor")).toBe(false);
+    expect([...REJECTION_CODE_SET]).not.toContain("invalid_cursor");
   });
 });
