@@ -207,6 +207,7 @@ describe("the concealment class matches what the SERVER conceals", () => {
     importMap,
     helperBody,
     emissions,
+    postEmissions,
   } = require("@/lib/workspaces/__tests__/teamVideoRouteContract") as typeof import("@/lib/workspaces/__tests__/teamVideoRouteContract");
 
   const routeSrc = routeSource();
@@ -230,6 +231,15 @@ describe("the concealment class matches what the SERVER conceals", () => {
       expect(helperBody(h, routeSrc)!.length).toBeGreaterThan(20);
       expect(routeSrc).toContain(`${h}(`);
     }
+  });
+
+  it("honours the shared fail-closed result before claiming completeness", () => {
+    // This spec derives the server-concealed set from the same route contract
+    // the vocabulary proof uses, and then claims completeness. It must
+    // therefore fail on an unreadable candidate itself, not lean on a sibling
+    // file's assertion: an unreadable concealed 404 added to POST previously
+    // left this suite green while its own claim was false.
+    expect(postEmissions(routeSrc).unresolved).toEqual([]);
   });
 
   it("every code the server conceals is in the class, and nothing else is", () => {

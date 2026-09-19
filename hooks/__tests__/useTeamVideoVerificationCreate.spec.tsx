@@ -414,7 +414,12 @@ describe("success containment", () => {
  * This block derives the expected vocabulary from the ROUTE instead: it reads
  * the POST handler and the denial helpers it actually calls, extracts every
  * sub-500 error code they can emit, and requires the hook to classify each one.
- * If someone adds a denial to the route, this fails until the hook learns it.
+ * Within the modelled contract — error returns in POST's own body, in a
+ * top-level callable POST calls directly, or in an imported `*Response` helper
+ * those reach — adding a denial fails this proof until the hook learns it.
+ * A delegate reached only via another delegate, or a factory-produced
+ * handler, is outside the model; a direct call this model cannot classify
+ * is reported rather than assumed absent.
  */
 describe("the rejection vocabulary is derived from the ROUTE, not from itself", () => {
   const {
