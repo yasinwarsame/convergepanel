@@ -47,6 +47,8 @@ export default async function TeamWorkspaceVideosPage({ params }: { params: { wo
       workspaceId={params.workspaceId}
       workspaceName={access.workspace.name}
       showAudit={access.capabilities.includes("audit.read")}
+      /* R5-I3-B — the Unfiled create address needs only `research.create`; filing into a Project is a different address with a stricter gate. Presentation only. */
+      canCreateVideo={access.capabilities.includes("research.create")}
     />
   );
 }
