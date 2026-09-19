@@ -148,6 +148,14 @@ describe("the prepared-upload contract carries no context", () => {
   const directMembers = (name: string): { required: string[]; optional: string[]; all: string[] } | null => {
     const decl = localTypes.get(name);
     if (!decl) return null;
+    // C4. An interface's `members` are only its OWN. `extends` brings in
+    // structure this proof does not model, so an inherited `originRef` became
+    // part of the prepared payload while every assertion here stayed green —
+    // and a token-neutral name evaded the spelling lists too. Converting the
+    // alias to an interface is a legitimate refactor, which makes this a
+    // realistic two-step path rather than sabotage. Resolving inheritance is
+    // not worth building; refusing to model it is, so heritage fails closed.
+    if (ts.isInterfaceDeclaration(decl) && (decl.heritageClauses?.length ?? 0) > 0) return null;
     const members = ts.isInterfaceDeclaration(decl)
       ? decl.members
       : ts.isTypeLiteralNode(unwrap(decl.type))
