@@ -417,112 +417,58 @@ describe("success containment", () => {
  * If someone adds a denial to the route, this fails until the hook learns it.
  */
 describe("the rejection vocabulary is derived from the ROUTE, not from itself", () => {
-  const { readFileSync } = require("fs") as typeof import("fs");
-  const { join } = require("path") as typeof import("path");
-  const src = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const {
+    routeSource,
+    postScope,
+    getScope,
+    importMap,
+    reachedResponseHelpers,
+    helperBody,
+    emissions,
+    postEmissions,
+    postSubFiveHundredCodes,
+  } = require("@/lib/workspaces/__tests__/teamVideoRouteContract") as typeof import("@/lib/workspaces/__tests__/teamVideoRouteContract");
 
-  const ROUTE = "app/api/workspaces/[workspaceId]/video-verifications/route.ts";
+  const routeSrc = routeSource();
 
-  /**
-   * Pair a code with its status WITHIN ONE `return` statement.
-   *
-   * A character-window regex pairs them across statement boundaries — it
-   * reported `team_workspaces_disabled` (503-only) as sub-500 by borrowing a
-   * neighbouring 4xx. Splitting on `return` keeps every pairing inside the
-   * emission it belongs to.
-   */
-  function emissions(code: string): { code: string; status: number }[] {
-    const out: { code: string; status: number }[] = [];
-    for (const chunk of code.split(/\breturn\b/).slice(1)) {
-      const status = /status:\s*(\d{3})/.exec(chunk);
-      if (!status) continue;
-      const c = /errorCode:\s*"([a-z_]+)"/.exec(chunk) ?? /\bcode:\s*"([a-z_]+)"/.exec(chunk);
-      if (!c) continue;
-      out.push({ code: c[1], status: Number(status[1]) });
+  it("reads a real route and a real, DERIVED helper set", () => {
+    // Positive controls. Without these an extraction that silently read
+    // nothing would satisfy every `toEqual([])` below.
+    expect(postScope(routeSrc).length).toBeGreaterThan(2000);
+    expect(postScope(routeSrc)).toContain("mapGateDenial(gate1)");
+    expect(postScope(routeSrc)).toContain("mapGateDenial(gate2)");
+
+    const reached = reachedResponseHelpers(routeSrc);
+    expect(reached.length).toBeGreaterThan(3);
+    // The set is DERIVED from the route's imports and call sites — these are
+    // spot-checks that the derivation works, not the definition of the set.
+    for (const known of ["teamProjectAuthorizationDeniedResponse", "invalidRequestBodyResponse"]) {
+      expect(reached).toContain(known);
     }
-    return out;
-  }
-
-  const routeSrc = src(ROUTE);
-
-  /**
-   * POST ONLY. The file ends with a GET section that has its OWN identity
-   * helper and its OWN response vocabulary, so a slice running to
-   * `export async function GET` swallows it — that is how `unauthorized` and
-   * `auth_error` were previously being read from GET's helper rather than
-   * POST's. The slice therefore stops at the GET section banner, and POST's own
-   * identity helper (defined ABOVE POST, so outside any forward slice) is
-   * appended explicitly.
-   */
-  const GET_SECTION = "// TEAM-VERIFICATION-PARITY-R5-I1 — GET";
-  const postBody = routeSrc.slice(routeSrc.indexOf("export async function POST"), routeSrc.indexOf(GET_SECTION));
-  const postIdentityHelper = (() => {
-    const at = routeSrc.indexOf("async function getUid(req");
-    return at < 0 ? "" : routeSrc.slice(at, routeSrc.indexOf("\n}", at));
-  })();
-  const postSlice = `${postIdentityHelper}\n${postBody}`;
-
-  /** Only the helpers POST actually invokes — not every export of those modules. */
-  const REACHED_HELPERS = [
-    "teamProjectAuthorizationDeniedResponse",
-    "runProjectAssociationTargetNotFoundResponse",
-    "projectArchivedTargetResponse",
-    "invalidRequestBodyResponse",
-    "unexpectedFieldResponse",
-  ];
-
-  /**
-   * Resolve each helper to the module the ROUTE ACTUALLY IMPORTS IT FROM.
-   *
-   * `invalidRequestBodyResponse` and `unexpectedFieldResponse` exist in BOTH
-   * `lib/workspaces/teamWorkspaceErrorResponse.ts` (what POST imports) and
-   * `lib/projects/projectErrorResponse.ts`, with identical names and identical
-   * codes. A hand-written module list read the wrong one and was correct only
-   * by coincidence — editing the module POST actually uses would not have been
-   * noticed. The import line is the only reliable mapping.
-   */
-  function moduleOf(helper: string): string {
-    for (const m of routeSrc.matchAll(/import\s*\{([^}]+)\}\s*from\s*"@\/([^"]+)"/g)) {
-      const names = m[1].split(",").map((n) => n.trim());
-      if (names.includes(helper)) return `${m[2]}.ts`;
+    for (const helper of reached) {
+      expect(helperBody(helper, routeSrc)).not.toBeNull();
     }
-    return "";
-  }
-
-  function helperBody(name: string): string {
-    const mod = moduleOf(name);
-    if (!mod) return "";
-    const modSrc = src(mod);
-    const at = modSrc.indexOf(`export function ${name}`);
-    if (at < 0) return "";
-    return modSrc.slice(at, modSrc.indexOf("\n}", at));
-  }
-
-  it("reaches the denial helpers this test claims it does", () => {
-    // Positive control: without this the extraction below could silently read
-    // nothing and every assertion would pass vacuously.
-    expect(postSlice.length).toBeGreaterThan(2000);
-    expect(postSlice).toContain("mapGateDenial");
-    expect(postSlice).toContain("teamProjectAuthorizationDeniedResponse");
-    for (const h of REACHED_HELPERS) {
-      // Positive control: each helper this test reads must exist AND be wired
-      // into this route — directly in POST, or through `mapGateDenial`, which
-      // is module-level rather than inside the POST slice.
-      expect(helperBody(h).length).toBeGreaterThan(20);
-      expect(routeSrc).toContain(`${h}(`);
-    }
-    // ...and POST must actually reach the gate mapper.
-    expect(postSlice).toContain("mapGateDenial(gate1)");
-    expect(postSlice).toContain("mapGateDenial(gate2)");
-    expect(routeSrc).toContain("case \"project_not_found\":");
-    expect(routeSrc).toContain("case \"project_archived\":");
   });
 
-  it("classifies EVERY sub-500 code the route can emit", () => {
-    const all = [...emissions(postSlice), ...REACHED_HELPERS.flatMap((h) => emissions(helperBody(h)))];
-    const subFive = [...new Set(all.filter((e) => e.status < 500).map((e) => e.code))].sort();
+  it("resolves every helper through the route's OWN import line", () => {
+    // Two modules export identically named `invalidRequestBodyResponse` /
+    // `unexpectedFieldResponse`. Only the import line says which one POST
+    // compiles against; a candidate-list search finds whichever comes first.
+    const imports = importMap(routeSrc);
+    expect(imports.get("invalidRequestBodyResponse")).toBe("lib/workspaces/teamWorkspaceErrorResponse.ts");
+    expect(imports.get("unexpectedFieldResponse")).toBe("lib/workspaces/teamWorkspaceErrorResponse.ts");
+    expect(imports.get("teamProjectAuthorizationDeniedResponse")).toBe("lib/projects/teamProjectErrorResponse.ts");
+  });
 
-    // Sanity: the extraction found a real, non-trivial vocabulary.
+  it("models every reached helper — an unreadable shape fails closed", () => {
+    // The converse completeness proof. A newly imported and called `*Response`
+    // helper is discovered automatically; if its shape cannot be modelled it
+    // lands here rather than being silently dropped.
+    expect(postEmissions(routeSrc).unresolved).toEqual([]);
+  });
+
+  it("classifies every sub-500 code POST can emit, within the modelled route conventions", () => {
+    const subFive = postSubFiveHundredCodes(routeSrc);
     expect(subFive.length).toBeGreaterThan(8);
     expect(subFive).toContain("team_workspace_not_found");
     expect(subFive).toContain("plan_required");
@@ -531,28 +477,32 @@ describe("the rejection vocabulary is derived from the ROUTE, not from itself", 
     expect(unclassified).toEqual([]);
   });
 
-  it("claims no code the route cannot emit below 500", () => {
-    // POST scope, not the whole file: reading the GET section too would accept
-    // GET-only codes (`invalid_cursor`, `invalid_scope`) as evidence that POST
-    // can emit them.
-    const all = [...emissions(postSlice), ...REACHED_HELPERS.flatMap((h) => emissions(helperBody(h)))];
-    const subFive = new Set(all.filter((e) => e.status < 500).map((e) => e.code));
+  it("claims no code POST cannot emit below 500", () => {
+    const subFive = new Set(postSubFiveHundredCodes(routeSrc));
     // NB: `unauthorized` and `auth_error` are NOT client-only. POST's own
     // `getUid` emits both at 401 in Personal's `{error:{code}}` shape, which is
-    // why the identity helper is part of `postSlice` above. The hook also
-    // produces them itself — for the signed-out precondition and the terminal
-    // second 401 — so they are legitimate on both sides.
+    // why the identity helper is part of the POST scope. The hook also produces
+    // them itself — for the signed-out precondition and the terminal second
+    // 401 — so they are legitimate on both sides.
     const phantom = [...REJECTION_CODE_SET].filter((c) => !subFive.has(c));
     expect(phantom).toEqual([]);
   });
 
   it("does not accept a GET-only code as something POST can emit", () => {
-    // Evidence-integrity control for the scoping above.
-    const getSection = routeSrc.slice(routeSrc.indexOf(GET_SECTION));
-    const getOnly = [...getSection.matchAll(/errorCode:\s*"([a-z_]+)"/g)].map((m) => m[1]);
+    const getOnly = [...getScope(routeSrc).matchAll(/errorCode:\s*"([a-z_]+)"/g)].map((m) => m[1]);
     expect(getOnly).toContain("invalid_cursor");
-    const postCodes = new Set(emissions(postSlice).map((e) => e.code));
-    expect(postCodes.has("invalid_cursor")).toBe(false);
+    expect(new Set(emissions(postScope(routeSrc)).map((e) => e.code)).has("invalid_cursor")).toBe(false);
     expect([...REJECTION_CODE_SET]).not.toContain("invalid_cursor");
+  });
+
+  it("binds each code to its own return's status, never a neighbour's", () => {
+    const probe = `
+      return NextResponse.json({ ok: false, errorCode: "probe_conceal_x", message: "x" }, { status: 503 });
+      return NextResponse.json({ ok: false, error: { code: "probe_body_y", message: "y" } }, { status: 400 });
+    `;
+    expect(emissions(probe)).toEqual([
+      { code: "probe_conceal_x", status: 503 },
+      { code: "probe_body_y", status: 400 },
+    ]);
   });
 });

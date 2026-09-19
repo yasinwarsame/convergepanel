@@ -6,8 +6,20 @@
  * denials — no membership, membership removed, rollout not admitted, Workspace
  * malformed, Project absent, Project archived, capability missing — are all
  * concealed behind one answer. That concealment is only real if the CLIENT also
- * renders them indistinguishably; a mapper that says "This Project is archived"
- * hands back exactly the existence oracle the server just closed.
+ * renders them indistinguishably.
+ *
+ * ONE NUANCE, STATED ACCURATELY. For most of the class the server genuinely
+ * cannot afford disclosure. `project_archived` is different: Gate 1 authorizes
+ * membership and capability BEFORE resolving the Project
+ * (`lib/firestore/teamVideoVerifications.ts`), and `projectErrorResponse.ts`
+ * documents that archived state is "safe to reveal, distinct from the concealed
+ * 404". So concealing it is this CLIENT's deliberate choice to answer the whole
+ * class uniformly — strictly more concealing than the server requires — not
+ * something the server forces. Do not justify it by claiming the archived state
+ * would leak existence; by that point the caller is already authorized. The
+ * production mapper still carries the older, inaccurate justification in a
+ * comment; correcting it is a production edit and is deliberately left out of
+ * this evidence-only change.
  *
  * WHY THIS FILE EXISTS: an independent review proved the property was
  * unguarded. Giving `team_workspace_not_found`, `project_not_found` and
@@ -170,54 +182,67 @@ describe("the concealment class is complete", () => {
 });
 
 /**
- * Drift detection. The frozen list above cannot shrink under a client-side
- * mutation — that is the point — but it could go stale if the SERVER starts
- * concealing a denial the client does not yet know to conceal. So the class is
- * cross-checked against the route's own concealing helpers.
+ * SERVER-SIDE MEMBERSHIP — the third, independent anchor.
+ *
+ * The frozen table catches a branch gaining unique copy; the mapper-derived set
+ * catches the table being trimmed. Neither catches BOTH done together: giving
+ * `not_found` its own leaking copy AND deleting it from the table left the
+ * suite green, because the derived set shrank in step with the table.
+ *
+ * `not_found` was the one class member with no independent cross-check — it is
+ * emitted inline in the route's dedup branch rather than by a denial helper, so
+ * the helper drift check never saw it. The anchor below closes that: it derives
+ * membership from what the SERVER does, independently of both the mapper and
+ * the table.
+ *
+ * The rule is the route's own posture: a 404 from this endpoint is by
+ * definition "I will not tell you whether that exists", so every code POST
+ * answers with 404 belongs to the concealment class — as does every code its
+ * concealing helpers emit. Today that union is exactly the five.
  */
-describe("the concealment class still matches what the server conceals", () => {
-  const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
-  const ROUTE = "app/api/workspaces/[workspaceId]/video-verifications/route.ts";
+describe("the concealment class matches what the SERVER conceals", () => {
+  const {
+    routeSource,
+    postScope,
+    importMap,
+    helperBody,
+    emissions,
+  } = require("@/lib/workspaces/__tests__/teamVideoRouteContract") as typeof import("@/lib/workspaces/__tests__/teamVideoRouteContract");
 
-  /**
-   * The helpers the route uses for a denial it refuses to explain. Read from
-   * the modules the route ACTUALLY imports — `invalidRequestBodyResponse` and
-   * friends live in a different module with identically named exports, so the
-   * import line is the only reliable source of that mapping.
-   */
+  const routeSrc = routeSource();
+
+  /** Helpers whose whole purpose is to answer without explaining. */
   const CONCEALING_HELPERS = [
     "teamProjectAuthorizationDeniedResponse",
     "runProjectAssociationTargetNotFoundResponse",
     "projectArchivedTargetResponse",
   ];
-  const HELPER_SOURCES = ["lib/projects/teamProjectErrorResponse.ts", "lib/projects/projectErrorResponse.ts"];
 
-  const routeSrc = read(ROUTE);
-  const helperSrc = HELPER_SOURCES.map(read).join("\n");
-
-  function helperBody(name: string): string {
-    const at = helperSrc.indexOf(`export function ${name}`);
-    return at < 0 ? "" : helperSrc.slice(at, helperSrc.indexOf("\n}", at));
-  }
-
-  it("reads helpers the route genuinely reaches", () => {
-    // Positive control: a silently-empty read would make the assertion below
-    // pass with an empty set.
+  it("reads real, route-imported concealing helpers", () => {
+    // Positive control, and the import-resolution fix: a same-named decoy in a
+    // module the route does NOT import must not be what gets read.
+    const imports = importMap(routeSrc);
+    expect(imports.get("runProjectAssociationTargetNotFoundResponse")).toBe("lib/projects/projectErrorResponse.ts");
+    expect(imports.get("projectArchivedTargetResponse")).toBe("lib/projects/projectErrorResponse.ts");
+    expect(imports.get("teamProjectAuthorizationDeniedResponse")).toBe("lib/projects/teamProjectErrorResponse.ts");
     for (const h of CONCEALING_HELPERS) {
-      expect(helperBody(h).length).toBeGreaterThan(20);
+      expect(helperBody(h, routeSrc)).not.toBeNull();
+      expect(helperBody(h, routeSrc)!.length).toBeGreaterThan(20);
       expect(routeSrc).toContain(`${h}(`);
     }
   });
 
-  it("every code those helpers emit is in the client's concealment class", () => {
-    const emitted = new Set<string>();
-    for (const h of CONCEALING_HELPERS) {
-      for (const m of helperBody(h).matchAll(/errorCode:\s*"([a-z_]+)"/g)) {
-        emitted.add(m[1]);
-      }
-    }
-    expect(emitted.size).toBeGreaterThan(2);
-    const unconcealed = [...emitted].filter((c) => !CONCEALED.includes(c as TeamVideoCreateRejectionCode));
-    expect(unconcealed).toEqual([]);
+  it("every code the server conceals is in the class, and nothing else is", () => {
+    const fromHelpers = CONCEALING_HELPERS.flatMap((h) => emissions(helperBody(h, routeSrc)!).map((e) => e.code));
+    // A 404 answered inline by POST is a concealed answer too — this is what
+    // independently anchors `not_found`.
+    const inline404 = emissions(postScope(routeSrc))
+      .filter((e) => e.status === 404)
+      .map((e) => e.code);
+    expect(inline404).toContain("not_found");
+
+    const concealedByServer = [...new Set([...fromHelpers, ...inline404])].sort();
+    expect(concealedByServer.length).toBeGreaterThan(3);
+    expect(concealedByServer).toEqual([...CONCEALED].sort());
   });
 });
