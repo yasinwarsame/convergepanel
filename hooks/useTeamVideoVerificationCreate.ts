@@ -52,9 +52,24 @@
  * TWO ERROR VOCABULARIES, on purpose. This route answers body/quota failures in
  * Personal's shape (`{error:{code}}` — `plan_required`, `video_limit_reached`,
  * `no_frames`, …) and authorization failures in the Team concealment shape
- * (`{errorCode}` — `insufficient_capability`, `not_found`,
- * `team_workspaces_disabled`). Both are read; anything else is not provably a
+ * (`{errorCode}`). Both are read; anything else is not provably a
  * non-creation.
+ *
+ * The Team half is NOT a short list. Gate 1 and Gate 2 route every
+ * non-capability denial — non-member, removed membership, malformed Workspace,
+ * rollout not admitted — through `teamProjectAuthorizationDeniedResponse`,
+ * which emits `team_workspace_not_found` (404). That is the DOMINANT Team
+ * denial, and omitting it would degrade the commonest authorization failure
+ * into `outcome_unknown`, telling a user who never got past Gate 1 to go and
+ * check whether their video was saved. `mapGateDenial` adds `project_not_found`
+ * (404) and `project_archived` (409); the body validators add
+ * `invalid_request_body` and `unexpected_field` (400). `not_found` comes from
+ * the dedup branch alone.
+ *
+ * Deliberately ABSENT: `team_workspaces_disabled`. The route emits it only at
+ * 503, and the `>= 500` guard below fires first, so listing it would be a claim
+ * this code cannot honour. A rollout denial arrives as `team_workspace_not_found`
+ * instead — Phase 10C.1A concealed the two deliberately.
  *
  * A `_deduplicated: true` success is a SUCCESS: the server matched an existing
  * Team artifact, freshly reauthorized it for `research.read`, and spent
@@ -87,7 +102,11 @@ export type TeamVideoCreateRejectionCode =
   // Team concealment vocabulary (`errorCode`)
   | "not_found"
   | "insufficient_capability"
-  | "team_workspaces_disabled"
+  | "team_workspace_not_found"
+  | "project_not_found"
+  | "project_archived"
+  | "invalid_request_body"
+  | "unexpected_field"
   // Personal-shaped vocabulary (`error.code`)
   | "plan_required"
   | "video_limit_reached"
@@ -106,10 +125,14 @@ export type TeamVideoCreateRejectionCode =
   | "unauthorized"
   | "auth_error";
 
-const REJECTION_CODES: ReadonlySet<string> = new Set<TeamVideoCreateRejectionCode>([
+export const REJECTION_CODES: ReadonlySet<string> = new Set<TeamVideoCreateRejectionCode>([
   "not_found",
   "insufficient_capability",
-  "team_workspaces_disabled",
+  "team_workspace_not_found",
+  "project_not_found",
+  "project_archived",
+  "invalid_request_body",
+  "unexpected_field",
   "plan_required",
   "video_limit_reached",
   "run_limit_reached",
@@ -185,11 +208,14 @@ export function useTeamVideoVerificationCreate(args: { address: TeamVideoCreateA
       inFlightRef.current = true;
       setIsSubmitting(true);
 
-      const url = `/api/workspaces/${encodeURIComponent(address.workspaceId)}/video-verifications`;
       const expectedProjectId = address.kind === "project" ? address.projectId : null;
-      const serialized = JSON.stringify(buildTeamVideoRequestBody(prepared, expectedProjectId));
 
       try {
+        // Inside the `try` so the `finally` below always releases the latch —
+        // an acquire outside it would wedge the hook permanently if body
+        // construction ever threw.
+        const url = `/api/workspaces/${encodeURIComponent(address.workspaceId)}/video-verifications`;
+        const serialized = JSON.stringify(buildTeamVideoRequestBody(prepared, expectedProjectId));
         const post = (forceTokenRefresh = false) =>
           authedFetch(url, {
             user: user as User,

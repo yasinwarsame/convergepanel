@@ -42,12 +42,19 @@ describe("creation lives ONLY in the R5-I3-B create surfaces", () => {
     }
   });
 
-  it("the read-only detail and row components link to no create address", () => {
+  it("the read path links to no create address", () => {
+    // Every UI_FILES entry except the Videos LIST shell, which legitimately
+    // owns the one Unfiled entry point. Re-pointing the I2 guard must not
+    // quietly drop the read hooks or the detail-href builder from it.
     for (const p of [
       "components/workspace/videos/TeamVideoListRow.tsx",
       "components/workspace/videos/TeamVideoDetailShell.tsx",
       "app/workspace/team/[workspaceId]/videos/[verificationId]/page.tsx",
       "app/workspace/team/[workspaceId]/projects/[projectId]/videos/[verificationId]/page.tsx",
+      "hooks/useTeamVideoVerificationList.ts",
+      "hooks/useTeamVideoVerification.ts",
+      "lib/workspaces/teamVideoDetailHref.ts",
+      "app/workspace/team/[workspaceId]/videos/page.tsx",
     ]) {
       const code = stripComments(read(p));
       expect(code).not.toContain("videos/new");

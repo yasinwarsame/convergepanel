@@ -28,6 +28,7 @@ jest.mock("@/lib/client/authedFetch", () => ({ authedFetch: (...a: unknown[]) =>
 import {
   useTeamVideoVerificationCreate,
   buildTeamVideoRequestBody,
+  REJECTION_CODES as REJECTION_CODE_SET,
   type TeamVideoCreateAddress,
   type UseTeamVideoVerificationCreateResult,
 } from "@/hooks/useTeamVideoVerificationCreate";
@@ -309,7 +310,7 @@ describe("both server error vocabularies", () => {
     [403, "insufficient_capability"],
     [404, "not_found"],
     [503, "team_workspaces_disabled"],
-  ])("classifies Team-shaped %s %s as a definite rejection", async (status, code) => {
+  ])("classifies Team-shaped %s %s — rejection below 500, unknown at or above it", async (status, code) => {
     // 503 here carries a Team errorCode; the >=500 guard runs first, so only
     // the two sub-500 codes can reach classification.
     mockedAuthedFetch.mockResolvedValue(response(status as number, { ok: false, errorCode: code }));
@@ -398,5 +399,111 @@ describe("success containment", () => {
       outcome = await hook.submit(prepared());
     });
     expect(outcome).toEqual({ status: "outcome_unknown" });
+  });
+});
+
+/**
+ * THE ROOT-CAUSE TEST.
+ *
+ * Every other assertion in this file enumerates codes that are already in
+ * `REJECTION_CODES` — which is why the first version of this hook silently
+ * omitted `team_workspace_not_found`, the DOMINANT Team authorization denial,
+ * and shipped a set validated only against itself. A set that agrees with a
+ * list copied from the same set proves nothing.
+ *
+ * This block derives the expected vocabulary from the ROUTE instead: it reads
+ * the POST handler and the denial helpers it actually calls, extracts every
+ * sub-500 error code they can emit, and requires the hook to classify each one.
+ * If someone adds a denial to the route, this fails until the hook learns it.
+ */
+describe("the rejection vocabulary is derived from the ROUTE, not from itself", () => {
+  const { readFileSync } = require("fs") as typeof import("fs");
+  const { join } = require("path") as typeof import("path");
+  const src = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+
+  const ROUTE = "app/api/workspaces/[workspaceId]/video-verifications/route.ts";
+  /** The denial helpers POST reaches, directly or through `mapGateDenial`. */
+  const HELPER_FILES = ["lib/projects/teamProjectErrorResponse.ts", "lib/projects/projectErrorResponse.ts"];
+
+  /**
+   * Pair a code with its status WITHIN ONE `return` statement.
+   *
+   * A character-window regex pairs them across statement boundaries — it
+   * reported `team_workspaces_disabled` (503-only) as sub-500 by borrowing a
+   * neighbouring 4xx. Splitting on `return` keeps every pairing inside the
+   * emission it belongs to.
+   */
+  function emissions(code: string): { code: string; status: number }[] {
+    const out: { code: string; status: number }[] = [];
+    for (const chunk of code.split(/\breturn\b/).slice(1)) {
+      const status = /status:\s*(\d{3})/.exec(chunk);
+      if (!status) continue;
+      const c = /errorCode:\s*"([a-z_]+)"/.exec(chunk) ?? /\bcode:\s*"([a-z_]+)"/.exec(chunk);
+      if (!c) continue;
+      out.push({ code: c[1], status: Number(status[1]) });
+    }
+    return out;
+  }
+
+  const routeSrc = src(ROUTE);
+  const postSlice = routeSrc.slice(routeSrc.indexOf("export async function POST"), routeSrc.indexOf("export async function GET"));
+  const helperSrc = HELPER_FILES.map(src).join("\n");
+
+  /** Only the helpers POST actually invokes — not every export of those modules. */
+  const REACHED_HELPERS = [
+    "teamProjectAuthorizationDeniedResponse",
+    "runProjectAssociationTargetNotFoundResponse",
+    "projectArchivedTargetResponse",
+    "invalidRequestBodyResponse",
+    "unexpectedFieldResponse",
+  ];
+
+  function helperBody(name: string): string {
+    const at = helperSrc.indexOf(`export function ${name}`);
+    if (at < 0) return "";
+    return helperSrc.slice(at, helperSrc.indexOf("\n}", at));
+  }
+
+  it("reaches the denial helpers this test claims it does", () => {
+    // Positive control: without this the extraction below could silently read
+    // nothing and every assertion would pass vacuously.
+    expect(postSlice.length).toBeGreaterThan(2000);
+    expect(postSlice).toContain("mapGateDenial");
+    expect(postSlice).toContain("teamProjectAuthorizationDeniedResponse");
+    for (const h of REACHED_HELPERS) {
+      // Positive control: each helper this test reads must exist AND be wired
+      // into this route — directly in POST, or through `mapGateDenial`, which
+      // is module-level rather than inside the POST slice.
+      expect(helperBody(h).length).toBeGreaterThan(20);
+      expect(routeSrc).toContain(`${h}(`);
+    }
+    // ...and POST must actually reach the gate mapper.
+    expect(postSlice).toContain("mapGateDenial(gate1)");
+    expect(postSlice).toContain("mapGateDenial(gate2)");
+    expect(routeSrc).toContain("case \"project_not_found\":");
+    expect(routeSrc).toContain("case \"project_archived\":");
+  });
+
+  it("classifies EVERY sub-500 code the route can emit", () => {
+    const all = [...emissions(postSlice), ...REACHED_HELPERS.flatMap((h) => emissions(helperBody(h)))];
+    const subFive = [...new Set(all.filter((e) => e.status < 500).map((e) => e.code))].sort();
+
+    // Sanity: the extraction found a real, non-trivial vocabulary.
+    expect(subFive.length).toBeGreaterThan(8);
+    expect(subFive).toContain("team_workspace_not_found");
+    expect(subFive).toContain("plan_required");
+
+    const unclassified = subFive.filter((c) => !REJECTION_CODE_SET.has(c));
+    expect(unclassified).toEqual([]);
+  });
+
+  it("claims no code the route cannot emit below 500", () => {
+    const all = [...emissions(routeSrc), ...REACHED_HELPERS.flatMap((h) => emissions(helperBody(h)))];
+    const subFive = new Set(all.filter((e) => e.status < 500).map((e) => e.code));
+    // `unauthorized` and `auth_error` are this hook's OWN client-side outcomes:
+    // the signed-out precondition and the terminal second 401.
+    const clientOwned = new Set(["unauthorized", "auth_error"]);
+    const phantom = [...REJECTION_CODE_SET].filter((c) => !subFive.has(c) && !clientOwned.has(c));
+    expect(phantom).toEqual([]);
   });
 });

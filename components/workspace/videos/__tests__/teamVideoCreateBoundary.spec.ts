@@ -46,6 +46,13 @@ describe("the shared surface stayed transport-neutral after a second consumer ar
 describe("the prepared-upload contract gained no Team concept", () => {
   const code = stripComments(read(CONTRACT));
 
+  it("is a real, non-empty contract — without this every negative below is vacuous", () => {
+    expect(code.trim().length).toBeGreaterThan(0);
+    for (const required of ["PreparedVideoUpload", "VideoUploadSubmitOutcome", "SubmitPreparedVideo"]) {
+      expect(code).toContain(required);
+    }
+  });
+
   it.each(["workspaceId", "projectId", "token", "endpoint", "capabilit", "authedFetch", "admission"])("declares no %s", (forbidden) => {
     expect(code).not.toContain(forbidden);
   });

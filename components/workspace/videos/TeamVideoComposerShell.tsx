@@ -94,15 +94,21 @@ export function teamVideoCreateRejectionCopy(code: TeamVideoCreateRejectionCode)
     case "payload_too_large":
       return "Frame data is too large. Try a shorter or lower-resolution video.";
     case "invalid_request":
+    case "invalid_request_body":
+    case "unexpected_field":
       return "Invalid request. Ensure the app is updated and try again.";
     case "unauthorized":
     case "auth_error":
       return "Please sign in again to verify a video.";
-    // Membership, capability, Workspace and rollout drift — deliberately one
-    // indistinguishable sentence.
+    // Membership, capability, Workspace, Project and rollout drift — ONE
+    // indistinguishable sentence. `project_archived` in particular must never
+    // get its own message: "this Project is archived" would confirm the Project
+    // exists to someone the server just refused to tell.
     case "not_found":
     case "insufficient_capability":
-    case "team_workspaces_disabled":
+    case "team_workspace_not_found":
+    case "project_not_found":
+    case "project_archived":
       return "You can no longer create videos in this Workspace.";
   }
 }

@@ -301,6 +301,23 @@ describe("provider-spending guard end to end", () => {
     expect(replace).toHaveBeenCalledTimes(1);
   });
 
+  it("does NOT navigate a viewer who left the form before the request landed", async () => {
+    // The guard exists (`mountedRef`) and was previously untested: a late
+    // success must not yank someone who has already navigated away.
+    let resolveFetch!: (v: unknown) => void;
+    mockedAuthedFetch.mockReturnValue(new Promise((r) => { resolveFetch = r; }));
+    const r = await mount();
+    const input = r.root.findAll((x) => x.type === "input")[0];
+    await act(async () => { (input.props.onChange as (e: unknown) => void)({ target: { files: [file()] } }); });
+    await flush();
+    const btn = r.root.findAll((x) => x.type === "button" && nodeText(x).includes("Verify Video"))[0];
+    await act(async () => { (btn.props.onClick as () => void)(); });
+    await act(async () => { r.unmount(); });
+    await act(async () => { resolveFetch(response(200, okBody())); });
+    await flush();
+    expect(replace).not.toHaveBeenCalled();
+  });
+
   it("issues nothing at all when auth has resolved signed-out", async () => {
     auth = { user: null, authReady: true };
     const r = await mount();
