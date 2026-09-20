@@ -63,7 +63,9 @@ const mockAdminDb: any = {
   getAll: async (...refs: Array<{ __path: string }>) => {
     if (getAllShouldThrow) throw new Error("batch read boom");
     refs.forEach((r) => readPaths.push(r.__path));
-    return refs.map((ref) => ({ exists: pathStore.has(ref.__path), data: () => pathStore.get(ref.__path) }));
+    // A real DocumentSnapshot always carries `id`; the read guard associates
+    // results by identity rather than array position, so the fake must too.
+    return refs.map((ref) => ({ id: ref.__path.split("/").pop(), exists: pathStore.has(ref.__path), data: () => pathStore.get(ref.__path) }));
   },
 };
 
@@ -159,6 +161,15 @@ function setRun(runId: string, binding: Record<string, unknown> = {}) {
     },
     ...binding,
   });
+}
+
+/**
+ * A canonical Claim verification artifact. Personal and Team Claims share the
+ * `verifications` collection; ONLY the Team writer persists `workspaceId`, so
+ * field presence is the scope discriminator (`verificationArtifactScope.ts`).
+ */
+function setVerification(verificationId: string, binding: Record<string, unknown> = {}) {
+  pathStore.set(`verifications/${verificationId}`, { claimText: "c", ...binding });
 }
 
 /** Canonical Workspace-governed review state — what a legacy caller must never reach. */
@@ -344,10 +355,46 @@ describe("GET /api/teams/runs?version=1 — Workspace-bound exclusion", () => {
     expect(body.items).toEqual([]);
   });
 
-  it("leaves a classic row that names no canonical run untouched", async () => {
-    // A legacy VERIFICATION row carries `runId: null` — it addresses no run, so
-    // it cannot be a Workspace-bound run and is outside this guard's scope.
-    teamRunDocs.set("p-V", legacyRow({ type: "verification", runId: null, verificationId: "ver-1" }));
+  // ---- Residual Finding B: rows backed by a VERIFICATION artifact ----
+  // A Workspace Claim verification writes a CLASSIC `teamRuns` row with
+  // `runId: null` (the Team Workspace route calls the legacy pipeline with no
+  // run id). Treating `runId: null` as "cannot be Workspace-bound" left that
+  // row — claim text, verdict, consensus, audit bundle — fully readable.
+  it("hides a row whose verification artifact is Workspace-bound", async () => {
+    setVerification("ver-ws", { workspaceId: "ws-team-1" });
+    teamRunDocs.set("p-V", legacyRow({ type: "verification", runId: null, verificationId: "ver-ws", query: "CONFIDENTIAL CLAIM" }));
+    const body = await (await GET(buildRequest())).json();
+    expect(body.items).toEqual([]);
+    expect(JSON.stringify(body)).not.toContain("CONFIDENTIAL CLAIM");
+  });
+
+  it("CONTROL — keeps a row whose verification artifact is genuinely legacy/Personal", async () => {
+    // `/api/verify-claim` writes the artifact with NO `workspaceId`, and calls
+    // the same legacy pipeline — this is the legitimate `runId: null` shape,
+    // and hiding it would be a regression rather than a security gain.
+    setVerification("ver-legacy");
+    teamRunDocs.set("p-V", legacyRow({ type: "verification", runId: null, verificationId: "ver-legacy" }));
+    const body = await (await GET(buildRequest())).json();
+    expect(body.items).toHaveLength(1);
+  });
+
+  it("fails closed when the verification artifact is absent", async () => {
+    teamRunDocs.set("p-V", legacyRow({ type: "verification", runId: null, verificationId: "ver-missing" }));
+    expect((await (await GET(buildRequest())).json()).items).toEqual([]);
+  });
+
+  it("fails closed when the verification artifact read fails", async () => {
+    setVerification("ver-legacy");
+    teamRunDocs.set("p-V", legacyRow({ type: "verification", runId: null, verificationId: "ver-legacy" }));
+    getAllShouldThrow = true;
+    expect((await (await GET(buildRequest())).json()).items).toEqual([]);
+  });
+
+  it("CONTROL — keeps a row that names neither a run nor a verification", async () => {
+    // `synthesize-panel` passes `runId: runId || undefined`, so a legacy
+    // research row can reference no canonical artifact at all. It has nothing
+    // in another authority domain to expose.
+    teamRunDocs.set("p-N", legacyRow({ runId: null }));
     const body = await (await GET(buildRequest())).json();
     expect(body.items).toHaveLength(1);
   });

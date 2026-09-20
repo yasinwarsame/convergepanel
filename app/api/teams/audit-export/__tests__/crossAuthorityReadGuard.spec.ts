@@ -37,7 +37,9 @@ const mockAdminDb: any = {
   },
   getAll: async (...refs: Array<{ __path: string }>) => {
     if (getAllShouldThrow) throw new Error("batch read boom");
-    return refs.map((ref) => ({ exists: runDocs.has(ref.__path), data: () => runDocs.get(ref.__path) }));
+    // A real DocumentSnapshot always carries `id`; the read guard associates
+    // results by identity rather than array position, so the fake must too.
+    return refs.map((ref) => ({ id: ref.__path.split("/").pop(), exists: runDocs.has(ref.__path), data: () => runDocs.get(ref.__path) }));
   },
 };
 
@@ -85,6 +87,11 @@ function classicRow(runId: string | null, overrides: Record<string, unknown> = {
 
 function setRun(runId: string, binding: Record<string, unknown> = {}) {
   runDocs.set(`runs/${runId}`, { userId: "owner-uid", ...binding });
+}
+
+/** A canonical Claim verification artifact — only the Team writer persists `workspaceId`. */
+function setVerification(verificationId: string, binding: Record<string, unknown> = {}) {
+  runDocs.set(`verifications/${verificationId}`, { claimText: "c", ...binding });
 }
 
 beforeEach(() => {
@@ -154,8 +161,36 @@ describe("GET /api/teams/audit-export — Workspace-bound exclusion", () => {
     expect(rows[0].humanDecision).not.toBeNull();
   });
 
-  it("CONTROL — a classic row naming no run is still exported", async () => {
-    teamRunDocs.set("p-v", classicRow(null, { type: "verification", verificationId: "ver-1" }));
+  it("omits a Workspace-bound CLAIM VERIFICATION row from JSON", async () => {
+    setVerification("ver-ws", { workspaceId: "ws-team-1" });
+    teamRunDocs.set("p-v", classicRow(null, { type: "verification", verificationId: "ver-ws", query: "CONFIDENTIAL CLAIM" }));
+    const rows = await (await GET(new NextRequest("http://localhost/api/teams/audit-export"))).json();
+    expect(rows).toEqual([]);
+  });
+
+  it("omits a Workspace-bound CLAIM VERIFICATION row from CSV", async () => {
+    setVerification("ver-ws", { workspaceId: "ws-team-1" });
+    teamRunDocs.set("p-v", classicRow(null, { type: "verification", verificationId: "ver-ws", query: "CONFIDENTIAL CLAIM" }));
+    const text = await (await GET(new NextRequest("http://localhost/api/teams/audit-export?format=csv"))).text();
+    expect(text).not.toContain("CONFIDENTIAL CLAIM");
+    expect(text).not.toContain("approved");
+  });
+
+  it("fails closed when the verification artifact is absent", async () => {
+    teamRunDocs.set("p-v", classicRow(null, { type: "verification", verificationId: "ver-missing" }));
+    const rows = await (await GET(new NextRequest("http://localhost/api/teams/audit-export"))).json();
+    expect(rows).toEqual([]);
+  });
+
+  it("CONTROL — a genuinely legacy/Personal verification row is still exported", async () => {
+    setVerification("ver-legacy");
+    teamRunDocs.set("p-v", classicRow(null, { type: "verification", verificationId: "ver-legacy" }));
+    const rows = await (await GET(new NextRequest("http://localhost/api/teams/audit-export"))).json();
+    expect(rows).toHaveLength(1);
+  });
+
+  it("CONTROL — a classic row naming neither a run nor a verification is still exported", async () => {
+    teamRunDocs.set("p-n", classicRow(null));
     const rows = await (await GET(new NextRequest("http://localhost/api/teams/audit-export"))).json();
     expect(rows).toHaveLength(1);
   });

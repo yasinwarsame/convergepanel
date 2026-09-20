@@ -53,7 +53,9 @@ const mockAdminDb = {
   getAll: async (...refs: Array<{ __path: string }>) => {
     getAllCallCount += 1;
     if (getAllShouldThrow && getAllCallCount > getAllSucceedForFirstCalls) throw new Error("batch read boom");
-    return refs.map((ref) => ({ exists: pathStore.has(ref.__path), data: () => pathStore.get(ref.__path) }));
+    // A real DocumentSnapshot always carries `id`; the read guard associates
+    // results by identity rather than array position, so the fake must too.
+    return refs.map((ref) => ({ id: ref.__path.split("/").pop(), exists: pathStore.has(ref.__path), data: () => pathStore.get(ref.__path) }));
   },
 };
 

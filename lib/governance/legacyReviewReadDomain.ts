@@ -2,6 +2,7 @@ import "server-only";
 import { adminDb } from "@/lib/firebase/admin";
 import { logger } from "@/lib/logger";
 import { runIsLegacyOnlyForReviewMutation } from "./legacyReviewRunAuthority";
+import { isWorkspaceBoundVerificationArtifact } from "@/lib/verification/verificationArtifactScope";
 
 /**
  * Phase 1 Review Stack Cross-Authority READ Guard — the list/export half of
@@ -14,129 +15,196 @@ import { runIsLegacyOnlyForReviewMutation } from "./legacyReviewRunAuthority";
  * Workspace-governed review state — reviewer identities, per-reviewer vote
  * decisions, assignment metadata, panel status/quorum/counts, the canonical
  * human-review status and answer-derived `receiptConclusion` — simply because
- * a legacy `teamRuns` projection existed for the same run. The projection is
- * created by `lib/runPanelExecution.ts` whenever the run OWNER belongs to a
- * legacy team with `adaptiveReviewSettings.enabled`, with no `workspaceId`
- * condition whatsoever, so the overlap is ordinary rather than exotic.
+ * a legacy `teamRuns` row existed for the same artifact.
  *
- * THE RULE, identical in shape to PR #186's. A Workspace-bound run lies
+ * THE RULE, identical in shape to PR #186's. A Workspace-bound artifact lies
  * OUTSIDE the authority domain of the legacy Team read surface. Legacy Team
- * membership, legacy Team admin, a valid `teamRuns` projection and the legacy
+ * membership, legacy Team admin, a valid `teamRuns` row and the legacy
  * adaptive-review settings are each insufficient, and both feature flags are
  * irrelevant — this is an authority boundary, not a rollout gate. The fix is
  * domain EXCLUSION, never teaching legacy routes to accept Workspace
  * capabilities: that would recreate the dual authority being closed.
  *
- * WHY A SEPARATE MODULE FROM THE DETAIL ROUTES. A single-run legacy route
- * already reads `runs/{runId}` itself, so it needs only the pure predicate
- * (`runIsLegacyOnlyForReviewMutation`) applied to the snapshot it is holding —
- * exactly as PR #186's guards do, at no extra read cost. The LIST and EXPORT
- * surfaces are different: they start from `teamRuns` projection rows and hold
- * no canonical run document at all, so they need a batched canonical lookup.
- * That lookup is what this module provides, and nothing else.
+ * TWO LINKAGE SHAPES, ONE ANSWER. This module answers exactly one question —
+ * "may this `teamRuns` row be read through legacy Team authority?" — and a row
+ * reaches that answer by one of two routes, because `teamRuns` has two
+ * different producers:
  *
- * THE PREDICATE IS SHARED DELIBERATELY. `runIsLegacyOnlyForReviewMutation()`
- * is named for its first caller but is, by its own doc comment, the authority-
- * DOMAIN classifier — "it only decides which authority DOMAIN owns the run".
- * Reads and mutations must answer that question identically or the two halves
- * of the boundary could drift apart, so this module calls that same function
- * rather than reimplementing or re-deriving the classification.
+ *   - RUN-BACKED rows (`runId` present). `lib/runPanelExecution.ts` writes the
+ *     adaptive projection, and `teamGovernancePipeline.ts` a classic research
+ *     row, whenever the OWNER belongs to a legacy team — with no `workspaceId`
+ *     condition — so a Workspace-bound run routinely also has a legacy row.
+ *     Authority comes from the canonical `runs/{runId}` document.
+ *
+ *   - VERIFICATION-BACKED rows (`runId` null, `verificationId` present). The
+ *     TEAM WORKSPACE Claim route
+ *     (`app/api/workspaces/{workspaceId}/verifications/route.ts`) calls the
+ *     LEGACY `applyTeamGovernancePipeline({type: "verification", …})` with no
+ *     `runId`, so a Workspace Claim verification ALSO writes a classic
+ *     `teamRuns` row — carrying the claim text (5 000 chars), verdict,
+ *     consensus summary and audit bundle. Authority comes from the canonical
+ *     `verifications/{verificationId}` artifact.
+ *
+ * An earlier revision treated `runId === null` as proof a row could not be
+ * Workspace-bound. The premise ("it is not a run") was true and the conclusion
+ * was wrong: it left every Workspace-bound Claim verification readable through
+ * the legacy Team list and audit export. Both shapes are classified now, so
+ * there is no branch where a run-backed row is guarded while a
+ * verification-backed row silently bypasses the same rule.
+ *
+ * THE PREDICATES ARE SHARED DELIBERATELY. Run binding uses
+ * `runIsLegacyOnlyForReviewMutation()` — by its own doc comment the
+ * authority-DOMAIN classifier, not a mutation-only check — so reads and
+ * mutations can never answer differently. Verification binding uses
+ * `isWorkspaceBoundVerificationArtifact()`, the same field-presence rule that
+ * `/api/governance/*`, `/api/user/panel-history` and `/api/verify-video`
+ * already enforce; this surface was simply the one that never adopted it.
  */
 
-/** One chunk per `getAll()`, matching the established batching precedent in `app/api/teams/runs/route.ts` and `lib/governance/reviewerIdentity.ts`. */
+/** One chunk per `getAll()`, matching the batching precedent in `app/api/teams/runs/route.ts` and `lib/governance/reviewerIdentity.ts`. */
 const CHUNK_SIZE = 10;
+/** Chunks run concurrently, never more than this many at once — bounded, so a large team cannot open an unbounded number of simultaneous reads. */
+const MAX_CONCURRENT_CHUNKS = 5;
+
+function nonEmptyString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
 
 /**
- * The canonical run id a `teamRuns` row points at, or `null` when the row
- * points at no canonical run at all.
+ * The canonical run id a `teamRuns` row points at, or `null`.
  *
  * A row's own document id is NOT the run id: the adaptive projection id is
  * `buildAdaptiveTeamRunProjectionId(teamId, runId)` and the classic legacy id
  * is an opaque `{teamId}-{uid}-{ts}-{rand}` (`teamGovernancePipeline.ts`).
- * Both carry the run id in an explicit `runId` field, which is `null` for a
- * classic row created for a VERIFICATION rather than a research run. Such a
- * row has no canonical run document to classify and cannot be a
- * Workspace-bound run, so it is left entirely alone here — Workspace-bound
- * verification ARTIFACT scoping is a separate concern, already handled for the
- * `/api/governance/*` family by `isWorkspaceBoundVerificationArtifact()`, and
- * is deliberately out of this guard's scope.
+ * Both carry the run id in an explicit `runId` field.
  */
 export function teamRunRowCanonicalRunId(raw: unknown): string | null {
   if (!raw || typeof raw !== "object") return null;
-  const runId = (raw as Record<string, unknown>).runId;
-  return typeof runId === "string" && runId.trim().length > 0 ? runId : null;
+  return nonEmptyString((raw as Record<string, unknown>).runId);
 }
 
-export type LegacyOnlyRunIdsResult = {
+/** The canonical verification artifact id a `teamRuns` row points at, or `null`. */
+export function teamRunRowVerificationId(raw: unknown): string | null {
+  if (!raw || typeof raw !== "object") return null;
+  return nonEmptyString((raw as Record<string, unknown>).verificationId);
+}
+
+export type LegacyReadDomain = {
   /**
    * Exactly the run ids PROVABLY classified legacy-only from their canonical
-   * run document. Membership is the whole contract: a caller treats absence as
-   * "not readable through the legacy Team surface" and never needs to
-   * distinguish why, so a Workspace binding, a Personal binding, a malformed
-   * `workspaceId`, a missing run document and a failed read all collapse to
-   * the same safe answer.
+   * run document, and the verification ids PROVABLY classified non-Workspace
+   * from their canonical artifact. Membership is the whole contract: callers
+   * treat absence as "not readable through the legacy Team surface" and never
+   * need to know why, so a Workspace binding, a Personal binding, a malformed
+   * binding, a missing document and a failed read all collapse to one safe
+   * answer.
    */
-  legacyOnly: Set<string>;
+  legacyOnlyRunIds: Set<string>;
+  legacyOnlyVerificationIds: Set<string>;
 };
 
-/**
- * Batched canonical classification for a set of `teamRuns` rows' run ids.
- *
- * FAILS CLOSED, which is the entire point. A run id is admitted only when its
- * canonical `runs/{runId}` document was read successfully AND
- * `runIsLegacyOnlyForReviewMutation()` accepted it. A read failure, an absent
- * run document, a Personal binding, a Team Workspace binding and a malformed
- * binding are all simply left out. Schema drift therefore cannot convert an
- * unknown run into legacy-authorized data — the direction every ambiguity
- * resolves in is exclusion.
- *
- * A chunk-level read failure excludes only that chunk's ids rather than
- * throwing, matching the degrade-per-chunk behaviour the team review queue
- * already relies on; but note the direction differs on purpose. There,
- * degrading means "omit enrichment"; here it means "omit the row", because a
- * row whose authority cannot be established must not be shown.
- */
-export async function legacyOnlyRunIds(runIds: readonly string[]): Promise<LegacyOnlyRunIdsResult> {
-  const legacyOnly = new Set<string>();
-  const unique = Array.from(new Set(runIds.filter((id) => typeof id === "string" && id.trim().length > 0)));
-  if (unique.length === 0) return { legacyOnly };
+/** Batched, bounded-concurrency read of one collection, returning the ids whose document satisfies `admit`. */
+async function classifyByDocument(
+  collection: string,
+  ids: readonly string[],
+  admit: (data: unknown) => boolean
+): Promise<Set<string>> {
+  const admitted = new Set<string>();
+  const unique = Array.from(new Set(ids));
+  if (unique.length === 0) return admitted;
 
   if (!adminDb) {
-    // No database handle: nothing can be proven legacy-only, so nothing is.
+    // No database handle: nothing can be proven, so nothing is admitted.
     logger.warn("[governance/legacyReviewReadDomain] Firestore unavailable; excluding every row from the legacy Team read domain", {
-      runIdCount: unique.length,
+      collection,
+      idCount: unique.length,
     });
-    return { legacyOnly };
+    return admitted;
   }
 
-  for (let i = 0; i < unique.length; i += CHUNK_SIZE) {
-    const chunk = unique.slice(i, i + CHUNK_SIZE);
-    try {
-      const snaps = await adminDb.getAll(...chunk.map((id) => adminDb!.collection("runs").doc(id)));
-      snaps.forEach((snap, idx) => {
-        if (!snap.exists) return;
-        if (runIsLegacyOnlyForReviewMutation(snap.data())) legacyOnly.add(chunk[idx]);
-      });
-    } catch (err: unknown) {
-      // Metadata only — never a run's content, query or review data.
-      logger.warn("[governance/legacyReviewReadDomain] Canonical binding read failed for a chunk; excluding those rows", {
-        chunkSize: chunk.length,
-        errorMessage: err instanceof Error ? err.message : "unknown_error",
-      });
-    }
+  const chunks: string[][] = [];
+  for (let i = 0; i < unique.length; i += CHUNK_SIZE) chunks.push(unique.slice(i, i + CHUNK_SIZE));
+
+  for (let i = 0; i < chunks.length; i += MAX_CONCURRENT_CHUNKS) {
+    const wave = chunks.slice(i, i + MAX_CONCURRENT_CHUNKS);
+    await Promise.all(
+      wave.map(async (chunk) => {
+        try {
+          const snaps = await adminDb!.getAll(...chunk.map((id) => adminDb!.collection(collection).doc(id)));
+          for (const snap of snaps) {
+            // Associated by DOCUMENT IDENTITY, never by position in the
+            // response array: a positional mapping would silently credit one
+            // document's binding to another id if ordering ever changed, and
+            // that misattribution would fail OPEN.
+            const id = nonEmptyString((snap as { id?: unknown }).id);
+            if (!id || !snap.exists) continue;
+            if (admit(snap.data())) admitted.add(id);
+          }
+        } catch (err: unknown) {
+          // Metadata only — never a row's content, query or review data. A
+          // chunk-level failure excludes only that chunk's ids rather than
+          // throwing: a row whose authority cannot be established is not shown.
+          logger.warn("[governance/legacyReviewReadDomain] Canonical binding read failed for a chunk; excluding those rows", {
+            collection,
+            chunkSize: chunk.length,
+            errorMessage: err instanceof Error ? err.message : "unknown_error",
+          });
+        }
+      })
+    );
   }
 
-  return { legacyOnly };
+  return admitted;
 }
 
 /**
- * Convenience predicate over an already-resolved result, expressing the rule
- * a row-filtering caller applies: a row with no canonical run id at all stays
- * (it cannot be a Workspace-bound run), and a row that names one is kept only
- * if that run was proven legacy-only.
+ * Classifies every linkage a page/export of `teamRuns` rows carries.
+ *
+ * Takes the ROWS rather than pre-extracted ids so a caller cannot accidentally
+ * omit one: an id that never reached this function would be absent from the
+ * result, and absence means exclusion — safe, but it would silently hide
+ * legitimate rows. At most two batched passes (runs, verifications), both
+ * bounded and both fail-closed.
  */
-export function teamRunRowIsInLegacyReadDomain(raw: unknown, result: LegacyOnlyRunIdsResult): boolean {
+export async function resolveLegacyReadDomain(rows: readonly unknown[]): Promise<LegacyReadDomain> {
+  const runIds: string[] = [];
+  const verificationIds: string[] = [];
+  for (const raw of rows) {
+    const runId = teamRunRowCanonicalRunId(raw);
+    if (runId !== null) {
+      runIds.push(runId);
+      continue;
+    }
+    const verificationId = teamRunRowVerificationId(raw);
+    if (verificationId !== null) verificationIds.push(verificationId);
+  }
+
+  const [legacyOnlyRunIds, legacyOnlyVerificationIds] = await Promise.all([
+    classifyByDocument("runs", runIds, (data) => runIsLegacyOnlyForReviewMutation(data)),
+    classifyByDocument("verifications", verificationIds, (data) => !isWorkspaceBoundVerificationArtifact(data)),
+  ]);
+
+  return { legacyOnlyRunIds, legacyOnlyVerificationIds };
+}
+
+/**
+ * The rule a row-filtering caller applies.
+ *
+ * A row backed by a run is kept only if that run was proven legacy-only; a row
+ * backed by a verification artifact only if that artifact was proven
+ * non-Workspace. A row naming NEITHER is kept: it references no canonical
+ * artifact, so it has nothing in another authority domain to expose. That
+ * shape is real and legitimate — `app/api/synthesize-panel` passes
+ * `runId: runId || undefined`, so a legacy research row written without a run
+ * id lands here — and hiding it would be an unjustified regression of existing
+ * legacy behaviour rather than a security gain.
+ */
+export function teamRunRowIsInLegacyReadDomain(raw: unknown, domain: LegacyReadDomain): boolean {
   const runId = teamRunRowCanonicalRunId(raw);
-  if (runId === null) return true;
-  return result.legacyOnly.has(runId);
+  if (runId !== null) return domain.legacyOnlyRunIds.has(runId);
+
+  const verificationId = teamRunRowVerificationId(raw);
+  if (verificationId !== null) return domain.legacyOnlyVerificationIds.has(verificationId);
+
+  return true;
 }

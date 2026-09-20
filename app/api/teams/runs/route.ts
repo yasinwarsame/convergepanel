@@ -33,7 +33,7 @@ import { parseAdaptiveHumanReviewVote, buildAdaptiveHumanReviewVoteId, AdaptiveH
 import type { AdaptiveHumanReviewAssignmentV1 } from "@/lib/governance/adaptiveHumanReviewAssignment";
 import type { GovernanceRecordV1 } from "@/lib/adaptiveSchema/governanceRecord";
 import { resolveReviewerDisplayNames, UNKNOWN_REVIEWER_LABEL } from "@/lib/governance/reviewerIdentity";
-import { legacyOnlyRunIds, teamRunRowCanonicalRunId, teamRunRowIsInLegacyReadDomain } from "@/lib/governance/legacyReviewReadDomain";
+import { resolveLegacyReadDomain, teamRunRowIsInLegacyReadDomain } from "@/lib/governance/legacyReviewReadDomain";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -287,9 +287,8 @@ export async function GET(req: NextRequest) {
     // Deliberately AFTER member scoping: a non-admin's own rows are the only
     // ones that could ever be returned, so classifying the rest would cost
     // canonical reads for rows already dropped.
-    const readDomain = await legacyOnlyRunIds(
-      scopedDocs.map((d) => teamRunRowCanonicalRunId(d.data())).filter((id): id is string => id !== null)
-    );
+    const scopedRows = scopedDocs.map((d) => d.data());
+    const readDomain = await resolveLegacyReadDomain(scopedRows);
     const eligibleDocs = scopedDocs.filter((d) => teamRunRowIsInLegacyReadDomain(d.data(), readDomain));
 
     const items: TeamRunListItemV1[] = [];
@@ -360,9 +359,7 @@ export async function GET(req: NextRequest) {
   // second, independent entry form into the identical `teamRuns` data. Guarding
   // only `?version=1` would leave the disclosure fully reachable. Applied
   // before `total`/pagination so hidden rows leak no count.
-  const readDomain = await legacyOnlyRunIds(
-    rows.map((r) => teamRunRowCanonicalRunId(r)).filter((id): id is string => id !== null)
-  );
+  const readDomain = await resolveLegacyReadDomain(rows);
   rows = rows.filter((r) => teamRunRowIsInLegacyReadDomain(r, readDomain));
 
   if (typeFilter === "research" || typeFilter === "verification") {
