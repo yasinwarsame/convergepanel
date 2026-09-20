@@ -17,6 +17,11 @@
 const runDocs = new Map<string, Record<string, any>>();
 const panelDocs = new Map<string, Record<string, any>>();
 const voteDocs = new Map<string, Record<string, any>>();
+// Phase 1 Cross-Authority Guard — the assignment document needs a real store
+// here. Without one `txn.set(assignmentRef, …)` was silently dropped, so the
+// "nothing was written" assertion below could not observe an assignment write
+// and passed even with the guard relocated after it.
+const assignmentDocs = new Map<string, Record<string, any>>();
 const teamDocs = new Map<string, Record<string, any>>();
 const firestoreUnavailableFlag = { value: false };
 
@@ -37,7 +42,8 @@ const mockAdminDb: any = {
         collection: (subName: string) => ({
           doc: (docId: string) => ({
             get: jest.fn().mockImplementation(async () => {
-              const store = subName === "humanReviewPanel" ? panelDocs : voteDocs;
+              const store =
+                subName === "humanReviewPanel" ? panelDocs : subName === "humanReviewAssignment" ? assignmentDocs : voteDocs;
               const key = `${runId}/${subName}/${docId}`;
               return { exists: store.has(key), data: () => store.get(key) };
             }),
@@ -56,6 +62,10 @@ const mockAdminDb: any = {
         if (ref.__isVoteRef) {
           const key = `${ref.__runId}/humanReviewVotes/${ref.__voteId}`;
           return { exists: voteDocs.has(key), data: () => voteDocs.get(key) };
+        }
+        if (ref.__isAssignmentRef) {
+          const key = `${ref.__runId}/humanReviewAssignment/current`;
+          return { exists: assignmentDocs.has(key), data: () => assignmentDocs.get(key) };
         }
         if (ref.__isTeamRef) {
           return { exists: teamDocs.has(ref.__teamId), data: () => teamDocs.get(ref.__teamId) };
@@ -80,6 +90,8 @@ const mockAdminDb: any = {
           panelDocs.set(`${ref.__runId}/humanReviewPanel/current`, value);
         } else if (ref.__isVoteRef) {
           voteDocs.set(`${ref.__runId}/humanReviewVotes/${ref.__voteId}`, value);
+        } else if (ref.__isAssignmentRef) {
+          assignmentDocs.set(`${ref.__runId}/humanReviewAssignment/current`, value);
         }
       },
     };
@@ -124,6 +136,7 @@ mockAdminDb.collection = (name: string) => {
                 id: docId,
                 __isPanelRef: subName === "humanReviewPanel" && docId === "current",
                 __isVoteRef: subName === "humanReviewVotes",
+                __isAssignmentRef: subName === "humanReviewAssignment" && docId === "current",
                 __voteId: docId,
                 __runId: runId,
               };
@@ -141,6 +154,8 @@ import {
   finalizeAdaptiveHumanReviewPanel,
   overrideAdaptiveHumanReviewPanel,
   getAdaptiveHumanReviewPanel,
+  cancelAdaptiveHumanReviewPanel,
+  submitAdaptiveHumanReviewAssignment,
 } from "@/lib/firestore/runs";
 
 const RUN_ID = "run-1";
@@ -193,6 +208,7 @@ beforeEach(() => {
   runDocs.clear();
   panelDocs.clear();
   voteDocs.clear();
+  assignmentDocs.clear();
   teamDocs.clear();
   firestoreUnavailableFlag.value = false;
   teamDocs.set(TEAM_ID, team());
@@ -428,5 +444,167 @@ describe("End-to-end — single-reviewer coexistence (no panel ever created)", (
       expectedRevision: 0,
     });
     expect(created.ok).toBe(true);
+  });
+});
+
+/**
+ * PHASE 1 REVIEW STACK CROSS-AUTHORITY GUARD — Workspace authority is
+ * EXCLUSIVE over a Workspace-bound run's human-review state.
+ *
+ * THE STRUCTURAL HOLE THIS CLOSES. Two mutation stacks write the same
+ * documents. The legacy stack (`/api/teams/adaptive-runs/{runId}/…`)
+ * authorizes through the legacy `teams` document — membership plus
+ * `isTeamAdmin()` — and a `teamRuns` projection. The canonical Workspace
+ * stack authorizes through Team Workspace membership plus `reviews.manage`
+ * and `research.read`. A single run can hold BOTH bindings, because
+ * `lib/runPanelExecution.ts` writes a legacy `teamRuns` projection whenever
+ * the run OWNER belongs to a legacy team with adaptive review enabled.
+ * Nothing stopped a legacy team admin, holding no Workspace capability at
+ * all, from finalizing, overriding, cancelling, re-assigning or voting on a
+ * panel the Workspace stack governs.
+ *
+ * WHAT THE FIXTURE DOES. It builds a REAL open panel through the real
+ * services on a legacy run, then changes ONE thing — it binds the run to a
+ * Workspace — and re-runs every legacy mutation. Nothing else differs, so a
+ * denial can only be attributable to the binding. Each case also asserts
+ * ZERO mutation: panel, votes and the run document must be byte-identical
+ * afterwards, because a guard that denies only after writing is not a guard.
+ */
+describe("legacy review mutations cannot touch a Workspace-bound run", () => {
+  const OWNER_UID = "owner-uid";
+
+  /** Every mutable store, captured so "nothing changed" is checkable. */
+  function snapshot() {
+    return JSON.stringify({
+      runs: [...runDocs.entries()].sort(),
+      panels: [...panelDocs.entries()].sort(),
+      votes: [...voteDocs.entries()].sort(),
+      assignments: [...assignmentDocs.entries()].sort(),
+    });
+  }
+
+  /** An open panel on a genuinely legacy run — the shared starting state. */
+  async function openPanelOnLegacyRun() {
+    runDocs.set(RUN_ID, { userId: OWNER_UID, governanceRecord: governanceRecord() });
+    const created = await submitAdaptiveHumanReviewPanel({
+      runId: RUN_ID,
+      teamId: TEAM_ID,
+      reviewerUserIds: [R1, R2, R3],
+      actorUserId: OWNER,
+      expectedRevision: 0,
+      now: "2020-01-01T01:00:00.000Z",
+    });
+    expect(created.ok).toBe(true);
+    if (!created.ok) throw new Error("fixture could not open a panel");
+
+    // Cast a MAJORITY of votes — enough that the panel is genuinely
+    // finalizable, so the finalize/override probes reach their writes instead
+    // of short-circuiting at `quorum_not_met`. R3 is deliberately left
+    // un-voted: the loop below votes as R3, and a reviewer who has already
+    // voted would be turned away at the idempotent `already_submitted` branch
+    // BEFORE the write, making that probe's zero-side-effect claim vacuous.
+    for (const reviewer of [R1, R2]) {
+      const voted = await submitAdaptiveHumanReviewVote({
+        runId: RUN_ID,
+        teamId: TEAM_ID,
+        reviewerUserId: reviewer,
+        panelRevision: created.panel.revision,
+        status: "approved",
+      });
+      expect(voted.ok).toBe(true);
+    }
+    return created.panel.revision;
+  }
+
+  /** Every legacy TEAM mutation over the shared review state. */
+  function legacyMutations(revision: number) {
+    return [
+      ["panel create/reconfigure", () => submitAdaptiveHumanReviewPanel({ runId: RUN_ID, teamId: TEAM_ID, reviewerUserIds: [R1, R2], actorUserId: OWNER, expectedRevision: revision })],
+      ["panel cancel", () => cancelAdaptiveHumanReviewPanel({ runId: RUN_ID, teamId: TEAM_ID, actorUserId: OWNER, expectedRevision: revision })],
+      ["vote", () => submitAdaptiveHumanReviewVote({ runId: RUN_ID, teamId: TEAM_ID, reviewerUserId: R3, panelRevision: revision, status: "approved" })],
+      ["finalize", () => finalizeAdaptiveHumanReviewPanel({ runId: RUN_ID, teamId: TEAM_ID, actorUserId: OWNER, expectedPanelRevision: revision, expectedGovernanceUpdatedAt: "2020-01-01T00:00:00.000Z" })],
+      // `justification` is REQUIRED: without it `buildAdaptivePanelOverrideDecisionId`
+      // throws and the service returns `write_failed` before reaching its write,
+      // which would leave this probe unable to observe a side effect at all.
+      ["override", () => overrideAdaptiveHumanReviewPanel({ runId: RUN_ID, teamId: TEAM_ID, actorUserId: OWNER, expectedPanelRevision: revision, expectedGovernanceUpdatedAt: "2020-01-01T00:00:00.000Z", status: "approved", justification: "operator override for the cross-authority fixture" })],
+      ["assignment", () => submitAdaptiveHumanReviewAssignment({ runId: RUN_ID, teamId: TEAM_ID, newReviewerUserId: R2, actorUserId: OWNER, expectedRevision: 0 })],
+    ] as const;
+  }
+
+  const BINDINGS: [label: string, workspaceId: unknown][] = [
+    ["a Team Workspace", "ws-team-1"],
+    ["its owner's Personal Workspace", `personal-${OWNER_UID}`],
+    ["a malformed binding", 12345],
+  ];
+
+  it.each(BINDINGS)("refuses every legacy mutation when the run is bound to %s", async (_label, workspaceId) => {
+    const revision = await openPanelOnLegacyRun();
+    // The ONLY change: the canonical run record gains a Workspace binding.
+    runDocs.set(RUN_ID, { ...runDocs.get(RUN_ID), workspaceId });
+    const before = snapshot();
+
+    for (const [name, run] of legacyMutations(revision)) {
+      const result = await run();
+      // Denied, and indistinguishable from a run that does not exist.
+      expect(`${name} => ${JSON.stringify(result)}`).toBe(`${name} => ${JSON.stringify({ ok: false, reason: "run_missing" })}`);
+      // And nothing was written on the way to that denial.
+      expect(`${name} => ${snapshot()}`).toBe(`${name} => ${before}`);
+    }
+  });
+
+  it("still allows every legacy mutation on a genuinely legacy run", async () => {
+    // The drain control. Without this, a guard that refused everything
+    // would satisfy every assertion above.
+    const revision = await openPanelOnLegacyRun();
+    expect(runDocs.get(RUN_ID)).not.toHaveProperty("workspaceId");
+
+    // Three different legacy mutations, in an order the panel lifecycle
+    // actually permits: vote on the open panel, then drain it by cancelling.
+    const voted = await submitAdaptiveHumanReviewVote({ runId: RUN_ID, teamId: TEAM_ID, reviewerUserId: R1, panelRevision: revision, status: "approved" });
+    expect(voted.ok).toBe(true);
+
+    const assigned = await submitAdaptiveHumanReviewAssignment({ runId: RUN_ID, teamId: TEAM_ID, newReviewerUserId: R2, actorUserId: OWNER, expectedRevision: 0 });
+    expect(assigned.ok).toBe(true);
+
+    const cancelled = await cancelAdaptiveHumanReviewPanel({ runId: RUN_ID, teamId: TEAM_ID, actorUserId: OWNER, expectedRevision: revision });
+    expect(cancelled.ok).toBe(true);
+  });
+
+  it("does not disturb the PERSONAL assignment path on a Workspace-bound run", async () => {
+    // `teamId: null` is `personalReviewerAssignment`'s propagation call. A
+    // personal run legitimately carries its owner's Personal Workspace id,
+    // so excluding it would have broken reviewer propagation outright.
+    runDocs.set(RUN_ID, {
+      userId: OWNER_UID,
+      workspaceId: `personal-${OWNER_UID}`,
+      governanceRecord: governanceRecord(),
+    });
+    const result = await submitAdaptiveHumanReviewAssignment({
+      runId: RUN_ID,
+      teamId: null,
+      newReviewerUserId: R1,
+      actorUserId: OWNER_UID,
+      expectedRevision: 0,
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it("denies a legacy TEAM assignment on that same Workspace-bound run", async () => {
+    // Same run, same state — only the authority differs.
+    runDocs.set(RUN_ID, {
+      userId: OWNER_UID,
+      workspaceId: `personal-${OWNER_UID}`,
+      governanceRecord: governanceRecord(),
+    });
+    const before = snapshot();
+    const result = await submitAdaptiveHumanReviewAssignment({
+      runId: RUN_ID,
+      teamId: TEAM_ID,
+      newReviewerUserId: R1,
+      actorUserId: OWNER,
+      expectedRevision: 0,
+    });
+    expect(result).toEqual({ ok: false, reason: "run_missing" });
+    expect(snapshot()).toBe(before);
   });
 });
