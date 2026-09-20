@@ -102,6 +102,25 @@ export async function GET(req: NextRequest) {
   const readDomain = await resolveLegacyReadDomain(windowedDocs.map((d) => d.data()));
   const eligibleDocs = windowedDocs.filter((d) => teamRunRowIsInLegacyReadDomain(d.data(), readDomain));
 
+  // An audit export is a DURABLE compliance artifact: a reader who downloads it
+  // treats its contents as the authoritative record for the window. So when the
+  // authority of even one in-window candidate could not be determined, the
+  // export fails visibly instead of returning a file that is indistinguishable
+  // from "there was no activity". Fail-closed stays fail-closed — nothing
+  // unproven is ever included — but silence is not an acceptable way to say it.
+  //
+  // Atomic on purpose: a partially-complete export is not offered, because this
+  // route has no completeness marker a reader could notice. And deliberately
+  // generic: the response never says which row, which collection or which
+  // authority domain was involved, so it cannot become an existence oracle for
+  // the very artifacts the read guard hides.
+  if (readDomain.classificationUnavailable) {
+    return NextResponse.json(
+      { ok: false, error: { code: "firestore_unavailable", message: "Could not generate the audit export. Please try again." } },
+      { status: 503 }
+    );
+  }
+
   const rows = eligibleDocs
     .map((d) => {
       const x = d.data();

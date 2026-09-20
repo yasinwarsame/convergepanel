@@ -137,6 +137,19 @@ export type LegacyReadDomain = {
    */
   legacyOnlyRunIds: Set<string>;
   legacyOnlyVerificationIds: Set<string>;
+  /**
+   * True when at least one candidate's authority could NOT be determined —
+   * a batched canonical read failed, or Firestore was unavailable.
+   *
+   * This is deliberately NOT the same as "classified ineligible". A missing
+   * document, a Workspace binding, a Personal binding and a malformed binding
+   * are all SUCCESSFUL classifications whose answer happens to be "no"; this
+   * flag means the question could not be answered at all. Both outcomes
+   * exclude the row, so a caller that only filters can ignore it — but a
+   * caller producing a DURABLE artifact must not represent "could not
+   * determine" as "there was nothing to include".
+   */
+  classificationUnavailable: boolean;
 };
 
 /** The authority domain a canonical document belongs to. Only `legacy` is readable here. */
@@ -183,18 +196,19 @@ async function classifyByDocument(
   collection: string,
   ids: readonly string[],
   domainOfBody: (body: Record<string, unknown>) => AuthorityDomain
-): Promise<Set<string>> {
+): Promise<{ admitted: Set<string>; unavailable: boolean }> {
   const admitted = new Set<string>();
   const denied = new Set<string>();
+  let unavailable = false;
   const unique = Array.from(new Set(ids));
-  if (unique.length === 0) return admitted;
+  if (unique.length === 0) return { admitted, unavailable };
 
   if (!adminDb) {
     logger.warn("[governance/legacyReviewReadDomain] Firestore unavailable; excluding every row from the legacy Team read domain", {
       collection,
       idCount: unique.length,
     });
-    return admitted;
+    return { admitted, unavailable: true };
   }
 
   const chunks: string[][] = [];
@@ -216,6 +230,10 @@ async function classifyByDocument(
             else denied.add(id);
           }
         } catch (err: unknown) {
+          // The question could not be answered for this chunk. Every id in it
+          // is excluded (fail closed) AND the caller is told classification was
+          // incomplete, so a durable artifact can refuse to look authoritative.
+          unavailable = true;
           // Metadata only — never a row's content, query or review data. A
           // chunk-level failure excludes only that chunk's ids rather than
           // throwing: a row whose authority cannot be established is not shown.
@@ -230,7 +248,7 @@ async function classifyByDocument(
   }
 
   for (const id of denied) admitted.delete(id);
-  return admitted;
+  return { admitted, unavailable };
 }
 
 /**
@@ -251,12 +269,16 @@ export async function resolveLegacyReadDomain(rows: readonly unknown[]): Promise
     else if (linkage.kind === "verification") verificationIds.push(linkage.id);
   }
 
-  const [legacyOnlyRunIds, legacyOnlyVerificationIds] = await Promise.all([
+  const [runs, verifications] = await Promise.all([
     classifyByDocument("runs", runIds, runBodyDomain),
     classifyByDocument("verifications", verificationIds, verificationBodyDomain),
   ]);
 
-  return { legacyOnlyRunIds, legacyOnlyVerificationIds };
+  return {
+    legacyOnlyRunIds: runs.admitted,
+    legacyOnlyVerificationIds: verifications.admitted,
+    classificationUnavailable: runs.unavailable || verifications.unavailable,
+  };
 }
 
 /**

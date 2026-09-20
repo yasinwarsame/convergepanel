@@ -18,6 +18,8 @@ const runDocs = new Map<string, Record<string, any>>();
 /** Canonical paths the guard actually classified — proves the window runs first. */
 const classifiedPaths: string[] = [];
 let getAllShouldThrow = false;
+/** Fails only the chunk containing this canonical path, leaving others healthy. */
+let failChunkContaining: string | null = null;
 
 function makeDocRef(path: string): any {
   return { __path: path, get: async () => ({ exists: runDocs.has(path), data: () => runDocs.get(path) }) };
@@ -40,6 +42,7 @@ const mockAdminDb: any = {
   getAll: async (...refs: Array<{ __path: string }>) => {
     refs.forEach((r) => classifiedPaths.push(r.__path));
     if (getAllShouldThrow) throw new Error("batch read boom");
+    if (failChunkContaining && refs.some((r) => r.__path === failChunkContaining)) throw new Error("transient chunk failure");
     // A real DocumentSnapshot always carries `id`; the read guard associates
     // results by identity rather than array position, so the fake must too.
     return refs.map((ref) => ({ id: ref.__path.split("/").pop(), exists: runDocs.has(ref.__path), data: () => runDocs.get(ref.__path) }));
@@ -101,6 +104,7 @@ beforeEach(() => {
   teamRunDocs.clear();
   runDocs.clear();
   classifiedPaths.length = 0;
+  failChunkContaining = null;
   getAllShouldThrow = false;
   [mockedGetRequestUid, mockedLoadUserAndTeam, mockedMemberRole, mockedIsTeamAdmin].forEach((m) => m.mockReset());
   mockedGetRequestUid.mockResolvedValue("caller-uid");
@@ -148,12 +152,15 @@ describe("GET /api/teams/audit-export — Workspace-bound exclusion", () => {
     expect(rows).toEqual([]);
   });
 
-  it("fails closed when the canonical binding read fails", async () => {
+  it("refuses the export when the canonical binding read fails", async () => {
+    // Fail-closed AND visibly: an empty artifact would be indistinguishable
+    // from "no activity". See the failure-signalling block below.
     setRun("run-legacy");
     teamRunDocs.set("p-legacy", classicRow("run-legacy"));
     getAllShouldThrow = true;
-    const rows = await (await GET(new NextRequest("http://localhost/api/teams/audit-export"))).json();
-    expect(rows).toEqual([]);
+    const res = await GET(new NextRequest("http://localhost/api/teams/audit-export"));
+    expect(res.status).toBe(503);
+    expect((await res.json()).error.code).toBe("firestore_unavailable");
   });
 
   it("CONTROL — a legitimate legacy export is unchanged", async () => {
@@ -242,6 +249,121 @@ describe("GET /api/teams/audit-export — Workspace-bound exclusion", () => {
       expect(rows).toHaveLength(1);
       const csv = await (await GET(new NextRequest(`http://localhost/api/teams/audit-export${WINDOW}&format=csv`))).text();
       expect(csv).toContain("KEEP ME");
+    });
+  });
+
+  // ---- Failure signalling: "could not determine" is not "nothing to report" ----
+  describe("classification failure is never presented as an empty export", () => {
+    const W = "?from=2026-08-01T00:00:00.000Z&to=2026-08-31T00:00:00.000Z";
+    const inWindow = fakeTimestamp("2026-08-15T00:00:00.000Z");
+    const outWindow = fakeTimestamp("2026-01-01T00:00:00.000Z");
+    const url = (extra = "") => new NextRequest(`http://localhost/api/teams/audit-export${W}${extra}`);
+
+    /** The one response a downloadable artifact must never be confused with. */
+    async function expectVisibleFailure(res: Response) {
+      expect(res.status).toBe(503);
+      expect(await res.json()).toEqual({
+        ok: false,
+        error: { code: "firestore_unavailable", message: "Could not generate the audit export. Please try again." },
+      });
+      // Nothing a client could save as a compliance record.
+      expect(res.headers.get("content-disposition")).toBeNull();
+    }
+
+    it("E-M7: a genuinely empty window is still a SUCCESSFUL empty export (JSON and CSV)", async () => {
+      setRun("run-out");
+      teamRunDocs.set("p-out", classicRow("run-out", { timestamp: outWindow }));
+      const json = await GET(url());
+      expect(json.status).toBe(200);
+      expect(await json.json()).toEqual([]);
+      const csv = await GET(url("&format=csv"));
+      expect(csv.status).toBe(200);
+      expect((await csv.text()).trim().split("\n")).toHaveLength(1); // header only
+    });
+
+    it("fails visibly in JSON when an in-window candidate cannot be classified", async () => {
+      setRun("run-in");
+      teamRunDocs.set("p-in", classicRow("run-in", { timestamp: inWindow }));
+      failChunkContaining = "runs/run-in";
+      await expectVisibleFailure(await GET(url()));
+    });
+
+    it("fails visibly in CSV too — no format retains the silent-empty behaviour", async () => {
+      setRun("run-in");
+      teamRunDocs.set("p-in", classicRow("run-in", { timestamp: inWindow }));
+      failChunkContaining = "runs/run-in";
+      await expectVisibleFailure(await GET(url("&format=csv")));
+    });
+
+    it("fails visibly when a VERIFICATION artifact cannot be classified", async () => {
+      setVerification("ver-in");
+      teamRunDocs.set("p-v", classicRow(null, { type: "verification", verificationId: "ver-in", timestamp: inWindow }));
+      failChunkContaining = "verifications/ver-in";
+      await expectVisibleFailure(await GET(url()));
+    });
+
+    it("E-M4: is ATOMIC — healthy rows are not exported alongside an unclassifiable one", async () => {
+      // CHUNK_SIZE is 10, so 11 rows span TWO chunks. Failing only the second
+      // leaves the first fully classified and 10 rows genuinely eligible — the
+      // exact shape a "partial export" would happily emit. Putting every row in
+      // one chunk would make this assertion vacuous, because then nothing is
+      // eligible and even a partial-export implementation would refuse.
+      for (let i = 0; i < 11; i++) {
+        const id = `run-${String(i).padStart(2, "0")}`;
+        setRun(id);
+        teamRunDocs.set(`p-${i}`, classicRow(id, { timestamp: inWindow, query: `ROW-${i}` }));
+      }
+      failChunkContaining = "runs/run-10"; // alone in the second chunk
+      const res = await GET(url());
+      await expectVisibleFailure(res);
+      // And no partial file leaked on the way to that refusal.
+      expect(res.headers.get("content-type")).toBe("application/json");
+    });
+
+    it("E-M5: a successfully classified Workspace row is an EXCLUSION, not a failure", async () => {
+      setRun("run-ws", { workspaceId: "ws-team-1" });
+      setRun("run-ok");
+      teamRunDocs.set("p-ws", classicRow("run-ws", { timestamp: inWindow, query: "SECRET" }));
+      teamRunDocs.set("p-ok", classicRow("run-ok", { timestamp: inWindow, query: "KEEP" }));
+      const res = await GET(url());
+      expect(res.status).toBe(200);
+      const rows = await res.json();
+      expect(rows.map((r: any) => r.queryTruncated)).toEqual(["KEEP"]);
+    });
+
+    it("E-M6: an out-of-window unclassifiable row does not fail the export", async () => {
+      setRun("run-in");
+      setRun("run-out");
+      teamRunDocs.set("p-in", classicRow("run-in", { timestamp: inWindow, query: "KEEP" }));
+      teamRunDocs.set("p-out", classicRow("run-out", { timestamp: outWindow }));
+      // The out-of-window row is filtered before classification, so this never fires.
+      failChunkContaining = "runs/run-out";
+      const res = await GET(url());
+      expect(res.status).toBe(200);
+      expect((await res.json()).map((r: any) => r.queryTruncated)).toEqual(["KEEP"]);
+      expect(classifiedPaths).toEqual(["runs/run-in"]);
+    });
+
+    it("does not disclose WHICH authority domain failed", async () => {
+      // A legacy-looking candidate and a Workspace-bound one must produce the
+      // byte-identical refusal, or the failure becomes an existence oracle.
+      setRun("run-legacy");
+      teamRunDocs.set("p-l", classicRow("run-legacy", { timestamp: inWindow }));
+      failChunkContaining = "runs/run-legacy";
+      const a = await GET(url());
+      const aBody = await a.json();
+
+      teamRunDocs.clear();
+      runDocs.clear();
+      classifiedPaths.length = 0;
+      setRun("run-ws", { workspaceId: "ws-team-1" });
+      teamRunDocs.set("p-w", classicRow("run-ws", { timestamp: inWindow }));
+      failChunkContaining = "runs/run-ws";
+      const b = await GET(url());
+      const bBody = await b.json();
+
+      expect({ status: a.status, body: aBody }).toEqual({ status: b.status, body: bBody });
+      expect(JSON.stringify(aBody)).not.toMatch(/workspace|ws-team-1|run-/i);
     });
   });
 });
