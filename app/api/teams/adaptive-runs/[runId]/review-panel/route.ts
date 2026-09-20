@@ -65,6 +65,7 @@ import type { AdaptiveHumanReviewVoteV1 } from "@/lib/governance/adaptiveHumanRe
 import { maskEmail } from "@/lib/utils/maskEmail";
 import { logger } from "@/lib/logger";
 import { MULTI_REVIEWER_GOVERNANCE_ENABLED } from "@/lib/env";
+import { runIsLegacyOnlyForReviewMutation } from "@/lib/governance/legacyReviewRunAuthority";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -119,6 +120,15 @@ async function authorizeAndLoadContext(req: NextRequest, runId: string) {
 
   const runSnap = await adminDb.collection("runs").doc(runId).get();
   if (!runSnap.exists) {
+    return { errorRes: errorResponse(404, "not_found", "Run not found.") } as const;
+  }
+  // Phase 1 Cross-Authority READ Guard — see the note in
+  // `app/api/teams/adaptive-runs/[runId]/route.ts`. Placed in this shared
+  // context loader so every caller (GET and each mutation) inherits it, and so
+  // no sibling serializer can reach canonical review state around it. Refused
+  // before any panel/assignment/vote read and before reviewer identity
+  // resolution, as this route's own existing not-found answer.
+  if (!runIsLegacyOnlyForReviewMutation(runSnap.data())) {
     return { errorRes: errorResponse(404, "not_found", "Run not found.") } as const;
   }
 

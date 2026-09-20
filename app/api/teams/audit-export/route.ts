@@ -4,6 +4,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebase/admin";
+import { legacyOnlyRunIds, teamRunRowCanonicalRunId, teamRunRowIsInLegacyReadDomain } from "@/lib/governance/legacyReviewReadDomain";
 import {
   getRequestUid,
   loadUserAndTeam,
@@ -79,7 +80,20 @@ export async function GET(req: NextRequest) {
   // to a future step, per §21.14/§25 — not built here.
   const legacyDocs = snap.docs.filter((d) => d.data().adaptive !== true);
 
-  const rows = legacyDocs
+  // Phase 1 Cross-Authority READ Guard — a Workspace-bound run is outside this
+  // surface's authority domain, so its row is excluded from the legacy-domain
+  // export as well. An export is the highest-leverage read on this collection
+  // (bulk, durable, leaves the product), so it gets the same exclusion as the
+  // queue rather than a weaker one. Adaptive rows are already excluded above;
+  // this closes the CLASSIC rows, whose `query`/`verdict`/`consensusScore`/
+  // `humanDecision` are equally outside a legacy caller's domain once the run
+  // itself belongs to a Workspace.
+  const readDomain = await legacyOnlyRunIds(
+    legacyDocs.map((d) => teamRunRowCanonicalRunId(d.data())).filter((id): id is string => id !== null)
+  );
+  const eligibleDocs = legacyDocs.filter((d) => teamRunRowIsInLegacyReadDomain(d.data(), readDomain));
+
+  const rows = eligibleDocs
     .map((d) => {
       const x = d.data();
       const t = tsMillis(x.timestamp);

@@ -11,6 +11,7 @@ import { adminDb } from "@/lib/firebase/admin";
 import { getRequestUid, loadUserAndTeam, memberRole, isTeamAdmin } from "@/lib/teams/teamApiAuth";
 import { getAdaptiveTeamRunProjection } from "@/lib/firestore/teamRuns";
 import { logger } from "@/lib/logger";
+import { runIsLegacyOnlyForReviewMutation } from "@/lib/governance/legacyReviewRunAuthority";
 import {
   classifyAdaptiveHumanReviewHistoryRow,
   sortAdaptiveReviewHistoryRows,
@@ -72,6 +73,16 @@ export async function GET(req: NextRequest, { params }: { params: { runId: strin
 
   const runSnap = await adminDb.collection("runs").doc(runId).get();
   if (!runSnap.exists) {
+    return errorResponse(404, "not_found", "Run not found.");
+  }
+  // Phase 1 Cross-Authority READ Guard — this route authorizes through legacy
+  // Team admin status plus a `teamRuns` projection. A Workspace-bound run lies
+  // outside that authority domain for READS exactly as PR #186 established for
+  // mutations, so it is refused here, BEFORE any panel/assignment/vote/history
+  // read and before any reviewer identity is resolved. Reported as this route's
+  // own existing not-found answer so the denial is indistinguishable from a
+  // genuinely absent run and reveals no other authority domain.
+  if (!runIsLegacyOnlyForReviewMutation(runSnap.data())) {
     return errorResponse(404, "not_found", "Run not found.");
   }
 
