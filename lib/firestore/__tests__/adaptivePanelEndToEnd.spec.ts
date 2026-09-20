@@ -17,6 +17,11 @@
 const runDocs = new Map<string, Record<string, any>>();
 const panelDocs = new Map<string, Record<string, any>>();
 const voteDocs = new Map<string, Record<string, any>>();
+// Phase 1 Cross-Authority Guard — the assignment document needs a real store
+// here. Without one `txn.set(assignmentRef, …)` was silently dropped, so the
+// "nothing was written" assertion below could not observe an assignment write
+// and passed even with the guard relocated after it.
+const assignmentDocs = new Map<string, Record<string, any>>();
 const teamDocs = new Map<string, Record<string, any>>();
 const firestoreUnavailableFlag = { value: false };
 
@@ -37,7 +42,8 @@ const mockAdminDb: any = {
         collection: (subName: string) => ({
           doc: (docId: string) => ({
             get: jest.fn().mockImplementation(async () => {
-              const store = subName === "humanReviewPanel" ? panelDocs : voteDocs;
+              const store =
+                subName === "humanReviewPanel" ? panelDocs : subName === "humanReviewAssignment" ? assignmentDocs : voteDocs;
               const key = `${runId}/${subName}/${docId}`;
               return { exists: store.has(key), data: () => store.get(key) };
             }),
@@ -56,6 +62,10 @@ const mockAdminDb: any = {
         if (ref.__isVoteRef) {
           const key = `${ref.__runId}/humanReviewVotes/${ref.__voteId}`;
           return { exists: voteDocs.has(key), data: () => voteDocs.get(key) };
+        }
+        if (ref.__isAssignmentRef) {
+          const key = `${ref.__runId}/humanReviewAssignment/current`;
+          return { exists: assignmentDocs.has(key), data: () => assignmentDocs.get(key) };
         }
         if (ref.__isTeamRef) {
           return { exists: teamDocs.has(ref.__teamId), data: () => teamDocs.get(ref.__teamId) };
@@ -80,6 +90,8 @@ const mockAdminDb: any = {
           panelDocs.set(`${ref.__runId}/humanReviewPanel/current`, value);
         } else if (ref.__isVoteRef) {
           voteDocs.set(`${ref.__runId}/humanReviewVotes/${ref.__voteId}`, value);
+        } else if (ref.__isAssignmentRef) {
+          assignmentDocs.set(`${ref.__runId}/humanReviewAssignment/current`, value);
         }
       },
     };
@@ -124,6 +136,7 @@ mockAdminDb.collection = (name: string) => {
                 id: docId,
                 __isPanelRef: subName === "humanReviewPanel" && docId === "current",
                 __isVoteRef: subName === "humanReviewVotes",
+                __isAssignmentRef: subName === "humanReviewAssignment" && docId === "current",
                 __voteId: docId,
                 __runId: runId,
               };
@@ -195,6 +208,7 @@ beforeEach(() => {
   runDocs.clear();
   panelDocs.clear();
   voteDocs.clear();
+  assignmentDocs.clear();
   teamDocs.clear();
   firestoreUnavailableFlag.value = false;
   teamDocs.set(TEAM_ID, team());
@@ -465,6 +479,7 @@ describe("legacy review mutations cannot touch a Workspace-bound run", () => {
       runs: [...runDocs.entries()].sort(),
       panels: [...panelDocs.entries()].sort(),
       votes: [...voteDocs.entries()].sort(),
+      assignments: [...assignmentDocs.entries()].sort(),
     });
   }
 
@@ -481,6 +496,20 @@ describe("legacy review mutations cannot touch a Workspace-bound run", () => {
     });
     expect(created.ok).toBe(true);
     if (!created.ok) throw new Error("fixture could not open a panel");
+
+    // Cast every vote, so the panel is genuinely finalizable. Without this the
+    // finalize/override probes short-circuit at `quorum_not_met` BEFORE their
+    // write, and the zero-side-effect assertion never exercises their ordering.
+    for (const reviewer of [R1, R2, R3]) {
+      const voted = await submitAdaptiveHumanReviewVote({
+        runId: RUN_ID,
+        teamId: TEAM_ID,
+        reviewerUserId: reviewer,
+        panelRevision: created.panel.revision,
+        status: "approved",
+      });
+      expect(voted.ok).toBe(true);
+    }
     return created.panel.revision;
   }
 

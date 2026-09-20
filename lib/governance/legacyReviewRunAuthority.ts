@@ -64,7 +64,11 @@ export function runIsLegacyOnlyForReviewMutation(runData: unknown): boolean {
   }
   const data = runData as Record<string, unknown>;
   const shape = classifyRunWorkspaceBindingShape({
-    hasWorkspaceIdField: Object.prototype.hasOwnProperty.call(data, "workspaceId"),
+    // `in`, matching `resolveWorkspaceReviewTarget()` exactly. The two
+    // authority domains must read the binding the SAME way: under an
+    // inherited `workspaceId`, `hasOwnProperty` would say "legacy" while the
+    // Workspace stack said "bound", and the guard would be the permissive one.
+    hasWorkspaceIdField: "workspaceId" in data,
     workspaceIdValue: data.workspaceId,
     userId: data.userId,
   });
