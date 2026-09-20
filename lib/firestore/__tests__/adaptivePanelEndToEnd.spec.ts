@@ -497,10 +497,13 @@ describe("legacy review mutations cannot touch a Workspace-bound run", () => {
     expect(created.ok).toBe(true);
     if (!created.ok) throw new Error("fixture could not open a panel");
 
-    // Cast every vote, so the panel is genuinely finalizable. Without this the
-    // finalize/override probes short-circuit at `quorum_not_met` BEFORE their
-    // write, and the zero-side-effect assertion never exercises their ordering.
-    for (const reviewer of [R1, R2, R3]) {
+    // Cast a MAJORITY of votes — enough that the panel is genuinely
+    // finalizable, so the finalize/override probes reach their writes instead
+    // of short-circuiting at `quorum_not_met`. R3 is deliberately left
+    // un-voted: the loop below votes as R3, and a reviewer who has already
+    // voted would be turned away at the idempotent `already_submitted` branch
+    // BEFORE the write, making that probe's zero-side-effect claim vacuous.
+    for (const reviewer of [R1, R2]) {
       const voted = await submitAdaptiveHumanReviewVote({
         runId: RUN_ID,
         teamId: TEAM_ID,
@@ -518,9 +521,12 @@ describe("legacy review mutations cannot touch a Workspace-bound run", () => {
     return [
       ["panel create/reconfigure", () => submitAdaptiveHumanReviewPanel({ runId: RUN_ID, teamId: TEAM_ID, reviewerUserIds: [R1, R2], actorUserId: OWNER, expectedRevision: revision })],
       ["panel cancel", () => cancelAdaptiveHumanReviewPanel({ runId: RUN_ID, teamId: TEAM_ID, actorUserId: OWNER, expectedRevision: revision })],
-      ["vote", () => submitAdaptiveHumanReviewVote({ runId: RUN_ID, teamId: TEAM_ID, reviewerUserId: R1, panelRevision: revision, status: "approved" })],
+      ["vote", () => submitAdaptiveHumanReviewVote({ runId: RUN_ID, teamId: TEAM_ID, reviewerUserId: R3, panelRevision: revision, status: "approved" })],
       ["finalize", () => finalizeAdaptiveHumanReviewPanel({ runId: RUN_ID, teamId: TEAM_ID, actorUserId: OWNER, expectedPanelRevision: revision, expectedGovernanceUpdatedAt: "2020-01-01T00:00:00.000Z" })],
-      ["override", () => overrideAdaptiveHumanReviewPanel({ runId: RUN_ID, teamId: TEAM_ID, actorUserId: OWNER, expectedPanelRevision: revision, expectedGovernanceUpdatedAt: "2020-01-01T00:00:00.000Z", status: "approved" })],
+      // `justification` is REQUIRED: without it `buildAdaptivePanelOverrideDecisionId`
+      // throws and the service returns `write_failed` before reaching its write,
+      // which would leave this probe unable to observe a side effect at all.
+      ["override", () => overrideAdaptiveHumanReviewPanel({ runId: RUN_ID, teamId: TEAM_ID, actorUserId: OWNER, expectedPanelRevision: revision, expectedGovernanceUpdatedAt: "2020-01-01T00:00:00.000Z", status: "approved", justification: "operator override for the cross-authority fixture" })],
       ["assignment", () => submitAdaptiveHumanReviewAssignment({ runId: RUN_ID, teamId: TEAM_ID, newReviewerUserId: R2, actorUserId: OWNER, expectedRevision: 0 })],
     ] as const;
   }
