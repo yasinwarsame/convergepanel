@@ -24,6 +24,7 @@ let getAllSucceedForFirstCalls = 0;
 function makeDocRef(path: string): any {
   return {
     __path: path,
+    path,
     id: path.split("/").pop(),
     get: async () => ({ exists: pathStore.has(path), data: () => pathStore.get(path) }),
     collection: (name: string) => makeCollectionRef(`${path}/${name}`),
@@ -55,7 +56,7 @@ const mockAdminDb = {
     if (getAllShouldThrow && getAllCallCount > getAllSucceedForFirstCalls) throw new Error("batch read boom");
     // A real DocumentSnapshot always carries `id`; the read guard associates
     // results by identity rather than array position, so the fake must too.
-    return refs.map((ref) => ({ id: ref.__path.split("/").pop(), exists: pathStore.has(ref.__path), data: () => pathStore.get(ref.__path) }));
+    return refs.map((ref) => ({ id: ref.__path.split("/").pop(), ref: { path: ref.__path }, exists: pathStore.has(ref.__path), data: () => pathStore.get(ref.__path) }));
   },
 };
 

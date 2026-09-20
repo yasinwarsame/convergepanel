@@ -23,10 +23,10 @@ const mockAdminDb: any = {
         return { docs: matches.map(([id, data]) => ({ id, data: () => data })) };
       },
     }),
-    doc: (id: string) => ({ __path: `${name}/${id}`, __id: id }),
+    doc: (id: string) => ({ __path: `${name}/${id}`, __id: id, path: `${name}/${id}` }),
   }),
   getAll: async (...refs: Array<{ __path: string; __id: string }>) =>
-    refs.map((ref) => ({ id: ref.__id, exists: canonicalDocs.has(ref.__path), data: () => canonicalDocs.get(ref.__path) })),
+    refs.map((ref) => ({ id: ref.__id, ref: { path: ref.__path }, exists: canonicalDocs.has(ref.__path), data: () => canonicalDocs.get(ref.__path) })),
 };
 
 jest.mock("@/lib/firebase/admin", () => ({

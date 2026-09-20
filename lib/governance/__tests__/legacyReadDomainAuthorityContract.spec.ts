@@ -24,7 +24,12 @@ let maxInFlight = 0;
 let failChunksContaining: string | null = null;
 
 const mockAdminDb: any = {
-  collection: (name: string) => ({ doc: (id: string) => ({ __path: `${name}/${id}`, __id: id }) }),
+  // A real DocumentReference/Snapshot exposes the LEAF segment as `id` and the
+  // full path as `path`/`ref.path`. Keeping `__id` as the logical value we asked
+  // for lets a test distinguish the two, which is the whole point of C1/C1b.
+  collection: (name: string) => ({
+    doc: (id: string) => ({ __path: `${name}/${id}`, __id: id, id: id.split("/").pop(), path: `${name}/${id}` }),
+  }),
   getAll: async (...refs: Array<{ __path: string; __id: string }>) => {
     getAllCalls.push(refs.map((r) => r.__id));
     inFlight += 1;
@@ -34,13 +39,18 @@ const mockAdminDb: any = {
       await new Promise((r) => setTimeout(r, 5));
       if (failChunksContaining && refs.some((r) => r.__id === failChunksContaining)) throw new Error("chunk boom");
       if (snapshotFactory) return refs.map((r) => snapshotFactory!(r.__id, r.__path));
-      return refs.map((r) => ({ id: r.__id, exists: docs.has(r.__path), data: () => docs.get(r.__path) }));
+      return refs.map((r) => ({ id: r.__id.split("/").pop(), ref: { path: r.__path }, exists: docs.has(r.__path), data: () => docs.get(r.__path) }));
     } finally {
       inFlight -= 1;
     }
   },
 };
-jest.mock("@/lib/firebase/admin", () => ({ get adminDb() { return mockAdminDb; } }));
+let adminDbAvailable = true;
+jest.mock("@/lib/firebase/admin", () => ({
+  get adminDb() {
+    return adminDbAvailable ? mockAdminDb : null;
+  },
+}));
 jest.mock("@/lib/logger", () => ({ logger: { warn: jest.fn(), info: jest.fn(), error: jest.fn(), debug: jest.fn() } }));
 
 import { resolveLegacyReadDomain, teamRunRowIsInLegacyReadDomain } from "@/lib/governance/legacyReviewReadDomain";
@@ -54,6 +64,7 @@ beforeEach(() => {
   getAllCalls.length = 0;
   snapshotFactory = null;
   failChunksContaining = null;
+  adminDbAvailable = true;
   inFlight = 0;
   maxInFlight = 0;
 });
@@ -69,9 +80,9 @@ async function admits(kind: "run" | "verification"): Promise<boolean> {
   return teamRunRowIsInLegacyReadDomain(row, domain);
 }
 
-/** A snapshot that reports the id it was asked for — what a real batched read does. */
+/** A snapshot that reports the reference it was asked for — what a real batched read does. */
 function selfSnap(body: unknown, exists = true) {
-  return (id: string) => ({ id, exists, data: () => body });
+  return (id: string, path: string) => ({ id, ref: { path }, exists, data: () => body });
 }
 
 describe("ONE authority contract — identical fail-closed semantics for both canonical record types", () => {
@@ -162,14 +173,14 @@ describe("conflicting identifiers", () => {
 
 describe("D2 — batch association is by requested identity", () => {
   it("D2-M1: a foreign snapshot id contributes nothing", async () => {
-    snapshotFactory = () => ({ id: "FOREIGN-ID", exists: true, data: () => ({ userId: OWNER }) });
+    snapshotFactory = () => ({ id: "FOREIGN-ID", ref: { path: "runs/FOREIGN-ID" }, exists: true, data: () => ({ userId: OWNER }) });
     const domain = await resolveLegacyReadDomain([runRow("run-1")]);
     expect([...domain.legacyOnlyRunIds]).toEqual([]);
     expect(teamRunRowIsInLegacyReadDomain(runRow("FOREIGN-ID"), domain)).toBe(false);
   });
 
   it("D2-M2: an omitted snapshot leaves its row ineligible", async () => {
-    snapshotFactory = (id) => (id === "run-1" ? { id, exists: true, data: () => ({ userId: OWNER }) } : undefined);
+    snapshotFactory = (id, path) => (id === "run-1" ? { id, ref: { path }, exists: true, data: () => ({ userId: OWNER }) } : undefined);
     const domain = await resolveLegacyReadDomain([runRow("run-1"), runRow("run-2")]);
     expect([...domain.legacyOnlyRunIds]).toEqual(["run-1"]);
     expect(teamRunRowIsInLegacyReadDomain(runRow("run-2"), domain)).toBe(false);
@@ -189,9 +200,9 @@ describe("D2 — batch association is by requested identity", () => {
   });
 
   it("D2-M4: expected results survive alongside an extra foreign snapshot", async () => {
-    snapshotFactory = (id) => ({ id, exists: true, data: () => ({ userId: OWNER }) });
+    snapshotFactory = (id, path) => ({ id, ref: { path }, exists: true, data: () => ({ userId: OWNER }) });
     const base = mockAdminDb.getAll;
-    mockAdminDb.getAll = async (...refs: any[]) => [...(await base(...refs)), { id: "FOREIGN-ID", exists: true, data: () => ({ userId: OWNER }) }];
+    mockAdminDb.getAll = async (...refs: any[]) => [...(await base(...refs)), { id: "FOREIGN-ID", ref: { path: "runs/FOREIGN-ID" }, exists: true, data: () => ({ userId: OWNER }) }];
     try {
       const domain = await resolveLegacyReadDomain([runRow("run-1")]);
       expect([...domain.legacyOnlyRunIds]).toEqual(["run-1"]);
@@ -206,7 +217,7 @@ describe("D2 — batch association is by requested identity", () => {
     const bodies = [{ userId: OWNER, workspaceId: "ws-1" }, { userId: OWNER }];
     let n = 0;
     const base = mockAdminDb.getAll;
-    mockAdminDb.getAll = async (...refs: any[]) => refs.flatMap((r: any) => bodies.map((b) => ({ id: r.__id, exists: true, data: () => (n++, b) })));
+    mockAdminDb.getAll = async (...refs: any[]) => refs.flatMap((r: any) => bodies.map((b) => ({ id: r.__id.split("/").pop(), ref: { path: r.__path }, exists: true, data: () => (n++, b) })));
     try {
       const domain = await resolveLegacyReadDomain([runRow("run-1")]);
       expect([...domain.legacyOnlyRunIds]).toEqual([]);
@@ -224,8 +235,8 @@ describe("D2 — batch association is by requested identity", () => {
       const real = await base(...refs);
       return [
         ...real.filter((s: any) => s.id !== "ok-2"),                       // omitted
-        { id: "FOREIGN-ID", exists: true, data: () => ({ userId: OWNER }) }, // foreign
-        { id: "malformed-1", exists: true, data: () => undefined },         // unreadable body
+        { id: "FOREIGN-ID", ref: { path: "runs/FOREIGN-ID" }, exists: true, data: () => ({ userId: OWNER }) }, // foreign
+        { id: "malformed-1", ref: { path: "runs/malformed-1" }, exists: true, data: () => undefined }, // unreadable body
       ].reverse();                                                          // reordered
     };
     try {
@@ -260,4 +271,98 @@ describe("bounded concurrency", () => {
     expect(domain.legacyOnlyRunIds.has("run-000")).toBe(false);
     expect(domain.legacyOnlyRunIds.size).toBe(10); // exactly the surviving chunk
   });
+
+describe("completeness accounting — every requested reference must be answered", () => {
+  /** A faithful snapshot: reports the exact reference it was asked for. */
+  const faithful = (body: unknown, exists = true) => (id: string, path: string) => ({ id, ref: { path }, exists, data: () => body });
+
+  it("C1: a multi-segment logical id is correlated by reference PATH, not leaf id", async () => {
+    // `runs/tenant/run-1` is a perfectly valid document path whose leaf id is
+    // `run-1`. Correlating on the leaf silently dropped the row from BOTH sets
+    // while reporting classification as complete.
+    docs.set("runs/tenant/run-1", { userId: OWNER });
+    const row = { runId: "tenant/run-1" };
+    const d = await resolveLegacyReadDomain([row]);
+    expect(d.classificationUnavailable).toBe(false);
+    expect([...d.legacyOnlyRunIds]).toEqual(["tenant/run-1"]);
+    expect(teamRunRowIsInLegacyReadDomain(row, d)).toBe(true);
+  });
+
+  it("C1b: two references sharing a leaf id are classified independently", async () => {
+    docs.set("runs/tenant-a/run-1", { userId: OWNER });
+    docs.set("runs/tenant-b/run-1", { userId: OWNER, workspaceId: "ws-9" });
+    const a = { runId: "tenant-a/run-1" };
+    const b = { runId: "tenant-b/run-1" };
+    const d = await resolveLegacyReadDomain([a, b]);
+    expect(d.classificationUnavailable).toBe(false);
+    expect(teamRunRowIsInLegacyReadDomain(a, d)).toBe(true);   // legacy
+    expect(teamRunRowIsInLegacyReadDomain(b, d)).toBe(false);  // Workspace-bound
+  });
+
+  it("C2: a requested reference that never comes back is NOT a completed classification", async () => {
+    docs.set("runs/run-1", { userId: OWNER });
+    docs.set("runs/run-2", { userId: OWNER });
+    const base = mockAdminDb.getAll;
+    mockAdminDb.getAll = async (...refs: any[]) => (await base(...refs)).filter((s: any) => s.ref.path !== "runs/run-2");
+    try {
+      const d = await resolveLegacyReadDomain([runRow("run-1"), runRow("run-2")]);
+      expect(d.classificationUnavailable).toBe(true);
+    } finally {
+      mockAdminDb.getAll = base;
+    }
+  });
+
+  it("C3: a snapshot with no usable reference identity makes classification unavailable", async () => {
+    docs.set("runs/run-1", { userId: OWNER });
+    snapshotFactory = (id) => ({ id, exists: true, data: () => ({ userId: OWNER }) }); // no `ref`
+    const d = await resolveLegacyReadDomain([runRow("run-1")]);
+    expect(d.classificationUnavailable).toBe(true);
+    expect([...d.legacyOnlyRunIds]).toEqual([]); // and it admits nothing
+  });
+
+  it("C4: a foreign reference admits nothing AND breaks completeness", async () => {
+    docs.set("runs/run-1", { userId: OWNER });
+    snapshotFactory = () => ({ id: "x", ref: { path: "runs/NOT-REQUESTED" }, exists: true, data: () => ({ userId: OWNER }) });
+    const d = await resolveLegacyReadDomain([runRow("run-1")]);
+    expect([...d.legacyOnlyRunIds]).toEqual([]);
+    expect(d.classificationUnavailable).toBe(true);
+  });
+
+  it("C5: a duplicated observation cannot make up the count for an omitted one", async () => {
+    docs.set("runs/run-1", { userId: OWNER });
+    docs.set("runs/run-2", { userId: OWNER });
+    const base = mockAdminDb.getAll;
+    mockAdminDb.getAll = async (...refs: any[]) => {
+      const all = await base(...refs);
+      const first = all.find((s: any) => s.ref.path === "runs/run-1");
+      return [first, first]; // right COUNT, wrong SET
+    };
+    try {
+      const d = await resolveLegacyReadDomain([runRow("run-1"), runRow("run-2")]);
+      expect(d.classificationUnavailable).toBe(true);
+    } finally {
+      mockAdminDb.getAll = base;
+    }
+  });
+
+  it("C6: an observed exists:false is an ordinary completed exclusion, NOT unavailable", async () => {
+    // The distinction the whole fix rests on: answered "no" vs never answered.
+    snapshotFactory = faithful(undefined, false);
+    const d = await resolveLegacyReadDomain([runRow("missing-1")]);
+    expect(d.classificationUnavailable).toBe(false);
+    expect([...d.legacyOnlyRunIds]).toEqual([]);
+  });
+
+  it("C7: Firestore unavailable is reported as unavailable, not as an empty classification", async () => {
+    adminDbAvailable = false;
+    const d = await resolveLegacyReadDomain([runRow("run-1")]);
+    expect(d.classificationUnavailable).toBe(true);
+    expect([...d.legacyOnlyRunIds]).toEqual([]);
+  });
+
+  it("C7b: no candidates at all is a completed classification, not unavailable", async () => {
+    const d = await resolveLegacyReadDomain([{ type: "research" }]);
+    expect(d.classificationUnavailable).toBe(false);
+  });
+});
 });

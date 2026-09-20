@@ -218,25 +218,55 @@ async function classifyByDocument(
     const wave = chunks.slice(i, i + MAX_CONCURRENT_CHUNKS);
     await Promise.all(
       wave.map(async (chunk) => {
-        const requested = new Set(chunk);
         try {
-          const snaps = await adminDb!.getAll(...chunk.map((id) => adminDb!.collection(collection).doc(id)));
-          for (const snap of snaps) {
-            // Associated by DOCUMENT IDENTITY and only within the requested
-            // set — never by position, and never by an id we did not ask for.
-            const id = nonEmptyString((snap as { id?: unknown } | null | undefined)?.id);
-            if (!id || !requested.has(id)) continue;
-            if (classifyCanonicalSnapshot(snap, domainOfBody) === "legacy") admitted.add(id);
-            else denied.add(id);
+          // Reference construction stays INSIDE the try: an id Firestore rejects
+          // as a document path throws here, and that must become "could not
+          // classify" rather than escaping and 500-ing the caller.
+          //
+          // Association is keyed on the EXACT canonical reference path, not on
+          // the leaf `snapshot.id`. A projection's linkage value is only
+          // length-validated by its writers, so a multi-segment value like
+          // `tenant/run-1` is reachable: it builds the perfectly valid path
+          // `runs/tenant/run-1` whose leaf id is `run-1`, and two different
+          // tenants' references can share one leaf. Leaf ids are therefore not
+          // a sufficient correlation key, and using them silently dropped such
+          // a row from BOTH sets while reporting classification as complete.
+          const expected = new Map<string, string>();
+          for (const id of chunk) {
+            expected.set(adminDb!.collection(collection).doc(id).path, id);
           }
+          const snaps = await adminDb!.getAll(...chunk.map((id) => adminDb!.collection(collection).doc(id)));
+
+          const observed = new Set<string>();
+          for (const snap of snaps) {
+            const path = nonEmptyString((snap as { ref?: { path?: unknown } } | null | undefined)?.ref?.path);
+            const logicalId = path === null ? undefined : expected.get(path);
+            if (logicalId === undefined) {
+              // A result we cannot tie back to something we asked for. It can
+              // never admit anything, and it means the result set's integrity
+              // is not intact, so the batch is not a completed classification.
+              unavailable = true;
+              continue;
+            }
+            observed.add(path as string);
+            if (classifyCanonicalSnapshot(snap, domainOfBody) === "legacy") admitted.add(logicalId);
+            else denied.add(logicalId);
+          }
+
+          // POSITIVE completeness: every requested reference must have been
+          // observed. `exists: false` IS an observation — a missing canonical
+          // document is an ordinary completed exclusion, per the authority
+          // contract — but a reference that simply never came back was never
+          // answered, and an empty eligible set must not stand in for that.
+          // Keyed on the expected-path SET, so a duplicated observation cannot
+          // make up the count for an omitted one.
+          if (observed.size !== expected.size) unavailable = true;
         } catch (err: unknown) {
           // The question could not be answered for this chunk. Every id in it
           // is excluded (fail closed) AND the caller is told classification was
           // incomplete, so a durable artifact can refuse to look authoritative.
           unavailable = true;
-          // Metadata only — never a row's content, query or review data. A
-          // chunk-level failure excludes only that chunk's ids rather than
-          // throwing: a row whose authority cannot be established is not shown.
+          // Metadata only — never a row's content, query or review data.
           logger.warn("[governance/legacyReviewReadDomain] Canonical binding read failed for a chunk; excluding those rows", {
             collection,
             chunkSize: chunk.length,

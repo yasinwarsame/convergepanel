@@ -22,7 +22,7 @@ let getAllShouldThrow = false;
 let failChunkContaining: string | null = null;
 
 function makeDocRef(path: string): any {
-  return { __path: path, get: async () => ({ exists: runDocs.has(path), data: () => runDocs.get(path) }) };
+  return { __path: path, path, get: async () => ({ exists: runDocs.has(path), data: () => runDocs.get(path) }) };
 }
 
 const mockAdminDb: any = {
@@ -45,7 +45,7 @@ const mockAdminDb: any = {
     if (failChunkContaining && refs.some((r) => r.__path === failChunkContaining)) throw new Error("transient chunk failure");
     // A real DocumentSnapshot always carries `id`; the read guard associates
     // results by identity rather than array position, so the fake must too.
-    return refs.map((ref) => ({ id: ref.__path.split("/").pop(), exists: runDocs.has(ref.__path), data: () => runDocs.get(ref.__path) }));
+    return refs.map((ref) => ({ id: ref.__path.split("/").pop(), ref: { path: ref.__path }, exists: runDocs.has(ref.__path), data: () => runDocs.get(ref.__path) }));
   },
 };
 

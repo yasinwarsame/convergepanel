@@ -33,6 +33,7 @@ let getAllShouldThrow = false;
 function makeDocRef(path: string): any {
   return {
     __path: path,
+    path,
     id: path.split("/").pop(),
     get: async () => {
       readPaths.push(path);
@@ -65,7 +66,7 @@ const mockAdminDb: any = {
     refs.forEach((r) => readPaths.push(r.__path));
     // A real DocumentSnapshot always carries `id`; the read guard associates
     // results by identity rather than array position, so the fake must too.
-    return refs.map((ref) => ({ id: ref.__path.split("/").pop(), exists: pathStore.has(ref.__path), data: () => pathStore.get(ref.__path) }));
+    return refs.map((ref) => ({ id: ref.__path.split("/").pop(), ref: { path: ref.__path }, exists: pathStore.has(ref.__path), data: () => pathStore.get(ref.__path) }));
   },
 };
 

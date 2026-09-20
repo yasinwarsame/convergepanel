@@ -16,11 +16,11 @@ let getAllShouldThrow = false;
 let getAllReverseResults = false;
 
 const mockAdminDb: any = {
-  collection: (name: string) => ({ doc: (id: string) => ({ __path: `${name}/${id}`, __id: id }) }),
+  collection: (name: string) => ({ doc: (id: string) => ({ __path: `${name}/${id}`, __id: id, path: `${name}/${id}` }) }),
   getAll: async (...refs: Array<{ __path: string; __id: string }>) => {
     getAllCalls.push(refs.map((r) => r.__path));
     if (getAllShouldThrow) throw new Error("batch read boom");
-    const out = refs.map((ref) => ({ id: ref.__id, exists: docs.has(ref.__path), data: () => docs.get(ref.__path) }));
+    const out = refs.map((ref) => ({ id: ref.__id, ref: { path: ref.__path }, exists: docs.has(ref.__path), data: () => docs.get(ref.__path) }));
     return getAllReverseResults ? out.reverse() : out;
   },
 };
