@@ -211,40 +211,73 @@ async function classifyByDocument(
     return { admitted, unavailable: true };
   }
 
-  const chunks: string[][] = [];
-  for (let i = 0; i < unique.length; i += CHUNK_SIZE) chunks.push(unique.slice(i, i + CHUNK_SIZE));
+  // ---- Canonical reference resolution, ONCE for the whole request ----
+  //
+  // Firestore NORMALIZES a document path: `doc("R")`, `doc("R/")` and
+  // `doc("/R")` all resolve to `runs/R`. Two distinct raw linkage values can
+  // therefore collapse onto ONE canonical reference, and a map keyed on the
+  // path would quietly keep whichever was written last — leaving the other
+  // logical row in neither the admitted nor the denied set while the counts
+  // still matched, so classification reported itself complete. That is the same
+  // silent-drop this module exists to prevent.
+  //
+  // So the mapping from logical id to canonical reference must be INJECTIVE. It
+  // is checked across the ENTIRE request rather than per chunk, because two
+  // colliding values could otherwise land in different batches and escape; and
+  // because that makes the answer independent of row ordering, which a per-chunk
+  // check is not.
+  //
+  // When two distinct logical ids do collide, NEITHER is classified and the
+  // operation is unavailable. Picking a winner would be a guess, and this module
+  // does not guess.
+  const owners = new Map<string, Set<string>>();
+  for (const id of unique) {
+    let path: string;
+    try {
+      path = adminDb.collection(collection).doc(id).path;
+    } catch {
+      // An id Firestore rejects as a document path cannot be classified.
+      unavailable = true;
+      continue;
+    }
+    const existing = owners.get(path);
+    if (existing) existing.add(id);
+    else owners.set(path, new Set([id]));
+  }
+
+  const resolved: Array<{ id: string; path: string }> = [];
+  for (const [path, ids] of owners) {
+    if (ids.size > 1) {
+      // Ambiguous: distinct logical ids, one canonical reference.
+      unavailable = true;
+      continue;
+    }
+    resolved.push({ id: [...ids][0], path });
+  }
+
+  const chunks: Array<Array<{ id: string; path: string }>> = [];
+  for (let i = 0; i < resolved.length; i += CHUNK_SIZE) chunks.push(resolved.slice(i, i + CHUNK_SIZE));
 
   for (let i = 0; i < chunks.length; i += MAX_CONCURRENT_CHUNKS) {
     const wave = chunks.slice(i, i + MAX_CONCURRENT_CHUNKS);
     await Promise.all(
       wave.map(async (chunk) => {
         try {
-          // Reference construction stays INSIDE the try: an id Firestore rejects
-          // as a document path throws here, and that must become "could not
-          // classify" rather than escaping and 500-ing the caller.
-          //
-          // Association is keyed on the EXACT canonical reference path, not on
-          // the leaf `snapshot.id`. A projection's linkage value is only
-          // length-validated by its writers, so a multi-segment value like
-          // `tenant/run-1` is reachable: it builds the perfectly valid path
-          // `runs/tenant/run-1` whose leaf id is `run-1`, and two different
-          // tenants' references can share one leaf. Leaf ids are therefore not
-          // a sufficient correlation key, and using them silently dropped such
-          // a row from BOTH sets while reporting classification as complete.
-          const expected = new Map<string, string>();
-          for (const id of chunk) {
-            expected.set(adminDb!.collection(collection).doc(id).path, id);
-          }
-          const snaps = await adminDb!.getAll(...chunk.map((id) => adminDb!.collection(collection).doc(id)));
+          // Association is keyed on the EXACT canonical reference path resolved
+          // above — never the leaf `snapshot.id`, which is only the last segment
+          // and can be shared by references in different parents.
+          const expected = new Map(chunk.map((entry) => [entry.path, entry.id] as const));
+          const snaps = await adminDb!.getAll(...chunk.map((entry) => adminDb!.collection(collection).doc(entry.id)));
 
           const observed = new Set<string>();
           for (const snap of snaps) {
             const path = nonEmptyString((snap as { ref?: { path?: unknown } } | null | undefined)?.ref?.path);
             const logicalId = path === null ? undefined : expected.get(path);
             if (logicalId === undefined) {
-              // A result we cannot tie back to something we asked for. It can
-              // never admit anything, and it means the result set's integrity
-              // is not intact, so the batch is not a completed classification.
+              // A result we cannot tie back to something we asked for. It admits
+              // nothing, and it means the result set's integrity is not intact,
+              // so this batch is not a completed classification — even if every
+              // reference we DID ask for also came back.
               unavailable = true;
               continue;
             }
@@ -255,11 +288,9 @@ async function classifyByDocument(
 
           // POSITIVE completeness: every requested reference must have been
           // observed. `exists: false` IS an observation — a missing canonical
-          // document is an ordinary completed exclusion, per the authority
-          // contract — but a reference that simply never came back was never
-          // answered, and an empty eligible set must not stand in for that.
-          // Keyed on the expected-path SET, so a duplicated observation cannot
-          // make up the count for an omitted one.
+          // document is an ordinary completed exclusion — but a reference that
+          // never came back was never answered. Keyed on the expected-path SET,
+          // so a duplicated observation cannot make up for an omitted one.
           if (observed.size !== expected.size) unavailable = true;
         } catch (err: unknown) {
           // The question could not be answered for this chunk. Every id in it

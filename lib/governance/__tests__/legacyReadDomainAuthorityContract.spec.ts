@@ -15,6 +15,11 @@
  * chunk.
  */
 
+import { Firestore } from "@google-cloud/firestore";
+
+/** Real SDK instance, used ONLY for local path construction/validation — no network, no credentials. */
+const realFirestore = new Firestore({ projectId: "contract-spec", ssl: false });
+
 const docs = new Map<string, unknown>();
 /** Lets a test replace what the batched read hands back, per requested id. */
 let snapshotFactory: ((id: string, path: string) => unknown) | null = null;
@@ -24,11 +29,17 @@ let maxInFlight = 0;
 let failChunksContaining: string | null = null;
 
 const mockAdminDb: any = {
-  // A real DocumentReference/Snapshot exposes the LEAF segment as `id` and the
-  // full path as `path`/`ref.path`. Keeping `__id` as the logical value we asked
-  // for lets a test distinguish the two, which is the whole point of C1/C1b.
+  // Path construction is delegated to the REAL Firestore SDK (local, no network
+  // or credentials). String concatenation is NOT good enough here: the SDK
+  // NORMALIZES (`doc("R")`, `doc("R/")` and `doc("/R")` all resolve to `runs/R`)
+  // and VALIDATES (`doc("tenant/run-1")` throws — three segments is a collection
+  // path, not a document). A naive fake makes colliding ids look distinct and
+  // invalid ids look valid, which is exactly how a silent-drop hid here before.
   collection: (name: string) => ({
-    doc: (id: string) => ({ __path: `${name}/${id}`, __id: id, id: id.split("/").pop(), path: `${name}/${id}` }),
+    doc: (id: string) => {
+      const real = realFirestore.collection(name).doc(id); // throws where production throws
+      return { __path: real.path, __id: id, id: real.id, path: real.path };
+    },
   }),
   getAll: async (...refs: Array<{ __path: string; __id: string }>) => {
     getAllCalls.push(refs.map((r) => r.__id));
@@ -277,22 +288,32 @@ describe("completeness accounting — every requested reference must be answered
   const faithful = (body: unknown, exists = true) => (id: string, path: string) => ({ id, ref: { path }, exists, data: () => body });
 
   it("C1: a multi-segment logical id is correlated by reference PATH, not leaf id", async () => {
-    // `runs/tenant/run-1` is a perfectly valid document path whose leaf id is
-    // `run-1`. Correlating on the leaf silently dropped the row from BOTH sets
-    // while reporting classification as complete.
-    docs.set("runs/tenant/run-1", { userId: OWNER });
-    const row = { runId: "tenant/run-1" };
+    // A document path needs an EVEN number of segments, so the reachable
+    // multi-segment shape is an ODD number of id segments: `a/b/c` resolves to
+    // `runs/a/b/c`, whose leaf id is `c`. Correlating on that leaf dropped the
+    // row from BOTH sets while reporting classification complete.
+    docs.set("runs/a/b/c", { userId: OWNER });
+    const row = { runId: "a/b/c" };
     const d = await resolveLegacyReadDomain([row]);
     expect(d.classificationUnavailable).toBe(false);
-    expect([...d.legacyOnlyRunIds]).toEqual(["tenant/run-1"]);
+    expect([...d.legacyOnlyRunIds]).toEqual(["a/b/c"]);
     expect(teamRunRowIsInLegacyReadDomain(row, d)).toBe(true);
   });
 
+  it("C1c: an id the SDK rejects as a document path is refused, not guessed at", async () => {
+    // `tenant/run-1` is THREE segments — a collection path. The SDK throws, so
+    // the artifact cannot be classified and the operation is unavailable.
+    const row = { runId: "tenant/run-1" };
+    const d = await resolveLegacyReadDomain([row]);
+    expect(d.classificationUnavailable).toBe(true);
+    expect(teamRunRowIsInLegacyReadDomain(row, d)).toBe(false);
+  });
+
   it("C1b: two references sharing a leaf id are classified independently", async () => {
-    docs.set("runs/tenant-a/run-1", { userId: OWNER });
-    docs.set("runs/tenant-b/run-1", { userId: OWNER, workspaceId: "ws-9" });
-    const a = { runId: "tenant-a/run-1" };
-    const b = { runId: "tenant-b/run-1" };
+    docs.set("runs/t-a/x/run-1", { userId: OWNER });
+    docs.set("runs/t-b/x/run-1", { userId: OWNER, workspaceId: "ws-9" });
+    const a = { runId: "t-a/x/run-1" };
+    const b = { runId: "t-b/x/run-1" };
     const d = await resolveLegacyReadDomain([a, b]);
     expect(d.classificationUnavailable).toBe(false);
     expect(teamRunRowIsInLegacyReadDomain(a, d)).toBe(true);   // legacy
@@ -362,6 +383,91 @@ describe("completeness accounting — every requested reference must be answered
 
   it("C7b: no candidates at all is a completed classification, not unavailable", async () => {
     const d = await resolveLegacyReadDomain([{ type: "research" }]);
+    expect(d.classificationUnavailable).toBe(false);
+  });
+});
+
+describe("canonical path injectivity — two logical ids must not collapse onto one reference", () => {
+  // Firestore normalizes: "R", "R/" and "/R" all resolve to `runs/R`.
+  it("P1: colliding ids in the SAME chunk make the operation unavailable, and neither is admitted", async () => {
+    docs.set("runs/R", { userId: OWNER }); // a real, legacy, otherwise-eligible run
+    const plain = { runId: "R" };
+    const decoy = { runId: "R/" };
+    const d = await resolveLegacyReadDomain([plain, decoy]);
+    expect(d.classificationUnavailable).toBe(true);
+    expect([...d.legacyOnlyRunIds]).toEqual([]);
+    // Neither is picked as a winner.
+    expect(teamRunRowIsInLegacyReadDomain(plain, d)).toBe(false);
+    expect(teamRunRowIsInLegacyReadDomain(decoy, d)).toBe(false);
+  });
+
+  it("P2: colliding ids in DIFFERENT chunks are still detected", async () => {
+    // CHUNK_SIZE is 10; nine fillers push the pair across a batch boundary.
+    docs.set("runs/R", { userId: OWNER });
+    for (let i = 0; i < 9; i++) docs.set(`runs/f${i}`, { userId: OWNER });
+    const rows = [{ runId: "R" }, ...Array.from({ length: 9 }, (_, i) => ({ runId: `f${i}` })), { runId: "R/" }];
+    const d = await resolveLegacyReadDomain(rows);
+    expect(d.classificationUnavailable).toBe(true);
+  });
+
+  it("P3: the verdict does not depend on row ordering", async () => {
+    docs.set("runs/R", { userId: OWNER });
+    for (let i = 0; i < 9; i++) docs.set(`runs/f${i}`, { userId: OWNER });
+    const fillers = Array.from({ length: 9 }, (_, i) => ({ runId: `f${i}` }));
+    const adjacent = await resolveLegacyReadDomain([{ runId: "R" }, { runId: "R/" }, ...fillers]);
+    const separated = await resolveLegacyReadDomain([{ runId: "R" }, ...fillers, { runId: "R/" }]);
+    expect(adjacent.classificationUnavailable).toBe(separated.classificationUnavailable);
+    expect(adjacent.classificationUnavailable).toBe(true);
+  });
+
+  it("P4: a leading-slash variant collides too", async () => {
+    docs.set("runs/R", { userId: OWNER });
+    const d = await resolveLegacyReadDomain([{ runId: "R" }, { runId: "/R" }]);
+    expect(d.classificationUnavailable).toBe(true);
+  });
+
+  it("P5: the SAME logical id repeated is benign, not a collision", async () => {
+    // A page can legitimately list one id twice; that is deduplication, not
+    // ambiguity, and it must not refuse the export.
+    docs.set("runs/R", { userId: OWNER });
+    const row = { runId: "R" };
+    const d = await resolveLegacyReadDomain([row, row, row]);
+    expect(d.classificationUnavailable).toBe(false);
+    expect(teamRunRowIsInLegacyReadDomain(row, d)).toBe(true);
+  });
+
+  it("P6: a collision does not taint unrelated rows' classification", async () => {
+    docs.set("runs/R", { userId: OWNER });
+    docs.set("runs/ok", { userId: OWNER });
+    const d = await resolveLegacyReadDomain([{ runId: "R" }, { runId: "R/" }, { runId: "ok" }]);
+    expect(d.classificationUnavailable).toBe(true);        // the operation is incomplete
+    expect([...d.legacyOnlyRunIds]).toEqual(["ok"]);        // but `ok` was still answered
+  });
+});
+
+describe("batch result integrity — an UNREQUESTED result is an anomaly, not noise", () => {
+  it("P7: an extra untied snapshot marks the operation unavailable even when every expected reference came back", async () => {
+    // Completeness alone cannot catch this: all expected paths ARE observed, so
+    // `observed.size === expected.size`. Only the untied-result branch does.
+    docs.set("runs/r1", { userId: OWNER });
+    const base = mockAdminDb.getAll;
+    mockAdminDb.getAll = async (...refs: any[]) => [
+      ...(await base(...refs)),
+      { id: "FOREIGN", ref: { path: "runs/FOREIGN" }, exists: true, data: () => ({ userId: OWNER }) },
+    ];
+    try {
+      const d = await resolveLegacyReadDomain([runRow("r1")]);
+      expect(d.classificationUnavailable).toBe(true);
+      expect([...d.legacyOnlyRunIds]).toEqual(["r1"]); // the real answer still stands
+    } finally {
+      mockAdminDb.getAll = base;
+    }
+  });
+
+  it("P8: an ordinary excluded answer is NOT a batch anomaly", async () => {
+    // Workspace-bound is an answered "no"; it must not look like corruption.
+    docs.set("runs/w", { userId: OWNER, workspaceId: "ws-9" });
+    const d = await resolveLegacyReadDomain([runRow("w")]);
     expect(d.classificationUnavailable).toBe(false);
   });
 });

@@ -281,6 +281,30 @@ describe("GET /api/teams/audit-export — Workspace-bound exclusion", () => {
       expect((await csv.text()).trim().split("\n")).toHaveLength(1); // header only
     });
 
+    // The three-way contract. The failure case asserts the ABSENCE of an
+    // attachment; without these two positive controls, deleting the header from
+    // both success branches would satisfy every assertion in this file.
+    it("a successful JSON export IS a downloadable attachment", async () => {
+      setRun("run-in");
+      teamRunDocs.set("p-in", classicRow("run-in", { timestamp: inWindow }));
+      const res = await GET(url());
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-disposition")).toMatch(/^attachment; filename=".*\.json"$/);
+    });
+
+    it("a successful CSV export IS a downloadable attachment", async () => {
+      setRun("run-in");
+      teamRunDocs.set("p-in", classicRow("run-in", { timestamp: inWindow }));
+      const res = await GET(url("&format=csv"));
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-disposition")).toMatch(/^attachment; filename=".*\.csv"$/);
+    });
+
+    it("a genuinely EMPTY export is still an attachment in both formats", async () => {
+      expect((await GET(url())).headers.get("content-disposition")).toMatch(/attachment/);
+      expect((await GET(url("&format=csv"))).headers.get("content-disposition")).toMatch(/attachment/);
+    });
+
     it("fails visibly in JSON when an in-window candidate cannot be classified", async () => {
       setRun("run-in");
       teamRunDocs.set("p-in", classicRow("run-in", { timestamp: inWindow }));
