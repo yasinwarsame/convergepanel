@@ -36,6 +36,7 @@ import {
 import { hasAdaptiveReviewSubmissionOverride } from "@/lib/governance/adaptiveHumanReviewAssignment";
 import { PersistedAdaptiveSchemaId } from "@/lib/adaptiveSchema/persistedOutput";
 import { logger } from "@/lib/logger";
+import { runIsLegacyOnlyForReviewMutation } from "@/lib/governance/legacyReviewRunAuthority";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -218,6 +219,20 @@ export async function POST(req: NextRequest, { params }: { params: { runId: stri
   // substitute for it, since state could change between the two reads.
   const runSnap = await adminDb.collection("runs").doc(runId).get();
   if (!runSnap.exists) {
+    return errorResponse(404, "not_found", "Run not found.");
+  }
+
+  // Phase 1 Cross-Authority Guard — this route authorizes through legacy Team
+  // admin status plus a `teamRuns` projection. Once a run is Workspace-bound,
+  // Workspace authority is exclusive and that legacy authority no longer
+  // applies to it. The check lives HERE rather than inside
+  // `submitAdaptiveHumanReview()` because that mutation is shared verbatim
+  // with the PERSONAL decision route (`/api/user/runs/{runId}/decision`),
+  // which legitimately serves Personal-Workspace-bound runs and must keep
+  // working; the exclusion belongs where legacy TEAM authority is
+  // established, not in the shared writer. Reported as the route's existing
+  // not-found answer so the denial reveals no other authority domain.
+  if (!runIsLegacyOnlyForReviewMutation(runSnap.data())) {
     return errorResponse(404, "not_found", "Run not found.");
   }
   const runData = runSnap.data();

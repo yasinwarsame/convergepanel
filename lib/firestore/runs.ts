@@ -70,6 +70,7 @@ import {
   HumanReviewStatus,
 } from "@/lib/adaptiveSchema/governanceRecordParser";
 import { logger } from "@/lib/logger";
+import { runIsLegacyOnlyForReviewMutation } from "@/lib/governance/legacyReviewRunAuthority";
 
 // CRITICAL: Shared safeNum helper for consistency
 // This ensures we use the same NaN protection everywhere
@@ -1060,6 +1061,16 @@ export async function submitAdaptiveHumanReviewAssignment(args: {
       if (!runSnap.exists) {
         return { ok: false, reason: "run_missing" };
       }
+      // Phase 1 Cross-Authority Guard — applies to LEGACY TEAM authority only.
+      // `teamId: null` is the PERSONAL reviewer-assignment propagation path
+      // (`lib/governance/personalReviewerAssignment.ts`), which legitimately
+      // serves runs bound to their owner's Personal Workspace and must keep
+      // working; only a legacy TEAM actor is excluded from a Workspace-bound
+      // run. Refused inside this transaction, before any write, and reported
+      // as `run_missing` so the denial discloses no other authority domain.
+      if (args.teamId !== null && !runIsLegacyOnlyForReviewMutation(runSnap.data())) {
+        return { ok: false, reason: "run_missing" };
+      }
 
       const parseResult = parseGovernanceRecord(runSnap.data()?.governanceRecord);
       if (!parseResult.ok) {
@@ -1247,6 +1258,13 @@ export async function submitAdaptiveHumanReviewPanel(args: {
       if (!runSnap.exists) {
         return { ok: false, reason: "run_missing" };
       }
+      // Phase 1 Cross-Authority Guard — a Workspace-bound run belongs to
+      // Workspace authority alone. Refused INSIDE this transaction, before any
+      // write, and reported as `run_missing` so the denial is byte-identical to
+      // a genuinely absent run and discloses no other authority domain.
+      if (!runIsLegacyOnlyForReviewMutation(runSnap.data())) {
+        return { ok: false, reason: "run_missing" };
+      }
 
       const parseResult = parseGovernanceRecord(runSnap.data()?.governanceRecord);
       if (!parseResult.ok) {
@@ -1362,6 +1380,13 @@ export async function cancelAdaptiveHumanReviewPanel(args: {
       const [runSnap, panelSnap] = await Promise.all([txn.get(runRef), txn.get(panelRef)]);
 
       if (!runSnap.exists) {
+        return { ok: false, reason: "run_missing" };
+      }
+      // Phase 1 Cross-Authority Guard — a Workspace-bound run belongs to
+      // Workspace authority alone. Refused INSIDE this transaction, before any
+      // write, and reported as `run_missing` so the denial is byte-identical to
+      // a genuinely absent run and discloses no other authority domain.
+      if (!runIsLegacyOnlyForReviewMutation(runSnap.data())) {
         return { ok: false, reason: "run_missing" };
       }
 
@@ -1551,6 +1576,13 @@ export async function submitAdaptiveHumanReviewVote(args: {
       ]);
 
       if (!runSnap.exists) {
+        return { ok: false, reason: "run_missing" };
+      }
+      // Phase 1 Cross-Authority Guard — a Workspace-bound run belongs to
+      // Workspace authority alone. Refused INSIDE this transaction, before any
+      // write, and reported as `run_missing` so the denial is byte-identical to
+      // a genuinely absent run and discloses no other authority domain.
+      if (!runIsLegacyOnlyForReviewMutation(runSnap.data())) {
         return { ok: false, reason: "run_missing" };
       }
 
@@ -1756,6 +1788,13 @@ export async function finalizeAdaptiveHumanReviewPanel(args: {
       const [runSnap, panelSnap] = await Promise.all([txn.get(runRef), txn.get(panelRef)]);
 
       if (!runSnap.exists) {
+        return { ok: false, reason: "run_missing" };
+      }
+      // Phase 1 Cross-Authority Guard — a Workspace-bound run belongs to
+      // Workspace authority alone. Refused INSIDE this transaction, before any
+      // write, and reported as `run_missing` so the denial is byte-identical to
+      // a genuinely absent run and discloses no other authority domain.
+      if (!runIsLegacyOnlyForReviewMutation(runSnap.data())) {
         return { ok: false, reason: "run_missing" };
       }
 
@@ -2125,6 +2164,13 @@ export async function overrideAdaptiveHumanReviewPanel(args: {
       const [runSnap, panelSnap] = await Promise.all([txn.get(runRef), txn.get(panelRef)]);
 
       if (!runSnap.exists) {
+        return { ok: false, reason: "run_missing" };
+      }
+      // Phase 1 Cross-Authority Guard — a Workspace-bound run belongs to
+      // Workspace authority alone. Refused INSIDE this transaction, before any
+      // write, and reported as `run_missing` so the denial is byte-identical to
+      // a genuinely absent run and discloses no other authority domain.
+      if (!runIsLegacyOnlyForReviewMutation(runSnap.data())) {
         return { ok: false, reason: "run_missing" };
       }
 
