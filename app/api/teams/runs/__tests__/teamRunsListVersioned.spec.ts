@@ -130,8 +130,20 @@ function adaptiveDoc(overrides: Record<string, unknown> = {}) {
   };
 }
 
+/**
+ * Phase 1 Cross-Authority READ Guard — a classic `teamRuns` row always names
+ * exactly one canonical artifact (`teamGovernancePipeline.ts` writes both
+ * `runId` and `verificationId`, one of them null), so a row naming NEITHER is
+ * not a product shape and is no longer readable. These contract tests give the
+ * row a run linkage and seed its canonical run, bound legacy; the Workspace-bound
+ * and unlinked cases live in `crossAuthorityReadGuard.spec.ts`.
+ */
+let legacyRunSeq = 0;
 function legacyDoc(overrides: Record<string, unknown> = {}) {
+  const runId = typeof overrides.runId === "string" ? overrides.runId : `legacy-run-${++legacyRunSeq}`;
+  if (!pathStore.has(`runs/${runId}`)) pathStore.set(`runs/${runId}`, { userId: "owner-uid" });
   return {
+    runId,
     teamId: TEAM_ID,
     userId: "owner-uid",
     userEmail: "owner@test.com",
@@ -152,6 +164,7 @@ beforeEach(() => {
   teamRunDocs.clear();
   pathStore.clear();
   getAllShouldThrow = false;
+  legacyRunSeq = 0;
   getAllCallCount = 0;
   getAllSucceedForFirstCalls = 0;
   mockLoggerWarn.mockClear();

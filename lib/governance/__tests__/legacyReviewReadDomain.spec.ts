@@ -144,10 +144,14 @@ describe("verification-backed rows — which artifacts are admitted", () => {
     expect([...d.legacyOnlyVerificationIds]).toEqual(["ver-legacy"]);
   });
 
-  it("never looks up a verification for a row that already names a run", async () => {
+  it("looks up NEITHER artifact for a row naming both — the shape is ineligible", async () => {
+    // Preferring the run would let a legacy run id authorize content that came
+    // from a Workspace-bound verification, so the row is refused outright.
     docs.set("runs/run-1", { userId: OWNER });
-    await resolveLegacyReadDomain([{ runId: "run-1", verificationId: "ver-1" }]);
-    expect(getAllCalls.flat()).toEqual(["runs/run-1"]);
+    docs.set("verifications/ver-1", { claimText: "c" });
+    const d = await resolveLegacyReadDomain([{ runId: "run-1", verificationId: "ver-1" }]);
+    expect(getAllCalls).toEqual([]);
+    expect(teamRunRowIsInLegacyReadDomain({ runId: "run-1", verificationId: "ver-1" }, d)).toBe(false);
   });
 });
 
@@ -182,9 +186,9 @@ describe("read shape", () => {
 });
 
 describe("teamRunRowIsInLegacyReadDomain", () => {
-  it("keeps a row that names neither a run nor a verification", async () => {
+  it("drops a row that names neither a run nor a verification", async () => {
     const d = await resolveLegacyReadDomain([]);
-    expect(teamRunRowIsInLegacyReadDomain({ type: "research", runId: null }, d)).toBe(true);
+    expect(teamRunRowIsInLegacyReadDomain({ type: "research", runId: null }, d)).toBe(false);
   });
 
   it("keeps a run-backed row proven legacy-only, drops one that was not", async () => {

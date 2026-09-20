@@ -15,6 +15,8 @@
 
 const teamRunDocs = new Map<string, Record<string, any>>();
 const runDocs = new Map<string, Record<string, any>>();
+/** Canonical paths the guard actually classified — proves the window runs first. */
+const classifiedPaths: string[] = [];
 let getAllShouldThrow = false;
 
 function makeDocRef(path: string): any {
@@ -36,6 +38,7 @@ const mockAdminDb: any = {
     return { doc: (id: string) => makeDocRef(`${name}/${id}`) };
   },
   getAll: async (...refs: Array<{ __path: string }>) => {
+    refs.forEach((r) => classifiedPaths.push(r.__path));
     if (getAllShouldThrow) throw new Error("batch read boom");
     // A real DocumentSnapshot always carries `id`; the read guard associates
     // results by identity rather than array position, so the fake must too.
@@ -97,6 +100,7 @@ function setVerification(verificationId: string, binding: Record<string, unknown
 beforeEach(() => {
   teamRunDocs.clear();
   runDocs.clear();
+  classifiedPaths.length = 0;
   getAllShouldThrow = false;
   [mockedGetRequestUid, mockedLoadUserAndTeam, mockedMemberRole, mockedIsTeamAdmin].forEach((m) => m.mockReset());
   mockedGetRequestUid.mockResolvedValue("caller-uid");
@@ -189,9 +193,55 @@ describe("GET /api/teams/audit-export — Workspace-bound exclusion", () => {
     expect(rows).toHaveLength(1);
   });
 
-  it("CONTROL — a classic row naming neither a run nor a verification is still exported", async () => {
+  it("omits a classic row naming neither a run nor a verification", async () => {
+    // No writer produces this shape, so it cannot be proven legacy-eligible.
     teamRunDocs.set("p-n", classicRow(null));
     const rows = await (await GET(new NextRequest("http://localhost/api/teams/audit-export"))).json();
-    expect(rows).toHaveLength(1);
+    expect(rows).toEqual([]);
+  });
+
+  // ---- Date window ordering (cheap local filter before canonical reads) ----
+  describe("from/to window", () => {
+    const WINDOW = "?from=2026-08-01T00:00:00.000Z&to=2026-08-31T00:00:00.000Z";
+    const inWindow = fakeTimestamp("2026-08-15T00:00:00.000Z");
+    const outWindow = fakeTimestamp("2026-01-01T00:00:00.000Z");
+
+    it("does not classify rows outside the requested window", async () => {
+      setRun("run-in");
+      setRun("run-out");
+      teamRunDocs.set("p-in", classicRow("run-in", { timestamp: inWindow, query: "IN" }));
+      teamRunDocs.set("p-out", classicRow("run-out", { timestamp: outWindow, query: "OUT" }));
+
+      const rows = await (await GET(new NextRequest(`http://localhost/api/teams/audit-export${WINDOW}`))).json();
+
+      expect(rows.map((r: any) => r.queryTruncated)).toEqual(["IN"]);
+      // The out-of-window row cost no canonical read at all.
+      expect(classifiedPaths).toEqual(["runs/run-in"]);
+    });
+
+    it("still excludes a Workspace-bound run INSIDE the window", async () => {
+      setRun("run-ws", { workspaceId: "ws-team-1" });
+      teamRunDocs.set("p-ws", classicRow("run-ws", { timestamp: inWindow, query: "SECRET" }));
+      const rows = await (await GET(new NextRequest(`http://localhost/api/teams/audit-export${WINDOW}`))).json();
+      expect(rows).toEqual([]);
+    });
+
+    it("still excludes a Workspace-bound CLAIM VERIFICATION inside the window, in JSON and CSV", async () => {
+      setVerification("ver-ws", { workspaceId: "ws-team-1" });
+      teamRunDocs.set("p-v", classicRow(null, { type: "verification", verificationId: "ver-ws", timestamp: inWindow, query: "SECRET CLAIM" }));
+      const rows = await (await GET(new NextRequest(`http://localhost/api/teams/audit-export${WINDOW}`))).json();
+      expect(rows).toEqual([]);
+      const csv = await (await GET(new NextRequest(`http://localhost/api/teams/audit-export${WINDOW}&format=csv`))).text();
+      expect(csv).not.toContain("SECRET CLAIM");
+    });
+
+    it("CONTROL — a legitimate legacy verification inside the window is exported in JSON and CSV", async () => {
+      setVerification("ver-ok");
+      teamRunDocs.set("p-v", classicRow(null, { type: "verification", verificationId: "ver-ok", timestamp: inWindow, query: "KEEP ME" }));
+      const rows = await (await GET(new NextRequest(`http://localhost/api/teams/audit-export${WINDOW}`))).json();
+      expect(rows).toHaveLength(1);
+      const csv = await (await GET(new NextRequest(`http://localhost/api/teams/audit-export${WINDOW}&format=csv`))).text();
+      expect(csv).toContain("KEEP ME");
+    });
   });
 });

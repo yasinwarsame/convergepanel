@@ -390,13 +390,23 @@ describe("GET /api/teams/runs?version=1 — Workspace-bound exclusion", () => {
     expect((await (await GET(buildRequest())).json()).items).toEqual([]);
   });
 
-  it("CONTROL — keeps a row that names neither a run nor a verification", async () => {
-    // `synthesize-panel` passes `runId: runId || undefined`, so a legacy
-    // research row can reference no canonical artifact at all. It has nothing
-    // in another authority domain to expose.
+  it("excludes a row that names neither a run nor a verification", async () => {
+    // Every writer names exactly one canonical artifact (`synthesize-panel`
+    // 400s without a runId; both Claim routes always pass a verificationId), so
+    // a row naming neither cannot be proven to belong to this authority domain.
     teamRunDocs.set("p-N", legacyRow({ runId: null }));
     const body = await (await GET(buildRequest())).json();
-    expect(body.items).toHaveLength(1);
+    expect(body.items).toEqual([]);
+  });
+
+  it("excludes a row naming BOTH a run and a verification", async () => {
+    // Not a product shape; preferring one canonical artifact over the other
+    // would let a legacy run id authorize Workspace-bound verification content.
+    setRun("run-A");
+    setVerification("ver-A");
+    teamRunDocs.set("p-B", legacyRow({ runId: "run-A", verificationId: "ver-A" }));
+    const body = await (await GET(buildRequest())).json();
+    expect(body.items).toEqual([]);
   });
 
   it("excludes a Workspace-bound CLASSIC row too, not only adaptive rows", async () => {
@@ -450,4 +460,71 @@ describe("GET /api/teams/runs (unversioned) — same authority boundary", () => 
     expect(body.runs).toHaveLength(1);
     expect(body.runs[0].query).toBe("What is the best CRM for a 20-person sales team?");
   });
+
+describe("pagination integrity across every row category", () => {
+  it("returns only eligible rows, with correct totals, no duplicates and no skips", async () => {
+    // Six categories interleaved: legacy run, Workspace run, legacy
+    // verification, Workspace verification, malformed run, and a row naming no
+    // canonical artifact at all.
+    const expectedRuns: string[] = [];
+    let expectedLegacyVerifications = 0;
+    for (let i = 0; i < 18; i++) {
+      const createdAt = `2026-07-${String(28 - i).padStart(2, "0")}T00:00:00.000Z`;
+      const ts = fakeTimestamp(createdAt);
+      switch (i % 6) {
+        case 0: {
+          const id = `run-ok-${i}`; setRun(id);
+          teamRunDocs.set(`p${i}`, adaptiveRow(id, { createdAt }));
+          expectedRuns.push(id); break;
+        }
+        case 1: {
+          const id = `run-ws-${i}`; setRun(id, { workspaceId: "ws-team-1" }); setWorkspaceReviewState(id);
+          teamRunDocs.set(`p${i}`, adaptiveRow(id, { createdAt })); break;
+        }
+        case 2: {
+          setVerification(`ver-ok-${i}`);
+          teamRunDocs.set(`p${i}`, legacyRow({ type: "verification", runId: null, verificationId: `ver-ok-${i}`, timestamp: ts }));
+          expectedLegacyVerifications += 1; break;
+        }
+        case 3: {
+          setVerification(`ver-ws-${i}`, { workspaceId: "ws-team-1" });
+          teamRunDocs.set(`p${i}`, legacyRow({ type: "verification", runId: null, verificationId: `ver-ws-${i}`, query: "SECRET CLAIM", timestamp: ts })); break;
+        }
+        case 4: {
+          // Canonical run exists but its binding is malformed -> ineligible.
+          const id = `run-bad-${i}`; setRun(id, { workspaceId: 12345 });
+          teamRunDocs.set(`p${i}`, adaptiveRow(id, { createdAt })); break;
+        }
+        default: {
+          // Names no canonical artifact -> ineligible.
+          teamRunDocs.set(`p${i}`, legacyRow({ runId: null, timestamp: ts })); break;
+        }
+      }
+    }
+
+    const seenRuns: string[] = [];
+    let legacyRows = 0;
+    let total = -1;
+    const nextFlags: boolean[] = [];
+    for (let page = 1; page <= 4; page++) {
+      const body = await (await GET(buildRequest(`&page=${page}&limit=3`))).json();
+      total = body.pagination.total;
+      nextFlags.push(body.pagination.hasNextPage);
+      for (const item of body.items) {
+        if (item.kind === "adaptive") seenRuns.push(item.runId);
+        else legacyRows += 1;
+      }
+      expect(JSON.stringify(body)).not.toContain("SECRET CLAIM");
+      expect(JSON.stringify(body)).not.toContain("ws-reviewer");
+    }
+
+    expect(total).toBe(expectedRuns.length + expectedLegacyVerifications); // 3 + 3
+    expect(seenRuns.length).toBe(new Set(seenRuns).size);                   // no duplicates
+    expect([...seenRuns].sort()).toEqual([...expectedRuns].sort());         // none skipped
+    expect(legacyRows).toBe(expectedLegacyVerifications);
+    expect(nextFlags.slice(0, 2)).toEqual([true, false]);                   // 6 rows at 3/page
+    // No excluded run was ever enriched.
+    for (let i = 1; i < 18; i += 6) expect(reviewPathsFor(`run-ws-${i}`)).toEqual([]);
+  });
+});
 });
