@@ -410,3 +410,107 @@ describe("§13 parity — neither route may expose a field the other suppresses"
     expect(identityResolverSawTeamReviewers()).toBe(false);
   });
 });
+
+/**
+ * A LEGACY run whose canonical `humanReview` was DECIDED BY A TEAM ACTOR via
+ * the Team decision route — no panel involved. This is the shape the first
+ * version of the fix missed entirely: the earlier parity fixture left
+ * `humanReview.status = "unreviewed"` with no `reviewerId`, so the vulnerable
+ * `singleReviewer` branch was never entered and the test passed vacuously.
+ */
+const TEAM_ACTOR = "TEAM_ACTOR_UID";
+function seedTeamDecidedRun() {
+  runDoc = {
+    userId: OWNER,
+    question: "q",
+    governanceRecord: {
+      ...governanceRecord(),
+      humanReview: { status: "approved", reviewerId: TEAM_ACTOR, reviewedAt: "2026-08-03T00:00:00.000Z", decidedVia: "single_reviewer" },
+    },
+  };
+  historyDocs = [
+    {
+      id: "h-team",
+      data: {
+        version: 1, kind: "adaptive_human_review", historyId: "h-team", decisionId: "h-team",
+        runId: RUN, teamId: "team-SECRET", schemaId: "decision_support", answerShape: "decision_support_view",
+        priorStatus: "unreviewed", newStatus: "approved", reviewerId: TEAM_ACTOR,
+        reviewedAt: "2026-08-03T00:00:00.000Z", governanceRecordUpdatedAt: "2026-08-03T00:00:00.000Z",
+        commentPresent: true, conditionsCount: 0,
+      },
+    },
+  ];
+}
+
+function identityResolverSaw(uid: string): boolean {
+  return resolvedUidCalls.some((call) => call.includes(uid));
+}
+
+describe("F1 — a legacy TEAM actor's single-reviewer decision is not disclosed to a Personal reviewer", () => {
+  beforeEach(() => {
+    seedTeamDecidedRun();
+    seedPersonalAssignment();
+  });
+
+  it("the Team decider's uid never reaches the identity resolver", async () => {
+    await callGovernance();
+    expect(identityResolverSaw(TEAM_ACTOR)).toBe(false);
+  });
+
+  it("singleReviewer does not carry the Team decider's identity", async () => {
+    const r = await callGovernance();
+    expect(r.status).toBe(200);
+    expect(r.body.viewerRole).toBe("personal_reviewer");
+    expect(r.body.governance.singleReviewer).toBeNull();
+    expect(JSON.stringify(r.body)).not.toContain(`NAME_OF_${TEAM_ACTOR}`);
+    expect(JSON.stringify(r.body)).not.toContain(TEAM_ACTOR);
+  });
+
+  it("PARITY: governance and review-history agree — both hide that decision", async () => {
+    const g = await callGovernance();
+    const h = await callHistory();
+    expect(h.body.items).toEqual([]);
+    expect(JSON.stringify(g.body)).not.toContain(TEAM_ACTOR);
+    expect(JSON.stringify(h.body)).not.toContain(TEAM_ACTOR);
+    expect(identityResolverSaw(TEAM_ACTOR)).toBe(false);
+  });
+
+  it("CONTROL: the reviewer's OWN decision is still shown to them", async () => {
+    runDoc = {
+      userId: OWNER,
+      question: "q",
+      governanceRecord: {
+        ...governanceRecord(),
+        humanReview: { status: "approved", reviewerId: REVIEWER, reviewedAt: "2026-08-04T00:00:00.000Z", decidedVia: "single_reviewer" },
+      },
+    };
+    const r = await callGovernance();
+    expect(r.body.governance.singleReviewer).not.toBeNull();
+    expect(r.body.governance.singleReviewer.displayName).toBe(`NAME_OF_${REVIEWER}`);
+  });
+
+  it("CONTROL: the OWNER still sees the Team decider", async () => {
+    mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: OWNER });
+    const r = await callGovernance();
+    expect(r.body.viewerRole).toBe("owner");
+    expect(r.body.governance.singleReviewer.displayName).toBe(`NAME_OF_${TEAM_ACTOR}`);
+    expect(identityResolverSaw(TEAM_ACTOR)).toBe(true);
+  });
+});
+
+describe("F2 — a finalized panel's reviewer is not resolved for a Personal reviewer", () => {
+  it("the panelist uid never reaches the identity resolver, even though no name is returned", async () => {
+    runDoc = {
+      userId: OWNER,
+      question: "q",
+      governanceRecord: {
+        ...governanceRecord(),
+        humanReview: { status: "approved", reviewerId: "TEAM_PANELIST_UID", reviewedAt: "2026-08-03T00:00:00.000Z", decidedVia: "multi_reviewer_panel" },
+      },
+    };
+    seedPersonalAssignment();
+    const r = await callGovernance();
+    expect(r.body.governance.singleReviewer).toBeNull();
+    expect(identityResolverSaw("TEAM_PANELIST_UID")).toBe(false);
+  });
+});

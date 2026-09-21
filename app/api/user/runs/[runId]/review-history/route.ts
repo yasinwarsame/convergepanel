@@ -122,7 +122,11 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
   // identity is resolved — the Team reviewers' uids must never reach
   // `resolveReviewerDisplayNames` at all. The OWNER is unchanged and still
   // sees every row on their own run.
-  const restrictToPersonalScope = access.role === "personal_reviewer";
+  // Fail closed on role, not open: anything that is not the owner is
+  // restricted to personal scope, so a role added to
+  // `AdaptiveRunAccessRole` later cannot silently inherit the owner's
+  // unrestricted history view.
+  const restrictToPersonalScope = access.role !== "owner";
   const rows: Array<{ item: AdaptiveReviewHistoryListItemV1; historyId: string; reviewerId: string | null }> = [];
   for (const doc of historySnap.docs) {
     const result = classifyAdaptiveHumanReviewHistoryRow(doc.id, doc.data());

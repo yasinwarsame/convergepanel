@@ -1,3 +1,4 @@
+import { viewerMayReadDecisionProvenance } from "@/lib/governance/personalReviewScope";
 import "server-only";
 import type { RunDocument } from "@/lib/panel/schemas";
 import type { ModelId } from "@/lib/types";
@@ -143,11 +144,22 @@ export async function buildRunReadPayload(args: {
   // and only when a real adaptiveOutput was persisted (governance is never
   // initialized otherwise). Never reviewer name or comment text.
   const parsedGovernance = parsedAdaptive.ok ? parseGovernanceRecord(data.governanceRecord) : { ok: false as const };
+  //
+  // PHASE 1 — Personal/Team review isolation. `decidedVia` is omitted for a
+  // personal reviewer. `"multi_reviewer_panel"` / `"multi_reviewer_owner_override"`
+  // are positive assertions that a legacy Team panel exists on this run — a
+  // provenance oracle that survives even when no reviewer name, vote or
+  // panel object is returned, and it would have re-opened through this
+  // sibling exactly what the governance route's `historyScope` closed.
+  // Scoped to the Personal capability only: the owner and Team-authorized
+  // viewers keep the field.
   const humanReview = parsedGovernance.ok
     ? {
         status: parsedGovernance.record.humanReview.status,
         conditions: parsedGovernance.record.humanReview.conditions,
-        decidedVia: parsedGovernance.record.humanReview.decidedVia,
+        ...(viewerMayReadDecisionProvenance(viewerRole)
+          ? { decidedVia: parsedGovernance.record.humanReview.decidedVia }
+          : {}),
       }
     : null;
 
