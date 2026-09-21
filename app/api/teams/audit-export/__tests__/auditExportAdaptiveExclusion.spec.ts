@@ -7,8 +7,15 @@
  */
 
 const teamRunDocs = new Map<string, Record<string, any>>();
+/**
+ * Phase 1 Cross-Authority READ Guard — the export now classifies each row's
+ * canonical artifact before rendering it, so the fake must serve `runs/{id}`
+ * lookups too. Snapshots carry `id`, as real ones do: association is by
+ * identity, never by position.
+ */
+const canonicalDocs = new Map<string, Record<string, any>>();
 
-const mockAdminDb = {
+const mockAdminDb: any = {
   collection: (name: string) => ({
     where: (field: string, _op: string, value: unknown) => ({
       get: async () => {
@@ -16,7 +23,10 @@ const mockAdminDb = {
         return { docs: matches.map(([id, data]) => ({ id, data: () => data })) };
       },
     }),
+    doc: (id: string) => ({ __path: `${name}/${id}`, __id: id, path: `${name}/${id}` }),
   }),
+  getAll: async (...refs: Array<{ __path: string; __id: string }>) =>
+    refs.map((ref) => ({ id: ref.__id, ref: { path: ref.__path }, exists: canonicalDocs.has(ref.__path), data: () => canonicalDocs.get(ref.__path) })),
 };
 
 jest.mock("@/lib/firebase/admin", () => ({
@@ -43,8 +53,13 @@ function fakeTimestamp(iso: string) {
   return { toMillis: () => new Date(iso).getTime() };
 }
 
+let legacyRunSeq = 0;
 function legacyDoc(overrides: Record<string, unknown> = {}) {
+  // A classic row always names exactly one canonical artifact; seed its run.
+  const runId = typeof overrides.runId === "string" ? overrides.runId : `legacy-run-${++legacyRunSeq}`;
+  if (!canonicalDocs.has(`runs/${runId}`)) canonicalDocs.set(`runs/${runId}`, { userId: "owner-uid" });
   return {
+    runId,
     teamId: TEAM_ID,
     userEmail: "owner@test.com",
     type: "research",
@@ -82,6 +97,8 @@ function buildRequest(qs = ""): NextRequest {
 
 beforeEach(() => {
   teamRunDocs.clear();
+  canonicalDocs.clear();
+  legacyRunSeq = 0;
   mockedGetRequestUid.mockReset();
   mockedLoadUserAndTeam.mockReset();
   mockedMemberRole.mockReset();

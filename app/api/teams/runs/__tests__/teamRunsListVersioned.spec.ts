@@ -12,10 +12,19 @@ const teamRunDocs = new Map<string, Record<string, any>>();
 // "runs/{runId}/humanReviewPanel/current", "runs/{runId}/humanReviewVotes/{voteId}".
 const pathStore = new Map<string, Record<string, any>>();
 let getAllShouldThrow = false;
+// Phase 1 Cross-Authority READ Guard — the route now issues an EXTRA batched
+// read before enrichment, to classify each row's canonical Workspace binding.
+// That read and the enrichment reads fail in opposite directions on purpose: a
+// binding-read failure must EXCLUDE the row (authority unprovable), while an
+// enrichment-read failure must KEEP it and merely degrade detail. This counter
+// lets a test fail only the enrichment pass, so both contracts stay testable.
+let getAllCallCount = 0;
+let getAllSucceedForFirstCalls = 0;
 
 function makeDocRef(path: string): any {
   return {
     __path: path,
+    path,
     id: path.split("/").pop(),
     get: async () => ({ exists: pathStore.has(path), data: () => pathStore.get(path) }),
     collection: (name: string) => makeCollectionRef(`${path}/${name}`),
@@ -43,8 +52,11 @@ const mockAdminDb = {
     return makeCollectionRef(name);
   },
   getAll: async (...refs: Array<{ __path: string }>) => {
-    if (getAllShouldThrow) throw new Error("batch read boom");
-    return refs.map((ref) => ({ exists: pathStore.has(ref.__path), data: () => pathStore.get(ref.__path) }));
+    getAllCallCount += 1;
+    if (getAllShouldThrow && getAllCallCount > getAllSucceedForFirstCalls) throw new Error("batch read boom");
+    // A real DocumentSnapshot always carries `id`; the read guard associates
+    // results by identity rather than array position, so the fake must too.
+    return refs.map((ref) => ({ id: ref.__path.split("/").pop(), ref: { path: ref.__path }, exists: pathStore.has(ref.__path), data: () => pathStore.get(ref.__path) }));
   },
 };
 
@@ -88,7 +100,18 @@ function fakeTimestamp(iso: string) {
   return { toMillis: () => new Date(iso).getTime() };
 }
 
+/**
+ * Phase 1 Cross-Authority READ Guard — an adaptive projection only ever exists
+ * for a run that was already persisted, so building one here also seeds its
+ * canonical `runs/{runId}` document, bound legacy (no `workspaceId`). Without a
+ * canonical run the guard correctly refuses to prove the row's authority and
+ * hides it; that fail-closed behaviour, and every Workspace-bound case, is
+ * covered in `crossAuthorityReadGuard.spec.ts`. These tests are about the list
+ * CONTRACT, so they get an ordinary legacy run.
+ */
 function adaptiveDoc(overrides: Record<string, unknown> = {}) {
+  const runId = typeof overrides.runId === "string" ? overrides.runId : "run-1";
+  if (!pathStore.has(`runs/${runId}`)) pathStore.set(`runs/${runId}`, { userId: "owner-uid" });
   return {
     teamId: TEAM_ID,
     userId: "owner-uid",
@@ -108,8 +131,20 @@ function adaptiveDoc(overrides: Record<string, unknown> = {}) {
   };
 }
 
+/**
+ * Phase 1 Cross-Authority READ Guard — a classic `teamRuns` row always names
+ * exactly one canonical artifact (`teamGovernancePipeline.ts` writes both
+ * `runId` and `verificationId`, one of them null), so a row naming NEITHER is
+ * not a product shape and is no longer readable. These contract tests give the
+ * row a run linkage and seed its canonical run, bound legacy; the Workspace-bound
+ * and unlinked cases live in `crossAuthorityReadGuard.spec.ts`.
+ */
+let legacyRunSeq = 0;
 function legacyDoc(overrides: Record<string, unknown> = {}) {
+  const runId = typeof overrides.runId === "string" ? overrides.runId : `legacy-run-${++legacyRunSeq}`;
+  if (!pathStore.has(`runs/${runId}`)) pathStore.set(`runs/${runId}`, { userId: "owner-uid" });
   return {
+    runId,
     teamId: TEAM_ID,
     userId: "owner-uid",
     userEmail: "owner@test.com",
@@ -130,6 +165,9 @@ beforeEach(() => {
   teamRunDocs.clear();
   pathStore.clear();
   getAllShouldThrow = false;
+  legacyRunSeq = 0;
+  getAllCallCount = 0;
+  getAllSucceedForFirstCalls = 0;
   mockLoggerWarn.mockClear();
   mockedGetRequestUid.mockReset();
   mockedLoadUserAndTeam.mockReset();
@@ -604,11 +642,13 @@ describe("GET /api/teams/runs?version=1 — identity batching, never N+1 (final 
     }
     const getAllSpy = jest.spyOn(mockAdminDb, "getAll");
     await GET(buildRequest(""));
-    // One batched db.getAll() call per read TYPE (runs, assignment, panel —
-    // each its own chunked batch, ≤10 refs so 1 call each here) = 3 total,
-    // no votes (no panels exist) — never one call per ROW (which would be
-    // 5), let alone one per row per field (15 individual .get() calls).
-    expect(getAllSpy.mock.calls.length).toBe(3);
+    // One batched db.getAll() call per read TYPE: the Phase 1 READ GUARD's
+    // canonical binding classification (1), then runs/assignment/panel
+    // enrichment (3) — each its own chunked batch, ≤10 refs so 1 call each
+    // here = 4 total, no votes (no panels exist). Still never one call per ROW
+    // (5), let alone one per row per field (15 individual .get() calls): the
+    // guard adds a fixed batched pass, not an N+1.
+    expect(getAllSpy.mock.calls.length).toBe(4);
     getAllSpy.mockRestore();
   });
 
@@ -728,6 +768,12 @@ describe("GET /api/teams/runs?version=1 — enrichment failure resilience (Step 
   it("a batched-read failure degrades enrichment for affected rows without removing them from the queue or failing the request", async () => {
     teamRunDocs.set("a1", adaptiveDoc({ runId: "run-enrich-fail" }));
     setGovernanceRecord("run-enrich-fail", { status: "approved", reviewerId: "reviewer-1", decidedVia: "single_reviewer" });
+    // The binding classification (first batched read) succeeds — the row IS
+    // provably legacy — and only the ENRICHMENT reads after it fail. This is
+    // the case this test has always been about; a binding-read failure is a
+    // different situation with the opposite, fail-closed outcome, asserted in
+    // crossAuthorityReadGuard.spec.ts.
+    getAllSucceedForFirstCalls = 1;
     getAllShouldThrow = true;
 
     const res = await GET(buildRequest(""));

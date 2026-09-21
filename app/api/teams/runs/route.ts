@@ -33,6 +33,7 @@ import { parseAdaptiveHumanReviewVote, buildAdaptiveHumanReviewVoteId, AdaptiveH
 import type { AdaptiveHumanReviewAssignmentV1 } from "@/lib/governance/adaptiveHumanReviewAssignment";
 import type { GovernanceRecordV1 } from "@/lib/adaptiveSchema/governanceRecord";
 import { resolveReviewerDisplayNames, UNKNOWN_REVIEWER_LABEL } from "@/lib/governance/reviewerIdentity";
+import { resolveLegacyReadDomain, teamRunRowIsInLegacyReadDomain } from "@/lib/governance/legacyReviewReadDomain";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -272,8 +273,26 @@ export async function GET(req: NextRequest) {
     // shape.
     const scopedDocs = admin ? snap.docs : snap.docs.filter((d) => d.data().userId === uid);
 
+    // ============================================
+    // PHASE 1 CROSS-AUTHORITY READ GUARD
+    // ============================================
+    // A Workspace-bound run is outside this surface's authority domain, for
+    // reads exactly as PR #186 established for mutations. Excluded here on RAW
+    // document data — before classification, before filtering, before
+    // pagination and before `enrichPageItems()` — so an excluded row can never
+    // reach a canonical panel/assignment/vote read or reviewer identity
+    // resolution, and never contributes to `pagination.total` (a count is
+    // itself information about a domain this caller cannot address).
+    //
+    // Deliberately AFTER member scoping: a non-admin's own rows are the only
+    // ones that could ever be returned, so classifying the rest would cost
+    // canonical reads for rows already dropped.
+    const scopedRows = scopedDocs.map((d) => d.data());
+    const readDomain = await resolveLegacyReadDomain(scopedRows);
+    const eligibleDocs = scopedDocs.filter((d) => teamRunRowIsInLegacyReadDomain(d.data(), readDomain));
+
     const items: TeamRunListItemV1[] = [];
-    for (const doc of scopedDocs) {
+    for (const doc of eligibleDocs) {
       const result = classifyTeamRunRow(doc.id, doc.data());
       if (result.status === "valid") {
         items.push(result.item);
@@ -334,6 +353,14 @@ export async function GET(req: NextRequest) {
   if (!admin) {
     rows = rows.filter((r) => r.userId === uid);
   }
+
+  // Phase 1 Cross-Authority READ Guard — the same exclusion the versioned
+  // contract above applies, repeated here because this default response is a
+  // second, independent entry form into the identical `teamRuns` data. Guarding
+  // only `?version=1` would leave the disclosure fully reachable. Applied
+  // before `total`/pagination so hidden rows leak no count.
+  const readDomain = await resolveLegacyReadDomain(rows);
+  rows = rows.filter((r) => teamRunRowIsInLegacyReadDomain(r, readDomain));
 
   if (typeFilter === "research" || typeFilter === "verification") {
     rows = rows.filter((r) => r.type === typeFilter);

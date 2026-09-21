@@ -90,7 +90,12 @@ beforeEach(() => {
   mockedMemberRole.mockReturnValue("admin");
   mockedIsTeamAdmin.mockReturnValue(true);
   mockedGetProjection.mockResolvedValue({ status: "found", projection: validProjection() });
-  mockedRunGet.mockResolvedValue({ exists: true });
+  // Phase 1 Cross-Authority READ Guard — a real snapshot with `exists: true`
+  // always carries a `data()`, which the guard classifies the run's Workspace
+  // binding from. This is an ordinary legacy run (no `workspaceId`); the
+  // Workspace-bound cases live in
+  // `app/api/teams/adaptive-runs/__tests__/crossAuthorityReadGuard.spec.ts`.
+  mockedRunGet.mockResolvedValue({ exists: true, data: () => ({ userId: "owner-uid" }) });
   mockedHistoryGet.mockResolvedValue(fakeHistorySnap([]));
 });
 

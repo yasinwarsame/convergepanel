@@ -1,0 +1,474 @@
+/**
+ * PHASE 1 CROSS-AUTHORITY READ GUARD — the module's ONE authority contract.
+ *
+ * The final adversarial review found the two canonical record types answering
+ * the SAME malformed state differently: the run predicate denied an unreadable
+ * document body while the verification predicate ADMITTED it, because
+ * `isWorkspaceBoundVerificationArtifact()` returns false for any non-object and
+ * the call site negated that into "allow". A module whose contract is "every
+ * ambiguity collapses to one safe answer" cannot have two helpers disagreeing
+ * about what ambiguity means.
+ *
+ * This file pins the contract as a TRUTH TABLE applied identically to both
+ * record types, and pins the batch-association boundary: a returned snapshot
+ * may contribute a classification only if its own id was in the requested
+ * chunk.
+ */
+
+import { Firestore } from "@google-cloud/firestore";
+
+/** Real SDK instance, used ONLY for local path construction/validation — no network, no credentials. */
+const realFirestore = new Firestore({ projectId: "contract-spec", ssl: false });
+
+const docs = new Map<string, unknown>();
+/** Lets a test replace what the batched read hands back, per requested id. */
+let snapshotFactory: ((id: string, path: string) => unknown) | null = null;
+const getAllCalls: string[][] = [];
+let inFlight = 0;
+let maxInFlight = 0;
+let failChunksContaining: string | null = null;
+
+const mockAdminDb: any = {
+  // Path construction is delegated to the REAL Firestore SDK (local, no network
+  // or credentials). String concatenation is NOT good enough here: the SDK
+  // NORMALIZES (`doc("R")`, `doc("R/")` and `doc("/R")` all resolve to `runs/R`)
+  // and VALIDATES (`doc("tenant/run-1")` throws — three segments is a collection
+  // path, not a document). A naive fake makes colliding ids look distinct and
+  // invalid ids look valid, which is exactly how a silent-drop hid here before.
+  collection: (name: string) => ({
+    doc: (id: string) => {
+      const real = realFirestore.collection(name).doc(id); // throws where production throws
+      return { __path: real.path, __id: id, id: real.id, path: real.path };
+    },
+  }),
+  getAll: async (...refs: Array<{ __path: string; __id: string }>) => {
+    getAllCalls.push(refs.map((r) => r.__id));
+    inFlight += 1;
+    maxInFlight = Math.max(maxInFlight, inFlight);
+    try {
+      // Yield so overlapping waves are actually observable.
+      await new Promise((r) => setTimeout(r, 5));
+      if (failChunksContaining && refs.some((r) => r.__id === failChunksContaining)) throw new Error("chunk boom");
+      if (snapshotFactory) return refs.map((r) => snapshotFactory!(r.__id, r.__path));
+      return refs.map((r) => ({ id: r.__id.split("/").pop(), ref: { path: r.__path }, exists: docs.has(r.__path), data: () => docs.get(r.__path) }));
+    } finally {
+      inFlight -= 1;
+    }
+  },
+};
+let adminDbAvailable = true;
+jest.mock("@/lib/firebase/admin", () => ({
+  get adminDb() {
+    return adminDbAvailable ? mockAdminDb : null;
+  },
+}));
+jest.mock("@/lib/logger", () => ({ logger: { warn: jest.fn(), info: jest.fn(), error: jest.fn(), debug: jest.fn() } }));
+
+import { resolveLegacyReadDomain, teamRunRowIsInLegacyReadDomain } from "@/lib/governance/legacyReviewReadDomain";
+
+const OWNER = "owner-uid";
+const runRow = (runId: string) => ({ runId });
+const verRow = (verificationId: string) => ({ runId: null, verificationId });
+
+beforeEach(() => {
+  docs.clear();
+  getAllCalls.length = 0;
+  snapshotFactory = null;
+  failChunksContaining = null;
+  adminDbAvailable = true;
+  inFlight = 0;
+  maxInFlight = 0;
+});
+
+/**
+ * Drives ONE row of the truth table for ONE record type. The caller sets
+ * `snapshotFactory` first; this helper must NOT overwrite it, or every case
+ * would collapse to the same snapshot and the comparison would be vacuous.
+ */
+async function admits(kind: "run" | "verification"): Promise<boolean> {
+  const row = kind === "run" ? runRow("run-1") : verRow("ver-1");
+  const domain = await resolveLegacyReadDomain([row]);
+  return teamRunRowIsInLegacyReadDomain(row, domain);
+}
+
+/** A snapshot that reports the reference it was asked for — what a real batched read does. */
+function selfSnap(body: unknown, exists = true) {
+  return (id: string, path: string) => ({ id, ref: { path }, exists, data: () => body });
+}
+
+describe("ONE authority contract — identical fail-closed semantics for both canonical record types", () => {
+  // Each case is applied to BOTH record types and must produce the SAME verdict.
+  const SHARED: Array<[label: string, body: unknown, exists: boolean, admitted: boolean]> = [
+    ["a valid legacy document (no workspaceId field)", { userId: OWNER }, true, true],
+    ["a Workspace-bound document", { userId: OWNER, workspaceId: "ws-team-1" }, true, false],
+    ["a missing document", undefined, false, false],
+    ["an unreadable body (undefined)", undefined, true, false],
+    ["an unreadable body (null)", null, true, false],
+    ["an unreadable body (string)", "not-an-object", true, false],
+    ["an unreadable body (number)", 42, true, false],
+    ["a malformed binding (workspaceId: null)", { userId: OWNER, workspaceId: null }, true, false],
+    ["a malformed binding (workspaceId: 12345)", { userId: OWNER, workspaceId: 12345 }, true, false],
+    ["a malformed binding (workspaceId: '')", { userId: OWNER, workspaceId: "" }, true, false],
+  ];
+
+  it.each(SHARED)("run-backed: %s", async (_label, body, exists, admitted) => {
+    snapshotFactory = selfSnap(body, exists);
+    expect(await admits("run")).toBe(admitted);
+  });
+
+  it.each(SHARED)("verification-backed: %s", async (_label, body, exists, admitted) => {
+    snapshotFactory = selfSnap(body, exists);
+    expect(await admits("verification")).toBe(admitted);
+  });
+
+  it("the two record types never disagree on any shared state", async () => {
+    const disagreements: string[] = [];
+    for (const [label, body, exists] of SHARED) {
+      snapshotFactory = selfSnap(body, exists);
+      const r = await admits("run");
+      snapshotFactory = selfSnap(body, exists);
+      const v = await admits("verification");
+      if (r !== v) disagreements.push(`${label}: run=${r} verification=${v}`);
+    }
+    expect(disagreements).toEqual([]);
+  });
+
+  it("a read failure excludes, for both record types", async () => {
+    docs.set("runs/run-1", { userId: OWNER });
+    docs.set("verifications/ver-1", { claimText: "c" });
+    failChunksContaining = "run-1";
+    expect(teamRunRowIsInLegacyReadDomain(runRow("run-1"), await resolveLegacyReadDomain([runRow("run-1")]))).toBe(false);
+    failChunksContaining = "ver-1";
+    expect(teamRunRowIsInLegacyReadDomain(verRow("ver-1"), await resolveLegacyReadDomain([verRow("ver-1")]))).toBe(false);
+  });
+});
+
+describe("D3 — a row naming no canonical artifact is not readable", () => {
+  it("excludes a row with neither a runId nor a verificationId", async () => {
+    const row = { type: "research", query: "q" };
+    expect(teamRunRowIsInLegacyReadDomain(row, await resolveLegacyReadDomain([row]))).toBe(false);
+  });
+
+  it("excludes a row whose ids are blank or non-string", async () => {
+    for (const row of [{ runId: "   ", verificationId: "  " }, { runId: 7, verificationId: 9 }, { runId: null, verificationId: null }]) {
+      expect(teamRunRowIsInLegacyReadDomain(row, await resolveLegacyReadDomain([row]))).toBe(false);
+    }
+  });
+
+  it("CONTROL — a valid legacy run-backed row is still admitted", async () => {
+    docs.set("runs/run-1", { userId: OWNER });
+    expect(teamRunRowIsInLegacyReadDomain(runRow("run-1"), await resolveLegacyReadDomain([runRow("run-1")]))).toBe(true);
+  });
+
+  it("CONTROL — a valid legacy verification-backed row is still admitted", async () => {
+    docs.set("verifications/ver-1", { claimText: "c" });
+    expect(teamRunRowIsInLegacyReadDomain(verRow("ver-1"), await resolveLegacyReadDomain([verRow("ver-1")]))).toBe(true);
+  });
+
+  it("CONTROL — a Workspace verification row is still excluded", async () => {
+    docs.set("verifications/ver-1", { workspaceId: "ws-1" });
+    expect(teamRunRowIsInLegacyReadDomain(verRow("ver-1"), await resolveLegacyReadDomain([verRow("ver-1")]))).toBe(false);
+  });
+});
+
+describe("conflicting identifiers", () => {
+  it("excludes a row naming BOTH a run and a verification, even when both are legacy", async () => {
+    // No writer emits this shape. It is therefore unclassifiable product state,
+    // and preferring one canonical artifact over the other would be arbitrary.
+    docs.set("runs/run-1", { userId: OWNER });
+    docs.set("verifications/ver-1", { claimText: "c" });
+    const row = { runId: "run-1", verificationId: "ver-1" };
+    expect(teamRunRowIsInLegacyReadDomain(row, await resolveLegacyReadDomain([row]))).toBe(false);
+  });
+});
+
+describe("D2 — batch association is by requested identity", () => {
+  it("D2-M1: a foreign snapshot id contributes nothing", async () => {
+    snapshotFactory = () => ({ id: "FOREIGN-ID", ref: { path: "runs/FOREIGN-ID" }, exists: true, data: () => ({ userId: OWNER }) });
+    const domain = await resolveLegacyReadDomain([runRow("run-1")]);
+    expect([...domain.legacyOnlyRunIds]).toEqual([]);
+    expect(teamRunRowIsInLegacyReadDomain(runRow("FOREIGN-ID"), domain)).toBe(false);
+  });
+
+  it("D2-M2: an omitted snapshot leaves its row ineligible", async () => {
+    snapshotFactory = (id, path) => (id === "run-1" ? { id, ref: { path }, exists: true, data: () => ({ userId: OWNER }) } : undefined);
+    const domain = await resolveLegacyReadDomain([runRow("run-1"), runRow("run-2")]);
+    expect([...domain.legacyOnlyRunIds]).toEqual(["run-1"]);
+    expect(teamRunRowIsInLegacyReadDomain(runRow("run-2"), domain)).toBe(false);
+  });
+
+  it("D2-M3: reversed snapshots keep their own classification", async () => {
+    docs.set("runs/run-legacy", { userId: OWNER });
+    docs.set("runs/run-ws", { userId: OWNER, workspaceId: "ws-1" });
+    const base = mockAdminDb.getAll;
+    mockAdminDb.getAll = async (...refs: any[]) => (await base(...refs)).reverse();
+    try {
+      const domain = await resolveLegacyReadDomain([runRow("run-legacy"), runRow("run-ws")]);
+      expect([...domain.legacyOnlyRunIds]).toEqual(["run-legacy"]);
+    } finally {
+      mockAdminDb.getAll = base;
+    }
+  });
+
+  it("D2-M4: expected results survive alongside an extra foreign snapshot", async () => {
+    snapshotFactory = (id, path) => ({ id, ref: { path }, exists: true, data: () => ({ userId: OWNER }) });
+    const base = mockAdminDb.getAll;
+    mockAdminDb.getAll = async (...refs: any[]) => [...(await base(...refs)), { id: "FOREIGN-ID", ref: { path: "runs/FOREIGN-ID" }, exists: true, data: () => ({ userId: OWNER }) }];
+    try {
+      const domain = await resolveLegacyReadDomain([runRow("run-1")]);
+      expect([...domain.legacyOnlyRunIds]).toEqual(["run-1"]);
+    } finally {
+      mockAdminDb.getAll = base;
+    }
+  });
+
+  it("D2-M5: a duplicated snapshot id cannot flip a decision open", async () => {
+    // Same id returned twice: once Workspace-bound, once legacy. Neither
+    // ordering may admit it.
+    const bodies = [{ userId: OWNER, workspaceId: "ws-1" }, { userId: OWNER }];
+    let n = 0;
+    const base = mockAdminDb.getAll;
+    mockAdminDb.getAll = async (...refs: any[]) => refs.flatMap((r: any) => bodies.map((b) => ({ id: r.__id.split("/").pop(), ref: { path: r.__path }, exists: true, data: () => (n++, b) })));
+    try {
+      const domain = await resolveLegacyReadDomain([runRow("run-1")]);
+      expect([...domain.legacyOnlyRunIds]).toEqual([]);
+    } finally {
+      mockAdminDb.getAll = base;
+    }
+  });
+
+  it("D2-M6 / batch-integrity attack: reversed + omitted + foreign + malformed, together", async () => {
+    docs.set("runs/ok-1", { userId: OWNER });
+    docs.set("runs/ok-2", { userId: OWNER });
+    docs.set("runs/ws-1", { userId: OWNER, workspaceId: "ws-team-1" });
+    const base = mockAdminDb.getAll;
+    mockAdminDb.getAll = async (...refs: any[]) => {
+      const real = await base(...refs);
+      return [
+        ...real.filter((s: any) => s.id !== "ok-2"),                       // omitted
+        { id: "FOREIGN-ID", ref: { path: "runs/FOREIGN-ID" }, exists: true, data: () => ({ userId: OWNER }) }, // foreign
+        { id: "malformed-1", ref: { path: "runs/malformed-1" }, exists: true, data: () => undefined }, // unreadable body
+      ].reverse();                                                          // reordered
+    };
+    try {
+      const rows = [runRow("ok-1"), runRow("ok-2"), runRow("ws-1"), runRow("malformed-1")];
+      const domain = await resolveLegacyReadDomain(rows);
+      expect([...domain.legacyOnlyRunIds].sort()).toEqual(["ok-1"]);
+      expect(rows.map((r) => teamRunRowIsInLegacyReadDomain(r, domain))).toEqual([true, false, false, false]);
+    } finally {
+      mockAdminDb.getAll = base;
+    }
+  });
+});
+
+describe("bounded concurrency", () => {
+  it("never exceeds the configured wave cap, and still executes every chunk", async () => {
+    // 120 ids => 12 chunks of 10 => more than one wave at a cap of 5.
+    const ids = Array.from({ length: 120 }, (_, i) => `run-${String(i).padStart(3, "0")}`);
+    ids.forEach((id) => docs.set(`runs/${id}`, { userId: OWNER }));
+    const domain = await resolveLegacyReadDomain(ids.map(runRow));
+    expect(getAllCalls.length).toBe(12);
+    expect(getAllCalls.flat().sort()).toEqual([...ids].sort()); // every chunk ran
+    expect(domain.legacyOnlyRunIds.size).toBe(120);
+    expect(maxInFlight).toBeLessThanOrEqual(5);
+    expect(maxInFlight).toBeGreaterThan(1); // genuinely concurrent, not serial
+  });
+
+  it("a failing chunk cannot make another chunk's rows default-readable", async () => {
+    const ids = Array.from({ length: 20 }, (_, i) => `run-${String(i).padStart(3, "0")}`);
+    ids.forEach((id) => docs.set(`runs/${id}`, { userId: OWNER }));
+    failChunksContaining = "run-000";
+    const domain = await resolveLegacyReadDomain(ids.map(runRow));
+    expect(domain.legacyOnlyRunIds.has("run-000")).toBe(false);
+    expect(domain.legacyOnlyRunIds.size).toBe(10); // exactly the surviving chunk
+  });
+
+describe("completeness accounting — every requested reference must be answered", () => {
+  /** A faithful snapshot: reports the exact reference it was asked for. */
+  const faithful = (body: unknown, exists = true) => (id: string, path: string) => ({ id, ref: { path }, exists, data: () => body });
+
+  it("C1: a multi-segment logical id is correlated by reference PATH, not leaf id", async () => {
+    // A document path needs an EVEN number of segments, so the reachable
+    // multi-segment shape is an ODD number of id segments: `a/b/c` resolves to
+    // `runs/a/b/c`, whose leaf id is `c`. Correlating on that leaf dropped the
+    // row from BOTH sets while reporting classification complete.
+    docs.set("runs/a/b/c", { userId: OWNER });
+    const row = { runId: "a/b/c" };
+    const d = await resolveLegacyReadDomain([row]);
+    expect(d.classificationUnavailable).toBe(false);
+    expect([...d.legacyOnlyRunIds]).toEqual(["a/b/c"]);
+    expect(teamRunRowIsInLegacyReadDomain(row, d)).toBe(true);
+  });
+
+  it("C1c: an id the SDK rejects as a document path is refused, not guessed at", async () => {
+    // `tenant/run-1` is THREE segments — a collection path. The SDK throws, so
+    // the artifact cannot be classified and the operation is unavailable.
+    const row = { runId: "tenant/run-1" };
+    const d = await resolveLegacyReadDomain([row]);
+    expect(d.classificationUnavailable).toBe(true);
+    expect(teamRunRowIsInLegacyReadDomain(row, d)).toBe(false);
+  });
+
+  it("C1b: two references sharing a leaf id are classified independently", async () => {
+    docs.set("runs/t-a/x/run-1", { userId: OWNER });
+    docs.set("runs/t-b/x/run-1", { userId: OWNER, workspaceId: "ws-9" });
+    const a = { runId: "t-a/x/run-1" };
+    const b = { runId: "t-b/x/run-1" };
+    const d = await resolveLegacyReadDomain([a, b]);
+    expect(d.classificationUnavailable).toBe(false);
+    expect(teamRunRowIsInLegacyReadDomain(a, d)).toBe(true);   // legacy
+    expect(teamRunRowIsInLegacyReadDomain(b, d)).toBe(false);  // Workspace-bound
+  });
+
+  it("C2: a requested reference that never comes back is NOT a completed classification", async () => {
+    docs.set("runs/run-1", { userId: OWNER });
+    docs.set("runs/run-2", { userId: OWNER });
+    const base = mockAdminDb.getAll;
+    mockAdminDb.getAll = async (...refs: any[]) => (await base(...refs)).filter((s: any) => s.ref.path !== "runs/run-2");
+    try {
+      const d = await resolveLegacyReadDomain([runRow("run-1"), runRow("run-2")]);
+      expect(d.classificationUnavailable).toBe(true);
+    } finally {
+      mockAdminDb.getAll = base;
+    }
+  });
+
+  it("C3: a snapshot with no usable reference identity makes classification unavailable", async () => {
+    docs.set("runs/run-1", { userId: OWNER });
+    snapshotFactory = (id) => ({ id, exists: true, data: () => ({ userId: OWNER }) }); // no `ref`
+    const d = await resolveLegacyReadDomain([runRow("run-1")]);
+    expect(d.classificationUnavailable).toBe(true);
+    expect([...d.legacyOnlyRunIds]).toEqual([]); // and it admits nothing
+  });
+
+  it("C4: a foreign reference admits nothing AND breaks completeness", async () => {
+    docs.set("runs/run-1", { userId: OWNER });
+    snapshotFactory = () => ({ id: "x", ref: { path: "runs/NOT-REQUESTED" }, exists: true, data: () => ({ userId: OWNER }) });
+    const d = await resolveLegacyReadDomain([runRow("run-1")]);
+    expect([...d.legacyOnlyRunIds]).toEqual([]);
+    expect(d.classificationUnavailable).toBe(true);
+  });
+
+  it("C5: a duplicated observation cannot make up the count for an omitted one", async () => {
+    docs.set("runs/run-1", { userId: OWNER });
+    docs.set("runs/run-2", { userId: OWNER });
+    const base = mockAdminDb.getAll;
+    mockAdminDb.getAll = async (...refs: any[]) => {
+      const all = await base(...refs);
+      const first = all.find((s: any) => s.ref.path === "runs/run-1");
+      return [first, first]; // right COUNT, wrong SET
+    };
+    try {
+      const d = await resolveLegacyReadDomain([runRow("run-1"), runRow("run-2")]);
+      expect(d.classificationUnavailable).toBe(true);
+    } finally {
+      mockAdminDb.getAll = base;
+    }
+  });
+
+  it("C6: an observed exists:false is an ordinary completed exclusion, NOT unavailable", async () => {
+    // The distinction the whole fix rests on: answered "no" vs never answered.
+    snapshotFactory = faithful(undefined, false);
+    const d = await resolveLegacyReadDomain([runRow("missing-1")]);
+    expect(d.classificationUnavailable).toBe(false);
+    expect([...d.legacyOnlyRunIds]).toEqual([]);
+  });
+
+  it("C7: Firestore unavailable is reported as unavailable, not as an empty classification", async () => {
+    adminDbAvailable = false;
+    const d = await resolveLegacyReadDomain([runRow("run-1")]);
+    expect(d.classificationUnavailable).toBe(true);
+    expect([...d.legacyOnlyRunIds]).toEqual([]);
+  });
+
+  it("C7b: no candidates at all is a completed classification, not unavailable", async () => {
+    const d = await resolveLegacyReadDomain([{ type: "research" }]);
+    expect(d.classificationUnavailable).toBe(false);
+  });
+});
+
+describe("canonical path injectivity — two logical ids must not collapse onto one reference", () => {
+  // Firestore normalizes: "R", "R/" and "/R" all resolve to `runs/R`.
+  it("P1: colliding ids in the SAME chunk make the operation unavailable, and neither is admitted", async () => {
+    docs.set("runs/R", { userId: OWNER }); // a real, legacy, otherwise-eligible run
+    const plain = { runId: "R" };
+    const decoy = { runId: "R/" };
+    const d = await resolveLegacyReadDomain([plain, decoy]);
+    expect(d.classificationUnavailable).toBe(true);
+    expect([...d.legacyOnlyRunIds]).toEqual([]);
+    // Neither is picked as a winner.
+    expect(teamRunRowIsInLegacyReadDomain(plain, d)).toBe(false);
+    expect(teamRunRowIsInLegacyReadDomain(decoy, d)).toBe(false);
+  });
+
+  it("P2: colliding ids in DIFFERENT chunks are still detected", async () => {
+    // CHUNK_SIZE is 10; nine fillers push the pair across a batch boundary.
+    docs.set("runs/R", { userId: OWNER });
+    for (let i = 0; i < 9; i++) docs.set(`runs/f${i}`, { userId: OWNER });
+    const rows = [{ runId: "R" }, ...Array.from({ length: 9 }, (_, i) => ({ runId: `f${i}` })), { runId: "R/" }];
+    const d = await resolveLegacyReadDomain(rows);
+    expect(d.classificationUnavailable).toBe(true);
+  });
+
+  it("P3: the verdict does not depend on row ordering", async () => {
+    docs.set("runs/R", { userId: OWNER });
+    for (let i = 0; i < 9; i++) docs.set(`runs/f${i}`, { userId: OWNER });
+    const fillers = Array.from({ length: 9 }, (_, i) => ({ runId: `f${i}` }));
+    const adjacent = await resolveLegacyReadDomain([{ runId: "R" }, { runId: "R/" }, ...fillers]);
+    const separated = await resolveLegacyReadDomain([{ runId: "R" }, ...fillers, { runId: "R/" }]);
+    expect(adjacent.classificationUnavailable).toBe(separated.classificationUnavailable);
+    expect(adjacent.classificationUnavailable).toBe(true);
+  });
+
+  it("P4: a leading-slash variant collides too", async () => {
+    docs.set("runs/R", { userId: OWNER });
+    const d = await resolveLegacyReadDomain([{ runId: "R" }, { runId: "/R" }]);
+    expect(d.classificationUnavailable).toBe(true);
+  });
+
+  it("P5: the SAME logical id repeated is benign, not a collision", async () => {
+    // A page can legitimately list one id twice; that is deduplication, not
+    // ambiguity, and it must not refuse the export.
+    docs.set("runs/R", { userId: OWNER });
+    const row = { runId: "R" };
+    const d = await resolveLegacyReadDomain([row, row, row]);
+    expect(d.classificationUnavailable).toBe(false);
+    expect(teamRunRowIsInLegacyReadDomain(row, d)).toBe(true);
+  });
+
+  it("P6: a collision does not taint unrelated rows' classification", async () => {
+    docs.set("runs/R", { userId: OWNER });
+    docs.set("runs/ok", { userId: OWNER });
+    const d = await resolveLegacyReadDomain([{ runId: "R" }, { runId: "R/" }, { runId: "ok" }]);
+    expect(d.classificationUnavailable).toBe(true);        // the operation is incomplete
+    expect([...d.legacyOnlyRunIds]).toEqual(["ok"]);        // but `ok` was still answered
+  });
+});
+
+describe("batch result integrity — an UNREQUESTED result is an anomaly, not noise", () => {
+  it("P7: an extra untied snapshot marks the operation unavailable even when every expected reference came back", async () => {
+    // Completeness alone cannot catch this: all expected paths ARE observed, so
+    // `observed.size === expected.size`. Only the untied-result branch does.
+    docs.set("runs/r1", { userId: OWNER });
+    const base = mockAdminDb.getAll;
+    mockAdminDb.getAll = async (...refs: any[]) => [
+      ...(await base(...refs)),
+      { id: "FOREIGN", ref: { path: "runs/FOREIGN" }, exists: true, data: () => ({ userId: OWNER }) },
+    ];
+    try {
+      const d = await resolveLegacyReadDomain([runRow("r1")]);
+      expect(d.classificationUnavailable).toBe(true);
+      expect([...d.legacyOnlyRunIds]).toEqual(["r1"]); // the real answer still stands
+    } finally {
+      mockAdminDb.getAll = base;
+    }
+  });
+
+  it("P8: an ordinary excluded answer is NOT a batch anomaly", async () => {
+    // Workspace-bound is an answered "no"; it must not look like corruption.
+    docs.set("runs/w", { userId: OWNER, workspaceId: "ws-9" });
+    const d = await resolveLegacyReadDomain([runRow("w")]);
+    expect(d.classificationUnavailable).toBe(false);
+  });
+});
+});

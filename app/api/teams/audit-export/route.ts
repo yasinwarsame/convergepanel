@@ -4,6 +4,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebase/admin";
+import { resolveLegacyReadDomain, teamRunRowIsInLegacyReadDomain } from "@/lib/governance/legacyReviewReadDomain";
 import {
   getRequestUid,
   loadUserAndTeam,
@@ -79,7 +80,58 @@ export async function GET(req: NextRequest) {
   // to a future step, per §21.14/§25 — not built here.
   const legacyDocs = snap.docs.filter((d) => d.data().adaptive !== true);
 
-  const rows = legacyDocs
+  // Phase 1 Cross-Authority READ Guard — a Workspace-bound artifact is outside
+  // this surface's authority domain, so its row is excluded from the
+  // legacy-domain export as well. An export is the highest-leverage read on
+  // this collection (bulk, durable, it leaves the product), so it gets the
+  // same exclusion as the queue rather than a weaker one. Adaptive rows are
+  // already excluded above; this closes the CLASSIC rows — both the
+  // run-backed ones and the Workspace Claim VERIFICATION rows, whose
+  // `query`/`verdict`/`consensusScore`/`humanDecision` are equally outside a
+  // legacy caller's domain.
+  //
+  // Deliberately applied AFTER the pure `from`/`to` window filter below it in
+  // time but before any row is rendered: the window is a local, purely
+  // subtractive filter that cannot weaken authorization, so classifying only
+  // the rows that could actually be exported keeps a one-day export from
+  // reading the team's entire history.
+  const windowedDocs = legacyDocs.filter((d) => {
+    const t = tsMillis(d.data().timestamp);
+    return t >= fromMs && t <= toMs;
+  });
+  const readDomain = await resolveLegacyReadDomain(windowedDocs.map((d) => d.data()));
+  const eligibleDocs = windowedDocs.filter((d) => teamRunRowIsInLegacyReadDomain(d.data(), readDomain));
+
+  // An audit export is a DURABLE compliance artifact, so a reader must be able
+  // to tell "nothing matched" from "we could not tell what matched". When the
+  // authority of even one in-window candidate could not be DETERMINED, the
+  // export fails visibly instead of returning a file indistinguishable from
+  // "there was no activity". Fail-closed stays fail-closed — nothing unproven is
+  // ever included — but silence is not an acceptable way to say it.
+  //
+  // THE EXACT GUARANTEE, stated narrowly on purpose. A successful export means
+  // every in-window row was ACCOUNTED FOR: its canonical artifact was read and
+  // classified. It does NOT mean every row appears. Rows deliberately and
+  // silently omitted from a successful export are those whose canonical artifact
+  // was successfully classified as outside this domain — Workspace-bound,
+  // Personal-bound, malformed, or absent (an observed `exists: false` is an
+  // answer, not a gap). What can no longer happen is a row that was never
+  // answered for at all: an unreadable canonical document, a failed batch, or a
+  // requested reference that never came back.
+  //
+  // Atomic on purpose: a partially-complete export is not offered, because this
+  // route has no completeness marker a reader could notice. And deliberately
+  // generic: the response never says which row, which collection or which
+  // authority domain was involved, so it cannot become an existence oracle for
+  // the very artifacts the read guard hides.
+  if (readDomain.classificationUnavailable) {
+    return NextResponse.json(
+      { ok: false, error: { code: "firestore_unavailable", message: "Could not generate the audit export. Please try again." } },
+      { status: 503 }
+    );
+  }
+
+  const rows = eligibleDocs
     .map((d) => {
       const x = d.data();
       const t = tsMillis(x.timestamp);

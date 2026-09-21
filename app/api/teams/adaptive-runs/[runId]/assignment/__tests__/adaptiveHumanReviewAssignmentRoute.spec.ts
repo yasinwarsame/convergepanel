@@ -36,7 +36,12 @@ const mockedUserGet = jest.fn();
 const mockAdminDb: any = {
   collection: (name: string) => ({
     doc: (id: string) => ({
-      get: async () => (name === "runs" ? { exists: true } : mockedUserGet(id)),
+      // Phase 1 Cross-Authority READ Guard — a real Firestore snapshot with
+      // `exists: true` always has a `data()`, and the guard classifies the run's
+      // Workspace binding from it. This run is an ordinary legacy one (no
+      // `workspaceId`); the Workspace-bound cases live in
+      // `app/api/teams/adaptive-runs/__tests__/crossAuthorityReadGuard.spec.ts`.
+      get: async () => (name === "runs" ? { exists: true, data: () => ({ userId: "owner-uid" }) } : mockedUserGet(id)),
     }),
   }),
 };

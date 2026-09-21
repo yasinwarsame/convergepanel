@@ -133,44 +133,6 @@ export async function POST(req: NextRequest, { params }: { params: { runId: stri
     return errorResponse(403, "insufficient_role", "Admin access required");
   }
 
-  // ============================================
-  // Multi-Reviewer Panel Foundation, Part B — the panel-presence gate.
-  // Ordered BEFORE the single-reviewer assignment check below: an open
-  // panel takes precedence over — and blocks — the single-reviewer path
-  // entirely, regardless of any existing assignment. See
-  // evaluateAdaptiveReviewPanelGate's own doc comment for the fail-closed
-  // rationale (a deliberate asymmetry from the assignment check's
-  // fail-open behavior immediately below).
-  // ============================================
-  const panelGate = await evaluateAdaptiveReviewPanelGate(runId);
-  if (panelGate.blocked) {
-    return errorResponse(panelGate.status, panelGate.code, panelGate.message);
-  }
-
-  // ============================================
-  // Part E3 — Single-Reviewer Assignment for Adaptive Human Review. The
-  // SMALLEST additive check this feature requires against the existing
-  // decision route (§20, protected scope): if a reviewer is assigned to
-  // this run, only that reviewer or an actor with the documented
-  // administrative override permission (team OWNER — §28) may submit.
-  // This NEVER grants permission beyond the existing isTeamAdmin() gate
-  // above — it only ever narrows who, among already-admin callers, may
-  // proceed. A caller who is already authorized to view this run receives
-  // a clear 403, never a 404 used to conceal the assignment.
-  // ============================================
-  const assignmentResult = await getAdaptiveHumanReviewAssignment(runId);
-  if (assignmentResult.status === "found" && assignmentResult.assignment.assignedReviewerUserId !== null) {
-    const assignedReviewerUserId = assignmentResult.assignment.assignedReviewerUserId;
-    const isAssignedReviewer = uid === assignedReviewerUserId;
-    if (!isAssignedReviewer && !hasAdaptiveReviewSubmissionOverride(role)) {
-      return errorResponse(403, "reviewer_assigned", "This run is assigned to another reviewer.");
-    }
-  }
-  // A read failure (firestore_unavailable/read_failed) is treated as
-  // "unassigned" for this check ONLY — never blocking a legitimate
-  // decision submission because the assignment lookup itself hiccuped;
-  // the canonical decision transaction below remains the sole source of
-  // truth for whether the review itself may proceed.
 
   // ---- Request validation (Part D3) ----
   let rawBody: unknown;
@@ -235,6 +197,65 @@ export async function POST(req: NextRequest, { params }: { params: { runId: stri
   if (!runIsLegacyOnlyForReviewMutation(runSnap.data())) {
     return errorResponse(404, "not_found", "Run not found.");
   }
+
+  // ---- Legacy-authorized canonical review reads (Phase 1 READ GUARD) ----
+  // The panel-presence gate and the single-reviewer assignment check below
+  // read `runs/{runId}/humanReviewPanel/current` and
+  // `.../humanReviewAssignment/current`. They USED to run before the
+  // projection lookup and before the Workspace-domain guard above, which made
+  // this route an information oracle: an authenticated admin of ANY legacy
+  // team could probe an arbitrary run id and distinguish "panel open"
+  // (409 `adaptive_review_panel_active`) from "no panel", and "reviewer
+  // assigned" (403 `reviewer_assigned`) from "unassigned" — for runs belonging
+  // to other teams and to Workspaces they hold no capability in. The mutation
+  // itself was always blocked; the information was not.
+  //
+  // `evaluateAdaptiveReviewPanelGate()` calls `getAdaptiveHumanReviewPanel()`
+  // with NO teamId, so the panel's own team binding is not validated either —
+  // the ONLY thing standing between the caller and that document is where
+  // these reads sit. So they now sit here: after team-admin eligibility, after
+  // the deterministic projection lookup that establishes the run belongs to
+  // THIS team, and after the canonical Workspace-domain classification. A run
+  // outside the legacy read domain is refused above without either document
+  // ever being fetched.
+  // ============================================
+  // Multi-Reviewer Panel Foundation, Part B — the panel-presence gate.
+  // Ordered BEFORE the single-reviewer assignment check below: an open
+  // panel takes precedence over — and blocks — the single-reviewer path
+  // entirely, regardless of any existing assignment. See
+  // evaluateAdaptiveReviewPanelGate's own doc comment for the fail-closed
+  // rationale (a deliberate asymmetry from the assignment check's
+  // fail-open behavior immediately below).
+  // ============================================
+  const panelGate = await evaluateAdaptiveReviewPanelGate(runId);
+  if (panelGate.blocked) {
+    return errorResponse(panelGate.status, panelGate.code, panelGate.message);
+  }
+
+  // ============================================
+  // Part E3 — Single-Reviewer Assignment for Adaptive Human Review. The
+  // SMALLEST additive check this feature requires against the existing
+  // decision route (§20, protected scope): if a reviewer is assigned to
+  // this run, only that reviewer or an actor with the documented
+  // administrative override permission (team OWNER — §28) may submit.
+  // This NEVER grants permission beyond the existing isTeamAdmin() gate
+  // above — it only ever narrows who, among already-admin callers, may
+  // proceed. A caller who is already authorized to view this run receives
+  // a clear 403, never a 404 used to conceal the assignment.
+  // ============================================
+  const assignmentResult = await getAdaptiveHumanReviewAssignment(runId);
+  if (assignmentResult.status === "found" && assignmentResult.assignment.assignedReviewerUserId !== null) {
+    const assignedReviewerUserId = assignmentResult.assignment.assignedReviewerUserId;
+    const isAssignedReviewer = uid === assignedReviewerUserId;
+    if (!isAssignedReviewer && !hasAdaptiveReviewSubmissionOverride(role)) {
+      return errorResponse(403, "reviewer_assigned", "This run is assigned to another reviewer.");
+    }
+  }
+  // A read failure (firestore_unavailable/read_failed) is treated as
+  // "unassigned" for this check ONLY — never blocking a legitimate
+  // decision submission because the assignment lookup itself hiccuped;
+  // the canonical decision transaction below remains the sole source of
+  // truth for whether the review itself may proceed.
   const runData = runSnap.data();
   const preParse = parseGovernanceRecord(runData?.governanceRecord);
   if (!preParse.ok) {
