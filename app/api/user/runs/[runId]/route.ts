@@ -10,6 +10,7 @@ import { adminDb } from "@/lib/firebase/admin";
 import { parseGovernanceRecord } from "@/lib/adaptiveSchema/governanceRecordParser";
 import { getAdaptiveHumanReviewAssignment } from "@/lib/firestore/runs";
 import { resolveAdaptiveRunAccess } from "@/lib/governance/adaptiveRunAccess";
+import { expectedPersonalDecisionId, classifyDecisionScopeFromPersonalDoc } from "@/lib/governance/personalReviewScope";
 import { validateRunWorkspaceAssociation } from "@/lib/workspaces/runWorkspaceIntegrity";
 import { classifyRunWorkspaceBindingShape } from "@/lib/workspaces/classifyRunWorkspaceBindingShape";
 import { resolveTeamRunWorkspaceAccess, type ResolveTeamRunWorkspaceAccessResult } from "@/lib/workspaces/resolveTeamRunWorkspaceAccess";
@@ -303,9 +304,51 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
   // writes, regenerates synthesis or executes models. `reviewRouting` I/O
   // (`resolveRunReviewRouting`, likewise extracted verbatim) is injected
   // and still runs only for a still-unreviewed/pending human review.
+  // PHASE 1 — Personal/Team review isolation, decision CONTENT.
+  // `humanReview.conditions` can carry Team panelists' `approved_with_conditions`
+  // vote text verbatim (`buildFinalConditionsUnion`), so a personal reviewer
+  // gets it only for a decision proven inside their own capability. Every
+  // other role here already holds owner or Team/Workspace authority over the
+  // run. One point read, only for the role that needs the proof.
+  let mayReadDecisionContent = true;
+  if (viewerRole === "personal_reviewer") {
+    const parsed = parseGovernanceRecord(data.governanceRecord);
+    if (!parsed.ok) {
+      mayReadDecisionContent = false;
+    } else if (parsed.record.humanReview.reviewerId && parsed.record.humanReview.reviewerId === uid) {
+      // Their own decision — their own conditions.
+      mayReadDecisionContent = true;
+    } else {
+      let personalDoc: { exists: boolean; data: unknown } | null = null;
+      const expectedId = expectedPersonalDecisionId({
+        runId,
+        reviewedAt: parsed.record.humanReview.reviewedAt,
+        status: parsed.record.humanReview.status,
+      });
+      if (expectedId) {
+        try {
+          const snap = await adminDb.collection("runs").doc(runId).collection("humanReviewHistory").doc(expectedId).get();
+          personalDoc = { exists: snap.exists === true, data: snap.exists ? snap.data() : null };
+        } catch {
+          logger.warn("[user/runs/[runId]] decision_provenance_read_failed", { runId });
+          personalDoc = null;
+        }
+      }
+      mayReadDecisionContent =
+        classifyDecisionScopeFromPersonalDoc({
+          decidedVia: parsed.record.humanReview.decidedVia,
+          reviewerId: parsed.record.humanReview.reviewerId,
+          reviewedAt: parsed.record.humanReview.reviewedAt,
+          status: parsed.record.humanReview.status,
+          personalDoc,
+        }) === "personal";
+    }
+  }
+
   const requestId = req.headers.get("x-vercel-id") ?? req.headers.get("x-request-id") ?? undefined;
   const payload = await buildRunReadPayload({
     runId,
+    mayReadDecisionContent,
     data,
     viewerRole,
     requestId,

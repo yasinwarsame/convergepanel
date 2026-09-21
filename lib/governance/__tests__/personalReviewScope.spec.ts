@@ -9,12 +9,14 @@
  * unrecognised scope value is DENIED, not defaulted open.
  */
 
+import { buildPersonalReviewDecisionId, buildAdaptiveReviewDecisionId, buildWorkspaceReviewDecisionId } from "@/lib/governance/adaptiveHumanReviewHistory";
 import {
   viewerMayReadReviewPanel,
   viewerMayReadDecisionProvenance,
   viewerMayReadDecisionReviewerIdentity,
   historyRowIsInPersonalReviewScope,
-  classifyCanonicalDecisionScope,
+  expectedPersonalDecisionId,
+  classifyDecisionScopeFromPersonalDoc,
 } from "@/lib/governance/personalReviewScope";
 
 describe("viewerMayReadReviewPanel — allow-list", () => {
@@ -77,40 +79,73 @@ describe("historyRowIsInPersonalReviewScope — allow-list on the persisted disc
   });
 });
 
-describe("classifyCanonicalDecisionScope", () => {
-  const base = { reviewerId: "r1", reviewedAt: "2026-08-03T00:00:00.000Z", status: "approved" };
-  const row = (over: Record<string, unknown> = {}) => ({
-    reviewerId: "r1",
-    reviewedAt: "2026-08-03T00:00:00.000Z",
-    newStatus: "approved",
-    teamId: null,
-    ...over,
+describe("expectedPersonalDecisionId — the exact, derivable linkage", () => {
+  it("reconstructs the id the Personal decision route writes under", () => {
+    const id = expectedPersonalDecisionId({ runId: "run-1", reviewedAt: "2026-08-03T00:00:00.000Z", status: "approved" });
+    expect(id).toBe(buildPersonalReviewDecisionId("run-1", "2026-08-03T00:00:00.000Z", "approved"));
   });
 
-  it("a matching personal row proves personal scope", () => {
-    expect(classifyCanonicalDecisionScope({ ...base, decidedVia: "single_reviewer", historyRows: [row()] })).toBe("personal");
+  it("is NAMESPACE-SEPARATED from the Team and Workspace forms for identical material", () => {
+    const personal = expectedPersonalDecisionId({ runId: "run-1", reviewedAt: "2026-08-03T00:00:00.000Z", status: "approved" });
+    const team = buildAdaptiveReviewDecisionId("team-1", "run-1", "2026-08-03T00:00:00.000Z", "approved");
+    const workspace = buildWorkspaceReviewDecisionId("ws-1", "run-1", "2026-08-03T00:00:00.000Z", "approved");
+    expect(new Set([personal, team, workspace]).size).toBe(3);
   });
 
-  it("a matching TEAM row proves team scope", () => {
-    expect(classifyCanonicalDecisionScope({ ...base, decidedVia: "single_reviewer", historyRows: [row({ teamId: "team-1" })] })).toBe("team");
+  it.each([
+    ["blank runId", { runId: "  ", reviewedAt: "2026-08-03T00:00:00.000Z", status: "approved" }],
+    ["missing reviewedAt", { runId: "run-1", reviewedAt: undefined, status: "approved" }],
+    ["blank reviewedAt", { runId: "run-1", reviewedAt: "", status: "approved" }],
+    ["missing status", { runId: "run-1", reviewedAt: "2026-08-03T00:00:00.000Z", status: undefined }],
+  ])("returns null (never throws) for %s", (_label, args) => {
+    expect(expectedPersonalDecisionId(args as never)).toBeNull();
+  });
+});
+
+describe("classifyDecisionScopeFromPersonalDoc — authority truth table", () => {
+  const base = { reviewerId: "r1", reviewedAt: "2026-08-03T00:00:00.000Z", status: "approved", decidedVia: "single_reviewer" as string | undefined };
+  const personalRow = (over: Record<string, unknown> = {}) => ({
+    exists: true,
+    data: { reviewerId: "r1", reviewedAt: "2026-08-03T00:00:00.000Z", newStatus: "approved", teamId: null, ...over },
+  });
+
+  it("the personal-namespaced document, agreeing with the record, proves personal scope", () => {
+    expect(classifyDecisionScopeFromPersonalDoc({ ...base, personalDoc: personalRow() })).toBe("personal");
   });
 
   it.each(["multi_reviewer_panel", "multi_reviewer_owner_override"])(
-    "%s is team-scoped by definition, with no lookup and regardless of rows",
+    "%s is team-scoped by definition — no lookup, and a present personal doc cannot override it",
     (decidedVia) => {
-      expect(classifyCanonicalDecisionScope({ ...base, decidedVia, historyRows: [row()] })).toBe("team");
+      expect(classifyDecisionScopeFromPersonalDoc({ ...base, decidedVia, personalDoc: personalRow() })).toBe("team");
     }
   );
 
   it.each([
-    ["no rows at all", []],
-    ["a row for a different reviewer", [row({ reviewerId: "other" })]],
-    ["a row at a different timestamp", [row({ reviewedAt: "2026-01-01T00:00:00.000Z" })]],
-    ["a row with a different terminal status", [row({ newStatus: "rejected" })]],
-    ["TWO rows matching the same decision", [row(), row()]],
-    ["a matching row whose teamId key is absent", [{ reviewerId: "r1", reviewedAt: "2026-08-03T00:00:00.000Z", newStatus: "approved" }]],
-  ])("returns unknown (a denial) for %s", (_label, rows) => {
-    expect(classifyCanonicalDecisionScope({ ...base, decidedVia: "single_reviewer", historyRows: rows as unknown[] })).toBe("unknown");
+    ["the document is absent (a Team or Workspace decision wrote a DIFFERENT id)", { exists: false, data: null }],
+    ["the read failed entirely", null],
+    ["the body is not an object", { exists: true, data: "nope" }],
+    ["the body is an array", { exists: true, data: [] }],
+    ["the body is null", { exists: true, data: null }],
+  ])("returns unknown when %s", (_label, doc) => {
+    expect(classifyDecisionScopeFromPersonalDoc({ ...base, personalDoc: doc as never })).toBe("unknown");
+  });
+
+  it.each([
+    ["teamId is a real team", personalRow({ teamId: "team-1" })],
+    ["teamId key is absent", { exists: true, data: { reviewerId: "r1", reviewedAt: "2026-08-03T00:00:00.000Z", newStatus: "approved" } }],
+    ["the reviewer disagrees with the record", personalRow({ reviewerId: "someone-else" })],
+    ["the timestamp disagrees with the record", personalRow({ reviewedAt: "2026-01-01T00:00:00.000Z" })],
+    ["the status disagrees with the record", personalRow({ newStatus: "rejected" })],
+  ])("returns unknown when %s", (_label, doc) => {
+    expect(classifyDecisionScopeFromPersonalDoc({ ...base, personalDoc: doc as never })).toBe("unknown");
+  });
+
+  it("a WORKSPACE decision cannot be mislabelled personal even though it also stores teamId: null", () => {
+    // The Workspace writer stores `teamId: null` exactly like the Personal
+    // one — the old discriminator could not tell them apart. The namespaced
+    // id can: a Workspace decision simply is not at the personal id, so the
+    // point read misses.
+    expect(classifyDecisionScopeFromPersonalDoc({ ...base, personalDoc: { exists: false, data: null } })).toBe("unknown");
   });
 
   it.each([
@@ -118,7 +153,7 @@ describe("classifyCanonicalDecisionScope", () => {
     ["a blank reviewerId", { reviewerId: "" }],
     ["a missing reviewedAt", { reviewedAt: undefined }],
   ])("returns unknown for %s", (_label, over) => {
-    expect(classifyCanonicalDecisionScope({ ...base, ...over, decidedVia: undefined, historyRows: [row()] })).toBe("unknown");
+    expect(classifyDecisionScopeFromPersonalDoc({ ...base, ...over, decidedVia: undefined, personalDoc: personalRow() } as never)).toBe("unknown");
   });
 });
 

@@ -200,7 +200,9 @@ export async function GET(req: NextRequest, { params }: { params: { workspaceId:
   const viewerRole = deriveTeamRunViewerRole({ uid, capabilities: access.capabilities, assignmentResult, governanceRecord: data.governanceRecord });
 
   const requestId = req.headers.get("x-vercel-id") ?? req.headers.get("x-request-id") ?? undefined;
-  const payload = await buildRunReadPayload({ runId, data, viewerRole, requestId, resolveReviewRouting: resolveRunReviewRouting });
+  // Team viewers hold Workspace authority over this run's review, so the
+  // decision's conditions are inside their capability.
+  const payload = await buildRunReadPayload({ runId, data, viewerRole, requestId, mayReadDecisionContent: true, resolveReviewRouting: resolveRunReviewRouting });
 
   // Project label — containment + label only (no Project ACL). A missing or
   // malformed Project document degrades to `null` (the run stays readable);

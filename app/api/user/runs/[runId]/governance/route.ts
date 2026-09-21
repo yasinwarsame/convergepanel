@@ -39,7 +39,8 @@ import { resolveReviewerDisplayNames, REVIEWER_UNAVAILABLE_LABEL } from "@/lib/g
 import { resolveAdaptiveRunAccess } from "@/lib/governance/adaptiveRunAccess";
 import {
   viewerMayReadReviewPanel,
-  classifyCanonicalDecisionScope,
+  expectedPersonalDecisionId,
+  classifyDecisionScopeFromPersonalDoc,
   viewerMayReadDecisionReviewerIdentity,
 } from "@/lib/governance/personalReviewScope";
 import { loadUserAndTeam } from "@/lib/teams/teamApiAuth";
@@ -219,23 +220,37 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
   // surfaces in agreement. The rows are read ONLY when a non-owner actually
   // faces a decided review, and an unreadable read denies rather than
   // admits.
-  let decisionHistoryRows: unknown[] = [];
-  if (viewerRole !== "owner" && govParse.ok && govParse.record.humanReview.reviewerId) {
-    try {
-      const historySnap = await adminDb.collection("runs").doc(runId).collection("humanReviewHistory").get();
-      decisionHistoryRows = historySnap.docs.map((d) => d.data());
-    } catch {
-      logger.warn("[user/runs/governance] Decision-provenance history read failed; denying reviewer identity", { runId });
-      decisionHistoryRows = [];
+  // The provenance lookup is a single POINT READ of the exact document a
+  // PERSONAL decision on this run would have been written under —
+  // `humanReviewHistory/{buildPersonalReviewDecisionId(runId, reviewedAt, status)}`.
+  // The id is namespaced (`sha256("personal:"…)` vs the team/workspace
+  // forms), so a Team or Workspace decision cannot land on it; `teamId`
+  // alone could not tell those apart, because Workspace writers also store
+  // `null`. A failed read denies rather than admits.
+  let personalDecisionDoc: { exists: boolean; data: unknown } | null = null;
+  if (viewerRole !== "owner" && govParse.ok) {
+    const expectedId = expectedPersonalDecisionId({
+      runId,
+      reviewedAt: govParse.record.humanReview.reviewedAt,
+      status: govParse.record.humanReview.status,
+    });
+    if (expectedId) {
+      try {
+        const snap = await adminDb.collection("runs").doc(runId).collection("humanReviewHistory").doc(expectedId).get();
+        personalDecisionDoc = { exists: snap.exists === true, data: snap.exists ? snap.data() : null };
+      } catch {
+        logger.warn("[user/runs/governance] Decision-provenance read failed; denying reviewer identity", { runId });
+        personalDecisionDoc = null;
+      }
     }
   }
   const decisionScope = govParse.ok
-    ? classifyCanonicalDecisionScope({
+    ? classifyDecisionScopeFromPersonalDoc({
         decidedVia: govParse.record.humanReview.decidedVia,
         reviewerId: govParse.record.humanReview.reviewerId,
         reviewedAt: govParse.record.humanReview.reviewedAt,
         status: govParse.record.humanReview.status,
-        historyRows: decisionHistoryRows,
+        personalDoc: personalDecisionDoc,
       })
     : "unknown";
   const mayReadDecisionReviewer = viewerMayReadDecisionReviewerIdentity({

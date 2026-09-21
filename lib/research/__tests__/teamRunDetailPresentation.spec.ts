@@ -37,7 +37,7 @@ function teamBlock(over: Record<string, unknown> = {}) {
 
 /** A real R1 detail body: builder output + team block, JSON round-tripped. */
 async function r1Body(opts: { data?: Record<string, unknown>; viewerRole?: RunReadViewerRole; team?: Record<string, unknown> } = {}) {
-  const payload = await buildRunReadPayload({
+  const payload = await buildRunReadPayload({ mayReadDecisionContent: true,
     runId: FIXTURE_RUN_ID,
     data: fullTeamRunData(opts.data ?? {}),
     viewerRole: opts.viewerRole ?? "team_member",

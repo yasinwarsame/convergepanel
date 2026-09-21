@@ -514,3 +514,47 @@ describe("F2 — a finalized panel's reviewer is not resolved for a Personal rev
     expect(identityResolverSaw("TEAM_PANELIST_UID")).toBe(false);
   });
 });
+
+/**
+ * §14 — the LEGACY-family (System A) branch of reviewer-identity suppression.
+ *
+ * Previously uncovered: deleting the guard from the legacy branch of
+ * `buildReviewGovernanceViewModel` passed the whole suite. That branch is
+ * live — a run with no Milestone-2 governance record but a legacy
+ * `governanceStatus` falls into it, and `governanceReviewedBy` is typically a
+ * team admin. Reaching it needs a run whose `governanceRecord` is absent.
+ */
+describe("§14 — legacy System A governance family", () => {
+  const LEGACY_REVIEWER = "LEGACY_GOV_REVIEWER";
+
+  beforeEach(() => {
+    runDoc = {
+      userId: OWNER,
+      question: "q",
+      // No governanceRecord at all -> legacy family.
+      governanceStatus: "approved",
+      governanceReasons: ["policy ok"],
+      governanceReviewedBy: LEGACY_REVIEWER,
+      governanceReviewedAt: "2026-08-02T00:00:00.000Z",
+    };
+    seedPersonalAssignment();
+  });
+
+  it("a Personal reviewer never learns the legacy governance reviewer's identity", async () => {
+    const r = await callGovernance();
+    expect(r.status).toBe(200);
+    expect(r.body.viewerRole).toBe("personal_reviewer");
+    expect(r.body.governance.family).toBe("legacy");
+    expect(r.body.governance.reviewer).toBeNull();
+    expect(identityResolverSaw(LEGACY_REVIEWER)).toBe(false);
+    expect(JSON.stringify(r.body)).not.toContain(LEGACY_REVIEWER);
+  });
+
+  it("CONTROL: the owner still sees it — so the assertion above is not vacuous", async () => {
+    mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: OWNER });
+    const r = await callGovernance();
+    expect(r.body.governance.family).toBe("legacy");
+    expect(r.body.governance.reviewer.displayName).toBe(`NAME_OF_${LEGACY_REVIEWER}`);
+    expect(identityResolverSaw(LEGACY_REVIEWER)).toBe(true);
+  });
+});

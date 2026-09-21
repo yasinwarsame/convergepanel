@@ -35,6 +35,7 @@
  */
 
 import type { AdaptiveRunAccessRole } from "./adaptiveRunAccess";
+import { buildPersonalReviewDecisionId } from "./adaptiveHumanReviewHistory";
 
 /**
  * Whether this viewer may read the run's multi-reviewer panel and its votes.
@@ -76,11 +77,19 @@ export function viewerMayReadDecisionProvenance(role: ReviewProvenanceViewerRole
  * Whether one raw `humanReviewHistory` document is inside the personal
  * review scope.
  *
- * ALLOW-LIST on the canonical `teamId` discriminator, read from the raw
- * stored document rather than the classified list item (which deliberately
- * drops `teamId`). Every personal decision is written with `teamId: null` and
- * every legacy Team decision with a non-empty string, so `null` is the
- * precise persisted signal — never an inference from status or timestamps.
+ * ALLOW-LIST on the stored `teamId`, read from the raw document rather than
+ * the classified list item (which deliberately drops `teamId`).
+ *
+ * IMPORTANT — `teamId: null` is NOT by itself proof of Personal origin. It
+ * separates a row from the LEGACY TEAM writers (which always store a
+ * non-empty string) and nothing more: three Workspace writers also store
+ * `null` (`workspaceReviewMutations.ts` single review,
+ * `workspaceReviewPanelMutations.ts` panel finalization and owner override).
+ * An earlier version of this comment claimed otherwise, which was false.
+ * Authority-grade provenance comes from the namespaced decision id — see
+ * `classifyDecisionScopeFromPersonalDoc` — and this predicate is only the
+ * secondary legacy-Team check applied to a row already located that way, or
+ * the row filter for the review-history list.
  *
  * A row whose `teamId` key is ABSENT, or present with any other value, is
  * excluded: an unclassifiable row must not default open.
@@ -91,62 +100,92 @@ export function historyRowIsInPersonalReviewScope(raw: unknown): boolean {
   return (raw as { teamId?: unknown }).teamId === null;
 }
 
-export type CanonicalDecisionScope = "personal" | "team" | "unknown";
+export type CanonicalDecisionScope = "personal" | "team" | "workspace" | "unknown";
+
+/**
+ * The exact `humanReviewHistory` document id a PERSONAL decision on this run
+ * would have been written under, or `null` when the canonical record cannot
+ * produce one.
+ *
+ * This is an exact, derivable relation, not a heuristic:
+ * `app/api/user/runs/[runId]/decision/route.ts` derives ONE
+ * `new Date().toISOString()` per request, passes it to the canonical writer
+ * as `now` (so `humanReview.reviewedAt` IS that string) and to
+ * `buildPersonalReviewDecisionId(runId, reviewedAt, newStatusForHistory)`,
+ * where `newStatusForHistory` is `updatedRecord.humanReview.status`. The
+ * document is then created at `runs/{runId}/humanReviewHistory/{decisionId}`.
+ * That route has used this id form since the commit that introduced it, so
+ * there is no legacy personal-decision id variant to be compatible with.
+ *
+ * The id is namespaced and collision-separated by construction:
+ * `sha256("personal:" + …)` vs `sha256(teamId + ":" + …)` vs
+ * `sha256("workspace:" + workspaceId + ":" + …)`. A Team or Workspace
+ * decision therefore cannot land on the personal id — which is exactly what
+ * `teamId` alone cannot tell us, since Workspace writers also store `null`.
+ */
+export function expectedPersonalDecisionId(args: {
+  runId: string;
+  reviewedAt: string | undefined;
+  status: string | undefined;
+}): string | null {
+  if (typeof args.runId !== "string" || args.runId.trim().length === 0) return null;
+  if (typeof args.reviewedAt !== "string" || args.reviewedAt.trim().length === 0) return null;
+  if (typeof args.status !== "string" || args.status.trim().length === 0) return null;
+  try {
+    return buildPersonalReviewDecisionId(args.runId, args.reviewedAt, args.status);
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Classify the authority scope of the canonical `governanceRecord.humanReview`
- * decision.
+ * decision from a POINT READ of the expected personal history document.
  *
- * `humanReview` itself carries NO `teamId` and no scope field — verified
- * against its persisted schema — so a single-reviewer decision cannot be
- * attributed from the record alone. The guaranteed persisted provenance is
- * the matching `runs/{runId}/humanReviewHistory` row's `teamId`, which is the
- * same discriminator the review-history surface already treats as canonical.
- * Using it here is what keeps the two surfaces from disagreeing.
+ * `humanReview` itself carries no `teamId` and no scope field, so the decision
+ * cannot be attributed from the record alone. This replaces an earlier
+ * `(reviewerId, reviewedAt, newStatus)` scan of the whole history collection.
+ * The tuple scan failed closed in every case tested, but it was weaker in two
+ * ways that matter: it could not distinguish a Personal decision from a
+ * WORKSPACE one (both store `teamId: null`), and duplicate tuples produced an
+ * ambiguity class that the keyed lookup does not have — a document id is
+ * unique by definition.
  *
- * - A panel `decidedVia` is Team-scoped by definition, with no lookup needed.
- * - Otherwise exactly one history row must match the decision on reviewer,
- *   timestamp and resulting status. Zero matches, several matches, or a row
- *   that fails the scope allow-list all yield `"unknown"`.
+ * - A panel `decidedVia` is Team-scoped by definition; no lookup is needed.
+ * - Otherwise the expected personal document must EXIST, parse as a history
+ *   row, carry `teamId: null`, and AGREE with the canonical record on
+ *   reviewer, timestamp and resulting status. Agreement is re-checked rather
+ *   than assumed: the id proves which namespace wrote it, the body proves it
+ *   describes this decision.
  *
- * `"unknown"` is a denial, never a fallback to `"personal"`.
+ * Anything else — absent document, unreadable body, disagreement — is
+ * `"unknown"`, which denies. `"unknown"` is never a fallback to `"personal"`.
  */
-export function classifyCanonicalDecisionScope(args: {
+export function classifyDecisionScopeFromPersonalDoc(args: {
   decidedVia: string | undefined;
   reviewerId: string | undefined;
   reviewedAt: string | undefined;
   status: string;
-  /** Raw `humanReviewHistory` documents already fetched by the caller. */
-  historyRows: readonly unknown[];
+  /** The point-read of `humanReviewHistory/{expectedPersonalDecisionId}`. */
+  personalDoc: { exists: boolean; data: unknown } | null;
 }): CanonicalDecisionScope {
   if (args.decidedVia === "multi_reviewer_panel" || args.decidedVia === "multi_reviewer_owner_override") {
     return "team";
   }
   if (typeof args.reviewerId !== "string" || args.reviewerId.length === 0) return "unknown";
   if (typeof args.reviewedAt !== "string" || args.reviewedAt.length === 0) return "unknown";
+  if (!args.personalDoc || args.personalDoc.exists !== true) return "unknown";
 
-  const matches = args.historyRows.filter((raw) => {
-    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
-    const row = raw as { reviewerId?: unknown; reviewedAt?: unknown; newStatus?: unknown };
-    return row.reviewerId === args.reviewerId && row.reviewedAt === args.reviewedAt && row.newStatus === args.status;
-  });
+  const raw = args.personalDoc.data;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return "unknown";
+  if (!historyRowIsInPersonalReviewScope(raw)) return "unknown";
 
-  // Exactly one decision may correspond to one (reviewer, timestamp, status).
-  // Anything else is an ambiguity this boundary refuses to resolve in the
-  // requester's favour.
-  if (matches.length !== 1) return "unknown";
+  const row = raw as { reviewerId?: unknown; reviewedAt?: unknown; newStatus?: unknown };
+  if (row.reviewerId !== args.reviewerId) return "unknown";
+  if (row.reviewedAt !== args.reviewedAt) return "unknown";
+  if (row.newStatus !== args.status) return "unknown";
 
-  // Three-way on the matched row, never two-way. `teamId: null` proves
-  // personal; a non-empty string proves team; anything else (absent key,
-  // wrong type, empty string) is genuinely unclassifiable and is reported as
-  // such rather than being attributed to either side. All three of
-  // "team"/"unknown" deny a personal reviewer, but calling an unreadable row
-  // "team" would be a false attribution, and this value is a claim about
-  // provenance, not just a gate input.
-  const matched = matches[0] as { teamId?: unknown };
-  if (historyRowIsInPersonalReviewScope(matched)) return "personal";
-  if (typeof matched.teamId === "string" && matched.teamId.length > 0) return "team";
-  return "unknown";
+  return "personal";
 }
 
 /**

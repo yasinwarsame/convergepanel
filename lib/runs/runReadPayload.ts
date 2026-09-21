@@ -76,6 +76,14 @@ export type RunReadPayload = {
 };
 
 export async function buildRunReadPayload(args: {
+  /**
+   * Whether this caller may read the DECISION'S CONTENT (currently the
+   * condition strings), as opposed to its neutral status. Decided by the
+   * caller, which is the layer that can establish decision provenance.
+   * Owner and Team-authorized callers pass true; a personal reviewer passes
+   * true only for a decision proven to be inside their own capability.
+   */
+  mayReadDecisionContent: boolean;
   runId: string;
   data: Record<string, unknown>;
   viewerRole: RunReadViewerRole;
@@ -143,6 +151,7 @@ export async function buildRunReadPayload(args: {
   // Adaptive Synthesis Report, Phase 1 — compact human-review fields only,
   // and only when a real adaptiveOutput was persisted (governance is never
   // initialized otherwise). Never reviewer name or comment text.
+  const mayReadDecisionContent = args.mayReadDecisionContent;
   const parsedGovernance = parsedAdaptive.ok ? parseGovernanceRecord(data.governanceRecord) : { ok: false as const };
   //
   // PHASE 1 — Personal/Team review isolation. `decidedVia` is omitted for a
@@ -153,10 +162,18 @@ export async function buildRunReadPayload(args: {
   // sibling exactly what the governance route's `historyScope` closed.
   // Scoped to the Personal capability only: the owner and Team-authorized
   // viewers keep the field.
+  //
+  // `conditions` is NOT neutral decision metadata. When a multi-reviewer Team
+  // panel finalizes, `buildFinalConditionsUnion` copies the supporting
+  // reviewers' `approved_with_conditions` vote condition strings VERBATIM
+  // into the canonical record, so this field can carry Team reviewer-authored
+  // vote content — strictly more than the `decidedVia` provenance flag beside
+  // it. It is released only when the caller may read the decision's content;
+  // `status` is the neutral part and always stays.
   const humanReview = parsedGovernance.ok
     ? {
         status: parsedGovernance.record.humanReview.status,
-        conditions: parsedGovernance.record.humanReview.conditions,
+        ...(mayReadDecisionContent ? { conditions: parsedGovernance.record.humanReview.conditions } : {}),
         ...(viewerMayReadDecisionProvenance(viewerRole)
           ? { decidedVia: parsedGovernance.record.humanReview.decidedVia }
           : {}),
