@@ -37,6 +37,7 @@ import type { AdaptiveHumanReviewPanelV1 } from "@/lib/governance/adaptiveHumanR
 import type { AdaptiveHumanReviewVoteV1 } from "@/lib/governance/adaptiveHumanReviewVote";
 import { resolveReviewerDisplayNames, REVIEWER_UNAVAILABLE_LABEL } from "@/lib/governance/reviewerIdentity";
 import { resolveAdaptiveRunAccess } from "@/lib/governance/adaptiveRunAccess";
+import { viewerMayReadReviewPanel } from "@/lib/governance/personalReviewScope";
 import { loadUserAndTeam } from "@/lib/teams/teamApiAuth";
 import { validateRunWorkspaceAssociation } from "@/lib/workspaces/runWorkspaceIntegrity";
 import { logger } from "@/lib/logger";
@@ -141,7 +142,20 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
         }
       : null;
 
-  if (govParse.ok) {
+  // PHASE 1 — Personal/Team review-panel isolation. The panel and its votes
+  // are read ONLY for a viewer whose capability covers them. This used to be
+  // unconditional, justified by "a panel is team-only by construction
+  // (personal runs never have one)" — false: a LEGACY run carries no
+  // `workspaceId` at all, passes integrity as `legacy`, and can hold a legacy
+  // Team panel alongside an independent `teamId: null` Personal assignment,
+  // since `submitAdaptiveHumanReviewPanel` never touches the assignment doc.
+  //
+  // The gate sits BEFORE the reads, not over the output: redacting Team
+  // identities after resolving them would still have fetched the panel, every
+  // vote, and every reviewer profile. `panel` staying null is also what keeps
+  // the Team reviewer uids out of `candidateUids` below, so the identity
+  // resolver is never asked about them at all.
+  if (govParse.ok && viewerMayReadReviewPanel(viewerRole)) {
     const panelResult = await getAdaptiveHumanReviewPanel(runId);
 
     if (panelResult.status === "found") {
