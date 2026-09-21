@@ -61,11 +61,39 @@ jest.mock("@/lib/firestore/workspaces", () => ({ getWorkspace: (...a: any[]) => 
 
 let runDoc: Record<string, unknown> | null = null;
 let historyDocs: Array<{ id: string; data: Record<string, unknown> }> = [];
+
+/**
+ * HARNESS FIDELITY (H2). The production provenance lookup is a POINT READ:
+ * `.collection("humanReviewHistory").doc(expectedId).get()`. An earlier
+ * version of this fake exposed only `.get()` on the subcollection, so every
+ * test in this file threw a TypeError inside the route, the route's own
+ * `catch` swallowed it, provenance became `unknown`, and every assertion
+ * here passed by FAILING CLOSED rather than by exercising the mechanism.
+ * Two opening mutations survived the suite as a result.
+ *
+ * The fake now serves the point read faithfully and records both access
+ * shapes, so a test can assert the point read happened AND that no
+ * collection-wide scan did.
+ */
+const historyIdsRequested: string[] = [];
+let historyCollectionScans = 0;
 const mockAdminDb: any = {
   collection: () => ({
     doc: () => ({
       get: async () => ({ exists: runDoc !== null, data: () => runDoc }),
-      collection: () => ({ get: async () => ({ docs: historyDocs.map((d) => ({ id: d.id, data: () => d.data })) }) }),
+      collection: () => ({
+        doc: (id: string) => ({
+          get: async () => {
+            historyIdsRequested.push(id);
+            const row = historyDocs.find((d) => d.id === id);
+            return { exists: row !== undefined, data: () => row?.data };
+          },
+        }),
+        get: async () => {
+          historyCollectionScans += 1;
+          return { docs: historyDocs.map((d) => ({ id: d.id, data: () => d.data })) };
+        },
+      }),
     }),
   }),
 };
@@ -74,6 +102,7 @@ jest.mock("@/lib/firebase/admin", () => ({ get adminDb() { return mockAdminDb; }
 import { NextRequest } from "next/server";
 import { GET as governanceGET } from "@/app/api/user/runs/[runId]/governance/route";
 import { GET as historyGET } from "@/app/api/user/runs/[runId]/review-history/route";
+import { buildPersonalReviewDecisionId, buildAdaptiveReviewDecisionId } from "@/lib/governance/adaptiveHumanReviewHistory";
 
 const RUN = "run-legacy-1";
 const OWNER = "owner-uid";
@@ -191,6 +220,8 @@ beforeEach(() => {
   jest.clearAllMocks();
   resolvedUidCalls = [];
   historyDocs = [];
+  historyIdsRequested.length = 0;
+  historyCollectionScans = 0;
   runDoc = null;
   mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: REVIEWER });
   mockedGetAssignment.mockResolvedValue({ status: "absent" });
@@ -556,5 +587,114 @@ describe("§14 — legacy System A governance family", () => {
     expect(r.body.governance.family).toBe("legacy");
     expect(r.body.governance.reviewer.displayName).toBe(`NAME_OF_${LEGACY_REVIEWER}`);
     expect(identityResolverSaw(LEGACY_REVIEWER)).toBe(true);
+  });
+});
+
+/**
+ * §6/§7/§18 — the GOVERNANCE route's provenance path, proven in its GRANTING
+ * direction and proven to be a point read.
+ *
+ * Until the fake above was corrected these could not exist: the lookup threw
+ * and was swallowed, so the route could only ever deny. Without a granting
+ * test, disabling the lookup entirely — or bolting a collection scan onto it —
+ * left the whole suite green.
+ */
+describe("§7 — governance provenance, granting direction", () => {
+  const PRIOR_PERSONAL_REVIEWER = "prior-personal-reviewer";
+  const DECIDED_AT = "2026-08-04T00:00:00.000Z";
+
+  function seedPersonalDecidedRun() {
+    runDoc = {
+      userId: OWNER,
+      question: "q",
+      governanceRecord: {
+        ...governanceRecord(),
+        humanReview: { status: "approved", reviewerId: PRIOR_PERSONAL_REVIEWER, reviewedAt: DECIDED_AT, decidedVia: "single_reviewer" },
+      },
+    };
+    const id = buildPersonalReviewDecisionId(RUN, DECIDED_AT, "approved");
+    historyDocs = [
+      {
+        id,
+        data: {
+          version: 1, kind: "adaptive_human_review", historyId: id, decisionId: id, runId: RUN,
+          teamId: null, schemaId: "decision_support", answerShape: "decision_support_view",
+          priorStatus: "unreviewed", newStatus: "approved", reviewerId: PRIOR_PERSONAL_REVIEWER,
+          reviewedAt: DECIDED_AT, governanceRecordUpdatedAt: DECIDED_AT,
+          commentPresent: false, conditionsCount: 0,
+        },
+      },
+    ];
+    seedPersonalAssignment();
+  }
+
+  it("GRANTS: a non-self decision proven Personal releases the decider's identity", async () => {
+    seedPersonalDecidedRun();
+    const r = await callGovernance();
+    expect(r.status).toBe(200);
+    expect(r.body.viewerRole).toBe("personal_reviewer");
+    expect(r.body.governance.singleReviewer).not.toBeNull();
+    expect(r.body.governance.singleReviewer.displayName).toBe(`NAME_OF_${PRIOR_PERSONAL_REVIEWER}`);
+  });
+
+  it("HARNESS FIDELITY: the lookup is a POINT READ at the exact namespaced id, and no collection scan occurs", async () => {
+    seedPersonalDecidedRun();
+    await callGovernance();
+    expect(historyIdsRequested).toEqual([buildPersonalReviewDecisionId(RUN, DECIDED_AT, "approved")]);
+    expect(historyCollectionScans).toBe(0);
+  });
+
+  it("MUTATION GUARD: an empty provenance lookup must DENY — what a disabled lookup looks like", async () => {
+    seedPersonalDecidedRun();
+    historyDocs = [];
+    const r = await callGovernance();
+    expect(r.body.governance.singleReviewer).toBeNull();
+    expect(identityResolverSaw(PRIOR_PERSONAL_REVIEWER)).toBe(false);
+  });
+
+  it("§9 NO SCAN FALLBACK: a Team-namespaced row whose body agrees is not admitted", async () => {
+    seedPersonalDecidedRun();
+    // The personal document is absent; a Team-family row sits at its own id
+    // with a body that otherwise agrees. A collection-scan fallback would
+    // find it; a point read must not.
+    const teamId = buildAdaptiveReviewDecisionId("team-SECRET", RUN, DECIDED_AT, "approved");
+    historyDocs = [
+      {
+        id: teamId,
+        data: {
+          version: 1, kind: "adaptive_human_review", historyId: teamId, decisionId: teamId, runId: RUN,
+          teamId: "team-SECRET", schemaId: "decision_support", answerShape: "decision_support_view",
+          priorStatus: "unreviewed", newStatus: "approved", reviewerId: PRIOR_PERSONAL_REVIEWER,
+          reviewedAt: DECIDED_AT, governanceRecordUpdatedAt: DECIDED_AT, commentPresent: false, conditionsCount: 0,
+        },
+      },
+    ];
+    const r = await callGovernance();
+    expect(r.body.governance.singleReviewer).toBeNull();
+    expect(historyCollectionScans).toBe(0);
+    expect(identityResolverSaw(PRIOR_PERSONAL_REVIEWER)).toBe(false);
+  });
+
+  it("§11 ALIAS: a Team row placed at the EXACT expected personal id is rejected by the BODY, not the id", async () => {
+    seedPersonalDecidedRun();
+    // `buildAdaptiveReviewDecisionId("personal", …)` yields byte-identical
+    // material to the personal builder, so a Team-family document can sit at
+    // the very id we point-read. Only its body distinguishes it.
+    const aliased = buildAdaptiveReviewDecisionId("personal", RUN, DECIDED_AT, "approved");
+    expect(aliased).toBe(buildPersonalReviewDecisionId(RUN, DECIDED_AT, "approved"));
+    historyDocs = [
+      {
+        id: aliased,
+        data: {
+          version: 1, kind: "adaptive_human_review", historyId: aliased, decisionId: aliased, runId: RUN,
+          teamId: "personal", schemaId: "decision_support", answerShape: "decision_support_view",
+          priorStatus: "unreviewed", newStatus: "approved", reviewerId: PRIOR_PERSONAL_REVIEWER,
+          reviewedAt: DECIDED_AT, governanceRecordUpdatedAt: DECIDED_AT, commentPresent: false, conditionsCount: 0,
+        },
+      },
+    ];
+    const r = await callGovernance();
+    expect(r.body.governance.singleReviewer).toBeNull();
+    expect(identityResolverSaw(PRIOR_PERSONAL_REVIEWER)).toBe(false);
   });
 });

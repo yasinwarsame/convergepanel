@@ -17,6 +17,7 @@ import {
   historyRowIsInPersonalReviewScope,
   expectedPersonalDecisionId,
   classifyDecisionScopeFromPersonalDoc,
+  viewerMayReadDecisionContent,
 } from "@/lib/governance/personalReviewScope";
 
 describe("viewerMayReadReviewPanel — allow-list", () => {
@@ -187,5 +188,66 @@ describe("viewerMayReadDecisionReviewerIdentity", () => {
 
   it.each(["unauthorized", "team_member", undefined])("denies role %p", (role) => {
     expect(viewerMayReadDecisionReviewerIdentity({ role: role as never, scope: "personal", viewerUid: VIEWER, reviewerId: VIEWER })).toBe(false);
+  });
+});
+
+describe("viewerMayReadDecisionContent — NO self case, unlike the identity predicate", () => {
+  it.each([
+    ["owner", "unknown", true],
+    ["owner", "team", true],
+    ["personal_reviewer", "personal", true],
+    ["personal_reviewer", "team", false],
+    ["personal_reviewer", "workspace", false],
+    ["personal_reviewer", "unknown", false],
+    ["unauthorized", "personal", false],
+  ])("role %s + scope %s -> %s", (role, scope, expected) => {
+    expect(viewerMayReadDecisionContent({ role: role as never, scope: scope as never })).toBe(expected);
+  });
+
+  it("takes no uid at all — identity equality cannot reach this decision", () => {
+    // The signature is the guarantee: there is no argument through which a
+    // self short-circuit could be reintroduced without changing the type.
+    expect(viewerMayReadDecisionContent.length).toBe(1);
+    expect(Object.keys({ role: "personal_reviewer", scope: "team" })).toEqual(["role", "scope"]);
+  });
+
+  it.each([undefined, null, "", "future_role"])("denies unrecognised role %p", (role) => {
+    expect(viewerMayReadDecisionContent({ role: role as never, scope: "personal" })).toBe(false);
+  });
+});
+
+describe("§11 — namespace ALIAS: a matching id alone is not authentication", () => {
+  it("the team builder produces the SAME id when its teamId is literally \"personal\"", () => {
+    expect(buildAdaptiveReviewDecisionId("personal", "run-1", "2026-08-03T00:00:00.000Z", "approved")).toBe(
+      buildPersonalReviewDecisionId("run-1", "2026-08-03T00:00:00.000Z", "approved")
+    );
+  });
+
+  it("colon-bearing inputs can realign the segments too", () => {
+    expect(buildAdaptiveReviewDecisionId("personal:x", "y", "2026-08-03T00:00:00.000Z", "approved")).toBe(
+      buildPersonalReviewDecisionId("x:y", "2026-08-03T00:00:00.000Z", "approved")
+    );
+  });
+
+  it("the workspace form CANNOT alias — the literal prefixes differ", () => {
+    expect(buildWorkspaceReviewDecisionId("ws-1", "run-1", "2026-08-03T00:00:00.000Z", "approved")).not.toBe(
+      buildPersonalReviewDecisionId("run-1", "2026-08-03T00:00:00.000Z", "approved")
+    );
+  });
+
+  it("an aliased Team document at the expected personal id is denied by the BODY", () => {
+    // This is the whole point: the id selected it, the body rejected it.
+    expect(
+      classifyDecisionScopeFromPersonalDoc({
+        decidedVia: "single_reviewer",
+        reviewerId: "r1",
+        reviewedAt: "2026-08-03T00:00:00.000Z",
+        status: "approved",
+        personalDoc: {
+          exists: true,
+          data: { reviewerId: "r1", reviewedAt: "2026-08-03T00:00:00.000Z", newStatus: "approved", teamId: "personal" },
+        },
+      })
+    ).toBe("unknown");
   });
 });

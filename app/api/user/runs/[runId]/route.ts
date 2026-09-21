@@ -10,7 +10,7 @@ import { adminDb } from "@/lib/firebase/admin";
 import { parseGovernanceRecord } from "@/lib/adaptiveSchema/governanceRecordParser";
 import { getAdaptiveHumanReviewAssignment } from "@/lib/firestore/runs";
 import { resolveAdaptiveRunAccess } from "@/lib/governance/adaptiveRunAccess";
-import { expectedPersonalDecisionId, classifyDecisionScopeFromPersonalDoc } from "@/lib/governance/personalReviewScope";
+import { expectedPersonalDecisionId, classifyDecisionScopeFromPersonalDoc, viewerMayReadDecisionContent } from "@/lib/governance/personalReviewScope";
 import { validateRunWorkspaceAssociation } from "@/lib/workspaces/runWorkspaceIntegrity";
 import { classifyRunWorkspaceBindingShape } from "@/lib/workspaces/classifyRunWorkspaceBindingShape";
 import { resolveTeamRunWorkspaceAccess, type ResolveTeamRunWorkspaceAccessResult } from "@/lib/workspaces/resolveTeamRunWorkspaceAccess";
@@ -315,10 +315,21 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
     const parsed = parseGovernanceRecord(data.governanceRecord);
     if (!parsed.ok) {
       mayReadDecisionContent = false;
-    } else if (parsed.record.humanReview.reviewerId && parsed.record.humanReview.reviewerId === uid) {
-      // Their own decision — their own conditions.
-      mayReadDecisionContent = true;
     } else {
+      // The provenance classifier runs UNCONDITIONALLY for a personal
+      // reviewer. An earlier version short-circuited on
+      // `humanReview.reviewerId === uid` with the comment "their own
+      // decision — their own conditions". That premise is false: on a
+      // panel-finalized decision the recorded reviewer is the actor who
+      // pressed Finalize (or the overriding owner), while `conditions` is
+      // the union of the OTHER supporting panelists' vote text. The
+      // short-circuit ran ahead of the classifier and so defeated its own
+      // first rule (a panel `decidedVia` is Team-scoped), releasing other
+      // people's vote content to whoever happened to finalize the panel.
+      //
+      // Identity equality now authorizes identity only, in
+      // `viewerMayReadDecisionReviewerIdentity`; content is a separate
+      // capability with no self case.
       let personalDoc: { exists: boolean; data: unknown } | null = null;
       const expectedId = expectedPersonalDecisionId({
         runId,
@@ -334,14 +345,14 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
           personalDoc = null;
         }
       }
-      mayReadDecisionContent =
-        classifyDecisionScopeFromPersonalDoc({
-          decidedVia: parsed.record.humanReview.decidedVia,
-          reviewerId: parsed.record.humanReview.reviewerId,
-          reviewedAt: parsed.record.humanReview.reviewedAt,
-          status: parsed.record.humanReview.status,
-          personalDoc,
-        }) === "personal";
+      const scope = classifyDecisionScopeFromPersonalDoc({
+        decidedVia: parsed.record.humanReview.decidedVia,
+        reviewerId: parsed.record.humanReview.reviewerId,
+        reviewedAt: parsed.record.humanReview.reviewedAt,
+        status: parsed.record.humanReview.status,
+        personalDoc,
+      });
+      mayReadDecisionContent = viewerMayReadDecisionContent({ role: "personal_reviewer", scope });
     }
   }
 

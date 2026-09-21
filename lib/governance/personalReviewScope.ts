@@ -117,11 +117,14 @@ export type CanonicalDecisionScope = "personal" | "team" | "workspace" | "unknow
  * That route has used this id form since the commit that introduced it, so
  * there is no legacy personal-decision id variant to be compatible with.
  *
- * The id is namespaced and collision-separated by construction:
- * `sha256("personal:" + …)` vs `sha256(teamId + ":" + …)` vs
- * `sha256("workspace:" + workspaceId + ":" + …)`. A Team or Workspace
- * decision therefore cannot land on the personal id — which is exactly what
- * `teamId` alone cannot tell us, since Workspace writers also store `null`.
+ * The id is a CANDIDATE SELECTOR, not authentication. The namespaces are
+ * `:`-joined string prefixes, so the id alone is not proof of origin: the
+ * team builder produces byte-identical material whenever its `teamId` is
+ * literally `"personal"` (and colon-bearing inputs can realign the segments
+ * too). What denies an aliased document is the BODY validation below — the
+ * Personal discriminator plus agreement with the canonical decision — not an
+ * assumed impossibility. (The `workspace:` form cannot alias `personal:`,
+ * since the literal prefixes differ; that one IS a property of the strings.)
  */
 export function expectedPersonalDecisionId(args: {
   runId: string;
@@ -153,10 +156,11 @@ export function expectedPersonalDecisionId(args: {
  *
  * - A panel `decidedVia` is Team-scoped by definition; no lookup is needed.
  * - Otherwise the expected personal document must EXIST, parse as a history
- *   row, carry `teamId: null`, and AGREE with the canonical record on
- *   reviewer, timestamp and resulting status. Agreement is re-checked rather
- *   than assumed: the id proves which namespace wrote it, the body proves it
- *   describes this decision.
+ *   row, carry the Personal discriminator (`teamId: null`), and AGREE with
+ *   the canonical record on reviewer, timestamp and resulting status. The id
+ *   only selects a candidate; the body is what establishes provenance, which
+ *   is why an aliased id from another authority family is rejected here
+ *   rather than earlier.
  *
  * Anything else — absent document, unreadable body, disagreement — is
  * `"unknown"`, which denies. `"unknown"` is never a fallback to `"personal"`.
@@ -194,14 +198,40 @@ export function classifyDecisionScopeFromPersonalDoc(args: {
  *
  * ALLOW-LIST:
  * - the owner, always;
- * - a personal reviewer, when the decider IS them (their own uid can never
- *   be a cross-boundary disclosure, and resolving their own name is not a
- *   cross-tenant read — this keeps a reviewer's own completed decision
- *   visible even when provenance is otherwise unprovable);
+ * - a personal reviewer, when the recorded decider IS them. The only value
+ *   this releases is the caller's own uid resolved to their own display
+ *   name, so it discloses nothing they do not already hold, and it keeps
+ *   their own completed decision legible when provenance is unprovable.
+ *   It authorizes IDENTITY ONLY — see `viewerMayReadDecisionContent`, which
+ *   has no self case, for why that distinction is load-bearing: on a
+ *   panel-finalized decision the recorded reviewer is the finalizing actor,
+ *   not the author of the attached content;
  * - a personal reviewer, when the decision is proven `"personal"`.
  *
  * `"unknown"` denies. Every other role denies.
  */
+/**
+ * Whether the DECISION'S CONTENT — the reviewer-authored material attached to
+ * it, currently `conditions` — may be read by this viewer.
+ *
+ * Deliberately SEPARATE from `viewerMayReadDecisionReviewerIdentity`, and
+ * deliberately WITHOUT that function's self case. Identity equality and
+ * content authority are different questions, and conflating them was a real
+ * defect: on a panel-finalized decision `humanReview.reviewerId` is the actor
+ * who pressed Finalize (`adaptivePanelFinalization.ts`) or the overriding
+ * owner — NOT a voter — while `conditions` is the union of the OTHER
+ * supporting panelists' `approved_with_conditions` vote text. "It is their
+ * own decision" therefore does not make it their own content.
+ *
+ * ALLOW-LIST: the owner always; a personal reviewer only for a decision
+ * proven `"personal"`. `"team"`, `"workspace"` and `"unknown"` all deny.
+ */
+export function viewerMayReadDecisionContent(args: { role: AdaptiveRunAccessRole; scope: CanonicalDecisionScope }): boolean {
+  if (args.role === "owner") return true;
+  if (args.role !== "personal_reviewer") return false;
+  return args.scope === "personal";
+}
+
 export function viewerMayReadDecisionReviewerIdentity(args: {
   role: AdaptiveRunAccessRole;
   scope: CanonicalDecisionScope;

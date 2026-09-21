@@ -238,3 +238,88 @@ describe("§12 — non-self Personal provenance GRANT", () => {
     expect(r.body.adaptive.humanReview).not.toHaveProperty("conditions");
   });
 });
+
+/**
+ * H1 — identity equality is not content authority.
+ *
+ * On a panel-finalized decision `humanReview.reviewerId` is the actor who
+ * pressed Finalize (or the overriding owner), NOT a voter, while
+ * `conditions` is the union of the OTHER supporting panelists'
+ * `approved_with_conditions` vote text. A self short-circuit that ran ahead
+ * of the provenance classifier therefore released other people's vote content
+ * to whoever finalized the panel — and did so while still correctly
+ * suppressing `decidedVia`, i.e. it blocked the smaller leak and passed the
+ * larger one.
+ */
+describe("H1 — self identity must not authorize decision CONTENT", () => {
+  const TEAM_SECRET = "TEAM_SECRET_FROM_ANOTHER_PANELIST";
+
+  function seedPanelFinalizedBy(uid: string, decidedVia: string) {
+    seedPanelFinalizedRun();
+    (runDoc as any).governanceRecord.humanReview = {
+      status: "approved_with_conditions",
+      reviewerId: uid,
+      reviewedAt: "2026-08-03T00:00:00.000Z",
+      decidedVia,
+      conditions: [TEAM_SECRET],
+    };
+  }
+
+  it.each(["multi_reviewer_panel", "multi_reviewer_owner_override"])(
+    "H-S2: the caller FINALIZED the panel (%s) — their own identity, but not the panelists' conditions",
+    async (decidedVia) => {
+      seedPanelFinalizedBy(REVIEWER, decidedVia);
+      mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: REVIEWER });
+      const r = await call();
+      expect(r.status).toBe(200);
+      expect(r.body.viewerRole).toBe("personal_reviewer");
+      expect(r.body.adaptive.humanReview.status).toBe("approved_with_conditions");
+      expect(r.body.adaptive.humanReview).not.toHaveProperty("conditions");
+      expect(r.body.adaptive.humanReview).not.toHaveProperty("decidedVia");
+      expect(JSON.stringify(r.body)).not.toContain(TEAM_SECRET);
+    }
+  );
+
+  it("H-S2: the provenance classifier is actually INVOKED — the self branch no longer bypasses it", async () => {
+    seedPanelFinalizedBy(REVIEWER, "multi_reviewer_panel");
+    mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: REVIEWER });
+    await call();
+    // One point read at the expected personal id. The old short-circuit
+    // performed ZERO lookups, which is how the bypass was detected.
+    expect(historyIdsRequested).toEqual([
+      buildPersonalReviewDecisionId("run-legacy-1", "2026-08-03T00:00:00.000Z", "approved_with_conditions"),
+    ]);
+  });
+
+  it("H-S3: self + unprovable provenance on a single-reviewer decision still withholds content", async () => {
+    seedPanelFinalizedBy(REVIEWER, "single_reviewer");
+    historyById = {}; // no provenance document at all
+    mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: REVIEWER });
+    const r = await call();
+    expect(r.body.adaptive.humanReview).not.toHaveProperty("conditions");
+    expect(JSON.stringify(r.body)).not.toContain(TEAM_SECRET);
+  });
+
+  it("H-S1: self + a genuine Personal decision proven by the exact document DOES release its conditions", async () => {
+    seedPanelFinalizedBy(REVIEWER, "single_reviewer");
+    const id = buildPersonalReviewDecisionId("run-legacy-1", "2026-08-03T00:00:00.000Z", "approved_with_conditions");
+    historyById[id] = {
+      version: 1, kind: "adaptive_human_review", historyId: id, decisionId: id, runId: RUN,
+      teamId: null, reviewerId: REVIEWER, reviewedAt: "2026-08-03T00:00:00.000Z",
+      newStatus: "approved_with_conditions", priorStatus: "unreviewed",
+      commentPresent: false, conditionsCount: 1,
+    };
+    mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: REVIEWER });
+    const r = await call();
+    expect(r.body.adaptive.humanReview.conditions).toEqual([TEAM_SECRET]);
+  });
+
+  it("CONTROL: the owner still sees the panel conditions from the identical fixture", async () => {
+    seedPanelFinalizedBy(REVIEWER, "multi_reviewer_panel");
+    mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: OWNER });
+    const r = await call();
+    expect(r.body.viewerRole).toBe("owner");
+    expect(r.body.adaptive.humanReview.conditions).toEqual([TEAM_SECRET]);
+    expect(historyIdsRequested).toEqual([]); // the owner needs no provenance proof
+  });
+});

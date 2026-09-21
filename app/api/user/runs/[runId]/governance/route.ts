@@ -223,10 +223,13 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
   // The provenance lookup is a single POINT READ of the exact document a
   // PERSONAL decision on this run would have been written under —
   // `humanReviewHistory/{buildPersonalReviewDecisionId(runId, reviewedAt, status)}`.
-  // The id is namespaced (`sha256("personal:"…)` vs the team/workspace
-  // forms), so a Team or Workspace decision cannot land on it; `teamId`
-  // alone could not tell those apart, because Workspace writers also store
-  // `null`. A failed read denies rather than admits.
+  // The id SELECTS a candidate; it does not authenticate one. The namespaces
+  // are `:`-joined prefixes, so the team builder yields the identical id when
+  // its `teamId` is literally "personal". What denies an aliased document is
+  // the body validation in `classifyDecisionScopeFromPersonalDoc` — the
+  // Personal discriminator plus agreement with the canonical record — which
+  // is also what separates Personal from WORKSPACE, since Workspace writers
+  // store `teamId: null` too. A failed read denies rather than admits.
   let personalDecisionDoc: { exists: boolean; data: unknown } | null = null;
   if (viewerRole !== "owner" && govParse.ok) {
     const expectedId = expectedPersonalDecisionId({
