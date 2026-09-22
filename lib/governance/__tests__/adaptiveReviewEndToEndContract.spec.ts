@@ -422,15 +422,17 @@ describe("Adaptive review — end-to-end immutable history and admin audit", () 
  * be a CONFIGURED fact, not the by-product of an unknown-id lookup. Before
  * this correction the transaction fake keyed on `ref.id`, the subcollection
  * ref had none, and the read silently resolved to a missing run document.
+ *
+ * The single assertion below is the whole proof: the panel path is genuinely
+ * requested, served from `panelDocsByPath`, and that store is empty by
+ * configuration. A companion assertion on `panelDocsByPath.size` was removed
+ * as unfalsifiable — `beforeEach` clears the store and that test issued no
+ * request, so no production change could ever have failed it.
  */
 describe("harness fidelity — the in-transaction panel read is represented", () => {
   it("the decision transaction requests the exact panel document path", async () => {
     const detail = await fetchDetail();
     await postDecisionRequest({ status: "approved", expectedUpdatedAt: detail.json.review.updatedAt });
     expect(panelReadPaths.some((p) => /^runs\/.+\/humanReviewPanel\/current$/.test(p))).toBe(true);
-  });
-
-  it("and it is served from the explicit panel store, which is empty by configuration", () => {
-    expect(panelDocsByPath.size).toBe(0);
   });
 });
