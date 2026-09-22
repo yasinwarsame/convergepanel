@@ -15,8 +15,13 @@
  * the decision transaction read only the run doc and was not protected
  * against a racing panel creation.
  *
- * These are route-level tests; the transaction-level state contract is
- * covered in `lib/firestore/__tests__/adaptiveHumanReviewPersistence.spec.ts`.
+ * These are route-level tests driving the REAL `submitAdaptiveHumanReview`
+ * over in-memory stores, so the in-transaction guard is genuinely exercised
+ * here — including the read ordering and the race. An earlier version of this
+ * comment claimed the transaction-level contract was covered in
+ * `lib/firestore/__tests__/adaptiveHumanReviewPersistence.spec.ts`; it is not.
+ * That file was only made panel-AWARE so its pre-existing tests keep passing,
+ * and it contains no panel assertions.
  */
 
 const mockedResolveRequestIdentity = jest.fn();
@@ -28,7 +33,12 @@ const mockedCreateHistory = jest.fn();
 const mockedGetAssignment = jest.fn();
 jest.mock("@/lib/firestore/runs", () => ({
   ...jest.requireActual("@/lib/firestore/runs"),
-  createAdaptiveHumanReviewHistoryEntry: (...a: any[]) => mockedCreateHistory(...a),
+  // F1 — this must be the EXACT symbol the route imports. An earlier version
+  // mocked `createAdaptiveHumanReviewHistoryEntry`, which does not exist in
+  // this module; with `requireActual` spread, the real writer ran and the
+  // mock had zero call sites, so the "no history on refusal" assertion could
+  // never fail. The harness-fidelity test below pins that the mock is live.
+  createAdaptiveHumanReviewHistory: (...a: any[]) => mockedCreateHistory(...a),
   getAdaptiveHumanReviewAssignment: (...a: any[]) => mockedGetAssignment(...a),
 }));
 const mockedAudit = jest.fn();
@@ -140,10 +150,13 @@ describe("F3-A — no panel: the Personal decision path is untouched (anti-overr
 describe("F3-B — an OPEN Team panel blocks the Personal decision", () => {
   beforeEach(() => panelDocs.set(RUN, panel("open")));
 
-  it("is refused with the Team route's own established contract", async () => {
+  it("is refused with the Team route's own established contract, exactly", async () => {
     const r = await submit();
-    expect(r.status).toBe(409);
-    expect(r.body.error.code).toBe("adaptive_review_panel_active");
+    expect({ status: r.status, code: r.body.error.code, message: r.body.error.message }).toEqual({
+      status: 409,
+      code: "adaptive_review_panel_active",
+      message: "This run is under multi-reviewer panel review. Direct decision submission is not available.",
+    });
   });
 
   it("ZERO side effects — no canonical write, no history, no audit", async () => {
@@ -163,28 +176,84 @@ describe("F3-B — an OPEN Team panel blocks the Personal decision", () => {
 });
 
 describe("F3-C — panel states that do NOT own the decision", () => {
-  it.each(["cancelled", "finalized"])("a %s panel restores the single-reviewer path", async (status) => {
-    panelDocs.set(RUN, status === "finalized"
-      ? panel("finalized", { finalizedAt: UPDATED_AT, finalizedByUserId: "admin", finalStatus: "approved", finalDecisionId: "dec_x", aggregationPolicyVersion: 1 })
-      : panel("cancelled"));
+  // Reachability is split deliberately (F6). A CANCELLED panel is
+  // writer-reachable alongside a still-pending review: cancelling drains the
+  // panel and does not touch `humanReview`. A FINALIZED panel is NOT —
+  // `finalizeAdaptiveHumanReviewPanel` writes the panel and the terminal
+  // `humanReview` in ONE transaction, so "finalized panel + pending review"
+  // cannot occur in production. An earlier version of this file asserted a
+  // 200 for that impossible pairing, which overstated the product claim.
+
+  it("WRITER-REACHABLE: a cancelled panel restores the single-reviewer path", async () => {
+    panelDocs.set(RUN, panel("cancelled"));
     const r = await submit();
     expect(r.status).toBe(200);
     expect(canonicalWrites).toBe(1);
   });
+
+  it("WRITER-REACHABLE: a finalized panel means the review is already terminal — refused by the terminal check, not the panel gate", async () => {
+    panelDocs.set(RUN, panel("finalized", { finalizedAt: UPDATED_AT, finalizedByUserId: "admin", finalStatus: "approved", finalDecisionId: "dec_x", aggregationPolicyVersion: 1 }));
+    // The state finalization actually produces: panel finalized AND review terminal.
+    runDocs.get(RUN)!.governanceRecord.humanReview = { status: "approved", reviewerId: "admin", reviewedAt: UPDATED_AT, decidedVia: "multi_reviewer_panel" };
+    const r = await submit();
+    expect(r.status).toBe(409);
+    expect(r.body.error.code).toBe("terminal_review_exists");
+    expect(canonicalWrites).toBe(0);
+  });
+
+  it("PARSER-ACCEPTED, writer-unreachable: the gate itself does not treat 'finalized' as owning the decision", async () => {
+    // Guard-local semantics only — documented as parser hardening, not as a
+    // production workflow state. Pinned so a future writer that CAN produce
+    // this pairing does not silently change the gate's meaning.
+    panelDocs.set(RUN, panel("finalized", { finalizedAt: UPDATED_AT, finalizedByUserId: "admin", finalStatus: "approved", finalDecisionId: "dec_x", aggregationPolicyVersion: 1 }));
+    const r = await submit();
+    expect(r.body?.error?.code).not.toBe("adaptive_review_panel_active");
+  });
 });
 
 describe("F3-D — malformed/ambiguous panel state fails CLOSED", () => {
+  // F3 — EXACT mapping per case, never membership in a set of acceptable
+  // codes. A `toContain([invalid, active])` assertion let a mutation that
+  // reports malformed panels as "active" pass: the client would be told the
+  // run is under panel review when nothing establishes that.
   it.each([
     ["a malformed body", { kind: "adaptive_review_panel", schemaVersion: 1, status: "open" }],
     ["an unsupported version", { ...panel("open"), schemaVersion: 99 }],
     ["a non-object body", "nope"],
-  ])("refuses on %s rather than treating it as no panel", async (_label, body) => {
+    ["a panel whose stored runId disagrees with its own path", panel("cancelled", { runId: "some-other-run" })],
+  ])("refuses on %s with the INVALID contract, not the ACTIVE one", async (_label, body) => {
     panelDocs.set(RUN, body as any);
     const r = await submit();
-    expect(r.status).toBe(409);
-    expect(["adaptive_review_panel_invalid", "adaptive_review_panel_active"]).toContain(r.body.error.code);
+    expect({ status: r.status, code: r.body.error.code, message: r.body.error.message }).toEqual({
+      status: 409,
+      code: "adaptive_review_panel_invalid",
+      message: "This run's review panel could not be read.",
+    });
     expect(canonicalWrites).toBe(0);
     expect(canonicalStatus()).toBe("unreviewed");
+  });
+});
+
+describe("F4 — the panel's path/field binding is load-bearing", () => {
+  // `parseAdaptiveHumanReviewPanel` is given `expectedRunId`, so a panel
+  // document stored at THIS run's path but claiming another run fails
+  // closed. Without that binding a `cancelled`/`finalized` foreign panel
+  // would parse valid and wave the decision through.
+  it("a panel at this run's path claiming another runId fails closed", async () => {
+    panelDocs.set(RUN, panel("cancelled", { runId: "run-SOMEWHERE-ELSE" }));
+    const r = await submit();
+    expect(r.status).toBe(409);
+    expect(r.body.error.code).toBe("adaptive_review_panel_invalid");
+    expect(canonicalWrites).toBe(0);
+    expect(canonicalStatus()).toBe("unreviewed");
+  });
+
+  it("the same panel body at its OWN run's path parses fine — isolating the binding as the cause", async () => {
+    // Identical document except `runId` agrees; a cancelled panel does not block.
+    panelDocs.set(RUN, panel("cancelled"));
+    const r = await submit();
+    expect(r.status).toBe(200);
+    expect(canonicalWrites).toBe(1);
   });
 });
 
@@ -244,5 +313,37 @@ describe("§8 — the guard is inside the transaction, which is what closes the 
     } finally {
       mockAdminDb.runTransaction = original;
     }
+  });
+});
+
+/**
+ * §25 — harness fidelity.
+ *
+ * Every zero-call assertion in this file is only meaningful if the mocked
+ * symbol is the one production actually invokes. F1 was exactly this failure:
+ * the spec mocked `createAdaptiveHumanReviewHistoryEntry`, a name that does
+ * not exist in `@/lib/firestore/runs`, so with `requireActual` spread the real
+ * writer ran, the mock had zero call sites, and "no history on refusal" could
+ * never fail.
+ *
+ * These tests drive the ALLOWED path and assert each side-effecting mock IS
+ * called there. If a mock is misnamed or unwired, these fail — which is what
+ * makes the refusal-path zero-call assertions falsifiable.
+ */
+describe("§25 — the side-effect mocks are live", () => {
+  it("the history writer mock is invoked on the allowed path", async () => {
+    const r = await submit();
+    expect(r.status).toBe(200);
+    expect(mockedCreateHistory).toHaveBeenCalled();
+  });
+
+  it("the admin-audit mock is invoked on the allowed path", async () => {
+    await submit();
+    expect(mockedAudit).toHaveBeenCalled();
+  });
+
+  it("the assignment reader mock is invoked", async () => {
+    await submit();
+    expect(mockedGetAssignment).toHaveBeenCalled();
   });
 });
