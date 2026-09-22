@@ -83,10 +83,14 @@ jest.mock("@/lib/firestore/workspaces", () => ({ getWorkspace: jest.fn().mockRes
  *    `bump()`. Every conflict claim here bumps explicitly, and disabling
  *    conflict detection is a killed mutation;
  *  - `readPath` returns a live `data()` view rather than an immutable
- *    snapshot. `exists` IS snapshotted, which is what the absent-to-created
- *    race turns on; a future CONTENT-mutation race (cancelled to open mid
- *    callback) would be served the new value, which real Firestore would not
- *    do. No test asserts such a race.
+ *    snapshot. This is NOT load-bearing either way, because the harness does
+ *    not model mid-callback interleaving at all: `onBeforeCommit` fires only
+ *    after the callback has returned, so no test ever observes a document
+ *    changing between two reads inside one transaction. What the harness
+ *    models is exactly: reads happen; an external mutation occurs at
+ *    `onBeforeCommit`; commit compares read versions and detects the change;
+ *    the callback re-runs. It claims no general scheduler or interleaving
+ *    fidelity beyond that.
  */
 type TxnOp = { kind: "read" | "write"; path: string };
 type TxnJournal = {
@@ -427,8 +431,17 @@ describe("§8 — the COMMITTING transaction's read set is what closes the race"
     const txn = committingTxn()!;
     const w = firstWriteIndex(txn);
     expect(w).toBeGreaterThan(-1);
-    expect(lastReadIndexOf(txn, `runs/${RUN}`)).toBeLessThan(w);
-    expect(lastReadIndexOf(txn, `runs/${RUN}/humanReviewPanel/current`)).toBeLessThan(w);
+    // R4 P3-1: presence is asserted SEPARATELY from ordering. `lastReadIndexOf`
+    // returns -1 for a path that was never read, and `-1 < w` is trivially
+    // true, so the ordering comparison alone was satisfied by "the panel was
+    // never read" — verified under the mutation that moves the panel read out
+    // of the committing transaction, where this test used to pass.
+    const runAt = lastReadIndexOf(txn, `runs/${RUN}`);
+    const panelAt = lastReadIndexOf(txn, `runs/${RUN}/humanReviewPanel/current`);
+    expect(runAt).toBeGreaterThan(-1);
+    expect(panelAt).toBeGreaterThan(-1);
+    expect(runAt).toBeLessThan(w);
+    expect(panelAt).toBeLessThan(w);
   });
 
   it("the panel is read by the COMMITTING transaction specifically, not merely by some transaction", async () => {
@@ -464,6 +477,39 @@ describe("§8 — the COMMITTING transaction's read set is what closes the race"
     const attempts = journals.filter((j) => readsOf(j).includes(`runs/${RUN}`));
     expect(attempts.length).toBeGreaterThan(1);
     expect(attempts[0].committed).toBe(false);
+  });
+
+  it("RETRY ATTRIBUTION: when attempt 1 conflicts and attempt 2 commits, the COMMITTING attempt itself read run + panel before its write", async () => {
+    // R4 P3-4 — §8's other assertions all run on the single-attempt path, so
+    // nothing applied them to a committing attempt that is NOT the first.
+    // Force a conflict on the run document (not the panel), so the retry
+    // proceeds to commit rather than refuse, and assert the read set and
+    // ordering on the journal that actually committed.
+    let fired = false;
+    onBeforeCommit = (attempt) => {
+      if (attempt === 0 && !fired) {
+        fired = true;
+        bump(`runs/${RUN}`);
+      }
+    };
+    const r = await submit();
+    expect(r.status).toBe(200);
+
+    const attempts = journals.filter((j) => readsOf(j).includes(`runs/${RUN}`));
+    expect(attempts.length).toBeGreaterThan(1);
+    expect(attempts[0].committed).toBe(false);
+
+    const txn = committingTxn()!;
+    expect(txn.id).toBe(attempts[attempts.length - 1].id);
+    const w = firstWriteIndex(txn);
+    const runAt = lastReadIndexOf(txn, `runs/${RUN}`);
+    const panelAt = lastReadIndexOf(txn, `runs/${RUN}/humanReviewPanel/current`);
+    expect(w).toBeGreaterThan(-1);
+    expect(runAt).toBeGreaterThan(-1);
+    expect(panelAt).toBeGreaterThan(-1);
+    expect(runAt).toBeLessThan(w);
+    expect(panelAt).toBeLessThan(w);
+    expect(canonicalWrites).toBe(1);
   });
 
   it("CONTROL: with no interference the same request commits on the FIRST attempt — so the retry above is caused by the conflict, not by the harness", async () => {
@@ -614,7 +660,10 @@ describe("§2 — emulator self-test: transaction journals are isolated", () => 
     expect(readsOf(b)).not.toContain(runPath());
   });
 
-  it("a read in transaction A is absent from transaction B's journal even for the same document", async () => {
+  it("a transaction that reads nothing has an EMPTY journal, even though a previous transaction read", async () => {
+    // R4 P3-2: this was titled "…even for the same document", which the body
+    // never exercised — B read nothing at all. Retitled to what it proves. The
+    // same-document case is covered by the next test.
     await mockAdminDb.runTransaction(async (t: any) => { await t.get(panelRef()); });
     const a = journals[journals.length - 1];
     await mockAdminDb.runTransaction(async (t: any) => { /* reads nothing */ });
@@ -623,11 +672,38 @@ describe("§2 — emulator self-test: transaction journals are isolated", () => 
     expect(readsOf(b)).toEqual([]);
   });
 
-  it("each transaction's op log is a distinct array instance", () => {
-    const a: TxnJournal = { id: -1, ops: [], readVersions: new Map(), committed: false };
-    const b: TxnJournal = { id: -2, ops: [], readVersions: new Map(), committed: false };
-    a.ops.push({ kind: "read", path: "x" });
-    expect(b.ops).toEqual([]);
+  it("two transactions reading the SAME document each record it once, in their own journal", async () => {
+    await mockAdminDb.runTransaction(async (t: any) => { await t.get(panelRef()); });
+    const a = journals[journals.length - 1];
+    await mockAdminDb.runTransaction(async (t: any) => { await t.get(panelRef()); });
+    const b = journals[journals.length - 1];
+    expect(a.id).not.toBe(b.id);
+    expect(a.ops).not.toBe(b.ops);
+    expect(readsOf(a)).toEqual([panelPath()]);
+    expect(readsOf(b)).toEqual([panelPath()]);
+  });
+
+  it("the emulator gives each transaction its own journal object and its own ops ARRAY (identity, not contents)", async () => {
+    // R4 P2-1: an earlier version of this test constructed two `TxnJournal`
+    // literals locally and asserted that pushing to one array left the other
+    // empty — a property of JavaScript, not of the emulator. It never touched
+    // `mockAdminDb`, `runTransaction` or `journals`, and it PASSED under the
+    // exact aliasing it claimed to detect (distinct journals sharing one `ops`
+    // array). The subject is now the real emulator state, and the comparison
+    // is reference identity, which deep equality cannot fake.
+    await mockAdminDb.runTransaction(async (t: any) => { await t.get(runRef()); });
+    await mockAdminDb.runTransaction(async (t: any) => { await t.get(panelRef()); });
+    const [a, b] = journals.slice(-2);
+
+    expect(a).not.toBe(b);
+    expect(a.ops).not.toBe(b.ops);
+    expect(a.readVersions).not.toBe(b.readVersions);
+
+    // Appending to one real journal must not reach the other.
+    const bOpsLengthBefore = b.ops.length;
+    a.ops.push({ kind: "read", path: "sentinel/only-in-a" });
+    expect(b.ops.length).toBe(bOpsLengthBefore);
+    expect(readsOf(b)).not.toContain("sentinel/only-in-a");
   });
 
   it("writes are recorded on the transaction that issued them, in order with its reads", async () => {
