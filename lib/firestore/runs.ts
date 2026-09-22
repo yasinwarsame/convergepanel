@@ -783,6 +783,14 @@ export type SubmitAdaptiveHumanReviewFailureReason =
   | "unsupported_version"
   | "stale_expected_updated_at"
   | "terminal_review_exists"
+  /**
+   * F3 — an independently governed multi-reviewer Team panel currently owns
+   * this run's review decision, so a direct single-reviewer decision must not
+   * commit a competing terminal one.
+   */
+  | "adaptive_review_panel_active"
+  /** F3 — the panel document exists but could not be read/parsed. Fails CLOSED: losing visibility into a panel is never equivalent to "no panel exists". */
+  | "adaptive_review_panel_invalid"
   | HumanReviewUpdateFailureReason
   | "write_failed";
 
@@ -813,9 +821,37 @@ export async function submitAdaptiveHumanReview(args: {
   try {
     return await adminDb.runTransaction<SubmitAdaptiveHumanReviewResult>(async (txn) => {
       const ref = adminDb!.collection("runs").doc(args.runId);
-      const snap = await txn.get(ref);
+      // F3 — the panel is read INSIDE this transaction, together with the run
+      // document, so Firestore's serializability covers it.
+      //
+      // A route-level precheck alone is not race-free, and the asymmetry is
+      // real rather than theoretical: `submitAdaptiveHumanReviewPanel` reads
+      // the RUN document in its own transaction and refuses `not_pending`
+      // once a review is terminal, so panel creation is already protected
+      // against a racing decision — but the decision transaction read only
+      // the run document, so it was NOT protected against a racing panel
+      // creation. Gate → panel created → decision commits anyway. Including
+      // the panel in this read set closes that window in the only place it
+      // can be closed.
+      const panelRef = ref.collection("humanReviewPanel").doc("current");
+      const [snap, panelSnap] = await Promise.all([txn.get(ref), txn.get(panelRef)]);
       if (!snap.exists) {
         return { ok: false, reason: "run_missing" };
+      }
+
+      // Same state contract as the Team decision route's own panel gate:
+      // absent → proceed; "open" → refuse; "cancelled"/"finalized" → proceed
+      // (a drained panel restores the single-reviewer path, and a finalized
+      // one already made the review terminal, which the check below catches);
+      // malformed/unsupported → refuse, fail closed.
+      const panelParse = parseAdaptiveHumanReviewPanel(panelSnap.exists ? panelSnap.data() : undefined, {
+        expectedRunId: args.runId,
+      });
+      if (panelParse.status === "valid" && panelParse.panel.status === "open") {
+        return { ok: false, reason: "adaptive_review_panel_active" };
+      }
+      if (panelParse.status === "malformed" || panelParse.status === "unsupported_version") {
+        return { ok: false, reason: "adaptive_review_panel_invalid" };
       }
 
       const data = snap.data();

@@ -319,6 +319,15 @@ export async function POST(req: NextRequest, { params }: { params: { runId: stri
         return errorResponse(409, "stale_expected_updated_at", "This run has changed since you last viewed it. Please refresh and try again.");
       case "terminal_review_exists":
         return errorResponse(409, "terminal_review_exists", "This run already has a final review decision.");
+      case "adaptive_review_panel_active":
+        // Unreachable via this route's own precheck above, which returns the
+        // identical response earlier. Handled explicitly because the shared
+        // transaction can now also refuse for this reason — that is what
+        // closes the precheck's race window — and an unhandled reason would
+        // otherwise fall through to a generic validation error.
+        return errorResponse(409, "adaptive_review_panel_active", "This run is under multi-reviewer panel review. Direct decision submission is not available.");
+      case "adaptive_review_panel_invalid":
+        return errorResponse(409, "adaptive_review_panel_invalid", "This run's review panel could not be read.");
       default:
         // invalid_status / invalid_fields / invalid_timestamp / conditions_required — the
         // request-validation layer above should already prevent these; the
