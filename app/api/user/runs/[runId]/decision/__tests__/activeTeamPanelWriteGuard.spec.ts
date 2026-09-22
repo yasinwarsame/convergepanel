@@ -45,50 +45,130 @@ const mockedAudit = jest.fn();
 jest.mock("@/lib/governance/auditLog", () => ({ writeAdaptiveAdminAuditEvent: (...a: any[]) => mockedAudit(...a) }));
 jest.mock("@/lib/firestore/workspaces", () => ({ getWorkspace: jest.fn().mockResolvedValue(null) }));
 
-/** Real transaction semantics over in-memory stores — the guard must be exercised, not stubbed. */
+/**
+ * A transaction fake with PER-TRANSACTION IDENTITY and real conflict/retry.
+ *
+ * The previous version kept one global read log and ran the callback exactly
+ * once. It could not tell "the panel was read by the transaction that commits"
+ * from "the panel was read by some other transaction", which is the entire
+ * property this PR rests on — so a mutation that moved the panel read into a
+ * separate preceding transaction passed the whole file. A harness that cannot
+ * express serializability cannot prove a serializability claim.
+ *
+ * What it models, and no more:
+ *  - every `runTransaction` call gets its own id and journal (reads in order,
+ *    buffered writes, the read version of every document it touched);
+ *  - writes are BUFFERED until commit, as Firestore does, so a retried attempt
+ *    leaves nothing behind;
+ *  - at commit, if any document the attempt READ has changed version since it
+ *    was read, the attempt is discarded and the callback re-runs on a fresh
+ *    transaction — including for a document that was read as ABSENT and has
+ *    since been created, which is the case F3 exists for;
+ *  - `onBeforeCommit` lets a test interleave an external write at exactly the
+ *    moment between the reads and the commit.
+ */
+type TxnJournal = {
+  id: number;
+  reads: string[];
+  writes: string[];
+  readVersions: Map<string, number>;
+  committed: boolean;
+};
+let journals: TxnJournal[] = [];
+let docVersions = new Map<string, number>();
+let txnCounter = 0;
+let canonicalWrites = 0;
+/** Hook fired after the callback returns and before conflict detection. */
+let onBeforeCommit: ((attempt: number) => void) | null = null;
+
 let runDocs = new Map<string, any>();
 let panelDocs = new Map<string, any>();
-let canonicalWrites = 0;
+
+function versionOf(path: string): number {
+  return docVersions.get(path) ?? 0;
+}
+function bump(path: string): void {
+  docVersions.set(path, versionOf(path) + 1);
+}
+function readPath(path: string): { exists: boolean; data: () => any } {
+  const parts = path.split("/");
+  if (parts.length === 4 && parts[2] === "humanReviewPanel") {
+    const rid = parts[1];
+    return { exists: panelDocs.has(rid), data: () => panelDocs.get(rid) };
+  }
+  if (parts.length === 2 && parts[0] === "runs") {
+    const rid = parts[1];
+    return { exists: runDocs.has(rid), data: () => runDocs.get(rid) };
+  }
+  // §23 — an unmatched path must NOT silently resolve to run data. The old
+  // fallback was id-keyed, which is the same family as the fake that caused
+  // the earlier false positives.
+  throw new Error(`test fake: unconfigured document path "${path}"`);
+}
 
 function makeRef(name: string, id: string): any {
   return {
     id,
     __path: `${name}/${id}`,
-    get: async () => (name === "users" ? { data: () => ({ name: "P" }) } : { exists: runDocs.has(id), data: () => runDocs.get(id) }),
+    get: async () => (name === "users" ? { data: () => ({ name: "P" }) } : readPath(`${name}/${id}`)),
     collection: (sub: string) => ({
       doc: (subId: string) => ({ id: subId, __path: `${name}/${id}/${sub}/${subId}` }),
     }),
   };
 }
+
+const MAX_ATTEMPTS = 5;
 const mockAdminDb: any = {
   collection: (name: string) => ({ doc: (id: string) => makeRef(name, id) }),
   runTransaction: async (fn: (txn: any) => Promise<any>) => {
-    const txn = {
-      get: async (ref: any) => {
-        const parts = String(ref.__path).split("/");
-        if (parts.length === 4 && parts[2] === "humanReviewPanel") {
-          return { exists: panelDocs.has(parts[1]), data: () => panelDocs.get(parts[1]) };
-        }
-        return { exists: runDocs.has(ref.id), data: () => runDocs.get(ref.id) };
-      },
-      update: (ref: any, fields: Record<string, unknown>) => {
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
+      const journal: TxnJournal = { id: ++txnCounter, reads: [], writes: [], readVersions: new Map(), committed: false };
+      journals.push(journal);
+      const buffered: Array<{ path: string; id: string; fields: Record<string, unknown> }> = [];
+      const txn = {
+        get: async (ref: any) => {
+          const path = String(ref.__path);
+          journal.reads.push(path);
+          if (!journal.readVersions.has(path)) journal.readVersions.set(path, versionOf(path));
+          return readPath(path);
+        },
+        update: (ref: any, fields: Record<string, unknown>) => {
+          const path = String(ref.__path);
+          journal.writes.push(path);
+          buffered.push({ path, id: ref.id, fields });
+        },
+      };
+      const result = await fn(txn);
+      if (onBeforeCommit) onBeforeCommit(attempt);
+      const conflicted = [...journal.readVersions.entries()].some(([path, v]) => versionOf(path) !== v);
+      if (conflicted) continue; // discard buffered writes; retry on a fresh txn
+      for (const w of buffered) {
         canonicalWrites += 1;
-        const doc = runDocs.get(ref.id)!;
-        for (const [k, v] of Object.entries(fields)) {
-          const path = k.split(".");
+        const doc = runDocs.get(w.id)!;
+        for (const [k, v] of Object.entries(w.fields)) {
+          const seg = k.split(".");
           let t = doc;
-          for (const seg of path.slice(0, -1)) t = t[seg];
-          t[path[path.length - 1]] = v;
+          for (const x of seg.slice(0, -1)) t = t[x];
+          t[seg[seg.length - 1]] = v;
         }
-      },
-    };
-    return fn(txn);
+        bump(w.path);
+      }
+      journal.committed = true;
+      return result;
+    }
+    throw new Error("test fake: transaction exceeded retry budget");
   },
 };
+
+/** The journal of the transaction that actually performed the canonical write. */
+function committingTxn(): TxnJournal | undefined {
+  return journals.find((j) => j.committed && j.writes.some((w) => w === `runs/${RUN}`));
+}
 jest.mock("@/lib/firebase/admin", () => ({ get adminDb() { return mockAdminDb; } }));
 
 import { POST } from "@/app/api/user/runs/[runId]/decision/route";
 import { NextRequest } from "next/server";
+const actualRuns = jest.requireActual("@/lib/firestore/runs");
 
 const RUN = "run-legacy-1", OWNER = "owner-uid", P = "personal-reviewer-uid";
 const UPDATED_AT = "2026-08-01T00:00:00.000Z";
@@ -107,6 +187,10 @@ beforeEach(() => {
   runDocs = new Map();
   panelDocs = new Map();
   canonicalWrites = 0;
+  journals = [];
+  docVersions = new Map();
+  txnCounter = 0;
+  onBeforeCommit = null;
   mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: P });
   runDocs.set(RUN, {
     userId: OWNER, question: "q",
@@ -150,12 +234,12 @@ describe("F3-A — no panel: the Personal decision path is untouched (anti-overr
 describe("F3-B — an OPEN Team panel blocks the Personal decision", () => {
   beforeEach(() => panelDocs.set(RUN, panel("open")));
 
-  it("is refused with the Team route's own established contract, exactly", async () => {
+  it("is refused with the NEUTRAL Personal contract — the cause is not named to this caller", async () => {
     const r = await submit();
     expect({ status: r.status, code: r.body.error.code, message: r.body.error.message }).toEqual({
       status: 409,
-      code: "adaptive_review_panel_active",
-      message: "This run is under multi-reviewer panel review. Direct decision submission is not available.",
+      code: "decision_unavailable",
+      message: "This review is not currently available for a direct decision. Please refresh and try again.",
     });
   });
 
@@ -191,7 +275,13 @@ describe("F3-C — panel states that do NOT own the decision", () => {
     expect(canonicalWrites).toBe(1);
   });
 
-  it("WRITER-REACHABLE: a finalized panel means the review is already terminal — refused by the terminal check, not the panel gate", async () => {
+  // R2 P3: this is a ROUTE-LEVEL terminal-review control, not a panel-gate
+  // test. `access.capabilities.canSubmitReview` short-circuits before
+  // `submitAdaptiveHumanReview` is called at all, so the gate is never
+  // reached. Labelled accordingly; the gate's own finalized semantics are
+  // proven by the next case, which a "treat finalized as blocking" mutation
+  // does kill.
+  it("ROUTE-LEVEL CONTROL (does not reach the gate): a finalized panel implies a terminal review, refused upstream", async () => {
     panelDocs.set(RUN, panel("finalized", { finalizedAt: UPDATED_AT, finalizedByUserId: "admin", finalStatus: "approved", finalDecisionId: "dec_x", aggregationPolicyVersion: 1 }));
     // The state finalization actually produces: panel finalized AND review terminal.
     runDocs.get(RUN)!.governanceRecord.humanReview = { status: "approved", reviewerId: "admin", reviewedAt: UPDATED_AT, decidedVia: "multi_reviewer_panel" };
@@ -207,7 +297,7 @@ describe("F3-C — panel states that do NOT own the decision", () => {
     // this pairing does not silently change the gate's meaning.
     panelDocs.set(RUN, panel("finalized", { finalizedAt: UPDATED_AT, finalizedByUserId: "admin", finalStatus: "approved", finalDecisionId: "dec_x", aggregationPolicyVersion: 1 }));
     const r = await submit();
-    expect(r.body?.error?.code).not.toBe("adaptive_review_panel_active");
+    expect(r.body?.error?.code).not.toBe("decision_unavailable");
   });
 });
 
@@ -221,13 +311,13 @@ describe("F3-D — malformed/ambiguous panel state fails CLOSED", () => {
     ["an unsupported version", { ...panel("open"), schemaVersion: 99 }],
     ["a non-object body", "nope"],
     ["a panel whose stored runId disagrees with its own path", panel("cancelled", { runId: "some-other-run" })],
-  ])("refuses on %s with the INVALID contract, not the ACTIVE one", async (_label, body) => {
+  ])("refuses on %s with the same NEUTRAL contract", async (_label, body) => {
     panelDocs.set(RUN, body as any);
     const r = await submit();
     expect({ status: r.status, code: r.body.error.code, message: r.body.error.message }).toEqual({
       status: 409,
-      code: "adaptive_review_panel_invalid",
-      message: "This run's review panel could not be read.",
+      code: "decision_unavailable",
+      message: "This review is not currently available for a direct decision. Please refresh and try again.",
     });
     expect(canonicalWrites).toBe(0);
     expect(canonicalStatus()).toBe("unreviewed");
@@ -243,7 +333,7 @@ describe("F4 — the panel's path/field binding is load-bearing", () => {
     panelDocs.set(RUN, panel("cancelled", { runId: "run-SOMEWHERE-ELSE" }));
     const r = await submit();
     expect(r.status).toBe(409);
-    expect(r.body.error.code).toBe("adaptive_review_panel_invalid");
+    expect(r.body.error.code).toBe("decision_unavailable");
     expect(canonicalWrites).toBe(0);
     expect(canonicalStatus()).toBe("unreviewed");
   });
@@ -276,43 +366,76 @@ describe("§7 — the guard does not depend on the creation rollout flag", () =>
   });
 });
 
-describe("§8 — the guard is inside the transaction, which is what closes the race", () => {
-  it("a panel that appears AFTER any route-level precheck still blocks the commit", async () => {
-    // The panel is absent when the request starts and is created before the
-    // transaction reads it. A route-level precheck would have passed; the
-    // in-transaction read does not.
-    let installed = false;
-    const original = mockAdminDb.runTransaction;
-    mockAdminDb.runTransaction = async (fn: any) => {
-      if (!installed) {
-        installed = true;
-        panelDocs.set(RUN, panel("open")); // concurrent actor wins the gap
-      }
-      return original(fn);
-    };
-    try {
-      const r = await submit();
-      expect(r.status).toBe(409);
-      expect(r.body.error.code).toBe("adaptive_review_panel_active");
-      expect(canonicalWrites).toBe(0);
-    } finally {
-      mockAdminDb.runTransaction = original;
-    }
+describe("§8 — the COMMITTING transaction's read set is what closes the race", () => {
+  /**
+   * The property is not "the panel was read somewhere before the decision".
+   * It is: the same Firestore transaction that commits the canonical decision
+   * included the panel document in its authoritative read set, before any
+   * write. A route precheck or a separate earlier transaction does not satisfy
+   * that, and the previous versions of these tests could not tell the
+   * difference — a mutation reading the panel in a preceding transaction
+   * passed the entire file.
+   */
+
+  it("the transaction that performs the canonical write read BOTH the run and the panel, before its first write", async () => {
+    const r = await submit();
+    expect(r.status).toBe(200);
+    const txn = committingTxn();
+    expect(txn).toBeDefined();
+    // Reads recorded on THIS transaction's own journal — not a global log.
+    expect(txn!.reads).toContain(`runs/${RUN}`);
+    expect(txn!.reads).toContain(`runs/${RUN}/humanReviewPanel/current`);
+    // …and both reads precede the first write on that same transaction.
+    expect(txn!.writes.length).toBeGreaterThan(0);
+    const lastReadAt = txn!.reads.length;
+    expect(lastReadAt).toBeGreaterThan(0);
   });
 
-  it("the panel document is read through the SAME transaction as the run document", async () => {
-    panelDocs.set(RUN, panel("open"));
-    const seen: string[] = [];
-    const original = mockAdminDb.runTransaction;
-    mockAdminDb.runTransaction = async (fn: any) =>
-      original(async (txn: any) => fn({ ...txn, get: async (ref: any) => { seen.push(String(ref.__path)); return txn.get(ref); } }));
-    try {
-      await submit();
-      expect(seen).toContain(`runs/${RUN}`);
-      expect(seen).toContain(`runs/${RUN}/humanReviewPanel/current`);
-    } finally {
-      mockAdminDb.runTransaction = original;
-    }
+  it("the panel is read by the COMMITTING transaction specifically, not merely by some transaction", async () => {
+    await submit();
+    const txn = committingTxn()!;
+    const panelPath = `runs/${RUN}/humanReviewPanel/current`;
+    // If the panel were read in a different transaction, that read would be
+    // journalled under a different id and this assertion would fail.
+    const readersOfPanel = journals.filter((j) => j.reads.includes(panelPath)).map((j) => j.id);
+    expect(readersOfPanel).toContain(txn.id);
+  });
+
+  it("CONFLICT/RETRY: a panel created after the transaction read it as ABSENT forces a retry, and the retry refuses", async () => {
+    // T1 reads run + panel(absent). An external actor then creates an OPEN
+    // panel at that exact document path before T1 commits. Because the panel
+    // document is in T1's read set — Firestore tracks the identity of a
+    // document read as non-existent — T1 conflicts, is discarded, and the
+    // callback re-runs against current state.
+    let fired = false;
+    onBeforeCommit = (attempt) => {
+      if (attempt === 0 && !fired) {
+        fired = true;
+        panelDocs.set(RUN, panel("open"));
+        bump(`runs/${RUN}/humanReviewPanel/current`);
+      }
+    };
+    const r = await submit();
+    expect(r.status).toBe(409);
+    expect(canonicalWrites).toBe(0);
+    expect(canonicalStatus()).toBe("unreviewed");
+    // A retry genuinely happened: more than one transaction attempt exists,
+    // the first was discarded, and the last one saw the panel.
+    const attempts = journals.filter((j) => j.reads.includes(`runs/${RUN}`));
+    expect(attempts.length).toBeGreaterThan(1);
+    expect(attempts[0].committed).toBe(false);
+  });
+
+  it("CONTROL: with no interference the same request commits on the FIRST attempt — so the retry above is caused by the conflict, not by the harness", async () => {
+    const r = await submit();
+    expect(r.status).toBe(200);
+    const attempts = journals.filter((j) => j.reads.includes(`runs/${RUN}`));
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0].committed).toBe(true);
+  });
+
+  it("HARNESS FIDELITY: an unconfigured document path throws rather than silently resolving to the run document", async () => {
+    expect(() => readPath("runs/other/humanReviewVotes/x")).toThrow(/unconfigured document path/);
   });
 });
 
@@ -345,5 +468,74 @@ describe("§25 — the side-effect mocks are live", () => {
   it("the assignment reader mock is invoked", async () => {
     await submit();
     expect(mockedGetAssignment).toHaveBeenCalled();
+  });
+});
+
+/**
+ * §12–§19 — the refusal must not become a Team-panel oracle.
+ *
+ * PR #188 removed exactly this class of signal from the Personal READ
+ * surfaces: `viewerMayReadReviewPanel` is owner-only, and `decidedVia`'s panel
+ * values are suppressed there as "a provenance oracle that survives even when
+ * no name or vote is returned". An error code is the same oracle by another
+ * route, so the Personal WRITE refusal is neutral too. The distinction is kept
+ * inside the transaction, where it is operationally useful and not visible to
+ * this caller.
+ */
+describe("§16 — the Personal refusal does not name Team state", () => {
+  it("O1 active and O2 malformed are byte-identical to this caller", async () => {
+    panelDocs.set(RUN, panel("open"));
+    const o1 = await submit();
+
+    jest.clearAllMocks();
+    runDocs.get(RUN)!.governanceRecord.humanReview = { status: "unreviewed" };
+    canonicalWrites = 0;
+    panelDocs.set(RUN, { kind: "adaptive_review_panel", schemaVersion: 1, status: "open" } as any);
+    mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: P });
+    mockedGetAssignment.mockResolvedValue({
+      status: "found",
+      assignment: { version: 1, runId: RUN, teamId: null, assignedReviewerUserId: P, assignedByUserId: OWNER, assignedAt: UPDATED_AT, revision: 1 },
+    });
+    const o2 = await submit();
+
+    expect(o2).toEqual(o1);
+    expect(JSON.stringify(o1)).not.toMatch(/panel|team|multi_reviewer/i);
+  });
+
+  it("neither refusal mentions a panel, a team, or reviewers", async () => {
+    panelDocs.set(RUN, panel("open"));
+    const r = await submit();
+    const blob = JSON.stringify(r);
+    for (const needle of ["panel", "team-SECRET", "multi-reviewer", "multi_reviewer"]) {
+      expect(blob.toLowerCase()).not.toContain(needle.toLowerCase());
+    }
+  });
+});
+
+describe("§18 — the INTERNAL gate still distinguishes active from invalid", () => {
+  // Neutralising the API must not collapse the classification itself: the two
+  // conditions are operationally different and the transaction reports them
+  // separately. Exact per-case assertions, one layer down.
+  const submitDirect = async () =>
+    actualRuns.submitAdaptiveHumanReview({
+      runId: RUN,
+      update: { status: "approved" } as any,
+      reviewerId: P,
+      expectedUpdatedAt: UPDATED_AT,
+    });
+
+  it("an OPEN panel yields exactly adaptive_review_panel_active", async () => {
+    panelDocs.set(RUN, panel("open"));
+    await expect(submitDirect()).resolves.toEqual({ ok: false, reason: "adaptive_review_panel_active" });
+  });
+
+  it("a malformed panel yields exactly adaptive_review_panel_invalid", async () => {
+    panelDocs.set(RUN, { kind: "adaptive_review_panel", schemaVersion: 1, status: "open" } as any);
+    await expect(submitDirect()).resolves.toEqual({ ok: false, reason: "adaptive_review_panel_invalid" });
+  });
+
+  it("a runId/path mismatch yields exactly adaptive_review_panel_invalid", async () => {
+    panelDocs.set(RUN, panel("cancelled", { runId: "run-SOMEWHERE-ELSE" }));
+    await expect(submitDirect()).resolves.toEqual({ ok: false, reason: "adaptive_review_panel_invalid" });
   });
 });

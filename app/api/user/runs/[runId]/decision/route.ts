@@ -183,12 +183,22 @@ export async function POST(req: NextRequest, { params }: { params: { runId: stri
       case "terminal_review_exists":
         return errorResponse(409, "terminal_review_exists", "This run already has a final review decision.");
       case "adaptive_review_panel_active":
-        // Reuses the Team decision route's established contract verbatim —
-        // same status, code and message — because it is the same condition
-        // reported to a different caller. No new API error is invented.
-        return errorResponse(409, "adaptive_review_panel_active", "This run is under multi-reviewer panel review. Direct decision submission is not available.");
       case "adaptive_review_panel_invalid":
-        return errorResponse(409, "adaptive_review_panel_invalid", "This run's review panel could not be read.");
+        // NEUTRAL on purpose. The write must be refused, but this caller holds
+        // only a Personal assignment, and naming the cause would disclose
+        // independently governed Team state: that a Team panel exists on this
+        // run, and in the second case that it exists AND is unreadable.
+        // `lib/governance/personalReviewScope.ts` already establishes that a
+        // personal reviewer may not read panel state — `viewerMayReadReviewPanel`
+        // is owner-only, and `decidedVia`'s panel values are suppressed there
+        // precisely as "a provenance oracle that survives even when no name or
+        // vote is returned". An error code is the same oracle by another route.
+        //
+        // The two reasons stay DISTINCT inside the transaction, for logs and
+        // for the gate's own tests; only the externally visible envelope is
+        // collapsed. The Team decision route keeps its specific codes: it acts
+        // inside Team authority, where the panel is not concealed from it.
+        return errorResponse(409, "decision_unavailable", "This review is not currently available for a direct decision. Please refresh and try again.");
       default:
         return errorResponse(400, "validation_error", "Invalid review decision.");
     }
