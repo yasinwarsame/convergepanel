@@ -95,7 +95,7 @@ const REPORTS = {
 } as const;
 
 async function presentationFor(data: Record<string, unknown>, viewerRole: RunReadViewerRole = "team_member"): Promise<PersistedResearchPresentation> {
-  const body = JSON.parse(JSON.stringify(await buildRunReadPayload({ runId: FIXTURE_RUN_ID, data: fullTeamRunData(data), viewerRole, resolveReviewRouting: async () => "in_queue" })));
+  const body = JSON.parse(JSON.stringify(await buildRunReadPayload({ runId: FIXTURE_RUN_ID, data: fullTeamRunData(data), viewerRole, mayReadDecisionContent: true, resolveReviewRouting: async () => "in_queue" })));
   const interpreted = interpretPersistedRunReadPayload(body, FIXTURE_RUN_ID);
   if (interpreted.kind !== "ready") throw new Error(`fixture not ready: ${interpreted.kind}`);
   return interpreted.presentation;

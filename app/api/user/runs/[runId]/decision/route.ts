@@ -9,8 +9,18 @@
  * parameter at all, so it is called here completely unchanged. Only the
  * side-effect writers around it (history/admin-audit) are personal-scoped
  * variants (teamId: null); there is no teamRuns projection to sync for a
- * personal run, and no multi-reviewer panel can exist for one (panels are
- * created exclusively by team-only routes), so neither is checked here.
+ * personal run, so that is not checked here.
+ *
+ * PHASE 1 correction — this comment used to continue "and no multi-reviewer
+ * panel can exist for one (panels are created exclusively by team-only
+ * routes)". The premise was false: a LEGACY run (no `workspaceId` field)
+ * can hold a legacy Team panel and an independent `teamId: null` Personal
+ * assignment at once. It happened to be harmless HERE — this route reads no
+ * panel and returns no panel-derived field — but the same false premise did
+ * cause a real disclosure in the governance/review-history siblings. The
+ * boundary now lives in `lib/governance/personalReviewScope.ts`; this route
+ * needs nothing from it, and that is a fact about its response shape, not
+ * about panels being impossible.
  */
 
 import { NextRequest, NextResponse } from "next/server";

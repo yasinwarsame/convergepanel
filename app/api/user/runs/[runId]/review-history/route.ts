@@ -34,6 +34,7 @@ import { logIdentityResolutionFailure } from "@/lib/auth/identityResolutionTelem
 import { parseGovernanceRecord } from "@/lib/adaptiveSchema/governanceRecordParser";
 import { getAdaptiveHumanReviewAssignment } from "@/lib/firestore/runs";
 import { resolveAdaptiveRunAccess } from "@/lib/governance/adaptiveRunAccess";
+import { historyRowIsInPersonalReviewScope } from "@/lib/governance/personalReviewScope";
 import { classifyAdaptiveHumanReviewHistoryRow, AdaptiveReviewHistoryListItemV1 } from "@/lib/governance/adaptiveHumanReviewHistory";
 import { resolveReviewerDisplayNames, REVIEWER_UNAVAILABLE_LABEL } from "@/lib/governance/reviewerIdentity";
 import { loadUserAndTeam } from "@/lib/teams/teamApiAuth";
@@ -112,10 +113,27 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
   // reviewerId is read directly off the raw doc for identity resolution
   // only, since the classifier deliberately excludes it from the compact
   // item it returns.
+  //
+  // PHASE 1 — Personal/Team review-panel isolation. This subcollection holds
+  // BOTH the personal decisions on this run (`teamId: null`) and, on a legacy
+  // run that also carries a legacy Team panel, that panel's Team decisions
+  // (non-empty `teamId`). A Personal assignment authorizes the former only,
+  // so a personal reviewer's rows are filtered to their own scope BEFORE any
+  // identity is resolved — the Team reviewers' uids must never reach
+  // `resolveReviewerDisplayNames` at all. The OWNER is unchanged and still
+  // sees every row on their own run.
+  // Fail closed on role, not open: anything that is not the owner is
+  // restricted to personal scope, so a role added to
+  // `AdaptiveRunAccessRole` later cannot silently inherit the owner's
+  // unrestricted history view.
+  const restrictToPersonalScope = access.role !== "owner";
   const rows: Array<{ item: AdaptiveReviewHistoryListItemV1; historyId: string; reviewerId: string | null }> = [];
   for (const doc of historySnap.docs) {
     const result = classifyAdaptiveHumanReviewHistoryRow(doc.id, doc.data());
     if (result.status === "valid") {
+      if (restrictToPersonalScope && !historyRowIsInPersonalReviewScope(doc.data())) {
+        continue;
+      }
       const rawReviewerId = doc.data()?.reviewerId;
       rows.push({ item: result.item, historyId: result.historyId, reviewerId: typeof rawReviewerId === "string" ? rawReviewerId : null });
     } else {

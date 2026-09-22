@@ -128,6 +128,21 @@ export interface BuildReviewGovernanceViewModelInput {
   votes: AdaptiveHumanReviewVoteV1[];
   /** Injected so this builder stays pure/testable — no Firestore/adminDb import in this file. */
   resolveDisplayName: (uid: string) => Promise<string>;
+  /**
+   * PHASE 1 — Personal/Team review isolation. When true, the identity of
+   * whoever DECIDED this review is neither resolved nor returned: the
+   * Milestone-2 `singleReviewer` and the legacy `reviewer` both come back
+   * `null`. Set by a caller that has established the decision is outside the
+   * viewer's capability (a legacy Team actor's decision reaching a Personal
+   * reviewer, or a decision whose scope could not be proven).
+   *
+   * The builder never resolves a suppressed identity rather than blanking it
+   * afterwards: resolution is itself a cross-tenant `users/{uid}` read.
+   *
+   * Does NOT affect the assignment view — a personal reviewer's own
+   * assignment is exactly what their capability covers.
+   */
+  suppressReviewerIdentity?: boolean;
 }
 
 type MilestoneAssignmentView = Extract<ReviewGovernanceViewModel, { family: "milestone2" }>["assignment"];
@@ -203,12 +218,13 @@ async function buildPanelView(
  */
 export async function buildReviewGovernanceViewModel(input: BuildReviewGovernanceViewModelInput): Promise<ReviewGovernanceViewModel> {
   const { governanceRecord, legacy, assignment, panel, votes, resolveDisplayName } = input;
+  const suppressReviewerIdentity = input.suppressReviewerIdentity === true;
 
   if (governanceRecord) {
     const hr = governanceRecord.humanReview;
 
     let singleReviewer: { displayName: string; reviewedAt: string | null } | null = null;
-    if (hr.reviewerId && (hr.decidedVia === undefined || hr.decidedVia === "single_reviewer")) {
+    if (!suppressReviewerIdentity && hr.reviewerId && (hr.decidedVia === undefined || hr.decidedVia === "single_reviewer")) {
       singleReviewer = {
         displayName: await resolveDisplayName(hr.reviewerId),
         reviewedAt: hr.reviewedAt ?? null,
@@ -234,7 +250,7 @@ export async function buildReviewGovernanceViewModel(input: BuildReviewGovernanc
   }
 
   if (legacy) {
-    const reviewer = legacy.reviewedByUid ? { displayName: await resolveDisplayName(legacy.reviewedByUid) } : null;
+    const reviewer = !suppressReviewerIdentity && legacy.reviewedByUid ? { displayName: await resolveDisplayName(legacy.reviewedByUid) } : null;
     return { family: "legacy", status: legacy.status, reasons: legacy.reasons, reviewer, reviewedAt: legacy.reviewedAt };
   }
 

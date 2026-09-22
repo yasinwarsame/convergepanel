@@ -37,6 +37,12 @@ import type { AdaptiveHumanReviewPanelV1 } from "@/lib/governance/adaptiveHumanR
 import type { AdaptiveHumanReviewVoteV1 } from "@/lib/governance/adaptiveHumanReviewVote";
 import { resolveReviewerDisplayNames, REVIEWER_UNAVAILABLE_LABEL } from "@/lib/governance/reviewerIdentity";
 import { resolveAdaptiveRunAccess } from "@/lib/governance/adaptiveRunAccess";
+import {
+  viewerMayReadReviewPanel,
+  expectedPersonalDecisionId,
+  classifyDecisionScopeFromPersonalDoc,
+  viewerMayReadDecisionReviewerIdentity,
+} from "@/lib/governance/personalReviewScope";
 import { loadUserAndTeam } from "@/lib/teams/teamApiAuth";
 import { validateRunWorkspaceAssociation } from "@/lib/workspaces/runWorkspaceIntegrity";
 import { logger } from "@/lib/logger";
@@ -141,7 +147,20 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
         }
       : null;
 
-  if (govParse.ok) {
+  // PHASE 1 — Personal/Team review-panel isolation. The panel and its votes
+  // are read ONLY for a viewer whose capability covers them. This used to be
+  // unconditional, justified by "a panel is team-only by construction
+  // (personal runs never have one)" — false: a LEGACY run carries no
+  // `workspaceId` at all, passes integrity as `legacy`, and can hold a legacy
+  // Team panel alongside an independent `teamId: null` Personal assignment,
+  // since `submitAdaptiveHumanReviewPanel` never touches the assignment doc.
+  //
+  // The gate sits BEFORE the reads, not over the output: redacting Team
+  // identities after resolving them would still have fetched the panel, every
+  // vote, and every reviewer profile. `panel` staying null is also what keeps
+  // the Team reviewer uids out of `candidateUids` below, so the identity
+  // resolver is never asked about them at all.
+  if (govParse.ok && viewerMayReadReviewPanel(viewerRole)) {
     const panelResult = await getAdaptiveHumanReviewPanel(runId);
 
     if (panelResult.status === "found") {
@@ -184,9 +203,73 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
   // collected up front since assignment/panel/governance are all already
   // in hand at this point. Bounded by MAX_ADAPTIVE_PANEL_REVIEWERS (9) in
   // practice; deduplicated internally by the resolver.
+  // PHASE 1 — Personal/Team review isolation, the SINGLE-REVIEWER half.
+  //
+  // Suppressing the panel was not sufficient. A legacy Team actor can decide
+  // a legacy run directly through the Team decision route, with no panel
+  // involved at all; that lands in `governanceRecord.humanReview.reviewerId`.
+  // Enriching it unconditionally handed a Personal reviewer the Team
+  // decider's resolved display name — while the review-history sibling,
+  // filtering on the persisted `teamId`, correctly hid the very same
+  // decision. Two surfaces, one run, one viewer, opposite answers.
+  //
+  // `humanReview` carries no `teamId` and no scope field, so the decision is
+  // attributed from the guaranteed persisted provenance instead: the
+  // matching `humanReviewHistory` row's `teamId` — the same discriminator
+  // review-history treats as canonical, which is what keeps the two
+  // surfaces in agreement. The rows are read ONLY when a non-owner actually
+  // faces a decided review, and an unreadable read denies rather than
+  // admits.
+  // The provenance lookup is a single POINT READ of the exact document a
+  // PERSONAL decision on this run would have been written under —
+  // `humanReviewHistory/{buildPersonalReviewDecisionId(runId, reviewedAt, status)}`.
+  // The id SELECTS a candidate; it does not authenticate one. The namespaces
+  // are `:`-joined prefixes, so the team builder yields the identical id when
+  // its `teamId` is literally "personal". What denies an aliased document is
+  // the body validation in `classifyDecisionScopeFromPersonalDoc` — the
+  // Personal discriminator plus agreement with the canonical record — which
+  // is also what separates Personal from WORKSPACE, since Workspace writers
+  // store `teamId: null` too. A failed read denies rather than admits.
+  let personalDecisionDoc: { exists: boolean; data: unknown } | null = null;
+  if (viewerRole !== "owner" && govParse.ok) {
+    const expectedId = expectedPersonalDecisionId({
+      runId,
+      reviewedAt: govParse.record.humanReview.reviewedAt,
+      status: govParse.record.humanReview.status,
+    });
+    if (expectedId) {
+      try {
+        const snap = await adminDb.collection("runs").doc(runId).collection("humanReviewHistory").doc(expectedId).get();
+        personalDecisionDoc = { exists: snap.exists === true, data: snap.exists ? snap.data() : null };
+      } catch {
+        logger.warn("[user/runs/governance] Decision-provenance read failed; denying reviewer identity", { runId });
+        personalDecisionDoc = null;
+      }
+    }
+  }
+  const decisionScope = govParse.ok
+    ? classifyDecisionScopeFromPersonalDoc({
+        decidedVia: govParse.record.humanReview.decidedVia,
+        reviewerId: govParse.record.humanReview.reviewerId,
+        reviewedAt: govParse.record.humanReview.reviewedAt,
+        status: govParse.record.humanReview.status,
+        personalDoc: personalDecisionDoc,
+      })
+    : "unknown";
+  const mayReadDecisionReviewer = viewerMayReadDecisionReviewerIdentity({
+    role: viewerRole,
+    scope: decisionScope,
+    viewerUid: uid,
+    reviewerId: govParse.ok ? govParse.record.humanReview.reviewerId : undefined,
+  });
+
   const candidateUids = new Set<string>();
-  if (legacy?.reviewedByUid) candidateUids.add(legacy.reviewedByUid);
-  if (govParse.ok && govParse.record.humanReview.reviewerId) candidateUids.add(govParse.record.humanReview.reviewerId);
+  // The legacy (System A) reviewer carries no recoverable scope at all, so a
+  // non-owner never resolves it — fail closed, same rule.
+  if (mayReadDecisionReviewer && legacy?.reviewedByUid) candidateUids.add(legacy.reviewedByUid);
+  if (mayReadDecisionReviewer && govParse.ok && govParse.record.humanReview.reviewerId) {
+    candidateUids.add(govParse.record.humanReview.reviewerId);
+  }
   if (assignment?.assignedReviewerUserId) candidateUids.add(assignment.assignedReviewerUserId);
   if (assignment?.assignedByUserId) candidateUids.add(assignment.assignedByUserId);
   if (panel) {
@@ -198,6 +281,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
   const resolveDisplayName = async (reviewerUid: string) => resolvedNames.get(reviewerUid) ?? REVIEWER_UNAVAILABLE_LABEL;
 
   const governance = await buildReviewGovernanceViewModel({
+    suppressReviewerIdentity: !mayReadDecisionReviewer,
     governanceRecord: govParse.ok ? govParse.record : null,
     legacy,
     assignment,
