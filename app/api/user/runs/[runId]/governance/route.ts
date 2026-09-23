@@ -293,11 +293,19 @@ export async function GET(req: NextRequest, context: { params: Promise<{ runId: 
   // Governance Follow-Up Hardening — a coarse routing signal (never a raw
   // teamId) so the client knows which review-history endpoint to call:
   // the team-only `/api/teams/adaptive-runs/[runId]/history` or the new
-  // `/api/user/runs/[runId]/review-history`. A panel is team-only by
-  // construction (personal runs never have one), so its presence alone is
-  // decisive; otherwise derived from the single-reviewer assignment's own
-  // teamId. "unknown" only when nothing is configured yet — there is no
-  // history to fetch either way in that case.
+  // `/api/user/runs/[runId]/review-history`.
+  //
+  // This comment previously read "A panel is team-only by construction
+  // (personal runs never have one)". That was false — a legacy run can carry
+  // a Team panel and an independent `teamId: null` Personal assignment at
+  // once — and it is the premise that produced this route's original
+  // disclosure. Panel visibility is not a property of which documents can
+  // coexist; it is decided by explicit viewer scope. `panel` is non-null here
+  // only for a viewer `viewerMayReadReviewPanel` admits, so a personal
+  // reviewer always falls through to the assignment branch, and
+  // `resolveAdaptiveRunAccess` grants that role only when
+  // `assignment.teamId === null` — hence "personal" for them. "unknown" only
+  // when nothing is configured yet, where there is no history to fetch.
   const historyScope: "team" | "personal" | "unknown" = panel ? "team" : assignment ? (assignment.teamId === null ? "personal" : "team") : "unknown";
 
   return NextResponse.json({

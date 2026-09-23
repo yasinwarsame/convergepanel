@@ -49,6 +49,10 @@ function topLevelStoreFor(name: string): Map<string, Record<string, any>> | null
   return null;
 }
 
+/** R2 P3 — explicit panel store so "absent" is configured, never accidental. */
+const panelDocsByPath = new Map<string, Record<string, unknown>>();
+const panelReadPaths: string[] = [];
+
 const mockAdminDb: any = {
   collection: (name: string) => ({
     doc: (id: string) => ({
@@ -78,6 +82,8 @@ const mockAdminDb: any = {
           return { id: `event-${existing.length}` };
         }),
         doc: (docId: string) => ({
+          id: docId,
+          __path: `runs/${id}/${subName}/${docId}`,
           create: jest.fn().mockImplementation(async (value: Record<string, unknown>) => {
             const key = `${id}/${subName}/${docId}`;
             if (historyDocs.has(key)) throw alreadyExistsError();
@@ -107,7 +113,26 @@ const mockAdminDb: any = {
   }),
   runTransaction: jest.fn().mockImplementation(async (fn: (txn: any) => Promise<any>) => {
     const txn = {
-      get: async (ref: { id: string }) => ({ exists: runDocs.has(ref.id), data: () => runDocs.get(ref.id) }),
+      // R2 P3 — PR #189 added an in-transaction read of
+      // `runs/{runId}/humanReviewPanel/current`. This fake used to key
+      // `txn.get` on `ref.id` alone, and the subcollection ref carried no
+      // `id`, so that production read silently resolved to `runDocs.get(
+      // undefined)` -> "absent". It was answering the panel question by
+      // accident. Subcollection reads are now dispatched by PATH and served
+      // from an explicit store, so "no panel" is a configured fact and the
+      // request is recorded for assertion.
+      get: async (ref: { id: string; __path?: string }) => {
+        const path = ref.__path;
+        if (path && path.includes("/humanReviewPanel/")) {
+          panelReadPaths.push(path);
+          return { exists: panelDocsByPath.has(path), data: () => panelDocsByPath.get(path) };
+        }
+        if (path && !path.startsWith(`runs/${ref.id}`)) {
+          const key = path.split("/").slice(1).join("/");
+          return { exists: historyDocs.has(key), data: () => historyDocs.get(key) };
+        }
+        return { exists: runDocs.has(ref.id), data: () => runDocs.get(ref.id) };
+      },
       update: (ref: { id: string }, fields: Record<string, unknown>) => {
         if (!runDocs.has(ref.id)) throw notFoundError(ref.id);
         applyDotPathUpdate(runDocs.get(ref.id)!, fields);
@@ -213,6 +238,8 @@ async function fetchHistory() {
 }
 
 beforeEach(() => {
+  panelDocsByPath.clear();
+  panelReadPaths.length = 0;
   runDocs.clear();
   teamRunDocs.clear();
   auditDocs.clear();
@@ -385,5 +412,27 @@ describe("Adaptive review — end-to-end immutable history and admin audit", () 
   it("history remains empty for an unreviewed run — no premature record before any decision is made", async () => {
     const { json } = await fetchHistory();
     expect(json.items).toEqual([]);
+  });
+});
+
+/**
+ * §22 — harness fidelity for the panel read PR #189 added.
+ *
+ * Every test in this file relies on "this run has no review panel". That must
+ * be a CONFIGURED fact, not the by-product of an unknown-id lookup. Before
+ * this correction the transaction fake keyed on `ref.id`, the subcollection
+ * ref had none, and the read silently resolved to a missing run document.
+ *
+ * The single assertion below is the whole proof: the panel path is genuinely
+ * requested, served from `panelDocsByPath`, and that store is empty by
+ * configuration. A companion assertion on `panelDocsByPath.size` was removed
+ * as unfalsifiable — `beforeEach` clears the store and that test issued no
+ * request, so no production change could ever have failed it.
+ */
+describe("harness fidelity — the in-transaction panel read is represented", () => {
+  it("the decision transaction requests the exact panel document path", async () => {
+    const detail = await fetchDetail();
+    await postDecisionRequest({ status: "approved", expectedUpdatedAt: detail.json.review.updatedAt });
+    expect(panelReadPaths.some((p) => /^runs\/.+\/humanReviewPanel\/current$/.test(p))).toBe(true);
   });
 });

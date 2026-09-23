@@ -204,12 +204,21 @@ describe("viewerMayReadDecisionContent — NO self case, unlike the identity pre
     expect(viewerMayReadDecisionContent({ role: role as never, scope: scope as never })).toBe(expected);
   });
 
-  it("takes no uid at all — identity equality cannot reach this decision", () => {
-    // The signature is the guarantee: there is no argument through which a
-    // self short-circuit could be reintroduced without changing the type.
-    expect(viewerMayReadDecisionContent.length).toBe(1);
-    expect(Object.keys({ role: "personal_reviewer", scope: "team" })).toEqual(["role", "scope"]);
-  });
+  // REMOVED: a test that claimed to pin this function's signature via
+  // `viewerMayReadDecisionContent.length === 1` plus `Object.keys` on a
+  // separately constructed literal. Both assertions were vacuous.
+  // `Function.length` counts POSITIONAL parameters, so a single-object
+  // parameter function stays `1` even after `viewerUid`/`reviewerId` are
+  // added to its type; and inspecting the keys of an unrelated inline object
+  // never references the function at all. Widening the parameter and adding a
+  // self case left this entire file green.
+  //
+  // No reflection test replaces it. The real evidence is behavioural and
+  // lives in `personalDecidedViaOracle.spec.ts` (H-S3): caller IS the
+  // canonical reviewer, Personal provenance is absent, conditions are still
+  // withheld. The accurate invariant is that the current content-authority
+  // derivation does not take a viewer uid — not that TypeScript makes
+  // identity-based authorization impossible in future.
 
   it.each([undefined, null, "", "future_role"])("denies unrecognised role %p", (role) => {
     expect(viewerMayReadDecisionContent({ role: role as never, scope: "personal" })).toBe(false);

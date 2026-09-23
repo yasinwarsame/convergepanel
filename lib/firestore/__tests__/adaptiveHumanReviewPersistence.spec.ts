@@ -39,39 +39,66 @@ function notFoundError(id: string) {
   return err;
 }
 
-const mockAdminDb: any = {
-  collection: (name: string) => ({
-    doc: (id: string) => ({
-      id,
-      get: jest.fn().mockImplementation(async () => {
-        const store = name === "runs" ? runDocs : teamRunDocs;
-        return { exists: store.has(id), data: () => store.get(id) };
+/**
+ * F3 — `submitAdaptiveHumanReview` now reads
+ * `runs/{runId}/humanReviewPanel/current` INSIDE its transaction, so this
+ * fake must serve that read faithfully. It is PATH-aware: `txn.get` keys off
+ * the ref's full path rather than its `id`, because a subcollection document
+ * and its parent run would otherwise collide (`current` vs the run id). A
+ * fake that cannot serve a production read is not a passing test — it is a
+ * silent one.
+ */
+const panelDocs = new Map<string, Record<string, any>>();
+
+function runRef(id: string, name: string) {
+  return {
+    id,
+    __path: `${name}/${id}`,
+    get: jest.fn().mockImplementation(async () => {
+      const store = name === "runs" ? runDocs : teamRunDocs;
+      return { exists: store.has(id), data: () => store.get(id) };
+    }),
+    update: jest.fn().mockImplementation(async (fields: Record<string, unknown>) => {
+      const store = name === "runs" ? runDocs : teamRunDocs;
+      if (!store.has(id)) throw notFoundError(id);
+      applyDotPathUpdate(store.get(id)!, fields);
+    }),
+    collection: (subName: string) => ({
+      add: jest.fn().mockImplementation(async (event: Record<string, unknown>) => {
+        const key = `${id}/${subName}`;
+        const existing = eventsByRunId.get(key) || [];
+        existing.push(event);
+        eventsByRunId.set(key, existing);
+        return { id: `event-${existing.length}` };
       }),
-      update: jest.fn().mockImplementation(async (fields: Record<string, unknown>) => {
-        const store = name === "runs" ? runDocs : teamRunDocs;
-        if (!store.has(id)) throw notFoundError(id);
-        applyDotPathUpdate(store.get(id)!, fields);
-      }),
-      collection: (subName: string) => ({
-        add: jest.fn().mockImplementation(async (event: Record<string, unknown>) => {
-          const key = `${id}/${subName}`;
-          const existing = eventsByRunId.get(key) || [];
-          existing.push(event);
-          eventsByRunId.set(key, existing);
-          return { id: `event-${existing.length}` };
+      doc: (subId: string) => ({
+        id: subId,
+        __path: `${name}/${id}/${subName}/${subId}`,
+        get: jest.fn().mockImplementation(async () => {
+          const has = subName === "humanReviewPanel" && panelDocs.has(id);
+          return { exists: has, data: () => (has ? panelDocs.get(id) : undefined) };
         }),
       }),
     }),
-  }),
+  };
+}
+
+const mockAdminDb: any = {
+  collection: (name: string) => ({ doc: (id: string) => runRef(id, name) }),
   runTransaction: jest.fn().mockImplementation(async (fn: (txn: any) => Promise<any>) => {
     if (forceTransactionThrow.value) {
       throw new Error("transaction failed");
     }
     const txn = {
-      get: async (ref: { id: string }) => ({
-        exists: runDocs.has(ref.id),
-        data: () => runDocs.get(ref.id),
-      }),
+      get: async (ref: { id: string; __path?: string }) => {
+        const path = ref.__path ?? `runs/${ref.id}`;
+        const parts = path.split("/");
+        if (parts.length === 4 && parts[2] === "humanReviewPanel") {
+          const rid = parts[1];
+          return { exists: panelDocs.has(rid), data: () => panelDocs.get(rid) };
+        }
+        return { exists: runDocs.has(ref.id), data: () => runDocs.get(ref.id) };
+      },
       update: (ref: { id: string }, fields: Record<string, unknown>) => {
         if (!runDocs.has(ref.id)) throw notFoundError(ref.id);
         applyDotPathUpdate(runDocs.get(ref.id)!, fields);
@@ -138,6 +165,7 @@ beforeEach(() => {
   firestoreUnavailableFlag.value = false;
   forceTransactionThrow.value = false;
   mockLoggerWarn.mockClear();
+  panelDocs.clear();
   mockAdminDb.runTransaction.mockClear();
 });
 
