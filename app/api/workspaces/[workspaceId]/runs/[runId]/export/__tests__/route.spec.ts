@@ -268,6 +268,33 @@ describe("E1 — admission, capability and binding are three independent gates",
     noSideEffects();
   });
 
+  it("§37 the RUN OWNER gets no Personal fallback: ownership never substitutes for Workspace authority", async () => {
+    // The caller is the run's own creator — the identity the Personal export
+    // route would authorize outright — but the run is not canonically bound
+    // to the addressed Workspace. Workspace export must still conceal it;
+    // this route is not Personal export with a different URL.
+    const ownerUid = String(fullTeamRunData().userId);
+    mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: ownerUid });
+    mockedAccess.mockResolvedValue(grant("member"));
+    runDocs.set(RUN, teamRun({ workspaceId: OTHER_WS }));
+
+    const r = await submit();
+    expect(r.status).toBe(404);
+    expect(r.json.errorCode).toBe("run_not_found");
+    noSideEffects();
+  });
+
+  it("§37 a run owner who is NOT admitted to the Workspace is refused by the Team family", async () => {
+    const ownerUid = String(fullTeamRunData().userId);
+    mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: ownerUid });
+    mockedAccess.mockResolvedValue({ granted: false, reason: "membership_not_found" });
+
+    const r = await submit();
+    expect(r.status).toBe(404);
+    expect(r.json.errorCode).toBe("team_workspace_not_found");
+    noSideEffects();
+  });
+
   it("owner and admin both hold the capability", async () => {
     for (const role of ["owner", "admin"] as const) {
       jest.clearAllMocks();
