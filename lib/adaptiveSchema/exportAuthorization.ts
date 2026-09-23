@@ -37,7 +37,8 @@ export type AdaptiveExportDenialReason =
   | "role_not_permitted"
   | "organization_policy_blocked"
   | "governance_state_blocked"
-  | "not_run_owner";
+  | "not_run_owner"
+  | "workspace_capability_missing";
 
 export type AdaptiveExportVerdict =
   | { allowed: true; requiresVisibleStatusNotice: boolean }
@@ -146,4 +147,68 @@ export async function resolveAdaptiveExportVerdict(
     classification,
     governanceStatusAtExport,
   });
+}
+
+/**
+ * TEAM_EXPORT_E1 — the Workspace sibling of `canExportAdaptiveResearch()`.
+ *
+ * Deliberately a SEPARATE pure function rather than a new branch inside the
+ * Personal one: the Personal path's owner axis (`isRunOwner`) and this path's
+ * Workspace axis are different authority models, and threading a discriminated
+ * union through the existing function would put Personal export — a shipped,
+ * owner-only product — at regression risk for no gain. The two security axes
+ * that are genuinely shared (`isGovernanceStateBlocking`,
+ * `requiresVisibleStatusNotice`) are REUSED here, not reimplemented, so the
+ * governance policy itself still lives in exactly one place.
+ *
+ * What replaces the owner axis: the caller must hold `exports.create` in the
+ * Workspace that canonically contains the run. BOTH halves are established by
+ * the route BEFORE this is called — Workspace admission + membership via
+ * `resolveTeamRunWorkspaceAccess()`, and the run's own
+ * `workspaceId === {workspaceId}` binding via `validateTeamRunRowShape()`.
+ * This function never sees, and must never be given, a client-supplied
+ * Workspace id: it receives only the already-derived boolean.
+ *
+ * Plan entitlement stays the ACTING CALLER's, matching the established
+ * Workspace write precedent (Team run creation and Team video creation both
+ * meter `uid`, not the Workspace — Workspaces carry no plan of their own).
+ *
+ * Never throws; an unrecognized state fails closed to denied.
+ */
+export interface CanExportWorkspaceAdaptiveResearchInput {
+  /** Derived server-side from `resolveTeamRunWorkspaceAccess().capabilities` — never from the request. */
+  hasExportsCreateCapability: boolean;
+  /** The acting caller's plan, not the Workspace's (Workspaces have no plan). */
+  planId: PlanId;
+  classification: AdaptiveExportClassification;
+  governanceStatusAtExport: AdaptiveExportGovernanceStatus;
+}
+
+export function canExportWorkspaceAdaptiveResearch(input: CanExportWorkspaceAdaptiveResearchInput): AdaptiveExportVerdict {
+  if (!input.hasExportsCreateCapability) {
+    return { allowed: false, reason: "workspace_capability_missing" };
+  }
+
+  const planConfig = getPlanConfig(input.planId);
+  if (!planConfig.advancedExportEnabled) {
+    return { allowed: false, reason: "plan_not_entitled" };
+  }
+
+  // Organization policy — same named, currently-always-passing check point as
+  // the Personal path. No `exportPolicy` field exists on a Workspace today
+  // (verified, not invented), so this stays a one-line change later rather
+  // than a new call site.
+  const organizationPolicyBlocked = false;
+  if (organizationPolicyBlocked) {
+    return { allowed: false, reason: "organization_policy_blocked" };
+  }
+
+  // Governance — shared helper, identical policy to Personal: a rejected
+  // (Milestone-2) or blocked (legacy) run is never exportable, by any role or
+  // plan. Every other state exports but carries a visible status notice.
+  if (isGovernanceStateBlocking(input.governanceStatusAtExport)) {
+    return { allowed: false, reason: "governance_state_blocked" };
+  }
+
+  return { allowed: true, requiresVisibleStatusNotice: requiresVisibleStatusNotice(input.governanceStatusAtExport) };
 }
