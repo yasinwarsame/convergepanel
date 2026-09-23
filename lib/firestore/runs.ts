@@ -840,10 +840,22 @@ export async function submitAdaptiveHumanReview(args: {
       }
 
       // Same state contract as the Team decision route's own panel gate:
-      // absent → proceed; "open" → refuse; "cancelled"/"finalized" → proceed
-      // (a drained panel restores the single-reviewer path, and a finalized
-      // one already made the review terminal, which the check below catches);
+      // absent → proceed; "open" → refuse; "cancelled"/"finalized" → proceed;
       // malformed/unsupported → refuse, fail closed.
+      //
+      // Why "finalized" may proceed: NOT because the review is already
+      // terminal. It need not be — a panel finalizing as `changes_requested`
+      // is terminal for the panel, and `resubmitWorkspaceReview` then returns
+      // the review to `unreviewed` without ever writing
+      // `humanReviewPanel/current`. So a finalized panel above a pending
+      // review is writer-reachable, and this route legitimately allows it;
+      // the spec's F3-C strong positive asserts exactly that (200, one
+      // canonical write). The real invariant is that a finalized panel is
+      // terminal AS A PANEL: `submitAdaptiveHumanReviewPanel` refuses to
+      // reopen it (`panel_finalized`) and `submitAdaptiveHumanReviewVote`
+      // requires `status === "open"`, so it can never again produce a
+      // competing panel decision. "cancelled" is safe for the same reason —
+      // a drained panel restores the single-reviewer path.
       const panelParse = parseAdaptiveHumanReviewPanel(panelSnap.exists ? panelSnap.data() : undefined, {
         expectedRunId: args.runId,
       });

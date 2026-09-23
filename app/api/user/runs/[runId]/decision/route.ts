@@ -184,15 +184,27 @@ export async function POST(req: NextRequest, { params }: { params: { runId: stri
         return errorResponse(409, "terminal_review_exists", "This run already has a final review decision.");
       case "adaptive_review_panel_active":
       case "adaptive_review_panel_invalid":
-        // NEUTRAL on purpose. The write must be refused, but this caller holds
-        // only a Personal assignment, and naming the cause would disclose
-        // independently governed Team state: that a Team panel exists on this
-        // run, and in the second case that it exists AND is unreadable.
-        // `lib/governance/personalReviewScope.ts` already establishes that a
-        // personal reviewer may not read panel state — `viewerMayReadReviewPanel`
-        // is owner-only, and `decidedVia`'s panel values are suppressed there
+        // NEUTRAL on purpose, and the claim is deliberately exact (R7 Minor 2).
+        //
+        // WHAT THIS ACHIEVES: the two panel reasons become mutually
+        // indistinguishable to a Personal caller. Naming them would say not
+        // only that a Team panel exists but, in the second case, that it
+        // exists AND is unreadable — a strictly finer disclosure.
+        // `lib/governance/personalReviewScope.ts` establishes that a personal
+        // reviewer may not read panel state: `viewerMayReadReviewPanel` is
+        // owner-only and `decidedVia`'s panel values are suppressed there
         // precisely as "a provenance oracle that survives even when no name or
         // vote is returned". An error code is the same oracle by another route.
+        //
+        // WHAT THIS DOES NOT ACHIEVE: it does not conceal that SOME panel
+        // condition exists. `decision_unavailable` is emitted from this one
+        // site for exactly these two reasons, while every other refusal this
+        // route can produce carries a different code, so the code remains a
+        // binary observable for "an open-or-unparseable panel is present on
+        // this run". That residue is inherent — refusing the write at all is
+        // observable — and it is accepted, not claimed away. Removing it would
+        // mean reusing a code for an unrelated cause, misreporting the failure
+        // to the client; that is an API contract decision, not a comment fix.
         //
         // The two reasons stay DISTINCT inside the transaction, for logs and
         // for the gate's own tests; only the externally visible envelope is

@@ -377,6 +377,15 @@ describe("§7 — the guard does not depend on the creation rollout flag", () =>
   it("an existing OPEN panel blocks identically with MULTI_REVIEWER_GOVERNANCE_ENABLED false and true", async () => {
     panelDocs.set(RUN, panel("open"));
     const whenFalse = await submit();
+
+    // R7 Minor 3. Resetting `canonicalWrites` alone is not enough: the two
+    // probes shared `runDocs`, so under a flag-keyed gate the first probe
+    // COMMITS and the second then short-circuits at `terminal_review_exists`
+    // in the access layer without ever reaching the guard. The mutation still
+    // died, but on contamination rather than on rollout coupling. Restore the
+    // run to its pre-probe state so each probe reaches the guard independently
+    // — the same reset §16 already performs.
+    runDocs.get(RUN)!.governanceRecord.humanReview = { status: "unreviewed" };
     jest.replaceProperty(require("@/lib/env"), "MULTI_REVIEWER_GOVERNANCE_ENABLED", true as never);
     canonicalWrites = 0;
     const whenTrue = await submit();
@@ -490,5 +499,39 @@ describe("§6 — transaction attribution is real", () => {
     const [first, second] = [...new Set(ids)];
     expect(opsOfTxn(first).map((o) => o.path)).toEqual([RUN_PATH]);
     expect(opsOfTxn(second).map((o) => o.path)).toEqual([PANEL_PATH]);
+  });
+
+  it("an op issued AFTER an inner transaction started still carries its OWN issuer's id", async () => {
+    // R7 BLOCKING. The sequential test above cannot distinguish a correctly
+    // CAPTURED per-invocation id from a mutable global "current transaction"
+    // read at push time: with no overlap the two produce identical output.
+    // That gap was not theoretical. Stamping ops from the global (`txn:
+    // txnSeq`) left the focused suite 28/28 green AND, combined with the real
+    // split-transaction defect, left the entire repository green — the inner
+    // transaction bumps the global, every op collapses onto one id, and the
+    // two assertions that detect the defect are satisfied by a lie.
+    //
+    // Only OVERLAPPING invocation lifetimes separate the two mechanisms, so
+    // this drives the real recorder with an inner transaction opened and
+    // closed inside an outer one. Instrumentation testing only: no versions,
+    // no conflict detection, no retries, no buffered commits.
+    const runRef = mockAdminDb.collection("runs").doc(RUN);
+    const panelRef = runRef.collection("humanReviewPanel").doc("current");
+
+    await mockAdminDb.runTransaction(async (t: any) => {
+      await t.get(runRef);
+      await mockAdminDb.runTransaction(async (t2: any) => {
+        await t2.get(panelRef);
+      });
+      await t.get(runRef);
+    });
+
+    const [before, inner, after] = ops;
+    // The outer transaction's identity survives an intervening invocation…
+    expect(before.txn).toBe(after.txn);
+    // …and the inner op is attributed to the inner invocation, not the outer.
+    expect(inner.txn).not.toBe(before.txn);
+    // Paths pin that these are the ops we think they are.
+    expect([before.path, inner.path, after.path]).toEqual([RUN_PATH, PANEL_PATH, RUN_PATH]);
   });
 });
