@@ -61,15 +61,36 @@ jest.mock("@/lib/firestore/workspaces", () => ({ getWorkspace: jest.fn().mockRes
  * ORDERED operations of that one transaction, which is all the structural
  * proof needs. No versions, no conflicts, no retries.
  */
-type TxnOp = { kind: "read" | "write"; path: string };
+/**
+ * Each recorded operation carries the id of the transaction invocation that
+ * issued it. R6 found that without this the helpers could only establish
+ * "SOME transaction read the panel before SOME write" — moving the panel read
+ * into a separate preceding transaction left the whole suite green, which is
+ * the exact defect this PR exists to close.
+ *
+ * This is structural instrumentation and nothing more. No document versions,
+ * no conflict detection, no retries, no buffered commits, no snapshot
+ * emulation. Firestore's read-set semantics remain REASONED, not simulated.
+ */
+type TxnOp = { txn: number; kind: "read" | "write"; path: string };
 let ops: TxnOp[] = [];
+let txnSeq = 0;
 let canonicalWrites = 0;
 let runDocs = new Map<string, any>();
 let panelDocs = new Map<string, any>();
 
+/** The transaction invocation that issued the canonical write, or null. */
+const committingTxnId = (): number | null => {
+  const w = ops.find((o) => o.kind === "write" && o.path === RUN_PATH);
+  return w ? w.txn : null;
+};
+/** Ops belonging to one transaction invocation, in order. */
+const opsOfTxn = (txn: number) => ops.filter((o) => o.txn === txn);
 const readsOf = () => ops.filter((o) => o.kind === "read").map((o) => o.path);
-const firstWriteIndex = () => ops.findIndex((o) => o.kind === "write");
-const lastReadIndexOf = (path: string) => ops.reduce((acc, o, i) => (o.kind === "read" && o.path === path ? i : acc), -1);
+/** Indices are computed WITHIN one transaction invocation, never globally. */
+const firstWriteIndexIn = (txn: number) => opsOfTxn(txn).findIndex((o) => o.kind === "write");
+const lastReadIndexIn = (txn: number, path: string) =>
+  opsOfTxn(txn).reduce((acc, o, i) => (o.kind === "read" && o.path === path ? i : acc), -1);
 
 function readPath(path: string): { exists: boolean; data: () => any } {
   const parts = path.split("/");
@@ -98,14 +119,15 @@ function makeRef(name: string, id: string): any {
 const mockAdminDb: any = {
   collection: (name: string) => ({ doc: (id: string) => makeRef(name, id) }),
   runTransaction: async (fn: (txn: any) => Promise<any>) => {
+    const myTxn = ++txnSeq;
     const txn = {
       get: async (ref: any) => {
         const path = String(ref.__path);
-        ops.push({ kind: "read", path });
+        ops.push({ txn: myTxn, kind: "read", path });
         return readPath(path);
       },
       update: (ref: any, fields: Record<string, unknown>) => {
-        ops.push({ kind: "write", path: String(ref.__path) });
+        ops.push({ txn: myTxn, kind: "write", path: String(ref.__path) });
         canonicalWrites += 1;
         const doc = runDocs.get(ref.id)!;
         for (const [k, v] of Object.entries(fields)) {
@@ -150,6 +172,7 @@ const finalizedPanel = () =>
 beforeEach(() => {
   jest.clearAllMocks();
   ops = [];
+  txnSeq = 0;
   canonicalWrites = 0;
   runDocs = new Map();
   panelDocs = new Map();
@@ -186,21 +209,42 @@ describe("STRUCTURAL — the committing transaction reads run + panel before it 
   // The single fact this harness pins for the concurrency argument. Steps 3-5
   // of that argument (read-set conflict semantics) are Firestore properties
   // cited in the PR evidence, not simulated here.
-  it("both required reads are present, and both precede the first write", async () => {
+  it("the transaction that performs the canonical write itself read BOTH the run and the panel, before writing", async () => {
     const r = await submit();
     expect(r.status).toBe(200);
 
-    // Presence asserted SEPARATELY from ordering: `lastReadIndexOf` returns -1
+    // Identify the COMMITTING transaction, then assert only against it.
+    // Global ordering is not enough: R6 showed that a panel read issued by a
+    // separate preceding transaction satisfied a global check while leaving
+    // the committing transaction's read set holding the run alone.
+    const committing = committingTxnId();
+    expect(committing).not.toBeNull();
+
+    // Presence asserted SEPARATELY from ordering: `lastReadIndexIn` returns -1
     // for a path never read, and `-1 < w` is trivially true, so the ordering
     // comparison alone would be satisfied by "the panel was never read".
-    const runAt = lastReadIndexOf(RUN_PATH);
-    const panelAt = lastReadIndexOf(PANEL_PATH);
-    const w = firstWriteIndex();
+    const runAt = lastReadIndexIn(committing!, RUN_PATH);
+    const panelAt = lastReadIndexIn(committing!, PANEL_PATH);
+    const w = firstWriteIndexIn(committing!);
     expect(runAt).toBeGreaterThan(-1);
     expect(panelAt).toBeGreaterThan(-1);
     expect(w).toBeGreaterThan(-1);
     expect(runAt).toBeLessThan(w);
     expect(panelAt).toBeLessThan(w);
+  });
+
+  it("R6 REGRESSION: the panel read and the canonical write share the SAME transaction invocation", async () => {
+    // The mutation this pins: move the panel read into a separate preceding
+    // `runTransaction`. Global op ordering stays identical; only the
+    // attribution changes. Without this assertion that mutation passed the
+    // entire suite.
+    await submit();
+    const committing = committingTxnId();
+    expect(committing).not.toBeNull();
+    const panelReaders = ops.filter((o) => o.kind === "read" && o.path === PANEL_PATH).map((o) => o.txn);
+    expect(panelReaders).toContain(committing);
+    // …and exactly one transaction invocation was involved in this request.
+    expect(new Set(ops.map((o) => o.txn)).size).toBe(1);
   });
 
   it("the panel is read through the transaction, not by a separate non-transactional read", async () => {
@@ -240,8 +284,11 @@ describe("F3-B — an OPEN Team panel blocks the Personal decision", () => {
   });
 
   it("leaves the panel document untouched", async () => {
+    // R6 P3: the recorded write paths are the load-bearing half. A
+    // `panelDocs` content comparison could not fail for the reason it names,
+    // because the fake's `txn.update` writes into `runDocs` — a panel write
+    // would throw rather than mutate `panelDocs`.
     await submit();
-    expect(panelDocs.get(RUN)).toEqual(panel("open"));
     expect(ops.filter((o) => o.kind === "write").map((o) => o.path)).not.toContain(PANEL_PATH);
   });
 
@@ -419,5 +466,29 @@ describe("§18 — the INTERNAL gate still distinguishes active from invalid", (
   it("a runId/path mismatch yields exactly adaptive_review_panel_invalid", async () => {
     panelDocs.set(RUN, panel("cancelled", { runId: "run-SOMEWHERE-ELSE" }));
     await expect(submitDirect()).resolves.toEqual({ ok: false, reason: "adaptive_review_panel_invalid" });
+  });
+});
+
+/**
+ * §6 — a minimal self-test of transaction attribution itself.
+ *
+ * R6's defect existed because the proof depended on attribution while the
+ * recorder had none. Two assertions keep attribution from silently collapsing
+ * back into a global operation stream. This is deliberately NOT a rebuild of
+ * the deleted emulator self-test suite.
+ */
+describe("§6 — transaction attribution is real", () => {
+  it("separate transaction invocations receive different ids, and each op carries its issuer's", async () => {
+    const runRef = mockAdminDb.collection("runs").doc(RUN);
+    const panelRef = runRef.collection("humanReviewPanel").doc("current");
+
+    await mockAdminDb.runTransaction(async (t: any) => { await t.get(runRef); });
+    await mockAdminDb.runTransaction(async (t: any) => { await t.get(panelRef); });
+
+    const ids = ops.map((o) => o.txn);
+    expect(new Set(ids).size).toBe(2);
+    const [first, second] = [...new Set(ids)];
+    expect(opsOfTxn(first).map((o) => o.path)).toEqual([RUN_PATH]);
+    expect(opsOfTxn(second).map((o) => o.path)).toEqual([PANEL_PATH]);
   });
 });
