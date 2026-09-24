@@ -172,6 +172,15 @@ beforeEach(() => {
   mockedRender.mockResolvedValue({ bytes: Buffer.from("%PDF-1.7 fixture"), sha256: "a".repeat(64) });
 });
 
+/** R1 P2-1 — the canonical run path must not be read at all. Asserting the
+ * response alone cannot detect a reordering that reads the run first and only
+ * then denies: that ordering is what turns two distinct 404 codes into a
+ * cross-tenant run-existence oracle. */
+const expectNoRunRead = () => {
+  expect(readPaths).not.toContain(RUN_PATH);
+  expect(readPaths.filter((p) => p.startsWith("runs/"))).toEqual([]);
+};
+
 /** Every side effect that a denied request must not produce. */
 const noSideEffects = () => {
   expect(mockedCreateRecord).not.toHaveBeenCalled();
@@ -266,6 +275,52 @@ describe("E1 — admission, capability and binding are three independent gates",
     expect(r.status).toBe(404);
     expect(r.json.errorCode).toBe("run_not_found");
     noSideEffects();
+  });
+
+  it("R1 P2-1: a NON-MEMBER triggers zero run I/O — denial precedes any run read", async () => {
+    mockedAccess.mockResolvedValue({ granted: false, reason: "membership_not_found" });
+    const r = await submit();
+    expect(r.status).toBe(404);
+    expect(r.json.errorCode).toBe("team_workspace_not_found");
+    expectNoRunRead();
+    noSideEffects();
+  });
+
+  it("R1 P2-1: for a non-member, an EXISTING and a MISSING run are indistinguishable AND neither is read", async () => {
+    mockedAccess.mockResolvedValue({ granted: false, reason: "membership_not_found" });
+
+    // Case A — the run exists.
+    runDocs.set(RUN, teamRun());
+    const present = await submit();
+    const pathsWhenPresent = [...readPaths];
+
+    readPaths.length = 0;
+    // Case B — the run does not exist.
+    runDocs.clear();
+    const missing = await submit();
+
+    // Identical externally…
+    expect(missing.status).toBe(present.status);
+    expect(missing.json).toEqual(present.json);
+    // …and, the part a response comparison cannot show, no run I/O either way.
+    expect(pathsWhenPresent.filter((p) => p.startsWith("runs/"))).toEqual([]);
+    expect(readPaths.filter((p) => p.startsWith("runs/"))).toEqual([]);
+    noSideEffects();
+  });
+
+  it("R1 P2-1: a caller WITHOUT exports.create triggers zero run I/O — capability precedes the run read", async () => {
+    mockedAccess.mockResolvedValue(grant("reviewer"));
+    const r = await submit();
+    expect(r.status).toBe(403);
+    expect(r.json.errorCode).toBe("insufficient_capability");
+    expectNoRunRead();
+    noSideEffects();
+  });
+
+  it("R1 P2-1: the AUTHORIZED exporter does read the canonical run — the control that makes the assertions above meaningful", async () => {
+    const r = await submit();
+    expect(r.status).toBe(200);
+    expect(readPaths).toEqual([RUN_PATH]);
   });
 
   it("§37 the RUN OWNER gets no Personal fallback: ownership never substitutes for Workspace authority", async () => {
@@ -409,5 +464,24 @@ describe("E1 — the feature flag", () => {
     expect(r.json.errorCode).toBe("run_not_found");
     expect(mockedAccess).not.toHaveBeenCalled();
     noSideEffects();
+  });
+});
+
+describe("R1 P3 — runId syntax is load-bearing for path integrity", () => {
+  // `collection("runs").doc("a/b")` is a LEGAL nested document path in the
+  // Admin SDK, so without this gate a crafted runId would address a different
+  // document than the containment check believes it validated.
+  it.each(["a/b", "runs/other", "../escape", ""])("rejects %p before any document path is constructed", async (badRunId) => {
+    const r = await submit({ format: "pdf" }, WS, badRunId);
+    expect(r.status).toBe(404);
+    expect(r.json.errorCode).toBe("run_not_found");
+    // Nothing under runs/ was addressed at all — not the crafted path, not a run.
+    expect(readPaths).toEqual([]);
+    expect(mockedAccess).not.toHaveBeenCalled();
+    noSideEffects();
+  });
+
+  it("a syntactically valid runId is accepted (isolating the syntax gate as the cause)", async () => {
+    expect((await submit()).status).toBe(200);
   });
 });

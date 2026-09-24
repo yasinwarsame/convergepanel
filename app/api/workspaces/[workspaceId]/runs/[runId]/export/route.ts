@@ -29,8 +29,8 @@
  *   7. request format                    → 400
  *   8. snapshot + export verdict         → 403
  *
- * Steps 4-6 are three INDEPENDENT gates and none substitutes for another.
- * Admission says the caller belongs to the addressed Workspace; the
+ * Steps 4-6 are three separate ENFORCEMENT POINTS and none substitutes for
+ * another. Admission says the caller belongs to the addressed Workspace; the
  * capability says they may export at all; the row validation says the run
  * itself is canonically bound to that same Workspace. Only all three
  * together authorize an export, which is what makes a caller admitted to
@@ -38,23 +38,43 @@
  * either id in the path. The client-supplied `workspaceId` is a TARGET,
  * never an authority.
  *
+ * Precisely: Workspace admission and `exports.create` are established before
+ * any run access, and the DERIVED capability fact is then preserved as an
+ * axis of the export verdict. That is one source of truth reused at two
+ * layers, not two independent sources of authorization — the verdict's
+ * capability axis cannot disagree with the gate, because it IS the gate's
+ * value.
+ *
  * Deliberately AFTER access and the run's binding: the request body is not
  * even parsed until the caller has been authorized for this run, so an
  * unauthorized caller cannot learn anything from format validation — the
  * Personal route can afford to validate format earlier because it has no
  * concealment obligation toward non-owners.
  *
- * DATA BOUNDARY — export changes representation, not authority. The snapshot
- * carries the report, its sources and `humanReview` {status, conditions,
- * decidedVia}; it carries no reviewer identity, no private reviewer comment
- * text and no raw model output, because `buildExportSnapshot()` never reads
- * them. Those three governance fields are exactly what the canonical Team
- * detail read already returns to a Workspace-authorized caller
- * (`buildRunReadPayload` with `mayReadDecisionContent: true`), and the roles
- * that lose content there — `reviewer`, `viewer` — are precisely the roles
- * denied `exports.create`. So this route cannot surface anything the caller
- * could not already read, and it is not an aggregation bypass around the
- * cross-authority boundaries established by PRs #186-#189.
+ * DATA BOUNDARY — export changes representation, not authority. The invariant
+ * is deliberately about AUTHORITY AMPLIFICATION, not an absolute ban on any
+ * particular field:
+ *
+ *   Workspace export must not expose anything beyond what the same caller is
+ *   already authorized to receive through the corresponding canonical Team
+ *   Research read boundary.
+ *
+ * The snapshot carries the report, its sources and `humanReview` {status,
+ * conditions, decidedVia}, and it carries no reviewer identity and no private
+ * reviewer comment text, because `buildExportSnapshot()` never reads them.
+ * It DOES carry `modelResponses: output.results` for the LEGACY family
+ * (`exportSnapshot.ts`) — an earlier version of this comment wrongly claimed
+ * "no raw model output". That is authorized, not a leak:
+ * `buildRunReadPayload` returns the same `legacyAdaptive.output` unredacted to
+ * every Team role, so export reveals nothing extra.
+ *
+ * The governance fields are exactly what the canonical Team detail read
+ * already returns to a Workspace-authorized caller (`buildRunReadPayload` with
+ * `mayReadDecisionContent: true`), and the roles that lose content there —
+ * `reviewer`, `viewer` — are precisely the roles denied `exports.create`
+ * (`exports.create` is also a subset of `research.read`, so every exporter
+ * could already read this content). So this route is not an aggregation
+ * bypass around the cross-authority boundaries established by PRs #186-#189.
  *
  * NOT in this slice (E1 is create + stream only): export history listing,
  * historical regeneration, Team UI, Project-scoped route wiring, Claim or
@@ -137,7 +157,13 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
   }
 
   // ── Gate 2: the export capability itself, distinct from run access ──
-  if (!access.capabilities.includes("exports.create")) {
+  // Derived ONCE, here, from the canonical capability set the resolver
+  // returned. This same value is the capability axis handed to the export
+  // verdict below — never recomputed, never a route-local role list, and
+  // never a literal (R1 P2-2: passing `true` made the verdict's own
+  // capability branch unreachable and therefore untestable).
+  const hasExportsCreate = access.capabilities.includes("exports.create");
+  if (!hasExportsCreate) {
     return shared(teamRunInsufficientCapabilityResponse());
   }
 
@@ -224,9 +250,16 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
   const { reportSnapshot, governanceStatusAtExport, classification } = snapshotResult;
 
   // ── Export verdict: capability + caller plan + classification + governance ──
+  // Plan axis. NOT "reused verbatim" from the Personal route: Personal export
+  // resolves its plan through `loadUserAndTeam()`, while every Workspace write
+  // in this repository (Team run creation, Team video creation) meters the
+  // acting caller through `getEffectiveEntitlements()`. E1 follows the
+  // Workspace precedent deliberately. The two sources can disagree (an active
+  // admin override, or a stale `users.plan`), so this is a real behavioural
+  // difference from Personal, stated rather than glossed.
   const entitlements = await getEffectiveEntitlements(uid);
   const verdict = canExportWorkspaceAdaptiveResearch({
-    hasExportsCreateCapability: true,
+    hasExportsCreateCapability: hasExportsCreate,
     planId: (entitlements?.planId as PlanId | undefined) ?? "free",
     classification,
     governanceStatusAtExport,
