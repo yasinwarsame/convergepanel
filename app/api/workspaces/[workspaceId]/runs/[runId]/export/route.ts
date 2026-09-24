@@ -127,8 +127,16 @@
  * (per-model `tokenUsage`/`latencyMs`) has NO counterpart in the export
  * snapshot to leak — `models` there is `{modelId, ok}` only. And every role
  * granted `exports.create` also holds `research.read` (asserted in
- * `lib/workspaces/__tests__/capabilities.spec.ts`), so every exporter already
- * has the canonical read authority for this content. So this route is not an
+ * `lib/workspaces/__tests__/capabilities.spec.ts` over the CANONICAL role
+ * enumeration), so every exporter already has the canonical read authority for
+ * this content.
+ *
+ * That subset is LOAD-BEARING, not merely supporting: this route gates on
+ * `exports.create` alone and never checks `research.read` itself. A future role
+ * holding `exports.create` without `research.read` would therefore be able to
+ * export content it could not read through the detail route, which is exactly
+ * the authority amplification E1-S6a forbids. The capability test is where that
+ * would surface, which is why it enumerates the role union rather than a copy. So this route is not an
  * aggregation bypass around the cross-authority boundaries established by
  * PRs #186-#189.
  *

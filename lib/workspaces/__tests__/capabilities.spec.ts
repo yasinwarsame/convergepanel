@@ -147,13 +147,13 @@ describe("ORDINARY_SETTABLE_ROLES", () => {
 });
 
 /**
- * TEAM_EXPORT_E1 (R2 §15) — export safety leans on exporters already being
- * Research readers, so that relationship is pinned rather than assumed. It is
- * SUPPORTING evidence: canonical run access independently enforces read
- * authority on the export route, so this is not the sole load-bearing gate.
- * But if a future role were granted `exports.create` without `research.read`,
- * the export route's "representation, not authority" argument would need
- * re-deriving, and this test is where that surfaces.
+ * TEAM_EXPORT_E1 — export safety leans on exporters already being Research
+ * readers. Reclassified after R4: this is LOAD-BEARING, not supporting. The
+ * export route gates on `exports.create` alone and never checks
+ * `research.read`, so a role holding the former without the latter could export
+ * content it cannot read through the Team detail route — the authority
+ * amplification E1-S6a forbids. Enumerating the canonical role union (not a
+ * hardcoded copy) is what makes a future role surface here.
  */
 describe("exports.create implies research.read", () => {
   it("every role granted exports.create also holds research.read", () => {
