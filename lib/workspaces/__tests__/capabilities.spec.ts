@@ -145,3 +145,31 @@ describe("ORDINARY_SETTABLE_ROLES", () => {
     expect(Object.isFrozen(ORDINARY_SETTABLE_ROLES)).toBe(true);
   });
 });
+
+/**
+ * TEAM_EXPORT_E1 — export safety leans on exporters already being Research
+ * readers. Reclassified after R4: this is LOAD-BEARING, not supporting. The
+ * export route gates on `exports.create` alone and never checks
+ * `research.read`, so a role holding the former without the latter could export
+ * content it cannot read through the Team detail route — the authority
+ * amplification E1-S6a forbids. Enumerating the canonical role union (not a
+ * hardcoded copy) is what makes a future role surface here.
+ */
+describe("exports.create implies research.read", () => {
+  it("every role granted exports.create also holds research.read", () => {
+    // R5 P3-3: the IMPLICATION stands alone. An exact-set assertion used to run
+    // first, so a future role granted exports.create without research.read died
+    // on the hardcoded list rather than on the invariant — surfacing, but for a
+    // misleading reason. Only non-vacuity is asserted here.
+    const exporters = WORKSPACE_MEMBERSHIP_ROLES.filter((r) => roleHasCapability(r, "exports.create"));
+    expect(exporters.length).toBeGreaterThan(0);
+    for (const role of exporters) {
+      expect(roleHasCapability(role, "research.read")).toBe(true);
+    }
+  });
+
+  it("role enum contract: exactly owner/admin/member currently hold exports.create", () => {
+    // A separate contract, deliberately NOT evidence for the implication above.
+    expect(WORKSPACE_MEMBERSHIP_ROLES.filter((r) => roleHasCapability(r, "exports.create"))).toEqual(["owner", "admin", "member"]);
+  });
+});

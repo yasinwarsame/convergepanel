@@ -5,7 +5,7 @@
  * table-driven cases.
  */
 
-import { canExportAdaptiveResearch, CanExportAdaptiveResearchInput } from "@/lib/adaptiveSchema/exportAuthorization";
+import { canExportAdaptiveResearch, canExportWorkspaceAdaptiveResearch, CanExportAdaptiveResearchInput, CanExportWorkspaceAdaptiveResearchInput } from "@/lib/adaptiveSchema/exportAuthorization";
 import { ReportStatusKind } from "@/lib/adaptiveSchema/reportStatus";
 
 function baseInput(overrides: Partial<CanExportAdaptiveResearchInput> = {}): CanExportAdaptiveResearchInput {
@@ -95,5 +95,50 @@ describe("canExportAdaptiveResearch", () => {
 
   it("every input combination maps to a real verdict — never throws", () => {
     expect(() => canExportAdaptiveResearch(baseInput({ planId: "free", isRunOwner: false }))).not.toThrow();
+  });
+});
+
+/**
+ * TEAM_EXPORT_E1 R1 P2-2 — the Workspace verdict's capability axis, tested
+ * DIRECTLY. Previously the route handed this function the literal `true`, so
+ * the branch below was unreachable from production and deleting it left the
+ * whole suite green. These two tests are a matched pair: the negative pins the
+ * denial, and the positive control proves the negative is not passing merely
+ * because some unrelated axis (plan, governance) already denied the export.
+ */
+describe("canExportWorkspaceAdaptiveResearch — the exports.create axis", () => {
+  const baseWorkspaceInput = (overrides: Partial<CanExportWorkspaceAdaptiveResearchInput> = {}): CanExportWorkspaceAdaptiveResearchInput => ({
+    hasExportsCreateCapability: true,
+    planId: "full",
+    classification: "internal",
+    governanceStatusAtExport: { family: "milestone2", kind: "approved", isOwnerOverride: false },
+    ...overrides,
+  });
+
+  it("denies with exactly workspace_capability_missing when exports.create is absent", () => {
+    const verdict = canExportWorkspaceAdaptiveResearch(baseWorkspaceInput({ hasExportsCreateCapability: false }));
+    expect(verdict).toEqual({ allowed: false, reason: "workspace_capability_missing" });
+  });
+
+  it("POSITIVE CONTROL: the identical fixture WITH exports.create is allowed — every other axis passes", () => {
+    const verdict = canExportWorkspaceAdaptiveResearch(baseWorkspaceInput());
+    expect(verdict).toEqual({ allowed: true, requiresVisibleStatusNotice: false });
+  });
+
+  it("the capability axis is evaluated BEFORE plan, so an uncapable free caller is reported as capability-missing", () => {
+    const verdict = canExportWorkspaceAdaptiveResearch(baseWorkspaceInput({ hasExportsCreateCapability: false, planId: "free" }));
+    expect(verdict).toEqual({ allowed: false, reason: "workspace_capability_missing" });
+  });
+
+  it("still enforces the shared plan and governance axes for a capable caller", () => {
+    expect(canExportWorkspaceAdaptiveResearch(baseWorkspaceInput({ planId: "free" }))).toEqual({ allowed: false, reason: "plan_not_entitled" });
+    expect(
+      canExportWorkspaceAdaptiveResearch(baseWorkspaceInput({ governanceStatusAtExport: { family: "milestone2", kind: "rejected", isOwnerOverride: false } }))
+    ).toEqual({ allowed: false, reason: "governance_state_blocked" });
+  });
+
+  it("a non-approved but exportable state still requires the visible status notice", () => {
+    const verdict = canExportWorkspaceAdaptiveResearch(baseWorkspaceInput({ governanceStatusAtExport: { family: "milestone2", kind: "changes_requested", isOwnerOverride: false } }));
+    expect(verdict).toEqual({ allowed: true, requiresVisibleStatusNotice: true });
   });
 });
