@@ -65,6 +65,7 @@
  *           truncated cursor/limit (or `undefined`) and never clamps, so the
  *           [1,50] bound has exactly one implementation — the shared helper's.
  *           → spec "does not clamp in the route — the helper owns the [1,50] bound"
+ *             (group: "this route forwards paging and owns no paging policy")
  *
  * WHAT IS SHARED WITH PERSONAL, AND WHAT IS ONLY DUPLICATED. R1 asked that no
  * parity claim survive unproven. Genuinely shared, therefore one

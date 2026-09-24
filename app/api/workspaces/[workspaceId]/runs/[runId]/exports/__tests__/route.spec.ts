@@ -368,7 +368,7 @@ describe("E2A-S4 — pagination validity is concealed until authorization", () =
   });
 });
 
-describe("E2A-S10 — pagination matches the Personal contract", () => {
+describe("E2A-S10 — this route forwards paging and owns no paging policy", () => {
   const lastCall = () => mockedListExports.mock.calls[mockedListExports.mock.calls.length - 1][1] as { limit?: number; beforeReportVersion?: number };
 
   it("passes cursor and limit through, truncating fractions", async () => {
