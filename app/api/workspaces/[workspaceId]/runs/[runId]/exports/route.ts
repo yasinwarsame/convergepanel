@@ -5,26 +5,32 @@
  * frozen `reportSnapshot` never leaves the server through this route.
  *
  * Workspace sibling of `GET /api/user/runs/[runId]/exports`, which stays
- * owner-only and untouched. Pagination, the DTO and the status contract are the
- * Personal ones, reused through `listAdaptiveExportRecords` rather than
- * reimplemented — only the AUTHORITY differs.
+ * owner-only and untouched. This route REUSES THE SAME export-history helper
+ * Personal uses (`listAdaptiveExportRecords`), so ordering, the cursor contract
+ * and the [1,50] clamp have one implementation rather than two. That is the
+ * provable claim and the only one made here — the earlier "byte-for-byte the
+ * Personal list item" wording was true when written but pinned by no test, so
+ * it is not repeated as a guarantee.
  *
  * SECURITY INVARIANTS. Each carries an id and names the test that falsifies it;
  * a claim without one is description, not a guarantee. (This header does NOT
  * restate the execution order as a numbered list — the table IS the contract,
  * because a second ordered description is a second thing to drift.)
  *
- *   E2A-S1  Workspace admission precedes any target-run or export-subcollection I/O.
- *           → spec "a NON-MEMBER performs zero run and zero export I/O"
- *   E2A-S2  `research.read` precedes any target-run or export I/O.
- *           → spec "a caller WITHOUT research.read performs zero run and zero export I/O"
+ *   E2A-S1  Workspace admission precedes ALL target-associated I/O — the run, the
+ *           Project, and the export subcollection. R1 found the Project read was
+ *           outside the instrumented boundary, so a mutation moving it above
+ *           admission survived; it is now counted.
+ *           → spec "a NON-MEMBER performs zero run, Project and export I/O"
+ *   E2A-S2  `research.read` precedes ALL target-associated I/O, same three reads.
+ *           → spec "a caller WITHOUT research.read performs zero run, Project and export I/O"
  *   E2A-S3  Global export feature state is concealed until admission and
  *           `research.read` have both succeeded.
  *           → spec "a non-member cannot distinguish the flag state" + the
  *             capability-denied pair + the authorized positive control
- *   E2A-S4  No pagination-shaped response exists before authorization, so valid,
- *           malformed and absurd paging are indistinguishable to an unauthorized
- *           caller.
+ *   E2A-S4  Pagination input must not create an externally observable error
+ *           distinction before Workspace authorization — valid, malformed and
+ *           absurd paging are indistinguishable to an unauthorized caller.
  *           → spec "an unauthorized caller cannot distinguish pagination validity"
  *           FALSIFIER, stated precisely because the obvious one does not work:
  *           MOVING the parse above admission proves nothing — it is a pure
@@ -44,9 +50,14 @@
  *   E2A-S7  Creator identity is not authority: `createdBy` is metadata. A
  *           currently authorized NON-creator may list; a removed creator may not.
  *           → spec "a current reader who did not create the exports can list them"
- *   E2A-S8  Response is metadata-only: no `reportSnapshot`, no governance record,
- *           no reviewer-private field.
- *           → spec "the response carries no frozen snapshot and no reviewer-private data"
+ *   E2A-S8  The response exposes only the approved metadata DTO — never
+ *           `reportSnapshot` or any other persisted non-DTO field. Stated as an
+ *           allow-list, which is what the projection actually is. R1 removed an
+ *           earlier "no governance record / no reviewer-private field" clause:
+ *           `AdaptiveResearchExportV1` has no such key and `buildExportSnapshot`
+ *           emits none, so that claim was trivially true and its fixture named a
+ *           shape production cannot produce.
+ *           → spec "the response exposes only the approved metadata DTO"
  *   E2A-S9  LIST is gated on `research.read`, NOT `exports.create` — a reader who
  *           cannot create exports can still read their history.
  *           → spec "a role with research.read but WITHOUT exports.create can list"
@@ -89,7 +100,7 @@ export const dynamic = "force-dynamic";
 
 const LOG = "[api/workspaces/runs/exports GET]";
 
-/** Byte-for-byte the Personal list item (`AdaptiveExportListItem`) — the DTO is authority-independent, so it is reused rather than re-specified. `reportSnapshot` is absent by construction. */
+/** The export-history metadata DTO. Shaped like the Personal list item because the DTO is authority-independent; the key set is pinned by the spec's allow-list assertion, so drift is caught there rather than asserted in prose. `reportSnapshot` is absent by construction — this is an allow-list projection, not a denylist. */
 export interface TeamAdaptiveExportListItem {
   exportId: string;
   reportVersion: number;
@@ -174,7 +185,7 @@ export async function GET(req: NextRequest, { params }: { params: { workspaceId:
     return shared(runNotFoundConcealedResponse());
   }
 
-  // ── E2A-S4: pagination parsed after authorization ──
+  // ── E2A-S4: pagination input creates no observable error ──
   // Identical semantics to the Personal list, including the finite/truncation
   // guards; `listAdaptiveExportRecords` re-applies its own clamp regardless, so
   // a client can never force an unbounded read. Malformed values fall back to
@@ -232,6 +243,17 @@ export async function GET(req: NextRequest, { params }: { params: { workspaceId:
   // them, and a removed creator sees nothing because they never get here.
   const listResult = await listAdaptiveExportRecords(runId, { limit, beforeReportVersion });
   if (!listResult.ok) {
+    // R1 INFORMATIONAL-3: one underlying condition used to surface as two codes
+    // — 503 when the run read failed, 500 here. Normalised route-locally on the
+    // helper's OWN TYPED reasons (`"firestore_unavailable" | "read_failed"`,
+    // the same pair the run read maps to 503), so infrastructure failure has a
+    // single contract on this route. Deliberately NOT a blanket catch and NOT a
+    // change to the shared helper, which Personal also consumes: an unexpected
+    // reason still falls through to 500 rather than being laundered into 503.
+    if (listResult.reason === "firestore_unavailable" || listResult.reason === "read_failed") {
+      logger.warn(`${LOG} export history read failed`, { workspaceId, runId, errorCategory: listResult.reason });
+      return shared(teamRunLookupUnavailableResponse());
+    }
     return errorResponse(500, "list_failed", "Could not load export history. Please try again.");
   }
 

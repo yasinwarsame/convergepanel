@@ -29,11 +29,13 @@ jest.mock("@/lib/firestore/adaptiveExports", () => ({ listAdaptiveExportRecords:
 
 const runDocs = new Map<string, Record<string, unknown>>();
 let runGetThrows = false;
+let adminDbAvailable = true;
 const readPaths: string[] = [];
 /** E2-A must write nothing at all. */
 const writeAttempts: string[] = [];
 jest.mock("@/lib/firebase/admin", () => ({
   get adminDb() {
+    if (!adminDbAvailable) return null;
     const record = (op: string) => async () => {
       writeAttempts.push(op);
       throw new Error(`unexpected write: ${op}`);
@@ -108,7 +110,6 @@ const exportRecord = (reportVersion: number, over: Record<string, unknown> = {})
   // sentinels are what make E2A-S8 falsifiable: `"milestone2"` could never
   // serve, because `schemaFamily` legitimately carries that exact value.
   reportSnapshot: { question: "SENTINEL_FROZEN_QUESTION", milestone2: { schemaId: "comparison_matrix", result: { executiveSummary: "SENTINEL_REPORT_BODY" } } },
-  governanceRecord: { humanReview: { status: "approved", reviewerId: "SENTINEL_REVIEWER_UID", reviewerName: "SENTINEL_REVIEWER_NAME", comment: "SENTINEL_PRIVATE_COMMENT", overrideJustification: "SENTINEL_OVERRIDE_JUSTIFICATION" } },
   exportMetadata: { exportId: `exp-${reportVersion}`, runId: RUN, schemaVersion: 1, fileHash: "f".repeat(64), requestingUser: CREATOR_UID },
   ...over,
 });
@@ -124,6 +125,7 @@ beforeEach(() => {
   readPaths.length = 0;
   writeAttempts.length = 0;
   runGetThrows = false;
+  adminDbAvailable = true;
   mockExportFlagEnabled = true;
   runDocs.set(RUN, teamRun());
   mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: UID });
@@ -132,9 +134,14 @@ beforeEach(() => {
   mockedListExports.mockResolvedValue({ ok: true, records: [exportRecord(3), exportRecord(2)], hasMore: false });
 });
 
-/** E2A-S1/S2: neither the run nor the export subcollection may be touched. */
-const expectNoRunOrExportIO = () => {
+/**
+ * E2A-S1/S2 — NO target-associated I/O: the run, the Project and the export
+ * subcollection. R1 found the Project read outside this boundary, so a mutation
+ * moving `getProject` above admission survived; it is counted now.
+ */
+const expectNoTargetIO = () => {
   expect(readPaths.filter((p) => p.startsWith("runs/"))).toEqual([]);
+  expect(mockedGetProject).not.toHaveBeenCalled();
   expect(mockedListExports).not.toHaveBeenCalled();
 };
 const noWrites = () => expect(writeAttempts).toEqual([]);
@@ -153,30 +160,37 @@ describe("E2-A — the authorized list path", () => {
     expect(readPaths).toEqual([RUN_PATH]);
   });
 
-  it("E2A-S8 the response carries no frozen snapshot and no reviewer-private data", async () => {
+  it("E2A-S8 the response exposes only the approved metadata DTO", async () => {
     const r = await submit();
     const blob = JSON.stringify(r.json);
-    // Sentinel VALUES, not type names: the persisted record carries a frozen
-    // snapshot and a governance record with four reviewer-private fields, and
-    // none of it may reach the response.
-    for (const sentinel of ["SENTINEL_FROZEN_QUESTION", "SENTINEL_REPORT_BODY", "SENTINEL_REVIEWER_UID", "SENTINEL_REVIEWER_NAME", "SENTINEL_PRIVATE_COMMENT", "SENTINEL_OVERRIDE_JUSTIFICATION"]) {
+    // Sentinel VALUES from the REAL persisted shape, not type names —
+    // `"milestone2"` could never serve, since `schemaFamily` legitimately
+    // carries it. R1 removed an earlier `governanceRecord` fixture: the export
+    // record has no such key, so those sentinels proved nothing.
+    for (const sentinel of ["SENTINEL_FROZEN_QUESTION", "SENTINEL_REPORT_BODY"]) {
       expect(blob).not.toContain(sentinel);
     }
-    for (const field of ["reportSnapshot", "governanceRecord", "humanReview", "reviewerId", "reviewerName", "overrideJustification"]) {
-      expect(blob).not.toContain(field);
-    }
+    expect(blob).not.toContain("reportSnapshot");
     // the projection is an allow-list: exactly these keys
     expect(Object.keys(r.json.exports[0]).sort()).toEqual(
       ["artifactStatus", "classification", "createdAt", "createdBy", "exportId", "fileHash", "format", "governanceStatusAtExport", "hashAlgorithm", "hashReproducible", "reportVersion", "schemaFamily", "schemaId"].sort()
     );
   });
 
-  it("E2A-S7 a current reader who did NOT create the exports can list them", async () => {
-    // every fixture record is createdBy CREATOR_UID, never the caller
+  it("E2A-S7 a current reader who did NOT create the exports receives them", async () => {
+    // R1 P2: the previous version could not fail under the violation it named.
+    // `status 200` survives an EMPTY list, `[].every(...)` is true, and
+    // comparing two module constants can never fail — so a route filtering by
+    // `createdBy === uid` passed this test. Cardinality and identity now carry
+    // the proof: if the records a non-creator is entitled to disappear, this
+    // fails, which is exactly what the mutation does.
     const r = await submit();
     expect(r.status).toBe(200);
-    expect(r.json.exports.every((e: { createdBy: string }) => e.createdBy === CREATOR_UID)).toBe(true);
-    expect(UID).not.toBe(CREATOR_UID);
+    expect(r.json.exports).toHaveLength(2);
+    expect(r.json.exports.map((e: { exportId: string }) => e.exportId)).toEqual(["exp-3", "exp-2"]);
+    expect(r.json.exports.map((e: { reportVersion: number }) => e.reportVersion)).toEqual([3, 2]);
+    // supporting evidence only: every returned record was created by someone else
+    expect(r.json.exports.map((e: { createdBy: string }) => e.createdBy)).toEqual([CREATOR_UID, CREATOR_UID]);
   });
 
   it("E2A-S9 a role with research.read but WITHOUT exports.create can list", async () => {
@@ -201,8 +215,21 @@ describe("E2-A — the authorized list path", () => {
     expect(r.json.nextCursor).toBe(8);
   });
 
-  it("a helper failure is a 500, not a concealed 404", async () => {
-    mockedListExports.mockResolvedValue({ ok: false, reason: "read_failed" });
+  it("a TYPED persistence failure is 503 — one contract for one condition", async () => {
+    // R1 INFORMATIONAL-3: this used to be 500 while the identical condition on
+    // the run read was 503. Normalised on the helper's own typed reasons.
+    for (const reason of ["firestore_unavailable", "read_failed"]) {
+      mockedListExports.mockResolvedValue({ ok: false, reason });
+      const r = await submit();
+      expect(r.status).toBe(503);
+      expect(r.json.errorCode).toBe("team_workspace_unavailable");
+    }
+  });
+
+  it("an UNRECOGNISED failure reason still falls through to 500 — not laundered into 503", async () => {
+    // The mapping is deliberately not a blanket catch: an unexpected reason must
+    // not be dressed up as infrastructure unavailability.
+    mockedListExports.mockResolvedValue({ ok: false, reason: "something_new" });
     const r = await submit();
     expect(r.status).toBe(500);
     expect(r.json.errorCode).toBe("list_failed");
@@ -210,23 +237,23 @@ describe("E2-A — the authorized list path", () => {
 });
 
 describe("E2-A — authority ordering", () => {
-  it("E2A-S1 a NON-MEMBER performs zero run and zero export I/O", async () => {
+  it("E2A-S1 a NON-MEMBER performs zero run, Project and export I/O", async () => {
     mockedAccess.mockResolvedValue({ granted: false, reason: "membership_not_found" });
     const r = await submit();
     expect(r.status).toBe(404);
     expect(r.json.errorCode).toBe("team_workspace_not_found");
-    expectNoRunOrExportIO();
+    expectNoTargetIO();
     noWrites();
   });
 
-  it("E2A-S2 a caller WITHOUT research.read performs zero run and zero export I/O", async () => {
+  it("E2A-S2 a caller WITHOUT research.read performs zero run, Project and export I/O", async () => {
     // a real role lacking research.read does not exist today, so the capability
     // set is narrowed directly — the route reads `capabilities`, not the label.
     mockedAccess.mockResolvedValue({ ...grant("member"), capabilities: ["workspace.read"] });
     const r = await submit();
     expect(r.status).toBe(403);
     expect(r.json.errorCode).toBe("insufficient_capability");
-    expectNoRunOrExportIO();
+    expectNoTargetIO();
     noWrites();
   });
 
@@ -235,7 +262,7 @@ describe("E2-A — authority ordering", () => {
     const r = await submit();
     expect(r.status).toBe(401);
     expect(mockedAccess).not.toHaveBeenCalled();
-    expectNoRunOrExportIO();
+    expectNoTargetIO();
   });
 
   it("E2A-S6 CROSS-WORKSPACE: a run bound to another Workspace is concealed and never listed", async () => {
@@ -264,7 +291,7 @@ describe("E2-A — authority ordering", () => {
     mockedAccess.mockResolvedValue({ granted: false, reason: "membership_removed" });
     const r = await submit();
     expect(r.status).toBe(404);
-    expectNoRunOrExportIO();
+    expectNoTargetIO();
   });
 
   it("a missing run is concealed; an infrastructure failure is 503", async () => {
@@ -327,7 +354,7 @@ describe("E2A-S4 — pagination validity is concealed until authorization", () =
       expect(r.status).toBe(404);
       expect(JSON.stringify(r.json)).not.toMatch(/cursor|limit|pagination/i);
     }
-    expectNoRunOrExportIO();
+    expectNoTargetIO();
   });
 });
 
@@ -388,10 +415,38 @@ describe("E2A-S5 — runId syntax is load-bearing for path integrity", () => {
     expect(r.json.errorCode).toBe("run_not_found");
     expect(readPaths).toEqual([]);
     expect(mockedAccess).not.toHaveBeenCalled();
-    expectNoRunOrExportIO();
+    expectNoTargetIO();
   });
 
   it("a valid runId is accepted (isolating the syntax gate as the cause)", async () => {
     expect((await submit()).status).toBe(200);
+  });
+});
+
+describe("E2-A — infrastructure and identity envelopes", () => {
+  it("§7 an unavailable database short-circuits before ALL authority work and all target I/O", async () => {
+    adminDbAvailable = false;
+    const r = await submit();
+    expect(r.status).toBe(404);
+    expect(r.json.errorCode).toBe("run_not_found");
+    expect(mockedAccess).not.toHaveBeenCalled();
+    expectNoTargetIO();
+    noWrites();
+  });
+
+  it("§10 identity failures keep DISTINCT pre-auth vocabulary, so a later edit cannot collapse them into an oracle", async () => {
+    mockedResolveRequestIdentity.mockResolvedValue({ status: "unauthenticated", reason: "missing_credentials" });
+    const missing = await submit();
+    expect(missing.status).toBe(401);
+    expect(missing.json.errorCode).toBe("unauthorized");
+
+    mockedResolveRequestIdentity.mockResolvedValue({ status: "unauthenticated", reason: "invalid_token" });
+    const invalid = await submit();
+    expect(invalid.status).toBe(401);
+    expect(invalid.json.errorCode).toBe("auth_error");
+
+    // distinct codes, and neither reveals anything about the target
+    expect(missing.json.errorCode).not.toBe(invalid.json.errorCode);
+    expectNoTargetIO();
   });
 });
