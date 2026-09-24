@@ -485,3 +485,29 @@ describe("R1 P3 — runId syntax is load-bearing for path integrity", () => {
     expect((await submit()).status).toBe(200);
   });
 });
+
+describe("R1 P2-2 — the verdict's capability axis is fed the DERIVED fact, not a literal", () => {
+  // The route gate denies before the verdict is ever reached, so production
+  // cannot exercise the verdict's capability axis with `false`. That makes the
+  // axis defence-in-depth — valuable, but unreachable by a behavioural test.
+  // Mutation M17 (re-hardcoding `true`) therefore survived the entire
+  // behavioural suite. The call site is pinned structurally instead, which is
+  // the only layer at which that mutation is observable, and the axis itself
+  // is proven by its own unit tests in exportAuthorization.spec.ts.
+  const source = () => require("fs").readFileSync("app/api/workspaces/[workspaceId]/runs/[runId]/export/route.ts", "utf8") as string;
+
+  it("passes the derived capability constant into the export verdict", () => {
+    expect(source()).toContain("hasExportsCreateCapability: hasExportsCreate,");
+  });
+
+  it("never asserts the capability as a literal at the call site", () => {
+    expect(source()).not.toContain("hasExportsCreateCapability: true");
+  });
+
+  it("derives that constant from the resolver's canonical capability set, not a role list", () => {
+    const src = source();
+    expect(src).toContain('const hasExportsCreate = access.capabilities.includes("exports.create");');
+    // exactly one derivation, reused — never recomputed at the verdict.
+    expect(src.match(/access\.capabilities\.includes\("exports\.create"\)/g)).toHaveLength(1);
+  });
+});
