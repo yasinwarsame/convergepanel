@@ -103,6 +103,9 @@ const WS = FIXTURE_WORKSPACE_ID;
 const OTHER_WS = "bOtherWorkspaceAutoId9999";
 const RUN = FIXTURE_RUN_ID;
 const RUN_PATH = `runs/${RUN}`;
+const OWNER_UID = String(fullTeamRunData().userId);
+/** uid -> planId, so a test can give the caller and the run owner DIFFERENT plans. */
+const entitlementsByUid = new Map<string, string>();
 /** `validateTeamRunRowShape` requires a genuine Timestamp `createdAt`; a blind-cast object is rejected by design. */
 const CREATED = Timestamp.fromDate(new Date("2026-09-02T10:00:00.000Z"));
 /**
@@ -139,7 +142,7 @@ const teamRun = (overrides: Record<string, unknown> = {}) => fullTeamRunData({ c
 
 const grant = (role: "owner" | "admin" | "member" | "reviewer" | "viewer") => ({
   granted: true,
-  workspace: { workspaceId: WS, type: "team" },
+  workspace: { schemaVersion: 1, id: WS, type: "team", name: "WS", ownerUserId: "owner-1", createdByUserId: "owner-1", createdAt: CREATED, updatedAt: CREATED },
   membership: { uid: UID, role },
   capabilities: ROLE_CAPABILITIES[role],
 });
@@ -163,8 +166,18 @@ beforeEach(() => {
   runDocs.set(RUN, teamRun({ governanceRecord: governanceRecord("approved") }));
   mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: UID });
   mockedAccess.mockResolvedValue(grant("member"));
-  mockedEntitlements.mockResolvedValue({ planId: "full" });
-  mockedGeneratedBy.mockResolvedValue({ kind: "user", uid: UID });
+  // R2 §4 — entitlements are keyed BY UID. A single global result cannot
+  // distinguish "the acting caller's plan" from "the run owner's plan", which
+  // is exactly why the owner-substitution mutation previously survived.
+  entitlementsByUid.clear();
+  entitlementsByUid.set(UID, "full");
+  entitlementsByUid.set(OWNER_UID, "full");
+  mockedEntitlements.mockImplementation(async (uid: string) => ({ planId: entitlementsByUid.get(uid) ?? "free" }));
+  // R2 §17 — the REAL `AdaptiveExportGeneratedBy` is {displayName, maskedEmail}
+  // and its contract is "never persists a raw Firebase UID". The previous
+  // `{kind, uid}` fixture put a raw uid into the record, contradicting
+  // production and quietly weakening the redaction blob assertion.
+  mockedGeneratedBy.mockResolvedValue({ displayName: "Member B", maskedEmail: "m***@example.com" });
   mockedCreateRecord.mockResolvedValue({ ok: true, reportVersion: 3 });
   mockedMarkReady.mockResolvedValue({ ok: true });
   mockedSupersede.mockResolvedValue({ ok: true });
@@ -219,10 +232,15 @@ describe("E1 — the authorized Team export path", () => {
     expect(arg.record.createdBy).not.toBe(fullTeamRunData().userId);
   });
 
-  it("§24 introduces no durable byte storage and reads only the run document", async () => {
+  it("§24 introduces no durable byte storage, and the only PROTECTED document it reads is the run", async () => {
+    // Corrected wording after R2. This is not "no other reads whatsoever":
+    // production also reads `users/{uid}` for export provenance and transacts
+    // on the run for the export record — both mocked here. The invariant that
+    // matters is about the PROTECTED target resource: an unauthorized request
+    // must never read the target run (pinned by the ordering tests below).
     await submit();
     expect(rawWriteAttempts).toEqual([]);
-    expect(readPaths).toEqual([RUN_PATH]);
+    expect(readPaths.filter((p) => p.startsWith("runs/"))).toEqual([RUN_PATH]);
   });
 
   it("§13/§39 the frozen snapshot carries no reviewer identity and no private comment text", async () => {
@@ -232,6 +250,17 @@ describe("E1 — the authorized Team export path", () => {
     expect(blob).not.toContain("secret-reviewer-uid");
     expect(blob).not.toContain("SECRET COMMENT");
     expect(blob).not.toContain("reviewerId");
+  });
+
+  it("R2 P3-C — the frozen provenance block carries no raw Firebase uid", async () => {
+    // `AdaptiveExportGeneratedBy`'s own contract: "Never persists a raw
+    // Firebase UID or unmasked email … only a human-facing display name and an
+    // already-masked email". The previous fixture mocked `{kind, uid}`, which
+    // contradicted production and put a raw uid in the record.
+    await submit();
+    const record = (mockedCreateRecord.mock.calls[0][0] as { record: Record<string, unknown> }).record;
+    expect(record.generatedBy).toEqual({ displayName: "Member B", maskedEmail: "m***@example.com" });
+    expect(JSON.stringify(record.generatedBy)).not.toContain(UID);
   });
 });
 
@@ -383,11 +412,41 @@ describe("E1 — admission, capability and binding are three independent gates",
 
 describe("E1 — verdict axes", () => {
   it("§42 plan: an unentitled caller is refused after authority succeeds", async () => {
-    mockedEntitlements.mockResolvedValue({ planId: "free" });
+    entitlementsByUid.set(UID, "free");
     const r = await submit();
     expect(r.status).toBe(403);
     expect(r.json.errorCode).toBe("plan_not_entitled");
     noSideEffects();
+  });
+
+  it("R2 P2 / TEST A — caller NOT entitled, run owner IS: refused, and the metering subject is the CALLER", async () => {
+    // The run's owner could export this run. The acting caller cannot. The
+    // owner must not be able to donate paid entitlement to another member.
+    entitlementsByUid.set(UID, "free");
+    entitlementsByUid.set(OWNER_UID, "full");
+
+    const r = await submit();
+    expect(r.status).toBe(403);
+    expect(r.json.errorCode).toBe("plan_not_entitled");
+    // Pin the LOOKUP SUBJECT, not just the outcome: a denial alone stays green
+    // even when the wrong identity is metered.
+    expect(mockedEntitlements).toHaveBeenCalledWith(UID);
+    expect(mockedEntitlements).not.toHaveBeenCalledWith(OWNER_UID);
+    noSideEffects();
+  });
+
+  it("R2 P2 / TEST B — caller IS entitled, run owner is NOT: proceeds (the isolating control for direction)", async () => {
+    // The mirror image. Together with Test A this proves directionality: the
+    // caller's plan governs in BOTH directions, so neither a generous owner
+    // nor a restricted owner changes the caller's eligibility.
+    entitlementsByUid.set(UID, "full");
+    entitlementsByUid.set(OWNER_UID, "free");
+
+    const r = await submit();
+    expect(r.status).toBe(200);
+    expect(mockedEntitlements).toHaveBeenCalledWith(UID);
+    expect(mockedEntitlements).not.toHaveBeenCalledWith(OWNER_UID);
+    expect(mockedCreateRecord).toHaveBeenCalledTimes(1);
   });
 
   it("§40 governance: a rejected run is never exportable, even for an entitled owner", async () => {
@@ -467,17 +526,49 @@ describe("E1 — the feature flag", () => {
   });
 });
 
-describe("R1 P3 — runId syntax is load-bearing for path integrity", () => {
-  // `collection("runs").doc("a/b")` is a LEGAL nested document path in the
-  // Admin SDK, so without this gate a crafted runId would address a different
-  // document than the containment check believes it validated.
-  it.each(["a/b", "runs/other", "../escape", ""])("rejects %p before any document path is constructed", async (badRunId) => {
+describe("R1 P3 / R2 P3-A — runId syntax is load-bearing for path integrity", () => {
+  // CORRECTED after R2. An earlier version of this comment claimed
+  // `doc("a/b")` is a legal nested document path. It is NOT — probed against
+  // the real @google-cloud/firestore in this repo:
+  //
+  //   "a/b"                     THROWS (odd component count)
+  //   "runs/other"              THROWS
+  //   "../escape"               THROWS
+  //   ""                        THROWS
+  //   "a/b/c"                   OK -> runs/a/b/c
+  //   "otherRun/exports/exp-1"  OK -> runs/otherRun/exports/exp-1
+  //   ".."                      OK -> runs/..
+  //   " x"                      OK -> "runs/ x"
+  //
+  // The security fact is therefore NOT "any slash makes a nested document".
+  // It is: certain malformed runIds containing an EVEN number of path
+  // components are ACCEPTED by the document-path API and redirect the
+  // reference to a different, valid document location. `runs/{runId}/exports/
+  // {exportId}` is a real location in this repo (lib/firestore/adaptiveExports.ts),
+  // so `otherRun/exports/exp-1` would address another run's export record.
+  // That is what makes `validateRunIdSyntax` load-bearing.
+  //
+  // NOTE ON THE HARNESS: the fake below is MORE PERMISSIVE than the real SDK
+  // (it will happily build `runs/a/b`). It is fine for exercising the route's
+  // own validation, but it is NOT evidence of Firestore path legality — the
+  // table above is, and it came from probing the real library.
+  const sdkAccepted = ["a/b/c", "otherRun/exports/exp-1", "..", " x"];
+  const sdkRejected = ["a/b", "runs/other", "../escape", ""];
+
+  it.each(sdkAccepted)("rejects %p — a value the real SDK WOULD accept as a different document", async (badRunId) => {
     const r = await submit({ format: "pdf" }, WS, badRunId);
     expect(r.status).toBe(404);
     expect(r.json.errorCode).toBe("run_not_found");
-    // Nothing under runs/ was addressed at all — not the crafted path, not a run.
+    // Nothing was addressed at all — not the redirected path, not a run.
     expect(readPaths).toEqual([]);
     expect(mockedAccess).not.toHaveBeenCalled();
+    noSideEffects();
+  });
+
+  it.each(sdkRejected)("also rejects %p, which the real SDK would throw on anyway", async (badRunId) => {
+    const r = await submit({ format: "pdf" }, WS, badRunId);
+    expect(r.status).toBe(404);
+    expect(readPaths).toEqual([]);
     noSideEffects();
   });
 

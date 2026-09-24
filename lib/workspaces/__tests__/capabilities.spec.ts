@@ -145,3 +145,25 @@ describe("ORDINARY_SETTABLE_ROLES", () => {
     expect(Object.isFrozen(ORDINARY_SETTABLE_ROLES)).toBe(true);
   });
 });
+
+/**
+ * TEAM_EXPORT_E1 (R2 §15) — export safety leans on exporters already being
+ * Research readers, so that relationship is pinned rather than assumed. It is
+ * SUPPORTING evidence: canonical run access independently enforces read
+ * authority on the export route, so this is not the sole load-bearing gate.
+ * But if a future role were granted `exports.create` without `research.read`,
+ * the export route's "representation, not authority" argument would need
+ * re-deriving, and this test is where that surfaces.
+ */
+describe("exports.create implies research.read", () => {
+  const ROLES = ["owner", "admin", "member", "reviewer", "viewer"] as const;
+
+  it("every role granted exports.create also holds research.read", () => {
+    const exporters = ROLES.filter((r) => roleHasCapability(r, "exports.create"));
+    // positive control: the set is non-empty, so the implication is not vacuous
+    expect(exporters).toEqual(["owner", "admin", "member"]);
+    for (const role of exporters) {
+      expect(roleHasCapability(role, "research.read")).toBe(true);
+    }
+  });
+});

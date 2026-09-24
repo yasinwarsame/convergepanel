@@ -70,11 +70,25 @@
  *
  * The governance fields are exactly what the canonical Team detail read
  * already returns to a Workspace-authorized caller (`buildRunReadPayload` with
- * `mayReadDecisionContent: true`), and the roles that lose content there —
- * `reviewer`, `viewer` — are precisely the roles denied `exports.create`
- * (`exports.create` is also a subset of `research.read`, so every exporter
- * could already read this content). So this route is not an aggregation
- * bypass around the cross-authority boundaries established by PRs #186-#189.
+ * `mayReadDecisionContent: true`).
+ *
+ * An earlier version of this comment claimed "the roles that lose content
+ * there — reviewer, viewer — are precisely the roles denied exports.create".
+ * That is FALSE in both directions and R2 disproved it: a `viewer` loses
+ * nothing (becoming `team_reviewer` requires `reviews.submit`, which
+ * VIEWER_CAPABILITIES lacks, so a viewer is always `team_member`), and a
+ * member/admin/owner — all of whom DO hold `exports.create` — loses per-model
+ * `tokenUsage`/`latencyMs` when they are an assigned reviewer.
+ *
+ * The invariant does not depend on that role symmetry, and it survives a
+ * fortiori: the redaction `buildRunReadPayload` applies for `team_reviewer`
+ * (per-model `tokenUsage`/`latencyMs`) has NO counterpart in the export
+ * snapshot to leak — `models` there is `{modelId, ok}` only. And every role
+ * granted `exports.create` also holds `research.read` (asserted in
+ * `lib/workspaces/__tests__/capabilities.spec.ts`), so every exporter already
+ * has the canonical read authority for this content. So this route is not an
+ * aggregation bypass around the cross-authority boundaries established by
+ * PRs #186-#189.
  *
  * NOT in this slice (E1 is create + stream only): export history listing,
  * historical regeneration, Team UI, Project-scoped route wiring, Claim or
