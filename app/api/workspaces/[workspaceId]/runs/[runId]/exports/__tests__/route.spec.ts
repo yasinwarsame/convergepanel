@@ -145,6 +145,15 @@ const expectNoTargetIO = () => {
   expect(mockedListExports).not.toHaveBeenCalled();
 };
 const noWrites = () => expect(writeAttempts).toEqual([]);
+// R1 FROZEN RULE: for a positive "this caller CAN list/read X" test, `status 200`
+// is insufficient — it survives an empty list, and a universal predicate over an
+// empty array is vacuously true. Every positive read asserts non-emptiness by
+// CARDINALITY and by IDENTITY.
+const expectTheFixtureHistory = (r: { status: number; json: { exports: { exportId: string }[] } }) => {
+  expect(r.status).toBe(200);
+  expect(r.json.exports).toHaveLength(2);
+  expect(r.json.exports.map((e) => e.exportId)).toEqual(["exp-3", "exp-2"]);
+};
 
 describe("E2-A — the authorized list path", () => {
   it("returns metadata newest-first for an authorized Research reader", async () => {
@@ -198,7 +207,8 @@ describe("E2-A — the authorized list path", () => {
       expect(ROLE_CAPABILITIES[role]).toContain("research.read");
       expect(ROLE_CAPABILITIES[role]).not.toContain("exports.create");
       mockedAccess.mockResolvedValue(grant(role));
-      expect((await submit()).status).toBe(200);
+      // Not merely "not refused": this role receives the actual history.
+      expectTheFixtureHistory(await submit());
     }
   });
 
@@ -283,7 +293,7 @@ describe("E2-A — authority ordering", () => {
 
   it("POSITIVE CONTROL: a same-Workspace Project lists normally", async () => {
     mockedGetProject.mockResolvedValue({ status: "found", project: { id: "projAutoId0001", name: "P", status: "active", workspaceId: WS } });
-    expect((await submit()).status).toBe(200);
+    expectTheFixtureHistory(await submit());
   });
 
   it("E2A-S6/S7 a FORMER member — including the export creator — is concealed", async () => {
@@ -419,7 +429,7 @@ describe("E2A-S5 — runId syntax is load-bearing for path integrity", () => {
   });
 
   it("a valid runId is accepted (isolating the syntax gate as the cause)", async () => {
-    expect((await submit()).status).toBe(200);
+    expectTheFixtureHistory(await submit());
   });
 });
 

@@ -61,8 +61,20 @@
  *   E2A-S9  LIST is gated on `research.read`, NOT `exports.create` — a reader who
  *           cannot create exports can still read their history.
  *           → spec "a role with research.read but WITHOUT exports.create can list"
- *   E2A-S10 Pagination matches the established Personal contract.
- *           → spec "§21 pagination" group
+ *   E2A-S10 This route owns NO pagination policy: it forwards a finite,
+ *           truncated cursor/limit (or `undefined`) and never clamps, so the
+ *           [1,50] bound has exactly one implementation — the shared helper's.
+ *           → spec "does not clamp in the route — the helper owns the [1,50] bound"
+ *
+ * WHAT IS SHARED WITH PERSONAL, AND WHAT IS ONLY DUPLICATED. R1 asked that no
+ * parity claim survive unproven. Genuinely shared, therefore one
+ * implementation: `listAdaptiveExportRecords` — ordering, the cursor query and
+ * the clamp. NOT shared, merely identical source today: the query-parameter
+ * parse and the `format !== "docx"` hash derivation are duplicated in both
+ * routes, and no cross-route test pins them together. This route's own tests
+ * pin its own behaviour; they cannot detect Personal drifting away from it.
+ * Treated as known duplication rather than claimed as parity — de-duplicating
+ * it would edit the Personal route, which is out of scope for E2-A.
  *
  * WHY THE FLAG IS CHECKED LATE. The Personal route checks
  * `ADAPTIVE_RESEARCH_EXPORT_ENABLED` before its owner check, which it can afford
@@ -75,8 +87,9 @@
  * DELIBERATELY ABSENT, and each absence is load-bearing rather than an
  * oversight: no export verdict, no plan/entitlement check, no classification or
  * governance re-evaluation, and no audit event. LIST is a read of export history
- * by a current Research reader — the Personal list makes exactly the same
- * choices, deferring per-item authorization to the regeneration route. Plan and
+ * by a current Research reader, deferring per-item authorization to the
+ * regeneration route (the Personal list, read at this SHA, makes the same
+ * choices — an observation about current code, not a pinned contract). Plan and
  * the frozen-governance verdict belong to E2-B, which will require
  * `exports.create`; folding them in here would quietly turn a read into E1.
  */
@@ -100,7 +113,7 @@ export const dynamic = "force-dynamic";
 
 const LOG = "[api/workspaces/runs/exports GET]";
 
-/** The export-history metadata DTO. Shaped like the Personal list item because the DTO is authority-independent; the key set is pinned by the spec's allow-list assertion, so drift is caught there rather than asserted in prose. `reportSnapshot` is absent by construction — this is an allow-list projection, not a denylist. */
+/** The export-history metadata DTO. Its key set is pinned by the spec's allow-list assertion, so drift is caught there rather than asserted in prose; correspondence with the Personal list item is not claimed as a guarantee. `reportSnapshot` is absent by construction — this is an allow-list projection, not a denylist. */
 export interface TeamAdaptiveExportListItem {
   exportId: string;
   reportVersion: number;
@@ -117,7 +130,7 @@ export interface TeamAdaptiveExportListItem {
   hashReproducible?: boolean;
 }
 
-/** Derived purely from `format`, exactly as the Personal list derives it — DOCX regeneration cannot reproduce its original whole-file hash. */
+/** Derived purely from `format` — DOCX regeneration cannot reproduce its original whole-file hash. Duplicates the Personal list's one-line derivation; identical today, pinned together by no test (see the header's shared-vs-duplicated note). */
 function isHashReproducible(format: string): boolean {
   return format !== "docx";
 }
@@ -186,8 +199,10 @@ export async function GET(req: NextRequest, { params }: { params: { workspaceId:
   }
 
   // ── E2A-S4: pagination input creates no observable error ──
-  // Identical semantics to the Personal list, including the finite/truncation
-  // guards; `listAdaptiveExportRecords` re-applies its own clamp regardless, so
+  // The finite/truncation guards are duplicated from the Personal list — same
+  // source today, not a shared implementation. `Number.isFinite` also rejects
+  // ±Infinity and `Math.trunc` keeps a fractional value out of Firestore's
+  // `.limit()`/`.where("<", …)`. `listAdaptiveExportRecords` re-applies its own clamp regardless, so
   // a client can never force an unbounded read. Malformed values fall back to
   // the first page and the default size rather than erroring — and THAT, not
   // this block's position, is what makes paging unobservable to an
