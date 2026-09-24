@@ -157,14 +157,19 @@ describe("ORDINARY_SETTABLE_ROLES", () => {
  */
 describe("exports.create implies research.read", () => {
   it("every role granted exports.create also holds research.read", () => {
-    // R4 P3-3: enumerate the CANONICAL role list, not a hardcoded copy — a
-    // future role granted exports.create without research.read must be caught,
-    // and a hardcoded list would simply not see it.
+    // R5 P3-3: the IMPLICATION stands alone. An exact-set assertion used to run
+    // first, so a future role granted exports.create without research.read died
+    // on the hardcoded list rather than on the invariant — surfacing, but for a
+    // misleading reason. Only non-vacuity is asserted here.
     const exporters = WORKSPACE_MEMBERSHIP_ROLES.filter((r) => roleHasCapability(r, "exports.create"));
-    // positive control: the set is non-empty, so the implication is not vacuous
-    expect(exporters).toEqual(["owner", "admin", "member"]);
+    expect(exporters.length).toBeGreaterThan(0);
     for (const role of exporters) {
       expect(roleHasCapability(role, "research.read")).toBe(true);
     }
+  });
+
+  it("role enum contract: exactly owner/admin/member currently hold exports.create", () => {
+    // A separate contract, deliberately NOT evidence for the implication above.
+    expect(WORKSPACE_MEMBERSHIP_ROLES.filter((r) => roleHasCapability(r, "exports.create"))).toEqual(["owner", "admin", "member"]);
   });
 });

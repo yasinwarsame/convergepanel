@@ -53,37 +53,25 @@
  *          cleared Workspace admission and `exports.create`.
  *          → spec "a non-member cannot distinguish the flag" + capability pair
  *
- * AUTHORIZATION ORDER IS SECURITY-CRITICAL and mirrors the sibling
- * `GET /api/workspaces/{workspaceId}/runs/{runId}` exactly:
+ * SINGLE SOURCE OF TRUTH FOR ORDERING. Security-sensitive ordering is defined
+ * by E1-S1…E1-S8 above and enforced by their mutation-backed tests. This header
+ * deliberately does NOT restate the execution order as a numbered list.
  *
- *   1. identity                          → 401
- *   2. runId syntax                      → concealed 404
- *   3. ADAPTIVE_RESEARCH_EXPORT_ENABLED  → concealed 404 (feature absent)
- *   4. resolveTeamRunWorkspaceAccess()   → target-Workspace admission FIRST,
- *      zero-I/O, before any Workspace document is read; denial is concealed
- *      by the shared Team response helpers
- *   5. `exports.create` capability       → the family's 403
- *   6. request body + format             → 400 (E1-S3: only now, never before
- *                                          authorization)
- *   7. run read + validateTeamRunRowShape(data, workspaceId) → concealed 404
- *   8. Project→Workspace integrity       → concealed 404 (E1-S7) / 503
- *   9. snapshot + export verdict         → 403
+ * It used to. After the E1-S8 reorder moved the feature-flag gate below
+ * authorization, that list still named the flag as step 3 — documenting exactly
+ * the ordering E1-S8 exists to forbid, omitting the `!adminDb` branch, and
+ * mis-numbering every step after it. Code and the nearest inline comments were
+ * updated; the enumeration was not. A second ordered description of the same
+ * sequence is a second thing to drift, and the one a maintainer would "restore"
+ * to. The invariant table names a test for each claim; prose cannot.
  *
- * Steps 4-6 are three separate ENFORCEMENT POINTS and none substitutes for
- * another. Admission says the caller belongs to the addressed Workspace; the
- * capability says they may export at all; the row validation says the run
- * itself is canonically bound to that same Workspace. Only all three
- * together authorize an export, which is what makes a caller admitted to
- * Workspace A unable to export a run bound to Workspace B by supplying
- * either id in the path. The client-supplied `workspaceId` is a TARGET,
- * never an authority.
- *
- * Precisely: Workspace admission and `exports.create` are established before
- * any run access, and the DERIVED capability fact is then preserved as an
- * axis of the export verdict. That is one source of truth reused at two
- * layers, not two independent sources of authorization — the verdict's
- * capability axis cannot disagree with the gate, because it IS the gate's
- * value.
+ * What IS reused from the sibling `GET /api/workspaces/{workspaceId}/runs/{runId}`
+ * — stated at the level actually shared, not as whole-route parity: the same
+ * access resolver, the same row validator, the same `getProject` integrity
+ * check, and the same response helpers, so the externally visible concealment
+ * vocabulary matches. It deliberately DIFFERS in having a feature-flag gate and
+ * a request body at all, and in answering `!adminDb` with the family's concealed
+ * 404 where the sibling returns 503 (a separately tracked divergence).
  *
  * Deliberately AFTER Workspace admission and `exports.create`, and BEFORE the
  * run read: the request body is not parsed until the caller has cleared export
@@ -214,7 +202,8 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
     return shared(runNotFoundConcealedResponse());
   }
 
-  // ── Gate 1: target-Workspace admission + membership (zero I/O first) ──
+  // ── E1-S1: admission must precede any target-run I/O ──
+  // Zero-I/O pre-filter first, per the resolver's own contract.
   const access = await resolveTeamRunWorkspaceAccess({ uid, workspaceId });
   if (!access.granted) {
     // The shared mapper already routes `lookup_failed` to 503 and every
@@ -222,7 +211,8 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
     return shared(teamRunAccessDeniedResponse(access.reason));
   }
 
-  // ── Gate 2: the export capability itself, distinct from run access ──
+  // ── E1-S2: `exports.create` must precede any target-run I/O ──
+  // A distinct gate from admission; neither substitutes for the other.
   // Derived ONCE, here, from the canonical capability set the resolver
   // returned. This same value is the capability axis handed to the export
   // verdict below — never recomputed, never a route-local role list, and
@@ -234,6 +224,11 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
   }
 
   // ── E1-S8: global feature state is concealed until export authorization ──
+  // NOTE the deliberate cost: because this sits after admission, a request to a
+  // DISABLED surface still performs the reads that admission and capability
+  // evaluation require. Flag-disabled requests are therefore NOT zero-I/O — the
+  // protected property is that an unauthorized caller cannot observe flag
+  // state, not that a disabled feature performs no authorization reads.
   // This check sits AFTER admission and `exports.create` on purpose. When it
   // ran first, a caller with no membership at all received the concealed
   // `run_not_found` while the flag was off and `team_workspace_not_found` while
@@ -266,7 +261,7 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
   }
   const validatedFormat: AdaptiveExportFormat = format as AdaptiveExportFormat;
 
-  // ── Gate 3: the run must be canonically bound to THIS Workspace ──
+  // ── E1-S6a: the run must be canonically bound to THIS Workspace ──
   let data: Record<string, unknown>;
   try {
     const snap = await adminDb.collection("runs").doc(runId).get();

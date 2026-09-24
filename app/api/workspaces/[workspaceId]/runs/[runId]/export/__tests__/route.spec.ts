@@ -98,7 +98,7 @@ import { NextRequest } from "next/server";
 import { Timestamp } from "firebase-admin/firestore";
 import { POST } from "@/app/api/workspaces/[workspaceId]/runs/[runId]/export/route";
 import { parseGovernanceRecord } from "@/lib/adaptiveSchema/governanceRecordParser";
-import { FIXTURE_RUN_ID, FIXTURE_WORKSPACE_ID, fullTeamRunData, governanceRecord } from "@/lib/runs/__tests__/runReadFixtures";
+import { FIXTURE_RUN_ID, FIXTURE_WORKSPACE_ID, fullTeamRunData, governanceRecord, legacyAdaptiveOutput } from "@/lib/runs/__tests__/runReadFixtures";
 import { ROLE_CAPABILITIES } from "@/lib/workspaces/capabilities";
 
 const UID = "member-b";
@@ -428,9 +428,14 @@ describe("E1 — admission, capability and binding are three independent gates",
     expect(malformed.status).toBe(404);
     // None of the three may leak format vocabulary.
     for (const blob of [JSON.stringify(enabled.json), JSON.stringify(disabled.json), JSON.stringify(await malformed.json())]) {
+      // R5: the forbidden observables are named explicitly. The previous
+      // `/pdf|docx|json"/i` had a quote-anchored third alternative that could
+      // not match "valid JSON." — it contributed nothing, and the proof was
+      // actually carried by the two error codes below.
       expect(blob).not.toContain("unsupported_format");
       expect(blob).not.toContain("invalid_request");
-      expect(blob).not.toMatch(/pdf|docx|json"/i);
+      expect(blob).not.toMatch(/\bpdf\b/i);
+      expect(blob).not.toMatch(/\bdocx\b/i);
     }
     noSideEffects();
   });
@@ -626,6 +631,11 @@ describe("E1-S8 — global feature state is concealed until export authorization
   const bothFlagStates = async () => {
     mockExportFlagEnabled = false;
     const off = await submit();
+    // R5: assert the FLAG-OFF request's side-effect absence before clearing,
+    // otherwise the trailing noSideEffects() only covers the flag-on request.
+    expect(mockedCreateRecord).not.toHaveBeenCalled();
+    expect(mockedRender).not.toHaveBeenCalled();
+    expect(mockedAudit).not.toHaveBeenCalled();
     jest.clearAllMocks();
     mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: UID });
     mockExportFlagEnabled = true;
@@ -790,5 +800,45 @@ describe("E1-S7 — Project binding integrity matches the canonical read", () =>
     runDocs.set(RUN, teamRun({ projectId: null }));
     expect((await submit()).status).toBe(200);
     expect(mockedGetProject).not.toHaveBeenCalled();
+  });
+});
+
+describe("the LEGACY schema family", () => {
+  // R5 P3-1: this branch had zero route-level coverage. Scope of the claim is
+  // deliberately narrow — the legacy branch never reads `governanceRecord`, so it
+  // has no equivalent private-governance sentinel path. E1-S6b's redaction proof
+  // is a MILESTONE2 proof; this pair proves the legacy branch's actual behaviour.
+  const legacyRun = (governanceStatus: string) =>
+    fullTeamRunData({
+      createdAt: CREATED,
+      adaptiveOutput: undefined,
+      legacyAdaptiveOutput: legacyAdaptiveOutput(),
+      governanceStatus,
+      governanceRecord: undefined,
+    });
+
+  it("AUTHORIZED: a legacy run exports, and the record identifies the legacy family", async () => {
+    runDocs.set(RUN, legacyRun("approved"));
+    const r = await submit();
+
+    expect(r.status).toBe(200);
+    const record = (mockedCreateRecord.mock.calls[0][0] as { record: Record<string, unknown> }).record;
+    expect(record.schemaFamily).toBe("legacy");
+    expect(record.schemaId).toBe("procedural");
+    expect((record.exportMetadata as Record<string, unknown>).exportedSections).toEqual(["reportSnapshot.legacy"]);
+    expect(record.governanceStatusAtExport).toEqual({ family: "legacy", status: "approved" });
+    // No private governance data can appear: this branch reads no governance record.
+    const blob = JSON.stringify(record);
+    for (const needle of ["reviewerId", "reviewerName", "overrideJustification"]) {
+      expect(blob).not.toContain(needle);
+    }
+  });
+
+  it("DENIED: a legacy run whose governance is blocked is never exportable", async () => {
+    runDocs.set(RUN, legacyRun("blocked"));
+    const r = await submit();
+    expect(r.status).toBe(403);
+    expect(r.json.errorCode).toBe("governance_state_blocked");
+    noSideEffects();
   });
 });
