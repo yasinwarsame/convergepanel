@@ -22,10 +22,19 @@
  *           `research.read` have both succeeded.
  *           → spec "a non-member cannot distinguish the flag state" + the
  *             capability-denied pair + the authorized positive control
- *   E2A-S4  Pagination parsing/validation is concealed until authorization, so
- *           valid, malformed and absurd paging are indistinguishable to an
- *           unauthorized caller.
+ *   E2A-S4  No pagination-shaped response exists before authorization, so valid,
+ *           malformed and absurd paging are indistinguishable to an unauthorized
+ *           caller.
  *           → spec "an unauthorized caller cannot distinguish pagination validity"
+ *           FALSIFIER, stated precisely because the obvious one does not work:
+ *           MOVING the parse above admission proves nothing — it is a pure
+ *           computation that never errors (malformed input falls back to the
+ *           first page and the default size), so relocating it is an equivalent
+ *           mutant and the suite stays green. The violating mutation is to make
+ *           paging VALIDATION RESPOND — e.g. a 400 `invalid_cursor` — before
+ *           authorization; that kills the named test, while the identical 400
+ *           placed after authorization does not. Position matters only once
+ *           there is something to observe.
  *   E2A-S5  A malformed `runId` cannot redirect the reference to another
  *           document or subcollection.
  *           → spec "runId syntax is load-bearing for path integrity"
@@ -165,12 +174,14 @@ export async function GET(req: NextRequest, { params }: { params: { workspaceId:
     return shared(runNotFoundConcealedResponse());
   }
 
-  // ── E2A-S4: pagination parsed only now ──
+  // ── E2A-S4: pagination parsed after authorization ──
   // Identical semantics to the Personal list, including the finite/truncation
   // guards; `listAdaptiveExportRecords` re-applies its own clamp regardless, so
   // a client can never force an unbounded read. Malformed values fall back to
-  // the first page and the default size rather than erroring — which also means
-  // there is no paging-shaped response for an unauthorized caller to probe.
+  // the first page and the default size rather than erroring — and THAT, not
+  // this block's position, is what makes paging unobservable to an
+  // unauthorized caller. Keep it that way: adding a 4xx for bad paging would
+  // create the oracle, and it would do so wherever the parse happens to sit.
   const cursorParam = req.nextUrl.searchParams.get("cursor");
   const limitParam = req.nextUrl.searchParams.get("limit");
   const parsedCursor = cursorParam !== null ? Number(cursorParam) : NaN;
