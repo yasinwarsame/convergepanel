@@ -50,6 +50,8 @@ jest.mock("@/lib/firestore/adaptiveExports", () => ({
 }));
 const mockedGeneratedBy = jest.fn();
 jest.mock("@/lib/adaptiveSchema/exportGeneratedBy", () => ({ resolveExportGeneratedBy: (...a: unknown[]) => mockedGeneratedBy(...a) }));
+const mockedGetProject = jest.fn();
+jest.mock("@/lib/firestore/projects", () => ({ getProject: (...a: unknown[]) => mockedGetProject(...a) }));
 const mockedAudit = jest.fn();
 jest.mock("@/lib/governance/auditLog", () => ({ writeAdaptiveExportAdminAuditEvent: (...a: unknown[]) => mockedAudit(...a) }));
 
@@ -183,6 +185,8 @@ beforeEach(() => {
   mockedSupersede.mockResolvedValue({ ok: true });
   mockedMarkFailed.mockResolvedValue({ ok: true });
   mockedRender.mockResolvedValue({ bytes: Buffer.from("%PDF-1.7 fixture"), sha256: "a".repeat(64) });
+  // the fixture run declares FIXTURE_PROJECT_ID; by default that Project lives in THIS Workspace
+  mockedGetProject.mockResolvedValue({ status: "found", project: { id: "projAutoId0001", name: "P", status: "active", workspaceId: WS } });
 });
 
 /** R1 P2-1 — the canonical run path must not be read at all. Asserting the
@@ -298,7 +302,7 @@ describe("E1 — admission, capability and binding are three independent gates",
 
   it("§33 CROSS-WORKSPACE: admitted to A, run bound to B — concealed, never exported", async () => {
     // The caller is genuinely admitted to the addressed Workspace…
-    mockedAccess.mockResolvedValue({ ...grant("member"), workspace: { workspaceId: OTHER_WS, type: "team" } });
+    mockedAccess.mockResolvedValue({ ...grant("member"), workspace: { ...grant("member").workspace, id: OTHER_WS } });
     // …but the run's own canonical binding is a different Workspace.
     const r = await submit({ format: "pdf" }, OTHER_WS, RUN);
     expect(r.status).toBe(404);
@@ -346,6 +350,56 @@ describe("E1 — admission, capability and binding are three independent gates",
     noSideEffects();
   });
 
+  it("E1-S3: a NON-MEMBER's request body is never parsed", async () => {
+    mockedAccess.mockResolvedValue({ granted: false, reason: "membership_not_found" });
+    // A request whose json() is observable: if authorization ran first, it is
+    // never called. Asserting the status alone cannot show that.
+    const json = jest.fn().mockResolvedValue({ format: "pdf" });
+    const req = new NextRequest(`http://localhost/api/workspaces/${WS}/runs/${RUN}/export`, { method: "POST", body: "{}", headers: { "Content-Type": "application/json" } });
+    Object.defineProperty(req, "json", { value: json });
+
+    const res = await POST(req, { params: { workspaceId: WS, runId: RUN } });
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ ok: false, errorCode: "team_workspace_not_found", message: "This Team Workspace could not be found." });
+    expect(json).not.toHaveBeenCalled();
+    expectNoRunRead();
+    noSideEffects();
+  });
+
+  it("E1-S3: a non-member gets the SAME concealed answer for an enabled and a disabled format — no format oracle", async () => {
+    mockedAccess.mockResolvedValue({ granted: false, reason: "membership_not_found" });
+    const enabled = await submit({ format: "pdf" });
+    const disabled = await submit({ format: "docx" });
+    const malformed = await POST(
+      new NextRequest(`http://localhost/api/workspaces/${WS}/runs/${RUN}/export`, { method: "POST", body: "not json", headers: { "Content-Type": "application/json" } }),
+      { params: { workspaceId: WS, runId: RUN } }
+    );
+
+    expect(enabled.status).toBe(404);
+    expect(disabled.json).toEqual(enabled.json);
+    expect(malformed.status).toBe(404);
+    // None of the three may leak format vocabulary.
+    for (const blob of [JSON.stringify(enabled.json), JSON.stringify(disabled.json), JSON.stringify(await malformed.json())]) {
+      expect(blob).not.toContain("unsupported_format");
+      expect(blob).not.toContain("invalid_request");
+      expect(blob).not.toMatch(/pdf|docx|json"/i);
+    }
+    noSideEffects();
+  });
+
+  it("E1-S3: a caller WITHOUT exports.create also never has their body parsed", async () => {
+    mockedAccess.mockResolvedValue(grant("reviewer"));
+    const json = jest.fn().mockResolvedValue({ format: "totally-made-up" });
+    const req = new NextRequest(`http://localhost/api/workspaces/${WS}/runs/${RUN}/export`, { method: "POST", body: "{}", headers: { "Content-Type": "application/json" } });
+    Object.defineProperty(req, "json", { value: json });
+
+    const res = await POST(req, { params: { workspaceId: WS, runId: RUN } });
+    expect(res.status).toBe(403);
+    expect(json).not.toHaveBeenCalled();
+    expectNoRunRead();
+    noSideEffects();
+  });
+
   it("R1 P2-1: the AUTHORIZED exporter does read the canonical run — the control that makes the assertions above meaningful", async () => {
     const r = await submit();
     expect(r.status).toBe(200);
@@ -384,7 +438,7 @@ describe("E1 — admission, capability and binding are three independent gates",
       jest.clearAllMocks();
       mockedAccess.mockResolvedValue(grant(role));
       mockedEntitlements.mockResolvedValue({ planId: "full" });
-      mockedGeneratedBy.mockResolvedValue({ kind: "user", uid: UID });
+      mockedGeneratedBy.mockResolvedValue({ displayName: "Member B", maskedEmail: "m***@example.com" });
       mockedCreateRecord.mockResolvedValue({ ok: true, reportVersion: 1 });
       mockedMarkReady.mockResolvedValue({ ok: true });
       mockedSupersede.mockResolvedValue({ ok: true });
@@ -600,5 +654,47 @@ describe("R1 P2-2 — the verdict's capability axis is fed the DERIVED fact, not
     expect(src).toContain('const hasExportsCreate = access.capabilities.includes("exports.create");');
     // exactly one derivation, reused — never recomputed at the verdict.
     expect(src.match(/access\.capabilities\.includes\("exports\.create"\)/g)).toHaveLength(1);
+  });
+});
+
+describe("E1-S7 — Project binding integrity matches the canonical read", () => {
+  it("conceals a run filed in a Project belonging to ANOTHER Workspace", async () => {
+    // The run's own workspaceId IS the addressed Workspace, so containment
+    // passes — but its Project lives elsewhere. The canonical Team detail read
+    // treats that as an integrity anomaly and conceals; export must too, or it
+    // would stream a report the canonical read refuses to show (E1-S6).
+    mockedGetProject.mockResolvedValue({ status: "found", project: { id: "projAutoId0001", name: "P", status: "active", workspaceId: OTHER_WS } });
+
+    const r = await submit();
+    expect(r.status).toBe(404);
+    expect(r.json.errorCode).toBe("run_not_found");
+    noSideEffects();
+  });
+
+  it("POSITIVE CONTROL: a Project in the SAME Workspace exports normally", async () => {
+    mockedGetProject.mockResolvedValue({ status: "found", project: { id: "projAutoId0001", name: "P", status: "active", workspaceId: WS } });
+    const r = await submit();
+    expect(r.status).toBe(200);
+    expect(mockedCreateRecord).toHaveBeenCalledTimes(1);
+  });
+
+  it("an infrastructure failure resolving the Project is 503, not a concealed 404", async () => {
+    mockedGetProject.mockResolvedValue({ status: "read_failed" });
+    const r = await submit();
+    expect(r.status).toBe(503);
+    expect(r.json.errorCode).toBe("team_workspace_unavailable");
+    noSideEffects();
+  });
+
+  it("a Project that simply no longer exists is NOT an integrity anomaly — export proceeds", async () => {
+    // Matches the canonical read, which logs and continues without the label.
+    mockedGetProject.mockResolvedValue({ status: "not_found" });
+    expect((await submit()).status).toBe(200);
+  });
+
+  it("an UNFILED run performs no Project lookup at all", async () => {
+    runDocs.set(RUN, teamRun({ projectId: null }));
+    expect((await submit()).status).toBe(200);
+    expect(mockedGetProject).not.toHaveBeenCalled();
   });
 });

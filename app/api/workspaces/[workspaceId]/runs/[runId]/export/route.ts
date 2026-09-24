@@ -15,6 +15,33 @@
  * downloads is byte-comparable in construction to the Personal one, and so
  * E2 can replay the same frozen snapshot later.
  *
+ * SECURITY INVARIANTS. Three consecutive review rounds found precise claims in
+ * this header with no test that would fail if they stopped holding, so every
+ * security claim below now carries a stable id and names the test that
+ * falsifies it. A claim without one is not a guarantee and must be written as
+ * ordinary description instead.
+ *
+ *   E1-S1  Workspace admission precedes any target-run I/O.
+ *          → spec "a NON-MEMBER triggers zero run I/O"
+ *   E1-S2  `exports.create` precedes any target-run I/O.
+ *          → spec "a caller WITHOUT exports.create triggers zero run I/O"
+ *   E1-S3  Authorization precedes request-body parsing and format validation,
+ *          so an unauthorized caller learns neither that this route exists nor
+ *          which formats are enabled.
+ *          → spec "a non-member's body is never parsed" + the format-oracle pair
+ *   E1-S4  The ACTING caller's entitlement governs, never the run owner's.
+ *          → spec TEST A / TEST B (directional, asserting the lookup subject)
+ *   E1-S5  A malformed runId cannot redirect the reference to another document.
+ *          → spec "runId syntax is load-bearing for path integrity"
+ *   E1-S6  Export never exposes a run in any state where the canonical Team
+ *          Research read would refuse it for Workspace/Project integrity or
+ *          cross-authority reasons. This is an authority/integrity equivalence,
+ *          NOT byte equality — export is a different representation.
+ *          → spec §33/§37 cross-Workspace + §13/§39 redaction + E1-S7 below
+ *   E1-S7  Project binding integrity matches the canonical read: a run filed in
+ *          another Workspace's Project is concealed.
+ *          → spec "a Project belonging to another Workspace is concealed"
+ *
  * AUTHORIZATION ORDER IS SECURITY-CRITICAL and mirrors the sibling
  * `GET /api/workspaces/{workspaceId}/runs/{runId}` exactly:
  *
@@ -25,9 +52,11 @@
  *      zero-I/O, before any Workspace document is read; denial is concealed
  *      by the shared Team response helpers
  *   5. `exports.create` capability       → the family's 403
- *   6. run read + validateTeamRunRowShape(data, workspaceId) → concealed 404
- *   7. request format                    → 400
- *   8. snapshot + export verdict         → 403
+ *   6. request body + format             → 400 (E1-S3: only now, never before
+ *                                          authorization)
+ *   7. run read + validateTeamRunRowShape(data, workspaceId) → concealed 404
+ *   8. Project→Workspace integrity       → concealed 404 (E1-S7) / 503
+ *   9. snapshot + export verdict         → 403
  *
  * Steps 4-6 are three separate ENFORCEMENT POINTS and none substitutes for
  * another. Admission says the caller belongs to the addressed Workspace; the
@@ -106,6 +135,7 @@ import { resolveTeamRunWorkspaceAccess } from "@/lib/workspaces/resolveTeamRunWo
 import { teamRunAccessDeniedResponse, teamRunInsufficientCapabilityResponse, teamRunLookupUnavailableResponse } from "@/lib/workspaces/teamRunAccessResponse";
 import { runNotFoundConcealedResponse } from "@/lib/projects/projectErrorResponse";
 import { validateTeamRunRowShape } from "@/lib/workspaces/teamRunRowValidation";
+import { getProject } from "@/lib/firestore/projects";
 import { parsePersistedAdaptiveOutput, parsePersistedLegacyAdaptiveOutput } from "@/lib/adaptiveSchema/persistedOutput";
 import { parseGovernanceRecord } from "@/lib/adaptiveSchema/governanceRecordParser";
 import { buildExportSnapshot } from "@/lib/adaptiveSchema/exportSnapshot";
@@ -181,6 +211,24 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
     return shared(teamRunInsufficientCapabilityResponse());
   }
 
+  // ── Format (only now that the caller is authorized for this run) ──
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return errorResponse(400, "invalid_request", "Request body must be valid JSON.");
+  }
+  const format = (body as { format?: unknown })?.format;
+  const validFormats: AdaptiveExportFormat[] = ["pdf"];
+  if (ADAPTIVE_RESEARCH_DOCX_EXPORT_ENABLED) validFormats.push("docx");
+  if (ADAPTIVE_RESEARCH_JSON_EXPORT_ENABLED) validFormats.push("json");
+  if (typeof format !== "string" || !validFormats.includes(format as AdaptiveExportFormat)) {
+    // A disabled-but-real format is rejected exactly like an unknown one —
+    // never a flag-specific message that would reveal the feature exists.
+    return errorResponse(400, "unsupported_format", `Only format: ${validFormats.map((f) => `"${f}"`).join(" or ")} is supported.`);
+  }
+  const validatedFormat: AdaptiveExportFormat = format as AdaptiveExportFormat;
+
   // ── Gate 3: the run must be canonically bound to THIS Workspace ──
   let data: Record<string, unknown>;
   try {
@@ -201,23 +249,31 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
     return shared(runNotFoundConcealedResponse());
   }
 
-  // ── Format (only now that the caller is authorized for this run) ──
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return errorResponse(400, "invalid_request", "Request body must be valid JSON.");
+  // ── E1-S7: Project binding integrity, mirroring the canonical read ──
+  // A run may declare a `projectId`. The canonical Team detail read resolves it
+  // and CONCEALS the run when that Project belongs to another Workspace, as an
+  // integrity anomaly. Export must refuse in exactly the same state: otherwise
+  // export would stream a report the canonical read refuses to show, which is a
+  // real (if not currently attacker-constructible) breach of E1-S6. Same helper,
+  // same three outcomes, same responses — never a second Project-authority
+  // algorithm, and never a Project lookup before Workspace authority is settled.
+  if (validated.projectId !== null) {
+    const projectResult = await getProject(validated.projectId);
+    if (projectResult.status === "firestore_unavailable" || projectResult.status === "read_failed") {
+      logger.warn(`${LOG} project read failed`, { workspaceId, runId, errorCategory: projectResult.status });
+      return shared(teamRunLookupUnavailableResponse());
+    }
+    if (projectResult.status === "found" && projectResult.project.workspaceId !== workspaceId) {
+      logger.warn(`${LOG} run filed in a Project of another Workspace (integrity anomaly)`, { workspaceId, runId });
+      return shared(runNotFoundConcealedResponse());
+    }
+    // Any other status (e.g. the Project is simply gone) is NOT an integrity
+    // anomaly: the canonical read logs and continues without the label, and
+    // export carries no Project label at all, so it continues too.
+    if (projectResult.status !== "found") {
+      logger.warn(`${LOG} filed run's Project unresolved`, { workspaceId, runId, errorCategory: projectResult.status });
+    }
   }
-  const format = (body as { format?: unknown })?.format;
-  const validFormats: AdaptiveExportFormat[] = ["pdf"];
-  if (ADAPTIVE_RESEARCH_DOCX_EXPORT_ENABLED) validFormats.push("docx");
-  if (ADAPTIVE_RESEARCH_JSON_EXPORT_ENABLED) validFormats.push("json");
-  if (typeof format !== "string" || !validFormats.includes(format as AdaptiveExportFormat)) {
-    // A disabled-but-real format is rejected exactly like an unknown one —
-    // never a flag-specific message that would reveal the feature exists.
-    return errorResponse(400, "unsupported_format", `Only format: ${validFormats.map((f) => `"${f}"`).join(" or ")} is supported.`);
-  }
-  const validatedFormat: AdaptiveExportFormat = format as AdaptiveExportFormat;
 
   // ── Frozen snapshot (schema-family-aware, same builder as Personal) ──
   const question = String(data.question ?? "");
@@ -263,8 +319,21 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
 
   const { reportSnapshot, governanceStatusAtExport, classification } = snapshotResult;
 
-  // ── Export verdict: capability + caller plan + classification + governance ──
-  // Plan axis. NOT "reused verbatim" from the Personal route: Personal export
+  // ── Export verdict: capability + caller plan + governance ──
+  // `classification` is passed through and RECORDED on the export, but it is
+  // NOT currently an enforcing axis: neither this verdict nor the Personal one
+  // reads it (R3 P3-4). It is a reserved, named input for a future policy, in
+  // the same spirit as the always-passing organization-policy check point —
+  // described here accurately rather than claimed as a live gate.
+  // Plan axis (E1-S4). The proven claim is deliberately narrow: entitlement is
+  // taken from the ACTING, ADMITTED caller rather than the run owner/creator —
+  // that is the load-bearing distinction and TEST A/TEST B falsify it in both
+  // directions. Substituting `access.membership.uid` for `uid` is NOT an
+  // independently meaningful security difference, because canonical admission
+  // resolves that membership FOR the authenticated caller, so the two are equal
+  // by the resolver's own contract (R3 P3-2).
+  //
+  // NOT "reused verbatim" from the Personal route: Personal export
   // resolves its plan through `loadUserAndTeam()`, while every Workspace write
   // in this repository (Team run creation, Team video creation) meters the
   // acting caller through `getEffectiveEntitlements()`. E1 follows the
