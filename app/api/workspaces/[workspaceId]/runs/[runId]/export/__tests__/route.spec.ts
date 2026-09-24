@@ -97,6 +97,7 @@ jest.mock("@/lib/logger", () => ({ logger: { warn: jest.fn(), info: jest.fn(), e
 import { NextRequest } from "next/server";
 import { Timestamp } from "firebase-admin/firestore";
 import { POST } from "@/app/api/workspaces/[workspaceId]/runs/[runId]/export/route";
+import { parseGovernanceRecord } from "@/lib/adaptiveSchema/governanceRecordParser";
 import { FIXTURE_RUN_ID, FIXTURE_WORKSPACE_ID, fullTeamRunData, governanceRecord } from "@/lib/runs/__tests__/runReadFixtures";
 import { ROLE_CAPABILITIES } from "@/lib/workspaces/capabilities";
 
@@ -247,13 +248,60 @@ describe("E1 — the authorized Team export path", () => {
     expect(readPaths.filter((p) => p.startsWith("runs/"))).toEqual([RUN_PATH]);
   });
 
-  it("§13/§39 the frozen snapshot carries no reviewer identity and no private comment text", async () => {
-    runDocs.set(RUN, teamRun({ governanceRecord: governanceRecord("approved", { humanReview: { status: "approved", reviewerId: "secret-reviewer-uid", reviewerComment: "SECRET COMMENT", conditions: ["c1"], decidedVia: "multi_reviewer_panel" } }) }));
+  /**
+   * E1-S6b. REBUILT after R4. The previous fixture used `reviewerComment`, which
+   * is NOT a field of `GovernanceRecordV1.humanReview` (the real private fields
+   * are `reviewerId`, `reviewerName`, `comment`, `overrideJustification`), AND it
+   * replaced `humanReview` wholesale, deleting the real `comment` the shared
+   * fixture supplies. So the only live needle was `reviewerId`, and mutations
+   * leaking the comment, the reviewer name or the override justification all
+   * survived. Every sentinel below is a real schema field, MERGED into the valid
+   * record rather than replacing it, and each has its own leak mutation.
+   */
+  const hostileGovernance = () => {
+    const base = governanceRecord("approved_with_conditions") as { humanReview: Record<string, unknown> };
+    return governanceRecord("approved_with_conditions", {
+      humanReview: {
+        ...base.humanReview,
+        reviewerId: "SENTINEL_REVIEWER_UID",
+        reviewerName: "SENTINEL_REVIEWER_NAME",
+        comment: "SENTINEL_PRIVATE_COMMENT",
+        // `overrideJustification` is populated iff decidedVia is the owner
+        // override, per the schema — and the schema states its full text is
+        // never copied into history/event/audit artifacts.
+        decidedVia: "multi_reviewer_owner_override",
+        overrideJustification: "SENTINEL_OVERRIDE_JUSTIFICATION",
+      },
+    });
+  };
+  const SENTINELS = ["SENTINEL_REVIEWER_UID", "SENTINEL_REVIEWER_NAME", "SENTINEL_PRIVATE_COMMENT", "SENTINEL_OVERRIDE_JUSTIFICATION"] as const;
+
+  it("E1-S6b REACHABILITY: every sentinel survives the production parser, so absence below is meaningful", () => {
+    // Guards the exact R4 failure mode: if a sentinel is named wrongly, or the
+    // parser drops it before the redaction boundary, this fails LOUDLY instead
+    // of the absence assertions passing for the wrong reason.
+    const parsed = parseGovernanceRecord(hostileGovernance());
+    expect(parsed.ok).toBe(true);
+    const hr = (parsed as { ok: true; record: { humanReview: Record<string, unknown> } }).record.humanReview;
+    expect(hr.reviewerId).toBe("SENTINEL_REVIEWER_UID");
+    expect(hr.reviewerName).toBe("SENTINEL_REVIEWER_NAME");
+    expect(hr.comment).toBe("SENTINEL_PRIVATE_COMMENT");
+    expect(hr.overrideJustification).toBe("SENTINEL_OVERRIDE_JUSTIFICATION");
+  });
+
+  it("E1-S6b the frozen snapshot carries no reviewer-private identity or text", async () => {
+    runDocs.set(RUN, teamRun({ governanceRecord: hostileGovernance() }));
     await submit();
     const blob = JSON.stringify((mockedCreateRecord.mock.calls[0][0] as { record: unknown }).record);
-    expect(blob).not.toContain("secret-reviewer-uid");
-    expect(blob).not.toContain("SECRET COMMENT");
-    expect(blob).not.toContain("reviewerId");
+    // Per-field, so no sentinel is protected only because another catches the
+    // same mutation.
+    for (const sentinel of SENTINELS) {
+      expect(blob).not.toContain(sentinel);
+    }
+    // …and the field NAMES do not appear either.
+    for (const field of ["reviewerId", "reviewerName", "overrideJustification"]) {
+      expect(blob).not.toContain(field);
+    }
   });
 
   it("R2 P3-C — the frozen provenance block carries no raw Firebase uid", async () => {
@@ -569,14 +617,60 @@ describe("E1 — failure semantics", () => {
   });
 });
 
-describe("E1 — the feature flag", () => {
-  it("with the export flag off the route is concealed as absent, before any authority work", async () => {
+describe("E1-S8 — global feature state is concealed until export authorization", () => {
+  // R4 P3-2: the flag used to be checked FIRST, so a non-member saw
+  // `run_not_found` with the flag off and `team_workspace_not_found` with it on
+  // — any authenticated user could read the global flag by posting to a
+  // Workspace they do not belong to. The gate now sits after admission and
+  // `exports.create`.
+  const bothFlagStates = async () => {
     mockExportFlagEnabled = false;
-    const r = await submit();
-    expect(r.status).toBe(404);
-    expect(r.json.errorCode).toBe("run_not_found");
-    expect(mockedAccess).not.toHaveBeenCalled();
+    const off = await submit();
+    jest.clearAllMocks();
+    mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: UID });
+    mockExportFlagEnabled = true;
+    const on = await submit();
+    return { off, on };
+  };
+
+  it("a NON-MEMBER cannot distinguish the flag state", async () => {
+    mockedAccess.mockImplementation(async () => ({ granted: false, reason: "membership_not_found" }));
+    const { off, on } = await bothFlagStates();
+    expect(off.status).toBe(on.status);
+    expect(off.json).toEqual(on.json);
+    expect(off.json.errorCode).toBe("team_workspace_not_found");
+    expectNoRunRead();
     noSideEffects();
+  });
+
+  it("a caller WITHOUT exports.create cannot distinguish the flag state either", async () => {
+    mockedAccess.mockImplementation(async () => grant("reviewer"));
+    const { off, on } = await bothFlagStates();
+    expect(off.status).toBe(on.status);
+    expect(off.json).toEqual(on.json);
+    expect(off.json.errorCode).toBe("insufficient_capability");
+    expectNoRunRead();
+    noSideEffects();
+  });
+
+  it("POSITIVE CONTROL: an AUTHORIZED caller does observe the flag — so the two tests above are not passing because it is ignored", async () => {
+    mockExportFlagEnabled = false;
+    const off = await submit();
+    expect(off.status).toBe(404);
+    expect(off.json.errorCode).toBe("run_not_found");
+    expect(mockedCreateRecord).not.toHaveBeenCalled();
+
+    jest.clearAllMocks();
+    mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: UID });
+    mockedEntitlements.mockImplementation(async (uid: string) => ({ planId: entitlementsByUid.get(uid) ?? "free" }));
+    mockedGeneratedBy.mockResolvedValue({ displayName: "Member B", maskedEmail: "m***@example.com" });
+    mockedCreateRecord.mockResolvedValue({ ok: true, reportVersion: 3 });
+    mockedMarkReady.mockResolvedValue({ ok: true });
+    mockedSupersede.mockResolvedValue({ ok: true });
+    mockedRender.mockResolvedValue({ bytes: Buffer.from("%PDF-1.7 fixture"), sha256: "a".repeat(64) });
+    mockedGetProject.mockResolvedValue({ status: "found", project: { id: "projAutoId0001", name: "P", status: "active", workspaceId: WS } });
+    mockExportFlagEnabled = true;
+    expect((await submit()).status).toBe(200);
   });
 });
 

@@ -156,10 +156,11 @@ describe("ORDINARY_SETTABLE_ROLES", () => {
  * re-deriving, and this test is where that surfaces.
  */
 describe("exports.create implies research.read", () => {
-  const ROLES = ["owner", "admin", "member", "reviewer", "viewer"] as const;
-
   it("every role granted exports.create also holds research.read", () => {
-    const exporters = ROLES.filter((r) => roleHasCapability(r, "exports.create"));
+    // R4 P3-3: enumerate the CANONICAL role list, not a hardcoded copy — a
+    // future role granted exports.create without research.read must be caught,
+    // and a hardcoded list would simply not see it.
+    const exporters = WORKSPACE_MEMBERSHIP_ROLES.filter((r) => roleHasCapability(r, "exports.create"));
     // positive control: the set is non-empty, so the implication is not vacuous
     expect(exporters).toEqual(["owner", "admin", "member"]);
     for (const role of exporters) {

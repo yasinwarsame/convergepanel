@@ -33,14 +33,25 @@
  *          → spec TEST A / TEST B (directional, asserting the lookup subject)
  *   E1-S5  A malformed runId cannot redirect the reference to another document.
  *          → spec "runId syntax is load-bearing for path integrity"
- *   E1-S6  Export never exposes a run in any state where the canonical Team
+ *   E1-S6a Export never exposes a run in any state where the canonical Team
  *          Research read would refuse it for Workspace/Project integrity or
- *          cross-authority reasons. This is an authority/integrity equivalence,
- *          NOT byte equality — export is a different representation.
- *          → spec §33/§37 cross-Workspace + §13/§39 redaction + E1-S7 below
+ *          cross-authority reasons. An authority/integrity equivalence, NOT
+ *          byte equality — export is a different representation.
+ *          → spec §37 (the run-containment killer). §33 is NOT independently
+ *            load-bearing here: its fixture is already concealed by the
+ *            E1-S7 Project branch, so it fails only incidentally.
+ *   E1-S6b Export contains no reviewer-private identity or text the caller
+ *          cannot obtain from the canonical Team Research read: `reviewerId`,
+ *          `reviewerName`, `comment`, `overrideJustification`. Each has its own
+ *          sentinel and its own leak mutation — no field is protected merely
+ *          because another assertion catches the same mutation.
+ *          → spec "carries no reviewer-private identity or text", per-field
  *   E1-S7  Project binding integrity matches the canonical read: a run filed in
  *          another Workspace's Project is concealed.
  *          → spec "a Project belonging to another Workspace is concealed"
+ *   E1-S8  Global export feature state is concealed until the caller has
+ *          cleared Workspace admission and `exports.create`.
+ *          → spec "a non-member cannot distinguish the flag" + capability pair
  *
  * AUTHORIZATION ORDER IS SECURITY-CRITICAL and mirrors the sibling
  * `GET /api/workspaces/{workspaceId}/runs/{runId}` exactly:
@@ -74,11 +85,13 @@
  * capability axis cannot disagree with the gate, because it IS the gate's
  * value.
  *
- * Deliberately AFTER access and the run's binding: the request body is not
- * even parsed until the caller has been authorized for this run, so an
- * unauthorized caller cannot learn anything from format validation — the
- * Personal route can afford to validate format earlier because it has no
- * concealment obligation toward non-owners.
+ * Deliberately AFTER Workspace admission and `exports.create`, and BEFORE the
+ * run read: the request body is not parsed until the caller has cleared export
+ * authorization, so an unauthorized caller cannot learn anything from format
+ * validation. It does NOT wait for the run's binding — the 400 is independent
+ * of the run, so parsing before the run read is not a run oracle. The Personal
+ * route can afford to validate format earlier because it has no concealment
+ * obligation toward non-owners.
  *
  * DATA BOUNDARY — export changes representation, not authority. The invariant
  * is deliberately about AUTHORITY AMPLIFICATION, not an absolute ban on any
@@ -185,10 +198,11 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
     return shared(runNotFoundConcealedResponse());
   }
 
-  // The feature's absence is concealed exactly as the Personal route
-  // conceals it — a disabled export surface must be indistinguishable from
-  // a route that does not exist.
-  if (!ADAPTIVE_RESEARCH_EXPORT_ENABLED || !adminDb) {
+  // `!adminDb` only. The FEATURE FLAG is deliberately checked LATER, after
+  // export authorization — see E1-S8 below. (That this infrastructure branch
+  // answers with the family's concealed 404 rather than the sibling's 503 is a
+  // known, separately tracked divergence, unchanged here.)
+  if (!adminDb) {
     return shared(runNotFoundConcealedResponse());
   }
 
@@ -211,7 +225,22 @@ export async function POST(req: NextRequest, { params }: { params: { workspaceId
     return shared(teamRunInsufficientCapabilityResponse());
   }
 
-  // ── Format (only now that the caller is authorized for this run) ──
+  // ── E1-S8: global feature state is concealed until export authorization ──
+  // This check sits AFTER admission and `exports.create` on purpose. When it
+  // ran first, a caller with no membership at all received the concealed
+  // `run_not_found` while the flag was off and `team_workspace_not_found` while
+  // it was on — so any authenticated user could read the global flag by posting
+  // to a Workspace they do not belong to. Now only a caller who has already
+  // cleared export authorization can observe the feature's availability.
+  //
+  // Not claimed to match the Personal route's vocabulary: Personal answers
+  // `not_found`, this family answers `run_not_found`. The shared principle is
+  // that unavailable functionality is concealed, not that the envelopes match.
+  if (!ADAPTIVE_RESEARCH_EXPORT_ENABLED) {
+    return shared(runNotFoundConcealedResponse());
+  }
+
+  // ── Format (only now that the caller has cleared export authorization) ──
   let body: unknown;
   try {
     body = await req.json();
