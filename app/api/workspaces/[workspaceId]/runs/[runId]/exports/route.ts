@@ -5,77 +5,95 @@
  * frozen `reportSnapshot` never leaves the server through this route.
  *
  * Workspace sibling of `GET /api/user/runs/[runId]/exports`, which stays
- * owner-only and untouched. This route REUSES THE SAME export-history helper
- * Personal uses (`listAdaptiveExportRecords`), so ordering, the cursor contract
- * and the [1,50] clamp have one implementation rather than two. That is the
- * provable claim and the only one made here — the earlier "byte-for-byte the
- * Personal list item" wording was true when written but pinned by no test, so
- * it is not repeated as a guarantee.
+ * owner-only and is untouched by this PR.
  *
- * SECURITY INVARIANTS. Each carries an id and names the test that falsifies it;
- * a claim without one is description, not a guarantee. (This header does NOT
- * restate the execution order as a numbered list — the table IS the contract,
- * because a second ordered description is a second thing to drift.)
+ * WHAT IS SHARED WITH PERSONAL. Exactly one thing: `listAdaptiveExportRecords`.
+ * It owns the query — `orderBy("reportVersion","desc")`, the `where("<", cursor)`
+ * range, `limit+1`/`hasMore`, and the `[1,50]` clamp (pinned in
+ * `lib/firestore/__tests__/adaptiveExports.spec.ts`). Everything else that looks
+ * shared is DUPLICATED source: the query-parameter parse, the `nextCursor`
+ * derivation and the `format !== "docx"` hash rule each exist separately in both
+ * routes, identical today and pinned together by no test. An earlier version of
+ * this header claimed "ordering, the cursor contract and the [1,50] clamp have
+ * one implementation rather than two"; the cursor contract's client-facing half
+ * is two implementations, so the claim was false and is withdrawn rather than
+ * re-scoped. No inventory of duplications is maintained here — one that drifts
+ * out of date is worse than none; the rule is simply that nothing in this file
+ * may be described as shared unless it is literally the same function.
  *
- *   E2A-S1  Workspace admission precedes ALL target-associated I/O — the run, the
- *           Project, and the export subcollection. R1 found the Project read was
- *           outside the instrumented boundary, so a mutation moving it above
- *           admission survived; it is now counted.
- *           → spec "a NON-MEMBER performs zero run, Project and export I/O"
+ * SECURITY INVARIANTS. Each carries an id and names, VERBATIM, the test that
+ * falsifies it; a claim without one is description, not a guarantee. The table
+ * IS the ordering contract — there is deliberately no second numbered
+ * restatement of the execution order, because that is a second thing to drift.
+ *
+ *   E2A-S1  Workspace admission precedes ALL target-associated I/O — the run,
+ *           the Project and the export subcollection.
+ *           → "E2A-S1 a NON-MEMBER performs zero run, Project and export I/O"
  *   E2A-S2  `research.read` precedes ALL target-associated I/O, same three reads.
- *           → spec "a caller WITHOUT research.read performs zero run, Project and export I/O"
+ *           → "E2A-S2 a caller WITHOUT research.read performs zero run, Project and export I/O"
  *   E2A-S3  Global export feature state is concealed until admission and
  *           `research.read` have both succeeded.
- *           → spec "a non-member cannot distinguish the flag state" + the
- *             capability-denied pair + the authorized positive control
+ *           → "a non-member cannot distinguish the flag state"
+ *           → "a caller without research.read cannot distinguish the flag state"
+ *           → "POSITIVE CONTROL: an authorized reader DOES observe the flag"
  *   E2A-S4  Pagination input must not create an externally observable error
- *           distinction before Workspace authorization — valid, malformed and
- *           absurd paging are indistinguishable to an unauthorized caller.
- *           → spec "an unauthorized caller cannot distinguish pagination validity"
+ *           distinction before Workspace authorization.
+ *           → "an unauthorized caller cannot distinguish pagination validity"
  *           FALSIFIER, stated precisely because the obvious one does not work:
- *           MOVING the parse above admission proves nothing — it is a pure
- *           computation that never errors (malformed input falls back to the
- *           first page and the default size), so relocating it is an equivalent
- *           mutant and the suite stays green. The violating mutation is to make
- *           paging VALIDATION RESPOND — e.g. a 400 `invalid_cursor` — before
- *           authorization; that kills the named test, while the identical 400
- *           placed after authorization does not. Position matters only once
- *           there is something to observe.
+ *           MOVING the parse above admission proves nothing — it is pure
+ *           computation that never errors, so relocating it is an equivalent
+ *           mutant and the suite stays green (verified twice, R1 and R2). The
+ *           violating mutation is to make paging validation RESPOND — a 400
+ *           `invalid_cursor` — BEFORE authorization; that kills the named test,
+ *           while the identical 400 placed after authorization does not. The
+ *           invariant is response-scoped, not source-line-scoped.
  *   E2A-S5  A malformed `runId` cannot redirect the reference to another
  *           document or subcollection.
- *           → spec "runId syntax is load-bearing for path integrity"
+ *           → "E2A-S5 — runId syntax is load-bearing for path integrity" (6 cases)
  *   E2A-S6  Current Workspace/run/Project authority governs history access —
  *           never historical membership.
- *           → spec cross-Workspace, Project-anomaly and former-member cases
+ *           → "E2A-S6 CROSS-WORKSPACE: a run bound to another Workspace is concealed and never listed"
+ *           → "E2A-S6 a Project belonging to another Workspace is concealed"
+ *           → "E2A-S6/S7 a FORMER member — including the export creator — is concealed"
  *   E2A-S7  Creator identity is not authority: `createdBy` is metadata. A
  *           currently authorized NON-creator may list; a removed creator may not.
- *           → spec "a current reader who did not create the exports can list them"
- *   E2A-S8  The response exposes only the approved metadata DTO — never
- *           `reportSnapshot` or any other persisted non-DTO field. Stated as an
- *           allow-list, which is what the projection actually is. R1 removed an
- *           earlier "no governance record / no reviewer-private field" clause:
- *           `AdaptiveResearchExportV1` has no such key and `buildExportSnapshot`
- *           emits none, so that claim was trivially true and its fixture named a
- *           shape production cannot produce.
- *           → spec "the response exposes only the approved metadata DTO"
- *   E2A-S9  LIST is gated on `research.read`, NOT `exports.create` — a reader who
- *           cannot create exports can still read their history.
- *           → spec "a role with research.read but WITHOUT exports.create can list"
+ *           → "E2A-S7 a current reader who did NOT create the exports receives them"
+ *   E2A-S8  The response exposes only the approved metadata DTO — at the item
+ *           level AND the envelope level. Proved against the fields E1 really
+ *           persists, each carrying a sentinel value.
+ *           → "E2A-S8 the response exposes only the approved metadata DTO — proved against what E1 really persists"
+ *   E2A-S9  LIST is gated on `research.read`, NOT `exports.create`.
+ *           → "E2A-S9 a role with research.read but WITHOUT exports.create can list"
+ *   E2A-S9b The gate asks for `research.read` SPECIFICALLY, not a capability
+ *           that today's role matrix happens to co-grant.
+ *           → "a caller holding reviews.read AND exports.create but NOT research.read is refused"
  *   E2A-S10 This route owns NO pagination policy: it forwards a finite,
- *           truncated cursor/limit (or `undefined`) and never clamps, so the
- *           [1,50] bound has exactly one implementation — the shared helper's.
- *           → spec "does not clamp in the route — the helper owns the [1,50] bound"
- *             (group: "this route forwards paging and owns no paging policy")
+ *           truncated cursor/limit (or `undefined`) and never clamps.
+ *           → "does not clamp in the route — the helper owns the [1,50] bound (one implementation)"
+ *   E2A-S11 Admission is evaluated for the AUTHENTICATED caller against the
+ *           ADDRESSED Workspace — not merely called in the right order. R2
+ *           found both dimensions unpinned: `uid: "attacker-static"` and
+ *           `workspaceId: runId` each passed the whole suite.
+ *           → "E2A-S11a admission receives the AUTHENTICATED caller's uid"
+ *           → "E2A-S11b admission receives the ADDRESSED workspaceId"
+ *           → both CONTROLs, which prove the fake discriminates per dimension
+ *   E2A-S12 The Project-integrity read targets `validated.projectId` — not some
+ *           other id that happens to be in scope. `getProject(workspaceId)`
+ *           previously passed the whole suite.
+ *           → "E2A-S12 getProject receives validated.projectId"
+ *   E2A-S13 An UNFILED run (`projectId === null`) is listable and performs NO
+ *           Project read.
+ *           → "E2A-S13 an UNFILED run (projectId null) lists WITHOUT any Project read"
+ *   E2A-S14 The export-history read is scoped to the addressed run.
+ *           → "E2A-S14 the helper receives the addressed runId"
  *
- * WHAT IS SHARED WITH PERSONAL, AND WHAT IS ONLY DUPLICATED. R1 asked that no
- * parity claim survive unproven. Genuinely shared, therefore one
- * implementation: `listAdaptiveExportRecords` — ordering, the cursor query and
- * the clamp. NOT shared, merely identical source today: the query-parameter
- * parse and the `format !== "docx"` hash derivation are duplicated in both
- * routes, and no cross-route test pins them together. This route's own tests
- * pin its own behaviour; they cannot detect Personal drifting away from it.
- * Treated as known duplication rather than claimed as parity — de-duplicating
- * it would edit the Personal route, which is out of scope for E2-A.
+ * THE AUTHORITY-MOCK RULE (adopted this round). A mocked security collaborator
+ * is not proven by having been called: its security-relevant arguments must be
+ * pinned, and where practical the fake must BEHAVE DIFFERENTLY when they are
+ * wrong. Caller identity, Workspace identity, Project identity, capability
+ * identity and run identity are all argument-sensitive in the spec, each with a
+ * CONTROL test proving the fake discriminates — otherwise the fake becomes the
+ * next assertion that cannot fail.
  *
  * WHY THE FLAG IS CHECKED LATE. The Personal route checks
  * `ADAPTIVE_RESEARCH_EXPORT_ENABLED` before its owner check, which it can afford
@@ -85,14 +103,40 @@
  * reasoning applies to query-parameter validation (E2A-S4) — a 400 about a bad
  * cursor would tell a non-member the route exists and reached its paging layer.
  *
+ * PAGINATION SEMANTICS, stated per input class rather than as one sweeping
+ * "malformed values fall back to the first page and the default size" — R2
+ * showed that sentence was false for one of the four classes:
+ *
+ *   absent      (`?`)                 → `undefined`; the helper applies its own
+ *                                       default page size of 30. First page.
+ *   malformed   (`?cursor=abc`)       → `undefined`; genuine fallback, as above.
+ *   finite      (`?cursor=12.7`)      → truncated to `12`; forwarded as given.
+ *   EMPTY       (`?cursor=`)          → `0`, NOT absent. `searchParams.get()`
+ *                                       returns `""` rather than `null`, and
+ *                                       `Number("") === 0`, which is finite. The
+ *                                       helper then applies
+ *                                       `where("reportVersion","<",0)` and a run
+ *                                       WITH exports reports none. `?limit=`
+ *                                       likewise forwards `0`, which the helper
+ *                                       clamps UP to 1 instead of defaulting to 30.
+ *
+ * The empty-string case is a DEFECT, tracked as
+ * SHARED_EXPORT_HISTORY_EMPTY_QUERY_PARAM_NORMALIZATION and deliberately NOT
+ * fixed here. The identical parse exists in the Personal list, and normalizing
+ * it on one surface only would replace a shared inconsistency with a divergence
+ * between two surfaces that clients reasonably expect to behave alike. It is
+ * characterized by tests ("empty query parameters — inherited behaviour,
+ * characterized not endorsed") so the behaviour is recorded rather than
+ * discovered again, and the future fix updates BOTH surfaces together. E2A-S4 is
+ * unaffected: all four classes remain equally unobservable before authorization.
+ *
  * DELIBERATELY ABSENT, and each absence is load-bearing rather than an
  * oversight: no export verdict, no plan/entitlement check, no classification or
  * governance re-evaluation, and no audit event. LIST is a read of export history
  * by a current Research reader, deferring per-item authorization to the
- * regeneration route (the Personal list, read at this SHA, makes the same
- * choices — an observation about current code, not a pinned contract). Plan and
- * the frozen-governance verdict belong to E2-B, which will require
- * `exports.create`; folding them in here would quietly turn a read into E1.
+ * regeneration route. Plan and the frozen-governance verdict belong to E2-B,
+ * which will require `exports.create`; folding them in here would quietly turn a
+ * read into E1.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -103,6 +147,7 @@ import { ADAPTIVE_RESEARCH_EXPORT_ENABLED } from "@/lib/env";
 import { validateRunIdSyntax } from "@/lib/projects/runIdSyntax";
 import { resolveTeamRunWorkspaceAccess } from "@/lib/workspaces/resolveTeamRunWorkspaceAccess";
 import { teamRunAccessDeniedResponse, teamRunInsufficientCapabilityResponse, teamRunLookupUnavailableResponse } from "@/lib/workspaces/teamRunAccessResponse";
+import type { TeamWorkspaceErrorBody } from "@/lib/workspaces/teamWorkspaceErrorResponse";
 import { runNotFoundConcealedResponse } from "@/lib/projects/projectErrorResponse";
 import { validateTeamRunRowShape } from "@/lib/workspaces/teamRunRowValidation";
 import { getProject } from "@/lib/firestore/projects";
@@ -138,6 +183,23 @@ function isHashReproducible(format: string): boolean {
 
 function errorResponse(status: number, errorCode: string, message: string) {
   return NextResponse.json({ ok: false, errorCode, message }, { status });
+}
+
+/**
+ * R2 P3-5/§25: the shared `teamRunLookupUnavailableResponse()` says "We couldn't
+ * verify your access right now", which is accurate for an ADMISSION lookup
+ * failure and wrong for a failure three stages later, after access was already
+ * verified. The shared helper is NOT route-owned — `teamRunAccessDeniedResponse`
+ * maps `lookup_failed` through it and E1 and the canonical read both emit it —
+ * so editing its text would change other routes' user-facing strings. Instead
+ * this route keeps the PRIMARY contract byte-identical (503 +
+ * `team_workspace_unavailable`, the same status and errorCode the family uses)
+ * and supplies a stage-accurate generic message for its own post-authorization
+ * failures. Clients must key on status/errorCode, never on wording.
+ */
+function unavailableAfterAuthorization(): { status: number; body: TeamWorkspaceErrorBody } {
+  const base = teamRunLookupUnavailableResponse();
+  return { status: base.status, body: { ...base.body, message: "We couldn't load this export history right now. Please try again in a moment." } };
 }
 
 /** The shared Team/Project helpers return a `{status, body}` envelope; emitting them this way keeps the concealment vocabulary identical across the Team run family. */
@@ -226,7 +288,7 @@ export async function GET(req: NextRequest, { params }: { params: { workspaceId:
     data = (snap.data() ?? {}) as Record<string, unknown>;
   } catch (err: unknown) {
     logger.warn(`${LOG} run read failed`, { workspaceId, runId, error: err instanceof Error ? err.message : String(err) });
-    return shared(teamRunLookupUnavailableResponse());
+    return shared(unavailableAfterAuthorization());
   }
 
   const validated = validateTeamRunRowShape(data, workspaceId);
@@ -244,7 +306,7 @@ export async function GET(req: NextRequest, { params }: { params: { workspaceId:
     const projectResult = await getProject(validated.projectId);
     if (projectResult.status === "firestore_unavailable" || projectResult.status === "read_failed") {
       logger.warn(`${LOG} project read failed`, { workspaceId, runId, errorCategory: projectResult.status });
-      return shared(teamRunLookupUnavailableResponse());
+      return shared(unavailableAfterAuthorization());
     }
     if (projectResult.status === "found" && projectResult.project.workspaceId !== workspaceId) {
       logger.warn(`${LOG} run filed in a Project of another Workspace (integrity anomaly)`, { workspaceId, runId });
@@ -259,18 +321,31 @@ export async function GET(req: NextRequest, { params }: { params: { workspaceId:
   // them, and a removed creator sees nothing because they never get here.
   const listResult = await listAdaptiveExportRecords(runId, { limit, beforeReportVersion });
   if (!listResult.ok) {
-    // R1 INFORMATIONAL-3: one underlying condition used to surface as two codes
-    // — 503 when the run read failed, 500 here. Normalised route-locally on the
-    // helper's OWN TYPED reasons (`"firestore_unavailable" | "read_failed"`,
-    // the same pair the run read maps to 503), so infrastructure failure has a
-    // single contract on this route. Deliberately NOT a blanket catch and NOT a
-    // change to the shared helper, which Personal also consumes: an unexpected
-    // reason still falls through to 500 rather than being laundered into 503.
-    if (listResult.reason === "firestore_unavailable" || listResult.reason === "read_failed") {
-      logger.warn(`${LOG} export history read failed`, { workspaceId, runId, errorCategory: listResult.reason });
-      return shared(teamRunLookupUnavailableResponse());
+    // R1 normalised this to 503 (one condition, one contract). R2 P3-1/§28 then
+    // found the 500 `list_failed` fallback it left behind was DEAD BY TYPE:
+    // `ListAdaptiveExportsResult`'s failure arm is exactly
+    // `{ reason: "firestore_unavailable" | "read_failed" }`, so once both are
+    // handled `reason` narrows to `never`. The comment claiming "an unexpected
+    // reason still falls through to 500" described a branch no in-type value can
+    // reach, and the test that "proved" it could only do so by making an untyped
+    // mock return a reason production cannot produce. Both are gone: a future
+    // added reason now breaks the BUILD here instead of being silently laundered
+    // into 503, which is the property the dead branch only pretended to give.
+    //
+    // `read_failed` is the only reason reachable from THIS route —
+    // `firestore_unavailable` is returned solely when the helper sees
+    // `!adminDb`, which the guard near the top of GET already answered. It is
+    // handled because it is in the union, not because it can arrive.
+    switch (listResult.reason) {
+      case "firestore_unavailable":
+      case "read_failed":
+        logger.warn(`${LOG} export history read failed`, { workspaceId, runId, errorCategory: listResult.reason });
+        return shared(unavailableAfterAuthorization());
+      default: {
+        const unhandledReason: never = listResult.reason;
+        throw new Error(`Unhandled export-history failure reason: ${String(unhandledReason)}`);
+      }
     }
-    return errorResponse(500, "list_failed", "Could not load export history. Please try again.");
   }
 
   // E2A-S8: an explicit allow-list projection. The frozen `reportSnapshot`, the
@@ -287,7 +362,19 @@ export async function GET(req: NextRequest, { params }: { params: { workspaceId:
     createdBy: r.createdBy,
     governanceStatusAtExport: r.governanceStatusAtExport,
     classification: r.classification,
-    ...(r.exportMetadata.fileHash
+    // R2 P2-4: `exportMetadata` is OPTIONAL at runtime even though the type
+    // declares it required. `normalizeAdaptiveExportRecord` blind-casts
+    // (`raw as AdaptiveResearchExportV1`) with no shape validation, and its
+    // legacy branch for the flat `"exportMetadata.fileHash"` key returns the
+    // record UNCHANGED when there is no nested map to merge into
+    // (`if (rest.exportMetadata && …)`), so a legacy document whose only hash
+    // carrier was the flat key arrives here with no `exportMetadata` at all.
+    // Unguarded, that threw a TypeError out of GET — the one failure path with
+    // no `{ok:false,errorCode}` envelope, and one bad historical document broke
+    // the whole page. The record still lists; only its hash trio is omitted,
+    // which is exactly the established contract for a record that never
+    // produced bytes. No hash value is ever synthesized.
+    ...(r.exportMetadata?.fileHash
       ? { fileHash: r.exportMetadata.fileHash, hashAlgorithm: "sha256" as const, hashReproducible: isHashReproducible(r.format) }
       : {}),
   }));

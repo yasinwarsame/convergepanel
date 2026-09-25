@@ -75,10 +75,12 @@ jest.mock("@/lib/logger", () => ({ logger: { warn: jest.fn(), info: jest.fn(), e
 import { NextRequest } from "next/server";
 import { Timestamp } from "firebase-admin/firestore";
 import { GET } from "@/app/api/workspaces/[workspaceId]/runs/[runId]/exports/route";
-import { FIXTURE_RUN_ID, FIXTURE_WORKSPACE_ID, fullTeamRunData } from "@/lib/runs/__tests__/runReadFixtures";
+import { FIXTURE_PROJECT_ID, FIXTURE_RUN_ID, FIXTURE_WORKSPACE_ID, fullTeamRunData } from "@/lib/runs/__tests__/runReadFixtures";
 import { ROLE_CAPABILITIES } from "@/lib/workspaces/capabilities";
 
 const UID = "member-b";
+const OTHER_UID = "someone-else-entirely";
+const OTHER_PROJECT_ID = "projAutoId0002";
 const CREATOR_UID = "member-a";
 const WS = FIXTURE_WORKSPACE_ID;
 const OTHER_WS = "bOtherWorkspaceAutoId9999";
@@ -87,6 +89,19 @@ const RUN_PATH = `runs/${RUN}`;
 const CREATED = Timestamp.fromDate(new Date("2026-09-02T10:00:00.000Z"));
 const teamRun = (overrides: Record<string, unknown> = {}) => fullTeamRunData({ createdAt: CREATED, ...overrides });
 
+/**
+ * R2 §2 — THE AUTHORITY-MOCK RULE. A mocked security collaborator is not proven
+ * by having been called; its security-relevant arguments must be pinned, and
+ * where practical the fake must BEHAVE DIFFERENTLY when they are wrong. R2
+ * showed why: with unconditional fakes, `resolveTeamRunWorkspaceAccess({ uid:
+ * "attacker-static", workspaceId })`, `{ workspaceId: runId }` and
+ * `getProject(workspaceId)` all passed 35/35. Ordering was pinned; IDENTITY,
+ * TENANT and RESOURCE were not.
+ *
+ * So each fake below is a function of its arguments, and every discrimination
+ * has its own CONTROL test proving the fake actually discriminates — otherwise
+ * the fake itself would be the new vacuous assertion.
+ */
 const grant = (role: "owner" | "admin" | "member" | "reviewer" | "viewer") => ({
   granted: true,
   workspace: { schemaVersion: 1, id: WS, type: "team", name: "WS", ownerUserId: "owner-1", createdByUserId: "owner-1", createdAt: CREATED, updatedAt: CREATED },
@@ -94,25 +109,75 @@ const grant = (role: "owner" | "admin" | "member" | "reviewer" | "viewer") => ({
   capabilities: ROLE_CAPABILITIES[role],
 });
 
-/** A record shaped like what E1 persists — created by SOMEONE ELSE, so `createdBy` can never be the thing granting access. */
+/**
+ * R2 §16 — every field here is one the REAL E1 writer persists, checked against
+ * `app/api/workspaces/[workspaceId]/runs/[runId]/export/route.ts:391-417`
+ * (`recordBase`), `createAdaptiveExportRecord` (which adds `reportVersion` and
+ * `exportMetadata.finalReportVersion`) and `markAdaptiveExportReady`
+ * (`exportMetadata.fileHash`). The previous fixture omitted `version`, `runId`,
+ * `schemaVersion`, `generatedBy` and `exportedSections`, so the E2A-S8 key-set
+ * assertion could not see a projection of them — `JSON.stringify` drops
+ * `undefined`, so projecting a field absent from the fixture changed nothing.
+ * R2 proved it: adding `generatedBy` + `failureReason` to the DTO passed 35/35.
+ *
+ * Created by SOMEONE ELSE, so `createdBy` can never be the thing granting access.
+ * Every non-DTO field carries a sentinel VALUE (never a type name — `"milestone2"`
+ * could not serve, since `schemaFamily` legitimately carries it).
+ */
 const exportRecord = (reportVersion: number, over: Record<string, unknown> = {}) => ({
+  version: 1,
   exportId: `exp-${reportVersion}`,
-  reportVersion,
+  runId: RUN,
   schemaId: "comparison_matrix",
   schemaFamily: "milestone2",
+  schemaVersion: 1,
+  reportVersion,
   format: "pdf",
   artifactStatus: "ready",
   createdAt: "2026-09-02T11:00:00.000Z",
   createdBy: CREATOR_UID,
+  // E1 writes this UNCONDITIONALLY (`resolveExportGeneratedBy(uid)`), so every
+  // real Team record carries the creator's frozen display name and masked
+  // email. It is NOT in the DTO — Personal excludes it too (identical 13 keys).
+  generatedBy: { displayName: "SENTINEL_CREATOR_DISPLAY_NAME", maskedEmail: "SENTINEL_MASKED_EMAIL" },
   governanceStatusAtExport: { family: "milestone2", kind: "approved", isOwnerOverride: false },
   classification: "internal",
-  // Present in Firestore and deliberately NOT projected into the DTO. The
-  // sentinels are what make E2A-S8 falsifiable: `"milestone2"` could never
-  // serve, because `schemaFamily` legitimately carries that exact value.
   reportSnapshot: { question: "SENTINEL_FROZEN_QUESTION", milestone2: { schemaId: "comparison_matrix", result: { executiveSummary: "SENTINEL_REPORT_BODY" } } },
-  exportMetadata: { exportId: `exp-${reportVersion}`, runId: RUN, schemaVersion: 1, fileHash: "f".repeat(64), requestingUser: CREATOR_UID },
+  exportMetadata: {
+    exportId: `exp-${reportVersion}`,
+    runId: RUN,
+    schemaVersion: 1,
+    exportedSections: ["SENTINEL_EXPORTED_SECTION"],
+    createdAt: "2026-09-02T11:00:00.000Z",
+    requestingUser: "SENTINEL_REQUESTING_USER",
+    finalReportVersion: reportVersion,
+    fileHash: "f".repeat(64),
+  },
   ...over,
 });
+
+/** `failureReason` is written ONLY by `markAdaptiveExportFailed`, always together with `artifactStatus: "failed"` — and a failed export produced no bytes, so it has no `fileHash`. Using it on a "ready" record would be a shape production cannot make (§36). */
+const failedExportRecord = (reportVersion: number) => {
+  const r = exportRecord(reportVersion, { artifactStatus: "failed", failureReason: "SENTINEL_FAILURE_REASON" }) as Record<string, unknown>;
+  const meta = { ...(r.exportMetadata as Record<string, unknown>) };
+  delete meta.fileHash;
+  return { ...r, exportMetadata: meta };
+};
+
+/** Admission succeeds ONLY for the exact authenticated caller against the exact addressed Workspace. Any other principal or tenant gets the concealed denial production gives it. */
+const accessFake = (role: "owner" | "admin" | "member" | "reviewer" | "viewer" = "member") =>
+  async (args: { uid: string; workspaceId: string }) =>
+    args.uid === UID && args.workspaceId === WS ? grant(role) : { granted: false, reason: "membership_not_found" };
+
+/** The run's OWN Project resolves inside this Workspace; ANY other id resolves to a Project of another Workspace, so reading the wrong document is visibly concealed rather than silently tolerated. */
+const projectFake = async (projectId: string) =>
+  projectId === FIXTURE_PROJECT_ID
+    ? { status: "found", project: { id: FIXTURE_PROJECT_ID, name: "P", status: "active", workspaceId: WS } }
+    : { status: "found", project: { id: String(projectId), name: "Foreign", status: "active", workspaceId: OTHER_WS } };
+
+/** History exists for the ADDRESSED run only — a helper that returns the same records for any runId would hide a cross-run read. */
+const listFake = (records = [exportRecord(3), exportRecord(2)], hasMore = false) =>
+  async (runId: string) => (runId === RUN ? { ok: true, records, hasMore } : { ok: true, records: [], hasMore: false });
 
 const submit = async (query = "", workspaceId = WS, runId = RUN) => {
   const res = await GET(new NextRequest(`http://localhost/api/workspaces/${workspaceId}/runs/${runId}/exports${query}`), { params: { workspaceId, runId } });
@@ -129,9 +194,9 @@ beforeEach(() => {
   mockExportFlagEnabled = true;
   runDocs.set(RUN, teamRun());
   mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: UID });
-  mockedAccess.mockResolvedValue(grant("member"));
-  mockedGetProject.mockResolvedValue({ status: "found", project: { id: "projAutoId0001", name: "P", status: "active", workspaceId: WS } });
-  mockedListExports.mockResolvedValue({ ok: true, records: [exportRecord(3), exportRecord(2)], hasMore: false });
+  mockedAccess.mockImplementation(accessFake());
+  mockedGetProject.mockImplementation(projectFake);
+  mockedListExports.mockImplementation(listFake());
 });
 
 /**
@@ -169,21 +234,36 @@ describe("E2-A — the authorized list path", () => {
     expect(readPaths).toEqual([RUN_PATH]);
   });
 
-  it("E2A-S8 the response exposes only the approved metadata DTO", async () => {
+  it("E2A-S8 the response exposes only the approved metadata DTO — proved against what E1 really persists", async () => {
+    // R2: the old fixture omitted fields E1 writes, so projecting them changed
+    // nothing (`JSON.stringify` drops `undefined`) and the key-set assertion was
+    // blind to the two most likely additions. Both records below carry every
+    // real persisted field, each non-DTO one holding a sentinel VALUE.
+    mockedListExports.mockImplementation(listFake([exportRecord(3), failedExportRecord(2)]));
     const r = await submit();
     const blob = JSON.stringify(r.json);
-    // Sentinel VALUES from the REAL persisted shape, not type names —
-    // `"milestone2"` could never serve, since `schemaFamily` legitimately
-    // carries it. R1 removed an earlier `governanceRecord` fixture: the export
-    // record has no such key, so those sentinels proved nothing.
-    for (const sentinel of ["SENTINEL_FROZEN_QUESTION", "SENTINEL_REPORT_BODY"]) {
+    for (const sentinel of [
+      "SENTINEL_FROZEN_QUESTION",      // reportSnapshot.question
+      "SENTINEL_REPORT_BODY",          // reportSnapshot.milestone2…executiveSummary
+      "SENTINEL_CREATOR_DISPLAY_NAME", // generatedBy.displayName
+      "SENTINEL_MASKED_EMAIL",         // generatedBy.maskedEmail
+      "SENTINEL_FAILURE_REASON",       // failureReason
+      "SENTINEL_EXPORTED_SECTION",     // exportMetadata.exportedSections
+      "SENTINEL_REQUESTING_USER",      // exportMetadata.requestingUser
+    ]) {
       expect(blob).not.toContain(sentinel);
     }
-    expect(blob).not.toContain("reportSnapshot");
-    // the projection is an allow-list: exactly these keys
-    expect(Object.keys(r.json.exports[0]).sort()).toEqual(
-      ["artifactStatus", "classification", "createdAt", "createdBy", "exportId", "fileHash", "format", "governanceStatusAtExport", "hashAlgorithm", "hashReproducible", "reportVersion", "schemaFamily", "schemaId"].sort()
-    );
+    // container names too: no raw persisted object is forwarded wholesale
+    for (const container of ["reportSnapshot", "exportMetadata", "generatedBy", "failureReason", "schemaVersion", "finalReportVersion"]) {
+      expect(blob).not.toContain(container);
+    }
+    // the item projection is an allow-list: exactly these keys
+    expect(Object.keys(r.json.exports[0]).sort()).toEqual([...["artifactStatus", "classification", "createdAt", "createdBy", "exportId", "format", "governanceStatusAtExport", "reportVersion", "schemaFamily", "schemaId"], ...["fileHash", "hashAlgorithm", "hashReproducible"]].sort());
+    // the FAILED record produced no bytes, so it carries none of the hash trio
+    expect(Object.keys(r.json.exports[1]).sort()).toEqual(["artifactStatus", "classification", "createdAt", "createdBy", "exportId", "format", "governanceStatusAtExport", "reportVersion", "schemaFamily", "schemaId"].sort());
+    // R2 (reviewer 1) P3: the TOP-LEVEL envelope is an allow-list too. Without
+    // this, emitting the whole run document beside the list passed 35/35.
+    expect(Object.keys(r.json).sort()).toEqual(["exports", "hasMore", "nextCursor", "ok", "runId"]);
   });
 
   it("E2A-S7 a current reader who did NOT create the exports receives them", async () => {
@@ -206,7 +286,7 @@ describe("E2-A — the authorized list path", () => {
     for (const role of ["reviewer", "viewer"] as const) {
       expect(ROLE_CAPABILITIES[role]).toContain("research.read");
       expect(ROLE_CAPABILITIES[role]).not.toContain("exports.create");
-      mockedAccess.mockResolvedValue(grant(role));
+      mockedAccess.mockImplementation(accessFake(role));
       // Not merely "not refused": this role receives the actual history.
       expectTheFixtureHistory(await submit());
     }
@@ -236,14 +316,14 @@ describe("E2-A — the authorized list path", () => {
     }
   });
 
-  it("an UNRECOGNISED failure reason still falls through to 500 — not laundered into 503", async () => {
-    // The mapping is deliberately not a blanket catch: an unexpected reason must
-    // not be dressed up as infrastructure unavailability.
-    mockedListExports.mockResolvedValue({ ok: false, reason: "something_new" });
-    const r = await submit();
-    expect(r.status).toBe(500);
-    expect(r.json.errorCode).toBe("list_failed");
-  });
+  // R2 §28: a test asserting that an UNRECOGNISED reason falls through to 500
+  // used to live here. It was DELETED, not repaired: the 500 branch was dead by
+  // type, and the only way to reach it was to make an untyped mock return a
+  // reason `ListAdaptiveExportsResult` cannot carry. A test that can only pass
+  // by fabricating an impossible state proves nothing about production. The
+  // guarantee it reached for — a future added reason must not be silently
+  // laundered into 503 — is now enforced by the route's `never` exhaustiveness
+  // check, at COMPILE time, which no mock can defeat.
 });
 
 describe("E2-A — authority ordering", () => {
@@ -257,9 +337,13 @@ describe("E2-A — authority ordering", () => {
   });
 
   it("E2A-S2 a caller WITHOUT research.read performs zero run, Project and export I/O", async () => {
-    // a real role lacking research.read does not exist today, so the capability
+    // A real role lacking research.read does not exist today, so the capability
     // set is narrowed directly — the route reads `capabilities`, not the label.
-    mockedAccess.mockResolvedValue({ ...grant("member"), capabilities: ["workspace.read"] });
+    // R2 P3-8: the set deliberately HOLDS `reviews.read` and `exports.create`,
+    // so a gate asking for either of those instead of `research.read` would be
+    // admitted here and this test would fail. With the old `["workspace.read"]`
+    // set, substituting `reviews.read` for `research.read` passed 35/35.
+    mockedAccess.mockResolvedValue({ ...grant("member"), capabilities: ["workspace.read", "reviews.read", "exports.create"] });
     const r = await submit();
     expect(r.status).toBe(403);
     expect(r.json.errorCode).toBe("insufficient_capability");
@@ -403,8 +487,18 @@ describe("E2A-S10 — this route forwards paging and owns no paging policy", () 
   it("omits the hash trio when no fileHash was persisted", async () => {
     mockedListExports.mockResolvedValue({ ok: true, records: [exportRecord(1, { exportMetadata: { exportId: "exp-1", runId: RUN, schemaVersion: 1, requestingUser: CREATOR_UID } })], hasMore: false });
     const item = (await submit()).json.exports[0];
+    // R2 P3-9: `hashAlgorithm` was unasserted, so emitting it unconditionally
+    // passed 35/35. All THREE members of the trio now have explicit disposition.
+    // NOTE (§19 deviation, reported): `hashAlgorithm` is NOT a persisted field —
+    // `AdaptiveExportManifest` has no such key and grep finds it only in the two
+    // route DTOs. It is derived (`"sha256" as const`), so it cannot be proved by
+    // putting a sentinel in persisted metadata without inventing a shape
+    // production cannot make (§36). Its contract is CONDITIONAL EMISSION, which
+    // is what the key-set assertion below pins.
     expect(item.fileHash).toBeUndefined();
+    expect(item.hashAlgorithm).toBeUndefined();
     expect(item.hashReproducible).toBeUndefined();
+    expect(Object.keys(item).sort()).toEqual(["artifactStatus", "classification", "createdAt", "createdBy", "exportId", "format", "governanceStatusAtExport", "reportVersion", "schemaFamily", "schemaId"].sort());
   });
 
   it("marks docx as non-reproducible and pdf as reproducible", async () => {
@@ -458,5 +552,273 @@ describe("E2-A — infrastructure and identity envelopes", () => {
     // distinct codes, and neither reveals anything about the target
     expect(missing.json.errorCode).not.toBe(invalid.json.errorCode);
     expectNoTargetIO();
+  });
+});
+
+/**
+ * R2 §3/§4/§7/§32/§33 — THE ARGUMENT LEDGER. Ordering was already pinned; these
+ * pin WHO, WHICH TENANT and WHICH RESOURCE. Each `it` is the primary diagnostic
+ * for exactly one wrong-argument mutation, and each CONTROL proves the
+ * argument-sensitive fake genuinely discriminates on that dimension — without
+ * the controls, the fakes would be the next vacuous assertion.
+ *
+ * | Collaborator                        | Required argument      | Wrong-argument mutation              |
+ * |-------------------------------------|------------------------|--------------------------------------|
+ * | resolveTeamRunWorkspaceAccess.uid   | the authenticated uid  | uid: "attacker-static"               |
+ * | resolveTeamRunWorkspaceAccess.wsId  | the addressed wsId     | workspaceId: runId                   |
+ * | capability                          | "research.read"        | "reviews.read" / "exports.create"    |
+ * | getProject.projectId                | validated.projectId    | getProject(workspaceId)              |
+ * | getProject (unfiled)                | not called at all      | `!== undefined` → getProject(null)   |
+ * | listAdaptiveExportRecords.runId     | the addressed runId    | a different runId                    |
+ */
+describe("E2A-S11 — admission is evaluated for THIS caller against THIS Workspace", () => {
+  it("E2A-S11a admission receives the AUTHENTICATED caller's uid", async () => {
+    const r = await submit();
+    expect(mockedAccess).toHaveBeenCalledTimes(1);
+    // asserted on the uid dimension ALONE so this test fails for the principal
+    // mutation and not for the tenant one — the two stay independently pinned
+    expect(mockedAccess.mock.calls[0][0]).toMatchObject({ uid: UID });
+    expectTheFixtureHistory(r);
+  });
+
+  it("E2A-S11a CONTROL: the fake is uid-sensitive — a different authenticated caller is concealed", async () => {
+    mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: OTHER_UID });
+    const r = await submit();
+    expect(r.status).toBe(404);
+    expect(r.json.errorCode).toBe("team_workspace_not_found");
+    expect(mockedAccess.mock.calls[0][0]).toMatchObject({ uid: OTHER_UID });
+    expectNoTargetIO();
+  });
+
+  it("E2A-S11b admission receives the ADDRESSED workspaceId", async () => {
+    const r = await submit();
+    expect(mockedAccess.mock.calls[0][0]).toMatchObject({ workspaceId: WS });
+    expectTheFixtureHistory(r);
+  });
+
+  it("E2A-S11b CONTROL: the fake is workspace-sensitive — the same caller addressing another Workspace is concealed", async () => {
+    const r = await submit("", OTHER_WS);
+    expect(r.status).toBe(404);
+    expect(mockedAccess.mock.calls[0][0]).toMatchObject({ workspaceId: OTHER_WS });
+    expectNoTargetIO();
+  });
+
+  it("E2A-S11 admission is passed EXACTLY the caller and the Workspace — nothing else", async () => {
+    await submit();
+    expect(mockedAccess).toHaveBeenCalledWith({ uid: UID, workspaceId: WS });
+  });
+});
+
+describe("E2A-S12 — the Project integrity read targets the VALIDATED Project", () => {
+  it("E2A-S12 getProject receives validated.projectId", async () => {
+    const r = await submit();
+    expect(mockedGetProject).toHaveBeenCalledTimes(1);
+    expect(mockedGetProject).toHaveBeenCalledWith(FIXTURE_PROJECT_ID);
+    expectTheFixtureHistory(r);
+  });
+
+  it("E2A-S12 CONTROL: the fake is projectId-sensitive — any other id resolves to a FOREIGN Workspace and is concealed", async () => {
+    runDocs.set(RUN, teamRun({ projectId: OTHER_PROJECT_ID }));
+    const r = await submit();
+    expect(mockedGetProject).toHaveBeenCalledWith(OTHER_PROJECT_ID);
+    expect(r.status).toBe(404);
+    expect(r.json.errorCode).toBe("run_not_found");
+    expect(mockedListExports).not.toHaveBeenCalled();
+  });
+
+  it("E2A-S13 an UNFILED run (projectId null) lists WITHOUT any Project read", async () => {
+    runDocs.set(RUN, teamRun({ projectId: null }));
+    const r = await submit();
+    expectTheFixtureHistory(r);
+    expect(mockedGetProject).not.toHaveBeenCalled();
+  });
+});
+
+describe("E2A-S14 — the export-history read is scoped to the addressed run", () => {
+  it("E2A-S14 the helper receives the addressed runId", async () => {
+    const r = await submit();
+    expect(mockedListExports).toHaveBeenCalledWith(RUN, { limit: undefined, beforeReportVersion: undefined });
+    expectTheFixtureHistory(r);
+  });
+
+  it("E2A-S14 CONTROL: the fake is runId-sensitive — another run's id yields no records", async () => {
+    await expect(mockedListExports("some-other-run", {})).resolves.toEqual({ ok: true, records: [], hasMore: false });
+  });
+});
+
+describe("E2A-S9b — the gate asks for research.read SPECIFICALLY", () => {
+  it("a caller holding reviews.read AND exports.create but NOT research.read is refused", async () => {
+    // R2 P3-8: substituting `reviews.read` for `research.read` was invisible,
+    // because no role holds one without the other and the denial fixture held
+    // neither. This set holds both neighbours and not the required one, so any
+    // gate on a neighbour would admit and this test would fail.
+    mockedAccess.mockResolvedValue({ ...grant("member"), capabilities: ["workspace.read", "reviews.read", "exports.create"] });
+    const r = await submit();
+    expect(r.status).toBe(403);
+    expect(r.json.errorCode).toBe("insufficient_capability");
+    expectNoTargetIO();
+  });
+
+  it("POSITIVE CONTROL: research.read ALONE is sufficient", async () => {
+    mockedAccess.mockResolvedValue({ ...grant("member"), capabilities: ["workspace.read", "research.read"] });
+    expectTheFixtureHistory(await submit());
+  });
+});
+
+describe("R2 P2-4 — a malformed historical record cannot crash the list", () => {
+  /**
+   * REACHABLE, not hypothetical. `normalizeAdaptiveExportRecord` blind-casts
+   * (`raw as AdaptiveResearchExportV1`) with no shape validation, and its legacy
+   * branch for the flat `"exportMetadata.fileHash"` key only merges into an
+   * EXISTING nested map (`if (rest.exportMetadata && …)`). A legacy document
+   * whose only hash carrier was the flat key therefore arrives with no
+   * `exportMetadata` at all. Unguarded, `r.exportMetadata.fileHash` threw a
+   * TypeError out of GET — the one failure path with no `{ok:false}` envelope.
+   */
+  const withoutMetadata = () => {
+    const r = exportRecord(3) as Record<string, unknown>;
+    delete r.exportMetadata;
+    return r;
+  };
+
+  it("a record with NO exportMetadata still lists, with the hash trio omitted", async () => {
+    mockedListExports.mockImplementation(listFake([withoutMetadata(), exportRecord(2)]));
+    const r = await submit();
+    expect(r.status).toBe(200);
+    expect(r.json.exports).toHaveLength(2);
+    expect(r.json.exports.map((e: { exportId: string }) => e.exportId)).toEqual(["exp-3", "exp-2"]);
+    expect(Object.keys(r.json.exports[0]).sort()).toEqual(["artifactStatus", "classification", "createdAt", "createdBy", "exportId", "format", "governanceStatusAtExport", "reportVersion", "schemaFamily", "schemaId"].sort());
+    // no synthesized hash, and the sibling record is unaffected
+    expect(r.json.exports[0].fileHash).toBeUndefined();
+    expect(r.json.exports[1].fileHash).toBe("f".repeat(64));
+  });
+
+  it("the LEGACY flat-key shape — the real producer — lists and never forwards the raw key", async () => {
+    const legacy = withoutMetadata();
+    legacy["exportMetadata.fileHash"] = "a".repeat(64);
+    mockedListExports.mockImplementation(listFake([legacy]));
+    const r = await submit();
+    expect(r.status).toBe(200);
+    expect(r.json.exports).toHaveLength(1);
+    expect(r.json.exports[0].exportId).toBe("exp-3");
+    expect(JSON.stringify(r.json)).not.toContain("exportMetadata");
+    expect(JSON.stringify(r.json)).not.toContain("a".repeat(64));
+  });
+});
+
+describe("R2 §23/§24/§29 — every REACHABLE persistence failure has its own envelope", () => {
+  it("admission lookup_failed is 503, NOT laundered into the concealed 404", async () => {
+    // An infrastructure inability to verify membership is not evidence about
+    // membership. Laundering it into the 404 would make an outage
+    // indistinguishable from — and retried like — a genuine absence.
+    mockedAccess.mockResolvedValue({ granted: false, reason: "lookup_failed" });
+    const r = await submit();
+    expect(r.status).toBe(503);
+    expect(r.json.errorCode).toBe("team_workspace_unavailable");
+    expectNoTargetIO();
+    noWrites();
+  });
+
+  it.each(["firestore_unavailable", "read_failed"] as const)("a Project read failure (%s) is 503 and lists nothing", async (status) => {
+    mockedGetProject.mockResolvedValue({ status });
+    const r = await submit();
+    expect(r.status).toBe(503);
+    expect(r.json.errorCode).toBe("team_workspace_unavailable");
+    expect(mockedListExports).not.toHaveBeenCalled();
+    noWrites();
+  });
+
+  it("the only reason the list helper can REALLY return is read_failed, and it is 503", async () => {
+    // `listAdaptiveExportRecords` never throws (it catches and returns
+    // `read_failed`), and its `firestore_unavailable` arm fires only on
+    // `!adminDb`, which GET already answered with a concealed 404. So
+    // `read_failed` is the one reachable failure from this route. The former
+    // 500 `list_failed` fallback was dead by type and is gone, along with the
+    // test that could only reach it via an untyped mock.
+    mockedListExports.mockResolvedValue({ ok: false, reason: "read_failed" });
+    const r = await submit();
+    expect(r.status).toBe(503);
+    expect(r.json.errorCode).toBe("team_workspace_unavailable");
+  });
+
+  it("every post-authorization 503 carries a STAGE-ACCURATE message, not \"couldn't verify your access\"", async () => {
+    // R2 P3-5: access was verified stages earlier. Status and errorCode stay
+    // byte-identical to the family's; only this route's own wording changes.
+    mockedListExports.mockResolvedValue({ ok: false, reason: "read_failed" });
+    const listFailed = await submit();
+    expect(listFailed.json.message).not.toContain("verify your access");
+    expect(listFailed.json.message).toContain("export history");
+
+    // ...while the ADMISSION failure keeps the shared family message, because
+    // there "we couldn't verify your access" is exactly what happened.
+    mockedAccess.mockResolvedValue({ granted: false, reason: "lookup_failed" });
+    const admissionFailed = await submit();
+    expect(admissionFailed.status).toBe(503);
+    expect(admissionFailed.json.message).toContain("verify your access");
+  });
+});
+
+describe("R2 P3-7 — the nextCursor guard", () => {
+  it("hasMore with a NON-EMPTY page: the cursor is the last item's reportVersion", async () => {
+    mockedListExports.mockImplementation(listFake([exportRecord(3), exportRecord(2)], true));
+    const r = await submit();
+    expect(r.json.exports).toHaveLength(2);
+    expect(r.json.hasMore).toBe(true);
+    expect(r.json.nextCursor).toBe(2);
+  });
+
+  it("hasMore with an EMPTY page cannot crash or invent a cursor", async () => {
+    // Without the `items.length > 0` guard this dereferences `items[-1]` and
+    // throws; dropping the guard previously passed 35/35.
+    mockedListExports.mockImplementation(listFake([], true));
+    const r = await submit();
+    expect(r.status).toBe(200);
+    expect(r.json.exports).toEqual([]);
+    expect(r.json.nextCursor).toBeNull();
+  });
+});
+
+/**
+ * R2 §13/§15/§38 — CHARACTERIZATION of `SHARED_EXPORT_HISTORY_EMPTY_QUERY_PARAM_NORMALIZATION`.
+ *
+ * These tests record what the code DOES today, not what it should do. The
+ * behaviour is inherited verbatim from the Personal list, which this PR must not
+ * touch, and fixing it on one surface only would be worse than the shared
+ * inconsistency. The empty-string case is a known defect, deliberately deferred
+ * to a change that updates BOTH surfaces together; nothing here endorses it.
+ *
+ * `searchParams.get()` returns `""` — not `null` — for `?cursor=`, and
+ * `Number("") === 0`, which IS finite, so the intended "absent" fallback never
+ * fires. Four distinct input classes, only three of which behave alike:
+ */
+describe("empty query parameters — inherited behaviour, characterized not endorsed", () => {
+  const lastArgs = () => mockedListExports.mock.calls[mockedListExports.mock.calls.length - 1][1];
+
+  it("cursor ABSENT → undefined (a genuine first page)", async () => {
+    await submit();
+    expect(lastArgs().beforeReportVersion).toBeUndefined();
+  });
+
+  it("cursor MALFORMED → undefined (the documented fallback, which does work here)", async () => {
+    await submit("?cursor=not-a-number");
+    expect(lastArgs().beforeReportVersion).toBeUndefined();
+  });
+
+  it("cursor EMPTY → 0, NOT the first page — the known inherited defect", async () => {
+    await submit("?cursor=");
+    expect(lastArgs().beforeReportVersion).toBe(0);
+    // consequence, spelled out: the helper applies `where("reportVersion", "<", 0)`
+    // and `reportVersion` starts at 1, so a run WITH exports reports none.
+  });
+
+  it("limit ABSENT → undefined, so the helper applies its own default of 30", async () => {
+    await submit();
+    expect(lastArgs().limit).toBeUndefined();
+  });
+
+  it("limit EMPTY → 0, which the helper clamps UP to 1 rather than defaulting to 30", async () => {
+    await submit("?limit=");
+    expect(lastArgs().limit).toBe(0);
+    // the clamp itself is the helper's, pinned in lib/firestore/__tests__/adaptiveExports.spec.ts
   });
 });
