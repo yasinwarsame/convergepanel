@@ -722,7 +722,103 @@ const projectFake = async (projectId: string) =>
 
 /** History exists for the ADDRESSED run only — a helper that returns the same records for any runId would hide a cross-run read. */
 const listFake = (records = [exportRecord(3), exportRecord(2)], hasMore = false) =>
-  async (runId: string) => (runId === RUN ? { ok: true, records, hasMore } : { ok: true, records: [], hasMore: false });
+  async (runId: string) =>
+    runId === RUN
+      // E2A-S8A: every record handed to the route is access-trapped
+      ? { ok: true, records: records.map((r, i) => trapRecord(r as Record<string, unknown>, `rec${i}`)), hasMore }
+      : { ok: true, records: [], hasMore: false };
+
+
+/**
+ * ─── E2A-S8A: THE SOURCE-ACCESS TRAP (primary secrecy mechanism) ──────────
+ *
+ * WHY THIS REPLACED RECURSIVE FIXTURE COMPLETENESS. Five review rounds each
+ * found the *next* missing leaf, because an exhaustive hand-maintained
+ * inventory of `reportSnapshot` cannot be made safe: an `undefined` optional
+ * leaf, an empty array, an open `Record`, an `unknown`-typed field, an
+ * uncovered member of a 9-variant union, or any newly added nested field all
+ * make a sentinel-based proof vacuous, and `JSON.stringify` erases the
+ * difference between "absent from the response" and "absent from the fixture".
+ *
+ * The stronger invariant does not depend on the shape of the data at all:
+ *
+ *      THE LIST PROJECTION NEVER READS `reportSnapshot`.
+ *
+ * If the source property is never consulted, no leaf beneath it can reach the
+ * response — at any depth, for any variant, for any field added later. The
+ * mechanism is a `Proxy` around each record the list helper returns, which
+ * RECORDS every property access. Recording (rather than throwing) is
+ * deliberate: a throw could in principle be caught and swallowed by the code
+ * under test, whereas the push into `sourceReads` has already happened by the
+ * time any handler runs, and it names the offending property precisely instead
+ * of collapsing the whole suite.
+ *
+ * `ownKeys` / `getOwnPropertyDescriptor` are trapped too, because a future
+ * refactor could bypass a `get`-only trap with `{ ...record }`,
+ * `Object.assign({}, record)` or `Object.entries(record)` — none of which
+ * touches `reportSnapshot` by name.
+ *
+ * THE LEDGER below is derived from the route's actual projection, not from
+ * intent. Anything the projection legitimately consumes is ALLOWED; everything
+ * else the persisted record carries is FORBIDDEN, so consuming it in future
+ * has to be a deliberate, visible change to this list.
+ */
+const ALLOWED_SOURCE_PROPS: readonly string[] = [
+  "exportId",                 // → DTO.exportId
+  "reportVersion",            // → DTO.reportVersion, and the continuation cursor
+  "schemaId",                 // → DTO.schemaId
+  "schemaFamily",             // → DTO.schemaFamily
+  "format",                   // → DTO.format, and isHashReproducible()
+  "artifactStatus",           // → DTO.artifactStatus
+  "createdAt",                // → DTO.createdAt
+  "createdBy",                // → DTO.createdBy (metadata, never authority)
+  "classification",           // → DTO.classification
+  "governanceStatusAtExport", // → DTO.governanceStatusAtExport
+  "exportMetadata",           // → fileHash / hashAlgorithm / hashReproducible ONLY
+];
+/** Every other property `AdaptiveResearchExportV1` actually carries. `reportSnapshot` is the one this invariant is named for; the rest are forbidden because the DTO does not consume them, so a future read is a deliberate contract change rather than a silent one. */
+const FORBIDDEN_SOURCE_PROPS: readonly string[] = [
+  "reportSnapshot", // the frozen report content — the whole point
+  "generatedBy",    // the creator's frozen display name + masked email
+  "failureReason",  // internal failure text
+  "version",        // contract version, not a DTO field
+  "runId",          // the envelope carries the route's own runId, not the record's
+  "schemaVersion",  // not a DTO field
+];
+
+let sourceReads: string[] = [];
+let forbiddenSourceReads: string[] = [];
+let recordEnumerations: string[] = [];
+
+const trapRecord = (record: Record<string, unknown>, label: string): Record<string, unknown> =>
+  new Proxy(record, {
+    get(target, prop, receiver) {
+      if (typeof prop === "string") {
+        sourceReads.push(prop);
+        if (FORBIDDEN_SOURCE_PROPS.includes(prop)) forbiddenSourceReads.push(`${label}.${prop}`);
+      }
+      return Reflect.get(target, prop, receiver);
+    },
+    ownKeys(target) {
+      // fires on { ...record }, Object.keys/entries/assign, JSON.stringify(record)
+      recordEnumerations.push(`ownKeys(${label})`);
+      return Reflect.ownKeys(target);
+    },
+    getOwnPropertyDescriptor(target, prop) {
+      if (typeof prop === "string") recordEnumerations.push(`descriptor(${label}.${prop})`);
+      return Reflect.getOwnPropertyDescriptor(target, prop);
+    },
+  });
+
+/** E2A-S8A assertion: no forbidden source property was consulted, and the record was never enumerated wholesale. */
+const expectNoForbiddenSourceAccess = () => {
+  expect(forbiddenSourceReads).toEqual([]);
+  expect(recordEnumerations).toEqual([]);
+};
+/** Non-vacuity companion: the trap must actually have observed the projection doing its job. */
+const expectSourceWasRead = (...props: string[]) => {
+  for (const p of props) expect(sourceReads).toContain(p);
+};
 
 const submit = async (query = "", workspaceId = WS, runId = RUN) => {
   const res = await GET(new NextRequest(`http://localhost/api/workspaces/${workspaceId}/runs/${runId}/exports${query}`), { params: { workspaceId, runId } });
@@ -736,6 +832,9 @@ beforeEach(() => {
   writeAttempts.length = 0;
   runGetThrows = false;
   adminDbAvailable = true;
+  sourceReads = [];
+  forbiddenSourceReads = [];
+  recordEnumerations = [];
   mockExportFlagEnabled = true;
   runDocs.set(RUN, teamRun());
   mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: UID });
@@ -1654,5 +1753,165 @@ describe("E2A-S15 — the paging envelope is never self-contradictory", () => {
     expect(r.json.hasMore).toBe(false);
     expect(r.json.nextCursor).toBeNull();
     expect(r.json.exports).toHaveLength(1);
+  });
+});
+
+/**
+ * ─── E2A-S8A — SOURCE ACCESS (primary) ────────────────────────────────────
+ * The projection never reads a forbidden persisted source. This is the
+ * invariant that ends the five-round "next missing leaf" loop: it holds for
+ * every depth, every optional field, every array element, every member of the
+ * 9-variant `result` union and every field added in future, because the ROOT is
+ * never consulted.
+ */
+describe("E2A-S8A — the LIST projection never reads reportSnapshot", () => {
+  it("E2A-S8A a normal list reads only allow-listed source properties", async () => {
+    const r = await submit();
+    expectTheFixtureHistory(r);
+    expectNoForbiddenSourceAccess();
+    // non-vacuity: the trap really did observe the projection working
+    expectSourceWasRead("exportId", "reportVersion", "format", "exportMetadata", "governanceStatusAtExport");
+    // and every property it read is on the ledger
+    expect(Array.from(new Set(sourceReads)).filter((p) => !ALLOWED_SOURCE_PROPS.includes(p))).toEqual([]);
+  });
+
+  it("E2A-S8A holds for BOTH schema families and a failed record", async () => {
+    mockedListExports.mockImplementation(listFake([exportRecord(4), legacyExportRecord(3), failedExportRecord(2)]));
+    const r = await submit();
+    expect(r.json.exports).toHaveLength(3);
+    expectNoForbiddenSourceAccess();
+  });
+
+  it("E2A-S8A holds on the malformed-record path too", async () => {
+    const bad = exportRecord(3) as Record<string, unknown>;
+    delete bad.exportMetadata;
+    mockedListExports.mockImplementation(listFake([bad]));
+    const r = await submit();
+    expect(r.status).toBe(200);
+    expectNoForbiddenSourceAccess();
+  });
+
+  it("E2A-S8A the ledger is exhaustive over the persisted record shape", () => {
+    // Every field AdaptiveResearchExportV1 carries is classified exactly once,
+    // so a NEW persisted field cannot sit unclassified: this fails until it is
+    // deliberately placed on one of the two lists.
+    const classified = [...ALLOWED_SOURCE_PROPS, ...FORBIDDEN_SOURCE_PROPS].sort();
+    expect(classified).toEqual(
+      [
+        "artifactStatus", "classification", "createdAt", "createdBy", "exportId", "exportMetadata",
+        "failureReason", "format", "generatedBy", "governanceStatusAtExport", "reportSnapshot",
+        "reportVersion", "runId", "schemaFamily", "schemaId", "schemaVersion", "version",
+      ].sort()
+    );
+    // the two lists must not overlap
+    expect(ALLOWED_SOURCE_PROPS.filter((p) => FORBIDDEN_SOURCE_PROPS.includes(p))).toEqual([]);
+  });
+
+  it("E2A-S8A the record is never enumerated or spread wholesale", async () => {
+    await submit();
+    // `{ ...record }`, Object.keys/entries/assign and JSON.stringify(record) all
+    // trip `ownKeys`; a get-only trap would miss every one of them.
+    expect(recordEnumerations).toEqual([]);
+  });
+
+  it("MECHANISM PROOF: the trap fires on a forbidden read, and on enumeration", async () => {
+    // §3/§7 — the mechanism is falsified here rather than trusted. These call
+    // the trap the way a leaking route would, so the assertions above are known
+    // to be capable of failing.
+    const probe = trapRecord({ exportId: "x", reportSnapshot: { deep: { leaf: 1 } } }, "probe");
+    expect(forbiddenSourceReads).toEqual([]);
+    void probe.reportSnapshot;
+    expect(forbiddenSourceReads).toEqual(["probe.reportSnapshot"]);
+
+    // a DEEP leaf whose value is undefined still trips the ROOT read — this is
+    // the property sentinel completeness could never give us
+    const probe2 = trapRecord({ exportId: "y" }, "probe2");
+    void (probe2.reportSnapshot as undefined);
+    expect(forbiddenSourceReads).toContain("probe2.reportSnapshot");
+
+    // enumeration
+    recordEnumerations = [];
+    void { ...probe };
+    expect(recordEnumerations).toContain("ownKeys(probe)");
+  });
+});
+
+/**
+ * ─── E2A-S8B — RESPONSE SHAPE (independent of S8A) ────────────────────────
+ * A deep, exact comparison of the whole response. Unlike `Object.keys`, this
+ * catches a forbidden value nested INSIDE an allowed object — the gap R5 found
+ * by hiding a snapshot leaf under `governanceStatusAtExport`.
+ */
+describe("E2A-S8B — the response is exactly the approved DTO, deeply", () => {
+  it("E2A-S8B deep-equals the expected response, so no nested extra survives", async () => {
+    mockedListExports.mockImplementation(listFake([exportRecord(3)]));
+    const r = await submit();
+    expect(r.json).toEqual({
+      ok: true,
+      runId: RUN,
+      exports: [
+        {
+          exportId: "exp-3",
+          reportVersion: 3,
+          schemaId: "comparison_matrix",
+          schemaFamily: "milestone2",
+          format: "pdf",
+          artifactStatus: "ready",
+          createdAt: "2026-09-02T11:00:00.000Z",
+          createdBy: CREATOR_UID,
+          governanceStatusAtExport: { family: "milestone2", kind: "approved", isOwnerOverride: false },
+          classification: "internal",
+          fileHash: "f".repeat(64),
+          hashAlgorithm: "sha256",
+          hashReproducible: true,
+        },
+      ],
+      hasMore: false,
+      nextCursor: null,
+    });
+  });
+
+  it("E2A-S8B deep-equals for the legacy family and a failed record", async () => {
+    mockedListExports.mockImplementation(listFake([legacyExportRecord(3), failedExportRecord(2)]));
+    const r = await submit();
+    expect(r.json.exports).toEqual([
+      {
+        exportId: "exp-3",
+        reportVersion: 3,
+        schemaId: "financial_valuation",
+        schemaFamily: "legacy",
+        format: "pdf",
+        artifactStatus: "ready",
+        createdAt: "2026-09-02T11:00:00.000Z",
+        createdBy: CREATOR_UID,
+        governanceStatusAtExport: { family: "legacy", status: "needs_review" },
+        classification: "internal",
+        fileHash: "f".repeat(64),
+        hashAlgorithm: "sha256",
+        hashReproducible: true,
+      },
+      {
+        exportId: "exp-2",
+        reportVersion: 2,
+        schemaId: "comparison_matrix",
+        schemaFamily: "milestone2",
+        format: "pdf",
+        artifactStatus: "failed",
+        createdAt: "2026-09-02T11:00:00.000Z",
+        createdBy: CREATOR_UID,
+        governanceStatusAtExport: { family: "milestone2", kind: "approved", isOwnerOverride: false },
+        classification: "internal",
+      },
+    ]);
+  });
+
+  it("E2A-S8B MECHANISM PROOF: a value nested inside an ALLOWED key is caught", () => {
+    // The gap this replaces: `Object.keys(item)` is depth-1, so nesting data
+    // under the already-allowed `governanceStatusAtExport` left the key set
+    // intact and passed. Deep equality does not have that blind spot — proved
+    // here against the matcher itself rather than asserted in prose.
+    const approved = { family: "milestone2", kind: "approved", isOwnerOverride: false };
+    expect(() => expect({ governanceStatusAtExport: { ...approved, smuggled: "x" } }).toEqual({ governanceStatusAtExport: approved })).toThrow();
+    expect(() => expect({ governanceStatusAtExport: approved }).toEqual({ governanceStatusAtExport: approved })).not.toThrow();
   });
 });
