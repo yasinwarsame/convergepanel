@@ -12,10 +12,15 @@
  * a divergence between two surfaces clients expect to match — so where it does
  * exactly that, it says so here rather than leaving it to be discovered:
  *   1. `SHARED_EXPORT_HISTORY_MISSING_NEXT_CURSOR_HARDENING` — E2A-S15 below.
- *      Personal still derives `nextCursor` unguarded and can therefore emit
- *      `hasMore: true` with no usable cursor. E2-A must not knowingly ship a
- *      response that traps a paging client, so it is hardened HERE ONLY and
- *      Personal is left untouched and tracked.
+ *      Personal derives `nextCursor` without a finiteness guard (it does have a
+ *      length guard), so it could emit `hasMore: true` with no usable cursor.
+ *      Like divergence 2, this is HARDENING rather than a fix for a live bug:
+ *      the real helper cannot currently produce the trigger, because
+ *      `orderBy("reportVersion")` excludes documents lacking the field,
+ *      `hasMore` implies a non-empty page, and `reportVersion` is only ever
+ *      `counter + 1` from a `FieldValue.increment`-only counter. E2-A still
+ *      refuses to ship a response shape that can trap a paging client, so it is
+ *      hardened HERE ONLY and Personal is left untouched and tracked.
  *   2. `SHARED_EXPORT_METADATA_BLIND_CAST_HARDENING` — the optional-chained
  *      `exportMetadata` read below. Personal's identical read stays unguarded.
  *      Neither surface has a demonstrated crash path (see the retraction at that
@@ -87,19 +92,19 @@
  *   E2A-S7  Creator identity is not authority: `createdBy` is metadata. A
  *           currently authorized NON-creator may list; a removed creator may not.
  *           → "E2A-S7 a current reader who did NOT create the exports receives them"
- *   E2A-S8  The E2-A LIST response contains only the approved export metadata
- *           DTO — at the item level AND the envelope level. NO field and no
- *           NESTED LEAF of the frozen `reportSnapshot` is projected into the
- *           response. R3 showed why the nested half has to be said out loud: the
- *           old fixture populated only `reportSnapshot.question`, so extracting
- *           `milestone2.decisionReceipt`, `milestone2.meta`, the five top-level
- *           report leaves or the whole `legacy` branch LEAF BY LEAF passed the
- *           entire suite. A wholesale `reportSnapshot: r.reportSnapshot` was
- *           caught; field-by-field was invisible, because an absent fixture leaf
- *           serializes as nothing.
- *           → "E2A-S8 the response exposes only the approved metadata DTO — proved against what E1 really persists"
- *           → "E2A-S8 no milestone2 reportSnapshot leaf reaches the response"
- *           → "E2A-S8 no legacy reportSnapshot leaf reaches the response"
+ *   E2A-S8A SOURCE ACCESS (the primary secrecy invariant). The LIST projection
+ *           NEVER READS `reportSnapshot`, nor any other persisted property the
+ *           DTO does not consume. Proved by a `Proxy` around every record the
+ *           list helper returns, which records each property access and every
+ *           attempt to enumerate the record wholesale.
+ *           → "E2A-S8A a normal list reads only allow-listed source properties"
+ *           → "E2A-S8A the record is never enumerated or spread wholesale"
+ *           → "E2A-S8A the ledger is exhaustive over the persisted record shape"
+ *           → "MECHANISM PROOF: the trap fires on a forbidden read, and on enumeration"
+ *   E2A-S8B RESPONSE SHAPE, proved INDEPENDENTLY of S8A by deep equality over
+ *           the whole response — not `Object.keys`, which is depth-1 only.
+ *           → "E2A-S8B deep-equals the expected response, so no nested extra survives"
+ *           → "E2A-S8B MECHANISM PROOF: a value nested inside an ALLOWED key is caught"
  *   E2A-S15 A paging envelope is never self-contradictory: `hasMore: true` is
  *           emitted only together with a usable continuation cursor.
  *           → "a page that cannot yield a continuation cursor is an integrity failure, not a trap"
@@ -133,33 +138,56 @@
  *   E2A-S14 The export-history read is scoped to the addressed run.
  *           → "E2A-S14 the helper receives the addressed runId"
  *
- * WHERE THE E2A-S8 GUARANTEE ACTUALLY COMES FROM — two mechanisms that only work
- * together, and NOT from "every persisted field carries a sentinel" (an earlier
- * revision claimed that; it was never true, and the arithmetic it offered was
- * wrong as well as decorative, so no count is given here):
- *   1. the exact DTO key allow-list, at both the item and the envelope level;
- *   2. distinctive VALUES — string sentinels, and recognisable numbers for
- *      numeric leaves — on the persisted non-DTO fields, including every
- *      proof-relevant `reportSnapshot` leaf of BOTH schema families.
+ * WHY THE SECRECY PROOF WAS RESTRUCTURED, AND WHAT IT NOW RESTS ON.
  *
- * R4 established why (1) CANNOT stand alone, which the earlier revision got
- * wrong by claiming the allow-list "catches ANY added key": `JSON.stringify`
- * drops keys whose value is `undefined`, so such a key never reaches the parsed
- * response and `Object.keys()` never sees it either. A projected leaf is caught
- * IF AND ONLY IF its fixture value SERIALIZES. `null` and `[]` serialize and are
- * safe; `undefined` defeats both mechanisms at once.
+ * Five review rounds each found the NEXT missing `reportSnapshot` leaf. That was
+ * not bad luck: an exhaustive, hand-maintained inventory of that subtree cannot
+ * be made safe. An `undefined` optional leaf, an empty array, an open `Record`,
+ * an `unknown`-typed field, an uncovered member of the 9-variant `result` union,
+ * or any field added later each makes a sentinel-based proof vacuous — and
+ * `JSON.stringify` erases the difference between "absent from the response" and
+ * "absent from the fixture", which is what made every one of those gaps look
+ * like a pass. R4 showed the same erasure defeats the key-set allow-list, since
+ * `Object.keys()` on a parsed response never sees an undefined-valued key
+ * either.
  *
- * FIXTURE FIDELITY IS RECURSIVE (the permanent rule, sharpened by R4). A nested
- * field can only prove non-disclosure if the production-realizable fixture holds
- * a non-undefined value at that exact path BEFORE DTO projection — which means
- * every proof-relevant OPTIONAL leaf needs a value and every content-bearing
- * ARRAY needs at least one populated element. An empty array proves only itself,
- * never its element type, and that is where the most sensitive content in the
- * system lives: verbatim model excerpts, disagreement positions and bias
- * evidence. The spec carries a per-path inventory, a runtime reachability
- * self-check, and controls proving that deleting a value, emptying an array, or
- * replacing a sentinel with an ordinary value each break the self-check BEFORE
- * any non-disclosure claim can be made.
+ * So the primary mechanism is no longer completeness of the data. It is
+ * ABSENCE OF ACCESS (E2A-S8A): the projection never reads `reportSnapshot` at
+ * all, which holds at every depth, for every optional field, for every union
+ * variant and for every field added in future, without the fixture needing to
+ * anticipate any of them. Two independent mechanisms now carry the boundary:
+ *   S8A  a runtime source-access trap (a `Proxy` recording reads and
+ *        enumerations), with a ledger classifying EVERY persisted property as
+ *        allowed or forbidden, so a new field cannot sit unclassified;
+ *   S8B  a DEEP equality assertion on the response, which — unlike the depth-1
+ *        `Object.keys` check it replaces — catches a forbidden value nested
+ *        inside an allowed key.
+ * Their independence is demonstrated, not assumed: with the output assertions
+ * neutralised a `reportSnapshot` read still fails, and with the trap neutralised
+ * an extra defined DTO key still fails.
+ *
+ * The representative real-schema snapshots are retained as INTEGRATION EVIDENCE
+ * — they show the route behaves correctly against realistic, deeply-populated
+ * data of both families, including model prose, citations, trust scores and
+ * concrete result content. They are no longer asked to be exhaustive, and no
+ * claim here depends on them being so.
+ *
+ * RETRACTED MECHANISM, stated plainly because it was load-bearing and false.
+ * Earlier revisions of this header, the spec docblock, the PR body and commit
+ * `f76c109d`'s message all claimed that `satisfies` in the route spec pins every
+ * required leaf at compile time via the Quality Gate's `tsc --noEmit`. It does
+ * not, and it never did: `tsconfig.json` excludes every spec file by glob,
+ * `tsc --listFilesOnly` contains zero route-spec files, and ts-jest transpiles
+ * without type-checking. The decisive probe — inserting
+ * `const x: number = "a string"` into the spec — yields `tsc` exit 0 and a green
+ * Jest run. `satisfies` in that file is editor assistance and nothing more; it
+ * supplies no enforced evidence, and no proof here relies on it. The historical
+ * commit message is left intact.
+ *
+ * A PROOF MECHANISM MUST ITSELF BE FALSIFIED BEFORE PROSE RELIES ON IT. That
+ * rule exists because of the retraction above: the claim was documented from
+ * inspection, never probed. Every mechanism this file cites now has a test that
+ * deliberately triggers the defect it claims to catch.
  *
  * THE AUTHORITY-MOCK RULE (adopted in R2). A mocked security collaborator
  * is not proven by having been called: its security-relevant arguments must be
@@ -436,9 +464,16 @@ export async function GET(req: NextRequest, { params }: { params: { workspaceId:
     }
   }
 
-  // E2A-S8: an explicit allow-list projection. The frozen `reportSnapshot`, the
-  // governance record and every reviewer-private field are absent because they
-  // are never copied here — not because a denylist strips them.
+  // E2A-S8A/S8B: an explicit allow-list projection. `reportSnapshot`,
+  // `generatedBy`, `failureReason` and the record's own `version`/`runId`/
+  // `schemaVersion` are absent because they are never READ here — the spec's
+  // access trap proves that, rather than inferring it from the output. Note what
+  // is NOT claimed: `governanceStatusAtExport` IS copied, wholesale and
+  // un-narrowed, and its milestone2 form carries verbatim reviewer `conditions`.
+  // That is deliberate and not a disclosure — the canonical Team detail read
+  // already returns those conditions to every `research.read` holder — but an
+  // earlier revision said "the governance record … never copied here", which was
+  // wrong. Only `GovernanceRecordV1` is absent; the export's frozen status is not.
   const items: TeamAdaptiveExportListItem[] = listResult.records.map((r) => ({
     exportId: r.exportId,
     reportVersion: r.reportVersion,
@@ -470,8 +505,10 @@ export async function GET(req: NextRequest, { params }: { params: { workspaceId:
     // `markAdaptiveExportReady` wrote the flat key via
     // `.set({ "exportMetadata.fileHash": hash }, { merge: true })` onto a
     // document `createAdaptiveExportRecord` had ALREADY written with a full
-    // nested `exportMetadata` (the flat-key bug is commit 86185a6; the create
-    // writer has existed since fe1891f). Legacy records therefore carry BOTH,
+    // nested `exportMetadata`. (Attribution corrected in R6: the flat-key WRITE
+    // was introduced in fe1891f, the same commit as the create writer; 86185a6
+    // is the FIX that replaced it with a nested merge. An earlier revision named
+    // 86185a6 as the bug.) Legacy records therefore carry BOTH,
     // and `normalizeAdaptiveExportRecord` merges the flat value in and strips
     // the key. NO writer in this repository has been demonstrated to produce a
     // record lacking `exportMetadata`. The guard is justified by the blind cast

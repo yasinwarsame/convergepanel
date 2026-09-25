@@ -222,6 +222,10 @@ const SNAP = {
   LEGACY_COERCION_RAW: "SENTINEL_LEGACY_COERCION_RAW",
   LEGACY_COERCION_COERCED: "SENTINEL_LEGACY_COERCION_COERCED",
   LEGACY_COERCION_PATH: "SENTINEL_LEGACY_COERCION_PATH",
+  LEGACY_RAW_METRIC_LABEL: "SENTINEL_LEGACY_RAW_METRIC_LABEL",
+  LEGACY_RAW_METRIC_UNIT: "SENTINEL_LEGACY_RAW_METRIC_UNIT",
+  LEGACY_RAW_METRIC_SOURCE: "SENTINEL_LEGACY_RAW_METRIC_SOURCE",
+  LEGACY_MODEL_BULL_CASE: "SENTINEL_LEGACY_MODEL_BULL_CASE",
 } as const;
 
 /** Distinctive NUMBERS. R4's rule cuts both ways: a numeric leaf projected into the DTO serializes, so a recognisable value detects it — an allow-list entry alone would not survive a substitution into an already-allowed key. */
@@ -289,9 +293,21 @@ const M2_RESULT = {
  * array holds at least one populated element.
  *
  * Shapes come from `buildExportSnapshot` (`lib/adaptiveSchema/exportSnapshot.ts`)
- * and the types it writes. `satisfies` pins required leaves at compile time (the
- * Quality Gate runs `tsc --noEmit`; jest is transpile-only under
- * `isolatedModules`), and `M2_RESULT` is typed `satisfies ComparisonMatrixResult`
+ * and the types it writes.
+ *
+ * `satisfies` HERE ENFORCES NOTHING — retracted claim, stated plainly. An earlier
+ * revision said it "pins required leaves at compile time (the Quality Gate runs
+ * `tsc --noEmit`)". Disproved: `tsconfig.json` excludes every spec file by glob,
+ * `tsc --listFilesOnly` lists zero route-spec files, ts-jest transpiles without
+ * type-checking, and `const x: number = "a string"` inserted here gives `tsc` exit
+ * 0 with Jest green. Treat every `satisfies` in this file as editor assistance
+ * only. Nothing in the secrecy proof depends on it: E2A-S8A traps the source read
+ * at the root, which needs no type-level guarantee about the fixture. `result` is
+ * `unknown` at the snapshot boundary and its union has NINE members; only
+ * `ComparisonMatrixResult` is instantiated, and no coverage of the other eight is
+ * claimed — E2A-S8A makes that census unnecessary.
+ *
+ * `M2_RESULT` is still typed `satisfies ComparisonMatrixResult`
  * rather than leaning on `result: unknown` — R4 found the previous fixture paired
  * `schemaId: "comparison_matrix"` with `{ executiveSummary }`, a field that type
  * does not have (it belongs to `DeepResearchResult`), so the single result
@@ -325,12 +341,19 @@ const MILESTONE2_SNAPSHOT = {
       freshness: "timeless",
       riskLevel: "professional",
       evidenceQuality: "not_applicable",
-      consensusSummary: SNAP.M2_META_CONSENSUS,
-      disagreementSummary: SNAP.M2_META_DISAGREEMENT,
-      uncertainties: [SNAP.M2_META_UNCERTAINTY],
-      blindSpots: [SNAP.M2_META_BLINDSPOT],
+      // R5/§24: an earlier revision put sentinels on `consensusSummary`,
+      // `disagreementSummary` and `recommendedNextAction` and attributed them to
+      // `buildCommonMeta`. Source-traced, that attribution is FALSE:
+      // `buildCommonMeta` has one caller (`routeClassifiedQuery.ts`) and writes
+      // only onto `GracefulLimitationResponse.meta`, NEVER a
+      // `PersistedAdaptiveOutputV1`. The sole producer of THIS persisted path is
+      // `buildCommonResponseMeta`, which never writes those three and always
+      // writes `uncertainties: []` / `blindSpots: []`. The fixture now matches
+      // the real writer instead of inventing a superset, and the three invented
+      // inventory paths are gone.
+      uncertainties: [],
+      blindSpots: [],
       humanReviewNeeded: true,
-      recommendedNextAction: SNAP.M2_META_NEXT_ACTION,
       generatedAt: SNAP.GENERATED_AT,
       schemaId: "comparison_matrix",
       routingKind: "active",
@@ -365,6 +388,11 @@ const LEGACY_CELL = {
   excerpt: SNAP.LEGACY_CELL_EXCERPT,
   evidenceType: "empirical",
   backfilled: false,
+  // R5: `raw` carries real model content — `fieldAlignment.ts` writes a Metric,
+  // Scenario or Step here, and `Scenario.narrative` can be tens of words of model
+  // prose while `Metric.source` is a citation. Populated as integration evidence.
+  // It is NOT the proof: E2A-S8A blocks the root read regardless.
+  raw: { label: SNAP.LEGACY_RAW_METRIC_LABEL, value: 1, unit: SNAP.LEGACY_RAW_METRIC_UNIT, asOf: "2026", source: SNAP.LEGACY_RAW_METRIC_SOURCE },
 } satisfies AlignedClaimCell;
 
 const LEGACY_SNAPSHOT = {
@@ -472,7 +500,10 @@ const LEGACY_SNAPSHOT = {
         modelId: "chatgpt" as ModelId,
         schemaId: "financial_valuation",
         ok: false,
-        data: { thesis: SNAP.LEGACY_MODEL_THESIS },
+        // an open `Record<string, AdaptiveFieldValue>`; two realistic keys as
+        // integration evidence. Exhaustive coverage of an open record is
+        // impossible, which is exactly why E2A-S8A is the proof and this is not.
+        data: { thesis: SNAP.LEGACY_MODEL_THESIS, bullCase: SNAP.LEGACY_MODEL_BULL_CASE },
         parseError: SNAP.LEGACY_MODEL_PARSE_ERROR,
         truncatedFields: [SNAP.LEGACY_MODEL_TRUNCATED_FIELD],
         invalidFields: [SNAP.LEGACY_MODEL_INVALID_FIELD],
@@ -525,11 +556,6 @@ const snapshotSentinelPaths = (snapshot: AdaptiveExportReportSnapshot): [string,
       ["milestone2.result.cells[0].consensusValue", res.cells[0]?.consensusValue, "string"],
       ["milestone2.result.cells[0].rationale", res.cells[0]?.rationale, "string"],
       ["milestone2.result.cells[0].sources[0]", res.cells[0]?.sources?.[0], "string"],
-      ["milestone2.meta.consensusSummary", meta.consensusSummary, "string"],
-      ["milestone2.meta.disagreementSummary", meta.disagreementSummary, "string"],
-      ["milestone2.meta.uncertainties[0]", meta.uncertainties[0], "string"],
-      ["milestone2.meta.blindSpots[0]", meta.blindSpots[0], "string"],
-      ["milestone2.meta.recommendedNextAction", meta.recommendedNextAction, "string"],
       ["milestone2.meta.limitations[0]", meta.limitations?.[0], "string"],
       ["milestone2.meta.totalModels", meta.totalModels, "number"],
       ["milestone2.meta.successfulModels", meta.successfulModels, "number"],
@@ -562,6 +588,8 @@ const snapshotSentinelPaths = (snapshot: AdaptiveExportReportSnapshot): [string,
       ["legacy.alignedClaims[0].cells[0].excerpt", cell?.excerpt, "string"],
       ["legacy.alignedClaims[0].cells[0].camps[0].label", cell?.camps?.[0]?.label, "string"],
       ["legacy.alignedClaims[0].cells[0].camps[0].position", cell?.camps?.[0]?.position, "string"],
+      ["legacy.alignedClaims[0].cells[0].raw.label", (cell?.raw as { label?: string } | undefined)?.label, "string"],
+      ["legacy.alignedClaims[0].cells[0].raw.source", (cell?.raw as { source?: string } | undefined)?.source, "string"],
       ["legacy.gate.loadBearingClaims[0].claimText", lg.gate?.loadBearingClaims[0]?.claimText, "string"],
       ["legacy.gate.loadBearingClaims[0].cells[0].excerpt", lg.gate?.loadBearingClaims[0]?.cells[0]?.excerpt, "string"],
       ["legacy.synthesisReport.unifiedAnswer", sr?.unifiedAnswer, "string"],
@@ -599,6 +627,7 @@ const snapshotSentinelPaths = (snapshot: AdaptiveExportReportSnapshot): [string,
       ["legacy.trustSummary.perModel[0].trustScore", trust?.perModel[0]?.trustScore, "number"],
       ["legacy.trustSummary.perModel[0].parseHealth", trust?.perModel[0]?.parseHealth, "present"],
       ["legacy.modelResponses[0].data.thesis", (mr?.data as { thesis?: string } | null | undefined)?.thesis, "string"],
+      ["legacy.modelResponses[0].data.bullCase", (mr?.data as { bullCase?: string } | null | undefined)?.bullCase, "string"],
       ["legacy.modelResponses[0].parseError", mr?.parseError, "string"],
       ["legacy.modelResponses[0].truncatedFields[0]", mr?.truncatedFields?.[0], "string"],
       ["legacy.modelResponses[0].invalidFields[0]", mr?.invalidFields?.[0], "string"],
@@ -657,8 +686,13 @@ const allSnapshotSentinels = () => {
  * R2 proved it: adding `generatedBy` + `failureReason` to the DTO passed 35/35.
  *
  * Created by SOMEONE ELSE, so `createdBy` can never be the thing granting access.
- * Every non-DTO field carries a sentinel VALUE (never a type name — `"milestone2"`
- * could not serve, since `schemaFamily` legitimately carries it).
+ * Representative non-DTO fields carry sentinel VALUES (never a type name —
+ * `"milestone2"` could not serve, since `schemaFamily` legitimately carries it).
+ * This is deliberately NOT an exhaustive-sentinel claim: several non-DTO fields
+ * hold ordinary values, and secrecy does not rest on this fixture at all. It rests
+ * on E2A-S8A (the projection never READS a forbidden source) plus E2A-S8B (deep
+ * equality on the response); these records are integration evidence that the
+ * route behaves correctly against realistic data.
  */
 const exportRecord = (reportVersion: number, over: Record<string, unknown> = {}) => ({
   version: 1,
@@ -882,7 +916,8 @@ describe("E2-A — the authorized list path", () => {
     // R2: the old fixture omitted fields E1 writes, so projecting them changed
     // nothing (`JSON.stringify` drops `undefined`) and the key-set assertion was
     // blind to the two most likely additions. Both records below carry every
-    // real persisted field, each non-DTO one holding a sentinel VALUE.
+    // real persisted field, with sentinels on the representative and
+    // highest-sensitivity non-DTO ones. Integration evidence, not the proof.
     mockedListExports.mockImplementation(listFake([exportRecord(3), failedExportRecord(2)]));
     const r = await submit();
     const blob = JSON.stringify(r.json);
@@ -1517,9 +1552,9 @@ describe("E2A-S8 — no reportSnapshot leaf reaches the response", () => {
     expect(() => assertSnapshotSentinelsReachable(LEGACY_SNAPSHOT)).not.toThrow();
     // and there is genuinely something to hide, at a useful depth
     // exact counts, so neither a dropped path nor an unreviewed addition is silent
-    expect(snapshotSentinelPaths(MILESTONE2_SNAPSHOT).length).toBe(40);
-    expect(snapshotSentinelPaths(LEGACY_SNAPSHOT).length).toBe(57);
-    expect(allSnapshotSentinels().length).toBe(81);
+    expect(snapshotSentinelPaths(MILESTONE2_SNAPSHOT).length).toBe(35);
+    expect(snapshotSentinelPaths(LEGACY_SNAPSHOT).length).toBe(60);
+    expect(allSnapshotSentinels().length).toBe(79);
   });
 
   it("REACHABILITY CONTROL: dropping ONE nested leaf fails the self-check, before any non-disclosure claim", () => {
@@ -1575,7 +1610,7 @@ describe("E2A-S8 — no reportSnapshot leaf reaches the response", () => {
     // EXACT, not a threshold: R4 showed `>= 30` against 31 entries was defeated by
     // dropping one. An exact count fails on any silent shrink AND on any silent
     // growth that was not accompanied by a deliberate update here.
-    expect(needles.length).toBe(33);
+    expect(needles.length).toBe(28);
     for (const [path, needle] of needles) {
       // `path` is in the message so a failure names the leaking leaf, not just the value
       expect(`${path}=${blob.includes(needle)}`).toBe(`${path}=false`);
@@ -1591,7 +1626,7 @@ describe("E2A-S8 — no reportSnapshot leaf reaches the response", () => {
     expect(r.json.exports[0].schemaFamily).toBe("legacy");
     const blob = JSON.stringify(r.json);
     const needles = familySentinels(LEGACY_SNAPSHOT);
-    expect(needles.length).toBe(50);
+    expect(needles.length).toBe(53);
     for (const [path, needle] of needles) {
       expect(`${path}=${blob.includes(needle)}`).toBe(`${path}=false`);
     }
@@ -1733,6 +1768,22 @@ describe("E2A-S15 — the paging envelope is never self-contradictory", () => {
     const r = await submit();
     expect(r.status).toBe(200);
     expect(r.json.nextCursor).toBe(-5);
+  });
+
+  it("the integrity refusal emits a STRUCTURED operator warning — the only signal distinguishing it from a transient 503", async () => {
+    // R5 P2-2: this branch answers with a status, errorCode and message
+    // byte-identical to three TRANSIENT failures, so the response carries no
+    // signal at all and this warning is the only way an operator can tell a
+    // permanently-stuck run from a retryable blip. Deleting it passed 82/82.
+    // Deemed contractual and pinned on its STRUCTURED fields, not its prose.
+    mockedListExports.mockImplementation(listFake([exportRecord(3, { reportVersion: Number.NaN })], true));
+    const r = await submit();
+    expect(r.status).toBe(503);
+    const calls = mockedLoggerWarn.mock.calls.filter((c) => typeof c[0] === "string" && c[0].includes("continuation cursor"));
+    expect(calls).toHaveLength(1);
+    expect(calls[0][1]).toEqual(
+      expect.objectContaining({ workspaceId: WS, runId: RUN, itemCount: 1, lastReportVersionType: "number", lastReportVersionFinite: false })
+    );
   });
 
   it("POSITIVE CONTROL: hasMore with a usable terminal reportVersion still pages", async () => {
