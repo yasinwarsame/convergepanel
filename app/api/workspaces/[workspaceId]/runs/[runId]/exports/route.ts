@@ -99,7 +99,10 @@
  *           attempt to enumerate the record wholesale.
  *           → "E2A-S8A a normal list reads only allow-listed source properties"
  *           → "E2A-S8A the record is never enumerated or spread wholesale"
- *           → "E2A-S8A the ledger is exhaustive over the persisted record shape"
+ *           → "E2A-S8A the allowed-read policy is DEFAULT-DENY, so an unclassified property is still caught"
+ *           → "§5 instrumentation is applied by the MOCK BOUNDARY, so a raw mockResolvedValue cannot opt out"
+ *           → "§8 MECHANISM PROOF: every clone/serialize/enumerate operation fires the tripwire"
+ *           → "§9/§10 a SWALLOWED structuredClone still leaves the access recorded"
  *           → "MECHANISM PROOF: the trap fires on a forbidden read, and on enumeration"
  *   E2A-S8B RESPONSE SHAPE, proved INDEPENDENTLY of S8A by deep equality over
  *           the whole response — not `Object.keys`, which is depth-1 only.
@@ -156,9 +159,22 @@
  * all, which holds at every depth, for every optional field, for every union
  * variant and for every field added in future, without the fixture needing to
  * anticipate any of them. Two independent mechanisms now carry the boundary:
- *   S8A  a runtime source-access trap (a `Proxy` recording reads and
- *        enumerations), with a ledger classifying EVERY persisted property as
- *        allowed or forbidden, so a new field cannot sit unclassified;
+ *   S8A  runtime source-access instrumentation applied AT THE MOCK BOUNDARY, so
+ *        no fixture class can opt out (R6 found four input classes that had),
+ *        in TWO independent modes because neither covers every JS operation:
+ *        a DEFAULT-DENY `Proxy` (explicit reads, destructuring, `Reflect.get`,
+ *        off-policy reads, `ownKeys`/descriptor enumeration) and a PLAIN-OBJECT
+ *        ACCESSOR tripwire (`structuredClone`, `JSON.stringify`, spread,
+ *        `Object.values`/`entries`/`assign`) — the latter exists because
+ *        `structuredClone(proxy)` throws before any trap runs. Both RECORD
+ *        rather than throw, so a caught exception cannot erase the evidence.
+ *        The property list is this endpoint's ALLOWED-READ POLICY, not a mirror
+ *        of the persisted type: an earlier revision claimed it was exhaustive
+ *        over `AdaptiveResearchExportV1` so "a new field cannot sit
+ *        unclassified", which was false — the test compared it against another
+ *        literal in the same unchecked file. Withdrawn. Default-deny carries the
+ *        property instead: a read of anything off-policy, future fields
+ *        included, fails regardless of what the type declares;
  *   S8B  a DEEP equality assertion on the response, which — unlike the depth-1
  *        `Object.keys` check it replaces — catches a forbidden value nested
  *        inside an allowed key.
@@ -183,6 +199,23 @@
  * Jest run. `satisfies` in that file is editor assistance and nothing more; it
  * supplies no enforced evidence, and no proof here relies on it. The historical
  * commit message is left intact.
+ *
+ * OBSERVABILITY, CLASSIFIED (R6 asked; §31). Two warnings are CONTRACTUAL and
+ * asserted on their structured fields:
+ *   • `filed run's Project unresolved` — parity with the canonical read and E1,
+ *     which both warn here; E2-A used to log nothing at all.
+ *   • the E2A-S15 continuation-cursor warning — the ONLY operator signal
+ *     separating a PERMANENT data-integrity 503 from the transient ones, whose
+ *     status, errorCode and message are byte-identical.
+ *   • the cross-Workspace Project integrity anomaly — the sole trace of a
+ *     cross-tenant filing inconsistency, so it is asserted too.
+ * The remaining three (`run read failed`, `project read failed`,
+ * `export history read failed`) are INCIDENTAL and deliberately unasserted. R6
+ * noted the S15 argument could be read as applying to them; it does not, and the
+ * difference is stated rather than glossed: those three conditions are TRANSIENT
+ * and self-resolving, so the operator question is "is the datastore healthy",
+ * answered by the surrounding infrastructure, not "which of four identical 503s
+ * was this". Nothing in this file claims they are pinned, and nothing should.
  *
  * A PROOF MECHANISM MUST ITSELF BE FALSIFIED BEFORE PROSE RELIES ON IT. That
  * rule exists because of the retraction above: the claim was documented from

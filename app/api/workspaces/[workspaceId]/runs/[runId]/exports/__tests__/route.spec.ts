@@ -25,7 +25,23 @@ jest.mock("@/lib/workspaces/resolveTeamRunWorkspaceAccess", () => ({ resolveTeam
 const mockedGetProject = jest.fn();
 jest.mock("@/lib/firestore/projects", () => ({ getProject: (...a: unknown[]) => mockedGetProject(...a) }));
 const mockedListExports = jest.fn();
-jest.mock("@/lib/firestore/adaptiveExports", () => ({ listAdaptiveExportRecords: (...a: unknown[]) => mockedListExports(...a) }));
+/**
+ * R7 §3 — INSTRUMENTATION LIVES AT THE MOCK BOUNDARY.
+ *
+ * R6 found the previous design structurally unsafe: wrapping happened inside a
+ * `listFake` HELPER, so any test that reached for `mockResolvedValue` instead
+ * silently opted out — and those opt-outs turned out to be the SOLE carriers of
+ * the `generating`, `superseded`, `docx` and no-`fileHash` input classes. A leak
+ * gated on `artifactStatus === "generating"` therefore passed 92/92 green.
+ *
+ * Now the module mock itself instruments whatever any test resolves, so opting
+ * out is impossible by construction rather than by discipline. `instrumentListResult`
+ * is applied to the awaited result on every call; tests hand over raw logical
+ * results and cannot choose otherwise.
+ */
+jest.mock("@/lib/firestore/adaptiveExports", () => ({
+  listAdaptiveExportRecords: async (...a: unknown[]) => instrumentListResult(await mockedListExports(...a)),
+}));
 
 const runDocs = new Map<string, Record<string, unknown>>();
 let runGetThrows = false;
@@ -132,10 +148,11 @@ const grant = (role: "owner" | "admin" | "member" | "reviewer" | "viewer") => ({
  *
  * Shapes are taken from `buildExportSnapshot` (`lib/adaptiveSchema/
  * exportSnapshot.ts:141-154` for milestone2, `:174-189` for legacy) and the
- * types it writes, NOT from recollection. `satisfies` gives compile-time
- * enforcement of every REQUIRED leaf (the Quality Gate runs `tsc --noEmit`;
- * jest is transpile-only under `isolatedModules`, so `satisfies` alone is not
- * enough), and OPTIONAL leaves are covered by the runtime self-check below.
+ * types it writes, NOT from recollection. NOTE: `satisfies` here enforces
+ * NOTHING — this file is excluded from `tsconfig.json` and ts-jest transpiles it
+ * without type-checking, so treat it as editor assistance only (full retraction
+ * below). Fixture completeness is therefore integration evidence, never proof;
+ * the proof is E2A-S8A's runtime source-access instrumentation.
  *
  * Sentinel values are used wherever the type admits a free-form string. Where
  * it does not — enums (`consensusLevel`), `ModelId`, numbers, booleans — the
@@ -320,8 +337,11 @@ const M2_RESULT = {
  * `blindSpots: []`, `dataBasis: "training_prior"`,
  * `evidenceQuality: "not_applicable"`; `buildCommonMeta` (`commonMeta.ts:31-36`)
  * is what writes `consensusSummary`, `disagreementSummary` and
- * `recommendedNextAction`. This fixture is a deliberate union of both — a hostile
- * superset, every field of which SOME real writer emits.
+ * `recommendedNextAction` — but only onto `GracefulLimitationResponse.meta`,
+ * NEVER a `PersistedAdaptiveOutputV1`. So this fixture is NOT a union of both
+ * builders: an earlier revision said it was, which was false. It carries only
+ * what `buildCommonResponseMeta` — the sole producer of this persisted path —
+ * actually writes.
  */
 const MILESTONE2_SNAPSHOT = {
   question: SNAP.QUESTION,
@@ -723,6 +743,11 @@ const exportRecord = (reportVersion: number, over: Record<string, unknown> = {})
     finalReportVersion: reportVersion,
     fileHash: "f".repeat(64),
   },
+  // §14: a realistic FUTURE persisted field, deliberately absent from the
+  // allowed-read policy. It is not "forbidden" either — the point is that the
+  // Proxy is DEFAULT-DENY, so the route reading anything off-policy is caught
+  // without the test pretending to know the type's future shape.
+  futurePrivateField: "SENTINEL_FUTURE_PRIVATE_FIELD",
   ...over,
 });
 
@@ -755,12 +780,9 @@ const projectFake = async (projectId: string) =>
     : { status: "found", project: { id: String(projectId), name: "Foreign", status: "active", workspaceId: OTHER_WS } };
 
 /** History exists for the ADDRESSED run only — a helper that returns the same records for any runId would hide a cross-run read. */
+/** Raw logical results only — instrumentation is applied at the mock boundary above, so this helper cannot opt out and neither can any other call site. */
 const listFake = (records = [exportRecord(3), exportRecord(2)], hasMore = false) =>
-  async (runId: string) =>
-    runId === RUN
-      // E2A-S8A: every record handed to the route is access-trapped
-      ? { ok: true, records: records.map((r, i) => trapRecord(r as Record<string, unknown>, `rec${i}`)), hasMore }
-      : { ok: true, records: [], hasMore: false };
+  async (runId: string) => (runId === RUN ? { ok: true, records, hasMore } : { ok: true, records: [], hasMore: false });
 
 
 /**
@@ -797,6 +819,30 @@ const listFake = (records = [exportRecord(3), exportRecord(2)], hasMore = false)
  * else the persisted record carries is FORBIDDEN, so consuming it in future
  * has to be a deliberate, visible change to this list.
  */
+/**
+ * §15 — THE ALLOWED-READ POLICY. This is NOT a mirror of
+ * `AdaptiveResearchExportV1` (that claim was withdrawn in R7); it is the set of
+ * persistence-record properties this endpoint is authorized to consult. The Proxy
+ * mode is DEFAULT-DENY, so anything absent — including a field added to the type
+ * tomorrow — fails when read.
+ *
+ *   | source property           | LIST may read? | reason                        |
+ *   |---------------------------|----------------|-------------------------------|
+ *   | exportId                  | yes            | → DTO.exportId                |
+ *   | reportVersion             | yes            | → DTO + continuation cursor   |
+ *   | schemaId / schemaFamily   | yes            | → DTO                         |
+ *   | format                    | yes            | → DTO + isHashReproducible()  |
+ *   | artifactStatus            | yes            | → DTO                         |
+ *   | createdAt / createdBy     | yes            | → DTO (metadata, not authority)|
+ *   | classification            | yes            | → DTO                         |
+ *   | governanceStatusAtExport  | yes            | → DTO (copied wholesale)      |
+ *   | exportMetadata            | yes            | fileHash trio ONLY            |
+ *   | reportSnapshot            | NO             | the frozen report content     |
+ *   | generatedBy               | NO             | creator display name + email  |
+ *   | failureReason             | NO             | internal failure text         |
+ *   | version / runId / schemaVersion | NO       | not DTO fields                |
+ *   | anything else             | NO             | default deny                  |
+ */
 const ALLOWED_SOURCE_PROPS: readonly string[] = [
   "exportId",                 // → DTO.exportId
   "reportVersion",            // → DTO.reportVersion, and the continuation cursor
@@ -824,6 +870,32 @@ let sourceReads: string[] = [];
 let forbiddenSourceReads: string[] = [];
 let recordEnumerations: string[] = [];
 
+/**
+ * Two INDEPENDENT mechanisms, selected by `trapMode`, because R6 proved neither
+ * covers every JavaScript operation:
+ *
+ *   "proxy"    — default-deny Proxy. Sees explicit reads, destructuring,
+ *                `Reflect.get`, unclassified-property reads, and enumeration via
+ *                `ownKeys`/`getOwnPropertyDescriptor`.
+ *                BLIND SPOT (R6 P1-2): `structuredClone(proxy)` throws
+ *                `DataCloneError` BEFORE any trap runs — zero traps fire — so a
+ *                production `try { structuredClone(r).reportSnapshot } catch {}`
+ *                passed green while leaking in production, where records are
+ *                plain objects.
+ *
+ *   "accessor" — plain-object tripwire. A real plain object (NOT proxied, which
+ *                is the point) whose forbidden properties are `defineProperty`
+ *                getters that RECORD the access and return the real value. This
+ *                is what production looks like, so `structuredClone`,
+ *                `JSON.stringify`, spread, `Object.values`/`entries`/`assign` all
+ *                traverse it and fire the getter without throwing.
+ *
+ * Both RECORD rather than throw (§11): a production mutation may catch an
+ * exception, and a caught exception must not erase the proof that forbidden data
+ * was reached. The recorded flag is checked as a postcondition.
+ */
+let trapMode: "proxy" | "accessor" = "proxy";
+
 const trapRecord = (record: Record<string, unknown>, label: string): Record<string, unknown> =>
   new Proxy(record, {
     get(target, prop, receiver) {
@@ -843,6 +915,40 @@ const trapRecord = (record: Record<string, unknown>, label: string): Record<stri
       return Reflect.getOwnPropertyDescriptor(target, prop);
     },
   });
+
+/**
+ * Mechanism B — the plain-object accessor tripwire. Deliberately NOT wrapped in
+ * the Proxy: R6 showed `structuredClone` rejects a Proxy before traversing it, so
+ * the clone proof has to run against a genuine plain object.
+ */
+const accessorRecord = (record: Record<string, unknown>, label: string): Record<string, unknown> => {
+  const plain: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(record)) {
+    if (!FORBIDDEN_SOURCE_PROPS.includes(k)) plain[k] = v;
+  }
+  for (const prop of FORBIDDEN_SOURCE_PROPS) {
+    if (!(prop in record)) continue;
+    const value = record[prop];
+    Object.defineProperty(plain, prop, {
+      enumerable: true, // production records enumerate these; the tripwire must too
+      configurable: true,
+      get() {
+        sourceReads.push(prop);
+        forbiddenSourceReads.push(`${label}.${prop}`);
+        return value;
+      },
+    });
+  }
+  return plain;
+};
+
+/** §3 — the single instrumentation boundary. Every list result from the mocked helper passes through here, whatever a test resolved. */
+const instrumentListResult = (result: unknown): unknown => {
+  const r = result as { ok?: boolean; records?: unknown[] } | null;
+  if (!r || r.ok !== true || !Array.isArray(r.records)) return result;
+  const wrap = trapMode === "accessor" ? accessorRecord : trapRecord;
+  return { ...r, records: r.records.map((rec, i) => wrap(rec as Record<string, unknown>, `rec${i}`)) };
+};
 
 /** E2A-S8A assertion: no forbidden source property was consulted, and the record was never enumerated wholesale. */
 const expectNoForbiddenSourceAccess = () => {
@@ -869,6 +975,7 @@ beforeEach(() => {
   sourceReads = [];
   forbiddenSourceReads = [];
   recordEnumerations = [];
+  trapMode = "proxy";
   mockExportFlagEnabled = true;
   runDocs.set(RUN, teamRun());
   mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: UID });
@@ -1357,8 +1464,10 @@ describe("R2 P2-4 — a malformed historical record cannot crash the list", () =
    * pre-fix `markAdaptiveExportReady` wrote the flat `"exportMetadata.fileHash"`
    * key via `.set(…, { merge: true })` onto a document
    * `createAdaptiveExportRecord` had ALREADY written with a full nested
-   * `exportMetadata` (flat-key bug 86185a6; the create writer has required it
-   * since fe1891f, and `sanitizeForFirestore` never drops keys). Legacy records
+   * `exportMetadata` (the flat-key WRITE was introduced in fe1891f alongside the
+   * create writer, and 86185a6 is the FIX that replaced it with a nested merge —
+   * an earlier revision here had that backwards; the create writer has required
+   * `exportMetadata` since fe1891f, and `sanitizeForFirestore` never drops keys). Legacy records
    * therefore carry BOTH, and the normalizer merges the flat value in and strips
    * the key. NO writer in this repository has been demonstrated to produce a
    * record lacking `exportMetadata`.
@@ -1541,10 +1650,12 @@ describe("empty query parameters — inherited behaviour, characterized not endo
 });
 
 /**
- * R3 §2-§7 — the recursive non-disclosure proof. The fixtures are schema-
- * complete for BOTH families (`satisfies AdaptiveExportReportSnapshot`, so every
- * REQUIRED leaf is enforced at compile time) and every sentinel's presence at
- * its exact path is asserted at RUNTIME before any projection claim is made.
+ * R3 §2-§7 — the per-leaf non-disclosure evidence, now SECONDARY to E2A-S8A.
+ * The fixtures are deeply populated for BOTH families (`satisfies
+ * AdaptiveExportReportSnapshot` is editor assistance only — nothing type-checks
+ * this file) and every sentinel's presence at its exact path is asserted at
+ * RUNTIME before any projection claim is made. These tests demonstrate correct
+ * behaviour against realistic data; they are no longer the secrecy proof.
  */
 describe("E2A-S8 — no reportSnapshot leaf reaches the response", () => {
   it("REACHABILITY: every sentinel exists at its exact path in both fixtures BEFORE projection", () => {
@@ -1688,6 +1799,15 @@ describe("E2A-S6 — the Project outcome matrix matches the canonical read", () 
     expect(r.json.errorCode).toBe("team_workspace_unavailable");
     expect(mockedListExports).not.toHaveBeenCalled();
     noWrites();
+  });
+
+  it("the cross-Workspace Project integrity anomaly is logged — the sole trace of a cross-tenant filing inconsistency", async () => {
+    mockedGetProject.mockResolvedValue({ status: "found", project: { id: FIXTURE_PROJECT_ID, name: "F", status: "active", workspaceId: OTHER_WS } });
+    const r = await submit();
+    expect(r.status).toBe(404);
+    const calls = mockedLoggerWarn.mock.calls.filter((c) => typeof c[0] === "string" && c[0].includes("integrity anomaly"));
+    expect(calls).toHaveLength(1);
+    expect(calls[0][1]).toEqual(expect.objectContaining({ workspaceId: WS, runId: RUN }));
   });
 
   it("the degraded-Project warning carries NO report content, snapshot or governance data", async () => {
@@ -1842,19 +1962,25 @@ describe("E2A-S8A — the LIST projection never reads reportSnapshot", () => {
     expectNoForbiddenSourceAccess();
   });
 
-  it("E2A-S8A the ledger is exhaustive over the persisted record shape", () => {
-    // Every field AdaptiveResearchExportV1 carries is classified exactly once,
-    // so a NEW persisted field cannot sit unclassified: this fails until it is
-    // deliberately placed on one of the two lists.
-    const classified = [...ALLOWED_SOURCE_PROPS, ...FORBIDDEN_SOURCE_PROPS].sort();
-    expect(classified).toEqual(
-      [
-        "artifactStatus", "classification", "createdAt", "createdBy", "exportId", "exportMetadata",
-        "failureReason", "format", "generatedBy", "governanceStatusAtExport", "reportSnapshot",
-        "reportVersion", "runId", "schemaFamily", "schemaId", "schemaVersion", "version",
-      ].sort()
-    );
-    // the two lists must not overlap
+  it("E2A-S8A the allowed-read policy is DEFAULT-DENY, so an unclassified property is still caught", async () => {
+    // R6/§13: an earlier revision asserted this ledger was "exhaustive over
+    // AdaptiveResearchExportV1", so that "a new persisted field cannot sit
+    // unclassified". That was FALSE — the test compared the two lists against a
+    // third hand-written literal in the same file, nothing derived from the type,
+    // and jest does not type-check, so adding a field to the type left 92/92
+    // green. The claim is withdrawn rather than propped up with a second
+    // hand-maintained mirror of the schema.
+    //
+    // What actually carries the property is DEFAULT DENY: the policy lists what
+    // this projection is AUTHORIZED to consult, and any read outside it — a
+    // future field included — shows up in `sourceReads` and fails the filter
+    // below. The fixture carries `futurePrivateField` precisely to make that
+    // concrete.
+    const r = await submit();
+    expectTheFixtureHistory(r);
+    expect(sourceReads).not.toContain("futurePrivateField");
+    expect(Array.from(new Set(sourceReads)).filter((p) => !ALLOWED_SOURCE_PROPS.includes(p))).toEqual([]);
+    // the two lists must not overlap, which IS checkable without the type
     expect(ALLOWED_SOURCE_PROPS.filter((p) => FORBIDDEN_SOURCE_PROPS.includes(p))).toEqual([]);
   });
 
@@ -1964,5 +2090,128 @@ describe("E2A-S8B — the response is exactly the approved DTO, deeply", () => {
     const approved = { family: "milestone2", kind: "approved", isOwnerOverride: false };
     expect(() => expect({ governanceStatusAtExport: { ...approved, smuggled: "x" } }).toEqual({ governanceStatusAtExport: approved })).toThrow();
     expect(() => expect({ governanceStatusAtExport: approved }).toEqual({ governanceStatusAtExport: approved })).not.toThrow();
+  });
+});
+
+/**
+ * ─── §4/§5/§17 — INPUT-CLASS COVERAGE, and proof there is no bypass ───────
+ * R6's blocker was not a missing assertion but a missing BOUNDARY: four input
+ * classes only ever appeared on paths that opted out of wrapping. These tests
+ * exercise every DTO-branch-selecting input class THROUGH the central boundary,
+ * and the first one proves the boundary itself cannot be opted out of.
+ */
+describe("E2A-S8A — every input class passes through the instrumentation boundary", () => {
+  it("§5 instrumentation is applied by the MOCK BOUNDARY, so a raw mockResolvedValue cannot opt out", async () => {
+    // This is the exact shape that bypassed the old per-fixture wrapper.
+    mockedListExports.mockResolvedValue({ ok: true, records: [exportRecord(3)], hasMore: false });
+    const r = await submit();
+    expect(r.status).toBe(200);
+    // the record really was instrumented: the projection's reads were observed
+    expectSourceWasRead("exportId", "reportVersion", "format");
+    expectNoForbiddenSourceAccess();
+  });
+
+  it.each([
+    ["ready pdf", { artifactStatus: "ready", format: "pdf" }],
+    ["ready docx", { artifactStatus: "ready", format: "docx" }],
+    ["generating", { artifactStatus: "generating" }],
+    ["superseded", { artifactStatus: "superseded" }],
+    ["failed", { artifactStatus: "failed" }],
+  ])("§17 %s: instrumented and forbidden-read-free", async (_label, over) => {
+    mockedListExports.mockResolvedValue({ ok: true, records: [exportRecord(3, over)], hasMore: false });
+    const r = await submit();
+    expect(r.status).toBe(200);
+    expect(r.json.exports).toHaveLength(1);
+    expectSourceWasRead("artifactStatus", "format");
+    expectNoForbiddenSourceAccess();
+    expect(Array.from(new Set(sourceReads)).filter((p) => !ALLOWED_SOURCE_PROPS.includes(p))).toEqual([]);
+  });
+
+  it("§17 no fileHash: instrumented and forbidden-read-free", async () => {
+    const meta = { exportId: "exp-1", runId: RUN, schemaVersion: 1, requestingUser: CREATOR_UID };
+    mockedListExports.mockResolvedValue({ ok: true, records: [exportRecord(1, { exportMetadata: meta })], hasMore: false });
+    const r = await submit();
+    expect(r.json.exports[0].fileHash).toBeUndefined();
+    expectNoForbiddenSourceAccess();
+  });
+
+  it("§17 legacy family: instrumented and forbidden-read-free", async () => {
+    mockedListExports.mockResolvedValue({ ok: true, records: [legacyExportRecord(3)], hasMore: false });
+    const r = await submit();
+    expect(r.json.exports[0].schemaFamily).toBe("legacy");
+    expectNoForbiddenSourceAccess();
+  });
+
+  it("§17 hasMore paging path: instrumented and forbidden-read-free", async () => {
+    mockedListExports.mockResolvedValue({ ok: true, records: [exportRecord(9), exportRecord(8)], hasMore: true });
+    const r = await submit();
+    expect(r.json.nextCursor).toBe(8);
+    expectNoForbiddenSourceAccess();
+  });
+});
+
+/**
+ * ─── §6–§11 — MECHANISM B: the plain-object accessor tripwire ─────────────
+ * The Proxy's blind spot, closed. `structuredClone(proxy)` throws
+ * `DataCloneError` before any trap runs, so a production
+ * `try { structuredClone(r).reportSnapshot } catch {}` was invisible while
+ * leaking in production, where records are plain objects. The accessor tripwire
+ * IS a plain object, so clone/serialize/enumerate operations traverse it and fire
+ * the getter — and it RECORDS rather than throws, so catching an exception cannot
+ * erase the evidence.
+ */
+describe("E2A-S8A mechanism B — plain-object accessor tripwire", () => {
+  beforeEach(() => {
+    trapMode = "accessor";
+  });
+
+  it("§8 MECHANISM PROOF: every clone/serialize/enumerate operation fires the tripwire", () => {
+    const probe = () => accessorRecord({ exportId: "x", reportSnapshot: { q: "SECRET" } }, "probe");
+    const fired = (op: (rec: Record<string, unknown>) => unknown) => {
+      forbiddenSourceReads = [];
+      const rec = probe();
+      try { op(rec); } catch { /* the operation itself may throw; the record is what matters */ }
+      return forbiddenSourceReads.length > 0;
+    };
+    // §8 asks for ACTUAL JavaScript behaviour, recorded rather than assumed
+    expect(fired((r) => r.reportSnapshot)).toBe(true);           // direct read
+    expect(fired((r) => JSON.stringify(r))).toBe(true);          // serialization
+    expect(fired((r) => ({ ...r }))).toBe(true);                 // spread
+    expect(fired((r) => Object.values(r))).toBe(true);
+    expect(fired((r) => Object.entries(r))).toBe(true);
+    expect(fired((r) => Object.assign({}, r))).toBe(true);
+    expect(fired((r) => structuredClone(r))).toBe(true);         // the R6 blind spot
+    // and the one that does NOT traverse values, recorded honestly:
+    expect(fired((r) => Object.keys(r))).toBe(false);
+  });
+
+  it("§9/§10 a SWALLOWED structuredClone still leaves the access recorded", () => {
+    // The precise R6 attack: the exception is caught, so nothing propagates —
+    // but the getter already ran, and that is what the assertion checks.
+    const rec = accessorRecord({ exportId: "x", reportSnapshot: { q: "SECRET" } }, "probe");
+    forbiddenSourceReads = [];
+    try {
+      void (structuredClone(rec) as Record<string, unknown>).reportSnapshot;
+    } catch {
+      /* swallowed, exactly as the attacking mutation would */
+    }
+    expect(forbiddenSourceReads).toEqual(["probe.reportSnapshot"]);
+  });
+
+  it("the baseline route triggers NO tripwire in accessor mode either", async () => {
+    const r = await submit();
+    expectTheFixtureHistory(r);
+    expect(forbiddenSourceReads).toEqual([]);
+  });
+
+  it("accessor mode covers both families and every artifactStatus", async () => {
+    mockedListExports.mockResolvedValue({
+      ok: true,
+      records: [exportRecord(4, { artifactStatus: "generating" }), legacyExportRecord(3), failedExportRecord(2), exportRecord(1, { format: "docx" })],
+      hasMore: false,
+    });
+    const r = await submit();
+    expect(r.json.exports).toHaveLength(4);
+    expect(forbiddenSourceReads).toEqual([]);
   });
 });
