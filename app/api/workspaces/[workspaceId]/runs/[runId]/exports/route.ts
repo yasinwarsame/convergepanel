@@ -7,13 +7,21 @@
  * Workspace sibling of `GET /api/user/runs/[runId]/exports`, which stays
  * owner-only and is untouched by this PR.
  *
- * WHAT IS SHARED WITH PERSONAL. Exactly one thing: `listAdaptiveExportRecords`.
- * It owns the query — `orderBy("reportVersion","desc")`, the `where("<", cursor)`
- * range, `limit+1`/`hasMore`, and the `[1,50]` clamp (pinned in
- * `lib/firestore/__tests__/adaptiveExports.spec.ts`). Everything else that looks
- * shared is DUPLICATED source: the query-parameter parse, the `nextCursor`
- * derivation and the `format !== "docx"` hash rule each exist separately in both
- * routes, identical today and pinned together by no test. An earlier version of
+ * WHAT IS SHARED WITH PERSONAL. Of the EXPORT-LIST logic, one thing:
+ * `listAdaptiveExportRecords`. It owns the query —
+ * `orderBy("reportVersion","desc")`, the `where("<", cursor)` range,
+ * `limit+1`/`hasMore`, and the `[1,50]` clamp (pinned in
+ * `lib/firestore/__tests__/adaptiveExports.spec.ts`). Route-level authority and
+ * request handling are entirely separate. (This is deliberately NOT a claim that
+ * the two routes share only one module: they both import the same
+ * `resolveRequestIdentity`, `logIdentityResolutionFailure`, `env`, `adminDb` and
+ * `logger`, as any two routes in this codebase do, and their `getUid` helpers are
+ * near-verbatim duplicates. Generic infrastructure being shared is not the point;
+ * the point is which EXPORT-LIST semantics have one implementation.) Everything
+ * else in the export-list path that looks shared is DUPLICATED source: the
+ * query-parameter parse, the `nextCursor` derivation and the
+ * `format !== "docx"` hash rule each exist separately in both routes, identical
+ * today and pinned together by no test. An earlier version of
  * this header claimed "ordering, the cursor contract and the [1,50] clamp have
  * one implementation rather than two"; the cursor contract's client-facing half
  * is two implementations, so the claim was false and is withdrawn rather than
@@ -58,10 +66,25 @@
  *   E2A-S7  Creator identity is not authority: `createdBy` is metadata. A
  *           currently authorized NON-creator may list; a removed creator may not.
  *           → "E2A-S7 a current reader who did NOT create the exports receives them"
- *   E2A-S8  The response exposes only the approved metadata DTO — at the item
- *           level AND the envelope level. Proved against the fields E1 really
- *           persists, each carrying a sentinel value.
+ *   E2A-S8  The E2-A LIST response contains only the approved export metadata
+ *           DTO — at the item level AND the envelope level. NO field and no
+ *           NESTED LEAF of the frozen `reportSnapshot` is projected into the
+ *           response. R3 showed why the nested half has to be said out loud: the
+ *           old fixture populated only `reportSnapshot.question`, so extracting
+ *           `milestone2.decisionReceipt`, `milestone2.meta`, the five top-level
+ *           report leaves or the whole `legacy` branch LEAF BY LEAF passed the
+ *           entire suite. A wholesale `reportSnapshot: r.reportSnapshot` was
+ *           caught; field-by-field was invisible, because an absent fixture leaf
+ *           serializes as nothing.
  *           → "E2A-S8 the response exposes only the approved metadata DTO — proved against what E1 really persists"
+ *           → "E2A-S8 no milestone2 reportSnapshot leaf reaches the response"
+ *           → "E2A-S8 no legacy reportSnapshot leaf reaches the response"
+ *   E2A-S15 A paging envelope is never self-contradictory: `hasMore: true` is
+ *           emitted only together with a usable continuation cursor.
+ *           → "a page that cannot yield a continuation cursor is an integrity failure, not a trap"
+ *           → "a NON-NUMERIC reportVersion is refused the same way"
+ *           → "hasMore with an EMPTY page cannot crash or invent a cursor"
+ *           → "POSITIVE CONTROL: hasMore with a usable terminal reportVersion still pages"
  *   E2A-S9  LIST is gated on `research.read`, NOT `exports.create`.
  *           → "E2A-S9 a role with research.read but WITHOUT exports.create can list"
  *   E2A-S9b The gate asks for `research.read` SPECIFICALLY, not a capability
@@ -87,7 +110,25 @@
  *   E2A-S14 The export-history read is scoped to the addressed run.
  *           → "E2A-S14 the helper receives the addressed runId"
  *
- * THE AUTHORITY-MOCK RULE (adopted this round). A mocked security collaborator
+ * WHERE THE E2A-S8 GUARANTEE ACTUALLY COMES FROM — three mechanisms, not one,
+ * and not from "every persisted field carries a sentinel" (an earlier revision
+ * said that; seven non-DTO fixture fields carry ordinary values):
+ *   1. the exact DTO key allow-list, at both the item and envelope level, which
+ *      catches ANY added key including ones no sentinel covers;
+ *   2. targeted sentinel VALUES on the representative and highest-risk persisted
+ *      non-DTO fields — `generatedBy`, `failureReason`, `exportMetadata`'s own
+ *      leaves, and every `reportSnapshot` leaf;
+ *   3. RECURSIVE hostile `reportSnapshot` fixtures for BOTH schema families, so
+ *      a nested leaf cannot be "proved absent" merely by being absent from the
+ *      fixture.
+ *
+ * FIXTURE FIDELITY IS RECURSIVE (the permanent rule from R3). A nested field can
+ * only prove non-disclosure if the production-valid fixture actually contains a
+ * non-undefined value at that exact path BEFORE DTO projection. Absent nested
+ * values are not evidence — they are the absence of evidence, and
+ * `JSON.stringify` erases the difference at every depth.
+ *
+ * THE AUTHORITY-MOCK RULE (adopted in R2). A mocked security collaborator
  * is not proven by having been called: its security-relevant arguments must be
  * pinned, and where practical the fake must BEHAVE DIFFERENTLY when they are
  * wrong. Caller identity, Workspace identity, Project identity, capability
@@ -312,6 +353,20 @@ export async function GET(req: NextRequest, { params }: { params: { workspaceId:
       logger.warn(`${LOG} run filed in a Project of another Workspace (integrity anomaly)`, { workspaceId, runId });
       return shared(runNotFoundConcealedResponse());
     }
+    // R3 P2: `not_found` and `malformed` are NOT integrity anomalies — a
+    // Project document that is simply gone says nothing about which Workspace
+    // this run belongs to, which `validateTeamRunRowShape` already settled. The
+    // canonical Team detail read logs and renders the run without a Project
+    // label, and E1 logs and exports; E2-A carries no Project label either, so
+    // it logs and lists. Behaviourally the two statuses are identical in all
+    // three routes — the distinction survives in `errorCategory`, not in the
+    // response — and turning them into a refusal would make export history
+    // unlistable for a run the canonical read still renders. E2-A previously
+    // logged NOTHING here, so a run listing against a vanished Project left no
+    // operator trace at all; that asymmetry with its two siblings is fixed.
+    if (projectResult.status !== "found") {
+      logger.warn(`${LOG} filed run's Project unresolved`, { workspaceId, runId, errorCategory: projectResult.status });
+    }
   }
 
   // ── The list itself ──
@@ -362,24 +417,63 @@ export async function GET(req: NextRequest, { params }: { params: { workspaceId:
     createdBy: r.createdBy,
     governanceStatusAtExport: r.governanceStatusAtExport,
     classification: r.classification,
-    // R2 P2-4: `exportMetadata` is OPTIONAL at runtime even though the type
-    // declares it required. `normalizeAdaptiveExportRecord` blind-casts
-    // (`raw as AdaptiveResearchExportV1`) with no shape validation, and its
-    // legacy branch for the flat `"exportMetadata.fileHash"` key returns the
-    // record UNCHANGED when there is no nested map to merge into
-    // (`if (rest.exportMetadata && …)`), so a legacy document whose only hash
-    // carrier was the flat key arrives here with no `exportMetadata` at all.
-    // Unguarded, that threw a TypeError out of GET — the one failure path with
-    // no `{ok:false,errorCode}` envelope, and one bad historical document broke
-    // the whole page. The record still lists; only its hash trio is omitted,
-    // which is exactly the established contract for a record that never
-    // produced bytes. No hash value is ever synthesized.
+    // BLIND_CAST_HARDENING. `exportMetadata` is declared required on
+    // `AdaptiveResearchExportV1`, but nothing validates it at runtime:
+    // `normalizeAdaptiveExportRecord` returns `raw as AdaptiveResearchExportV1`
+    // with no shape check, so the type is an assumption about persisted data,
+    // not a guarantee about it. Unguarded, `r.exportMetadata.fileHash` threw a
+    // TypeError out of GET — the one failure path with no `{ok:false,errorCode}`
+    // envelope — and a single malformed document would break the whole page for
+    // every reader. The record still lists; only its hash trio is omitted, which
+    // is already the contract for a record that produced no bytes, and no hash
+    // value is ever synthesized.
+    //
+    // SUPERSEDED CLAIM, recorded deliberately. An earlier revision of this
+    // comment (and of commit 8a5ef05d's message, which is left intact for
+    // auditability) asserted this shape was "REACHABLE from historical data":
+    // that a legacy document whose only hash carrier was the flat
+    // `"exportMetadata.fileHash"` key would arrive with no `exportMetadata`.
+    // R3 source-traced it and that is FALSE. The pre-fix
+    // `markAdaptiveExportReady` wrote the flat key via
+    // `.set({ "exportMetadata.fileHash": hash }, { merge: true })` onto a
+    // document `createAdaptiveExportRecord` had ALREADY written with a full
+    // nested `exportMetadata` (the flat-key bug is commit 86185a6; the create
+    // writer has existed since fe1891f). Legacy records therefore carry BOTH,
+    // and `normalizeAdaptiveExportRecord` merges the flat value in and strips
+    // the key. NO writer in this repository has been demonstrated to produce a
+    // record lacking `exportMetadata`. The guard is justified by the blind cast
+    // at a public API boundary, not by a known producer.
     ...(r.exportMetadata?.fileHash
       ? { fileHash: r.exportMetadata.fileHash, hashAlgorithm: "sha256" as const, hashReproducible: isHashReproducible(r.format) }
       : {}),
   }));
 
-  const nextCursor = listResult.hasMore && items.length > 0 ? items[items.length - 1].reportVersion : null;
+  // ── E2A-S15: a paging envelope is never self-contradictory ──
+  // R3 reproduced the trap: a record whose `reportVersion` is missing or
+  // non-numeric (this route reads blind-cast historical persistence, so it
+  // cannot assume otherwise) produced `hasMore: true` with `nextCursor`
+  // ABSENT — `JSON.stringify` drops `undefined`, which also violated this
+  // route's own envelope allow-list — and a client paging on `nextCursor`
+  // re-requests page 1 for ever.
+  //
+  // The two tempting repairs are both lies: `hasMore: false` would claim the
+  // history is complete when it is not, and synthesizing a cursor would invent
+  // a position in someone's audit history. So a page that cannot yield a valid
+  // continuation is treated as what it is — malformed persisted data — and
+  // answered with this route's existing service-unavailable envelope. No new
+  // public error vocabulary, and the caller is told to retry rather than handed
+  // a contradiction.
+  const lastReportVersion = items.length > 0 ? items[items.length - 1].reportVersion : null;
+  const nextCursor = listResult.hasMore && typeof lastReportVersion === "number" && Number.isFinite(lastReportVersion) ? lastReportVersion : null;
+  if (listResult.hasMore && nextCursor === null) {
+    logger.warn(`${LOG} export history page cannot yield a continuation cursor`, {
+      workspaceId,
+      runId,
+      itemCount: items.length,
+      lastReportVersionType: typeof lastReportVersion,
+    });
+    return shared(unavailableAfterAuthorization());
+  }
 
   return NextResponse.json({ ok: true, runId, exports: items, hasMore: listResult.hasMore, nextCursor });
 }

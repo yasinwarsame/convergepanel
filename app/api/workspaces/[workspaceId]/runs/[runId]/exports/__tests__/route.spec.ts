@@ -70,13 +70,19 @@ jest.mock("@/lib/firebase/admin", () => ({
     };
   },
 }));
-jest.mock("@/lib/logger", () => ({ logger: { warn: jest.fn(), info: jest.fn(), error: jest.fn(), debug: jest.fn() } }));
+const mockedLoggerWarn = jest.fn();
+// deferred reference (same pattern as the other mocks here) so the hoisted
+// factory does not touch the const before its initializer has run
+jest.mock("@/lib/logger", () => ({ logger: { warn: (...a: unknown[]) => mockedLoggerWarn(...a), info: jest.fn(), error: jest.fn(), debug: jest.fn() } }));
 
 import { NextRequest } from "next/server";
 import { Timestamp } from "firebase-admin/firestore";
 import { GET } from "@/app/api/workspaces/[workspaceId]/runs/[runId]/exports/route";
 import { FIXTURE_PROJECT_ID, FIXTURE_RUN_ID, FIXTURE_WORKSPACE_ID, fullTeamRunData } from "@/lib/runs/__tests__/runReadFixtures";
 import { ROLE_CAPABILITIES } from "@/lib/workspaces/capabilities";
+import type { AdaptiveExportReportSnapshot } from "@/lib/adaptiveSchema/researchExport";
+import type { ModelId } from "@/lib/types";
+import { teamRunLookupUnavailableResponse } from "@/lib/workspaces/teamRunAccessResponse";
 
 const UID = "member-b";
 const OTHER_UID = "someone-else-entirely";
@@ -108,6 +114,233 @@ const grant = (role: "owner" | "admin" | "member" | "reviewer" | "viewer") => ({
   membership: { uid: UID, role },
   capabilities: ROLE_CAPABILITIES[role],
 });
+
+
+/**
+ * ─── RECURSIVE HOSTILE reportSnapshot FIXTURES (R3 §2-§4) ──────────────────
+ *
+ * THE PERMANENT RULE: fixture fidelity is RECURSIVE. A nested field can only
+ * prove non-disclosure if the production-valid fixture actually contains a
+ * non-undefined value at that exact path BEFORE DTO projection. R3 proved the
+ * cost of ignoring it: the previous fixture populated only
+ * `reportSnapshot.question`, so projecting `milestone2.decisionReceipt`,
+ * `milestone2.meta`, the five top-level report leaves, or the whole `legacy`
+ * branch LEAF BY LEAF left all 60 tests green. `JSON.stringify` drops
+ * `undefined` at every depth, so an absent leaf is not evidence of protection —
+ * it is the absence of evidence.
+ *
+ * Shapes are taken from `buildExportSnapshot` (`lib/adaptiveSchema/
+ * exportSnapshot.ts:141-154` for milestone2, `:174-189` for legacy) and the
+ * types it writes, NOT from recollection. `satisfies` gives compile-time
+ * enforcement of every REQUIRED leaf (the Quality Gate runs `tsc --noEmit`;
+ * jest is transpile-only under `isolatedModules`, so `satisfies` alone is not
+ * enough), and OPTIONAL leaves are covered by the runtime self-check below.
+ *
+ * Sentinel values are used wherever the type admits a free-form string. Where
+ * it does not — enums (`consensusLevel`), `ModelId`, numbers, booleans — the
+ * leak is caught by the exact DTO key allow-list instead, which fires for ANY
+ * added key. Both mechanisms are load-bearing; neither alone is sufficient.
+ */
+const SNAP = {
+  QUESTION: "SENTINEL_SNAPSHOT_QUESTION",
+  REPORT_TYPE_LABEL: "SENTINEL_REPORT_TYPE_LABEL",
+  GENERATED_AT: "2031-12-31T23:59:59.001Z",
+  M2_RESULT: "SENTINEL_M2_RESULT_BODY",
+  M2_META_UNCERTAINTY: "SENTINEL_M2_META_UNCERTAINTY",
+  M2_META_BLINDSPOT: "SENTINEL_M2_META_BLINDSPOT",
+  M2_META_CONSENSUS: "SENTINEL_M2_META_CONSENSUS_SUMMARY",
+  M2_META_DISAGREEMENT: "SENTINEL_M2_META_DISAGREEMENT_SUMMARY",
+  M2_META_NEXT_ACTION: "SENTINEL_M2_META_NEXT_ACTION",
+  M2_META_LIMITATION: "SENTINEL_M2_META_LIMITATION",
+  RECEIPT_CONCLUSION: "SENTINEL_RECEIPT_CONCLUSION",
+  RECEIPT_BASIS: "SENTINEL_RECEIPT_BASIS",
+  RECEIPT_ASSUMPTION: "SENTINEL_RECEIPT_ASSUMPTION",
+  RECEIPT_UNCERTAINTY: "SENTINEL_RECEIPT_UNCERTAINTY",
+  RECEIPT_LIMITATION: "SENTINEL_RECEIPT_LIMITATION",
+  RECEIPT_SOURCE: "SENTINEL_RECEIPT_SOURCE",
+  LEGACY_CLAIM_TEXT: "SENTINEL_LEGACY_ALIGNED_CLAIM",
+  LEGACY_CLAIM_ID: "SENTINEL_LEGACY_CLAIM_ID",
+  LEGACY_UNIFIED_ANSWER: "SENTINEL_LEGACY_UNIFIED_ANSWER",
+  LEGACY_PANEL_VERDICT: "SENTINEL_LEGACY_PANEL_VERDICT",
+  LEGACY_EXEC_SUMMARY: "SENTINEL_LEGACY_EXEC_SUMMARY",
+  LEGACY_CERTAINTY_TEXT: "SENTINEL_LEGACY_CERTAINTY_ASSESSMENT",
+  LEGACY_AGREE: "SENTINEL_LEGACY_WHERE_MODELS_AGREE",
+  LEGACY_DISAGREE: "SENTINEL_LEGACY_WHERE_MODELS_DISAGREE",
+  LEGACY_NARRATIVE_TITLE: "SENTINEL_LEGACY_NARRATIVE_TITLE",
+  LEGACY_NARRATIVE_BODY: "SENTINEL_LEGACY_NARRATIVE_BODY",
+  LEGACY_VERDICT_TOP_CONSENSUS: "SENTINEL_LEGACY_VERDICT_TOP_CONSENSUS",
+  LEGACY_VERDICT_NEXT_STEP: "SENTINEL_LEGACY_VERDICT_NEXT_STEP",
+  LEGACY_MODEL_THESIS: "SENTINEL_LEGACY_MODEL_THESIS",
+  LEGACY_GATE_CLAIM_TEXT: "SENTINEL_LEGACY_GATE_CLAIM",
+} as const;
+
+const MILESTONE2_SNAPSHOT = {
+  question: SNAP.QUESTION,
+  models: [{ modelId: "chatgpt" as ModelId, ok: true }],
+  reportTypeLabel: SNAP.REPORT_TYPE_LABEL,
+  consensusLevel: "split",
+  sourceGroundingLevel: "weak",
+  reportGeneratedAt: SNAP.GENERATED_AT,
+  milestone2: {
+    schemaId: "comparison_matrix",
+    result: { executiveSummary: SNAP.M2_RESULT },
+    meta: {
+      schemaVersion: 1,
+      queryType: "comparison_matrix",
+      answerShape: "comparison_grid",
+      dataBasis: "mixed",
+      freshness: "timeless",
+      riskLevel: "professional",
+      evidenceQuality: "moderate",
+      consensusSummary: SNAP.M2_META_CONSENSUS,
+      disagreementSummary: SNAP.M2_META_DISAGREEMENT,
+      uncertainties: [SNAP.M2_META_UNCERTAINTY],
+      blindSpots: [SNAP.M2_META_BLINDSPOT],
+      humanReviewNeeded: true,
+      recommendedNextAction: SNAP.M2_META_NEXT_ACTION,
+      generatedAt: SNAP.GENERATED_AT,
+      limitations: [SNAP.M2_META_LIMITATION],
+    },
+    decisionReceipt: {
+      conclusion: SNAP.RECEIPT_CONCLUSION,
+      basis: [SNAP.RECEIPT_BASIS],
+      assumptions: [SNAP.RECEIPT_ASSUMPTION],
+      uncertainties: [SNAP.RECEIPT_UNCERTAINTY],
+      limitations: [SNAP.RECEIPT_LIMITATION],
+      sources: [SNAP.RECEIPT_SOURCE],
+      sourceBacked: true,
+      humanReviewNeeded: true,
+    },
+  },
+} satisfies AdaptiveExportReportSnapshot;
+
+const LEGACY_SNAPSHOT = {
+  question: SNAP.QUESTION,
+  models: [{ modelId: "chatgpt" as ModelId, ok: true }],
+  reportTypeLabel: SNAP.REPORT_TYPE_LABEL,
+  consensusLevel: "split",
+  sourceGroundingLevel: "weak",
+  reportGeneratedAt: SNAP.GENERATED_AT,
+  legacy: {
+    schemaId: "financial_valuation",
+    alignedClaims: [
+      { id: SNAP.LEGACY_CLAIM_ID, claimText: SNAP.LEGACY_CLAIM_TEXT, cells: [], agreementScore: 0.5, certaintyScore: 0.5, status: "split" },
+    ],
+    gate: {
+      status: "caution",
+      runCertainty: 0.5,
+      loadBearingSplitCount: 1,
+      loadBearingClaims: [
+        { id: "gate-claim-1", claimText: SNAP.LEGACY_GATE_CLAIM_TEXT, cells: [], agreementScore: 0.1, certaintyScore: 0.1, status: "split" },
+      ],
+    },
+    synthesisReport: {
+      unifiedAnswer: SNAP.LEGACY_UNIFIED_ANSWER,
+      panelVerdict: SNAP.LEGACY_PANEL_VERDICT,
+      gate: "caution",
+      runCertainty: 0.5,
+      whereModelsAgree: [SNAP.LEGACY_AGREE],
+      whereModelsDisagree: [SNAP.LEGACY_DISAGREE],
+      certaintyAssessment: SNAP.LEGACY_CERTAINTY_TEXT,
+      narrativeSections: [{ title: SNAP.LEGACY_NARRATIVE_TITLE, body: SNAP.LEGACY_NARRATIVE_BODY }],
+      executiveSummary: SNAP.LEGACY_EXEC_SUMMARY,
+      disagreements: [],
+      biasAndBlindSpots: [],
+      biasEmptyReason: "below_threshold",
+      panelCoverageGaps: [],
+      diagnostics: {
+        citedClaimCount: 1,
+        totalClaimCount: 1,
+        evidenceMix: { empirical: 1, theoretical: 0, anecdotal: 0, authoritative: 0 },
+        homogeneityFlag: false,
+        meanAgreement: 0.5,
+      },
+      verdictCard: {
+        question: SNAP.QUESTION,
+        topConsensus: SNAP.LEGACY_VERDICT_TOP_CONSENSUS,
+        consensusModelCount: 1,
+        keyDisagreement: null,
+        disagreementDetail: null,
+        disagreementModelCount: 0,
+        caveat: null,
+        recommendedNextSteps: [SNAP.LEGACY_VERDICT_NEXT_STEP],
+      },
+      degraded: true,
+    },
+    trustSummary: { perModel: [], overallTrust: 0.5 },
+    modelResponses: [
+      { modelId: "chatgpt" as ModelId, schemaId: "financial_valuation", ok: true, data: { thesis: SNAP.LEGACY_MODEL_THESIS } },
+    ],
+  },
+} satisfies AdaptiveExportReportSnapshot;
+
+/**
+ * §4/§7 REACHABILITY SELF-CHECK. Proves each sentinel is present at its EXACT
+ * path in the fixture BEFORE the route runs. Without this, a future fixture edit
+ * that drops a leaf would silently restore the R3 proof hole: the
+ * `not.toContain` assertions would all still pass, on a value that is no longer
+ * there. Checking `reportSnapshot !== undefined` would not catch that; only
+ * per-path checks do.
+ */
+const snapshotSentinelPaths = (snapshot: AdaptiveExportReportSnapshot): [string, string][] => {
+  const m2 = snapshot.milestone2;
+  const lg = snapshot.legacy;
+  const paths: [string, string][] = [
+    ["question", snapshot.question],
+    ["reportTypeLabel", snapshot.reportTypeLabel],
+    ["reportGeneratedAt", snapshot.reportGeneratedAt],
+  ];
+  if (m2) {
+    paths.push(
+      ["milestone2.result.executiveSummary", String((m2.result as { executiveSummary?: string }).executiveSummary)],
+      ["milestone2.meta.consensusSummary", String(m2.meta.consensusSummary)],
+      ["milestone2.meta.disagreementSummary", String(m2.meta.disagreementSummary)],
+      ["milestone2.meta.uncertainties[0]", String(m2.meta.uncertainties[0])],
+      ["milestone2.meta.blindSpots[0]", String(m2.meta.blindSpots[0])],
+      ["milestone2.meta.recommendedNextAction", String(m2.meta.recommendedNextAction)],
+      ["milestone2.meta.limitations[0]", String(m2.meta.limitations?.[0])],
+      ["milestone2.decisionReceipt.conclusion", String(m2.decisionReceipt?.conclusion)],
+      ["milestone2.decisionReceipt.basis[0]", String(m2.decisionReceipt?.basis[0])],
+      ["milestone2.decisionReceipt.assumptions[0]", String(m2.decisionReceipt?.assumptions[0])],
+      ["milestone2.decisionReceipt.uncertainties[0]", String(m2.decisionReceipt?.uncertainties[0])],
+      ["milestone2.decisionReceipt.limitations[0]", String(m2.decisionReceipt?.limitations[0])],
+      ["milestone2.decisionReceipt.sources[0]", String(m2.decisionReceipt?.sources[0])]
+    );
+  }
+  if (lg) {
+    paths.push(
+      ["legacy.alignedClaims[0].claimText", String(lg.alignedClaims[0]?.claimText)],
+      ["legacy.alignedClaims[0].id", String(lg.alignedClaims[0]?.id)],
+      ["legacy.gate.loadBearingClaims[0].claimText", String(lg.gate?.loadBearingClaims[0]?.claimText)],
+      ["legacy.synthesisReport.unifiedAnswer", String(lg.synthesisReport?.unifiedAnswer)],
+      ["legacy.synthesisReport.panelVerdict", String(lg.synthesisReport?.panelVerdict)],
+      ["legacy.synthesisReport.executiveSummary", String(lg.synthesisReport?.executiveSummary)],
+      ["legacy.synthesisReport.certaintyAssessment", String(lg.synthesisReport?.certaintyAssessment)],
+      ["legacy.synthesisReport.whereModelsAgree[0]", String(lg.synthesisReport?.whereModelsAgree[0])],
+      ["legacy.synthesisReport.whereModelsDisagree[0]", String(lg.synthesisReport?.whereModelsDisagree[0])],
+      ["legacy.synthesisReport.narrativeSections[0].title", String(lg.synthesisReport?.narrativeSections[0]?.title)],
+      ["legacy.synthesisReport.narrativeSections[0].body", String(lg.synthesisReport?.narrativeSections[0]?.body)],
+      ["legacy.synthesisReport.verdictCard.topConsensus", String(lg.synthesisReport?.verdictCard.topConsensus)],
+      ["legacy.synthesisReport.verdictCard.recommendedNextSteps[0]", String(lg.synthesisReport?.verdictCard.recommendedNextSteps[0])],
+      ["legacy.modelResponses[0].data.thesis", String((lg.modelResponses?.[0]?.data as { thesis?: string } | null)?.thesis)]
+    );
+  }
+  return paths;
+};
+
+const assertSnapshotSentinelsReachable = (snapshot: AdaptiveExportReportSnapshot) => {
+  for (const [path, value] of snapshotSentinelPaths(snapshot)) {
+    if (!value.startsWith("SENTINEL_") && value !== SNAP.GENERATED_AT) {
+      throw new Error(`fixture sentinel missing at ${path}: got ${JSON.stringify(value)}`);
+    }
+  }
+};
+
+/** Every sentinel that must never appear in a response, derived from the fixtures themselves rather than hand-listed (so adding a sentinel cannot be forgotten here). */
+const allSnapshotSentinels = () => [
+  ...snapshotSentinelPaths(MILESTONE2_SNAPSHOT).map(([, v]) => v),
+  ...snapshotSentinelPaths(LEGACY_SNAPSHOT).map(([, v]) => v),
+].filter((v) => v.startsWith("SENTINEL_"));
 
 /**
  * R2 §16 — every field here is one the REAL E1 writer persists, checked against
@@ -142,7 +375,7 @@ const exportRecord = (reportVersion: number, over: Record<string, unknown> = {})
   generatedBy: { displayName: "SENTINEL_CREATOR_DISPLAY_NAME", maskedEmail: "SENTINEL_MASKED_EMAIL" },
   governanceStatusAtExport: { family: "milestone2", kind: "approved", isOwnerOverride: false },
   classification: "internal",
-  reportSnapshot: { question: "SENTINEL_FROZEN_QUESTION", milestone2: { schemaId: "comparison_matrix", result: { executiveSummary: "SENTINEL_REPORT_BODY" } } },
+  reportSnapshot: MILESTONE2_SNAPSHOT,
   exportMetadata: {
     exportId: `exp-${reportVersion}`,
     runId: RUN,
@@ -155,6 +388,15 @@ const exportRecord = (reportVersion: number, over: Record<string, unknown> = {})
   },
   ...over,
 });
+
+/** A production-valid LEGACY-family record: `schemaFamily: "legacy"` with the legacy snapshot branch, exactly as `buildExportSnapshot`'s legacy path writes it. */
+const legacyExportRecord = (reportVersion: number) =>
+  exportRecord(reportVersion, {
+    schemaId: "financial_valuation",
+    schemaFamily: "legacy",
+    governanceStatusAtExport: { family: "legacy", status: "needs_review" },
+    reportSnapshot: LEGACY_SNAPSHOT,
+  });
 
 /** `failureReason` is written ONLY by `markAdaptiveExportFailed`, always together with `artifactStatus: "failed"` — and a failed export produced no bytes, so it has no `fileHash`. Using it on a "ready" record would be a shape production cannot make (§36). */
 const failedExportRecord = (reportVersion: number) => {
@@ -243,13 +485,12 @@ describe("E2-A — the authorized list path", () => {
     const r = await submit();
     const blob = JSON.stringify(r.json);
     for (const sentinel of [
-      "SENTINEL_FROZEN_QUESTION",      // reportSnapshot.question
-      "SENTINEL_REPORT_BODY",          // reportSnapshot.milestone2…executiveSummary
       "SENTINEL_CREATOR_DISPLAY_NAME", // generatedBy.displayName
       "SENTINEL_MASKED_EMAIL",         // generatedBy.maskedEmail
       "SENTINEL_FAILURE_REASON",       // failureReason
       "SENTINEL_EXPORTED_SECTION",     // exportMetadata.exportedSections
       "SENTINEL_REQUESTING_USER",      // exportMetadata.requestingUser
+      ...allSnapshotSentinels(),       // every reportSnapshot leaf, both families
     ]) {
       expect(blob).not.toContain(sentinel);
     }
@@ -489,12 +730,12 @@ describe("E2A-S10 — this route forwards paging and owns no paging policy", () 
     const item = (await submit()).json.exports[0];
     // R2 P3-9: `hashAlgorithm` was unasserted, so emitting it unconditionally
     // passed 35/35. All THREE members of the trio now have explicit disposition.
-    // NOTE (§19 deviation, reported): `hashAlgorithm` is NOT a persisted field —
-    // `AdaptiveExportManifest` has no such key and grep finds it only in the two
-    // route DTOs. It is derived (`"sha256" as const`), so it cannot be proved by
-    // putting a sentinel in persisted metadata without inventing a shape
-    // production cannot make (§36). Its contract is CONDITIONAL EMISSION, which
-    // is what the key-set assertion below pins.
+    // `hashAlgorithm` is NOT a persisted field — `AdaptiveExportManifest` has no
+    // such key and grep finds it only in the two route DTOs. It is derived
+    // (`"sha256" as const`), so it cannot be proved by putting a sentinel in
+    // persisted metadata without inventing a shape production cannot make (§36).
+    // Its contract is therefore CONDITIONAL EMISSION (pinned by the key set
+    // below) plus its VALUE where it IS emitted (pinned in the docx/pdf test).
     expect(item.fileHash).toBeUndefined();
     expect(item.hashAlgorithm).toBeUndefined();
     expect(item.hashReproducible).toBeUndefined();
@@ -506,6 +747,11 @@ describe("E2A-S10 — this route forwards paging and owns no paging policy", () 
     const items = (await submit()).json.exports;
     expect(items[0].hashReproducible).toBe(false);
     expect(items[1].hashReproducible).toBe(true);
+    // R3 P3-c: the label's VALUE was pinned only by its literal type, which jest
+    // does not check (transpile-only under isolatedModules). A wrong algorithm
+    // label beside a sha256 digest is an integrity-labelling defect.
+    expect(items[0].hashAlgorithm).toBe("sha256");
+    expect(items[1].hashAlgorithm).toBe("sha256");
   });
 });
 
@@ -749,12 +995,18 @@ describe("R2 §23/§24/§29 — every REACHABLE persistence failure has its own 
     expect(listFailed.json.message).not.toContain("verify your access");
     expect(listFailed.json.message).toContain("export history");
 
-    // ...while the ADMISSION failure keeps the shared family message, because
-    // there "we couldn't verify your access" is exactly what happened.
+    // ...while the ADMISSION failure keeps the shared family envelope verbatim.
+    // R3 P3-1: this used to assert `toContain("verify your access")` — the SHARED
+    // helper's prose — while the route tells clients to key on status/errorCode
+    // and never on wording. That held this test to a standard the route forbids
+    // others, and rewording a shared module would have broken this PR's spec.
+    // Compared against the helper's own value instead, so the split stays pinned
+    // without freezing copy this route does not own.
     mockedAccess.mockResolvedValue({ granted: false, reason: "lookup_failed" });
     const admissionFailed = await submit();
     expect(admissionFailed.status).toBe(503);
-    expect(admissionFailed.json.message).toContain("verify your access");
+    expect(admissionFailed.json.message).toBe(teamRunLookupUnavailableResponse().body.message);
+    expect(listFailed.json.message).not.toBe(admissionFailed.json.message);
   });
 });
 
@@ -768,12 +1020,27 @@ describe("R2 P3-7 — the nextCursor guard", () => {
   });
 
   it("hasMore with an EMPTY page cannot crash or invent a cursor", async () => {
-    // Without the `items.length > 0` guard this dereferences `items[-1]` and
-    // throws; dropping the guard previously passed 35/35.
+    // Without the length guard this dereferences `items[-1]` and throws.
+    // R3 §23 then unified the contract: an empty page and a page whose terminal
+    // record has no usable `reportVersion` are the SAME condition — `hasMore`
+    // says there is more and nothing can address it — so both take the integrity
+    // path rather than emitting a contradictory envelope. (Unreachable from the
+    // real helper, which only sets `hasMore` when it read more than `limit`
+    // documents and `limit >= 1`; handled because the route cannot assume it.)
     mockedListExports.mockImplementation(listFake([], true));
+    const r = await submit();
+    expect(r.status).toBe(503);
+    expect(r.json.errorCode).toBe("team_workspace_unavailable");
+    expect(r.json.nextCursor).toBeUndefined();
+    expect(r.json.hasMore).toBeUndefined();
+  });
+
+  it("an empty page with hasMore:FALSE is a normal empty history, not an error", async () => {
+    mockedListExports.mockImplementation(listFake([], false));
     const r = await submit();
     expect(r.status).toBe(200);
     expect(r.json.exports).toEqual([]);
+    expect(r.json.hasMore).toBe(false);
     expect(r.json.nextCursor).toBeNull();
   });
 });
@@ -820,5 +1087,179 @@ describe("empty query parameters — inherited behaviour, characterized not endo
     await submit("?limit=");
     expect(lastArgs().limit).toBe(0);
     // the clamp itself is the helper's, pinned in lib/firestore/__tests__/adaptiveExports.spec.ts
+  });
+});
+
+/**
+ * R3 §2-§7 — the recursive non-disclosure proof. The fixtures are schema-
+ * complete for BOTH families (`satisfies AdaptiveExportReportSnapshot`, so every
+ * REQUIRED leaf is enforced at compile time) and every sentinel's presence at
+ * its exact path is asserted at RUNTIME before any projection claim is made.
+ */
+describe("E2A-S8 — no reportSnapshot leaf reaches the response", () => {
+  it("REACHABILITY: every sentinel exists at its exact path in both fixtures BEFORE projection", () => {
+    expect(() => assertSnapshotSentinelsReachable(MILESTONE2_SNAPSHOT)).not.toThrow();
+    expect(() => assertSnapshotSentinelsReachable(LEGACY_SNAPSHOT)).not.toThrow();
+    // and there is genuinely something to hide, at a useful depth
+    expect(snapshotSentinelPaths(MILESTONE2_SNAPSHOT).length).toBeGreaterThanOrEqual(16);
+    expect(snapshotSentinelPaths(LEGACY_SNAPSHOT).length).toBeGreaterThanOrEqual(17);
+    expect(allSnapshotSentinels().length).toBeGreaterThanOrEqual(30);
+  });
+
+  it("REACHABILITY CONTROL: dropping ONE nested leaf fails the self-check, before any non-disclosure claim", () => {
+    // §7 — this is what stops future fixture drift from silently recreating the
+    // R3 hole. Without it, deleting a leaf would leave every `not.toContain`
+    // assertion passing, on a value that is no longer in the fixture at all.
+    const damaged = JSON.parse(JSON.stringify(MILESTONE2_SNAPSHOT)) as AdaptiveExportReportSnapshot;
+    delete damaged.milestone2!.decisionReceipt;
+    expect(() => assertSnapshotSentinelsReachable(damaged)).toThrow(/decisionReceipt\.conclusion/);
+
+    const damagedLegacy = JSON.parse(JSON.stringify(LEGACY_SNAPSHOT)) as AdaptiveExportReportSnapshot;
+    delete damagedLegacy.legacy!.synthesisReport;
+    expect(() => assertSnapshotSentinelsReachable(damagedLegacy)).toThrow(/synthesisReport\.unifiedAnswer/);
+  });
+
+  it("E2A-S8 no milestone2 reportSnapshot leaf reaches the response", async () => {
+    mockedListExports.mockImplementation(listFake([exportRecord(3)]));
+    const r = await submit();
+    expect(r.status).toBe(200);
+    expect(r.json.exports).toHaveLength(1);
+    const blob = JSON.stringify(r.json);
+    for (const [path, sentinel] of snapshotSentinelPaths(MILESTONE2_SNAPSHOT)) {
+      if (!sentinel.startsWith("SENTINEL_")) continue;
+      expect(blob).not.toContain(sentinel);
+      expect(path).toBeTruthy();
+    }
+    expect(Object.keys(r.json.exports[0]).sort()).toEqual([...["artifactStatus", "classification", "createdAt", "createdBy", "exportId", "format", "governanceStatusAtExport", "reportVersion", "schemaFamily", "schemaId"], "fileHash", "hashAlgorithm", "hashReproducible"].sort());
+  });
+
+  it("E2A-S8 no legacy reportSnapshot leaf reaches the response", async () => {
+    mockedListExports.mockImplementation(listFake([legacyExportRecord(3)]));
+    const r = await submit();
+    expect(r.status).toBe(200);
+    expect(r.json.exports).toHaveLength(1);
+    expect(r.json.exports[0].schemaFamily).toBe("legacy");
+    const blob = JSON.stringify(r.json);
+    for (const [, sentinel] of snapshotSentinelPaths(LEGACY_SNAPSHOT)) {
+      if (!sentinel.startsWith("SENTINEL_")) continue;
+      expect(blob).not.toContain(sentinel);
+    }
+    expect(Object.keys(r.json.exports[0]).sort()).toEqual([...["artifactStatus", "classification", "createdAt", "createdBy", "exportId", "format", "governanceStatusAtExport", "reportVersion", "schemaFamily", "schemaId"], "fileHash", "hashAlgorithm", "hashReproducible"].sort());
+  });
+
+  it("BOTH families list together, and neither leaks", async () => {
+    mockedListExports.mockImplementation(listFake([exportRecord(4), legacyExportRecord(3), failedExportRecord(2)]));
+    const r = await submit();
+    expect(r.json.exports.map((e: { schemaFamily: string }) => e.schemaFamily)).toEqual(["milestone2", "legacy", "milestone2"]);
+    const blob = JSON.stringify(r.json);
+    for (const sentinel of allSnapshotSentinels()) expect(blob).not.toContain(sentinel);
+  });
+});
+
+/**
+ * R3 §9-§15 — the FULL Project outcome matrix. `getProject` has five outcomes
+ * (`lib/firestore/projects.ts:17-22`) and E2-A must match the canonical Team
+ * detail read on every one. R3 found `not_found`/`malformed` unpinned AND
+ * unlogged: `if (projectResult.status !== "found") return concealed;` passed all
+ * 60 tests while making history unlistable for a run the canonical read still
+ * renders.
+ */
+describe("E2A-S6 — the Project outcome matrix matches the canonical read", () => {
+  it("found + SAME Workspace: lists, and the exact Project id was read", async () => {
+    const r = await submit();
+    expect(mockedGetProject).toHaveBeenCalledWith(FIXTURE_PROJECT_ID);
+    expectTheFixtureHistory(r);
+  });
+
+  it("found + FOREIGN Workspace: concealed, nothing listed", async () => {
+    mockedGetProject.mockResolvedValue({ status: "found", project: { id: FIXTURE_PROJECT_ID, name: "F", status: "active", workspaceId: OTHER_WS } });
+    const r = await submit();
+    expect(r.status).toBe(404);
+    expect(r.json.errorCode).toBe("run_not_found");
+    expect(mockedListExports).not.toHaveBeenCalled();
+  });
+
+  it.each(["not_found", "malformed"] as const)("%s: logs and LISTS — parity with the canonical read, not concealment", async (status) => {
+    // Canonical Team detail read: logs `filed run's Project unresolved; label
+    // omitted` and renders the run. E1: logs `filed run's Project unresolved`
+    // and exports. Neither treats it as an integrity anomaly, because a missing
+    // Project document says nothing about which Workspace owns the run — that
+    // was settled by validateTeamRunRowShape. E2-A carries no Project label at
+    // all, so it lists.
+    mockedGetProject.mockResolvedValue({ status });
+    const r = await submit();
+    expectTheFixtureHistory(r);
+    expect(mockedLoggerWarn).toHaveBeenCalledWith(
+      expect.stringContaining("Project unresolved"),
+      expect.objectContaining({ errorCategory: status, workspaceId: WS, runId: RUN })
+    );
+  });
+
+  it.each(["firestore_unavailable", "read_failed"] as const)("%s: 503, nothing listed", async (status) => {
+    mockedGetProject.mockResolvedValue({ status });
+    const r = await submit();
+    expect(r.status).toBe(503);
+    expect(r.json.errorCode).toBe("team_workspace_unavailable");
+    expect(mockedListExports).not.toHaveBeenCalled();
+    noWrites();
+  });
+
+  it("the degraded-Project warning carries NO report content, snapshot or governance data", async () => {
+    mockedGetProject.mockResolvedValue({ status: "not_found" });
+    await submit();
+    const logged = JSON.stringify(mockedLoggerWarn.mock.calls);
+    for (const sentinel of allSnapshotSentinels()) expect(logged).not.toContain(sentinel);
+    for (const s of ["SENTINEL_CREATOR_DISPLAY_NAME", "SENTINEL_MASKED_EMAIL", "SENTINEL_FAILURE_REASON"]) {
+      expect(logged).not.toContain(s);
+    }
+  });
+});
+
+/**
+ * R3 §22-§24 — E2A-S15. A response must never say "there is more" without a
+ * usable way to ask for it.
+ */
+describe("E2A-S15 — the paging envelope is never self-contradictory", () => {
+  it("a page that cannot yield a continuation cursor is an integrity failure, not a trap", async () => {
+    // Reproduced by R3: `reportVersion` missing on the terminal item made
+    // `nextCursor` serialize away, leaving `{hasMore:true}` with no cursor — a
+    // client paging on it re-requests page 1 for ever, and the envelope broke
+    // this route's own 5-key allow-list.
+    const noVersion = exportRecord(3) as Record<string, unknown>;
+    delete noVersion.reportVersion;
+    mockedListExports.mockImplementation(listFake([noVersion], true));
+    const r = await submit();
+    expect(r.status).toBe(503);
+    expect(r.json.errorCode).toBe("team_workspace_unavailable");
+    expect(r.json.hasMore).toBeUndefined();
+    expect(r.json.exports).toBeUndefined();
+    noWrites();
+  });
+
+  it("a NON-NUMERIC reportVersion is refused the same way", async () => {
+    mockedListExports.mockImplementation(listFake([exportRecord(3, { reportVersion: "3" })], true));
+    const r = await submit();
+    expect(r.status).toBe(503);
+    expect(r.json.errorCode).toBe("team_workspace_unavailable");
+  });
+
+  it("POSITIVE CONTROL: hasMore with a usable terminal reportVersion still pages", async () => {
+    mockedListExports.mockImplementation(listFake([exportRecord(3), exportRecord(2)], true));
+    const r = await submit();
+    expect(r.status).toBe(200);
+    expect(r.json.hasMore).toBe(true);
+    expect(r.json.nextCursor).toBe(2);
+    expect(Object.keys(r.json).sort()).toEqual(["exports", "hasMore", "nextCursor", "ok", "runId"]);
+  });
+
+  it("hasMore:false with a malformed terminal record is NOT refused — there is nothing to continue", async () => {
+    const noVersion = exportRecord(3) as Record<string, unknown>;
+    delete noVersion.reportVersion;
+    mockedListExports.mockImplementation(listFake([noVersion], false));
+    const r = await submit();
+    expect(r.status).toBe(200);
+    expect(r.json.hasMore).toBe(false);
+    expect(r.json.nextCursor).toBeNull();
+    expect(r.json.exports).toHaveLength(1);
   });
 });
