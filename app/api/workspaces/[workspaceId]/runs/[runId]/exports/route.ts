@@ -7,6 +7,23 @@
  * Workspace sibling of `GET /api/user/runs/[runId]/exports`, which stays
  * owner-only and is untouched by this PR.
  *
+ * DELIBERATE, DECLARED DIVERGENCES FROM PERSONAL. This route argues below that
+ * fixing a shared behaviour on one surface only trades a shared inconsistency for
+ * a divergence between two surfaces clients expect to match — so where it does
+ * exactly that, it says so here rather than leaving it to be discovered:
+ *   1. `SHARED_EXPORT_HISTORY_MISSING_NEXT_CURSOR_HARDENING` — E2A-S15 below.
+ *      Personal still derives `nextCursor` unguarded and can therefore emit
+ *      `hasMore: true` with no usable cursor. E2-A must not knowingly ship a
+ *      response that traps a paging client, so it is hardened HERE ONLY and
+ *      Personal is left untouched and tracked.
+ *   2. `SHARED_EXPORT_METADATA_BLIND_CAST_HARDENING` — the optional-chained
+ *      `exportMetadata` read below. Personal's identical read stays unguarded.
+ *      Neither surface has a demonstrated crash path (see the retraction at that
+ *      site), so this is hardening, not a fix on one side of a live bug.
+ * Both are one-surface changes justified by the same rule the empty-query case is
+ * DEFERRED under: do it on both together, unless shipping the defect knowingly is
+ * itself the worse outcome.
+ *
  * WHAT IS SHARED WITH PERSONAL. Of the EXPORT-LIST logic, one thing:
  * `listAdaptiveExportRecords`. It owns the query —
  * `orderBy("reportVersion","desc")`, the `where("<", cursor)` range,
@@ -18,10 +35,14 @@
  * `logger`, as any two routes in this codebase do, and their `getUid` helpers are
  * near-verbatim duplicates. Generic infrastructure being shared is not the point;
  * the point is which EXPORT-LIST semantics have one implementation.) Everything
- * else in the export-list path that looks shared is DUPLICATED source: the
- * query-parameter parse, the `nextCursor` derivation and the
- * `format !== "docx"` hash rule each exist separately in both routes, identical
- * today and pinned together by no test. An earlier version of
+ * else in the export-list path that looks shared is DUPLICATED source, and the
+ * three cases are no longer alike: the query-parameter parse and the
+ * `format !== "docx"` hash rule are byte-identical in both routes today, while
+ * the `nextCursor` derivation has DELIBERATELY diverged (E2A-S15 added a
+ * finiteness guard and an integrity path here that Personal does not have). An
+ * earlier revision of this header called all three "identical today"; that became
+ * false the moment E2A-S15 landed, and is corrected rather than left. None of the
+ * three is pinned across the two routes by any test. An earlier version of
  * this header claimed "ordering, the cursor contract and the [1,50] clamp have
  * one implementation rather than two"; the cursor contract's client-facing half
  * is two implementations, so the claim was false and is withdrawn rather than
@@ -85,6 +106,8 @@
  *           → "a NON-NUMERIC reportVersion is refused the same way"
  *           → "hasMore with an EMPTY page cannot crash or invent a cursor"
  *           → "POSITIVE CONTROL: hasMore with a usable terminal reportVersion still pages"
+ *           → "a NON-FINITE terminal reportVersion (%s) is refused — it serializes to null, which is the trap" (3 cases)
+ *           → "reportVersion 0 IS a usable cursor and must still page — the guard tests finiteness, not truthiness"
  *   E2A-S9  LIST is gated on `research.read`, NOT `exports.create`.
  *           → "E2A-S9 a role with research.read but WITHOUT exports.create can list"
  *   E2A-S9b The gate asks for `research.read` SPECIFICALLY, not a capability
@@ -110,23 +133,33 @@
  *   E2A-S14 The export-history read is scoped to the addressed run.
  *           → "E2A-S14 the helper receives the addressed runId"
  *
- * WHERE THE E2A-S8 GUARANTEE ACTUALLY COMES FROM — three mechanisms, not one,
- * and not from "every persisted field carries a sentinel" (an earlier revision
- * said that; seven non-DTO fixture fields carry ordinary values):
- *   1. the exact DTO key allow-list, at both the item and envelope level, which
- *      catches ANY added key including ones no sentinel covers;
- *   2. targeted sentinel VALUES on the representative and highest-risk persisted
- *      non-DTO fields — `generatedBy`, `failureReason`, `exportMetadata`'s own
- *      leaves, and every `reportSnapshot` leaf;
- *   3. RECURSIVE hostile `reportSnapshot` fixtures for BOTH schema families, so
- *      a nested leaf cannot be "proved absent" merely by being absent from the
- *      fixture.
+ * WHERE THE E2A-S8 GUARANTEE ACTUALLY COMES FROM — two mechanisms that only work
+ * together, and NOT from "every persisted field carries a sentinel" (an earlier
+ * revision claimed that; it was never true, and the arithmetic it offered was
+ * wrong as well as decorative, so no count is given here):
+ *   1. the exact DTO key allow-list, at both the item and the envelope level;
+ *   2. distinctive VALUES — string sentinels, and recognisable numbers for
+ *      numeric leaves — on the persisted non-DTO fields, including every
+ *      proof-relevant `reportSnapshot` leaf of BOTH schema families.
  *
- * FIXTURE FIDELITY IS RECURSIVE (the permanent rule from R3). A nested field can
- * only prove non-disclosure if the production-valid fixture actually contains a
- * non-undefined value at that exact path BEFORE DTO projection. Absent nested
- * values are not evidence — they are the absence of evidence, and
- * `JSON.stringify` erases the difference at every depth.
+ * R4 established why (1) CANNOT stand alone, which the earlier revision got
+ * wrong by claiming the allow-list "catches ANY added key": `JSON.stringify`
+ * drops keys whose value is `undefined`, so such a key never reaches the parsed
+ * response and `Object.keys()` never sees it either. A projected leaf is caught
+ * IF AND ONLY IF its fixture value SERIALIZES. `null` and `[]` serialize and are
+ * safe; `undefined` defeats both mechanisms at once.
+ *
+ * FIXTURE FIDELITY IS RECURSIVE (the permanent rule, sharpened by R4). A nested
+ * field can only prove non-disclosure if the production-realizable fixture holds
+ * a non-undefined value at that exact path BEFORE DTO projection — which means
+ * every proof-relevant OPTIONAL leaf needs a value and every content-bearing
+ * ARRAY needs at least one populated element. An empty array proves only itself,
+ * never its element type, and that is where the most sensitive content in the
+ * system lives: verbatim model excerpts, disagreement positions and bias
+ * evidence. The spec carries a per-path inventory, a runtime reachability
+ * self-check, and controls proving that deleting a value, emptying an array, or
+ * replacing a sentinel with an ordinary value each break the self-check BEFORE
+ * any non-disclosure claim can be made.
  *
  * THE AUTHORITY-MOCK RULE (adopted in R2). A mocked security collaborator
  * is not proven by having been called: its security-relevant arguments must be
@@ -464,13 +497,19 @@ export async function GET(req: NextRequest, { params }: { params: { workspaceId:
   // public error vocabulary, and the caller is told to retry rather than handed
   // a contradiction.
   const lastReportVersion = items.length > 0 ? items[items.length - 1].reportVersion : null;
-  const nextCursor = listResult.hasMore && typeof lastReportVersion === "number" && Number.isFinite(lastReportVersion) ? lastReportVersion : null;
+  // `Number.isFinite` performs no coercion, so it already rejects `null`, a
+  // string and `undefined` as well as NaN/±Infinity. An earlier revision also
+  // tested `typeof === "number"`; R4 correctly classified removing that as an
+  // EQUIVALENT MUTANT, so it is removed rather than kept and decorated with a
+  // test that could only pass by manufacturing a distinction that does not exist.
+  const nextCursor = listResult.hasMore && Number.isFinite(lastReportVersion) ? lastReportVersion : null;
   if (listResult.hasMore && nextCursor === null) {
     logger.warn(`${LOG} export history page cannot yield a continuation cursor`, {
       workspaceId,
       runId,
       itemCount: items.length,
       lastReportVersionType: typeof lastReportVersion,
+      lastReportVersionFinite: Number.isFinite(lastReportVersion),
     });
     return shared(unavailableAfterAuthorization());
   }

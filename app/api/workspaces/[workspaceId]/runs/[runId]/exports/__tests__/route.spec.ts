@@ -81,6 +81,7 @@ import { GET } from "@/app/api/workspaces/[workspaceId]/runs/[runId]/exports/rou
 import { FIXTURE_PROJECT_ID, FIXTURE_RUN_ID, FIXTURE_WORKSPACE_ID, fullTeamRunData } from "@/lib/runs/__tests__/runReadFixtures";
 import { ROLE_CAPABILITIES } from "@/lib/workspaces/capabilities";
 import type { AdaptiveExportReportSnapshot } from "@/lib/adaptiveSchema/researchExport";
+import type { AlignedClaimCell, ComparisonMatrixResult } from "@/lib/adaptiveSchema/types";
 import type { ModelId } from "@/lib/types";
 import { teamRunLookupUnavailableResponse } from "@/lib/workspaces/teamRunAccessResponse";
 
@@ -141,25 +142,53 @@ const grant = (role: "owner" | "admin" | "member" | "reviewer" | "viewer") => ({
  * leak is caught by the exact DTO key allow-list instead, which fires for ANY
  * added key. Both mechanisms are load-bearing; neither alone is sufficient.
  */
+/**
+ * ─── SENTINEL REGISTRY ────────────────────────────────────────────────────
+ * String sentinels for every leaf whose type admits a free-form string, and
+ * DISTINCTIVE NUMBERS for leaves that are numeric — R4 showed a leak is caught
+ * iff the projected value SERIALIZES, so numeric leaves need detectable values
+ * too, not just an allow-list entry.
+ */
 const SNAP = {
   QUESTION: "SENTINEL_SNAPSHOT_QUESTION",
   REPORT_TYPE_LABEL: "SENTINEL_REPORT_TYPE_LABEL",
   GENERATED_AT: "2031-12-31T23:59:59.001Z",
-  M2_RESULT: "SENTINEL_M2_RESULT_BODY",
+  // milestone2.result — real ComparisonMatrixResult leaves
+  M2_DIRECT_CONCLUSION: "SENTINEL_M2_DIRECT_CONCLUSION",
+  M2_TRADEOFF: "SENTINEL_M2_TRADEOFF",
+  M2_BEST_USE: "SENTINEL_M2_BEST_USE",
+  M2_RESULT_UNCERTAINTY: "SENTINEL_M2_RESULT_UNCERTAINTY",
+  M2_SUBJECT_LABEL: "SENTINEL_M2_SUBJECT_LABEL",
+  M2_LOWCONF_SUBJECT_LABEL: "SENTINEL_M2_LOWCONF_SUBJECT_LABEL",
+  M2_ATTRIBUTE_LABEL: "SENTINEL_M2_ATTRIBUTE_LABEL",
+  M2_LOWCONF_ATTRIBUTE_LABEL: "SENTINEL_M2_LOWCONF_ATTRIBUTE_LABEL",
+  M2_CELL_VALUE: "SENTINEL_M2_CELL_VALUE",
+  M2_CELL_CONSENSUS: "SENTINEL_M2_CELL_CONSENSUS",
+  M2_CELL_RATIONALE: "SENTINEL_M2_CELL_RATIONALE",
+  M2_CELL_SOURCE: "SENTINEL_M2_CELL_SOURCE",
+  // milestone2.meta
   M2_META_UNCERTAINTY: "SENTINEL_M2_META_UNCERTAINTY",
   M2_META_BLINDSPOT: "SENTINEL_M2_META_BLINDSPOT",
   M2_META_CONSENSUS: "SENTINEL_M2_META_CONSENSUS_SUMMARY",
   M2_META_DISAGREEMENT: "SENTINEL_M2_META_DISAGREEMENT_SUMMARY",
   M2_META_NEXT_ACTION: "SENTINEL_M2_META_NEXT_ACTION",
   M2_META_LIMITATION: "SENTINEL_M2_META_LIMITATION",
+  // decision receipt
   RECEIPT_CONCLUSION: "SENTINEL_RECEIPT_CONCLUSION",
   RECEIPT_BASIS: "SENTINEL_RECEIPT_BASIS",
   RECEIPT_ASSUMPTION: "SENTINEL_RECEIPT_ASSUMPTION",
   RECEIPT_UNCERTAINTY: "SENTINEL_RECEIPT_UNCERTAINTY",
   RECEIPT_LIMITATION: "SENTINEL_RECEIPT_LIMITATION",
   RECEIPT_SOURCE: "SENTINEL_RECEIPT_SOURCE",
+  // legacy
   LEGACY_CLAIM_TEXT: "SENTINEL_LEGACY_ALIGNED_CLAIM",
   LEGACY_CLAIM_ID: "SENTINEL_LEGACY_CLAIM_ID",
+  LEGACY_CLAIM_DISAGREEMENT_TYPE: "SENTINEL_LEGACY_CLAIM_DISAGREEMENT_TYPE",
+  LEGACY_CELL_EXCERPT: "SENTINEL_LEGACY_CELL_EXCERPT",
+  LEGACY_CELL_CAMP_LABEL: "SENTINEL_LEGACY_CELL_CAMP_LABEL",
+  LEGACY_CELL_CAMP_POSITION: "SENTINEL_LEGACY_CELL_CAMP_POSITION",
+  LEGACY_GATE_CLAIM_TEXT: "SENTINEL_LEGACY_GATE_CLAIM",
+  LEGACY_GATE_CELL_EXCERPT: "SENTINEL_LEGACY_GATE_CELL_EXCERPT",
   LEGACY_UNIFIED_ANSWER: "SENTINEL_LEGACY_UNIFIED_ANSWER",
   LEGACY_PANEL_VERDICT: "SENTINEL_LEGACY_PANEL_VERDICT",
   LEGACY_EXEC_SUMMARY: "SENTINEL_LEGACY_EXEC_SUMMARY",
@@ -168,12 +197,116 @@ const SNAP = {
   LEGACY_DISAGREE: "SENTINEL_LEGACY_WHERE_MODELS_DISAGREE",
   LEGACY_NARRATIVE_TITLE: "SENTINEL_LEGACY_NARRATIVE_TITLE",
   LEGACY_NARRATIVE_BODY: "SENTINEL_LEGACY_NARRATIVE_BODY",
+  LEGACY_DIS_TOPIC: "SENTINEL_LEGACY_DISAGREEMENT_TOPIC",
+  LEGACY_DIS_WHY: "SENTINEL_LEGACY_DISAGREEMENT_WHY",
+  LEGACY_DIS_POSITION: "SENTINEL_LEGACY_DISAGREEMENT_POSITION",
+  LEGACY_BIAS_TYPE: "SENTINEL_LEGACY_BIAS_TYPE",
+  LEGACY_BIAS_DESCRIPTION: "SENTINEL_LEGACY_BIAS_DESCRIPTION",
+  LEGACY_BIAS_EXCERPT: "SENTINEL_LEGACY_BIAS_EXCERPT",
+  LEGACY_BIAS_RATIONALE: "SENTINEL_LEGACY_BIAS_RATIONALE",
+  LEGACY_BIAS_CAUSE: "SENTINEL_LEGACY_BIAS_CAUSE",
+  LEGACY_BIAS_IMPACT: "SENTINEL_LEGACY_BIAS_IMPACT",
+  LEGACY_BIAS_MITIGATION: "SENTINEL_LEGACY_BIAS_MITIGATION",
+  LEGACY_GAP_DIMENSION: "SENTINEL_LEGACY_GAP_DIMENSION",
+  LEGACY_GAP_WHY: "SENTINEL_LEGACY_GAP_WHY",
+  LEGACY_GAP_FOLLOWUP: "SENTINEL_LEGACY_GAP_FOLLOWUP",
   LEGACY_VERDICT_TOP_CONSENSUS: "SENTINEL_LEGACY_VERDICT_TOP_CONSENSUS",
+  LEGACY_VERDICT_KEY_DISAGREEMENT: "SENTINEL_LEGACY_VERDICT_KEY_DISAGREEMENT",
+  LEGACY_VERDICT_DETAIL: "SENTINEL_LEGACY_VERDICT_DETAIL",
+  LEGACY_VERDICT_CAVEAT: "SENTINEL_LEGACY_VERDICT_CAVEAT",
   LEGACY_VERDICT_NEXT_STEP: "SENTINEL_LEGACY_VERDICT_NEXT_STEP",
   LEGACY_MODEL_THESIS: "SENTINEL_LEGACY_MODEL_THESIS",
-  LEGACY_GATE_CLAIM_TEXT: "SENTINEL_LEGACY_GATE_CLAIM",
+  LEGACY_MODEL_PARSE_ERROR: "SENTINEL_LEGACY_MODEL_PARSE_ERROR",
+  LEGACY_MODEL_TRUNCATED_FIELD: "SENTINEL_LEGACY_MODEL_TRUNCATED_FIELD",
+  LEGACY_MODEL_INVALID_FIELD: "SENTINEL_LEGACY_MODEL_INVALID_FIELD",
+  LEGACY_COERCION_RAW: "SENTINEL_LEGACY_COERCION_RAW",
+  LEGACY_COERCION_COERCED: "SENTINEL_LEGACY_COERCION_COERCED",
+  LEGACY_COERCION_PATH: "SENTINEL_LEGACY_COERCION_PATH",
 } as const;
 
+/** Distinctive NUMBERS. R4's rule cuts both ways: a numeric leaf projected into the DTO serializes, so a recognisable value detects it — an allow-list entry alone would not survive a substitution into an already-allowed key. */
+const NUM = {
+  M2_SOURCE_SUPPORTED: 90111,
+  M2_SOURCE_TOTAL: 90222,
+  M2_SOURCE_RATIO: 0.90333,
+  M2_TOTAL_MODELS: 90444,
+  M2_SUCCESSFUL: 90555,
+  M2_FAILED: 90666,
+  M2_USABLE: 90777,
+  TRUST_OVERALL: 0.91888,
+  TRUST_CLAIMS: 91999,
+  TRUST_MAJORITY: 0.92111,
+  TRUST_CITATION: 0.92222,
+  TRUST_CONTRADICTIONS: 92333,
+  TRUST_SCORE: 0.92444,
+  LEGACY_MODEL_LATENCY: 93555,
+} as const;
+
+const M2_RESULT = {
+  subjects: [{ id: "subj-1", label: SNAP.M2_SUBJECT_LABEL, coverageCount: 2, totalModels: 2, coverageRatio: 1 }],
+  lowConfidenceSubjects: [{ id: "subj-2", label: SNAP.M2_LOWCONF_SUBJECT_LABEL, coverageCount: 1, totalModels: 2, coverageRatio: 0.5 }],
+  attributes: [{ id: "attr-1", label: SNAP.M2_ATTRIBUTE_LABEL, coverageCount: 2, totalModels: 2, coverageRatio: 1 }],
+  lowConfidenceAttributes: [{ id: "attr-2", label: SNAP.M2_LOWCONF_ATTRIBUTE_LABEL, coverageCount: 1, totalModels: 2, coverageRatio: 0.5 }],
+  cells: [
+    {
+      subjectId: "subj-1",
+      subject: SNAP.M2_SUBJECT_LABEL,
+      attributeId: "attr-1",
+      attribute: SNAP.M2_ATTRIBUTE_LABEL,
+      valuesByModel: { chatgpt: SNAP.M2_CELL_VALUE, claude: "ordinary", grok: "ordinary", perplexity: "ordinary", gemini: "ordinary" },
+      coverageCount: 2,
+      totalModels: 2,
+      coverageRatio: 1,
+      agreement: "consensus",
+      consensusValue: SNAP.M2_CELL_CONSENSUS,
+      verdictTally: { better: 1 },
+      rationale: SNAP.M2_CELL_RATIONALE,
+      sources: [SNAP.M2_CELL_SOURCE],
+    },
+  ],
+  hasVerifiedSourceData: false,
+  totalModels: 2,
+  directConclusion: SNAP.M2_DIRECT_CONCLUSION,
+  tradeoffs: [SNAP.M2_TRADEOFF],
+  bestUseRecommendations: [SNAP.M2_BEST_USE],
+  uncertainties: [SNAP.M2_RESULT_UNCERTAINTY],
+} satisfies ComparisonMatrixResult;
+
+/**
+ * ─── RECURSIVE HOSTILE reportSnapshot FIXTURES ────────────────────────────
+ *
+ * THE PERMANENT RULE, sharpened by R4: a projected leaf is caught IF AND ONLY IF
+ * its fixture value SERIALIZES. `JSON.stringify` drops `undefined`-valued keys,
+ * so an undefined leaf defeats BOTH detection mechanisms — the sentinel AND the
+ * exact key-set allow-list, because `Object.keys()` on the parsed response never
+ * sees the key either. R3's fix populated the branches; R4 found every remaining
+ * OPTIONAL leaf and every EMPTY ARRAY still invisible, including the most
+ * sensitive content in the system: verbatim model excerpts, disagreement
+ * positions and bias evidence. `null` and `[]` serialize and are therefore safe;
+ * `undefined` is not.
+ *
+ * So: every proof-relevant optional leaf holds a value, and every content-bearing
+ * array holds at least one populated element.
+ *
+ * Shapes come from `buildExportSnapshot` (`lib/adaptiveSchema/exportSnapshot.ts`)
+ * and the types it writes. `satisfies` pins required leaves at compile time (the
+ * Quality Gate runs `tsc --noEmit`; jest is transpile-only under
+ * `isolatedModules`), and `M2_RESULT` is typed `satisfies ComparisonMatrixResult`
+ * rather than leaning on `result: unknown` — R4 found the previous fixture paired
+ * `schemaId: "comparison_matrix"` with `{ executiveSummary }`, a field that type
+ * does not have (it belongs to `DeepResearchResult`), so the single result
+ * sentinel sat at a path production cannot produce while all six real result
+ * leaves were absent and invisible.
+ *
+ * A NOTE ON `meta`: the two builders populate different halves.
+ * `buildCommonResponseMeta` always writes the execution fields (`totalModels` …
+ * `sourceCoverage`, `limitations`) and always writes `uncertainties: []`,
+ * `blindSpots: []`, `dataBasis: "training_prior"`,
+ * `evidenceQuality: "not_applicable"`; `buildCommonMeta` (`commonMeta.ts:31-36`)
+ * is what writes `consensusSummary`, `disagreementSummary` and
+ * `recommendedNextAction`. This fixture is a deliberate union of both — a hostile
+ * superset, every field of which SOME real writer emits.
+ */
 const MILESTONE2_SNAPSHOT = {
   question: SNAP.QUESTION,
   models: [{ modelId: "chatgpt" as ModelId, ok: true }],
@@ -183,15 +316,15 @@ const MILESTONE2_SNAPSHOT = {
   reportGeneratedAt: SNAP.GENERATED_AT,
   milestone2: {
     schemaId: "comparison_matrix",
-    result: { executiveSummary: SNAP.M2_RESULT },
+    result: M2_RESULT,
     meta: {
       schemaVersion: 1,
       queryType: "comparison_matrix",
       answerShape: "comparison_grid",
-      dataBasis: "mixed",
+      dataBasis: "training_prior",
       freshness: "timeless",
       riskLevel: "professional",
-      evidenceQuality: "moderate",
+      evidenceQuality: "not_applicable",
       consensusSummary: SNAP.M2_META_CONSENSUS,
       disagreementSummary: SNAP.M2_META_DISAGREEMENT,
       uncertainties: [SNAP.M2_META_UNCERTAINTY],
@@ -199,7 +332,16 @@ const MILESTONE2_SNAPSHOT = {
       humanReviewNeeded: true,
       recommendedNextAction: SNAP.M2_META_NEXT_ACTION,
       generatedAt: SNAP.GENERATED_AT,
+      schemaId: "comparison_matrix",
+      routingKind: "active",
+      totalModels: NUM.M2_TOTAL_MODELS,
+      successfulModels: NUM.M2_SUCCESSFUL,
+      failedModels: NUM.M2_FAILED,
+      modelsWithUsableOutput: NUM.M2_USABLE,
+      sourceBacked: true,
+      sourceCoverage: { supportedUnits: NUM.M2_SOURCE_SUPPORTED, totalUnits: NUM.M2_SOURCE_TOTAL, ratio: NUM.M2_SOURCE_RATIO },
       limitations: [SNAP.M2_META_LIMITATION],
+      executionStatus: "partial",
     },
     decisionReceipt: {
       conclusion: SNAP.RECEIPT_CONCLUSION,
@@ -214,6 +356,17 @@ const MILESTONE2_SNAPSHOT = {
   },
 } satisfies AdaptiveExportReportSnapshot;
 
+const LEGACY_CELL = {
+  modelId: "chatgpt" as ModelId,
+  stance: "agrees",
+  rawStance: "asserts",
+  confidence: "majority_view",
+  camps: [{ label: SNAP.LEGACY_CELL_CAMP_LABEL, position: SNAP.LEGACY_CELL_CAMP_POSITION }],
+  excerpt: SNAP.LEGACY_CELL_EXCERPT,
+  evidenceType: "empirical",
+  backfilled: false,
+} satisfies AlignedClaimCell;
+
 const LEGACY_SNAPSHOT = {
   question: SNAP.QUESTION,
   models: [{ modelId: "chatgpt" as ModelId, ok: true }],
@@ -224,14 +377,29 @@ const LEGACY_SNAPSHOT = {
   legacy: {
     schemaId: "financial_valuation",
     alignedClaims: [
-      { id: SNAP.LEGACY_CLAIM_ID, claimText: SNAP.LEGACY_CLAIM_TEXT, cells: [], agreementScore: 0.5, certaintyScore: 0.5, status: "split" },
+      {
+        id: SNAP.LEGACY_CLAIM_ID,
+        claimText: SNAP.LEGACY_CLAIM_TEXT,
+        cells: [LEGACY_CELL],
+        agreementScore: 0.5,
+        certaintyScore: 0.5,
+        status: "split",
+        disagreementType: SNAP.LEGACY_CLAIM_DISAGREEMENT_TYPE,
+      },
     ],
     gate: {
       status: "caution",
       runCertainty: 0.5,
       loadBearingSplitCount: 1,
       loadBearingClaims: [
-        { id: "gate-claim-1", claimText: SNAP.LEGACY_GATE_CLAIM_TEXT, cells: [], agreementScore: 0.1, certaintyScore: 0.1, status: "split" },
+        {
+          id: "gate-claim-1",
+          claimText: SNAP.LEGACY_GATE_CLAIM_TEXT,
+          cells: [{ ...LEGACY_CELL, excerpt: SNAP.LEGACY_GATE_CELL_EXCERPT }],
+          agreementScore: 0.1,
+          certaintyScore: 0.1,
+          status: "split",
+        },
       ],
     },
     synthesisReport: {
@@ -244,10 +412,27 @@ const LEGACY_SNAPSHOT = {
       certaintyAssessment: SNAP.LEGACY_CERTAINTY_TEXT,
       narrativeSections: [{ title: SNAP.LEGACY_NARRATIVE_TITLE, body: SNAP.LEGACY_NARRATIVE_BODY }],
       executiveSummary: SNAP.LEGACY_EXEC_SUMMARY,
-      disagreements: [],
-      biasAndBlindSpots: [],
-      biasEmptyReason: "below_threshold",
-      panelCoverageGaps: [],
+      disagreements: [
+        {
+          topic: SNAP.LEGACY_DIS_TOPIC,
+          whyTheyDiffer: SNAP.LEGACY_DIS_WHY,
+          positions: [{ modelId: "chatgpt" as ModelId, position: SNAP.LEGACY_DIS_POSITION }],
+          stakes: "decision-critical",
+        },
+      ],
+      biasAndBlindSpots: [
+        {
+          biasType: SNAP.LEGACY_BIAS_TYPE,
+          description: SNAP.LEGACY_BIAS_DESCRIPTION,
+          modelsImplicated: ["chatgpt" as ModelId],
+          evidence: [{ modelId: "chatgpt" as ModelId, excerpt: SNAP.LEGACY_BIAS_EXCERPT, rationale: SNAP.LEGACY_BIAS_RATIONALE }],
+          likelyCauses: [SNAP.LEGACY_BIAS_CAUSE],
+          impact: SNAP.LEGACY_BIAS_IMPACT,
+          mitigationSteps: [SNAP.LEGACY_BIAS_MITIGATION],
+        },
+      ],
+      biasEmptyReason: null,
+      panelCoverageGaps: [{ dimension: SNAP.LEGACY_GAP_DIMENSION, whyItMatters: SNAP.LEGACY_GAP_WHY, followUpQuestion: SNAP.LEGACY_GAP_FOLLOWUP }],
       diagnostics: {
         citedClaimCount: 1,
         totalClaimCount: 1,
@@ -259,88 +444,206 @@ const LEGACY_SNAPSHOT = {
         question: SNAP.QUESTION,
         topConsensus: SNAP.LEGACY_VERDICT_TOP_CONSENSUS,
         consensusModelCount: 1,
-        keyDisagreement: null,
-        disagreementDetail: null,
-        disagreementModelCount: 0,
-        caveat: null,
+        keyDisagreement: SNAP.LEGACY_VERDICT_KEY_DISAGREEMENT,
+        disagreementDetail: SNAP.LEGACY_VERDICT_DETAIL,
+        disagreementModelCount: 1,
+        caveat: SNAP.LEGACY_VERDICT_CAVEAT,
         recommendedNextSteps: [SNAP.LEGACY_VERDICT_NEXT_STEP],
       },
       degraded: true,
     },
-    trustSummary: { perModel: [], overallTrust: 0.5 },
+    trustSummary: {
+      perModel: [
+        {
+          modelId: "chatgpt" as ModelId,
+          claimsContributed: NUM.TRUST_CLAIMS,
+          majorityAlignment: NUM.TRUST_MAJORITY,
+          citationScore: NUM.TRUST_CITATION,
+          contradictionCount: NUM.TRUST_CONTRADICTIONS,
+          parseHealth: "degraded",
+          trustScore: NUM.TRUST_SCORE,
+          capped: true,
+        },
+      ],
+      overallTrust: NUM.TRUST_OVERALL,
+    },
     modelResponses: [
-      { modelId: "chatgpt" as ModelId, schemaId: "financial_valuation", ok: true, data: { thesis: SNAP.LEGACY_MODEL_THESIS } },
+      {
+        modelId: "chatgpt" as ModelId,
+        schemaId: "financial_valuation",
+        ok: false,
+        data: { thesis: SNAP.LEGACY_MODEL_THESIS },
+        parseError: SNAP.LEGACY_MODEL_PARSE_ERROR,
+        truncatedFields: [SNAP.LEGACY_MODEL_TRUNCATED_FIELD],
+        invalidFields: [SNAP.LEGACY_MODEL_INVALID_FIELD],
+        coercions: [
+          { modelId: "chatgpt" as ModelId, schemaId: "financial_valuation", field: "stance", path: SNAP.LEGACY_COERCION_PATH, raw: SNAP.LEGACY_COERCION_RAW, coerced: SNAP.LEGACY_COERCION_COERCED },
+        ],
+        retried: true,
+        latencyMs: NUM.LEGACY_MODEL_LATENCY,
+      },
     ],
   },
 } satisfies AdaptiveExportReportSnapshot;
 
 /**
- * §4/§7 REACHABILITY SELF-CHECK. Proves each sentinel is present at its EXACT
- * path in the fixture BEFORE the route runs. Without this, a future fixture edit
- * that drops a leaf would silently restore the R3 proof hole: the
- * `not.toContain` assertions would all still pass, on a value that is no longer
- * there. Checking `reportSnapshot !== undefined` would not catch that; only
- * per-path checks do.
+ * ─── THE SELF-CHECK INVENTORY ─────────────────────────────────────────────
+ * Every path the non-disclosure proof relies on, with the kind of evidence it
+ * carries. `string`/`number` entries are detectable in a serialized response;
+ * `present` entries are structural (enums, ids) and rely on the key-set
+ * allow-list, but are still enumerated so that DELETING them breaks the
+ * self-check — R4 found `trustSummary` had no entry at all, so removing it from
+ * the fixture passed 77/77 and then projecting it became invisible.
  */
-const snapshotSentinelPaths = (snapshot: AdaptiveExportReportSnapshot): [string, string][] => {
+type SentinelKind = "string" | "number" | "present";
+const snapshotSentinelPaths = (snapshot: AdaptiveExportReportSnapshot): [string, unknown, SentinelKind][] => {
   const m2 = snapshot.milestone2;
   const lg = snapshot.legacy;
-  const paths: [string, string][] = [
-    ["question", snapshot.question],
-    ["reportTypeLabel", snapshot.reportTypeLabel],
-    ["reportGeneratedAt", snapshot.reportGeneratedAt],
+  const out: [string, unknown, SentinelKind][] = [
+    ["question", snapshot.question, "string"],
+    ["reportTypeLabel", snapshot.reportTypeLabel, "string"],
+    ["reportGeneratedAt", snapshot.reportGeneratedAt, "present"],
+    ["consensusLevel", snapshot.consensusLevel, "present"],
+    ["sourceGroundingLevel", snapshot.sourceGroundingLevel, "present"],
+    ["models[0].modelId", snapshot.models[0]?.modelId, "present"],
   ];
   if (m2) {
-    paths.push(
-      ["milestone2.result.executiveSummary", String((m2.result as { executiveSummary?: string }).executiveSummary)],
-      ["milestone2.meta.consensusSummary", String(m2.meta.consensusSummary)],
-      ["milestone2.meta.disagreementSummary", String(m2.meta.disagreementSummary)],
-      ["milestone2.meta.uncertainties[0]", String(m2.meta.uncertainties[0])],
-      ["milestone2.meta.blindSpots[0]", String(m2.meta.blindSpots[0])],
-      ["milestone2.meta.recommendedNextAction", String(m2.meta.recommendedNextAction)],
-      ["milestone2.meta.limitations[0]", String(m2.meta.limitations?.[0])],
-      ["milestone2.decisionReceipt.conclusion", String(m2.decisionReceipt?.conclusion)],
-      ["milestone2.decisionReceipt.basis[0]", String(m2.decisionReceipt?.basis[0])],
-      ["milestone2.decisionReceipt.assumptions[0]", String(m2.decisionReceipt?.assumptions[0])],
-      ["milestone2.decisionReceipt.uncertainties[0]", String(m2.decisionReceipt?.uncertainties[0])],
-      ["milestone2.decisionReceipt.limitations[0]", String(m2.decisionReceipt?.limitations[0])],
-      ["milestone2.decisionReceipt.sources[0]", String(m2.decisionReceipt?.sources[0])]
+    const res = m2.result as ComparisonMatrixResult;
+    const meta = m2.meta;
+    const rec = m2.decisionReceipt;
+    out.push(
+      ["milestone2.schemaId", m2.schemaId, "present"],
+      ["milestone2.result.directConclusion", res.directConclusion, "string"],
+      ["milestone2.result.tradeoffs[0]", res.tradeoffs[0], "string"],
+      ["milestone2.result.bestUseRecommendations[0]", res.bestUseRecommendations[0], "string"],
+      ["milestone2.result.uncertainties[0]", res.uncertainties[0], "string"],
+      ["milestone2.result.subjects[0].label", res.subjects[0]?.label, "string"],
+      ["milestone2.result.lowConfidenceSubjects[0].label", res.lowConfidenceSubjects[0]?.label, "string"],
+      ["milestone2.result.attributes[0].label", res.attributes[0]?.label, "string"],
+      ["milestone2.result.lowConfidenceAttributes[0].label", res.lowConfidenceAttributes[0]?.label, "string"],
+      ["milestone2.result.cells[0].valuesByModel.chatgpt", res.cells[0]?.valuesByModel.chatgpt, "string"],
+      ["milestone2.result.cells[0].consensusValue", res.cells[0]?.consensusValue, "string"],
+      ["milestone2.result.cells[0].rationale", res.cells[0]?.rationale, "string"],
+      ["milestone2.result.cells[0].sources[0]", res.cells[0]?.sources?.[0], "string"],
+      ["milestone2.meta.consensusSummary", meta.consensusSummary, "string"],
+      ["milestone2.meta.disagreementSummary", meta.disagreementSummary, "string"],
+      ["milestone2.meta.uncertainties[0]", meta.uncertainties[0], "string"],
+      ["milestone2.meta.blindSpots[0]", meta.blindSpots[0], "string"],
+      ["milestone2.meta.recommendedNextAction", meta.recommendedNextAction, "string"],
+      ["milestone2.meta.limitations[0]", meta.limitations?.[0], "string"],
+      ["milestone2.meta.totalModels", meta.totalModels, "number"],
+      ["milestone2.meta.successfulModels", meta.successfulModels, "number"],
+      ["milestone2.meta.failedModels", meta.failedModels, "number"],
+      ["milestone2.meta.modelsWithUsableOutput", meta.modelsWithUsableOutput, "number"],
+      ["milestone2.meta.sourceCoverage.supportedUnits", meta.sourceCoverage?.supportedUnits, "number"],
+      ["milestone2.meta.sourceCoverage.totalUnits", meta.sourceCoverage?.totalUnits, "number"],
+      ["milestone2.meta.sourceCoverage.ratio", meta.sourceCoverage?.ratio, "number"],
+      ["milestone2.meta.executionStatus", meta.executionStatus, "present"],
+      ["milestone2.meta.sourceBacked", meta.sourceBacked, "present"],
+      ["milestone2.decisionReceipt.conclusion", rec?.conclusion, "string"],
+      ["milestone2.decisionReceipt.basis[0]", rec?.basis[0], "string"],
+      ["milestone2.decisionReceipt.assumptions[0]", rec?.assumptions[0], "string"],
+      ["milestone2.decisionReceipt.uncertainties[0]", rec?.uncertainties[0], "string"],
+      ["milestone2.decisionReceipt.limitations[0]", rec?.limitations[0], "string"],
+      ["milestone2.decisionReceipt.sources[0]", rec?.sources[0], "string"]
     );
   }
   if (lg) {
-    paths.push(
-      ["legacy.alignedClaims[0].claimText", String(lg.alignedClaims[0]?.claimText)],
-      ["legacy.alignedClaims[0].id", String(lg.alignedClaims[0]?.id)],
-      ["legacy.gate.loadBearingClaims[0].claimText", String(lg.gate?.loadBearingClaims[0]?.claimText)],
-      ["legacy.synthesisReport.unifiedAnswer", String(lg.synthesisReport?.unifiedAnswer)],
-      ["legacy.synthesisReport.panelVerdict", String(lg.synthesisReport?.panelVerdict)],
-      ["legacy.synthesisReport.executiveSummary", String(lg.synthesisReport?.executiveSummary)],
-      ["legacy.synthesisReport.certaintyAssessment", String(lg.synthesisReport?.certaintyAssessment)],
-      ["legacy.synthesisReport.whereModelsAgree[0]", String(lg.synthesisReport?.whereModelsAgree[0])],
-      ["legacy.synthesisReport.whereModelsDisagree[0]", String(lg.synthesisReport?.whereModelsDisagree[0])],
-      ["legacy.synthesisReport.narrativeSections[0].title", String(lg.synthesisReport?.narrativeSections[0]?.title)],
-      ["legacy.synthesisReport.narrativeSections[0].body", String(lg.synthesisReport?.narrativeSections[0]?.body)],
-      ["legacy.synthesisReport.verdictCard.topConsensus", String(lg.synthesisReport?.verdictCard.topConsensus)],
-      ["legacy.synthesisReport.verdictCard.recommendedNextSteps[0]", String(lg.synthesisReport?.verdictCard.recommendedNextSteps[0])],
-      ["legacy.modelResponses[0].data.thesis", String((lg.modelResponses?.[0]?.data as { thesis?: string } | null)?.thesis)]
+    const sr = lg.synthesisReport;
+    const claim = lg.alignedClaims[0];
+    const cell = claim?.cells[0];
+    const trust = lg.trustSummary;
+    const mr = lg.modelResponses?.[0];
+    out.push(
+      ["legacy.schemaId", lg.schemaId, "present"],
+      ["legacy.alignedClaims[0].id", claim?.id, "string"],
+      ["legacy.alignedClaims[0].claimText", claim?.claimText, "string"],
+      ["legacy.alignedClaims[0].disagreementType", claim?.disagreementType, "string"],
+      ["legacy.alignedClaims[0].cells[0].excerpt", cell?.excerpt, "string"],
+      ["legacy.alignedClaims[0].cells[0].camps[0].label", cell?.camps?.[0]?.label, "string"],
+      ["legacy.alignedClaims[0].cells[0].camps[0].position", cell?.camps?.[0]?.position, "string"],
+      ["legacy.gate.loadBearingClaims[0].claimText", lg.gate?.loadBearingClaims[0]?.claimText, "string"],
+      ["legacy.gate.loadBearingClaims[0].cells[0].excerpt", lg.gate?.loadBearingClaims[0]?.cells[0]?.excerpt, "string"],
+      ["legacy.synthesisReport.unifiedAnswer", sr?.unifiedAnswer, "string"],
+      ["legacy.synthesisReport.panelVerdict", sr?.panelVerdict, "string"],
+      ["legacy.synthesisReport.executiveSummary", sr?.executiveSummary, "string"],
+      ["legacy.synthesisReport.certaintyAssessment", sr?.certaintyAssessment, "string"],
+      ["legacy.synthesisReport.whereModelsAgree[0]", sr?.whereModelsAgree[0], "string"],
+      ["legacy.synthesisReport.whereModelsDisagree[0]", sr?.whereModelsDisagree[0], "string"],
+      ["legacy.synthesisReport.narrativeSections[0].title", sr?.narrativeSections[0]?.title, "string"],
+      ["legacy.synthesisReport.narrativeSections[0].body", sr?.narrativeSections[0]?.body, "string"],
+      ["legacy.synthesisReport.disagreements[0].topic", sr?.disagreements[0]?.topic, "string"],
+      ["legacy.synthesisReport.disagreements[0].whyTheyDiffer", sr?.disagreements[0]?.whyTheyDiffer, "string"],
+      ["legacy.synthesisReport.disagreements[0].positions[0].position", sr?.disagreements[0]?.positions[0]?.position, "string"],
+      ["legacy.synthesisReport.biasAndBlindSpots[0].biasType", sr?.biasAndBlindSpots[0]?.biasType, "string"],
+      ["legacy.synthesisReport.biasAndBlindSpots[0].description", sr?.biasAndBlindSpots[0]?.description, "string"],
+      ["legacy.synthesisReport.biasAndBlindSpots[0].evidence[0].excerpt", sr?.biasAndBlindSpots[0]?.evidence[0]?.excerpt, "string"],
+      ["legacy.synthesisReport.biasAndBlindSpots[0].evidence[0].rationale", sr?.biasAndBlindSpots[0]?.evidence[0]?.rationale, "string"],
+      ["legacy.synthesisReport.biasAndBlindSpots[0].likelyCauses[0]", sr?.biasAndBlindSpots[0]?.likelyCauses[0], "string"],
+      ["legacy.synthesisReport.biasAndBlindSpots[0].impact", sr?.biasAndBlindSpots[0]?.impact, "string"],
+      ["legacy.synthesisReport.biasAndBlindSpots[0].mitigationSteps[0]", sr?.biasAndBlindSpots[0]?.mitigationSteps[0], "string"],
+      ["legacy.synthesisReport.panelCoverageGaps[0].dimension", sr?.panelCoverageGaps[0]?.dimension, "string"],
+      ["legacy.synthesisReport.panelCoverageGaps[0].whyItMatters", sr?.panelCoverageGaps[0]?.whyItMatters, "string"],
+      ["legacy.synthesisReport.panelCoverageGaps[0].followUpQuestion", sr?.panelCoverageGaps[0]?.followUpQuestion, "string"],
+      ["legacy.synthesisReport.verdictCard.topConsensus", sr?.verdictCard.topConsensus, "string"],
+      ["legacy.synthesisReport.verdictCard.keyDisagreement", sr?.verdictCard.keyDisagreement, "string"],
+      ["legacy.synthesisReport.verdictCard.disagreementDetail", sr?.verdictCard.disagreementDetail, "string"],
+      ["legacy.synthesisReport.verdictCard.caveat", sr?.verdictCard.caveat, "string"],
+      ["legacy.synthesisReport.verdictCard.recommendedNextSteps[0]", sr?.verdictCard.recommendedNextSteps[0], "string"],
+      ["legacy.trustSummary.overallTrust", trust?.overallTrust, "number"],
+      ["legacy.trustSummary.perModel[0].modelId", trust?.perModel[0]?.modelId, "present"],
+      ["legacy.trustSummary.perModel[0].claimsContributed", trust?.perModel[0]?.claimsContributed, "number"],
+      ["legacy.trustSummary.perModel[0].majorityAlignment", trust?.perModel[0]?.majorityAlignment, "number"],
+      ["legacy.trustSummary.perModel[0].citationScore", trust?.perModel[0]?.citationScore, "number"],
+      ["legacy.trustSummary.perModel[0].contradictionCount", trust?.perModel[0]?.contradictionCount, "number"],
+      ["legacy.trustSummary.perModel[0].trustScore", trust?.perModel[0]?.trustScore, "number"],
+      ["legacy.trustSummary.perModel[0].parseHealth", trust?.perModel[0]?.parseHealth, "present"],
+      ["legacy.modelResponses[0].data.thesis", (mr?.data as { thesis?: string } | null | undefined)?.thesis, "string"],
+      ["legacy.modelResponses[0].parseError", mr?.parseError, "string"],
+      ["legacy.modelResponses[0].truncatedFields[0]", mr?.truncatedFields?.[0], "string"],
+      ["legacy.modelResponses[0].invalidFields[0]", mr?.invalidFields?.[0], "string"],
+      ["legacy.modelResponses[0].coercions[0].raw", mr?.coercions?.[0]?.raw, "string"],
+      ["legacy.modelResponses[0].coercions[0].coerced", mr?.coercions?.[0]?.coerced, "string"],
+      ["legacy.modelResponses[0].coercions[0].path", mr?.coercions?.[0]?.path, "string"],
+      ["legacy.modelResponses[0].latencyMs", mr?.latencyMs, "number"]
     );
   }
-  return paths;
+  return out;
 };
 
+const NUMERIC_SENTINELS: readonly number[] = Object.values(NUM);
+
 const assertSnapshotSentinelsReachable = (snapshot: AdaptiveExportReportSnapshot) => {
-  for (const [path, value] of snapshotSentinelPaths(snapshot)) {
-    if (!value.startsWith("SENTINEL_") && value !== SNAP.GENERATED_AT) {
+  for (const [path, value, kind] of snapshotSentinelPaths(snapshot)) {
+    if (value === undefined || value === null) {
+      throw new Error(`fixture value ABSENT at ${path} (got ${String(value)}) — an undefined leaf proves nothing, it serializes to nothing`);
+    }
+    if (kind === "string" && !(typeof value === "string" && value.startsWith("SENTINEL_"))) {
       throw new Error(`fixture sentinel missing at ${path}: got ${JSON.stringify(value)}`);
+    }
+    if (kind === "number" && !(typeof value === "number" && NUMERIC_SENTINELS.includes(value))) {
+      throw new Error(`fixture numeric sentinel missing at ${path}: got ${JSON.stringify(value)}`);
     }
   }
 };
 
-/** Every sentinel that must never appear in a response, derived from the fixtures themselves rather than hand-listed (so adding a sentinel cannot be forgotten here). */
-const allSnapshotSentinels = () => [
-  ...snapshotSentinelPaths(MILESTONE2_SNAPSHOT).map(([, v]) => v),
-  ...snapshotSentinelPaths(LEGACY_SNAPSHOT).map(([, v]) => v),
-].filter((v) => v.startsWith("SENTINEL_"));
+/** The detectable needles of ONE family: string sentinels plus numeric sentinels rendered as they serialize. `present`-kind paths are excluded — they carry no distinctive value and are covered by the exact key-set allow-list. */
+const familySentinels = (snapshot: AdaptiveExportReportSnapshot): [string, string][] =>
+  snapshotSentinelPaths(snapshot)
+    .filter(([, , kind]) => kind !== "present")
+    .map(([path, value]) => [path, String(value)] as [string, string]);
+
+/** Every needle that must never appear in a response — derived FROM THE FIXTURES, so adding a leaf cannot be forgotten here. Numeric sentinels are included as strings, because a projected number serializes just as a string does. */
+const allSnapshotSentinels = () => {
+  const needles: string[] = [];
+  for (const snap of [MILESTONE2_SNAPSHOT, LEGACY_SNAPSHOT] as AdaptiveExportReportSnapshot[]) {
+    for (const [, value, kind] of snapshotSentinelPaths(snap)) {
+      if (kind === "string" && typeof value === "string") needles.push(value);
+      if (kind === "number" && typeof value === "number") needles.push(String(value));
+    }
+  }
+  return Array.from(new Set(needles));
+};
 
 /**
  * R2 §16 — every field here is one the REAL E1 writer persists, checked against
@@ -913,13 +1216,26 @@ describe("E2A-S9b — the gate asks for research.read SPECIFICALLY", () => {
 
 describe("R2 P2-4 — a malformed historical record cannot crash the list", () => {
   /**
-   * REACHABLE, not hypothetical. `normalizeAdaptiveExportRecord` blind-casts
-   * (`raw as AdaptiveResearchExportV1`) with no shape validation, and its legacy
-   * branch for the flat `"exportMetadata.fileHash"` key only merges into an
-   * EXISTING nested map (`if (rest.exportMetadata && …)`). A legacy document
-   * whose only hash carrier was the flat key therefore arrives with no
-   * `exportMetadata` at all. Unguarded, `r.exportMetadata.fileHash` threw a
-   * TypeError out of GET — the one failure path with no `{ok:false}` envelope.
+   * BLIND_CAST_HARDENING — NOT a known historical producer.
+   *
+   * R4 caught this docblock still asserting the claim the route itself retracts.
+   * The retraction is the correct side, source-traced twice independently: the
+   * pre-fix `markAdaptiveExportReady` wrote the flat `"exportMetadata.fileHash"`
+   * key via `.set(…, { merge: true })` onto a document
+   * `createAdaptiveExportRecord` had ALREADY written with a full nested
+   * `exportMetadata` (flat-key bug 86185a6; the create writer has required it
+   * since fe1891f, and `sanitizeForFirestore` never drops keys). Legacy records
+   * therefore carry BOTH, and the normalizer merges the flat value in and strips
+   * the key. NO writer in this repository has been demonstrated to produce a
+   * record lacking `exportMetadata`.
+   *
+   * The guard is justified instead by the BLIND CAST at a public API boundary:
+   * `normalizeAdaptiveExportRecord` returns `raw as AdaptiveResearchExportV1`
+   * with no shape validation, so the required-ness of `exportMetadata` is an
+   * assumption about persisted data rather than a guarantee about it. Unguarded,
+   * `r.exportMetadata.fileHash` threw a TypeError out of GET — the one failure
+   * path with no `{ok:false}` envelope. These fixtures are therefore hostile
+   * inputs for a defensive guard, not reproductions of a known bad record.
    */
   const withoutMetadata = () => {
     const r = exportRecord(3) as Record<string, unknown>;
@@ -939,7 +1255,7 @@ describe("R2 P2-4 — a malformed historical record cannot crash the list", () =
     expect(r.json.exports[1].fileHash).toBe("f".repeat(64));
   });
 
-  it("the LEGACY flat-key shape — the real producer — lists and never forwards the raw key", async () => {
+  it("the legacy flat-key shape — a hostile blind-cast input, not a known producer — lists and never forwards the raw key", async () => {
     const legacy = withoutMetadata();
     legacy["exportMetadata.fileHash"] = "a".repeat(64);
     mockedListExports.mockImplementation(listFake([legacy]));
@@ -1101,9 +1417,10 @@ describe("E2A-S8 — no reportSnapshot leaf reaches the response", () => {
     expect(() => assertSnapshotSentinelsReachable(MILESTONE2_SNAPSHOT)).not.toThrow();
     expect(() => assertSnapshotSentinelsReachable(LEGACY_SNAPSHOT)).not.toThrow();
     // and there is genuinely something to hide, at a useful depth
-    expect(snapshotSentinelPaths(MILESTONE2_SNAPSHOT).length).toBeGreaterThanOrEqual(16);
-    expect(snapshotSentinelPaths(LEGACY_SNAPSHOT).length).toBeGreaterThanOrEqual(17);
-    expect(allSnapshotSentinels().length).toBeGreaterThanOrEqual(30);
+    // exact counts, so neither a dropped path nor an unreviewed addition is silent
+    expect(snapshotSentinelPaths(MILESTONE2_SNAPSHOT).length).toBe(40);
+    expect(snapshotSentinelPaths(LEGACY_SNAPSHOT).length).toBe(57);
+    expect(allSnapshotSentinels().length).toBe(81);
   });
 
   it("REACHABILITY CONTROL: dropping ONE nested leaf fails the self-check, before any non-disclosure claim", () => {
@@ -1117,6 +1434,35 @@ describe("E2A-S8 — no reportSnapshot leaf reaches the response", () => {
     const damagedLegacy = JSON.parse(JSON.stringify(LEGACY_SNAPSHOT)) as AdaptiveExportReportSnapshot;
     delete damagedLegacy.legacy!.synthesisReport;
     expect(() => assertSnapshotSentinelsReachable(damagedLegacy)).toThrow(/synthesisReport\.unifiedAnswer/);
+
+    // R4 found `trustSummary` had NO inventory entry, so deleting it from the
+    // fixture passed the whole suite — and projecting it then became invisible.
+    // It carries no free-form string, only numbers, which is exactly why it was
+    // overlooked; numeric sentinels make it detectable and this proves the
+    // inventory now covers it.
+    const damagedTrust = JSON.parse(JSON.stringify(LEGACY_SNAPSHOT)) as AdaptiveExportReportSnapshot;
+    delete damagedTrust.legacy!.trustSummary;
+    expect(() => assertSnapshotSentinelsReachable(damagedTrust)).toThrow(/trustSummary\.overallTrust/);
+
+    // ...and emptying a content-bearing ARRAY is caught too — an empty array
+    // serializes, so it silently proves nothing about its element type.
+    const emptiedCells = JSON.parse(JSON.stringify(LEGACY_SNAPSHOT)) as AdaptiveExportReportSnapshot;
+    emptiedCells.legacy!.alignedClaims[0].cells = [];
+    expect(() => assertSnapshotSentinelsReachable(emptiedCells)).toThrow(/cells\[0\]\.excerpt/);
+
+    const emptiedDisagreements = JSON.parse(JSON.stringify(LEGACY_SNAPSHOT)) as AdaptiveExportReportSnapshot;
+    emptiedDisagreements.legacy!.synthesisReport!.disagreements = [];
+    expect(() => assertSnapshotSentinelsReachable(emptiedDisagreements)).toThrow(/disagreements\[0\]\.topic/);
+
+    // ...and an optional leaf replaced by an ordinary value, not just deleted
+    const plainValue = JSON.parse(JSON.stringify(MILESTONE2_SNAPSHOT)) as AdaptiveExportReportSnapshot;
+    (plainValue.milestone2!.meta as { limitations?: string[] }).limitations = ["an ordinary limitation"];
+    expect(() => assertSnapshotSentinelsReachable(plainValue)).toThrow(/meta\.limitations\[0\]/);
+
+    // ...and a numeric sentinel replaced by an ordinary number
+    const plainNumber = JSON.parse(JSON.stringify(MILESTONE2_SNAPSHOT)) as AdaptiveExportReportSnapshot;
+    plainNumber.milestone2!.meta.totalModels = 3;
+    expect(() => assertSnapshotSentinelsReachable(plainNumber)).toThrow(/meta\.totalModels/);
   });
 
   it("E2A-S8 no milestone2 reportSnapshot leaf reaches the response", async () => {
@@ -1125,10 +1471,15 @@ describe("E2A-S8 — no reportSnapshot leaf reaches the response", () => {
     expect(r.status).toBe(200);
     expect(r.json.exports).toHaveLength(1);
     const blob = JSON.stringify(r.json);
-    for (const [path, sentinel] of snapshotSentinelPaths(MILESTONE2_SNAPSHOT)) {
-      if (!sentinel.startsWith("SENTINEL_")) continue;
-      expect(blob).not.toContain(sentinel);
-      expect(path).toBeTruthy();
+    const needles = familySentinels(MILESTONE2_SNAPSHOT);
+    // non-vacuity: the loop below must actually iterate a substantial set
+    // EXACT, not a threshold: R4 showed `>= 30` against 31 entries was defeated by
+    // dropping one. An exact count fails on any silent shrink AND on any silent
+    // growth that was not accompanied by a deliberate update here.
+    expect(needles.length).toBe(33);
+    for (const [path, needle] of needles) {
+      // `path` is in the message so a failure names the leaking leaf, not just the value
+      expect(`${path}=${blob.includes(needle)}`).toBe(`${path}=false`);
     }
     expect(Object.keys(r.json.exports[0]).sort()).toEqual([...["artifactStatus", "classification", "createdAt", "createdBy", "exportId", "format", "governanceStatusAtExport", "reportVersion", "schemaFamily", "schemaId"], "fileHash", "hashAlgorithm", "hashReproducible"].sort());
   });
@@ -1140,9 +1491,10 @@ describe("E2A-S8 — no reportSnapshot leaf reaches the response", () => {
     expect(r.json.exports).toHaveLength(1);
     expect(r.json.exports[0].schemaFamily).toBe("legacy");
     const blob = JSON.stringify(r.json);
-    for (const [, sentinel] of snapshotSentinelPaths(LEGACY_SNAPSHOT)) {
-      if (!sentinel.startsWith("SENTINEL_")) continue;
-      expect(blob).not.toContain(sentinel);
+    const needles = familySentinels(LEGACY_SNAPSHOT);
+    expect(needles.length).toBe(50);
+    for (const [path, needle] of needles) {
+      expect(`${path}=${blob.includes(needle)}`).toBe(`${path}=false`);
     }
     expect(Object.keys(r.json.exports[0]).sort()).toEqual([...["artifactStatus", "classification", "createdAt", "createdBy", "exportId", "format", "governanceStatusAtExport", "reportVersion", "schemaFamily", "schemaId"], "fileHash", "hashAlgorithm", "hashReproducible"].sort());
   });
@@ -1241,6 +1593,47 @@ describe("E2A-S15 — the paging envelope is never self-contradictory", () => {
     const r = await submit();
     expect(r.status).toBe(503);
     expect(r.json.errorCode).toBe("team_workspace_unavailable");
+  });
+
+  it.each([["NaN", Number.NaN], ["Infinity", Number.POSITIVE_INFINITY], ["-Infinity", Number.NEGATIVE_INFINITY]])(
+    "a NON-FINITE terminal reportVersion (%s) is refused — it serializes to null, which is the trap",
+    async (_label, value) => {
+      // R4: dropping `Number.isFinite` from the guard passed the whole suite,
+      // because the only cases here were a MISSING key and a STRING, both of
+      // which `typeof === "number"` alone already rejects. A non-finite number
+      // passes `typeof` and `JSON.stringify` turns it into `null` — producing
+      // exactly `{hasMore:true, nextCursor:null}`, the envelope this invariant
+      // exists to forbid, plus a 6th key in violation of the allow-list.
+      mockedListExports.mockImplementation(listFake([exportRecord(3, { reportVersion: value })], true));
+      const r = await submit();
+      expect(r.status).toBe(503);
+      expect(r.json.errorCode).toBe("team_workspace_unavailable");
+      expect(r.json.hasMore).toBeUndefined();
+      expect(r.json.nextCursor).toBeUndefined();
+      noWrites();
+    }
+  );
+
+  it("reportVersion 0 IS a usable cursor and must still page — the guard tests finiteness, not truthiness", async () => {
+    // R4: replacing `nextCursor === null` with `!nextCursor` passed the whole
+    // suite, yet it turns this page into a permanent 503. `0` round-trips
+    // correctly — `?cursor=0` maps back to `beforeReportVersion: 0`, which the
+    // helper honours — so refusing it would break a legitimate page. The guard's
+    // premise is that this route reads blind-cast persistence and cannot assume
+    // `reportVersion >= 1`, which makes `0` exactly as admissible as `"3"`.
+    mockedListExports.mockImplementation(listFake([exportRecord(3, { reportVersion: 0 })], true));
+    const r = await submit();
+    expect(r.status).toBe(200);
+    expect(r.json.hasMore).toBe(true);
+    expect(r.json.nextCursor).toBe(0);
+    expect(Object.keys(r.json).sort()).toEqual(["exports", "hasMore", "nextCursor", "ok", "runId"]);
+  });
+
+  it("a NEGATIVE terminal reportVersion is finite, so it pages rather than being refused", async () => {
+    mockedListExports.mockImplementation(listFake([exportRecord(3, { reportVersion: -5 })], true));
+    const r = await submit();
+    expect(r.status).toBe(200);
+    expect(r.json.nextCursor).toBe(-5);
   });
 
   it("POSITIVE CONTROL: hasMore with a usable terminal reportVersion still pages", async () => {
