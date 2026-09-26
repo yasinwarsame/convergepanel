@@ -42,39 +42,85 @@ jest.mock("@/lib/env", () => ({
  * calls it: the `peek*` helpers deliberately interrogate the access / list /
  * Project mocks instead, so a precondition peek cannot perturb the count.
  *
- * WHY THE ACCOUNTING CANNOT BE FAKED. `secured()` is the ONLY registrar of a
- * secured invocation and it verifies its own claim — it measures the raw-entry
- * delta across the wrapped call and fails unless that delta is exactly 1. So a
- * test cannot inflate the secured count without genuinely entering the route once
- * through the wrapper, and a raw handler call anywhere else leaves
- * `rawEntries === securedEntries + 1` for the top-level `afterEach` to catch.
- * Both counters are closure-private: no reset, no setter, no comparator baseline
- * for a test to reach. R8 defeated a reassignable sink and R9 re-marked the
- * baseline a counter was compared to; there is no operand here to re-mark.
+ * R11 ROUND 2 — WHY ACCOUNTING ALONE WAS THE WRONG BOUNDARY, AND WHAT REPLACED IT.
+ *
+ * R11's first attempt made the boundary an ACCOUNTING invariant: count route
+ * entries, count secured invocations, assert they match in a top-level
+ * `afterEach`. Independent review broke it three ways, each measured with the frozen
+ * report provably on the wire and the suite green:
+ *   1. the secured-invocation registrar was a reachable public member, so wrapping a
+ *      RAW aliased call in it balanced the books while skipping the helper entirely;
+ *   2. the postcondition was a public assert-AND-RESET, so a test could perform a raw
+ *      call and then swallow the throw — R9's "re-mark the baseline" defect, which
+ *      the prose claimed was gone, reappearing in a new operand;
+ *   3. a route entry from a TRAILING top-level `afterAll` landed after the last
+ *      `afterEach`, in a window nothing checked.
+ * All three share one cause: accounting is checked AFTER the fact, somewhere a test
+ * can influence or outrun. So accounting is no longer the boundary.
+ *
+ * THE BOUNDARY IS NOW FAIL-CLOSED, AT THE UNIVERSAL ENTRY. The mock REFUSES to let
+ * the route proceed when no secured request is in progress: it throws, the handler
+ * rejects, and there is no response for a leak to travel in. That defeats all three
+ * escapes at once, and it depends on no hook, no ordering, no counter a test can
+ * reach and nothing a test must remember to assert — outside the helper the route
+ * simply does not run.
+ *
+ * The counters remain as a cheap CONSISTENCY check for anomalies the guard cannot
+ * see: two entries inside one secured request, or a secured request that never
+ * entered the route. They are MONOTONIC with no reset, so there is no baseline to
+ * re-mark and nothing to swallow — an imbalance, once created, fails every
+ * subsequent `afterEach` too. Stated precisely, because the previous wording
+ * over-claimed: `noteSecuredInvocation` IS reachable and calling it does perturb the
+ * consistency check. It cannot make the route run outside the helper, and that is
+ * the property being claimed.
  */
-const routeInvocationAudit = (() => {
+const routeEntryGuard = (() => {
   let rawEntries = 0;
   let securedEntries = 0;
   return {
-    /** Called ONLY from the `resolveRequestIdentity` module mock — once per real route entry. */
-    noteRouteEntry: () => {
+    /**
+     * Called ONLY from the `resolveRequestIdentity` module mock — once per real route
+     * entry, before the fake answers, so an identity FAILURE counts too. Fails CLOSED:
+     * outside a secured request there is no witness, so no instrumentation, no canary
+     * registration and no output scan would run. Rather than let the route produce a
+     * response nothing examines, it does not produce one.
+     */
+    noteRouteEntry: (): void => {
+      // The guard comes FIRST and the counter second: a REFUSED entry never executed,
+      // so counting it would permanently unbalance a consistency check about entries
+      // that did execute — and would make every later `afterEach` fail for a reason
+      // that is not a defect. Counting only admitted entries keeps the two mechanisms
+      // measuring different things, which is the point of having both.
+      if (activeWitness === null) {
+        throw new Error(
+          "E2A-S8E VIOLATION: the route was entered OUTSIDE the secured request helper. " +
+            "Every route invocation must go through submitRequest(), which is where E2A-S8A, " +
+            "E2A-S8B and E2A-S8C are enforced. A raw handler call — however it is reached, " +
+            "including through an alias, an object property, Reflect.apply, a lifecycle hook, " +
+            "or a wrapper around the invocation audit — would produce a response nothing examines.",
+        );
+      }
       rawEntries += 1;
     },
-    /** The only way to register a secured invocation, and it proves it performed one. */
-    secured: async <T>(run: () => Promise<T>): Promise<T> => {
+    /**
+     * Registered by `submitRequest`, after it has published the witness. Guarded the
+     * same way, so calling it from anywhere else throws instead of inflating the
+     * count — which is what made the previous version's registrar a laundering
+     * surface. It is therefore unreachable IN EFFECT, not merely documented as
+     * "not load-bearing".
+     */
+    noteSecuredInvocation: (): void => {
+      if (activeWitness === null) {
+        throw new Error(
+          "E2A-S8E VIOLATION: the secured-invocation registrar was called outside a secured request. " +
+            "Only submitRequest() may register one, and only after it has published its witness.",
+        );
+      }
       securedEntries += 1;
-      const before = rawEntries;
-      const out = await run();
-      expect(`routeEntriesInsideSecuredHelper:${rawEntries - before}`).toBe("routeEntriesInsideSecuredHelper:1");
-      return out;
     },
-    /** The top-level postcondition: read, reset, then assert on the captured pair. */
-    assertBalancedAndReset: () => {
-      const raw = rawEntries;
-      const secured = securedEntries;
-      rawEntries = 0;
-      securedEntries = 0;
-      expect(`rawRouteEntries=${raw} securedInvocations=${secured}`).toBe(`rawRouteEntries=${secured} securedInvocations=${secured}`);
+    /** The global consistency postcondition. Monotonic: nothing to reset, no baseline to re-mark. */
+    assertBalanced: (): void => {
+      expect(`rawRouteEntries=${rawEntries} securedInvocations=${securedEntries}`).toBe(`rawRouteEntries=${securedEntries} securedInvocations=${securedEntries}`);
     },
   };
 })();
@@ -82,9 +128,10 @@ const routeInvocationAudit = (() => {
 const mockedResolveRequestIdentity = jest.fn();
 jest.mock("@/lib/auth/resolveRequestIdentity", () => ({
   resolveRequestIdentity: (...a: unknown[]) => {
-    // §3 — the unavoidable route-entry signal. Counted before the fake answers, so
-    // an identity FAILURE is still a route entry.
-    routeInvocationAudit.noteRouteEntry();
+    // §3 — the unavoidable route-entry signal. Counted AND GUARDED before the fake
+    // answers, so an identity failure is still a route entry and an UNSECURED entry
+    // never reaches the handler body at all.
+    routeEntryGuard.noteRouteEntry();
     return mockedResolveRequestIdentity(...a);
   },
 }));
@@ -914,9 +961,15 @@ const accessFake = (role: "owner" | "admin" | "member" | "reviewer" | "viewer" =
  * the cross-Workspace test must refuse. The two ids it IS configured with keep
  * their argument-sensitive behaviour, each with its own CONTROL test.
  */
+const PROJECT_UPDATE_TIME = Timestamp.fromDate(new Date("2026-09-02T09:00:00.000Z"));
 const projectFake = async (projectId: string) => {
-  if (projectId === FIXTURE_PROJECT_ID) return { status: "found", project: { id: FIXTURE_PROJECT_ID, name: "P", status: "active", workspaceId: WS } };
-  if (projectId === OTHER_PROJECT_ID) return { status: "found", project: { id: OTHER_PROJECT_ID, name: "Foreign", status: "active", workspaceId: OTHER_WS } };
+  // `documentUpdateTime` is carried because the real `GetProjectResult["found"]`
+  // requires it (`lib/firestore/projects.ts:18`). This route never reads it, so its
+  // absence changed no behaviour — but a fake whose successful arm cannot be produced
+  // by production is a fidelity gap of exactly the kind that has bitten this proof
+  // before, and closing it costs one field.
+  if (projectId === FIXTURE_PROJECT_ID) return { status: "found", project: { id: FIXTURE_PROJECT_ID, name: "P", status: "active", workspaceId: WS }, documentUpdateTime: PROJECT_UPDATE_TIME };
+  if (projectId === OTHER_PROJECT_ID) return { status: "found", project: { id: OTHER_PROJECT_ID, name: "Foreign", status: "active", workspaceId: OTHER_WS }, documentUpdateTime: PROJECT_UPDATE_TIME };
   return { status: "not_found" };
 };
 
@@ -1255,7 +1308,15 @@ const instrumentListResult = (result: unknown): unknown => {
  * HTTP response material and nothing else.
  *
  * Callable on a synthetic `Response`, which is how its own positive controls
- * falsify it (§9) without needing the production route to leak.
+ * falsify it (§9) without needing the production route to leak. Note that the
+ * mechanism controls prove the FUNCTION works; what proves the ROUTE PATH calls it
+ * is the enforced-check ledger and its structural pin — R11's reviewers found those
+ * are different things, and only the first had been falsified.
+ *
+ * `statusText` is included for completeness of the claim rather than because it is
+ * exploitable — Vercel serves HTTP/2, which carries no reason phrase. Scanning it
+ * costs nothing and means "client-visible HTTP response material" is exactly true
+ * rather than true-with-an-exception.
  */
 const assertResponseSecrecy = (res: Response, bodyText: string, canaries: ReadonlySet<string>): void => {
   // The third element is CASE FOLDING, and it is used for exactly one channel.
@@ -1266,7 +1327,7 @@ const assertResponseSecrecy = (res: Response, bodyText: string, canaries: Readon
   // census (§23) — the body and header VALUES are compared byte-for-byte, and
   // nothing here tries to anticipate hex, base64 or compression. S8C exists so
   // output safety does not rest on the canary's literal representation at all.
-  const surfaces: [string, string, boolean][] = [["body", bodyText, false]];
+  const surfaces: [string, string, boolean][] = [["body", bodyText, false], ["statusText", res.statusText ?? "", false]];
   res.headers.forEach((value, name) => {
     surfaces.push([`header-name:${name}`, name, true]);
     surfaces.push([`header-value:${name}`, value, false]);
@@ -1282,6 +1343,45 @@ const assertResponseSecrecy = (res: Response, bodyText: string, canaries: Readon
     }
   }
 };
+
+/**
+ * ─── R11 ROUND 2 — THE ENFORCED-CHECK LEDGER ──────────────────────────────
+ *
+ * The defect this exists for, measured by both independent reviewers: every security
+ * assertion inside the secured helper was an UNDEFENDED LINE. Replacing
+ * `assertResponseSecrecy(...)` with `void 0` left 212/212 green, and combined with a
+ * header leak the entire frozen report went out with the suite still green. The same
+ * held for the DTO validator, the S8A checks and the fixture-canary guard — six
+ * silently removable lines.
+ *
+ * The cause was not any single missing test. It was that the eight S8B positive
+ * controls drive `assertResponseSecrecy` against SYNTHETIC responses: they prove the
+ * FUNCTION works, never that the route path calls it. A mechanism and its WIRING are
+ * two different things to falsify, and only the first had been.
+ *
+ * So the wiring is now data. Every enforced property is invoked through `enforce`,
+ * which records its name, and the helper finishes by comparing the recorded names
+ * against this frozen ledger. Deleting a check changes the recorded list and the
+ * assertion names exactly what disappeared; adding one without registering it here
+ * fails the same way. The ledger is additionally pinned STRUCTURALLY (§7 LAYER C),
+ * so removing a call site and its ledger entry together is caught too.
+ *
+ * Residual, stated plainly rather than papered over: the completeness assertion is
+ * itself one line, and a spec author who deliberately rewrites this harness can
+ * defeat it — no in-file mechanism can stop its own file. What is now structurally
+ * impossible is FORGETTING, which is what actually happened in every round of this
+ * series. Both the ledger and the structural pin have falsifying tests.
+ */
+const ENFORCED_CHECK_NAMES = [
+  "S8A:no-forbidden-source-reads",
+  "S8A:no-wholesale-enumeration",
+  "S8A:no-off-policy-reads",
+  "S8B:fixture-canary-integrity",
+  "S8B:registry-non-empty",
+  "S8B:response-secrecy",
+  "S8C:approved-shape",
+] as const;
+type EnforcedCheckName = (typeof ENFORCED_CHECK_NAMES)[number];
 
 /**
  * ─── R11 §19/§20 — E2A-S8C: THE APPROVED-DTO VALIDATOR ────────────────────
@@ -1373,6 +1473,22 @@ const assertApprovedGovernanceStatus = (value: unknown, at: string): void => {
   }
 };
 
+/**
+ * The other half of E2A-S8C, so the check is unconditional rather than success-only:
+ * a REFUSAL must be a concealment envelope and must never carry a payload. Without
+ * this, a route that answered 404 with the export list attached would satisfy every
+ * success-shaped assertion by never being a success.
+ */
+const S8C_ENVELOPE_ERROR_KEYS: readonly string[] = ["ok", "errorCode", "message"];
+const assertConcealmentEnvelope = (json: unknown): void => {
+  expect(`refusal:isObject:${json !== null && typeof json === "object" && !Array.isArray(json)}`).toBe("refusal:isObject:true");
+  const body = json as Record<string, unknown>;
+  expect(`refusal:unapprovedKeys:${Object.keys(body).filter((k) => !S8C_ENVELOPE_ERROR_KEYS.includes(k)).sort().join(",")}`).toBe("refusal:unapprovedKeys:");
+  expect(`refusal.ok:${body.ok}`).toBe("refusal.ok:false");
+  expect(`refusal.errorCode:isNonEmptyString:${typeof body.errorCode === "string" && (body.errorCode as string).length > 0}`).toBe("refusal.errorCode:isNonEmptyString:true");
+  expect(`refusal.message:isNonEmptyString:${typeof body.message === "string" && (body.message as string).length > 0}`).toBe("refusal.message:isNonEmptyString:true");
+};
+
 const assertApprovedListDto = (json: unknown): void => {
   expect(`envelope:isObject:${json !== null && typeof json === "object" && !Array.isArray(json)}`).toBe("envelope:isObject:true");
   const body = json as Record<string, unknown>;
@@ -1437,44 +1553,61 @@ const expectSourceWasRead = (r: { reads: string[] }, ...props: string[]) => {
 const buildRequest = (query = "", workspaceId = WS, runId = RUN) =>
   new NextRequest(`http://localhost/api/workspaces/${workspaceId}/runs/${runId}/exports${query}`);
 
-// SUBMIT_BOUNDARY_BEGIN — the single raw-handler call site; asserted structurally by §7 LAYER B.
-const submitRequest = async (req: NextRequest, workspaceId = WS, runId = RUN) =>
-  routeInvocationAudit.secured(async () => {
-    const witness = newWitness(); // private to this invocation
-    activeWitness = witness;
-    try {
-      const res = await GET(req, { params: { workspaceId, runId } });
-      // §14: materialize from a CLONE, so the caller's `Response` instance is never
-      // consumed here, and scan what was actually serialized rather than a DTO.
-      const bodyText = await res.clone().text();
+// SUBMIT_BOUNDARY_BEGIN — the single raw-handler call site AND the wiring of every
+// enforced check; both asserted structurally by §7 LAYER C.
+const submitRequest = async (req: NextRequest, workspaceId = WS, runId = RUN) => {
+  const witness = newWitness(); // private to this invocation
+  activeWitness = witness;
+  try {
+    routeEntryGuard.noteSecuredInvocation();
+    const res = await GET(req, { params: { workspaceId, runId } });
+    // §14: materialize from a CLONE, so the caller's `Response` instance is never
+    // consumed here, and scan what was actually serialized rather than a DTO.
+    const bodyText = await res.clone().text();
+    const json = JSON.parse(bodyText) as Record<string, any>;
 
-      // ── E2A-S8A: source discipline ──
-      expect(witness.sink.forbidden).toEqual([]);
-      expect(witness.sink.enumerations).toEqual([]);
-      expect(Array.from(new Set(witness.sink.reads)).filter((p) => !ALLOWED_SOURCE_PROPS.includes(p))).toEqual([]);
+    // Every enforced property runs through `enforce`, which RECORDS that it ran.
+    // Deleting any one of these lines no longer removes a check silently: the
+    // completeness assertion below compares the recorded names against the frozen
+    // ledger and names exactly what went missing. See ENFORCED_CHECK_NAMES.
+    const ran: EnforcedCheckName[] = [];
+    const enforce = (name: EnforcedCheckName, assertion: () => void): void => {
+      assertion();
+      ran.push(name);
+    };
 
-      // ── E2A-S8B: output secrecy ──
-      // §11: the fixtures that carry frozen content must carry their canary...
-      expect(witness.reportBearingWithoutCanary).toEqual([]);
-      // ...and §10: a request handed report-bearing records cannot proceed with an
-      // empty registry, which is exactly how R10's emptied array stayed green.
-      if (witness.reportBearing > 0) {
-        expect(`reportBearingRecords:${witness.reportBearing} registeredCanaries:${witness.canaries.size > 0}`).toBe(`reportBearingRecords:${witness.reportBearing} registeredCanaries:true`);
-      }
-      // §13: body AND headers. However the value was obtained — structuredClone,
-      // util.inspect, a descriptor, or a primitive nobody here has thought of — it
-      // must not be in anything the client receives.
-      assertResponseSecrecy(res, bodyText, witness.canaries);
+    // ── E2A-S8A: source discipline ──
+    enforce("S8A:no-forbidden-source-reads", () => expect(witness.sink.forbidden).toEqual([]));
+    enforce("S8A:no-wholesale-enumeration", () => expect(witness.sink.enumerations).toEqual([]));
+    enforce("S8A:no-off-policy-reads", () => expect(Array.from(new Set(witness.sink.reads)).filter((p) => !ALLOWED_SOURCE_PROPS.includes(p))).toEqual([]));
 
-      const json = JSON.parse(bodyText) as Record<string, any>;
-      // ── E2A-S8C: the approved metadata DTO, unconditionally, on every success ──
-      if (res.status === 200) assertApprovedListDto(json);
+    // ── E2A-S8B: output secrecy ──
+    // §11: the fixtures that carry frozen content must carry their canary...
+    enforce("S8B:fixture-canary-integrity", () => expect(witness.reportBearingWithoutCanary).toEqual([]));
+    // ...and §10: a request handed report-bearing records cannot proceed with an
+    // empty registry, which is exactly how R10's emptied array stayed green.
+    enforce("S8B:registry-non-empty", () =>
+      expect(`reportBearingRecords:${witness.reportBearing} registryUsable:${witness.reportBearing === 0 || witness.canaries.size > 0}`).toBe(`reportBearingRecords:${witness.reportBearing} registryUsable:true`),
+    );
+    // §13: body AND headers. However the value was obtained — structuredClone,
+    // util.inspect, a descriptor, or a primitive nobody here has thought of — it
+    // must not be in anything the client receives.
+    enforce("S8B:response-secrecy", () => assertResponseSecrecy(res, bodyText, witness.canaries));
 
-      return { status: res.status, json, bodyText, reads: [...witness.sink.reads] };
-    } finally {
-      activeWitness = null;
-    }
-  });
+    // ── E2A-S8C: the approved shape, on EVERY response ──
+    // A success must be the approved metadata DTO; a refusal must be a concealment
+    // envelope and must never carry a payload. Both directions, always, so the check
+    // is unconditional and the ledger below can require it unconditionally.
+    enforce("S8C:approved-shape", () => (res.status === 200 ? assertApprovedListDto(json) : assertConcealmentEnvelope(json)));
+
+    // ── E2A-S8E (b): the ledger. No enforced check can go missing quietly. ──
+    expect(`enforcedChecks:${ran.join("|")}`).toBe(`enforcedChecks:${ENFORCED_CHECK_NAMES.join("|")}`);
+
+    return { status: res.status, json, bodyText, reads: [...witness.sink.reads] };
+  } finally {
+    activeWitness = null;
+  }
+};
 // SUBMIT_BOUNDARY_END
 
 const submit = async (query = "", workspaceId = WS, runId = RUN) => submitRequest(buildRequest(query, workspaceId, runId), workspaceId, runId);
@@ -1537,7 +1670,7 @@ beforeEach(resetHarnessState);
  * proves it entered the route itself.
  */
 afterEach(() => {
-  routeInvocationAudit.assertBalancedAndReset();
+  routeEntryGuard.assertBalanced();
 });
 
 describe("E2-A — the authorized list path", () => {
@@ -2469,9 +2602,13 @@ describe("E2A-S15 — the paging envelope is never self-contradictory", () => {
     // Contractual, and asserted on its STRUCTURED fields. Stated precisely, because
     // an earlier revision said "not its prose" and that was an over-claim: the
     // message substring is the SELECTOR that picks this warn out of the six, so a
-    // benign reword does fail these tests. Direction of error is benign — a false
-    // alarm on a reword, never a missed signal — and the payload assertion is what
-    // carries the contract: dropping a structured field fails this named test.
+    // reword that REMOVES the selector substring fails these tests. R11's reviewer
+    // measured the previous wording ("a benign reword does fail these tests") and it
+    // is false: rewording the human sentence while KEEPING the selector substring
+    // changes nothing. The direction of error is still benign — a false alarm on some
+    // rewords, never a missed signal — but the claim is now the measured one, and the
+    // payload assertion is what carries the contract: dropping a structured field
+    // fails this named test.
     // (Durable prose carries no mutation counts; those belong in review reports,
     // where their scope is stated.) No stable structured event/discriminator field
     // exists on these calls to select by instead, so the substring is the least-bad
@@ -2790,22 +2927,27 @@ describe("E2A-S8A — the instrumentation boundary cannot be opted out of", () =
    * calling the handler directly then put the whole frozen report on the wire with
    * the suite green.
    *
-   * The guarantee now has two layers, and only the first is load-bearing:
-   *   LAYER A — runtime invocation accounting (`routeInvocationAudit`), asserted by
-   *             the top-level `afterEach`. This is what catches a direct call.
-   *   LAYER B — this test, which localizes the single call site so the accounting
-   *             has one place to be true. It is a structural aid, NOT the security
-   *             guarantee; if it were deleted, Layer A would still fail a direct
-   *             call. Verified in both directions in this round.
+   * R11 round 2 replaced the accounting-based Layer A after review broke it three
+   * ways. The guarantee now has THREE layers and the FIRST is load-bearing:
+   *   LAYER A — the FAIL-CLOSED entry guard. Outside the secured helper the route
+   *             does not run, so there is no response for a leak to travel in. This
+   *             is what catches a direct call, through any reaching mechanism, from
+   *             any lifecycle hook, at any time.
+   *   LAYER B — monotonic invocation counters, asserted by the top-level
+   *             `afterEach`. A consistency check for the anomalies Layer A cannot
+   *             see: two entries inside one secured request, or a secured request
+   *             that never entered the route. Not the boundary.
+   *   LAYER C — this test and its sibling below. They localize the single raw call
+   *             site AND pin the WIRING of every enforced check — the defect round
+   *             11's first attempt shipped, where each security assertion inside the
+   *             helper was an undefended line, silently removable at 212/212 green.
+   *             A structural aid, NOT the security guarantee.
    *
-   * The self-counting defect is fixed by ASSEMBLING the needle at runtime, so this
-   * file contains no second literal occurrence of it to find.
+   * The self-counting defect is fixed by ASSEMBLING every needle at runtime, so this
+   * file contains no second literal occurrence of any of them to find.
    */
-  it("R11 §7 LAYER B: the raw route handler has exactly ONE call site, inside the secured helper", () => {
+  it("R11 §7 LAYER C: the raw route handler has exactly ONE call site, inside the secured helper", () => {
     const src = readFileSync(__filename, "utf8");
-    // Assembled, so this file contains no second literal occurrence to miscount —
-    // which is the self-counting defect that got the original test deleted. Prose
-    // elsewhere deliberately says "raw handler call" rather than spelling it.
     const needle = ["G", "E", "T", "("].join("");
     const begin = src.indexOf("SUBMIT_BOUNDARY_BEGIN");
     const end = src.indexOf("SUBMIT_BOUNDARY_END");
@@ -2814,6 +2956,26 @@ describe("E2A-S8A — the instrumentation boundary cannot be opted out of", () =
     for (let i = src.indexOf(needle); i !== -1; i = src.indexOf(needle, i + 1)) sites.push(i);
     expect(`rawHandlerCallSites:${sites.length}`).toBe("rawHandlerCallSites:1");
     expect(`callSiteInsideSecuredHelper:${sites[0] > begin && sites[0] < end}`).toBe("callSiteInsideSecuredHelper:true");
+  });
+
+  it("R11 §7 LAYER C: every enforced check is WIRED inside the secured helper, and the ledger is asserted there", () => {
+    // Both reviewers proved the mechanism tests could all pass while the route path
+    // called none of them, because the eight S8B controls drive the scanner against
+    // SYNTHETIC responses. A mechanism and its WIRING are two things to falsify.
+    const src = readFileSync(__filename, "utf8");
+    const begin = src.indexOf("SUBMIT_BOUNDARY_BEGIN");
+    const end = src.indexOf("SUBMIT_BOUNDARY_END");
+    const helper = src.slice(begin, end);
+    const wiring = (name: string) => ["enf", 'orce("'].join("") + name + '"';
+    const missing = ENFORCED_CHECK_NAMES.filter((name) => !helper.includes(wiring(name)));
+    expect(`checksNotWiredInsideTheHelper:${missing.join(",")}`).toBe("checksNotWiredInsideTheHelper:");
+    // the completeness assertion itself is present, in that same body
+    expect(`ledgerAssertionPresent:${helper.includes(["enforced", "Checks:${ran.join"].join(""))}`).toBe("ledgerAssertionPresent:true");
+    // and no enforced check is wired anywhere ELSE, which would let a site outside
+    // the helper satisfy the ledger on the helper's behalf
+    const outside = src.slice(0, begin) + src.slice(end);
+    const strays = ENFORCED_CHECK_NAMES.filter((name) => outside.includes(wiring(name)));
+    expect(`checksWiredOutsideTheHelper:${strays.join(",")}`).toBe("checksWiredOutsideTheHelper:");
   });
 });
 
@@ -2832,6 +2994,100 @@ describe("E2A-S8A — the instrumentation boundary cannot be opted out of", () =
  * positive controls are PERMANENT rather than a mutation someone has to remember
  * to re-run. §8: none of them enters the route.
  */
+describe("R11 round 2 — the ENTRY GUARD and the CHECK LEDGER are falsifiable", () => {
+  /**
+   * The rule this file states, and which round 11's first attempt broke for its own
+   * newest mechanism: a proof mechanism must itself be falsified before prose relies
+   * on it. These are the falsifiers for the two mechanisms that replaced the
+   * accounting boundary, written in the SAME change that introduced them.
+   */
+  it("LAYER A: entering the route outside the secured helper FAILS CLOSED, so no response exists to leak in", async () => {
+    const handler: typeof GET = GET;
+    expect(`witnessActiveOutsideTheHelper:${activeWitness === null}`).toBe("witnessActiveOutsideTheHelper:true");
+    await expect(handler(buildRequest(), { params: { workspaceId: WS, runId: RUN } })).rejects.toThrow(/E2A-S8E VIOLATION/);
+    // NEGATIVE CONTROL: the guard is not simply refusing everything — the same
+    // request through the helper still succeeds.
+    const r = await submit();
+    expect(r.status).toBe(200);
+  });
+
+  it("LAYER A: the refusal does not depend on WHICH mechanism reaches the handler", async () => {
+    const params = { params: { workspaceId: WS, runId: RUN } };
+    const shapes: [string, () => Promise<unknown>][] = [
+      ["alias", () => { const h: typeof GET = GET; return h(buildRequest(), params); }],
+      ["object property", () => { const o = { h: GET }; return o.h(buildRequest(), params); }],
+      ["Reflect.apply", () => Reflect.apply(GET, undefined, [buildRequest(), params])],
+      ["Promise.all", () => Promise.all([(GET as typeof GET)(buildRequest(), params)])],
+      ["a wrapper around the invocation registrar", async () => { routeEntryGuard.noteSecuredInvocation(); const h: typeof GET = GET; return h(buildRequest(), params); }],
+    ];
+    const refused: string[] = [];
+    for (const [name, invoke] of shapes) {
+      await expect(invoke()).rejects.toThrow(/E2A-S8E VIOLATION/);
+      refused.push(name);
+    }
+    expect(`refusedShapes:${refused.join(",")}`).toBe(`refusedShapes:${shapes.map(([n]) => n).join(",")}`);
+    // Nothing needs compensating: a refused entry is never counted, and the registrar
+    // refuses outside a secured request rather than inflating anything.
+  });
+
+  it("LAYER A: a route entry from a lifecycle hook is refused just the same", async () => {
+    // The shape review found slipping past accounting entirely: a hook runs where no
+    // `afterEach` follows it. Fail-closed does not care when it happens.
+    let outcome = "not attempted";
+    const hook = async () => {
+      try {
+        const h: typeof GET = GET;
+        await h(buildRequest(), { params: { workspaceId: WS, runId: RUN } });
+        outcome = "PRODUCED A RESPONSE";
+      } catch (err) {
+        outcome = (err as Error).message.includes("E2A-S8E VIOLATION") ? "refused" : `unexpected: ${(err as Error).message}`;
+      }
+    };
+    await hook();
+    expect(`hookEntryOutcome:${outcome}`).toBe("hookEntryOutcome:refused");
+  });
+
+  it("THE LEDGER: a check that stops running is NAMED, not silent", () => {
+    // Driven against the same ledger comparison the helper performs, with one check
+    // deliberately absent. Every name must be individually detectable.
+    const compare = (ran: readonly EnforcedCheckName[]) => () =>
+      expect(`enforcedChecks:${ran.join("|")}`).toBe(`enforcedChecks:${ENFORCED_CHECK_NAMES.join("|")}`);
+    expect(compare(ENFORCED_CHECK_NAMES)).not.toThrow();
+    const undetected = ENFORCED_CHECK_NAMES.filter((skip) => {
+      try {
+        compare(ENFORCED_CHECK_NAMES.filter((n) => n !== skip))();
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    expect(`checksWhoseAbsenceIsUndetected:${undetected.join(",")}`).toBe("checksWhoseAbsenceIsUndetected:");
+    // a non-empty ledger, or every comparison above would be vacuous
+    expect(`ledgerSize:${ENFORCED_CHECK_NAMES.length}`).toBe("ledgerSize:7");
+  });
+
+  it("THE LEDGER: its contents are pinned, so a property cannot be dropped from the helper AND the ledger together", () => {
+    expect([...ENFORCED_CHECK_NAMES].sort()).toEqual([
+      "S8A:no-forbidden-source-reads",
+      "S8A:no-off-policy-reads",
+      "S8A:no-wholesale-enumeration",
+      "S8B:fixture-canary-integrity",
+      "S8B:registry-non-empty",
+      "S8B:response-secrecy",
+      "S8C:approved-shape",
+    ]);
+  });
+
+  it("E2A-S8C covers REFUSALS too, not only successes", () => {
+    // Without this half, a route that answered 404 with the export list attached
+    // would satisfy every success-shaped assertion by never being a success.
+    expect(() => assertConcealmentEnvelope({ ok: false, errorCode: "run_not_found", message: "Not found." })).not.toThrow();
+    expect(() => assertConcealmentEnvelope({ ok: false, errorCode: "run_not_found", message: "Not found.", exports: [] })).toThrow(/refusal:unapprovedKeys:exports/);
+    expect(() => assertConcealmentEnvelope({ ok: true, errorCode: "x", message: "y" })).toThrow(/refusal.ok/);
+    expect(() => assertConcealmentEnvelope({ ok: false, errorCode: "", message: "y" })).toThrow(/refusal.errorCode/);
+  });
+});
+
 describe("R11 — E2A-S8B and E2A-S8C are falsifiable, and independent", () => {
   const canaries = new Set([FROZEN_REPORT_CANARY_M2]);
   const approvedBody = {
@@ -2899,6 +3155,70 @@ describe("R11 — E2A-S8B and E2A-S8C are falsifiable, and independent", () => {
     const names = [...(res.headers as unknown as { keys: () => Iterable<string> }).keys()];
     expect(`headerNameWasFolded:${names.some((n) => n.includes(FROZEN_REPORT_CANARY_M2.toLowerCase()) && !n.includes(FROZEN_REPORT_CANARY_M2))}`).toBe("headerNameWasFolded:true");
     await expect(scan(res)).rejects.toThrow(/frozen-report-content@header-name/);
+  });
+
+  it("§9/§13 POSITIVE CONTROL: a canary in Set-Cookie and in statusText fails the scan", async () => {
+    // The two surfaces the scan covers that no ordinary response exercises. Without
+    // these they were code nothing drove — claimed coverage, unproven.
+    const cookie = new NextResponse(JSON.stringify(approvedBody), { status: 200, headers: { "Set-Cookie": `sid=${FROZEN_REPORT_CANARY_M2}; Path=/` } }) as unknown as Response;
+    await expect(scan(cookie)).rejects.toThrow(/frozen-report-content@(set-cookie|header-value:set-cookie)/);
+    const reason = new Response(JSON.stringify(approvedBody), { status: 200, statusText: `OK ${FROZEN_REPORT_CANARY_M2}` });
+    await expect(scan(reason)).rejects.toThrow(/frozen-report-content@statusText/);
+  });
+
+  it("§7 the exportMetadata container allow-list CONTENTS are pinned, not just its existence", async () => {
+    // R11's reviewer found widening it to include `requestingUser` was silent: the
+    // trap fired, but nothing said which sub-properties the DTO is entitled to read.
+    expect([...ALLOWED_EXPORT_METADATA_PROPS]).toEqual(["fileHash"]);
+    // ...and the trap really does deny everything else, driven through the container
+    const sink = newSink();
+    const rec = trapRecord({ exportId: "x", exportMetadata: { fileHash: "f", requestingUser: "u", exportedSections: [] } }, "probe", sink);
+    const container = rec.exportMetadata as Record<string, unknown>;
+    void container.fileHash;
+    expect(sink.forbidden).toEqual([]);
+    void container.requestingUser;
+    void container.exportedSections;
+    expect(sink.forbidden).toEqual(["probe.exportMetadata:requestingUser", "probe.exportMetadata:exportedSections"]);
+  });
+
+  it("§19/§20 every S8C sub-assertion can fail — each one individually", () => {
+    // R11's reviewer found eleven sub-assertions inside this oracle that no test
+    // could falsify: removing any of them left the suite green. A mechanism is not
+    // falsified at "mechanism granularity" when its parts are what do the work.
+    const base = () => JSON.parse(JSON.stringify(approvedBody)) as Record<string, any>;
+    const cases: [string, (b: Record<string, any>) => void, RegExp][] = [
+      ["envelope.nextCursor non-numeric", (b) => { b.nextCursor = "5"; }, /nextCursor:nullOrFiniteNumber/],
+      ["envelope.nextCursor non-finite", (b) => { b.nextCursor = null; b.hasMore = false; b.__x = 1; }, /envelope:keys/],
+      ["hasMore true without a cursor", (b) => { b.hasMore = true; b.nextCursor = null; }, /hasMoreWithoutCursor/],
+      ["envelope.ok false on a success", (b) => { b.ok = false; }, /envelope.ok/],
+      ["envelope.runId empty", (b) => { b.runId = ""; }, /runId:isNonEmptyString/],
+      ["envelope.hasMore non-boolean", (b) => { b.hasMore = "no"; }, /hasMore:isBoolean/],
+      ["exports not an array", (b) => { b.exports = {}; }, /exports:isArray/],
+      ["item schemaFamily off-union", (b) => { b.exports[0].schemaFamily = "milestone3"; }, /schemaFamily/],
+      ["item hashAlgorithm wrong", (b) => { b.exports[0].hashAlgorithm = "md5"; }, /hashAlgorithm/],
+      ["item hashReproducible non-boolean", (b) => { b.exports[0].hashReproducible = "yes"; }, /hashReproducible:isBoolean/],
+      ["item fileHash non-string", (b) => { b.exports[0].fileHash = 1; }, /fileHash:isString/],
+      ["governance family off-union", (b) => { b.exports[0].governanceStatusAtExport.family = "future"; }, /governanceStatusAtExport.family/],
+      ["governance required key missing", (b) => { delete b.exports[0].governanceStatusAtExport.isOwnerOverride; }, /missingKeys/],
+      ["governance kind non-string", (b) => { b.exports[0].governanceStatusAtExport.kind = 7; }, /kind:isString/],
+      ["governance isOwnerOverride non-boolean", (b) => { b.exports[0].governanceStatusAtExport.isOwnerOverride = "no"; }, /isOwnerOverride:isBoolean/],
+      ["legacy governance status non-string", (b) => { b.exports[0].governanceStatusAtExport = { family: "legacy", status: 3 }; }, /status:isStringOrNull/],
+      ["item is not an object", (b) => { b.exports[0] = "x"; }, /isObject/],
+    ];
+    const undetected: string[] = [];
+    for (const [label, corrupt, pattern] of cases) {
+      const body = base();
+      corrupt(body);
+      try {
+        assertApprovedListDto(body);
+        undetected.push(label);
+      } catch (err) {
+        if (!pattern.test((err as Error).message)) undetected.push(`${label} (wrong diagnostic)`);
+      }
+    }
+    expect(`s8cSubAssertionsWithoutAFalsifier:${undetected.join(" | ")}`).toBe("s8cSubAssertionsWithoutAFalsifier:");
+    // and the clean body still passes, so the list above is not trivially failing
+    expect(() => assertApprovedListDto(base())).not.toThrow();
   });
 
   it("§9 NEGATIVE CONTROL: a clean approved response passes the scan", async () => {
@@ -3071,6 +3391,45 @@ const peekProjectStatus = async (): Promise<string> => {
 };
 const listing = (records: Record<string, unknown>[], hasMore = false) => () => {
   mockedListExports.mockResolvedValue({ ok: true, records, hasMore });
+};
+
+/**
+ * R11 §29 — ONE fingerprint function, so its falsifier drives the real thing.
+ *
+ * The mechanism this replaces was a source-text heuristic that ts-jest erased. Its
+ * first replacement was behaviourally right but had the same META-defect: the
+ * "mechanism proof" built a separate, smaller closure, so salting the real
+ * fingerprint was silent and a decorative duplicate row was accepted. Extracting the
+ * function is what makes the proof and the check the same code.
+ *
+ * It observes CONFIGURED STATE, not source text: the query, the resolved role, the
+ * Project outcome, the run's Project binding, `hasMore`, and the record fields any
+ * row varies. Every dimension listed here is covered by the mechanism proof, so a
+ * dimension silently dropped from this object fails there.
+ */
+const observableEffectFingerprint = async (setup: () => void, query: string): Promise<string> => {
+  resetHarnessState(); // fresh baseline, so a row is fingerprinted by what IT configures
+  setup();
+  const { records, hasMore } = await peekList();
+  return JSON.stringify({
+    query,
+    role: await peekRole(),
+    projectStatus: await peekProjectStatus(),
+    runProjectId: (runDocs.get(RUN) as { projectId?: unknown } | undefined)?.projectId ?? null,
+    hasMore,
+    records: records.map((rec) => ({
+      exportId: rec.exportId,
+      createdBy: rec.createdBy,
+      schemaId: rec.schemaId,
+      schemaFamily: rec.schemaFamily,
+      classification: rec.classification,
+      reportVersion: rec.reportVersion,
+      artifactStatus: rec.artifactStatus,
+      governanceStatusAtExport: rec.governanceStatusAtExport,
+      hasExportMetadata: rec.exportMetadata !== undefined,
+      hasFlatHashKey: rec["exportMetadata.fileHash"] !== undefined,
+    })),
+  });
 };
 
 /**
@@ -3321,29 +3680,7 @@ describe("R11 — the context matrix is neither decorative nor unvalidated", () 
     const seen = new Map<string, string>();
     for (const row of REQUEST_CONTEXTS) {
       const [name, setup, query] = validateContextRow(row);
-      // fresh baseline per row, so a row is fingerprinted by what IT configures
-      resetHarnessState();
-      setup();
-      const { records, hasMore } = await peekList();
-      const fingerprint = JSON.stringify({
-        query,
-        role: await peekRole(),
-        projectStatus: await peekProjectStatus(),
-        runProjectId: (runDocs.get(RUN) as { projectId?: unknown } | undefined)?.projectId ?? null,
-        hasMore,
-        records: records.map((rec) => ({
-          exportId: rec.exportId,
-          createdBy: rec.createdBy,
-          schemaId: rec.schemaId,
-          schemaFamily: rec.schemaFamily,
-          classification: rec.classification,
-          reportVersion: rec.reportVersion,
-          artifactStatus: rec.artifactStatus,
-          governanceStatusAtExport: rec.governanceStatusAtExport,
-          hasExportMetadata: rec.exportMetadata !== undefined,
-          hasFlatHashKey: rec["exportMetadata.fileHash"] !== undefined,
-        })),
-      });
+      const fingerprint = await observableEffectFingerprint(setup, query);
       const collidesWith = seen.get(fingerprint);
       expect(`row "${name}" effect-duplicates: ${collidesWith ?? "nothing"}`).toBe(`row "${name}" effect-duplicates: nothing`);
       seen.set(fingerprint, name);
@@ -3351,22 +3688,30 @@ describe("R11 — the context matrix is neither decorative nor unvalidated", () 
     expect(`distinctEffects:${seen.size} rows:${REQUEST_CONTEXTS.length}`).toBe(`distinctEffects:${REQUEST_CONTEXTS.length} rows:${REQUEST_CONTEXTS.length}`);
   });
 
-  it("§29 MECHANISM PROOF: the fingerprint really collides for a decorative duplicate", async () => {
-    // The exact shape R10's reviewer added to defeat the old source-text check: a
-    // second row with an empty query and a body-less setup. Fingerprinted, the two
-    // are indistinguishable — which is the point.
-    const fingerprintOf = async (setup: () => void, query: string) => {
-      resetHarnessState();
-      setup();
-      const { records, hasMore } = await peekList();
-      return JSON.stringify({ query, role: await peekRole(), records: records.map((r) => r.exportId), hasMore });
-    };
-    const a = await fingerprintOf(() => { /* nothing */ }, "");
-    const b = await fingerprintOf(() => {}, "");
-    expect(`decorativeDuplicateCollides:${a === b}`).toBe("decorativeDuplicateCollides:true");
-    // ...and a row that genuinely configures something else does NOT collide
-    const c = await fingerprintOf(() => { mockedAccess.mockImplementation(accessFake("viewer")); }, "");
-    expect(`genuinelyDifferentRowCollides:${a === c}`).toBe("genuinelyDifferentRowCollides:false");
+  it("§29 MECHANISM PROOF: THE SAME fingerprint function collides for a decorative duplicate", async () => {
+    // R11's reviewer found the previous version of this test built its OWN smaller
+    // closure and never touched the fingerprint it claimed to prove — so salting the
+    // real one left 212/212 green and a decorative duplicate was fully accepted. It
+    // now drives `observableEffectFingerprint` itself, the single function the real
+    // test above uses, so neutering that function fails here.
+    const decorativeA = await observableEffectFingerprint(() => { /* nothing */ }, "");
+    const decorativeB = await observableEffectFingerprint(() => {}, "");
+    expect(`decorativeDuplicateCollides:${decorativeA === decorativeB}`).toBe("decorativeDuplicateCollides:true");
+    // ...and rows that genuinely configure something else do NOT collide, on each
+    // dimension the fingerprint claims to observe
+    const distinct: [string, () => void, string][] = [
+      ["role", () => { mockedAccess.mockImplementation(accessFake("viewer")); }, ""],
+      ["query", () => { /* nothing */ }, "?cursor=5"],
+      ["records", listing([exportRecord(9)]), ""],
+      ["hasMore", listing([exportRecord(3), exportRecord(2)], true), ""],
+      ["project status", () => { mockedGetProject.mockResolvedValue({ status: "not_found" }); }, ""],
+      ["run projectId", () => { runDocs.set(RUN, teamRun({ projectId: null })); }, ""],
+    ];
+    const blind: string[] = [];
+    for (const [dimension, setup, query] of distinct) {
+      if ((await observableEffectFingerprint(setup, query)) === decorativeA) blind.push(dimension);
+    }
+    expect(`dimensionsTheFingerprintCannotSee:${blind.join(",")}`).toBe("dimensionsTheFingerprintCannotSee:");
   });
 
   it("§30/§32 the row validator REFUSES a malformed row", () => {

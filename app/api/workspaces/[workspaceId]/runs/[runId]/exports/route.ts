@@ -55,10 +55,22 @@
  * out of date is worse than none; the rule is simply that nothing in this file
  * may be described as shared unless it is literally the same function.
  *
- * SECURITY INVARIANTS. Each carries an id and names, VERBATIM, the test that
- * falsifies it; a claim without one is description, not a guarantee. The table
- * IS the ordering contract — there is deliberately no second numbered
- * restatement of the execution order, because that is a second thing to drift.
+ * SECURITY INVARIANTS. Each carries an id and names, VERBATIM, the tests that bear
+ * on it; a claim without one is description, not a guarantee. The table IS the
+ * ordering contract — there is deliberately no second numbered restatement of the
+ * execution order, because that is a second thing to drift.
+ *
+ * READ THE MARKERS, because R11's reviewer was right that an unmarked list reads as
+ * if every entry is a falsifier and 14 of them are not:
+ *   (F) FALSIFIER — violate the invariant in this route and this test fails. This is
+ *       what makes the invariant a guarantee.
+ *   (C) CONTROL — proves a fake, a mode or a mechanism DISCRIMINATES, so the
+ *       falsifier above it cannot pass vacuously. It does not fail on a route
+ *       violation and is not claimed to.
+ *   (M) MECHANISM — falsifies the proof machinery itself, usually against a
+ *       synthetic input and without entering the route. Necessary, and separately
+ *       not sufficient: R11 shipped a round where every (M) passed while the route
+ *       path invoked none of them, which is why E2A-S8E now pins the WIRING too.
  *
  *   E2A-S1  Workspace admission precedes ALL target-associated I/O — the run,
  *           the Project and the export subcollection.
@@ -112,35 +124,62 @@
  *           an empty registry or a canary deleted from a fixture cannot pass.
  *           (An earlier revision of this row described S8B as response SHAPE; that
  *           is now S8C, and the two are different properties — see §21 below.)
- *           → "§9 POSITIVE CONTROL: a canary in the JSON BODY fails the scan"
- *           → "§9/§16 POSITIVE CONTROL: a canary in a response HEADER VALUE fails the scan — the R10 blind channel"
- *           → "§9/§16 POSITIVE CONTROL: a canary in a response HEADER NAME fails the scan, despite platform lowercasing"
- *           → "§9/§15 POSITIVE CONTROL: the exact R10 leak — util.inspect of a real report-bearing record — fails the scan"
- *           → "§9/§17 POSITIVE CONTROL: a descriptor-obtained value reaching the response fails the scan"
- *           → "§9/§18 POSITIVE CONTROL: a structuredClone-obtained value reaching the response fails the scan"
- *           → "§9 NEGATIVE CONTROL: a clean approved response passes the scan"
- *           → "§11 the real fixtures carry their canaries, so deleting one cannot be silent"
+ *           (F) → "returns metadata newest-first for an authorized Research reader"
+ *               and every other ordinary route test: the scan runs INSIDE the secured
+ *               helper, so a route that leaks into the body or a header fails them all.
+ *               R11's reviewer was right that the eight entries below are (M), not (F) —
+ *               an unmarked list implied S8B had a route-level falsifier when it did not.
+ *           (M) → "§9 POSITIVE CONTROL: a canary in the JSON BODY fails the scan"
+ *           (M) → "§9/§16 POSITIVE CONTROL: a canary in a response HEADER VALUE fails the scan — the R10 blind channel"
+ *           (M) → "§9/§16 POSITIVE CONTROL: a canary in a response HEADER NAME fails the scan, despite platform lowercasing"
+ *           (M) → "§9/§13 POSITIVE CONTROL: a canary in Set-Cookie and in statusText fails the scan"
+ *           (M) → "§9/§15 POSITIVE CONTROL: the exact R10 leak — util.inspect of a real report-bearing record — fails the scan"
+ *           (M) → "§9/§17 POSITIVE CONTROL: a descriptor-obtained value reaching the response fails the scan"
+ *           (M) → "§9/§18 POSITIVE CONTROL: a structuredClone-obtained value reaching the response fails the scan"
+ *           (C) → "§9 NEGATIVE CONTROL: a clean approved response passes the scan"
+ *           (F) → "§11 the real fixtures carry their canaries, so deleting one cannot be silent"
  *   E2A-S8C DTO CONTRACT. Every successful LIST response conforms to the approved
  *           metadata shape — envelope keys, item keys, and the permitted structure
  *           of the one nested object it carries. Validated UNCONDITIONALLY on every
  *           success by a checker written independently from this route's projection,
  *           because a route cannot be its own oracle. Depth matters: `Object.keys`
  *           is depth-1, and R5 hid a snapshot leaf under `governanceStatusAtExport`.
- *           → "E2A-S8B deep-equals the expected response, so no nested extra survives"
- *           → "E2A-S8B MECHANISM PROOF: a value nested inside an ALLOWED key is caught"
- *           → "§20 S8C rejects data nested inside the ALLOWED governance object, with every top-level key intact"
- *           → "§20 S8C rejects a non-string smuggled into governance `conditions`"
- *           → "§20 S8C rejects a raw container in a scalar field, and an unapproved item key"
- *           → "§19 S8C's absent-key tolerance is BOUNDED to the one documented field"
- *   E2A-S8E SINGLE ENTRY POINT. No route invocation escapes the secured request
- *           helper. The load-bearing half is runtime invocation accounting against
- *           `resolveRequestIdentity` — the route's unconditional first call —
- *           asserted by a top-level `afterEach`; the structural half merely
- *           localizes the one call site. R10 broke this by deleting the structural
- *           test as "redundant to the global afterEach" and then deleting that
- *           afterEach, after which a direct call put the whole frozen report on the
- *           wire with the suite green.
- *           → "R11 §7 LAYER B: the raw route handler has exactly ONE call site, inside the secured helper"
+ *           (F) → "E2A-S8B deep-equals the expected response, so no nested extra survives"
+ *           (M) → "E2A-S8B MECHANISM PROOF: a value nested inside an ALLOWED key is caught"
+ *           (M) → "§20 S8C rejects data nested inside the ALLOWED governance object, with every top-level key intact"
+ *           (M) → "§20 S8C rejects a non-string smuggled into governance `conditions`"
+ *           (M) → "§20 S8C rejects a raw container in a scalar field, and an unapproved item key"
+ *           (M) → "§19 S8C's absent-key tolerance is BOUNDED to the one documented field"
+ *           (M) → "§19/§20 every S8C sub-assertion can fail — each one individually"
+ *           (F) → "E2A-S8C covers REFUSALS too, not only successes" — the validator runs
+ *               on every response, so a refusal carrying a payload fails as well as a
+ *               malformed success.
+ *   E2A-S8E SINGLE ENTRY POINT, AND THE WIRING OF WHAT IT ENFORCES. No route
+ *           invocation escapes the secured request helper, and no check the helper
+ *           performs can go missing quietly. Three layers, of which the FIRST is
+ *           load-bearing:
+ *             A — FAIL CLOSED at `resolveRequestIdentity`, the route's unconditional
+ *                 first call. Outside a secured request the mock throws, the handler
+ *                 rejects, and no response exists for a leak to travel in.
+ *             B — monotonic invocation counters, asserted by a top-level `afterEach`.
+ *                 A consistency check, not the boundary.
+ *             C — a structural audit of the single raw call site AND of the wiring of
+ *                 every enforced check.
+ *           HISTORY, because two rounds died here. R10 deleted the structural test as
+ *           "redundant to the global afterEach" and then deleted that afterEach, after
+ *           which a direct call put the whole frozen report on the wire, green. R11's
+ *           first attempt replaced it with ACCOUNTING, which review broke three ways:
+ *           a reachable registrar, a public assert-AND-RESET, and a trailing
+ *           `afterAll` entry that outran the last `afterEach`. Review also found every
+ *           assertion inside the helper was individually removable in silence. Hence
+ *           fail-closed plus a ledger, rather than a fourth thing to check afterwards.
+ *           (F) → "LAYER A: entering the route outside the secured helper FAILS CLOSED, so no response exists to leak in"
+ *           (F) → "LAYER A: the refusal does not depend on WHICH mechanism reaches the handler"
+ *           (F) → "LAYER A: a route entry from a lifecycle hook is refused just the same"
+ *           (F) → "THE LEDGER: a check that stops running is NAMED, not silent"
+ *           (F) → "THE LEDGER: its contents are pinned, so a property cannot be dropped from the helper AND the ledger together"
+ *           (F) → "R11 §7 LAYER C: every enforced check is WIRED inside the secured helper, and the ledger is asserted there"
+ *           (C) → "R11 §7 LAYER C: the raw route handler has exactly ONE call site, inside the secured helper"
  *   E2A-S15 A paging envelope is never self-contradictory: `hasMore: true` is
  *           emitted only together with a usable continuation cursor.
  *           → "a page that cannot yield a continuation cursor is an integrity failure, not a trap"
