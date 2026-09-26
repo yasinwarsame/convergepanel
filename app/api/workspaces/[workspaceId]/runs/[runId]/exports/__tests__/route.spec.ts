@@ -912,12 +912,43 @@ let globalSink: AccessSink = newSink();
  */
 let trapMode: "proxy" | "accessor" = "proxy";
 
+/**
+ * R7 P2-3 — AN ALLOWED CONTAINER IS NOT AN ALLOWED SUBTREE. `exportMetadata` is
+ * on the allowed list, but the DTO consumes exactly ONE field of it. The rest —
+ * `requestingUser`, `exportedSections`, `finalReportVersion`, `runId`,
+ * `schemaVersion` — are persisted data the response has no business reading, and
+ * a depth-1 policy could not see them: `void r.exportMetadata?.requestingUser`
+ * passed the whole suite. The container is therefore trapped one level deep with
+ * its own allow-list.
+ */
+const ALLOWED_EXPORT_METADATA_PROPS: readonly string[] = ["fileHash"];
+
+const trapContainer = (value: unknown, label: string, allowed: readonly string[], sink: AccessSink): unknown => {
+  if (value === null || typeof value !== "object") return value;
+  return new Proxy(value as Record<string, unknown>, {
+    get(target, prop, receiver) {
+      if (typeof prop === "string") {
+        sink.reads.push(`${label}.${prop}`);
+        if (!allowed.includes(prop)) sink.forbidden.push(`${label}.${prop}`);
+      }
+      return Reflect.get(target, prop, receiver);
+    },
+    ownKeys(target) {
+      sink.enumerations.push(`ownKeys(${label})`);
+      return Reflect.ownKeys(target);
+    },
+  });
+};
+
 const trapRecord = (record: Record<string, unknown>, label: string, sink: AccessSink = globalSink): Record<string, unknown> =>
   new Proxy(record, {
     get(target, prop, receiver) {
       if (typeof prop === "string") {
         sink.reads.push(prop);
         if (FORBIDDEN_SOURCE_PROPS.includes(prop)) sink.forbidden.push(`${label}.${prop}`);
+        if (prop === "exportMetadata") {
+          return trapContainer(Reflect.get(target, prop, receiver), `${label}.exportMetadata`, ALLOWED_EXPORT_METADATA_PROPS, sink);
+        }
       }
       return Reflect.get(target, prop, receiver);
     },
@@ -952,6 +983,9 @@ const accessorRecord = (record: Record<string, unknown>, label: string, sink: Ac
       get() {
         sink.reads.push(prop);
         if (FORBIDDEN_SOURCE_PROPS.includes(prop)) sink.forbidden.push(`${label}.${prop}`);
+        if (prop === "exportMetadata") {
+          return trapContainer(value, `${label}.exportMetadata`, ALLOWED_EXPORT_METADATA_PROPS, sink);
+        }
         return value;
       },
     });
@@ -983,7 +1017,11 @@ const instrumentListResult = (result: unknown): unknown => {
 const assertGlobalSourceAccessPolicy = () => {
   expect(globalSink.forbidden).toEqual([]);
   expect(globalSink.enumerations).toEqual([]);
-  expect(Array.from(new Set(globalSink.reads)).filter((p) => !ALLOWED_SOURCE_PROPS.includes(p))).toEqual([]);
+  // nested container reads are labelled `rec0.exportMetadata.<prop>`; the nested
+  // trap already classified them, so the top-level filter ignores them and only
+  // judges bare top-level property names.
+  const topLevelReads = Array.from(new Set(globalSink.reads)).filter((p) => !p.includes("."));
+  expect(topLevelReads.filter((p) => !ALLOWED_SOURCE_PROPS.includes(p))).toEqual([]);
 };
 
 /** Retained for tests that want to say it locally too; the global hook makes it redundant, never load-bearing. */
