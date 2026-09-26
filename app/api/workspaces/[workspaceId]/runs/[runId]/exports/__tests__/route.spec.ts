@@ -1533,8 +1533,15 @@ describe("E2A-S11 — admission is evaluated for THIS caller against THIS Worksp
   it("E2A-S11a admission receives the AUTHENTICATED caller's uid", async () => {
     const r = await submit();
     expect(mockedAccess).toHaveBeenCalledTimes(1);
-    // asserted on the uid dimension ALONE so this test fails for the principal
-    // mutation and not for the tenant one — the two stay independently pinned
+    // R8/§22: an earlier revision claimed this made S11a and S11b independently
+    // diagnostic — that "this test fails for the principal mutation and not for the
+    // tenant one". FALSE, and measured: either wrong-argument mutation fails BOTH
+    // named tests (120 each), because the trailing `expectTheFixtureHistory(r)`
+    // also fails once the argument-sensitive fake denies. What is true and
+    // load-bearing is narrower: the `toMatchObject` below pins THIS dimension, and
+    // the mutation for this dimension cannot pass it. Other failures are
+    // incidental, and the two CONTROL tests are what prove the fake discriminates
+    // on each dimension separately.
     expect(mockedAccess.mock.calls[0][0]).toMatchObject({ uid: UID });
     expectTheFixtureHistory(r);
   });
@@ -2063,7 +2070,15 @@ describe("E2A-S15 — the paging envelope is never self-contradictory", () => {
     // byte-identical to three TRANSIENT failures, so the response carries no
     // signal at all and this warning is the only way an operator can tell a
     // permanently-stuck run from a retryable blip. Deleting it passed 82/82.
-    // Deemed contractual and pinned on its STRUCTURED fields, not its prose.
+    // Contractual, and asserted on its STRUCTURED fields. Stated precisely, because
+    // an earlier revision said "not its prose" and that was an over-claim: the
+    // message substring is the SELECTOR that picks this warn out of the six, so a
+    // benign reword does fail these tests (measured: 4). Direction of error is
+    // benign — a false alarm on a reword, never a missed signal — and the payload
+    // assertion is what carries the contract: dropping a structured field fails the
+    // named test (measured: 2). No stable structured event/discriminator field
+    // exists on these calls to select by instead, so the substring is the least-bad
+    // selector rather than a claim that prose is uncoupled.
     mockedListExports.mockImplementation(listFake([exportRecord(3, { reportVersion: Number.NaN })], true));
     const r = await submit();
     expect(r.status).toBe(503);
@@ -2510,6 +2525,23 @@ describe("E2A-S8A — Proxy-specific operation classes", () => {
     const r = await submit();
     expect(r.status).toBe(200);
     expect(globalSink.reads).not.toContain("futurePrivateField");
+  });
+
+  it("§19 the flat `exportMetadata.fileHash` key has an EXPLICIT disposition: denied", () => {
+    // Two facts, kept separate on purpose.
+    // (1) NORMALIZATION: `normalizeAdaptiveExportRecord` destructures the flat key
+    //     out (`const { "exportMetadata.fileHash": _legacy, ...rest }`) whenever it
+    //     is defined, so the route boundary should only ever see the nested form.
+    // (2) POLICY: this proof does NOT rest on (1). The key is absent from the
+    //     allowed-read policy, so default-deny denies it whether or not the
+    //     normalizer strips it first. That ordering matters — an earlier round
+    //     inferred a data property from a writer's shape and was wrong, so the
+    //     disposition here is stated as policy, which is checkable now, rather than
+    //     as a guarantee about what the helper will always do.
+    expect(ALLOWED_SOURCE_PROPS).not.toContain("exportMetadata.fileHash");
+    expect(FORBIDDEN_SOURCE_PROPS).not.toContain("exportMetadata.fileHash");
+    // ...and "not on either list" means DENIED, which is what the next test proves
+    // behaviourally through the route.
   });
 
   it("a DOTTED top-level property name gets no free pass from its punctuation", async () => {

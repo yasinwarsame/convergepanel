@@ -219,7 +219,19 @@
  * answered by the surrounding infrastructure, not "which of four identical 503s
  * was this". Nothing in this file claims they are pinned, and nothing should.
  *
- * E2A-S8A IS THREE PIECES, AND NO ONE OF THEM PROVES IT ALONE:
+ * E2A-S8A IS UNAVOIDABLE ACROSS *TWO* DIMENSIONS (§28). R6 closed record shape:
+ * instrumentation moved to the mock boundary so no test could opt out of being
+ * instrumented. R8 closed the other one only partly, and R9 finishes it: the
+ * REQUEST/AUTHORITY CONTEXT. A leak gated on who created the export, on the
+ * caller's role, on an unfiled run, on `?cursor=`/`?limit=`, on a degraded
+ * Project or on the record count was invisible, because those contexts existed
+ * in no instrumented test. Worst of it: every fixture is created by a different
+ * uid than the caller — deliberately, to prove E2A-S7 — so the most common
+ * production case, a member listing their own exports, had NO test at all, and
+ * emitting the whole frozen report for exactly those records passed the suite.
+ * A mode default cannot fix a missing fixture value; only the context matrix can.
+ *
+ * E2A-S8A IS SIX PIECES, AND NO ONE OF THEM PROVES IT ALONE:
  *   1. BOUNDARY INSTRUMENTATION — every list result is wrapped inside the module
  *      mock, so no test can opt out of being instrumented.
  *   2. ACCESS DETECTION — two modes, each covering the operation classes it has
@@ -233,6 +245,25 @@
  *      R7 is why: with enforcement opt-in, a leak gated on `reportVersion === 0`
  *      put the whole frozen report on the wire with the suite green. There is no
  *      opt-out flag; mechanism self-tests use a private sink instead.
+ *   4. ACCESSOR BY DEFAULT — the plain-object tripwire is what ordinary route
+ *      tests get, because it is the mode that observes value-obtaining operations
+ *      (`structuredClone`, `v8.serialize`, `util.inspect`, getter traversal). The
+ *      Proxy runs as an ADDITIONAL focused matrix for the classes only it sees —
+ *      key enumeration and descriptor access, which obtain no values. Neither mode
+ *      dominates universally and the division of labour is measured, not asserted:
+ *      a MECHANISM PROOF test shows `Object.keys` fires the Proxy and not the
+ *      accessor.
+ *   5. A REQUEST/AUTHORITY CONTEXT MATRIX — 21 rows covering every branch that can
+ *      influence DTO construction or which properties are consulted, including the
+ *      creator-self case, each running under the accessor default.
+ *   6. A MONOTONIC WITNESS — the postcondition's authority is a counter held in a
+ *      closure that can only be incremented, not the diagnostic arrays. `const` and
+ *      an identity assertion stop the sink being REBOUND; they do not stop it being
+ *      CLEARED, and I verified that an inner `afterEach` clearing it hid a
+ *      creator-self leak completely. The witness closes that. Residual, stated
+ *      plainly: a spec author who rewrites this harness can always defeat it — no
+ *      in-file mechanism can stop its own file. What is now structurally impossible
+ *      is the failure that actually happened repeatedly here: forgetting.
  *   Also: an ALLOWED CONTAINER IS NOT AN ALLOWED SUBTREE. `exportMetadata` is
  *   trapped one level deep with its own allow-list (`fileHash` only), because a
  *   depth-1 policy could not see `exportMetadata.requestingUser`.
