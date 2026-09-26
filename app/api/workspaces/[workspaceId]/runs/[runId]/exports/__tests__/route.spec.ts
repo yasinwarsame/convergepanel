@@ -980,7 +980,7 @@ let activeSink: AccessSink | null = null;
  * `"none"` mode and no bypass flag: an ordinary test cannot end up uninstrumented
  * or instrumented in the weaker mode by omission.
  */
-let trapMode: "proxy" | "accessor" = "accessor";
+let trapMode: "proxy" | "accessor" | "plain" = "accessor";
 
 /**
  * R7 P2-3 — AN ALLOWED CONTAINER IS NOT AN ALLOWED SUBTREE. `exportMetadata` is
@@ -1068,6 +1068,15 @@ const accessorRecord = (record: Record<string, unknown>, label: string, sink: Ac
 const instrumentListResult = (result: unknown): unknown => {
   const r = result as { ok?: boolean; records?: unknown[] } | null;
   if (!r || r.ok !== true || !Array.isArray(r.records)) return result;
+  // "plain" mode hands the route a PRODUCTION-SHAPED record: an ordinary data
+  // object, no Proxy, no accessors. R10 found this is necessary, not optional.
+  // `util.inspect` renders an accessor property as `[Getter]` without invoking it,
+  // so in accessor mode an inspect-based leak never obtains the value and the body
+  // canary never fires — the leak exists only in production. A plain record makes
+  // the harness match production, and then E2A-S8B catches the disclosure no matter
+  // which primitive produced it. Source instrumentation is necessarily silent in
+  // this mode; that is the point of having two independent defences.
+  if (trapMode === "plain") return result;
   const wrap = trapMode === "accessor" ? accessorRecord : trapRecord;
   return { ...r, records: r.records.map((rec, i) => wrap(rec as Record<string, unknown>, `rec${i}`)) };
 };
@@ -2451,18 +2460,25 @@ const REQUEST_CONTEXTS: ReadonlyArray<ContextRow> = [
   }, ""],
 ];
 
-describe("E2A-S8A — the request/authority context matrix (accessor default)", () => {
+describe.each(["accessor", "proxy", "plain"] as const)("E2A-S8A/S8B [%s record] — the request/authority context matrix", (mode) => {
   it.each(REQUEST_CONTEXTS)("%s", async (_label, setup, query) => {
+    trapMode = mode;
     setup();
     const r = await submit(query);
     // Every context must reach the projection; 200 normally, 503 only on the
     // integrity path (which none of these rows triggers).
     expect(r.status).toBe(200);
     expect(Array.isArray(r.json.exports)).toBe(true);
-    // non-vacuity: instrumentation observed the projection under THIS context
-    expectSourceWasRead(r, "exportId", "format");
-    // The S8A policy itself is asserted by the GLOBAL afterEach — deliberately not
-    // here, so no row can forget it and no row needs to remember.
+    // Non-vacuity differs by mode, honestly: with instrumentation we can prove the
+    // projection ran; with a plain production-shaped record there are no traps to
+    // observe, and the response content is the evidence. Both S8A (where
+    // observable) and S8B are asserted inside submit(), so no row can forget them.
+    if (mode === "plain") {
+      expect(r.reads).toEqual([]);
+      expect(r.bodyText.length).toBeGreaterThan(0);
+    } else {
+      expectSourceWasRead(r, "exportId", "format");
+    }
   });
 
   it("the matrix reaches every context it claims to (non-vacuity of the table itself)", () => {
