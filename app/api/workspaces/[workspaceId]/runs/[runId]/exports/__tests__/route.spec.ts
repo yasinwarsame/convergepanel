@@ -162,18 +162,30 @@ const E2A_S8E_VIOLATION = "E2A-S8E VIOLATION";
  * only what ordinary tests legitimately need. There is no registrar, no setter, no
  * reset, and no reference to the map anywhere outside these braces.
  *
- * WHAT IS EXPORTED, AND WHY EACH IS SAFE:
+ * WHAT IS EXPORTED, AND WHY EACH IS SAFE. This list is the SIX members of the frozen
+ * facade, and §8 pins that exact set, so this comment cannot drift from it silently. An
+ * earlier revision of this list was stale in three directions at once: it named
+ * `admitRouteEntry`, which R15 removed from the public surface; it named
+ * `currentContextForProducerA`, which R15 deleted outright; and it omitted the primitive
+ * that replaced that accessor. It described a boundary that no longer existed.
  *   • `submitRequest` — the only ordinary route path. It registers the exact request it
  *     is about to call the handler with; no caller supplies a handler, callback,
  *     registrar or token.
- *   • `admitRouteEntry` — called by the identity mock. It can only CONSUME or REFUSE an
- *     EXISTING registration; it cannot create one, so it is useless for forging.
- *   • `instrumentListResult` / `currentContextForProducerA` — called by the list-helper
- *     mock. They record evidence; neither creates a registration.
+ *   • `instrumentListResult` — called by the list-helper mock. It records evidence and
+ *     returns a wrapper over ITS ARGUMENT; it creates no registration.
+ *   • `noteHelperInvokedForCurrentInvocation` — the other boundary producer. It RECORDS
+ *     and returns nothing, which is why it replaced the accessor that handed out the
+ *     live authorization record.
  *   • `newInvocationContext` — inert alone. A context object authorizes nothing without a
  *     registrar, and the negative controls need to build one.
  *   • `isInsideSecuredFlow` / `currentInvocationLabel` — primitive read accessors for the
  *     detector tests. Neither returns an object.
+ *
+ * NOT exported: `admitRouteEntry`. It is destructured into a module-scope `const` that
+ * only the identity mock closes over. It could only ever CONSUME or REFUSE an existing
+ * registration, never create one — but R14 proved that reasoning is not a substitute for
+ * unreachability, because a member that cannot forge can still be REPLACED by one that
+ * does not check at all.
  *
  * §40 THREAT-MODEL BOUNDARY, deliberate and finite: this resists ordinary test code
  * reaching for a registration primitive, and resists the R13 attack STRUCTURALLY rather
@@ -3670,13 +3682,41 @@ describe("R15 — the public harness facade grants no authorization capability",
     // `entryConsumed` a collaborator could rewrite. There is no context accessor now —
     // the producer RECORDS through a primitive and the detector reads a label string.
     expect(`labelIsAPrimitive:${typeof secureHarness.currentInvocationLabel()}`).toBe("labelIsAPrimitive:undefined");
-    // `newInvocationContext` is excluded BY NAME and only because it is a BUILDER: it
-    // returns a fresh inert object, never a handle on registered state. That distinction is
-    // asserted below rather than assumed here.
-    const accessors = Object.keys(secureHarness).filter((k) => k !== "newInvocationContext" && (k.endsWith("ForProducerA") || /context/i.test(k)));
-    expect(`accessorsReturningAContext:${accessors.join(",")}`).toBe("accessorsReturningAContext:");
-    // the one object-returning member is the INERT builder, and a fresh call is a fresh
-    // object — it is not a handle on anything registered
+    // R16 §8 — a BEHAVIOURAL sweep replaces a name filter that COULD NOT FAIL. The previous
+    // form selected members with `endsWith("ForProducerA") || /context/i`, then excluded
+    // `newInvocationContext` from the result. Over the real member set that predicate matches
+    // that member and nothing else, so the match set was always EMPTY: the assertion held
+    // whatever any member returned, including a live sink. It was retained as a name-scope
+    // control and read as a capability proof, which it never was.
+    //
+    // This calls every member and inspects what comes back, ONE LEVEL DEEP, because the live
+    // sink hangs off `ctx.sink` rather than being returned directly — the R15 blocker was a
+    // member that returned the sink itself, and a top-level-only check would have missed the
+    // nested form. `submitRequest` is skipped because calling it performs a real request,
+    // which the raw-entry region covers instead.
+    //
+    // What this pins is not "no sink is reachable" — one is, from the builder — but EXACTLY
+    // WHICH. Re-adding any accessor that reaches the current invocation's sink adds an entry
+    // and fails here; the builder's inertness is proven immediately below.
+    const isSink = (v: unknown): boolean =>
+      v !== null && typeof v === "object" && ["reads", "forbidden", "enumerations"].every((k) => Array.isArray((v as Record<string, unknown>)[k]));
+    const sinkExposure: string[] = [];
+    for (const [name, member] of Object.entries(secureHarness as unknown as Record<string, unknown>)) {
+      if (name === "submitRequest" || typeof member !== "function") continue;
+      let returned: unknown;
+      try { returned = (member as (x?: unknown) => unknown)("probe-sweep"); } catch { continue; }
+      if (returned === null || typeof returned !== "object") continue;
+      if (isSink(returned)) sinkExposure.push(`${name}()`);
+      for (const [key, nested] of Object.entries(returned as Record<string, unknown>)) {
+        if (isSink(nested)) sinkExposure.push(`${name}().${key}`);
+      }
+    }
+    expect(`membersExposingASink:${sinkExposure.sort().join(",")}`).toBe("membersExposingASink:newInvocationContext().sink");
+    // TWO members return an object at all — `instrumentListResult`, which returns a wrapper
+    // over its own argument, and this INERT builder. §10/§11 pins that pair by name; an
+    // earlier comment here called it "the one object-returning member", undercounting the
+    // pair its own neighbouring test already asserted. A fresh call is a fresh object, not a
+    // handle on anything registered.
     const a = secureHarness.newInvocationContext("probe-a");
     const b = secureHarness.newInvocationContext("probe-b");
     expect(`builderReturnsDistinctObjects:${a !== b}`).toBe("builderReturnsDistinctObjects:true");
