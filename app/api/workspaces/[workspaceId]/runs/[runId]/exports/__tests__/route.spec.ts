@@ -10,6 +10,9 @@
  * against actual I/O rather than HTTP status.
  */
 
+import { readFileSync } from "fs";
+import { inspect } from "util";
+
 let mockExportFlagEnabled = true;
 jest.mock("@/lib/env", () => ({
   get ADAPTIVE_RESEARCH_EXPORT_ENABLED() {
@@ -17,8 +20,74 @@ jest.mock("@/lib/env", () => ({
   },
 }));
 
+/**
+ * R11 §3/§4/§5 — THE GLOBAL ROUTE-INVOCATION AUDIT, and why the signal is
+ * `resolveRequestIdentity`.
+ *
+ * R10's blocker in one sentence: enforcement moved INSIDE `submit()` in the same
+ * series of edits that deleted the test proving every route call goes THROUGH
+ * `submit()`. Neither edit was wrong alone. Together they left nothing requiring a
+ * test to use the secured helper, so an ordinary-looking test calling the raw
+ * handler put the entire frozen `reportSnapshot` — canary included — on the wire
+ * with the suite green, while four comments still described a global `afterEach`
+ * that `grep -c "afterEach("` put at zero. R10's own reviewers reproduced it
+ * independently from both the runtime and the prose side.
+ *
+ * WHY THIS SIGNAL IS UNAVOIDABLE. `GET` cannot execute without calling
+ * `resolveRequestIdentity`. In `route.ts` the handler's first statement is
+ * `await getUid(req)`, and `getUid`'s first statement is
+ * `await resolveRequestIdentity(req)` — no branch, guard, cache or early return
+ * precedes either. Every route entry therefore lands here exactly once, including
+ * the entries that go on to fail authentication, and nothing else in this file
+ * calls it: the `peek*` helpers deliberately interrogate the access / list /
+ * Project mocks instead, so a precondition peek cannot perturb the count.
+ *
+ * WHY THE ACCOUNTING CANNOT BE FAKED. `secured()` is the ONLY registrar of a
+ * secured invocation and it verifies its own claim — it measures the raw-entry
+ * delta across the wrapped call and fails unless that delta is exactly 1. So a
+ * test cannot inflate the secured count without genuinely entering the route once
+ * through the wrapper, and a raw handler call anywhere else leaves
+ * `rawEntries === securedEntries + 1` for the top-level `afterEach` to catch.
+ * Both counters are closure-private: no reset, no setter, no comparator baseline
+ * for a test to reach. R8 defeated a reassignable sink and R9 re-marked the
+ * baseline a counter was compared to; there is no operand here to re-mark.
+ */
+const routeInvocationAudit = (() => {
+  let rawEntries = 0;
+  let securedEntries = 0;
+  return {
+    /** Called ONLY from the `resolveRequestIdentity` module mock — once per real route entry. */
+    noteRouteEntry: () => {
+      rawEntries += 1;
+    },
+    /** The only way to register a secured invocation, and it proves it performed one. */
+    secured: async <T>(run: () => Promise<T>): Promise<T> => {
+      securedEntries += 1;
+      const before = rawEntries;
+      const out = await run();
+      expect(`routeEntriesInsideSecuredHelper:${rawEntries - before}`).toBe("routeEntriesInsideSecuredHelper:1");
+      return out;
+    },
+    /** The top-level postcondition: read, reset, then assert on the captured pair. */
+    assertBalancedAndReset: () => {
+      const raw = rawEntries;
+      const secured = securedEntries;
+      rawEntries = 0;
+      securedEntries = 0;
+      expect(`rawRouteEntries=${raw} securedInvocations=${secured}`).toBe(`rawRouteEntries=${secured} securedInvocations=${secured}`);
+    },
+  };
+})();
+
 const mockedResolveRequestIdentity = jest.fn();
-jest.mock("@/lib/auth/resolveRequestIdentity", () => ({ resolveRequestIdentity: (...a: unknown[]) => mockedResolveRequestIdentity(...a) }));
+jest.mock("@/lib/auth/resolveRequestIdentity", () => ({
+  resolveRequestIdentity: (...a: unknown[]) => {
+    // §3 — the unavoidable route-entry signal. Counted before the fake answers, so
+    // an identity FAILURE is still a route entry.
+    routeInvocationAudit.noteRouteEntry();
+    return mockedResolveRequestIdentity(...a);
+  },
+}));
 jest.mock("@/lib/auth/identityResolutionTelemetry", () => ({ logIdentityResolutionFailure: jest.fn() }));
 const mockedAccess = jest.fn();
 jest.mock("@/lib/workspaces/resolveTeamRunWorkspaceAccess", () => ({ resolveTeamRunWorkspaceAccess: (...a: unknown[]) => mockedAccess(...a) }));
@@ -91,7 +160,7 @@ const mockedLoggerWarn = jest.fn();
 // factory does not touch the const before its initializer has run
 jest.mock("@/lib/logger", () => ({ logger: { warn: (...a: unknown[]) => mockedLoggerWarn(...a), info: jest.fn(), error: jest.fn(), debug: jest.fn() } }));
 
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { Timestamp } from "firebase-admin/firestore";
 import { GET } from "@/app/api/workspaces/[workspaceId]/runs/[runId]/exports/route";
 import { FIXTURE_PROJECT_ID, FIXTURE_RUN_ID, FIXTURE_WORKSPACE_ID, fullTeamRunData } from "@/lib/runs/__tests__/runReadFixtures";
@@ -183,14 +252,40 @@ const grant = (role: "owner" | "admin" | "member" | "reviewer" | "viewer") => ({
  *
  * So the security property is asserted where it actually matters: an
  * unmistakable canary lives inside real frozen-report content, and the central
- * request helper scans the FULLY SERIALIZED response body for it. However a
- * future developer obtains the value — a primitive nobody here has thought of
- * included — if it reaches the response, this fails. That is operation-independent
- * by construction, which is the whole point.
+ * request helper scans the fully materialized response for it. However a future
+ * developer obtains the value — a primitive nobody here has thought of included —
+ * if it reaches the response, this fails.
+ *
+ * R11 §10/§12 — REGISTRATION IS PER-REQUEST AND DERIVED FROM THE ACTUAL RECORDS.
+ * R10 shipped a module-level `REGISTERED_CANARIES` array, and emptying it left the
+ * suite green: a successful history response then looked secure because the scan
+ * had nothing to look for. Deleting the canary from a fixture was equally silent.
+ * So there is no module-level registry any more. Canaries are DISCOVERED, by
+ * prefix, inside the real `reportSnapshot` of every record the route is about to
+ * be handed, and registered into a `Set` owned by that one request. A record that
+ * carries a snapshot but yields no canary is a FIXTURE-INTEGRITY FAILURE, and a
+ * request that was handed report-bearing records with nothing registered fails
+ * before its response is accepted. Neither condition can be silent, and no test
+ * can replace the registry to switch the mechanism off.
  */
-const FROZEN_REPORT_CANARY_M2 = "__E2A_FROZEN_REPORT_CANARY_MILESTONE2__";
-const FROZEN_REPORT_CANARY_LEGACY = "__E2A_FROZEN_REPORT_CANARY_LEGACY__";
-const REGISTERED_CANARIES: readonly string[] = [FROZEN_REPORT_CANARY_M2, FROZEN_REPORT_CANARY_LEGACY];
+const FROZEN_REPORT_CANARY_PREFIX = "__E2A_FROZEN_REPORT_CANARY_";
+const FROZEN_REPORT_CANARY_M2 = `${FROZEN_REPORT_CANARY_PREFIX}MILESTONE2__`;
+const FROZEN_REPORT_CANARY_LEGACY = `${FROZEN_REPORT_CANARY_PREFIX}LEGACY__`;
+
+/** Walks real frozen content and collects every canary string it actually contains. Runs on the RAW record, before instrumentation, so discovery never trips a trap. */
+const discoverCanaries = (value: unknown, found: Set<string>): void => {
+  if (typeof value === "string") {
+    if (value.startsWith(FROZEN_REPORT_CANARY_PREFIX)) found.add(value);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const v of value) discoverCanaries(v, found);
+    return;
+  }
+  if (value !== null && typeof value === "object") {
+    for (const v of Object.values(value as Record<string, unknown>)) discoverCanaries(v, found);
+  }
+};
 
 const SNAP = {
   QUESTION: "SENTINEL_SNAPSHOT_QUESTION",
@@ -693,7 +788,7 @@ const assertSnapshotSentinelsReachable = (snapshot: AdaptiveExportReportSnapshot
     if (value === undefined || value === null) {
       throw new Error(`fixture value ABSENT at ${path} (got ${String(value)}) — an undefined leaf proves nothing, it serializes to nothing`);
     }
-    if (kind === "string" && !(typeof value === "string" && (value.startsWith("SENTINEL_") || value.startsWith("__E2A_FROZEN_REPORT_CANARY")))) {
+    if (kind === "string" && !(typeof value === "string" && (value.startsWith("SENTINEL_") || value.startsWith(FROZEN_REPORT_CANARY_PREFIX)))) {
       throw new Error(`fixture sentinel missing at ${path}: got ${JSON.stringify(value)}`);
     }
     if (kind === "number" && !(typeof value === "number" && NUMERIC_SENTINELS.includes(value))) {
@@ -901,12 +996,19 @@ const FORBIDDEN_SOURCE_PROPS: readonly string[] = [
  * `format: "json"`. A leak gated on `r.reportVersion === 0` put the whole frozen
  * report on the wire with 106/106 green.
  *
- * The fix is a GLOBAL `afterEach` that asserts the tracker for EVERY test. That
- * creates one problem: the mechanism self-tests deliberately trigger forbidden
- * access, and they must not be exempted by a flag — `skipSecurityCheck` would
- * recreate the opt-out defect in a new shape. So instead of a flag, those tests
- * pass their OWN sink. The global sink is what the global postcondition watches;
- * a local sink is invisible to it. There is no way to silence the global check.
+ * The fix, as it now stands: the security postcondition is asserted INSIDE the
+ * secured request helper for every request, against a witness local to that
+ * invocation, and a top-level `afterEach` separately proves no route entry
+ * happened outside that helper (§3/§4/§7). An earlier revision of this paragraph
+ * described the enforcement as a global `afterEach` that "covers any invocation
+ * path"; by R10 that hook no longer existed and the claim was simply false — see
+ * the correction at the instrumentation-boundary tests.
+ *
+ * The mechanism self-tests deliberately trigger forbidden access, and they must
+ * not be exempted by a flag — `skipSecurityCheck` would recreate the opt-out
+ * defect in a new shape. So instead of a flag, those tests pass their OWN sink and
+ * never enter the route (§8), which keeps them invisible to the per-request
+ * assertions and harmless to the invocation audit.
  */
 /**
  * R9 §17/§18 — NESTED READS ARE RECORDED STRUCTURALLY, NOT BY STRING PREFIX.
@@ -939,10 +1041,24 @@ const newSink = (): AccessSink => ({ reads: [], forbidden: [], enumerations: [] 
  * asserts both security properties against that local `const` before returning.
  * Nothing outside the invocation can reach the baseline, reset it, or replace the
  * object being compared — a test receives the response, never control of the
- * witness. `activeSink` below is only the channel the mock boundary reads from;
+ * witness. `activeWitness` below is only the channel the mock boundary reads from;
  * the assertions never consult it.
+ *
+ * R11 §12 — the witness now also owns the REQUEST-LOCAL canary registry and the
+ * fixture-integrity tally, for the reason recorded at the canary definition: a
+ * module-level registry could be emptied, and emptying it was silent.
  */
-let activeSink: AccessSink | null = null;
+type RequestWitness = {
+  sink: AccessSink;
+  /** Canaries discovered in the real frozen content handed to THIS request. */
+  canaries: Set<string>;
+  /** How many records carried a `reportSnapshot` at all. */
+  reportBearing: number;
+  /** Records that carried a snapshot but yielded no canary — a fixture defect, never a pass. */
+  reportBearingWithoutCanary: string[];
+};
+const newWitness = (): RequestWitness => ({ sink: newSink(), canaries: new Set<string>(), reportBearing: 0, reportBearingWithoutCanary: [] });
+let activeWitness: RequestWitness | null = null;
 /**
  * Two INDEPENDENT mechanisms, selected by `trapMode`, because R6 proved neither
  * covers every JavaScript operation:
@@ -1012,7 +1128,7 @@ const trapContainer = (value: unknown, label: string, allowed: readonly string[]
   });
 };
 
-const trapRecord = (record: Record<string, unknown>, label: string, sink: AccessSink = activeSink ?? newSink()): Record<string, unknown> =>
+const trapRecord = (record: Record<string, unknown>, label: string, sink: AccessSink = activeWitness?.sink ?? newSink()): Record<string, unknown> =>
   new Proxy(record, {
     get(target, prop, receiver) {
       if (typeof prop === "string") {
@@ -1041,7 +1157,7 @@ const trapRecord = (record: Record<string, unknown>, label: string, sink: Access
  * the Proxy: R6 showed `structuredClone` rejects a Proxy before traversing it, so
  * the clone proof has to run against a genuine plain object.
  */
-const accessorRecord = (record: Record<string, unknown>, label: string, sink: AccessSink = activeSink ?? newSink()): Record<string, unknown> => {
+const accessorRecord = (record: Record<string, unknown>, label: string, sink: AccessSink = activeWitness?.sink ?? newSink()): Record<string, unknown> => {
   const plain: Record<string, unknown> = {};
   // EVERY own property becomes a recording accessor, not just the forbidden ones.
   // R8: an earlier revision left allowed properties as plain data, so in accessor
@@ -1066,21 +1182,198 @@ const accessorRecord = (record: Record<string, unknown>, label: string, sink: Ac
   return plain;
 };
 
-/** §3 — the single instrumentation boundary. Every list result from the mocked helper passes through here, whatever a test resolved. */
+/**
+ * §3 — the single instrumentation boundary. Every list result from the mocked
+ * helper passes through here, whatever a test resolved.
+ *
+ * R11 §10/§12: CANARY REGISTRATION HAPPENS IN EVERY MODE, before any wrapping and
+ * off the RAW record, so discovery never trips a trap and `plain` mode — which is
+ * deliberately uninstrumented — still arms the output scan.
+ *
+ * WHY `plain` MODE EXISTS, corrected. R10 claimed the canary was "only meaningful
+ * against a PRODUCTION-SHAPED plain record" and that this third mode was
+ * "necessary, not optional". R10's reviewer measured that and it is FALSE. With a
+ * `util.inspect` leak in the route: `plain` 20/20 context rows fail and `proxy`
+ * 20/20 fail (Node reads a Proxy's TARGET, so the value lands in the body), while
+ * `accessor` 0/20 fail — `util.inspect` renders an accessor as `[Getter]` without
+ * invoking it, so that ONE mode is blind to that ONE operation. The accurate claim
+ * is narrower: accessor mode can mask an inspect-shaped leak, Proxy mode does not,
+ * and `plain` mode is ADDITIONAL production-shape coverage — the mode that matches
+ * what the route really receives, and the only one a `structuredClone`-rejecting
+ * path cannot distinguish from production. No mode is the sole meaningful one.
+ */
 const instrumentListResult = (result: unknown): unknown => {
   const r = result as { ok?: boolean; records?: unknown[] } | null;
   if (!r || r.ok !== true || !Array.isArray(r.records)) return result;
-  // "plain" mode hands the route a PRODUCTION-SHAPED record: an ordinary data
-  // object, no Proxy, no accessors. R10 found this is necessary, not optional.
-  // `util.inspect` renders an accessor property as `[Getter]` without invoking it,
-  // so in accessor mode an inspect-based leak never obtains the value and the body
-  // canary never fires — the leak exists only in production. A plain record makes
-  // the harness match production, and then E2A-S8B catches the disclosure no matter
-  // which primitive produced it. Source instrumentation is necessarily silent in
-  // this mode; that is the point of having two independent defences.
+  const witness = activeWitness;
+  if (witness) {
+    for (const rec of r.records as Record<string, unknown>[]) {
+      if (!rec || typeof rec !== "object" || rec.reportSnapshot === undefined) continue;
+      witness.reportBearing += 1;
+      // §11: a record carrying real frozen content MUST carry its canary. If the
+      // canary is deleted from a fixture this fails on the spot, rather than being
+      // discovered later as an absence the scanner cannot distinguish from safety.
+      const own = new Set<string>();
+      discoverCanaries(rec.reportSnapshot, own);
+      if (own.size === 0) witness.reportBearingWithoutCanary.push(String(rec.exportId ?? "<no exportId>"));
+      for (const canary of own) witness.canaries.add(canary);
+    }
+  }
   if (trapMode === "plain") return result;
   const wrap = trapMode === "accessor" ? accessorRecord : trapRecord;
   return { ...r, records: r.records.map((rec, i) => wrap(rec as Record<string, unknown>, `rec${i}`)) };
+};
+
+/**
+ * ─── R11 §13/§14 — E2A-S8B: THE RESPONSE-SECRECY SCAN ─────────────────────
+ *
+ * R10 scanned `res.text()` only, and a canary placed in a response HEADER
+ * survived the whole suite. `encodeURIComponent` leaves it byte-identical, so that
+ * was not even an encoding trick. "Operation-independent" is not
+ * "channel-independent": what a client receives is the body AND the headers, so
+ * both are scanned. Nothing beyond that is claimed — this scans client-visible
+ * HTTP response material and nothing else.
+ *
+ * Callable on a synthetic `Response`, which is how its own positive controls
+ * falsify it (§9) without needing the production route to leak.
+ */
+const assertResponseSecrecy = (res: Response, bodyText: string, canaries: ReadonlySet<string>): void => {
+  // The third element is CASE FOLDING, and it is used for exactly one channel.
+  // HTTP header NAMES are case-insensitive and the platform lowercases them on the
+  // way out, so that channel changes the bytes by itself: a verbatim comparison
+  // there would report "absent" for a canary the channel had merely down-cased.
+  // This is a platform invariant about one channel, NOT the start of an encoding
+  // census (§23) — the body and header VALUES are compared byte-for-byte, and
+  // nothing here tries to anticipate hex, base64 or compression. S8C exists so
+  // output safety does not rest on the canary's literal representation at all.
+  const surfaces: [string, string, boolean][] = [["body", bodyText, false]];
+  res.headers.forEach((value, name) => {
+    surfaces.push([`header-name:${name}`, name, true]);
+    surfaces.push([`header-value:${name}`, value, false]);
+  });
+  const headersWithCookies = res.headers as unknown as { getSetCookie?: () => string[] };
+  if (typeof headersWithCookies.getSetCookie === "function") {
+    headersWithCookies.getSetCookie().forEach((cookie, i) => surfaces.push([`set-cookie[${i}]`, cookie, false]));
+  }
+  for (const canary of canaries) {
+    for (const [where, text, fold] of surfaces) {
+      const found = fold ? text.toLowerCase().includes(canary.toLowerCase()) : text.includes(canary);
+      expect(`frozen-report-content@${where}:${found}`).toBe(`frozen-report-content@${where}:false`);
+    }
+  }
+};
+
+/**
+ * ─── R11 §19/§20 — E2A-S8C: THE APPROVED-DTO VALIDATOR ────────────────────
+ *
+ * S8B and S8C are different properties and neither implies the other (§21). S8B
+ * asks "did frozen content reach the client"; S8C asks "is this the approved
+ * metadata shape at all". A transformed or newly-added field leaks nothing the
+ * canary recognises, and a canary can reach a structurally perfect response.
+ *
+ * WRITTEN INDEPENDENTLY, from the API contract — `TeamAdaptiveExportListItem` and
+ * `AdaptiveExportGovernanceStatus` as declared — and deliberately NOT by reusing
+ * the route's own projection, which would make the route its own oracle.
+ *
+ * DEPTH IS THE POINT. R4's key-set check was depth-1, so data hidden under the
+ * already-allowed `governanceStatusAtExport` passed. This validator therefore
+ * pins that object's permitted key set PER FAMILY, and the elements of
+ * `conditions`, so `governanceStatusAtExport.meta = <report data>` fails even
+ * though every top-level item key is untouched.
+ *
+ * SCOPED HONESTLY. Types are asserted where the contract makes them stable: the
+ * envelope, the route-MINTED hash trio, the `schemaFamily` union, and the shape of
+ * the one nested object. Blind-copied scalars (`reportVersion`, `createdAt`,
+ * `classification`, …) are checked for being SCALARS — `absence of raw internal
+ * containers` — rather than for an exact runtime type the persisted data does not
+ * actually guarantee. That is the difference between a check and a wish.
+ */
+const S8C_ENVELOPE_KEYS: readonly string[] = ["ok", "runId", "exports", "hasMore", "nextCursor"];
+const S8C_ITEM_REQUIRED: readonly string[] = ["exportId", "reportVersion", "schemaId", "schemaFamily", "format", "artifactStatus", "createdAt", "createdBy", "governanceStatusAtExport", "classification"];
+const S8C_ITEM_OPTIONAL: readonly string[] = ["fileHash", "hashAlgorithm", "hashReproducible"];
+/**
+ * R11 §19/§43 — A DOCUMENTED, BOUNDED TOLERANCE, discovered by this validator and
+ * deliberately NOT "fixed" in the route.
+ *
+ * `reportVersion` is declared REQUIRED on `TeamAdaptiveExportListItem`, and a
+ * successful response can still omit it: the route reads blind-cast persistence, so
+ * `r.reportVersion` may be `undefined`, and `JSON.stringify` drops an
+ * undefined-valued key at every depth. The route's own E2A-S15 test
+ * ("hasMore:false with a malformed terminal record is NOT refused — there is
+ * nothing to continue") asserts that tolerance deliberately: when there is no next
+ * page there is no paging trap to spring, so the record lists.
+ *
+ * So this validator records the consequence rather than inventing a failure the
+ * route was designed to allow, and rather than quietly dropping the presence check
+ * altogether. The tolerance is an explicit ONE-ENTRY allow-list, and a test below
+ * proves it is narrow: a response missing any OTHER required key still fails. The
+ * one case where absence is genuinely dangerous — the continuation cursor — is
+ * refused with a 503 by E2A-S15 instead of being emitted.
+ *
+ * Reported as an R11 observation for the owner, not changed here: R11 forbids
+ * executable route changes absent an independently classified production defect,
+ * and this is a metadata-completeness wart with no disclosure component.
+ */
+const S8C_ITEM_TOLERATED_ABSENT: readonly string[] = ["reportVersion"];
+const S8C_GOVERNANCE_KEYS: Readonly<Record<string, readonly string[]>> = {
+  milestone2: ["family", "kind", "isOwnerOverride", "conditions"],
+  legacy: ["family", "status"],
+};
+const S8C_GOVERNANCE_REQUIRED: Readonly<Record<string, readonly string[]>> = {
+  milestone2: ["family", "kind", "isOwnerOverride"],
+  legacy: ["family", "status"],
+};
+
+const assertApprovedGovernanceStatus = (value: unknown, at: string): void => {
+  expect(`${at}:isObject:${value !== null && typeof value === "object" && !Array.isArray(value)}`).toBe(`${at}:isObject:true`);
+  const gov = value as Record<string, unknown>;
+  const family = String(gov.family);
+  expect(`${at}.family:${family}`).toBe(`${at}.family:${family in S8C_GOVERNANCE_KEYS ? family : "milestone2|legacy"}`);
+  const allowed = S8C_GOVERNANCE_KEYS[family];
+  expect(`${at}:unapprovedKeys:${Object.keys(gov).filter((k) => !allowed.includes(k)).sort().join(",")}`).toBe(`${at}:unapprovedKeys:`);
+  expect(`${at}:missingKeys:${S8C_GOVERNANCE_REQUIRED[family].filter((k) => !(k in gov)).sort().join(",")}`).toBe(`${at}:missingKeys:`);
+  if (family === "milestone2") {
+    expect(`${at}.kind:isString:${typeof gov.kind === "string"}`).toBe(`${at}.kind:isString:true`);
+    expect(`${at}.isOwnerOverride:isBoolean:${typeof gov.isOwnerOverride === "boolean"}`).toBe(`${at}.isOwnerOverride:isBoolean:true`);
+    if ("conditions" in gov) {
+      const conditions = gov.conditions;
+      expect(`${at}.conditions:isStringArray:${Array.isArray(conditions) && (conditions as unknown[]).every((c) => typeof c === "string")}`).toBe(`${at}.conditions:isStringArray:true`);
+    }
+  } else {
+    expect(`${at}.status:isStringOrNull:${gov.status === null || typeof gov.status === "string"}`).toBe(`${at}.status:isStringOrNull:true`);
+  }
+};
+
+const assertApprovedListDto = (json: unknown): void => {
+  expect(`envelope:isObject:${json !== null && typeof json === "object" && !Array.isArray(json)}`).toBe("envelope:isObject:true");
+  const body = json as Record<string, unknown>;
+  expect(`envelope:keys:${Object.keys(body).sort().join(",")}`).toBe(`envelope:keys:${[...S8C_ENVELOPE_KEYS].sort().join(",")}`);
+  expect(`envelope.ok:${body.ok}`).toBe("envelope.ok:true");
+  expect(`envelope.runId:isNonEmptyString:${typeof body.runId === "string" && (body.runId as string).length > 0}`).toBe("envelope.runId:isNonEmptyString:true");
+  expect(`envelope.hasMore:isBoolean:${typeof body.hasMore === "boolean"}`).toBe("envelope.hasMore:isBoolean:true");
+  const cursorOk = body.nextCursor === null || (typeof body.nextCursor === "number" && Number.isFinite(body.nextCursor));
+  expect(`envelope.nextCursor:nullOrFiniteNumber:${cursorOk}`).toBe("envelope.nextCursor:nullOrFiniteNumber:true");
+  // The E2A-S15 contract, restated on the OUTPUT side: a successful page never
+  // advertises more while withholding the means to ask for it.
+  expect(`envelope:hasMoreWithoutCursor:${body.hasMore === true && body.nextCursor === null}`).toBe("envelope:hasMoreWithoutCursor:false");
+  expect(`envelope.exports:isArray:${Array.isArray(body.exports)}`).toBe("envelope.exports:isArray:true");
+  const allowedItemKeys = [...S8C_ITEM_REQUIRED, ...S8C_ITEM_OPTIONAL];
+  (body.exports as unknown[]).forEach((raw, i) => {
+    const at = `exports[${i}]`;
+    expect(`${at}:isObject:${raw !== null && typeof raw === "object" && !Array.isArray(raw)}`).toBe(`${at}:isObject:true`);
+    const item = raw as Record<string, unknown>;
+    expect(`${at}:unapprovedKeys:${Object.keys(item).filter((k) => !allowedItemKeys.includes(k)).sort().join(",")}`).toBe(`${at}:unapprovedKeys:`);
+    const absent = S8C_ITEM_REQUIRED.filter((k) => !(k in item));
+    expect(`${at}:unexpectedlyAbsentKeys:${absent.filter((k) => !S8C_ITEM_TOLERATED_ABSENT.includes(k)).sort().join(",")}`).toBe(`${at}:unexpectedlyAbsentKeys:`);
+    // No raw internal container may ride along inside an approved scalar field.
+    const containers = Object.keys(item).filter((k) => k !== "governanceStatusAtExport" && item[k] !== null && typeof item[k] === "object");
+    expect(`${at}:scalarFieldsCarryingContainers:${containers.sort().join(",")}`).toBe(`${at}:scalarFieldsCarryingContainers:`);
+    expect(`${at}.schemaFamily:${item.schemaFamily}`).toBe(`${at}.schemaFamily:${item.schemaFamily === "legacy" ? "legacy" : "milestone2"}`);
+    if ("hashAlgorithm" in item) expect(`${at}.hashAlgorithm:${item.hashAlgorithm}`).toBe(`${at}.hashAlgorithm:sha256`);
+    if ("hashReproducible" in item) expect(`${at}.hashReproducible:isBoolean:${typeof item.hashReproducible === "boolean"}`).toBe(`${at}.hashReproducible:isBoolean:true`);
+    if ("fileHash" in item) expect(`${at}.fileHash:isString:${typeof item.fileHash === "string"}`).toBe(`${at}.fileHash:isString:true`);
+    assertApprovedGovernanceStatus(item.governanceStatusAtExport, `${at}.governanceStatusAtExport`);
+  });
 };
 
 /**
@@ -1094,43 +1387,68 @@ const expectSourceWasRead = (r: { reads: string[] }, ...props: string[]) => {
 };
 
 /**
- * §5/§13/§26 — THE ONLY ORDINARY ROUTE PATH, AND IT ENFORCES BOTH PROPERTIES.
+ * §5/§13/§26 — THE ONLY ORDINARY ROUTE PATH, AND IT ENFORCES ALL THREE PROPERTIES.
  *
  * A test cannot opt out, cannot forget, and cannot reach the witness. Order
- * matters: the response body is FULLY SERIALIZED via `res.text()` before anything
- * is asserted, so the output check observes exactly the bytes a client receives —
- * not an internal DTO and not a pre-Response object.
+ * matters: the response is FULLY MATERIALIZED before anything is asserted, so the
+ * output checks observe exactly what a client receives — not an internal DTO and
+ * not a pre-`Response` object.
  *
- * E2A-S8A (source discipline) and E2A-S8B (output secrecy) are asserted here,
- * against a `sink` that is `const` and local to this invocation. R8 and R9 both
- * defeated module-level witnesses — one by rebinding the sink, one by re-marking
- * the baseline it was compared to. There is no module-level witness left to reach.
+ * R11 §25 — THE REQUEST IS BUILT BY THE CALLER AND PASSED THROUGH UNCHANGED, so a
+ * context row's precondition can interrogate the very `Request` the route will
+ * receive instead of re-asserting its own row literal (R10 found four rows doing
+ * exactly that). `submit()` is the convenience wrapper that builds one from a
+ * query string.
+ *
+ * R11 §3/§4 — EVERY CALL IS REGISTERED WITH THE ROUTE-INVOCATION AUDIT, and the
+ * audit independently verifies that this helper really entered the route once. A
+ * raw handler call elsewhere is therefore visible to the top-level `afterEach`
+ * whether or not its author asserted anything.
  */
-const submit = async (query = "", workspaceId = WS, runId = RUN) => {
-  const sink = newSink(); // private to this invocation
-  activeSink = sink;
-  try {
-    const res = await GET(new NextRequest(`http://localhost/api/workspaces/${workspaceId}/runs/${runId}/exports${query}`), { params: { workspaceId, runId } });
-    const bodyText = await res.text(); // the actual serialized representation
+const buildRequest = (query = "", workspaceId = WS, runId = RUN) =>
+  new NextRequest(`http://localhost/api/workspaces/${workspaceId}/runs/${runId}/exports${query}`);
 
-    // ── E2A-S8A: source discipline ──
-    expect(sink.forbidden).toEqual([]);
-    expect(sink.enumerations).toEqual([]);
-    expect(Array.from(new Set(sink.reads)).filter((p) => !ALLOWED_SOURCE_PROPS.includes(p))).toEqual([]);
+// SUBMIT_BOUNDARY_BEGIN — the single raw-handler call site; asserted structurally by §7 LAYER B.
+const submitRequest = async (req: NextRequest, workspaceId = WS, runId = RUN) =>
+  routeInvocationAudit.secured(async () => {
+    const witness = newWitness(); // private to this invocation
+    activeWitness = witness;
+    try {
+      const res = await GET(req, { params: { workspaceId, runId } });
+      // §14: materialize from a CLONE, so the caller's `Response` instance is never
+      // consumed here, and scan what was actually serialized rather than a DTO.
+      const bodyText = await res.clone().text();
 
-    // ── E2A-S8B: output secrecy, operation-independent ──
-    // However the value was obtained — structuredClone, util.inspect, a
-    // descriptor, or a primitive nobody here has thought of — it must not be in
-    // the bytes the client receives.
-    for (const canary of REGISTERED_CANARIES) {
-      expect(`frozen-report-canary-in-body:${bodyText.includes(canary)}`).toBe("frozen-report-canary-in-body:false");
+      // ── E2A-S8A: source discipline ──
+      expect(witness.sink.forbidden).toEqual([]);
+      expect(witness.sink.enumerations).toEqual([]);
+      expect(Array.from(new Set(witness.sink.reads)).filter((p) => !ALLOWED_SOURCE_PROPS.includes(p))).toEqual([]);
+
+      // ── E2A-S8B: output secrecy ──
+      // §11: the fixtures that carry frozen content must carry their canary...
+      expect(witness.reportBearingWithoutCanary).toEqual([]);
+      // ...and §10: a request handed report-bearing records cannot proceed with an
+      // empty registry, which is exactly how R10's emptied array stayed green.
+      if (witness.reportBearing > 0) {
+        expect(`reportBearingRecords:${witness.reportBearing} registeredCanaries:${witness.canaries.size > 0}`).toBe(`reportBearingRecords:${witness.reportBearing} registeredCanaries:true`);
+      }
+      // §13: body AND headers. However the value was obtained — structuredClone,
+      // util.inspect, a descriptor, or a primitive nobody here has thought of — it
+      // must not be in anything the client receives.
+      assertResponseSecrecy(res, bodyText, witness.canaries);
+
+      const json = JSON.parse(bodyText) as Record<string, any>;
+      // ── E2A-S8C: the approved metadata DTO, unconditionally, on every success ──
+      if (res.status === 200) assertApprovedListDto(json);
+
+      return { status: res.status, json, bodyText, reads: [...witness.sink.reads] };
+    } finally {
+      activeWitness = null;
     }
+  });
+// SUBMIT_BOUNDARY_END
 
-    return { status: res.status, json: JSON.parse(bodyText) as Record<string, any>, bodyText, reads: [...sink.reads] };
-  } finally {
-    activeSink = null;
-  }
-};
+const submit = async (query = "", workspaceId = WS, runId = RUN) => submitRequest(buildRequest(query, workspaceId, runId), workspaceId, runId);
 
 /**
  * E2A-S1/S2 — NO target-associated I/O: the run, the Project and the export
@@ -1153,14 +1471,15 @@ const expectTheFixtureHistory = (r: { status: number; json: { exports: { exportI
   expect(r.json.exports.map((e) => e.exportId)).toEqual(["exp-3", "exp-2"]);
 };
 
-beforeEach(() => {
+/** Extracted so §29's effect-fingerprint comparison can re-establish the same baseline between rows. */
+const resetHarnessState = () => {
   jest.clearAllMocks();
   runDocs.clear();
   readPaths.length = 0;
   writeAttempts.length = 0;
   runGetThrows = false;
   adminDbAvailable = true;
-  activeSink = null;
+  activeWitness = null;
   trapMode = "accessor"; // §2: ordinary route tests get the accessor tripwire
   mockExportFlagEnabled = true;
   runDocs.set(RUN, teamRun());
@@ -1168,6 +1487,28 @@ beforeEach(() => {
   mockedAccess.mockImplementation(accessFake());
   mockedGetProject.mockImplementation(projectFake);
   mockedListExports.mockImplementation(listFake());
+};
+
+beforeEach(resetHarnessState);
+
+/**
+ * R11 §4 — THE GLOBAL POSTCONDITION, FOR REAL THIS TIME.
+ *
+ * R10 documented a global `afterEach` in four places and had none: enforcement had
+ * moved inside the request helper, and the test proving every call went through
+ * that helper had already been deleted as "redundant" to the hook that then
+ * disappeared. `grep -c "afterEach("` settled it at zero.
+ *
+ * This hook is the LOAD-BEARING half of the single-entry-point guarantee (§7
+ * LAYER A). It does not re-check secrecy — that is asserted per request, against a
+ * witness no test can reach. It checks the one thing a per-request assertion
+ * structurally cannot: that no route entry happened OUTSIDE the secured helper.
+ * Jest runs an inner `afterEach` before an outer one, and nothing nested can
+ * satisfy or reset this: the counters are closure-private and the only registrar
+ * proves it entered the route itself.
+ */
+afterEach(() => {
+  routeInvocationAudit.assertBalancedAndReset();
 });
 
 describe("E2-A — the authorized list path", () => {
@@ -1829,7 +2170,17 @@ describe("empty query parameters — inherited behaviour, characterized not endo
  * RUNTIME before any projection claim is made. These tests demonstrate correct
  * behaviour against realistic data; they are no longer the secrecy proof.
  */
-describe("E2A-S8 — no reportSnapshot leaf reaches the response", () => {
+/**
+ * R11 §34 — SCOPE, CORRECTED. The old title claimed no `reportSnapshot` LEAF
+ * reaches the response, which is a completeness claim over that subtree, and the
+ * final proof model explicitly does not make it: an exhaustive hand-maintained
+ * inventory of those leaves is what five rounds each found the next hole in. What
+ * these tests actually show is that the leaves of the two REPRESENTATIVE fixtures
+ * are absent — integration evidence against realistic data. The invariant is
+ * carried by E2A-S8A (source discipline), E2A-S8B (output secrecy, which needs no
+ * inventory) and E2A-S8C (DTO contract).
+ */
+describe("E2A-S8 — the representative snapshots' sentinels do not reach the response (integration evidence)", () => {
   it("REACHABILITY: every sentinel exists at its exact path in both fixtures BEFORE projection", () => {
     expect(() => assertSnapshotSentinelsReachable(MILESTONE2_SNAPSHOT)).not.toThrow();
     expect(() => assertSnapshotSentinelsReachable(LEGACY_SNAPSHOT)).not.toThrow();
@@ -1903,7 +2254,7 @@ describe("E2A-S8 — no reportSnapshot leaf reaches the response", () => {
     expect(Object.keys(r.json.exports[0]).sort()).toEqual([...["artifactStatus", "classification", "createdAt", "createdBy", "exportId", "format", "governanceStatusAtExport", "reportVersion", "schemaFamily", "schemaId"], "fileHash", "hashAlgorithm", "hashReproducible"].sort());
   });
 
-  it("E2A-S8 no legacy reportSnapshot leaf reaches the response", async () => {
+  it("E2A-S8 no legacy fixture sentinel reaches the response", async () => {
     mockedListExports.mockImplementation(listFake([legacyExportRecord(3)]));
     const r = await submit();
     expect(r.status).toBe(200);
@@ -1911,6 +2262,9 @@ describe("E2A-S8 — no reportSnapshot leaf reaches the response", () => {
     expect(r.json.exports[0].schemaFamily).toBe("legacy");
     const blob = JSON.stringify(r.json);
     const needles = familySentinels(LEGACY_SNAPSHOT);
+    // Contractual, for the same reason as the 35/60/80 counts above: pinning it is
+    // what makes a dropped path or an unreviewed addition to this fixture fail
+    // rather than quietly shrink the evidence.
     expect(needles.length).toBe(53);
     for (const [path, needle] of needles) {
       expect(`${path}=${blob.includes(needle)}`).toBe(`${path}=false`);
@@ -2374,14 +2728,208 @@ describe("E2A-S8A — the instrumentation boundary cannot be opted out of", () =
     expect(r.status).toBe(200);
     // the record really was wrapped: the projection's reads were observed
     expectSourceWasRead(r, "exportId", "reportVersion", "format");
-    // (the S8A policy itself is asserted by the global afterEach)
+    // (the S8A policy itself is asserted inside the secured request helper)
   });
 
-  // A source-grep test asserting "GET is only invoked inside submit()" lived here
-  // briefly and was removed: it read its own file, so it counted the needle in its
-  // own source. More importantly it was redundant — the postcondition is a GLOBAL
-  // `afterEach`, so it covers any invocation path, including a future direct one.
-  // The single entry point is a readability convenience, not the guarantee.
+  /**
+   * R11 §7/§39 — LAYER B, AND THE CLAIM IT REPLACES.
+   *
+   * A source test asserting "the raw handler is only invoked inside the secured
+   * helper" lived here and was deleted in R9 on two grounds. The first was true:
+   * it read its own file and counted the needle in its own source. The second was
+   * that it was "redundant — the postcondition is a GLOBAL `afterEach`, so it
+   * covers any invocation path, including a future direct one. The single entry
+   * point is a readability convenience, not the guarantee."
+   *
+   * That was exactly inverted, and R10 proved it: with enforcement resident in the
+   * helper, the single entry point IS the guarantee, and the `afterEach` the
+   * argument leaned on was itself deleted in the same round. A new ordinary test
+   * calling the handler directly then put the whole frozen report on the wire with
+   * the suite green.
+   *
+   * The guarantee now has two layers, and only the first is load-bearing:
+   *   LAYER A — runtime invocation accounting (`routeInvocationAudit`), asserted by
+   *             the top-level `afterEach`. This is what catches a direct call.
+   *   LAYER B — this test, which localizes the single call site so the accounting
+   *             has one place to be true. It is a structural aid, NOT the security
+   *             guarantee; if it were deleted, Layer A would still fail a direct
+   *             call. Verified in both directions in this round.
+   *
+   * The self-counting defect is fixed by ASSEMBLING the needle at runtime, so this
+   * file contains no second literal occurrence of it to find.
+   */
+  it("R11 §7 LAYER B: the raw route handler has exactly ONE call site, inside the secured helper", () => {
+    const src = readFileSync(__filename, "utf8");
+    // Assembled, so this file contains no second literal occurrence to miscount —
+    // which is the self-counting defect that got the original test deleted. Prose
+    // elsewhere deliberately says "raw handler call" rather than spelling it.
+    const needle = ["G", "E", "T", "("].join("");
+    const begin = src.indexOf("SUBMIT_BOUNDARY_BEGIN");
+    const end = src.indexOf("SUBMIT_BOUNDARY_END");
+    expect(`boundaryMarkersPresent:${begin > -1 && end > begin}`).toBe("boundaryMarkersPresent:true");
+    const sites: number[] = [];
+    for (let i = src.indexOf(needle); i !== -1; i = src.indexOf(needle, i + 1)) sites.push(i);
+    expect(`rawHandlerCallSites:${sites.length}`).toBe("rawHandlerCallSites:1");
+    expect(`callSiteInsideSecuredHelper:${sites[0] > begin && sites[0] < end}`).toBe("callSiteInsideSecuredHelper:true");
+  });
+});
+
+/**
+ * ─── R11 §9/§11/§15/§16/§22 — THE RESPONSE-SIDE MECHANISMS, FALSIFIED ─────
+ *
+ * The rule this file already stated and R10 then broke for its own newest
+ * mechanism: a proof mechanism must itself be falsified before prose relies on it.
+ * R10 added the body canary as the PRIMARY defence and gave it no positive
+ * control, so `REGISTERED_CANARIES = []` and deleting the canary from a fixture
+ * both left the suite green. The scan was not inert — R10's reviewer measured it
+ * killing a real `util.inspect` leak in two of three record modes — but nothing
+ * proved it could fire, and "no test proves it can fire" is not "it cannot fire".
+ *
+ * These tests drive the mechanisms directly, with synthetic responses, so the
+ * positive controls are PERMANENT rather than a mutation someone has to remember
+ * to re-run. §8: none of them enters the route.
+ */
+describe("R11 — E2A-S8B and E2A-S8C are falsifiable, and independent", () => {
+  const canaries = new Set([FROZEN_REPORT_CANARY_M2]);
+  const approvedBody = {
+    ok: true,
+    runId: RUN,
+    exports: [
+      {
+        exportId: "exp-3",
+        reportVersion: 3,
+        schemaId: "comparison_matrix",
+        schemaFamily: "milestone2",
+        format: "pdf",
+        artifactStatus: "ready",
+        createdAt: "2026-09-02T11:00:00.000Z",
+        createdBy: CREATOR_UID,
+        governanceStatusAtExport: { family: "milestone2", kind: "approved", isOwnerOverride: false },
+        classification: "internal",
+        fileHash: "f".repeat(64),
+        hashAlgorithm: "sha256",
+        hashReproducible: true,
+      },
+    ],
+    hasMore: false,
+    nextCursor: null,
+  };
+  const respond = (body: unknown, headers: Record<string, string> = {}) => {
+    const res = NextResponse.json(body as Record<string, unknown>, { status: 200, headers });
+    return res as unknown as Response;
+  };
+  const scan = async (res: Response) => assertResponseSecrecy(res, await res.clone().text(), canaries);
+
+  it("§9 POSITIVE CONTROL: a canary in the JSON BODY fails the scan", async () => {
+    const res = respond({ ...approvedBody, leaked: FROZEN_REPORT_CANARY_M2 });
+    await expect(scan(res)).rejects.toThrow(/frozen-report-content@body/);
+  });
+
+  it("§9/§15 POSITIVE CONTROL: the exact R10 leak — util.inspect of a real report-bearing record — fails the scan", async () => {
+    // The mutation R10's reviewer proved lands the canary in the body in plain and
+    // Proxy modes. Run here against the real fixture record, permanently.
+    const leaked = inspect(exportRecord(3), { depth: null });
+    expect(`inspectOutputCarriesTheCanary:${leaked.includes(FROZEN_REPORT_CANARY_M2)}`).toBe("inspectOutputCarriesTheCanary:true");
+    await expect(scan(respond({ ...approvedBody, leaked }))).rejects.toThrow(/frozen-report-content@body/);
+  });
+
+  it("§9/§17 POSITIVE CONTROL: a descriptor-obtained value reaching the response fails the scan", async () => {
+    const rec = exportRecord(3) as Record<string, unknown>;
+    const leaked = JSON.stringify(Object.getOwnPropertyDescriptor(rec, "reportSnapshot")?.value);
+    expect(`descriptorValueCarriesTheCanary:${leaked.includes(FROZEN_REPORT_CANARY_M2)}`).toBe("descriptorValueCarriesTheCanary:true");
+    await expect(scan(respond({ ...approvedBody, leaked }))).rejects.toThrow(/frozen-report-content@body/);
+  });
+
+  it("§9/§18 POSITIVE CONTROL: a structuredClone-obtained value reaching the response fails the scan", async () => {
+    const leaked = structuredClone(exportRecord(3) as Record<string, unknown>).reportSnapshot;
+    await expect(scan(respond({ ...approvedBody, leaked }))).rejects.toThrow(/frozen-report-content@body/);
+  });
+
+  it("§9/§16 POSITIVE CONTROL: a canary in a response HEADER VALUE fails the scan — the R10 blind channel", async () => {
+    await expect(scan(respond(approvedBody, { "x-debug-report": FROZEN_REPORT_CANARY_M2 }))).rejects.toThrow(/frozen-report-content@header-value/);
+  });
+
+  it("§9/§16 POSITIVE CONTROL: a canary in a response HEADER NAME fails the scan, despite platform lowercasing", async () => {
+    const res = respond(approvedBody, { [`x-${FROZEN_REPORT_CANARY_M2}`]: "1" });
+    // Recorded rather than assumed: the platform really does fold the name, which is
+    // why this channel is compared case-insensitively.
+    const names = [...(res.headers as unknown as { keys: () => Iterable<string> }).keys()];
+    expect(`headerNameWasFolded:${names.some((n) => n.includes(FROZEN_REPORT_CANARY_M2.toLowerCase()) && !n.includes(FROZEN_REPORT_CANARY_M2))}`).toBe("headerNameWasFolded:true");
+    await expect(scan(res)).rejects.toThrow(/frozen-report-content@header-name/);
+  });
+
+  it("§9 NEGATIVE CONTROL: a clean approved response passes the scan", async () => {
+    await expect(scan(respond(approvedBody, { "x-harmless": "ok" }))).resolves.toBeUndefined();
+  });
+
+  it("§11 the real fixtures carry their canaries, so deleting one cannot be silent", () => {
+    const m2 = new Set<string>();
+    discoverCanaries(MILESTONE2_SNAPSHOT, m2);
+    expect(`milestone2FixtureCanaries:${[...m2].join(",")}`).toBe(`milestone2FixtureCanaries:${FROZEN_REPORT_CANARY_M2}`);
+    const legacy = new Set<string>();
+    discoverCanaries(LEGACY_SNAPSHOT, legacy);
+    expect(`legacyFixtureCanaries:${[...legacy].join(",")}`).toBe(`legacyFixtureCanaries:${FROZEN_REPORT_CANARY_LEGACY}`);
+    // and the discovery mechanism itself is falsifiable: strip the canary and it finds nothing
+    const stripped = new Set<string>();
+    discoverCanaries({ ...MILESTONE2_SNAPSHOT, question: "SENTINEL_NOT_A_CANARY" }, stripped);
+    expect(`strippedFixtureCanaries:${stripped.size}`).toBe("strippedFixtureCanaries:0");
+  });
+
+  it("§20 S8C rejects data nested inside the ALLOWED governance object, with every top-level key intact", () => {
+    const smuggled = JSON.parse(JSON.stringify(approvedBody)) as typeof approvedBody;
+    (smuggled.exports[0].governanceStatusAtExport as Record<string, unknown>).meta = { question: "SENTINEL_SMUGGLED" };
+    expect(Object.keys(smuggled.exports[0]).sort()).toEqual(Object.keys(approvedBody.exports[0]).sort());
+    expect(() => assertApprovedListDto(smuggled)).toThrow(/unapprovedKeys/);
+    expect(() => assertApprovedListDto(approvedBody)).not.toThrow();
+  });
+
+  it("§20 S8C rejects a non-string smuggled into governance `conditions`", () => {
+    const withConditions = JSON.parse(JSON.stringify(approvedBody)) as typeof approvedBody;
+    (withConditions.exports[0].governanceStatusAtExport as Record<string, unknown>).conditions = [{ question: "SENTINEL_SMUGGLED" }];
+    expect(() => assertApprovedListDto(withConditions)).toThrow(/conditions:isStringArray/);
+  });
+
+  it("§20 S8C rejects a raw container in a scalar field, and an unapproved item key", () => {
+    const container = JSON.parse(JSON.stringify(approvedBody)) as typeof approvedBody;
+    (container.exports[0] as Record<string, unknown>).format = { nested: "SENTINEL_SMUGGLED" };
+    expect(() => assertApprovedListDto(container)).toThrow(/scalarFieldsCarryingContainers/);
+    const extraKey = JSON.parse(JSON.stringify(approvedBody)) as typeof approvedBody;
+    (extraKey.exports[0] as Record<string, unknown>).reportSnapshot = "anything";
+    expect(() => assertApprovedListDto(extraKey)).toThrow(/unapprovedKeys/);
+    const extraEnvelope = { ...approvedBody, debug: 1 };
+    expect(() => assertApprovedListDto(extraEnvelope)).toThrow(/envelope:keys/);
+  });
+
+  it("§19 S8C's absent-key tolerance is BOUNDED to the one documented field", () => {
+    const withoutReportVersion = JSON.parse(JSON.stringify(approvedBody)) as typeof approvedBody;
+    delete (withoutReportVersion.exports[0] as Record<string, unknown>).reportVersion;
+    // tolerated, because the route deliberately emits this for a record whose
+    // persisted reportVersion is undefined and which cannot trap a paging client
+    expect(() => assertApprovedListDto(withoutReportVersion)).not.toThrow();
+    // ...and nothing else is tolerated
+    for (const key of ["createdBy", "exportId", "classification", "governanceStatusAtExport", "schemaFamily"]) {
+      const broken = JSON.parse(JSON.stringify(approvedBody)) as typeof approvedBody;
+      delete (broken.exports[0] as Record<string, unknown>)[key];
+      expect(() => assertApprovedListDto(broken)).toThrow(new RegExp(`unexpectedlyAbsentKeys:${key}|isObject`));
+    }
+  });
+
+  it("§22 INDEPENDENCE: S8B fires on a leak that S8C accepts", async () => {
+    // A structurally perfect response with the canary in a header. S8C sees nothing
+    // wrong — because nothing about the DTO is wrong — and S8B still fails.
+    const res = respond(approvedBody, { "x-debug-report": FROZEN_REPORT_CANARY_M2 });
+    expect(() => assertApprovedListDto(approvedBody)).not.toThrow();
+    await expect(scan(res)).rejects.toThrow(/frozen-report-content@header-value/);
+  });
+
+  it("§22 INDEPENDENCE: S8C fires on a violation that S8B accepts", async () => {
+    // An unexpected DEFINED field carrying no canary at all: the scan is clean and
+    // only the DTO contract catches it.
+    const shapeBroken = JSON.parse(JSON.stringify(approvedBody)) as typeof approvedBody;
+    (shapeBroken.exports[0] as Record<string, unknown>).internalDebugState = { retries: 2 };
+    await expect(scan(respond(shapeBroken))).resolves.toBeUndefined();
+    expect(() => assertApprovedListDto(shapeBroken)).toThrow(/unapprovedKeys/);
+  });
 });
 
 describe.each(["proxy", "accessor"] as const)("E2A-S8A [%s mode] — the shared input-class table", (mode) => {
@@ -2397,8 +2945,9 @@ describe.each(["proxy", "accessor"] as const)("E2A-S8A [%s mode] — the shared 
     expect([200, 503]).toContain(r.status);
     // non-vacuity: the projection really executed under instrumentation
     expectSourceWasRead(r, "exportId", "format");
-    // ...and the S8A policy itself is asserted by the GLOBAL afterEach, not here.
-    // That is the point of this round: no row of this table can forget it.
+    // ...and the S8A/S8B/S8C policies are asserted inside the secured request
+    // helper, not here — no row of this table can forget them, and the top-level
+    // afterEach proves no row reached the route any other way.
   });
 });
 
@@ -2432,10 +2981,18 @@ describe.each(["proxy", "accessor"] as const)("E2A-S8A [%s mode] — the shared 
  * status and the non-vacuity test merely counted rows and grepped labels. A row's
  * NAME is not evidence that it established anything.
  *
- * So each row now carries `assertPrecondition`, run after `setup()` and before
- * `submit()`. Delete a row's setup and its own precondition fails. The two
- * effect-identical rows R9 found (both no-op setup, empty query) are collapsed
- * into one; decorative rows are worse than no rows.
+ * So each row now carries `assertPrecondition`, run after `setup()` and before the
+ * request. Delete a row's setup and its own precondition fails.
+ *
+ * R11 §28/§29 — HOW DUPLICATE ROWS ARE ACTUALLY DETECTED. R10 shipped a check that
+ * filtered rows whose `setup.toString()` matched a `/* … *\/` comment body — and
+ * ts-jest strips comments before `toString()` ever runs, so the filtered set was
+ * ALWAYS empty and the assertion could not fail. Adding the exact decorative
+ * duplicate it existed to catch passed. Source text is not evidence about a
+ * transpiled function, so that heuristic is gone and is not replaced by another
+ * one. Duplicates are now detected by OBSERVABLE EFFECT: each row's `setup()` is
+ * run against a fresh baseline and the configured state is fingerprinted, so two
+ * rows that configure the same thing collide whatever their source looks like.
  */
 /**
  * §18 — A PRECONDITION MUST OBSERVE WHAT `setup()` CONFIGURED.
@@ -2450,12 +3007,13 @@ const unrecordSince = (m: jest.Mock, before: number) => {
   m.mock.calls.length = before;
   m.mock.results.length = before;
 };
-const peekRecords = async (): Promise<Record<string, unknown>[]> => {
+const peekList = async (): Promise<{ records: Record<string, unknown>[]; hasMore: boolean }> => {
   const before = mockedListExports.mock.calls.length;
-  const res = (await mockedListExports(RUN, {})) as { records?: Record<string, unknown>[] };
+  const res = (await mockedListExports(RUN, {})) as { records?: Record<string, unknown>[]; hasMore?: boolean };
   unrecordSince(mockedListExports, before);
-  return res.records ?? [];
+  return { records: res.records ?? [], hasMore: res.hasMore === true };
 };
+const peekRecords = async (): Promise<Record<string, unknown>[]> => (await peekList()).records;
 const peekRole = async (): Promise<string> => {
   const before = mockedAccess.mock.calls.length;
   const res = (await mockedAccess({ uid: UID, workspaceId: WS })) as { membership?: { role?: string } };
@@ -2472,7 +3030,43 @@ const listing = (records: Record<string, unknown>[], hasMore = false) => () => {
   mockedListExports.mockResolvedValue({ ok: true, records, hasMore });
 };
 
-type ContextRow = readonly [name: string, setup: () => void, query: string, assertPrecondition: (query: string) => Promise<void>];
+/**
+ * R11 §24/§25 — A PRECONDITION RECEIVES THE ACTUAL REQUEST.
+ *
+ * R10's finding: the four query rows asserted their own row literal
+ * (`expect(q).toBe("?cursor=5")`), which is true however the runner behaves.
+ * Removing the query from the request the route received left all four green and
+ * silently collapsed them into duplicates of the default row — on the very axis
+ * the table is named for. The precondition now gets the `NextRequest` OBJECT that
+ * `submitRequest` will hand to the handler, so it can interrogate what the route
+ * will actually see. Nothing reconstructs a second request.
+ */
+type PreconditionContext = { request: NextRequest };
+type ContextRow = readonly [name: string, setup: () => void, query: string, assertPrecondition: (ctx: PreconditionContext) => Promise<void>];
+
+/**
+ * R11 §30/§31/§32 — RUNTIME ROW VALIDATION, scoped honestly.
+ *
+ * The runner genuinely requires this shape at runtime: it destructures four fields
+ * and calls two of them. The spec is transpile-only (`tsconfig.json` excludes every
+ * spec file by glob and ts-jest does not type-check), so `ContextRow` above
+ * enforces nothing at run time and no compile-time claim is made for it.
+ *
+ * What this validator buys is a NAMED failure instead of an incidental
+ * `TypeError`, and a place for the self-test below to prove the refusal exists at
+ * all. It is not claimed to be a security mechanism — a malformed row breaks the
+ * runner either way. That is the whole claim; there is no ornamental validation
+ * here.
+ */
+const validateContextRow = (row: readonly unknown[]): ContextRow => {
+  const [name, setup, query, assertPrecondition] = row;
+  expect(`row:length:${row.length}`).toBe("row:length:4");
+  expect(`row:name:isString:${typeof name === "string" && (name as string).length > 0}`).toBe("row:name:isString:true");
+  expect(`row[${String(name)}]:setup:isFunction:${typeof setup === "function"}`).toBe(`row[${String(name)}]:setup:isFunction:true`);
+  expect(`row[${String(name)}]:query:isString:${typeof query === "string"}`).toBe(`row[${String(name)}]:query:isString:true`);
+  expect(`row[${String(name)}]:assertPrecondition:isFunction:${typeof assertPrecondition === "function"}`).toBe(`row[${String(name)}]:assertPrecondition:isFunction:true`);
+  return row as unknown as ContextRow;
+};
 
 /**
  * §4/§17 — THE REQUEST/AUTHORITY CONTEXT MATRIX. Every row proves its own
@@ -2518,22 +3112,33 @@ const REQUEST_CONTEXTS: ReadonlyArray<ContextRow> = [
   ["degraded Project: malformed, listing proceeds",
     () => { mockedGetProject.mockResolvedValue({ status: "malformed" }); }, "",
     async () => { expect(await peekProjectStatus()).toBe("malformed"); }],
+  // §24 — each of these interrogates the ACTUAL Request the handler will receive.
+  // `searchParams.get` distinguishes the three cases that matter here: absent is
+  // `null`, `?cursor=` is `""`, and a supplied value is the string itself. Asserting
+  // BOTH `has` and `get` is what separates the EMPTY rows from the absent default.
   ["cursor supplied", () => { /* default records */ }, "?cursor=5",
-    async (q) => { expect(q).toBe("?cursor=5"); }],
+    async ({ request }) => {
+      expect(`cursor=${String(request.nextUrl.searchParams.get("cursor"))}`).toBe("cursor=5");
+      expect(`limitPresent=${request.nextUrl.searchParams.has("limit")}`).toBe("limitPresent=false");
+    }],
   ["EMPTY cursor (characterized inherited behaviour)", () => { /* default */ }, "?cursor=",
-    async (q) => { expect(q).toBe("?cursor="); }],
+    async ({ request }) => {
+      expect(`cursorPresent=${request.nextUrl.searchParams.has("cursor")}`).toBe("cursorPresent=true");
+      expect(`cursor=${JSON.stringify(request.nextUrl.searchParams.get("cursor"))}`).toBe('cursor=""');
+    }],
   ["limit supplied", () => { /* default */ }, "?limit=10",
-    async (q) => { expect(q).toBe("?limit=10"); }],
+    async ({ request }) => {
+      expect(`limit=${String(request.nextUrl.searchParams.get("limit"))}`).toBe("limit=10");
+      expect(`cursorPresent=${request.nextUrl.searchParams.has("cursor")}`).toBe("cursorPresent=false");
+    }],
   ["EMPTY limit (characterized inherited behaviour)", () => { /* default */ }, "?limit=",
-    async (q) => { expect(q).toBe("?limit="); }],
+    async ({ request }) => {
+      expect(`limitPresent=${request.nextUrl.searchParams.has("limit")}`).toBe("limitPresent=true");
+      expect(`limit=${JSON.stringify(request.nextUrl.searchParams.get("limit"))}`).toBe('limit=""');
+    }],
   ["hasMore continuation path",
     listing([exportRecord(3), exportRecord(2)], true), "",
-    async () => {
-      const before = mockedListExports.mock.calls.length;
-      const res = (await mockedListExports(RUN, {})) as { hasMore?: boolean };
-      unrecordSince(mockedListExports, before);
-      expect(res.hasMore).toBe(true);
-    }],
+    async () => { expect((await peekList()).hasMore).toBe(true); }],
   ["exactly ONE record", listing([exportRecord(3)]), "",
     async () => { expect((await peekRecords()).length).toBe(1); }],
   ["THREE OR MORE records",
@@ -2560,14 +3165,19 @@ const REQUEST_CONTEXTS: ReadonlyArray<ContextRow> = [
     }],
 ];
 
-describe.each(["accessor", "proxy", "plain"] as const)("E2A-S8A/S8B [%s record] — the request/authority context matrix", (mode) => {
-  it.each(REQUEST_CONTEXTS)("%s", async (_label, setup, query, assertPrecondition) => {
+describe.each(["accessor", "proxy", "plain"] as const)("E2A-S8A/S8B/S8C [%s record] — the request/authority context matrix", (mode) => {
+  it.each(REQUEST_CONTEXTS)("%s", async (label, rawSetup, rawQuery, rawPrecondition) => {
+    const [, setup, query, assertPrecondition] = validateContextRow([label, rawSetup, rawQuery, rawPrecondition]);
     trapMode = mode;
     setup();
+    // §25: ONE request object — interrogated by the precondition, then handed to
+    // the handler unchanged. Removing the query here fails the query rows, which is
+    // precisely what R10 found could not happen.
+    const request = buildRequest(query);
     // §18: the row must prove it established what its name claims, BEFORE the
     // security assertions run. A deleted setup fails here, not silently passes.
-    await assertPrecondition(query);
-    const r = await submit(query);
+    await assertPrecondition({ request });
+    const r = await submitRequest(request);
     // Every context must reach the projection; 200 normally, 503 only on the
     // integrity path (which none of these rows triggers).
     expect(r.status).toBe(200);
@@ -2584,19 +3194,9 @@ describe.each(["accessor", "proxy", "plain"] as const)("E2A-S8A/S8B [%s record] 
     }
   });
 
-  it("every row carries a precondition, and no two rows are effect-identical", () => {
-    // R9: the old version of this test counted rows and grepped LABELS, so a
-    // neutered row passed. It now constrains structure instead of prose.
-    for (const [name, setup, query, assertPrecondition] of REQUEST_CONTEXTS) {
-      expect(typeof name).toBe("string");
-      expect(typeof setup).toBe("function");
-      expect(typeof assertPrecondition).toBe("function");
-      expect(typeof query).toBe("string");
-    }
-    // no two rows share BOTH an empty query and a body-less setup — that is the
-    // duplicate shape R9 found (two rows that executed identically).
-    const inert = REQUEST_CONTEXTS.filter(([, setup, query]) => query === "" && /^\(\) => \{ \/\*/.test(setup.toString().replace(/\s+/g, " ")));
-    expect(inert.length).toBeLessThanOrEqual(1);
+  it("§30 every row satisfies the runtime row contract", () => {
+    for (const row of REQUEST_CONTEXTS) validateContextRow(row);
+    expect(`rowCount:${REQUEST_CONTEXTS.length}`).toBe("rowCount:20");
   });
 });
 
@@ -2665,5 +3265,74 @@ describe("E2A-S8A — Proxy-specific operation classes", () => {
     expect(r.status).toBe(200);
     expect(r.reads).not.toContain("exportMetadata.fileHash");
     expect(ALLOWED_SOURCE_PROPS).not.toContain("exportMetadata.fileHash");
+  });
+});
+
+/**
+ * ─── R11 §29/§30/§32 — THE MATRIX'S OWN MECHANISMS, FALSIFIED ─────────────
+ * These run once (not per record mode) and never enter the route, so they are
+ * invisible to the invocation audit.
+ */
+describe("R11 — the context matrix is neither decorative nor unvalidated", () => {
+  it("§29 no two rows are effect-identical, measured by OBSERVABLE CONFIGURED STATE", async () => {
+    const seen = new Map<string, string>();
+    for (const row of REQUEST_CONTEXTS) {
+      const [name, setup, query] = validateContextRow(row);
+      // fresh baseline per row, so a row is fingerprinted by what IT configures
+      resetHarnessState();
+      setup();
+      const { records, hasMore } = await peekList();
+      const fingerprint = JSON.stringify({
+        query,
+        role: await peekRole(),
+        projectStatus: await peekProjectStatus(),
+        runProjectId: (runDocs.get(RUN) as { projectId?: unknown } | undefined)?.projectId ?? null,
+        hasMore,
+        records: records.map((rec) => ({
+          exportId: rec.exportId,
+          createdBy: rec.createdBy,
+          schemaId: rec.schemaId,
+          schemaFamily: rec.schemaFamily,
+          classification: rec.classification,
+          reportVersion: rec.reportVersion,
+          artifactStatus: rec.artifactStatus,
+          governanceStatusAtExport: rec.governanceStatusAtExport,
+          hasExportMetadata: rec.exportMetadata !== undefined,
+          hasFlatHashKey: rec["exportMetadata.fileHash"] !== undefined,
+        })),
+      });
+      const collidesWith = seen.get(fingerprint);
+      expect(`row "${name}" effect-duplicates: ${collidesWith ?? "nothing"}`).toBe(`row "${name}" effect-duplicates: nothing`);
+      seen.set(fingerprint, name);
+    }
+    expect(`distinctEffects:${seen.size} rows:${REQUEST_CONTEXTS.length}`).toBe(`distinctEffects:${REQUEST_CONTEXTS.length} rows:${REQUEST_CONTEXTS.length}`);
+  });
+
+  it("§29 MECHANISM PROOF: the fingerprint really collides for a decorative duplicate", async () => {
+    // The exact shape R10's reviewer added to defeat the old source-text check: a
+    // second row with an empty query and a body-less setup. Fingerprinted, the two
+    // are indistinguishable — which is the point.
+    const fingerprintOf = async (setup: () => void, query: string) => {
+      resetHarnessState();
+      setup();
+      const { records, hasMore } = await peekList();
+      return JSON.stringify({ query, role: await peekRole(), records: records.map((r) => r.exportId), hasMore });
+    };
+    const a = await fingerprintOf(() => { /* nothing */ }, "");
+    const b = await fingerprintOf(() => {}, "");
+    expect(`decorativeDuplicateCollides:${a === b}`).toBe("decorativeDuplicateCollides:true");
+    // ...and a row that genuinely configures something else does NOT collide
+    const c = await fingerprintOf(() => { mockedAccess.mockImplementation(accessFake("viewer")); }, "");
+    expect(`genuinelyDifferentRowCollides:${a === c}`).toBe("genuinelyDifferentRowCollides:false");
+  });
+
+  it("§30/§32 the row validator REFUSES a malformed row", () => {
+    const ok: readonly unknown[] = ["name", () => {}, "", async () => {}];
+    expect(() => validateContextRow(ok)).not.toThrow();
+    expect(() => validateContextRow(["name", () => {}, "", "not a function"])).toThrow(/assertPrecondition:isFunction/);
+    expect(() => validateContextRow(["name", "not a function", "", async () => {}])).toThrow(/setup:isFunction/);
+    expect(() => validateContextRow(["name", () => {}, 5, async () => {}])).toThrow(/query:isString/);
+    expect(() => validateContextRow(["", () => {}, "", async () => {}])).toThrow(/name:isString/);
+    expect(() => validateContextRow(["name", () => {}, ""])).toThrow(/row:length/);
   });
 });

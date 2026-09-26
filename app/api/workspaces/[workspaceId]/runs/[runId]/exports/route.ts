@@ -104,10 +104,43 @@
  *           → "§8 MECHANISM PROOF: every clone/serialize/enumerate operation fires the tripwire"
  *           → "§9/§10 a SWALLOWED structuredClone still leaves the access recorded"
  *           → "MECHANISM PROOF: the trap fires on a forbidden read, and on enumeration"
- *   E2A-S8B RESPONSE SHAPE, proved INDEPENDENTLY of S8A by deep equality over
- *           the whole response — not `Object.keys`, which is depth-1 only.
+ *   E2A-S8B OUTPUT SECRECY — the actual security property. Frozen report content
+ *           must never appear in anything the client receives: the fully
+ *           materialized body, or any response header name or value. Proved
+ *           INDEPENDENTLY of S8A by a canary that lives inside real frozen content
+ *           and is registered PER REQUEST from the records the route was handed, so
+ *           an empty registry or a canary deleted from a fixture cannot pass.
+ *           (An earlier revision of this row described S8B as response SHAPE; that
+ *           is now S8C, and the two are different properties — see §21 below.)
+ *           → "§9 POSITIVE CONTROL: a canary in the JSON BODY fails the scan"
+ *           → "§9/§16 POSITIVE CONTROL: a canary in a response HEADER VALUE fails the scan — the R10 blind channel"
+ *           → "§9/§16 POSITIVE CONTROL: a canary in a response HEADER NAME fails the scan, despite platform lowercasing"
+ *           → "§9/§15 POSITIVE CONTROL: the exact R10 leak — util.inspect of a real report-bearing record — fails the scan"
+ *           → "§9/§17 POSITIVE CONTROL: a descriptor-obtained value reaching the response fails the scan"
+ *           → "§9/§18 POSITIVE CONTROL: a structuredClone-obtained value reaching the response fails the scan"
+ *           → "§9 NEGATIVE CONTROL: a clean approved response passes the scan"
+ *           → "§11 the real fixtures carry their canaries, so deleting one cannot be silent"
+ *   E2A-S8C DTO CONTRACT. Every successful LIST response conforms to the approved
+ *           metadata shape — envelope keys, item keys, and the permitted structure
+ *           of the one nested object it carries. Validated UNCONDITIONALLY on every
+ *           success by a checker written independently from this route's projection,
+ *           because a route cannot be its own oracle. Depth matters: `Object.keys`
+ *           is depth-1, and R5 hid a snapshot leaf under `governanceStatusAtExport`.
  *           → "E2A-S8B deep-equals the expected response, so no nested extra survives"
  *           → "E2A-S8B MECHANISM PROOF: a value nested inside an ALLOWED key is caught"
+ *           → "§20 S8C rejects data nested inside the ALLOWED governance object, with every top-level key intact"
+ *           → "§20 S8C rejects a non-string smuggled into governance `conditions`"
+ *           → "§20 S8C rejects a raw container in a scalar field, and an unapproved item key"
+ *           → "§19 S8C's absent-key tolerance is BOUNDED to the one documented field"
+ *   E2A-S8E SINGLE ENTRY POINT. No route invocation escapes the secured request
+ *           helper. The load-bearing half is runtime invocation accounting against
+ *           `resolveRequestIdentity` — the route's unconditional first call —
+ *           asserted by a top-level `afterEach`; the structural half merely
+ *           localizes the one call site. R10 broke this by deleting the structural
+ *           test as "redundant to the global afterEach" and then deleting that
+ *           afterEach, after which a direct call put the whole frozen report on the
+ *           wire with the suite green.
+ *           → "R11 §7 LAYER B: the raw route handler has exactly ONE call site, inside the secured helper"
  *   E2A-S15 A paging envelope is never self-contradictory: `hasMore: true` is
  *           emitted only together with a usable continuation cursor.
  *           → "a page that cannot yield a continuation cursor is an integrity failure, not a trap"
@@ -259,9 +292,17 @@
  * prove the response is clean: a value obtained through an unobservable primitive
  * would reach the body unseen, and only S8B catches it. S8C catches a shape
  * violation that leaks nothing. The three are complementary, and the record mode
- * matters: the canary is only meaningful against a PRODUCTION-SHAPED plain record,
- * which is why the context matrix runs in `plain` mode as well as the two
- * instrumented ones.
+ * matters — though NOT in the way an earlier revision of this paragraph said. It
+ * claimed the canary was "only meaningful against a PRODUCTION-SHAPED plain
+ * record" and that the third mode was "necessary, not optional". R10's reviewer
+ * measured that and it is false: with a `util.inspect` leak in the route, `plain`
+ * fails 20/20 context rows and `proxy` fails 20/20 (Node reads a Proxy's TARGET, so
+ * the value reaches the body), while `accessor` fails 0/20 because `util.inspect`
+ * renders an accessor as `[Getter]` without invoking it. The accurate statement is
+ * narrower: ONE mode can mask ONE operation, Proxy mode does not mask it, and
+ * `plain` mode is ADDITIONAL production-shape coverage — the mode that matches what
+ * the route really receives, and the only one indistinguishable from production to
+ * a `structuredClone`-rejecting path. No mode is the sole meaningful one.
  *
  * SUPPORTING STRUCTURE, AND NO ONE PIECE PROVES THE WHOLE:
  *   1. BOUNDARY INSTRUMENTATION — every list result is wrapped inside the module
@@ -272,11 +313,17 @@
  *      `structuredClone`/`JSON.stringify`/spread/`Object.values`/`entries`/
  *      `assign`. Neither covers the other's set; one shared input-class table is
  *      run under BOTH, so mode coverage cannot drift.
- *   3. UNIVERSAL ENFORCEMENT — a global `afterEach` asserts the access policy for
- *      EVERY test, so no test and no input class can forget the postcondition.
- *      R7 is why: with enforcement opt-in, a leak gated on `reportVersion === 0`
- *      put the whole frozen report on the wire with the suite green. There is no
- *      opt-out flag; mechanism self-tests use a private sink instead.
+ *   3. UNIVERSAL ENFORCEMENT, IN TWO PARTS — because R10 proved one part alone is
+ *      not enough. (a) The postcondition is asserted INSIDE the secured request
+ *      helper for every request, against a witness local to that invocation, so no
+ *      test and no input class can forget it: R7 is why, since with enforcement
+ *      opt-in a leak gated on `reportVersion === 0` put the whole frozen report on
+ *      the wire with the suite green. (b) A top-level `afterEach` separately proves
+ *      no route entry happened OUTSIDE that helper (E2A-S8E), because R10 showed
+ *      that (a) without (b) is bypassed by simply calling the handler. An earlier
+ *      revision of this bullet described (a) as a global `afterEach` covering "any
+ *      invocation path"; no such hook existed. There is no opt-out flag either way;
+ *      mechanism self-tests use a private sink and never enter the route.
  *   4. ACCESSOR BY DEFAULT — the plain-object tripwire is what ordinary route
  *      tests get, because it is the mode that observes value-obtaining operations
  *      (`structuredClone`, `v8.serialize`, `util.inspect`, getter traversal). The
@@ -285,24 +332,41 @@
  *      dominates universally and the division of labour is measured, not asserted:
  *      a MECHANISM PROOF test shows `Object.keys` fires the Proxy and not the
  *      accessor.
- *   5. A REQUEST/AUTHORITY CONTEXT MATRIX — 20 rows covering the REQUEST and
- *      AUTHORITY branches, including the creator-self case, each running under all
- *      three record modes and each PROVING ITS OWN PRECONDITION before any security
- *      assertion (R9 found a row could be neutered and still pass). Scoped
- *      deliberately: record-SHAPE branches such as `format: "docx"` and
- *      present-but-hashless `exportMetadata` live in the separate input-class
- *      table, and source-OPERATION classes live in the Proxy matrix. No single
- *      table is exhaustive across all three axes, and none claims to be.
+ *   5. THREE SEPARATE AXES, each with its own table. No table covers another's
+ *      axis, none is exhaustive across all three, and none claims to be — an
+ *      earlier revision described the first as though the split were cleaner than
+ *      it is, since that table does carry four record-shape rows of its own:
+ *        • REQUEST/AUTHORITY CONTEXT — 20 rows over the request and authority
+ *          branches, including the creator-self case, each running under all three
+ *          record modes and each PROVING ITS OWN PRECONDITION against the actual
+ *          `Request` before any security assertion. R9 found a row could be
+ *          neutered and still pass; R10 then found four rows whose preconditions
+ *          asserted their own row literal, which removing the query from the real
+ *          request left green. Rows are also checked for DISTINCT OBSERVABLE
+ *          EFFECT, so a decorative duplicate collides.
+ *        • RECORD SHAPE — the input-class table: `format: "docx"`, `json`,
+ *          present-but-hashless `exportMetadata`, absent `exportMetadata`, the
+ *          legacy family, and the `reportVersion` variants.
+ *        • SOURCE OPERATION / MECHANISM — the Proxy matrix for the classes only it
+ *          observes, plus the mechanism self-tests that falsify each defence.
  *   6. A PER-REQUEST PRIVATE WITNESS. Enforcement lives INSIDE the central request
- *      helper, asserted against a `const` sink local to that one invocation. There
- *      is no module-level witness left to reach. R8 defeated a reassignable sink;
+ *      helper, asserted against a `const` sink local to that one invocation, which
+ *      no test can reach (see the precise scope below). R8 defeated a reassignable sink;
  *      R9 then defeated the `const` sink plus monotonic counter that replaced it,
  *      by re-marking the module-level baseline the counter was COMPARED TO. Fixing
  *      the operand would only have moved the target again, so the whole category is
- *      gone: a test receives the response, never control of the witness. Residual,
- *      stated plainly: a spec author who rewrites this harness can still defeat it —
- *      no in-file mechanism can stop its own file — but forgetting, which is what
- *      actually happened repeatedly here, is now structurally impossible.
+ *      gone: a test receives the response, never control of the assertions.
+ *      SCOPED PRECISELY, because R10's reviewer was right that the previous wording
+ *      ("there is no module-level witness left to reach") over-claimed: the
+ *      `activeWitness` BINDING is module-level and a mock hook can see it, since the
+ *      instrumentation boundary has to publish the current request's witness
+ *      somehow. What no test can do is reach the values the assertions compare —
+ *      they read the `const` witness captured inside the invocation, not that
+ *      binding — or reach the invocation counters, which are closure-private with no
+ *      setter and no comparator baseline. Residual, stated plainly: a spec author
+ *      who rewrites this harness can still defeat it — no in-file mechanism can stop
+ *      its own file — but forgetting, which is what actually happened repeatedly
+ *      here, is now structurally impossible.
  *   Also: an ALLOWED CONTAINER IS NOT AN ALLOWED SUBTREE. `exportMetadata` is
  *   trapped one level deep with its own allow-list (`fileHash` only), because a
  *   depth-1 policy could not see `exportMetadata.requestingUser`.
