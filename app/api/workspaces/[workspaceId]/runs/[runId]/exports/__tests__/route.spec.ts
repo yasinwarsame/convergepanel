@@ -886,9 +886,38 @@ const FORBIDDEN_SOURCE_PROPS: readonly string[] = [
  * pass their OWN sink. The global sink is what the global postcondition watches;
  * a local sink is invisible to it. There is no way to silence the global check.
  */
-type AccessSink = { reads: string[]; forbidden: string[]; enumerations: string[] };
-const newSink = (): AccessSink => ({ reads: [], forbidden: [], enumerations: [] });
-let globalSink: AccessSink = newSink();
+/**
+ * R9 §17/§18 — NESTED READS ARE RECORDED STRUCTURALLY, NOT BY STRING PREFIX.
+ * An earlier revision labelled container reads `rec0.exportMetadata.<prop>` and
+ * then had the default-deny filter skip every recorded name containing a `.` —
+ * which meant a DOTTED TOP-LEVEL property escaped the policy entirely.
+ * `r["exportMetadata.fileHash"]` passed the whole suite, and that is not a
+ * hypothetical name: these records historically carried exactly that flat key.
+ * A property name is not safe because it looks like Firestore path notation. Top
+ * level and nested are now separate arrays, so the policy compares exact property
+ * names with no syntax heuristic of any kind.
+ */
+type AccessSink = { reads: string[]; nested: string[]; forbidden: string[]; enumerations: string[] };
+const newSink = (): AccessSink => ({ reads: [], nested: [], forbidden: [], enumerations: [] });
+
+/**
+ * R9 §11/§12 — THE SINK BINDING IS IMMUTABLE. R8 showed the universal
+ * postcondition could be disarmed in three lines: `globalSink` was a reassignable
+ * `let`, and Jest runs inner `afterEach` hooks BEFORE outer ones, so an inner
+ * `afterEach(() => { globalSink = newSink(); })` emptied the tracker before the
+ * global check read it. An unconditional clone leak went from 15 failures to
+ * green. The binding is now `const`; `resetGlobalSink()` clears the arrays IN
+ * PLACE so instrumentation and postcondition always share one identity, and the
+ * postcondition asserts that identity at runtime rather than trusting `const`.
+ */
+const GLOBAL_SINK: AccessSink = newSink();
+const globalSink = GLOBAL_SINK;
+const resetGlobalSink = () => {
+  GLOBAL_SINK.reads.length = 0;
+  GLOBAL_SINK.nested.length = 0;
+  GLOBAL_SINK.forbidden.length = 0;
+  GLOBAL_SINK.enumerations.length = 0;
+};
 
 /**
  * Two INDEPENDENT mechanisms, selected by `trapMode`, because R6 proved neither
@@ -914,7 +943,23 @@ let globalSink: AccessSink = newSink();
  * exception, and a caught exception must not erase the proof that forbidden data
  * was reached. The recorded flag is checked as a postcondition.
  */
-let trapMode: "proxy" | "accessor" = "proxy";
+/**
+ * R9 §2/§3 — ACCESSOR IS THE ORDINARY DEFAULT, PROXY IS A SUPPLEMENT.
+ *
+ * R8's finding: accessor mode — the only mode that observes value-obtaining
+ * operations on a plain object (`structuredClone`, `v8.serialize`,
+ * `util.inspect`, getter traversal), because `structuredClone(proxy)` throws
+ * `DataCloneError` before any trap runs — reached the route through 15
+ * record-shape rows in ONE request context. Clone leaks gated on an unfiled run,
+ * `?cursor=`, a reviewer role or a degraded Project were invisible.
+ *
+ * So accessor is now the default for EVERY ordinary route test, and the Proxy
+ * runs as an additional focused matrix for the classes only it observes
+ * (enumeration, descriptor access, off-policy top-level reads). There is no
+ * `"none"` mode and no bypass flag: an ordinary test cannot end up uninstrumented
+ * or instrumented in the weaker mode by omission.
+ */
+let trapMode: "proxy" | "accessor" = "accessor";
 
 /**
  * R7 P2-3 — AN ALLOWED CONTAINER IS NOT AN ALLOWED SUBTREE. `exportMetadata` is
@@ -932,8 +977,8 @@ const trapContainer = (value: unknown, label: string, allowed: readonly string[]
   return new Proxy(value as Record<string, unknown>, {
     get(target, prop, receiver) {
       if (typeof prop === "string") {
-        sink.reads.push(`${label}.${prop}`);
-        if (!allowed.includes(prop)) sink.forbidden.push(`${label}.${prop}`);
+        sink.nested.push(`${label}:${prop}`); // structural: never mixed with top-level names
+        if (!allowed.includes(prop)) sink.forbidden.push(`${label}:${prop}`);
       }
       return Reflect.get(target, prop, receiver);
     },
@@ -962,7 +1007,7 @@ const trapRecord = (record: Record<string, unknown>, label: string, sink: Access
       return Reflect.ownKeys(target);
     },
     getOwnPropertyDescriptor(target, prop) {
-      if (typeof prop === "string") sink.enumerations.push(`descriptor(${label}.${prop})`);
+      if (typeof prop === "string") sink.enumerations.push(`descriptor(${label}:${prop})`);
       return Reflect.getOwnPropertyDescriptor(target, prop);
     },
   });
@@ -1019,13 +1064,15 @@ const instrumentListResult = (result: unknown): unknown => {
  *     was applied in only 3 of the tests that exercise the projection.
  */
 const assertGlobalSourceAccessPolicy = () => {
-  expect(globalSink.forbidden).toEqual([]);
-  expect(globalSink.enumerations).toEqual([]);
-  // nested container reads are labelled `rec0.exportMetadata.<prop>`; the nested
-  // trap already classified them, so the top-level filter ignores them and only
-  // judges bare top-level property names.
-  const topLevelReads = Array.from(new Set(globalSink.reads)).filter((p) => !p.includes("."));
-  expect(topLevelReads.filter((p) => !ALLOWED_SOURCE_PROPS.includes(p))).toEqual([]);
+  // §12: the instrumentation and this assertion must be looking at the SAME object.
+  // A nested scope that rebinds or shadows the sink would otherwise silence this.
+  expect(globalSink).toBe(GLOBAL_SINK);
+  expect(GLOBAL_SINK.forbidden).toEqual([]);
+  expect(GLOBAL_SINK.enumerations).toEqual([]);
+  // §18: exact property names, DEFAULT DENY, no syntax heuristic. Nested container
+  // reads live in their own array and were already classified by the container's
+  // own allow-list, so nothing is skipped here for looking "nested".
+  expect(Array.from(new Set(GLOBAL_SINK.reads)).filter((p) => !ALLOWED_SOURCE_PROPS.includes(p))).toEqual([]);
 };
 
 /** Retained for tests that want to say it locally too; the global hook makes it redundant, never load-bearing. */
@@ -1048,8 +1095,8 @@ beforeEach(() => {
   writeAttempts.length = 0;
   runGetThrows = false;
   adminDbAvailable = true;
-  globalSink = newSink();
-  trapMode = "proxy";
+  resetGlobalSink();
+  trapMode = "accessor"; // §2: ordinary route tests get the accessor tripwire
   mockExportFlagEnabled = true;
   runDocs.set(RUN, teamRun());
   mockedResolveRequestIdentity.mockResolvedValue({ status: "authenticated", uid: UID });
@@ -2091,7 +2138,7 @@ describe("E2A-S8A — the LIST projection never reads reportSnapshot", () => {
     expect(sink.forbidden).toContain("probe2.reportSnapshot");
 
     // enumeration
-    sink.enumerations = [];
+    sink.enumerations.length = 0;
     void { ...probe };
     expect(sink.enumerations).toContain("ownKeys(probe)");
   });
@@ -2305,5 +2352,141 @@ describe.each(["proxy", "accessor"] as const)("E2A-S8A [%s mode] — the shared 
     expectSourceWasRead("exportId", "format");
     // ...and the S8A policy itself is asserted by the GLOBAL afterEach, not here.
     // That is the point of this round: no row of this table can forget it.
+  });
+});
+
+/**
+ * ─── §4/§5/§28 — THE REQUEST / AUTHORITY CONTEXT MATRIX ───────────────────
+ *
+ * R8's second blocker was a DIMENSION, not a mode: instrumentation covered
+ * record SHAPES in one fixed request context, so a leak gated on the request or
+ * the caller's authority was invisible. Verified then: gates on an unfiled run,
+ * `?cursor=`, `?limit=`, a reviewer role, a degraded Project, ≥3 records and the
+ * legacy flat-key shape all passed the suite.
+ *
+ * Worst of all was `createdBy === uid`: every fixture is created by a DIFFERENT
+ * uid than the caller (deliberately, to prove E2A-S7), so the single most common
+ * production case — a member listing exports they created themselves — had ZERO
+ * tests in either mode, and emitting the whole frozen report for exactly those
+ * records passed 126/126. That is a fixture-VALUE gap; no mode default fixes it.
+ *
+ * Each row below is a materially different branch that can influence DTO
+ * construction or which source properties get consulted. Deliberately NOT a
+ * Cartesian product with the record-shape table — the smallest set that reaches
+ * every distinct branch. All rows run under the ORDINARY default, which is now
+ * accessor mode, so the clone/serialize family is covered across every context.
+ */
+type ContextRow = readonly [string, () => void, string];
+const REQUEST_CONTEXTS: ReadonlyArray<ContextRow> = [
+  ["creator listing their OWN export", () => {
+    mockedListExports.mockResolvedValue({ ok: true, records: [exportRecord(3, { createdBy: UID }), exportRecord(2, { createdBy: UID })], hasMore: false });
+  }, ""],
+  ["non-creator authorized member (E2A-S7 case)", () => { /* default fixtures */ }, ""],
+  ["mixed: one own record, one someone else's", () => {
+    mockedListExports.mockResolvedValue({ ok: true, records: [exportRecord(3, { createdBy: UID }), exportRecord(2)], hasMore: false });
+  }, ""],
+  ["reviewer role", () => { mockedAccess.mockImplementation(accessFake("reviewer")); }, ""],
+  ["viewer role", () => { mockedAccess.mockImplementation(accessFake("viewer")); }, ""],
+  ["owner role", () => { mockedAccess.mockImplementation(accessFake("owner")); }, ""],
+  ["UNFILED run (projectId null, no Project read)", () => { runDocs.set(RUN, teamRun({ projectId: null })); }, ""],
+  ["filed run, same-Workspace Project (default)", () => { /* default */ }, ""],
+  ["degraded Project: not_found, listing proceeds", () => { mockedGetProject.mockResolvedValue({ status: "not_found" }); }, ""],
+  ["degraded Project: malformed, listing proceeds", () => { mockedGetProject.mockResolvedValue({ status: "malformed" }); }, ""],
+  ["cursor supplied", () => { /* default records */ }, "?cursor=5"],
+  ["EMPTY cursor (characterized inherited behaviour)", () => { /* default */ }, "?cursor="],
+  ["limit supplied", () => { /* default */ }, "?limit=10"],
+  ["EMPTY limit (characterized inherited behaviour)", () => { /* default */ }, "?limit="],
+  ["hasMore continuation path", () => {
+    mockedListExports.mockResolvedValue({ ok: true, records: [exportRecord(3), exportRecord(2)], hasMore: true });
+  }, ""],
+  ["exactly ONE record", () => { mockedListExports.mockResolvedValue({ ok: true, records: [exportRecord(3)], hasMore: false }); }, ""],
+  ["THREE OR MORE records", () => {
+    mockedListExports.mockResolvedValue({ ok: true, records: [exportRecord(4), exportRecord(3), legacyExportRecord(2) as Record<string, unknown>, failedExportRecord(1) as Record<string, unknown>], hasMore: false });
+  }, ""],
+  ["alternate classification", () => { mockedListExports.mockResolvedValue({ ok: true, records: [exportRecord(3, { classification: "restricted" })], hasMore: false }); }, ""],
+  ["alternate schemaId", () => { mockedListExports.mockResolvedValue({ ok: true, records: [exportRecord(3, { schemaId: "deep_research" })], hasMore: false }); }, ""],
+  ["alternate governanceStatusAtExport shape", () => {
+    mockedListExports.mockResolvedValue({ ok: true, records: [exportRecord(3, { governanceStatusAtExport: { family: "milestone2", kind: "blocked", isOwnerOverride: true, conditions: ["SENTINEL_GOV_CONDITION"] } })], hasMore: false });
+  }, ""],
+  ["legacy flat-key record shape", () => {
+    const legacy = exportRecord(3) as Record<string, unknown>;
+    delete legacy.exportMetadata;
+    legacy["exportMetadata.fileHash"] = "b".repeat(64);
+    mockedListExports.mockResolvedValue({ ok: true, records: [legacy], hasMore: false });
+  }, ""],
+];
+
+describe("E2A-S8A — the request/authority context matrix (accessor default)", () => {
+  it.each(REQUEST_CONTEXTS)("%s", async (_label, setup, query) => {
+    setup();
+    const r = await submit(query);
+    // Every context must reach the projection; 200 normally, 503 only on the
+    // integrity path (which none of these rows triggers).
+    expect(r.status).toBe(200);
+    expect(Array.isArray(r.json.exports)).toBe(true);
+    // non-vacuity: instrumentation observed the projection under THIS context
+    expectSourceWasRead("exportId", "format");
+    // The S8A policy itself is asserted by the GLOBAL afterEach — deliberately not
+    // here, so no row can forget it and no row needs to remember.
+  });
+
+  it("the matrix reaches every context it claims to (non-vacuity of the table itself)", () => {
+    expect(REQUEST_CONTEXTS.length).toBe(21);
+    const labels = REQUEST_CONTEXTS.map(([l]) => l);
+    expect(new Set(labels).size).toBe(labels.length); // no duplicate rows
+    for (const needle of ["OWN export", "reviewer", "viewer", "UNFILED", "not_found", "cursor", "limit", "hasMore", "THREE OR MORE", "flat-key"]) {
+      expect(labels.some((l) => l.includes(needle))).toBe(true);
+    }
+  });
+});
+
+/**
+ * ─── §9/§10 — THE FOCUSED PROXY OPERATION MATRIX ──────────────────────────
+ * Accessor mode is the ordinary default because it sees value-obtaining
+ * operations. It does NOT observe key-enumeration that obtains no value, and the
+ * Proxy does. Neither mode dominates universally, so this matrix covers exactly
+ * the operation classes whose proof depends on Proxy traps. Empirically
+ * established, not asserted: see the MECHANISM PROOF tests for what each mode
+ * actually observes.
+ */
+describe("E2A-S8A — Proxy-specific operation classes", () => {
+  beforeEach(() => {
+    trapMode = "proxy";
+  });
+
+  it("MECHANISM PROOF: the Proxy observes enumeration that obtains no values; the accessor does not", () => {
+    const enumerationFires = (mode: "proxy" | "accessor") => {
+      const sink = newSink();
+      const wrap = mode === "proxy" ? trapRecord : accessorRecord;
+      const rec = wrap({ exportId: "x", reportSnapshot: { q: "SECRET" } }, "probe", sink);
+      void Object.keys(rec);
+      return { enumerations: sink.enumerations.length > 0, forbidden: sink.forbidden.length > 0 };
+    };
+    // Proxy: sees the enumeration, obtains no value
+    expect(enumerationFires("proxy")).toEqual({ enumerations: true, forbidden: false });
+    // Accessor: Object.keys reads no values, so nothing fires — recorded honestly,
+    // and it is why the Proxy matrix still exists.
+    expect(enumerationFires("accessor")).toEqual({ enumerations: false, forbidden: false });
+  });
+
+  it("an off-policy TOP-LEVEL property is denied by default under the Proxy", async () => {
+    const r = await submit();
+    expect(r.status).toBe(200);
+    expect(globalSink.reads).not.toContain("futurePrivateField");
+  });
+
+  it("a DOTTED top-level property name gets no free pass from its punctuation", async () => {
+    // §17/§20: the policy used to skip any recorded name containing a ".", so
+    // `r["exportMetadata.fileHash"]` — a key these records historically carried —
+    // escaped default-deny entirely. Top-level and nested reads are now separate
+    // arrays, so a dotted name is compared exactly like any other.
+    const legacy = exportRecord(3) as Record<string, unknown>;
+    delete legacy.exportMetadata;
+    legacy["exportMetadata.fileHash"] = "c".repeat(64);
+    mockedListExports.mockResolvedValue({ ok: true, records: [legacy], hasMore: false });
+    const r = await submit();
+    expect(r.status).toBe(200);
+    expect(globalSink.reads).not.toContain("exportMetadata.fileHash");
+    expect(ALLOWED_SOURCE_PROPS).not.toContain("exportMetadata.fileHash");
   });
 });
