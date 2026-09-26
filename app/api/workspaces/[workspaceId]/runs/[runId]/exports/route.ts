@@ -151,40 +151,58 @@
  *           (M) → "§20 S8C rejects a raw container in a scalar field, and an unapproved item key"
  *           (M) → "§19 S8C's absent-key tolerance is BOUNDED to the one documented field"
  *           (M) → "§19/§20 each enumerated S8C violation is rejected, with its own diagnostic"
- *           (D) → "§31 the four DERIVED assertions are redundant, not unfalsifiable — their violations are still rejected"
- *               R12 measured that 4 of this oracle's 29 assertions can each be deleted
- *               with the suite green. They are ordering guards whose violation another
- *               assertion also rejects — classified D, and the universal "every
- *               sub-assertion can fail" wording is withdrawn.
- *           (F) → "E2A-S8C covers REFUSALS too, not only successes" — the validator runs
- *               on every response, so a refusal carrying a payload fails as well as a
- *               malformed success.
+ *           (D) → "§31 the DERIVED assertions are redundant, not unfalsifiable — their violations are still rejected"
+ *               R12 reported 4 such assertions; R13 measured 6 and found the named set
+ *               wrong in both directions, including one that is NOT deletable — three
+ *               refusal assertions were derived only because NOTHING DROVE THEM. R14 gave
+ *               the refusal envelope a real driver and re-measured from a green baseline:
+ *               exactly TWO of the oracle's 26 assertions are derived, governance
+ *               `:isObject` and `envelope:isObject`, both ordering guards. The universal
+ *               "every sub-assertion can fail" wording stays withdrawn: F assertions have
+ *               direct falsifiers, D assertions are intentionally redundant, and removing
+ *               a D changes no rejection behaviour.
+ *           (F) → "§4/§5 E2A-S8C covers REFUSALS too, and every refusal assertion is load-bearing"
+ *               The validator runs on EVERY response, so a refusal carrying a payload fails
+ *               as well as a malformed success. R13 found the title previously cited here
+ *               named no test at all, and that three of the four refusal assertions had no
+ *               driver — which is why deleting them was silent.
+ *           (F) → "§4 the refusal-envelope allow-list CONTENTS are pinned, not just its existence"
  *   E2A-S8E SINGLE ENTRY POINT, AND THE WIRING OF WHAT IT ENFORCES. No route
  *           invocation escapes the secured request helper, and no check the helper
  *           performs can go missing quietly. TWO layers, of which the FIRST is
  *           load-bearing:
  *             A — FAIL CLOSED at `resolveRequestIdentity`, the route's unconditional
- *                 first call, keyed on the EXACT REQUEST INSTANCE with one-entry
- *                 consumption. A request the secured helper did not register is
- *                 refused however it is reached and whatever else is in flight; the
- *                 handler rejects and no response exists for a leak to travel in.
- *             C — a structural audit of the single raw call site and of the single
- *                 call to the required-check runner. An aid, not the guarantee.
- *           HISTORY, because two rounds died here. R10 deleted the structural test as
- *           "redundant to the global afterEach" and then deleted that afterEach, after
- *           which a direct call put the whole frozen report on the wire, green. R11's
- *           first attempt replaced it with ACCOUNTING, which review broke three ways:
- *           a reachable registrar, a public assert-AND-RESET, and a trailing
- *           `afterAll` entry that outran the last `afterEach`. Review also found every
- *           assertion inside the helper was individually removable in silence. Hence
- *           fail-closed plus a ledger, rather than a fourth thing to check afterwards.
- *           (F) → "LAYER A: entering the route outside the secured helper FAILS CLOSED, so no response exists to leak in"
- *           (F) → "LAYER A: the refusal does not depend on WHICH mechanism reaches the handler"
- *           (F) → "LAYER A: a route entry from a lifecycle hook is refused just the same"
- *           (F) → "THE LEDGER: a check that stops running is NAMED, not silent"
- *           (F) → "THE LEDGER: its contents are pinned, so a property cannot be dropped from the helper AND the ledger together"
- *           (F) → "R11 §7 LAYER C: every enforced check is WIRED inside the secured helper, and the ledger is asserted there"
- *           (C) → "R11 §7 LAYER C: the raw route handler has exactly ONE call site, inside the secured helper"
+ *                 first call, keyed on the EXACT REQUEST INSTANCE. The registration map
+ *                 and the async-context store are private to a closure that exports only
+ *                 the operations tests legitimately need — there is no registrar, setter
+ *                 or reset to reach — so a request the helper did not register is refused
+ *                 however it is reached and whatever else is in flight. Two distinct
+ *                 guarantees, separately falsified: REGISTRATION LIFETIME (the entry
+ *                 exists only for its own invocation) and ROUTE-ENTRY CONSUMPTION (a
+ *                 registered request may enter exactly once).
+ *             C — a structural audit of the single raw call site and of the single call to
+ *                 the required-check runner. A SCOPE CONTROL, explicitly not the barrier:
+ *                 R13 defeated the text-matching version with an alias plus a computed
+ *                 property, which is why the barrier is now visibility rather than text.
+ *           HISTORY, because three rounds died here. R10 deleted the structural test as
+ *           "redundant to the global afterEach" and then deleted that afterEach. R11
+ *           replaced it with ACCOUNTING, which review broke three ways. R12's flag asked
+ *           "is SOME request secured" rather than "is THIS one", and a module singleton
+ *           let a concurrent request erase another's evidence. R13 then forged a
+ *           registration through the visible map. Hence closure-private state plus a
+ *           registry that holds its own assertions, rather than a fourth thing to check
+ *           afterwards.
+ *           (F) → "§47 a raw route entry FAILS CLOSED, through every reaching mechanism"
+ *           (F) → "§47 a route entry from a lifecycle hook is refused just the same"
+ *           (F) → "§12 (R11) swallowing the refusal yields NO response to leak in"
+ *           (F) → "§14 GUARANTEE A — REGISTRATION LIFETIME: after the invocation, the request is no longer registered"
+ *           (F) → "§11/§12/§13 GUARANTEE B — CONSUMPTION: a second entry is refused WHILE the registration is still live"
+ *           (F) → "§13/§15 EVERY required check REJECTS its own violation — so a no-op body fails here"
+ *           (F) → "§26/§27/§28 registry MEMBERSHIP is pinned, so deleting an entry cannot narrow the contract silently"
+ *           (F) → "§14 negative-control coverage matches the registry exactly, in both directions"
+ *           (F) → "R13 §7 LAYER C: the required-check RUNNER is invoked inside the secured helper, exactly once"
+ *           (C) → "R13 §7 LAYER C: the raw route handler is called only inside the secured helper, or inside the pinned attack region"
+ *           (M) → "R14 §30 every executable test cited by this invariant table resolves"
  *   E2A-S15 A paging envelope is never self-contradictory: `hasMore: true` is
  *           emitted only together with a usable continuation cursor.
  *           → "a page that cannot yield a continuation cursor is an integrity failure, not a trap"

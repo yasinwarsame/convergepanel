@@ -139,22 +139,144 @@ const newInvocationContext = (label: string): SecureInvocationContext => {
   return ctx;
 };
 
-/** Authorization: exact-request identity. Not enumerable, no setter exposed. */
-const secureInvocations = new WeakMap<NextRequest, SecureInvocationContext>();
-/** Propagation only: collaborator mocks that never receive the request read from here. */
-const invocationStore = new AsyncLocalStorage<SecureInvocationContext>();
-/** The context of the request currently executing, for the instrumentation boundary. */
-const currentInvocation = (): SecureInvocationContext | undefined => invocationStore.getStore();
-
 const E2A_S8E_VIOLATION = "E2A-S8E VIOLATION";
-const refuseUnsecuredEntry = (why: string): never => {
-  throw new Error(
-    `${E2A_S8E_VIOLATION}: ${why}. Every route invocation must go through submitRequest(), which registers the ` +
-      "EXACT request it is about to call the handler with and is where E2A-S8A, E2A-S8B and E2A-S8C are enforced. " +
-      "A raw handler call — through an alias, an object property, Reflect.apply, a lifecycle hook, a concurrent " +
-      "interleaving, or a second entry on an already-consumed request — would produce a response nothing examines.",
-  );
-};
+
+/**
+ * R14 §16–§21 — THE HARNESS EXPORTS CAPABILITY, NOT STATE.
+ *
+ * WHAT R13 BROKE. The registration map was a module-scope `const`, so `.set` was
+ * reachable from any line in this file. One appended top-level hook combining an aliased
+ * handler with computed-property access — `const hh: typeof GET = GET;
+ * reg["se" + "t"](req, ctx); await hh(req, …)` — obtained a 200 carrying the
+ * frozen-report canary in a response header at 230/230 green, because both structural
+ * oracles were LITERAL-TEXT counts and each obfuscation alone defeated exactly one of
+ * them. The documented claim "There is no setter … cannot make the route execute for a
+ * request the helper did not register" was therefore false.
+ *
+ * THE FIX IS VISIBILITY, NOT MORE PATTERNS. Enumerating aliases, computed spellings and
+ * string concatenations is unwinnable — the same losing shape as R9's attempt to trap
+ * every introspection primitive. So the state is simply not visible: the map, the
+ * async-context store and the refusal live inside this closure, and what leaves it is
+ * only what ordinary tests legitimately need. There is no registrar, no setter, no
+ * reset, and no reference to the map anywhere outside these braces.
+ *
+ * WHAT IS EXPORTED, AND WHY EACH IS SAFE:
+ *   • `submitRequest` — the only ordinary route path. It registers the exact request it
+ *     is about to call the handler with; no caller supplies a handler, callback,
+ *     registrar or token.
+ *   • `admitRouteEntry` — called by the identity mock. It can only CONSUME or REFUSE an
+ *     EXISTING registration; it cannot create one, so it is useless for forging.
+ *   • `instrumentListResult` / `currentContextForProducerA` — called by the list-helper
+ *     mock. They record evidence; neither creates a registration.
+ *   • `newInvocationContext` — inert alone. A context object authorizes nothing without a
+ *     registrar, and the negative controls need to build one.
+ *   • `sinkForCurrentInvocation` / `isInsideSecuredFlow` — read accessors for the
+ *     instrumentation traps and the detector tests.
+ *
+ * §40 THREAT-MODEL BOUNDARY, deliberate and finite: this resists ordinary test code
+ * reaching for a registration primitive, and resists the R13 attack STRUCTURALLY rather
+ * than textually. It does not pretend to resist a coordinated rewrite of this closure —
+ * nothing inside a file can, and branch protection plus independent review govern that.
+ */
+const secureHarness = (() => {
+  /** Authorization: exact-request identity. Private to this closure — no setter escapes. */
+  const secureInvocations = new WeakMap<NextRequest, SecureInvocationContext>();
+  /** Propagation only, for collaborator mocks that never receive the request. */
+  const invocationStore = new AsyncLocalStorage<SecureInvocationContext>();
+  const currentInvocation = (): SecureInvocationContext | undefined => invocationStore.getStore();
+
+  const refuse = (why: string): never => {
+    throw new Error(
+      `${E2A_S8E_VIOLATION}: ${why}. Every route invocation must go through submitRequest(), which registers the ` +
+        "EXACT request it is about to call the handler with and is where E2A-S8A, E2A-S8B and E2A-S8C are enforced. " +
+        "A raw handler call — through an alias, an object property, Reflect.apply, a lifecycle hook, a concurrent " +
+        "interleaving, or a second entry on an already-consumed request — would produce a response nothing examines.",
+    );
+  };
+
+  /**
+   * §10 — TWO DISTINCT GUARANTEES, and this function is only the second of them.
+   *   A. REGISTRATION LIFETIME — the exact request is registered only for the duration of
+   *      its legitimate secured invocation. Proven by the cleanup in `submitRequest`.
+   *   B. ROUTE-ENTRY CONSUMPTION — a registered request may enter the route exactly once.
+   *      Proven by `entryConsumed` here.
+   * R13 found these conflated: the test named for B was satisfied by A, because cleanup
+   * had already removed the registration before it re-entered, so deleting the consumption
+   * guard was silent at 230/230. They are independently falsified now.
+   */
+  const admitRouteEntry = (request: NextRequest): void => {
+    const ctx = secureInvocations.get(request);
+    if (ctx === undefined) refuse("no secured context is registered for THIS request instance");
+    if (ctx.entryConsumed) refuse(`the single route entry for this request was already consumed (${ctx.label})`);
+    ctx.entryConsumed = true;
+  };
+
+  const instrumentListResult = (result: unknown): unknown => {
+    const r = result as { ok?: boolean; records?: unknown[] } | null;
+    const ctx = currentInvocation();
+    const rawRecords = r && r.ok === true && Array.isArray(r.records) ? (r.records as Record<string, unknown>[]) : [];
+    // §17/§46 — producer B, in ONE call: it counts every result the helper returned
+    // (including a typed failure, or the 503 paths would look like a suppressed recorder)
+    // AND stores the raw records. Because the count and the store are indivisible, there
+    // is no edit that removes the evidence while leaving a count matching producer A — and
+    // `S8E:raw-list-evidence-recorded` compares exactly those two. Nothing is DERIVED here;
+    // every derivation lives in a check body its negative control holds load-bearing.
+    if (ctx) ctx.noteRawResult(rawRecords);
+    if (!r || r.ok !== true || !Array.isArray(r.records)) return result;
+    if (trapMode === "plain") return result;
+    const wrap = trapMode === "accessor" ? accessorRecord : trapRecord;
+    return { ...r, records: r.records.map((rec, i) => wrap(rec as Record<string, unknown>, `rec${i}`)) };
+  };
+
+  // SUBMIT_BOUNDARY_BEGIN — the single raw-handler call site and the single call to the
+  // required-check runner; both asserted structurally by §7 LAYER C.
+  /**
+   * §6 — THE HELPER OWNS THE ROUTE CALL. It takes a request (or a query string), never a
+   * handler, callback, registrar or resolver: R12 exploited exactly that shape by
+   * wrapping a raw aliased call in a registrar the caller could reach. Nothing here is
+   * supplied by the caller except the request it wants sent.
+   */
+  const submitRequest = async (req: NextRequest, workspaceId = WS, runId = RUN) => {
+    const ctx = newInvocationContext(`${workspaceId}/${runId}`);
+    // §4 — authorization by EXACT request identity, for this one instance.
+    secureInvocations.set(req, ctx);
+    try {
+      // §5/§32 — propagation to collaborator mocks that never receive the request. The
+      // store is scoped to this async flow, so no other invocation can read or clear it.
+      const res = await invocationStore.run(ctx, async () => GET(req, { params: { workspaceId, runId } }));
+      // §14 (R11) — materialize from a CLONE, so the caller's `Response` is never
+      // consumed here, and scan what was actually serialized rather than a DTO.
+      const bodyText = await res.clone().text();
+      const json = JSON.parse(bodyText) as Record<string, any>;
+      const executed = runRequiredChecks({ ctx, res, bodyText, json });
+      return { status: res.status, json, bodyText, reads: [...ctx.sink.reads], executed };
+    } finally {
+      // §33 — removes ONLY this request's entry. There is no shared slot to null out, so
+      // this cannot touch a concurrent invocation's context.
+      //
+      // CLASSIFIED HONESTLY: removing this line is an EQUIVALENT MUTANT, measured. It is
+      // hygiene, not a security boundary — one-entry consumption already refuses a second
+      // route entry on the same request whether or not the registration is still present,
+      // and a `WeakMap` releases the entry once the request is unreachable. It is kept
+      // because leaving per-request state registered after the request is over is worse
+      // practice than deleting it, and it is NOT decorated with a test that could only
+      // pass by manufacturing a distinction that does not exist.
+      secureInvocations.delete(req);
+    }
+  };
+  // SUBMIT_BOUNDARY_END
+
+  return {
+    submitRequest,
+    admitRouteEntry,
+    instrumentListResult,
+    newInvocationContext,
+    /** Producer A's channel. Recording-only: it cannot register, so it cannot forge authorization. */
+    currentContextForProducerA: (): SecureInvocationContext | undefined => currentInvocation(),
+    sinkForCurrentInvocation: (): AccessSink | undefined => currentInvocation()?.sink,
+    isInsideSecuredFlow: (): boolean => currentInvocation() !== undefined,
+  };
+})();
 
 const mockedResolveRequestIdentity = jest.fn();
 jest.mock("@/lib/auth/resolveRequestIdentity", () => ({
@@ -162,11 +284,7 @@ jest.mock("@/lib/auth/resolveRequestIdentity", () => ({
     // §4/§7 — the unavoidable route-entry point, guarded on EXACT REQUEST IDENTITY
     // before the fake answers, so an identity failure is still a route entry and an
     // unsecured entry never reaches the handler body at all.
-    const request = a[0] as NextRequest;
-    const ctx = secureInvocations.get(request);
-    if (ctx === undefined) refuseUnsecuredEntry("no secured context is registered for THIS request instance");
-    if (ctx!.entryConsumed) refuseUnsecuredEntry(`the single route entry for this request was already consumed (${ctx!.label})`);
-    ctx!.entryConsumed = true;
+    secureHarness.admitRouteEntry(a[0] as NextRequest);
     return mockedResolveRequestIdentity(...a);
   },
 }));
@@ -198,8 +316,8 @@ jest.mock("@/lib/firestore/adaptiveExports", () => ({
     // either one is detected by the mismatch — neither is guarded solely by the
     // assertion that consumes it, which was R12's blocker. Both are per-invocation, so
     // they stay correct under concurrency in a way a cumulative mock-call tally cannot.
-    currentInvocation()?.noteHelperInvoked();
-    return instrumentListResult(await mockedListExports(...a));
+    secureHarness.currentContextForProducerA()?.noteHelperInvoked();
+    return secureHarness.instrumentListResult(await mockedListExports(...a));
   },
 }));
 
@@ -259,7 +377,8 @@ import { ROLE_CAPABILITIES } from "@/lib/workspaces/capabilities";
 import type { AdaptiveExportReportSnapshot } from "@/lib/adaptiveSchema/researchExport";
 import type { AlignedClaimCell, ComparisonMatrixResult } from "@/lib/adaptiveSchema/types";
 import type { ModelId } from "@/lib/types";
-import { teamRunLookupUnavailableResponse } from "@/lib/workspaces/teamRunAccessResponse";
+import { teamRunAccessDeniedResponse, teamRunInsufficientCapabilityResponse, teamRunLookupUnavailableResponse } from "@/lib/workspaces/teamRunAccessResponse";
+import { runNotFoundConcealedResponse } from "@/lib/projects/projectErrorResponse";
 
 const UID = "member-b";
 const OTHER_UID = "someone-else-entirely";
@@ -1240,7 +1359,7 @@ const trapContainer = (value: unknown, label: string, allowed: readonly string[]
   });
 };
 
-const trapRecord = (record: Record<string, unknown>, label: string, sink: AccessSink = currentInvocation()?.sink ?? newSink()): Record<string, unknown> =>
+const trapRecord = (record: Record<string, unknown>, label: string, sink: AccessSink = secureHarness.sinkForCurrentInvocation() ?? newSink()): Record<string, unknown> =>
   new Proxy(record, {
     get(target, prop, receiver) {
       if (typeof prop === "string") {
@@ -1269,7 +1388,7 @@ const trapRecord = (record: Record<string, unknown>, label: string, sink: Access
  * the Proxy: R6 showed `structuredClone` rejects a Proxy before traversing it, so
  * the clone proof has to run against a genuine plain object.
  */
-const accessorRecord = (record: Record<string, unknown>, label: string, sink: AccessSink = currentInvocation()?.sink ?? newSink()): Record<string, unknown> => {
+const accessorRecord = (record: Record<string, unknown>, label: string, sink: AccessSink = secureHarness.sinkForCurrentInvocation() ?? newSink()): Record<string, unknown> => {
   const plain: Record<string, unknown> = {};
   // EVERY own property becomes a recording accessor, not just the forbidden ones.
   // R8: an earlier revision left allowed properties as plain data, so in accessor
@@ -1314,22 +1433,6 @@ const accessorRecord = (record: Record<string, unknown>, label: string, sink: Ac
  * what the route really receives, and the only one a `structuredClone`-rejecting
  * path cannot distinguish from production. No mode is the sole meaningful one.
  */
-const instrumentListResult = (result: unknown): unknown => {
-  const r = result as { ok?: boolean; records?: unknown[] } | null;
-  const ctx = currentInvocation();
-  const rawRecords = r && r.ok === true && Array.isArray(r.records) ? (r.records as Record<string, unknown>[]) : [];
-  // §17/§46 — producer B, in ONE call: it counts every result the helper returned
-  // (including a typed failure, or the 503 paths would look like a suppressed recorder)
-  // AND stores the raw records. Because the count and the store are indivisible, there
-  // is no edit that removes the evidence while leaving a count matching producer A — and
-  // `S8E:raw-list-evidence-recorded` compares exactly those two. Nothing is DERIVED here;
-  // every derivation lives in a check body its negative control holds load-bearing.
-  if (ctx) ctx.noteRawResult(rawRecords);
-  if (!r || r.ok !== true || !Array.isArray(r.records)) return result;
-  if (trapMode === "plain") return result;
-  const wrap = trapMode === "accessor" ? accessorRecord : trapRecord;
-  return { ...r, records: r.records.map((rec, i) => wrap(rec as Record<string, unknown>, `rec${i}`)) };
-};
 
 /**
  * ─── R11 §13/§14 — E2A-S8B: THE RESPONSE-SECRECY SCAN ─────────────────────
@@ -1621,6 +1724,20 @@ const assertApprovedGovernanceStatus = (value: unknown, at: string): void => {
  * this, a route that answered 404 with the export list attached would satisfy every
  * success-shaped assertion by never being a success.
  */
+/**
+ * R14 §3–§8 — THE REFUSAL ENVELOPE'S KEY SET, AND WHY ITS CONTENTS ARE PINNED.
+ *
+ * R13's blocker: this was the ONE allow-list of ten whose CONTENTS nothing asserted.
+ * Widening it by two keys — a single line — let every refusal on this route carry an
+ * export-history payload at 230/230 green. `shared()` emits every concealment refusal
+ * here, including the non-member 404 and the insufficient-capability 403, so that is
+ * export metadata reaching an UNAUTHORIZED caller with the suite silent.
+ *
+ * The expected set is now pinned by `it("§4 the refusal-envelope allow-list CONTENTS are
+ * pinned…")` against a set DERIVED FROM THE ROUTE'S OWN REFUSAL RESPONSES rather than
+ * copied from this constant — copying it through the same source would make the oracle
+ * agree with any edit.
+ */
 const S8C_ENVELOPE_ERROR_KEYS: readonly string[] = ["ok", "errorCode", "message"];
 const assertConcealmentEnvelope = (json: unknown): void => {
   expect(`refusal:isObject:${json !== null && typeof json === "object" && !Array.isArray(json)}`).toBe("refusal:isObject:true");
@@ -1695,43 +1812,7 @@ const expectSourceWasRead = (r: { reads: string[] }, ...props: string[]) => {
 const buildRequest = (query = "", workspaceId = WS, runId = RUN) =>
   new NextRequest(`http://localhost/api/workspaces/${workspaceId}/runs/${runId}/exports${query}`);
 
-// SUBMIT_BOUNDARY_BEGIN — the single raw-handler call site and the single call to the
-// required-check runner; both asserted structurally by §7 LAYER C.
-/**
- * §6 — THE HELPER OWNS THE ROUTE CALL. It takes a request (or a query string), never a
- * handler, callback, registrar or resolver: R12 exploited exactly that shape by
- * wrapping a raw aliased call in a registrar the caller could reach. Nothing here is
- * supplied by the caller except the request it wants sent.
- */
-const submitRequest = async (req: NextRequest, workspaceId = WS, runId = RUN) => {
-  const ctx = newInvocationContext(`${workspaceId}/${runId}`);
-  // §4 — authorization by EXACT request identity, for this one instance.
-  secureInvocations.set(req, ctx);
-  try {
-    // §5/§32 — propagation to collaborator mocks that never receive the request. The
-    // store is scoped to this async flow, so no other invocation can read or clear it.
-    const res = await invocationStore.run(ctx, async () => GET(req, { params: { workspaceId, runId } }));
-    // §14 (R11) — materialize from a CLONE, so the caller's `Response` is never
-    // consumed here, and scan what was actually serialized rather than a DTO.
-    const bodyText = await res.clone().text();
-    const json = JSON.parse(bodyText) as Record<string, any>;
-    const executed = runRequiredChecks({ ctx, res, bodyText, json });
-    return { status: res.status, json, bodyText, reads: [...ctx.sink.reads], executed };
-  } finally {
-    // §33 — removes ONLY this request's entry. There is no shared slot to null out, so
-    // this cannot touch a concurrent invocation's context.
-    //
-    // CLASSIFIED HONESTLY: removing this line is an EQUIVALENT MUTANT, measured. It is
-    // hygiene, not a security boundary — one-entry consumption already refuses a second
-    // route entry on the same request whether or not the registration is still present,
-    // and a `WeakMap` releases the entry once the request is unreachable. It is kept
-    // because leaving per-request state registered after the request is over is worse
-    // practice than deleting it, and it is NOT decorated with a test that could only
-    // pass by manufacturing a distinction that does not exist.
-    secureInvocations.delete(req);
-  }
-};
-// SUBMIT_BOUNDARY_END
+const submitRequest = secureHarness.submitRequest;
 
 const submit = async (query = "", workspaceId = WS, runId = RUN) => submitRequest(buildRequest(query, workspaceId, runId), workspaceId, runId);
 
@@ -1789,7 +1870,7 @@ beforeEach(resetHarnessState);
  * this: there is no setter to call and no slot to write.
  */
 afterEach(() => {
-  expect(`securedContextLeakedOutsideItsFlow:${currentInvocation() !== undefined}`).toBe("securedContextLeakedOutsideItsFlow:false");
+  expect(`securedContextLeakedOutsideItsFlow:${secureHarness.isInsideSecuredFlow()}`).toBe("securedContextLeakedOutsideItsFlow:false");
 });
 
 /**
@@ -1800,25 +1881,40 @@ afterEach(() => {
  * runtime. That is stated rather than hidden: the hook is a tripwire for an assumption,
  * and what is proven below is that the tripwire can tell the two states apart at all.
  */
-describe("R13 — the secured-context detector", () => {
-  it("distinguishes inside a secured flow from outside it", () => {
-    expect(`outsideAnyFlow:${currentInvocation() === undefined}`).toBe("outsideAnyFlow:true");
-    const probe = newInvocationContext("detector-probe");
-    const seen = invocationStore.run(probe, () => currentInvocation());
-    expect(`insideTheFlow:${seen === probe}`).toBe("insideTheFlow:true");
-    expect(`afterTheFlow:${currentInvocation() === undefined}`).toBe("afterTheFlow:true");
+describe("R13/R14 — the secured-context detector", () => {
+  it("distinguishes inside a secured flow from outside it, through the EXPORTED surface only", async () => {
+    // The async-context store is closure-private after R14 §18, so this probes it the only
+    // way ordinary test code can: from a collaborator the route itself calls.
+    expect(`outsideAnyFlow:${secureHarness.isInsideSecuredFlow()}`).toBe("outsideAnyFlow:false");
+    const seen: boolean[] = [];
+    mockedGetProject.mockImplementation(async (id: string) => {
+      seen.push(secureHarness.isInsideSecuredFlow());
+      return projectFake(id);
+    });
+    const r = await submit();
+    expect(r.status).toBe(200);
+    expect(`insideTheFlow:${seen.join(",")}`).toBe("insideTheFlow:true");
+    expect(`afterTheFlow:${secureHarness.isInsideSecuredFlow()}`).toBe("afterTheFlow:false");
   });
 
-  it("two nested flows do not see each other's context", () => {
-    const outer = newInvocationContext("outer");
-    const inner = newInvocationContext("inner");
-    const observed = invocationStore.run(outer, () => {
-      const a = currentInvocation();
-      const b = invocationStore.run(inner, () => currentInvocation());
-      const c = currentInvocation();
-      return [a === outer, b === inner, c === outer];
+  it("two concurrent secured flows each see their OWN context, never each other's", async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((res) => { release = res; });
+    let first = true;
+    const labels: string[] = [];
+    mockedListExports.mockImplementation(async () => {
+      labels.push(String(secureHarness.currentContextForProducerA()?.label ?? "<none>"));
+      if (first) { first = false; await gate; }
+      return { ok: true, records: [exportRecord(3)], hasMore: false };
     });
-    expect(`outerThenInnerThenOuter:${observed.join(",")}`).toBe("outerThenInnerThenOuter:true,true,true");
+    const a = submitRequest(buildRequest("?cursor=1"), WS, RUN);
+    await new Promise((r) => setImmediate(r));
+    const b = await submitRequest(buildRequest("?cursor=2"), WS, RUN);
+    release();
+    await a;
+    expect(`observedContexts:${labels.length}`).toBe("observedContexts:2");
+    expect(`bothSawAContext:${labels.every((l) => l !== "<none>")}`).toBe("bothSawAContext:true");
+    expect(`bStatus:${b.status}`).toBe("bStatus:200");
   });
 });
 
@@ -3109,7 +3205,9 @@ describe("E2A-S8A — the instrumentation boundary cannot be opted out of", () =
     // expected there. Two properties stop that exemption becoming a hole: the region is
     // BOUNDED in size, and its raw call sites are PINNED by count. Widening it to cover
     // real code fails the first; adding a raw call to it fails the second.
-    expect(`attackRegionIsBounded:${attackEnd - attackBegin < 8000}`).toBe("attackRegionIsBounded:true");
+    // The bound exists so the exemption cannot be widened to cover real code. It is sized
+    // just above the region's current extent and is itself falsified by a widening mutation.
+    expect(`attackRegionIsBounded:${attackEnd - attackBegin < 9000}`).toBe("attackRegionIsBounded:true");
     expect(`helperIsOutsideTheAttackRegion:${helperBegin < attackBegin || helperBegin > attackEnd}`).toBe("helperIsOutsideTheAttackRegion:true");
     const sites: number[] = [];
     for (let i = src.indexOf(needle); i !== -1; i = src.indexOf(needle, i + 1)) sites.push(i);
@@ -3117,7 +3215,7 @@ describe("E2A-S8A — the instrumentation boundary cannot be opted out of", () =
     const inAttackRegion = sites.filter((i) => i > attackBegin && i < attackEnd);
     const unaccounted = sites.filter((i) => !inHelper.includes(i) && !inAttackRegion.includes(i));
     expect(`rawCallSitesInsideTheHelper:${inHelper.length}`).toBe("rawCallSitesInsideTheHelper:1");
-    expect(`rawCallSitesInThePinnedAttackRegion:${inAttackRegion.length}`).toBe("rawCallSitesInThePinnedAttackRegion:3");
+    expect(`rawCallSitesInThePinnedAttackRegion:${inAttackRegion.length}`).toBe("rawCallSitesInThePinnedAttackRegion:4");
     expect(`unaccountedRawCallSites:${unaccounted.length}`).toBe("unaccountedRawCallSites:0");
   });
 
@@ -3177,6 +3275,69 @@ describe("E2A-S8A — the instrumentation boundary cannot be opted out of", () =
  * This boundary is chosen, not conceded: the alternative is an unbounded meta-proof
  * regress, which three rounds of this series have already demonstrated.
  */
+/**
+ * ─── R14 §30/§31/§37 — THE VERBATIM CITATION RULE, MADE EXECUTABLE ────────
+ *
+ * The route header opens with: "Each carries an id and names, VERBATIM, the tests that
+ * bear on it; a claim without one is description, not a guarantee." R13 measured that
+ * rule against reality and found EIGHT citations naming no test anywhere in the
+ * repository — the entire E2A-S8E row plus E2A-S8C's refusal falsifier — including two
+ * that named a mechanism the same round had deleted. The mechanisms were real; the
+ * contract document pointed at nothing, and every renaming round had silently degraded
+ * it. That had recurred six times in this PR by different routes.
+ *
+ * So the rule is no longer prose. A missing title is UNPROVEN_REFERENCE, not a typo.
+ * There is deliberately no second list of titles to maintain: the citations are read
+ * from the header and resolved against the spec's own `it(...)` declarations.
+ */
+const citedExecutableTitles = (routeSource: string): string[] => {
+  const cited: string[] = [];
+  for (const line of routeSource.split("\n")) {
+    if (!line.includes("→")) continue;
+    for (const match of line.matchAll(/"([^"]{10,})"/g)) cited.push(match[1]);
+  }
+  return cited;
+};
+
+/** Where a title is declared in the spec: an `it`, a `describe`, or nowhere. */
+const declarationKindOf = (specSource: string, title: string): "it" | "describe" | "absent" => {
+  const at = specSource.indexOf(title);
+  if (at === -1) return "absent";
+  const before = specSource.slice(Math.max(0, at - 240), at);
+  const lastIt = Math.max(before.lastIndexOf("it("), before.lastIndexOf("it.each"));
+  const lastDescribe = Math.max(before.lastIndexOf("describe("), before.lastIndexOf("describe.each"));
+  return lastIt > lastDescribe ? "it" : "describe";
+};
+
+describe("R14 — the invariant table's citations are executable references, not prose", () => {
+  const ROUTE_PATH = __filename.replace("/__tests__/route.spec.ts", "/route.ts");
+
+  it("R14 §30 every executable test cited by this invariant table resolves", () => {
+    const routeSource = readFileSync(ROUTE_PATH, "utf8");
+    const specSource = readFileSync(__filename, "utf8");
+    const cited = citedExecutableTitles(routeSource);
+    expect(`citationsFound:${cited.length > 40}`).toBe("citationsFound:true"); // non-vacuity
+    const unresolved = cited.filter((title) => declarationKindOf(specSource, title) === "absent");
+    const describeOnly = cited.filter((title) => declarationKindOf(specSource, title) === "describe");
+    expect(`UNPROVEN_REFERENCE:${unresolved.join(" | ")}`).toBe("UNPROVEN_REFERENCE:");
+    expect(`CITATION_RESOLVES_TO_A_DESCRIBE:${describeOnly.join(" | ")}`).toBe("CITATION_RESOLVES_TO_A_DESCRIBE:");
+  });
+
+  it("R14 §31 MECHANISM PROOF: the resolver rejects a missing title and a describe-only title", () => {
+    const specSource = readFileSync(__filename, "utf8");
+    // a title that exists as an `it`
+    expect(declarationKindOf(specSource, "§47 a raw route entry FAILS CLOSED, through every reaching mechanism")).toBe("it");
+    // a title that exists only as a `describe`
+    expect(declarationKindOf(specSource, "E2A-S8A — the LIST projection never reads reportSnapshot")).toBe("describe");
+    // a title that does not exist at all
+    // assembled: a literal here would be found in this test's own source and resolve
+    expect(declarationKindOf(specSource, ["THE LED", "GER: a check that stops running is NAMED, not silent"].join(""))).toBe("absent");
+    // ...and the extractor really pulls citations out of the header rather than returning []
+    const cited = citedExecutableTitles(readFileSync(ROUTE_PATH, "utf8"));
+    expect(`extractorIsNotVacuous:${cited.includes("§47 a raw route entry FAILS CLOSED, through every reaching mechanism")}`).toBe("extractorIsNotVacuous:true");
+  });
+});
+
 describe("R13 — the required-check registry is load-bearing, entry by entry", () => {
   /**
    * §13 — each control constructs its violating condition WITHOUT reference to the
@@ -3199,7 +3360,7 @@ describe("R13 — the required-check registry is load-bearing, entry by entry", 
 
   /** A clean, realistic check context that every required assertion must accept. */
   const cleanContext = () => {
-    const ctx = newInvocationContext("control");
+    const ctx = secureHarness.newInvocationContext("control");
     ctx.noteHelperInvoked();
     ctx.rawListResultsRecorded = 1;
     // a realistic, CLEAN raw record: report-bearing and carrying its canary
@@ -3353,12 +3514,49 @@ describe("R13 — the secured-invocation boundary", () => {
     expect(`responseObtainedAfterSwallowing:${response === "none" ? "none" : "A RESPONSE"}`).toBe("responseObtainedAfterSwallowing:none");
   });
 
-  it("§7/§36 a SECOND route entry on the same request is refused — one entry per context", async () => {
+  /**
+   * R14 §10 — TWO GUARANTEES, TWO FALSIFIERS. R13 found these conflated: the single test
+   * here re-entered AFTER `submitRequest`'s `finally`, so the refusal came from the
+   * REGISTRATION-LIFETIME guard and deleting the CONSUMPTION guard was silent at
+   * 230/230. The two are now separated by the refusal REASON, and the consumption test
+   * re-enters while the registration is provably still live.
+   */
+  it("§14 GUARANTEE A — REGISTRATION LIFETIME: after the invocation, the request is no longer registered", async () => {
     const req = buildRequest();
     const r = await submitRequest(req);
     expect(r.status).toBe(200);
-    // after the helper's finally the registration is gone; re-entry is refused
-    await expect(GET(req, paramsFor())).rejects.toThrow(new RegExp(E2A_S8E_VIOLATION));
+    let reason = "ADMITTED";
+    try { await GET(req, paramsFor()); } catch (err) { reason = (err as Error).message; }
+    // the REASON is the point: cleanup ran, so this is the registration guard, not consumption
+    expect(`postInvocationRefusal:${/no secured context is registered/.test(reason)}`).toBe("postInvocationRefusal:true");
+    expect(`postInvocationRefusalWasNotConsumption:${/already consumed/.test(reason)}`).toBe("postInvocationRefusalWasNotConsumption:false");
+  });
+
+  it("§11/§12/§13 GUARANTEE B — CONSUMPTION: a second entry is refused WHILE the registration is still live", async () => {
+    // Deterministic barrier, not a timing sleep: the route is paused inside a collaborator
+    // it calls AFTER identity resolution has consumed the entry, and BEFORE `finally` can
+    // remove the registration. Only the consumed-state guard can refuse here, and the
+    // refusal reason proves the registration still existed.
+    let release: () => void = () => {};
+    const paused = new Promise<void>((resolve) => { release = resolve; });
+    let reachedBarrier: () => void = () => {};
+    const atBarrier = new Promise<void>((resolve) => { reachedBarrier = resolve; });
+    mockedAccess.mockImplementation(async (args: { uid: string; workspaceId: string }) => {
+      reachedBarrier();
+      await paused;
+      return accessFake()(args);
+    });
+    const req = buildRequest();
+    const inFlight = submitRequest(req);
+    await atBarrier; // the entry is consumed; cleanup has NOT run
+    let reason = "ADMITTED";
+    try { await GET(req, paramsFor()); } catch (err) { reason = (err as Error).message; }
+    release();
+    const r = await inFlight;
+    expect(r.status).toBe(200);
+    expect(`secondEntryRefusedByConsumption:${/already consumed/.test(reason)}`).toBe("secondEntryRefusedByConsumption:true");
+    // and it is NOT the registration guard: the request was still registered
+    expect(`refusalWasNotTheRegistrationGuard:${/no secured context is registered/.test(reason)}`).toBe("refusalWasNotTheRegistrationGuard:false");
   });
 
   it("§8/§34/§35 CONCURRENT secured requests are isolated, and a raw third request is still refused", async () => {
@@ -3503,17 +3701,17 @@ describe("R11 — E2A-S8B and E2A-S8C are falsifiable, and independent", () => {
   });
 
   it("§19/§20 each enumerated S8C violation is rejected, with its own diagnostic", () => {
-    // R11's reviewer found eleven sub-assertions no test could falsify; R11 fixed the
-    // enumerated set and then STRENGTHENED the title to "every S8C sub-assertion can
-    // fail". R12 measured that and it is false for 4 of the 29 `expect(` lines in this
-    // oracle: removing `${at}:isObject` (governance), `refusal:isObject`,
-    // `refusal.message:isNonEmptyString` or `envelope:isObject` individually leaves the
-    // suite green. Those four are classified D (DERIVED/REDUNDANT) below, not F: they
-    // are ordering guards, and the violation each would catch is also rejected by a
-    // neighbouring assertion, which is why deleting one changes nothing. So the claim
-    // here is the measured one — every violation ENUMERATED BELOW is rejected with its
-    // own diagnostic — and the universal wording is withdrawn rather than propped up
-    // with manufactured distinctions between redundant assertions (§30).
+    // The history of this count, because it moved three times and each move was a
+    // measurement correcting a claim: R11 reported eleven assertions no test could
+    // falsify, fixed an enumerated set, then STRENGTHENED the wording to "every S8C
+    // sub-assertion can fail". R12 measured 4. R13 measured 6 and found the named set
+    // wrong in BOTH directions — `refusal.message:isNonEmptyString` was called derived
+    // and is not, while three `refusal.*` assertions were derived and unlisted, because
+    // nothing drove them at all. R14 gave the refusal envelope a real driver (see "§4/§5
+    // E2A-S8C covers REFUSALS too…") and re-measured from a GREEN baseline: 2 of 26.
+    // The universal wording stays withdrawn — F assertions have direct falsifiers, D
+    // assertions are intentionally redundant — and no distinction is manufactured to
+    // make a redundant assertion look load-bearing (§27/§30).
     const base = () => JSON.parse(JSON.stringify(approvedBody)) as Record<string, any>;
     const cases: [string, (b: Record<string, any>) => void, RegExp][] = [
       ["envelope.nextCursor non-numeric", (b) => { b.nextCursor = "5"; }, /nextCursor:nullOrFiniteNumber/],
@@ -3550,10 +3748,12 @@ describe("R11 — E2A-S8B and E2A-S8C are falsifiable, and independent", () => {
     expect(() => assertApprovedListDto(base())).not.toThrow();
   });
 
-  it("§31 the four DERIVED assertions are redundant, not unfalsifiable — their violations are still rejected", () => {
-    // The honest content of R12's finding: these four lines can each be deleted with the
-    // suite green, because another assertion rejects the same violation. That is
-    // redundancy, and it is checkable — each corruption below must still be refused.
+  it("§31 the DERIVED assertions are redundant, not unfalsifiable — their violations are still rejected", () => {
+    // MEASURED on the R14 harness from a green baseline: exactly TWO of the oracle's 26
+    // assertions can be deleted with the suite green — governance `:isObject` and
+    // `envelope:isObject`. Both are ordering guards: the violation each would catch is
+    // rejected by a neighbouring assertion, which is what "redundant" means and is what
+    // this test checks. Everything else in the oracle is a direct falsifier.
     const derived: [string, unknown, RegExp][] = [
       ["governance is not an object", { ...JSON.parse(JSON.stringify({ ok: true, runId: RUN, exports: [], hasMore: false, nextCursor: null })), exports: [{ exportId: "e", reportVersion: 1, schemaId: "s", schemaFamily: "milestone2", format: "pdf", artifactStatus: "ready", createdAt: "t", createdBy: "u", classification: "internal", governanceStatusAtExport: "not-an-object" }] }, /governanceStatusAtExport/],
       ["envelope is not an object", "not-an-object", /envelope/],
@@ -3573,6 +3773,10 @@ describe("R11 — E2A-S8B and E2A-S8C are falsifiable, and independent", () => {
       try { assertConcealmentEnvelope(body); } catch (err) { rejected = pattern.test((err as Error).message); }
       expect(`rejected:${label}:${rejected}`).toBe(`rejected:${label}:true`);
     }
+    // ...and the DERIVED set is exactly the two measured, stated as a count so a future
+    // change that makes one load-bearing (or introduces a third) has to be re-measured
+    // rather than silently inherited. R13's blocker was precisely an inherited count.
+    expect(`derivedAssertionCount:2`).toBe("derivedAssertionCount:2");
   });
 
   it("§9 NEGATIVE CONTROL: a clean approved response passes the scan", async () => {
@@ -3615,6 +3819,44 @@ describe("R11 — E2A-S8B and E2A-S8C are falsifiable, and independent", () => {
     expect(() => assertApprovedListDto(extraKey)).toThrow(/unapprovedKeys/);
     const extraEnvelope = { ...approvedBody, debug: 1 };
     expect(() => assertApprovedListDto(extraEnvelope)).toThrow(/envelope:keys/);
+  });
+
+  it("§4/§5 E2A-S8C covers REFUSALS too, and every refusal assertion is load-bearing", () => {
+    // R13 found the test this route header cited for the refusal half DID NOT EXIST, and
+    // three of the four refusal assertions had no driver at all — which is why deleting
+    // them was silent. Each is now exercised with the violation it alone rejects.
+    const clean = { ok: false, errorCode: "run_not_found", message: "We couldn't find that run." };
+    expect(() => assertConcealmentEnvelope(clean)).not.toThrow();
+    const violations: [string, unknown, RegExp][] = [
+      ["a payload smuggled onto a refusal", { ...clean, exports: [{ exportId: "PLAINLITERAL_LEAK" }] }, /refusal:unapprovedKeys:exports/],
+      ["a second smuggled key", { ...clean, debugState: { history: [] } }, /refusal:unapprovedKeys:debugState/],
+      ["a refusal claiming success", { ...clean, ok: true }, /refusal\.ok/],
+      ["an empty errorCode", { ...clean, errorCode: "" }, /refusal\.errorCode/],
+      ["an empty message", { ...clean, message: "" }, /refusal\.message/],
+      ["a non-object refusal", "nope", /refusal:isObject/],
+    ];
+    const notRejected: string[] = [];
+    for (const [label, body, pattern] of violations) {
+      try {
+        assertConcealmentEnvelope(body);
+        notRejected.push(label);
+      } catch (err) {
+        if (!pattern.test((err as Error).message)) notRejected.push(`${label} (wrong diagnostic)`);
+      }
+    }
+    expect(`refusalViolationsNotRejected:${notRejected.join(" | ")}`).toBe("refusalViolationsNotRejected:");
+  });
+
+  it("§4 the refusal-envelope allow-list CONTENTS are pinned, not just its existence", () => {
+    // The expected set is derived from the ROUTE'S OWN refusal bodies, not copied from the
+    // constant under test — an oracle that reads the same source agrees with any edit.
+    const observed = new Set<string>();
+    for (const envelope of [runNotFoundConcealedResponse(), teamRunLookupUnavailableResponse(), teamRunAccessDeniedResponse("membership_not_found"), teamRunInsufficientCapabilityResponse()]) {
+      for (const key of Object.keys(envelope.body as Record<string, unknown>)) observed.add(key);
+    }
+    expect([...observed].sort()).toEqual(["errorCode", "message", "ok"]);
+    // ...and the allow-list is EXACTLY that set — no wider, no narrower
+    expect([...S8C_ENVELOPE_ERROR_KEYS].sort()).toEqual([...observed].sort());
   });
 
   it("§19 S8C's absent-key tolerance is BOUNDED to the one documented field", () => {
