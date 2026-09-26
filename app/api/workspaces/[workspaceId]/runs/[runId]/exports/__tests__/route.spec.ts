@@ -101,11 +101,25 @@ type SecureInvocationContext = {
   /** Producer A: that the list helper was invoked for THIS request. */
   helperInvocations: number;
   noteHelperInvoked: () => void;
-  /** Producer B: what it returned. Compared against A by a required check. */
+  /**
+   * Producer B, as ONE indivisible operation: counting the result and storing its raw
+   * records are the same call, so there is no way to suppress the store while leaving a
+   * count that matches producer A. R13's second draft split them, and suppressing only
+   * the store was invisible again — the same defect, a third location.
+   */
   rawListResultsRecorded: number;
-  reportBearingRecordIds: string[];
-  recordsWithSnapshotButNoCanary: string[];
-  readonly expectedCanaries: Set<string>;
+  noteRawResult: (records: readonly Record<string, unknown>[]) => void;
+  /**
+   * The RAW records, stored verbatim and nothing else. R13's first attempt still
+   * pre-computed `reportBearingRecordIds` and an `expectedCanaries` set inside one
+   * conditional block at the boundary — which reproduced R12's exact defect in a new
+   * location: suppressing that block emptied both operands of the guard meant to protect
+   * them and the guard passed vacuously, with a header leak still green. There is
+   * therefore NO derived evidence to suppress any more. The boundary stores raw data;
+   * every required check DERIVES what it needs inside its own assertion body, and those
+   * bodies are held load-bearing by their negative controls.
+   */
+  readonly rawRecords: Record<string, unknown>[];
 };
 
 const newInvocationContext = (label: string): SecureInvocationContext => {
@@ -115,10 +129,12 @@ const newInvocationContext = (label: string): SecureInvocationContext => {
   sink: newSink(),
   helperInvocations: 0,
   noteHelperInvoked: () => { ctx.helperInvocations += 1; },
+  noteRawResult: (records) => {
+    ctx.rawListResultsRecorded += 1;
+    ctx.rawRecords.push(...records);
+  },
   rawListResultsRecorded: 0,
-  reportBearingRecordIds: [],
-  recordsWithSnapshotButNoCanary: [],
-  expectedCanaries: new Set<string>(),
+  rawRecords: [],
   };
   return ctx;
 };
@@ -1301,32 +1317,15 @@ const accessorRecord = (record: Record<string, unknown>, label: string, sink: Ac
 const instrumentListResult = (result: unknown): unknown => {
   const r = result as { ok?: boolean; records?: unknown[] } | null;
   const ctx = currentInvocation();
-  // Producer B counts EVERY result the helper returned, including a typed failure —
-  // otherwise the 503 paths would look like a suppressed recorder.
-  if (ctx) ctx.rawListResultsRecorded += 1;
+  const rawRecords = r && r.ok === true && Array.isArray(r.records) ? (r.records as Record<string, unknown>[]) : [];
+  // §17/§46 — producer B, in ONE call: it counts every result the helper returned
+  // (including a typed failure, or the 503 paths would look like a suppressed recorder)
+  // AND stores the raw records. Because the count and the store are indivisible, there
+  // is no edit that removes the evidence while leaving a count matching producer A — and
+  // `S8E:raw-list-evidence-recorded` compares exactly those two. Nothing is DERIVED here;
+  // every derivation lives in a check body its negative control holds load-bearing.
+  if (ctx) ctx.noteRawResult(rawRecords);
   if (!r || r.ok !== true || !Array.isArray(r.records)) return result;
-  if (ctx) {
-    // §17/§18/§19 — RAW mock-boundary evidence, captured before any wrapping and
-    // OUTSIDE every assertion that consumes it. R12's blocker was the opposite
-    // arrangement: `reportBearing` and the canary registry were both produced inside
-    // one `if` block, so suppressing that block zeroed both operands of the guard
-    // meant to protect them and the guard passed vacuously. Here there are TWO
-    // deliberately separate producers — `noteHelperInvoked()` above records THAT the
-    // helper ran for this request, this block records WHAT it returned — and a required
-    // check compares them, so suppressing either is a detectable mismatch rather than a
-    // silent zero on both sides. (An earlier draft of this comment said the comparison
-    // was against jest's own `mock.calls` tally; that was true briefly and is not now,
-    // because a cumulative tally cannot be attributed per invocation under concurrency.)
-    for (const rec of r.records as Record<string, unknown>[]) {
-      if (!rec || typeof rec !== "object" || rec.reportSnapshot === undefined) continue;
-      const id = String(rec.exportId ?? "<no exportId>");
-      ctx.reportBearingRecordIds.push(id);
-      const own = new Set<string>();
-      discoverCanaries(rec.reportSnapshot, own);
-      if (own.size === 0) ctx.recordsWithSnapshotButNoCanary.push(id);
-      for (const canary of own) ctx.expectedCanaries.add(canary);
-    }
-  }
   if (trapMode === "plain") return result;
   const wrap = trapMode === "accessor" ? accessorRecord : trapRecord;
   return { ...r, records: r.records.map((rec, i) => wrap(rec as Record<string, unknown>, `rec${i}`)) };
@@ -1377,6 +1376,24 @@ const assertResponseSecrecy = (res: Response, bodyText: string, canaries: Readon
       expect(`frozen-report-content@${where}:${found}`).toBe(`frozen-report-content@${where}:false`);
     }
   }
+};
+
+/**
+ * §18/§19 — DERIVATIONS, PURE AND CALLED FROM THE CHECK BODIES.
+ *
+ * These read only the raw records the boundary stored. Neutering either of them is
+ * caught in the SAFE direction by the very controls that hold the checks load-bearing:
+ * if `canariesIn` returned nothing, every report-bearing record would look canary-less
+ * and `S8B:fixture-canary-integrity` would fail, and `S8B:response-secrecy`'s control
+ * would stop rejecting a body that contains its canary.
+ */
+const reportBearingRawRecords = (raw: readonly Record<string, unknown>[]): Record<string, unknown>[] =>
+  raw.filter((rec) => rec !== null && typeof rec === "object" && rec.reportSnapshot !== undefined);
+
+const canariesIn = (raw: readonly Record<string, unknown>[]): Set<string> => {
+  const found = new Set<string>();
+  for (const rec of reportBearingRawRecords(raw)) discoverCanaries(rec.reportSnapshot, found);
+  return found;
 };
 
 /**
@@ -1457,17 +1474,19 @@ const REQUIRED_CHECKS: ReadonlyArray<RequiredCheck> = Object.freeze([
     // than from anything E2A-S8B produces.
     id: "S8B:fixture-canary-integrity",
     assert: (c) => {
-      expect(c.ctx.recordsWithSnapshotButNoCanary).toEqual([]);
-      expect(
-        `reportBearingRecords:${c.ctx.reportBearingRecordIds.length} expectedCanaries:${c.ctx.expectedCanaries.size > 0}`,
-      ).toBe(
-        `reportBearingRecords:${c.ctx.reportBearingRecordIds.length} expectedCanaries:${c.ctx.reportBearingRecordIds.length === 0 ? "false" : "true"}`,
+      const bearing = reportBearingRawRecords(c.ctx.rawRecords);
+      const withoutCanary = bearing
+        .filter((rec) => canariesIn([rec]).size === 0)
+        .map((rec) => String(rec.exportId ?? "<no exportId>"));
+      expect(withoutCanary).toEqual([]);
+      expect(`reportBearingRecords:${bearing.length} canariesDerived:${canariesIn(c.ctx.rawRecords).size > 0}`).toBe(
+        `reportBearingRecords:${bearing.length} canariesDerived:${bearing.length === 0 ? "false" : "true"}`,
       );
     },
   },
   {
     id: "S8B:response-secrecy",
-    assert: (c) => assertResponseSecrecy(c.res, c.bodyText, c.ctx.expectedCanaries),
+    assert: (c) => assertResponseSecrecy(c.res, c.bodyText, canariesIn(c.ctx.rawRecords)),
   },
   {
     id: "S8C:approved-shape",
@@ -3113,8 +3132,10 @@ describe("R13 — the required-check registry is load-bearing, entry by entry", 
     "S8A:no-wholesale-enumeration": { corrupt: (c) => { c.ctx.sink.enumerations.push("ownKeys(rec0)"); }, pattern: /ownKeys/ },
     "S8A:no-off-policy-reads": { corrupt: (c) => { c.ctx.sink.reads.push("futurePrivateField"); }, pattern: /futurePrivateField/ },
     "S8E:raw-list-evidence-recorded": { corrupt: (c) => { c.ctx.noteHelperInvoked(); }, pattern: /rawResultsRecorded/ },
-    "S8B:fixture-canary-integrity": { corrupt: (c) => { c.ctx.reportBearingRecordIds.push("exp-9"); c.ctx.expectedCanaries.clear(); }, pattern: /expectedCanaries/ },
-    "S8B:response-secrecy": { corrupt: (c) => { c.ctx.expectedCanaries.add(FROZEN_REPORT_CANARY_M2); (c as { bodyText: string }).bodyText = `{"leaked":"${FROZEN_REPORT_CANARY_M2}"}`; }, pattern: /frozen-report-content@body/ },
+    // a report-bearing record whose snapshot carries NO canary — the fixture defect
+    "S8B:fixture-canary-integrity": { corrupt: (c) => { c.ctx.rawRecords.push({ exportId: "exp-9", reportSnapshot: { question: "SENTINEL_NOT_A_CANARY" } }); }, pattern: /exp-9/ },
+    // a real canary in the raw records AND in the serialized body
+    "S8B:response-secrecy": { corrupt: (c) => { c.ctx.rawRecords.push({ exportId: "exp-9", reportSnapshot: { question: FROZEN_REPORT_CANARY_M2 } }); (c as { bodyText: string }).bodyText = `{"leaked":"${FROZEN_REPORT_CANARY_M2}"}`; }, pattern: /frozen-report-content@body/ },
     "S8C:approved-shape": { corrupt: (c) => { (c.json.exports as Record<string, unknown>[])[0].reportSnapshot = "smuggled"; }, pattern: /unapprovedKeys/ },
   };
 
@@ -3123,8 +3144,8 @@ describe("R13 — the required-check registry is load-bearing, entry by entry", 
     const ctx = newInvocationContext("control");
     ctx.noteHelperInvoked();
     ctx.rawListResultsRecorded = 1;
-    ctx.reportBearingRecordIds.push("exp-3");
-    ctx.expectedCanaries.add(FROZEN_REPORT_CANARY_M2);
+    // a realistic, CLEAN raw record: report-bearing and carrying its canary
+    ctx.rawRecords.push({ exportId: "exp-3", reportSnapshot: { question: FROZEN_REPORT_CANARY_M2 } });
     const json: Record<string, unknown> = {
       ok: true,
       runId: RUN,
