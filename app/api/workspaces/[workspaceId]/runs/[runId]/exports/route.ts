@@ -83,7 +83,7 @@
  *           invariant is response-scoped, not source-line-scoped.
  *   E2A-S5  A malformed `runId` cannot redirect the reference to another
  *           document or subcollection.
- *           → "E2A-S5 — runId syntax is load-bearing for path integrity" (6 cases)
+ *           → "rejects %p before any document path is constructed" (6 it.each cases)
  *   E2A-S6  Current Workspace/run/Project authority governs history access —
  *           never historical membership.
  *           → "E2A-S6 CROSS-WORKSPACE: a run bound to another Workspace is concealed and never listed"
@@ -200,8 +200,10 @@
  * supplies no enforced evidence, and no proof here relies on it. The historical
  * commit message is left intact.
  *
- * OBSERVABILITY, CLASSIFIED (R6 asked; §31). Two warnings are CONTRACTUAL and
- * asserted on their structured fields:
+ * OBSERVABILITY, CLASSIFIED. The following warnings are CONTRACTUAL operational
+ * signals, each asserted on its structured fields (an earlier revision opened
+ * this paragraph with a count that disagreed with its own list — no count is
+ * given now, the list is the contract):
  *   • `filed run's Project unresolved` — parity with the canonical read and E1,
  *     which both warn here; E2-A used to log nothing at all.
  *   • the E2A-S15 continuation-cursor warning — the ONLY operator signal
@@ -209,13 +211,40 @@
  *     status, errorCode and message are byte-identical.
  *   • the cross-Workspace Project integrity anomaly — the sole trace of a
  *     cross-tenant filing inconsistency, so it is asserted too.
- * The remaining three (`run read failed`, `project read failed`,
+ * The remaining warnings (`run read failed`, `project read failed`,
  * `export history read failed`) are INCIDENTAL and deliberately unasserted. R6
  * noted the S15 argument could be read as applying to them; it does not, and the
  * difference is stated rather than glossed: those three conditions are TRANSIENT
  * and self-resolving, so the operator question is "is the datastore healthy",
  * answered by the surrounding infrastructure, not "which of four identical 503s
  * was this". Nothing in this file claims they are pinned, and nothing should.
+ *
+ * E2A-S8A IS THREE PIECES, AND NO ONE OF THEM PROVES IT ALONE:
+ *   1. BOUNDARY INSTRUMENTATION — every list result is wrapped inside the module
+ *      mock, so no test can opt out of being instrumented.
+ *   2. ACCESS DETECTION — two modes, each covering the operation classes it has
+ *      been empirically shown to see: the Proxy for reads/destructuring/
+ *      `Reflect.get`/off-policy reads/enumeration, the plain-object accessor for
+ *      `structuredClone`/`JSON.stringify`/spread/`Object.values`/`entries`/
+ *      `assign`. Neither covers the other's set; one shared input-class table is
+ *      run under BOTH, so mode coverage cannot drift.
+ *   3. UNIVERSAL ENFORCEMENT — a global `afterEach` asserts the access policy for
+ *      EVERY test, so no test and no input class can forget the postcondition.
+ *      R7 is why: with enforcement opt-in, a leak gated on `reportVersion === 0`
+ *      put the whole frozen report on the wire with the suite green. There is no
+ *      opt-out flag; mechanism self-tests use a private sink instead.
+ *   Also: an ALLOWED CONTAINER IS NOT AN ALLOWED SUBTREE. `exportMetadata` is
+ *   trapped one level deep with its own allow-list (`fileHash` only), because a
+ *   depth-1 policy could not see `exportMetadata.requestingUser`.
+ *
+ * SCOPE OF S8A, stated exactly. It covers every read that participates in
+ * producing the HTTP response, which is what the invariant is about. A
+ * fire-and-forget `setTimeout(() => … , 0)` scheduled during the request and
+ * never awaited is NOT detected, and is deliberately not claimed: it cannot
+ * affect the response that was already returned. The AWAITED form — any deferred
+ * read the response actually waits on — IS detected, verified by mutation. The
+ * distinction is response-producing work versus post-response background work,
+ * and only the former is an HTTP disclosure path.
  *
  * A PROOF MECHANISM MUST ITSELF BE FALSIFIED BEFORE PROSE RELIES ON IT. That
  * rule exists because of the retraction above: the claim was documented from

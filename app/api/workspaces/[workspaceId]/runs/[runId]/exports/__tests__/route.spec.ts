@@ -154,15 +154,19 @@ const grant = (role: "owner" | "admin" | "member" | "reviewer" | "viewer") => ({
  * below). Fixture completeness is therefore integration evidence, never proof;
  * the proof is E2A-S8A's runtime source-access instrumentation.
  *
- * Sentinel values are used wherever the type admits a free-form string. Where
- * it does not — enums (`consensusLevel`), `ModelId`, numbers, booleans — the
+ * Sentinel values are placed on the PROOF-RELEVANT free-form-string leaves — the
+ * ones enumerated in `snapshotSentinelPaths` — not on every string in the
+ * fixtures: subject/attribute ids, four `valuesByModel` entries and `raw.asOf`
+ * deliberately carry ordinary values. Secrecy does not depend on sentinel
+ * coverage at all (that is E2A-S8A's job); these are integration evidence. Where
+ * the type does not admit a free-form string — enums (`consensusLevel`), `ModelId`, numbers, booleans — the
  * leak is caught by the exact DTO key allow-list instead, which fires for ANY
  * added key. Both mechanisms are load-bearing; neither alone is sufficient.
  */
 /**
  * ─── SENTINEL REGISTRY ────────────────────────────────────────────────────
- * String sentinels for every leaf whose type admits a free-form string, and
- * DISTINCTIVE NUMBERS for leaves that are numeric — R4 showed a leak is caught
+ * String sentinels for the proof-relevant free-form-string leaves, and
+ * DISTINCTIVE NUMBERS for the numeric ones — R4 showed a leak is caught
  * iff the projected value SERIALIZES, so numeric leaves need detectable values
  * too, not just an allow-list entry.
  */
@@ -2265,6 +2269,26 @@ const S8A_INPUT_CLASSES: ReadonlyArray<readonly [string, () => Record<string, un
   ["reportVersion non-numeric (integrity 503 path)", () => [exportRecord(3, { reportVersion: "3" })], true],
   ["reportVersion NaN (integrity 503 path)", () => [exportRecord(3, { reportVersion: Number.NaN })], true],
 ];
+
+describe("E2A-S8A — the instrumentation boundary cannot be opted out of", () => {
+  it("§5 instrumentation is applied by the MOCK BOUNDARY, so a raw mockResolvedValue cannot opt out", async () => {
+    // The exact shape that bypassed the old per-fixture wrapper. R6 moved wrapping
+    // into the jest.mock factory; this test is the standing proof that a test which
+    // never mentions `listFake` is still instrumented.
+    mockedListExports.mockResolvedValue({ ok: true, records: [exportRecord(3)], hasMore: false });
+    const r = await submit();
+    expect(r.status).toBe(200);
+    // the record really was wrapped: the projection's reads were observed
+    expectSourceWasRead("exportId", "reportVersion", "format");
+    // (the S8A policy itself is asserted by the global afterEach)
+  });
+
+  // A source-grep test asserting "GET is only invoked inside submit()" lived here
+  // briefly and was removed: it read its own file, so it counted the needle in its
+  // own source. More importantly it was redundant — the postcondition is a GLOBAL
+  // `afterEach`, so it covers any invocation path, including a future direct one.
+  // The single entry point is a readability convenience, not the guarantee.
+});
 
 describe.each(["proxy", "accessor"] as const)("E2A-S8A [%s mode] — the shared input-class table", (mode) => {
   beforeEach(() => {
