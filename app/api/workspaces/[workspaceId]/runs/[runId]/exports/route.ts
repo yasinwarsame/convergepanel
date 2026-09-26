@@ -231,7 +231,39 @@
  * emitting the whole frozen report for exactly those records passed the suite.
  * A mode default cannot fix a missing fixture value; only the context matrix can.
  *
- * E2A-S8A IS SIX PIECES, AND NO ONE OF THEM PROVES IT ALONE:
+ * THE FINAL PROOF MODEL — THREE INVARIANTS, THREE MECHANISMS, NO SUBSTITUTIONS.
+ *
+ * R9 ended the attempt to prove secrecy by trapping every way of reading an
+ * object. That claim is not defensible in JavaScript: `util.inspect` reaches a
+ * Proxy's target without firing a trap AND renders an accessor as `[Getter]`
+ * without invoking it; `Object.getOwnPropertyDescriptor(x, p).value` hands over
+ * the value on a plain object; a persisted field the harness fixture does not
+ * define cannot be observed by an accessor at all. Enumerating that surface is
+ * not a winnable strategy, so it is no longer the claimed invariant.
+ *
+ *   E2A-S8A  SOURCE DISCIPLINE. The projection should not consult forbidden
+ *            persistence sources while building the DTO.
+ *            Mechanism: the Proxy / accessor instrumentation.
+ *   E2A-S8B  OUTPUT SECRECY — the actual security property. Frozen report content
+ *            must never appear in the SERIALIZED response. Mechanism: a unique
+ *            canary inside real frozen content, scanned in the fully materialized
+ *            body by the central request helper. Operation-independent by
+ *            construction: it does not care which primitive produced the value,
+ *            including primitives nobody here has thought of.
+ *   E2A-S8C  DTO CONTRACT. The response conforms to the approved metadata shape.
+ *            Mechanism: deep response-shape assertions.
+ *
+ * WHAT EACH DOES NOT PROVE, stated because conflating them is how the last three
+ * rounds went wrong. S8B does NOT prove source non-access: a route could inspect
+ * secret data and choose not to return it, and only S8A sees that. S8A does NOT
+ * prove the response is clean: a value obtained through an unobservable primitive
+ * would reach the body unseen, and only S8B catches it. S8C catches a shape
+ * violation that leaks nothing. The three are complementary, and the record mode
+ * matters: the canary is only meaningful against a PRODUCTION-SHAPED plain record,
+ * which is why the context matrix runs in `plain` mode as well as the two
+ * instrumented ones.
+ *
+ * SUPPORTING STRUCTURE, AND NO ONE PIECE PROVES THE WHOLE:
  *   1. BOUNDARY INSTRUMENTATION — every list result is wrapped inside the module
  *      mock, so no test can opt out of being instrumented.
  *   2. ACCESS DETECTION — two modes, each covering the operation classes it has
@@ -253,17 +285,24 @@
  *      dominates universally and the division of labour is measured, not asserted:
  *      a MECHANISM PROOF test shows `Object.keys` fires the Proxy and not the
  *      accessor.
- *   5. A REQUEST/AUTHORITY CONTEXT MATRIX — 21 rows covering every branch that can
- *      influence DTO construction or which properties are consulted, including the
- *      creator-self case, each running under the accessor default.
- *   6. A MONOTONIC WITNESS — the postcondition's authority is a counter held in a
- *      closure that can only be incremented, not the diagnostic arrays. `const` and
- *      an identity assertion stop the sink being REBOUND; they do not stop it being
- *      CLEARED, and I verified that an inner `afterEach` clearing it hid a
- *      creator-self leak completely. The witness closes that. Residual, stated
- *      plainly: a spec author who rewrites this harness can always defeat it — no
- *      in-file mechanism can stop its own file. What is now structurally impossible
- *      is the failure that actually happened repeatedly here: forgetting.
+ *   5. A REQUEST/AUTHORITY CONTEXT MATRIX — 20 rows covering the REQUEST and
+ *      AUTHORITY branches, including the creator-self case, each running under all
+ *      three record modes and each PROVING ITS OWN PRECONDITION before any security
+ *      assertion (R9 found a row could be neutered and still pass). Scoped
+ *      deliberately: record-SHAPE branches such as `format: "docx"` and
+ *      present-but-hashless `exportMetadata` live in the separate input-class
+ *      table, and source-OPERATION classes live in the Proxy matrix. No single
+ *      table is exhaustive across all three axes, and none claims to be.
+ *   6. A PER-REQUEST PRIVATE WITNESS. Enforcement lives INSIDE the central request
+ *      helper, asserted against a `const` sink local to that one invocation. There
+ *      is no module-level witness left to reach. R8 defeated a reassignable sink;
+ *      R9 then defeated the `const` sink plus monotonic counter that replaced it,
+ *      by re-marking the module-level baseline the counter was COMPARED TO. Fixing
+ *      the operand would only have moved the target again, so the whole category is
+ *      gone: a test receives the response, never control of the witness. Residual,
+ *      stated plainly: a spec author who rewrites this harness can still defeat it —
+ *      no in-file mechanism can stop its own file — but forgetting, which is what
+ *      actually happened repeatedly here, is now structurally impossible.
  *   Also: an ALLOWED CONTAINER IS NOT AN ALLOWED SUBTREE. `exportMetadata` is
  *   trapped one level deep with its own allow-list (`fileHash` only), because a
  *   depth-1 policy could not see `exportMetadata.requestingUser`.

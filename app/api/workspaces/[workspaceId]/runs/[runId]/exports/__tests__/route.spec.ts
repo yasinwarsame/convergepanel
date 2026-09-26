@@ -919,8 +919,11 @@ const FORBIDDEN_SOURCE_PROPS: readonly string[] = [
  * level and nested are now separate arrays, so the policy compares exact property
  * names with no syntax heuristic of any kind.
  */
-type AccessSink = { reads: string[]; nested: string[]; forbidden: string[]; enumerations: string[] };
-const newSink = (): AccessSink => ({ reads: [], nested: [], forbidden: [], enumerations: [] });
+// §24: no field here exists without a test consuming it. An earlier `nested`
+// array was written and never asserted; off-policy nested reads already land in
+// `forbidden` via the container trap, so it added nothing and is gone.
+type AccessSink = { reads: string[]; forbidden: string[]; enumerations: string[] };
+const newSink = (): AccessSink => ({ reads: [], forbidden: [], enumerations: [] });
 
 /**
  * R10 §6/§7 — THE SECURITY WITNESS IS PER-REQUEST AND PRIVATE.
@@ -998,7 +1001,6 @@ const trapContainer = (value: unknown, label: string, allowed: readonly string[]
   return new Proxy(value as Record<string, unknown>, {
     get(target, prop, receiver) {
       if (typeof prop === "string") {
-        sink.nested.push(`${label}:${prop}`); // structural: never mixed with top-level names
         if (!allowed.includes(prop)) { sink.forbidden.push(`${label}:${prop}`); /* witness is per-request now */ }
       }
       return Reflect.get(target, prop, receiver);
@@ -1197,7 +1199,7 @@ describe("E2-A — the authorized list path", () => {
       "SENTINEL_FAILURE_REASON",       // failureReason
       "SENTINEL_EXPORTED_SECTION",     // exportMetadata.exportedSections
       "SENTINEL_REQUESTING_USER",      // exportMetadata.requestingUser
-      ...allSnapshotSentinels(),       // every reportSnapshot leaf, both families
+      ...allSnapshotSentinels(),       // every ENUMERATED snapshot sentinel, both families
     ]) {
       expect(blob).not.toContain(sentinel);
     }
@@ -2070,10 +2072,11 @@ describe("E2A-S15 — the paging envelope is never self-contradictory", () => {
     // Contractual, and asserted on its STRUCTURED fields. Stated precisely, because
     // an earlier revision said "not its prose" and that was an over-claim: the
     // message substring is the SELECTOR that picks this warn out of the six, so a
-    // benign reword does fail these tests (measured: 4). Direction of error is
-    // benign — a false alarm on a reword, never a missed signal — and the payload
-    // assertion is what carries the contract: dropping a structured field fails the
-    // named test (measured: 2). No stable structured event/discriminator field
+    // benign reword does fail these tests. Direction of error is benign — a false
+    // alarm on a reword, never a missed signal — and the payload assertion is what
+    // carries the contract: dropping a structured field fails this named test.
+    // (Durable prose carries no mutation counts; those belong in review reports,
+    // where their scope is stated.) No stable structured event/discriminator field
     // exists on these calls to select by instead, so the substring is the least-bad
     // selector rather than a claim that prose is uncoupled.
     mockedListExports.mockImplementation(listFake([exportRecord(3, { reportVersion: Number.NaN })], true));
