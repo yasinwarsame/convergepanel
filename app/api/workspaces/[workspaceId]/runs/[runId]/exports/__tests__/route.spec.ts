@@ -1153,7 +1153,7 @@ const trapRecord = (record: Record<string, unknown>, label: string, sink: Access
     get(target, prop, receiver) {
       if (typeof prop === "string") {
         sink.reads.push(prop);
-        
+
         if (FORBIDDEN_SOURCE_PROPS.includes(prop)) { sink.forbidden.push(`${label}.${prop}`); /* witness is per-request now */ }
         if (prop === "exportMetadata") {
           return trapContainer(Reflect.get(target, prop, receiver), `${label}.exportMetadata`, ALLOWED_EXPORT_METADATA_PROPS, sink);
