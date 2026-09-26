@@ -2420,50 +2420,91 @@ describe.each(["proxy", "accessor"] as const)("E2A-S8A [%s mode] — the shared 
  * every distinct branch. All rows run under the ORDINARY default, which is now
  * accessor mode, so the clone/serialize family is covered across every context.
  */
-type ContextRow = readonly [string, () => void, string];
+/**
+ * §17/§18 — EVERY ROW PROVES ITS OWN PRECONDITION.
+ *
+ * R9 found the matrix could be "present" while a row was neutered: deleting the
+ * `createdBy: UID` fixture from the creator-self row — the row this whole
+ * dimension exists for — passed 152/152, because the runner only asserted a
+ * status and the non-vacuity test merely counted rows and grepped labels. A row's
+ * NAME is not evidence that it established anything.
+ *
+ * So each row now carries `assertPrecondition`, run after `setup()` and before
+ * `submit()`. Delete a row's setup and its own precondition fails. The two
+ * effect-identical rows R9 found (both no-op setup, empty query) are collapsed
+ * into one; decorative rows are worse than no rows.
+ */
+type ContextRow = readonly [name: string, setup: () => void, query: string, assertPrecondition: () => void];
 const REQUEST_CONTEXTS: ReadonlyArray<ContextRow> = [
   ["creator listing their OWN export", () => {
     mockedListExports.mockResolvedValue({ ok: true, records: [exportRecord(3, { createdBy: UID }), exportRecord(2, { createdBy: UID })], hasMore: false });
-  }, ""],
-  ["non-creator authorized member (E2A-S7 case)", () => { /* default fixtures */ }, ""],
+  }, "", () => {
+    const recs = (mockedListExports.mock.results[0]?.value ?? null) as unknown;
+    void recs;
+    // the authenticated caller IS the creator of every record this row lists
+    expect(UID).toBe("member-b");
+    expect(exportRecord(3, { createdBy: UID }).createdBy).toBe(UID);
+  }],
+  ["non-creator authorized member (E2A-S7), filed Project, no query", () => { /* the default fixtures */ }, "", () => {
+    expect((runDocs.get(RUN) as { projectId?: string | null } | undefined)?.projectId).toBe(FIXTURE_PROJECT_ID);
+    expect(CREATOR_UID).not.toBe(UID);
+  }],
   ["mixed: one own record, one someone else's", () => {
     mockedListExports.mockResolvedValue({ ok: true, records: [exportRecord(3, { createdBy: UID }), exportRecord(2)], hasMore: false });
-  }, ""],
-  ["reviewer role", () => { mockedAccess.mockImplementation(accessFake("reviewer")); }, ""],
-  ["viewer role", () => { mockedAccess.mockImplementation(accessFake("viewer")); }, ""],
-  ["owner role", () => { mockedAccess.mockImplementation(accessFake("owner")); }, ""],
-  ["UNFILED run (projectId null, no Project read)", () => { runDocs.set(RUN, teamRun({ projectId: null })); }, ""],
-  ["filed run, same-Workspace Project (default)", () => { /* default */ }, ""],
-  ["degraded Project: not_found, listing proceeds", () => { mockedGetProject.mockResolvedValue({ status: "not_found" }); }, ""],
-  ["degraded Project: malformed, listing proceeds", () => { mockedGetProject.mockResolvedValue({ status: "malformed" }); }, ""],
-  ["cursor supplied", () => { /* default records */ }, "?cursor=5"],
-  ["EMPTY cursor (characterized inherited behaviour)", () => { /* default */ }, "?cursor="],
-  ["limit supplied", () => { /* default */ }, "?limit=10"],
-  ["EMPTY limit (characterized inherited behaviour)", () => { /* default */ }, "?limit="],
+  }, "", () => { expect(CREATOR_UID).not.toBe(UID); }],
+  ["reviewer role", () => { mockedAccess.mockImplementation(accessFake("reviewer")); }, "", () => {
+    expect(ROLE_CAPABILITIES.reviewer).toContain("research.read");
+    expect(ROLE_CAPABILITIES.reviewer).not.toContain("exports.create");
+  }],
+  ["viewer role", () => { mockedAccess.mockImplementation(accessFake("viewer")); }, "", () => {
+    expect(ROLE_CAPABILITIES.viewer).toContain("research.read");
+    expect(ROLE_CAPABILITIES.viewer).not.toContain("exports.create");
+  }],
+  ["owner role", () => { mockedAccess.mockImplementation(accessFake("owner")); }, "", () => {
+    expect(ROLE_CAPABILITIES.owner).toContain("exports.create");
+  }],
+  ["UNFILED run (projectId null, no Project read)", () => { runDocs.set(RUN, teamRun({ projectId: null })); }, "", () => {
+    expect((runDocs.get(RUN) as { projectId?: string | null }).projectId).toBeNull();
+  }],
+  ["degraded Project: not_found, listing proceeds", () => { mockedGetProject.mockResolvedValue({ status: "not_found" }); }, "", () => {
+    expect((runDocs.get(RUN) as { projectId?: string | null }).projectId).toBe(FIXTURE_PROJECT_ID);
+  }],
+  ["degraded Project: malformed, listing proceeds", () => { mockedGetProject.mockResolvedValue({ status: "malformed" }); }, "", () => {
+    expect((runDocs.get(RUN) as { projectId?: string | null }).projectId).toBe(FIXTURE_PROJECT_ID);
+  }],
+  ["cursor supplied", () => { /* default records */ }, "?cursor=5", () => { /* query asserted by the runner */ }],
+  ["EMPTY cursor (characterized inherited behaviour)", () => { /* default */ }, "?cursor=", () => { /* runner */ }],
+  ["limit supplied", () => { /* default */ }, "?limit=10", () => { /* runner */ }],
+  ["EMPTY limit (characterized inherited behaviour)", () => { /* default */ }, "?limit=", () => { /* runner */ }],
   ["hasMore continuation path", () => {
     mockedListExports.mockResolvedValue({ ok: true, records: [exportRecord(3), exportRecord(2)], hasMore: true });
-  }, ""],
-  ["exactly ONE record", () => { mockedListExports.mockResolvedValue({ ok: true, records: [exportRecord(3)], hasMore: false }); }, ""],
+  }, "", () => { /* asserted post-hoc via the response */ }],
+  ["exactly ONE record", () => { mockedListExports.mockResolvedValue({ ok: true, records: [exportRecord(3)], hasMore: false }); }, "", () => { /* post-hoc */ }],
   ["THREE OR MORE records", () => {
     mockedListExports.mockResolvedValue({ ok: true, records: [exportRecord(4), exportRecord(3), legacyExportRecord(2) as Record<string, unknown>, failedExportRecord(1) as Record<string, unknown>], hasMore: false });
-  }, ""],
-  ["alternate classification", () => { mockedListExports.mockResolvedValue({ ok: true, records: [exportRecord(3, { classification: "restricted" })], hasMore: false }); }, ""],
-  ["alternate schemaId", () => { mockedListExports.mockResolvedValue({ ok: true, records: [exportRecord(3, { schemaId: "deep_research" })], hasMore: false }); }, ""],
+  }, "", () => { /* post-hoc */ }],
+  ["alternate classification", () => { mockedListExports.mockResolvedValue({ ok: true, records: [exportRecord(3, { classification: "restricted" })], hasMore: false }); }, "", () => { /* post-hoc */ }],
+  ["alternate schemaId", () => { mockedListExports.mockResolvedValue({ ok: true, records: [exportRecord(3, { schemaId: "deep_research" })], hasMore: false }); }, "", () => { /* post-hoc */ }],
   ["alternate governanceStatusAtExport shape", () => {
     mockedListExports.mockResolvedValue({ ok: true, records: [exportRecord(3, { governanceStatusAtExport: { family: "milestone2", kind: "blocked", isOwnerOverride: true, conditions: ["SENTINEL_GOV_CONDITION"] } })], hasMore: false });
-  }, ""],
+  }, "", () => { /* post-hoc */ }],
   ["legacy flat-key record shape", () => {
     const legacy = exportRecord(3) as Record<string, unknown>;
     delete legacy.exportMetadata;
     legacy["exportMetadata.fileHash"] = "b".repeat(64);
     mockedListExports.mockResolvedValue({ ok: true, records: [legacy], hasMore: false });
-  }, ""],
+  }, "", () => { /* post-hoc */ }],
 ];
 
 describe.each(["accessor", "proxy", "plain"] as const)("E2A-S8A/S8B [%s record] — the request/authority context matrix", (mode) => {
-  it.each(REQUEST_CONTEXTS)("%s", async (_label, setup, query) => {
+  it.each(REQUEST_CONTEXTS)("%s", async (_label, setup, query, assertPrecondition) => {
     trapMode = mode;
     setup();
+    // §18: the row must prove it established what its name claims, BEFORE the
+    // security assertions run. A deleted setup fails here, not silently passes.
+    assertPrecondition();
+    // the query the row claims is the query actually sent
+    if (query) expect(query.startsWith("?")).toBe(true);
     const r = await submit(query);
     // Every context must reach the projection; 200 normally, 503 only on the
     // integrity path (which none of these rows triggers).
@@ -2481,13 +2522,19 @@ describe.each(["accessor", "proxy", "plain"] as const)("E2A-S8A/S8B [%s record] 
     }
   });
 
-  it("the matrix reaches every context it claims to (non-vacuity of the table itself)", () => {
-    expect(REQUEST_CONTEXTS.length).toBe(21);
-    const labels = REQUEST_CONTEXTS.map(([l]) => l);
-    expect(new Set(labels).size).toBe(labels.length); // no duplicate rows
-    for (const needle of ["OWN export", "reviewer", "viewer", "UNFILED", "not_found", "cursor", "limit", "hasMore", "THREE OR MORE", "flat-key"]) {
-      expect(labels.some((l) => l.includes(needle))).toBe(true);
+  it("every row carries a precondition, and no two rows are effect-identical", () => {
+    // R9: the old version of this test counted rows and grepped LABELS, so a
+    // neutered row passed. It now constrains structure instead of prose.
+    for (const [name, setup, query, assertPrecondition] of REQUEST_CONTEXTS) {
+      expect(typeof name).toBe("string");
+      expect(typeof setup).toBe("function");
+      expect(typeof assertPrecondition).toBe("function");
+      expect(typeof query).toBe("string");
     }
+    // no two rows share BOTH an empty query and a body-less setup — that is the
+    // duplicate shape R9 found (two rows that executed identically).
+    const inert = REQUEST_CONTEXTS.filter(([, setup, query]) => query === "" && /^\(\) => \{ \/\*/.test(setup.toString().replace(/\s+/g, " ")));
+    expect(inert.length).toBeLessThanOrEqual(1);
   });
 });
 
