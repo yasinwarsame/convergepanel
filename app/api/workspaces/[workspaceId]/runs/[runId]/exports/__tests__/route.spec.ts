@@ -895,10 +895,30 @@ const accessFake = (role: "owner" | "admin" | "member" | "reviewer" | "viewer" =
     args.uid === UID && args.workspaceId === WS ? grant(role) : { granted: false, reason: "membership_not_found" };
 
 /** The run's OWN Project resolves inside this Workspace; ANY other id resolves to a Project of another Workspace, so reading the wrong document is visibly concealed rather than silently tolerated. */
-const projectFake = async (projectId: string) =>
-  projectId === FIXTURE_PROJECT_ID
-    ? { status: "found", project: { id: FIXTURE_PROJECT_ID, name: "P", status: "active", workspaceId: WS } }
-    : { status: "found", project: { id: String(projectId), name: "Foreign", status: "active", workspaceId: OTHER_WS } };
+/**
+ * R11 §44 — WHY THE FALLBACK IS `not_found` AND NOT A FOREIGN PROJECT.
+ *
+ * The previous fallback returned a FOUND project in ANOTHER Workspace for ANY id it
+ * had not been configured with, which quietly made this fake a CONCEALMENT ORACLE.
+ * Disabling the route's row-shape refusal left `validated.projectId` as `undefined`
+ * for every request; `undefined !== null` entered this read; the fallback answered
+ * with a foreign project; and the route re-concealed with a byte-identical 404. So
+ * "E2A-S6 CROSS-WORKSPACE: a run bound to another Workspace is concealed and never
+ * listed" passed with the refusal REMOVED — it was satisfied for the wrong reason,
+ * and the invariant it names was not pinned at all. R10's reviewer found this and
+ * the mutation was verified SURVIVED before this change.
+ *
+ * An id this harness never configured now resolves the way production would: the
+ * document does not exist, so `not_found`. Removing the refusal then lets the run
+ * LIST (the route deliberately proceeds past `not_found`), which is exactly what
+ * the cross-Workspace test must refuse. The two ids it IS configured with keep
+ * their argument-sensitive behaviour, each with its own CONTROL test.
+ */
+const projectFake = async (projectId: string) => {
+  if (projectId === FIXTURE_PROJECT_ID) return { status: "found", project: { id: FIXTURE_PROJECT_ID, name: "P", status: "active", workspaceId: WS } };
+  if (projectId === OTHER_PROJECT_ID) return { status: "found", project: { id: OTHER_PROJECT_ID, name: "Foreign", status: "active", workspaceId: OTHER_WS } };
+  return { status: "not_found" };
+};
 
 /** History exists for the ADDRESSED run only — a helper that returns the same records for any runId would hide a cross-run read. */
 /** Raw logical results only — instrumentation is applied at the mock boundary above, so this helper cannot opt out and neither can any other call site. */
@@ -1281,6 +1301,15 @@ const assertResponseSecrecy = (res: Response, bodyText: string, canaries: Readon
  * `conditions`, so `governanceStatusAtExport.meta = <report data>` fails even
  * though every top-level item key is untouched.
  *
+ * TWO CARRIERS, DIFFERENT BREADTH — measured, not assumed. With this validator AND
+ * the response-secrecy scan both disabled, a nested extra under
+ * `governanceStatusAtExport` is still caught, by the two explicit deep-equality
+ * tests. They are not redundant with each other and neither is claimed to subsume
+ * the other: those tests pin TWO exact expected responses in full, while this
+ * validator is what makes S8C unconditional across every successful response the
+ * suite produces — including the ones no test wrote an expectation for, which is
+ * where R7's `reportVersion === 0` leak lived.
+ *
  * SCOPED HONESTLY. Types are asserted where the contract makes them stable: the
  * envelope, the route-MINTED hash trio, the `schemaFamily` union, and the shape of
  * the one nested object. Blind-copied scalars (`reportVersion`, `createdAt`,
@@ -1655,6 +1684,20 @@ describe("E2-A — authority ordering", () => {
     const r = await submit();
     expect(r.status).toBe(404);
     expect(r.json.errorCode).toBe("run_not_found");
+    expect(mockedListExports).not.toHaveBeenCalled();
+  });
+
+  it("E2A-S6 the ROW-SHAPE REFUSAL is what conceals a foreign run — not the Project read", async () => {
+    // §44/R10 P2-3: the test above cannot tell the two mechanisms apart, because a
+    // run bound to another Workspace also carries a Project id, and removing the
+    // refusal re-concealed through the Project branch. Here the Project read is
+    // proven not to be the concealer: it is never reached at all, so only
+    // `validateTeamRunRowShape` can be responsible for the 404.
+    runDocs.set(RUN, teamRun({ workspaceId: OTHER_WS }));
+    const r = await submit();
+    expect(r.status).toBe(404);
+    expect(r.json.errorCode).toBe("run_not_found");
+    expect(mockedGetProject).not.toHaveBeenCalled();
     expect(mockedListExports).not.toHaveBeenCalled();
   });
 
