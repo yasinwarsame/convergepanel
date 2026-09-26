@@ -1720,6 +1720,14 @@ const submitRequest = async (req: NextRequest, workspaceId = WS, runId = RUN) =>
   } finally {
     // §33 — removes ONLY this request's entry. There is no shared slot to null out, so
     // this cannot touch a concurrent invocation's context.
+    //
+    // CLASSIFIED HONESTLY: removing this line is an EQUIVALENT MUTANT, measured. It is
+    // hygiene, not a security boundary — one-entry consumption already refuses a second
+    // route entry on the same request whether or not the registration is still present,
+    // and a `WeakMap` releases the entry once the request is unreachable. It is kept
+    // because leaving per-request state registered after the request is over is worse
+    // practice than deleting it, and it is NOT decorated with a test that could only
+    // pass by manufacturing a distinction that does not exist.
     secureInvocations.delete(req);
   }
 };
@@ -1782,6 +1790,36 @@ beforeEach(resetHarnessState);
  */
 afterEach(() => {
   expect(`securedContextLeakedOutsideItsFlow:${currentInvocation() !== undefined}`).toBe("securedContextLeakedOutsideItsFlow:false");
+});
+
+/**
+ * ...and the DETECTOR that postcondition depends on is itself falsified here, because
+ * an assertion that cannot fail is the defect this whole series keeps rediscovering.
+ * Removing the `afterEach` above is an EQUIVALENT MUTANT — measured — since
+ * `AsyncLocalStorage` makes the leak it watches for structurally impossible under this
+ * runtime. That is stated rather than hidden: the hook is a tripwire for an assumption,
+ * and what is proven below is that the tripwire can tell the two states apart at all.
+ */
+describe("R13 — the secured-context detector", () => {
+  it("distinguishes inside a secured flow from outside it", () => {
+    expect(`outsideAnyFlow:${currentInvocation() === undefined}`).toBe("outsideAnyFlow:true");
+    const probe = newInvocationContext("detector-probe");
+    const seen = invocationStore.run(probe, () => currentInvocation());
+    expect(`insideTheFlow:${seen === probe}`).toBe("insideTheFlow:true");
+    expect(`afterTheFlow:${currentInvocation() === undefined}`).toBe("afterTheFlow:true");
+  });
+
+  it("two nested flows do not see each other's context", () => {
+    const outer = newInvocationContext("outer");
+    const inner = newInvocationContext("inner");
+    const observed = invocationStore.run(outer, () => {
+      const a = currentInvocation();
+      const b = invocationStore.run(inner, () => currentInvocation());
+      const c = currentInvocation();
+      return [a === outer, b === inner, c === outer];
+    });
+    expect(`outerThenInnerThenOuter:${observed.join(",")}`).toBe("outerThenInnerThenOuter:true,true,true");
+  });
 });
 
 describe("E2-A — the authorized list path", () => {
