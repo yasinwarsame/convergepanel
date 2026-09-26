@@ -2434,66 +2434,127 @@ describe.each(["proxy", "accessor"] as const)("E2A-S8A [%s mode] — the shared 
  * effect-identical rows R9 found (both no-op setup, empty query) are collapsed
  * into one; decorative rows are worse than no rows.
  */
-type ContextRow = readonly [name: string, setup: () => void, query: string, assertPrecondition: () => void];
+/**
+ * §18 — A PRECONDITION MUST OBSERVE WHAT `setup()` CONFIGURED.
+ *
+ * My first attempt at this asserted things like `UID === "member-b"` and
+ * `ROLE_CAPABILITIES.reviewer` — true regardless of setup, so neutering four of
+ * five critical rows still passed. That is the same vacuity this whole series has
+ * been chasing, authored fresh. These helpers interrogate the LIVE mocks and then
+ * un-record the peek, so assertions elsewhere about call arguments are unaffected.
+ */
+const unrecordSince = (m: jest.Mock, before: number) => {
+  m.mock.calls.length = before;
+  m.mock.results.length = before;
+};
+const peekRecords = async (): Promise<Record<string, unknown>[]> => {
+  const before = mockedListExports.mock.calls.length;
+  const res = (await mockedListExports(RUN, {})) as { records?: Record<string, unknown>[] };
+  unrecordSince(mockedListExports, before);
+  return res.records ?? [];
+};
+const peekRole = async (): Promise<string> => {
+  const before = mockedAccess.mock.calls.length;
+  const res = (await mockedAccess({ uid: UID, workspaceId: WS })) as { membership?: { role?: string } };
+  unrecordSince(mockedAccess, before);
+  return res.membership?.role ?? "<denied>";
+};
+const peekProjectStatus = async (): Promise<string> => {
+  const before = mockedGetProject.mock.calls.length;
+  const res = (await mockedGetProject(FIXTURE_PROJECT_ID)) as { status?: string };
+  unrecordSince(mockedGetProject, before);
+  return res.status ?? "<none>";
+};
+const listing = (records: Record<string, unknown>[], hasMore = false) => () => {
+  mockedListExports.mockResolvedValue({ ok: true, records, hasMore });
+};
+
+type ContextRow = readonly [name: string, setup: () => void, query: string, assertPrecondition: (query: string) => Promise<void>];
+
+/**
+ * §4/§17 — THE REQUEST/AUTHORITY CONTEXT MATRIX. Every row proves its own
+ * precondition before any security assertion runs, so deleting a row's setup
+ * fails that row rather than silently passing — which is exactly what R9 found.
+ * Run under all three record modes; the duplicate row R9 identified is gone.
+ */
 const REQUEST_CONTEXTS: ReadonlyArray<ContextRow> = [
-  ["creator listing their OWN export", () => {
-    mockedListExports.mockResolvedValue({ ok: true, records: [exportRecord(3, { createdBy: UID }), exportRecord(2, { createdBy: UID })], hasMore: false });
-  }, "", () => {
-    const recs = (mockedListExports.mock.results[0]?.value ?? null) as unknown;
-    void recs;
-    // the authenticated caller IS the creator of every record this row lists
-    expect(UID).toBe("member-b");
-    expect(exportRecord(3, { createdBy: UID }).createdBy).toBe(UID);
-  }],
-  ["non-creator authorized member (E2A-S7), filed Project, no query", () => { /* the default fixtures */ }, "", () => {
-    expect((runDocs.get(RUN) as { projectId?: string | null } | undefined)?.projectId).toBe(FIXTURE_PROJECT_ID);
-    expect(CREATOR_UID).not.toBe(UID);
-  }],
-  ["mixed: one own record, one someone else's", () => {
-    mockedListExports.mockResolvedValue({ ok: true, records: [exportRecord(3, { createdBy: UID }), exportRecord(2)], hasMore: false });
-  }, "", () => { expect(CREATOR_UID).not.toBe(UID); }],
-  ["reviewer role", () => { mockedAccess.mockImplementation(accessFake("reviewer")); }, "", () => {
-    expect(ROLE_CAPABILITIES.reviewer).toContain("research.read");
-    expect(ROLE_CAPABILITIES.reviewer).not.toContain("exports.create");
-  }],
-  ["viewer role", () => { mockedAccess.mockImplementation(accessFake("viewer")); }, "", () => {
-    expect(ROLE_CAPABILITIES.viewer).toContain("research.read");
-    expect(ROLE_CAPABILITIES.viewer).not.toContain("exports.create");
-  }],
-  ["owner role", () => { mockedAccess.mockImplementation(accessFake("owner")); }, "", () => {
-    expect(ROLE_CAPABILITIES.owner).toContain("exports.create");
-  }],
-  ["UNFILED run (projectId null, no Project read)", () => { runDocs.set(RUN, teamRun({ projectId: null })); }, "", () => {
-    expect((runDocs.get(RUN) as { projectId?: string | null }).projectId).toBeNull();
-  }],
-  ["degraded Project: not_found, listing proceeds", () => { mockedGetProject.mockResolvedValue({ status: "not_found" }); }, "", () => {
-    expect((runDocs.get(RUN) as { projectId?: string | null }).projectId).toBe(FIXTURE_PROJECT_ID);
-  }],
-  ["degraded Project: malformed, listing proceeds", () => { mockedGetProject.mockResolvedValue({ status: "malformed" }); }, "", () => {
-    expect((runDocs.get(RUN) as { projectId?: string | null }).projectId).toBe(FIXTURE_PROJECT_ID);
-  }],
-  ["cursor supplied", () => { /* default records */ }, "?cursor=5", () => { /* query asserted by the runner */ }],
-  ["EMPTY cursor (characterized inherited behaviour)", () => { /* default */ }, "?cursor=", () => { /* runner */ }],
-  ["limit supplied", () => { /* default */ }, "?limit=10", () => { /* runner */ }],
-  ["EMPTY limit (characterized inherited behaviour)", () => { /* default */ }, "?limit=", () => { /* runner */ }],
-  ["hasMore continuation path", () => {
-    mockedListExports.mockResolvedValue({ ok: true, records: [exportRecord(3), exportRecord(2)], hasMore: true });
-  }, "", () => { /* asserted post-hoc via the response */ }],
-  ["exactly ONE record", () => { mockedListExports.mockResolvedValue({ ok: true, records: [exportRecord(3)], hasMore: false }); }, "", () => { /* post-hoc */ }],
-  ["THREE OR MORE records", () => {
-    mockedListExports.mockResolvedValue({ ok: true, records: [exportRecord(4), exportRecord(3), legacyExportRecord(2) as Record<string, unknown>, failedExportRecord(1) as Record<string, unknown>], hasMore: false });
-  }, "", () => { /* post-hoc */ }],
-  ["alternate classification", () => { mockedListExports.mockResolvedValue({ ok: true, records: [exportRecord(3, { classification: "restricted" })], hasMore: false }); }, "", () => { /* post-hoc */ }],
-  ["alternate schemaId", () => { mockedListExports.mockResolvedValue({ ok: true, records: [exportRecord(3, { schemaId: "deep_research" })], hasMore: false }); }, "", () => { /* post-hoc */ }],
-  ["alternate governanceStatusAtExport shape", () => {
-    mockedListExports.mockResolvedValue({ ok: true, records: [exportRecord(3, { governanceStatusAtExport: { family: "milestone2", kind: "blocked", isOwnerOverride: true, conditions: ["SENTINEL_GOV_CONDITION"] } })], hasMore: false });
-  }, "", () => { /* post-hoc */ }],
-  ["legacy flat-key record shape", () => {
-    const legacy = exportRecord(3) as Record<string, unknown>;
-    delete legacy.exportMetadata;
-    legacy["exportMetadata.fileHash"] = "b".repeat(64);
-    mockedListExports.mockResolvedValue({ ok: true, records: [legacy], hasMore: false });
-  }, "", () => { /* post-hoc */ }],
+  ["creator listing their OWN export",
+    listing([exportRecord(3, { createdBy: UID }), exportRecord(2, { createdBy: UID })]), "",
+    async () => {
+      const recs = await peekRecords();
+      expect(recs.length).toBeGreaterThan(0);
+      expect(recs.every((rec) => rec.createdBy === UID)).toBe(true);
+    }],
+  ["non-creator authorized member (E2A-S7), filed Project, no query",
+    () => { /* the default fixtures */ }, "",
+    async () => {
+      expect((runDocs.get(RUN) as { projectId?: string | null } | undefined)?.projectId).toBe(FIXTURE_PROJECT_ID);
+      const recs = await peekRecords();
+      expect(recs.length).toBeGreaterThan(0);
+      expect(recs.every((rec) => rec.createdBy !== UID)).toBe(true);
+    }],
+  ["mixed: one own record, one someone else's",
+    listing([exportRecord(3, { createdBy: UID }), exportRecord(2)]), "",
+    async () => {
+      const recs = await peekRecords();
+      expect(recs.some((rec) => rec.createdBy === UID)).toBe(true);
+      expect(recs.some((rec) => rec.createdBy !== UID)).toBe(true);
+    }],
+  ["reviewer role", () => { mockedAccess.mockImplementation(accessFake("reviewer")); }, "",
+    async () => { expect(await peekRole()).toBe("reviewer"); }],
+  ["viewer role", () => { mockedAccess.mockImplementation(accessFake("viewer")); }, "",
+    async () => { expect(await peekRole()).toBe("viewer"); }],
+  ["owner role", () => { mockedAccess.mockImplementation(accessFake("owner")); }, "",
+    async () => { expect(await peekRole()).toBe("owner"); }],
+  ["UNFILED run (projectId null, no Project read)",
+    () => { runDocs.set(RUN, teamRun({ projectId: null })); }, "",
+    async () => { expect((runDocs.get(RUN) as { projectId?: string | null }).projectId).toBeNull(); }],
+  ["degraded Project: not_found, listing proceeds",
+    () => { mockedGetProject.mockResolvedValue({ status: "not_found" }); }, "",
+    async () => { expect(await peekProjectStatus()).toBe("not_found"); }],
+  ["degraded Project: malformed, listing proceeds",
+    () => { mockedGetProject.mockResolvedValue({ status: "malformed" }); }, "",
+    async () => { expect(await peekProjectStatus()).toBe("malformed"); }],
+  ["cursor supplied", () => { /* default records */ }, "?cursor=5",
+    async (q) => { expect(q).toBe("?cursor=5"); }],
+  ["EMPTY cursor (characterized inherited behaviour)", () => { /* default */ }, "?cursor=",
+    async (q) => { expect(q).toBe("?cursor="); }],
+  ["limit supplied", () => { /* default */ }, "?limit=10",
+    async (q) => { expect(q).toBe("?limit=10"); }],
+  ["EMPTY limit (characterized inherited behaviour)", () => { /* default */ }, "?limit=",
+    async (q) => { expect(q).toBe("?limit="); }],
+  ["hasMore continuation path",
+    listing([exportRecord(3), exportRecord(2)], true), "",
+    async () => {
+      const before = mockedListExports.mock.calls.length;
+      const res = (await mockedListExports(RUN, {})) as { hasMore?: boolean };
+      unrecordSince(mockedListExports, before);
+      expect(res.hasMore).toBe(true);
+    }],
+  ["exactly ONE record", listing([exportRecord(3)]), "",
+    async () => { expect((await peekRecords()).length).toBe(1); }],
+  ["THREE OR MORE records",
+    listing([exportRecord(4), exportRecord(3), legacyExportRecord(2) as Record<string, unknown>, failedExportRecord(1) as Record<string, unknown>]), "",
+    async () => { expect((await peekRecords()).length).toBeGreaterThanOrEqual(3); }],
+  ["alternate classification", listing([exportRecord(3, { classification: "restricted" })]), "",
+    async () => { expect((await peekRecords())[0].classification).toBe("restricted"); }],
+  ["alternate schemaId", listing([exportRecord(3, { schemaId: "deep_research" })]), "",
+    async () => { expect((await peekRecords())[0].schemaId).toBe("deep_research"); }],
+  ["alternate governanceStatusAtExport shape",
+    listing([exportRecord(3, { governanceStatusAtExport: { family: "milestone2", kind: "blocked", isOwnerOverride: true, conditions: ["SENTINEL_GOV_CONDITION"] } })]), "",
+    async () => { expect(((await peekRecords())[0].governanceStatusAtExport as { kind?: string }).kind).toBe("blocked"); }],
+  ["legacy flat-key record shape",
+    () => {
+      const legacy = exportRecord(3) as Record<string, unknown>;
+      delete legacy.exportMetadata;
+      legacy["exportMetadata.fileHash"] = "b".repeat(64);
+      mockedListExports.mockResolvedValue({ ok: true, records: [legacy], hasMore: false });
+    }, "",
+    async () => {
+      const r0 = (await peekRecords())[0];
+      expect(r0.exportMetadata).toBeUndefined();
+      expect(r0["exportMetadata.fileHash"]).toBeDefined();
+    }],
 ];
 
 describe.each(["accessor", "proxy", "plain"] as const)("E2A-S8A/S8B [%s record] — the request/authority context matrix", (mode) => {
@@ -2502,9 +2563,7 @@ describe.each(["accessor", "proxy", "plain"] as const)("E2A-S8A/S8B [%s record] 
     setup();
     // §18: the row must prove it established what its name claims, BEFORE the
     // security assertions run. A deleted setup fails here, not silently passes.
-    assertPrecondition();
-    // the query the row claims is the query actually sent
-    if (query) expect(query.startsWith("?")).toBe(true);
+    await assertPrecondition(query);
     const r = await submit(query);
     // Every context must reach the projection; 200 normally, 503 only on the
     // integrity path (which none of these rows triggers).
