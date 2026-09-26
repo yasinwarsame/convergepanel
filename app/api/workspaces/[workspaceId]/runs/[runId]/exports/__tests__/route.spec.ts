@@ -912,6 +912,39 @@ const newSink = (): AccessSink => ({ reads: [], nested: [], forbidden: [], enume
  */
 const GLOBAL_SINK: AccessSink = newSink();
 const globalSink = GLOBAL_SINK;
+
+/**
+ * R9 — A MONOTONIC WITNESS THE ARRAYS CANNOT HIDE.
+ *
+ * `const` + an identity assertion closes REBINDING the sink. It does not close
+ * CLEARING it: I verified that an inner `afterEach` calling the reset, paired with
+ * a leak gated on a context only that describe exercises, still passed the whole
+ * suite — because Jest runs inner hooks first, so the arrays were empty by the
+ * time the global check read them.
+ *
+ * So the authoritative witness is not an array at all. `FORBIDDEN_WITNESS` keeps
+ * its counter in a closure and exposes only `note()` and `total()`: the count can
+ * be incremented by the traps and READ by the postcondition, and there is no
+ * exported way to decrease it. The global `beforeEach` records a per-test
+ * baseline; the global `afterEach` asserts the total has not moved. Clearing the
+ * arrays now proves nothing, because the arrays are only there for diagnostics.
+ *
+ * RESIDUAL, stated rather than papered over: a spec author who deliberately
+ * rewrites this harness can always defeat it — no in-file mechanism can stop its
+ * own file. What is now structurally impossible is the thing that actually
+ * happened seven times in this PR: forgetting.
+ */
+const FORBIDDEN_WITNESS = (() => {
+  let total = 0;
+  return Object.freeze({
+    note: () => {
+      total += 1;
+    },
+    total: () => total,
+  });
+})();
+let witnessBaseline = 0;
+
 const resetGlobalSink = () => {
   GLOBAL_SINK.reads.length = 0;
   GLOBAL_SINK.nested.length = 0;
@@ -978,7 +1011,7 @@ const trapContainer = (value: unknown, label: string, allowed: readonly string[]
     get(target, prop, receiver) {
       if (typeof prop === "string") {
         sink.nested.push(`${label}:${prop}`); // structural: never mixed with top-level names
-        if (!allowed.includes(prop)) sink.forbidden.push(`${label}:${prop}`);
+        if (!allowed.includes(prop)) { sink.forbidden.push(`${label}:${prop}`); if (sink === GLOBAL_SINK) FORBIDDEN_WITNESS.note(); }
       }
       return Reflect.get(target, prop, receiver);
     },
@@ -994,7 +1027,8 @@ const trapRecord = (record: Record<string, unknown>, label: string, sink: Access
     get(target, prop, receiver) {
       if (typeof prop === "string") {
         sink.reads.push(prop);
-        if (FORBIDDEN_SOURCE_PROPS.includes(prop)) sink.forbidden.push(`${label}.${prop}`);
+        if (!ALLOWED_SOURCE_PROPS.includes(prop) && sink === GLOBAL_SINK) FORBIDDEN_WITNESS.note();
+        if (FORBIDDEN_SOURCE_PROPS.includes(prop)) { sink.forbidden.push(`${label}.${prop}`); if (sink === GLOBAL_SINK) FORBIDDEN_WITNESS.note(); }
         if (prop === "exportMetadata") {
           return trapContainer(Reflect.get(target, prop, receiver), `${label}.exportMetadata`, ALLOWED_EXPORT_METADATA_PROPS, sink);
         }
@@ -1031,7 +1065,7 @@ const accessorRecord = (record: Record<string, unknown>, label: string, sink: Ac
       configurable: true,
       get() {
         sink.reads.push(prop);
-        if (FORBIDDEN_SOURCE_PROPS.includes(prop)) sink.forbidden.push(`${label}.${prop}`);
+        if (FORBIDDEN_SOURCE_PROPS.includes(prop)) { sink.forbidden.push(`${label}.${prop}`); if (sink === GLOBAL_SINK) FORBIDDEN_WITNESS.note(); }
         if (prop === "exportMetadata") {
           return trapContainer(value, `${label}.exportMetadata`, ALLOWED_EXPORT_METADATA_PROPS, sink);
         }
@@ -1067,6 +1101,8 @@ const assertGlobalSourceAccessPolicy = () => {
   // §12: the instrumentation and this assertion must be looking at the SAME object.
   // A nested scope that rebinds or shadows the sink would otherwise silence this.
   expect(globalSink).toBe(GLOBAL_SINK);
+  // the monotonic witness is authoritative: clearing the diagnostic arrays cannot move it
+  expect(FORBIDDEN_WITNESS.total()).toBe(witnessBaseline);
   expect(GLOBAL_SINK.forbidden).toEqual([]);
   expect(GLOBAL_SINK.enumerations).toEqual([]);
   // §18: exact property names, DEFAULT DENY, no syntax heuristic. Nested container
@@ -1096,6 +1132,7 @@ beforeEach(() => {
   runGetThrows = false;
   adminDbAvailable = true;
   resetGlobalSink();
+  witnessBaseline = FORBIDDEN_WITNESS.total();
   trapMode = "accessor"; // §2: ordinary route tests get the accessor tripwire
   mockExportFlagEnabled = true;
   runDocs.set(RUN, teamRun());
