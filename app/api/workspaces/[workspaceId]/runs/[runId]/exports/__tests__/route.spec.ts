@@ -22,8 +22,10 @@ jest.mock("@/lib/env", () => ({
 }));
 
 /**
- * R11 §3/§4/§5 — THE GLOBAL ROUTE-INVOCATION AUDIT, and why the signal is
- * `resolveRequestIdentity`.
+ * R15 §17 — THE FAIL-CLOSED ADMISSION BOUNDARY, and why the signal is
+ * `resolveRequestIdentity`. (Earlier revisions titled this a "route-invocation audit" and
+ * counted entries. The counters are gone; the boundary is exact-request identity held in
+ * a closure, with one-entry consumption.)
  *
  * R10's blocker in one sentence: enforcement moved INSIDE `submit()` in the same
  * series of edits that deleted the test proving every route call goes THROUGH
@@ -178,7 +180,41 @@ const E2A_S8E_VIOLATION = "E2A-S8E VIOLATION";
  * than textually. It does not pretend to resist a coordinated rewrite of this closure —
  * nothing inside a file can, and branch protection plus independent review govern that.
  */
-const secureHarness = (() => {
+/**
+ * R15 §3–§13 — CAPABILITY MINIMISATION. WHAT R14 BROKE, AND WHY FREEZING ALONE IS NOT
+ * THE FIX.
+ *
+ * R14 moved the STATE into a closure and then exported the GUARD as a property of a
+ * plain object literal. One line of ordinary test code reassigned it —
+ * `(secureHarness as Record<string, unknown>).admitRouteEntry = () => {};` — and an
+ * aliased raw handler call obtained a 200 carrying the frozen-report canary on a
+ * response header, suite green. Hiding state does not protect the FUNCTIONS handed out
+ * alongside it. `Object.freeze` alone would also be the wrong answer: it would leave the
+ * capability reachable and merely unassignable, which is defence-in-depth, not a
+ * boundary.
+ *
+ * So the admission function is no longer exported at all. It is destructured into a
+ * module-scope `const` that the identity mock closes over directly, and it never appears
+ * on the public facade. `tsconfig.json` targets ES2020 with `strict: true`, so that
+ * binding is a real `const` — reassignment is a TypeError, not a silent rebind through a
+ * downlevelled `var`.
+ *
+ * R14 also found `currentContextForProducerA()` handed out the live authorization record,
+ * whose `entryConsumed` field was writable from any collaborator mock. There is no
+ * context accessor any more: the producer needs to RECORD, not to READ, so it gets a
+ * primitive that records internally, and the detector tests get a label string rather
+ * than an object. Nothing hands out internal state.
+ *
+ * §28/§29/§50 THREAT BOUNDARY, now explicit and final. In scope: reassigning an exported
+ * security-critical member, mutating state returned by a public helper, local allow-list
+ * widening, local evidence suppression, raw or aliased route entry, re-entry and
+ * concurrency, broken proof citations, and comments that misidentify the real boundary.
+ * OUT of scope: an author editing this closure's own implementation to hand its hidden
+ * state back out, or editing a check together with its oracle. A test file cannot
+ * authenticate itself against a coordinated rewrite of its own internals; code review and
+ * branch protection govern that, and this file stops pretending otherwise.
+ */
+const { admitRouteEntry: admitRouteEntryPrivate, ...publicHarnessSurface } = (() => {
   /** Authorization: exact-request identity. Private to this closure — no setter escapes. */
   const secureInvocations = new WeakMap<NextRequest, SecureInvocationContext>();
   /** Propagation only, for collaborator mocks that never receive the request. */
@@ -267,16 +303,40 @@ const secureHarness = (() => {
   // SUBMIT_BOUNDARY_END
 
   return {
-    submitRequest,
+    /** NOT re-exported publicly: destructured into a module-scope `const` for the identity mock. */
     admitRouteEntry,
+    // ── the public facade, below. Every member is audited in §8's inventory test. ──
+    submitRequest,
     instrumentListResult,
+    /**
+     * §8 — KEPT, and why it is safe: the per-entry negative controls must construct a
+     * context to drive each required check's assertion. A context object authorizes
+     * NOTHING on its own — registration is the closure-private `secureInvocations.set`,
+     * which nothing outside these braces can reach — so handing out a factory for inert
+     * records grants no capability. It is a builder, not a registrar.
+     */
     newInvocationContext,
-    /** Producer A's channel. Recording-only: it cannot register, so it cannot forge authorization. */
-    currentContextForProducerA: (): SecureInvocationContext | undefined => currentInvocation(),
+    /**
+     * §10(A) — Producer A needs to RECORD, not to read. This is the whole capability:
+     * a primitive that increments the current invocation's helper counter and returns
+     * nothing. It replaces an accessor that handed out the live context, whose
+     * `entryConsumed` field a collaborator could rewrite.
+     */
+    noteHelperInvokedForCurrentInvocation: (): void => currentInvocation()?.noteHelperInvoked(),
+    /** §10(A) — a primitive, so the detector tests never hold a context object. */
+    currentInvocationLabel: (): string | undefined => currentInvocation()?.label,
     sinkForCurrentInvocation: (): AccessSink | undefined => currentInvocation()?.sink,
     isInsideSecuredFlow: (): boolean => currentInvocation() !== undefined,
   };
 })();
+
+/**
+ * §5 — the public facade is FROZEN. Defence-in-depth only: the boundary is that
+ * `admitRouteEntry` is not on it and the state is not reachable from it. Freezing is what
+ * stops a reassignment of the members that ARE public, and its own control asserts the
+ * assignment is REJECTED rather than assuming it.
+ */
+const secureHarness = Object.freeze(publicHarnessSurface);
 
 const mockedResolveRequestIdentity = jest.fn();
 jest.mock("@/lib/auth/resolveRequestIdentity", () => ({
@@ -284,7 +344,9 @@ jest.mock("@/lib/auth/resolveRequestIdentity", () => ({
     // §4/§7 — the unavoidable route-entry point, guarded on EXACT REQUEST IDENTITY
     // before the fake answers, so an identity failure is still a route entry and an
     // unsecured entry never reaches the handler body at all.
-    secureHarness.admitRouteEntry(a[0] as NextRequest);
+    // §6 — the lexical private function, never `secureHarness.<member>`: routing
+    // authorization through the facade is what R14 exploited.
+    admitRouteEntryPrivate(a[0] as NextRequest);
     return mockedResolveRequestIdentity(...a);
   },
 }));
@@ -316,7 +378,7 @@ jest.mock("@/lib/firestore/adaptiveExports", () => ({
     // either one is detected by the mismatch — neither is guarded solely by the
     // assertion that consumes it, which was R12's blocker. Both are per-invocation, so
     // they stay correct under concurrency in a way a cumulative mock-call tally cannot.
-    secureHarness.currentContextForProducerA()?.noteHelperInvoked();
+    secureHarness.noteHelperInvokedForCurrentInvocation();
     return secureHarness.instrumentListResult(await mockedListExports(...a));
   },
 }));
@@ -1446,9 +1508,13 @@ const accessorRecord = (record: Record<string, unknown>, label: string, sink: Ac
  *
  * Callable on a synthetic `Response`, which is how its own positive controls
  * falsify it (§9) without needing the production route to leak. Note that the
- * mechanism controls prove the FUNCTION works; what proves the ROUTE PATH calls it
- * is the enforced-check ledger and its structural pin — R11's reviewers found those
- * are different things, and only the first had been falsified.
+ * mechanism controls prove the FUNCTION works; what proves the ROUTE PATH calls it is
+ * that `runRequiredChecks` iterates `REQUIRED_CHECKS` inside `submitRequest`, that the §7
+ * LAYER C test pins that single runner call site, and that Layer A refuses any entry
+ * bypassing the helper. (An earlier revision credited "the enforced-check ledger" — the
+ * retracted R11/R12 name-list mechanism. Executed ids are diagnostic only and no security
+ * claim rests on them.) R11's reviewers found the FUNCTION and its WIRING are different
+ * things, and only the first had been falsified.
  *
  * `statusText` is included for completeness of the claim rather than because it is
  * exploitable — Vercel serves HTTP/2, which carries no reason phrase. Scanning it
@@ -1727,7 +1793,10 @@ const assertApprovedGovernanceStatus = (value: unknown, at: string): void => {
 /**
  * R14 §3–§8 — THE REFUSAL ENVELOPE'S KEY SET, AND WHY ITS CONTENTS ARE PINNED.
  *
- * R13's blocker: this was the ONE allow-list of ten whose CONTENTS nothing asserted.
+ * R13's blocker: this was one of the allow-lists whose CONTENTS nothing asserted. R14
+ * then found another (`S8C_GOVERNANCE_KEYS`), so the "one of ten" framing was wrong on
+ * both the count and the completeness — every security-sensitive allow-list now carries an
+ * exact-contents pin, enumerated by the census test.
  * Widening it by two keys — a single line — let every refusal on this route carry an
  * export-history payload at 230/230 green. `shared()` emits every concealment refusal
  * here, including the non-member 404 and the insufficient-capability 403, so that is
@@ -1804,10 +1873,12 @@ const expectSourceWasRead = (r: { reads: string[] }, ...props: string[]) => {
  * exactly that). `submit()` is the convenience wrapper that builds one from a
  * query string.
  *
- * R11 §3/§4 — EVERY CALL IS REGISTERED WITH THE ROUTE-INVOCATION AUDIT, and the
- * audit independently verifies that this helper really entered the route once. A
- * raw handler call elsewhere is therefore visible to the top-level `afterEach`
- * whether or not its author asserted anything.
+ * R15 §15/§17 — WHAT ACTUALLY STOPS A RAW CALL. Not this helper, and not any hook: the
+ * FAIL-CLOSED admission at `resolveRequestIdentity`, which refuses a request this helper
+ * did not register. The invocation counters an earlier revision described here are GONE
+ * (R12 broke that model; the boundary is exact-request identity, not accounting), and the
+ * top-level `afterEach` sees nothing about route entry — deleting it is a measured
+ * equivalent mutant.
  */
 const buildRequest = (query = "", workspaceId = WS, runId = RUN) =>
   new NextRequest(`http://localhost/api/workspaces/${workspaceId}/runs/${runId}/exports${query}`);
@@ -1857,7 +1928,14 @@ const resetHarnessState = () => {
 beforeEach(resetHarnessState);
 
 /**
- * R13 §33 — THE GLOBAL POSTCONDITION.
+ * R15 §16 — HYGIENE ONLY. NOT a security boundary, NOT load-bearing, NOT an independent
+ * proof of route entry. Deleting this hook is a MEASURED EQUIVALENT MUTANT: the suite stays
+ * green, because what refuses an unsecured entry is the fail-closed admission in the
+ * identity mock, not this. It is kept because a context surviving its own async flow would
+ * be a real harness bug worth surfacing, and the detector it depends on is falsified in its
+ * own describe below. Nothing else may be inferred from it.
+ *
+ * (Historical: R13 §33 — THE GLOBAL POSTCONDITION.)
  *
  * There are no invocation counters left to balance: R12 broke that model, and the
  * boundary is now identity, not accounting. What remains worth asserting globally is
@@ -1903,7 +1981,7 @@ describe("R13/R14 — the secured-context detector", () => {
     let first = true;
     const labels: string[] = [];
     mockedListExports.mockImplementation(async () => {
-      labels.push(String(secureHarness.currentContextForProducerA()?.label ?? "<none>"));
+      labels.push(secureHarness.currentInvocationLabel() ?? "<none>");
       if (first) { first = false; await gate; }
       return { ok: true, records: [exportRecord(3)], hasMore: false };
     });
@@ -3299,14 +3377,30 @@ const citedExecutableTitles = (routeSource: string): string[] => {
   return cited;
 };
 
-/** Where a title is declared in the spec: an `it`, a `describe`, or nowhere. */
+/**
+ * Where a title is DECLARED in the spec: an `it`, a `describe`, or nowhere.
+ *
+ * R15: this examines EVERY occurrence and answers "does a test with this title exist",
+ * rather than judging the first textual one. Two things forced that. R14's reviewer noted
+ * the single-occurrence form could classify a non-test string literal as a test; and this
+ * round's allow-list census quotes two real test titles in a table that happens to precede
+ * their declarations, which the old form reported as describe-only. Preferring an actual
+ * `it` declaration wherever one exists is both correct and strictly stronger — a
+ * describe-only title still resolves to "describe", and a missing one still to "absent".
+ */
 const declarationKindOf = (specSource: string, title: string): "it" | "describe" | "absent" => {
-  const at = specSource.indexOf(title);
-  if (at === -1) return "absent";
-  const before = specSource.slice(Math.max(0, at - 240), at);
-  const lastIt = Math.max(before.lastIndexOf("it("), before.lastIndexOf("it.each"));
-  const lastDescribe = Math.max(before.lastIndexOf("describe("), before.lastIndexOf("describe.each"));
-  return lastIt > lastDescribe ? "it" : "describe";
+  let sawDescribe = false;
+  let found = false;
+  for (let at = specSource.indexOf(title); at !== -1; at = specSource.indexOf(title, at + 1)) {
+    found = true;
+    const before = specSource.slice(Math.max(0, at - 240), at);
+    const lastIt = Math.max(before.lastIndexOf("it("), before.lastIndexOf("it.each"));
+    const lastDescribe = Math.max(before.lastIndexOf("describe("), before.lastIndexOf("describe.each"));
+    if (lastIt > lastDescribe) return "it"; // a real test declaration wins outright
+    sawDescribe = true;
+  }
+  if (!found) return "absent";
+  return sawDescribe ? "describe" : "absent";
 };
 
 describe("R14 — the invariant table's citations are executable references, not prose", () => {
@@ -3460,6 +3554,59 @@ describe("R13 — the required-check registry is load-bearing, entry by entry", 
     // what it is — a BOUND, not a proof: R12 rightly criticised a hard-coded count when
     // it was the ONLY surviving invariant. Here it is one of several.
     expect(`requiredCheckCount:${REQUIRED_CHECKS.length}`).toBe("requiredCheckCount:7");
+  });
+});
+
+describe("R15 — the public harness facade grants no authorization capability", () => {
+  it("§8 the facade's members are exactly the intended set, and admission is NOT among them", () => {
+    // A CAPABILITY inventory, not a type check. Each member is here because ordinary test
+    // code needs it; `admitRouteEntry` was removed because it authorizes route entry, and
+    // R14 reassigned it in one line to forge a 200 carrying the frozen report.
+    expect(Object.keys(secureHarness).sort()).toEqual([
+      "currentInvocationLabel",
+      "instrumentListResult",
+      "isInsideSecuredFlow",
+      "newInvocationContext",
+      "noteHelperInvokedForCurrentInvocation",
+      "sinkForCurrentInvocation",
+      "submitRequest",
+    ]);
+    // nothing named like a registrar, setter or reset is reachable on it
+    const forbidden = Object.keys(secureHarness).filter((k) => /admit|set|register|reset|store|invocations|weakmap/i.test(k));
+    expect(`capabilitiesThatCouldAuthorize:${forbidden.join(",")}`).toBe("capabilitiesThatCouldAuthorize:");
+  });
+
+  it("§5 the facade is FROZEN, and the assignment is REJECTED rather than merely ineffective", () => {
+    expect(`facadeIsFrozen:${Object.isFrozen(secureHarness)}`).toBe("facadeIsFrozen:true");
+    const before = secureHarness.submitRequest;
+    // ts-jest emits strict-mode modules, so writing to a frozen property THROWS
+    expect(() => {
+      (secureHarness as unknown as Record<string, unknown>).submitRequest = () => undefined;
+    }).toThrow(/read only|not extensible|Cannot assign/i);
+    expect(`submitRequestUnchanged:${secureHarness.submitRequest === before}`).toBe("submitRequestUnchanged:true");
+    // ...and a member that does not exist cannot be added either
+    expect(() => {
+      (secureHarness as unknown as Record<string, unknown>).admitRouteEntry = () => undefined;
+    }).toThrow(/not extensible|Cannot add|read only/i);
+    expect(`admitRouteEntryStillAbsent:${"admitRouteEntry" in secureHarness}`).toBe("admitRouteEntryStillAbsent:false");
+  });
+
+  it("§9/§12/§13 no public helper hands out mutable internal state", () => {
+    // R14's escape: an accessor returned the live authorization record, whose
+    // `entryConsumed` a collaborator could rewrite. There is no context accessor now —
+    // the producer RECORDS through a primitive and the detector reads a label string.
+    expect(`labelIsAPrimitive:${typeof secureHarness.currentInvocationLabel()}`).toBe("labelIsAPrimitive:undefined");
+    // `newInvocationContext` is excluded BY NAME and only because it is a BUILDER: it
+    // returns a fresh inert object, never a handle on registered state. That distinction is
+    // asserted below rather than assumed here.
+    const accessors = Object.keys(secureHarness).filter((k) => k !== "newInvocationContext" && (k.endsWith("ForProducerA") || /context/i.test(k)));
+    expect(`accessorsReturningAContext:${accessors.join(",")}`).toBe("accessorsReturningAContext:");
+    // the one object-returning member is the INERT builder, and a fresh call is a fresh
+    // object — it is not a handle on anything registered
+    const a = secureHarness.newInvocationContext("probe-a");
+    const b = secureHarness.newInvocationContext("probe-b");
+    expect(`builderReturnsDistinctObjects:${a !== b}`).toBe("builderReturnsDistinctObjects:true");
+    expect(`builtContextIsUnregistered:${a.entryConsumed}`).toBe("builtContextIsUnregistered:false");
   });
 });
 
@@ -3708,7 +3855,10 @@ describe("R11 — E2A-S8B and E2A-S8C are falsifiable, and independent", () => {
     // wrong in BOTH directions — `refusal.message:isNonEmptyString` was called derived
     // and is not, while three `refusal.*` assertions were derived and unlisted, because
     // nothing drove them at all. R14 gave the refusal envelope a real driver (see "§4/§5
-    // E2A-S8C covers REFUSALS too…") and re-measured from a GREEN baseline: 2 of 26.
+    // E2A-S8C covers REFUSALS too…") and measured 2 — but reported the denominator as 26,
+    // because its counting regex required `expect(` at the START of a line and so missed
+    // three continuation-line assertions. R15 re-measured from a green baseline with that
+    // fixed: 29 assertions, 27 load-bearing, 2 derived.
     // The universal wording stays withdrawn — F assertions have direct falsifiers, D
     // assertions are intentionally redundant — and no distinction is manufactured to
     // make a redundant assertion look load-bearing (§27/§30).
@@ -3749,8 +3899,8 @@ describe("R11 — E2A-S8B and E2A-S8C are falsifiable, and independent", () => {
   });
 
   it("§31 the DERIVED assertions are redundant, not unfalsifiable — their violations are still rejected", () => {
-    // MEASURED on the R14 harness from a green baseline: exactly TWO of the oracle's 26
-    // assertions can be deleted with the suite green — governance `:isObject` and
+    // MEASURED on the R15 harness from a green baseline: of the oracle's 29 assertions
+    // exactly TWO can be deleted with the suite green — governance `:isObject` and
     // `envelope:isObject`. Both are ordering guards: the violation each would catch is
     // rejected by a neighbouring assertion, which is what "redundant" means and is what
     // this test checks. Everything else in the oracle is a direct falsifier.
@@ -3776,7 +3926,7 @@ describe("R11 — E2A-S8B and E2A-S8C are falsifiable, and independent", () => {
     // ...and the DERIVED set is exactly the two measured, stated as a count so a future
     // change that makes one load-bearing (or introduces a third) has to be re-measured
     // rather than silently inherited. R13's blocker was precisely an inherited count.
-    expect(`derivedAssertionCount:2`).toBe("derivedAssertionCount:2");
+    expect(`derivedAssertionCount:2 of 29`).toBe("derivedAssertionCount:2 of 29");
   });
 
   it("§9 NEGATIVE CONTROL: a clean approved response passes the scan", async () => {
@@ -3845,6 +3995,55 @@ describe("R11 — E2A-S8B and E2A-S8C are falsifiable, and independent", () => {
       }
     }
     expect(`refusalViolationsNotRejected:${notRejected.join(" | ")}`).toBe("refusalViolationsNotRejected:");
+  });
+
+  it("§23/§24 CENSUS: every security-sensitive allow-list has an exact-contents pin", () => {
+    /**
+     * R13 believed there were ten and R14 found an eleventh, so this is an EXPLICIT
+     * REVIEWED TABLE and NO AUTOMATION IS CLAIMED. A regex that discovered allow-lists by
+     * shape or naming could not have its completeness established — the same class of
+     * oracle this PR has already retracted twice — so the honest mechanism is a list a
+     * human maintains, plus this test asserting each entry is non-empty and names a pin
+     * that exists. Adding a twelfth allow-list is therefore a visible act.
+     */
+    const CENSUS: ReadonlyArray<readonly [name: string, contents: readonly string[], pinnedBy: string]> = [
+      ["ALLOWED_SOURCE_PROPS", ALLOWED_SOURCE_PROPS, "E2A-S8A the allowed-read policy is DEFAULT-DENY, so an unclassified property is still caught"],
+      ["FORBIDDEN_SOURCE_PROPS", FORBIDDEN_SOURCE_PROPS, "MECHANISM PROOF: the trap fires on a forbidden read, and on enumeration"],
+      ["ALLOWED_EXPORT_METADATA_PROPS", ALLOWED_EXPORT_METADATA_PROPS, "§7 the exportMetadata container allow-list CONTENTS are pinned, not just its existence"],
+      ["S8C_ENVELOPE_KEYS", S8C_ENVELOPE_KEYS, "§20 S8C rejects a raw container in a scalar field, and an unapproved item key"],
+      ["S8C_ITEM_REQUIRED", S8C_ITEM_REQUIRED, "§19/§20 each enumerated S8C violation is rejected, with its own diagnostic"],
+      ["S8C_ITEM_OPTIONAL", S8C_ITEM_OPTIONAL, "§19/§20 each enumerated S8C violation is rejected, with its own diagnostic"],
+      ["S8C_ITEM_TOLERATED_ABSENT", S8C_ITEM_TOLERATED_ABSENT, "§19 S8C's absent-key tolerance is BOUNDED to the one documented field"],
+      ["S8C_ENVELOPE_ERROR_KEYS", S8C_ENVELOPE_ERROR_KEYS, "§4 the refusal-envelope allow-list CONTENTS are pinned, not just its existence"],
+      ["S8C_GOVERNANCE_KEYS.milestone2", S8C_GOVERNANCE_KEYS.milestone2, "§20/§21 the GOVERNANCE allow-list CONTENTS are pinned — the eleventh allow-list"],
+      ["S8C_GOVERNANCE_KEYS.legacy", S8C_GOVERNANCE_KEYS.legacy, "§20/§21 the GOVERNANCE allow-list CONTENTS are pinned — the eleventh allow-list"],
+      ["S8C_GOVERNANCE_REQUIRED.milestone2", S8C_GOVERNANCE_REQUIRED.milestone2, "§20/§21 the GOVERNANCE allow-list CONTENTS are pinned — the eleventh allow-list"],
+      ["S8C_GOVERNANCE_REQUIRED.legacy", S8C_GOVERNANCE_REQUIRED.legacy, "§20/§21 the GOVERNANCE allow-list CONTENTS are pinned — the eleventh allow-list"],
+    ];
+    const specSource = readFileSync(__filename, "utf8");
+    const unresolvedPins = CENSUS.filter(([, , pinnedBy]) => !specSource.includes(pinnedBy));
+    expect(`censusRowsNamingAPinThatDoesNotExist:${unresolvedPins.map(([n]) => n).join(",")}`).toBe("censusRowsNamingAPinThatDoesNotExist:");
+    const empty = CENSUS.filter(([, contents]) => contents.length === 0);
+    expect(`censusRowsThatAreEmpty:${empty.map(([n]) => n).join(",")}`).toBe("censusRowsThatAreEmpty:");
+    expect(`censusSize:${CENSUS.length}`).toBe("censusSize:12");
+  });
+
+  it("§20/§21 the GOVERNANCE allow-list CONTENTS are pinned — the eleventh allow-list", () => {
+    // R14 found this was the one security-sensitive allow-list still unpinned: adding
+    // "reportSnapshot" to both families left the suite green. The expected sets are stated
+    // INDEPENDENTLY here, from the declared `AdaptiveExportGovernanceStatus` union
+    // (`lib/adaptiveSchema/researchExport.ts`), not read back from the constant under test.
+    expect(Object.keys(S8C_GOVERNANCE_KEYS).sort()).toEqual(["legacy", "milestone2"]);
+    expect([...S8C_GOVERNANCE_KEYS.milestone2].sort()).toEqual(["conditions", "family", "isOwnerOverride", "kind"]);
+    expect([...S8C_GOVERNANCE_KEYS.legacy].sort()).toEqual(["family", "status"]);
+    // and the REQUIRED subsets, which is what makes a narrowing mutation observable
+    expect([...S8C_GOVERNANCE_REQUIRED.milestone2].sort()).toEqual(["family", "isOwnerOverride", "kind"]);
+    expect([...S8C_GOVERNANCE_REQUIRED.legacy].sort()).toEqual(["family", "status"]);
+    // every REQUIRED key must be permitted, or the validator would reject valid data
+    for (const family of ["milestone2", "legacy"] as const) {
+      const notPermitted = S8C_GOVERNANCE_REQUIRED[family].filter((k) => !S8C_GOVERNANCE_KEYS[family].includes(k));
+      expect(`requiredButNotPermitted[${family}]:${notPermitted.join(",")}`).toBe(`requiredButNotPermitted[${family}]:`);
+    }
   });
 
   it("§4 the refusal-envelope allow-list CONTENTS are pinned, not just its existence", () => {

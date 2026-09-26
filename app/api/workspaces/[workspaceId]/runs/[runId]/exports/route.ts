@@ -155,9 +155,11 @@
  *               R12 reported 4 such assertions; R13 measured 6 and found the named set
  *               wrong in both directions, including one that is NOT deletable — three
  *               refusal assertions were derived only because NOTHING DROVE THEM. R14 gave
- *               the refusal envelope a real driver and re-measured from a green baseline:
- *               exactly TWO of the oracle's 26 assertions are derived, governance
- *               `:isObject` and `envelope:isObject`, both ordering guards. The universal
+ *               the refusal envelope a real driver and measured 2 — while reporting the
+ *               denominator as 26, because its counting regex required `expect(` at the
+ *               start of a line. R15 re-measured with that fixed: of 29 assertions, 27 are
+ *               load-bearing and exactly TWO are derived — governance `:isObject` and
+ *               `envelope:isObject`, both ordering guards. The universal
  *               "every sub-assertion can fail" wording stays withdrawn: F assertions have
  *               direct falsifiers, D assertions are intentionally redundant, and removing
  *               a D changes no rejection behaviour.
@@ -375,17 +377,26 @@
  *      `structuredClone`/`JSON.stringify`/spread/`Object.values`/`entries`/
  *      `assign`. Neither covers the other's set; one shared input-class table is
  *      run under BOTH, so mode coverage cannot drift.
- *   3. UNIVERSAL ENFORCEMENT, IN TWO PARTS — because R10 proved one part alone is
- *      not enough. (a) The postcondition is asserted INSIDE the secured request
- *      helper for every request, against a witness local to that invocation, so no
- *      test and no input class can forget it: R7 is why, since with enforcement
- *      opt-in a leak gated on `reportVersion === 0` put the whole frozen report on
- *      the wire with the suite green. (b) A top-level `afterEach` separately proves
- *      no route entry happened OUTSIDE that helper (E2A-S8E), because R10 showed
- *      that (a) without (b) is bypassed by simply calling the handler. An earlier
- *      revision of this bullet described (a) as a global `afterEach` covering "any
- *      invocation path"; no such hook existed. There is no opt-out flag either way;
- *      mechanism self-tests use a private sink and never enter the route.
+ *   3. UNIVERSAL ENFORCEMENT — and the load-bearing mechanism named correctly, because
+ *      two earlier revisions of this bullet named the wrong one.
+ *        (a) The required checks are asserted INSIDE the secured request helper for
+ *            every request, against a context local to that invocation, so no test and
+ *            no input class can forget them. R7 is why: with enforcement opt-in, a leak
+ *            gated on `reportVersion === 0` put the whole frozen report on the wire with
+ *            the suite green.
+ *        (b) No route entry can happen OUTSIDE that helper, and what guarantees it is
+ *            the FAIL-CLOSED admission at `resolveRequestIdentity` — exact-request
+ *            registration held in a closure, one-entry consumption, and a `submitRequest`
+ *            that owns the handler call. That is Layer A of E2A-S8E above.
+ *      DO NOT READ THIS AS LICENCE TO RELAX (b). Two earlier revisions of this bullet
+ *      attributed (b) to a `afterEach` hook: first to a global one that did not exist,
+ *      then to the top-level hook that does. Deleting that hook is a MEASURED EQUIVALENT
+ *      MUTANT — the suite stays green — so it proves nothing about route entry and is
+ *      documented at its own site as hygiene. The inversion mattered: a maintainer who
+ *      believed the hook covered raw invocation could have relaxed the admission
+ *      boundary, which is precisely the defect that killed R10, R12 and R13. There is no
+ *      opt-out flag either way; mechanism self-tests use a private sink and never enter
+ *      the route.
  *   4. ACCESSOR BY DEFAULT — the plain-object tripwire is what ordinary route
  *      tests get, because it is the mode that observes value-obtaining operations
  *      (`structuredClone`, `v8.serialize`, `util.inspect`, getter traversal). The
