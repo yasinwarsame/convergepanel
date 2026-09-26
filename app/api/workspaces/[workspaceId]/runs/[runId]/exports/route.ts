@@ -150,21 +150,26 @@
  *           (M) → "§20 S8C rejects a non-string smuggled into governance `conditions`"
  *           (M) → "§20 S8C rejects a raw container in a scalar field, and an unapproved item key"
  *           (M) → "§19 S8C's absent-key tolerance is BOUNDED to the one documented field"
- *           (M) → "§19/§20 every S8C sub-assertion can fail — each one individually"
+ *           (M) → "§19/§20 each enumerated S8C violation is rejected, with its own diagnostic"
+ *           (D) → "§31 the four DERIVED assertions are redundant, not unfalsifiable — their violations are still rejected"
+ *               R12 measured that 4 of this oracle's 29 assertions can each be deleted
+ *               with the suite green. They are ordering guards whose violation another
+ *               assertion also rejects — classified D, and the universal "every
+ *               sub-assertion can fail" wording is withdrawn.
  *           (F) → "E2A-S8C covers REFUSALS too, not only successes" — the validator runs
  *               on every response, so a refusal carrying a payload fails as well as a
  *               malformed success.
  *   E2A-S8E SINGLE ENTRY POINT, AND THE WIRING OF WHAT IT ENFORCES. No route
  *           invocation escapes the secured request helper, and no check the helper
- *           performs can go missing quietly. Three layers, of which the FIRST is
+ *           performs can go missing quietly. TWO layers, of which the FIRST is
  *           load-bearing:
  *             A — FAIL CLOSED at `resolveRequestIdentity`, the route's unconditional
- *                 first call. Outside a secured request the mock throws, the handler
- *                 rejects, and no response exists for a leak to travel in.
- *             B — monotonic invocation counters, asserted by a top-level `afterEach`.
- *                 A consistency check, not the boundary.
- *             C — a structural audit of the single raw call site AND of the wiring of
- *                 every enforced check.
+ *                 first call, keyed on the EXACT REQUEST INSTANCE with one-entry
+ *                 consumption. A request the secured helper did not register is
+ *                 refused however it is reached and whatever else is in flight; the
+ *                 handler rejects and no response exists for a leak to travel in.
+ *             C — a structural audit of the single raw call site and of the single
+ *                 call to the required-check runner. An aid, not the guarantee.
  *           HISTORY, because two rounds died here. R10 deleted the structural test as
  *           "redundant to the global afterEach" and then deleted that afterEach, after
  *           which a direct call put the whole frozen report on the wire, green. R11's
@@ -395,14 +400,16 @@
  *      by re-marking the module-level baseline the counter was COMPARED TO. Fixing
  *      the operand would only have moved the target again, so the whole category is
  *      gone: a test receives the response, never control of the assertions.
- *      SCOPED PRECISELY, because R10's reviewer was right that the previous wording
- *      ("there is no module-level witness left to reach") over-claimed: the
- *      `activeWitness` BINDING is module-level and a mock hook can see it, since the
- *      instrumentation boundary has to publish the current request's witness
- *      somehow. What no test can do is reach the values the assertions compare —
- *      they read the `const` witness captured inside the invocation, not that
- *      binding — or reach the invocation counters, which are closure-private with no
- *      setter and no comparator baseline. Residual, stated plainly: a spec author
+ *      SCOPED PRECISELY, and rewritten in R13 because both earlier versions of this
+ *      paragraph over-claimed. There is no module-level slot at all now: the
+ *      per-invocation context is reached by EXACT REQUEST IDENTITY through a
+ *      `WeakMap` (which a test cannot enumerate) for authorization, and by
+ *      `AsyncLocalStorage` (scoped to one async flow) for propagation to collaborator
+ *      mocks that never receive the request. R12 broke the previous design two ways
+ *      this closes: a concurrent request's unconditional cleanup erased another's
+ *      evidence, and "some request is secured" admitted a raw aliased entry. Residual,
+ *      stated plainly and deliberately bounded (see the threat-model note in the
+ *      spec): a spec author
  *      who rewrites this harness can still defeat it — no in-file mechanism can stop
  *      its own file — but forgetting, which is what actually happened repeatedly
  *      here, is now structurally impossible.
