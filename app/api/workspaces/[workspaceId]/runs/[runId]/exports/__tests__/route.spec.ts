@@ -1464,10 +1464,28 @@ const REQUIRED_CHECKS: ReadonlyArray<RequiredCheck> = Object.freeze([
     // assertions that consume it. `listHelperCalls` is jest's own bookkeeping, so
     // suppressing the recorder leaves a detectable gap rather than a silent zero.
     id: "S8E:raw-list-evidence-recorded",
-    assert: (c) =>
+    assert: (c) => {
+      // (a) the two boundary producers agree
       expect(`helperInvocations:${c.ctx.helperInvocations} rawResultsRecorded:${c.ctx.rawListResultsRecorded}`).toBe(
         `helperInvocations:${c.ctx.helperInvocations} rawResultsRecorded:${c.ctx.helperInvocations}`,
-      ),
+      );
+      // (b) AND the stored evidence agrees with the ROUTE'S OWN OUTPUT — a source this
+      // harness does not fabricate. This is the part that ends the regress. Three
+      // earlier drafts each guarded the evidence pipeline from inside the pipeline, and
+      // each time an edit that returned an EMPTY pipeline satisfied the guard and left
+      // the checks with nothing to check: the whole block suppressed, then the store
+      // emptied while the counter still incremented, then the record slice replaced with
+      // `[]`. All were green with a real header leak. A 200 response carries exactly one
+      // export item per record the helper returned (the projection is a 1:1 `map`), so
+      // an emptied store is visible HERE no matter how it was emptied, because the
+      // comparison is against data the route produced rather than data the harness kept.
+      if (c.res.status === 200) {
+        const items = Array.isArray(c.json.exports) ? (c.json.exports as unknown[]).length : -1;
+        expect(`responseExportItems:${items} rawRecordsRecorded:${c.ctx.rawRecords.length}`).toBe(
+          `responseExportItems:${items} rawRecordsRecorded:${items}`,
+        );
+      }
+    },
   },
   {
     // §20 — its own required check, taking BOTH operands from the raw recorder rather
@@ -3131,6 +3149,8 @@ describe("R13 — the required-check registry is load-bearing, entry by entry", 
     "S8A:no-forbidden-source-reads": { corrupt: (c) => { c.ctx.sink.forbidden.push("rec0.reportSnapshot"); }, pattern: /reportSnapshot/ },
     "S8A:no-wholesale-enumeration": { corrupt: (c) => { c.ctx.sink.enumerations.push("ownKeys(rec0)"); }, pattern: /ownKeys/ },
     "S8A:no-off-policy-reads": { corrupt: (c) => { c.ctx.sink.reads.push("futurePrivateField"); }, pattern: /futurePrivateField/ },
+    // two independent violations, both of which this check must reject: a producer
+    // mismatch, and stored evidence that disagrees with the route's own output
     "S8E:raw-list-evidence-recorded": { corrupt: (c) => { c.ctx.noteHelperInvoked(); }, pattern: /rawResultsRecorded/ },
     // a report-bearing record whose snapshot carries NO canary — the fixture defect
     "S8B:fixture-canary-integrity": { corrupt: (c) => { c.ctx.rawRecords.push({ exportId: "exp-9", reportSnapshot: { question: "SENTINEL_NOT_A_CANARY" } }); }, pattern: /exp-9/ },
@@ -3167,6 +3187,9 @@ describe("R13 — the required-check registry is load-bearing, entry by entry", 
       nextCursor: null,
     };
     const bodyText = JSON.stringify(json);
+    // the clean context's stored evidence must agree with its own response: one raw
+    // record, one export item
+    expect(`controlContextIsSelfConsistent:${(json.exports as unknown[]).length === ctx.rawRecords.length}`).toBe("controlContextIsSelfConsistent:true");
     return { ctx, res: new Response(bodyText, { status: 200 }), bodyText, json };
   };
 
@@ -3188,6 +3211,18 @@ describe("R13 — the required-check registry is load-bearing, entry by entry", 
     }
     expect(`requiredChecksWhoseBodyIsNotLoadBearing:${withoutAFalsifier.join(",")}`).toBe("requiredChecksWhoseBodyIsNotLoadBearing:");
     expect(`requiredChecksWithTheWrongDiagnostic:${wrongDiagnostic.join(",")}`).toBe("requiredChecksWithTheWrongDiagnostic:");
+  });
+
+  it("§46 S8E rejects stored evidence that DISAGREES with the route's own output", () => {
+    // The half that ends the regress, given its own control: an emptied evidence store
+    // against a response that plainly carried items.
+    const emptied = cleanContext();
+    emptied.ctx.rawRecords.length = 0;
+    expect(() => REQUIRED_CHECKS.find((c) => c.id === "S8E:raw-list-evidence-recorded")!.assert(emptied)).toThrow(/rawRecordsRecorded/);
+    // ...and a store with MORE than the response carried is equally rejected
+    const inflated = cleanContext();
+    inflated.ctx.rawRecords.push({ exportId: "exp-extra", reportSnapshot: { question: FROZEN_REPORT_CANARY_M2 } });
+    expect(() => REQUIRED_CHECKS.find((c) => c.id === "S8E:raw-list-evidence-recorded")!.assert(inflated)).toThrow(/rawRecordsRecorded/);
   });
 
   it("§14 negative-control coverage matches the registry exactly, in both directions", () => {
