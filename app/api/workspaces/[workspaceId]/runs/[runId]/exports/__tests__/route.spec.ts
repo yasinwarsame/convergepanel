@@ -866,9 +866,25 @@ const FORBIDDEN_SOURCE_PROPS: readonly string[] = [
   "schemaVersion",  // not a DTO field
 ];
 
-let sourceReads: string[] = [];
-let forbiddenSourceReads: string[] = [];
-let recordEnumerations: string[] = [];
+/**
+ * R8 §3/§4 — WHY THERE IS A SINK ABSTRACTION.
+ *
+ * R7's blocker: instrumentation was universal but CHECKING it was opt-in per
+ * test, so any input class whose tests forgot `expectNoForbiddenSourceAccess()`
+ * was unprotected — and the class list omitted every `reportVersion` variant and
+ * `format: "json"`. A leak gated on `r.reportVersion === 0` put the whole frozen
+ * report on the wire with 106/106 green.
+ *
+ * The fix is a GLOBAL `afterEach` that asserts the tracker for EVERY test. That
+ * creates one problem: the mechanism self-tests deliberately trigger forbidden
+ * access, and they must not be exempted by a flag — `skipSecurityCheck` would
+ * recreate the opt-out defect in a new shape. So instead of a flag, those tests
+ * pass their OWN sink. The global sink is what the global postcondition watches;
+ * a local sink is invisible to it. There is no way to silence the global check.
+ */
+type AccessSink = { reads: string[]; forbidden: string[]; enumerations: string[] };
+const newSink = (): AccessSink => ({ reads: [], forbidden: [], enumerations: [] });
+let globalSink: AccessSink = newSink();
 
 /**
  * Two INDEPENDENT mechanisms, selected by `trapMode`, because R6 proved neither
@@ -896,22 +912,22 @@ let recordEnumerations: string[] = [];
  */
 let trapMode: "proxy" | "accessor" = "proxy";
 
-const trapRecord = (record: Record<string, unknown>, label: string): Record<string, unknown> =>
+const trapRecord = (record: Record<string, unknown>, label: string, sink: AccessSink = globalSink): Record<string, unknown> =>
   new Proxy(record, {
     get(target, prop, receiver) {
       if (typeof prop === "string") {
-        sourceReads.push(prop);
-        if (FORBIDDEN_SOURCE_PROPS.includes(prop)) forbiddenSourceReads.push(`${label}.${prop}`);
+        sink.reads.push(prop);
+        if (FORBIDDEN_SOURCE_PROPS.includes(prop)) sink.forbidden.push(`${label}.${prop}`);
       }
       return Reflect.get(target, prop, receiver);
     },
     ownKeys(target) {
       // fires on { ...record }, Object.keys/entries/assign, JSON.stringify(record)
-      recordEnumerations.push(`ownKeys(${label})`);
+      sink.enumerations.push(`ownKeys(${label})`);
       return Reflect.ownKeys(target);
     },
     getOwnPropertyDescriptor(target, prop) {
-      if (typeof prop === "string") recordEnumerations.push(`descriptor(${label}.${prop})`);
+      if (typeof prop === "string") sink.enumerations.push(`descriptor(${label}.${prop})`);
       return Reflect.getOwnPropertyDescriptor(target, prop);
     },
   });
@@ -921,20 +937,21 @@ const trapRecord = (record: Record<string, unknown>, label: string): Record<stri
  * the Proxy: R6 showed `structuredClone` rejects a Proxy before traversing it, so
  * the clone proof has to run against a genuine plain object.
  */
-const accessorRecord = (record: Record<string, unknown>, label: string): Record<string, unknown> => {
+const accessorRecord = (record: Record<string, unknown>, label: string, sink: AccessSink = globalSink): Record<string, unknown> => {
   const plain: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(record)) {
-    if (!FORBIDDEN_SOURCE_PROPS.includes(k)) plain[k] = v;
-  }
-  for (const prop of FORBIDDEN_SOURCE_PROPS) {
-    if (!(prop in record)) continue;
-    const value = record[prop];
+  // EVERY own property becomes a recording accessor, not just the forbidden ones.
+  // R8: an earlier revision left allowed properties as plain data, so in accessor
+  // mode `sink.reads` stayed empty — which meant this mode had no non-vacuity
+  // signal that the projection had run AND no default-deny coverage for
+  // off-policy reads. Recording every read makes the two modes symmetric in what
+  // they can assert, differing only in which OPERATIONS reach them.
+  for (const [prop, value] of Object.entries(record)) {
     Object.defineProperty(plain, prop, {
       enumerable: true, // production records enumerate these; the tripwire must too
       configurable: true,
       get() {
-        sourceReads.push(prop);
-        forbiddenSourceReads.push(`${label}.${prop}`);
+        sink.reads.push(prop);
+        if (FORBIDDEN_SOURCE_PROPS.includes(prop)) sink.forbidden.push(`${label}.${prop}`);
         return value;
       },
     });
@@ -950,14 +967,31 @@ const instrumentListResult = (result: unknown): unknown => {
   return { ...r, records: r.records.map((rec, i) => wrap(rec as Record<string, unknown>, `rec${i}`)) };
 };
 
-/** E2A-S8A assertion: no forbidden source property was consulted, and the record was never enumerated wholesale. */
-const expectNoForbiddenSourceAccess = () => {
-  expect(forbiddenSourceReads).toEqual([]);
-  expect(recordEnumerations).toEqual([]);
+/**
+ * THE UNIVERSAL E2A-S8A POSTCONDITION (§3). Registered as a global `afterEach`
+ * below, so it runs for EVERY test in this file whether or not that test thought
+ * about security. This is the whole point: R7 showed that a per-test assertion is
+ * only as good as the author's memory, and the memory failed for every
+ * `reportVersion` variant and for `format: "json"`.
+ *
+ * It asserts three things about the global sink:
+ *   • no FORBIDDEN source property was read;
+ *   • the record was never enumerated/spread wholesale;
+ *   • nothing OFF-POLICY was read either (default deny) — R7 found this filter
+ *     was applied in only 3 of the tests that exercise the projection.
+ */
+const assertGlobalSourceAccessPolicy = () => {
+  expect(globalSink.forbidden).toEqual([]);
+  expect(globalSink.enumerations).toEqual([]);
+  expect(Array.from(new Set(globalSink.reads)).filter((p) => !ALLOWED_SOURCE_PROPS.includes(p))).toEqual([]);
 };
+
+/** Retained for tests that want to say it locally too; the global hook makes it redundant, never load-bearing. */
+const expectNoForbiddenSourceAccess = () => assertGlobalSourceAccessPolicy();
+
 /** Non-vacuity companion: the trap must actually have observed the projection doing its job. */
 const expectSourceWasRead = (...props: string[]) => {
-  for (const p of props) expect(sourceReads).toContain(p);
+  for (const p of props) expect(globalSink.reads).toContain(p);
 };
 
 const submit = async (query = "", workspaceId = WS, runId = RUN) => {
@@ -972,9 +1006,7 @@ beforeEach(() => {
   writeAttempts.length = 0;
   runGetThrows = false;
   adminDbAvailable = true;
-  sourceReads = [];
-  forbiddenSourceReads = [];
-  recordEnumerations = [];
+  globalSink = newSink();
   trapMode = "proxy";
   mockExportFlagEnabled = true;
   runDocs.set(RUN, teamRun());
@@ -982,6 +1014,16 @@ beforeEach(() => {
   mockedAccess.mockImplementation(accessFake());
   mockedGetProject.mockImplementation(projectFake);
   mockedListExports.mockImplementation(listFake());
+});
+
+/**
+ * §3 — THE POSTCONDITION IS UNAVOIDABLE. Every test in this file, present and
+ * future, asserts the S8A access policy whether or not it mentions security.
+ * There is deliberately NO opt-out flag (§4): mechanism self-tests use their own
+ * local sink, which this hook does not watch.
+ */
+afterEach(() => {
+  assertGlobalSourceAccessPolicy();
 });
 
 /**
@@ -1943,7 +1985,7 @@ describe("E2A-S8A — the LIST projection never reads reportSnapshot", () => {
     // non-vacuity: the trap really did observe the projection working
     expectSourceWasRead("exportId", "reportVersion", "format", "exportMetadata", "governanceStatusAtExport");
     // and every property it read is on the ledger
-    expect(Array.from(new Set(sourceReads)).filter((p) => !ALLOWED_SOURCE_PROPS.includes(p))).toEqual([]);
+    assertGlobalSourceAccessPolicy();
   });
 
   it("E2A-S8A holds for BOTH schema families and a failed record", async () => {
@@ -1978,8 +2020,8 @@ describe("E2A-S8A — the LIST projection never reads reportSnapshot", () => {
     // concrete.
     const r = await submit();
     expectTheFixtureHistory(r);
-    expect(sourceReads).not.toContain("futurePrivateField");
-    expect(Array.from(new Set(sourceReads)).filter((p) => !ALLOWED_SOURCE_PROPS.includes(p))).toEqual([]);
+    expect(globalSink.reads).not.toContain("futurePrivateField");
+    assertGlobalSourceAccessPolicy();
     // the two lists must not overlap, which IS checkable without the type
     expect(ALLOWED_SOURCE_PROPS.filter((p) => FORBIDDEN_SOURCE_PROPS.includes(p))).toEqual([]);
   });
@@ -1988,28 +2030,28 @@ describe("E2A-S8A — the LIST projection never reads reportSnapshot", () => {
     await submit();
     // `{ ...record }`, Object.keys/entries/assign and JSON.stringify(record) all
     // trip `ownKeys`; a get-only trap would miss every one of them.
-    expect(recordEnumerations).toEqual([]);
+    expect(globalSink.enumerations).toEqual([]);
   });
 
   it("MECHANISM PROOF: the trap fires on a forbidden read, and on enumeration", async () => {
-    // §3/§7 — the mechanism is falsified here rather than trusted. These call
-    // the trap the way a leaking route would, so the assertions above are known
-    // to be capable of failing.
-    const probe = trapRecord({ exportId: "x", reportSnapshot: { deep: { leaf: 1 } } }, "probe");
-    expect(forbiddenSourceReads).toEqual([]);
+    // §4 — a LOCAL sink, so deliberately tripping the trap here cannot be
+    // confused with route evidence and needs no exemption from the global hook.
+    const sink = newSink();
+    const probe = trapRecord({ exportId: "x", reportSnapshot: { deep: { leaf: 1 } } }, "probe", sink);
+    expect(sink.forbidden).toEqual([]);
     void probe.reportSnapshot;
-    expect(forbiddenSourceReads).toEqual(["probe.reportSnapshot"]);
+    expect(sink.forbidden).toEqual(["probe.reportSnapshot"]);
 
-    // a DEEP leaf whose value is undefined still trips the ROOT read — this is
-    // the property sentinel completeness could never give us
-    const probe2 = trapRecord({ exportId: "y" }, "probe2");
+    // a DEEP leaf whose value is undefined still trips the ROOT read — the
+    // property sentinel completeness could never give us
+    const probe2 = trapRecord({ exportId: "y" }, "probe2", sink);
     void (probe2.reportSnapshot as undefined);
-    expect(forbiddenSourceReads).toContain("probe2.reportSnapshot");
+    expect(sink.forbidden).toContain("probe2.reportSnapshot");
 
     // enumeration
-    recordEnumerations = [];
+    sink.enumerations = [];
     void { ...probe };
-    expect(recordEnumerations).toContain("ownKeys(probe)");
+    expect(sink.enumerations).toContain("ownKeys(probe)");
   });
 });
 
@@ -2100,56 +2142,6 @@ describe("E2A-S8B — the response is exactly the approved DTO, deeply", () => {
  * exercise every DTO-branch-selecting input class THROUGH the central boundary,
  * and the first one proves the boundary itself cannot be opted out of.
  */
-describe("E2A-S8A — every input class passes through the instrumentation boundary", () => {
-  it("§5 instrumentation is applied by the MOCK BOUNDARY, so a raw mockResolvedValue cannot opt out", async () => {
-    // This is the exact shape that bypassed the old per-fixture wrapper.
-    mockedListExports.mockResolvedValue({ ok: true, records: [exportRecord(3)], hasMore: false });
-    const r = await submit();
-    expect(r.status).toBe(200);
-    // the record really was instrumented: the projection's reads were observed
-    expectSourceWasRead("exportId", "reportVersion", "format");
-    expectNoForbiddenSourceAccess();
-  });
-
-  it.each([
-    ["ready pdf", { artifactStatus: "ready", format: "pdf" }],
-    ["ready docx", { artifactStatus: "ready", format: "docx" }],
-    ["generating", { artifactStatus: "generating" }],
-    ["superseded", { artifactStatus: "superseded" }],
-    ["failed", { artifactStatus: "failed" }],
-  ])("§17 %s: instrumented and forbidden-read-free", async (_label, over) => {
-    mockedListExports.mockResolvedValue({ ok: true, records: [exportRecord(3, over)], hasMore: false });
-    const r = await submit();
-    expect(r.status).toBe(200);
-    expect(r.json.exports).toHaveLength(1);
-    expectSourceWasRead("artifactStatus", "format");
-    expectNoForbiddenSourceAccess();
-    expect(Array.from(new Set(sourceReads)).filter((p) => !ALLOWED_SOURCE_PROPS.includes(p))).toEqual([]);
-  });
-
-  it("§17 no fileHash: instrumented and forbidden-read-free", async () => {
-    const meta = { exportId: "exp-1", runId: RUN, schemaVersion: 1, requestingUser: CREATOR_UID };
-    mockedListExports.mockResolvedValue({ ok: true, records: [exportRecord(1, { exportMetadata: meta })], hasMore: false });
-    const r = await submit();
-    expect(r.json.exports[0].fileHash).toBeUndefined();
-    expectNoForbiddenSourceAccess();
-  });
-
-  it("§17 legacy family: instrumented and forbidden-read-free", async () => {
-    mockedListExports.mockResolvedValue({ ok: true, records: [legacyExportRecord(3)], hasMore: false });
-    const r = await submit();
-    expect(r.json.exports[0].schemaFamily).toBe("legacy");
-    expectNoForbiddenSourceAccess();
-  });
-
-  it("§17 hasMore paging path: instrumented and forbidden-read-free", async () => {
-    mockedListExports.mockResolvedValue({ ok: true, records: [exportRecord(9), exportRecord(8)], hasMore: true });
-    const r = await submit();
-    expect(r.json.nextCursor).toBe(8);
-    expectNoForbiddenSourceAccess();
-  });
-});
-
 /**
  * ─── §6–§11 — MECHANISM B: the plain-object accessor tripwire ─────────────
  * The Proxy's blind spot, closed. `structuredClone(proxy)` throws
@@ -2166,12 +2158,11 @@ describe("E2A-S8A mechanism B — plain-object accessor tripwire", () => {
   });
 
   it("§8 MECHANISM PROOF: every clone/serialize/enumerate operation fires the tripwire", () => {
-    const probe = () => accessorRecord({ exportId: "x", reportSnapshot: { q: "SECRET" } }, "probe");
     const fired = (op: (rec: Record<string, unknown>) => unknown) => {
-      forbiddenSourceReads = [];
-      const rec = probe();
+      const sink = newSink(); // §4: local, so the global hook stays armed
+      const rec = accessorRecord({ exportId: "x", reportSnapshot: { q: "SECRET" } }, "probe", sink);
       try { op(rec); } catch { /* the operation itself may throw; the record is what matters */ }
-      return forbiddenSourceReads.length > 0;
+      return sink.forbidden.length > 0;
     };
     // §8 asks for ACTUAL JavaScript behaviour, recorded rather than assumed
     expect(fired((r) => r.reportSnapshot)).toBe(true);           // direct read
@@ -2188,30 +2179,69 @@ describe("E2A-S8A mechanism B — plain-object accessor tripwire", () => {
   it("§9/§10 a SWALLOWED structuredClone still leaves the access recorded", () => {
     // The precise R6 attack: the exception is caught, so nothing propagates —
     // but the getter already ran, and that is what the assertion checks.
-    const rec = accessorRecord({ exportId: "x", reportSnapshot: { q: "SECRET" } }, "probe");
-    forbiddenSourceReads = [];
+    const sink = newSink(); // §4: local sink, global hook stays armed
+    const rec = accessorRecord({ exportId: "x", reportSnapshot: { q: "SECRET" } }, "probe", sink);
     try {
       void (structuredClone(rec) as Record<string, unknown>).reportSnapshot;
     } catch {
       /* swallowed, exactly as the attacking mutation would */
     }
-    expect(forbiddenSourceReads).toEqual(["probe.reportSnapshot"]);
+    expect(sink.forbidden).toEqual(["probe.reportSnapshot"]);
   });
 
-  it("the baseline route triggers NO tripwire in accessor mode either", async () => {
-    const r = await submit();
-    expectTheFixtureHistory(r);
-    expect(forbiddenSourceReads).toEqual([]);
+  // The route-level coverage that used to live here is now the SHARED input-class
+  // table below, run under BOTH modes. R7 found this block was the sole carrier of
+  // accessor-mode route coverage over five hand-picked shapes, so three gated
+  // clone leaks (`superseded`, no-`exportMetadata`, `hasMore`) passed the suite.
+});
+
+/**
+ * ─── §7/§8/§9 — ONE INPUT-CLASS TABLE, BOTH TRAP MODES ────────────────────
+ *
+ * R7's second blocker: the trap MODE was chosen per-`describe`, so the accessor
+ * tripwire — the only mechanism that can see a swallowed `structuredClone`,
+ * because the Proxy is rejected by it before any trap runs — covered five
+ * hand-picked shapes. Gated clone leaks on `superseded`, no-`exportMetadata` and
+ * the `hasMore` path all passed 106/106. Two independently maintained lists drift;
+ * this is one list, run twice.
+ *
+ * Coverage is by BRANCH, not by Cartesian product: every class below selects a
+ * materially different path through the projection or the cursor logic. The
+ * `reportVersion` rows exist because R7 exploited exactly that gap — they were
+ * absent from every table while being the field the route branches on hardest.
+ */
+const S8A_INPUT_CLASSES: ReadonlyArray<readonly [string, () => Record<string, unknown>[], boolean]> = [
+  ["ready pdf, milestone2", () => [exportRecord(3)], false],
+  ["ready docx", () => [exportRecord(3, { format: "docx" })], false],
+  ["json format", () => [exportRecord(3, { format: "json" })], false],
+  ["generating", () => [exportRecord(3, { artifactStatus: "generating" })], false],
+  ["superseded", () => [exportRecord(3, { artifactStatus: "superseded" })], false],
+  ["failed (no fileHash)", () => [failedExportRecord(3) as Record<string, unknown>], false],
+  ["no fileHash on a ready record", () => [exportRecord(3, { exportMetadata: { exportId: "exp-3", runId: RUN, schemaVersion: 1, requestingUser: CREATOR_UID } })], false],
+  ["no exportMetadata at all", () => { const r = exportRecord(3) as Record<string, unknown>; delete r.exportMetadata; return [r]; }, false],
+  ["legacy family", () => [legacyExportRecord(3) as Record<string, unknown>], false],
+  ["both families together", () => [exportRecord(4), legacyExportRecord(3) as Record<string, unknown>], false],
+  ["hasMore paging", () => [exportRecord(3), exportRecord(2)], true],
+  ["reportVersion 0 (usable cursor)", () => [exportRecord(3, { reportVersion: 0 })], true],
+  ["reportVersion negative", () => [exportRecord(3, { reportVersion: -5 })], true],
+  ["reportVersion non-numeric (integrity 503 path)", () => [exportRecord(3, { reportVersion: "3" })], true],
+  ["reportVersion NaN (integrity 503 path)", () => [exportRecord(3, { reportVersion: Number.NaN })], true],
+];
+
+describe.each(["proxy", "accessor"] as const)("E2A-S8A [%s mode] — the shared input-class table", (mode) => {
+  beforeEach(() => {
+    trapMode = mode;
   });
 
-  it("accessor mode covers both families and every artifactStatus", async () => {
-    mockedListExports.mockResolvedValue({
-      ok: true,
-      records: [exportRecord(4, { artifactStatus: "generating" }), legacyExportRecord(3), failedExportRecord(2), exportRecord(1, { format: "docx" })],
-      hasMore: false,
-    });
+  it.each(S8A_INPUT_CLASSES)("%s", async (_label, build, hasMore) => {
+    mockedListExports.mockResolvedValue({ ok: true, records: build(), hasMore });
     const r = await submit();
-    expect(r.json.exports).toHaveLength(4);
-    expect(forbiddenSourceReads).toEqual([]);
+    // Either a normal listing or the E2A-S15 integrity refusal; both run the
+    // projection, which is what must not touch forbidden sources.
+    expect([200, 503]).toContain(r.status);
+    // non-vacuity: the projection really executed under instrumentation
+    expectSourceWasRead("exportId", "format");
+    // ...and the S8A policy itself is asserted by the GLOBAL afterEach, not here.
+    // That is the point of this round: no row of this table can forget it.
   });
 });
