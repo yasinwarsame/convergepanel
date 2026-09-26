@@ -1310,9 +1310,13 @@ const instrumentListResult = (result: unknown): unknown => {
     // OUTSIDE every assertion that consumes it. R12's blocker was the opposite
     // arrangement: `reportBearing` and the canary registry were both produced inside
     // one `if` block, so suppressing that block zeroed both operands of the guard
-    // meant to protect them and the guard passed vacuously. Here the recorder is a
-    // separate producer, and a required check compares what it recorded against
-    // jest's OWN call bookkeeping for the helper — a source this file does not write.
+    // meant to protect them and the guard passed vacuously. Here there are TWO
+    // deliberately separate producers — `noteHelperInvoked()` above records THAT the
+    // helper ran for this request, this block records WHAT it returned — and a required
+    // check compares them, so suppressing either is a detectable mismatch rather than a
+    // silent zero on both sides. (An earlier draft of this comment said the comparison
+    // was against jest's own `mock.calls` tally; that was true briefly and is not now,
+    // because a cumulative tally cannot be attributed per invocation under concurrency.)
     for (const rec of r.records as Record<string, unknown>[]) {
       if (!rec || typeof rec !== "object" || rec.reportSnapshot === undefined) continue;
       const id = String(rec.exportId ?? "<no exportId>");
@@ -3196,6 +3200,11 @@ describe("R13 — the required-check registry is load-bearing, entry by entry", 
     // stated as a property, not as proof: the ids come from the runner, so they can
     // only ever confirm iteration — never that a body asserted anything.
     expect(`executedIdsAreDiagnostic:${r.executed.length === REQUIRED_CHECKS.length}`).toBe("executedIdsAreDiagnostic:true");
+    // A second, independently-placed bound on registry size, so narrowing the contract
+    // costs one more coordinated edit than the pinned membership list alone. Stated as
+    // what it is — a BOUND, not a proof: R12 rightly criticised a hard-coded count when
+    // it was the ONLY surviving invariant. Here it is one of several.
+    expect(`requiredCheckCount:${REQUIRED_CHECKS.length}`).toBe("requiredCheckCount:7");
   });
 });
 
