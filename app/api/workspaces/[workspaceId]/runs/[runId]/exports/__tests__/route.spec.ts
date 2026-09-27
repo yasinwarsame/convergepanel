@@ -4348,7 +4348,13 @@ describe("R11 — E2A-S8B and E2A-S8C are falsifiable, and independent", () => {
   });
 
   it("§31 the DERIVED assertions are redundant, not unfalsifiable — their violations are still rejected", () => {
-    // MEASURED on the R15 harness from a green baseline: of the oracle's 29 assertions
+    // RE-MEASURED at the R17 head from a green baseline (not carried forward — the figure
+    // has been wrong three times: claimed 4, measured 6 with the membership wrong in both
+    // directions, and the DENOMINATOR once reported as 26 because a counting regex required
+    // `expect(` at line start and missed three continuation lines). A 29-way deletion sweep
+    // at this head kills 27 and survives exactly the two named below. Classification:
+    // F=19 unconditional, C=3 conditional, M=5 per-item, D=2 derived — summing to 29.
+    // Of the oracle's 29 assertions
     // exactly TWO can be deleted with the suite green — governance `:isObject` and
     // `envelope:isObject`. Both are ordering guards: the violation each would catch is
     // rejected by a neighbouring assertion, which is what "redundant" means and is what
