@@ -314,6 +314,26 @@ const RESPONSE_INTRINSICS = (() => {
      * a control tampers the global to prove the oracle no longer consults it.
      */
     apply: Reflect.apply,
+    /**
+     * R17-C3 §1 — THE TRANSFORM IS AN INTRINSIC TOO, and this is the same lesson one step
+     * further along than `apply`. Capturing the byte-level intrinsics made `bodyText`
+     * trustworthy, but the DTO checks consume a PARSED value, and the parse was a live global:
+     *
+     *     const json = JSON.parse(response.bodyText);   // bytes trusted, transform not
+     *
+     * `JSON.parse` is writable and configurable, so route.ts alone — no test edit — could hook
+     * it to drop an extra envelope key whenever the body carried a marker, then emit
+     * `{...clean, __mark: <the whole run document>}`. Measured: 258/258, exit 0, ~3 KB of the
+     * team-run Firestore document on the wire on EVERY response; removing only the hook gave
+     * exit 1 with 149 failures. It did not defeat S8B (the secrecy scan reads `bodyText`, not
+     * the parsed value) but it defeated E2A-S8C entirely, and it blinded it specifically in
+     * `plain` mode — the production record shape.
+     *
+     * `stringify` is captured alongside it for the round-trip consistency check below, which is
+     * a SECOND, INDEPENDENT layer: it does not care which key a transform dropped.
+     */
+    parse: JSON.parse as (text: string) => unknown,
+    stringify: JSON.stringify as (value: unknown) => string,
     clone: Response.prototype.clone as (this: Response) => Response,
     text: Response.prototype.text as (this: Response) => Promise<string>,
     status: accessor(Response.prototype, "status") as ((this: Response) => number) | undefined,
@@ -334,6 +354,8 @@ const RESPONSE_INTRINSICS = (() => {
     ["Response.prototype.headers (getter)", captured.headers],
     ["Headers.prototype.forEach", captured.headersForEach],
     ["Reflect.apply", captured.apply],
+    ["JSON.parse", captured.parse],
+    ["JSON.stringify", captured.stringify],
   ];
   const missing = required.filter(([, fn]) => typeof fn !== "function").map(([n]) => n);
   if (missing.length > 0) {
@@ -355,6 +377,10 @@ type CanonicalResponse = {
   readonly setCookies: ReadonlyArray<string>;
   readonly setCookieSource: "Headers.prototype.getSetCookie" | "canonical header enumeration";
   readonly bodyText: string;
+  /** Parsed with the CAPTURED `JSON.parse`, so the DTO checks and the secrecy scan describe the same bytes. */
+  readonly json: Record<string, unknown>;
+  /** `capturedStringify(json) === bodyText` — false means the parse did not round-trip the body. */
+  readonly bodyRoundTrips: boolean;
 };
 
 /**
@@ -380,6 +406,11 @@ const canonicalResponseSnapshot = async (res: Response): Promise<CanonicalRespon
   const setCookies = typeof I.headersGetSetCookie === "function"
     ? [...(apply(I.headersGetSetCookie, headers, []) as string[])]
     : headerEntries.filter(([n]) => n.toLowerCase() === "set-cookie").map(([, v]) => v);
+  // The parse and its verification both use CAPTURED primitives. The round-trip is the
+  // independent layer: a transform that drops, adds or rewrites anything makes the
+  // re-serialization differ from the bytes, whatever it touched.
+  const json = apply(I.parse, JSON, [bodyText]) as Record<string, unknown>;
+  const bodyRoundTrips = (apply(I.stringify, JSON, [json]) as string) === bodyText;
   return Object.freeze({
     status,
     statusText: statusText ?? "",
@@ -387,6 +418,8 @@ const canonicalResponseSnapshot = async (res: Response): Promise<CanonicalRespon
     setCookies: Object.freeze(setCookies),
     setCookieSource: typeof I.headersGetSetCookie === "function" ? "Headers.prototype.getSetCookie" : "canonical header enumeration",
     bodyText,
+    json,
+    bodyRoundTrips,
   });
 };
 
@@ -470,7 +503,10 @@ const { admitRouteEntry: admitRouteEntryPrivate, ...publicHarnessSurface } = (()
       // clean decoy while the client got the frozen report. Nothing below touches `res`
       // except as a receiver.
       const response = await canonicalResponseSnapshot(res);
-      const json = JSON.parse(response.bodyText) as Record<string, any>;
+      // R17-C3: no second parse here. The snapshot already carries the value, produced by the
+      // captured primitive, so there is exactly one derivation and no live global between the
+      // trusted bytes and every assertion that reads them.
+      const json = response.json as Record<string, any>;
       const executed = runRequiredChecks({ ctx, response, json });
       return { status: response.status, json, bodyText: response.bodyText, reads: [...ctx.sink.reads], executed };
     } finally {
@@ -1827,7 +1863,8 @@ type RequiredCheckId =
   | "S8E:raw-list-evidence-recorded"
   | "S8B:fixture-canary-integrity"
   | "S8B:response-secrecy"
-  | "S8C:approved-shape";
+  | "S8C:approved-shape"
+  | "S8C:body-json-consistency";
 
 /** What every required check is handed. Built once per invocation by the runner. */
 type RequiredCheckContext = {
@@ -1924,6 +1961,20 @@ const REQUIRED_CHECKS: ReadonlyArray<RequiredCheck> = Object.freeze(([
   {
     id: "S8C:approved-shape",
     assert: (c) => (c.response.status === 200 ? assertApprovedListDto(c.json) : assertConcealmentEnvelope(c.json)),
+  },
+  {
+    /**
+     * R17-C3 §2 — the SECOND, INDEPENDENT layer behind the captured parse. Capturing
+     * `JSON.parse` removes the live global; this asserts the parsed value still describes the
+     * exact bytes that went out, so a transform defect anywhere between them is visible
+     * without anyone having to guess which key it touched.
+     */
+    id: "S8C:body-json-consistency",
+    assert: (c) => {
+      expect(`bodyRoundTrips:${c.response.bodyRoundTrips}`).toBe("bodyRoundTrips:true");
+      // and the object the DTO checks read is the one the snapshot produced, not a substitute
+      expect(`jsonIsSnapshotJson:${c.json === c.response.json}`).toBe("jsonIsSnapshotJson:true");
+    },
   },
 ] as RequiredCheck[]).map((check) => Object.freeze(check)));
 
@@ -3759,6 +3810,8 @@ describe("R13 — the required-check registry is load-bearing, entry by entry", 
     // a real canary in the raw records AND in the serialized body
     "S8B:response-secrecy": { corrupt: (c) => { c.ctx.rawRecords.push({ exportId: "exp-9", reportSnapshot: { question: FROZEN_REPORT_CANARY_M2 } }); (c as { response: CanonicalResponse }).response = Object.freeze({ ...c.response, bodyText: `{"leaked":"${FROZEN_REPORT_CANARY_M2}"}` }); }, pattern: /frozen-report-content@body/ },
     "S8C:approved-shape": { corrupt: (c) => { (c.json.exports as Record<string, unknown>[])[0].reportSnapshot = "smuggled"; }, pattern: /unapprovedKeys/ },
+    // the violation this check exists for: the parsed value no longer matches the bytes
+    "S8C:body-json-consistency": { corrupt: (c) => { (c as { response: CanonicalResponse }).response = Object.freeze({ ...c.response, bodyRoundTrips: false }); }, pattern: /bodyRoundTrips/ },
   };
 
   /** A clean, realistic check context that every required assertion must accept. */
@@ -3801,6 +3854,8 @@ describe("R13 — the required-check registry is load-bearing, entry by entry", 
       setCookies: Object.freeze([] as string[]),
       setCookieSource: "Headers.prototype.getSetCookie" as const,
       bodyText,
+      json,
+      bodyRoundTrips: true,
     });
     return { ctx, response, json };
   };
@@ -3857,6 +3912,7 @@ describe("R13 — the required-check registry is load-bearing, entry by entry", 
       "S8B:fixture-canary-integrity",
       "S8B:response-secrecy",
       "S8C:approved-shape",
+      "S8C:body-json-consistency",
     ]);
     expect(`registryIsFrozen:${Object.isFrozen(REQUIRED_CHECKS)}`).toBe("registryIsFrozen:true");
     expect(`everyEntryHasAnAssertion:${REQUIRED_CHECKS.every((c) => typeof c.assert === "function")}`).toBe("everyEntryHasAnAssertion:true");
@@ -3872,7 +3928,7 @@ describe("R13 — the required-check registry is load-bearing, entry by entry", 
     // costs one more coordinated edit than the pinned membership list alone. Stated as
     // what it is — a BOUND, not a proof: R12 rightly criticised a hard-coded count when
     // it was the ONLY surviving invariant. Here it is one of several.
-    expect(`requiredCheckCount:${REQUIRED_CHECKS.length}`).toBe("requiredCheckCount:7");
+    expect(`requiredCheckCount:${REQUIRED_CHECKS.length}`).toBe("requiredCheckCount:8");
   });
 });
 
@@ -4366,6 +4422,36 @@ describe("R11 — E2A-S8B and E2A-S8C are falsifiable, and independent", () => {
     }
   });
 
+  it("§10/§51 tampering the GLOBAL JSON.parse cannot hide an extra envelope key", async () => {
+    // R17-C3's blocker, made permanent. The hook is body-scoped — it only fires on a body
+    // carrying the marker — so it is transparent to every other response in the suite, which is
+    // why nothing else noticed when this was live.
+    const MARK = "__cpLeakMark";
+    const leaked = { ...approvedBody, [MARK]: { runDocument: "SENTINEL_RUN_DOCUMENT" } };
+    const res = NextResponse.json(leaked, { status: 200 }) as unknown as Response;
+    const realParse = JSON.parse;
+    (JSON as unknown as { parse: unknown }).parse = function (text: string, reviver?: unknown) {
+      if (typeof text === "string" && text.includes(MARK)) {
+        const cleaned = (realParse as (t: string) => Record<string, unknown>)(text);
+        delete cleaned[MARK];
+        return cleaned;
+      }
+      return (realParse as (t: string, r?: unknown) => unknown)(text, reviver);
+    };
+    try {
+      // the hook IS active and would have fooled a live-`JSON.parse` oracle
+      expect(`liveParseIsHooked:${MARK in (JSON.parse(await res.clone().text()) as Record<string, unknown>)}`).toBe("liveParseIsHooked:false");
+      // ...and the canonical snapshot, which uses the CAPTURED parse, still sees the key
+      const canonical = await canonicalResponseSnapshot(res);
+      expect(`canonicalJsonCarriesTheKey:${MARK in canonical.json}`).toBe("canonicalJsonCarriesTheKey:true");
+      expect(`canonicalRoundTrips:${canonical.bodyRoundTrips}`).toBe("canonicalRoundTrips:true");
+      // and the DTO oracle rejects it, which is the property the hook was defeating
+      expect(() => assertApprovedListDto(canonical.json)).toThrow(/envelope:keys/);
+    } finally {
+      (JSON as unknown as { parse: unknown }).parse = realParse;
+    }
+  });
+
   it("§9 the canonical reader records which Set-Cookie path this runtime uses", async () => {
     // §9 asks for the actual behaviour to be documented rather than assumed. Recorded here so
     // a runtime change (an undici without `getSetCookie`) shows up as a diff, not a silent
@@ -4446,12 +4532,18 @@ describe("R11 — E2A-S8B and E2A-S8C are falsifiable, and independent", () => {
     // directions, and the DENOMINATOR once reported as 26 because a counting regex required
     // `expect(` at line start and missed three continuation lines). A 29-way deletion sweep
     // at this head kills 27 and survives exactly the two named below. Classification:
-    // Classification, WITH ITS RULE, because the first attempt did not re-measure under any
-    // consistent one: C counts every assertion guarded by an `if (…)` — which is FOUR, not
-    // three: the three `if ("x" in item)` hash assertions AND the governance
-    // `conditions:isStringArray` guarded by `if ("conditions" in gov)`. An earlier revision
-    // counted three of those four as conditional and the fourth as unconditional.
-    // F=18 unconditional, C=4 conditional, M=5 per-item, D=2 derived — summing to 29.
+    // Classification, WITH THE RULE THAT PRODUCES IT — earlier revisions stated a rule that did
+    // not match their own numbers, and a reviewer re-derived three different splits from three
+    // readings. The rule is:
+    //   C = conditional on OPTIONAL PRESENCE, i.e. guarded by `if (<key> in <obj>)`: the three
+    //       hash assertions and the governance `conditions`. FOUR.
+    //   F = runs on every call, INCLUDING both arms of the `family` if/else, because line 2017
+    //       pins `family` to `milestone2|legacy`, making that an EXHAUSTIVE DISPATCH rather than
+    //       a condition — exactly one arm always executes. (Saying merely "guarded by an `if`"
+    //       would count those three too and give C=7; that wording was the defect.)
+    //   M = inside the per-item `forEach` and not already C. FIVE.
+    //   D = the two `:isObject` ordering guards, the only assertions a deletion sweep survives.
+    // F=18, C=4, M=5, D=2 — summing to 29, and re-measured at this head.
     // Of the oracle's 29 assertions
     // exactly TWO can be deleted with the suite green — governance `:isObject` and
     // `envelope:isObject`. Both are ordering guards: the violation each would catch is
@@ -4772,12 +4864,20 @@ describe("R11 — E2A-S8B and E2A-S8C are falsifiable, and independent", () => {
     // tolerated, because the route deliberately emits this for a record whose
     // persisted reportVersion is undefined and which cannot trap a paging client
     expect(() => assertApprovedListDto(withoutReportVersion)).not.toThrow();
-    // ...and nothing else is tolerated. R17-C2: this loop was a HAND-PICKED FIVE, so adding
-    // `schemaId`, `format`, `artifactStatus` or `createdAt` to the tolerance list was silent —
-    // S8C would then accept a response that dropped four contractual metadata fields. It now
-    // derives from the required set itself, minus the one documented tolerance, so a new
-    // required key is covered the moment it is declared.
-    for (const key of S8C_ITEM_REQUIRED.filter((k) => !S8C_ITEM_TOLERATED_ABSENT.includes(k))) {
+    // ...and nothing else is tolerated.
+    //
+    // R17-C2 replaced a HAND-PICKED FIVE with `S8C_ITEM_REQUIRED.filter(k => !TOLERATED.includes(k))`,
+    // which fixed the missing coverage but was SELF-BLINDING IN THE TOLERANCE DIRECTION: widening
+    // the tolerance list simply shrank this loop, leaving §27's exact pin as the only guard.
+    // R17-C3 derives the loop from a LITERAL contract set minus a LITERAL tolerance instead, so
+    // widening either constant is caught HERE as well as by the pin — two independent layers.
+    // The literal required set is itself pinned against `S8C_ITEM_REQUIRED` by §27, so it cannot
+    // drift away from the contract unnoticed.
+    const CONTRACT_REQUIRED_KEYS = ["exportId", "reportVersion", "schemaId", "schemaFamily", "format", "artifactStatus", "createdAt", "createdBy", "governanceStatusAtExport", "classification"];
+    const CONTRACT_TOLERATED_ABSENT = ["reportVersion"];
+    expect(`contractRequiredMatchesPolicy:${[...CONTRACT_REQUIRED_KEYS].sort().join(",")}`).toBe(`contractRequiredMatchesPolicy:${[...S8C_ITEM_REQUIRED].sort().join(",")}`);
+    expect(`contractToleranceMatchesPolicy:${[...CONTRACT_TOLERATED_ABSENT].sort().join(",")}`).toBe(`contractToleranceMatchesPolicy:${[...S8C_ITEM_TOLERATED_ABSENT].sort().join(",")}`);
+    for (const key of CONTRACT_REQUIRED_KEYS.filter((k) => !CONTRACT_TOLERATED_ABSENT.includes(k))) {
       const broken = JSON.parse(JSON.stringify(approvedBody)) as typeof approvedBody;
       delete (broken.exports[0] as Record<string, unknown>)[key];
       expect(() => assertApprovedListDto(broken)).toThrow(new RegExp(`unexpectedlyAbsentKeys:${key}|isObject`));
