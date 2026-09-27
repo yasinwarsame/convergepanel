@@ -302,6 +302,42 @@ export type PutWorkspaceReviewPanelResult = { ok: true; panel: WorkspaceReviewPa
  * (mirrors 9B.5.1's own division of pure body-shape validation at the route
  * vs. transactional eligibility inside the service).
  */
+/**
+ * TECH_DEBT_WORKSPACE_PANEL_MUTATION_AUDIT_COVERAGE — the immutable secondary record for
+ * panel lifecycle mutations.
+ *
+ * WHAT WAS WRONG. Phase 9D confirmed in Production that panel create/reconfigure, cancel and
+ * vote wrote NO immutable secondary record at all — the canonical resource document was the
+ * only evidence they ever happened — while finalize wrote 3 and Owner Override 4. The coverage
+ * was inverted: the rarest, most privileged action had the best audit trail, and the routine
+ * ones that actually constitute the review (who was put on the panel, who voted, who cancelled
+ * it) left nothing behind. A governance product whose votes are unauditable is the gap this
+ * closes.
+ *
+ * WRITTEN INSIDE THE TRANSACTION, deliberately, following `resubmitWorkspaceReview()`'s Phase
+ * 9B.3 precedent rather than finalize/override's best-effort post-commit pattern — that
+ * precedent's own comment calls the atomic form "a stronger guarantee", and
+ * `TECH_DEBT_GOVERNANCE_AUDIT_DURABILITY` is precisely the weakness of the other one. An event
+ * written here cannot survive a rolled-back mutation and cannot be lost after a committed one.
+ *
+ * ONLY A WRITE, NEVER A NEW READ. Every field comes from data the surrounding transaction
+ * already has in scope. Adding a `tx.get` would enlarge the read set of transactions whose
+ * OCC/contention behaviour was Production-canaried at `c28edbbf`; appending an auto-id document
+ * to a subcollection nothing else reads introduces no new conflict source. That is why these
+ * events deliberately omit `schemaId`/`answerShape`, which `resubmitWorkspaceReview()` includes
+ * only because its own flow already reads the governance record.
+ */
+function appendPanelGovernanceEvent(
+  tx: FirebaseFirestore.Transaction,
+  runRef: FirebaseFirestore.DocumentReference,
+  event: Readonly<Record<string, unknown>> & { action: string; byUid: string; at: string },
+): void {
+  // Auto-generated id, matching this collection's existing convention. Duplicate events on a
+  // stale retry are impossible by construction: every caller below sits after an OCC/state
+  // check that a retried stale request fails before reaching this line.
+  tx.set(runRef.collection("governanceEvents").doc(), event);
+}
+
 export async function putWorkspaceReviewPanel(args: {
   uid: string;
   workspaceId: string;
@@ -391,6 +427,19 @@ export async function putWorkspaceReviewPanel(args: {
       });
 
       tx.set(runRef.collection("humanReviewPanel").doc("current"), nextPanel);
+      // `current === null` is genuinely "no panel existed", not "an unreadable one did": an
+      // unreadable panel is rejected earlier by `readAndParsePanel`, so the two actions below
+      // cannot be confused by malformed data.
+      appendPanelGovernanceEvent(tx, runRef, {
+        action: current === null ? "adaptive_review_panel_created" : "adaptive_review_panel_reconfigured",
+        byUid: args.uid,
+        at: now,
+        workspaceId: target.workspaceId,
+        projectId: target.projectId,
+        panelRevision: nextPanel.revision,
+        priorPanelRevision: current?.revision ?? null,
+        reviewerCount: args.reviewerUserIds.length,
+      });
       return { ok: true, panel: nextPanel };
     });
   } catch (err) {
@@ -474,6 +523,15 @@ export async function deleteWorkspaceReviewPanel(args: { uid: string; workspaceI
 
       const nextPanel = buildCancelledAdaptiveHumanReviewPanel({ current, actorUserId: args.uid, now });
       tx.set(panelRef, nextPanel);
+      appendPanelGovernanceEvent(tx, runRef, {
+        action: "adaptive_review_panel_cancelled",
+        byUid: args.uid,
+        at: now,
+        workspaceId: target.workspaceId,
+        projectId: target.projectId,
+        panelRevision: current.revision,
+        reviewerCount: current.reviewerUserIds.length,
+      });
       return { ok: true };
     });
   } catch (err) {
@@ -608,6 +666,20 @@ export async function submitWorkspaceReviewPanelVote(args: {
       }
 
       tx.set(voteRef, nextVote);
+      // Deliberately NOT written on the `already_submitted` path above: that path returns the
+      // EXISTING vote and writes nothing canonical, so emitting an event there would fabricate
+      // a second "vote cast" for one vote. An idempotent replay must leave no new trace.
+      appendPanelGovernanceEvent(tx, runRef, {
+        action: "adaptive_review_panel_vote_cast",
+        byUid: args.uid,
+        at: now,
+        workspaceId: target.workspaceId,
+        projectId: target.projectId,
+        panelRevision: args.panelRevision,
+        voteStatus: nextVote.status,
+        commentPresent: nextVote.commentPresent,
+        conditionsCount: nextVote.conditionsCount,
+      });
       return { ok: true, vote: nextVote, submissionStatus: "submitted" as const };
     });
   } catch (err) {

@@ -1585,3 +1585,145 @@ describe("overrideWorkspaceReviewPanel — Workspace-canary target admission (Ph
     expect(result).toEqual({ ok: false, reason: "run_not_found" });
   });
 });
+
+/**
+ * TECH_DEBT_WORKSPACE_PANEL_MUTATION_AUDIT_COVERAGE.
+ *
+ * Phase 9D confirmed in Production that panel create/reconfigure, cancel and vote wrote NO
+ * immutable secondary record — the canonical resource document was their only evidence — while
+ * finalize wrote 3 and Owner Override 4. These tests pin the four events that close that gap,
+ * and pin the two things that make them trustworthy: they are written ATOMICALLY with the
+ * canonical mutation (a rejected mutation leaves nothing behind), and an idempotent replay does
+ * not fabricate a second one.
+ */
+const panelEvents = () => [...stores.governanceEvents.entries()].filter(([k]) => k.startsWith(`${RUN_ID}::`)).map(([, v]) => v as Record<string, unknown>);
+
+describe("panel mutation audit coverage — immutable governanceEvents", () => {
+  it("panel CREATE writes exactly one adaptive_review_panel_created event, with the fields the transaction already had", async () => {
+    const result = await putCall();
+    expect(result.ok).toBe(true);
+    const events = panelEvents();
+    expect(events).toHaveLength(1);
+    expect(events[0]).toEqual({
+      action: "adaptive_review_panel_created",
+      byUid: OWNER_UID,
+      at: MUTATE_NOW,
+      workspaceId: WS_ID,
+      projectId: null,
+      panelRevision: 1,
+      priorPanelRevision: null,
+      reviewerCount: 2,
+    });
+  });
+
+  it("panel RECONFIGURE writes adaptive_review_panel_reconfigured, carrying the prior revision", async () => {
+    seedPanel({ revision: 1 });
+    const result = await putCall({ expectedRevision: 1, reviewerUserIds: [OWNER_UID, ADMIN_UID, REVIEWER_UID] });
+    expect(result.ok).toBe(true);
+    const events = panelEvents();
+    expect(events).toHaveLength(1);
+    expect(events[0].action).toBe("adaptive_review_panel_reconfigured");
+    expect(`prior:${events[0].priorPanelRevision} next:${events[0].panelRevision} reviewers:${events[0].reviewerCount}`).toBe("prior:1 next:2 reviewers:3");
+  });
+
+  it("panel CANCEL writes adaptive_review_panel_cancelled for the revision that was cancelled", async () => {
+    seedPanel({ revision: 1 });
+    const result = await deleteCall();
+    expect(result.ok).toBe(true);
+    const events = panelEvents();
+    expect(events).toHaveLength(1);
+    expect(events[0].action).toBe("adaptive_review_panel_cancelled");
+    expect(`revision:${events[0].panelRevision} by:${events[0].byUid}`).toBe(`revision:1 by:${OWNER_UID}`);
+  });
+
+  it("VOTE writes adaptive_review_panel_vote_cast, recording the vote's own shape", async () => {
+    seedPanel({ revision: 1 });
+    const result = await voteCall({ status: "changes_requested", comment: "needs work", conditions: ["c1", "c2"] });
+    expect(result.ok).toBe(true);
+    const events = panelEvents();
+    expect(events).toHaveLength(1);
+    expect(events[0]).toEqual({
+      action: "adaptive_review_panel_vote_cast",
+      byUid: OWNER_UID,
+      at: MUTATE_NOW,
+      workspaceId: WS_ID,
+      projectId: null,
+      panelRevision: 1,
+      voteStatus: "changes_requested",
+      commentPresent: true,
+      conditionsCount: 2,
+    });
+  });
+
+  it("an IDEMPOTENT vote replay writes NO second event — one vote, one record", async () => {
+    seedPanel({ revision: 1 });
+    expect((await voteCall()).ok).toBe(true);
+    expect(panelEvents()).toHaveLength(1);
+    const replay = await voteCall();
+    expect(replay).toMatchObject({ ok: true, submissionStatus: "already_submitted" });
+    // the replay returned the EXISTING vote and wrote nothing canonical, so it must not
+    // fabricate a second "vote cast"
+    expect(panelEvents()).toHaveLength(1);
+  });
+
+  /**
+   * ATOMICITY is what distinguishes this from the best-effort post-commit pattern
+   * finalize/override use: each case below is a mutation REJECTED after its state/OCC check, so
+   * a non-atomic implementation — one that wrote the event before the outcome was known, or
+   * post-commit without checking it — would leave a governance event claiming something that
+   * never happened.
+   *
+   * Each case is its own `it` so it gets the real seeded fixture from `beforeEach`. An earlier
+   * draft looped inside ONE test and called `resetStores()` between cases, which clears the
+   * workspace, memberships AND run — so every mutation after the first failed with
+   * `run_not_found` and the test passed without ever exercising a single intended rejection
+   * path. Each case therefore asserts its SPECIFIC reason, not merely `ok: false`.
+   */
+  it("create rejected on a stale expectedRevision writes no event", async () => {
+    seedPanel({ revision: 3 });
+    expect(await putCall({ expectedRevision: 0 })).toEqual({ ok: false, reason: "stale_revision" });
+    expect(panelEvents()).toHaveLength(0);
+  });
+
+  it("cancel rejected on a stale expectedRevision writes no event", async () => {
+    seedPanel({ revision: 3 });
+    expect(await deleteCall({ expectedRevision: 1 })).toEqual({ ok: false, reason: "stale_revision" });
+    expect(panelEvents()).toHaveLength(0);
+  });
+
+  it("cancel rejected because the panel is already cancelled writes no event", async () => {
+    seedPanel({ revision: 1, status: "cancelled" });
+    expect(await deleteCall()).toEqual({ ok: false, reason: "panel_already_cancelled" });
+    expect(panelEvents()).toHaveLength(0);
+  });
+
+  it("vote rejected because no panel exists writes no event", async () => {
+    expect(await voteCall()).toEqual({ ok: false, reason: "panel_absent" });
+    expect(panelEvents()).toHaveLength(0);
+  });
+
+  it("vote rejected from a non-panel-reviewer writes no event", async () => {
+    // REVIEWER2_UID is a seeded Workspace member with the reviewer role but is deliberately NOT
+    // on the panel `seedPanel()` builds (its default set is OWNER/ADMIN/REVIEWER) — so this is
+    // rejected for not being a panel member, not for lacking Workspace access. An earlier draft
+    // used REVIEWER_UID, which IS on that default panel, so the vote succeeded and the test
+    // failed honestly rather than passing vacuously.
+    seedPanel({ revision: 1 });
+    const result = await voteCall({ uid: REVIEWER2_UID });
+    expect(result).toEqual({ ok: false, reason: "not_reviewer" });
+    expect(panelEvents()).toHaveLength(0);
+  });
+
+  it("on a REJECTED create, neither the panel nor the event changed — both or neither", async () => {
+    seedPanel({ revision: 2 });
+    expect((await putCall({ expectedRevision: 0 })).ok).toBe(false);
+    const panel = stores.humanReviewPanel.get(`${RUN_ID}::current`) as { revision: number };
+    expect(`panel.revision:${panel.revision} events:${panelEvents().length}`).toBe("panel.revision:2 events:0");
+  });
+
+  it("on a SUCCESSFUL create, both the panel and the event are present — both or neither", async () => {
+    expect((await putCall()).ok).toBe(true);
+    const panel = stores.humanReviewPanel.get(`${RUN_ID}::current`) as { revision: number };
+    expect(`panel.revision:${panel.revision} events:${panelEvents().length}`).toBe("panel.revision:1 events:1");
+  });
+});
