@@ -77,6 +77,19 @@
  *           → "E2A-S1 a NON-MEMBER performs zero run, Project and export I/O"
  *   E2A-S2  `research.read` precedes ALL target-associated I/O, same three reads.
  *           → "E2A-S2 a caller WITHOUT research.read performs zero run, Project and export I/O"
+ *
+ *   WHAT CONCEALMENT MEANS HERE, stated exactly because a review draft once overstated it
+ *   (R17 §37). The property is: WORKSPACE AND RUN EXISTENCE ARE CONCEALED FROM A CALLER WHO
+ *   FAILS WORKSPACE ADMISSION. A caller who fails admission gets 404
+ *   `team_workspace_not_found`; an ADMITTED member who lacks `research.read` gets 403
+ *   `insufficient_capability`. Those two are deliberately DISTINGUISHABLE, and it is not a
+ *   defect: an admitted member already knows the Workspace exists and that they belong to
+ *   it, so a 403 discloses nothing they could not already observe, while telling them
+ *   something true and actionable about their own permissions. The vocabulary matches the
+ *   rest of the Team run family (`teamRunAccessResponse`), and both statuses are pinned by
+ *   the two tests named above. What must NOT become distinguishable is anything that varies
+ *   with the TARGET — flag state, pagination validity, run existence, Project state — which
+ *   is what E2A-S3 through E2A-S7 cover.
  *   E2A-S3  Global export feature state is concealed until admission and
  *           `research.read` have both succeeded.
  *           → "a non-member cannot distinguish the flag state"
@@ -178,7 +191,16 @@
  *                 and the async-context store are private to a closure that exports only
  *                 the operations tests legitimately need — there is no registrar, setter
  *                 or reset to reach — so a request the helper did not register is refused
- *                 however it is reached and whatever else is in flight. Two distinct
+ *                 through every reaching mechanism WITHIN THIS MODULE GRAPH: raw, aliased,
+ *                 via an object property, `Reflect.apply`, `Promise.all`, an async wrapper
+ *                 or a lifecycle hook, and whatever else is in flight. SCOPED PRECISELY
+ *                 (R17 §35): this is a statement about the canonical route module the spec
+ *                 imports. A test that calls `jest.resetModules()` and `require`s a route
+ *                 instance built on a differently mocked identity dependency is NOT refused
+ *                 — it constructs a different subject, and that is governed by review of
+ *                 the test configuration, not by this guard. An earlier revision said
+ *                 "however it is reached" without qualification, which R16 falsified in
+ *                 exactly that way. Two distinct
  *                 guarantees, separately falsified: REGISTRATION LIFETIME (the entry
  *                 exists only for its own invocation) and ROUTE-ENTRY CONSUMPTION (a
  *                 registered request may enter exactly once).

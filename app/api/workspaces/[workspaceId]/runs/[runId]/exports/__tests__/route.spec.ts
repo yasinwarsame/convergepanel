@@ -78,13 +78,24 @@ jest.mock("@/lib/env", () => ({
  * ALS propagates across `await`, `setTimeout` and `setImmediate`, keeps two concurrent
  * flows separate, and is `undefined` outside any flow.
  *
- * WHAT NO TEST CAN DO. There is no setter, no resetter, and no global slot. A test
- * cannot enumerate a `WeakMap`, cannot name another request's context, and cannot make
- * the route execute for a request the helper did not register. Residual, scoped
- * honestly and deliberately (§29): a spec author who rewrites this harness can defeat
- * it — editable tests cannot be made self-authenticating against arbitrary coordinated
- * replacement, and branch protection plus human review govern that threat. What is now
- * structurally impossible is FORGETTING, and every mechanism below has a negative
+ * WHAT NO TEST CAN DO, STATED WITH ITS SCOPE (R17 §35). Within this module graph there is
+ * no setter, no resetter and no global slot: a test cannot enumerate the `WeakMap`, cannot
+ * name another request's context, and cannot make THE IMPORTED ROUTE execute for a request
+ * the helper did not register.
+ *
+ * WHAT IS OUTSIDE THAT SCOPE, because R16 proved the unqualified version false. A test that
+ * calls `jest.doMock` on the identity module, `jest.resetModules()`, and then `require`s the
+ * route again obtains a DIFFERENT route instance whose identity resolver never consults the
+ * admission guard; it is ADMITTED, not refused, and the required checks never run for it.
+ * That is not a regression the production route can cause — it is deliberate reconfiguration
+ * of the dependency graph, replacing the subject under test — so it is governed by review of
+ * the test configuration itself. No mechanism here attempts to police Jest's module registry;
+ * attempting it would only add another recursive harness layer (§34).
+ *
+ * Residual, scoped honestly and deliberately (§29): a spec author who rewrites this harness
+ * can defeat it — editable tests cannot be made self-authenticating against arbitrary
+ * coordinated replacement, and branch protection plus human review govern that threat. What
+ * is now structurally impossible is FORGETTING, and every mechanism below has a negative
  * control that makes its own body fail.
  */
 type SecureInvocationContext = {
@@ -226,6 +237,113 @@ const E2A_S8E_VIOLATION = "E2A-S8E VIOLATION";
  * authenticate itself against a coordinated rewrite of its own internals; code review and
  * branch protection govern that, and this file stops pretending otherwise.
  */
+/**
+ * ─── R17 §3–§9 — THE CANONICAL RESPONSE ORACLE ────────────────────────────────
+ *
+ * GOVERNING RULE, and the reason this exists: THE ORACLE MUST NOT DERIVE SECURITY
+ * EVIDENCE THROUGH MEMBERS SUPPLIED BY THE SUBJECT UNDER TEST.
+ *
+ * R16 proved the previous design invalid with a mutation that touched NO test file.
+ * `submitRequest` materialized the body with `await res.clone().text()`, and `clone` is
+ * resolved on the object the ROUTE returned. `NextResponse` instances carry no own
+ * properties (measured), so a route is free to add one:
+ *
+ *     const out = NextResponse.json({ ...clean, __leak: frozenReport });
+ *     Object.defineProperty(out, "clone", { value: () => NextResponse.json(clean) });
+ *     return out;
+ *
+ * The client received the leak; the oracle received the decoy; 242/242 passed. Removing
+ * only the `defineProperty` line failed 20 tests, so the leak was real and the override
+ * was the only thing hiding it. Two facts made it reachable: production Firestore records
+ * are PLAIN objects, and in `plain` mode the read-sink is asserted EMPTY by contract, so
+ * S8A is inert for exactly the production record shape — leaving S8B as the only guard,
+ * reading the route's own copy.
+ *
+ * THE CORRECTION: capture the genuine platform functions and accessors ONCE, here, before
+ * any route runs, and invoke them with the response only as the RECEIVER. A route can
+ * shadow its own members; it cannot alter what `Response.prototype` held at module load.
+ *
+ * INTERNAL-SLOT VALIDATION COMES FREE, and is relied on deliberately: these intrinsics
+ * require real Response/Headers internal slots, so a route returning a plausible fake
+ * object makes the ORACLE FAIL rather than accepting the object's self-described values.
+ * There is NO duck-typing fallback — adding one would re-trust the subject.
+ *
+ * SCOPE (§16): this covers exactly the surfaces S8B/S8C already claim. It is not the start
+ * of a Web-API census.
+ */
+const RESPONSE_INTRINSICS = (() => {
+  const accessor = (proto: object, name: string): (() => unknown) | undefined =>
+    Object.getOwnPropertyDescriptor(proto, name)?.get;
+  const captured = {
+    clone: Response.prototype.clone as (this: Response) => Response,
+    text: Response.prototype.text as (this: Response) => Promise<string>,
+    status: accessor(Response.prototype, "status") as ((this: Response) => number) | undefined,
+    statusText: accessor(Response.prototype, "statusText") as ((this: Response) => string) | undefined,
+    headers: accessor(Response.prototype, "headers") as ((this: Response) => Headers) | undefined,
+    headersForEach: Headers.prototype.forEach as (this: Headers, cb: (v: string, k: string) => void) => void,
+    // Optional BY RUNTIME, not by choice: `getSetCookie` is absent on older undici. When it
+    // is missing the Set-Cookie channel is covered by canonical header enumeration instead,
+    // and §9's test records which path this runtime actually took.
+    headersGetSetCookie: (Headers.prototype as { getSetCookie?: (this: Headers) => string[] }).getSetCookie,
+  };
+  // FAIL LOUDLY AT INITIALIZATION (§4) rather than silently degrading to a weaker oracle.
+  const required: [string, unknown][] = [
+    ["Response.prototype.clone", captured.clone],
+    ["Response.prototype.text", captured.text],
+    ["Response.prototype.status (getter)", captured.status],
+    ["Response.prototype.statusText (getter)", captured.statusText],
+    ["Response.prototype.headers (getter)", captured.headers],
+    ["Headers.prototype.forEach", captured.headersForEach],
+  ];
+  const missing = required.filter(([, fn]) => typeof fn !== "function").map(([n]) => n);
+  if (missing.length > 0) {
+    throw new Error(`E2A-S8B ORACLE CANNOT INITIALIZE: missing platform intrinsics [${missing.join(", ")}]. The response oracle refuses to fall back to subject-supplied members.`);
+  }
+  return Object.freeze(captured);
+})();
+
+/**
+ * The one canonical, immutable view of a response that every security check reads (§52:
+ * S8B and S8C must not diverge on which copy they trust; §54: it is frozen because it is
+ * produced by trusted extraction, and freezing it must not be mistaken for a way to
+ * change the underlying Response).
+ */
+type CanonicalResponse = {
+  readonly status: number;
+  readonly statusText: string;
+  readonly headerEntries: ReadonlyArray<readonly [string, string]>;
+  readonly setCookies: ReadonlyArray<string>;
+  readonly setCookieSource: "Headers.prototype.getSetCookie" | "canonical header enumeration";
+  readonly bodyText: string;
+};
+
+/**
+ * §53 — ONE-SHOT BODY DISCIPLINE. The body is a stream, so evidence is read from an
+ * intrinsic CLONE and the caller's response is left unconsumed; a regression test asserts
+ * ordinary tests can still read the returned response afterwards.
+ */
+const canonicalResponseSnapshot = async (res: Response): Promise<CanonicalResponse> => {
+  const I = RESPONSE_INTRINSICS;
+  const clone = Reflect.apply(I.clone, res, []) as Response;
+  const bodyText = await Reflect.apply(I.text, clone, []);
+  const status = Reflect.apply(I.status as (this: Response) => number, res, []);
+  const statusText = Reflect.apply(I.statusText as (this: Response) => string, res, []);
+  const headers = Reflect.apply(I.headers as (this: Response) => Headers, res, []);
+  const headerEntries: (readonly [string, string])[] = [];
+  Reflect.apply(I.headersForEach, headers, [(value: string, name: string) => { headerEntries.push(Object.freeze([name, value] as const)); }]);
+  const setCookies = typeof I.headersGetSetCookie === "function"
+    ? [...(Reflect.apply(I.headersGetSetCookie, headers, []) as string[])]
+    : headerEntries.filter(([n]) => n.toLowerCase() === "set-cookie").map(([, v]) => v);
+  return Object.freeze({
+    status,
+    statusText: statusText ?? "",
+    headerEntries: Object.freeze(headerEntries),
+    setCookies: Object.freeze(setCookies),
+    setCookieSource: typeof I.headersGetSetCookie === "function" ? "Headers.prototype.getSetCookie" : "canonical header enumeration",
+    bodyText,
+  });
+};
+
 const { admitRouteEntry: admitRouteEntryPrivate, ...publicHarnessSurface } = (() => {
   /** Authorization: exact-request identity. Private to this closure — no setter escapes. */
   const secureInvocations = new WeakMap<NextRequest, SecureInvocationContext>();
@@ -300,12 +418,15 @@ const { admitRouteEntry: admitRouteEntryPrivate, ...publicHarnessSurface } = (()
       // §5/§32 — propagation to collaborator mocks that never receive the request. The
       // store is scoped to this async flow, so no other invocation can read or clear it.
       const res = await invocationStore.run(ctx, async () => GET(req, { params: { workspaceId, runId } }));
-      // §14 (R11) — materialize from a CLONE, so the caller's `Response` is never
-      // consumed here, and scan what was actually serialized rather than a DTO.
-      const bodyText = await res.clone().text();
-      const json = JSON.parse(bodyText) as Record<string, any>;
-      const executed = runRequiredChecks({ ctx, res, bodyText, json });
-      return { status: res.status, json, bodyText, reads: [...ctx.sink.reads], executed };
+      // R17 §3–§7 — evidence comes from CAPTURED PLATFORM INTRINSICS, never from members
+      // of the object the route returned. `res.clone()` / `res.text()` / `res.headers`
+      // are all shadowable by the subject, and R16 shadowed `clone` to hand the oracle a
+      // clean decoy while the client got the frozen report. Nothing below touches `res`
+      // except as a receiver.
+      const response = await canonicalResponseSnapshot(res);
+      const json = JSON.parse(response.bodyText) as Record<string, any>;
+      const executed = runRequiredChecks({ ctx, response, json });
+      return { status: response.status, json, bodyText: response.bodyText, reads: [...ctx.sink.reads], executed };
     } finally {
       // §33 — removes ONLY this request's entry. There is no shared slot to null out, so
       // this cannot touch a concurrent invocation's context.
@@ -1304,7 +1425,7 @@ const listFake = (records = [exportRecord(3), exportRecord(2)], hasMore = false)
  *   | version / runId / schemaVersion | NO       | not DTO fields                |
  *   | anything else             | NO             | default deny                  |
  */
-const ALLOWED_SOURCE_PROPS: readonly string[] = [
+const ALLOWED_SOURCE_PROPS: readonly string[] = Object.freeze([
   "exportId",                 // → DTO.exportId
   "reportVersion",            // → DTO.reportVersion, and the continuation cursor
   "schemaId",                 // → DTO.schemaId
@@ -1316,16 +1437,16 @@ const ALLOWED_SOURCE_PROPS: readonly string[] = [
   "classification",           // → DTO.classification
   "governanceStatusAtExport", // → DTO.governanceStatusAtExport
   "exportMetadata",           // → fileHash / hashAlgorithm / hashReproducible ONLY
-];
+]);
 /** Every other property `AdaptiveResearchExportV1` actually carries. `reportSnapshot` is the one this invariant is named for; the rest are forbidden because the DTO does not consume them, so a future read is a deliberate contract change rather than a silent one. */
-const FORBIDDEN_SOURCE_PROPS: readonly string[] = [
+const FORBIDDEN_SOURCE_PROPS: readonly string[] = Object.freeze([
   "reportSnapshot", // the frozen report content — the whole point
   "generatedBy",    // the creator's frozen display name + masked email
   "failureReason",  // internal failure text
   "version",        // contract version, not a DTO field
   "runId",          // the envelope carries the route's own runId, not the record's
   "schemaVersion",  // not a DTO field
-];
+]);
 
 /**
  * R8 §3/§4 — WHY THERE IS A SINK ABSTRACTION.
@@ -1447,7 +1568,7 @@ let trapMode: "proxy" | "accessor" | "plain" = "accessor";
  * passed the whole suite. The container is therefore trapped one level deep with
  * its own allow-list.
  */
-const ALLOWED_EXPORT_METADATA_PROPS: readonly string[] = ["fileHash"];
+const ALLOWED_EXPORT_METADATA_PROPS: readonly string[] = Object.freeze(["fileHash"]);
 
 const trapContainer = (value: unknown, label: string, allowed: readonly string[], sink: AccessSink): unknown => {
   if (value === null || typeof value !== "object") return value;
@@ -1538,6 +1659,19 @@ const accessorRecord = (record: Record<string, unknown>, label: string, sink: Ac
  * and `plain` mode is ADDITIONAL production-shape coverage — the mode that matches
  * what the route really receives, and the only one a `structuredClone`-rejecting
  * path cannot distinguish from production. No mode is the sole meaningful one.
+ *
+ * R17 §46 — THE DIVISION OF RESPONSIBILITY, stated exactly, because R16 exploited the gap
+ * between these two sentences. S8A's proof is MODE-SPECIFIC: a plain production-shaped
+ * record carries no instrumentation, so an empty read-sink in `plain` mode means "nothing
+ * was observable here", NOT "the route consulted no forbidden source". The `plain` row's
+ * `expect(r.reads).toEqual([])` is a statement about the harness, not about the route.
+ *
+ * S8B is the invariant that actually proves frozen report content did not reach the
+ * serialized, client-visible response, and it holds in every mode. That is why S8B's
+ * evidence must not come from anything the route controls (see the canonical response
+ * oracle): in `plain` mode it is the ONLY guard, and R16's leak selected that mode and then
+ * handed the oracle a decoy `clone()`. Read these two invariants as complements with
+ * different blind spots, never as mutual reinforcement.
  */
 
 /**
@@ -1565,7 +1699,7 @@ const accessorRecord = (record: Record<string, unknown>, label: string, sink: Ac
  * costs nothing and means "client-visible HTTP response material" is exactly true
  * rather than true-with-an-exception.
  */
-const assertResponseSecrecy = (res: Response, bodyText: string, canaries: ReadonlySet<string>): void => {
+const assertResponseSecrecy = (response: CanonicalResponse, canaries: ReadonlySet<string>): void => {
   // The third element is CASE FOLDING, and it is used for exactly one channel.
   // HTTP header NAMES are case-insensitive and the platform lowercases them on the
   // way out, so that channel changes the bytes by itself: a verbatim comparison
@@ -1574,15 +1708,16 @@ const assertResponseSecrecy = (res: Response, bodyText: string, canaries: Readon
   // census (§23) — the body and header VALUES are compared byte-for-byte, and
   // nothing here tries to anticipate hex, base64 or compression. S8C exists so
   // output safety does not rest on the canary's literal representation at all.
-  const surfaces: [string, string, boolean][] = [["body", bodyText, false], ["statusText", res.statusText ?? "", false]];
-  res.headers.forEach((value, name) => {
+  // Every value below came from `canonicalResponseSnapshot`, i.e. from captured
+  // `Response.prototype` / `Headers.prototype` intrinsics applied to the real instance.
+  // This function no longer touches a Response at all, so there is no member for a route
+  // to shadow between the leak and the scan.
+  const surfaces: [string, string, boolean][] = [["body", response.bodyText, false], ["statusText", response.statusText, false]];
+  for (const [name, value] of response.headerEntries) {
     surfaces.push([`header-name:${name}`, name, true]);
     surfaces.push([`header-value:${name}`, value, false]);
-  });
-  const headersWithCookies = res.headers as unknown as { getSetCookie?: () => string[] };
-  if (typeof headersWithCookies.getSetCookie === "function") {
-    headersWithCookies.getSetCookie().forEach((cookie, i) => surfaces.push([`set-cookie[${i}]`, cookie, false]));
   }
+  response.setCookies.forEach((cookie, i) => surfaces.push([`set-cookie[${i}]`, cookie, false]));
   for (const canary of canaries) {
     for (const [where, text, fold] of surfaces) {
       const found = fold ? text.toLowerCase().includes(canary.toLowerCase()) : text.includes(canary);
@@ -1651,14 +1786,35 @@ type RequiredCheckId =
 /** What every required check is handed. Built once per invocation by the runner. */
 type RequiredCheckContext = {
   readonly ctx: SecureInvocationContext;
-  readonly res: Response;
-  readonly bodyText: string;
+  /** R17: the canonical, intrinsic-derived snapshot — NOT the route's Response object. */
+  readonly response: CanonicalResponse;
   readonly json: Record<string, unknown>;
 };
 
 type RequiredCheck = { readonly id: RequiredCheckId; readonly assert: (c: RequiredCheckContext) => void };
 
-const REQUIRED_CHECKS: ReadonlyArray<RequiredCheck> = Object.freeze([
+/**
+ * R17 §17–§22 — DEEP IMMUTABILITY, because a shallow freeze was not a boundary.
+ *
+ * R16 measured `Object.isFrozen(REQUIRED_CHECKS) === true` while every ENTRY stayed
+ * mutable, and turned that into a green leak: a `beforeEach` replaced four `assert`
+ * functions with wrappers that ran the original only for contexts labelled "control", so
+ * the §13/§15 negative controls still passed while NO real response was ever validated.
+ * Every response then carried 2400 bytes of frozen report and the suite reported 243/243.
+ *
+ * `Object.freeze` is shallow, and `readonly` is erased — this file is deliberately not
+ * typechecked (`tsconfig` excludes `*.spec.ts`; ts-jest transpiles only), so the type
+ * annotation below prevents nothing at runtime. Each entry is therefore frozen
+ * individually. Entries hold only a string id and a function, so there is no nested
+ * mutable metadata to chase (§19) — this is exactly targeted, not recursive traversal
+ * theater.
+ *
+ * WHAT THIS DOES AND DOES NOT DO: it stops RUNTIME tampering through ordinary object
+ * access. It does not and cannot stop a SOURCE edit to a check body — that remains the
+ * job of each entry's independent negative control, and §23/§48's source-edit no-op matrix
+ * proves those still fail. The two properties are separate and both are measured.
+ */
+const REQUIRED_CHECKS: ReadonlyArray<RequiredCheck> = Object.freeze(([
   {
     id: "S8A:no-forbidden-source-reads",
     assert: (c) => expect(c.ctx.sink.forbidden).toEqual([]),
@@ -1692,7 +1848,7 @@ const REQUIRED_CHECKS: ReadonlyArray<RequiredCheck> = Object.freeze([
       // export item per record the helper returned (the projection is a 1:1 `map`), so
       // an emptied store is visible HERE no matter how it was emptied, because the
       // comparison is against data the route produced rather than data the harness kept.
-      if (c.res.status === 200) {
+      if (c.response.status === 200) {
         const items = Array.isArray(c.json.exports) ? (c.json.exports as unknown[]).length : -1;
         expect(`responseExportItems:${items} rawRecordsRecorded:${c.ctx.rawRecords.length}`).toBe(
           `responseExportItems:${items} rawRecordsRecorded:${items}`,
@@ -1717,13 +1873,13 @@ const REQUIRED_CHECKS: ReadonlyArray<RequiredCheck> = Object.freeze([
   },
   {
     id: "S8B:response-secrecy",
-    assert: (c) => assertResponseSecrecy(c.res, c.bodyText, canariesIn(c.ctx.rawRecords)),
+    assert: (c) => assertResponseSecrecy(c.response, canariesIn(c.ctx.rawRecords)),
   },
   {
     id: "S8C:approved-shape",
-    assert: (c) => (c.res.status === 200 ? assertApprovedListDto(c.json) : assertConcealmentEnvelope(c.json)),
+    assert: (c) => (c.response.status === 200 ? assertApprovedListDto(c.json) : assertConcealmentEnvelope(c.json)),
   },
-] as const);
+] as RequiredCheck[]).map((check) => Object.freeze(check)));
 
 /**
  * §11 — the central runner. It iterates the registry and calls each `assert` itself;
@@ -1772,9 +1928,9 @@ const runRequiredChecks = (c: RequiredCheckContext): RequiredCheckId[] => {
  * containers` — rather than for an exact runtime type the persisted data does not
  * actually guarantee. That is the difference between a check and a wish.
  */
-const S8C_ENVELOPE_KEYS: readonly string[] = ["ok", "runId", "exports", "hasMore", "nextCursor"];
-const S8C_ITEM_REQUIRED: readonly string[] = ["exportId", "reportVersion", "schemaId", "schemaFamily", "format", "artifactStatus", "createdAt", "createdBy", "governanceStatusAtExport", "classification"];
-const S8C_ITEM_OPTIONAL: readonly string[] = ["fileHash", "hashAlgorithm", "hashReproducible"];
+const S8C_ENVELOPE_KEYS: readonly string[] = Object.freeze(["ok", "runId", "exports", "hasMore", "nextCursor"]);
+const S8C_ITEM_REQUIRED: readonly string[] = Object.freeze(["exportId", "reportVersion", "schemaId", "schemaFamily", "format", "artifactStatus", "createdAt", "createdBy", "governanceStatusAtExport", "classification"]);
+const S8C_ITEM_OPTIONAL: readonly string[] = Object.freeze(["fileHash", "hashAlgorithm", "hashReproducible"]);
 /**
  * R11 §19/§43 — A DOCUMENTED, BOUNDED TOLERANCE, discovered by this validator and
  * deliberately NOT "fixed" in the route.
@@ -1798,15 +1954,15 @@ const S8C_ITEM_OPTIONAL: readonly string[] = ["fileHash", "hashAlgorithm", "hash
  * executable route changes absent an independently classified production defect,
  * and this is a metadata-completeness wart with no disclosure component.
  */
-const S8C_ITEM_TOLERATED_ABSENT: readonly string[] = ["reportVersion"];
-const S8C_GOVERNANCE_KEYS: Readonly<Record<string, readonly string[]>> = {
-  milestone2: ["family", "kind", "isOwnerOverride", "conditions"],
-  legacy: ["family", "status"],
-};
-const S8C_GOVERNANCE_REQUIRED: Readonly<Record<string, readonly string[]>> = {
-  milestone2: ["family", "kind", "isOwnerOverride"],
-  legacy: ["family", "status"],
-};
+const S8C_ITEM_TOLERATED_ABSENT: readonly string[] = Object.freeze(["reportVersion"]);
+const S8C_GOVERNANCE_KEYS: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  milestone2: Object.freeze(["family", "kind", "isOwnerOverride", "conditions"]),
+  legacy: Object.freeze(["family", "status"]),
+});
+const S8C_GOVERNANCE_REQUIRED: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  milestone2: Object.freeze(["family", "kind", "isOwnerOverride"]),
+  legacy: Object.freeze(["family", "status"]),
+});
 
 const assertApprovedGovernanceStatus = (value: unknown, at: string): void => {
   expect(`${at}:isObject:${value !== null && typeof value === "object" && !Array.isArray(value)}`).toBe(`${at}:isObject:true`);
@@ -1851,7 +2007,7 @@ const assertApprovedGovernanceStatus = (value: unknown, at: string): void => {
  * copied from this constant — copying it through the same source would make the oracle
  * agree with any edit.
  */
-const S8C_ENVELOPE_ERROR_KEYS: readonly string[] = ["ok", "errorCode", "message"];
+const S8C_ENVELOPE_ERROR_KEYS: readonly string[] = Object.freeze(["ok", "errorCode", "message"]);
 const assertConcealmentEnvelope = (json: unknown): void => {
   expect(`refusal:isObject:${json !== null && typeof json === "object" && !Array.isArray(json)}`).toBe("refusal:isObject:true");
   const body = json as Record<string, unknown>;
@@ -1924,8 +2080,11 @@ const expectSourceWasRead = (r: { reads: string[] }, ...props: string[]) => {
  * top-level `afterEach` sees nothing about route entry — deleting it is a measured
  * equivalent mutant.
  */
-const buildRequest = (query = "", workspaceId = WS, runId = RUN) =>
-  new NextRequest(`http://localhost/api/workspaces/${workspaceId}/runs/${runId}/exports${query}`);
+/** The route's own source path, for the few tests that assert on its executable text. */
+const ROUTE_SOURCE_PATH = __filename.replace("/__tests__/route.spec.ts", "/route.ts");
+
+const buildRequest = (query = "", workspaceId = WS, runId = RUN, headers?: Record<string, string>) =>
+  new NextRequest(`http://localhost/api/workspaces/${workspaceId}/runs/${runId}/exports${query}`, headers ? { headers } : undefined);
 
 const submitRequest = secureHarness.submitRequest;
 
@@ -2452,6 +2611,61 @@ describe("E2A-S11 — admission is evaluated for THIS caller against THIS Worksp
   it("E2A-S11 admission is passed EXACTLY the caller and the Workspace — nothing else", async () => {
     await submit();
     expect(mockedAccess).toHaveBeenCalledWith({ uid: UID, workspaceId: WS });
+  });
+
+  /**
+   * R17 §39–§44 — THE IDENTITY-SOURCE CLAIM, CONVERTED FROM PROSE INTO A FALSIFIER.
+   *
+   * The invariant table asserted that authority is never taken from client-controlled
+   * input. R16 showed that claim was UNFALSIFIED: the pins above assert the call arguments
+   * unconditionally and no test ever SENT a conflicting parameter, so
+   * `{ uid: req.nextUrl.searchParams.get("uid") ?? uid }` — a query-first override, the
+   * classic privilege-escalation shape — survived the whole suite, as did the `?ws=`
+   * equivalent. An assertion that the right value arrived when no wrong value was offered
+   * proves nothing about provenance.
+   *
+   * These requests OFFER the wrong value on every client-controlled channel the route could
+   * read, and assert the canonical sources still win. `uid` must come only from
+   * `resolveRequestIdentity(req)`, and the addressed Workspace only from the path params.
+   */
+  it("E2A-S11 an attacker-supplied uid QUERY PARAMETER does not become the authority", async () => {
+    const r = await submit("?uid=attacker-injected&userId=attacker-injected&caller=attacker-injected");
+    expect(r.status).toBe(200);
+    expect(mockedAccess).toHaveBeenCalledWith({ uid: UID, workspaceId: WS });
+    // stated as identity, so a partial/normalized injection cannot pass
+    expect(`admittedUid:${(mockedAccess.mock.calls[0][0] as { uid: string }).uid}`).toBe(`admittedUid:${UID}`);
+  });
+
+  it("E2A-S11 an attacker-supplied Workspace QUERY PARAMETER does not redirect admission", async () => {
+    const r = await submit(`?ws=${OTHER_WS}&workspaceId=${OTHER_WS}&workspace=${OTHER_WS}`);
+    expect(r.status).toBe(200);
+    // the ADDRESSED Workspace is the path segment, and that is what authority is evaluated for
+    expect(mockedAccess).toHaveBeenCalledWith({ uid: UID, workspaceId: WS });
+  });
+
+  it("E2A-S11 attacker-supplied identity/Workspace HEADERS do not become the authority", async () => {
+    // The route reads no request header itself — identity comes from
+    // `resolveRequestIdentity(req)` (cookie or bearer) and the Workspace from the path. That
+    // is asserted here rather than merely stated: a mutation preferring any of these headers
+    // fails this test. The names are the conventional spoofing candidates, chosen because a
+    // reverse proxy is the usual source of this bug class.
+    const r = await submitRequest(buildRequest("", WS, RUN, {
+      "x-uid": "attacker-injected",
+      "x-user-id": "attacker-injected",
+      "x-forwarded-user": "attacker-injected",
+      "x-workspace-id": OTHER_WS,
+    }));
+    expect(r.status).toBe(200);
+    expect(mockedAccess).toHaveBeenCalledWith({ uid: UID, workspaceId: WS });
+  });
+
+  it("E2A-S11 the LIST route parses no request body, so no body field can carry authority", async () => {
+    // §43 — stated factually rather than by forcing an unnatural GET-with-body. The route's
+    // executable source contains no body read at all; this pins that, so adding one becomes
+    // a visible change rather than a silent new authority channel.
+    const routeSource = readFileSync(ROUTE_SOURCE_PATH, "utf8");
+    const bodyReads = ["req.json(", "req.text(", "req.formData(", "req.body", "request.json("].filter((needle) => routeSource.includes(needle));
+    expect(`routeBodyReads:${bodyReads.join(",")}`).toBe("routeBodyReads:");
   });
 });
 
@@ -3299,9 +3513,11 @@ describe("E2A-S8A — the instrumentation boundary cannot be opted out of", () =
    * guarantee now has TWO layers and the FIRST is load-bearing:
    *   LAYER A — the FAIL-CLOSED entry boundary, keyed on EXACT REQUEST IDENTITY with
    *             one-entry consumption. A request the secured helper did not register
-   *             is refused however it is reached, from any hook, at any time, and
-   *             regardless of what other requests are in flight. There is no global
-   *             flag and no counter to balance.
+   *             is refused through every reaching mechanism in this module graph, from
+   *             any hook, at any time, and regardless of what other requests are in
+   *             flight. There is no global flag and no counter to balance. SCOPE (R17
+   *             §35): a deliberately re-mocked, `resetModules`-reloaded route instance is
+   *             a different subject and is out of this boundary, not covered by it.
    *   LAYER C — this test and its sibling below. They localize the single raw call
    *             site and pin that the required-check RUNNER is invoked inside the
    *             helper and nowhere else. A structural aid, NOT the security
@@ -3495,7 +3711,7 @@ describe("R13 — the required-check registry is load-bearing, entry by entry", 
     // a report-bearing record whose snapshot carries NO canary — the fixture defect
     "S8B:fixture-canary-integrity": { corrupt: (c) => { c.ctx.rawRecords.push({ exportId: "exp-9", reportSnapshot: { question: "SENTINEL_NOT_A_CANARY" } }); }, pattern: /exp-9/ },
     // a real canary in the raw records AND in the serialized body
-    "S8B:response-secrecy": { corrupt: (c) => { c.ctx.rawRecords.push({ exportId: "exp-9", reportSnapshot: { question: FROZEN_REPORT_CANARY_M2 } }); (c as { bodyText: string }).bodyText = `{"leaked":"${FROZEN_REPORT_CANARY_M2}"}`; }, pattern: /frozen-report-content@body/ },
+    "S8B:response-secrecy": { corrupt: (c) => { c.ctx.rawRecords.push({ exportId: "exp-9", reportSnapshot: { question: FROZEN_REPORT_CANARY_M2 } }); (c as { response: CanonicalResponse }).response = Object.freeze({ ...c.response, bodyText: `{"leaked":"${FROZEN_REPORT_CANARY_M2}"}` }); }, pattern: /frozen-report-content@body/ },
     "S8C:approved-shape": { corrupt: (c) => { (c.json.exports as Record<string, unknown>[])[0].reportSnapshot = "smuggled"; }, pattern: /unapprovedKeys/ },
   };
 
@@ -3530,7 +3746,17 @@ describe("R13 — the required-check registry is load-bearing, entry by entry", 
     // the clean context's stored evidence must agree with its own response: one raw
     // record, one export item
     expect(`controlContextIsSelfConsistent:${(json.exports as unknown[]).length === ctx.rawRecords.length}`).toBe("controlContextIsSelfConsistent:true");
-    return { ctx, res: new Response(bodyText, { status: 200 }), bodyText, json };
+    // R17: the controls drive the checks through the SAME CanonicalResponse shape the real
+    // route path produces, so a context that passes here is the same kind of input.
+    const response: CanonicalResponse = Object.freeze({
+      status: 200,
+      statusText: "",
+      headerEntries: Object.freeze([Object.freeze(["content-type", "application/json"] as const)]),
+      setCookies: Object.freeze([] as string[]),
+      setCookieSource: "Headers.prototype.getSetCookie" as const,
+      bodyText,
+    });
+    return { ctx, response, json };
   };
 
   it("§13/§15 EVERY required check REJECTS its own violation — so a no-op body fails here", () => {
@@ -3645,11 +3871,13 @@ describe("R15 — the public harness facade grants no authorization capability",
     // pass vacuously. The accessor is REMOVED — the closure now passes the sink to the
     // wrappers explicitly — so the old attack has no target.
     expect(`sinkAccessorStillExposed:${"sinkForCurrentInvocation" in secureHarness}`).toBe("sinkAccessorStillExposed:false");
-    // A complete census of object-returning members, derived from the facade itself rather
-    // than asserted: each is either a pure function of its arguments or an inert builder.
-    const objectReturning = Object.entries(secureHarness as unknown as Record<string, unknown>)
-      .filter(([, v]) => typeof v === "function")
-      .map(([k]) => k)
+    // R17 §32 — WITHDRAWN CLAIM, kept visible. An earlier revision called the next two lines
+    // "a complete census of object-returning members, derived from the facade itself". It was
+    // neither complete nor derived: it intersected the key set with a hardcoded pair, never
+    // called a member, and could not have seen a third object-returning one. What it actually
+    // pins is that these two NAMES are present — the classification of what they return is
+    // asserted below and, inside a live invocation, in §33.
+    const objectReturning = Object.keys(secureHarness as unknown as Record<string, unknown>)
       .filter((k) => ["instrumentListResult", "newInvocationContext"].includes(k));
     expect(objectReturning.sort()).toEqual(["instrumentListResult", "newInvocationContext"]);
     // `newInvocationContext` is a builder: fresh, unregistered, and mutating it changes
@@ -3682,45 +3910,77 @@ describe("R15 — the public harness facade grants no authorization capability",
     // `entryConsumed` a collaborator could rewrite. There is no context accessor now —
     // the producer RECORDS through a primitive and the detector reads a label string.
     expect(`labelIsAPrimitive:${typeof secureHarness.currentInvocationLabel()}`).toBe("labelIsAPrimitive:undefined");
-    // R16 §8 — a BEHAVIOURAL sweep replaces a name filter that COULD NOT FAIL. The previous
-    // form selected members with `endsWith("ForProducerA") || /context/i`, then excluded
-    // `newInvocationContext` from the result. Over the real member set that predicate matches
-    // that member and nothing else, so the match set was always EMPTY: the assertion held
-    // whatever any member returned, including a live sink. It was retained as a name-scope
-    // control and read as a capability proof, which it never was.
+    // R17 §31/§32 — THE R16 SWEEP IS REMOVED, NOT REPLACED BY A CLEVERER SWEEP.
     //
-    // This calls every member and inspects what comes back, ONE LEVEL DEEP, because the live
-    // sink hangs off `ctx.sink` rather than being returned directly — the R15 blocker was a
-    // member that returned the sink itself, and a top-level-only check would have missed the
-    // nested form. `submitRequest` is skipped because calling it performs a real request,
-    // which the raw-entry region covers instead.
+    // It called every member outside any secured flow and pinned the set exposing a sink to
+    // `newInvocationContext().sink`. R16's own reviewer falsified it: outside a flow
+    // `currentInvocation()` is `undefined`, so re-adding the verbatim R15 blocker
+    // `liveSinkPeek: () => currentInvocation()?.sink` returns `undefined`, the sweep's
+    // `typeof returned !== "object"` branch skips it, and the mutation SURVIVED 242/242.
+    // It was blind to exactly the accessor class it was written to catch — one that is live
+    // ONLY during an invocation, which is the only kind that is dangerous. The falsification
+    // that originally "proved" it passed only because that probe wrote `?? newSink()`, whose
+    // fallback returns an object outside a flow; the mutation had been chosen to fit the
+    // mechanism.
     //
-    // What this pins is not "no sink is reachable" — one is, from the builder — but EXACTLY
-    // WHICH. Re-adding any accessor that reaches the current invocation's sink adds an entry
-    // and fails here; the builder's inertness is proven immediately below.
-    const isSink = (v: unknown): boolean =>
-      v !== null && typeof v === "object" && ["reads", "forbidden", "enumerations"].every((k) => Array.isArray((v as Record<string, unknown>)[k]));
-    const sinkExposure: string[] = [];
-    for (const [name, member] of Object.entries(secureHarness as unknown as Record<string, unknown>)) {
-      if (name === "submitRequest" || typeof member !== "function") continue;
-      let returned: unknown;
-      try { returned = (member as (x?: unknown) => unknown)("probe-sweep"); } catch { continue; }
-      if (returned === null || typeof returned !== "object") continue;
-      if (isSink(returned)) sinkExposure.push(`${name}()`);
-      for (const [key, nested] of Object.entries(returned as Record<string, unknown>)) {
-        if (isSink(nested)) sinkExposure.push(`${name}().${key}`);
-      }
-    }
-    expect(`membersExposingASink:${sinkExposure.sort().join(",")}`).toBe("membersExposingASink:newInvocationContext().sink");
-    // TWO members return an object at all — `instrumentListResult`, which returns a wrapper
-    // over its own argument, and this INERT builder. §10/§11 pins that pair by name; an
-    // earlier comment here called it "the one object-returning member", undercounting the
-    // pair its own neighbouring test already asserted. A fresh call is a fresh object, not a
-    // handle on anything registered.
+    // No generic future-helper sweep replaces it. A sweep would have to anticipate the shape
+    // of a helper nobody has written, which is the recursive self-policing this series has
+    // already retracted three times. The boundary is instead stated plainly: CURRENT public
+    // helpers are audited directly, here and in §33 inside a live invocation; a helper added
+    // later is reviewed when it is added. This suite does not claim to discover it
+    // automatically.
     const a = secureHarness.newInvocationContext("probe-a");
     const b = secureHarness.newInvocationContext("probe-b");
     expect(`builderReturnsDistinctObjects:${a !== b}`).toBe("builderReturnsDistinctObjects:true");
     expect(`builtContextIsUnregistered:${a.entryConsumed}`).toBe("builtContextIsUnregistered:false");
+  });
+
+  /**
+   * R17 §33 — THE AUDIT THAT THE REMOVED SWEEP SHOULD HAVE BEEN: every CURRENT public
+   * member, exercised from INSIDE a live secured invocation, which is the only place
+   * "live internal state" exists at all. Outside a flow every one of these is trivially
+   * inert, which is precisely why the R16 sweep proved nothing.
+   *
+   * The decisive assertion is behavioural, not structural: from inside the flow, push a
+   * fabricated forbidden read into the sink of a context obtained from the builder. If the
+   * builder handed out the LIVE sink, `S8A:no-forbidden-source-reads` would see that entry
+   * and the request would fail. It returns 200, so the object is detached — and if a future
+   * change made any of these members return live state, this test fails rather than a name
+   * table needing an update.
+   */
+  it("§33 every current public helper, audited from inside a live invocation", async () => {
+    const seen: string[] = [];
+    const classify = (name: string, v: unknown): void => {
+      if (v === null || typeof v !== "object") { seen.push(`${name}=primitive:${typeof v}`); return; }
+      const o = v as Record<string, unknown>;
+      const isSink = ["reads", "forbidden", "enumerations"].every((k) => Array.isArray(o[k]));
+      seen.push(`${name}=${isSink ? "sink" : "entryConsumed" in o && "sink" in o ? "context" : "object"}`);
+    };
+    const projectImpl = mockedGetProject.getMockImplementation();
+    mockedGetProject.mockImplementation(async (id: string) => {
+      // inside the secured flow for THIS request
+      classify("isInsideSecuredFlow", secureHarness.isInsideSecuredFlow());
+      classify("currentInvocationLabel", secureHarness.currentInvocationLabel());
+      classify("noteHelperInvokedForCurrentInvocation", secureHarness.noteHelperInvokedForCurrentInvocation());
+      const builtInFlow = secureHarness.newInvocationContext("probe-in-flow");
+      classify("newInvocationContext", builtInFlow);
+      classify("instrumentListResult", secureHarness.instrumentListResult({ ok: true, records: [] }));
+      // THE DETACHMENT PROOF: if this were the live sink, S8A would reject this request.
+      builtInFlow.sink.forbidden.push("rec0.reportSnapshot");
+      builtInFlow.entryConsumed = true;
+      return projectImpl ? projectImpl(id) : { status: "found", project: { id, name: "P", status: "active", workspaceId: WS } };
+    });
+    try {
+      const r = await secureHarness.submitRequest(buildRequest());
+      expect(`requestSucceededDespiteBuilderSinkTampering:${r.status}`).toBe("requestSucceededDespiteBuilderSinkTampering:200");
+    } finally {
+      if (projectImpl) mockedGetProject.mockImplementation(projectImpl);
+    }
+    // the label is a STRING inside a flow (it is `undefined` outside one), which is what
+    // makes "the detector reads a primitive, not an object" true where it matters
+    expect(`inFlowClassification:${seen.sort().join(" ")}`).toBe(
+      "inFlowClassification:currentInvocationLabel=primitive:string instrumentListResult=object isInsideSecuredFlow=primitive:boolean newInvocationContext=context noteHelperInvokedForCurrentInvocation=primitive:undefined",
+    );
   });
 });
 
@@ -3897,7 +4157,9 @@ describe("R11 — E2A-S8B and E2A-S8C are falsifiable, and independent", () => {
     const res = NextResponse.json(body as Record<string, unknown>, { status: 200, headers });
     return res as unknown as Response;
   };
-  const scan = async (res: Response) => assertResponseSecrecy(res, await res.clone().text(), canaries);
+  // R17 §50/§51 — these positive controls now exercise the SAME canonical extraction the
+  // real route path uses, so a regression in the oracle shows up here as well.
+  const scan = async (res: Response) => assertResponseSecrecy(await canonicalResponseSnapshot(res), canaries);
 
   it("§9 POSITIVE CONTROL: a canary in the JSON BODY fails the scan", async () => {
     const res = respond({ ...approvedBody, leaked: FROZEN_REPORT_CANARY_M2 });
@@ -3932,7 +4194,7 @@ describe("R11 — E2A-S8B and E2A-S8C are falsifiable, and independent", () => {
     const res = respond(approvedBody, { [`x-${FROZEN_REPORT_CANARY_M2}`]: "1" });
     // Recorded rather than assumed: the platform really does fold the name, which is
     // why this channel is compared case-insensitively.
-    const names = [...(res.headers as unknown as { keys: () => Iterable<string> }).keys()];
+    const names = (await canonicalResponseSnapshot(res)).headerEntries.map(([n]) => n);
     expect(`headerNameWasFolded:${names.some((n) => n.includes(FROZEN_REPORT_CANARY_M2.toLowerCase()) && !n.includes(FROZEN_REPORT_CANARY_M2))}`).toBe("headerNameWasFolded:true");
     await expect(scan(res)).rejects.toThrow(/frozen-report-content@header-name/);
   });
@@ -3944,6 +4206,79 @@ describe("R11 — E2A-S8B and E2A-S8C are falsifiable, and independent", () => {
     await expect(scan(cookie)).rejects.toThrow(/frozen-report-content@(set-cookie|header-value:set-cookie)/);
     const reason = new Response(JSON.stringify(approvedBody), { status: 200, statusText: `OK ${FROZEN_REPORT_CANARY_M2}` });
     await expect(scan(reason)).rejects.toThrow(/frozen-report-content@statusText/);
+  });
+
+  /**
+   * ─── R17 §10–§14 — THE SUBJECT MAY NOT SUPPLY ITS OWN EVIDENCE ──────────────────
+   *
+   * R16's blocker, made permanent. Each test below builds a response whose REAL transport
+   * state carries the canary and whose OWN member is a clean decoy — the shape a route can
+   * produce with no test-file change at all, since `NextResponse` instances carry no own
+   * properties until something adds one. Each records what the subject's member would have
+   * returned beside what the captured intrinsic returned (§51), so the diagnostic states
+   * the architectural property rather than just failing.
+   */
+  it("§10/§51 an own `clone` decoy cannot hide a real body leak — the exact R16 blocker", async () => {
+    const leaked = { ...approvedBody, __leak: FROZEN_REPORT_CANARY_M2 };
+    const res = NextResponse.json(leaked, { status: 200 }) as unknown as Response;
+    Object.defineProperty(res, "clone", { value: () => NextResponse.json(approvedBody), configurable: true });
+    // what the OLD oracle would have read, through the subject's own member
+    const subjectView = await res.clone().text();
+    // what the canonical oracle reads, through the captured intrinsic
+    const canonicalView = (await canonicalResponseSnapshot(res)).bodyText;
+    expect(`subjectCloneCarriesCanary:${subjectView.includes(FROZEN_REPORT_CANARY_M2)}`).toBe("subjectCloneCarriesCanary:false");
+    expect(`canonicalBodyCarriesCanary:${canonicalView.includes(FROZEN_REPORT_CANARY_M2)}`).toBe("canonicalBodyCarriesCanary:true");
+    await expect(scan(res)).rejects.toThrow(/frozen-report-content@body/);
+  });
+
+  it("§11/§51 an own `text` decoy cannot hide a real body leak", async () => {
+    const res = NextResponse.json({ ...approvedBody, __leak: FROZEN_REPORT_CANARY_M2 }, { status: 200 }) as unknown as Response;
+    Object.defineProperty(res, "text", { value: async () => JSON.stringify(approvedBody), configurable: true });
+    expect(`subjectTextCarriesCanary:${(await res.text()).includes(FROZEN_REPORT_CANARY_M2)}`).toBe("subjectTextCarriesCanary:false");
+    await expect(scan(res)).rejects.toThrow(/frozen-report-content@body/);
+  });
+
+  it("§12/§51 an own `headers` decoy cannot hide a real header leak", async () => {
+    const res = NextResponse.json(approvedBody, { status: 200, headers: { "x-report": FROZEN_REPORT_CANARY_M2 } }) as unknown as Response;
+    Object.defineProperty(res, "headers", { value: new Headers({ "x-clean": "1" }), configurable: true });
+    expect(`subjectHeadersCarryCanary:${res.headers.get("x-report") !== null}`).toBe("subjectHeadersCarryCanary:false");
+    const canonical = await canonicalResponseSnapshot(res);
+    expect(`canonicalHeadersCarryCanary:${canonical.headerEntries.some(([, v]) => v.includes(FROZEN_REPORT_CANARY_M2))}`).toBe("canonicalHeadersCarryCanary:true");
+    await expect(scan(res)).rejects.toThrow(/frozen-report-content@header-value/);
+  });
+
+  it("§13 an own Headers METHOD decoy cannot hide a real header leak", async () => {
+    const res = NextResponse.json(approvedBody, { status: 200, headers: { "x-report": FROZEN_REPORT_CANARY_M2 } }) as unknown as Response;
+    // the decoy is installed on the genuine Headers instance this time, not on the Response
+    const realHeaders = res.headers;
+    Object.defineProperty(realHeaders, "forEach", { value: () => undefined, configurable: true });
+    Object.defineProperty(realHeaders, "get", { value: () => null, configurable: true });
+    Object.defineProperty(realHeaders, "getSetCookie", { value: () => [], configurable: true });
+    let subjectSawNothing = true;
+    res.headers.forEach(() => { subjectSawNothing = false; });
+    expect(`subjectForEachIsSilenced:${subjectSawNothing}`).toBe("subjectForEachIsSilenced:true");
+    await expect(scan(res)).rejects.toThrow(/frozen-report-content@header-value/);
+  });
+
+  it("§6 a plausible FAKE that is not a real Response makes the oracle FAIL, not accept it", async () => {
+    // No duck-typing fallback: a route returning a self-describing object cannot talk its way
+    // past the oracle, because the intrinsics require genuine Response internal slots.
+    const fake = {
+      status: 200,
+      statusText: "",
+      headers: new Headers(),
+      clone: () => fake,
+      text: async () => JSON.stringify(approvedBody),
+    } as unknown as Response;
+    await expect(canonicalResponseSnapshot(fake)).rejects.toThrow(/Illegal invocation|not a function|incompatible receiver|Cannot read/i);
+  });
+
+  it("§9 the canonical reader records which Set-Cookie path this runtime uses", async () => {
+    // §9 asks for the actual behaviour to be documented rather than assumed. Recorded here so
+    // a runtime change (an undici without `getSetCookie`) shows up as a diff, not a silent
+    // downgrade to a weaker channel.
+    const snap = await canonicalResponseSnapshot(NextResponse.json(approvedBody) as unknown as Response);
+    expect(`setCookieSource:${snap.setCookieSource}`).toBe("setCookieSource:Headers.prototype.getSetCookie");
   });
 
   it("§7 the exportMetadata container allow-list CONTENTS are pinned, not just its existence", async () => {
@@ -4153,6 +4488,113 @@ describe("R11 — E2A-S8B and E2A-S8C are falsifiable, and independent", () => {
     const empty = CENSUS.filter(([, contents]) => contents.length === 0);
     expect(`censusRowsThatAreEmpty:${empty.map(([n]) => n).join(",")}`).toBe("censusRowsThatAreEmpty:");
     expect(`censusSize:${CENSUS.length}`).toBe("censusSize:12");
+  });
+
+  /**
+   * R17 §26–§29 — THREE LISTS WERE DESCRIBED AS EXACT-CONTENT PINNED AND WERE NOT.
+   *
+   * R16 measured it: appending an INERT key such as `zzzBogus` to `ALLOWED_SOURCE_PROPS`,
+   * `FORBIDDEN_SOURCE_PROPS` or `S8C_ITEM_OPTIONAL` left the suite green. Their protection
+   * was BEHAVIOURAL — the default-deny trap and the S8C violation rejections catch a
+   * DANGEROUS addition like `reportSnapshot` — which is real coverage, but it is not what
+   * "exact-content pinned" says. A policy list that silently accepts new members is a list
+   * whose contents nobody is checking.
+   *
+   * The expected membership below is written out independently, from the DTO contract and
+   * the record type, deliberately NOT derived from the constant under test (deriving it
+   * would reproduce the self-comparison defect this PR has already retracted twice).
+   * Comparison is order-insensitive because every consumer uses `includes`.
+   *
+   * This is layer one of two, and the layers are independent: §29 keeps the dangerous-key
+   * behavioural falsifiers, so removing this pin does not remove leak protection, and
+   * removing the behavioural controls does not remove policy-drift detection.
+   */
+  it("§27 the three behaviourally-pinned lists now have EXACT membership pins", () => {
+    const sorted = (xs: readonly string[]) => [...xs].sort();
+    expect(sorted(ALLOWED_SOURCE_PROPS)).toEqual(sorted([
+      "exportId", "reportVersion", "schemaId", "schemaFamily", "format", "artifactStatus",
+      "createdAt", "createdBy", "classification", "governanceStatusAtExport", "exportMetadata",
+    ]));
+    expect(sorted(FORBIDDEN_SOURCE_PROPS)).toEqual(sorted([
+      "reportSnapshot", "generatedBy", "failureReason", "version", "runId", "schemaVersion",
+    ]));
+    expect(sorted(S8C_ITEM_OPTIONAL)).toEqual(sorted(["fileHash", "hashAlgorithm", "hashReproducible"]));
+    // and the two source policies stay disjoint, so a property cannot be both
+    expect(ALLOWED_SOURCE_PROPS.filter((p) => FORBIDDEN_SOURCE_PROPS.includes(p))).toEqual([]);
+  });
+
+  /**
+   * R17 §24–§25 — RUNTIME IMMUTABILITY. `readonly` is a TYPE annotation and this file is
+   * never typechecked (`tsconfig` excludes `*.spec.ts`, ts-jest transpiles only), which the
+   * PR already retracts `satisfies` for. R16 measured all eight named arrays as MUTABLE and
+   * a runtime `push` succeeding, so every pin above held only until the pin test had run:
+   * a later hook could widen a policy list and then leak through it.
+   *
+   * These are frozen at construction. No Sets or Maps carry security policy here (checked:
+   * the only module-scope Map is the run-document fixture store), so freezing is sufficient
+   * and there is no mutator-exposure case to encapsulate.
+   */
+  it("§25 every security-sensitive policy container is FROZEN at runtime, and widening THROWS", () => {
+    const CONTAINERS: ReadonlyArray<readonly [string, readonly string[]]> = [
+      ["ALLOWED_SOURCE_PROPS", ALLOWED_SOURCE_PROPS],
+      ["FORBIDDEN_SOURCE_PROPS", FORBIDDEN_SOURCE_PROPS],
+      ["ALLOWED_EXPORT_METADATA_PROPS", ALLOWED_EXPORT_METADATA_PROPS],
+      ["S8C_ENVELOPE_KEYS", S8C_ENVELOPE_KEYS],
+      ["S8C_ITEM_REQUIRED", S8C_ITEM_REQUIRED],
+      ["S8C_ITEM_OPTIONAL", S8C_ITEM_OPTIONAL],
+      ["S8C_ITEM_TOLERATED_ABSENT", S8C_ITEM_TOLERATED_ABSENT],
+      ["S8C_ENVELOPE_ERROR_KEYS", S8C_ENVELOPE_ERROR_KEYS],
+      ["S8C_GOVERNANCE_KEYS.milestone2", S8C_GOVERNANCE_KEYS.milestone2],
+      ["S8C_GOVERNANCE_KEYS.legacy", S8C_GOVERNANCE_KEYS.legacy],
+      ["S8C_GOVERNANCE_REQUIRED.milestone2", S8C_GOVERNANCE_REQUIRED.milestone2],
+      ["S8C_GOVERNANCE_REQUIRED.legacy", S8C_GOVERNANCE_REQUIRED.legacy],
+    ];
+    const notFrozen = CONTAINERS.filter(([, c]) => !Object.isFrozen(c)).map(([n]) => n);
+    expect(`containersNotFrozen:${notFrozen.join(",")}`).toBe("containersNotFrozen:");
+    expect(`containerCount:${CONTAINERS.length}`).toBe("containerCount:12");
+    // the enclosing Record maps are frozen too, so a whole key-list cannot be swapped out
+    expect(`governanceMapsFrozen:${Object.isFrozen(S8C_GOVERNANCE_KEYS) && Object.isFrozen(S8C_GOVERNANCE_REQUIRED)}`).toBe("governanceMapsFrozen:true");
+    // REJECTED, not merely ineffective — ts-jest emits strict-mode modules
+    for (const [name, container] of CONTAINERS) {
+      expect(() => (container as string[]).push("zzzRuntimeWidening")).toThrow(/not extensible|read only|Cannot add/i);
+      expect(() => { (container as string[])[0] = "zzzRuntimeOverwrite"; }).toThrow(/read only|Cannot assign/i);
+      expect(`${name}:stillClean:${container.includes("zzzRuntimeWidening") || container.includes("zzzRuntimeOverwrite")}`).toBe(`${name}:stillClean:false`);
+    }
+  });
+
+  /**
+   * R17 §20–§22 — THE REGISTRY, ENTRY BY ENTRY. R16's blocker: the array was frozen and the
+   * seven entries were not, so `entry.assert = wrapper` selectively disabled validation for
+   * real responses while the negative controls — whose contexts are labelled "control" —
+   * kept passing. 2400 bytes of frozen report on every response, 243/243 green.
+   *
+   * Runtime tampering and SOURCE weakening are different threats and both are measured:
+   * this test covers the first, and §23/§48's source-edit no-op matrix covers the second.
+   */
+  it("§20/§21/§22 the registry and EVERY entry are immutable at runtime", () => {
+    expect(`registryFrozen:${Object.isFrozen(REQUIRED_CHECKS)}`).toBe("registryFrozen:true");
+    const unfrozen = REQUIRED_CHECKS.filter((c) => !Object.isFrozen(c)).map((c) => c.id);
+    expect(`entriesNotFrozen:${unfrozen.join(",")}`).toBe("entriesNotFrozen:");
+    for (const entry of REQUIRED_CHECKS) {
+      const d = Object.getOwnPropertyDescriptor(entry, "assert");
+      expect(`${entry.id}:assertDescriptor:${d?.writable}/${d?.configurable}`).toBe(`${entry.id}:assertDescriptor:false/false`);
+      const original = entry.assert;
+      // R16's exact attack: a wrapper that defers to the original only for control contexts
+      expect(() => {
+        (entry as { assert: unknown }).assert = (c: RequiredCheckContext) => { if (c.ctx.label === "control") original(c); };
+      }).toThrow(/read only|Cannot assign/i);
+      // ...and the non-assignment route to the same end
+      expect(() => Object.defineProperty(entry, "assert", { value: () => undefined })).toThrow(/Cannot redefine|not extensible/i);
+      expect(() => { (entry as { id: string }).id = "S8B:response-secrecy"; }).toThrow(/read only|Cannot assign/i);
+      expect(`${entry.id}:assertIdentityUnchanged:${entry.assert === original}`).toBe(`${entry.id}:assertIdentityUnchanged:true`);
+    }
+    // the ARRAY cannot be reshaped either: replacement, growth, removal
+    const before = REQUIRED_CHECKS.map((c) => c.id).join(",");
+    const arr = REQUIRED_CHECKS as RequiredCheck[];
+    expect(() => { arr[0] = { id: "S8C:approved-shape", assert: () => undefined }; }).toThrow(/read only|Cannot assign/i);
+    expect(() => arr.push({ id: "S8C:approved-shape", assert: () => undefined })).toThrow(/not extensible|Cannot add/i);
+    expect(() => arr.splice(0, 1)).toThrow(/read only|Cannot delete|not extensible/i);
+    expect(`registryShapeUnchanged:${REQUIRED_CHECKS.map((c) => c.id).join(",")}`).toBe(`registryShapeUnchanged:${before}`);
   });
 
   it("§20/§21 the GOVERNANCE allow-list CONTENTS are pinned — the eleventh allow-list", () => {
@@ -4398,7 +4840,7 @@ const validateContextRow = (row: readonly unknown[]): ContextRow => {
  * fails that row rather than silently passing — which is exactly what R9 found.
  * Run under all three record modes; the duplicate row R9 identified is gone.
  */
-const REQUEST_CONTEXTS: ReadonlyArray<ContextRow> = [
+const REQUEST_CONTEXTS: ReadonlyArray<ContextRow> = Object.freeze([
   ["creator listing their OWN export",
     listing([exportRecord(3, { createdBy: UID }), exportRecord(2, { createdBy: UID })]), "",
     async () => {
@@ -4487,7 +4929,7 @@ const REQUEST_CONTEXTS: ReadonlyArray<ContextRow> = [
       expect(r0.exportMetadata).toBeUndefined();
       expect(r0["exportMetadata.fileHash"]).toBeDefined();
     }],
-];
+]);
 
 describe.each(["accessor", "proxy", "plain"] as const)("E2A-S8A/S8B/S8C [%s record] — the request/authority context matrix", (mode) => {
   it.each(REQUEST_CONTEXTS)("%s", async (label, rawSetup, rawQuery, rawPrecondition) => {
@@ -4510,6 +4952,11 @@ describe.each(["accessor", "proxy", "plain"] as const)("E2A-S8A/S8B/S8C [%s reco
     // projection ran; with a plain production-shaped record there are no traps to
     // observe, and the response content is the evidence. Both S8A (where
     // observable) and S8B are asserted inside submit(), so no row can forget them.
+    //
+    // R17 §46: the assertion below says the harness observed nothing in this mode — it is
+    // NOT evidence that the route read no forbidden source. In `plain` mode S8B carries the
+    // secrecy property alone, which is exactly why its evidence is extracted through
+    // captured platform intrinsics rather than through the response the route returned.
     if (mode === "plain") {
       expect(r.reads).toEqual([]);
       expect(r.bodyText.length).toBeGreaterThan(0);
