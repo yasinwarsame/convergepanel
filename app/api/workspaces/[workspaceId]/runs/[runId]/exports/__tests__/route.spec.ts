@@ -272,9 +272,48 @@ const E2A_S8E_VIOLATION = "E2A-S8E VIOLATION";
  * of a Web-API census.
  */
 const RESPONSE_INTRINSICS = (() => {
+  /**
+   * R17-C1 §1 — CAPTURE ORDERING IS PART OF THE TRUST MODEL, so it is asserted, not assumed.
+   *
+   * Capturing intrinsics protects the oracle only if the capture happens before the SUBJECT
+   * MODULE is evaluated; otherwise the route can patch `Response.prototype` at its own import
+   * time and the "genuine" functions captured here are already the route's. That held only
+   * because TypeScript's CommonJS emit leaves each `require` where its `import` sits and the
+   * route import is textually below this block — which a reviewer defeated by MOVING THE
+   * IMPORT UP, a cosmetic reordering any linter or author might make: with a module-load
+   * `Response.prototype.clone` decoy the suite then passed 256/256 with the frozen report on
+   * the wire.
+   *
+   * This fails loudly instead. The route module must not be in `require.cache` yet.
+   */
+  const subjectAlreadyLoaded = Object.keys(require.cache).filter((k) => k.endsWith("/exports/route.ts"));
+  if (subjectAlreadyLoaded.length > 0) {
+    throw new Error(`E2A-S8B ORACLE CANNOT INITIALIZE: the subject module was evaluated BEFORE the platform intrinsics were captured (${subjectAlreadyLoaded.join(", ")}). Move the route import below this block — a subject loaded first can patch Response.prototype and hand this oracle its own functions.`);
+  }
   const accessor = (proto: object, name: string): (() => unknown) | undefined =>
     Object.getOwnPropertyDescriptor(proto, name)?.get;
   const captured = {
+    /**
+     * R17-C1 §2 — THE INVOCATION PRIMITIVE IS AN INTRINSIC TOO. Capturing `clone`/`text` and
+     * then reaching them through `Reflect.apply(...)` left the lookup of `apply` ITSELF live
+     * on the mutable global `Reflect`, whose `apply` property is writable and configurable.
+     * A reviewer replaced it from route.ts alone — no test-file edit — with a hook keyed on a
+     * private `WeakMap` of the responses it had leaked into:
+     *
+     *     Reflect.apply = (target, thisArg, args) =>
+     *       target === realClone && decoys.has(thisArg) ? decoys.get(thisArg) : realApply(...);
+     *
+     * 3496 bytes of frozen `reportSnapshot` on the wire, suite 256/256, exit 0. It is the
+     * FOURTH iteration of one defect: WeakMap → facade property → module export → the
+     * oracle's own invoker. Being RECEIVER-SCOPED is what made it work where cruder tampering
+     * fails: a hook that blinds every response also blinds the synthetic positive controls
+     * below (measured — patching `String.prototype.includes` fails 12 tests, 8 of them S8B
+     * controls), but this one was transparent to them.
+     *
+     * So `apply` is captured here with everything else, read off the frozen object at use, and
+     * a control tampers the global to prove the oracle no longer consults it.
+     */
+    apply: Reflect.apply,
     clone: Response.prototype.clone as (this: Response) => Response,
     text: Response.prototype.text as (this: Response) => Promise<string>,
     status: accessor(Response.prototype, "status") as ((this: Response) => number) | undefined,
@@ -294,6 +333,7 @@ const RESPONSE_INTRINSICS = (() => {
     ["Response.prototype.statusText (getter)", captured.statusText],
     ["Response.prototype.headers (getter)", captured.headers],
     ["Headers.prototype.forEach", captured.headersForEach],
+    ["Reflect.apply", captured.apply],
   ];
   const missing = required.filter(([, fn]) => typeof fn !== "function").map(([n]) => n);
   if (missing.length > 0) {
@@ -324,15 +364,21 @@ type CanonicalResponse = {
  */
 const canonicalResponseSnapshot = async (res: Response): Promise<CanonicalResponse> => {
   const I = RESPONSE_INTRINSICS;
-  const clone = Reflect.apply(I.clone, res, []) as Response;
-  const bodyText = await Reflect.apply(I.text, clone, []);
-  const status = Reflect.apply(I.status as (this: Response) => number, res, []);
-  const statusText = Reflect.apply(I.statusText as (this: Response) => string, res, []);
-  const headers = Reflect.apply(I.headers as (this: Response) => Headers, res, []);
+  // `I.apply` — never the live global `Reflect.apply` (R17-C1 §2). `I` is frozen, so the
+  // primitive cannot be swapped between capture and use.
+  const apply = I.apply;
+  const clone = apply(I.clone, res, []) as Response;
+  const bodyText = await apply(I.text, clone, []);
+  const status = apply(I.status as (this: Response) => number, res, []) as number;
+  const statusText = apply(I.statusText as (this: Response) => string, res, []) as string;
+  const headers = apply(I.headers as (this: Response) => Headers, res, []) as Headers;
+  // Index assignment rather than `push`: one fewer live prototype method between the real
+  // header state and the evidence. (The scan's own comparison primitives remain shared with
+  // the synthetic positive controls, which is what makes broad tampering with them visible.)
   const headerEntries: (readonly [string, string])[] = [];
-  Reflect.apply(I.headersForEach, headers, [(value: string, name: string) => { headerEntries.push(Object.freeze([name, value] as const)); }]);
+  apply(I.headersForEach, headers, [(value: string, name: string) => { headerEntries[headerEntries.length] = Object.freeze([name, value] as const); }]);
   const setCookies = typeof I.headersGetSetCookie === "function"
-    ? [...(Reflect.apply(I.headersGetSetCookie, headers, []) as string[])]
+    ? [...(apply(I.headersGetSetCookie, headers, []) as string[])]
     : headerEntries.filter(([n]) => n.toLowerCase() === "set-cookie").map(([, v]) => v);
   return Object.freeze({
     status,
@@ -4271,6 +4317,53 @@ describe("R11 — E2A-S8B and E2A-S8C are falsifiable, and independent", () => {
       text: async () => JSON.stringify(approvedBody),
     } as unknown as Response;
     await expect(canonicalResponseSnapshot(fake)).rejects.toThrow(/Illegal invocation|not a function|incompatible receiver|Cannot read/i);
+  });
+
+  it("§10/§51 tampering the GLOBAL Reflect.apply cannot hide a real body leak", async () => {
+    // R17-C1 §2 — the reviewer's blocker, made permanent. The hook below is RECEIVER-SCOPED,
+    // which is why cruder global tampering fails where this succeeded: it is transparent to
+    // every other response, so nothing else in the suite notices.
+    const leakedBody = { ...approvedBody, __leak: FROZEN_REPORT_CANARY_M2 };
+    const res = NextResponse.json(leakedBody, { status: 200 }) as unknown as Response;
+    const decoy = NextResponse.json(approvedBody) as unknown as Response;
+    const realApply = Reflect.apply;
+    const realClone = Response.prototype.clone;
+    (Reflect as unknown as { apply: unknown }).apply = function (target: unknown, thisArg: unknown, args: unknown) {
+      if (target === (realClone as unknown) && thisArg === (res as unknown)) return decoy;
+      return (realApply as (a: unknown, b: unknown, c: unknown) => unknown)(target, thisArg, args);
+    };
+    try {
+      // the hook IS active and would have fooled a `Reflect.apply`-based oracle
+      const foolable = Reflect.apply(realClone as unknown as () => Response, res, []) as Response;
+      expect(`liveReflectApplyIsHooked:${(await foolable.text()).includes(FROZEN_REPORT_CANARY_M2)}`).toBe("liveReflectApplyIsHooked:false");
+      // ...and the oracle, which uses the CAPTURED primitive, still sees the real body
+      const canonical = await canonicalResponseSnapshot(res);
+      expect(`canonicalBodyCarriesCanary:${canonical.bodyText.includes(FROZEN_REPORT_CANARY_M2)}`).toBe("canonicalBodyCarriesCanary:true");
+      await expect(scan(res)).rejects.toThrow(/frozen-report-content@body/);
+    } finally {
+      (Reflect as unknown as { apply: unknown }).apply = realApply;
+    }
+  });
+
+  it("§10/§51 patching Response.prototype.clone AFTER capture cannot hide a real body leak", async () => {
+    // The module-load variant of the same attack: if the subject were evaluated before the
+    // capture it could install this decoy and own the oracle's "genuine" functions. The
+    // capture-order guard makes that ordering impossible; this proves a LATER patch is inert.
+    const res = NextResponse.json({ ...approvedBody, __leak: FROZEN_REPORT_CANARY_M2 }, { status: 200 }) as unknown as Response;
+    const decoy = NextResponse.json(approvedBody) as unknown as Response;
+    const realClone = Response.prototype.clone;
+    Object.defineProperty(Response.prototype, "clone", {
+      value: function (this: Response) { return (this as unknown) === (res as unknown) ? decoy : (realClone as () => Response).call(this); },
+      writable: true, configurable: true,
+    });
+    try {
+      expect(`prototypeIsPatched:${(await res.clone().text()).includes(FROZEN_REPORT_CANARY_M2)}`).toBe("prototypeIsPatched:false");
+      const canonical = await canonicalResponseSnapshot(res);
+      expect(`canonicalBodyCarriesCanary:${canonical.bodyText.includes(FROZEN_REPORT_CANARY_M2)}`).toBe("canonicalBodyCarriesCanary:true");
+      await expect(scan(res)).rejects.toThrow(/frozen-report-content@body/);
+    } finally {
+      Object.defineProperty(Response.prototype, "clone", { value: realClone, writable: true, configurable: true });
+    }
   });
 
   it("§9 the canonical reader records which Set-Cookie path this runtime uses", async () => {
