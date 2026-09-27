@@ -4446,7 +4446,12 @@ describe("R11 — E2A-S8B and E2A-S8C are falsifiable, and independent", () => {
     // directions, and the DENOMINATOR once reported as 26 because a counting regex required
     // `expect(` at line start and missed three continuation lines). A 29-way deletion sweep
     // at this head kills 27 and survives exactly the two named below. Classification:
-    // F=19 unconditional, C=3 conditional, M=5 per-item, D=2 derived — summing to 29.
+    // Classification, WITH ITS RULE, because the first attempt did not re-measure under any
+    // consistent one: C counts every assertion guarded by an `if (…)` — which is FOUR, not
+    // three: the three `if ("x" in item)` hash assertions AND the governance
+    // `conditions:isStringArray` guarded by `if ("conditions" in gov)`. An earlier revision
+    // counted three of those four as conditional and the fourth as unconditional.
+    // F=18 unconditional, C=4 conditional, M=5 per-item, D=2 derived — summing to 29.
     // Of the oracle's 29 assertions
     // exactly TWO can be deleted with the suite green — governance `:isObject` and
     // `envelope:isObject`. Both are ordering guards: the violation each would catch is
@@ -4608,18 +4613,53 @@ describe("R11 — E2A-S8B and E2A-S8C are falsifiable, and independent", () => {
    * behavioural falsifiers, so removing this pin does not remove leak protection, and
    * removing the behavioural controls does not remove policy-drift detection.
    */
-  it("§27 the three behaviourally-pinned lists now have EXACT membership pins", () => {
+  it("§27 ALL TWELVE policy lists have EXACT membership pins", () => {
+    /**
+     * R17-C2 — WHY THIS COVERS TWELVE AND NOT THREE. R17 added exact pins for the three lists
+     * R16 had named, and left the other nine on their behavioural protection alone. A reviewer
+     * then found a twelfth gap that measurement should have caught and did not:
+     * `S8C_ITEM_TOLERATED_ABSENT` accepted `zzzBogus`, `reportSnapshot`, `schemaId`, `format`,
+     * `artifactStatus` and `createdAt` in SILENCE — six widenings, four of them real required
+     * DTO keys — because its only guard was a hand-picked five-key loop that happened to
+     * contain `createdBy`, the key the R16 battery happened to widen with. Third time in this
+     * series that a mutation was chosen which the mechanism could already catch.
+     *
+     * So every list is pinned exactly, expectations written from the contract rather than read
+     * back from the constant under test, and the table is the single place to look. Behavioural
+     * falsifiers remain as an independent second layer (§29).
+     */
     const sorted = (xs: readonly string[]) => [...xs].sort();
-    expect(sorted(ALLOWED_SOURCE_PROPS)).toEqual(sorted([
-      "exportId", "reportVersion", "schemaId", "schemaFamily", "format", "artifactStatus",
-      "createdAt", "createdBy", "classification", "governanceStatusAtExport", "exportMetadata",
-    ]));
-    expect(sorted(FORBIDDEN_SOURCE_PROPS)).toEqual(sorted([
-      "reportSnapshot", "generatedBy", "failureReason", "version", "runId", "schemaVersion",
-    ]));
-    expect(sorted(S8C_ITEM_OPTIONAL)).toEqual(sorted(["fileHash", "hashAlgorithm", "hashReproducible"]));
-    // and the two source policies stay disjoint, so a property cannot be both
+    const EXPECTED: ReadonlyArray<readonly [string, readonly string[], readonly string[]]> = [
+      ["ALLOWED_SOURCE_PROPS", ALLOWED_SOURCE_PROPS, [
+        "exportId", "reportVersion", "schemaId", "schemaFamily", "format", "artifactStatus",
+        "createdAt", "createdBy", "classification", "governanceStatusAtExport", "exportMetadata",
+      ]],
+      ["FORBIDDEN_SOURCE_PROPS", FORBIDDEN_SOURCE_PROPS, [
+        "reportSnapshot", "generatedBy", "failureReason", "version", "runId", "schemaVersion",
+      ]],
+      ["ALLOWED_EXPORT_METADATA_PROPS", ALLOWED_EXPORT_METADATA_PROPS, ["fileHash"]],
+      ["S8C_ENVELOPE_KEYS", S8C_ENVELOPE_KEYS, ["ok", "runId", "exports", "hasMore", "nextCursor"]],
+      ["S8C_ITEM_REQUIRED", S8C_ITEM_REQUIRED, [
+        "exportId", "reportVersion", "schemaId", "schemaFamily", "format", "artifactStatus",
+        "createdAt", "createdBy", "governanceStatusAtExport", "classification",
+      ]],
+      ["S8C_ITEM_OPTIONAL", S8C_ITEM_OPTIONAL, ["fileHash", "hashAlgorithm", "hashReproducible"]],
+      ["S8C_ITEM_TOLERATED_ABSENT", S8C_ITEM_TOLERATED_ABSENT, ["reportVersion"]],
+      ["S8C_ENVELOPE_ERROR_KEYS", S8C_ENVELOPE_ERROR_KEYS, ["ok", "errorCode", "message"]],
+      ["S8C_GOVERNANCE_KEYS.milestone2", S8C_GOVERNANCE_KEYS.milestone2, ["family", "kind", "isOwnerOverride", "conditions"]],
+      ["S8C_GOVERNANCE_KEYS.legacy", S8C_GOVERNANCE_KEYS.legacy, ["family", "status"]],
+      ["S8C_GOVERNANCE_REQUIRED.milestone2", S8C_GOVERNANCE_REQUIRED.milestone2, ["family", "kind", "isOwnerOverride"]],
+      ["S8C_GOVERNANCE_REQUIRED.legacy", S8C_GOVERNANCE_REQUIRED.legacy, ["family", "status"]],
+    ];
+    expect(`exactPinCount:${EXPECTED.length}`).toBe("exactPinCount:12");
+    for (const [name, actual, expected] of EXPECTED) {
+      expect(`${name}:${sorted(actual).join(",")}`).toBe(`${name}:${sorted(expected).join(",")}`);
+    }
+    // the two source policies stay disjoint, so a property cannot be both
     expect(ALLOWED_SOURCE_PROPS.filter((p) => FORBIDDEN_SOURCE_PROPS.includes(p))).toEqual([]);
+    // every tolerated-absent key must itself be a REQUIRED key — tolerating a key that is not
+    // required would be meaningless, and tolerating an OPTIONAL one would be incoherent
+    expect(`toleratedButNotRequired:${S8C_ITEM_TOLERATED_ABSENT.filter((k) => !S8C_ITEM_REQUIRED.includes(k)).join(",")}`).toBe("toleratedButNotRequired:");
   });
 
   /**
@@ -4732,8 +4772,12 @@ describe("R11 — E2A-S8B and E2A-S8C are falsifiable, and independent", () => {
     // tolerated, because the route deliberately emits this for a record whose
     // persisted reportVersion is undefined and which cannot trap a paging client
     expect(() => assertApprovedListDto(withoutReportVersion)).not.toThrow();
-    // ...and nothing else is tolerated
-    for (const key of ["createdBy", "exportId", "classification", "governanceStatusAtExport", "schemaFamily"]) {
+    // ...and nothing else is tolerated. R17-C2: this loop was a HAND-PICKED FIVE, so adding
+    // `schemaId`, `format`, `artifactStatus` or `createdAt` to the tolerance list was silent —
+    // S8C would then accept a response that dropped four contractual metadata fields. It now
+    // derives from the required set itself, minus the one documented tolerance, so a new
+    // required key is covered the moment it is declared.
+    for (const key of S8C_ITEM_REQUIRED.filter((k) => !S8C_ITEM_TOLERATED_ABSENT.includes(k))) {
       const broken = JSON.parse(JSON.stringify(approvedBody)) as typeof approvedBody;
       delete (broken.exports[0] as Record<string, unknown>)[key];
       expect(() => assertApprovedListDto(broken)).toThrow(new RegExp(`unexpectedlyAbsentKeys:${key}|isObject`));
