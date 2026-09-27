@@ -3798,7 +3798,14 @@ describe("R13 — the required-check registry is load-bearing, entry by entry", 
    * assertion body it attacks, then requires that body to reject it. Neuter a body to
    * `() => {}` and its control fails, because the rejection stops happening.
    */
-  const NEGATIVE_CONTROLS: Readonly<Record<RequiredCheckId, { corrupt: (c: { ctx: SecureInvocationContext; res: Response; bodyText: string; json: Record<string, unknown> }) => void; pattern: RegExp }>> = {
+  /**
+   * Each entry carries the violation its check exists to reject. `also` holds ADDITIONAL
+   * violations for checks whose body asserts more than one thing — without it, a multi-part
+   * check counts as "controlled" while only its first assertion has a driver, which is how
+   * `jsonIsSnapshotJson` shipped with no falsifier of its own.
+   */
+  type NegativeControlCase = { corrupt: (c: RequiredCheckContext) => void; pattern: RegExp };
+  const NEGATIVE_CONTROLS: Readonly<Record<RequiredCheckId, NegativeControlCase & { also?: ReadonlyArray<NegativeControlCase> }>> = {
     "S8A:no-forbidden-source-reads": { corrupt: (c) => { c.ctx.sink.forbidden.push("rec0.reportSnapshot"); }, pattern: /reportSnapshot/ },
     "S8A:no-wholesale-enumeration": { corrupt: (c) => { c.ctx.sink.enumerations.push("ownKeys(rec0)"); }, pattern: /ownKeys/ },
     "S8A:no-off-policy-reads": { corrupt: (c) => { c.ctx.sink.reads.push("futurePrivateField"); }, pattern: /futurePrivateField/ },
@@ -3811,7 +3818,19 @@ describe("R13 — the required-check registry is load-bearing, entry by entry", 
     "S8B:response-secrecy": { corrupt: (c) => { c.ctx.rawRecords.push({ exportId: "exp-9", reportSnapshot: { question: FROZEN_REPORT_CANARY_M2 } }); (c as { response: CanonicalResponse }).response = Object.freeze({ ...c.response, bodyText: `{"leaked":"${FROZEN_REPORT_CANARY_M2}"}` }); }, pattern: /frozen-report-content@body/ },
     "S8C:approved-shape": { corrupt: (c) => { (c.json.exports as Record<string, unknown>[])[0].reportSnapshot = "smuggled"; }, pattern: /unapprovedKeys/ },
     // the violation this check exists for: the parsed value no longer matches the bytes
-    "S8C:body-json-consistency": { corrupt: (c) => { (c as { response: CanonicalResponse }).response = Object.freeze({ ...c.response, bodyRoundTrips: false }); }, pattern: /bodyRoundTrips/ },
+    "S8C:body-json-consistency": {
+      corrupt: (c) => { (c as { response: CanonicalResponse }).response = Object.freeze({ ...c.response, bodyRoundTrips: false }); },
+      pattern: /bodyRoundTrips/,
+      also: [
+        // Falsifies `jsonIsSnapshotJson` SPECIFICALLY. A structurally IDENTICAL shallow clone
+        // leaves `bodyRoundTrips` true, so the first assertion still passes and the identity
+        // assertion is the only one that can fail — which is what makes this a direct driver
+        // for it rather than a test that merely fails somewhere. The regression it guards is
+        // real and was measured: reintroducing `JSON.parse(response.bodyText)` in
+        // `submitRequest` hands the checks a second, disconnected parse of the same bytes.
+        { corrupt: (c) => { (c as { json: Record<string, unknown> }).json = { ...c.response.json }; }, pattern: /jsonIsSnapshotJson/ },
+      ],
+    },
   };
 
   /** A clean, realistic check context that every required assertion must accept. */
@@ -3863,21 +3882,67 @@ describe("R13 — the required-check registry is load-bearing, entry by entry", 
   it("§13/§15 EVERY required check REJECTS its own violation — so a no-op body fails here", () => {
     const withoutAFalsifier: string[] = [];
     const wrongDiagnostic: string[] = [];
+    let casesExercised = 0;
     for (const check of REQUIRED_CHECKS) {
-      const control = NEGATIVE_CONTROLS[check.id];
-      // the clean context must be ACCEPTED, or the control below proves nothing
+      const entry = NEGATIVE_CONTROLS[check.id];
+      // the clean context must be ACCEPTED, or the controls below prove nothing
       expect(() => check.assert(cleanContext())).not.toThrow();
-      const corrupted = cleanContext();
-      control.corrupt(corrupted);
-      try {
-        check.assert(corrupted);
-        withoutAFalsifier.push(check.id);
-      } catch (err) {
-        if (!control.pattern.test((err as Error).message)) wrongDiagnostic.push(check.id);
-      }
+      // every case, not just the first: a check that asserts two things needs two violations
+      const cases: ReadonlyArray<NegativeControlCase> = [{ corrupt: entry.corrupt, pattern: entry.pattern }, ...(entry.also ?? [])];
+      casesExercised += cases.length;
+      cases.forEach((control, i) => {
+        const label = i === 0 ? check.id : `${check.id}[also:${i}]`;
+        const corrupted = cleanContext();
+        control.corrupt(corrupted);
+        try {
+          check.assert(corrupted);
+          withoutAFalsifier.push(label);
+        } catch (err) {
+          if (!control.pattern.test((err as Error).message)) wrongDiagnostic.push(label);
+        }
+      });
     }
     expect(`requiredChecksWhoseBodyIsNotLoadBearing:${withoutAFalsifier.join(",")}`).toBe("requiredChecksWhoseBodyIsNotLoadBearing:");
     expect(`requiredChecksWithTheWrongDiagnostic:${wrongDiagnostic.join(",")}`).toBe("requiredChecksWithTheWrongDiagnostic:");
+    // The `also` plumbing needs its OWN falsifier, or dropping the spread above would silently
+    // reduce every multi-part check back to its first assertion — the defect this commit exists
+    // to fix, one level up. Measured: with the spread removed, this assertion fails while every
+    // other test stays green. The expected side is derived from the control DATA, not from the
+    // counter, so it cannot drift into agreement with a broken loop.
+    const declaredCases = REQUIRED_CHECKS.reduce((n, c) => n + 1 + (NEGATIVE_CONTROLS[c.id].also?.length ?? 0), 0);
+    expect(`negativeControlCasesExercised:${casesExercised}`).toBe(`negativeControlCasesExercised:${declaredCases}`);
+    expect(`casesExceedRegistryEntries:${declaredCases > REQUIRED_CHECKS.length}`).toBe("casesExceedRegistryEntries:true");
+  });
+
+  /**
+   * A DIRECT falsifier for `jsonIsSnapshotJson`, the second assertion inside
+   * `S8C:body-json-consistency`.
+   *
+   * Why it needed its own test rather than relying on the check's control: that control
+   * corrupted only `bodyRoundTrips`, so neutralizing the identity assertion alone left the
+   * suite green at 259/259. It was not unfalsifiable — reintroducing
+   * `JSON.parse(response.bodyText)` in `submitRequest` fires it — but nothing drove it, which
+   * by this file's own standard makes it an undeclared DERIVED assertion inside a check whose
+   * control was described as covering it.
+   *
+   * The violation is chosen so that NO OTHER assertion in the check can be the killer: a
+   * structurally identical shallow clone leaves the bytes and the round-trip verdict
+   * untouched, and only object identity differs. Both of those are asserted below before the
+   * rejection, so "the identity assertion is what fires" is measured here, not assumed.
+   */
+  it("§13/§15 `jsonIsSnapshotJson` has its OWN direct falsifier — a clone of the snapshot's json is REJECTED", () => {
+    const check = REQUIRED_CHECKS.find((c) => c.id === "S8C:body-json-consistency");
+    expect(`checkIsRegistered:${check !== undefined}`).toBe("checkIsRegistered:true");
+    const corrupted = cleanContext();
+    (corrupted as { json: Record<string, unknown> }).json = { ...corrupted.response.json };
+    // the two things that would let a DIFFERENT assertion fire are both still intact
+    expect(`roundTripStillHolds:${corrupted.response.bodyRoundTrips}`).toBe("roundTripStillHolds:true");
+    expect(`cloneIsStructurallyEqual:${JSON.stringify(corrupted.json) === JSON.stringify(corrupted.response.json)}`).toBe("cloneIsStructurallyEqual:true");
+    expect(`onlyIdentityDiffers:${corrupted.json !== corrupted.response.json}`).toBe("onlyIdentityDiffers:true");
+    // ...so the identity assertion is necessarily the direct killer
+    expect(() => check!.assert(corrupted)).toThrow(/jsonIsSnapshotJson/);
+    // and a clean context is accepted, so the rejection above is not trivial
+    expect(() => check!.assert(cleanContext())).not.toThrow();
   });
 
   it("§46 S8E rejects stored evidence that DISAGREES with the route's own output", () => {
@@ -4527,28 +4592,35 @@ describe("R11 — E2A-S8B and E2A-S8C are falsifiable, and independent", () => {
   });
 
   it("§31 the DERIVED assertions are redundant, not unfalsifiable — their violations are still rejected", () => {
-    // RE-MEASURED at the R17 head from a green baseline (not carried forward — the figure
-    // has been wrong three times: claimed 4, measured 6 with the membership wrong in both
-    // directions, and the DENOMINATOR once reported as 26 because a counting regex required
-    // `expect(` at line start and missed three continuation lines). A 29-way deletion sweep
-    // at this head kills 27 and survives exactly the two named below. Classification:
-    // Classification, WITH THE RULE THAT PRODUCES IT — earlier revisions stated a rule that did
-    // not match their own numbers, and a reviewer re-derived three different splits from three
-    // readings. The rule is:
+    // CLASSIFICATION OF THE S8C ORACLE, WITH THE RULE THAT PRODUCES IT.
+    //
+    // Re-measured rather than carried forward, because the figure was wrong three times:
+    // claimed 4, then measured 6 with the membership wrong in both directions, and the
+    // DENOMINATOR once reported as 26 because a counting regex required `expect(` at line
+    // start and missed three continuation lines. A 29-way deletion sweep kills 27 and
+    // survives exactly the two DERIVED assertions named below.
+    //
+    // Earlier revisions also stated a RULE that did not match their own numbers, so a
+    // reviewer re-derived three different splits from three readings. The rule is:
     //   C = conditional on OPTIONAL PRESENCE, i.e. guarded by `if (<key> in <obj>)`: the three
     //       hash assertions and the governance `conditions`. FOUR.
-    //   F = runs on every call, INCLUDING both arms of the `family` if/else, because line 2017
-    //       pins `family` to `milestone2|legacy`, making that an EXHAUSTIVE DISPATCH rather than
-    //       a condition — exactly one arm always executes. (Saying merely "guarded by an `if`"
-    //       would count those three too and give C=7; that wording was the defect.)
+    //   F = runs on every call, INCLUDING both arms of the `family` if/else. That is an
+    //       EXHAUSTIVE DISPATCH rather than a condition: the assertion `"${at}.family:"`
+    //       in `assertApprovedGovernanceStatus` compares against
+    //       `family in S8C_GOVERNANCE_KEYS ? family : "milestone2|legacy"`, so it throws
+    //       unless `family` is one of that map's two keys — after which exactly one arm
+    //       always executes. (Saying merely "guarded by an `if`" would count those three too
+    //       and give C=7; that wording was the defect.) Cited by assertion text, never by
+    //       line number: the previous revision cited a line that its own edit had already
+    //       moved, and nothing here resolves numeric citations — the citation validator
+    //       resolves test TITLES only, so line references rot silently.
     //   M = inside the per-item `forEach` and not already C. FIVE.
     //   D = the two `:isObject` ordering guards, the only assertions a deletion sweep survives.
-    // F=18, C=4, M=5, D=2 — summing to 29, and re-measured at this head.
-    // Of the oracle's 29 assertions
-    // exactly TWO can be deleted with the suite green — governance `:isObject` and
-    // `envelope:isObject`. Both are ordering guards: the violation each would catch is
-    // rejected by a neighbouring assertion, which is what "redundant" means and is what
-    // this test checks. Everything else in the oracle is a direct falsifier.
+    // F=18, C=4, M=5, D=2 — summing to 29.
+    //
+    // "Redundant, not unfalsifiable" is what this test checks: the violation each DERIVED
+    // assertion would catch is rejected by a neighbouring assertion anyway. Everything else
+    // in the oracle is a direct falsifier.
     const derived: [string, unknown, RegExp][] = [
       ["governance is not an object", { ...JSON.parse(JSON.stringify({ ok: true, runId: RUN, exports: [], hasMore: false, nextCursor: null })), exports: [{ exportId: "e", reportVersion: 1, schemaId: "s", schemaFamily: "milestone2", format: "pdf", artifactStatus: "ready", createdAt: "t", createdBy: "u", classification: "internal", governanceStatusAtExport: "not-an-object" }] }, /governanceStatusAtExport/],
       ["envelope is not an object", "not-an-object", /envelope/],
