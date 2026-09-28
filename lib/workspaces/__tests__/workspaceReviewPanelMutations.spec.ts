@@ -2405,6 +2405,92 @@ function deriveProductionWriteSurface(sourceText: string, targetFunctions: reado
   return { persistenceImports: [...new Set(persistenceImports)].sort(), transactionMethods: [...transactionMethods].sort(), directWriteCalls: directWriteCalls.sort(), allImports: allImports.sort() };
 }
 
+/**
+ * ─── R8 §61 — THE DIFF ENGINE'S OWN SELF-TEST ─────────────────────────────────────────────────
+ *
+ * The oracle is now the store diff, so the diff itself needs a mechanism test. Every case below is
+ * synthetic: it drives the fake directly and asserts the delta the engine reports, so a diff that
+ * silently missed a deletion, a dotted-field modification, or a document in a collection that did
+ * not exist at snapshot time would fail here rather than in a security assertion months later.
+ */
+describe("final-store diff engine — mechanism self-test (§61)", () => {
+  const doc = (collection: string, id: string) => mockAdminDb.collection(collection).doc(id);
+
+  it("detects an ADDED document", async () => {
+    const before = snapshotStore();
+    await doc("runs", "r-new").set({ a: 1 });
+    expect(describeDelta(diffStore(before, snapshotStore()))).toBe("added:[runs/r-new] modified:[] deleted:[]");
+  });
+
+  it("detects a MODIFIED document, and reports before/after", async () => {
+    await doc("runs", "r-mod").set({ a: 1 });
+    const before = snapshotStore();
+    await doc("runs", "r-mod").set({ a: 2 });
+    const delta = diffStore(before, snapshotStore());
+    expect(describeDelta(delta)).toBe("added:[] modified:[runs/r-mod] deleted:[]");
+    expect(`${delta.modified[0].before} -> ${delta.modified[0].after}`).toBe('{"a":1} -> {"a":2}');
+  });
+
+  it("detects a DELETED document", async () => {
+    await doc("runs", "r-del").set({ a: 1 });
+    const before = snapshotStore();
+    await doc("runs", "r-del").delete();
+    expect(describeDelta(diffStore(before, snapshotStore()))).toBe("added:[] modified:[] deleted:[runs/r-del]");
+  });
+
+  it("detects a document in a collection that did NOT exist at snapshot time", async () => {
+    const before = snapshotStore();
+    expect(stores.brandNewCollection).toBeUndefined();
+    await doc("brandNewCollection", "x").set({ a: 1 });
+    expect(describeDelta(diffStore(before, snapshotStore()))).toBe("added:[brandNewCollection/x] modified:[] deleted:[]");
+  });
+
+  it("detects a DOTTED-FIELD modification", async () => {
+    await doc("runs", "r-dot").set({ outer: { keep: 1 } });
+    const before = snapshotStore();
+    await mockAdminDb.runTransaction(async (tx: any) => tx.update(doc("runs", "r-dot"), { "outer.injected": "forged" }));
+    const delta = diffStore(before, snapshotStore());
+    expect(describeDelta(delta)).toBe("added:[] modified:[runs/r-dot] deleted:[]");
+    expect(delta.modified[0].after).toContain("forged");
+  });
+
+  it("ADD-then-DELETE leaves no final document, so an expected-addition contract FAILS", async () => {
+    const before = snapshotStore();
+    await mockAdminDb.runTransaction(async (tx: any) => {
+      const ref = doc("runs", RUN_ID).collection("governanceEvents").doc("transient");
+      tx.set(ref, { action: "adaptive_review_panel_cancelled" });
+      tx.delete(ref);
+    });
+    // the store is unchanged …
+    expect(describeDelta(diffStore(before, snapshotStore()))).toBe("added:[] modified:[] deleted:[]");
+    // … so a contract demanding one added event under the run's parent path cannot be satisfied
+    expect(() => expectStoreDelta("addThenDelete", before, { oneAddedUnder: eventParentPath(RUN_ID) })).toThrow();
+  });
+
+  it("is INSENSITIVE to key order but SENSITIVE to value change — the serialisation is stable", async () => {
+    await doc("runs", "r-ord").set({ a: 1, b: 2 });
+    const before = snapshotStore();
+    await doc("runs", "r-ord").set({ b: 2, a: 1 });
+    expect(describeDelta(diffStore(before, snapshotStore()))).toBe("added:[] modified:[] deleted:[]");
+    await doc("runs", "r-ord").set({ b: 3, a: 1 });
+    expect(describeDelta(diffStore(before, snapshotStore()))).toBe("added:[] modified:[runs/r-ord] deleted:[]");
+  });
+
+  it("canonical paths reconstruct run sub-collections, so two runs' events never collide", () => {
+    expect(canonicalPathOf("governanceEvents", "run-1::auto-7")).toBe("runs/run-1/governanceEvents/auto-7");
+    expect(canonicalPathOf("governanceEvents", "run-2::auto-7")).toBe("runs/run-2/governanceEvents/auto-7");
+    expect(canonicalPathOf("workspaces", "ws-1")).toBe("workspaces/ws-1");
+  });
+
+  /** §62 — the expected side must never be derived from the observed side. */
+  it("§62 — a contract that simply accepts whatever happened is not expressible: extras always fail", async () => {
+    const before = snapshotStore();
+    await doc("runs", "r-a").set({ a: 1 });
+    await doc("runs", "r-b").set({ b: 1 });
+    expect(() => expectStoreDelta("extras", before, { added: ["runs/r-a"] })).toThrow();
+  });
+});
+
 describe("whole-event-store oracle — channel inventory fails closed (§9)", () => {
   const surface = () => deriveProductionWriteSurface(PANEL_MUTATIONS_SOURCE, Object.keys(PANEL_OPERATION_FUNCTIONS));
 
@@ -3194,6 +3280,20 @@ describe("production ReturnStatement census — fails closed on unrecognised sha
     expect(RETURN_CENSUS().length).toBeGreaterThan(DISCOVERED_REJECTION_SITES.length);
   });
 
+  it("§28–§31 — every assignment to a relayed result is classified, and none is a rejection today", () => {
+    const byClass = (c: ResultAssignment["classification"]) => RESULT_ASSIGNMENTS.filter((a) => a.classification === c);
+    expect(RESULT_ASSIGNMENTS.map((a) => `${a.operation}:${a.target}:${a.classification}`)).toEqual([
+      "create:transactionResult:transaction-result",
+      "cancel:transactionResult:transaction-result",
+      "vote:transactionResult:transaction-result",
+    ]);
+    expect(`unsupportedResultAssignments:${byClass("unsupported").map((a) => `${a.operation}#assign-${a.ordinal}: ${a.expr}`).join(" | ")}`).toBe("unsupportedResultAssignments:");
+    expect(`rejectionAssignmentsPromotedToSites:${ASSIGNMENT_DECISION_SITES.length}`).toBe("rejectionAssignmentsPromotedToSites:0");
+    // and the detector is not vacuously blind
+    const synthetic = `export async function synthOp(a: number) { let r: Res; r = await db.runTransaction(async () => ({ ok: true })); if (a < 0) { r = { ok: false, reason: "assigned_rejection" }; } return r; }`;
+    expect(censusResultAssignments(synthetic, SYNTH_MAP).map((x) => `${x.classification}/${x.reasonLiteral}`)).toEqual(["transaction-result/null", "rejection/assigned_rejection"]);
+  });
+
   it("the audited functions contain NO `throw` — a rejection routed through one would be outside the model", () => {
     const throws = censusThrowStatements(PANEL_MUTATIONS_SOURCE, PANEL_OPERATION_FUNCTIONS);
     expect(`throwStatementsInAuditedFunctions:${throws.map((x) => `${x.operation}: ${x.expr}`).join(" | ")}`).toBe("throwStatementsInAuditedFunctions:");
@@ -3356,6 +3456,102 @@ function censusReturnStatements(sourceText: string, functionToOperation: Readonl
 }
 
 /**
+ * ─── R8 §28–§31 — THE CENSUS UNIT IS THE DECISION, NOT THE ReturnStatement ─────────────────────
+ *
+ * R7 MAJOR: a rejection can be introduced with no `ReturnStatement` at all, by assigning to the
+ * variable a relay later returns:
+ *
+ *     transactionResult = { ok: false, reason: "panel_unreadable" };
+ *
+ * That added a production decision point with zero census entries, zero obligations, no required
+ * case, and every committed number unmoved. The census counted the wrong unit.
+ *
+ * DELIBERATELY NOT a general dataflow engine (§29). For each audited function this identifies the
+ * identifiers its relay returns hand back, finds every assignment to them, and classifies each. The
+ * only classification treated as safe is "the awaited transaction result"; a rejection assignment
+ * becomes a decision site requiring its own executable obligation, and anything the classifier does
+ * not understand is UNSUPPORTED and fails the suite.
+ */
+type ResultAssignment = {
+  operation: "create" | "cancel" | "vote";
+  ordinal: number;
+  target: string;
+  classification: "transaction-result" | "rejection" | "success" | "unsupported";
+  reasonLiteral: string | null;
+  expr: string;
+};
+
+function censusResultAssignments(sourceText: string, functionToOperation: Readonly<Record<string, "create" | "cancel" | "vote">>): ResultAssignment[] {
+  const sf = tsApi.createSourceFile("subject.ts", sourceText, tsApi.ScriptTarget.ES2020, true);
+  const out: ResultAssignment[] = [];
+  const textOf = (n: tsApi.Node) => n.getText(sf).replace(/\s+/g, " ").trim();
+  const unwrap = (node: tsApi.Expression): tsApi.Expression => {
+    let c: tsApi.Expression = node;
+    for (;;) {
+      if (tsApi.isAsExpression(c) || tsApi.isSatisfiesExpression(c) || tsApi.isParenthesizedExpression(c)) { c = c.expression; continue; }
+      return c;
+    }
+  };
+
+  const collect = (fnNode: tsApi.Node, operation: "create" | "cancel" | "vote") => {
+    // 1. which identifiers do this function's relay returns hand back?
+    const relayed = new Set<string>();
+    const findRelays = (n: tsApi.Node) => {
+      if (n !== fnNode && (tsApi.isFunctionDeclaration(n) || tsApi.isMethodDeclaration(n))) return;
+      if (tsApi.isReturnStatement(n) && n.expression) {
+        const e = unwrap(n.expression);
+        if (tsApi.isIdentifier(e)) relayed.add(e.text);
+      }
+      tsApi.forEachChild(n, findRelays);
+    };
+    tsApi.forEachChild(fnNode, findRelays);
+
+    // 2. every assignment to one of them, classified
+    let ordinal = 0;
+    const visit = (n: tsApi.Node) => {
+      if (n !== fnNode && (tsApi.isFunctionDeclaration(n) || tsApi.isMethodDeclaration(n))) return;
+      const record = (target: string, rhs: tsApi.Expression | undefined, node: tsApi.Node) => {
+        ordinal += 1;
+        let classification: ResultAssignment["classification"] = "unsupported";
+        let reasonLiteral: string | null = null;
+        if (rhs) {
+          const value = unwrap(rhs);
+          if (tsApi.isAwaitExpression(value) && /runTransaction/.test(textOf(value))) classification = "transaction-result";
+          else if (tsApi.isObjectLiteralExpression(value)) {
+            const okProps = value.properties.filter((p) => p.name?.getText(sf) === "ok");
+            const ok = okProps.length === 1 && tsApi.isPropertyAssignment(okProps[0]) ? unwrap((okProps[0] as tsApi.PropertyAssignment).initializer) : undefined;
+            if (ok && ok.kind === tsApi.SyntaxKind.FalseKeyword) {
+              classification = "rejection";
+              const reason = value.properties.find((p): p is tsApi.PropertyAssignment => tsApi.isPropertyAssignment(p) && p.name.getText(sf) === "reason");
+              const rv = reason ? unwrap(reason.initializer) : undefined;
+              reasonLiteral = rv && tsApi.isStringLiteralLike(rv) ? rv.text : null;
+            } else if (ok && ok.kind === tsApi.SyntaxKind.TrueKeyword) classification = "success";
+          }
+        }
+        out.push({ operation, ordinal, target, classification, reasonLiteral, expr: textOf(node).slice(0, 140) });
+      };
+      if (tsApi.isBinaryExpression(n) && n.operatorToken.kind === tsApi.SyntaxKind.EqualsToken && tsApi.isIdentifier(n.left) && relayed.has(n.left.text)) {
+        record(n.left.text, n.right, n);
+      }
+      if (tsApi.isVariableDeclaration(n) && tsApi.isIdentifier(n.name) && relayed.has(n.name.text) && n.initializer) {
+        record(n.name.text, n.initializer, n);
+      }
+      tsApi.forEachChild(n, visit);
+    };
+    tsApi.forEachChild(fnNode, visit);
+  };
+
+  const walk = (node: tsApi.Node) => {
+    if (tsApi.isFunctionDeclaration(node) && node.name && Object.prototype.hasOwnProperty.call(functionToOperation, node.name.text)) {
+      collect(node, functionToOperation[node.name.text]);
+    }
+    tsApi.forEachChild(node, walk);
+  };
+  tsApi.forEachChild(sf, walk);
+  return out;
+}
+
+/**
  * The real inventory. Read from disk at module load: if the production file moves or is renamed,
  * this throws rather than silently discovering nothing.
  */
@@ -3367,7 +3563,27 @@ const DISCOVERED_REJECTION_SITES: readonly DiscoveredRejectionSite[] = Object.fr
 
 /** `write_failed` is the transaction-failure catch, not a decision. The atomicity suite owns it. */
 const WRITE_FAILED_SITES: readonly DiscoveredRejectionSite[] = DISCOVERED_REJECTION_SITES.filter((s) => s.guardKind === "catch");
-const DECISION_SITES: readonly DiscoveredRejectionSite[] = DISCOVERED_REJECTION_SITES.filter((s) => s.guardKind !== "catch");
+
+/** §28/§30 — a rejection ASSIGNED to the relayed result is a decision site and carries an obligation. */
+const RESULT_ASSIGNMENTS: readonly ResultAssignment[] = Object.freeze(censusResultAssignments(PANEL_MUTATIONS_SOURCE, PANEL_OPERATION_FUNCTIONS));
+const ASSIGNMENT_DECISION_SITES: readonly DiscoveredRejectionSite[] = Object.freeze(
+  RESULT_ASSIGNMENTS.filter((a) => a.classification === "rejection").map((a) => Object.freeze({
+    operation: a.operation,
+    functionName: "",
+    siteId: `${a.operation}#assign-${String(a.ordinal).padStart(2, "0")}`,
+    ordinal: a.ordinal,
+    reasonExpr: a.reasonLiteral ?? "<propagated>",
+    reasonLiteral: a.reasonLiteral,
+    isPassthrough: a.reasonLiteral === null,
+    guardExpr: a.expr,
+    guardKind: "none" as const,
+  }))
+);
+
+const DECISION_SITES: readonly DiscoveredRejectionSite[] = [
+  ...DISCOVERED_REJECTION_SITES.filter((s) => s.guardKind !== "catch"),
+  ...ASSIGNMENT_DECISION_SITES,
+];
 
 /**
  * ─── R5 §27/§28 — THE AUTH DENIAL UNION IS PINNED TO PRODUCTION SOURCE ────────────────────────
