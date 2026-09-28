@@ -320,21 +320,47 @@ export type PutWorkspaceReviewPanelResult = { ok: true; panel: WorkspaceReviewPa
  * `TECH_DEBT_GOVERNANCE_AUDIT_DURABILITY` is precisely the weakness of the other one. An event
  * written here cannot survive a rolled-back mutation and cannot be lost after a committed one.
  *
- * ONLY A WRITE, NEVER A NEW READ. Every field comes from data the surrounding transaction
- * already has in scope. Adding a `tx.get` would enlarge the read set of transactions whose
- * OCC/contention behaviour was Production-canaried at `c28edbbf`; appending an auto-id document
- * to a subcollection nothing else reads introduces no new conflict source. That is why these
- * events deliberately omit `schemaId`/`answerShape`, which `resubmitWorkspaceReview()` includes
- * only because its own flow already reads the governance record.
+ * FIELD SOURCE DISCIPLINE — every field traces to an authority, never to raw client input:
+ *   • `byUid` — the AUTHENTICATED caller (`args.uid`, which each route sets from
+ *     `identity.uid`). Never a reviewer target, never a body/query value.
+ *   • `workspaceId`/`projectId` — `target.*`, derived from the run document by
+ *     `resolveWorkspaceReviewTarget`, which rejects a workspace mismatch. Never `args.workspaceId`.
+ *   • `panelRevision`/`reviewerCount` — the CANONICAL panel object this transaction is about to
+ *     commit, never the request array. R1 measured why this matters: a request of
+ *     `[OWNER, OWNER, ADMIN]` canonicalizes to two reviewers, and an event built from
+ *     `args.reviewerUserIds.length` claimed three — an audit record overstating the panel it
+ *     documents. Route validation rejects duplicates today, but this module's own contract says
+ *     dedup is "assumed already validated by the route", and elsewhere it explicitly refuses to
+ *     trust upstream, so the audit record derives from what was actually written.
+ *   • `schemaId`/`answerShape` — `govParse.record`, the governance record this transaction has
+ *     ALREADY parsed for its own reviewability gate. An earlier revision of this comment
+ *     claimed these were omitted because obtaining them would need reads that
+ *     `resubmitWorkspaceReview()` already does. That was measurably FALSE — R1 proved
+ *     `parseGovernanceRecord()` runs in all three of these flows, adding them costs ZERO new
+ *     reads, and this file already said so further down. They are included, so these events
+ *     carry the same canonical governance context as every other `governanceEvents` entry
+ *     instead of leaving the collection heterogeneous for audit consumers.
+ *
+ * ONLY A WRITE, NEVER A NEW READ. Adding a `tx.get` would enlarge the read set of transactions
+ * whose OCC/contention behaviour was Production-canaried at `c28edbbf`; appending an auto-id
+ * document to a subcollection nothing else reads introduces no new conflict source. The read set
+ * is unchanged at 14 `tx.get` call sites, verified against `origin/main`.
  */
 function appendPanelGovernanceEvent(
   tx: FirebaseFirestore.Transaction,
   runRef: FirebaseFirestore.DocumentReference,
   event: Readonly<Record<string, unknown>> & { action: string; byUid: string; at: string },
 ): void {
-  // Auto-generated id, matching this collection's existing convention. Duplicate events on a
-  // stale retry are impossible by construction: every caller below sits after an OCC/state
-  // check that a retried stale request fails before reaching this line.
+  // Auto-generated id, matching this collection's existing convention.
+  //
+  // WHY A RETRY CANNOT DUPLICATE — stated as the mechanism that actually operates, because R1
+  // measured the previous explanation ("a retried stale request fails a check before reaching
+  // this line") to be wrong for the case that occurs. When a conflict is resolved by a retry
+  // that SUCCEEDS, this line IS reached twice and mints a fresh auto-id each time; the aborted
+  // attempt's buffered writes are DISCARDED by the transaction, so only the final attempt's
+  // event commits. Verified with a forced conflict: two attempts, ids `auto-1` then `auto-2`,
+  // and `auto-1` absent from the committed store. No deterministic event id is needed for that
+  // guarantee — but the reason is write-buffer discard, not an earlier check.
   tx.set(runRef.collection("governanceEvents").doc(), event);
 }
 
@@ -438,7 +464,9 @@ export async function putWorkspaceReviewPanel(args: {
         projectId: target.projectId,
         panelRevision: nextPanel.revision,
         priorPanelRevision: current?.revision ?? null,
-        reviewerCount: args.reviewerUserIds.length,
+        reviewerCount: nextPanel.reviewerUserIds.length,
+        schemaId: govParse.record.schemaId,
+        answerShape: govParse.record.answerShape,
       });
       return { ok: true, panel: nextPanel };
     });
@@ -531,6 +559,8 @@ export async function deleteWorkspaceReviewPanel(args: { uid: string; workspaceI
         projectId: target.projectId,
         panelRevision: current.revision,
         reviewerCount: current.reviewerUserIds.length,
+        schemaId: govParse.record.schemaId,
+        answerShape: govParse.record.answerShape,
       });
       return { ok: true };
     });
@@ -679,6 +709,8 @@ export async function submitWorkspaceReviewPanelVote(args: {
         voteStatus: nextVote.status,
         commentPresent: nextVote.commentPresent,
         conditionsCount: nextVote.conditionsCount,
+        schemaId: govParse.record.schemaId,
+        answerShape: govParse.record.answerShape,
       });
       return { ok: true, vote: nextVote, submissionStatus: "submitted" as const };
     });

@@ -1591,20 +1591,30 @@ describe("overrideWorkspaceReviewPanel — Workspace-canary target admission (Ph
  *
  * Phase 9D confirmed in Production that panel create/reconfigure, cancel and vote wrote NO
  * immutable secondary record — the canonical resource document was their only evidence — while
- * finalize wrote 3 and Owner Override 4. These tests pin the four events that close that gap,
- * and pin the two things that make them trustworthy: they are written ATOMICALLY with the
- * canonical mutation (a rejected mutation leaves nothing behind), and an idempotent replay does
- * not fabricate a second one.
+ * finalize wrote 3 and Owner Override 4. These tests pin the four events that close that gap.
+ *
+ * R1 review found the first version of this block non-discriminating in three ways, each
+ * addressed below and each with its own mutation:
+ *   1. ACTOR — `putCall()`'s default has `uid: OWNER_UID` AND `reviewerUserIds[0] === OWNER_UID`,
+ *      so an event actor sourced from the CLIENT-SUPPLIED reviewer array satisfied the assertion.
+ *   2. RESOURCE BINDING — reconfigure and cancel asserted fields individually and omitted
+ *      `workspaceId`/`projectId`, so an event bound to a FOREIGN workspace survived.
+ *   3. REJECTION COVERAGE — 5 of the 36 (function, reason) pairs were pinned, so a ghost
+ *      "created" event on the `target_not_eligible` rejection survived.
+ * All four actions now use a COMPLETE event-shape `toEqual`, so every authority-bearing field is
+ * pinned symmetrically rather than some actions pinning more than others.
  */
 const panelEvents = () => [...stores.governanceEvents.entries()].filter(([k]) => k.startsWith(`${RUN_ID}::`)).map(([, v]) => v as Record<string, unknown>);
 
+/** The governance context every panel event carries, from the already-parsed governance record. */
+const GOV_CONTEXT = { schemaId: "decision_support", answerShape: "decision_support_view" } as const;
+
 describe("panel mutation audit coverage — immutable governanceEvents", () => {
-  it("panel CREATE writes exactly one adaptive_review_panel_created event, with the fields the transaction already had", async () => {
+  it("panel CREATE writes exactly one created event, with its COMPLETE shape", async () => {
     const result = await putCall();
     expect(result.ok).toBe(true);
-    const events = panelEvents();
-    expect(events).toHaveLength(1);
-    expect(events[0]).toEqual({
+    expect(panelEvents()).toHaveLength(1);
+    expect(panelEvents()[0]).toEqual({
       action: "adaptive_review_panel_created",
       byUid: OWNER_UID,
       at: MUTATE_NOW,
@@ -1613,36 +1623,79 @@ describe("panel mutation audit coverage — immutable governanceEvents", () => {
       panelRevision: 1,
       priorPanelRevision: null,
       reviewerCount: 2,
+      ...GOV_CONTEXT,
     });
   });
 
-  it("panel RECONFIGURE writes adaptive_review_panel_reconfigured, carrying the prior revision", async () => {
+  /**
+   * R1's surviving mutation M9: the create event's actor could be sourced from
+   * `args.reviewerUserIds[0]` — client-supplied input — and every test still passed, because the
+   * default fixture's authenticated caller IS that first reviewer. This fixture breaks that
+   * coincidence, and asserts the precondition BEFORE the mutation so the discrimination is
+   * measured rather than assumed.
+   */
+  it("the created event's actor is the AUTHENTICATED caller, not any client-supplied reviewer", async () => {
+    const reviewers = [ADMIN_UID, REVIEWER_UID];
+    // the precondition that makes this test discriminating at all
+    expect(`callerIsNotAnyReviewer:${!reviewers.includes(OWNER_UID)}`).toBe("callerIsNotAnyReviewer:true");
+    expect(`callerIsNotTheFirstReviewer:${reviewers[0] !== OWNER_UID}`).toBe("callerIsNotTheFirstReviewer:true");
+    const result = await putCall({ uid: OWNER_UID, reviewerUserIds: reviewers });
+    expect(result.ok).toBe(true);
+    expect(panelEvents()).toHaveLength(1);
+    expect(panelEvents()[0].byUid).toBe(OWNER_UID);
+    expect(`actorIsNotTheFirstReviewer:${panelEvents()[0].byUid !== reviewers[0]}`).toBe("actorIsNotTheFirstReviewer:true");
+  });
+
+  it("the reconfigured event's actor is the AUTHENTICATED caller, not any client-supplied reviewer", async () => {
+    seedPanel({ revision: 1 });
+    const reviewers = [OWNER_UID, REVIEWER_UID];
+    expect(`callerIsNotTheFirstReviewer:${reviewers[0] !== ADMIN_UID}`).toBe("callerIsNotTheFirstReviewer:true");
+    const result = await putCall({ uid: ADMIN_UID, expectedRevision: 1, reviewerUserIds: reviewers });
+    expect(result.ok).toBe(true);
+    expect(panelEvents()[0].byUid).toBe(ADMIN_UID);
+  });
+
+  it("panel RECONFIGURE writes exactly one reconfigured event, with its COMPLETE shape", async () => {
     seedPanel({ revision: 1 });
     const result = await putCall({ expectedRevision: 1, reviewerUserIds: [OWNER_UID, ADMIN_UID, REVIEWER_UID] });
     expect(result.ok).toBe(true);
-    const events = panelEvents();
-    expect(events).toHaveLength(1);
-    expect(events[0].action).toBe("adaptive_review_panel_reconfigured");
-    expect(`prior:${events[0].priorPanelRevision} next:${events[0].panelRevision} reviewers:${events[0].reviewerCount}`).toBe("prior:1 next:2 reviewers:3");
+    expect(panelEvents()).toHaveLength(1);
+    expect(panelEvents()[0]).toEqual({
+      action: "adaptive_review_panel_reconfigured",
+      byUid: OWNER_UID,
+      at: MUTATE_NOW,
+      workspaceId: WS_ID,
+      projectId: null,
+      panelRevision: 2,
+      priorPanelRevision: 1,
+      reviewerCount: 3,
+      ...GOV_CONTEXT,
+    });
   });
 
-  it("panel CANCEL writes adaptive_review_panel_cancelled for the revision that was cancelled", async () => {
+  it("panel CANCEL writes exactly one cancelled event, with its COMPLETE shape", async () => {
     seedPanel({ revision: 1 });
     const result = await deleteCall();
     expect(result.ok).toBe(true);
-    const events = panelEvents();
-    expect(events).toHaveLength(1);
-    expect(events[0].action).toBe("adaptive_review_panel_cancelled");
-    expect(`revision:${events[0].panelRevision} by:${events[0].byUid}`).toBe(`revision:1 by:${OWNER_UID}`);
+    expect(panelEvents()).toHaveLength(1);
+    expect(panelEvents()[0]).toEqual({
+      action: "adaptive_review_panel_cancelled",
+      byUid: OWNER_UID,
+      at: MUTATE_NOW,
+      workspaceId: WS_ID,
+      projectId: null,
+      panelRevision: 1,
+      reviewerCount: 3,
+      ...GOV_CONTEXT,
+    });
   });
 
-  it("VOTE writes adaptive_review_panel_vote_cast, recording the vote's own shape", async () => {
+  it("VOTE writes exactly one vote_cast event, with its COMPLETE shape", async () => {
     seedPanel({ revision: 1 });
     const result = await voteCall({ status: "changes_requested", comment: "needs work", conditions: ["c1", "c2"] });
     expect(result.ok).toBe(true);
-    const events = panelEvents();
-    expect(events).toHaveLength(1);
-    expect(events[0]).toEqual({
+    expect(panelEvents()).toHaveLength(1);
+    expect(panelEvents()[0]).toEqual({
       action: "adaptive_review_panel_vote_cast",
       byUid: OWNER_UID,
       at: MUTATE_NOW,
@@ -1652,7 +1705,24 @@ describe("panel mutation audit coverage — immutable governanceEvents", () => {
       voteStatus: "changes_requested",
       commentPresent: true,
       conditionsCount: 2,
+      ...GOV_CONTEXT,
     });
+  });
+
+  /**
+   * R1 finding 5, measured: a request of `[OWNER, OWNER, ADMIN]` canonicalizes to TWO reviewers
+   * while an event built from `args.reviewerUserIds.length` claimed THREE — an audit record
+   * overstating the panel it documents. The event must describe what was committed.
+   */
+  it("reviewerCount comes from the COMMITTED panel, not the raw request array", async () => {
+    const raw = [OWNER_UID, OWNER_UID, ADMIN_UID];
+    const result = await putCall({ reviewerUserIds: raw });
+    expect(result.ok).toBe(true);
+    const panel = stores.humanReviewPanel.get(`${RUN_ID}::current`) as { reviewerUserIds: string[] };
+    // the fixture is only discriminating if canonicalization actually changed the cardinality
+    expect(`canonicalDiffersFromRaw:${panel.reviewerUserIds.length !== raw.length}`).toBe("canonicalDiffersFromRaw:true");
+    expect(panelEvents()[0].reviewerCount).toBe(panel.reviewerUserIds.length);
+    expect(`eventDoesNotEchoRawLength:${panelEvents()[0].reviewerCount !== raw.length}`).toBe("eventDoesNotEchoRawLength:true");
   });
 
   it("an IDEMPOTENT vote replay writes NO second event — one vote, one record", async () => {
@@ -1661,56 +1731,177 @@ describe("panel mutation audit coverage — immutable governanceEvents", () => {
     expect(panelEvents()).toHaveLength(1);
     const replay = await voteCall();
     expect(replay).toMatchObject({ ok: true, submissionStatus: "already_submitted" });
-    // the replay returned the EXISTING vote and wrote nothing canonical, so it must not
-    // fabricate a second "vote cast"
     expect(panelEvents()).toHaveLength(1);
   });
+});
 
-  /**
-   * ATOMICITY is what distinguishes this from the best-effort post-commit pattern
-   * finalize/override use: each case below is a mutation REJECTED after its state/OCC check, so
-   * a non-atomic implementation — one that wrote the event before the outcome was known, or
-   * post-commit without checking it — would leave a governance event claiming something that
-   * never happened.
-   *
-   * Each case is its own `it` so it gets the real seeded fixture from `beforeEach`. An earlier
-   * draft looped inside ONE test and called `resetStores()` between cases, which clears the
-   * workspace, memberships AND run — so every mutation after the first failed with
-   * `run_not_found` and the test passed without ever exercising a single intended rejection
-   * path. Each case therefore asserts its SPECIFIC reason, not merely `ok: false`.
-   */
-  it("create rejected on a stale expectedRevision writes no event", async () => {
+/**
+ * THE ZERO-GHOST-EVENT CONTRACT: no successful canonical state transition => no success audit
+ * event. R1 found only 5 of the rejection paths pinned, and proved a ghost `created` event on
+ * `target_not_eligible` survived the whole suite.
+ *
+ * `REJECTION_INVENTORY` below is an explicitly reviewed constant derived from the actual
+ * `reason:` / `kind:` literals in the three in-scope mutations — 36 (function, reason) pairs at
+ * the reviewed head. It is deliberately NOT `expected = table.length` against the same table,
+ * which would be the self-referential pattern this codebase has already retracted twice: the
+ * count is asserted against a separately written total, and the per-reason cases below reference
+ * this list, so deleting a case is visible as a coverage gap rather than silently reducing scope.
+ *
+ * Three reasons are excluded from per-case event assertions with the reason stated, not skipped
+ * silently: `team_workspaces_disabled` and `firestore_unavailable` reject BEFORE any Firestore
+ * access at all (already covered by the infra/rollout describes, which assert zero access), and
+ * `write_failed` is the transaction-failure catch, covered by the atomicity injections rather
+ * than by a fixture.
+ */
+const REJECTION_INVENTORY = {
+  putWorkspaceReviewPanel: ["team_workspaces_disabled", "firestore_unavailable", "insufficient_capability", "run_not_found", "not_pending", "single_review_active", "panel_unreadable", "panel_finalized", "stale_revision", "target_not_eligible", "write_failed"],
+  deleteWorkspaceReviewPanel: ["team_workspaces_disabled", "firestore_unavailable", "insufficient_capability", "run_not_found", "not_pending", "panel_absent", "panel_unreadable", "panel_finalized", "panel_already_cancelled", "stale_revision", "write_failed"],
+  submitWorkspaceReviewPanelVote: ["team_workspaces_disabled", "firestore_unavailable", "run_not_found", "not_pending", "panel_absent", "panel_unreadable", "panel_not_open", "panel_stale", "self_review", "not_reviewer", "review_content_unavailable", "vote_malformed", "vote_conflict", "write_failed"],
+} as const;
+const PRE_TRANSACTION_OR_INFRA = ["team_workspaces_disabled", "firestore_unavailable", "write_failed"];
+
+describe("panel mutation audit coverage — zero ghost events on every rejection", () => {
+  it("the rejection inventory matches the reviewed count, so a deleted case is visible", () => {
+    const pairs = Object.entries(REJECTION_INVENTORY).flatMap(([fn, reasons]) => reasons.map((r) => `${fn}:${r}`));
+    expect(`inventoryPairs:${pairs.length}`).toBe("inventoryPairs:36");
+    const covered = pairs.filter(([, ]) => true).filter((p) => !PRE_TRANSACTION_OR_INFRA.includes(p.split(":")[1]));
+    expect(`pairsRequiringAFixtureCase:${covered.length}`).toBe("pairsRequiringAFixtureCase:27");
+  });
+
+  // ── putWorkspaceReviewPanel ──
+  it("create: insufficient_capability writes no event", async () => {
+    expect(await putCall({ uid: MEMBER_UID })).toEqual({ ok: false, reason: "insufficient_capability" });
+    expect(panelEvents()).toHaveLength(0);
+  });
+  it("create: run_not_found writes no event", async () => {
+    stores.runs.delete(RUN_ID);
+    expect(await putCall()).toEqual({ ok: false, reason: "run_not_found" });
+    expect(panelEvents()).toHaveLength(0);
+  });
+  it("create: not_pending writes no event", async () => {
+    seedRun({ governanceRecord: { ...(stores.runs.get(RUN_ID) as { governanceRecord: Record<string, unknown> }).governanceRecord, humanReview: { status: "approved", reviewedAt: GOVERNANCE_UPDATED_AT } } });
+    const result = await putCall();
+    expect(result).toEqual({ ok: false, reason: "not_pending" });
+    expect(panelEvents()).toHaveLength(0);
+  });
+  it("create: single_review_active writes no event", async () => {
+    seedAssignment({ assignedReviewerUserId: REVIEWER_UID });
+    expect(await putCall()).toEqual({ ok: false, reason: "single_review_active" });
+    expect(panelEvents()).toHaveLength(0);
+  });
+  it("create: panel_unreadable writes no event", async () => {
+    stores.humanReviewPanel.set(`${RUN_ID}::current`, { kind: "not-a-panel" });
+    expect(await putCall()).toEqual({ ok: false, reason: "panel_unreadable" });
+    expect(panelEvents()).toHaveLength(0);
+  });
+  it("create: panel_finalized writes no event", async () => {
+    // a finalized panel needs its finalization fields or it parses as UNREADABLE and the test
+    // would assert the wrong branch — the same shape existing tests use.
+    seedPanel({ revision: 1, status: "finalized", finalizedAt: "2026-08-05T00:00:00.000Z", updatedAt: "2026-08-05T00:00:00.000Z", finalizedByUserId: OWNER_UID, finalStatus: "approved", finalDecisionId: "panel_workspace_dec_x", aggregationPolicyVersion: 1 });
+    expect(await putCall({ expectedRevision: 1 })).toEqual({ ok: false, reason: "panel_finalized" });
+    expect(panelEvents()).toHaveLength(0);
+  });
+  it("create: stale_revision writes no event", async () => {
     seedPanel({ revision: 3 });
     expect(await putCall({ expectedRevision: 0 })).toEqual({ ok: false, reason: "stale_revision" });
     expect(panelEvents()).toHaveLength(0);
   });
+  it("create: target_not_eligible writes no event — R1's surviving ghost", async () => {
+    const result = await putCall({ reviewerUserIds: [OWNER_UID, VIEWER_UID] });
+    expect(result.ok).toBe(false);
+    expect((result as { reason: { kind: string } }).reason.kind).toBe("target_not_eligible");
+    expect(panelEvents()).toHaveLength(0);
+  });
 
-  it("cancel rejected on a stale expectedRevision writes no event", async () => {
+  // ── deleteWorkspaceReviewPanel ──
+  it("cancel: insufficient_capability writes no event", async () => {
+    seedPanel({ revision: 1 });
+    expect(await deleteCall({ uid: MEMBER_UID })).toEqual({ ok: false, reason: "insufficient_capability" });
+    expect(panelEvents()).toHaveLength(0);
+  });
+  it("cancel: run_not_found writes no event", async () => {
+    seedPanel({ revision: 1 });
+    stores.runs.delete(RUN_ID);
+    expect(await deleteCall()).toEqual({ ok: false, reason: "run_not_found" });
+    expect(panelEvents()).toHaveLength(0);
+  });
+  it("cancel: panel_absent writes no event", async () => {
+    expect(await deleteCall()).toEqual({ ok: false, reason: "panel_absent" });
+    expect(panelEvents()).toHaveLength(0);
+  });
+  it("cancel: panel_unreadable writes no event", async () => {
+    stores.humanReviewPanel.set(`${RUN_ID}::current`, { kind: "not-a-panel" });
+    expect(await deleteCall()).toEqual({ ok: false, reason: "panel_unreadable" });
+    expect(panelEvents()).toHaveLength(0);
+  });
+  it("cancel: panel_finalized writes no event", async () => {
+    seedPanel({ revision: 1, status: "finalized", finalizedAt: "2026-08-05T00:00:00.000Z", updatedAt: "2026-08-05T00:00:00.000Z", finalizedByUserId: OWNER_UID, finalStatus: "approved", finalDecisionId: "panel_workspace_dec_x", aggregationPolicyVersion: 1 });
+    expect(await deleteCall()).toEqual({ ok: false, reason: "panel_finalized" });
+    expect(panelEvents()).toHaveLength(0);
+  });
+  it("cancel: panel_already_cancelled writes no event", async () => {
+    seedPanel({ revision: 1, status: "cancelled" });
+    expect(await deleteCall()).toEqual({ ok: false, reason: "panel_already_cancelled" });
+    expect(panelEvents()).toHaveLength(0);
+  });
+  it("cancel: stale_revision writes no event", async () => {
     seedPanel({ revision: 3 });
     expect(await deleteCall({ expectedRevision: 1 })).toEqual({ ok: false, reason: "stale_revision" });
     expect(panelEvents()).toHaveLength(0);
   });
 
-  it("cancel rejected because the panel is already cancelled writes no event", async () => {
-    seedPanel({ revision: 1, status: "cancelled" });
-    expect(await deleteCall()).toEqual({ ok: false, reason: "panel_already_cancelled" });
+  // ── submitWorkspaceReviewPanelVote ──
+  it("vote: run_not_found writes no event", async () => {
+    seedPanel({ revision: 1 });
+    stores.runs.delete(RUN_ID);
+    expect(await voteCall()).toEqual({ ok: false, reason: "run_not_found" });
     expect(panelEvents()).toHaveLength(0);
   });
-
-  it("vote rejected because no panel exists writes no event", async () => {
+  it("vote: panel_absent writes no event", async () => {
     expect(await voteCall()).toEqual({ ok: false, reason: "panel_absent" });
     expect(panelEvents()).toHaveLength(0);
   });
-
-  it("vote rejected from a non-panel-reviewer writes no event", async () => {
-    // REVIEWER2_UID is a seeded Workspace member with the reviewer role but is deliberately NOT
-    // on the panel `seedPanel()` builds (its default set is OWNER/ADMIN/REVIEWER) — so this is
-    // rejected for not being a panel member, not for lacking Workspace access. An earlier draft
-    // used REVIEWER_UID, which IS on that default panel, so the vote succeeded and the test
-    // failed honestly rather than passing vacuously.
+  it("vote: panel_unreadable writes no event", async () => {
+    stores.humanReviewPanel.set(`${RUN_ID}::current`, { kind: "not-a-panel" });
+    expect(await voteCall()).toEqual({ ok: false, reason: "panel_unreadable" });
+    expect(panelEvents()).toHaveLength(0);
+  });
+  it("vote: panel_not_open writes no event", async () => {
+    seedPanel({ revision: 1, status: "cancelled" });
+    expect(await voteCall()).toEqual({ ok: false, reason: "panel_not_open" });
+    expect(panelEvents()).toHaveLength(0);
+  });
+  it("vote: panel_stale writes no event", async () => {
+    seedPanel({ revision: 2 });
+    expect(await voteCall({ panelRevision: 1 })).toEqual({ ok: false, reason: "panel_stale" });
+    expect(panelEvents()).toHaveLength(0);
+  });
+  it("vote: self_review writes no event", async () => {
+    seedPanel({ revision: 1, reviewerUserIds: [CREATOR_UID, OWNER_UID] });
+    expect(await voteCall({ uid: CREATOR_UID })).toEqual({ ok: false, reason: "self_review" });
+    expect(panelEvents()).toHaveLength(0);
+  });
+  it("vote: not_reviewer writes no event", async () => {
+    // REVIEWER2_UID is a seeded reviewer-role member deliberately ABSENT from seedPanel()'s
+    // default set, which sorts to [admin-1, owner-1, reviewer-1]. Asserted, not assumed —
+    // R1's fixture trap (b) was using REVIEWER_UID, which IS on that panel.
     seedPanel({ revision: 1 });
-    const result = await voteCall({ uid: REVIEWER2_UID });
-    expect(result).toEqual({ ok: false, reason: "not_reviewer" });
+    const panel = stores.humanReviewPanel.get(`${RUN_ID}::current`) as { reviewerUserIds: string[] };
+    expect(`outsiderIsNotOnThePanel:${!panel.reviewerUserIds.includes(REVIEWER2_UID)}`).toBe("outsiderIsNotOnThePanel:true");
+    expect(await voteCall({ uid: REVIEWER2_UID })).toEqual({ ok: false, reason: "not_reviewer" });
+    expect(panelEvents()).toHaveLength(0);
+  });
+  it("vote: vote_conflict writes no event beyond the first accepted vote", async () => {
+    seedPanel({ revision: 1 });
+    expect((await voteCall({ status: "approved" })).ok).toBe(true);
+    expect(panelEvents()).toHaveLength(1);
+    expect(await voteCall({ status: "changes_requested" })).toEqual({ ok: false, reason: "vote_conflict" });
+    expect(panelEvents()).toHaveLength(1);
+  });
+  it("vote: vote_malformed writes no event", async () => {
+    seedPanel({ revision: 1 });
+    stores.humanReviewVotes.set(`${RUN_ID}::${buildAdaptiveHumanReviewVoteId(1, OWNER_UID)}`, { kind: "not-a-vote" });
+    expect(await voteCall()).toEqual({ ok: false, reason: "vote_malformed" });
     expect(panelEvents()).toHaveLength(0);
   });
 
