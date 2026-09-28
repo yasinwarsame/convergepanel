@@ -2001,6 +2001,22 @@ const SYNTHETIC = Object.freeze({
   unmappedNeighbour: `
     export async function synthOp(a: number) { if (a < 0) return { ok: false, reason: "mine" }; return { ok: true }; }
     export async function someOtherFunction(a: number) { if (a < 0) return { ok: false, reason: "not_mine" }; return { ok: true }; }`,
+  /**
+   * The scope rule, made testable in both directions: a NESTED function DECLARATION owns its own
+   * rejection returns and must be excluded, while an arrow/function EXPRESSION must be descended
+   * into — the real module's every decision point lives inside
+   * `adminDb.runTransaction(async (tx) => { ... })`. The first draft asserted this with two
+   * TOP-LEVEL siblings, which only exercised the name map: removing the nested-declaration guard
+   * entirely left that test green.
+   */
+  nestedDeclarationAndArrow: `
+    export async function synthOp(a: number) {
+      function nestedHelper(b: number) { if (b < 0) return { ok: false, reason: "belongs_to_helper" }; return { ok: true }; }
+      return await wrap(async () => {
+        if (a < 0) return { ok: false, reason: "belongs_to_operation" };
+        return nestedHelper(a);
+      });
+    }`,
 });
 const SYNTH_MAP = Object.freeze({ synthOp: "create" as const });
 
@@ -2041,6 +2057,11 @@ describe("AST rejection-site discoverer — self-falsification", () => {
   it("ignores a return site in a function that is not in the operation map", () => {
     const sites = discoverRejectionSites(SYNTHETIC.unmappedNeighbour, SYNTH_MAP);
     expect(sites.map((s) => s.reasonLiteral)).toEqual(["mine"]);
+  });
+
+  it("excludes a NESTED function declaration's returns but descends into an arrow expression's", () => {
+    const sites = discoverRejectionSites(SYNTHETIC.nestedDeclarationAndArrow, SYNTH_MAP);
+    expect(sites.map((s) => `${s.siteId}=${s.reasonLiteral}`)).toEqual(["create#reject-01=belongs_to_operation"]);
   });
 
   it("site identity keyed by (operation, reason) is STRICTLY WEAKER than site identity — on a two-line synthetic proof", () => {
