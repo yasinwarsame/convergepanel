@@ -40,9 +40,26 @@ const stores: Record<string, Map<string, StoredDoc>> = {
 
 function resetStores() {
   for (const store of Object.values(stores)) store.clear();
+  for (const name of lazilyCreatedCollections) delete stores[name];
+  lazilyCreatedCollections.clear();
   autoIdCounter = 0;
   governanceEventLog.length = 0;
   disabledEventObservers.clear();
+  harnessViolations.length = 0;
+}
+
+/**
+ * ─── R8 §19/§20 — UNSUPPORTED WRITE APIs FAIL CLOSED EVEN WHEN PRODUCTION SWALLOWS ────────────
+ *
+ * R7 BLOCKER: `BulkWriter` was simply absent from the fake, so calling it threw a `TypeError` that
+ * the module's swallow-and-warn house style discarded — an entire real write surface was silent.
+ * Implementing more methods is necessary but can never be future-complete, so an unrecognised
+ * write-capable API now records a violation HERE, independently of whether the thrown sentinel ever
+ * reaches the test. The assertion is on this array, not on the production promise.
+ */
+const harnessViolations: string[] = [];
+function recordHarnessViolation(what: string): void {
+  harnessViolations.push(what);
 }
 
 function asPersisted(data: Record<string, unknown>): Record<string, unknown> {
@@ -69,9 +86,15 @@ function applyDottedFieldUpdate(existing: Record<string, unknown>, data: Record<
   return result;
 }
 
-// `humanReviewVotes`/`governanceEvents` are keyed globally by parentDocId (runId) + subdoc id — mirror via composite key.
+/**
+ * Sub-collections of `runs/{runId}` are flattened into one map per collection, keyed
+ * `${runId}::${subId}`. The set lives in one place so `subKey` (which builds the key) and
+ * `canonicalPathOf` (which reconstructs the Firestore path from it) cannot drift apart.
+ */
+const RUN_SUBCOLLECTIONS: ReadonlySet<string> = new Set(["humanReviewVotes", "humanReviewAssignment", "humanReviewPanel", "governanceEvents"]);
+
 function subKey(collection: string, parentId: string, subId: string): string {
-  return collection === "humanReviewVotes" || collection === "humanReviewAssignment" || collection === "humanReviewPanel" || collection === "governanceEvents" ? `${parentId}::${subId}` : subId;
+  return RUN_SUBCOLLECTIONS.has(collection) ? `${parentId}::${subId}` : subId;
 }
 
 let autoIdCounter = 0;
@@ -102,6 +125,9 @@ type GovernanceEventChannel =
   | "direct.update"
   | "batch.set"
   | "batch.update"
+  | "bulkwriter.set"
+  | "bulkwriter.create"
+  | "bulkwriter.update"
   | "writer.panelFinalizationGovernanceEvent"
   | "writer.panelOverrideGovernanceEvent"
   | "writer.adaptiveHumanReviewEvent";
@@ -198,14 +224,191 @@ function observeWriterGovernanceEvent(channel: GovernanceEventChannel, runId: un
   });
 }
 
-/** Fails loudly rather than letting a write to an uninstrumented collection vanish. */
+/**
+ * ─── R8 §5 — EVERY COLLECTION IS VISIBLE, INCLUDING ONE CREATED DURING EXECUTION ──────────────
+ *
+ * R7 BLOCKER: the previous version threw for an unregistered collection. That is fail-closed only
+ * when the exception escapes — and the audited module's own house style for post-commit audit
+ * writes is `try { await write } catch { logger.warn(...) }`, which swallows it. A collection is now
+ * created on demand and therefore appears in the final-state diff, so an unexpected durable write
+ * is caught by the DELTA rather than by an exception production is free to discard.
+ */
 function storeFor(collectionName: string): Map<string, StoredDoc> {
-  const store = stores[collectionName];
+  let store = stores[collectionName];
   if (!store) {
-    throw new Error(`R5 harness: write to unregistered collection "${collectionName}" — the whole-event-store observation model does not cover it`);
+    store = new Map();
+    stores[collectionName] = store;
+    lazilyCreatedCollections.add(collectionName);
   }
   return store;
 }
+
+/** Collections that did not exist when the suite started — reset with the stores. */
+const lazilyCreatedCollections = new Set<string>();
+
+/**
+ * The Firestore path a flattened store key corresponds to. Derived, never registered, so a document
+ * seeded directly into a store is described exactly like one written through a reference.
+ */
+function canonicalPathOf(collectionName: string, key: string): string {
+  if (RUN_SUBCOLLECTIONS.has(collectionName)) {
+    const separator = key.indexOf("::");
+    if (separator >= 0) return `runs/${key.slice(0, separator)}/${collectionName}/${key.slice(separator + 2)}`;
+  }
+  return `${collectionName}/${key}`;
+}
+
+/**
+ * ─── R8 §3–§6 — THE SECURITY ORACLE IS THE FINAL STORE, NOT THE WRITE LOG ─────────────────────
+ *
+ * R7 BLOCKER 1, and the organizing defect of the whole series: every cardinality and payload
+ * conclusion was drawn from `governanceEventLog`, a derived accounting artifact. Exactly ONE
+ * assertion in 343 tests read the store. So an event could be written and DELETED in the same
+ * transaction — the log said "one committed event", the store held none, and the suite passed.
+ *
+ * The verdict now comes from a complete before/after snapshot of every collection, diffed by
+ * canonical path. Nothing is classified by collection name, by an `action` field, or by any guess
+ * at what an audit record looks like: an unexpected durable change of ANY shape, anywhere, is a
+ * delta. `governanceEventLog` survives for channel liveness and retry diagnostics ONLY, and no
+ * security assertion may read it.
+ */
+type StoreSnapshot = ReadonlyMap<string, string>;
+
+/** Deterministic serialisation: object keys sorted recursively, so a diff reflects value changes only. */
+function stableJson(value: unknown): string {
+  const normalize = (v: unknown): unknown => {
+    if (Array.isArray(v)) return v.map(normalize);
+    if (v && typeof v === "object") {
+      const source = v as Record<string, unknown>;
+      const out: Record<string, unknown> = {};
+      for (const k of Object.keys(source).sort()) out[k] = normalize(source[k]);
+      return out;
+    }
+    return v;
+  };
+  return JSON.stringify(normalize(value)) ?? "undefined";
+}
+
+function snapshotStore(): StoreSnapshot {
+  const snapshot = new Map<string, string>();
+  for (const [collectionName, store] of Object.entries(stores)) {
+    for (const [key, doc] of store.entries()) snapshot.set(canonicalPathOf(collectionName, key), stableJson(doc));
+  }
+  return snapshot;
+}
+
+type StoreDelta = {
+  added: string[];
+  deleted: string[];
+  modified: { path: string; before: string; after: string }[];
+};
+
+function diffStore(before: StoreSnapshot, after: StoreSnapshot): StoreDelta {
+  const added: string[] = [];
+  const deleted: string[] = [];
+  const modified: { path: string; before: string; after: string }[] = [];
+  for (const [path, afterJson] of after) {
+    const beforeJson = before.get(path);
+    if (beforeJson === undefined) added.push(path);
+    else if (beforeJson !== afterJson) modified.push({ path, before: beforeJson, after: afterJson });
+  }
+  for (const path of before.keys()) if (!after.has(path)) deleted.push(path);
+  return { added: added.sort(), deleted: deleted.sort(), modified: modified.sort((a, b) => a.path.localeCompare(b.path)) };
+}
+
+const describeDelta = (d: StoreDelta) => `added:[${d.added.join(" ")}] modified:[${d.modified.map((m) => m.path).join(" ")}] deleted:[${d.deleted.join(" ")}]`;
+
+/**
+ * ─── R8 §19/§20 — A FAIL-CLOSED SURFACE, SO "UNIMPLEMENTED" CANNOT MEAN "SILENT" ──────────────
+ *
+ * Modelling more of the SDK is necessary but can never be future-complete. Any property this fake
+ * does not implement is now recorded as a harness violation on access and then throws a sentinel.
+ * The assertion is on `harnessViolations`, never on whether the sentinel escaped — which is the
+ * whole point, because the audited module's house style swallows exceptions from audit writes.
+ */
+const HARNESS_INFRASTRUCTURE_PROPS: readonly string[] = [
+  "then", "catch", "finally", "toJSON", "inspect", "constructor", "valueOf", "toString",
+  "asymmetricMatch", "$$typeof", "nodeType", "tagName", "hasAttribute", "_isMockFunction", "mock",
+  "length", "name", "prototype",
+];
+
+function failClosedSurface<T extends object>(target: T, label: string): T {
+  const allow = new Set<string>(HARNESS_INFRASTRUCTURE_PROPS);
+  return new Proxy(target, {
+    get(obj, prop, receiver) {
+      if (typeof prop === "symbol" || prop in obj || allow.has(prop)) return Reflect.get(obj, prop, receiver);
+      recordHarnessViolation(`${label}.${String(prop)}`);
+      return (...args: unknown[]) => {
+        void args;
+        throw new Error(`R8 harness: ${label}.${String(prop)} is a write-capable API this fake does not model`);
+      };
+    },
+  }) as T;
+}
+
+/**
+ * ─── R8 §7–§9 — THE OPERATION-SPECIFIC ALLOWED DELTA ──────────────────────────────────────────
+ *
+ * Each audited operation declares the EXACT durable change it is allowed to make. Anything else —
+ * an extra document in any collection, a modification to any other document, any deletion — fails,
+ * with no dependence on what an audit record is shaped like. `oneAddedUnder` matches the event
+ * structurally because its id is a Firestore auto-id, while still pinning the parent resource.
+ */
+type ExpectedDelta = {
+  /** Exactly one added document directly under this canonical parent path. */
+  oneAddedUnder?: string;
+  /** Additional exact canonical paths expected to be added. */
+  added?: readonly string[];
+  modified?: readonly string[];
+  deleted?: readonly string[];
+};
+
+function assertNoHarnessViolation(label: string): void {
+  expect(`${label}:unsupportedWriteApiUsed:${[...new Set(harnessViolations)].join(",")}`).toBe(`${label}:unsupportedWriteApiUsed:`);
+}
+
+function expectStoreDelta(label: string, before: StoreSnapshot, expected: ExpectedDelta): StoreDelta {
+  assertNoHarnessViolation(label);
+  const delta = diffStore(before, snapshotStore());
+  const parent = expected.oneAddedUnder;
+  const underParent = parent ? delta.added.filter((p) => p.startsWith(`${parent}/`) && !p.slice(parent.length + 1).includes("/")) : [];
+  if (parent) {
+    expect(`${label}:addedUnder(${parent}):${underParent.length}`).toBe(`${label}:addedUnder(${parent}):1`);
+  }
+  const otherAdded = delta.added.filter((p) => !underParent.includes(p));
+  expect(`${label}:added:${otherAdded.join(" ")}`).toBe(`${label}:added:${[...(expected.added ?? [])].sort().join(" ")}`);
+  expect(`${label}:modified:${delta.modified.map((m) => m.path).join(" ")}`).toBe(`${label}:modified:${[...(expected.modified ?? [])].sort().join(" ")}`);
+  expect(`${label}:deleted:${delta.deleted.join(" ")}`).toBe(`${label}:deleted:${[...(expected.deleted ?? [])].sort().join(" ")}`);
+  return delta;
+}
+
+/** §8/§9 — the durable state is byte-identical to the pre-call snapshot. */
+function expectNoDurableChange(label: string, before: StoreSnapshot): void {
+  assertNoHarnessViolation(label);
+  const delta = diffStore(before, snapshotStore());
+  expect(`${label}:${describeDelta(delta)}`).toBe(`${label}:added:[] modified:[] deleted:[]`);
+}
+
+/**
+ * §63 — provenance is asserted against the FINAL PERSISTED DOCUMENT, never a helper's call
+ * arguments, never the write log's payload, and never a source object that may since have been
+ * mutated. Resolves the single event document the operation added and returns what the store holds.
+ */
+function soleStoredPanelEvent(delta: StoreDelta, parent: string): { path: string; payload: Record<string, unknown> } {
+  const under = delta.added.filter((p) => p.startsWith(`${parent}/`) && !p.slice(parent.length + 1).includes("/"));
+  if (under.length !== 1) {
+    throw new Error(`expected exactly ONE added document under ${parent}, saw ${under.length}: ${JSON.stringify(under)} (full delta ${describeDelta(delta)})`);
+  }
+  const path = under[0];
+  const subId = path.slice(parent.length + 1);
+  const runId = parent.split("/")[1];
+  const payload = stores.governanceEvents.get(`${runId}::${subId}`);
+  if (!payload) throw new Error(`the added event document ${path} is not present in the store`);
+  return { path, payload: payload as Record<string, unknown> };
+}
+
+/** The canonical governanceEvents parent for a run. */
+const eventParentPath = (runId: string) => `runs/${runId}/governanceEvents`;
 
 function recordFirestoreWrite(
   channel: GovernanceEventChannel,
@@ -246,9 +449,11 @@ function makeSubDocRef(subCollectionName: string, parentCollectionName: string, 
       const data = stores[subCollectionName].get(key);
       return { exists: data !== undefined, data: () => data, id: subDocId };
     },
+    id: subDocId,
+    path: `${parentCollectionName}/${parentDocId}/${subCollectionName}/${subDocId}`,
     ...directWriteMethods(() => ref, subCollectionName, key),
   };
-  return ref;
+  return failClosedSurface(ref, `DocumentReference(${subCollectionName})`);
 }
 
 /**
@@ -294,7 +499,7 @@ function makeDocRef(collectionName: string, docId: string) {
     __collection: collectionName,
     __id: docId,
     __path: `${collectionName}/${docId}`,
-    collection: (subCollectionName: string) => ({
+    collection: (subCollectionName: string) => failClosedSurface({
       // Phase 9C.5 — `.doc()` with no argument mirrors real Firestore's
       // auto-ID generation, needed by `resubmitWorkspaceReview()`'s
       // `runRef.collection("governanceEvents").doc()` call.
@@ -305,14 +510,16 @@ function makeDocRef(collectionName: string, docId: string) {
         await subRef.set(data);
         return subRef;
       },
-    }),
+    }, `CollectionReference(${subCollectionName})`),
     get: async () => {
       const data = stores[collectionName].get(docId);
       return { exists: data !== undefined, data: () => data, id: docId };
     },
+    id: docId,
+    path: `${collectionName}/${docId}`,
     ...directWriteMethods(() => ref, collectionName, docId),
   };
-  return ref;
+  return failClosedSurface(ref, `DocumentReference(${collectionName})`);
 }
 
 let concurrentMutationHook: ((ref: { __collection: string; __id: string }) => void) | null = null;
@@ -324,14 +531,14 @@ const transactionAttemptCount = { value: 0 };
 const MAX_TRANSACTION_ATTEMPTS = 5;
 
 const mockAdminDb: any = {
-  collection: (name: string) => ({
+  collection: (name: string) => failClosedSurface({
     doc: (docId: string) => makeDocRef(name, docId),
     add: async (data: Record<string, unknown>) => {
       const ref = makeDocRef(name, `auto-${++autoIdCounter}`);
       await ref.set(data);
       return ref;
     },
-  }),
+  }, `CollectionReference(${name})`),
   /**
    * R5 BLOCKER — `WriteBatch`. Absent before, so a batched governance-event write threw a
    * `TypeError` that the module's swallow-and-warn style hid. Batched writes commit as a unit, so
@@ -339,7 +546,7 @@ const mockAdminDb: any = {
    */
   batch: () => {
     const queued: Array<() => void> = [];
-    return {
+    return failClosedSurface({
       set: (ref: { __collection: string; __id: string; __path: string }, data: Record<string, unknown>) => {
         const observation = recordFirestoreWrite("batch.set", "direct-writer", ref, data);
         const snapshot = snapshotPayload(data);
@@ -364,8 +571,39 @@ const mockAdminDb: any = {
         for (const apply of queued) apply();
         return [];
       },
-    };
+    }, "WriteBatch");
   },
+
+  /**
+   * R8 §21 — BulkWriter. R7 proved its absence made an entire real write surface silent: the
+   * `TypeError` was swallowed by the module's own house style. Modelled here as APPLYING
+   * IMMEDIATELY rather than buffering until `flush()`/`close()`. That is a deliberate choice and
+   * strictly more detecting than the real SDK: a write production never flushes is still visible in
+   * the final-state diff, so a forged record cannot hide behind a missing flush.
+   */
+  bulkWriter: () => failClosedSurface({
+    set: async (ref: { __collection: string; __id: string; __path: string }, data: Record<string, unknown>) => {
+      const o = recordFirestoreWrite("bulkwriter.set", "direct-writer", ref, data);
+      storeFor(ref.__collection).set(ref.__id, snapshotPayload(data));
+      if (o) o.committed = true;
+    },
+    create: async (ref: { __collection: string; __id: string; __path: string }, data: Record<string, unknown>) => {
+      const o = recordFirestoreWrite("bulkwriter.create", "direct-writer", ref, data);
+      const store = storeFor(ref.__collection);
+      if (store.has(ref.__id)) { const err = new Error("ALREADY_EXISTS") as Error & { code: number }; err.code = 6; throw err; }
+      store.set(ref.__id, snapshotPayload(data));
+      if (o) o.committed = true;
+    },
+    update: async (ref: { __collection: string; __id: string; __path: string }, data: Record<string, unknown>) => {
+      const o = recordFirestoreWrite("bulkwriter.update", "direct-writer", ref, data);
+      const store = storeFor(ref.__collection);
+      store.set(ref.__id, applyDottedFieldUpdate(store.get(ref.__id) ?? {}, snapshotPayload(data)));
+      if (o) o.committed = true;
+    },
+    delete: async (ref: { __collection: string; __id: string }) => { storeFor(ref.__collection).delete(ref.__id); },
+    flush: async () => undefined,
+    close: async () => undefined,
+  }, "BulkWriter"),
   runTransaction: jest.fn().mockImplementation(async (fn: (txn: any) => Promise<any>) => {
     if (transactionShouldThrow.value) throw new Error("simulated transaction failure");
     for (let attempt = 0; attempt < MAX_TRANSACTION_ATTEMPTS; attempt++) {
@@ -373,7 +611,7 @@ const mockAdminDb: any = {
       const pendingWrites: Array<() => void> = [];
       const readSnapshots = new Map<string, unknown>();
       let hasWritten = false;
-      const txn = {
+      const txn = failClosedSurface({
         get: async (ref: { __collection: string; __id: string }) => {
           if (hasWritten) throw new Error("Firestore transactions require all reads to be executed before all writes.");
           const store = stores[ref.__collection];
@@ -439,7 +677,7 @@ const mockAdminDb: any = {
           hasWritten = true;
           pendingWrites.push(() => storeFor(ref.__collection).delete(ref.__id));
         },
-      };
+      }, "Transaction");
       const result = await fn(txn);
       const conflicted = [...readSnapshots.entries()].some(([key, snapshot]) => {
         const [collection, id] = key.split("/");
@@ -2051,6 +2289,9 @@ const INSTRUMENTED_EVENT_CHANNELS: readonly GovernanceEventChannel[] = Object.fr
   "direct.update",
   "batch.set",
   "batch.update",
+  "bulkwriter.set",
+  "bulkwriter.create",
+  "bulkwriter.update",
   "writer.panelFinalizationGovernanceEvent",
   "writer.panelOverrideGovernanceEvent",
   "writer.adaptiveHumanReviewEvent",
@@ -2290,6 +2531,13 @@ describe("whole-event-store oracle — every instrumented channel is LIVE (§10)
     expect(`attempted:${attemptedGovernanceEventCount()}`).toBe("attempted:1");
   });
 
+  it("bulkwriter.set is observed AND lands in the store — R7 proved its absence made a whole surface silent", async () => {
+    const w = mockAdminDb.bulkWriter();
+    await w.set(eventRef(RUN_ID, "bulk-1"), { action: "LIVENESS" });
+    await w.close();
+    expect(`observed:${seen("bulkwriter.set").length} stored:${stores.governanceEvents.has(`${RUN_ID}::bulk-1`)}`).toBe("observed:1 stored:true");
+  });
+
   it("transaction.create", async () => {
     await mockAdminDb.runTransaction(async (tx: any) => tx.create(eventRef(RUN_ID, "live-tx-create"), { action: "LIVENESS" }));
     expect(`observed:${seen("transaction.create").length} committed:${committedGovernanceEvents().length}`).toBe("observed:1 committed:1");
@@ -2334,6 +2582,9 @@ describe("whole-event-store oracle — every instrumented channel is LIVE (§10)
     "direct.update": async () => { await eventRef(RUN_ID, nextId()).update({ action: "X" }); },
     "batch.set": async () => { const b = mockAdminDb.batch(); b.set(eventRef(RUN_ID, nextId()), { action: "X" }); await b.commit(); },
     "batch.update": async () => { const b = mockAdminDb.batch(); b.update(eventRef(RUN_ID, nextId()), { action: "X" }); await b.commit(); },
+    "bulkwriter.set": async () => { const w = mockAdminDb.bulkWriter(); await w.set(eventRef(RUN_ID, nextId()), { action: "X" }); await w.close(); },
+    "bulkwriter.create": async () => { const w = mockAdminDb.bulkWriter(); await w.create(eventRef(RUN_ID, nextId()), { action: "X" }); await w.close(); },
+    "bulkwriter.update": async () => { const w = mockAdminDb.bulkWriter(); await w.update(eventRef(RUN_ID, nextId()), { action: "X" }); await w.close(); },
     "writer.panelFinalizationGovernanceEvent": async () => { await writeAdaptivePanelFinalizationGovernanceEvent({ runId: RUN_ID, teamId: null, schemaId: "decision_support", answerShape: "decision_support_view", finalStatus: "approved", finalDecisionId: "x", aggregationPolicyVersion: 1, supportingReviewerCount: 1, actorUserId: OWNER_UID, finalizedAt: MUTATE_NOW }); },
     "writer.panelOverrideGovernanceEvent": async () => { await writeAdaptivePanelOverrideGovernanceEvent({ runId: RUN_ID, teamId: null, schemaId: "decision_support", answerShape: "decision_support_view", finalStatus: "approved", finalDecisionId: "x", overrideByUserId: OWNER_UID, finalizedAt: MUTATE_NOW }); },
     "writer.adaptiveHumanReviewEvent": async () => { await writeAdaptiveHumanReviewEvent({ runId: RUN_ID, teamId: null, actorUserId: OWNER_UID, at: MUTATE_NOW } as never); },
@@ -2354,7 +2605,7 @@ describe("whole-event-store oracle — every instrumented channel is LIVE (§10)
     expect(`channelsWithoutAnExerciser:${missing.join(",")}`).toBe("channelsWithoutAnExerciser:");
     const extra = Object.keys(exerciseChannel).filter((c) => !INSTRUMENTED_EVENT_CHANNELS.includes(c as GovernanceEventChannel));
     expect(`exercisersWithoutAChannel:${extra.join(",")}`).toBe("exercisersWithoutAChannel:");
-    expect(INSTRUMENTED_EVENT_CHANNELS.length).toBe(11);
+    expect(INSTRUMENTED_EVENT_CHANNELS.length).toBe(14);
   });
 
   /**
@@ -2406,16 +2657,17 @@ describe("whole-event-store oracle — every instrumented channel is LIVE (§10)
 });
 
 describe("panel mutation audit coverage — successful mutations", () => {
-  it("panel CREATE writes exactly one created event, with its COMPLETE shape", async () => {
-    const before = attemptedGovernanceEventCount();
+  it("panel CREATE makes exactly its allowed durable delta, and the stored event has its COMPLETE shape", async () => {
+    const before = snapshotStore();
     expect((await putCall()).ok).toBe(true);
-    // §11 — resolved from the ALL-CHANNEL committed ledger, then path-checked, rather than asked
-    // of a narrow per-run-prefix helper.
-    const sole = soleCommittedGovernanceEvent();
-    expect(`channel:${sole.channel} path:${sole.path}`).toBe(`channel:transaction.set path:runs/${RUN_ID}/governanceEvents/auto-1`);
-    expect(`attemptedDelta:${attemptedGovernanceEventCount() - before}`).toBe("attemptedDelta:1");
+    // R8 §7 — the verdict is the FINAL STORE DELTA: the canonical panel added, exactly one event
+    // added under the run's governanceEvents, and nothing else added, modified or deleted anywhere.
+    const delta = expectStoreDelta("CREATE", before, {
+      oneAddedUnder: eventParentPath(RUN_ID),
+      added: [`runs/${RUN_ID}/humanReviewPanel/current`],
+    });
     expectNoForeignPersistenceWriters();
-    expect(panelEvents()[0]).toEqual({
+    expect(soleStoredPanelEvent(delta, eventParentPath(RUN_ID)).payload).toEqual({
       action: "adaptive_review_panel_created",
       byUid: OWNER_UID,
       at: MUTATE_NOW,
@@ -2430,10 +2682,14 @@ describe("panel mutation audit coverage — successful mutations", () => {
 
   it("panel RECONFIGURE writes exactly one reconfigured event, with its COMPLETE shape", async () => {
     seedPanel({ revision: 1 });
+    const before = snapshotStore();
     expect((await putCall({ expectedRevision: 1, reviewerUserIds: [OWNER_UID, ADMIN_UID, REVIEWER_UID] })).ok).toBe(true);
-    expect(soleCommittedGovernanceEvent().path).toBe(`runs/${RUN_ID}/governanceEvents/auto-1`);
+    const delta = expectStoreDelta("RECONFIGURE", before, {
+      oneAddedUnder: eventParentPath(RUN_ID),
+      modified: [`runs/${RUN_ID}/humanReviewPanel/current`],
+    });
     expectNoForeignPersistenceWriters();
-    expect(panelEvents()[0]).toEqual({
+    expect(soleStoredPanelEvent(delta, eventParentPath(RUN_ID)).payload).toEqual({
       action: "adaptive_review_panel_reconfigured",
       byUid: OWNER_UID,
       at: MUTATE_NOW,
@@ -2448,10 +2704,14 @@ describe("panel mutation audit coverage — successful mutations", () => {
 
   it("panel CANCEL writes exactly one cancelled event, with its COMPLETE shape", async () => {
     seedPanel({ revision: 1 });
+    const before = snapshotStore();
     expect((await deleteCall()).ok).toBe(true);
-    expect(soleCommittedGovernanceEvent().path).toBe(`runs/${RUN_ID}/governanceEvents/auto-1`);
+    const delta = expectStoreDelta("CANCEL", before, {
+      oneAddedUnder: eventParentPath(RUN_ID),
+      modified: [`runs/${RUN_ID}/humanReviewPanel/current`],
+    });
     expectNoForeignPersistenceWriters();
-    expect(panelEvents()[0]).toEqual({
+    expect(soleStoredPanelEvent(delta, eventParentPath(RUN_ID)).payload).toEqual({
       action: "adaptive_review_panel_cancelled",
       byUid: OWNER_UID,
       at: MUTATE_NOW,
@@ -2465,10 +2725,14 @@ describe("panel mutation audit coverage — successful mutations", () => {
 
   it("VOTE writes exactly one vote_cast event, with its COMPLETE shape", async () => {
     seedPanel({ revision: 1 });
+    const before = snapshotStore();
     expect((await voteCall({ status: "changes_requested", comment: "needs work", conditions: ["c1", "c2"] })).ok).toBe(true);
-    expect(soleCommittedGovernanceEvent().path).toBe(`runs/${RUN_ID}/governanceEvents/auto-1`);
+    const delta = expectStoreDelta("VOTE", before, {
+      oneAddedUnder: eventParentPath(RUN_ID),
+      added: [`runs/${RUN_ID}/humanReviewVotes/${buildAdaptiveHumanReviewVoteId(1, OWNER_UID)}`],
+    });
     expectNoForeignPersistenceWriters();
-    expect(panelEvents()[0]).toEqual({
+    expect(soleStoredPanelEvent(delta, eventParentPath(RUN_ID)).payload).toEqual({
       action: "adaptive_review_panel_vote_cast",
       byUid: OWNER_UID,
       at: MUTATE_NOW,
@@ -2513,13 +2777,11 @@ describe("panel mutation audit coverage — successful mutations", () => {
     seedPanel({ revision: 1 });
     expect((await voteCall()).ok).toBe(true);
     expect(panelEvents()).toHaveLength(1);
-    const afterFirst = attemptedGovernanceEventCount();
+    // R8 §9 — the replay's DURABLE delta must be empty. The previous version counted attempted log
+    // entries, which a write-then-delete or an unmodelled surface could sidestep entirely.
+    const before = snapshotStore();
     expect(await voteCall()).toMatchObject({ ok: true, submissionStatus: "already_submitted" });
-    // R4 BL1: the replay must not even ATTEMPT a write, on the transaction channel or through any
-    // imported writer helper. Counting committed panel-action events under one key prefix let a
-    // writer-helper call on this exact branch survive.
-    expect(`replayAttemptedDelta:${attemptedGovernanceEventCount() - afterFirst}`).toBe("replayAttemptedDelta:0");
-    expect(committedGovernanceEvents()).toHaveLength(1);
+    expectNoDurableChange("VOTE-replay", before);
     expectNoForeignPersistenceWriters();
   });
 });
@@ -3654,17 +3916,18 @@ const reasonOf = (r: { reason?: unknown }) => (typeof r.reason === "string" ? r.
 describe("panel mutation audit coverage — zero ghost events at every discovered decision site", () => {
   it.each(REJECTION_CASES.map((c) => [`${c.siteId} -> ${c.reason}`, c] as const))("%s rejects with its own reason and writes no event", async (label, testCase) => {
     if (testCase.setup) await testCase.setup();
-    const before = attemptedGovernanceEventCount();
     if (testCase.arrange) testCase.arrange();
     // §14 — the WITNESS runs here: after the fixture is arranged, before production is called, and
     // it interrogates canonical state through the real predicates rather than trusting the label.
     const witness = SITE_WITNESSES[testCase.siteId];
     if (witness) witness({ callerUid: testCase.resolveCallerUid?.() ?? testCase.callerUid ?? OWNER_UID, reason: testCase.reason, operation: testCase.siteId.split("#")[0] as "create" | "cancel" | "vote" });
+    // R8 §8 — snapshotted AFTER arrange, so the contract is "the OPERATION changed nothing durable".
+    const before = snapshotStore();
     const result = await testCase.act();
     expect(`${label}:rejected:${result.ok}`).toBe(`${label}:rejected:false`);
     expect(`${label}:reason:${reasonOf(result)}`).toBe(`${label}:reason:${testCase.reason}`);
-    // R4 BL1 — ALL channels, ALL paths, ALL actions, and ATTEMPTS not merely commits.
-    expect(`${label}:attemptedEventDelta:${attemptedGovernanceEventCount() - before}`).toBe(`${label}:attemptedEventDelta:0`);
+    // The whole store, by canonical path — not a log, not a collection name, not a payload shape.
+    expectNoDurableChange(label, before);
     expectNoForeignPersistenceWriters();
     executedObligations.push(obligationKey(testCase.siteId, testCase.reason));
   });
