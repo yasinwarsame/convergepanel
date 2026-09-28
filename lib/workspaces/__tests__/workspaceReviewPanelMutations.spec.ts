@@ -9,6 +9,10 @@
  */
 
 import { Timestamp } from "firebase-admin/firestore";
+import { readFileSync } from "fs";
+import { join as joinPath } from "path";
+import * as tsApi from "typescript";
+import { violatesAssignmentSelfReviewGuard, violatesDecisionSelfReviewGuard } from "@/lib/workspaces/workspaceReviewEligibility";
 
 type StoredDoc = Record<string, unknown>;
 const stores: Record<string, Map<string, StoredDoc>> = {
@@ -1806,80 +1810,412 @@ describe("panel mutation audit coverage — governance context provenance", () =
 });
 
 /**
- * ─── R3 §3–§13, §41–§45 — THE REJECTION PROOF, REBUILT AROUND BRANCH IDENTITY ────────────────
+ * ─── R4 §5–§9, §43 — REJECTION COVERAGE KEYED TO AST DECISION-POINT IDENTITY ──────────────────
  *
- * WHY THE PREVIOUS MODEL WAS INVALID. R2's inventory was derived by scanning inline
- * `reason: "..."` literals. That is structurally blind to a PASSTHROUGH branch:
+ * WHY BOTH EARLIER MODELS WERE INVALID.
+ *   R2 derived the inventory by scanning inline `reason: "..."` literals. That is structurally
+ *   blind to a PASSTHROUGH branch — `if (!auth.ok) return { ok: false, reason: auth.reason }` —
+ *   so the seven authorization reasons that reach each operation through that one line never
+ *   appeared, and a forged `vote_cast` minted on the vote's authorization denial survived.
+ *   R3 replaced it with a hand-written "branch" contract keyed by semantic names. That contract
+ *   was SELF-REFUTING: it asserted `branches:52 uniqueOperationReasonPairs:52`, and equality of
+ *   those two numbers is arithmetic proof that no reason repeated — i.e. proof the contract had
+ *   collapsed every duplicate-reason return site into one entry. Seven real decision points were
+ *   missing, five of them production-reachable, and a ghost event inserted before any of the seven
+ *   survived the whole suite.
  *
- *     const auth = await authorizeTeamWorkspaceMutationInTransaction(...);
- *     if (!auth.ok) return { ok: false, reason: auth.reason };
+ * THE UNIT IS NOW THE RETURN SITE, DISCOVERED FROM THE AST, not a name and not a line number.
+ * `discoverRejectionSites()` parses the production module with the TypeScript compiler API and
+ * emits one site per `return { ok: false, ... }` inside each in-scope function, identified by
+ * `<operation>#reject-<AST ordinal within that function>`, carrying its enclosing guard
+ * expression and its reason expression for review. Two returns of the SAME reason are therefore
+ * two sites with two identities — which is the whole point, because a ghost write can be inserted
+ * before either one independently and coverage of one is not coverage of the other. Line numbers
+ * are never used, so ordinary edits above a site do not rot its identity.
  *
- * Seven authorization reasons reach each caller through that single line and none of them appears
- * as a literal in this module, so the "complete" inventory never saw them — and a forged
- * `vote_cast` inserted on the vote's authorization denial survived the whole suite. An
- * unauthorized caller's REJECTED vote minting a "vote cast" record is the worst possible failure
- * for a collection whose purpose is proving who voted.
+ * TWO LAYERS, deliberately distinct, because they count different things:
+ *   • SYNTACTIC INVENTORY — 44 return sites / 39 unique (operation, reason) pairs / therefore
+ *     5 duplicate-reason sites. Derived, never asserted by hand.
+ *   • EXPANDED RUNTIME OBLIGATIONS — 59. The 3 `write_failed` catch returns are excluded (not
+ *     decision points; the atomicity regressions below own them), leaving 41 decision sites; the
+ *     3 authorization passthrough sites each expand to all 7 reachable runtime auth reasons,
+ *     so 38 + 21 = 59. Of those, 3 are classified STRUCTURALLY UNREACHABLE under the shipped role
+ *     matrix — with the invariant that forces it asserted, not assumed — leaving 56 executable.
  *
- * THE UNIT IS NOW THE BRANCH, not the reason string. Two branches can return the same reason
- * (`run_not_found` has two sites in each operation; `not_reviewer` has two in vote) and a ghost
- * write can be inserted before either, so a case covering one must not count as coverage for the
- * other. Branch IDs are stable semantic names, never line numbers.
+ * The structural invariant that matters is NOT the number 59. It is that the inventory preserves
+ * every return site independently, including duplicate reasons, and that the propagated union is
+ * expanded in a separate layer on top of it.
  *
- * TWO INDEPENDENT STRUCTURES, deliberately:
- *   • `EXPECTED_REJECTION_BRANCHES` — the reviewed contract, hand-audited from the production
- *     source and from `TeamMutationAuthorizationDenialReason`'s actual union.
- *   • `REJECTION_CASES` — executable fixtures, each declaring the branchId it exercises.
- * The runner executes every case and records what it executed; a separate test then asserts exact
- * set equality between the EXECUTION LEDGER and the CONTRACT. The expected side never comes from
- * the case table, so deleting a case, skipping one in the runner, registering a duplicate, or
- * registering an unknown branch all fail. R2's version asserted a hand-written count against a
- * hand-written total and was referenced by nothing, so deleting a case stayed green.
+ * THE RECONCILIATION never derives its expected side from the case table: it derives it from the
+ * AST. Deleting a case, skipping one, duplicating one, or collapsing two duplicate-reason sites
+ * back into a single `(operation, reason)` entry each leave an unmet obligation and fail.
  *
- * WHAT THIS DOES NOT CLAIM (§10, §44): it does not discover future production branches
- * automatically, and it cannot defend against a coordinated edit deleting both a contract entry
- * and its case. Adding a rejection branch in production requires updating this contract, which is
- * review-visible in the same diff. The guarantee is: every branch enumerated here has an
- * executable zero-event case that actually ran.
- *
- * `write_failed` is deliberately absent from the contract: it is not a decision branch but the
- * transaction-failure catch, and it is covered by the atomicity regressions below, which assert
- * that neither half of the atomic pair survives.
+ * WHAT THIS DOES NOT CLAIM (§10, §44): the reconciliation cannot defend against a coordinated edit
+ * that removes a production decision point and its case together — but it now DISCOVERS a newly
+ * added one automatically and fails until a case exists, which the hand-written contract could
+ * not. Running a subset of this file with `--testNamePattern` also leaves the ledger short and
+ * fails the reconciliation; that is deliberate, and the full file is what CI runs.
  */
+type DiscoveredRejectionSite = {
+  operation: "create" | "cancel" | "vote";
+  functionName: string;
+  siteId: string;
+  ordinal: number;
+  /** Source text of the whole `reason:` initializer, normalized for whitespace. Review anchor. */
+  reasonExpr: string;
+  /** The statically resolved reason, or `null` when the expression is a propagated value. */
+  reasonLiteral: string | null;
+  isPassthrough: boolean;
+  /** Source text of the enclosing guard. Review anchor; pinned exactly for the sites that matter. */
+  guardExpr: string;
+  guardKind: "if" | "catch" | "case" | "none";
+};
+
+const PANEL_OPERATION_FUNCTIONS: Readonly<Record<string, "create" | "cancel" | "vote">> = Object.freeze({
+  putWorkspaceReviewPanel: "create",
+  deleteWorkspaceReviewPanel: "cancel",
+  submitWorkspaceReviewPanelVote: "vote",
+});
+
+/**
+ * Pure over source text — which is what makes it falsifiable by the synthetic self-tests below
+ * rather than only by its agreement with one file it was written against.
+ *
+ * Descends into arrow/function EXPRESSIONS (every real decision point lives inside the
+ * `adminDb.runTransaction(async (tx) => { ... })` callback) but never into a nested function
+ * DECLARATION, which would belong to its own enclosing name.
+ */
+function discoverRejectionSites(
+  sourceText: string,
+  functionToOperation: Readonly<Record<string, "create" | "cancel" | "vote">>
+): DiscoveredRejectionSite[] {
+  const sourceFile = tsApi.createSourceFile("subject.ts", sourceText, tsApi.ScriptTarget.ES2020, true);
+  const discovered: DiscoveredRejectionSite[] = [];
+  const textOf = (node: tsApi.Node) => node.getText(sourceFile).replace(/\s+/g, " ").trim();
+
+  /** Strips `as const` / `as T` / `satisfies T` / parentheses so a literal is still seen as one. */
+  const unwrap = (node: tsApi.Expression): tsApi.Expression => {
+    let current: tsApi.Expression = node;
+    for (;;) {
+      if (tsApi.isAsExpression(current) || tsApi.isSatisfiesExpression(current) || tsApi.isParenthesizedExpression(current)) {
+        current = current.expression;
+        continue;
+      }
+      return current;
+    }
+  };
+  const propertyNamed = (object: tsApi.ObjectLiteralExpression, name: string) =>
+    object.properties.find((property): property is tsApi.PropertyAssignment => tsApi.isPropertyAssignment(property) && property.name.getText(sourceFile) === name);
+
+  const collectFrom = (functionNode: tsApi.Node, operation: "create" | "cancel" | "vote", functionName: string) => {
+    let ordinal = 0;
+    const visit = (node: tsApi.Node) => {
+      if (node !== functionNode && (tsApi.isFunctionDeclaration(node) || tsApi.isMethodDeclaration(node))) return;
+      if (tsApi.isReturnStatement(node) && node.expression && tsApi.isObjectLiteralExpression(node.expression)) {
+        const okProperty = propertyNamed(node.expression, "ok");
+        if (okProperty && unwrap(okProperty.initializer).kind === tsApi.SyntaxKind.FalseKeyword) {
+          ordinal += 1;
+          const reasonProperty = propertyNamed(node.expression, "reason");
+          const reasonExpr = reasonProperty ? textOf(reasonProperty.initializer) : "<absent>";
+          let reasonLiteral: string | null = null;
+          if (reasonProperty) {
+            const reasonValue = unwrap(reasonProperty.initializer);
+            if (tsApi.isStringLiteralLike(reasonValue)) {
+              reasonLiteral = reasonValue.text;
+            } else if (tsApi.isObjectLiteralExpression(reasonValue)) {
+              // A STRUCTURED reason (`{ kind: "target_not_eligible", ... }`) is still statically
+              // known: its discriminant is what the runtime result is compared on.
+              const kindProperty = propertyNamed(reasonValue, "kind");
+              const kindValue = kindProperty ? unwrap(kindProperty.initializer) : undefined;
+              if (kindValue && tsApi.isStringLiteralLike(kindValue)) reasonLiteral = kindValue.text;
+            }
+          }
+          let guardExpr = "<no-guard>";
+          let guardKind: DiscoveredRejectionSite["guardKind"] = "none";
+          for (let ancestor: tsApi.Node | undefined = node.parent; ancestor && ancestor !== functionNode.parent; ancestor = ancestor.parent) {
+            if (tsApi.isIfStatement(ancestor)) { guardExpr = textOf(ancestor.expression); guardKind = "if"; break; }
+            if (tsApi.isCatchClause(ancestor)) { guardExpr = `catch(${ancestor.variableDeclaration ? textOf(ancestor.variableDeclaration) : ""})`; guardKind = "catch"; break; }
+            if (tsApi.isCaseClause(ancestor)) { guardExpr = `case ${textOf(ancestor.expression)}`; guardKind = "case"; break; }
+          }
+          discovered.push({
+            operation,
+            functionName,
+            siteId: `${operation}#reject-${String(ordinal).padStart(2, "0")}`,
+            ordinal,
+            reasonExpr,
+            reasonLiteral,
+            isPassthrough: reasonLiteral === null,
+            guardExpr,
+            guardKind,
+          });
+        }
+      }
+      tsApi.forEachChild(node, visit);
+    };
+    tsApi.forEachChild(functionNode, visit);
+  };
+
+  const walkTopLevel = (node: tsApi.Node) => {
+    let name: string | null = null;
+    let body: tsApi.Node | null = null;
+    if (tsApi.isFunctionDeclaration(node) && node.name) {
+      name = node.name.text;
+      body = node;
+    } else if (tsApi.isVariableStatement(node)) {
+      for (const declaration of node.declarationList.declarations) {
+        if (tsApi.isIdentifier(declaration.name) && declaration.initializer && (tsApi.isArrowFunction(declaration.initializer) || tsApi.isFunctionExpression(declaration.initializer))) {
+          name = declaration.name.text;
+          body = declaration.initializer;
+        }
+      }
+    }
+    if (name && body && Object.prototype.hasOwnProperty.call(functionToOperation, name)) {
+      collectFrom(body, functionToOperation[name], name);
+    }
+    tsApi.forEachChild(node, walkTopLevel);
+  };
+  tsApi.forEachChild(sourceFile, walkTopLevel);
+  return discovered;
+}
+
+/**
+ * §43 — THE DISCOVERER'S OWN FALSIFIERS. Without these, the entire proof rests on a parser whose
+ * only evidence of correctness is that it agrees with the one file it was written against — and a
+ * discoverer that silently returned `[]`, or that collapsed two identical reasons into one site,
+ * would make every downstream reconciliation vacuously satisfiable.
+ */
+const SYNTHETIC = Object.freeze({
+  twoIdenticalReasons: `
+    export async function synthOp(args: { x: number }) {
+      return await run(async () => {
+        if (args.x === 1) return { ok: false, reason: "same_reason" as const };
+        if (args.x === 2) return { ok: false, reason: "same_reason" as const };
+        return { ok: true };
+      });
+    }`,
+  oneInlineLiteral: `export async function synthOp(a: number) { if (a < 0) return { ok: false, reason: "only_one" }; return { ok: true }; }`,
+  passthrough: `export async function synthOp() { const auth = await check(); if (!auth.ok) return { ok: false, reason: auth.reason }; return { ok: true }; }`,
+  noRejection: `export async function synthOp() { return { ok: true, value: 1 }; }`,
+  structuredReason: `export async function synthOp(a: number) { if (a < 0) return { ok: false, reason: { kind: "structured_denial" as const, detail: a } }; return { ok: true }; }`,
+  catchSite: `export async function synthOp() { try { return await go(); } catch (err) { return { ok: false, reason: "write_failed" }; } }`,
+  unmappedNeighbour: `
+    export async function synthOp(a: number) { if (a < 0) return { ok: false, reason: "mine" }; return { ok: true }; }
+    export async function someOtherFunction(a: number) { if (a < 0) return { ok: false, reason: "not_mine" }; return { ok: true }; }`,
+});
+const SYNTH_MAP = Object.freeze({ synthOp: "create" as const });
+
+describe("AST rejection-site discoverer — self-falsification", () => {
+  it("two IDENTICAL reasons at two return sites are TWO sites with TWO identities, not one", () => {
+    const sites = discoverRejectionSites(SYNTHETIC.twoIdenticalReasons, SYNTH_MAP);
+    expect(`sites:${sites.length} uniqueReasons:${new Set(sites.map((s) => s.reasonLiteral)).size} uniqueSiteIds:${new Set(sites.map((s) => s.siteId)).size}`).toBe("sites:2 uniqueReasons:1 uniqueSiteIds:2");
+    expect(sites.map((s) => s.siteId)).toEqual(["create#reject-01", "create#reject-02"]);
+    expect(sites.map((s) => s.guardExpr)).toEqual(["args.x === 1", "args.x === 2"]);
+  });
+
+  it("resolves an inline literal reason, through `as const`, and reports it as non-passthrough", () => {
+    const [site] = discoverRejectionSites(SYNTHETIC.oneInlineLiteral, SYNTH_MAP);
+    expect(`id:${site.siteId} reason:${site.reasonLiteral} passthrough:${site.isPassthrough} guard:${site.guardExpr}`).toBe("id:create#reject-01 reason:only_one passthrough:false guard:a < 0");
+  });
+
+  it("reports a PROPAGATED reason as passthrough, with its expression preserved for review", () => {
+    const [site] = discoverRejectionSites(SYNTHETIC.passthrough, SYNTH_MAP);
+    expect(`reason:${site.reasonLiteral} passthrough:${site.isPassthrough} expr:${site.reasonExpr} guard:${site.guardExpr}`).toBe("reason:null passthrough:true expr:auth.reason guard:!auth.ok");
+  });
+
+  it("a function with no rejection yields no sites — and a success return is never a site", () => {
+    expect(discoverRejectionSites(SYNTHETIC.noRejection, SYNTH_MAP)).toEqual([]);
+    expect(discoverRejectionSites(SYNTHETIC.twoIdenticalReasons, SYNTH_MAP).every((s) => s.reasonLiteral === "same_reason")).toBe(true);
+  });
+
+  it("resolves a STRUCTURED reason by its discriminant, which is what the runtime is compared on", () => {
+    const [site] = discoverRejectionSites(SYNTHETIC.structuredReason, SYNTH_MAP);
+    expect(`reason:${site.reasonLiteral} passthrough:${site.isPassthrough}`).toBe("reason:structured_denial passthrough:false");
+    expect(site.reasonExpr).toContain("kind: \"structured_denial\"");
+  });
+
+  it("classifies a catch-clause return by its guard kind, so it can be excluded as a non-decision", () => {
+    const [site] = discoverRejectionSites(SYNTHETIC.catchSite, SYNTH_MAP);
+    expect(`kind:${site.guardKind} reason:${site.reasonLiteral}`).toBe("kind:catch reason:write_failed");
+  });
+
+  it("ignores a return site in a function that is not in the operation map", () => {
+    const sites = discoverRejectionSites(SYNTHETIC.unmappedNeighbour, SYNTH_MAP);
+    expect(sites.map((s) => s.reasonLiteral)).toEqual(["mine"]);
+  });
+
+  it("site identity keyed by (operation, reason) is STRICTLY WEAKER than site identity — on a two-line synthetic proof", () => {
+    const sites = discoverRejectionSites(SYNTHETIC.twoIdenticalReasons, SYNTH_MAP);
+    const bySite = new Set(sites.map((s) => `${s.siteId}::${s.reasonLiteral}`));
+    const byOperationReason = new Set(sites.map((s) => `${s.operation}::${s.reasonLiteral}`));
+    expect(`bySite:${bySite.size} byOperationReason:${byOperationReason.size}`).toBe("bySite:2 byOperationReason:1");
+  });
+});
+
+/**
+ * The real inventory. Read from disk at module load: if the production file moves or is renamed,
+ * this throws rather than silently discovering nothing.
+ */
+const PANEL_MUTATIONS_SOURCE_PATH = joinPath(__dirname, "..", "workspaceReviewPanelMutations.ts");
+const PANEL_MUTATIONS_SOURCE = readFileSync(PANEL_MUTATIONS_SOURCE_PATH, "utf8");
+const DISCOVERED_REJECTION_SITES: readonly DiscoveredRejectionSite[] = Object.freeze(
+  discoverRejectionSites(PANEL_MUTATIONS_SOURCE, PANEL_OPERATION_FUNCTIONS).map((site) => Object.freeze(site))
+);
+
+/** `write_failed` is the transaction-failure catch, not a decision. The atomicity suite owns it. */
+const WRITE_FAILED_SITES: readonly DiscoveredRejectionSite[] = DISCOVERED_REJECTION_SITES.filter((s) => s.guardKind === "catch");
+const DECISION_SITES: readonly DiscoveredRejectionSite[] = DISCOVERED_REJECTION_SITES.filter((s) => s.guardKind !== "catch");
+
 const AUTH_DENIAL_REASONS = ["workspace_not_found", "workspace_malformed", "membership_not_found", "membership_malformed", "membership_removed", "owner_integrity_violation", "insufficient_capability"] as const;
 
-type RejectionBranch = { operation: "create" | "cancel" | "vote"; branchId: string; reason: string };
-const EXPECTED_REJECTION_BRANCHES: readonly RejectionBranch[] = [
-  ...(["create", "cancel", "vote"] as const).flatMap((operation) => [
-    { operation, branchId: `${operation}.team_workspaces_disabled`, reason: "team_workspaces_disabled" },
-    { operation, branchId: `${operation}.firestore_unavailable`, reason: "firestore_unavailable" },
-    ...AUTH_DENIAL_REASONS.map((reason) => ({ operation, branchId: `${operation}.auth_denied.${reason}`, reason })),
-    { operation, branchId: `${operation}.run_not_found`, reason: "run_not_found" },
-    { operation, branchId: `${operation}.not_pending`, reason: "not_pending" },
-  ]),
-  { operation: "create", branchId: "create.single_review_active", reason: "single_review_active" },
-  { operation: "create", branchId: "create.panel_unreadable", reason: "panel_unreadable" },
-  { operation: "create", branchId: "create.panel_finalized", reason: "panel_finalized" },
-  { operation: "create", branchId: "create.stale_revision", reason: "stale_revision" },
-  { operation: "create", branchId: "create.target_not_eligible", reason: "target_not_eligible" },
-  { operation: "cancel", branchId: "cancel.panel_absent", reason: "panel_absent" },
-  { operation: "cancel", branchId: "cancel.panel_unreadable", reason: "panel_unreadable" },
-  { operation: "cancel", branchId: "cancel.panel_finalized", reason: "panel_finalized" },
-  { operation: "cancel", branchId: "cancel.panel_already_cancelled", reason: "panel_already_cancelled" },
-  { operation: "cancel", branchId: "cancel.stale_revision", reason: "stale_revision" },
-  { operation: "vote", branchId: "vote.panel_absent", reason: "panel_absent" },
-  { operation: "vote", branchId: "vote.panel_unreadable", reason: "panel_unreadable" },
-  { operation: "vote", branchId: "vote.panel_not_open", reason: "panel_not_open" },
-  { operation: "vote", branchId: "vote.panel_stale", reason: "panel_stale" },
-  { operation: "vote", branchId: "vote.self_review", reason: "self_review" },
-  { operation: "vote", branchId: "vote.not_reviewer", reason: "not_reviewer" },
-  { operation: "vote", branchId: "vote.review_content_unavailable", reason: "review_content_unavailable" },
-  { operation: "vote", branchId: "vote.vote_malformed", reason: "vote_malformed" },
-  { operation: "vote", branchId: "vote.vote_conflict", reason: "vote_conflict" },
-];
+/**
+ * §8 — STRUCTURALLY PRESENT, UNREACHABLE UNDER THE SHIPPED ROLE MATRIX. Classified, never
+ * dropped: each entry names the invariant that makes it unreachable, and that invariant is
+ * ASSERTED below against the real capability matrix and the real predicates. If a future role or
+ * predicate change breaks one, the invariant test fails and demands a real executable case — the
+ * classification fails closed rather than quietly excusing a now-reachable branch.
+ *
+ * The guard expression is pinned for each, because site ids are AST ORDINALS: inserting a new
+ * decision point above one of these would otherwise silently re-point the exclusion at a
+ * different, reachable branch.
+ */
+const STRUCTURALLY_UNREACHABLE_SITES: Readonly<Record<string, { guardExpr: string; reason: string; invariant: string }>> = Object.freeze({
+  "create#reject-04": Object.freeze({
+    guardExpr: '!roleHasCapability(auth.membership.role, "research.read")',
+    reason: "insufficient_capability",
+    invariant: "the authorization above already required reviews.manage, and every shipped role holding reviews.manage also holds research.read",
+  }),
+  "cancel#reject-04": Object.freeze({
+    guardExpr: '!roleHasCapability(auth.membership.role, "research.read")',
+    reason: "insufficient_capability",
+    invariant: "the authorization above already required reviews.manage, and every shipped role holding reviews.manage also holds research.read",
+  }),
+  "vote#reject-13": Object.freeze({
+    guardExpr: "!eligibility.eligible",
+    reason: "not_reviewer",
+    invariant:
+      "isValidAssignmentTarget can only deny for four reasons here, and each is already excluded: `removed` by authorization's own membership_removed denial (vote#reject-03::membership_removed); `cross_workspace` because candidate.workspaceId and runWorkspaceId are BOTH args.workspaceId; `self_review` because vote#reject-11 already returned on the identical UID-equality predicate; `insufficient_capability` because authorization required reviews.submit and every shipped role holding reviews.submit also holds research.read",
+  }),
+});
+
+/**
+ * §7 — the expanded runtime obligation layer, derived from the AST inventory. A passthrough site
+ * carries the whole propagated union; every other site carries exactly its own reason.
+ */
+const obligationKey = (siteId: string, reason: string) => `${siteId}::${reason}`;
+const EXPANDED_OBLIGATIONS: readonly string[] = Object.freeze(
+  DECISION_SITES.flatMap((site) => (site.isPassthrough ? AUTH_DENIAL_REASONS.map((reason) => obligationKey(site.siteId, reason)) : [obligationKey(site.siteId, site.reasonLiteral as string)]))
+);
+const EXECUTABLE_OBLIGATIONS: readonly string[] = Object.freeze(
+  EXPANDED_OBLIGATIONS.filter((obligation) => !Object.prototype.hasOwnProperty.call(STRUCTURALLY_UNREACHABLE_SITES, obligation.slice(0, obligation.indexOf("::"))))
+);
+
+describe("AST rejection-site inventory — the production module's real decision points", () => {
+  it("the inventory reconciles: 44 return sites, 39 unique (operation, reason) pairs, 5 duplicate-reason sites", () => {
+    const uniquePairs = new Set(DISCOVERED_REJECTION_SITES.map((s) => `${s.operation}:${s.reasonExpr}`)).size;
+    expect(`sites:${DISCOVERED_REJECTION_SITES.length} uniquePairs:${uniquePairs} duplicateReasonSites:${DISCOVERED_REJECTION_SITES.length - uniquePairs}`).toBe("sites:44 uniquePairs:39 duplicateReasonSites:5");
+  });
+
+  it("SANITY: strictly more return sites than unique (operation, reason) pairs — so the two keyings cannot be interchangeable", () => {
+    const uniquePairs = new Set(DISCOVERED_REJECTION_SITES.map((s) => `${s.operation}:${s.reasonExpr}`)).size;
+    expect(`sitesExceedPairs:${DISCOVERED_REJECTION_SITES.length > uniquePairs}`).toBe("sitesExceedPairs:true");
+  });
+
+  it("all three operations were really parsed — a discoverer that found nothing cannot pass", () => {
+    const perOperation = (["create", "cancel", "vote"] as const).map((op) => `${op}:${DISCOVERED_REJECTION_SITES.filter((s) => s.operation === op).length}`);
+    expect(perOperation.join(" ")).toBe("create:14 cancel:13 vote:17");
+    expect(new Set(DISCOVERED_REJECTION_SITES.map((s) => s.functionName))).toEqual(new Set(Object.keys(PANEL_OPERATION_FUNCTIONS)));
+  });
+
+  it("every site id is unique, ordinals are dense and 1-based within each operation", () => {
+    expect(new Set(DISCOVERED_REJECTION_SITES.map((s) => s.siteId)).size).toBe(DISCOVERED_REJECTION_SITES.length);
+    for (const operation of ["create", "cancel", "vote"] as const) {
+      const ordinals = DISCOVERED_REJECTION_SITES.filter((s) => s.operation === operation).map((s) => s.ordinal);
+      expect(`${operation}:${ordinals.join(",")}`).toBe(`${operation}:${ordinals.map((_, i) => i + 1).join(",")}`);
+    }
+  });
+
+  it("the FIVE duplicate-reason sites are exactly the expected pairs, with their distinguishing guards pinned", () => {
+    const byPair = new Map<string, DiscoveredRejectionSite[]>();
+    for (const site of DISCOVERED_REJECTION_SITES) {
+      const key = `${site.operation}:${site.reasonExpr}`;
+      byPair.set(key, [...(byPair.get(key) ?? []), site]);
+    }
+    const duplicates = [...byPair.values()].filter((sites) => sites.length > 1);
+    expect(duplicates.map((sites) => `${sites[0].operation}:${sites[0].reasonLiteral}=${sites.map((s) => s.siteId).join("+")}`).sort()).toEqual([
+      "cancel:run_not_found=cancel#reject-05+cancel#reject-06",
+      "create:panel_finalized=create#reject-10+create#reject-11",
+      "create:run_not_found=create#reject-05+create#reject-06",
+      "vote:not_reviewer=vote#reject-12+vote#reject-13",
+      "vote:run_not_found=vote#reject-04+vote#reject-05",
+    ]);
+    // The guards are what make them genuinely different decisions rather than a stylistic repeat.
+    const guardOf = (siteId: string) => DISCOVERED_REJECTION_SITES.find((s) => s.siteId === siteId)?.guardExpr;
+    expect(guardOf("create#reject-05")).toBe("!runSnap.exists");
+    expect(guardOf("create#reject-06")).toBe('target.kind !== "valid_workspace_review_target"');
+    expect(guardOf("create#reject-10")).toBe('current.status === "finalized"');
+    expect(guardOf("create#reject-11")).toBe('current.status !== "open"');
+    expect(guardOf("cancel#reject-05")).toBe("!runSnap.exists");
+    expect(guardOf("cancel#reject-06")).toBe('target.kind !== "valid_workspace_review_target"');
+    expect(guardOf("vote#reject-04")).toBe("!runSnap.exists");
+    expect(guardOf("vote#reject-05")).toBe('target.kind !== "valid_workspace_review_target"');
+    expect(guardOf("vote#reject-12")).toBe("!panel.reviewerUserIds.includes(args.uid)");
+    expect(guardOf("vote#reject-13")).toBe("!eligibility.eligible");
+  });
+
+  it("the ONLY passthrough sites are the three authorization denials — nothing else is silently expanded to the auth union", () => {
+    const passthrough = DECISION_SITES.filter((s) => s.isPassthrough);
+    expect(passthrough.map((s) => `${s.siteId}=${s.reasonExpr}|${s.guardExpr}`)).toEqual([
+      "create#reject-03=auth.reason|!auth.ok",
+      "cancel#reject-03=auth.reason|!auth.ok",
+      "vote#reject-03=auth.reason|!auth.ok",
+    ]);
+  });
+
+  it("the three excluded catch returns are exactly the write_failed sites", () => {
+    expect(WRITE_FAILED_SITES.map((s) => `${s.siteId}=${s.reasonLiteral}`)).toEqual(["create#reject-14=write_failed", "cancel#reject-13=write_failed", "vote#reject-17=write_failed"]);
+    expect(`decisionSites:${DECISION_SITES.length}`).toBe("decisionSites:41");
+  });
+
+  it("the obligation layers reconcile: 41 decision sites -> 59 expanded -> 3 unreachable -> 56 executable", () => {
+    expect(`expanded:${EXPANDED_OBLIGATIONS.length} unreachableSites:${Object.keys(STRUCTURALLY_UNREACHABLE_SITES).length} executable:${EXECUTABLE_OBLIGATIONS.length}`).toBe("expanded:59 unreachableSites:3 executable:56");
+    expect(new Set(EXPANDED_OBLIGATIONS).size).toBe(EXPANDED_OBLIGATIONS.length);
+  });
+
+  it("every STRUCTURALLY UNREACHABLE site really exists, at the guard the classification names", () => {
+    for (const [siteId, classification] of Object.entries(STRUCTURALLY_UNREACHABLE_SITES)) {
+      const site = DISCOVERED_REJECTION_SITES.find((s) => s.siteId === siteId);
+      expect(`${siteId}:found:${Boolean(site)}`).toBe(`${siteId}:found:true`);
+      expect(`${siteId}:guard:${site?.guardExpr}`).toBe(`${siteId}:guard:${classification.guardExpr}`);
+      expect(`${siteId}:reason:${site?.reasonLiteral}`).toBe(`${siteId}:reason:${classification.reason}`);
+      expect(`${siteId}:invariantDocumented:${classification.invariant.length > 40}`).toBe(`${siteId}:invariantDocumented:true`);
+    }
+  });
+
+  it("INVARIANT behind create#reject-04 / cancel#reject-04: every shipped role with reviews.manage also has research.read", () => {
+    const roles = Object.keys(actualCapabilities.ROLE_CAPABILITIES) as (keyof typeof actualCapabilities.ROLE_CAPABILITIES)[];
+    expect(roles.length).toBeGreaterThan(0);
+    const managers = roles.filter((role) => actualCapabilities.roleHasCapability(role, "reviews.manage"));
+    expect(`rolesWithReviewsManage:${managers.join(",")}`).toBe("rolesWithReviewsManage:owner,admin");
+    const violating = managers.filter((role) => !actualCapabilities.roleHasCapability(role, "research.read"));
+    expect(`managersLackingResearchRead:${violating.join(",")}`).toBe("managersLackingResearchRead:");
+  });
+
+  it("INVARIANT behind vote#reject-13: every shipped role with reviews.submit also has research.read, and the two self-review predicates are the same predicate", () => {
+    const roles = Object.keys(actualCapabilities.ROLE_CAPABILITIES) as (keyof typeof actualCapabilities.ROLE_CAPABILITIES)[];
+    const submitters = roles.filter((role) => actualCapabilities.roleHasCapability(role, "reviews.submit"));
+    expect(`rolesWithReviewsSubmit:${submitters.join(",")}`).toBe("rolesWithReviewsSubmit:owner,admin,member,reviewer");
+    expect(`submittersLackingResearchRead:${submitters.filter((role) => !actualCapabilities.roleHasCapability(role, "research.read")).join(",")}`).toBe("submittersLackingResearchRead:");
+    const uids = [OWNER_UID, ADMIN_UID, CREATOR_UID, REVIEWER_UID, UNSEEDED_UID];
+    const disagreements = uids.flatMap((a) => uids.filter((b) => violatesDecisionSelfReviewGuard(a, b) !== violatesAssignmentSelfReviewGuard(a, b)).map((b) => `${a}/${b}`));
+    expect(`selfReviewPredicateDisagreements:${disagreements.join(",")}`).toBe("selfReviewPredicateDisagreements:");
+  });
+});
 
 const UNSEEDED_UID = "nobody-1";
 const FINALIZED = { status: "finalized", finalizedAt: "2026-08-05T00:00:00.000Z", updatedAt: "2026-08-05T00:00:00.000Z", finalizedByUserId: OWNER_UID, finalStatus: "approved", finalDecisionId: "panel_workspace_dec_x", aggregationPolicyVersion: 1 };
 const notPendingRun = () => seedRun({ governanceRecord: validGovernanceRecord({ humanReview: { status: "approved", reviewedAt: GOVERNANCE_UPDATED_AT } }) });
+/** A run bound to a DIFFERENT Workspace than the caller's — `resolveWorkspaceReviewTarget` -> `wrong_workspace`. */
+const foreignWorkspaceRun = () => seedRun({ workspaceId: OTHER_WS_ID });
 
 /** Puts the caller into the named authorization-denial state. Shared by all three operations. */
 function seedAuthDenial(reason: (typeof AUTH_DENIAL_REASONS)[number], callerUid: string, capabilityRole: string) {
@@ -1898,89 +2234,390 @@ function seedAuthDenial(reason: (typeof AUTH_DENIAL_REASONS)[number], callerUid:
 }
 
 /**
- * `setup` runs BEFORE the event-count snapshot, for branches whose prerequisites include a
- * genuinely successful prior mutation. `vote_conflict` needs an accepted first vote, which
- * legitimately writes its own event — measuring the delta across both would have counted that
- * event against the rejection, so the first draft reported `eventDelta:1` and failed honestly.
+ * `setup` runs BEFORE the event-count snapshot, for sites whose prerequisites include a genuinely
+ * successful prior mutation. `vote_conflict` needs an accepted first vote, which legitimately
+ * writes its own event — measuring the delta across both would have counted that event against the
+ * rejection, so the first draft reported `eventDelta:1` and failed honestly.
+ *
+ * Every case declares the DISCOVERED site id it exercises. It is not a label: the reconciliation
+ * below matches these against the AST inventory, so a case aimed at a site that does not exist, or
+ * a site with no case, fails.
  */
-type RejectionCase = { branchId: string; reason: string; setup?: () => Promise<void> | void; run: () => Promise<{ ok: boolean; reason?: unknown }> };
+type RejectionCase = { siteId: string; reason: string; setup?: () => Promise<void> | void; run: () => Promise<{ ok: boolean; reason?: unknown }> };
 const REJECTION_CASES: readonly RejectionCase[] = [
   // ── create ──
-  { branchId: "create.team_workspaces_disabled", reason: "team_workspaces_disabled", run: () => { teamWorkspacesEnabled = false; return putCall(); } },
-  { branchId: "create.firestore_unavailable", reason: "firestore_unavailable", run: () => { firestoreUnavailableFlag.value = true; return putCall(); } },
-  ...AUTH_DENIAL_REASONS.map((reason) => ({ branchId: `create.auth_denied.${reason}`, reason, run: () => { const uid = seedAuthDenial(reason, OWNER_UID, "owner"); return putCall({ uid }); } })),
-  { branchId: "create.run_not_found", reason: "run_not_found", run: () => { stores.runs.delete(RUN_ID); return putCall(); } },
-  { branchId: "create.not_pending", reason: "not_pending", run: () => { notPendingRun(); return putCall(); } },
-  { branchId: "create.single_review_active", reason: "single_review_active", run: () => { seedAssignment({ assignedReviewerUserId: REVIEWER_UID }); return putCall(); } },
-  { branchId: "create.panel_unreadable", reason: "panel_unreadable", run: () => { stores.humanReviewPanel.set(`${RUN_ID}::current`, { kind: "not-a-panel" }); return putCall(); } },
-  { branchId: "create.panel_finalized", reason: "panel_finalized", run: () => { seedPanel({ revision: 1, ...FINALIZED }); return putCall({ expectedRevision: 1 }); } },
-  { branchId: "create.stale_revision", reason: "stale_revision", run: () => { seedPanel({ revision: 3 }); return putCall({ expectedRevision: 0 }); } },
-  { branchId: "create.target_not_eligible", reason: "target_not_eligible", run: () => putCall({ reviewerUserIds: [OWNER_UID, VIEWER_UID] }) },
+  { siteId: "create#reject-01", reason: "team_workspaces_disabled", run: () => { teamWorkspacesEnabled = false; return putCall(); } },
+  { siteId: "create#reject-02", reason: "firestore_unavailable", run: () => { firestoreUnavailableFlag.value = true; return putCall(); } },
+  ...AUTH_DENIAL_REASONS.map((reason) => ({ siteId: "create#reject-03", reason, run: () => { const uid = seedAuthDenial(reason, OWNER_UID, "owner"); return putCall({ uid }); } })),
+  { siteId: "create#reject-05", reason: "run_not_found", run: () => { stores.runs.delete(RUN_ID); return putCall(); } },
+  { siteId: "create#reject-06", reason: "run_not_found", run: () => { foreignWorkspaceRun(); return putCall(); } },
+  { siteId: "create#reject-07", reason: "not_pending", run: () => { notPendingRun(); return putCall(); } },
+  { siteId: "create#reject-08", reason: "single_review_active", run: () => { seedAssignment({ assignedReviewerUserId: REVIEWER_UID }); return putCall(); } },
+  { siteId: "create#reject-09", reason: "panel_unreadable", run: () => { stores.humanReviewPanel.set(`${RUN_ID}::current`, { kind: "not-a-panel" }); return putCall(); } },
+  { siteId: "create#reject-10", reason: "panel_finalized", run: () => { seedPanel({ revision: 1, ...FINALIZED }); return putCall({ expectedRevision: 1 }); } },
+  { siteId: "create#reject-11", reason: "panel_finalized", run: () => { seedPanel({ revision: 1, status: "cancelled" }); return putCall({ expectedRevision: 1 }); } },
+  { siteId: "create#reject-12", reason: "stale_revision", run: () => { seedPanel({ revision: 3 }); return putCall({ expectedRevision: 0 }); } },
+  { siteId: "create#reject-13", reason: "target_not_eligible", run: () => putCall({ reviewerUserIds: [OWNER_UID, VIEWER_UID] }) },
   // ── cancel ──
-  { branchId: "cancel.team_workspaces_disabled", reason: "team_workspaces_disabled", run: () => { teamWorkspacesEnabled = false; return deleteCall(); } },
-  { branchId: "cancel.firestore_unavailable", reason: "firestore_unavailable", run: () => { firestoreUnavailableFlag.value = true; return deleteCall(); } },
-  ...AUTH_DENIAL_REASONS.map((reason) => ({ branchId: `cancel.auth_denied.${reason}`, reason, run: () => { seedPanel({ revision: 1 }); const uid = seedAuthDenial(reason, OWNER_UID, "owner"); return deleteCall({ uid }); } })),
-  { branchId: "cancel.run_not_found", reason: "run_not_found", run: () => { seedPanel({ revision: 1 }); stores.runs.delete(RUN_ID); return deleteCall(); } },
-  { branchId: "cancel.not_pending", reason: "not_pending", run: () => { seedPanel({ revision: 1 }); notPendingRun(); return deleteCall(); } },
-  { branchId: "cancel.panel_absent", reason: "panel_absent", run: () => deleteCall() },
-  { branchId: "cancel.panel_unreadable", reason: "panel_unreadable", run: () => { stores.humanReviewPanel.set(`${RUN_ID}::current`, { kind: "not-a-panel" }); return deleteCall(); } },
-  { branchId: "cancel.panel_finalized", reason: "panel_finalized", run: () => { seedPanel({ revision: 1, ...FINALIZED }); return deleteCall(); } },
-  { branchId: "cancel.panel_already_cancelled", reason: "panel_already_cancelled", run: () => { seedPanel({ revision: 1, status: "cancelled" }); return deleteCall(); } },
-  { branchId: "cancel.stale_revision", reason: "stale_revision", run: () => { seedPanel({ revision: 3 }); return deleteCall({ expectedRevision: 1 }); } },
+  { siteId: "cancel#reject-01", reason: "team_workspaces_disabled", run: () => { teamWorkspacesEnabled = false; return deleteCall(); } },
+  { siteId: "cancel#reject-02", reason: "firestore_unavailable", run: () => { firestoreUnavailableFlag.value = true; return deleteCall(); } },
+  ...AUTH_DENIAL_REASONS.map((reason) => ({ siteId: "cancel#reject-03", reason, run: () => { seedPanel({ revision: 1 }); const uid = seedAuthDenial(reason, OWNER_UID, "owner"); return deleteCall({ uid }); } })),
+  { siteId: "cancel#reject-05", reason: "run_not_found", run: () => { seedPanel({ revision: 1 }); stores.runs.delete(RUN_ID); return deleteCall(); } },
+  { siteId: "cancel#reject-06", reason: "run_not_found", run: () => { seedPanel({ revision: 1 }); foreignWorkspaceRun(); return deleteCall(); } },
+  { siteId: "cancel#reject-07", reason: "not_pending", run: () => { seedPanel({ revision: 1 }); notPendingRun(); return deleteCall(); } },
+  { siteId: "cancel#reject-08", reason: "panel_absent", run: () => deleteCall() },
+  { siteId: "cancel#reject-09", reason: "panel_unreadable", run: () => { stores.humanReviewPanel.set(`${RUN_ID}::current`, { kind: "not-a-panel" }); return deleteCall(); } },
+  { siteId: "cancel#reject-10", reason: "panel_finalized", run: () => { seedPanel({ revision: 1, ...FINALIZED }); return deleteCall(); } },
+  { siteId: "cancel#reject-11", reason: "panel_already_cancelled", run: () => { seedPanel({ revision: 1, status: "cancelled" }); return deleteCall(); } },
+  { siteId: "cancel#reject-12", reason: "stale_revision", run: () => { seedPanel({ revision: 3 }); return deleteCall({ expectedRevision: 1 }); } },
   // ── vote ──
-  { branchId: "vote.team_workspaces_disabled", reason: "team_workspaces_disabled", run: () => { teamWorkspacesEnabled = false; return voteCall(); } },
-  { branchId: "vote.firestore_unavailable", reason: "firestore_unavailable", run: () => { firestoreUnavailableFlag.value = true; return voteCall(); } },
-  ...AUTH_DENIAL_REASONS.map((reason) => ({ branchId: `vote.auth_denied.${reason}`, reason, run: () => { seedPanel({ revision: 1 }); const uid = seedAuthDenial(reason, OWNER_UID, "owner"); return voteCall({ uid }); } })),
-  { branchId: "vote.run_not_found", reason: "run_not_found", run: () => { seedPanel({ revision: 1 }); stores.runs.delete(RUN_ID); return voteCall(); } },
-  { branchId: "vote.not_pending", reason: "not_pending", run: () => { seedPanel({ revision: 1 }); notPendingRun(); return voteCall(); } },
-  { branchId: "vote.panel_absent", reason: "panel_absent", run: () => voteCall() },
-  { branchId: "vote.panel_unreadable", reason: "panel_unreadable", run: () => { stores.humanReviewPanel.set(`${RUN_ID}::current`, { kind: "not-a-panel" }); return voteCall(); } },
-  { branchId: "vote.panel_not_open", reason: "panel_not_open", run: () => { seedPanel({ revision: 1, status: "cancelled" }); return voteCall(); } },
-  { branchId: "vote.panel_stale", reason: "panel_stale", run: () => { seedPanel({ revision: 2 }); return voteCall({ panelRevision: 1 }); } },
-  { branchId: "vote.self_review", reason: "self_review", run: () => { seedPanel({ revision: 1, reviewerUserIds: [CREATOR_UID, OWNER_UID] }); return voteCall({ uid: CREATOR_UID }); } },
-  { branchId: "vote.not_reviewer", reason: "not_reviewer", run: () => { seedPanel({ revision: 1 }); return voteCall({ uid: REVIEWER2_UID }); } },
-  { branchId: "vote.review_content_unavailable", reason: "review_content_unavailable", run: () => { seedPanel({ revision: 1 }); seedRun({ governanceRecord: validGovernanceRecord({ decisionReceipt: { conclusion: "", basis: [], assumptions: [], uncertainties: [], limitations: [], sources: [], sourceBacked: true, humanReviewNeeded: false } }) }); return voteCall(); } },
-  { branchId: "vote.vote_malformed", reason: "vote_malformed", run: () => { seedPanel({ revision: 1 }); stores.humanReviewVotes.set(`${RUN_ID}::${buildAdaptiveHumanReviewVoteId(1, OWNER_UID)}`, { kind: "not-a-vote" }); return voteCall(); } },
-  { branchId: "vote.vote_conflict", reason: "vote_conflict", setup: async () => { seedPanel({ revision: 1 }); expect((await voteCall({ status: "approved" })).ok).toBe(true); }, run: () => voteCall({ status: "changes_requested" }) },
+  { siteId: "vote#reject-01", reason: "team_workspaces_disabled", run: () => { teamWorkspacesEnabled = false; return voteCall(); } },
+  { siteId: "vote#reject-02", reason: "firestore_unavailable", run: () => { firestoreUnavailableFlag.value = true; return voteCall(); } },
+  ...AUTH_DENIAL_REASONS.map((reason) => ({ siteId: "vote#reject-03", reason, run: () => { seedPanel({ revision: 1 }); const uid = seedAuthDenial(reason, OWNER_UID, "owner"); return voteCall({ uid }); } })),
+  { siteId: "vote#reject-04", reason: "run_not_found", run: () => { seedPanel({ revision: 1 }); stores.runs.delete(RUN_ID); return voteCall(); } },
+  // The worst ghost-event case in the whole module: a REJECTED cross-Workspace vote must not mint
+  // `vote_cast` on a foreign Workspace's run document.
+  { siteId: "vote#reject-05", reason: "run_not_found", run: () => { seedPanel({ revision: 1 }); foreignWorkspaceRun(); return voteCall(); } },
+  { siteId: "vote#reject-06", reason: "not_pending", run: () => { seedPanel({ revision: 1 }); notPendingRun(); return voteCall(); } },
+  { siteId: "vote#reject-07", reason: "panel_absent", run: () => voteCall() },
+  { siteId: "vote#reject-08", reason: "panel_unreadable", run: () => { stores.humanReviewPanel.set(`${RUN_ID}::current`, { kind: "not-a-panel" }); return voteCall(); } },
+  { siteId: "vote#reject-09", reason: "panel_not_open", run: () => { seedPanel({ revision: 1, status: "cancelled" }); return voteCall(); } },
+  { siteId: "vote#reject-10", reason: "panel_stale", run: () => { seedPanel({ revision: 2 }); return voteCall({ panelRevision: 1 }); } },
+  { siteId: "vote#reject-11", reason: "self_review", run: () => { seedPanel({ revision: 1, reviewerUserIds: [CREATOR_UID, OWNER_UID] }); return voteCall({ uid: CREATOR_UID }); } },
+  { siteId: "vote#reject-12", reason: "not_reviewer", run: () => { seedPanel({ revision: 1 }); return voteCall({ uid: REVIEWER2_UID }); } },
+  { siteId: "vote#reject-14", reason: "review_content_unavailable", run: () => { seedPanel({ revision: 1 }); seedRun({ governanceRecord: validGovernanceRecord({ decisionReceipt: { conclusion: "", basis: [], assumptions: [], uncertainties: [], limitations: [], sources: [], sourceBacked: true, humanReviewNeeded: false } }) }); return voteCall(); } },
+  { siteId: "vote#reject-15", reason: "vote_malformed", run: () => { seedPanel({ revision: 1 }); stores.humanReviewVotes.set(`${RUN_ID}::${buildAdaptiveHumanReviewVoteId(1, OWNER_UID)}`, { kind: "not-a-vote" }); return voteCall(); } },
+  { siteId: "vote#reject-16", reason: "vote_conflict", setup: async () => { seedPanel({ revision: 1 }); expect((await voteCall({ status: "approved" })).ok).toBe(true); }, run: () => voteCall({ status: "changes_requested" }) },
 ];
 
-/** The per-run execution ledger. Asserted against the CONTRACT, never against the case table. */
-const executedBranchIds: string[] = [];
+/** The per-run execution ledger. Asserted against the AST INVENTORY, never against the case table. */
+const executedObligations: string[] = [];
 const reasonOf = (r: { reason?: unknown }) => (typeof r.reason === "string" ? r.reason : (r.reason as { kind?: string } | undefined)?.kind);
 
-describe("panel mutation audit coverage — zero ghost events on every enumerated rejection branch", () => {
-  it.each(REJECTION_CASES.map((c) => [c.branchId, c] as const))("%s rejects with its own reason and writes no event", async (_branchId, testCase) => {
+describe("panel mutation audit coverage — zero ghost events at every discovered decision site", () => {
+  it.each(REJECTION_CASES.map((c) => [`${c.siteId} -> ${c.reason}`, c] as const))("%s rejects with its own reason and writes no event", async (label, testCase) => {
     if (testCase.setup) await testCase.setup();
     const before = panelEvents().length;
     const result = await testCase.run();
-    expect(`${testCase.branchId}:rejected:${result.ok}`).toBe(`${testCase.branchId}:rejected:false`);
-    expect(`${testCase.branchId}:reason:${reasonOf(result)}`).toBe(`${testCase.branchId}:reason:${testCase.reason}`);
-    expect(`${testCase.branchId}:eventDelta:${panelEvents().length - before}`).toBe(`${testCase.branchId}:eventDelta:0`);
-    executedBranchIds.push(testCase.branchId);
+    expect(`${label}:rejected:${result.ok}`).toBe(`${label}:rejected:false`);
+    expect(`${label}:reason:${reasonOf(result)}`).toBe(`${label}:reason:${testCase.reason}`);
+    expect(`${label}:eventDelta:${panelEvents().length - before}`).toBe(`${label}:eventDelta:0`);
+    executedObligations.push(obligationKey(testCase.siteId, testCase.reason));
   });
 
   /**
-   * §43 — THE RUNNER'S OWN FALSIFIER. Deleting a case, skipping one in the runner, registering a
-   * duplicate, or registering a branch absent from the contract each break this. The expected side
-   * is the CONTRACT, which is maintained independently of the case table.
+   * §43 — THE RECONCILIATION. The expected side is the AST inventory, maintained by the compiler
+   * rather than by hand, so this fails on a deleted case, a skipped case, a duplicated case, a
+   * case aimed at a non-existent site, a NEW production decision point with no case, and — the
+   * property R3's contract could not express — two duplicate-reason sites collapsed into one.
    */
-  it("every contract branch was executed exactly once — the ledger matches the contract", () => {
-    const contract = EXPECTED_REJECTION_BRANCHES.map((b) => b.branchId).sort();
-    expect([...executedBranchIds].sort()).toEqual(contract);
-    expect(`executed:${executedBranchIds.length} contract:${contract.length} duplicates:${executedBranchIds.length - new Set(executedBranchIds).size}`).toBe(`executed:${contract.length} contract:${contract.length} duplicates:0`);
+  it("every executable obligation discovered in the source was executed exactly once", () => {
+    expect([...executedObligations].sort()).toEqual([...EXECUTABLE_OBLIGATIONS].sort());
+    expect(`executed:${executedObligations.length} executable:${EXECUTABLE_OBLIGATIONS.length} duplicates:${executedObligations.length - new Set(executedObligations).size}`).toBe(`executed:56 executable:56 duplicates:0`);
   });
 
-  it("every case's declared reason matches the contract's reason for that branch", () => {
-    const contractReason = new Map(EXPECTED_REJECTION_BRANCHES.map((b) => [b.branchId, b.reason]));
-    const mismatched = REJECTION_CASES.filter((c) => contractReason.get(c.branchId) !== c.reason).map((c) => c.branchId);
-    expect(`casesDisagreeingWithTheContract:${mismatched.join(",")}`).toBe("casesDisagreeingWithTheContract:");
+  it("no case is aimed at a site that does not exist, or at a site classified unreachable", () => {
+    const knownSiteIds = new Set(DECISION_SITES.map((s) => s.siteId));
+    const unknown = REJECTION_CASES.filter((c) => !knownSiteIds.has(c.siteId)).map((c) => c.siteId);
+    expect(`casesAtUnknownSites:${[...new Set(unknown)].join(",")}`).toBe("casesAtUnknownSites:");
+    const excused = REJECTION_CASES.filter((c) => Object.prototype.hasOwnProperty.call(STRUCTURALLY_UNREACHABLE_SITES, c.siteId)).map((c) => c.siteId);
+    expect(`casesAtSitesClaimedUnreachable:${[...new Set(excused)].join(",")}`).toBe("casesAtSitesClaimedUnreachable:");
   });
 
-  it("the contract's shape reconciles: branches, unique operation/reason pairs, and passthrough branches", () => {
-    const branches = EXPECTED_REJECTION_BRANCHES.length;
-    const uniquePairs = new Set(EXPECTED_REJECTION_BRANCHES.map((b) => `${b.operation}:${b.reason}`)).size;
-    const passthrough = EXPECTED_REJECTION_BRANCHES.filter((b) => b.branchId.includes(".auth_denied.")).length;
-    expect(`branches:${branches} uniqueOperationReasonPairs:${uniquePairs} passthroughBranches:${passthrough} executableCases:${REJECTION_CASES.length}`).toBe(`branches:52 uniqueOperationReasonPairs:52 passthroughBranches:21 executableCases:52`);
+  it("every case's declared reason is one the AST says that site can actually return", () => {
+    const siteById = new Map(DECISION_SITES.map((s) => [s.siteId, s]));
+    const inconsistent = REJECTION_CASES.filter((c) => {
+      const site = siteById.get(c.siteId);
+      if (!site) return true;
+      return site.isPassthrough ? !(AUTH_DENIAL_REASONS as readonly string[]).includes(c.reason) : site.reasonLiteral !== c.reason;
+    }).map((c) => `${c.siteId}/${c.reason}`);
+    expect(`casesDisagreeingWithTheSource:${inconsistent.join(",")}`).toBe("casesDisagreeingWithTheSource:");
+  });
+
+  /**
+   * §43, the acceptance test — COLLAPSE AND DELETION FALSIFIERS, executable rather than asserted.
+   *
+   * (1) Re-keying reconciliation by `(operation, reason)` is STRICTLY WEAKER: it has fewer
+   *     obligations than there are sites, so the two keyings are not interchangeable and the
+   *     collapsed one cannot be substituted without losing coverage.
+   * (2) Deleting `create#reject-06`'s coverage FAILS under site identity and PASSES under
+   *     `(operation, reason)`, because `create#reject-05` returns the same `run_not_found`. That
+   *     masking is exactly what R3's contract did, and it is why site identity is load-bearing.
+   */
+  it("keying by (operation, reason) is strictly weaker than keying by discovered site", () => {
+    const collapse = (obligation: string) => `${obligation.slice(0, obligation.indexOf("#"))}::${obligation.slice(obligation.indexOf("::") + 2)}`;
+    expect(`bySite:${new Set(EXECUTABLE_OBLIGATIONS).size} byOperationReason:${new Set(EXECUTABLE_OBLIGATIONS.map(collapse)).size}`).toBe("bySite:56 byOperationReason:52");
+    // 59 -> 52 is SEVEN masked sites, not five: collapsing additionally merges each inline
+    // `insufficient_capability` twin (create#reject-04, cancel#reject-04) onto the authorization
+    // passthrough's own `insufficient_capability`, and vote#reject-13 onto vote#reject-12. A
+    // reason-keyed proof cannot even express those three sites separately.
+    expect(`allExpandedBySite:${new Set(EXPANDED_OBLIGATIONS).size} allExpandedCollapsed:${new Set(EXPANDED_OBLIGATIONS.map(collapse)).size}`).toBe("allExpandedBySite:59 allExpandedCollapsed:52");
+  });
+
+  it.each([
+    ["create#reject-06", "create#reject-05", "run_not_found"],
+    ["create#reject-05", "create#reject-06", "run_not_found"],
+    ["vote#reject-05", "vote#reject-04", "run_not_found"],
+    ["create#reject-11", "create#reject-10", "panel_finalized"],
+  ])("deleting %s's coverage is caught by site identity and MASKED by its %s twin (both return %s)", (deleted, twin, reason) => {
+    const collapse = (obligation: string) => `${obligation.slice(0, obligation.indexOf("#"))}::${obligation.slice(obligation.indexOf("::") + 2)}`;
+    const ledgerWithDeletion = executedObligations.filter((o) => !o.startsWith(`${deleted}::`));
+    // the twin really does still cover the same (operation, reason) pair — that is the masking
+    expect(ledgerWithDeletion.some((o) => o === obligationKey(twin, reason))).toBe(true);
+    // site identity: the obligation is now unmet
+    const missingBySite = EXECUTABLE_OBLIGATIONS.filter((o) => !new Set(ledgerWithDeletion).has(o));
+    expect(missingBySite).toEqual([obligationKey(deleted, reason)]);
+    // (operation, reason) identity: nothing appears missing at all
+    const collapsedLedger = new Set(ledgerWithDeletion.map(collapse));
+    const missingCollapsed = [...new Set(EXECUTABLE_OBLIGATIONS.map(collapse))].filter((o) => !collapsedLedger.has(o));
+    expect(missingCollapsed).toEqual([]);
+  });
+});
+
+/**
+ * ─── R4 §14–§22 — CANCEL EVENT PROVENANCE MATRIX ──────────────────────────────────────────────
+ *
+ * R3 found that 5 of the cancel event's 9 fields survived being re-sourced from a DIFFERENT value
+ * reachable at the same point in the transaction — most seriously `byUid`, where replacing the
+ * authenticated caller with the panel's `createdByUserId` left the whole suite green. R3 reported
+ * that as a production attribution defect. It is not: `byUid: args.uid` traces to
+ * `getUid()` -> `resolveRequestIdentity(req).uid`, so the shipped source is the authenticated
+ * caller and is correct. The defect was entirely in the PROOF — every cancel fixture happened to
+ * make the caller, the panel creator, the run creator, the Workspace owner and the first reviewer
+ * the same identity, so no assertion could tell a correct source from a hostile one. The
+ * production source is therefore deliberately unchanged; this suite is what changes.
+ *
+ * The fixture below makes every authority-bearing field's correct source differ in VALUE from
+ * every other value reachable at the event site, and asserts that discrimination BEFORE the
+ * production call, so a future fixture regression that re-collapses two identities fails here
+ * rather than silently making the field assertions vacuous again.
+ *
+ * Two fields cannot be discriminated, and are classified EQUIVALENT with the invariant that forces
+ * the equality on every path that reaches the event — never with "no test could tell":
+ *   • `workspaceId` <- `args.workspaceId` instead of `target.workspaceId`:
+ *     `resolveWorkspaceReviewTarget` returns `wrong_workspace` unless the run's stored
+ *     `workspaceId` equals the requested one, and `cancel#reject-06` returns on anything that is
+ *     not a valid target — so the two are provably equal here.
+ *   • `reviewerCount` <- `current.requiredReviewerCount` instead of `reviewerUserIds.length`:
+ *     `parseAdaptiveHumanReviewPanel` returns `malformed` unless
+ *     `requiredReviewerCount === reviewerUserIds.length`, and `cancel#reject-09` returns
+ *     `panel_unreadable` on a malformed panel — so the two are provably equal here.
+ * `panelRevision` <- `args.expectedRevision` is equivalent for the same class of reason
+ * (`cancel#reject-12`) and is recorded in the production source's own comment on the vote path.
+ */
+const CANCEL_PROVENANCE_CALLER = ADMIN_UID;
+const CANCEL_PROVENANCE_REVIEWERS = [OWNER_UID, REVIEWER_UID, REVIEWER2_UID];
+const CANCEL_PROVENANCE_REVISION = 5;
+const CANCEL_PROVENANCE_PANEL_CREATED_AT = "2026-07-02T00:00:00.000Z";
+const CANCEL_PROVENANCE_PANEL_UPDATED_AT = "2026-07-03T00:00:00.000Z";
+/** The panel's Workspace/Project mirror is DISCOVERY metadata, never authority — so it is seeded STALE on purpose. */
+const STALE_PANEL_WORKSPACE_MIRROR = "wsPanelMirrorStale01";
+const STALE_PANEL_PROJECT_MIRROR = "projPanelMirrorStale01";
+
+describe("panel mutation audit coverage — cancel event provenance", () => {
+  const storedRun = () => stores.runs.get(RUN_ID) as { userId: string; workspaceId: string; projectId: string | null; governanceRecord: { schemaId: string; answerShape: string } };
+  const storedPanel = () => stores.humanReviewPanel.get(`${RUN_ID}::current`) as { revision: number; reviewerUserIds: string[]; requiredReviewerCount: number; quorum: number; createdByUserId: string; updatedByUserId: string; createdAt: string; updatedAt: string; workspaceId: string; projectId: string | null };
+  const storedWorkspace = () => stores.workspaces.get(WS_ID) as { ownerUserId: string };
+
+  function seedProvenanceFixture() {
+    seedRun({ projectId: PROJECT_ID, governanceRecord: validGovernanceRecord({ schemaId: ALT_GOV.schemaId, answerShape: ALT_GOV.answerShape }) });
+    seedPanel({
+      revision: CANCEL_PROVENANCE_REVISION,
+      reviewerUserIds: CANCEL_PROVENANCE_REVIEWERS,
+      createdByUserId: REVIEWER_UID,
+      updatedByUserId: REVIEWER2_UID,
+      createdAt: CANCEL_PROVENANCE_PANEL_CREATED_AT,
+      updatedAt: CANCEL_PROVENANCE_PANEL_UPDATED_AT,
+      workspaceId: STALE_PANEL_WORKSPACE_MIRROR,
+      projectId: STALE_PANEL_PROJECT_MIRROR,
+    });
+  }
+  const provenanceCancel = () => deleteCall({ uid: CANCEL_PROVENANCE_CALLER, expectedRevision: CANCEL_PROVENANCE_REVISION });
+
+  /**
+   * One row per authority-bearing field. `discriminated` lists every OTHER value reachable at the
+   * event site that the field could plausibly have been sourced from; `equivalent` lists the
+   * sources a preceding guard proves equal, each with that guard named.
+   */
+  type ProvenanceRow = {
+    field: string;
+    correctSource: string;
+    correct: () => unknown;
+    discriminated: readonly (readonly [string, () => unknown])[];
+    equivalent: readonly (readonly [string, () => unknown, string])[];
+  };
+  const PROVENANCE_MATRIX: readonly ProvenanceRow[] = [
+    {
+      field: "byUid",
+      correctSource: "args.uid (the authenticated caller)",
+      correct: () => CANCEL_PROVENANCE_CALLER,
+      discriminated: [
+        ["current.createdByUserId", () => storedPanel().createdByUserId],
+        ["current.updatedByUserId", () => storedPanel().updatedByUserId],
+        ["target.creatorUid", () => storedRun().userId],
+        ["current.reviewerUserIds[0]", () => storedPanel().reviewerUserIds[0]],
+        ["workspace.ownerUserId", () => storedWorkspace().ownerUserId],
+      ],
+      equivalent: [],
+    },
+    {
+      field: "at",
+      correctSource: "now (the request's own clock)",
+      correct: () => MUTATE_NOW,
+      discriminated: [
+        ["current.createdAt", () => storedPanel().createdAt],
+        ["current.updatedAt", () => storedPanel().updatedAt],
+        ["govParse.record.updatedAt", () => GOVERNANCE_UPDATED_AT],
+      ],
+      equivalent: [],
+    },
+    {
+      field: "workspaceId",
+      correctSource: "target.workspaceId (the run's stored, authoritative binding)",
+      correct: () => storedRun().workspaceId,
+      discriminated: [["current.workspaceId (stale discovery mirror)", () => storedPanel().workspaceId]],
+      equivalent: [["args.workspaceId", () => WS_ID, "resolveWorkspaceReviewTarget yields wrong_workspace unless run.workspaceId === args.workspaceId, and cancel#reject-06 returns on any non-valid target"]],
+    },
+    {
+      field: "projectId",
+      correctSource: "target.projectId (the run's stored Project)",
+      correct: () => storedRun().projectId,
+      discriminated: [
+        ["current.projectId (stale discovery mirror)", () => storedPanel().projectId],
+        ["hardcoded null", () => null],
+        ["target.workspaceId", () => storedRun().workspaceId],
+      ],
+      equivalent: [],
+    },
+    {
+      field: "panelRevision",
+      correctSource: "current.revision (the canonical panel being cancelled)",
+      correct: () => storedPanel().revision,
+      discriminated: [
+        ["current.quorum", () => storedPanel().quorum],
+        ["current.reviewerUserIds.length", () => storedPanel().reviewerUserIds.length],
+        ["current.requiredReviewerCount", () => storedPanel().requiredReviewerCount],
+        ["hardcoded 0", () => 0],
+      ],
+      equivalent: [["args.expectedRevision", () => CANCEL_PROVENANCE_REVISION, "cancel#reject-12 returns stale_revision unless current.revision === args.expectedRevision"]],
+    },
+    {
+      field: "reviewerCount",
+      correctSource: "current.reviewerUserIds.length (the canonical roster)",
+      correct: () => storedPanel().reviewerUserIds.length,
+      discriminated: [
+        ["current.quorum", () => storedPanel().quorum],
+        ["current.revision", () => storedPanel().revision],
+        ["hardcoded 0", () => 0],
+      ],
+      equivalent: [["current.requiredReviewerCount", () => storedPanel().requiredReviewerCount, "parseAdaptiveHumanReviewPanel yields malformed unless requiredReviewerCount === reviewerUserIds.length, and cancel#reject-09 returns panel_unreadable on a malformed panel"]],
+    },
+    {
+      field: "schemaId",
+      correctSource: "govParse.record.schemaId",
+      correct: () => storedRun().governanceRecord.schemaId,
+      discriminated: [
+        ["the default fixture literal", () => "decision_support"],
+        ["govParse.record.answerShape", () => storedRun().governanceRecord.answerShape],
+      ],
+      equivalent: [],
+    },
+    {
+      field: "answerShape",
+      correctSource: "govParse.record.answerShape",
+      correct: () => storedRun().governanceRecord.answerShape,
+      discriminated: [
+        ["the default fixture literal", () => "decision_support_view"],
+        ["govParse.record.schemaId", () => storedRun().governanceRecord.schemaId],
+      ],
+      equivalent: [],
+    },
+  ];
+
+  it("the fixture DISCRIMINATES: every field's correct source differs in value from every plausible wrong source — asserted before the production call", () => {
+    seedProvenanceFixture();
+    const collisions = PROVENANCE_MATRIX.flatMap((row) => row.discriminated.filter(([, read]) => read() === row.correct()).map(([name]) => `${row.field}<-${name}`));
+    expect(`indistinguishableSources:${collisions.join(",")}`).toBe("indistinguishableSources:");
+    // and the values really are the distinct ones this fixture intends
+    expect({
+      caller: CANCEL_PROVENANCE_CALLER,
+      panelCreatedBy: storedPanel().createdByUserId,
+      panelUpdatedBy: storedPanel().updatedByUserId,
+      runCreator: storedRun().userId,
+      firstReviewer: storedPanel().reviewerUserIds[0],
+      workspaceOwner: storedWorkspace().ownerUserId,
+      revision: storedPanel().revision,
+      reviewerCount: storedPanel().reviewerUserIds.length,
+      quorum: storedPanel().quorum,
+      runWorkspaceId: storedRun().workspaceId,
+      panelWorkspaceMirror: storedPanel().workspaceId,
+      runProjectId: storedRun().projectId,
+      panelProjectMirror: storedPanel().projectId,
+    }).toEqual({
+      caller: ADMIN_UID,
+      panelCreatedBy: REVIEWER_UID,
+      panelUpdatedBy: REVIEWER2_UID,
+      runCreator: CREATOR_UID,
+      firstReviewer: OWNER_UID,
+      workspaceOwner: OWNER_UID,
+      revision: 5,
+      reviewerCount: 3,
+      quorum: 2,
+      runWorkspaceId: WS_ID,
+      panelWorkspaceMirror: STALE_PANEL_WORKSPACE_MIRROR,
+      runProjectId: PROJECT_ID,
+      panelProjectMirror: STALE_PANEL_PROJECT_MIRROR,
+    });
+  });
+
+  it("every source classified EQUIVALENT really is equal in this fixture, and names the guard that forces it", () => {
+    seedProvenanceFixture();
+    const rows = PROVENANCE_MATRIX.flatMap((row) => row.equivalent.map(([name, read, invariant]) => ({ row, name, equal: read() === row.correct(), invariant })));
+    expect(rows.length).toBe(3);
+    expect(rows.filter((r) => !r.equal).map((r) => `${r.row.field}<-${r.name}`)).toEqual([]);
+    expect(rows.filter((r) => !r.invariant.includes("cancel#reject-")).map((r) => `${r.row.field}<-${r.name}`)).toEqual([]);
+  });
+
+  /**
+   * Every value is snapshotted BEFORE the call. Cancel rewrites the panel document — it sets
+   * `updatedByUserId` to the caller and bumps `revision` — so reading the store afterwards turns
+   * two hostile sources into the correct value and silently un-discriminates the fixture. The
+   * first draft of this test did exactly that and failed honestly on `byUid`.
+   */
+  const snapshotMatrix = () =>
+    PROVENANCE_MATRIX.map((row) => Object.freeze({
+      field: row.field,
+      correct: row.correct(),
+      discriminated: row.discriminated.map(([name, read]) => Object.freeze([name, read()] as const)),
+    }));
+
+  it("the cancel event's EVERY authority-bearing field equals its canonical PRE-MUTATION source and no wrong source", async () => {
+    seedProvenanceFixture();
+    const expected = snapshotMatrix();
+    expect((await provenanceCancel()).ok).toBe(true);
+    expect(panelEvents()).toHaveLength(1);
+    const event = panelEvents()[0];
+    for (const row of expected) {
+      expect(`${row.field}:${JSON.stringify(event[row.field])}`).toBe(`${row.field}:${JSON.stringify(row.correct)}`);
+      for (const [name, wrongValue] of row.discriminated) {
+        expect(`${row.field}!=${name}:${JSON.stringify(event[row.field]) === JSON.stringify(wrongValue)}`).toBe(`${row.field}!=${name}:false`);
+      }
+    }
+    expect(event.action).toBe("adaptive_review_panel_cancelled");
+  });
+
+  it("cancel really DOES rewrite the panel's actor and revision — which is why the snapshot above must precede the call", async () => {
+    seedProvenanceFixture();
+    const before = { updatedByUserId: storedPanel().updatedByUserId, revision: storedPanel().revision };
+    expect((await provenanceCancel()).ok).toBe(true);
+    expect(`beforeActor:${before.updatedByUserId} afterActor:${storedPanel().updatedByUserId}`).toBe(`beforeActor:${REVIEWER2_UID} afterActor:${CANCEL_PROVENANCE_CALLER}`);
+    expect(`beforeRevision:${before.revision} afterRevision:${storedPanel().revision}`).toBe("beforeRevision:5 afterRevision:6");
+  });
+
+  it("the matrix is COMPLETE: the event has no field outside it, so a newly added field cannot escape the audit", async () => {
+    seedProvenanceFixture();
+    expect((await provenanceCancel()).ok).toBe(true);
+    expect(Object.keys(panelEvents()[0]).sort()).toEqual(["action", ...PROVENANCE_MATRIX.map((r) => r.field)].sort());
   });
 });
 
