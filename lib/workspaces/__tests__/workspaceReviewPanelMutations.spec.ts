@@ -1850,6 +1850,39 @@ describe("panel mutation audit coverage — governance context provenance", () =
  * AST. Deleting a case, skipping one, duplicating one, or collapsing two duplicate-reason sites
  * back into a single `(operation, reason)` entry each leave an unmet obligation and fail.
  *
+ * R4 MUTATION BATTERY — every claim below was made to fail before it was believed. Run from an
+ * immutable committed SHA; every patch verified present on disk before scoring, and the file
+ * verified byte-identical to the commit afterwards. Judged by process EXIT CODE.
+ *
+ *   GHOST-EVENT SWEEP — an unconditional `tx.set(... governanceEvents ...)` inserted into the
+ *   guarded branch of each of the 35 mutable decision sites (the `if`'s then-branch wrapped in a
+ *   block, so control flow is unchanged): 32 KILLED_DIRECT by this suite's own runner, 3 SURVIVED
+ *   — and those 3 are exactly `create#reject-04`, `cancel#reject-04`, `vote#reject-13`, the three
+ *   sites independently classified structurally unreachable. Their survival corroborates the
+ *   classification (nothing reaches them) and confirms the exclusion list contains no reachable
+ *   site. A first attempt at this sweep was DISCARDED as harness-invalid: it inserted the write
+ *   before the `return` of a brace-less `if (c) return x;`, which makes the return unconditional
+ *   and breaks success paths instead of testing a ghost write on the rejection path — every site
+ *   "died", and none of it was evidence.
+ *
+ *   NOT EXPRESSIBLE (6 sites, stated rather than scored): `create/cancel/vote#reject-01` and
+ *   `#reject-02` return before `runTransaction` is entered — there is no transaction and, for
+ *   `firestore_unavailable`, no database handle at all, so no write can be written there. The
+ *   three `write_failed` catches sit outside the transaction callback and belong to the atomicity
+ *   regressions below, which assert that neither half of the atomic pair survives.
+ *
+ *   DISCOVERER (7): every self-test falsified — site id keyed by reason instead of AST ordinal,
+ *   an empty return, no `as const` unwrapping, no structured-reason discriminant, no catch
+ *   classification, and the nested-scope rule in both directions. All KILLED.
+ *
+ *   COVERAGE TABLE AND EXCLUSION LIST (7): deleting `create#reject-06`, collapsing it onto
+ *   `create#reject-05` as one `(operation, reason)` entry, deleting the cross-Workspace
+ *   `vote#reject-05`, silently skipping one ledger push, renaming an unreachable entry to a
+ *   phantom site, claiming the REACHABLE `vote#reject-12` is unreachable, and dropping the
+ *   `write_failed` exclusion. All KILLED.
+ *
+ *   CANCEL PROVENANCE (16) and FIXTURE DEGRADATION (6): see that suite's own doc comment.
+ *
  * WHAT THIS DOES NOT CLAIM (§10, §44): the reconciliation cannot defend against a coordinated edit
  * that removes a production decision point and its case together — but it now DISCOVERS a newly
  * added one automatically and fails until a case exists, which the hand-written contract could
@@ -2425,6 +2458,14 @@ describe("panel mutation audit coverage — zero ghost events at every discovere
  *     `panel_unreadable` on a malformed panel — so the two are provably equal here.
  * `panelRevision` <- `args.expectedRevision` is equivalent for the same class of reason
  * (`cancel#reject-12`) and is recorded in the production source's own comment on the vote path.
+ *
+ * R4 MUTATION BATTERY for this suite. Re-sourcing each field from every other value reachable at
+ * the event site: 13 KILLED, 3 SURVIVED — and the 3 survivors are exactly the 3 sources declared
+ * EQUIVALENT above (`args.workspaceId`, `args.expectedRevision`, `current.requiredReviewerCount`).
+ * There is no unexplained survivor. Degrading the fixture also fails, which is what keeps the
+ * field assertions from going vacuous again: collapsing the panel creator onto the caller,
+ * collapsing the revision onto the reviewer count, un-staling the Workspace mirror, reverting to
+ * the default governance context, and moving the snapshot to AFTER the call were all KILLED.
  */
 const CANCEL_PROVENANCE_CALLER = ADMIN_UID;
 const CANCEL_PROVENANCE_REVIEWERS = [OWNER_UID, REVIEWER_UID, REVIEWER2_UID];
