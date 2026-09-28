@@ -692,9 +692,12 @@ const mockAdminDb: any = {
   get: undefined,
 };
 
+/** R8 §19 — the Firestore ROOT is fail-closed too: `adminDb.recursiveDelete(...)` must record a violation, not be an undefined property whose TypeError production swallows. */
+const failClosedAdminDb: any = failClosedSurface(mockAdminDb, "Firestore");
+
 jest.mock("@/lib/firebase/admin", () => ({
   get adminDb() {
-    return firestoreUnavailableFlag.value ? null : mockAdminDb;
+    return firestoreUnavailableFlag.value ? null : failClosedAdminDb;
   },
 }));
 
@@ -4750,6 +4753,15 @@ describe("panel audit events — atomicity: neither half survives a failure", ()
  * A `-t` run of this security suite is a debugging aid and is NOT evidence of rejection coverage;
  * only a full run of the file is. CI runs the file in full.
  */
+/**
+ * R8 §19 — unconditional. A harness violation recorded by ANY test fails that test, whether or not
+ * it happens to call `expectStoreDelta`. Without this the fail-closed surface would only bind where
+ * someone remembered to assert it.
+ */
+afterEach(() => {
+  expect(`unsupportedWriteApiUsed:${[...new Set(harnessViolations)].join(",")}`).toBe("unsupportedWriteApiUsed:");
+});
+
 afterAll(() => {
   const executed = [...executedObligations];
   const expected = [...EXECUTABLE_OBLIGATIONS];
