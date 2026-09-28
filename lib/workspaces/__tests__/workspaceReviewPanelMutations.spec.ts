@@ -2866,6 +2866,40 @@ describe("panel mutation audit coverage — successful mutations", () => {
     expect(`eventDoesNotEchoRawLength:${panelEvents()[0].reviewerCount !== raw.length}`).toBe("eventDoesNotEchoRawLength:true");
   });
 
+  /**
+   * ─── R8 §42/§43 — commentPresent IS SEPARATED FROM conditionsCount ────────────────────────────
+   *
+   * R7 MAJOR: every event-level `commentPresent` assertion in the repo expected `true`, and the only
+   * vote fixture supplied BOTH a comment and conditions. So `commentPresent: true`,
+   * `commentPresent: eligibility.eligible` and `commentPresent: nextVote.conditionsCount > 0` all
+   * survived the full 740-suite run — and the third genuinely inverts the field's meaning.
+   *
+   * The route contract allows conditions ONLY for `approved_with_conditions` (and requires them
+   * there), and requires a comment only for `changes_requested`/`rejected`. These two cases are
+   * therefore both reachable through the real contract and pin the two axes independently.
+   */
+  it("a vote with a COMMENT and NO conditions records commentPresent true, conditionsCount 0", async () => {
+    seedPanel({ revision: 1 });
+    const before = snapshotStore();
+    expect((await voteCall({ status: "changes_requested", comment: "needs work" })).ok).toBe(true);
+    const delta = expectStoreDelta("VOTE-comment-only", before, {
+      oneAddedUnder: eventParentPath(RUN_ID),
+      added: [`runs/${RUN_ID}/humanReviewVotes/${buildAdaptiveHumanReviewVoteId(1, OWNER_UID)}`],
+    });
+    expect(soleStoredPanelEvent(delta, eventParentPath(RUN_ID)).payload).toMatchObject({ voteStatus: "changes_requested", commentPresent: true, conditionsCount: 0 });
+  });
+
+  it("a vote with CONDITIONS and NO comment records commentPresent false, conditionsCount 1", async () => {
+    seedPanel({ revision: 1 });
+    const before = snapshotStore();
+    expect((await voteCall({ status: "approved_with_conditions", conditions: ["ship behind a flag"] })).ok).toBe(true);
+    const delta = expectStoreDelta("VOTE-conditions-only", before, {
+      oneAddedUnder: eventParentPath(RUN_ID),
+      added: [`runs/${RUN_ID}/humanReviewVotes/${buildAdaptiveHumanReviewVoteId(1, OWNER_UID)}`],
+    });
+    expect(soleStoredPanelEvent(delta, eventParentPath(RUN_ID)).payload).toMatchObject({ voteStatus: "approved_with_conditions", commentPresent: false, conditionsCount: 1 });
+  });
+
   it("an IDEMPOTENT vote replay attempts NO second event on ANY channel — one vote, one record", async () => {
     seedPanel({ revision: 1 });
     expect((await voteCall()).ok).toBe(true);
@@ -4044,6 +4078,30 @@ describe("AST rejection-site inventory — the production module's real decision
   });
 
   /**
+   * §39 — EVERY AUTH REASON LEG IS LOAD-BEARING. R7 found all seven reason legs of the old
+   * passthrough witness could be deleted with the suite green: it only asserted a fact about the
+   * capability mock, which is true for every reason, so the 21 expanded obligations were protected by
+   * table membership alone. Each leg is now proved individually: with the fixture arranged for reason
+   * A, the witness invoked with any OTHER reason must REJECT. A witness that stops comparing the
+   * reason therefore fails 42 ways, not zero.
+   */
+  it.each((["create", "cancel", "vote"] as const).flatMap((op) => AUTH_DENIAL_REASONS.map((reason) => [`${op}#reject-03`, reason] as const)))(
+    "%s — the witness rejects a context claiming any reason other than %s",
+    async (siteId, reason) => {
+      const own = caseFor(siteId, reason);
+      expect(`caseRegistered:${siteId}/${reason}:${Boolean(own)}`).toBe(`caseRegistered:${siteId}/${reason}:true`);
+      seedBaseFixture();
+      (own as RejectionCase).arrange?.();
+      const ctx = contextFor(own as RejectionCase);
+      await runSiteWitness(siteId, ctx);
+      executedWitnessIds.add(siteId);
+      for (const other of AUTH_DENIAL_REASONS.filter((r) => r !== reason)) {
+        await expect(runSiteWitness(siteId, { ...ctx, reason: other })).rejects.toThrow();
+      }
+    }
+  );
+
+  /**
    * §41 — a witness count is bookkeeping. Every witness included in a security claim must actually be
    * invoked by a committed test. The declared side is the map's keys; the executed side is recorded by
    * the runner and the twin meta-test. R7 found the 15th witness was never invoked and could be emptied.
@@ -4921,11 +4979,19 @@ describe("panel audit events — retry uniqueness", () => {
   };
 
   it("a CREATE that conflicts once and then succeeds commits exactly one event", async () => {
+    const beforeSnapshot = snapshotStore();
     forceOneConflict("runs", RUN_ID, () => seedRun());
     const result = await putCall();
     expect(result.ok).toBe(true);
     expect(`attempts:${transactionAttemptCount.value >= 2}`).toBe("attempts:true");
-    expect(panelEvents()).toHaveLength(1);
+    // R8 §54 — the FINAL STORE is the commit verdict: the panel plus exactly one event document and
+    // nothing else, so an aborted attempt's event cannot be counted from the log's auto-ids alone.
+    // The conflict hook re-seeds an IDENTICAL run document, so the value-based diff correctly
+    // reports no modification — a re-write of the same bytes is not a durable change.
+    expectStoreDelta("CREATE-retry", beforeSnapshot, {
+      oneAddedUnder: eventParentPath(RUN_ID),
+      added: [`runs/${RUN_ID}/humanReviewPanel/current`],
+    });
     // the aborted attempt's auto-id is ABSENT — this is the discard mechanism, not a count
     const keys = [...stores.governanceEvents.keys()].filter((k) => k.startsWith(`${RUN_ID}::`));
     expect(`keys:${keys.join(",")}`).toBe(`keys:${RUN_ID}::auto-2`);
@@ -4978,6 +5044,16 @@ describe("panel audit events — atomicity: neither half survives a failure", ()
     expect(await deleteCall()).toEqual({ ok: false, reason: "write_failed" });
     expect((stores.humanReviewPanel.get(`${RUN_ID}::current`) as { status: string }).status).toBe("open");
     expect(committedGovernanceEvents()).toHaveLength(0);
+  });
+
+  it("a MODELLED EVENT-write failure rolls back the panel RECONFIGURE — the prior revision stands", async () => {
+    seedPanel({ revision: 1 });
+    const before = snapshotStore();
+    throwOnSetCollection.value = "governanceEvents";
+    expect(await putCall({ expectedRevision: 1, reviewerUserIds: [OWNER_UID, ADMIN_UID, REVIEWER_UID] })).toEqual({ ok: false, reason: "write_failed" });
+    // R8 §51/§52 — asserted on the DURABLE state: nothing changed at all, in any collection.
+    expectNoDurableChange("RECONFIGURE-event-write-failure", before);
+    expect((stores.humanReviewPanel.get(`${RUN_ID}::current`) as { revision: number }).revision).toBe(1);
   });
 
   it("an EVENT-write failure rolls back the panel CREATE", async () => {
