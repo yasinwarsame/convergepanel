@@ -21,6 +21,10 @@ import { writeAdaptivePanelFinalizationGovernanceEvent, writeAdaptivePanelOverri
 import { resolveWorkspaceReviewTarget } from "@/lib/workspaces/resolveWorkspaceReviewTarget";
 import { parseAdaptiveHumanReviewPanel } from "@/lib/governance/adaptiveHumanReviewPanel";
 import { parseSubmitAdaptiveReviewVoteRequest } from "@/lib/governance/adaptiveHumanReviewVote";
+// R8 §38 — the witnesses invoke the REAL authorization mechanism and the REAL eligibility predicate
+// against the seeded stores, rather than asserting a fact about a mock.
+import { authorizeTeamWorkspaceMutationInTransaction } from "@/lib/workspaces/authorizeTeamWorkspaceMutationInTransaction";
+import { isValidAssignmentTarget } from "@/lib/workspaces/workspaceReviewEligibility";
 
 type StoredDoc = Record<string, unknown>;
 const stores: Record<string, Map<string, StoredDoc>> = {
@@ -3725,90 +3729,121 @@ function storedPanelState(): { parse: string; status: string | null; reviewers: 
     : { parse: parsed.status, status: null, reviewers: [] };
 }
 
-/** True when the ACTIVE capability mock denies `capability` to `role` — i.e. a split is installed. */
-const capabilityDeniedTo = (role: string, capability: string) => mockedRoleHasCapability(role, capability) === false;
-
-const witnessed = (label: string, actual: unknown, expected: unknown) => expect(`${label}:${String(actual)}`).toBe(`${label}:${String(expected)}`);
-
-/** R5 NIT — the caller's role is read from the seeded membership, never hardcoded, so a witness tracks a case whose caller changes. */
-function seededRoleOf(callerUid: string): string | null {
-  const membership = stores.workspaceMemberships.get(computeMembershipId(WS_ID, callerUid)) as { role?: string } | undefined;
-  return membership?.role ?? null;
-}
+type WitnessContext = { callerUid: string; reason: string; operation: "create" | "cancel" | "vote" };
 
 /**
- * R5 MAJOR — the three authorization PASSTHROUGH sites had no witness at all, so an obligation could
- * be credited to `<op>#reject-03` while the fixture actually drove the inline `research.read` check at
- * `<op>#reject-04`. Two obligations were exploitable (`create`/`cancel` `insufficient_capability`),
- * and §13's duplicate detection could not see the collision because it grouped on the reason
- * EXPRESSION — `auth.reason` never equals `"insufficient_capability" as const`.
+ * ─── R8 §32–§39 — WITNESSES ARE ANCHORED TO REAL GUARD EXPRESSIONS ────────────────────────────
  *
- * This witness is reason-specific and reads only canonical fixture state, plus the one fact that
- * separates site 03 from site 04: site 04 requires the synthetic capability split, site 03 must NOT
- * have it installed.
+ * R7 BLOCKER: the previous meta-test only required a witness to distinguish TWO fixtures, so a
+ * witness keyed on `panel.createdByUserId` — a field appearing in no guard anywhere — satisfied it,
+ * and a real ghost event on the never-executed branch then survived. Separating two fixtures is not
+ * the property; proving the guard's own preconditions is.
+ *
+ * WHAT A WITNESS NOW IS. Each witnessed site declares a list of GUARD FACTS. Every fact names the
+ * production guard expression it is an operand of, and that string is checked against the AST
+ * inventory: it must be this site's own `guardExpr`, or the `guardExpr` of a LOWER-ordinal site in
+ * the same operation (a short-circuit predecessor that must be false for control to arrive here).
+ * A fact that corresponds to no real guard cannot be declared at all, which is exactly what makes
+ * the incidental-field attack inexpressible rather than merely unlikely.
+ *
+ * WHAT A WITNESS IS NOT (§32). It is not by itself proof that a particular branch executed. Its
+ * committed job is to prove the canonical pre-call and dependency facts the claimed control flow
+ * requires. Case-to-source binding is additionally established by targeted site-local ghost
+ * mutations during independent review (§40), which remain the direct execution evidence.
+ *
+ * §36 — deliberately NOT global mutual exclusion. Two sites may legitimately share most facts;
+ * requiring a witness to reject every other case's fixture would manufacture incompatibilities
+ * production does not have. Twins are separated by their own distinguishing guard, nothing more.
  */
-/** The capability each audited operation's authorization call actually requires. */
+type GuardFact = {
+  /** The production guard expression this fact is an operand of. Verified against the AST. */
+  fromGuard: string;
+  label: string;
+  actual: unknown;
+  expected: unknown;
+};
+
+/** Runs the REAL authorizer against the seeded stores (§38) — the actual dependency, not a stand-in. */
+async function realAuthOutcome(uid: string, requiredCapability: string) {
+  const tx = {
+    get: async (ref: { __collection: string; __id: string }) => {
+      const data = stores[ref.__collection]?.get(ref.__id);
+      return { exists: data !== undefined, data: () => data, id: ref.__id };
+    },
+  };
+  return authorizeTeamWorkspaceMutationInTransaction(tx as never, { uid, workspaceId: WS_ID, requiredCapability: requiredCapability as never });
+}
+
 const OPERATION_REQUIRED_CAPABILITY: Readonly<Record<string, string>> = Object.freeze({ create: "reviews.manage", cancel: "reviews.manage", vote: "reviews.submit" });
 
-function authDenialWitness(reason: string, callerUid: string, operation: string): void {
-  witnessed("noCapabilitySplitInstalled", capabilityDeniedTo("owner", "research.read"), false);
-  const workspace = stores.workspaces.get(WS_ID) as { type?: string; ownerUserId?: string } | undefined;
-  const membership = stores.workspaceMemberships.get(computeMembershipId(WS_ID, callerUid)) as { uid?: string; role?: string; status?: string } | undefined;
-  switch (reason) {
-    case "workspace_not_found":
-      return witnessed("workspaceDocumentPresent", Boolean(workspace), false);
-    case "workspace_malformed":
-      witnessed("workspaceDocumentPresent", Boolean(workspace), true);
-      return witnessed("workspaceIsTeamType", workspace?.type === "team", false);
-    case "membership_not_found":
-      return witnessed("callerMembershipPresent", Boolean(membership), false);
-    case "membership_malformed":
-      witnessed("callerMembershipPresent", Boolean(membership), true);
-      return witnessed("membershipUidMatchesCaller", membership?.uid === callerUid, false);
-    case "membership_removed":
-      return witnessed("callerMembershipStatus", membership?.status, "removed");
-    case "owner_integrity_violation":
-      witnessed("callerMembershipRole", membership?.role, "owner");
-      return witnessed("callerIsTheWorkspaceOwner", workspace?.ownerUserId === callerUid, false);
-    case "insufficient_capability": {
-      const required = OPERATION_REQUIRED_CAPABILITY[operation];
-      witnessed("callerMembershipStatus", membership?.status, "active");
-      return witnessed(`callerRoleHolds:${required}`, actualCapabilities.roleHasCapability(membership?.role as never, required as never), false);
-    }
-    default:
-      throw new Error(`authDenialWitness: unhandled reason "${reason}"`);
+/** Guard expressions, verbatim from the production source — asserted against the AST inventory below. */
+const G = Object.freeze({
+  authDenied: "!auth.ok",
+  researchRead: '!roleHasCapability(auth.membership.role, "research.read")',
+  runAbsent: "!runSnap.exists",
+  targetInvalid: 'target.kind !== "valid_workspace_review_target"',
+  panelFinalized: 'current.status === "finalized"',
+  panelNotOpen: 'current.status !== "open"',
+  notOnRoster: "!panel.reviewerUserIds.includes(args.uid)",
+  notEligible: "!eligibility.eligible",
+});
+
+type SiteGuardFacts = (ctx: WitnessContext) => Promise<readonly GuardFact[]>;
+
+const SITE_GUARD_FACTS: Readonly<Record<string, SiteGuardFacts>> = Object.freeze({
+  // ── the three authorization passthrough sites: the REAL authorizer must deny, with this reason ──
+  ...Object.fromEntries((["create", "cancel", "vote"] as const).map((op) => [`${op}#reject-03`, async ({ callerUid, reason, operation }: WitnessContext) => {
+    const auth = await realAuthOutcome(callerUid, OPERATION_REQUIRED_CAPABILITY[operation]);
+    return [
+      { fromGuard: G.authDenied, label: "auth.ok", actual: auth.ok, expected: false },
+      { fromGuard: G.authDenied, label: "auth.reason", actual: auth.ok ? null : auth.reason, expected: reason },
+    ];
+  }])),
+  // ── the inline research.read checks: authorization SUCCEEDS, then the capability is denied ──
+  ...(["create", "cancel"] as const).reduce((acc, op) => ({ ...acc, [`${op}#reject-04`]: async ({ callerUid, operation }: WitnessContext) => {
+    const auth = await realAuthOutcome(callerUid, OPERATION_REQUIRED_CAPABILITY[operation]);
+    return [
+      { fromGuard: G.authDenied, label: "auth.ok (predecessor must be false)", actual: auth.ok, expected: true },
+      { fromGuard: G.researchRead, label: "roleHasCapability(role, research.read)", actual: auth.ok ? mockedRoleHasCapability(auth.membership.role, "research.read") : null, expected: false },
+    ];
+  } }), {} as Record<string, SiteGuardFacts>),
+  // ── run_not_found twins: absent document vs present-but-not-this-Workspace ──
+  ...(["create", "cancel", "vote"] as const).reduce((acc, op) => ({
+    ...acc,
+    [`${op}#reject-0${op === "vote" ? 4 : 5}`]: async () => [{ fromGuard: G.runAbsent, label: "runSnap.exists", actual: stores.runs.has(RUN_ID), expected: false }],
+    [`${op}#reject-0${op === "vote" ? 5 : 6}`]: async () => [
+      { fromGuard: G.runAbsent, label: "runSnap.exists (predecessor must be false)", actual: stores.runs.has(RUN_ID), expected: true },
+      { fromGuard: G.targetInvalid, label: "target.kind", actual: storedRunTargetKind() === "valid_workspace_review_target", expected: false },
+    ],
+  }), {} as Record<string, SiteGuardFacts>),
+  // ── create's panel_finalized twins: genuinely finalized vs cancelled-and-never-reopened ──
+  "create#reject-10": async () => [{ fromGuard: G.panelFinalized, label: "current.status", actual: storedPanelState().status, expected: "finalized" }],
+  "create#reject-11": async () => [
+    { fromGuard: G.panelFinalized, label: "current.status === finalized (predecessor must be false)", actual: storedPanelState().status === "finalized", expected: false },
+    { fromGuard: G.panelNotOpen, label: "current.status !== open", actual: storedPanelState().status !== "open", expected: true },
+  ],
+  // ── vote's not_reviewer twins: off the roster vs on it but ineligible ──
+  "vote#reject-12": async ({ callerUid }: WitnessContext) => [{ fromGuard: G.notOnRoster, label: "panel.reviewerUserIds.includes(caller)", actual: storedPanelState().reviewers.includes(callerUid), expected: false }],
+  "vote#reject-13": async ({ callerUid }: WitnessContext) => {
+    const auth = await realAuthOutcome(callerUid, "reviews.submit");
+    const role = auth.ok ? auth.membership.role : null;
+    return [
+      { fromGuard: G.notOnRoster, label: "panel.reviewerUserIds.includes(caller) (predecessor must be false)", actual: storedPanelState().reviewers.includes(callerUid), expected: true },
+      { fromGuard: G.notEligible, label: "eligibility.eligible", actual: role === null ? null : isValidAssignmentTarget({ candidate: { uid: callerUid, workspaceId: WS_ID, role, status: "active" }, runWorkspaceId: WS_ID, creatorUid: CREATOR_UID }).eligible, expected: false },
+    ];
+  },
+});
+
+/** The witness: assert every declared guard fact. A witness with no facts is rejected by §35. */
+async function runSiteWitness(siteId: string, ctx: WitnessContext): Promise<void> {
+  const facts = await SITE_GUARD_FACTS[siteId](ctx);
+  expect(`${siteId}:factCount>0:${facts.length > 0}`).toBe(`${siteId}:factCount>0:true`);
+  for (const fact of facts) {
+    expect(`${siteId}:${fact.label}:${String(fact.actual)}`).toBe(`${siteId}:${fact.label}:${String(fact.expected)}`);
   }
 }
 
-type WitnessContext = { callerUid: string; reason: string; operation: "create" | "cancel" | "vote" };
-const SITE_WITNESSES: Readonly<Record<string, (ctx: WitnessContext) => void>> = Object.freeze({
-  // ── the three authorization passthrough sites, one witness per reachable reason ──
-  "create#reject-03": ({ reason, callerUid, operation }) => authDenialWitness(reason, callerUid, operation),
-  "cancel#reject-03": ({ reason, callerUid, operation }) => authDenialWitness(reason, callerUid, operation),
-  "vote#reject-03": ({ reason, callerUid, operation }) => authDenialWitness(reason, callerUid, operation),
-  // ── the two `run_not_found` twins in each operation: absent document vs present-but-not-ours ──
-  "create#reject-05": () => witnessed("targetKind", storedRunTargetKind(), "run_document_absent"),
-  "create#reject-06": () => witnessed("targetKind", storedRunTargetKind(), "wrong_workspace"),
-  "cancel#reject-05": () => { witnessed("targetKind", storedRunTargetKind(), "run_document_absent"); witnessed("panelParse", storedPanelState().parse, "valid"); },
-  "cancel#reject-06": () => { witnessed("targetKind", storedRunTargetKind(), "wrong_workspace"); witnessed("panelParse", storedPanelState().parse, "valid"); },
-  "vote#reject-04": () => witnessed("targetKind", storedRunTargetKind(), "run_document_absent"),
-  "vote#reject-05": () => witnessed("targetKind", storedRunTargetKind(), "wrong_workspace"),
-  // ── create's two `panel_finalized` twins: genuinely finalized vs cancelled-and-never-reopened ──
-  "create#reject-10": () => { const p = storedPanelState(); witnessed("panelParse", p.parse, "valid"); witnessed("panelStatus", p.status, "finalized"); },
-  "create#reject-11": () => { const p = storedPanelState(); witnessed("panelParse", p.parse, "valid"); witnessed("panelStatus", p.status, "cancelled"); },
-  // ── vote's two `not_reviewer` twins: not on the roster vs on it but ineligible ──
-  "vote#reject-12": ({ callerUid }) => { const p = storedPanelState(); witnessed("panelParse", p.parse, "valid"); witnessed("callerOnRoster", p.reviewers.includes(callerUid), false); },
-  "vote#reject-13": ({ callerUid }) => {
-    const p = storedPanelState();
-    witnessed("panelParse", p.parse, "valid");
-    witnessed("callerOnRoster", p.reviewers.includes(callerUid), true);
-    witnessed("callerRoleDeniedResearchRead", capabilityDeniedTo(seededRoleOf(callerUid) as string, "research.read"), true);
-    witnessed("callerRoleStillHoldsReviewsSubmit", capabilityDeniedTo(seededRoleOf(callerUid) as string, "reviews.submit"), false);
-  },
-  // ── the two inline research.read checks, now executable rather than excused ──
-  "create#reject-04": ({ callerUid }) => { witnessed("roleDeniedResearchRead", capabilityDeniedTo(seededRoleOf(callerUid) as string, "research.read"), true); witnessed("roleStillHoldsReviewsManage", capabilityDeniedTo(seededRoleOf(callerUid) as string, "reviews.manage"), false); },
-  "cancel#reject-04": ({ callerUid }) => { witnessed("roleDeniedResearchRead", capabilityDeniedTo(seededRoleOf(callerUid) as string, "research.read"), true); witnessed("roleStillHoldsReviewsManage", capabilityDeniedTo(seededRoleOf(callerUid) as string, "reviews.manage"), false); },
-});
+const SITE_WITNESSES = SITE_GUARD_FACTS;
 
 describe("AST rejection-site inventory — the production module's real decision points", () => {
   it("the inventory reconciles: 44 return sites, 39 unique (operation, reason) pairs, 5 duplicate-reason sites", () => {
@@ -3965,21 +4000,56 @@ describe("AST rejection-site inventory — the production module's real decision
     operation: testCase.siteId.split("#")[0] as "create" | "cancel" | "vote",
   });
 
-  it.each(REASON_TWIN_PAIRS)("the %s witness accepts its own arranged state and REJECTS its %s twin's (%s)", (site, twin, reason) => {
+  it.each(REASON_TWIN_PAIRS)("the %s witness accepts its own arranged state and REJECTS its %s twin's (%s)", async (site, twin, reason) => {
     const own = caseFor(site, reason);
     const other = caseFor(twin, reason);
     expect(`bothCasesRegistered:${Boolean(own)}/${Boolean(other)}`).toBe("bothCasesRegistered:true/true");
-    const witness = SITE_WITNESSES[site];
-    expect(`witnessPresent:${site}:${Boolean(witness)}`).toBe(`witnessPresent:${site}:true`);
+    expect(`witnessPresent:${site}:${Boolean(SITE_GUARD_FACTS[site])}`).toBe(`witnessPresent:${site}:true`);
 
     seedBaseFixture();
     (own as RejectionCase).arrange?.();
-    expect(() => witness(contextFor(own as RejectionCase))).not.toThrow();
+    await runSiteWitness(site, contextFor(own as RejectionCase));
+    executedWitnessIds.add(site);
 
     seedBaseFixture();
     (other as RejectionCase).arrange?.();
-    expect(() => witness(contextFor(other as RejectionCase))).toThrow();
+    await expect(runSiteWitness(site, contextFor(other as RejectionCase))).rejects.toThrow();
   });
+
+  /**
+   * §33 — THE ANCHORING CHECK, and the reason an incidental discriminator is now inexpressible.
+   * Every guard fact names the production guard expression it is an operand of, and that string must
+   * be this site's own `guardExpr` or that of a LOWER-ordinal site in the same operation — a
+   * short-circuit predecessor control had to pass. A fact about `panel.createdByUserId`, which
+   * appears in no guard anywhere, cannot be declared.
+   */
+  it("§33 — every guard fact names a REAL guard: this site's own, or a preceding one in the same operation", async () => {
+    const bySite = new Map(DISCOVERED_REJECTION_SITES.map((s) => [s.siteId, s]));
+    const problems: string[] = [];
+    for (const siteId of Object.keys(SITE_GUARD_FACTS)) {
+      const site = bySite.get(siteId);
+      if (!site) { problems.push(`${siteId}:notADiscoveredSite`); continue; }
+      const permitted = new Set(DISCOVERED_REJECTION_SITES.filter((s) => s.operation === site.operation && s.ordinal <= site.ordinal).map((s) => s.guardExpr));
+      const example = REJECTION_CASES.find((c) => c.siteId === siteId);
+      seedBaseFixture();
+      example?.arrange?.();
+      const facts = await SITE_GUARD_FACTS[siteId](contextFor(example as RejectionCase));
+      if (facts.length === 0) problems.push(`${siteId}:noFacts`);
+      if (!facts.some((fact) => fact.fromGuard === site.guardExpr)) problems.push(`${siteId}:noFactOnItsOwnGuard`);
+      for (const fact of facts) {
+        if (!permitted.has(fact.fromGuard)) problems.push(`${siteId}:factCitesAGuardThatIsNotItsOwnOrPreceding(${fact.fromGuard})`);
+      }
+    }
+    expect(`guardAnchoringProblems:${problems.join(" | ")}`).toBe("guardAnchoringProblems:");
+  });
+
+  /**
+   * §41 — a witness count is bookkeeping. Every witness included in a security claim must actually be
+   * invoked by a committed test. The declared side is the map's keys; the executed side is recorded by
+   * the runner and the twin meta-test. R7 found the 15th witness was never invoked and could be emptied.
+   */
+  // §41 is asserted in the module-scope `afterAll` below: it is a statement about the whole run, and
+  // an `it` placed here would evaluate before the rejection cases had executed any witness.
 
   /**
    * §22 — RETAINED AS A ROLE-MATRIX FACT, not as an exclusion proof. It explains why these two
@@ -4124,6 +4194,8 @@ const REJECTION_CASES: readonly RejectionCase[] = [
 
 /** The per-run execution ledger. Asserted against the AST INVENTORY, never against the case table. */
 const executedObligations: string[] = [];
+/** §41 — which witnesses a committed test actually invoked. */
+const executedWitnessIds = new Set<string>();
 /**
  * §31 — set by the in-describe reconciliation. The postcondition requires it, so the exact command
  * R4 demonstrated — `-t "rejects with its own reason"`, which ran every case but FILTERED OUT the
@@ -4138,8 +4210,10 @@ describe("panel mutation audit coverage — zero ghost events at every discovere
     if (testCase.arrange) testCase.arrange();
     // §14 — the WITNESS runs here: after the fixture is arranged, before production is called, and
     // it interrogates canonical state through the real predicates rather than trusting the label.
-    const witness = SITE_WITNESSES[testCase.siteId];
-    if (witness) witness({ callerUid: testCase.resolveCallerUid?.() ?? testCase.callerUid ?? OWNER_UID, reason: testCase.reason, operation: testCase.siteId.split("#")[0] as "create" | "cancel" | "vote" });
+    if (SITE_GUARD_FACTS[testCase.siteId]) {
+      await runSiteWitness(testCase.siteId, { callerUid: testCase.resolveCallerUid?.() ?? testCase.callerUid ?? OWNER_UID, reason: testCase.reason, operation: testCase.siteId.split("#")[0] as "create" | "cancel" | "vote" });
+      executedWitnessIds.add(testCase.siteId);
+    }
     // R8 §8 — snapshotted AFTER arrange, so the contract is "the OPERATION changed nothing durable".
     const before = snapshotStore();
     const result = await testCase.act();
@@ -5003,7 +5077,9 @@ afterAll(() => {
       `unexpected:${unexpected.join(",")}`,
       `duplicates:${duplicates}`,
       `passthroughGaps:${passthroughGaps.join(",")}`,
-      `witnessedSites:${Object.keys(SITE_WITNESSES).length}`,
+      `declaredWitnesses:${Object.keys(SITE_GUARD_FACTS).length}`,
+      `witnessesNeverExecuted:${Object.keys(SITE_GUARD_FACTS).filter((id) => !executedWitnessIds.has(id)).sort().join(",")}`,
+      `witnessesExecutedButNotDeclared:${[...executedWitnessIds].filter((id) => !SITE_GUARD_FACTS[id]).sort().join(",")}`,
       `reconciliationExecuted:${reconciliationExecuted}`,
     ].join(" ")
   ).toBe(
@@ -5015,7 +5091,9 @@ afterAll(() => {
       "unexpected:",
       "duplicates:0",
       "passthroughGaps:",
-      "witnessedSites:15",
+      "declaredWitnesses:15",
+      "witnessesNeverExecuted:",
+      "witnessesExecutedButNotDeclared:",
       "reconciliationExecuted:true",
     ].join(" ")
   );
