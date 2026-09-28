@@ -199,7 +199,10 @@ const GOVERNANCE_EVENT_COLLECTION = "governanceEvents";
  * That second clause is what closes the sink, and it is safe here because NO canonical write in the
  * audited module carries an `action` field: the panel document, the vote document and the
  * `governanceRecord.humanReview` update have no such property, so there are no false positives.
- * `assertNoCanonicalWriteIsAuditShaped` below pins that precondition rather than assuming it.
+ * The committed test "no CANONICAL write in the audited module is audit-shaped, so payload-shape
+ * classification has no false positives" pins that precondition rather than assuming it. (R7 found
+ * this comment previously cited `assertNoCanonicalWriteIsAuditShaped`, an identifier that exists
+ * nowhere — the test was real, the citation was not.)
  */
 function isAuditShapedPayload(data: unknown): boolean {
   return typeof data === "object" && data !== null && typeof (data as { action?: unknown }).action === "string";
@@ -464,10 +467,13 @@ function makeSubDocRef(subCollectionName: string, parentCollectionName: string, 
  * R5 BLOCKER: the fake implemented only the write methods the audited production code happens to
  * call today. `add()`, `Transaction.create`/`delete` and `batch()` were absent — so a write through
  * any of them threw a `TypeError`, and the module's own established house style for post-commit
- * audit writes (`try { await write } catch { logger.warn(...) }`) swallowed it. Three real Admin SDK
- * write APIs were therefore silent channels, and `.add()` is the idiom two other governance-event
- * writers in this repo already use. The full surface is now implemented and observed, so an
- * unimplemented method cannot be the thing that hides a write.
+ * audit writes (`try { await write } catch { logger.warn(...) }`) swallowed it. `.add()` is in fact
+ * used at FOUR `.collection("governanceEvents").add(` sites in this repo (two in `lib/firestore/runs.ts`,
+ * one in `lib/governance/governanceBackfill.ts`, one in `lib/governance/evaluateAndStore.ts`) — an
+ * earlier revision of this comment said "two other governance-event writers", which was wrong.
+ * Modelling more methods can never be future-complete, so R8 pairs the fuller surface with the
+ * fail-closed guard below: an unmodelled write API records a violation even when the sentinel is
+ * swallowed.
  */
 function directWriteMethods(getRef: () => { __collection: string; __id: string; __path: string }, collectionName: string, key: string) {
   return {
@@ -2417,6 +2423,102 @@ function deriveProductionWriteSurface(sourceText: string, targetFunctions: reado
  * silently missed a deletion, a dotted-field modification, or a document in a collection that did
  * not exist at snapshot time would fail here rather than in a security assertion months later.
  */
+/**
+ * ─── R8 §49 — THE CITATION RESOLVER'S OWN NEGATIVE CONTROLS ────────────────────────────────────
+ *
+ * A resolver that accepts everything is worse than no resolver, because it launders prose as proof.
+ * These prove it rejects each way a citation can be wrong.
+ */
+/**
+ * ─── R8 §56–§58 — THE RUNBOOK ROW IS PARSED, NOT EYEBALLED ────────────────────────────────────
+ *
+ * R7 MAJOR: the debt row was a FOUR-cell row in a three-column table. The Status cell was never
+ * updated and Markdown silently dropped the fourth cell — which carried the Tier 2 / Tier 3 gating
+ * rationale — in the one document whose job is rollout gating. A prose review missed it twice, so it
+ * is parsed here instead.
+ */
+describe("governance canary runbook — the debt table parses and says what the PR claims (§57/§58)", () => {
+  const RUNBOOK = readFileSync(joinPath(__dirname, "..", "..", "..", "docs", "operations", "workspace-governance-canary-runbook.md"), "utf8");
+  const cellsOf = (row: string) => row.trim().replace(/^\|/, "").replace(/\|$/, "").split("|");
+
+  /** Every contiguous block of table rows, so a malformed row is found wherever it is. */
+  const tables = (() => {
+    const out: string[][] = [];
+    let current: string[] = [];
+    for (const line of RUNBOOK.split("\n")) {
+      if (line.trim().startsWith("|")) current.push(line);
+      else if (current.length) { out.push(current); current = []; }
+    }
+    if (current.length) out.push(current);
+    return out;
+  })();
+
+  it("every table row has exactly as many cells as its own header — no row silently drops a cell", () => {
+    const problems: string[] = [];
+    for (const table of tables) {
+      const width = cellsOf(table[0]).length;
+      for (const row of table) {
+        const n = cellsOf(row).length;
+        if (n !== width) problems.push(`"${row.trim().slice(0, 70)}" has ${n} cells, header has ${width}`);
+      }
+    }
+    expect(`malformedRunbookRows:${problems.join(" | ")}`).toBe("malformedRunbookRows:");
+    expect(tables.length).toBeGreaterThan(0);
+  });
+
+  it("the write-side debt row states PARTIALLY CLOSED and keeps its Tier 2 / Tier 3 gating rationale", () => {
+    const row = RUNBOOK.split("\n").find((l) => l.includes("TECH_DEBT_WORKSPACE_PANEL_MUTATION_AUDIT_COVERAGE") && l.trim().startsWith("|"));
+    expect(row).toBeDefined();
+    const cells = cellsOf(row as string);
+    expect(`cells:${cells.length}`).toBe("cells:3");
+    expect(cells[1]).toContain("PARTIALLY CLOSED — WRITE SIDE ONLY");
+    // the gating rationale must survive in the rendered cell, not a dropped fourth one
+    expect(cells[2]).toContain("Tier 2");
+    expect(cells[2]).toContain("Tier 3");
+    expect(cells[2]).toContain("TECH_DEBT_PANEL_MUTATION_AUDIT_READ_SURFACING");
+  });
+
+  it("the reader-surfacing debt is recorded under ONE canonical label, and customer-visible coverage is NOT claimed closed", () => {
+    expect(RUNBOOK).toContain("TECH_DEBT_PANEL_MUTATION_AUDIT_READ_SURFACING");
+    // exactly one label for this debt — no synonym anywhere in the runbook
+    expect(RUNBOOK.match(/TECH_DEBT_PANEL_MUTATION_AUDIT_READ[A-Z_]*/g)?.every((m) => m === "TECH_DEBT_PANEL_MUTATION_AUDIT_READ_SURFACING")).toBe(true);
+    // and the production comment uses the same phrase as the runbook
+    expect(PANEL_MUTATIONS_SOURCE).toContain("TECH_DEBT_PANEL_MUTATION_AUDIT_READ_SURFACING");
+    expect(PANEL_MUTATIONS_SOURCE).toContain("PARTIALLY CLOSED — WRITE SIDE ONLY");
+  });
+});
+
+describe("citation resolver — negative controls (§49)", () => {
+  it("resolves a real site id and a real mechanism symbol", () => {
+    expect(unresolvedCitations("cancel#reject-12 returns stale_revision")).toEqual([]);
+    expect(unresolvedCitations("parseAdaptiveHumanReviewPanel yields malformed")).toEqual([]);
+    expect(unresolvedCitations("buildNextAdaptiveHumanReviewPanel derives revision")).toEqual([]);
+  });
+
+  it("REJECTS a nonexistent site id", () => {
+    expect(unresolvedCitations("cancel#reject-99 guarantees it")).toEqual(["cancel#reject-99"]);
+  });
+
+  it("REJECTS a fabricated mechanism identifier that merely LOOKS like one", () => {
+    // the exact string R7 used to defeat the previous token check
+    expect(unresolvedCitations("buildAbsolutelyNothing: equal because the moon is made of cheese")).toEqual(["buildAbsolutelyNothing"]);
+    expect(unresolvedCitations("validateNothingAtAll forces equality")).toEqual(["validateNothingAtAll"]);
+  });
+
+  it("REJECTS a stale renamed symbol", () => {
+    expect(unresolvedCitations("parseAdaptiveHumanReviewPanelV2 rejects it")).toEqual(["parseAdaptiveHumanReviewPanelV2"]);
+    expect(unresolvedCitations("assertNoCanonicalWriteIsAuditShaped pins it")).toEqual([]); // not a citation shape at all …
+    expect(RESOLVABLE_MECHANISM_SYMBOLS.has("assertNoCanonicalWriteIsAuditShaped")).toBe(false); // … and would not resolve
+  });
+
+  it("the resolvable-symbol set is populated from real sources, not empty", () => {
+    expect(RESOLVABLE_MECHANISM_SYMBOLS.size).toBeGreaterThan(20);
+    for (const real of ["parseAdaptiveHumanReviewPanel", "buildAdaptiveHumanReviewVote", "resolveWorkspaceReviewTarget", "validateMembershipBinding", "validateAdaptiveReviewCommentAndConditions", "isValidAssignmentTarget"]) {
+      expect(`resolvable:${real}:${RESOLVABLE_MECHANISM_SYMBOLS.has(real)}`).toBe(`resolvable:${real}:true`);
+    }
+  });
+});
+
 describe("final-store diff engine — mechanism self-test (§61)", () => {
   const doc = (collection: string, id: string) => mockAdminDb.collection(collection).doc(id);
 
@@ -4411,6 +4513,84 @@ describe("panel mutation audit coverage — zero ghost events at every discovere
  * pure projection of the request (`nextVote.status` is literally `args.status`), the alternative is
  * classified EQUIVALENT with the projection named, rather than dressed up as a security property.
  */
+/**
+ * ─── R8 §48–§50 — A REAL CITATION RESOLVER, NOT A SPELL-CHECK ─────────────────────────────────
+ *
+ * R7 MAJOR: the previous check was `/#reject-|parse[A-Z]|build[A-Z]|.../.test(reason)`, which tests
+ * for a TOKEN, not a mechanism. A flatly false reason — "buildAbsolutelyNothing: equal because the
+ * moon is made of cheese" — passed, while only a reason containing no matching token failed.
+ *
+ * A citation must now RESOLVE. Site ids are resolved against the AST inventory; mechanism
+ * identifiers are resolved against the exported symbols of the modules the production file actually
+ * imports, parsed from their sources. A fabricated or renamed identifier is unresolved and fails.
+ */
+const CITED_MODULE_SOURCES: readonly string[] = Object.freeze([
+  "governance/adaptiveHumanReviewPanel",
+  "governance/adaptiveHumanReviewVote",
+  "governance/adaptiveHumanReviewRequest",
+  "workspaces/resolveWorkspaceReviewTarget",
+  "workspaces/membershipBinding",
+  "workspaces/workspaceReviewEligibility",
+  "workspaces/authorizeTeamWorkspaceMutationInTransaction",
+  "workspaces/capabilities",
+]);
+
+/** Every exported declaration name in the modules a citation may refer to, parsed from source. */
+const RESOLVABLE_MECHANISM_SYMBOLS: ReadonlySet<string> = (() => {
+  const names = new Set<string>();
+  for (const relative of CITED_MODULE_SOURCES) {
+    const source = readFileSync(joinPath(__dirname, "..", "..", `${relative}.ts`), "utf8");
+    const sf = tsApi.createSourceFile("m.ts", source, tsApi.ScriptTarget.ES2020, true);
+    tsApi.forEachChild(sf, (node) => {
+      const exported = tsApi.canHaveModifiers(node) && tsApi.getModifiers(node)?.some((m) => m.kind === tsApi.SyntaxKind.ExportKeyword);
+      if (!exported) return;
+      if (tsApi.isFunctionDeclaration(node) && node.name) names.add(node.name.text);
+      if (tsApi.isVariableStatement(node)) for (const d of node.declarationList.declarations) if (tsApi.isIdentifier(d.name)) names.add(d.name.text);
+      if ((tsApi.isTypeAliasDeclaration(node) || tsApi.isInterfaceDeclaration(node)) && node.name) names.add(node.name.text);
+    });
+  }
+  return names;
+})();
+
+/**
+ * Returns the citations in `reason` that do not resolve. A "citation" is a `<op>#reject-NN` site id or
+ * an identifier in the verb-prefixed shape this codebase uses for its mechanisms.
+ */
+function unresolvedCitations(reason: string): string[] {
+  const unresolved: string[] = [];
+  for (const siteId of reason.match(/\b(?:create|cancel|vote)#reject-\d+/g) ?? []) {
+    if (!DISCOVERED_REJECTION_SITES.some((s) => s.siteId === siteId)) unresolved.push(siteId);
+  }
+  for (const symbol of reason.match(/\b(?:parse|build|validate|resolve|normalize|is|derive)[A-Z][A-Za-z0-9]+/g) ?? []) {
+    if (!RESOLVABLE_MECHANISM_SYMBOLS.has(symbol)) unresolved.push(symbol);
+  }
+  return unresolved;
+}
+
+/**
+ * §46 — the pinned split per action. A self-comparison joining or leaving this set fails, so proof
+ * cannot silently become prose and prose cannot silently be counted as proof.
+ */
+const EXPECTED_EQUIVALENT_SPLIT: Readonly<Record<string, { proven: number; documented: readonly string[] }>> = Object.freeze({
+  CREATE: { proven: 7, documented: ["byUid<-auth.membership.uid"] },
+  RECONFIGURE: { proven: 6, documented: ["byUid<-auth.membership.uid"] },
+  CANCEL: {
+    proven: 2,
+    documented: ["at<-nextPanel.updatedAt", "byUid<-auth.membership.uid", "panelRevision<-args.expectedRevision", "reviewerCount<-nextPanel.reviewerUserIds.length"],
+  },
+  VOTE: {
+    proven: 3,
+    documented: [
+      "at<-nextVote.submittedAt",
+      "byUid<-auth.membership.uid",
+      "byUid<-nextVote.reviewerUserId",
+      "commentPresent<-args.comment !== undefined",
+      "conditionsCount<-args.conditions?.length ?? 0",
+      "voteStatus<-args.status",
+    ],
+  },
+});
+
 const PROV_CALLER_MANAGE = ADMIN_UID;
 const PROV_CALLER_VOTE = REVIEWER3_UID;
 const PROV_PANEL_CREATED_BY = REVIEWER_UID;
@@ -4470,10 +4650,18 @@ function seedProvenanceRun() {
  * SURVIVED — reopening the exact R4 blocker this section exists to close, from a one-line innocent
  * fixture edit.
  *
- * Every hostile value is now read from a snapshot of the real panel document taken at seed time
- * (before any mutation rewrites `updatedByUserId` or bumps the revision). A collapsed fixture is then
- * caught by the discrimination check itself, because the hostile value really does equal the correct
- * one and the collision is observable.
+ * The ACTOR, TIMESTAMP, NUMBER and MIRROR rows now read a snapshot of the real panel document taken
+ * at seed time, before any mutation rewrites `updatedByUserId` or bumps the revision. A collapsed
+ * fixture is then caught by the discrimination check itself, because the hostile value really does
+ * equal the correct one and the collision is observable.
+ *
+ * R8 §44 — WHAT IS *NOT* CLAIMED. An earlier revision of this comment and of the PR body said "every
+ * hostile value is read from a pre-call snapshot of the real panel document". That was false: roughly
+ * 20 of the 93 hostile entries are, correctly, explicit constants — `hardcoded null`, `hardcoded 0`,
+ * `the default fixture literal`, `hardcoded approved`. Those model a WRONG CONSTANT, not an alternate
+ * artifact, and a literal is the right input for them. The honest statement is: an entry that models
+ * an alternate CANONICAL SOURCE reads that source from the artifact; an entry that models a hardcoded
+ * wrong answer is a literal and is labelled as one. The universal claim is retracted.
  */
 let provPanelAtSeed: Record<string, unknown> | null = null;
 const seededPanel = <T,>(field: string): T => (provPanelAtSeed?.[field] as T);
@@ -4879,16 +5067,46 @@ describe.each(PROVENANCE_SUBJECTS.map((s) => [s.label, s] as const))("panel muta
     }
   });
 
-  it("every source classified EQUIVALENT really is equal, and names the reason it cannot differ", async () => {
+  /**
+   * ─── R8 §46/§47 — A SELF-COMPARISON IS NOT PROOF, AND IS NEVER COUNTED AS ONE ──────────────────
+   *
+   * R7 MAJOR: 12 of 30 equivalence entries compared an expression to ITSELF — `read` and `correct`
+   * were the same literal, constant or expression text — so `X === X` could not fail. Falsifying one
+   * such premise in production went unnoticed by this very test. That is the same self-refuting shape
+   * the corrections table already records for the distinctness test, recurring unacknowledged.
+   *
+   * Entries are now partitioned by comparing the two reader functions' SOURCE TEXT, so the rule
+   * cannot go stale as entries are edited:
+   *   • PROVEN — two genuinely different reads, asserted equal. Real evidence.
+   *   • DOCUMENTED — a self-comparison: the harness cannot read the alternative independently, so it
+   *     is recorded as documentation and explicitly NOT counted as a proven equivalent mutant.
+   * Both counts are pinned, so silently converting proof into prose fails here.
+   */
+  const readerSource = (fn: () => unknown) => fn.toString().replace(/\s+/g, "");
+
+  it("every EQUIVALENT entry is either PROVEN by two independent reads or declared DOCUMENTATION-ONLY", async () => {
     subject.seed();
     if (subject.canonicalIsCommitted) expect((await subject.call()).ok).toBe(true);
-    const rows = subject.rows().flatMap((row) => row.equivalent.map(([name, read, reason]) => ({ field: row.field, name, equal: read() === row.correct(), reason })));
+    const rows = subject.rows().flatMap((row) =>
+      row.equivalent.map(([name, read, reason]) => ({
+        field: row.field,
+        name,
+        reason,
+        selfComparison: readerSource(read) === readerSource(row.correct),
+        equal: read() === row.correct(),
+      }))
+    );
     expect(rows.length).toBeGreaterThan(0);
-    expect(rows.filter((r) => !r.equal).map((r) => `${r.field}<-${r.name}`)).toEqual([]);
-    // R5 NIT — a prose-length assertion polices nothing; what matters is that the reason NAMES the
-    // mechanism that forces the equality, so it must cite a guard site, a parser, or a builder.
-    const citesAMechanism = (reason: string) => /#reject-|parse[A-Z]|build[A-Z]|validate[A-Z]|§4[12]/.test(reason);
-    expect(rows.filter((r) => !citesAMechanism(r.reason)).map((r) => `${r.field}<-${r.name}`)).toEqual([]);
+    const proven = rows.filter((r) => !r.selfComparison);
+    const documented = rows.filter((r) => r.selfComparison).map((r) => `${r.field}<-${r.name}`).sort();
+    // the PROVEN ones must genuinely hold
+    expect(proven.filter((r) => !r.equal).map((r) => `${r.field}<-${r.name}`)).toEqual([]);
+    // the DOCUMENTED ones are pinned by name, so one cannot quietly join or leave the set
+    expect(`${label}:provenEquivalents:${proven.length}`).toBe(`${label}:provenEquivalents:${EXPECTED_EQUIVALENT_SPLIT[label].proven}`);
+    expect(`${label}:documentationOnly:${documented.join(",")}`).toBe(`${label}:documentationOnly:${EXPECTED_EQUIVALENT_SPLIT[label].documented.join(",")}`);
+    // §48 — every mechanism a reason cites must RESOLVE to something that exists in this repo
+    const unresolved = rows.flatMap((r) => unresolvedCitations(r.reason).map((c) => `${r.field}<-${r.name}:${c}`));
+    expect(`${label}:unresolvedCitations:${unresolved.join(" | ")}`).toBe(`${label}:unresolvedCitations:`);
   });
 
   it("the event's EVERY authority-bearing field equals its canonical source and no wrong source", async () => {
@@ -5110,11 +5328,13 @@ describe("panel audit events — atomicity: neither half survives a failure", ()
  * one test in this file but not the whole rejection matrix FAILS here. That is deliberate and
  * fail-closed.
  *
- * ONE EXCEPTION, corrected from an earlier overstatement: a `-t` pattern matching ZERO tests exits 0,
- * because Jest skips the file entirely and never runs a module-scope `afterAll`. That is outside this
- * hook's reach and cannot be closed from here. It is also not mistakable for coverage — such a run
- * reports `0 passed` — but the earlier claim that "including one that executes no rejection case at
- * all" fails was simply wrong.
+ * ONE EXCEPTION, measured precisely (§60). A `-t` pattern matching ZERO tests exits 0. The file IS
+ * loaded and all of its tests ARE registered — Jest reports `Tests: N skipped, N total` — but because
+ * no test in the file executes, Jest never runs a module-scope `afterAll`, so this hook cannot fire.
+ * That is a test-runner lifecycle limitation, not a production defect, and it is outside this hook's
+ * reach. Two earlier descriptions of it were wrong: that the file is "skipped entirely", and that such
+ * a run "reports 0 passed". A run reporting only skips is not mistakable for coverage, and CI runs the
+ * file in full; no recursive workaround is warranted.
  *
  * A `-t` run of this security suite is a debugging aid and is NOT evidence of rejection coverage;
  * only a full run of the file is. CI runs the file in full.
