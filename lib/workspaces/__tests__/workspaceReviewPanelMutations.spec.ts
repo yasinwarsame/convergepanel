@@ -2064,6 +2064,22 @@ describe("whole-event-store oracle — every instrumented channel is LIVE (§10)
     expect(`observed:${seen("writer.adaptiveHumanReviewEvent").length}`).toBe("observed:1");
   });
 
+  /**
+   * §8 — PATH coverage, distinct from CHANNEL coverage. R4 showed two escapes that used the ordinary
+   * transactional channel but a path the old helper's `${RUN_ID}::` key filter could not see.
+   */
+  it("a TOP-LEVEL governanceEvents collection write is observed, with its path preserved", async () => {
+    await mockAdminDb.runTransaction(async (tx: any) => tx.set(mockAdminDb.collection("governanceEvents").doc("live-top"), { action: "LIVENESS" }));
+    expect(governanceEventLog.map((o) => o.path)).toEqual(["governanceEvents/live-top"]);
+    expect(`attempted:${attemptedGovernanceEventCount()}`).toBe("attempted:1");
+  });
+
+  it("a SHADOW run document's governanceEvents write is observed, and is not confused with the real run", async () => {
+    await mockAdminDb.runTransaction(async (tx: any) => tx.set(eventRef(`${RUN_ID}-shadow`, "live-shadow"), { action: "LIVENESS" }));
+    expect(governanceEventLog.map((o) => o.path)).toEqual([`runs/${RUN_ID}-shadow/governanceEvents/live-shadow`]);
+    expect(`attempted:${attemptedGovernanceEventCount()}`).toBe("attempted:1");
+  });
+
   it("the liveness set covers exactly the instrumented channel list — no channel is claimed without a case", () => {
     // Each case above names its channel in its title; this pins the list they must jointly cover.
     expect([...INSTRUMENTED_EVENT_CHANNELS].sort()).toEqual([
