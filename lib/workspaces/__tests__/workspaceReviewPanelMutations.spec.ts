@@ -5241,6 +5241,40 @@ describe("panel audit events — retry uniqueness", () => {
  * returns `write_failed`), so a case where an earlier validation branch short-circuited before
  * reaching the injected write cannot pass silently.
  */
+/**
+ * ─── R8 §51/§52/§67 — THE ATOMICITY SUITE'S OWN CENSUS ────────────────────────────────────────
+ *
+ * R7 found the RECONFIGURE event-write-failure half simply absent, and the round before argued its
+ * equivalence rather than testing it. Nothing stopped a direction from being dropped — or quietly
+ * `it.skip`ped — because the suite had no statement about which directions it covers. It reads its
+ * own source and pins the exact set, so removing or skipping any half fails here.
+ */
+describe("atomicity coverage census (§51/§52)", () => {
+  const SPEC_SOURCE = readFileSync(__filename, "utf8");
+  const atomicityBlock = (() => {
+    // anchored on a leading newline so this line's own text is not what gets found
+    const start = SPEC_SOURCE.indexOf('\ndescribe("panel audit events — atomicity');
+    expect(start).toBeGreaterThan(-1);
+    const end = SPEC_SOURCE.indexOf("\ndescribe(", start + 1);
+    return SPEC_SOURCE.slice(start, end === -1 ? undefined : end);
+  })();
+
+  it("covers BOTH failure directions for all four operations — eight modelled injections, none skipped", () => {
+    const active = [...atomicityBlock.matchAll(/\n  it\("([^"]+)"/g)].map((m) => m[1]);
+    const skipped = [...atomicityBlock.matchAll(/\n  it\.(?:skip|todo|only)\("([^"]+)"/g)].map((m) => m[1]);
+    expect(`skippedAtomicityCases:${skipped.join(" | ")}`).toBe("skippedAtomicityCases:");
+    const direction = (title: string) => `${/RECONFIGURE/.test(title) ? "RECONFIGURE" : /CREATE/.test(title) ? "CREATE" : /CANCEL/.test(title) ? "CANCEL" : /VOTE/.test(title) ? "VOTE" : "?"}:${/CANONICAL-write/.test(title) ? "canonical" : /EVENT-write/.test(title) ? "event" : "?"}`;
+    expect([...new Set(active.map(direction))].sort()).toEqual([
+      "CANCEL:canonical", "CANCEL:event",
+      "CREATE:canonical", "CREATE:event",
+      "RECONFIGURE:canonical", "RECONFIGURE:event",
+      "VOTE:canonical", "VOTE:event",
+    ]);
+    // and every case really does inject a modelled write failure
+    expect(`injections:${(atomicityBlock.match(/throwOnSetCollection\.value = "/g) ?? []).length} cases:${active.length}`).toBe(`injections:${active.length} cases:${active.length}`);
+  });
+});
+
 describe("panel audit events — atomicity: neither half survives a failure", () => {
   /**
    * R5 MINOR — the matrix had an EVENT-write failure case for create/cancel/vote but a
