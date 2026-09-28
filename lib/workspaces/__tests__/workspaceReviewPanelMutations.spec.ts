@@ -705,6 +705,24 @@ const mockAdminDb: any = {
 /** R8 §19 — the Firestore ROOT is fail-closed too: `adminDb.recursiveDelete(...)` must record a violation, not be an undefined property whose TypeError production swallows. */
 const failClosedAdminDb: any = failClosedSurface(mockAdminDb, "Firestore");
 
+/**
+ * ─── R8 §25–§27 — NO MODULE-LOADING FORM CAN REACH A LIVE FIRESTORE HANDLE ────────────────────
+ *
+ * R7 BLOCKER: `require("firebase-admin/firestore").getFirestore()` bypassed BOTH the import pin (which
+ * walked only `ImportDeclaration` nodes) and the `adminDb` mock. In production that returns a real,
+ * live handle — `initFirebaseAdmin()` has already run — so the write would land, while under Jest it
+ * threw and was swallowed, giving the suite no signal at all on a channel that is live in production.
+ *
+ * `firebase-admin/firestore` is now mocked so every handle-producing entry point returns the SAME fake
+ * the oracle observes. `requireActual` is spread first so `Timestamp` and the other value exports keep
+ * working for the fixtures.
+ */
+jest.mock("firebase-admin/firestore", () => ({
+  ...(jest.requireActual("firebase-admin/firestore") as Record<string, unknown>),
+  getFirestore: () => failClosedAdminDb,
+  initializeFirestore: () => failClosedAdminDb,
+}));
+
 jest.mock("@/lib/firebase/admin", () => ({
   get adminDb() {
     return firestoreUnavailableFlag.value ? null : failClosedAdminDb;
@@ -2354,6 +2372,25 @@ function deriveProductionWriteSurface(sourceText: string, targetFunctions: reado
   const directWriteCalls: string[] = [];
   const allImports: string[] = [];
 
+  /**
+   * §23 — `require("...")` and dynamic `import("...")` with a static string literal are dependency
+   * introductions exactly like a static import, and the previous version saw neither. Discovered
+   * anywhere in the file, at any nesting depth, so they cannot hide inside a function body.
+   */
+  const walkForDynamicDeps = (node: tsApi.Node) => {
+    if (tsApi.isCallExpression(node)) {
+      const callee = node.expression;
+      const isRequire = tsApi.isIdentifier(callee) && callee.text === "require";
+      const isDynamicImport = callee.kind === tsApi.SyntaxKind.ImportKeyword;
+      const arg = node.arguments[0];
+      if ((isRequire || isDynamicImport) && arg && tsApi.isStringLiteralLike(arg)) {
+        allImports.push(`${arg.text} :: <${isRequire ? "require" : "dynamic import"}>`);
+      }
+    }
+    tsApi.forEachChild(node, walkForDynamicDeps);
+  };
+  walkForDynamicDeps(sf);
+
   tsApi.forEachChild(sf, (node) => {
     if (!tsApi.isImportDeclaration(node) || !tsApi.isStringLiteral(node.moduleSpecifier)) return;
     const specifier = node.moduleSpecifier.text;
@@ -2485,6 +2522,48 @@ describe("governance canary runbook — the debt table parses and says what the 
     // and the production comment uses the same phrase as the runbook
     expect(PANEL_MUTATIONS_SOURCE).toContain("TECH_DEBT_PANEL_MUTATION_AUDIT_READ_SURFACING");
     expect(PANEL_MUTATIONS_SOURCE).toContain("PARTIALLY CLOSED — WRITE SIDE ONLY");
+  });
+});
+
+/**
+ * ─── R8 §25–§27 — EVERY FIRESTORE HANDLE IS THE SAME FAKE ─────────────────────────────────────
+ */
+describe("module boundary — no loading form reaches a live Firestore (§25–§27)", () => {
+  it("require(\"firebase-admin/firestore\").getFirestore() returns the observed fake, not a live handle", async () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { getFirestore } = require("firebase-admin/firestore") as { getFirestore: () => typeof mockAdminDb };
+    const db = getFirestore();
+    const before = snapshotStore();
+    await db.collection("runs").doc(RUN_ID).collection("governanceEvents").doc("via-require").set({ action: "adaptive_review_panel_created" });
+    // it wrote into the SAME store the oracle diffs
+    expect(describeDelta(diffStore(before, snapshotStore()))).toBe(`added:[runs/${RUN_ID}/governanceEvents/via-require] modified:[] deleted:[]`);
+  });
+
+  it("a dynamic import of the same module resolves to the same fake", async () => {
+    const mod = (await import("firebase-admin/firestore")) as unknown as { getFirestore: () => typeof mockAdminDb };
+    const before = snapshotStore();
+    await mod.getFirestore().collection("runs").doc(RUN_ID).collection("governanceEvents").doc("via-import").set({ action: "adaptive_review_panel_cancelled" });
+    expect(describeDelta(diffStore(before, snapshotStore()))).toBe(`added:[runs/${RUN_ID}/governanceEvents/via-import] modified:[] deleted:[]`);
+  });
+
+  it("every handle-producing entry point yields the SAME store — there is no second hidden Firestore", async () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const viaRequire = (require("firebase-admin/firestore") as { getFirestore: () => typeof mockAdminDb }).getFirestore();
+    const viaImport = ((await import("firebase-admin/firestore")) as unknown as { getFirestore: () => typeof mockAdminDb }).getFirestore();
+    const before = snapshotStore();
+    await viaRequire.collection("runs").doc(RUN_ID).collection("governanceEvents").doc("h1").set({ action: "x" });
+    await viaImport.collection("runs").doc(RUN_ID).collection("governanceEvents").doc("h2").set({ action: "y" });
+    expect(diffStore(before, snapshotStore()).added.sort()).toEqual([`runs/${RUN_ID}/governanceEvents/h1`, `runs/${RUN_ID}/governanceEvents/h2`]);
+  });
+
+  it("§23 — a require() or dynamic import() in the production module is DISCOVERED by the dependency pin", () => {
+    const surface = (source: string) => deriveProductionWriteSurface(source, Object.keys(PANEL_OPERATION_FUNCTIONS)).allImports;
+    const withRequire = `import "server-only";\nexport async function putWorkspaceReviewPanel() { const { getFirestore } = require("firebase-admin/firestore"); return { ok: true }; }`;
+    expect(surface(withRequire)).toContain("firebase-admin/firestore :: <require>");
+    const withDynamic = `import "server-only";\nexport async function putWorkspaceReviewPanel() { const m = await import("firebase-admin/firestore"); return { ok: true }; }`;
+    expect(surface(withDynamic)).toContain("firebase-admin/firestore :: <dynamic import>");
+    // and the production module itself takes neither form today
+    expect(surface(PANEL_MUTATIONS_SOURCE).filter((i) => i.includes("<require>") || i.includes("<dynamic import>"))).toEqual([]);
   });
 });
 
