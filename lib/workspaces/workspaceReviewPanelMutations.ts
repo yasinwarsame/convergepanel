@@ -303,6 +303,17 @@ export type PutWorkspaceReviewPanelResult = { ok: true; panel: WorkspaceReviewPa
  * vs. transactional eligibility inside the service).
  */
 /**
+ * SCOPE OF WHAT THIS CLOSES (R5 §43/§44). This closes the WRITE side: the four panel mutations now
+ * leave an immutable secondary record. It does NOT close the customer-visible audit trail. None of
+ * these four actions appears in `AuditAction`, `GOVERNANCE_ACTIONS`, `AUDIT_LOG_DISPLAY_ACTIONS` or
+ * the governance-audit backfill's `isAuditAction` allow-list, and `listWorkspaceAuditEvents()`
+ * deliberately reads only `workspaceMembershipEvents`, so no supported read path surfaces them yet.
+ * That integration is tracked separately as `TECH_DEBT_PANEL_MUTATION_AUDIT_READ_SURFACING` and is
+ * deliberately NOT folded in here — it would expand a heavily reviewed write-path change into a
+ * second subsystem. `TECH_DEBT_WORKSPACE_PANEL_MUTATION_AUDIT_COVERAGE` therefore remains
+ * PARTIALLY OPEN until that follow-up lands; the post-deploy recanary for this change validates the
+ * stored canonical evidence, never reader or UI visibility.
+ *
  * TECH_DEBT_WORKSPACE_PANEL_MUTATION_AUDIT_COVERAGE — the immutable secondary record for
  * panel lifecycle mutations.
  *
@@ -340,8 +351,19 @@ export type PutWorkspaceReviewPanelResult = { ok: true; panel: WorkspaceReviewPa
  *     `resubmitWorkspaceReview()` already does. That was measurably FALSE — R1 proved
  *     `parseGovernanceRecord()` runs in all three of these flows, adding them costs ZERO new
  *     reads, and this file already said so further down. They are included, so these events
- *     carry the same canonical governance context as every other `governanceEvents` entry
- *     instead of leaving the collection heterogeneous for audit consumers.
+ *     carry the same canonical governance CONTEXT (`schemaId`/`answerShape`) that the
+ *     decision/finalization/override entries carry.
+ *
+ * R5 §46 — WHAT THAT DOES *NOT* CLAIM. An earlier revision of this comment said these events
+ * "carry the same canonical governance context as every other `governanceEvents` entry instead of
+ * leaving the collection heterogeneous", which overstated it: they omit `teamId`, which
+ * `writeAdaptiveHumanReviewEvent`, `writeAdaptivePanelFinalizationGovernanceEvent` and
+ * `writeAdaptivePanelOverrideGovernanceEvent` all include. There is no canonical
+ * `governanceEvents` schema or parser anywhere in this codebase — the collection is deliberately
+ * per-action heterogeneous — so `teamId` is not contract-required, and it is omitted here for
+ * exactly the reason `resubmitWorkspaceReview()` omits it and says so at its own event write:
+ * these are pure Workspace-native events, and no legacy Team concept applies on this path at all.
+ * Nothing is added to the payload to make a sentence true; the sentence is corrected instead.
  *
  * ONLY A WRITE, NEVER A NEW READ. Adding a `tx.get` would enlarge the read set of transactions
  * whose OCC/contention behaviour was Production-canaried at `c28edbbf`; appending an auto-id

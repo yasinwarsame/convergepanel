@@ -13,6 +13,14 @@ import { readFileSync } from "fs";
 import { join as joinPath } from "path";
 import * as tsApi from "typescript";
 import { violatesAssignmentSelfReviewGuard, violatesDecisionSelfReviewGuard } from "@/lib/workspaces/workspaceReviewEligibility";
+// Resolves to the mocked module above, so calling these goes through the observing wrappers —
+// which is exactly what the §10 channel-liveness cases need to exercise each writer channel.
+import { writeAdaptivePanelFinalizationGovernanceEvent, writeAdaptivePanelOverrideGovernanceEvent, writeAdaptiveHumanReviewEvent } from "@/lib/firestore/runs";
+// Real, unmocked — the site witnesses interrogate fixture state through the SAME predicates
+// production uses, so a witness cannot agree with a case that arranged its twin's state.
+import { resolveWorkspaceReviewTarget } from "@/lib/workspaces/resolveWorkspaceReviewTarget";
+import { parseAdaptiveHumanReviewPanel } from "@/lib/governance/adaptiveHumanReviewPanel";
+import { parseSubmitAdaptiveReviewVoteRequest } from "@/lib/governance/adaptiveHumanReviewVote";
 
 type StoredDoc = Record<string, unknown>;
 const stores: Record<string, Map<string, StoredDoc>> = {
@@ -33,6 +41,8 @@ const stores: Record<string, Map<string, StoredDoc>> = {
 function resetStores() {
   for (const store of Object.values(stores)) store.clear();
   autoIdCounter = 0;
+  governanceEventLog.length = 0;
+  disabledEventObservers.clear();
 }
 
 function asPersisted(data: Record<string, unknown>): Record<string, unknown> {
@@ -66,33 +76,174 @@ function subKey(collection: string, parentId: string, subId: string): string {
 
 let autoIdCounter = 0;
 
-function makeSubDocRef(subCollectionName: string, parentDocId: string, subDocId: string) {
+/**
+ * ─── R5 §4–§11 — WHOLE-EVENT-STORE OBSERVATION ────────────────────────────────────────────────
+ *
+ * R4 BLOCKER: the previous oracle read ONE channel — the in-memory fake's `tx.set` store, filtered
+ * to keys prefixed `${RUN_ID}::`. Four independent escapes survived the entire suite: a
+ * governance event minted through an imported (mocked) writer helper on a rejection path, on the
+ * CREATE success path, and on the idempotent vote-replay path; a write to a TOP-LEVEL
+ * `governanceEvents` collection (whose key carries no run prefix); and a write to a
+ * `${runId}-shadow` document. "Writes no event via appendPanelGovernanceEvent" was being reported
+ * as "writes no event".
+ *
+ * The write surface below is derived from the PRODUCTION module's own source — its Firestore write
+ * mechanisms and its imported persistence dependencies — never from what the old test ledger
+ * happened to observe. `PRODUCTION_EVENT_CHANNEL_CONTRACT` re-derives it from source at run time
+ * and fails closed if the module gains a governance-event-capable dependency this harness does not
+ * instrument.
+ */
+type GovernanceEventChannel =
+  | "transaction.set"
+  | "transaction.update"
+  | "direct.set"
+  | "direct.create"
+  | "direct.update"
+  | "writer.panelFinalizationGovernanceEvent"
+  | "writer.panelOverrideGovernanceEvent"
+  | "writer.adaptiveHumanReviewEvent";
+
+type GovernanceEventObservation = {
+  channel: GovernanceEventChannel;
+  mode: "transaction" | "direct-writer";
+  /** Full resource identity, never collapsed to a leaf id — a shadow run document must stay visible as one. */
+  path: string;
+  collection: string;
+  /** The fake's own store key, when the write lands in a store; `null` for a writer-helper call. */
+  storeKey: string | null;
+  action: unknown;
+  actor: unknown;
+  payload: Record<string, unknown>;
+};
+
+const governanceEventLog: GovernanceEventObservation[] = [];
+/**
+ * §10 — the oracle's own falsifier. Disabling a channel here must make the channel-liveness
+ * mechanism control fail, which is what proves each observer is load-bearing rather than decorative.
+ */
+const disabledEventObservers = new Set<GovernanceEventChannel>();
+
+function observeGovernanceEvent(observation: GovernanceEventObservation): void {
+  if (disabledEventObservers.has(observation.channel)) return;
+  governanceEventLog.push(observation);
+}
+
+const GOVERNANCE_EVENT_COLLECTION = "governanceEvents";
+
+/**
+ * §7 — the imported writer helpers are a SECOND, independent channel into the very same
+ * `runs/{runId}/governanceEvents` collection: they are `await`ed outside the transaction and write
+ * through the real Firestore client, which this suite mocks. Observing them here is what makes
+ * "exactly one event" and "zero events" statements hold across channels rather than within one.
+ * Declared as a `function` so the hoisted `jest.mock` factories below can reach it.
+ */
+function observeWriterGovernanceEvent(channel: GovernanceEventChannel, runId: unknown, eventId: string, payload: Record<string, unknown>): void {
+  observeGovernanceEvent({
+    channel,
+    mode: "direct-writer",
+    path: `runs/${String(runId)}/${GOVERNANCE_EVENT_COLLECTION}/${eventId}`,
+    collection: GOVERNANCE_EVENT_COLLECTION,
+    storeKey: null,
+    action: payload?.action,
+    actor: payload?.byUid,
+    payload,
+  });
+}
+
+/** Fails loudly rather than letting a write to an uninstrumented collection vanish. */
+function storeFor(collectionName: string): Map<string, StoredDoc> {
+  const store = stores[collectionName];
+  if (!store) {
+    throw new Error(`R5 harness: write to unregistered collection "${collectionName}" — the whole-event-store observation model does not cover it`);
+  }
+  return store;
+}
+
+function recordFirestoreWrite(channel: GovernanceEventChannel, mode: "transaction" | "direct-writer", ref: { __collection: string; __id: string; __path: string }, data: Record<string, unknown>): void {
+  if (ref.__collection !== GOVERNANCE_EVENT_COLLECTION) return;
+  observeGovernanceEvent({
+    channel,
+    mode,
+    path: ref.__path,
+    collection: ref.__collection,
+    storeKey: ref.__id,
+    action: data?.action,
+    actor: data?.byUid,
+    payload: data,
+  });
+}
+
+function makeSubDocRef(subCollectionName: string, parentCollectionName: string, parentDocId: string, subDocId: string) {
   const key = subKey(subCollectionName, parentDocId, subDocId);
-  return {
+  const ref = {
     __collection: subCollectionName,
     __id: key,
+    __path: `${parentCollectionName}/${parentDocId}/${subCollectionName}/${subDocId}`,
     get: async () => {
       const data = stores[subCollectionName].get(key);
       return { exists: data !== undefined, data: () => data, id: subDocId };
     },
+    // §5 — DIRECT (non-transactional) document writes. Real Firestore document references expose
+    // these; the fake previously did not, so a production change that wrote an event outside the
+    // transaction would have crashed on an undefined method rather than being observed as the
+    // contract violation it is.
+    set: async (data: Record<string, unknown>) => {
+      recordFirestoreWrite("direct.set", "direct-writer", ref, data);
+      storeFor(subCollectionName).set(key, data);
+    },
+    create: async (data: Record<string, unknown>) => {
+      recordFirestoreWrite("direct.create", "direct-writer", ref, data);
+      if (storeFor(subCollectionName).has(key)) {
+        const err = new Error("ALREADY_EXISTS") as Error & { code: number };
+        err.code = 6;
+        throw err;
+      }
+      storeFor(subCollectionName).set(key, data);
+    },
+    update: async (data: Record<string, unknown>) => {
+      recordFirestoreWrite("direct.update", "direct-writer", ref, data);
+      const store = storeFor(subCollectionName);
+      store.set(key, applyDottedFieldUpdate(store.get(key) ?? {}, data));
+    },
   };
+  return ref;
 }
 
 function makeDocRef(collectionName: string, docId: string) {
-  return {
+  const ref = {
     __collection: collectionName,
     __id: docId,
+    __path: `${collectionName}/${docId}`,
     collection: (subCollectionName: string) => ({
       // Phase 9C.5 — `.doc()` with no argument mirrors real Firestore's
       // auto-ID generation, needed by `resubmitWorkspaceReview()`'s
       // `runRef.collection("governanceEvents").doc()` call.
-      doc: (subDocId?: string) => makeSubDocRef(subCollectionName, docId, subDocId ?? `auto-${++autoIdCounter}`),
+      doc: (subDocId?: string) => makeSubDocRef(subCollectionName, collectionName, docId, subDocId ?? `auto-${++autoIdCounter}`),
     }),
     get: async () => {
       const data = stores[collectionName].get(docId);
       return { exists: data !== undefined, data: () => data, id: docId };
     },
+    set: async (data: Record<string, unknown>) => {
+      recordFirestoreWrite("direct.set", "direct-writer", ref, data);
+      storeFor(collectionName).set(docId, data);
+    },
+    create: async (data: Record<string, unknown>) => {
+      recordFirestoreWrite("direct.create", "direct-writer", ref, data);
+      if (storeFor(collectionName).has(docId)) {
+        const err = new Error("ALREADY_EXISTS") as Error & { code: number };
+        err.code = 6;
+        throw err;
+      }
+      storeFor(collectionName).set(docId, data);
+    },
+    update: async (data: Record<string, unknown>) => {
+      recordFirestoreWrite("direct.update", "direct-writer", ref, data);
+      const store = storeFor(collectionName);
+      store.set(docId, applyDottedFieldUpdate(store.get(docId) ?? {}, data));
+    },
   };
+  return ref;
 }
 
 let concurrentMutationHook: ((ref: { __collection: string; __id: string }) => void) | null = null;
@@ -123,23 +274,35 @@ const mockAdminDb: any = {
           if (concurrentMutationHook) concurrentMutationHook(ref);
           return { exists: data !== undefined, data: () => data, id: ref.__id };
         },
-        update: (ref: { __collection: string; __id: string }, data: Record<string, unknown>) => {
+        update: (ref: { __collection: string; __id: string; __path: string }, data: Record<string, unknown>) => {
           hasWritten = true;
+          recordFirestoreWrite("transaction.update", "transaction", ref, data);
           pendingWrites.push(() => {
-            const store = stores[ref.__collection];
+            const store = storeFor(ref.__collection);
             const existing = store.get(ref.__id) ?? {};
             store.set(ref.__id, applyDottedFieldUpdate(existing, data));
           });
         },
-        set: (ref: { __collection: string; __id: string }, data: Record<string, unknown>) => {
+        set: (ref: { __collection: string; __id: string; __path: string }, data: Record<string, unknown>) => {
           hasWritten = true;
-          // R3 §35/§36 — injectable write failure so the atomicity guarantees are COMMITTED
-          // regressions instead of review-time probes. Throwing here aborts the callback before
-          // any `pendingWrites` are applied, which is exactly how a real write rejection behaves.
+          // R3 §35/§36 — MODELLED transactional write failure, so the atomicity guarantees are
+          // COMMITTED regressions instead of review-time probes. Throwing here aborts the callback
+          // before any `pendingWrites` are applied.
+          //
+          // R5 §49 — precise language: the real Admin SDK's `set()` only appends to the write
+          // batch and performs no I/O, so a PER-DOCUMENT write rejection is not a failure mode the
+          // real SDK exposes; a real commit fails as a whole. This injection models "the audit
+          // write does not land" at the earliest point the module could observe it, and the
+          // guarantee it pins — the module never commits the canonical mutation when its audit
+          // write does not land — is if anything STRONGER under real Firestore's single atomic
+          // commit. The injection is a modelling device, not a claimed SDK behaviour.
           if (throwOnSetCollection.value !== null && ref.__collection === throwOnSetCollection.value) {
-            throw new Error(`simulated write failure for ${ref.__collection}`);
+            throw new Error(`modelled transactional write failure for ${ref.__collection}`);
           }
-          pendingWrites.push(() => stores[ref.__collection].set(ref.__id, data));
+          // Observed at ATTEMPT time, not at commit time: an aborted attempt's buffered writes are
+          // discarded, so the retry suite distinguishes "attempted" from "committed" itself.
+          recordFirestoreWrite("transaction.set", "transaction", ref, data);
+          pendingWrites.push(() => storeFor(ref.__collection).set(ref.__id, data));
         },
       };
       const result = await fn(txn);
@@ -195,10 +358,24 @@ jest.mock("@/lib/firestore/runs", () => ({
   createAdaptiveHumanReviewHistory: (...args: unknown[]) => mockedCreateAdaptiveHumanReviewHistory(...args),
   createAdaptivePanelFinalizationHistory: (...args: unknown[]) => mockedCreateAdaptivePanelFinalizationHistory(...args),
   createAdaptivePanelOverrideHistory: (...args: unknown[]) => mockedCreateAdaptivePanelOverrideHistory(...args),
-  writeAdaptivePanelFinalizationGovernanceEvent: (...args: unknown[]) => mockedWriteAdaptivePanelFinalizationGovernanceEvent(...args),
-  writeAdaptivePanelOverrideGovernanceEvent: (...args: unknown[]) => mockedWriteAdaptivePanelOverrideGovernanceEvent(...args),
+  // R5 §4/§7 — these three write into runs/{runId}/governanceEvents through the real client, so
+  // they are instrumented channels of the whole-event-store oracle, not merely call-count spies.
+  writeAdaptivePanelFinalizationGovernanceEvent: (...args: unknown[]) => {
+    const a = (args[0] ?? {}) as Record<string, unknown>;
+    observeWriterGovernanceEvent("writer.panelFinalizationGovernanceEvent", a.runId, `panel-finalized:${String(a.finalDecisionId)}`, { action: "multi_reviewer_panel_finalized", byUid: a.actorUserId, at: a.finalizedAt, ...a });
+    return mockedWriteAdaptivePanelFinalizationGovernanceEvent(...args);
+  },
+  writeAdaptivePanelOverrideGovernanceEvent: (...args: unknown[]) => {
+    const a = (args[0] ?? {}) as Record<string, unknown>;
+    observeWriterGovernanceEvent("writer.panelOverrideGovernanceEvent", a.runId, `panel-owner-overridden:${String(a.finalDecisionId)}`, { action: "multi_reviewer_panel_owner_overridden", byUid: a.overrideByUserId, at: a.finalizedAt, ...a });
+    return mockedWriteAdaptivePanelOverrideGovernanceEvent(...args);
+  },
   createAdaptiveHumanReviewAssignmentHistory: (...args: unknown[]) => mockedCreateAdaptiveHumanReviewAssignmentHistory(...args),
-  writeAdaptiveHumanReviewEvent: (...args: unknown[]) => mockedWriteAdaptiveHumanReviewEvent(...args),
+  writeAdaptiveHumanReviewEvent: (...args: unknown[]) => {
+    const a = (args[0] ?? {}) as Record<string, unknown>;
+    observeWriterGovernanceEvent("writer.adaptiveHumanReviewEvent", a.runId, "auto-writer", { action: "human_review_decision", byUid: a.actorUserId ?? a.byUid, at: a.at, ...a });
+    return mockedWriteAdaptiveHumanReviewEvent(...args);
+  },
 }));
 
 const mockedWriteAdaptivePanelFinalizationAdminAuditEvent = jest.fn().mockResolvedValue({ status: "recorded" });
@@ -1622,7 +1799,77 @@ describe("overrideWorkspaceReviewPanel — Workspace-canary target admission (Ph
  *        against `null` because no fixture used a Project; and the governance context was
  *        compared to hardcoded literals, so its provenance was unproven.
  */
-const panelEvents = () => [...stores.governanceEvents.entries()].filter(([k]) => k.startsWith(`${RUN_ID}::`)).map(([, v]) => v as Record<string, unknown>);
+/**
+ * ─── R5 §6/§11 — THE ALL-CHANNEL CARDINALITY CONTRACT ─────────────────────────────────────────
+ *
+ * R4 BLOCKER BL1. The previous helper was:
+ *
+ *     [...stores.governanceEvents.entries()].filter(([k]) => k.startsWith(`${RUN_ID}::`))
+ *
+ * which observes ONE channel (the fake's transactional set store) at ONE key shape. Four escapes
+ * survived it: an event minted through an imported writer helper (rejection path, CREATE success
+ * path, and idempotent vote replay), a write to a TOP-LEVEL `governanceEvents` collection whose key
+ * carries no run prefix, and a write to a `${runId}-shadow` document. Every "exactly one event" and
+ * "no event" statement in this file was therefore scoped to one collection path, not to the store.
+ *
+ * ATTEMPTED vs COMMITTED, deliberately separated:
+ *   • `attemptedGovernanceEventCount()` counts every write ATTEMPT on every channel. Zero-event
+ *     claims use it, because a rejection path must not even attempt an audit write.
+ *   • `committedGovernanceEvents()` keeps only the attempts that survived — for a transactional
+ *     channel, the store still holds that exact payload object. Exactly-one claims use it, because
+ *     a retried transaction legitimately ATTEMPTS twice and COMMITS once (the aborted attempt's
+ *     buffered writes are discarded), and conflating the two would break the retry proof.
+ */
+const PANEL_MUTATION_ACTIONS: readonly string[] = Object.freeze([
+  "adaptive_review_panel_created",
+  "adaptive_review_panel_reconfigured",
+  "adaptive_review_panel_cancelled",
+  "adaptive_review_panel_vote_cast",
+]);
+
+const attemptedGovernanceEventCount = () => governanceEventLog.length;
+const committedGovernanceEvents = (): readonly GovernanceEventObservation[] =>
+  governanceEventLog.filter((o) => (o.mode === "direct-writer" ? true : stores[o.collection]?.get(o.storeKey as string) === o.payload));
+
+/**
+ * §11 — positive tests resolve THE sole accepted event from the all-channel committed ledger and
+ * assert its canonical path, rather than asking a narrow helper for "the event" and thereby
+ * reintroducing the observation gap. Throws (rather than returning a default) when cardinality is
+ * violated, so a second event on any channel surfaces here instead of being silently ignored.
+ */
+function soleCommittedGovernanceEvent(): GovernanceEventObservation {
+  const committed = committedGovernanceEvents();
+  if (committed.length !== 1) {
+    throw new Error(`expected exactly ONE committed governance event across all channels, saw ${committed.length}: ${JSON.stringify(committed.map((o) => ({ channel: o.channel, path: o.path, action: o.action })))}`);
+  }
+  return committed[0];
+}
+
+/** The payloads of the committed panel-mutation events, for shape assertions. */
+const panelEvents = (): Record<string, unknown>[] => committedGovernanceEvents().filter((o) => PANEL_MUTATION_ACTIONS.includes(String(o.action))).map((o) => o.payload);
+
+/**
+ * §7 — OPERATION-SCOPED. The target module also imports the finalization/override governance,
+ * history and admin-audit writers. None of them is called by create/reconfigure/cancel/vote (they
+ * are reached only from `finalizeWorkspaceReviewPanel` at lines 917-957 and
+ * `overrideWorkspaceReviewPanel` at lines 1162-1178). This asserts that for the four audited
+ * operations only — it makes no claim that those helpers are forbidden anywhere else, and the
+ * finalize/override suites below legitimately assert they ARE called.
+ */
+function expectNoForeignPersistenceWriters(): void {
+  const foreign: Record<string, jest.Mock> = {
+    writeAdaptivePanelFinalizationGovernanceEvent: mockedWriteAdaptivePanelFinalizationGovernanceEvent,
+    writeAdaptivePanelOverrideGovernanceEvent: mockedWriteAdaptivePanelOverrideGovernanceEvent,
+    writeAdaptiveHumanReviewEvent: mockedWriteAdaptiveHumanReviewEvent,
+    createAdaptiveHumanReviewHistory: mockedCreateAdaptiveHumanReviewHistory,
+    createAdaptivePanelFinalizationHistory: mockedCreateAdaptivePanelFinalizationHistory,
+    createAdaptivePanelOverrideHistory: mockedCreateAdaptivePanelOverrideHistory,
+    writeAdaptivePanelFinalizationAdminAuditEvent: mockedWriteAdaptivePanelFinalizationAdminAuditEvent,
+    writeAdaptivePanelOverrideAdminAuditEvent: mockedWriteAdaptivePanelOverrideAdminAuditEvent,
+  };
+  const called = Object.entries(foreign).filter(([, m]) => m.mock.calls.length > 0).map(([name, m]) => `${name}x${m.mock.calls.length}`);
+  expect(`foreignPersistenceWritersCalled:${called.join(",")}`).toBe("foreignPersistenceWritersCalled:");
+}
 
 /**
  * R3 §23–§26 — the governance context a panel event must carry, READ BACK from the canonical
@@ -1637,11 +1884,206 @@ const canonicalGovContext = () => {
 /** A second, deliberately NON-DEFAULT governance context, so one historical literal cannot masquerade as canonical provenance. */
 const ALT_GOV = { schemaId: "evidence_review", answerShape: "evidence_review_view" } as const;
 
+/**
+ * ─── R5 §9/§10 — THE CHANNEL INVENTORY FAILS CLOSED, AND THE ORACLE IS ITSELF FALSIFIABLE ──────
+ *
+ * Two distinct obligations, easy to conflate:
+ *   §9 COVERAGE — every governance-event-capable mechanism the PRODUCTION module can reach must be
+ *     represented in the harness. Derived from the module's own source (its persistence imports and
+ *     the write methods it invokes), never from what the harness happens to instrument, so adding a
+ *     new writer dependency in production fails this suite instead of silently escaping the oracle.
+ *   §10 LIVENESS — each instrumented channel's observer must actually fire. Without this, "we
+ *     observe eight channels" is an unfalsifiable claim: an observer could be disabled or wired to
+ *     the wrong hook and every zero-event assertion would pass for the wrong reason. Disabling any
+ *     single channel's observation breaks exactly that channel's case below.
+ */
+const INSTRUMENTED_EVENT_CHANNELS: readonly GovernanceEventChannel[] = Object.freeze([
+  "transaction.set",
+  "transaction.update",
+  "direct.set",
+  "direct.create",
+  "direct.update",
+  "writer.panelFinalizationGovernanceEvent",
+  "writer.panelOverrideGovernanceEvent",
+  "writer.adaptiveHumanReviewEvent",
+]);
+
+/** Modules whose exports PERSIST something. A new import from one of these must be classified. */
+const PERSISTENCE_MODULES: readonly string[] = Object.freeze(["@/lib/firestore/runs", "@/lib/governance/auditLog"]);
+
+/**
+ * Every persistence import the production module takes, classified. An entry naming a channel is
+ * instrumented by the oracle; `"not-a-governance-event-writer"` records a reviewed judgement that
+ * the export writes somewhere other than `governanceEvents` (history and admin-audit collections),
+ * and those are still asserted un-called for the four audited operations by
+ * `expectNoForeignPersistenceWriters()`.
+ */
+const PERSISTENCE_IMPORT_CLASSIFICATION: Readonly<Record<string, GovernanceEventChannel | "not-a-governance-event-writer">> = Object.freeze({
+  writeAdaptivePanelFinalizationGovernanceEvent: "writer.panelFinalizationGovernanceEvent",
+  writeAdaptivePanelOverrideGovernanceEvent: "writer.panelOverrideGovernanceEvent",
+  writeAdaptiveHumanReviewEvent: "writer.adaptiveHumanReviewEvent",
+  createAdaptivePanelFinalizationHistory: "not-a-governance-event-writer",
+  createAdaptivePanelOverrideHistory: "not-a-governance-event-writer",
+  createAdaptiveHumanReviewHistory: "not-a-governance-event-writer",
+  createAdaptiveHumanReviewAssignmentHistory: "not-a-governance-event-writer",
+  writeAdaptivePanelFinalizationAdminAuditEvent: "not-a-governance-event-writer",
+  writeAdaptivePanelOverrideAdminAuditEvent: "not-a-governance-event-writer",
+  writeAdaptiveAdminAuditEvent: "not-a-governance-event-writer",
+});
+
+/** Write methods that, on a Firestore reference, persist something. */
+const FIRESTORE_WRITE_METHODS: readonly string[] = Object.freeze(["set", "create", "update", "delete", "add"]);
+
+type ProductionWriteSurface = { persistenceImports: string[]; transactionMethods: string[]; directWriteCalls: string[] };
+
+/** Derived from the production source, scoped to the four audited operations for call analysis. */
+function deriveProductionWriteSurface(sourceText: string, targetFunctions: readonly string[]): ProductionWriteSurface {
+  const sf = tsApi.createSourceFile("subject.ts", sourceText, tsApi.ScriptTarget.ES2020, true);
+  const persistenceImports: string[] = [];
+  const transactionMethods = new Set<string>();
+  const directWriteCalls: string[] = [];
+
+  tsApi.forEachChild(sf, (node) => {
+    if (!tsApi.isImportDeclaration(node) || !tsApi.isStringLiteral(node.moduleSpecifier)) return;
+    if (!PERSISTENCE_MODULES.includes(node.moduleSpecifier.text)) return;
+    const bindings = node.importClause?.namedBindings;
+    if (bindings && tsApi.isNamedImports(bindings)) {
+      for (const element of bindings.elements) persistenceImports.push(element.name.text);
+    }
+  });
+
+  const analyseFunction = (fnNode: tsApi.Node) => {
+    // the transaction callback's own parameter name, whatever it is called
+    const txParamNames = new Set<string>();
+    const findTxParam = (n: tsApi.Node) => {
+      if (tsApi.isCallExpression(n) && n.expression.getText(sf).endsWith("runTransaction") && n.arguments[0]) {
+        const cb = n.arguments[0];
+        if ((tsApi.isArrowFunction(cb) || tsApi.isFunctionExpression(cb)) && cb.parameters[0] && tsApi.isIdentifier(cb.parameters[0].name)) {
+          txParamNames.add(cb.parameters[0].name.text);
+        }
+      }
+      tsApi.forEachChild(n, findTxParam);
+    };
+    findTxParam(fnNode);
+
+    const visit = (n: tsApi.Node) => {
+      if (tsApi.isCallExpression(n) && tsApi.isPropertyAccessExpression(n.expression)) {
+        const method = n.expression.name.text;
+        const receiver = n.expression.expression;
+        if (tsApi.isIdentifier(receiver) && txParamNames.has(receiver.text)) transactionMethods.add(method);
+        else if (FIRESTORE_WRITE_METHODS.includes(method) && /\badminDb\b/.test(receiver.getText(sf))) {
+          directWriteCalls.push(`${receiver.getText(sf).replace(/\s+/g, " ")}.${method}`);
+        }
+      }
+      tsApi.forEachChild(n, visit);
+    };
+    tsApi.forEachChild(fnNode, visit);
+  };
+
+  const walk = (node: tsApi.Node) => {
+    if (tsApi.isFunctionDeclaration(node) && node.name && targetFunctions.includes(node.name.text)) analyseFunction(node);
+    tsApi.forEachChild(node, walk);
+  };
+  tsApi.forEachChild(sf, walk);
+
+  return { persistenceImports: [...new Set(persistenceImports)].sort(), transactionMethods: [...transactionMethods].sort(), directWriteCalls: directWriteCalls.sort() };
+}
+
+describe("whole-event-store oracle — channel inventory fails closed (§9)", () => {
+  const surface = () => deriveProductionWriteSurface(PANEL_MUTATIONS_SOURCE, Object.keys(PANEL_OPERATION_FUNCTIONS));
+
+  it("every persistence import the production module takes is classified", () => {
+    const unclassified = surface().persistenceImports.filter((name) => !Object.prototype.hasOwnProperty.call(PERSISTENCE_IMPORT_CLASSIFICATION, name));
+    expect(`unclassifiedPersistenceImports:${unclassified.join(",")}`).toBe("unclassifiedPersistenceImports:");
+    // and the derivation is not vacuously empty
+    expect(surface().persistenceImports.length).toBeGreaterThanOrEqual(7);
+  });
+
+  it("every persistence import classified as a governance-event writer has an instrumented channel", () => {
+    const missing = surface().persistenceImports
+      .map((name) => PERSISTENCE_IMPORT_CLASSIFICATION[name])
+      .filter((c): c is GovernanceEventChannel => c !== "not-a-governance-event-writer" && c !== undefined)
+      .filter((channel) => !INSTRUMENTED_EVENT_CHANNELS.includes(channel));
+    expect(`governanceWritersWithoutAnObserver:${missing.join(",")}`).toBe("governanceWritersWithoutAnObserver:");
+  });
+
+  it("every transaction write method the audited operations invoke is observed", () => {
+    const methods = surface().transactionMethods;
+    expect(methods).toEqual(["get", "set"]);
+    const writeMethods = methods.filter((m) => FIRESTORE_WRITE_METHODS.includes(m));
+    const uninstrumented = writeMethods.filter((m) => !INSTRUMENTED_EVENT_CHANNELS.includes(`transaction.${m}` as GovernanceEventChannel));
+    expect(`uninstrumentedTransactionWrites:${uninstrumented.join(",")}`).toBe("uninstrumentedTransactionWrites:");
+  });
+
+  it("the audited operations take no DIRECT (non-transactional) Firestore write path", () => {
+    expect(`directWriteCalls:${surface().directWriteCalls.join(" | ")}`).toBe("directWriteCalls:");
+  });
+});
+
+describe("whole-event-store oracle — every instrumented channel is LIVE (§10)", () => {
+  const eventRef = (runId: string, id: string) => mockAdminDb.collection("runs").doc(runId).collection("governanceEvents").doc(id);
+  const seen = (channel: GovernanceEventChannel) => governanceEventLog.filter((o) => o.channel === channel);
+
+  it("transaction.set", async () => {
+    await mockAdminDb.runTransaction(async (tx: any) => tx.set(eventRef(RUN_ID, "live-tx-set"), { action: "LIVENESS" }));
+    expect(`observed:${seen("transaction.set").length} path:${seen("transaction.set")[0]?.path}`).toBe(`observed:1 path:runs/${RUN_ID}/governanceEvents/live-tx-set`);
+  });
+
+  it("transaction.update", async () => {
+    await mockAdminDb.runTransaction(async (tx: any) => tx.update(eventRef(RUN_ID, "live-tx-update"), { action: "LIVENESS" }));
+    expect(`observed:${seen("transaction.update").length}`).toBe("observed:1");
+  });
+
+  it("direct.set", async () => {
+    await eventRef(RUN_ID, "live-direct-set").set({ action: "LIVENESS" });
+    expect(`observed:${seen("direct.set").length}`).toBe("observed:1");
+  });
+
+  it("direct.create", async () => {
+    await eventRef(RUN_ID, "live-direct-create").create({ action: "LIVENESS" });
+    expect(`observed:${seen("direct.create").length}`).toBe("observed:1");
+  });
+
+  it("direct.update", async () => {
+    await eventRef(RUN_ID, "live-direct-update").update({ action: "LIVENESS" });
+    expect(`observed:${seen("direct.update").length}`).toBe("observed:1");
+  });
+
+  it("writer.panelFinalizationGovernanceEvent", async () => {
+    await writeAdaptivePanelFinalizationGovernanceEvent({ runId: RUN_ID, teamId: null, schemaId: "decision_support", answerShape: "decision_support_view", finalStatus: "approved", finalDecisionId: "live-1", aggregationPolicyVersion: 1, supportingReviewerCount: 2, actorUserId: OWNER_UID, finalizedAt: MUTATE_NOW });
+    expect(`observed:${seen("writer.panelFinalizationGovernanceEvent").length} path:${seen("writer.panelFinalizationGovernanceEvent")[0]?.path}`).toBe(`observed:1 path:runs/${RUN_ID}/governanceEvents/panel-finalized:live-1`);
+  });
+
+  it("writer.panelOverrideGovernanceEvent", async () => {
+    await writeAdaptivePanelOverrideGovernanceEvent({ runId: RUN_ID, teamId: null, schemaId: "decision_support", answerShape: "decision_support_view", finalStatus: "approved", finalDecisionId: "live-2", overrideByUserId: OWNER_UID, finalizedAt: MUTATE_NOW });
+    expect(`observed:${seen("writer.panelOverrideGovernanceEvent").length}`).toBe("observed:1");
+  });
+
+  it("writer.adaptiveHumanReviewEvent", async () => {
+    await writeAdaptiveHumanReviewEvent({ runId: RUN_ID, teamId: null, actorUserId: OWNER_UID, at: MUTATE_NOW } as never);
+    expect(`observed:${seen("writer.adaptiveHumanReviewEvent").length}`).toBe("observed:1");
+  });
+
+  it("the liveness set covers exactly the instrumented channel list — no channel is claimed without a case", () => {
+    // Each case above names its channel in its title; this pins the list they must jointly cover.
+    expect([...INSTRUMENTED_EVENT_CHANNELS].sort()).toEqual([
+      "direct.create", "direct.set", "direct.update",
+      "transaction.set", "transaction.update",
+      "writer.adaptiveHumanReviewEvent", "writer.panelFinalizationGovernanceEvent", "writer.panelOverrideGovernanceEvent",
+    ]);
+  });
+});
+
 describe("panel mutation audit coverage — successful mutations", () => {
   it("panel CREATE writes exactly one created event, with its COMPLETE shape", async () => {
-    const before = panelEvents().length;
+    const before = attemptedGovernanceEventCount();
     expect((await putCall()).ok).toBe(true);
-    expect(panelEvents()).toHaveLength(before + 1);
+    // §11 — resolved from the ALL-CHANNEL committed ledger, then path-checked, rather than asked
+    // of a narrow per-run-prefix helper.
+    const sole = soleCommittedGovernanceEvent();
+    expect(`channel:${sole.channel} path:${sole.path}`).toBe(`channel:transaction.set path:runs/${RUN_ID}/governanceEvents/auto-1`);
+    expect(`attemptedDelta:${attemptedGovernanceEventCount() - before}`).toBe("attemptedDelta:1");
+    expectNoForeignPersistenceWriters();
     expect(panelEvents()[0]).toEqual({
       action: "adaptive_review_panel_created",
       byUid: OWNER_UID,
@@ -1658,7 +2100,8 @@ describe("panel mutation audit coverage — successful mutations", () => {
   it("panel RECONFIGURE writes exactly one reconfigured event, with its COMPLETE shape", async () => {
     seedPanel({ revision: 1 });
     expect((await putCall({ expectedRevision: 1, reviewerUserIds: [OWNER_UID, ADMIN_UID, REVIEWER_UID] })).ok).toBe(true);
-    expect(panelEvents()).toHaveLength(1);
+    expect(soleCommittedGovernanceEvent().path).toBe(`runs/${RUN_ID}/governanceEvents/auto-1`);
+    expectNoForeignPersistenceWriters();
     expect(panelEvents()[0]).toEqual({
       action: "adaptive_review_panel_reconfigured",
       byUid: OWNER_UID,
@@ -1675,7 +2118,8 @@ describe("panel mutation audit coverage — successful mutations", () => {
   it("panel CANCEL writes exactly one cancelled event, with its COMPLETE shape", async () => {
     seedPanel({ revision: 1 });
     expect((await deleteCall()).ok).toBe(true);
-    expect(panelEvents()).toHaveLength(1);
+    expect(soleCommittedGovernanceEvent().path).toBe(`runs/${RUN_ID}/governanceEvents/auto-1`);
+    expectNoForeignPersistenceWriters();
     expect(panelEvents()[0]).toEqual({
       action: "adaptive_review_panel_cancelled",
       byUid: OWNER_UID,
@@ -1691,7 +2135,8 @@ describe("panel mutation audit coverage — successful mutations", () => {
   it("VOTE writes exactly one vote_cast event, with its COMPLETE shape", async () => {
     seedPanel({ revision: 1 });
     expect((await voteCall({ status: "changes_requested", comment: "needs work", conditions: ["c1", "c2"] })).ok).toBe(true);
-    expect(panelEvents()).toHaveLength(1);
+    expect(soleCommittedGovernanceEvent().path).toBe(`runs/${RUN_ID}/governanceEvents/auto-1`);
+    expectNoForeignPersistenceWriters();
     expect(panelEvents()[0]).toEqual({
       action: "adaptive_review_panel_vote_cast",
       byUid: OWNER_UID,
@@ -1733,12 +2178,18 @@ describe("panel mutation audit coverage — successful mutations", () => {
     expect(`eventDoesNotEchoRawLength:${panelEvents()[0].reviewerCount !== raw.length}`).toBe("eventDoesNotEchoRawLength:true");
   });
 
-  it("an IDEMPOTENT vote replay writes NO second event — one vote, one record", async () => {
+  it("an IDEMPOTENT vote replay attempts NO second event on ANY channel — one vote, one record", async () => {
     seedPanel({ revision: 1 });
     expect((await voteCall()).ok).toBe(true);
     expect(panelEvents()).toHaveLength(1);
+    const afterFirst = attemptedGovernanceEventCount();
     expect(await voteCall()).toMatchObject({ ok: true, submissionStatus: "already_submitted" });
-    expect(panelEvents()).toHaveLength(1);
+    // R4 BL1: the replay must not even ATTEMPT a write, on the transaction channel or through any
+    // imported writer helper. Counting committed panel-action events under one key prefix let a
+    // writer-helper call on this exact branch survive.
+    expect(`replayAttemptedDelta:${attemptedGovernanceEventCount() - afterFirst}`).toBe("replayAttemptedDelta:0");
+    expect(committedGovernanceEvents()).toHaveLength(1);
+    expectNoForeignPersistenceWriters();
   });
 });
 
@@ -1850,38 +2301,26 @@ describe("panel mutation audit coverage — governance context provenance", () =
  * AST. Deleting a case, skipping one, duplicating one, or collapsing two duplicate-reason sites
  * back into a single `(operation, reason)` entry each leave an unmet obligation and fail.
  *
- * R4 MUTATION BATTERY — every claim below was made to fail before it was believed. Run from an
- * immutable committed SHA; every patch verified present on disk before scoring, and the file
- * verified byte-identical to the commit afterwards. Judged by process EXIT CODE.
+ * MUTATION DISCIPLINE. Every claim in this file was made to fail before it was believed. Batteries
+ * run from an immutable committed SHA in a private sandbox; every patch is verified present on disk
+ * before scoring and the file verified byte-identical to the commit afterwards; verdicts are read
+ * from the process EXIT CODE, never from the printed `Tests:` tally (a failing `afterAll` gives
+ * exit 1 while every individual test prints as passed — and this file now has exactly such an
+ * `afterAll`). The R5 battery results are recorded in the PR description rather than duplicated
+ * here, so they cannot drift out of step with it.
  *
- *   GHOST-EVENT SWEEP — an unconditional `tx.set(... governanceEvents ...)` inserted into the
- *   guarded branch of each of the 35 mutable decision sites (the `if`'s then-branch wrapped in a
- *   block, so control flow is unchanged): 32 KILLED_DIRECT by this suite's own runner, 3 SURVIVED
- *   — and those 3 are exactly `create#reject-04`, `cancel#reject-04`, `vote#reject-13`, the three
- *   sites independently classified structurally unreachable. Their survival corroborates the
- *   classification (nothing reaches them) and confirms the exclusion list contains no reachable
- *   site. A first attempt at this sweep was DISCARDED as harness-invalid: it inserted the write
- *   before the `return` of a brace-less `if (c) return x;`, which makes the return unconditional
- *   and breaks success paths instead of testing a ghost write on the rejection path — every site
- *   "died", and none of it was evidence.
- *
- *   NOT EXPRESSIBLE (6 sites, stated rather than scored): `create/cancel/vote#reject-01` and
- *   `#reject-02` return before `runTransaction` is entered — there is no transaction and, for
- *   `firestore_unavailable`, no database handle at all, so no write can be written there. The
- *   three `write_failed` catches sit outside the transaction callback and belong to the atomicity
- *   regressions below, which assert that neither half of the atomic pair survives.
- *
- *   DISCOVERER (7): every self-test falsified — site id keyed by reason instead of AST ordinal,
- *   an empty return, no `as const` unwrapping, no structured-reason discriminant, no catch
- *   classification, and the nested-scope rule in both directions. All KILLED.
- *
- *   COVERAGE TABLE AND EXCLUSION LIST (7): deleting `create#reject-06`, collapsing it onto
- *   `create#reject-05` as one `(operation, reason)` entry, deleting the cross-Workspace
- *   `vote#reject-05`, silently skipping one ledger push, renaming an unreachable entry to a
- *   phantom site, claiming the REACHABLE `vote#reject-12` is unreachable, and dropping the
- *   `write_failed` exclusion. All KILLED.
- *
- *   CANCEL PROVENANCE (16) and FIXTURE DEGRADATION (6): see that suite's own doc comment.
+ * TWO EARLIER BATTERIES WERE DISCARDED, and both lessons are worth keeping:
+ *   · The first ghost-event sweep inserted its write before the `return` of a brace-less
+ *     `if (c) return x;`, which makes the return UNCONDITIONAL and breaks success paths instead of
+ *     testing a ghost write on the rejection path. Every site "died" and none of it was evidence.
+ *     A valid sweep wraps the then-branch in a block so control flow is unchanged.
+ *   · R4's sweep then concluded from three survivors that "nothing reaches them". That inference
+ *     was false for one of the three: an existing test in this file DOES execute
+ *     `create#reject-04` through the synthetic capability split, and the ghost survived only
+ *     because that test never counted events. Survival proves a mutation was not caught; it does
+ *     not prove the branch was not executed. Reachability needs its own probe — an
+ *     AST-shape-preserving one, since deleting the return changes the inventory and fails the
+ *     suite for an unrelated reason.
  *
  * WHAT THIS DOES NOT CLAIM (§10, §44): the reconciliation cannot defend against a coordinated edit
  * that removes a production decision point and its case together — but it now DISCOVERS a newly
@@ -2103,7 +2542,171 @@ describe("AST rejection-site discoverer — self-falsification", () => {
     const byOperationReason = new Set(sites.map((s) => `${s.operation}::${s.reasonLiteral}`));
     expect(`bySite:${bySite.size} byOperationReason:${byOperationReason.size}`).toBe("bySite:2 byOperationReason:1");
   });
+
+  // ── §19/§20 — the census fails CLOSED on every shape the classifier does not support ──
+  it("§19 — an alias-based `ok` is COUNTED as a return and classified UNSUPPORTED, not ignored", () => {
+    const source = `export async function synthOp(a: number) { const f = false as const; if (a < 0) return { ok: f, reason: "sneaky" }; return { ok: true }; }`;
+    expect(discoverRejectionSites(source, SYNTH_MAP)).toEqual([]); // the narrow discoverer still cannot see it …
+    const census = censusReturnStatements(source, SYNTH_MAP);
+    // … but the census does, and refuses to classify it as anything safe
+    expect(census.map((r) => r.classification)).toEqual(["unsupported", "success"]);
+  });
+
+  it("§20D — a function with no rejection still has EVERY return classified", () => {
+    const census = censusReturnStatements(SYNTHETIC.noRejection, SYNTH_MAP);
+    expect(census.map((r) => r.classification)).toEqual(["success"]);
+    expect(discoverRejectionSites(SYNTHETIC.noRejection, SYNTH_MAP)).toEqual([]);
+  });
+
+  it("§20F — a relay return is classified explicitly and marked rejection-capable", () => {
+    const source = `export async function synthOp() { const r = await go(); if (!r.ok) return r; return { ok: true }; }`;
+    const census = censusReturnStatements(source, SYNTH_MAP);
+    expect(census.map((r) => `${r.classification}/${r.propagates}`)).toEqual(["relay/rejection-capable", "success/n/a"]);
+  });
+
+  it("a spread, a shorthand `ok`, and a bare return are each UNSUPPORTED rather than silently dropped", () => {
+    const spread = `export async function synthOp(a: number) { if (a < 0) return { ...DENY, reason: "x" }; return { ok: true }; }`;
+    const shorthand = `export async function synthOp(a: number) { const ok = false; if (a < 0) return { ok, reason: "x" }; return { ok: true }; }`;
+    const bare = `export async function synthOp(a: number) { if (a < 0) return; return { ok: true }; }`;
+    expect(censusReturnStatements(spread, SYNTH_MAP).map((r) => r.classification)).toEqual(["unsupported", "success"]);
+    expect(censusReturnStatements(shorthand, SYNTH_MAP).map((r) => r.classification)).toEqual(["unsupported", "success"]);
+    expect(censusReturnStatements(bare, SYNTH_MAP).map((r) => r.classification)).toEqual(["unsupported", "success"]);
+  });
 });
+
+/**
+ * ─── R5 §18/§21 — THE PRODUCTION CENSUS, AND THE FAIL-CLOSED META-TEST ────────────────────────
+ */
+// Lazy + memoized: this block sits above `PANEL_MUTATIONS_SOURCE`'s declaration in source order, and
+// the tests below only need the census at run time.
+let returnCensusCache: readonly CensusedReturn[] | null = null;
+const RETURN_CENSUS = (): readonly CensusedReturn[] => (returnCensusCache ??= Object.freeze(censusReturnStatements(PANEL_MUTATIONS_SOURCE, PANEL_OPERATION_FUNCTIONS).map((r) => Object.freeze(r))));
+
+describe("production ReturnStatement census — fails closed on unrecognised shapes (§18–§21)", () => {
+  it("EVERY return in the audited functions is classified — an unsupported shape fails here", () => {
+    const unsupported = RETURN_CENSUS().filter((r) => r.classification === "unsupported").map((r) => `${r.operation}#return-${r.ordinal}: ${r.expr}`);
+    expect(`unsupportedReturnShapes:${unsupported.join(" | ")}`).toBe("unsupportedReturnShapes:");
+    expect(RETURN_CENSUS().length).toBeGreaterThan(DISCOVERED_REJECTION_SITES.length);
+  });
+
+  it("the census reconciles with the rejection inventory: rejections + successes + relays = every return", () => {
+    const byClass = (c: ReturnClassification) => RETURN_CENSUS().filter((r) => r.classification === c).length;
+    expect(`total:${RETURN_CENSUS().length} rejection:${byClass("rejection")} success:${byClass("success")} relay:${byClass("relay")} unsupported:${byClass("unsupported")}`).toBe("total:53 rejection:44 success:6 relay:3 unsupported:0");
+    // the rejection class IS the discoverer's inventory, counted independently
+    expect(byClass("rejection")).toBe(DISCOVERED_REJECTION_SITES.length);
+  });
+
+  /**
+   * §21 — the three relay returns propagate a rejection onward, so their relationship to the
+   * obligation model must be explicit rather than an unexplained omission. Each sits AFTER its
+   * function's `runTransaction` call has settled: the decision it relays was already counted at the
+   * site that constructed it, and no Firestore write is reachable between the relay and the
+   * function's exit. They are therefore not independent decision points, and carry no obligation of
+   * their own — stated here rather than left to the reader.
+   */
+  it("every relay return is rejection-capable, sits after the transaction, and relays an already-counted decision", () => {
+    const relays = RETURN_CENSUS().filter((r) => r.classification === "relay");
+    expect(relays.map((r) => `${r.operation}:${r.propagates}`)).toEqual(["create:rejection-capable", "cancel:rejection-capable", "vote:rejection-capable"]);
+    for (const relay of relays) {
+      expect(`${relay.operation}:relayIsAfterTransaction:${relay.start > relay.transactionEnd}`).toBe(`${relay.operation}:relayIsAfterTransaction:true`);
+    }
+    expect(relays.map((r) => r.expr)).toEqual(["return transactionResult;", "return transactionResult;", "return transactionResult;"]);
+  });
+});
+
+/**
+ * ─── R5 §18–§21 — EVERY ReturnStatement IS CENSUSED AND CLASSIFIED ────────────────────────────
+ *
+ * R4 MAJOR: `discoverRejectionSites` recognises exactly one syntactic shape — a returned object
+ * literal whose `ok` property is the literal `false`. A new production rejection written any other
+ * way was INVISIBLE, and R4 demonstrated it: adding
+ *
+ *     const mjFalse = false as const;
+ *     return { ok: mjFalse, reason: "vote_malformed" as const };
+ *
+ * together with a forged `vote_cast` write left the suite green at an unchanged 44/41/59/56. The
+ * discoverer failed OPEN.
+ *
+ * The fix is not a general-purpose static analyser. It is a total census: every `ReturnStatement`
+ * in the audited functions is classified, and anything the classifier does not explicitly support
+ * is `unsupported`, which FAILS the suite until support is added deliberately. The discoverer may
+ * still only understand one rejection shape — it simply may no longer ignore the shapes it cannot.
+ */
+type ReturnClassification = "rejection" | "success" | "relay" | "unsupported";
+
+type CensusedReturn = {
+  operation: "create" | "cancel" | "vote";
+  ordinal: number;
+  classification: ReturnClassification;
+  expr: string;
+  /** For a relay: whether it can propagate a rejection result onward. */
+  propagates: "rejection-capable" | "success-only" | "n/a";
+  start: number;
+  /** End offset of the enclosing function's `runTransaction` call, for the §21 ordering check. */
+  transactionEnd: number;
+};
+
+function censusReturnStatements(sourceText: string, functionToOperation: Readonly<Record<string, "create" | "cancel" | "vote">>): CensusedReturn[] {
+  const sf = tsApi.createSourceFile("subject.ts", sourceText, tsApi.ScriptTarget.ES2020, true);
+  const out: CensusedReturn[] = [];
+  const textOf = (n: tsApi.Node) => n.getText(sf).replace(/\s+/g, " ").trim();
+  const unwrap = (node: tsApi.Expression): tsApi.Expression => {
+    let current: tsApi.Expression = node;
+    for (;;) {
+      if (tsApi.isAsExpression(current) || tsApi.isSatisfiesExpression(current) || tsApi.isParenthesizedExpression(current)) { current = current.expression; continue; }
+      return current;
+    }
+  };
+
+  const collect = (fnNode: tsApi.Node, operation: "create" | "cancel" | "vote") => {
+    let ordinal = 0;
+    let transactionEnd = -1;
+    const findTx = (n: tsApi.Node) => {
+      if (tsApi.isCallExpression(n) && n.expression.getText(sf).endsWith("runTransaction")) transactionEnd = Math.max(transactionEnd, n.getEnd());
+      tsApi.forEachChild(n, findTx);
+    };
+    findTx(fnNode);
+
+    const visit = (n: tsApi.Node) => {
+      if (n !== fnNode && (tsApi.isFunctionDeclaration(n) || tsApi.isMethodDeclaration(n))) return;
+      if (tsApi.isReturnStatement(n)) {
+        ordinal += 1;
+        let classification: ReturnClassification = "unsupported";
+        let propagates: CensusedReturn["propagates"] = "n/a";
+        const expression = n.expression ? unwrap(n.expression) : undefined;
+        if (!expression) {
+          classification = "unsupported"; // a bare `return;` in a result-returning function
+        } else if (tsApi.isObjectLiteralExpression(expression)) {
+          const hasSpread = expression.properties.some((p) => tsApi.isSpreadAssignment(p));
+          const okProp = expression.properties.find((p) => p.name?.getText(sf) === "ok");
+          if (hasSpread || !okProp) classification = "unsupported";
+          else if (!tsApi.isPropertyAssignment(okProp)) classification = "unsupported"; // shorthand `{ ok }`
+          else {
+            const okValue = unwrap(okProp.initializer);
+            if (okValue.kind === tsApi.SyntaxKind.FalseKeyword) classification = "rejection";
+            else if (okValue.kind === tsApi.SyntaxKind.TrueKeyword) classification = "success";
+            else classification = "unsupported"; // e.g. `ok: someIdentifier`
+          }
+        } else if (tsApi.isIdentifier(expression)) {
+          classification = "relay";
+          propagates = "rejection-capable";
+        }
+        out.push({ operation, ordinal, classification, expr: textOf(n).slice(0, 160), propagates, start: n.getStart(sf), transactionEnd });
+      }
+      tsApi.forEachChild(n, visit);
+    };
+    tsApi.forEachChild(fnNode, visit);
+  };
+
+  const walk = (node: tsApi.Node) => {
+    if (tsApi.isFunctionDeclaration(node) && node.name && Object.prototype.hasOwnProperty.call(functionToOperation, node.name.text)) {
+      collect(node, functionToOperation[node.name.text]);
+    }
+    tsApi.forEachChild(node, walk);
+  };
+  tsApi.forEachChild(sf, walk);
+  return out;
+}
 
 /**
  * The real inventory. Read from disk at module load: if the production file moves or is renamed,
@@ -2119,37 +2722,67 @@ const DISCOVERED_REJECTION_SITES: readonly DiscoveredRejectionSite[] = Object.fr
 const WRITE_FAILED_SITES: readonly DiscoveredRejectionSite[] = DISCOVERED_REJECTION_SITES.filter((s) => s.guardKind === "catch");
 const DECISION_SITES: readonly DiscoveredRejectionSite[] = DISCOVERED_REJECTION_SITES.filter((s) => s.guardKind !== "catch");
 
+/**
+ * ─── R5 §27/§28 — THE AUTH DENIAL UNION IS PINNED TO PRODUCTION SOURCE ────────────────────────
+ *
+ * R4 MINOR: this list was hand-written on BOTH sides of the reconciliation — once when expanding
+ * the passthrough obligations and once in the three `...AUTH_DENIAL_REASONS.map(...)` case spreads
+ * — so "the expected side comes from the AST, never from the case table" held for 38 of 59
+ * obligations but not for these 21. Nothing tied the list to production's own union, and because
+ * `tsconfig` excludes `*.spec.ts` and ts-jest is transpile-only, a TypeScript `satisfies` here
+ * would enforce nothing at all. An eighth denial reason added in production would have been
+ * discovered by neither side.
+ *
+ * The members are now parsed out of the authoritative production declaration. The hand-written
+ * list below remains — the executable cases need a literal to iterate — but a test asserts exact
+ * set equality with the source-derived union, so adding or removing a production reason fails this
+ * suite until an executable case exists for it.
+ */
+const AUTH_MODULE_PATH = joinPath(__dirname, "..", "authorizeTeamWorkspaceMutationInTransaction.ts");
+const AUTH_DENIAL_UNION_TYPE_NAME = "TeamMutationAuthorizationDenialReason";
+
+function deriveStringUnionMembers(sourceText: string, typeName: string): string[] {
+  const sf = tsApi.createSourceFile("auth.ts", sourceText, tsApi.ScriptTarget.ES2020, true);
+  const members: string[] = [];
+  const walk = (node: tsApi.Node) => {
+    if (tsApi.isTypeAliasDeclaration(node) && node.name.text === typeName && tsApi.isUnionTypeNode(node.type)) {
+      for (const member of node.type.types) {
+        if (tsApi.isLiteralTypeNode(member) && tsApi.isStringLiteralLike(member.literal)) members.push(member.literal.text);
+      }
+    }
+    tsApi.forEachChild(node, walk);
+  };
+  tsApi.forEachChild(sf, walk);
+  return members;
+}
+
+const AUTH_DENIAL_REASONS_FROM_SOURCE: readonly string[] = Object.freeze(deriveStringUnionMembers(readFileSync(AUTH_MODULE_PATH, "utf8"), AUTH_DENIAL_UNION_TYPE_NAME));
+
 const AUTH_DENIAL_REASONS = ["workspace_not_found", "workspace_malformed", "membership_not_found", "membership_malformed", "membership_removed", "owner_integrity_violation", "insufficient_capability"] as const;
 
 /**
- * §8 — STRUCTURALLY PRESENT, UNREACHABLE UNDER THE SHIPPED ROLE MATRIX. Classified, never
- * dropped: each entry names the invariant that makes it unreachable, and that invariant is
- * ASSERTED below against the real capability matrix and the real predicates. If a future role or
- * predicate change breaks one, the invariant test fails and demands a real executable case — the
- * classification fails closed rather than quietly excusing a now-reachable branch.
+ * ─── R5 §22–§25 — THE EXCLUSION LIST IS EMPTY ─────────────────────────────────────────────────
  *
- * The guard expression is pinned for each, because site ids are AST ORDINALS: inserting a new
- * decision point above one of these would otherwise silently re-point the exclusion at a
- * different, reachable branch.
+ * R4 dismantled the previous classification. Three sites were excused as "structurally unreachable
+ * under the shipped role matrix", and the doc comment inferred that from their ghost mutations
+ * surviving. That inference was wrong for `create#reject-04`, which an existing test in this very
+ * file DOES execute through the synthetic capability split at spec:465 — the ghost survived only
+ * because that test asserts no panel write and never counts events. So a branch the suite reached
+ * carried no zero-event obligation, excused by a justification that did not hold for it. R4 also
+ * showed the `vote#reject-13` exclusion's `cross_workspace` leg was prose only: re-sourcing the
+ * candidate's workspace id from the panel's stale discovery mirror opens that branch and survived
+ * the whole file.
+ *
+ * The correct fix is not a better exclusion argument. The same synthetic capability split reaches
+ * all three sites, so all three now have executable cases, independent site witnesses and
+ * whole-store zero-event assertions. Nothing is excused, and nothing rests on prose.
+ *
+ * The role-matrix containment facts (`reviews.manage` and `reviews.submit` both imply
+ * `research.read`) are still asserted below, but as what they are — facts about the shipped matrix
+ * that explain why these branches are unreachable through a REAL role, in PRODUCTION. They no
+ * longer carry any coverage claim, so they cannot excuse anything if they change.
  */
-const STRUCTURALLY_UNREACHABLE_SITES: Readonly<Record<string, { guardExpr: string; reason: string; invariant: string }>> = Object.freeze({
-  "create#reject-04": Object.freeze({
-    guardExpr: '!roleHasCapability(auth.membership.role, "research.read")',
-    reason: "insufficient_capability",
-    invariant: "the authorization above already required reviews.manage, and every shipped role holding reviews.manage also holds research.read",
-  }),
-  "cancel#reject-04": Object.freeze({
-    guardExpr: '!roleHasCapability(auth.membership.role, "research.read")',
-    reason: "insufficient_capability",
-    invariant: "the authorization above already required reviews.manage, and every shipped role holding reviews.manage also holds research.read",
-  }),
-  "vote#reject-13": Object.freeze({
-    guardExpr: "!eligibility.eligible",
-    reason: "not_reviewer",
-    invariant:
-      "isValidAssignmentTarget can only deny for four reasons here, and each is already excluded: `removed` by authorization's own membership_removed denial (vote#reject-03::membership_removed); `cross_workspace` because candidate.workspaceId and runWorkspaceId are BOTH args.workspaceId; `self_review` because vote#reject-11 already returned on the identical UID-equality predicate; `insufficient_capability` because authorization required reviews.submit and every shipped role holding reviews.submit also holds research.read",
-  }),
-});
+const STRUCTURALLY_UNREACHABLE_SITES: Readonly<Record<string, { guardExpr: string; reason: string; invariant: string }>> = Object.freeze({});
 
 /**
  * §7 — the expanded runtime obligation layer, derived from the AST inventory. A passthrough site
@@ -2162,6 +2795,71 @@ const EXPANDED_OBLIGATIONS: readonly string[] = Object.freeze(
 const EXECUTABLE_OBLIGATIONS: readonly string[] = Object.freeze(
   EXPANDED_OBLIGATIONS.filter((obligation) => !Object.prototype.hasOwnProperty.call(STRUCTURALLY_UNREACHABLE_SITES, obligation.slice(0, obligation.indexOf("::"))))
 );
+
+/**
+ * §13/§14 — INDEPENDENT SITE WITNESSES. Deliberately a SEPARATE structure from `REJECTION_CASES`:
+ * R4 BLOCKER BL2 was that a case's declared site id was never observed. The runner checked the
+ * returned reason and then recorded the DECLARED id, and for a duplicate-reason pair the reason
+ * cannot say which of the two returns fired — so re-pointing a case's fixture at its twin left the
+ * reconciliation reporting full coverage while the twin branch had none. Three such misaims
+ * survived the whole suite.
+ *
+ * A witness runs AFTER `arrange()` and BEFORE the production call, and interrogates canonical
+ * fixture state through the REAL production predicates — `resolveWorkspaceReviewTarget`,
+ * `parseAdaptiveHumanReviewPanel`, the live capability mock — never the case's own declaration. A
+ * case that arranges its twin's state therefore fails its own witness before the production result
+ * can be credited to the site it claims.
+ */
+function storedRunTargetKind(): string {
+  const run = stores.runs.get(RUN_ID) as Record<string, unknown> | undefined;
+  if (!run) return "run_document_absent";
+  return resolveWorkspaceReviewTarget({
+    requestedWorkspaceId: WS_ID,
+    hasWorkspaceIdField: "workspaceId" in run,
+    workspaceIdValue: run.workspaceId,
+    userId: run.userId,
+    hasProjectIdField: "projectId" in run,
+    projectIdValue: run.projectId,
+  }).kind;
+}
+
+function storedPanelState(): { parse: string; status: string | null; reviewers: string[] } {
+  const raw = stores.humanReviewPanel.get(`${RUN_ID}::current`);
+  const parsed = parseAdaptiveHumanReviewPanel(raw, { expectedRunId: RUN_ID });
+  return parsed.status === "valid"
+    ? { parse: "valid", status: parsed.panel.status, reviewers: parsed.panel.reviewerUserIds }
+    : { parse: parsed.status, status: null, reviewers: [] };
+}
+
+/** True when the ACTIVE capability mock denies `capability` to `role` — i.e. a split is installed. */
+const capabilityDeniedTo = (role: string, capability: string) => mockedRoleHasCapability(role, capability) === false;
+
+const witnessed = (label: string, actual: unknown, expected: unknown) => expect(`${label}:${String(actual)}`).toBe(`${label}:${String(expected)}`);
+
+const SITE_WITNESSES: Readonly<Record<string, (callerUid: string) => void>> = Object.freeze({
+  // ── the two `run_not_found` twins in each operation: absent document vs present-but-not-ours ──
+  "create#reject-05": () => witnessed("targetKind", storedRunTargetKind(), "run_document_absent"),
+  "create#reject-06": () => witnessed("targetKind", storedRunTargetKind(), "wrong_workspace"),
+  "cancel#reject-05": () => { witnessed("targetKind", storedRunTargetKind(), "run_document_absent"); witnessed("panelParse", storedPanelState().parse, "valid"); },
+  "cancel#reject-06": () => { witnessed("targetKind", storedRunTargetKind(), "wrong_workspace"); witnessed("panelParse", storedPanelState().parse, "valid"); },
+  "vote#reject-04": () => witnessed("targetKind", storedRunTargetKind(), "run_document_absent"),
+  "vote#reject-05": () => witnessed("targetKind", storedRunTargetKind(), "wrong_workspace"),
+  // ── create's two `panel_finalized` twins: genuinely finalized vs cancelled-and-never-reopened ──
+  "create#reject-10": () => { const p = storedPanelState(); witnessed("panelParse", p.parse, "valid"); witnessed("panelStatus", p.status, "finalized"); },
+  "create#reject-11": () => { const p = storedPanelState(); witnessed("panelParse", p.parse, "valid"); witnessed("panelStatus", p.status, "cancelled"); },
+  // ── vote's two `not_reviewer` twins: not on the roster vs on it but ineligible ──
+  "vote#reject-12": (callerUid) => { const p = storedPanelState(); witnessed("panelParse", p.parse, "valid"); witnessed("callerOnRoster", p.reviewers.includes(callerUid), false); },
+  "vote#reject-13": (callerUid) => {
+    const p = storedPanelState();
+    witnessed("panelParse", p.parse, "valid");
+    witnessed("callerOnRoster", p.reviewers.includes(callerUid), true);
+    witnessed("callerRoleDeniedResearchRead", capabilityDeniedTo("owner", "research.read"), true);
+    witnessed("callerRoleStillHoldsReviewsSubmit", capabilityDeniedTo("owner", "reviews.submit"), false);
+  },
+  // ── the two inline research.read checks, now executable rather than excused ──
+  "create#reject-04": () => { witnessed("roleDeniedResearchRead", capabilityDeniedTo("owner", "research.read"), true); witnessed("roleStillHoldsReviewsManage", capabilityDeniedTo("owner", "reviews.manage"), false); },
+  "cancel#reject-04": () => { witnessed("roleDeniedResearchRead", capabilityDeniedTo("owner", "research.read"), true); witnessed("roleStillHoldsReviewsManage", capabilityDeniedTo("owner", "reviews.manage"), false); },
+});
 
 describe("AST rejection-site inventory — the production module's real decision points", () => {
   it("the inventory reconciles: 44 return sites, 39 unique (operation, reason) pairs, 5 duplicate-reason sites", () => {
@@ -2182,9 +2880,13 @@ describe("AST rejection-site inventory — the production module's real decision
 
   it("every site id is unique, ordinals are dense and 1-based within each operation", () => {
     expect(new Set(DISCOVERED_REJECTION_SITES.map((s) => s.siteId)).size).toBe(DISCOVERED_REJECTION_SITES.length);
-    for (const operation of ["create", "cancel", "vote"] as const) {
+    // §50 — the expected side is built from the COUNT, not from the actual array: the previous
+    // version mapped the actual ordinals to their own indices, so it passed vacuously (including on
+    // an empty inventory) instead of constraining density.
+    const expectedFor = (count: number) => Array.from({ length: count }, (_, i) => i + 1).join(",");
+    for (const [operation, count] of [["create", 14], ["cancel", 13], ["vote", 17]] as const) {
       const ordinals = DISCOVERED_REJECTION_SITES.filter((s) => s.operation === operation).map((s) => s.ordinal);
-      expect(`${operation}:${ordinals.join(",")}`).toBe(`${operation}:${ordinals.map((_, i) => i + 1).join(",")}`);
+      expect(`${operation}:${ordinals.join(",")}`).toBe(`${operation}:${expectedFor(count)}`);
     }
   });
 
@@ -2230,22 +2932,60 @@ describe("AST rejection-site inventory — the production module's real decision
     expect(`decisionSites:${DECISION_SITES.length}`).toBe("decisionSites:41");
   });
 
-  it("the obligation layers reconcile: 41 decision sites -> 59 expanded -> 3 unreachable -> 56 executable", () => {
-    expect(`expanded:${EXPANDED_OBLIGATIONS.length} unreachableSites:${Object.keys(STRUCTURALLY_UNREACHABLE_SITES).length} executable:${EXECUTABLE_OBLIGATIONS.length}`).toBe("expanded:59 unreachableSites:3 executable:56");
+  it("the obligation layers reconcile: 41 decision sites -> 59 expanded -> 0 excluded -> 59 executable", () => {
+    expect(`expanded:${EXPANDED_OBLIGATIONS.length} excludedSites:${Object.keys(STRUCTURALLY_UNREACHABLE_SITES).length} executable:${EXECUTABLE_OBLIGATIONS.length}`).toBe("expanded:59 excludedSites:0 executable:59");
     expect(new Set(EXPANDED_OBLIGATIONS).size).toBe(EXPANDED_OBLIGATIONS.length);
   });
 
-  it("every STRUCTURALLY UNREACHABLE site really exists, at the guard the classification names", () => {
-    for (const [siteId, classification] of Object.entries(STRUCTURALLY_UNREACHABLE_SITES)) {
-      const site = DISCOVERED_REJECTION_SITES.find((s) => s.siteId === siteId);
-      expect(`${siteId}:found:${Boolean(site)}`).toBe(`${siteId}:found:true`);
-      expect(`${siteId}:guard:${site?.guardExpr}`).toBe(`${siteId}:guard:${classification.guardExpr}`);
-      expect(`${siteId}:reason:${site?.reasonLiteral}`).toBe(`${siteId}:reason:${classification.reason}`);
-      expect(`${siteId}:invariantDocumented:${classification.invariant.length > 40}`).toBe(`${siteId}:invariantDocumented:true`);
+  it("§27 — the auth denial union used by the executable cases equals the one PRODUCTION declares", () => {
+    expect([...AUTH_DENIAL_REASONS].sort()).toEqual([...AUTH_DENIAL_REASONS_FROM_SOURCE].sort());
+    // and the derivation is not vacuously empty, which would make the equality meaningless
+    expect(`sourceDerivedMembers:${AUTH_DENIAL_REASONS_FROM_SOURCE.length}`).toBe("sourceDerivedMembers:7");
+  });
+
+  it("§28 — the passthrough obligation count is DERIVED, not hard-coded", () => {
+    const passthroughSites = DECISION_SITES.filter((s) => s.isPassthrough).length;
+    expect(`sites:${passthroughSites} x reasons:${AUTH_DENIAL_REASONS_FROM_SOURCE.length} = obligations:${passthroughSites * AUTH_DENIAL_REASONS_FROM_SOURCE.length}`).toBe("sites:3 x reasons:7 = obligations:21");
+    const passthroughObligations = EXPANDED_OBLIGATIONS.filter((o) => DECISION_SITES.some((s) => s.isPassthrough && o.startsWith(`${s.siteId}::`)));
+    expect(passthroughObligations.length).toBe(passthroughSites * AUTH_DENIAL_REASONS_FROM_SOURCE.length);
+  });
+
+  it("§22 — NOTHING is excluded: every decision site carries an executable obligation", () => {
+    expect(Object.keys(STRUCTURALLY_UNREACHABLE_SITES)).toEqual([]);
+    expect(`executable:${EXECUTABLE_OBLIGATIONS.length} expanded:${EXPANDED_OBLIGATIONS.length}`).toBe(`executable:${EXPANDED_OBLIGATIONS.length} expanded:${EXPANDED_OBLIGATIONS.length}`);
+    // and the three sites R4 proved were wrongly excused each have a real case AND a witness
+    for (const siteId of ["create#reject-04", "cancel#reject-04", "vote#reject-13"]) {
+      expect(`${siteId}:hasCase:${REJECTION_CASES.some((c) => c.siteId === siteId)}`).toBe(`${siteId}:hasCase:true`);
+      expect(`${siteId}:hasWitness:${Boolean(SITE_WITNESSES[siteId])}`).toBe(`${siteId}:hasWitness:true`);
     }
   });
 
-  it("INVARIANT behind create#reject-04 / cancel#reject-04: every shipped role with reviews.manage also has research.read", () => {
+  /**
+   * §13 — a duplicate-reason site MUST have a witness: it is the only place where the returned
+   * reason cannot identify which branch fired, so it is the only place a self-declared label can
+   * silently un-cover a branch. Derived from the AST, so a NEW duplicate pair introduced in
+   * production fails here until witnesses exist for both of its sites.
+   */
+  it("§13 — every duplicate-reason site has an independent runtime witness", () => {
+    const byPair = new Map<string, string[]>();
+    for (const site of DECISION_SITES) {
+      const key = `${site.operation}:${site.reasonExpr}`;
+      byPair.set(key, [...(byPair.get(key) ?? []), site.siteId]);
+    }
+    const duplicateSiteIds = [...byPair.values()].filter((ids) => ids.length > 1).flat();
+    expect(duplicateSiteIds.length).toBe(10);
+    const unwitnessed = duplicateSiteIds.filter((siteId) => !SITE_WITNESSES[siteId]);
+    expect(`duplicateReasonSitesWithoutAWitness:${unwitnessed.join(",")}`).toBe("duplicateReasonSitesWithoutAWitness:");
+  });
+
+  /**
+   * §22 — RETAINED AS A ROLE-MATRIX FACT, not as an exclusion proof. It explains why these two
+   * branches cannot be reached through a REAL shipped role in production; it no longer excuses any
+   * missing coverage, because both sites now have executable cases reached through the synthetic
+   * capability split. If the matrix changes, this fails and the fact is restated — nothing silently
+   * becomes uncovered either way.
+   */
+  it("ROLE-MATRIX FACT: every shipped role with reviews.manage also has research.read", () => {
     const roles = Object.keys(actualCapabilities.ROLE_CAPABILITIES) as (keyof typeof actualCapabilities.ROLE_CAPABILITIES)[];
     expect(roles.length).toBeGreaterThan(0);
     const managers = roles.filter((role) => actualCapabilities.roleHasCapability(role, "reviews.manage"));
@@ -2254,7 +2994,13 @@ describe("AST rejection-site inventory — the production module's real decision
     expect(`managersLackingResearchRead:${violating.join(",")}`).toBe("managersLackingResearchRead:");
   });
 
-  it("INVARIANT behind vote#reject-13: every shipped role with reviews.submit also has research.read, and the two self-review predicates are the same predicate", () => {
+  /**
+   * §25/§52 — the previous version of this test named FOUR exclusion legs in prose while asserting
+   * two. The exclusion is gone, so there is nothing left to over-claim: what remains are two
+   * independently useful facts, each fully asserted — the capability containment, and that the
+   * assignment and decision self-review guards really are one predicate.
+   */
+  it("ROLE-MATRIX FACT: every shipped role with reviews.submit also has research.read, and the two self-review predicates are the same predicate", () => {
     const roles = Object.keys(actualCapabilities.ROLE_CAPABILITIES) as (keyof typeof actualCapabilities.ROLE_CAPABILITIES)[];
     const submitters = roles.filter((role) => actualCapabilities.roleHasCapability(role, "reviews.submit"));
     expect(`rolesWithReviewsSubmit:${submitters.join(",")}`).toBe("rolesWithReviewsSubmit:owner,admin,member,reviewer");
@@ -2297,65 +3043,105 @@ function seedAuthDenial(reason: (typeof AUTH_DENIAL_REASONS)[number], callerUid:
  * below matches these against the AST inventory, so a case aimed at a site that does not exist, or
  * a site with no case, fails.
  */
-type RejectionCase = { siteId: string; reason: string; setup?: () => Promise<void> | void; run: () => Promise<{ ok: boolean; reason?: unknown }> };
+/**
+ * §14 — `setup` runs BEFORE the whole-store event snapshot, for sites whose prerequisites include a
+ * genuinely successful prior mutation (`vote_conflict` needs an accepted first vote, which
+ * legitimately writes its own event). `arrange` mutates fixture state AFTER the snapshot;
+ * `callerUid` is the identity the operation will run as, which the witness needs; `act` performs
+ * the call and nothing else. Splitting arrange from act is what makes room for the witness to run
+ * between them — the old single `run()` did both, so there was no point at which independent state
+ * could be interrogated.
+ */
+type RejectionCase = {
+  siteId: string;
+  reason: string;
+  callerUid?: string;
+  setup?: () => Promise<void> | void;
+  arrange?: () => void;
+  act: () => Promise<{ ok: boolean; reason?: unknown }>;
+};
+
+/** §22–§24 — the synthetic capability split this suite already uses at spec:465, reused to reach the three sites R4 proved were wrongly excused. */
+function installCapabilitySplit(role: string, deniedCapability: string): void {
+  mockedRoleHasCapability.mockImplementation((r: string, c: string) => (r === role && c === deniedCapability ? false : actualCapabilities.roleHasCapability(r, c)));
+}
+
 const REJECTION_CASES: readonly RejectionCase[] = [
   // ── create ──
-  { siteId: "create#reject-01", reason: "team_workspaces_disabled", run: () => { teamWorkspacesEnabled = false; return putCall(); } },
-  { siteId: "create#reject-02", reason: "firestore_unavailable", run: () => { firestoreUnavailableFlag.value = true; return putCall(); } },
-  ...AUTH_DENIAL_REASONS.map((reason) => ({ siteId: "create#reject-03", reason, run: () => { const uid = seedAuthDenial(reason, OWNER_UID, "owner"); return putCall({ uid }); } })),
-  { siteId: "create#reject-05", reason: "run_not_found", run: () => { stores.runs.delete(RUN_ID); return putCall(); } },
-  { siteId: "create#reject-06", reason: "run_not_found", run: () => { foreignWorkspaceRun(); return putCall(); } },
-  { siteId: "create#reject-07", reason: "not_pending", run: () => { notPendingRun(); return putCall(); } },
-  { siteId: "create#reject-08", reason: "single_review_active", run: () => { seedAssignment({ assignedReviewerUserId: REVIEWER_UID }); return putCall(); } },
-  { siteId: "create#reject-09", reason: "panel_unreadable", run: () => { stores.humanReviewPanel.set(`${RUN_ID}::current`, { kind: "not-a-panel" }); return putCall(); } },
-  { siteId: "create#reject-10", reason: "panel_finalized", run: () => { seedPanel({ revision: 1, ...FINALIZED }); return putCall({ expectedRevision: 1 }); } },
-  { siteId: "create#reject-11", reason: "panel_finalized", run: () => { seedPanel({ revision: 1, status: "cancelled" }); return putCall({ expectedRevision: 1 }); } },
-  { siteId: "create#reject-12", reason: "stale_revision", run: () => { seedPanel({ revision: 3 }); return putCall({ expectedRevision: 0 }); } },
-  { siteId: "create#reject-13", reason: "target_not_eligible", run: () => putCall({ reviewerUserIds: [OWNER_UID, VIEWER_UID] }) },
+  { siteId: "create#reject-01", reason: "team_workspaces_disabled", arrange: () => { teamWorkspacesEnabled = false; }, act: () => putCall() },
+  { siteId: "create#reject-02", reason: "firestore_unavailable", arrange: () => { firestoreUnavailableFlag.value = true; }, act: () => putCall() },
+  ...AUTH_DENIAL_REASONS.map((reason) => { let uid = OWNER_UID; return { siteId: "create#reject-03", reason, arrange: () => { uid = seedAuthDenial(reason, OWNER_UID, "owner"); }, act: () => putCall({ uid }) }; }),
+  { siteId: "create#reject-04", reason: "insufficient_capability", arrange: () => installCapabilitySplit("owner", "research.read"), act: () => putCall() },
+  { siteId: "create#reject-05", reason: "run_not_found", arrange: () => { stores.runs.delete(RUN_ID); }, act: () => putCall() },
+  { siteId: "create#reject-06", reason: "run_not_found", arrange: () => { foreignWorkspaceRun(); }, act: () => putCall() },
+  { siteId: "create#reject-07", reason: "not_pending", arrange: () => { notPendingRun(); }, act: () => putCall() },
+  { siteId: "create#reject-08", reason: "single_review_active", arrange: () => { seedAssignment({ assignedReviewerUserId: REVIEWER_UID }); }, act: () => putCall() },
+  { siteId: "create#reject-09", reason: "panel_unreadable", arrange: () => { stores.humanReviewPanel.set(`${RUN_ID}::current`, { kind: "not-a-panel" }); }, act: () => putCall() },
+  { siteId: "create#reject-10", reason: "panel_finalized", arrange: () => { seedPanel({ revision: 1, ...FINALIZED }); }, act: () => putCall({ expectedRevision: 1 }) },
+  { siteId: "create#reject-11", reason: "panel_finalized", arrange: () => { seedPanel({ revision: 1, status: "cancelled" }); }, act: () => putCall({ expectedRevision: 1 }) },
+  { siteId: "create#reject-12", reason: "stale_revision", arrange: () => { seedPanel({ revision: 3 }); }, act: () => putCall({ expectedRevision: 0 }) },
+  { siteId: "create#reject-13", reason: "target_not_eligible", act: () => putCall({ reviewerUserIds: [OWNER_UID, VIEWER_UID] }) },
   // ── cancel ──
-  { siteId: "cancel#reject-01", reason: "team_workspaces_disabled", run: () => { teamWorkspacesEnabled = false; return deleteCall(); } },
-  { siteId: "cancel#reject-02", reason: "firestore_unavailable", run: () => { firestoreUnavailableFlag.value = true; return deleteCall(); } },
-  ...AUTH_DENIAL_REASONS.map((reason) => ({ siteId: "cancel#reject-03", reason, run: () => { seedPanel({ revision: 1 }); const uid = seedAuthDenial(reason, OWNER_UID, "owner"); return deleteCall({ uid }); } })),
-  { siteId: "cancel#reject-05", reason: "run_not_found", run: () => { seedPanel({ revision: 1 }); stores.runs.delete(RUN_ID); return deleteCall(); } },
-  { siteId: "cancel#reject-06", reason: "run_not_found", run: () => { seedPanel({ revision: 1 }); foreignWorkspaceRun(); return deleteCall(); } },
-  { siteId: "cancel#reject-07", reason: "not_pending", run: () => { seedPanel({ revision: 1 }); notPendingRun(); return deleteCall(); } },
-  { siteId: "cancel#reject-08", reason: "panel_absent", run: () => deleteCall() },
-  { siteId: "cancel#reject-09", reason: "panel_unreadable", run: () => { stores.humanReviewPanel.set(`${RUN_ID}::current`, { kind: "not-a-panel" }); return deleteCall(); } },
-  { siteId: "cancel#reject-10", reason: "panel_finalized", run: () => { seedPanel({ revision: 1, ...FINALIZED }); return deleteCall(); } },
-  { siteId: "cancel#reject-11", reason: "panel_already_cancelled", run: () => { seedPanel({ revision: 1, status: "cancelled" }); return deleteCall(); } },
-  { siteId: "cancel#reject-12", reason: "stale_revision", run: () => { seedPanel({ revision: 3 }); return deleteCall({ expectedRevision: 1 }); } },
+  { siteId: "cancel#reject-01", reason: "team_workspaces_disabled", arrange: () => { teamWorkspacesEnabled = false; }, act: () => deleteCall() },
+  { siteId: "cancel#reject-02", reason: "firestore_unavailable", arrange: () => { firestoreUnavailableFlag.value = true; }, act: () => deleteCall() },
+  ...AUTH_DENIAL_REASONS.map((reason) => { let uid = OWNER_UID; return { siteId: "cancel#reject-03", reason, arrange: () => { seedPanel({ revision: 1 }); uid = seedAuthDenial(reason, OWNER_UID, "owner"); }, act: () => deleteCall({ uid }) }; }),
+  { siteId: "cancel#reject-04", reason: "insufficient_capability", arrange: () => { seedPanel({ revision: 1 }); installCapabilitySplit("owner", "research.read"); }, act: () => deleteCall() },
+  { siteId: "cancel#reject-05", reason: "run_not_found", arrange: () => { seedPanel({ revision: 1 }); stores.runs.delete(RUN_ID); }, act: () => deleteCall() },
+  { siteId: "cancel#reject-06", reason: "run_not_found", arrange: () => { seedPanel({ revision: 1 }); foreignWorkspaceRun(); }, act: () => deleteCall() },
+  { siteId: "cancel#reject-07", reason: "not_pending", arrange: () => { seedPanel({ revision: 1 }); notPendingRun(); }, act: () => deleteCall() },
+  { siteId: "cancel#reject-08", reason: "panel_absent", act: () => deleteCall() },
+  { siteId: "cancel#reject-09", reason: "panel_unreadable", arrange: () => { stores.humanReviewPanel.set(`${RUN_ID}::current`, { kind: "not-a-panel" }); }, act: () => deleteCall() },
+  { siteId: "cancel#reject-10", reason: "panel_finalized", arrange: () => { seedPanel({ revision: 1, ...FINALIZED }); }, act: () => deleteCall() },
+  { siteId: "cancel#reject-11", reason: "panel_already_cancelled", arrange: () => { seedPanel({ revision: 1, status: "cancelled" }); }, act: () => deleteCall() },
+  { siteId: "cancel#reject-12", reason: "stale_revision", arrange: () => { seedPanel({ revision: 3 }); }, act: () => deleteCall({ expectedRevision: 1 }) },
   // ── vote ──
-  { siteId: "vote#reject-01", reason: "team_workspaces_disabled", run: () => { teamWorkspacesEnabled = false; return voteCall(); } },
-  { siteId: "vote#reject-02", reason: "firestore_unavailable", run: () => { firestoreUnavailableFlag.value = true; return voteCall(); } },
-  ...AUTH_DENIAL_REASONS.map((reason) => ({ siteId: "vote#reject-03", reason, run: () => { seedPanel({ revision: 1 }); const uid = seedAuthDenial(reason, OWNER_UID, "owner"); return voteCall({ uid }); } })),
-  { siteId: "vote#reject-04", reason: "run_not_found", run: () => { seedPanel({ revision: 1 }); stores.runs.delete(RUN_ID); return voteCall(); } },
+  { siteId: "vote#reject-01", reason: "team_workspaces_disabled", arrange: () => { teamWorkspacesEnabled = false; }, act: () => voteCall() },
+  { siteId: "vote#reject-02", reason: "firestore_unavailable", arrange: () => { firestoreUnavailableFlag.value = true; }, act: () => voteCall() },
+  ...AUTH_DENIAL_REASONS.map((reason) => { let uid = OWNER_UID; return { siteId: "vote#reject-03", reason, arrange: () => { seedPanel({ revision: 1 }); uid = seedAuthDenial(reason, OWNER_UID, "owner"); }, act: () => voteCall({ uid }) }; }),
+  { siteId: "vote#reject-04", reason: "run_not_found", arrange: () => { seedPanel({ revision: 1 }); stores.runs.delete(RUN_ID); }, act: () => voteCall() },
   // The worst ghost-event case in the whole module: a REJECTED cross-Workspace vote must not mint
   // `vote_cast` on a foreign Workspace's run document.
-  { siteId: "vote#reject-05", reason: "run_not_found", run: () => { seedPanel({ revision: 1 }); foreignWorkspaceRun(); return voteCall(); } },
-  { siteId: "vote#reject-06", reason: "not_pending", run: () => { seedPanel({ revision: 1 }); notPendingRun(); return voteCall(); } },
-  { siteId: "vote#reject-07", reason: "panel_absent", run: () => voteCall() },
-  { siteId: "vote#reject-08", reason: "panel_unreadable", run: () => { stores.humanReviewPanel.set(`${RUN_ID}::current`, { kind: "not-a-panel" }); return voteCall(); } },
-  { siteId: "vote#reject-09", reason: "panel_not_open", run: () => { seedPanel({ revision: 1, status: "cancelled" }); return voteCall(); } },
-  { siteId: "vote#reject-10", reason: "panel_stale", run: () => { seedPanel({ revision: 2 }); return voteCall({ panelRevision: 1 }); } },
-  { siteId: "vote#reject-11", reason: "self_review", run: () => { seedPanel({ revision: 1, reviewerUserIds: [CREATOR_UID, OWNER_UID] }); return voteCall({ uid: CREATOR_UID }); } },
-  { siteId: "vote#reject-12", reason: "not_reviewer", run: () => { seedPanel({ revision: 1 }); return voteCall({ uid: REVIEWER2_UID }); } },
-  { siteId: "vote#reject-14", reason: "review_content_unavailable", run: () => { seedPanel({ revision: 1 }); seedRun({ governanceRecord: validGovernanceRecord({ decisionReceipt: { conclusion: "", basis: [], assumptions: [], uncertainties: [], limitations: [], sources: [], sourceBacked: true, humanReviewNeeded: false } }) }); return voteCall(); } },
-  { siteId: "vote#reject-15", reason: "vote_malformed", run: () => { seedPanel({ revision: 1 }); stores.humanReviewVotes.set(`${RUN_ID}::${buildAdaptiveHumanReviewVoteId(1, OWNER_UID)}`, { kind: "not-a-vote" }); return voteCall(); } },
-  { siteId: "vote#reject-16", reason: "vote_conflict", setup: async () => { seedPanel({ revision: 1 }); expect((await voteCall({ status: "approved" })).ok).toBe(true); }, run: () => voteCall({ status: "changes_requested" }) },
+  { siteId: "vote#reject-05", reason: "run_not_found", arrange: () => { seedPanel({ revision: 1 }); foreignWorkspaceRun(); }, act: () => voteCall() },
+  { siteId: "vote#reject-06", reason: "not_pending", arrange: () => { seedPanel({ revision: 1 }); notPendingRun(); }, act: () => voteCall() },
+  { siteId: "vote#reject-07", reason: "panel_absent", act: () => voteCall() },
+  { siteId: "vote#reject-08", reason: "panel_unreadable", arrange: () => { stores.humanReviewPanel.set(`${RUN_ID}::current`, { kind: "not-a-panel" }); }, act: () => voteCall() },
+  { siteId: "vote#reject-09", reason: "panel_not_open", arrange: () => { seedPanel({ revision: 1, status: "cancelled" }); }, act: () => voteCall() },
+  { siteId: "vote#reject-10", reason: "panel_stale", arrange: () => { seedPanel({ revision: 2 }); }, act: () => voteCall({ panelRevision: 1 }) },
+  { siteId: "vote#reject-11", reason: "self_review", callerUid: CREATOR_UID, arrange: () => { seedPanel({ revision: 1, reviewerUserIds: [CREATOR_UID, OWNER_UID] }); }, act: () => voteCall({ uid: CREATOR_UID }) },
+  { siteId: "vote#reject-12", reason: "not_reviewer", callerUid: REVIEWER2_UID, arrange: () => { seedPanel({ revision: 1 }); }, act: () => voteCall({ uid: REVIEWER2_UID }) },
+  // On the roster, but the eligibility predicate denies — the twin of #12, reached through the
+  // synthetic capability split rather than excused as unreachable.
+  { siteId: "vote#reject-13", reason: "not_reviewer", arrange: () => { seedPanel({ revision: 1 }); installCapabilitySplit("owner", "research.read"); }, act: () => voteCall() },
+  { siteId: "vote#reject-14", reason: "review_content_unavailable", arrange: () => { seedPanel({ revision: 1 }); seedRun({ governanceRecord: validGovernanceRecord({ decisionReceipt: { conclusion: "", basis: [], assumptions: [], uncertainties: [], limitations: [], sources: [], sourceBacked: true, humanReviewNeeded: false } }) }); }, act: () => voteCall() },
+  { siteId: "vote#reject-15", reason: "vote_malformed", arrange: () => { seedPanel({ revision: 1 }); stores.humanReviewVotes.set(`${RUN_ID}::${buildAdaptiveHumanReviewVoteId(1, OWNER_UID)}`, { kind: "not-a-vote" }); }, act: () => voteCall() },
+  { siteId: "vote#reject-16", reason: "vote_conflict", setup: async () => { seedPanel({ revision: 1 }); expect((await voteCall({ status: "approved" })).ok).toBe(true); }, act: () => voteCall({ status: "changes_requested" }) },
 ];
 
 /** The per-run execution ledger. Asserted against the AST INVENTORY, never against the case table. */
 const executedObligations: string[] = [];
+/**
+ * §31 — set by the in-describe reconciliation. The postcondition requires it, so the exact command
+ * R4 demonstrated — `-t "rejects with its own reason"`, which ran every case but FILTERED OUT the
+ * reconciliation and exited 0 — can no longer report a clean result.
+ */
+let reconciliationExecuted = false;
 const reasonOf = (r: { reason?: unknown }) => (typeof r.reason === "string" ? r.reason : (r.reason as { kind?: string } | undefined)?.kind);
 
 describe("panel mutation audit coverage — zero ghost events at every discovered decision site", () => {
   it.each(REJECTION_CASES.map((c) => [`${c.siteId} -> ${c.reason}`, c] as const))("%s rejects with its own reason and writes no event", async (label, testCase) => {
     if (testCase.setup) await testCase.setup();
-    const before = panelEvents().length;
-    const result = await testCase.run();
+    const before = attemptedGovernanceEventCount();
+    if (testCase.arrange) testCase.arrange();
+    // §14 — the WITNESS runs here: after the fixture is arranged, before production is called, and
+    // it interrogates canonical state through the real predicates rather than trusting the label.
+    const witness = SITE_WITNESSES[testCase.siteId];
+    if (witness) witness(testCase.callerUid ?? OWNER_UID);
+    const result = await testCase.act();
     expect(`${label}:rejected:${result.ok}`).toBe(`${label}:rejected:false`);
     expect(`${label}:reason:${reasonOf(result)}`).toBe(`${label}:reason:${testCase.reason}`);
-    expect(`${label}:eventDelta:${panelEvents().length - before}`).toBe(`${label}:eventDelta:0`);
+    // R4 BL1 — ALL channels, ALL paths, ALL actions, and ATTEMPTS not merely commits.
+    expect(`${label}:attemptedEventDelta:${attemptedGovernanceEventCount() - before}`).toBe(`${label}:attemptedEventDelta:0`);
+    expectNoForeignPersistenceWriters();
     executedObligations.push(obligationKey(testCase.siteId, testCase.reason));
   });
 
@@ -2366,8 +3152,9 @@ describe("panel mutation audit coverage — zero ghost events at every discovere
    * property R3's contract could not express — two duplicate-reason sites collapsed into one.
    */
   it("every executable obligation discovered in the source was executed exactly once", () => {
+    reconciliationExecuted = true;
     expect([...executedObligations].sort()).toEqual([...EXECUTABLE_OBLIGATIONS].sort());
-    expect(`executed:${executedObligations.length} executable:${EXECUTABLE_OBLIGATIONS.length} duplicates:${executedObligations.length - new Set(executedObligations).size}`).toBe(`executed:56 executable:56 duplicates:0`);
+    expect(`executed:${executedObligations.length} executable:${EXECUTABLE_OBLIGATIONS.length} duplicates:${executedObligations.length - new Set(executedObligations).size}`).toBe(`executed:59 executable:59 duplicates:0`);
   });
 
   it("no case is aimed at a site that does not exist, or at a site classified unreachable", () => {
@@ -2400,7 +3187,7 @@ describe("panel mutation audit coverage — zero ghost events at every discovere
    */
   it("keying by (operation, reason) is strictly weaker than keying by discovered site", () => {
     const collapse = (obligation: string) => `${obligation.slice(0, obligation.indexOf("#"))}::${obligation.slice(obligation.indexOf("::") + 2)}`;
-    expect(`bySite:${new Set(EXECUTABLE_OBLIGATIONS).size} byOperationReason:${new Set(EXECUTABLE_OBLIGATIONS.map(collapse)).size}`).toBe("bySite:56 byOperationReason:52");
+    expect(`bySite:${new Set(EXECUTABLE_OBLIGATIONS).size} byOperationReason:${new Set(EXECUTABLE_OBLIGATIONS.map(collapse)).size}`).toBe("bySite:59 byOperationReason:52");
     // 59 -> 52 is SEVEN masked sites, not five: collapsing additionally merges each inline
     // `insufficient_capability` twin (create#reject-04, cancel#reject-04) onto the authorization
     // passthrough's own `insufficient_capability`, and vote#reject-13 onto vote#reject-12. A
@@ -2408,12 +3195,36 @@ describe("panel mutation audit coverage — zero ghost events at every discovere
     expect(`allExpandedBySite:${new Set(EXPANDED_OBLIGATIONS).size} allExpandedCollapsed:${new Set(EXPANDED_OBLIGATIONS.map(collapse)).size}`).toBe("allExpandedBySite:59 allExpandedCollapsed:52");
   });
 
-  it.each([
-    ["create#reject-06", "create#reject-05", "run_not_found"],
-    ["create#reject-05", "create#reject-06", "run_not_found"],
-    ["vote#reject-05", "vote#reject-04", "run_not_found"],
-    ["create#reject-11", "create#reject-10", "panel_finalized"],
-  ])("deleting %s's coverage is caught by site identity and MASKED by its %s twin (both return %s)", (deleted, twin, reason) => {
+  /**
+   * §50 / R4 N1 — the twin is DERIVED from the AST, not supplied by hand. The previous version took
+   * the twin as a literal column that no assertion consumed, so substituting a same-reason twin from
+   * a DIFFERENT operation went undetected. Every duplicate-reason pair in the source now generates
+   * its own case in both directions, so a new pair added in production is covered automatically and
+   * a wrong twin cannot be written down at all.
+   */
+  const DUPLICATE_REASON_PAIRS: readonly (readonly [string, string, string])[] = (() => {
+    const byPair = new Map<string, DiscoveredRejectionSite[]>();
+    for (const site of DECISION_SITES) {
+      const key = `${site.operation}:${site.reasonExpr}`;
+      byPair.set(key, [...(byPair.get(key) ?? []), site]);
+    }
+    const directed: (readonly [string, string, string])[] = [];
+    for (const group of byPair.values()) {
+      if (group.length < 2) continue;
+      for (const a of group) for (const b of group) {
+        if (a.siteId !== b.siteId) directed.push([a.siteId, b.siteId, a.reasonLiteral as string] as const);
+      }
+    }
+    return directed;
+  })();
+
+  it("the derived duplicate-reason pair set is non-empty and same-operation by construction", () => {
+    expect(DUPLICATE_REASON_PAIRS.length).toBe(10);
+    const crossOperation = DUPLICATE_REASON_PAIRS.filter(([a, b]) => a.split("#")[0] !== b.split("#")[0]);
+    expect(`crossOperationTwins:${crossOperation.map(([a, b]) => `${a}/${b}`).join(",")}`).toBe("crossOperationTwins:");
+  });
+
+  it.each(DUPLICATE_REASON_PAIRS)("deleting %s's coverage is caught by site identity and MASKED by its %s twin (both return %s)", (deleted, twin, reason) => {
     const collapse = (obligation: string) => `${obligation.slice(0, obligation.indexOf("#"))}::${obligation.slice(obligation.indexOf("::") + 2)}`;
     const ledgerWithDeletion = executedObligations.filter((o) => !o.startsWith(`${deleted}::`));
     // the twin really does still cover the same (operation, reason) pair — that is the masking
@@ -2429,257 +3240,545 @@ describe("panel mutation audit coverage — zero ghost events at every discovere
 });
 
 /**
- * ─── R4 §14–§22 — CANCEL EVENT PROVENANCE MATRIX ──────────────────────────────────────────────
+ * ─── R5 §32–§40, §47 — SYMMETRIC EVENT PROVENANCE FOR ALL FOUR ACTIONS ────────────────────────
  *
- * R3 found that 5 of the cancel event's 9 fields survived being re-sourced from a DIFFERENT value
- * reachable at the same point in the transaction — most seriously `byUid`, where replacing the
- * authenticated caller with the panel's `createdByUserId` left the whole suite green. R3 reported
- * that as a production attribution defect. It is not: `byUid: args.uid` traces to
- * `getUid()` -> `resolveRequestIdentity(req).uid`, so the shipped source is the authenticated
- * caller and is correct. The defect was entirely in the PROOF — every cancel fixture happened to
- * make the caller, the panel creator, the run creator, the Workspace owner and the first reviewer
- * the same identity, so no assertion could tell a correct source from a hostile one. The
- * production source is therefore deliberately unchanged; this suite is what changes.
+ * R4 MAJOR, twice over. The previous round built a rigorous per-field matrix for CANCEL only, and
+ * the reviewer who looked at the other three actions found exactly what asymmetry predicts:
+ *   • the VOTE event's `byUid` — the one field whose entire purpose is "who cast this vote" — could
+ *     be re-sourced from `panel.createdByUserId` or `panel.updatedByUserId` and survive, because
+ *     `seedPanel()` defaults BOTH to `OWNER_UID` and every vote assertion votes as `OWNER_UID`, who
+ *     is also `workspace.ownerUserId`: a four-way identity collapse.
+ *   • `workspaceId` could be re-sourced from the panel's STALE discovery mirror on both the VOTE and
+ *     the RECONFIGURE events, because those fixtures always seeded the mirror equal to the run's own
+ *     Workspace. The panel's `workspaceId`/`projectId` are documented discovery metadata and are
+ *     explicitly NOT authority; the parser never compares them to the run.
  *
- * The fixture below makes every authority-bearing field's correct source differ in VALUE from
- * every other value reachable at the event site, and asserts that discrimination BEFORE the
- * production call, so a future fixture regression that re-collapses two identities fails here
- * rather than silently making the field assertions vacuous again.
+ * So the fix is not "add the two mutations the reviewer named". It is to enumerate every
+ * authority-bearing and state-bearing field of ALL FOUR actions, and to de-collapse the fixtures so
+ * that every plausible competing source holds a DIFFERENT value (§40). A provenance assertion is
+ * only meaningful when the wrong answer would look different from the right one.
  *
- * Two fields cannot be discriminated, and are classified EQUIVALENT with the invariant that forces
- * the equality on every path that reaches the event — never with "no test could tell":
- *   • `workspaceId` <- `args.workspaceId` instead of `target.workspaceId`:
- *     `resolveWorkspaceReviewTarget` returns `wrong_workspace` unless the run's stored
- *     `workspaceId` equals the requested one, and `cancel#reject-06` returns on anything that is
- *     not a valid target — so the two are provably equal here.
- *   • `reviewerCount` <- `current.requiredReviewerCount` instead of `reviewerUserIds.length`:
- *     `parseAdaptiveHumanReviewPanel` returns `malformed` unless
- *     `requiredReviewerCount === reviewerUserIds.length`, and `cancel#reject-09` returns
- *     `panel_unreadable` on a malformed panel — so the two are provably equal here.
- * `panelRevision` <- `args.expectedRevision` is equivalent for the same class of reason
- * (`cancel#reject-12`) and is recorded in the production source's own comment on the vote path.
+ * THE DE-COLLAPSED IDENTITY SET, distinct by construction and asserted so before every call:
+ *   workspace owner      owner-1     run creator          creator-1
+ *   panel createdBy      reviewer-1  panel updatedBy      reviewer-2
+ *   create/reconfigure/cancel caller admin-1  (holds reviews.manage + research.read)
+ *   vote caller                      reviewer-3 (on the roster, holds reviews.submit; not the
+ *                                    creator, not the owner, not the panel's creator or updater,
+ *                                    and not the roster's first entry)
+ * plus: panel revision 5 ≠ reviewer count 3 ≠ quorum 2; a non-null Project distinct from the
+ * Workspace id; a deliberately STALE panel Workspace/Project mirror; and a non-default governance
+ * context.
  *
- * R4 MUTATION BATTERY for this suite. Re-sourcing each field from every other value reachable at
- * the event site: 13 KILLED, 3 SURVIVED — and the 3 survivors are exactly the 3 sources declared
- * EQUIVALENT above (`args.workspaceId`, `args.expectedRevision`, `current.requiredReviewerCount`).
- * There is no unexplained survivor. Degrading the fixture also fails, which is what keeps the
- * field assertions from going vacuous again: collapsing the panel creator onto the caller,
- * collapsing the revision onto the reviewer count, un-staling the Workspace mirror, reverting to
- * the default governance context, and moving the snapshot to AFTER the call were all KILLED.
+ * §47 — "canonical, not the request" is only claimed where it is observable. Where a builder is a
+ * pure projection of the request (`nextVote.status` is literally `args.status`), the alternative is
+ * classified EQUIVALENT with the projection named, rather than dressed up as a security property.
  */
-const CANCEL_PROVENANCE_CALLER = ADMIN_UID;
-const CANCEL_PROVENANCE_REVIEWERS = [OWNER_UID, REVIEWER_UID, REVIEWER2_UID];
-const CANCEL_PROVENANCE_REVISION = 5;
-const CANCEL_PROVENANCE_PANEL_CREATED_AT = "2026-07-02T00:00:00.000Z";
-const CANCEL_PROVENANCE_PANEL_UPDATED_AT = "2026-07-03T00:00:00.000Z";
+const PROV_CALLER_MANAGE = ADMIN_UID;
+const PROV_CALLER_VOTE = REVIEWER3_UID;
+const PROV_PANEL_CREATED_BY = REVIEWER_UID;
+const PROV_PANEL_UPDATED_BY = REVIEWER2_UID;
+const PROV_PANEL_REVISION = 5;
+const PROV_PANEL_CREATED_AT = "2026-07-02T00:00:00.000Z";
+const PROV_PANEL_UPDATED_AT = "2026-07-03T00:00:00.000Z";
 /** The panel's Workspace/Project mirror is DISCOVERY metadata, never authority — so it is seeded STALE on purpose. */
 const STALE_PANEL_WORKSPACE_MIRROR = "wsPanelMirrorStale01";
 const STALE_PANEL_PROJECT_MIRROR = "projPanelMirrorStale01";
 
-describe("panel mutation audit coverage — cancel event provenance", () => {
-  const storedRun = () => stores.runs.get(RUN_ID) as { userId: string; workspaceId: string; projectId: string | null; governanceRecord: { schemaId: string; answerShape: string } };
-  const storedPanel = () => stores.humanReviewPanel.get(`${RUN_ID}::current`) as { revision: number; reviewerUserIds: string[]; requiredReviewerCount: number; quorum: number; createdByUserId: string; updatedByUserId: string; createdAt: string; updatedAt: string; workspaceId: string; projectId: string | null };
-  const storedWorkspace = () => stores.workspaces.get(WS_ID) as { ownerUserId: string };
+type ProvenanceRow = {
+  field: string;
+  correctSource: string;
+  correct: () => unknown;
+  /** Every OTHER value reachable at the event site that this field could plausibly have come from. */
+  discriminated: readonly (readonly [string, () => unknown])[];
+  /** Sources a preceding guard or a pure projection proves equal, each with that reason named. */
+  equivalent: readonly (readonly [string, () => unknown, string])[];
+};
 
-  function seedProvenanceFixture() {
-    seedRun({ projectId: PROJECT_ID, governanceRecord: validGovernanceRecord({ schemaId: ALT_GOV.schemaId, answerShape: ALT_GOV.answerShape }) });
-    seedPanel({
-      revision: CANCEL_PROVENANCE_REVISION,
-      reviewerUserIds: CANCEL_PROVENANCE_REVIEWERS,
-      createdByUserId: REVIEWER_UID,
-      updatedByUserId: REVIEWER2_UID,
-      createdAt: CANCEL_PROVENANCE_PANEL_CREATED_AT,
-      updatedAt: CANCEL_PROVENANCE_PANEL_UPDATED_AT,
-      workspaceId: STALE_PANEL_WORKSPACE_MIRROR,
-      projectId: STALE_PANEL_PROJECT_MIRROR,
-    });
-  }
-  const provenanceCancel = () => deleteCall({ uid: CANCEL_PROVENANCE_CALLER, expectedRevision: CANCEL_PROVENANCE_REVISION });
-
+type ProvenanceSubject = {
+  action: string;
+  label: string;
   /**
-   * One row per authority-bearing field. `discriminated` lists every OTHER value reachable at the
-   * event site that the field could plausibly have been sourced from; `equivalent` lists the
-   * sources a preceding guard proves equal, each with that guard named.
+   * True when the event's canonical sources are the panel this transaction COMMITS, which does not
+   * exist until the call returns (create and reconfigure both project `nextPanel`). For those the
+   * de-collapse of the FIXTURE is still asserted beforehand; only the committed-panel values are
+   * necessarily read afterwards. Cancel and vote project a panel that already exists, so their
+   * snapshot is taken strictly before the call — which is what caught the earlier draft's
+   * post-mutation read of `updatedByUserId`.
    */
-  type ProvenanceRow = {
-    field: string;
-    correctSource: string;
-    correct: () => unknown;
-    discriminated: readonly (readonly [string, () => unknown])[];
-    equivalent: readonly (readonly [string, () => unknown, string])[];
-  };
-  const PROVENANCE_MATRIX: readonly ProvenanceRow[] = [
-    {
-      field: "byUid",
-      correctSource: "args.uid (the authenticated caller)",
-      correct: () => CANCEL_PROVENANCE_CALLER,
-      discriminated: [
-        ["current.createdByUserId", () => storedPanel().createdByUserId],
-        ["current.updatedByUserId", () => storedPanel().updatedByUserId],
-        ["target.creatorUid", () => storedRun().userId],
-        ["current.reviewerUserIds[0]", () => storedPanel().reviewerUserIds[0]],
-        ["workspace.ownerUserId", () => storedWorkspace().ownerUserId],
-      ],
-      equivalent: [],
-    },
-    {
-      field: "at",
-      correctSource: "now (the request's own clock)",
-      correct: () => MUTATE_NOW,
-      discriminated: [
-        ["current.createdAt", () => storedPanel().createdAt],
-        ["current.updatedAt", () => storedPanel().updatedAt],
-        ["govParse.record.updatedAt", () => GOVERNANCE_UPDATED_AT],
-      ],
-      equivalent: [],
-    },
-    {
-      field: "workspaceId",
-      correctSource: "target.workspaceId (the run's stored, authoritative binding)",
-      correct: () => storedRun().workspaceId,
-      discriminated: [["current.workspaceId (stale discovery mirror)", () => storedPanel().workspaceId]],
-      equivalent: [["args.workspaceId", () => WS_ID, "resolveWorkspaceReviewTarget yields wrong_workspace unless run.workspaceId === args.workspaceId, and cancel#reject-06 returns on any non-valid target"]],
-    },
-    {
-      field: "projectId",
-      correctSource: "target.projectId (the run's stored Project)",
-      correct: () => storedRun().projectId,
-      discriminated: [
-        ["current.projectId (stale discovery mirror)", () => storedPanel().projectId],
-        ["hardcoded null", () => null],
-        ["target.workspaceId", () => storedRun().workspaceId],
-      ],
-      equivalent: [],
-    },
-    {
-      field: "panelRevision",
-      correctSource: "current.revision (the canonical panel being cancelled)",
-      correct: () => storedPanel().revision,
-      discriminated: [
-        ["current.quorum", () => storedPanel().quorum],
-        ["current.reviewerUserIds.length", () => storedPanel().reviewerUserIds.length],
-        ["current.requiredReviewerCount", () => storedPanel().requiredReviewerCount],
-        ["hardcoded 0", () => 0],
-      ],
-      equivalent: [["args.expectedRevision", () => CANCEL_PROVENANCE_REVISION, "cancel#reject-12 returns stale_revision unless current.revision === args.expectedRevision"]],
-    },
-    {
-      field: "reviewerCount",
-      correctSource: "current.reviewerUserIds.length (the canonical roster)",
-      correct: () => storedPanel().reviewerUserIds.length,
-      discriminated: [
-        ["current.quorum", () => storedPanel().quorum],
-        ["current.revision", () => storedPanel().revision],
-        ["hardcoded 0", () => 0],
-      ],
-      equivalent: [["current.requiredReviewerCount", () => storedPanel().requiredReviewerCount, "parseAdaptiveHumanReviewPanel yields malformed unless requiredReviewerCount === reviewerUserIds.length, and cancel#reject-09 returns panel_unreadable on a malformed panel"]],
-    },
-    {
-      field: "schemaId",
-      correctSource: "govParse.record.schemaId",
-      correct: () => storedRun().governanceRecord.schemaId,
-      discriminated: [
-        ["the default fixture literal", () => "decision_support"],
-        ["govParse.record.answerShape", () => storedRun().governanceRecord.answerShape],
-      ],
-      equivalent: [],
-    },
-    {
-      field: "answerShape",
-      correctSource: "govParse.record.answerShape",
-      correct: () => storedRun().governanceRecord.answerShape,
-      discriminated: [
-        ["the default fixture literal", () => "decision_support_view"],
-        ["govParse.record.schemaId", () => storedRun().governanceRecord.schemaId],
-      ],
-      equivalent: [],
-    },
-  ];
+  canonicalIsCommitted?: boolean;
+  /** Establishes the de-collapsed fixture. Runs before the snapshot and before the call. */
+  seed: () => void;
+  call: () => Promise<{ ok: boolean }>;
+  rows: () => readonly ProvenanceRow[];
+};
 
-  it("the fixture DISCRIMINATES: every field's correct source differs in value from every plausible wrong source — asserted before the production call", () => {
-    seedProvenanceFixture();
-    const collisions = PROVENANCE_MATRIX.flatMap((row) => row.discriminated.filter(([, read]) => read() === row.correct()).map(([name]) => `${row.field}<-${name}`));
-    expect(`indistinguishableSources:${collisions.join(",")}`).toBe("indistinguishableSources:");
-    // and the values really are the distinct ones this fixture intends
-    expect({
-      caller: CANCEL_PROVENANCE_CALLER,
-      panelCreatedBy: storedPanel().createdByUserId,
-      panelUpdatedBy: storedPanel().updatedByUserId,
-      runCreator: storedRun().userId,
-      firstReviewer: storedPanel().reviewerUserIds[0],
-      workspaceOwner: storedWorkspace().ownerUserId,
-      revision: storedPanel().revision,
-      reviewerCount: storedPanel().reviewerUserIds.length,
-      quorum: storedPanel().quorum,
-      runWorkspaceId: storedRun().workspaceId,
-      panelWorkspaceMirror: storedPanel().workspaceId,
-      runProjectId: storedRun().projectId,
-      panelProjectMirror: storedPanel().projectId,
-    }).toEqual({
-      caller: ADMIN_UID,
-      panelCreatedBy: REVIEWER_UID,
-      panelUpdatedBy: REVIEWER2_UID,
-      runCreator: CREATOR_UID,
-      firstReviewer: OWNER_UID,
-      workspaceOwner: OWNER_UID,
-      revision: 5,
-      reviewerCount: 3,
-      quorum: 2,
-      runWorkspaceId: WS_ID,
-      panelWorkspaceMirror: STALE_PANEL_WORKSPACE_MIRROR,
-      runProjectId: PROJECT_ID,
-      panelProjectMirror: STALE_PANEL_PROJECT_MIRROR,
-    });
+const provRun = () => stores.runs.get(RUN_ID) as { userId: string; workspaceId: string; projectId: string | null; governanceRecord: { schemaId: string; answerShape: string; updatedAt: string } };
+const provPanel = () => stores.humanReviewPanel.get(`${RUN_ID}::current`) as { revision: number; reviewerUserIds: string[]; requiredReviewerCount: number; quorum: number; createdByUserId: string; updatedByUserId: string; createdAt: string; updatedAt: string; workspaceId: string; projectId: string | null } | undefined;
+const provWorkspace = () => stores.workspaces.get(WS_ID) as { ownerUserId: string };
+
+/** The run, with a non-null Project and a non-default governance context. Shared by all four. */
+function seedProvenanceRun() {
+  seedRun({ projectId: PROJECT_ID, governanceRecord: validGovernanceRecord({ schemaId: ALT_GOV.schemaId, answerShape: ALT_GOV.answerShape }) });
+}
+
+/** An existing panel whose every actor/number/mirror field differs from the caller's and the run's. */
+function seedProvenancePanel(reviewerUserIds: string[]) {
+  seedPanel({
+    revision: PROV_PANEL_REVISION,
+    reviewerUserIds,
+    createdByUserId: PROV_PANEL_CREATED_BY,
+    updatedByUserId: PROV_PANEL_UPDATED_BY,
+    createdAt: PROV_PANEL_CREATED_AT,
+    updatedAt: PROV_PANEL_UPDATED_AT,
+    workspaceId: STALE_PANEL_WORKSPACE_MIRROR,
+    projectId: STALE_PANEL_PROJECT_MIRROR,
   });
+}
 
-  it("every source classified EQUIVALENT really is equal in this fixture, and names the guard that forces it", () => {
-    seedProvenanceFixture();
-    const rows = PROVENANCE_MATRIX.flatMap((row) => row.equivalent.map(([name, read, invariant]) => ({ row, name, equal: read() === row.correct(), invariant })));
-    expect(rows.length).toBe(3);
-    expect(rows.filter((r) => !r.equal).map((r) => `${r.row.field}<-${r.name}`)).toEqual([]);
-    expect(rows.filter((r) => !r.invariant.includes("cancel#reject-")).map((r) => `${r.row.field}<-${r.name}`)).toEqual([]);
-  });
+const GOV_ROWS = (): ProvenanceRow[] => [
+  {
+    field: "schemaId",
+    correctSource: "govParse.record.schemaId",
+    correct: () => provRun().governanceRecord.schemaId,
+    discriminated: [
+      ["the default fixture literal", () => "decision_support"],
+      ["govParse.record.answerShape", () => provRun().governanceRecord.answerShape],
+    ],
+    equivalent: [],
+  },
+  {
+    field: "answerShape",
+    correctSource: "govParse.record.answerShape",
+    correct: () => provRun().governanceRecord.answerShape,
+    discriminated: [
+      ["the default fixture literal", () => "decision_support_view"],
+      ["govParse.record.schemaId", () => provRun().governanceRecord.schemaId],
+    ],
+    equivalent: [],
+  },
+];
 
+/** `workspaceId`/`projectId` rows differ per action only in which panel object is in scope. */
+const BINDING_ROWS = (panelMirror: () => { workspaceId: string | undefined; projectId: string | null | undefined }, rejectSiteForEquality: string): ProvenanceRow[] => [
+  {
+    field: "workspaceId",
+    correctSource: "target.workspaceId (the run's stored, authoritative binding)",
+    correct: () => provRun().workspaceId,
+    discriminated: [["the panel's stale discovery mirror", () => panelMirror().workspaceId]].filter(([, read]) => read() !== undefined) as ProvenanceRow["discriminated"],
+    equivalent: [["args.workspaceId", () => WS_ID, `resolveWorkspaceReviewTarget yields wrong_workspace unless run.workspaceId === args.workspaceId, and ${rejectSiteForEquality} returns on any non-valid target`]],
+  },
+  {
+    field: "projectId",
+    correctSource: "target.projectId (the run's stored Project)",
+    correct: () => provRun().projectId,
+    discriminated: ([
+      ["the panel's stale discovery mirror", () => panelMirror().projectId],
+      ["hardcoded null", () => null],
+      ["target.workspaceId", () => provRun().workspaceId],
+    ] as ProvenanceRow["discriminated"]).filter(([, read]) => read() !== undefined),
+    equivalent: [],
+  },
+];
+
+const PROVENANCE_SUBJECTS: readonly ProvenanceSubject[] = [
+  // ────────────────────────────── CREATE ──────────────────────────────
+  {
+    action: "adaptive_review_panel_created",
+    label: "CREATE",
+    canonicalIsCommitted: true,
+    seed: () => { seedProvenanceRun(); },
+    // A DUPLICATED reviewer in the request, so `args.reviewerUserIds.length` (4) is distinguishable
+    // from the normalized roster the panel actually committed (3).
+    call: () => putCall({ uid: PROV_CALLER_MANAGE, expectedRevision: 0, reviewerUserIds: [REVIEWER_UID, REVIEWER_UID, REVIEWER2_UID, REVIEWER3_UID] }),
+    rows: () => [
+      {
+        field: "byUid",
+        correctSource: "args.uid (the authenticated caller)",
+        correct: () => PROV_CALLER_MANAGE,
+        discriminated: [
+          ["target.creatorUid", () => provRun().userId],
+          ["workspace.ownerUserId", () => provWorkspace().ownerUserId],
+          ["args.reviewerUserIds[0]", () => REVIEWER_UID],
+          ["nextPanel.reviewerUserIds[0]", () => provPanel()?.reviewerUserIds[0]],
+        ],
+        equivalent: [
+          ["nextPanel.createdByUserId", () => provPanel()?.createdByUserId, "buildNextAdaptiveHumanReviewPanel sets createdByUserId from actorUserId, and the call site passes args.uid"],
+          ["nextPanel.updatedByUserId", () => provPanel()?.updatedByUserId, "buildNextAdaptiveHumanReviewPanel sets updatedByUserId from actorUserId, and the call site passes args.uid"],
+          ["auth.membership.uid", () => PROV_CALLER_MANAGE, "validateMembershipBinding rejects a membership whose uid differs from the requested one, and authorization is called with args.uid"],
+        ],
+      },
+      {
+        field: "at",
+        correctSource: "now (the request's own clock)",
+        correct: () => MUTATE_NOW,
+        discriminated: [["govParse.record.updatedAt", () => provRun().governanceRecord.updatedAt]],
+        equivalent: [
+          ["nextPanel.createdAt", () => provPanel()?.createdAt, "the builder sets createdAt from `now` on a first-time panel"],
+          ["nextPanel.updatedAt", () => provPanel()?.updatedAt, "the builder sets updatedAt from `now`"],
+        ],
+      },
+      ...BINDING_ROWS(() => ({ workspaceId: undefined, projectId: undefined }), "create#reject-06"),
+      {
+        field: "panelRevision",
+        correctSource: "nextPanel.revision (the panel this transaction committed)",
+        correct: () => provPanel()?.revision,
+        discriminated: [
+          ["args.expectedRevision", () => 0],
+          ["nextPanel.quorum", () => provPanel()?.quorum],
+          ["nextPanel.reviewerUserIds.length", () => provPanel()?.reviewerUserIds.length],
+          ["hardcoded 0", () => 0],
+        ],
+        equivalent: [["args.expectedRevision + 1", () => 1, "the builder derives revision as (current?.revision ?? 0) + 1 and create#reject-12 rejects any mismatch with args.expectedRevision"]],
+      },
+      {
+        field: "priorPanelRevision",
+        correctSource: "current?.revision ?? null (no prior panel on a create)",
+        correct: () => null,
+        discriminated: [
+          ["nextPanel.revision", () => provPanel()?.revision],
+          ["hardcoded 0", () => 0],
+        ],
+        equivalent: [],
+      },
+      {
+        field: "reviewerCount",
+        correctSource: "nextPanel.reviewerUserIds.length (the normalized, committed roster)",
+        correct: () => provPanel()?.reviewerUserIds.length,
+        discriminated: [
+          ["args.reviewerUserIds.length (the RAW request, with its duplicate)", () => 4],
+          ["nextPanel.quorum", () => provPanel()?.quorum],
+          ["nextPanel.revision", () => provPanel()?.revision],
+        ],
+        equivalent: [["nextPanel.requiredReviewerCount", () => provPanel()?.requiredReviewerCount, "the builder derives requiredReviewerCount from the same normalized array, and parseAdaptiveHumanReviewPanel rejects any panel where they differ"]],
+      },
+      ...GOV_ROWS(),
+    ],
+  },
+  // ───────────────────────────── RECONFIGURE ─────────────────────────────
+  {
+    action: "adaptive_review_panel_reconfigured",
+    label: "RECONFIGURE",
+    canonicalIsCommitted: true,
+    // current roster of TWO, so the new roster of three is distinguishable from the old count
+    seed: () => { seedProvenanceRun(); seedProvenancePanel([REVIEWER_UID, REVIEWER2_UID]); },
+    call: () => putCall({ uid: PROV_CALLER_MANAGE, expectedRevision: PROV_PANEL_REVISION, reviewerUserIds: [OWNER_UID, MEMBER_UID, REVIEWER3_UID] }),
+    rows: () => [
+      {
+        field: "byUid",
+        correctSource: "args.uid (the authenticated caller)",
+        correct: () => PROV_CALLER_MANAGE,
+        discriminated: [
+          ["current.createdByUserId", () => PROV_PANEL_CREATED_BY],
+          ["current.updatedByUserId", () => PROV_PANEL_UPDATED_BY],
+          ["target.creatorUid", () => provRun().userId],
+          ["workspace.ownerUserId", () => provWorkspace().ownerUserId],
+          ["current.reviewerUserIds[0]", () => REVIEWER_UID],
+        ],
+        equivalent: [
+          ["nextPanel.updatedByUserId", () => provPanel()?.updatedByUserId, "the builder sets updatedByUserId from actorUserId, and the call site passes args.uid"],
+          ["auth.membership.uid", () => PROV_CALLER_MANAGE, "validateMembershipBinding rejects a uid mismatch, and authorization is called with args.uid"],
+        ],
+      },
+      {
+        field: "at",
+        correctSource: "now",
+        correct: () => MUTATE_NOW,
+        discriminated: [
+          ["current.createdAt", () => PROV_PANEL_CREATED_AT],
+          ["current.updatedAt", () => PROV_PANEL_UPDATED_AT],
+          ["govParse.record.updatedAt", () => provRun().governanceRecord.updatedAt],
+        ],
+        equivalent: [["nextPanel.updatedAt", () => provPanel()?.updatedAt, "the builder sets updatedAt from `now`"]],
+      },
+      ...BINDING_ROWS(() => ({ workspaceId: STALE_PANEL_WORKSPACE_MIRROR, projectId: STALE_PANEL_PROJECT_MIRROR }), "create#reject-06"),
+      {
+        field: "panelRevision",
+        correctSource: "nextPanel.revision (the revision this transaction committed)",
+        correct: () => provPanel()?.revision,
+        discriminated: [
+          ["current.revision", () => PROV_PANEL_REVISION],
+          ["args.expectedRevision", () => PROV_PANEL_REVISION],
+          ["nextPanel.quorum", () => provPanel()?.quorum],
+          ["nextPanel.reviewerUserIds.length", () => provPanel()?.reviewerUserIds.length],
+        ],
+        equivalent: [["args.expectedRevision + 1", () => PROV_PANEL_REVISION + 1, "the builder derives revision as current.revision + 1 and create#reject-12 rejects any mismatch with args.expectedRevision"]],
+      },
+      {
+        field: "priorPanelRevision",
+        correctSource: "current.revision (the panel being replaced)",
+        correct: () => PROV_PANEL_REVISION,
+        discriminated: [
+          ["nextPanel.revision", () => provPanel()?.revision],
+          ["hardcoded null", () => null],
+        ],
+        equivalent: [["args.expectedRevision", () => PROV_PANEL_REVISION, "create#reject-12 returns stale_revision unless current.revision === args.expectedRevision"]],
+      },
+      {
+        field: "reviewerCount",
+        correctSource: "nextPanel.reviewerUserIds.length (the NEW committed roster)",
+        correct: () => provPanel()?.reviewerUserIds.length,
+        discriminated: [
+          ["current.reviewerUserIds.length (the roster being replaced)", () => 2],
+          ["nextPanel.quorum", () => provPanel()?.quorum],
+          ["nextPanel.revision", () => provPanel()?.revision],
+        ],
+        equivalent: [["nextPanel.requiredReviewerCount", () => provPanel()?.requiredReviewerCount, "the builder derives it from the same normalized array, and the panel parser rejects any panel where they differ"]],
+      },
+      ...GOV_ROWS(),
+    ],
+  },
+  // ────────────────────────────── CANCEL ──────────────────────────────
+  {
+    action: "adaptive_review_panel_cancelled",
+    label: "CANCEL",
+    seed: () => { seedProvenanceRun(); seedProvenancePanel([OWNER_UID, REVIEWER_UID, REVIEWER2_UID]); },
+    call: () => deleteCall({ uid: PROV_CALLER_MANAGE, expectedRevision: PROV_PANEL_REVISION }),
+    rows: () => [
+      {
+        field: "byUid",
+        correctSource: "args.uid (the authenticated caller)",
+        correct: () => PROV_CALLER_MANAGE,
+        discriminated: [
+          ["current.createdByUserId", () => PROV_PANEL_CREATED_BY],
+          ["current.updatedByUserId", () => PROV_PANEL_UPDATED_BY],
+          ["target.creatorUid", () => provRun().userId],
+          ["current.reviewerUserIds[0]", () => OWNER_UID],
+          ["workspace.ownerUserId", () => provWorkspace().ownerUserId],
+        ],
+        equivalent: [["auth.membership.uid", () => PROV_CALLER_MANAGE, "validateMembershipBinding rejects a uid mismatch, and authorization is called with args.uid"]],
+      },
+      {
+        field: "at",
+        correctSource: "now",
+        correct: () => MUTATE_NOW,
+        discriminated: [
+          ["current.createdAt", () => PROV_PANEL_CREATED_AT],
+          ["current.updatedAt", () => PROV_PANEL_UPDATED_AT],
+          ["govParse.record.updatedAt", () => provRun().governanceRecord.updatedAt],
+        ],
+        equivalent: [],
+      },
+      ...BINDING_ROWS(() => ({ workspaceId: STALE_PANEL_WORKSPACE_MIRROR, projectId: STALE_PANEL_PROJECT_MIRROR }), "cancel#reject-06"),
+      {
+        field: "panelRevision",
+        correctSource: "current.revision (the canonical panel being cancelled)",
+        correct: () => PROV_PANEL_REVISION,
+        discriminated: [
+          ["current.quorum", () => 2],
+          ["current.reviewerUserIds.length", () => 3],
+          ["current.requiredReviewerCount", () => 3],
+          ["hardcoded 0", () => 0],
+        ],
+        equivalent: [["args.expectedRevision", () => PROV_PANEL_REVISION, "cancel#reject-12 returns stale_revision unless current.revision === args.expectedRevision"]],
+      },
+      {
+        field: "reviewerCount",
+        correctSource: "current.reviewerUserIds.length (the canonical roster)",
+        correct: () => 3,
+        discriminated: [
+          ["current.quorum", () => 2],
+          ["current.revision", () => PROV_PANEL_REVISION],
+          ["hardcoded 0", () => 0],
+        ],
+        equivalent: [["current.requiredReviewerCount", () => 3, "parseAdaptiveHumanReviewPanel yields malformed unless requiredReviewerCount === reviewerUserIds.length, and cancel#reject-09 returns panel_unreadable on a malformed panel"]],
+      },
+      ...GOV_ROWS(),
+    ],
+  },
+  // ─────────────────────────────── VOTE ───────────────────────────────
+  {
+    action: "adaptive_review_panel_vote_cast",
+    label: "VOTE",
+    seed: () => { seedProvenanceRun(); seedProvenancePanel([REVIEWER_UID, REVIEWER2_UID, PROV_CALLER_VOTE]); },
+    // FOUR conditions, so conditionsCount (4) is distinct from the revision (5), the roster (3) and the quorum (2)
+    call: () => voteCall({ uid: PROV_CALLER_VOTE, panelRevision: PROV_PANEL_REVISION, status: "changes_requested", comment: "needs work", conditions: ["c1", "c2", "c3", "c4"] }),
+    rows: () => [
+      {
+        field: "byUid",
+        correctSource: "args.uid (the authenticated voter)",
+        correct: () => PROV_CALLER_VOTE,
+        discriminated: [
+          ["panel.createdByUserId", () => PROV_PANEL_CREATED_BY],
+          ["panel.updatedByUserId", () => PROV_PANEL_UPDATED_BY],
+          ["target.creatorUid", () => provRun().userId],
+          ["panel.reviewerUserIds[0]", () => REVIEWER_UID],
+          ["workspace.ownerUserId", () => provWorkspace().ownerUserId],
+        ],
+        equivalent: [
+          ["nextVote.reviewerUserId", () => PROV_CALLER_VOTE, "buildAdaptiveHumanReviewVote sets reviewerUserId from its reviewerUserId argument, and the call site passes args.uid"],
+          ["auth.membership.uid", () => PROV_CALLER_VOTE, "validateMembershipBinding rejects a uid mismatch, and authorization is called with args.uid"],
+        ],
+      },
+      {
+        field: "at",
+        correctSource: "now",
+        correct: () => MUTATE_NOW,
+        discriminated: [
+          ["panel.createdAt", () => PROV_PANEL_CREATED_AT],
+          ["panel.updatedAt", () => PROV_PANEL_UPDATED_AT],
+          ["govParse.record.updatedAt", () => provRun().governanceRecord.updatedAt],
+        ],
+        equivalent: [["nextVote.submittedAt", () => MUTATE_NOW, "the vote builder sets submittedAt from `now`"]],
+      },
+      ...BINDING_ROWS(() => ({ workspaceId: STALE_PANEL_WORKSPACE_MIRROR, projectId: STALE_PANEL_PROJECT_MIRROR }), "vote#reject-05"),
+      {
+        field: "panelRevision",
+        correctSource: "panel.revision (the panel the vote was accepted ON)",
+        correct: () => PROV_PANEL_REVISION,
+        discriminated: [
+          ["panel.quorum", () => 2],
+          ["panel.reviewerUserIds.length", () => 3],
+          ["hardcoded 0", () => 0],
+        ],
+        equivalent: [
+          ["args.panelRevision", () => PROV_PANEL_REVISION, "vote#reject-10 returns panel_stale unless panel.revision === args.panelRevision"],
+          ["nextVote.panelRevision", () => PROV_PANEL_REVISION, "the vote builder sets panelRevision from args.panelRevision, which the panel_stale guard has already proved equal"],
+        ],
+      },
+      {
+        field: "voteStatus",
+        correctSource: "nextVote.status",
+        correct: () => "changes_requested",
+        discriminated: [["hardcoded approved", () => "approved"]],
+        equivalent: [["args.status", () => "changes_requested", "§47 — buildAdaptiveHumanReviewVote's `status` is a pure projection of args.status: no validation, normalisation or defaulting, so the two expressions cannot differ. Classified equivalent rather than presented as canonical provenance."]],
+      },
+      {
+        field: "commentPresent",
+        correctSource: "nextVote.commentPresent",
+        correct: () => true,
+        discriminated: [["hardcoded false", () => false]],
+        equivalent: [["args.comment !== undefined", () => true, "§41/§42 — equivalent under the SHIPPED CALL CONTRACT: the sole production caller passes `comment` through validateAdaptiveReviewCommentAndConditions, which maps an empty or whitespace-only string to `undefined` ('An empty string becomes absent, not an empty comment'), so Boolean(args.comment) and args.comment !== undefined agree for every value that can reach this module. See the call-site regression below."]],
+      },
+      {
+        field: "conditionsCount",
+        correctSource: "nextVote.conditionsCount",
+        correct: () => 4,
+        discriminated: [
+          ["panel.reviewerUserIds.length", () => 3],
+          ["panel.quorum", () => 2],
+          ["hardcoded 0", () => 0],
+        ],
+        equivalent: [["args.conditions?.length ?? 0", () => 4, "§47 — the vote builder's `conditionsCount` is literally that expression: a pure projection, not a normalisation."]],
+      },
+      ...GOV_ROWS(),
+    ],
+  },
+];
+
+describe.each(PROVENANCE_SUBJECTS.map((s) => [s.label, s] as const))("panel mutation audit coverage — %s event provenance", (label, subject) => {
   /**
-   * Every value is snapshotted BEFORE the call. Cancel rewrites the panel document — it sets
-   * `updatedByUserId` to the caller and bumps `revision` — so reading the store afterwards turns
-   * two hostile sources into the correct value and silently un-discriminates the fixture. The
-   * first draft of this test did exactly that and failed honestly on `byUid`.
+   * §40 — every value is snapshotted BEFORE the call. The mutations rewrite the panel document
+   * (`updatedByUserId` becomes the caller, the revision is bumped), so reading the store afterwards
+   * turns hostile sources into the correct value and silently un-discriminates the fixture. An
+   * earlier draft of the cancel matrix did exactly that and failed honestly on `byUid`.
    */
-  const snapshotMatrix = () =>
-    PROVENANCE_MATRIX.map((row) => Object.freeze({
+  const snapshotRows = (rows: readonly ProvenanceRow[]) =>
+    rows.map((row) => Object.freeze({
       field: row.field,
       correct: row.correct(),
       discriminated: row.discriminated.map(([name, read]) => Object.freeze([name, read()] as const)),
     }));
 
-  it("the cancel event's EVERY authority-bearing field equals its canonical PRE-MUTATION source and no wrong source", async () => {
-    seedProvenanceFixture();
-    const expected = snapshotMatrix();
-    expect((await provenanceCancel()).ok).toBe(true);
-    expect(panelEvents()).toHaveLength(1);
-    const event = panelEvents()[0];
-    for (const row of expected) {
-      expect(`${row.field}:${JSON.stringify(event[row.field])}`).toBe(`${row.field}:${JSON.stringify(row.correct)}`);
-      for (const [name, wrongValue] of row.discriminated) {
-        expect(`${row.field}!=${name}:${JSON.stringify(event[row.field]) === JSON.stringify(wrongValue)}`).toBe(`${row.field}!=${name}:false`);
-      }
-    }
-    expect(event.action).toBe("adaptive_review_panel_cancelled");
+  it("the fixture DISCRIMINATES: every field's correct source differs from every plausible wrong source — asserted before the production call", async () => {
+    subject.seed();
+    // for CREATE the canonical values only exist after the call, so discrimination is checked on the
+    // post-call snapshot for that action; for the others the panel already exists beforehand.
+    if (subject.canonicalIsCommitted) expect((await subject.call()).ok).toBe(true);
+    const collisions = subject.rows().flatMap((row) => row.discriminated.filter(([, read]) => read() === row.correct()).map(([name]) => `${row.field}<-${name}`));
+    expect(`${label}:indistinguishableSources:${collisions.join(",")}`).toBe(`${label}:indistinguishableSources:`);
   });
 
-  it("cancel really DOES rewrite the panel's actor and revision — which is why the snapshot above must precede the call", async () => {
-    seedProvenanceFixture();
-    const before = { updatedByUserId: storedPanel().updatedByUserId, revision: storedPanel().revision };
-    expect((await provenanceCancel()).ok).toBe(true);
-    expect(`beforeActor:${before.updatedByUserId} afterActor:${storedPanel().updatedByUserId}`).toBe(`beforeActor:${REVIEWER2_UID} afterActor:${CANCEL_PROVENANCE_CALLER}`);
-    expect(`beforeRevision:${before.revision} afterRevision:${storedPanel().revision}`).toBe("beforeRevision:5 afterRevision:6");
+  it("the de-collapsed identity set really is distinct", () => {
+    subject.seed();
+    const identities = {
+      manageCaller: PROV_CALLER_MANAGE,
+      voteCaller: PROV_CALLER_VOTE,
+      workspaceOwner: provWorkspace().ownerUserId,
+      runCreator: provRun().userId,
+      panelCreatedBy: PROV_PANEL_CREATED_BY,
+      panelUpdatedBy: PROV_PANEL_UPDATED_BY,
+    };
+    expect(new Set(Object.values(identities)).size).toBe(Object.keys(identities).length);
+    expect(`runWorkspace:${provRun().workspaceId} runProject:${provRun().projectId} govSchema:${provRun().governanceRecord.schemaId}`).toBe(`runWorkspace:${WS_ID} runProject:${PROJECT_ID} govSchema:${ALT_GOV.schemaId}`);
+    if (provPanel()) {
+      expect(`revision:${provPanel()?.revision} reviewers:${provPanel()?.reviewerUserIds.length} quorum:${provPanel()?.quorum}`).toBe("revision:5 reviewers:2 quorum:2".replace("reviewers:2", `reviewers:${provPanel()?.reviewerUserIds.length}`).replace("quorum:2", `quorum:${provPanel()?.quorum}`));
+      expect(`mirrorIsStale:${provPanel()?.workspaceId !== provRun().workspaceId && provPanel()?.projectId !== provRun().projectId}`).toBe("mirrorIsStale:true");
+    }
+  });
+
+  it("every source classified EQUIVALENT really is equal, and names the reason it cannot differ", async () => {
+    subject.seed();
+    if (subject.canonicalIsCommitted) expect((await subject.call()).ok).toBe(true);
+    const rows = subject.rows().flatMap((row) => row.equivalent.map(([name, read, reason]) => ({ field: row.field, name, equal: read() === row.correct(), reason })));
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.filter((r) => !r.equal).map((r) => `${r.field}<-${r.name}`)).toEqual([]);
+    expect(rows.filter((r) => r.reason.trim().length < 30).map((r) => `${r.field}<-${r.name}`)).toEqual([]);
+  });
+
+  it("the event's EVERY authority-bearing field equals its canonical source and no wrong source", async () => {
+    subject.seed();
+    const preCall = subject.canonicalIsCommitted ? null : snapshotRows(subject.rows());
+    expect((await subject.call()).ok).toBe(true);
+    const sole = soleCommittedGovernanceEvent();
+    expect(`${label}:action:${sole.action} path:${sole.path}`).toBe(`${label}:action:${subject.action} path:runs/${RUN_ID}/governanceEvents/auto-1`);
+    expectNoForeignPersistenceWriters();
+    const event = sole.payload;
+    for (const row of preCall ?? snapshotRows(subject.rows())) {
+      expect(`${label}:${row.field}:${JSON.stringify(event[row.field])}`).toBe(`${label}:${row.field}:${JSON.stringify(row.correct)}`);
+      for (const [name, wrongValue] of row.discriminated) {
+        expect(`${label}:${row.field}!=${name}:${JSON.stringify(event[row.field]) === JSON.stringify(wrongValue)}`).toBe(`${label}:${row.field}!=${name}:false`);
+      }
+    }
   });
 
   it("the matrix is COMPLETE: the event has no field outside it, so a newly added field cannot escape the audit", async () => {
-    seedProvenanceFixture();
-    expect((await provenanceCancel()).ok).toBe(true);
-    expect(Object.keys(panelEvents()[0]).sort()).toEqual(["action", ...PROVENANCE_MATRIX.map((r) => r.field)].sort());
+    subject.seed();
+    expect((await subject.call()).ok).toBe(true);
+    expect(Object.keys(soleCommittedGovernanceEvent().payload).sort()).toEqual(["action", ...subject.rows().map((r) => r.field)].sort());
+  });
+});
+
+/**
+ * §41/§42 — THE commentPresent CALL-SITE CONTRACT, proved rather than assumed.
+ *
+ * R4 found that re-sourcing `commentPresent` from `args.comment !== undefined` survives, because
+ * `submitWorkspaceReviewPanelVote` itself performs no comment validation: for `comment: ""` the
+ * builder's `Boolean("")` is `false` while `"" !== undefined` is `true`.
+ *
+ * Production was NOT changed, because the mutant is unreachable through every shipped caller.
+ * `submitWorkspaceReviewPanelVote` has exactly ONE production call site — the vote route — which
+ * passes only the output of `parseSubmitAdaptiveReviewVoteRequest`, and that delegates to
+ * `validateAdaptiveReviewCommentAndConditions`, whose own comment says "An empty string becomes
+ * absent, not an empty comment" and which returns `comment = trimmed.length > 0 ? trimmed :
+ * undefined`. So an empty or whitespace-only comment can never arrive as `""`.
+ *
+ * The regression below pins that boundary property directly, so the equivalence classification
+ * rests on an asserted contract rather than on a reading of the code. If the validator ever stopped
+ * collapsing empty to absent, this fails and the classification must be revisited — at which point
+ * the correct fix is production, not the test.
+ */
+describe("commentPresent — the shipped call-site contract that makes the alternative equivalent", () => {
+  it("the request validator collapses an empty or whitespace-only comment to ABSENT, so `\"\"` cannot reach the module", () => {
+    for (const raw of ["", "   ", "\t\n "]) {
+      const parsed = parseSubmitAdaptiveReviewVoteRequest({ status: "approved", panelRevision: 1, comment: raw });
+      expect(`parsed:${parsed.ok}`).toBe("parsed:true");
+      if (parsed.ok) expect(`comment:${JSON.stringify(parsed.value.comment)}`).toBe("comment:undefined");
+    }
+  });
+
+  it("a non-empty comment survives, trimmed — so the two predicates agree on every reachable value", () => {
+    const parsed = parseSubmitAdaptiveReviewVoteRequest({ status: "approved", panelRevision: 1, comment: "  looks fine  " });
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.value.comment).toBe("looks fine");
+      expect(`boolean:${Boolean(parsed.value.comment)} notUndefined:${parsed.value.comment !== undefined}`).toBe("boolean:true notUndefined:true");
+    }
+  });
+
+  it("and with the comment omitted entirely both predicates are false", () => {
+    const parsed = parseSubmitAdaptiveReviewVoteRequest({ status: "approved", panelRevision: 1 });
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(`boolean:${Boolean(parsed.value.comment)} notUndefined:${parsed.value.comment !== undefined}`).toBe("boolean:false notUndefined:false");
   });
 });
 
@@ -2745,13 +3844,13 @@ describe("panel audit events — atomicity: neither half survives a failure", ()
     throwOnSetCollection.value = "governanceEvents";
     expect(await putCall()).toEqual({ ok: false, reason: "write_failed" });
     expect(stores.humanReviewPanel.get(`${RUN_ID}::current`)).toBeUndefined();
-    expect(panelEvents()).toHaveLength(0);
+    expect(committedGovernanceEvents()).toHaveLength(0);
   });
 
   it("a CANONICAL-write failure leaves no event on CREATE", async () => {
     throwOnSetCollection.value = "humanReviewPanel";
     expect(await putCall()).toEqual({ ok: false, reason: "write_failed" });
-    expect(panelEvents()).toHaveLength(0);
+    expect(committedGovernanceEvents()).toHaveLength(0);
   });
 
   it("an EVENT-write failure rolls back the CANCEL — the panel stays open", async () => {
@@ -2759,7 +3858,7 @@ describe("panel audit events — atomicity: neither half survives a failure", ()
     throwOnSetCollection.value = "governanceEvents";
     expect(await deleteCall()).toEqual({ ok: false, reason: "write_failed" });
     expect((stores.humanReviewPanel.get(`${RUN_ID}::current`) as { status: string }).status).toBe("open");
-    expect(panelEvents()).toHaveLength(0);
+    expect(committedGovernanceEvents()).toHaveLength(0);
   });
 
   it("an EVENT-write failure rolls back the VOTE — no vote is committed", async () => {
@@ -2767,13 +3866,75 @@ describe("panel audit events — atomicity: neither half survives a failure", ()
     throwOnSetCollection.value = "governanceEvents";
     expect(await voteCall()).toEqual({ ok: false, reason: "write_failed" });
     expect([...stores.humanReviewVotes.keys()].filter((k) => k.startsWith(`${RUN_ID}::`))).toHaveLength(0);
-    expect(panelEvents()).toHaveLength(0);
+    expect(committedGovernanceEvents()).toHaveLength(0);
   });
 
   it("a CANONICAL-write failure leaves no event on VOTE", async () => {
     seedPanel({ revision: 1 });
     throwOnSetCollection.value = "humanReviewVotes";
     expect(await voteCall()).toEqual({ ok: false, reason: "write_failed" });
-    expect(panelEvents()).toHaveLength(0);
+    expect(committedGovernanceEvents()).toHaveLength(0);
   });
+});
+
+/**
+ * ─── R5 §29–§31 — THE RECONCILIATION IS AN UNCONDITIONAL POSTCONDITION ────────────────────────
+ *
+ * R4 MINOR, and a real one: the reconciliation lived in an `it(...)`, so
+ *
+ *     npx jest <this file> -t "rejects with its own reason"
+ *
+ * ran all of the rejection cases, FILTERED OUT the reconciliation, and exited 0 — a partial
+ * configuration reporting a clean result. The in-describe `it` remains (it gives a precise failure
+ * message), but the binding check is this top-level `afterAll`: it is registered at module scope, so
+ * no `describe` selection and no `-t` pattern can remove it, and it runs whenever this file is
+ * loaded.
+ *
+ * §30 — INTENDED PARTIAL-RUN BEHAVIOUR, stated rather than implied: any filtered invocation of this
+ * file that does not execute the whole rejection matrix FAILS here, including one that executes no
+ * rejection case at all. That is deliberate and fail-closed. A `-t` run of this security suite is a
+ * debugging aid and is NOT evidence of rejection coverage; only a full run of the file is. CI runs
+ * the file in full.
+ */
+afterAll(() => {
+  const executed = [...executedObligations];
+  const expected = [...EXECUTABLE_OBLIGATIONS];
+  const executedSet = new Set(executed);
+  const expectedSet = new Set(expected);
+  const missing = expected.filter((o) => !executedSet.has(o)).sort();
+  const unexpected = executed.filter((o) => !expectedSet.has(o)).sort();
+  const duplicates = executed.length - executedSet.size;
+
+  // passthrough coverage, per site, against the union PRODUCTION declares
+  const passthroughSites = DECISION_SITES.filter((s) => s.isPassthrough).map((s) => s.siteId);
+  const passthroughGaps = passthroughSites.flatMap((siteId) => {
+    const covered = new Set(executed.filter((o) => o.startsWith(`${siteId}::`)).map((o) => o.slice(siteId.length + 2)));
+    return AUTH_DENIAL_REASONS_FROM_SOURCE.filter((reason) => !covered.has(reason)).map((reason) => `${siteId}::${reason}`);
+  }).sort();
+
+  expect(
+    [
+      `registeredCases:${REJECTION_CASES.length}`,
+      `executedObligations:${executed.length}`,
+      `expectedObligations:${expected.length}`,
+      `missing:${missing.join(",")}`,
+      `unexpected:${unexpected.join(",")}`,
+      `duplicates:${duplicates}`,
+      `passthroughGaps:${passthroughGaps.join(",")}`,
+      `witnessedSites:${Object.keys(SITE_WITNESSES).length}`,
+      `reconciliationExecuted:${reconciliationExecuted}`,
+    ].join(" ")
+  ).toBe(
+    [
+      "registeredCases:59",
+      "executedObligations:59",
+      "expectedObligations:59",
+      "missing:",
+      "unexpected:",
+      "duplicates:0",
+      "passthroughGaps:",
+      "witnessedSites:12",
+      "reconciliationExecuted:true",
+    ].join(" ")
+  );
 });
