@@ -713,6 +713,13 @@ export async function submitWorkspaceReviewPanelVote(args: {
         // panel object rather than from `args`. The previous revision used `args.panelRevision`
         // while the field-source table claimed canonical provenance — safe, but the table was
         // wrong about it.
+        //
+        // DOCUMENTED EQUIVALENT MUTANT: reverting this to `args.panelRevision` SURVIVES the suite,
+        // and no test can distinguish the two, because the `panel_stale` guard above rejects any
+        // request whose expected revision differs from the canonical panel's. That is the proof
+        // that they are equal on every success path — not a coverage gap. The canonical form is
+        // kept because the field documents the panel the vote was accepted ON, so it should not
+        // depend on a guard elsewhere remaining in place.
         panelRevision: panel.revision,
         voteStatus: nextVote.status,
         commentPresent: nextVote.commentPresent,
